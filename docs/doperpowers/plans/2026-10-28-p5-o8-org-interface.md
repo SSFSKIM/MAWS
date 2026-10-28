@@ -25,7 +25,11 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
 
 ## Progress
 
-- [ ] M1 — The app's org session — **executable now** (needs O6, O10 M9, O11 and O13 M2, all landed; O7 M1's `src/main/org/session.ts` by the second-lands-takes-the-file rule)
+- [x] M1 — The app's org session — landed (PR #287, master 790002644, P5 Decision Log 105); the owner's staging sitting owed — (needs O6, O10 M9, O11 and O13 M2, all landed; O7 M1's `src/main/org/session.ts` by the second-lands-takes-the-file rule)
+  - [x] (2026-10-28) Built on `p5-o8-m1`: `org.*`, `<userData>/org/`, the login transfer and stand-in, the hub client, the held view, the Registry feed, the production session, the Org section, main's composition over O7's seam (O7 M1 landed first, #285; its `session.ts` taken, the file this branch had copied byte for byte). The unit suites and `test/org/sign-in.local.test.ts` pass locally.
+  - [x] (2026-10-28) reviewer-high converged: round 1 at ef4bb83cb (3 P1, 5 P2, all fixed at 59edeebe1), round 2 on the fix found nothing. Class 1a green at b5816709a (run 40683146373).
+  - [x] (2026-10-28) The final gate on the PR's tree: run 40683839806, three reds none of #287's (c7 green on rerun 40699088283; design-systems a hosted flake; packaged's known `layout-transfer.spec.ts:541`).
+  - [ ] The owner's staging sitting.
 - [ ] M2 — The remote rows — **executable** once M1 and O7 M1 are on master
 - [ ] M3 — The app as the org's signer: a co-root, the weekly successor, the signing checks — *advisory*
 - [ ] M4 — The Org page — *advisory; taste (Q1)*
@@ -809,6 +813,11 @@ Each is built as its recommendation when its milestone is re-planned, unless the
   Evidence: `Registry.submitState` closes the removed members' sockets with `4403` after rebuilding `members`, and the Worker's `route` resolves the member before any `/api/*` route, answering `403 not-a-member`.
   Evidence: O11's Surprises (2026-10-27): "Not captured: `/api/me` with that token, and renewal without a browser."
 
+- Observation: an adoption moves `HeldOrg.head()` in memory before the anchor's write and the listeners, so a reader polling `head()` can see a new head before `onChanged` fires.
+  Evidence: held.ts `#commit` (the file, then memory, then `saveAnchor`, then the listeners); `test/org/sign-in.local.test.ts`'s refresh case first raced on it.
+- Observation: the Worker refuses a removed member's socket upgrade `403 not-a-member` with `X-Desk-Build` (its member resolution runs before every route), so a refused upgrade tells Access's end of a credential from the hub's refusal by that header.
+  Evidence: `apps/desk-hub/src/worker.ts` `route`: `if (!principal) return json(403, { error: … 'not-a-member' … })`, then `fetch` names the build on every answer but a `101`.
+
 ## Decision Log
 
 - Decision: Verification. This document gets one `doperpowers:adversarial-reviewer` buildability round on its execution section, focused on the first milestone (M1 and M2), repeated until a round yields nothing worth changing. M1's and M2's PRs each get doperpowers:reviewer-high. M3–M8 each get their own buildability round when re-planned, and the review rung their re-plan names.
@@ -834,6 +843,50 @@ Each is built as its recommendation when its milestone is re-planned, unless the
 - Decision: The fifth round, narrowed to that fix, found nothing (approve at 2e5e6da22). The review has converged: rounds of 7, 6, 1, 1, then 0 findings, every one adopted.
   Rationale: the skill's stop rule; a round that yields nothing worth changing.
   Date/Author: 2026-10-28, O8's planner.
+
+- Decision: `src/main/org/session.ts` is O7's, taken as it landed (#285 at ccdc14943): this branch copied it byte for byte from `p5-o7-m1` before O7 landed, so the merge was clean; main hands `startMachines` the production session, or O7's development session when `MAWS_DEV_ORG` is set in an unpackaged build, in which case no production session is made at all and `org.status` answers `development` from the development session's identity, every `org.*` act refused `busy`. `STANDIN_HEADER` is imported from `dev-session.ts`.
+  Rationale: one org session per run: two would hold two feeds and allow a production sign-in beside a development one. Rejected: creating the production session in development runs too and only not handing it to `startMachines`.
+  Date/Author: 2026-10-28, O8 M1's executor.
+
+- Decision: A token fresh from the login is given a grace: `/api/me` answered 401, 403 or a redirect without `X-Desk-Build` (Access, not the Worker) is retried at 2, 4, 8 and 16 s, then every 16 s, for up to `FRESH_TOKEN_GRACE_MS` (120 s), before the attempt is refused `access`; `cancel` ends the wait at once; a Worker's `403 not-a-member` (which carries `X-Desk-Build`) is never retried. Applies to registration, `signIn` and `reanchor`. (Architect accepted.)
+  Rationale: staging answered a fresh Access credential 401 for 5 s to about a minute (O11 M8, via the desk track). Rejected: refusing at the first 401, which fails most first sign-ins on staging; retrying a Worker refusal, which is the hub's word and not a propagation delay.
+  Date/Author: 2026-10-28, O8 M1's executor.
+
+- Decision: `org.*`'s event goes on the client side of the link surface (`CLIENT_RULES` gains `org`), and `routes.json` lists the six commands under `client`; after a merge that touches the registry, `routes.json` is regenerated (`MAWS_ROUTES_WRITE=1`), never hand-merged. (Architect accepted.)
+  Rationale: `org.*` is this app's own state; `link-surface.test.ts` holds every event to one side. Rejected: a link event, which would offer another machine's app this app's sign-in status.
+  Date/Author: 2026-10-28, O8 M1's executor.
+
+- Decision: Beyond Interfaces §B and §F: `ORG_REFUSALS` gains `directory` (`<userData>/org/` failed its checks, so a registration can write nothing), and `RegistryFeedHooks` gains `onClose` (an open socket ended), which the session reads as `hubAccess: 'connecting'`.
+  Rationale: §B's `problem: 'directory'` had no refusal to give an attempt that meets it, and §F had no way to say the feed went down, so `connected` would outlive the socket. Rejected: overloading `keys` or `hub`; polling `feed.connected()` from the status.
+  Date/Author: 2026-10-28, O8 M1's executor.
+
+- Decision: A registration with no readable `access.json` reads signed out, as one marked `signedOut` does; a token that ends by its clock or Access's answer keeps its file (so it reads `expired`, not signed out). Sign-out writes the marker first and removes the token even when the marker's write fails.
+  Rationale: acceptance 1's "a failed marker write … starting signed out with no token used": with the token gone and no marker, the profile must not start signed in on the direct carrier. Rejected: reading a missing token as signed in with `hub` null, which brings the links up after a sign-out whose marker failed.
+  Date/Author: 2026-10-28, O8 M1's executor.
+
+- Decision: Following the hub, the session reads `?since=<held version>`, and reads again from a served transition's `fromVersion` when one below the head is not held, or from genesis when the served head is below the held one; the certificate poll hands any served head at another version to that read.
+  Rationale: `?since=<head>` leaves out the state at `fromVersion + 1` a recovery needs, so a genuine recovery would be refused as a rollback; the whole chain tells a rewind from a rollback. Rejected: `?since=<head>` alone (`EndpointOrg.sync`'s), which works for the endpoint only because its window keeps the base.
+  Date/Author: 2026-10-28, O8 M1's executor.
+
+- Decision: The held view as built (held.ts), where §D or the load rule left room. `startHeldOrg` takes the org files (`files: OrgFiles`) rather than a path and no clock; it returns `{ok, held} | {ok: false, reason}`; `adoptServed` answers `certificatesChanged` too; `HeldOrg.highWater()` is added. The high-water mark is recomputed at load as the head's version (the anchor carries rollback protection across restarts). The load also checks that `accepted` holds every transition the run took. "Authorized" in the superseded case is both `verifyTransition(base, t, recoveryPub)` and `verifySuccessor(base, next, [t])`. Rollback and fork are judged only when nothing was adopted, as `EndpointOrg` does, so a recovery whose served head is below the mark is taken. The rewind's base is always the held state (the whole chain is held), never one a delivery carries. A failed anchor write after an adoption is logged, not thrown: `chain.json` holds the adoption, and the next load moves the anchor up. A recover from the hub writes a fresh file (`accepted` the run's transitions, nothing superseded).
+  Rationale: each follows the rule it serves (the round-1 to round-5 findings); `verifySuccessor` alone falls back to the old root set when a transition fails to verify. Rejected: re-using a delivered base (the endpoint's path, which its window needs and this view doesn't).
+  Date/Author: 2026-10-28, O8 M1's executor.
+
+- Decision: The login transfer generates its box key from WebCrypto's random bytes (`nacl.box.keyPair.fromSecretKey`), not tweetnacl's own source, and does not check the metadata JWT's `iat` (cloudflared master refuses one missing, older than 24 h or 5 min ahead; §E doesn't list it). The stand-in admits `http://127.0.0.1:<port>` only, not `localhost` or `[::1]`.
+  Rationale: tweetnacl's PRNG detection depends on how the CJS bundle rewrites its `typeof require`, and failing it throws at sign-in. The metadata arrives over TLS from the hub's own host, and the spike ran without the `iat` check; the staging sitting confirms the header's claims. Rejected: tweetnacl's `keyPair()`; adding the `iat` check before staging shows Access sets it.
+  Date/Author: 2026-10-28, O8 M1's executor.
+
+- Decision: The Org section reads `org.*` itself and takes no props (so no prop can carry a token), and Sign out sits on the Account row. While approval waits, an unreachable hub or an unexpected answer keeps the poll going until `expires`; an Access answer refuses `access` and the Worker's `not-a-member` refuses `not-member`.
+  Rationale: the other sections take the settings object; this one has its own data. Rejected: a row of its own for Sign out, which read as an empty label.
+  Date/Author: 2026-10-28, O8 M1's executor.
+
+- Decision: M1's reviewer-high (round 1 at ef4bb83cb: 3 P1 and 5 P2, each verified and fixed). (1) Every durable write and trust change of the session runs in one serialized commit queue, each taking its registration snapshot at its turn and changing only its own fields, each attempt fenced inside the queue by its generation (and, for a re-anchor and a recovery, by the trust it started from): a sign-in's write can't roll back an anchor an adoption moved, a re-anchor's token can't land after a sign-out, and a recovery can't overwrite a re-anchored chain. Sign-out advances the generation and reads signed out at once, then queues its marker and the token's removal. Every `startHeldOrg` call takes a capturing anchor saver that forwards to the queued write once its view is held, so no queued operation waits on a view's adoption queue. (2) Production passes `excludeFromBackup` for `<userData>/org/` (no default inside the module, so no suite runs osascript). (3) The hub client keeps a response's `error` only in a short code grammar (else `unrecognized`), `/api/me`'s email only as an address, and a pending entry's `expires` only as an ISO instant, so a hostile hub can't reflect the bearer token into a refusal, a status or a log. (4) A served certificate set must pass `isCertificates`, and items that aren't signed certificates or retirements are dropped at the boundary (O7's `nextCertExpiry` reads them unguarded). (5) The feed keeps at most 4 incomplete part sets and 8 MiB of their text. (6) Every background read and adoption (the feed's callbacks, the certificate and recovery clocks) is caught and logged, the held state unchanged.
+  Rationale: each was a concrete interleaving or input against the code; each fix has a test that fails without it. Rejected: per-write ad hoc fences (the round found three windows they left), a default exclusion inside `files.ts`, failing a whole state read for one malformed certificate.
+  Date/Author: 2026-10-28, O8 M1's executor.
+
+- Decision: M1's review has converged: round 2 (reviewer-high on 59edeebe1, narrowed to the fix wave) found nothing material. Rounds of 8, then 0.
+  Rationale: the stop rule; a round that yields nothing worth changing.
+  Date/Author: 2026-10-28, O8 M1's executor.
 
 The residue for P5's Decision Log. Each item is decided where it binds (M1 or M2 unless marked), with the alternative it rejected:
 
@@ -877,4 +930,6 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
+
+Retrospective. The document held: every decision it made stood, and the gaps it left were small (a `directory` refusal, a feed close hook, the chain re-read from below the head for a recovery). What it didn't foresee was the session's write concurrency: four parallel actors (attempts, adoptions from two sources, sign-out, recovery) each writing `registration.json`. Ad hoc fences left three windows, which the review found; one serialized commit queue closed them. A future child holding a trust anchor beside a credential should start from that queue. The test-writing workers found three real bugs each time they were given a module they hadn't written, which paid for the split.

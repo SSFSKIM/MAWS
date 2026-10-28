@@ -31,6 +31,12 @@
     "apps/desk-hub/deploy/hub.ts",
     "apps/desk-hub/deploy/org-admin.ts",
     "apps/desk-hub/deploy/proof.ts",
+    // P5 O8 M1: test/org/sign-in.local.test.ts roots its org and approves its pairing with O13's `deployment admin`
+    "apps/desk-hub/deploy/admin.ts",
+    "apps/desk-hub/deploy/admin-device.ts",
+    "apps/desk-hub/deploy/admin-machines.ts",
+    "apps/desk-hub/deploy/deploy.ts",
+    "apps/desk-hub/deploy/run-lock.ts",
     "apps/desk-hub/fake-machine/json-file.ts",
     "apps/desk-hub/fake-machine/link.ts",
     "apps/desk-hub/fake-machine/org.ts",

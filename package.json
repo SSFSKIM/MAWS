@@ -213,6 +213,7 @@
     "shiki": "^3.19.0",
     "streamdown": "^2.6.0",
     "tailwindcss": "^4.3.3",
+    "tweetnacl": "1.0.3",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.70.1",
     "unist-util-visit": "^5.0.0",

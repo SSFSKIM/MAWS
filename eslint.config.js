@@ -218,7 +218,8 @@ module.exports = defineConfig(
     rules: { 'no-restricted-imports': ['error', { patterns: YJS_PATTERNS }] },
   },
   {
-    files: ['test/machines/**/*.ts'],
+    // P5 O8 M1: the org session's suites, against the same hub and endpoint harness
+    files: ['test/machines/**/*.ts', 'test/org/**/*.ts'],
     rules: { 'no-restricted-imports': 'off' },
   },
   // P5 O10 end
