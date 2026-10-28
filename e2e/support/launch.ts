@@ -225,6 +225,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     await sizeForGroup(app, page); // P3-F1
     await placeForInstance(app); // ci-kit's mac-lane concurrency spec, M2
     await reportForeground(app);
+    await untilDaemonHostReady(page, launchedAt); // P5 O3-B
     return { app, page, consoleErrors, userData, shellHome: shellHome.dir, packaged: executable !== null, launchedAt, ...(engine && discover && { realEngine: { ...engine, scratch: discover } }), cleanup };
   } catch (error) {
     await cleanup().catch((cleanupError) => console.error('[e2e] cleanup after a failed launch also failed', cleanupError));
@@ -272,6 +273,29 @@ async function placeForInstance(app: ElectronApplication): Promise<void> {
   });
   const { x, y } = cornerOrigin(corner, area, size);
   await app.evaluate(({ BrowserWindow }, [x, y]) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setPosition(x, y), [x, y] as const);
+}
+
+// P5 O3-B: on the daemon shape a launch starts its hosts cold, `mawsd` first and then the engine host and pty host it
+// serves, where the utility shape forked them beside the window; the specs' first waits after a launch (a seeded session
+// indexed through the engine host's scan within 5 s) were written for the utility shape's start. So on the daemon shape
+// the launch returns once the engine host is ready through `mawsd`; bounded and never failing, so a spec about a host
+// that does not come up still reads its state itself. Any other shape, or a page without the bridge, returns at once.
+// Each daemon-shape launch prints one line with the wait and the time from the launch to the host's ready (`[e2e]
+// daemon host ready:`), so a slower cold start shows in the job logs rather than hiding behind the wait.
+const DAEMON_HOST_READY_MS = 30_000;
+async function untilDaemonHostReady(page: Page, launchedAt: number): Promise<void> {
+  const started = Date.now();
+  const until = started + DAEMON_HOST_READY_MS;
+  for (;;) {
+    const status = await page.evaluate(() => window.maws.invoke('host.status', undefined)).catch(() => null);
+    if (!status?.ok || status.value.transport !== 'daemon') return;
+    const ready = status.value.state === 'ready' && status.value.supervisor !== null;
+    if (ready || Date.now() >= until) {
+      const now = Date.now();
+      return console.log(`[e2e] daemon host ready: waited ${now - started} ms after the window, ${now - launchedAt} ms after the launch${ready ? '' : ` (the ${DAEMON_HOST_READY_MS / 1000} s bound: ${status.value.state}; the launch goes on)`}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
 }
 
 // Under MAWS_E2E_FOREGROUND=1 (src/main/window-show.ts) the app activates and its window
