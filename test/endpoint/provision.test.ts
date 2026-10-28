@@ -5,7 +5,7 @@
 // on a delegated endpoint; and the crash-recovery scene carried through to `retire`, after which no private key is left.
 import * as fs from 'node:fs';
 import { join } from 'node:path';
-import { base64urlEncode, encodeProvisioningCodeV2, generateSigningKey, keyId, type ProvisioningCodeV2 } from 'org-protocol';
+import { base64urlEncode, encodeProvisioningCodeV2, generateSigningKey, keyId, NO_CERTIFICATES, verifyEvent, type LogEventV2, type ProvisioningCodeV2 } from 'org-protocol';
 import { delegationFor, type MachineView, type ProvisioningKeyIssued, type ProvisioningKeys } from 'desk-hub/protocol';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createEndpoint, type Endpoint } from '../../src/endpoint';
@@ -493,4 +493,64 @@ describe('unenroll', () => {
     expect(again.code, again.out).toBe(0);
     expect(again.view).toMatchObject({ enrollment: 'org-listed', ref: services.machine.ref });
   });
+});
+
+describe('the kept records across an unenroll', () => {
+  /** Enrolls `endpoint` as `name` by a code of `by`, attended, and waits for its listing. */
+  async function enrollBy(by: Member, endpoint: Endpoint, name: string, reenroll = false) {
+    const issued = await by.code(reenroll ? name : undefined);
+    const enrolling = endpoint.cli('enroll', ['--name', name, '--wait', '30'], issued.code);
+    await by.awaitPosted(issued.enrollment);
+    await by.list(issued.enrollment, issued.k);
+    expect((await enrolling).code).toBe(0);
+  }
+
+  /** The machine's own event `event` relayed up as RL10 hands it over; the signed copy the hub was sent. */
+  async function upload(endpoint: Endpoint, project: string, event: Record<string, unknown>): Promise<LogEventV2> {
+    const sent: Array<{ t: string; events?: LogEventV2[] }> = [];
+    const spy = vi.spyOn(endpoint.hub, 'send').mockImplementation((frame) => (sent.push(frame as (typeof sent)[number]), true));
+    try {
+      await endpoint.rl10.relay.events({ t: 'events', project, events: [event] });
+    } finally {
+      spy.mockRestore();
+    }
+    const up = sent.find((f) => f.t === 'events')?.events?.[0];
+    expect(up, 'an events frame went up').toBeDefined();
+    return up!;
+  }
+
+  it('reuses its signatures when the same org enrolls the ref again', async () => {
+    const first = await endpointOn();
+    await enrollBy(member, first.endpoint, 'records-same');
+    const event = { writer: 'records-same/human', seq: 1, kind: 'human', text: 'history', ts: new Date().toISOString() };
+    const before = await upload(first.endpoint, 'project-same', event);
+    expect((await first.endpoint.cli('unenroll', [])).code).toBe(0);
+    const again = await restart(first);
+    await enrollBy(member, again.endpoint, 'records-same', true);
+    const resent = await upload(again.endpoint, 'project-same', event);
+    // The position the hub holds is resent as it went up, never signed anew by the new key.
+    expect(resent.sig).toEqual(before.sig);
+  });
+
+  it('puts them aside when another org enrolls the ref: a resent event is signed anew and verifies under that org', async () => {
+    const first = await endpointOn();
+    await enrollBy(member, first.endpoint, 'records-moved');
+    const event = { writer: 'records-moved/human', seq: 1, kind: 'human', text: 'history', ts: new Date().toISOString() };
+    const before = await upload(first.endpoint, 'project-moved', event);
+    expect((await first.endpoint.cli('unenroll', [])).code).toBe(0);
+    const again = await restart(first);
+    const otherHub = await startLocalHub();
+    try {
+      const other = await otherHub.admin();
+      await enrollBy(other, again.endpoint, 'records-moved');
+      const resent = await upload(again.endpoint, 'project-moved', event);
+      expect(resent.sig.value).not.toBe(before.sig.value);
+      expect(await verifyEvent({ org: 'local', project: 'project-moved' }, (await other.head()).state, resent, NO_CERTIFICATES, new Date())).toEqual({ ok: true });
+      // The old org's records are kept aside, not lost.
+      const dir = again.services.machine.stateDir;
+      expect(fs.readdirSync(dir).some((n) => n.startsWith('stale-') && fs.existsSync(join(dir, n, 'signatures', 'project-moved.jsonl')))).toBe(true);
+    } finally {
+      await otherHub.stop();
+    }
+  }, 180_000);
 });

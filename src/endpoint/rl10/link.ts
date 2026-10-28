@@ -127,6 +127,12 @@ export class Rl10 {
     ctx.policy.onChange((policy) => this.send({ t: 'policy', read_only: policy.read_only, ceiling: policy.ceiling }));
   }
 
+  /** The kept records were moved aside (`EndpointState.claimRecords`): what was read of them is dropped. */
+  forgetRecords(): void {
+    this.#ledger.forget();
+    this.#index.forget();
+  }
+
   /** Whether RL10 is wanted served (the last `serve` or `unserve` called); the socket follows, one change at a time. */
   get serving(): boolean {
     return this.#wanted;

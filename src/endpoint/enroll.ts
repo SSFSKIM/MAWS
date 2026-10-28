@@ -38,6 +38,8 @@ export type EnrollContext = {
    * wait for the listing runs outside it.
    */
   lifecycle<T>(run: () => Promise<T>): Promise<T>;
+  /** RL10's kept records were moved aside for an enrollment under another authority: their caches are dropped. */
+  recordsMoved(): void;
 };
 
 export type EnrollmentState = { state: 'hub-confirmed' | 'org-listed'; name: string; org: string; ref: string };
@@ -216,6 +218,7 @@ function writeEnrollment(ctx: EnrollContext, key: SigningKey, keepLedger: boolea
     refuseOtherOrg(state, enrollment.org, pins);
     const id = await keyId(key.pub);
     const jwk = (await crypto.subtle.exportKey('jwk', key.privateKey)) as JsonWebKey;
+    if (state.claimRecords({ org: enrollment.org, hub: enrollment.hub, recoveryPub: pins.recoveryPub }, ctx.deps.now())) ctx.recordsMoved();
     const kept = keepLedger ? state.ledger : null;
     state.setMachineKey({ version: 1, keyId: id, jwk, created: new Date(ctx.deps.now()).toISOString() });
     state.setLedger(kept === null ? { version: 1, heldKeys: [id], grants: {}, highWater: {} } : { ...kept, heldKeys: [...kept.heldKeys.filter((k) => k !== id), id] });

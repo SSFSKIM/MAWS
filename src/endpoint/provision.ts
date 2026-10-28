@@ -180,7 +180,7 @@ export async function settle(ctx: EnrollContext, age: CredentialAge): Promise<Pr
     throw new CertRefused(`the hub refused the machine's certificate: ${posted.status} ${await refusalOf(posted)}`, posted.status === 401 || posted.status === 403);
   }
   await posted.body?.cancel();
-  await writeProvisionedSet(state, ctx.org, p);
+  await writeProvisionedSet(state, ctx.org, p, () => ctx.recordsMoved());
   state.removeProvisioning();
   ctx.keyChanged(await importSigningKey(p.machineKey.jwk));
   ctx.log(`endpoint: certified under the delegation ${p.cert.body.delegation} as ${p.redeemed.machine} in ${p.redeemed.org} (use ${p.redeemed.use})`);
@@ -191,11 +191,11 @@ export async function settle(ctx: EnrollContext, age: CredentialAge): Promise<Pr
  * The endpoint's start with a pending provisioning: the write set completed from the record before anything judges the
  * directory, the record kept until a run of `provision` (or `retire`) has the certificate's post answered.
  */
-export async function completeProvisioning(state: EndpointState, org: EndpointOrg, log: (line: string) => void): Promise<void> {
+export async function completeProvisioning(state: EndpointState, org: EndpointOrg, log: (line: string) => void, recordsMoved: () => void): Promise<void> {
   const p = state.provisioning;
   if (p === null) return;
   try {
-    await writeProvisionedSet(state, org, p);
+    await writeProvisionedSet(state, org, p, recordsMoved);
     log(`endpoint: completed the provisioning of ${p.redeemed.machine} from its record; \`mawsd endpoint provision\` posts its certificate again`);
   } catch (error) {
     log(`endpoint: the pending provisioning of ${p.redeemed.machine} could not be completed: ${(error as Error).message}`);
@@ -208,9 +208,10 @@ export async function completeProvisioning(state: EndpointState, org: EndpointOr
  * atomic and the set idempotent (what already holds its value is not written again, so a listed enrollment stays
  * listed), run in the org view's queue as an enrollment's writes are.
  */
-function writeProvisionedSet(state: EndpointState, org: EndpointOrg, p: ProvisioningFile): Promise<void> {
+function writeProvisionedSet(state: EndpointState, org: EndpointOrg, p: ProvisioningFile, recordsMoved: () => void): Promise<void> {
   return org.exclusive(async () => {
     refuseOtherOrg(state, p.redeemed.org, p.pins);
+    if (state.claimRecords({ org: p.redeemed.org, hub: p.hub, recoveryPub: p.pins.recoveryPub }, Date.now())) recordsMoved();
     const { keyId: id, jwk } = p.machineKey;
     if (state.machineKey?.keyId !== id) state.setMachineKey({ version: 1, keyId: id, jwk, created: p.cert.body.issued });
     if (state.ledger === null || !state.ledger.heldKeys.includes(id)) state.setLedger({ version: 1, heldKeys: [id], grants: {}, highWater: {} });

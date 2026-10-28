@@ -314,7 +314,7 @@ export class Endpoint implements EndpointModule {
     this.notifier.restore();
     if (state.refusing !== null) return;
     // A provisioning interrupted mid-set (O14 M1) is whole again before anything below reads the directory.
-    await completeProvisioning(state, org, log);
+    await completeProvisioning(state, org, log, () => this.rl10.forgetRecords());
     this.own.open();
     if (state.machineKey !== null) {
       try {
@@ -391,6 +391,10 @@ export class Endpoint implements EndpointModule {
       deps: this.deps,
       log: (line) => parts.services.log(line),
       lifecycle: (run) => this.#serialLifecycle(run),
+      recordsMoved: () => {
+        this.rl10.forgetRecords();
+        parts.services.log('endpoint: RL10\'s kept signatures and replay index were another authority\'s: moved aside');
+      },
       keyChanged: (key) => {
         this.#key = key;
         // The new key speaks for the machine once it is judged to; the channels the old key authenticated end, their

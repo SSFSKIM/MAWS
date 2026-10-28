@@ -32,7 +32,7 @@ import {
 import * as z from 'zod';
 import { assertPrivateDirectory, PrivatePathError } from '@shared/host/private-path';
 import { checkPrivateFile, removeFile, StateFileError, sweepTemporaries, syncDirectory, writeAtomic } from './files';
-import { STALE_DIRECTORY, staleDirectories, unenrollDirectory } from './unenroll';
+import { moveRecordsAside, STALE_DIRECTORY, staleDirectories, unenrollDirectory } from './unenroll';
 
 export const PERMISSION_MODES = ['plan', 'default', 'acceptEdits', 'auto', 'dontAsk', 'bypassPermissions'] as const;
 export type PermissionMode = (typeof PERMISSION_MODES)[number];
@@ -151,6 +151,13 @@ const ProvisioningSchema = z.strictObject({
   hub: z.string().min(1),
 });
 
+/**
+ * The authority RL10's kept records (`signatures/`, `inbound/`) were made under (O14 M1, review round 2): the org, its
+ * hub and its recovery key, the org's identity as the org file's pins keep it (its roots rotate under the same recovery
+ * key). Written with an enrollment's set; it outlives an unenroll with the records it names.
+ */
+const AuthoritySchema = z.strictObject({ version: z.literal(1), org: z.string().min(1), hub: z.string().min(1), recoveryPub: z.string().min(1) });
+
 /** `retire`'s durable record (O14 M1, Interfaces §B): the same signed record and `notAfter` on every rerun. */
 const RetirementSchema = z.strictObject({
   version: z.literal(1),
@@ -172,6 +179,7 @@ export type HostsFile = z.infer<typeof HostsSchema>;
 export type DelegationFile = z.infer<typeof DelegationSchema>;
 export type ProvisioningFile = z.infer<typeof ProvisioningSchema>;
 export type RetirementFile = z.infer<typeof RetirementSchema>;
+export type Authority = Omit<z.infer<typeof AuthoritySchema>, 'version'>;
 export type ChainEntry = z.infer<typeof ChainEntrySchema>;
 
 const FILES = {
@@ -188,6 +196,7 @@ const FILES = {
   delegation: 'delegation.json',
   provisioning: 'provisioning.json',
   retirement: 'retirement.json',
+  authority: 'records-authority.json',
 } as const;
 
 type Options = { uid?: number; now?: () => number; log?: (line: string) => void };
@@ -210,6 +219,7 @@ export class EndpointState {
   #delegation: DelegationFile | null = null;
   #provisioning: ProvisioningFile | null = null;
   #retirement: RetirementFile | null = null;
+  #authority: Authority | null = null;
 
   private constructor(
     readonly dir: string,
@@ -249,6 +259,7 @@ export class EndpointState {
       const delegation = read(FILES.delegation, DelegationSchema);
       const provisioning = read(FILES.provisioning, ProvisioningSchema);
       const retirement = read(FILES.retirement, RetirementSchema);
+      const authority = read(FILES.authority, AuthoritySchema);
 
       // A pending provisioning's set may be half written: it is completed from its record, never moved aside.
       const alone = provisioning === null && (machineKey === null) !== (ledger === null);
@@ -276,6 +287,7 @@ export class EndpointState {
       state.#delegation = delegation;
       state.#provisioning = provisioning;
       state.#retirement = retirement;
+      state.#authority = authority === null ? null : { org: authority.org, hub: authority.hub, recoveryPub: authority.recoveryPub };
       return state;
     } catch (error) {
       if (error instanceof PrivatePathError || error instanceof StateFileError) return refuse(error.reason, error.message);
@@ -399,6 +411,36 @@ export class EndpointState {
   }
 
   /**
+   * Claims RL10's kept records for the authority an enrollment's set is about to be written under: records made under
+   * another, or under none this directory can name, are moved aside with their marker first, and the marker then names
+   * `authority`. True when records were moved (their in-memory caches are then stale). Called before the set is
+   * written, so the authority held is still the one the records were made under.
+   */
+  claimRecords(authority: Authority, now: number): boolean {
+    this.#refuseWrites();
+    const held = this.#authority ?? this.#enrolledAuthority();
+    if (held !== null && sameAuthority(held, authority)) {
+      if (this.#authority === null) this.#setAuthority(authority);
+      return false;
+    }
+    const moved = moveRecordsAside(this.dir, now) !== null;
+    this.#setAuthority(authority);
+    return moved;
+  }
+
+  /** The authority of the enrollment or the pending provisioning held, for records made before the marker was kept. */
+  #enrolledAuthority(): Authority | null {
+    if (this.#enrollment !== null && this.#org !== null) return { org: this.#enrollment.org, hub: this.#enrollment.hub, recoveryPub: this.#org.pinned.recoveryPub };
+    const p = this.#provisioning;
+    return p === null ? null : { org: p.redeemed.org, hub: p.hub, recoveryPub: p.pins.recoveryPub };
+  }
+
+  #setAuthority(authority: Authority): void {
+    this.#write(FILES.authority, AuthoritySchema.parse({ version: 1, ...authority }));
+    this.#authority = authority;
+  }
+
+  /**
    * Takes the directory back to unenrolled (`mawsd endpoint unenroll`, and `retire`'s local part; O14 M1): every private
    * key it holds, at its top and under each earlier `stale-*\/`, destroyed, their ids kept in the new `stale-<time>/`'s
    * `keys.json`; the enrollment's files moved there; `signatures/`, `inbound/`, `policy.json`, `hosts.json` and the
@@ -408,6 +450,9 @@ export class EndpointState {
    */
   async unenroll(now: number): Promise<{ aside: string; keyIds: string[] }> {
     this.#refuseWrites();
+    // The kept records outlive the enrollment: their marker names its authority, for the next one to compare.
+    const authority = this.#authority === null ? this.#enrolledAuthority() : null;
+    if (authority !== null) this.#setAuthority(authority);
     const ids = new Set<string>();
     for (const dir of [this.dir, ...staleDirectories(this.dir)]) for (const id of await privateKeyIds(dir)) ids.add(id);
     const aside = unenrollDirectory(this.dir, now, [...ids]);
@@ -480,6 +525,8 @@ async function privateKeyIds(dir: string): Promise<string[]> {
   }
   return ids;
 }
+
+const sameAuthority = (a: Authority, b: Authority) => a.org === b.org && a.hub === b.hub && a.recoveryPub === b.recoveryPub;
 
 function parseJson(text: string): unknown {
   try {
