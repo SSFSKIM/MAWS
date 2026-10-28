@@ -33,7 +33,7 @@ After O6:
 - [x] M2: addresses across the boundary, one machine (2026-10-27; commits `8362f2d74`..`849b08ae5`, task review clean after one fix round; class 1a GREEN 40520987967; hosted e2e GREEN 40501648644, 40503154665, 40506863633; mini e2e:default GREEN 40518812172; OX7 bench within budget 40507512064)
 - [x] M3: machine links and the second-profile stand-in (2026-10-27; commits `98d55f9cf`..`4cc3aa1fc`, task review clean after two fix rounds; class 1a with e2e:cross-build GREEN 40537654843; hosted e2e:supervisor GREEN 40527949745 and self-hosted e2e:machines GREEN 40527965726, both at `f7672566b`, before the manager-only fixes)
 - [x] M4: per-machine stores, the shell per machine, explicit machines for paths (2026-10-27; commits `6370e06ec`..`3d385c4cb`, task review clean after one fix round; class 1a GREEN 40573698654; at `4b59cd5f5`, before the fix wave: hosted GREEN 40559770099, mini e2e:machines with M4's scene and e2e:default GREEN 40559769024, OX7 bench within budget 40563723819. At the fix head, once the mini's loginwindow alert (ci-kit-sandbox#59) closed: e2e:machines, e2e:default and e2e:cross-build GREEN, run 40585344264. Hosted e2e:layout's `shell.spec.ts:367`, red at the pre-fix head too (40577605822), was a race in the test, fixed in `18c452b74`)
-- [ ] M5: org projects and the sidebar
+- [x] M5: org projects and the sidebar (2026-10-27; commits `18c452b74`..`de5d12a5b`; task review converged after one fix round, with two findings logged as debt; class 1a GREEN 40607054840; mini e2e:machines and e2e:default GREEN 40607045251; hosted at `361f4c0c0` GREEN 40591232003 and e2e:layout GREEN 40597601420; at `de5d12a5b` the hosted maws-app runs were green but four MAWS waiter jobs died with no log (40607043033), so M6's whole set stands in for them)
 - [ ] M6: acceptance
 
 ## Acceptance
@@ -1079,7 +1079,19 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
   - Greying (T2): an org row greys only when every checkout's machine is offline; a machine row greys with its machine. A greyed row's accessible name gains ", machine offline", and the chip reads "offline", titled "machine offline". The project hover card is unchanged (T4).
   - Names: before the roster answers, a machine is named "This Mac" if local, else by its ref. The Environment card names another machine, with "· offline" when it is down.
   - Test support: `renderer-machine-setup.ts` reinstalls the bare `{ localMachine }` bridge before each test, because the page now reads its machine while rendering.
-  Date/Author: 2026-10-27, O6's executor (controller), from M5's executor.
+  - The task review's round:
+    - A legacy address-keyed set that `rekeySets` leaves waiting is held whole: `refile` moves nothing out of a set whose old key still answers 'wait', so a later arrival merges it with its panes and ratio. `rekeyOf` answers a not-yet-derived listed project's own address, so the ordinary refile still runs for it.
+    - The chosen merge base's panel context wins over an entry already at the destination key. The merge base among non-current sets is the first source key in string order.
+    - Re-homed tabs keep their order.
+    - For two projects on one machine, the opened checkout's name wins over a discovered clone's.
+    - Resume, `/resume` and "Archived sessions…" follow the row's membership (`rowOfSession`), reading archived records from each of the row's machines that is up.
+    - Needs-you rows carry the machine mark and grey their titles.
+    - The Overview gives each machine its own group for sessions of no project, named after the machine and placed after the projects, this machine first. No surface says "Other sessions" (P5 Decision Log 28).
+    - `.smns` `project` and `name` are coerced as sminos's `str()` does before validation.
+  - Converged with two findings logged as debt (the report's debt list), not fixed:
+    - Numeric `.smns` values whose JSON spelling Python's `str()` keeps and JavaScript's doesn't (`42.0`, `1e3`, `0.000001`, integers above 2^53) derive a different key from sminos's. sminos writes string ids, and an integer or a string id matches.
+    - A context-only merge with no open set to supply a base keeps insertion order.
+  Date/Author: 2026-10-27, O6's executor (controller), from M5's executor and its task review.
 
 - Decision: the verification.
   - This document gets one `doperpowers:adversarial-reviewer` buildability review before execution (P5 Decision Log 12).
