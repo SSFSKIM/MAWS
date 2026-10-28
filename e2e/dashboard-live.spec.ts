@@ -37,6 +37,7 @@ import { ownerPlugins } from '../test/support/claude-env';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { compareA15 } from '../test/support/owner-file';
 import { relaySkipReason } from '../test/support/relay-health';
+import { addressed } from './support/address';
 import { journal } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';
 import { AgentSeam } from './support/dashboards';
@@ -208,7 +209,7 @@ test('the agent creates a dashboard from markdown, binds the CSV it wrote in one
 
     await (await sidebarRow(page, { appSessionId: id })).click();
     await page.mouse.move(700, 20);
-    await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();
+    await expect(pane.locator(`[data-composer="${await addressed(page, id)}"]`)).toBeVisible();
     const spec = { ...launchDefaults(id, repo), model: 'haiku', permissionMode: 'default' as const, subagentModel: 'haiku', maxBudgetUsd: CAP_USD };
     expect(value(await invoke(page, 'session.launch', { spec }))).toMatchObject({ status: 'launching' });
     journalPath = (await statusOf()).journalPath;

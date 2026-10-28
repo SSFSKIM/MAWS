@@ -8,6 +8,7 @@ import { projectLabels } from './project-labels';
 import { isSidebarProject, projectGroups } from './project-groups';
 import { runAddProject, useAddProjectEnabled } from './project-actions';
 import { Search } from './Search';
+import { machineOf } from '@shared/machine/address';
 
 // Discovery supplies choices, never membership. Adding uses the persisted user-origin path, also used by Finder.
 export function AddProject() {
@@ -23,7 +24,7 @@ export function AddProject() {
     setBusy(true);
     setError(null);
     try {
-      const result = await ipc.invoke('session.projects.add', { directory: project.directory });
+      const result = await ipc.invoke('session.projects.add', { directory: project.directory }, { machine: machineOf(project.id) });
       if (result.ok) setOpen(false);
       else setError(result.error.message);
     } finally { setBusy(false); }

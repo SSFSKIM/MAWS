@@ -33,6 +33,7 @@
     "test/support/fixtures.ts",
     "test/support/git-env.ts",
     "test/support/import-reports.ts",
+    "test/support/machine.ts", // P5 O6 M2: the unit suites' local machine
     "test/support/memory-reader.ts",
     "test/support/optional-heap.ts",
     "test/support/panel-child-fixture.ts",

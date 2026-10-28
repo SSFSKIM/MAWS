@@ -4,8 +4,12 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest, SessionPhase } from '@shared/ipc/schema';
+import { machineOf } from '@shared/machine/address';
+import { machineKey, type OrgKey } from '@shared/machine/org-key';
+import type { MachineRef } from '@shared/machine/ref';
 import { holderLine, isActionable, waitingItem, type NeedsYouRow } from '../attention/derive';
 import { glyphFor } from '../attention/glyph';
+import { machineOfRow, machineOrder } from '../stores/org-projects';
 
 const LIVE = new Set<SessionPhase>(['starting', 'working', 'waiting', 'idle', 'failed', 'foreign']);
 
@@ -21,10 +25,12 @@ export interface OverviewInput {
   digests: Map<AppSessionId, SessionDigest>;
   projects: Iterable<ProjectRecord>;
   rows: NeedsYouRow[];
+  local: MachineRef; // P5 O6 M5: the sessions of no project group by machine, this one's first, each named as its row is
+  machineName(machine: MachineRef): string;
 }
 
 export interface CardGroup {
-  id: 'needs-you' | 'other' | ProjectId;
+  id: 'needs-you' | ProjectId | OrgKey; // a machine's: `machine:<ref>`
   title: string;
   sessions: AppSessionId[];
 }
@@ -39,15 +45,15 @@ function eligible(record: SessionRecord, digest: SessionDigest | undefined, wait
 const latestTurn = (record: SessionRecord, digest: SessionDigest | undefined) =>
   time(digest?.turnStartedAt ?? digest?.lastTurnEndedAt ?? record.updatedAt);
 
-export function overviewGroups({ records, digests, projects, rows }: OverviewInput): CardGroup[] {
+export function overviewGroups({ records, digests, projects, rows, local, machineName }: OverviewInput): CardGroup[] {
   const waiting = new Set(rows.map((row) => row.appSessionId));
   const groups: CardGroup[] = [{ id: 'needs-you', title: 'Needs you', sessions: rows.map((row) => row.appSessionId).filter((id) => records.has(id)) }];
   const ordered = orderProjects(projects);
-  const byProject = new Map<ProjectId | 'other', SessionRecord[]>();
+  const byProject = new Map<ProjectId | OrgKey, SessionRecord[]>();
   const known = new Set(ordered.map((p) => p.id));
   for (const record of records.values()) {
     if (waiting.has(record.appId) || !eligible(record, digests.get(record.appId), false)) continue;
-    const key = record.projectId !== null && known.has(record.projectId) ? record.projectId : 'other';
+    const key = record.projectId !== null && known.has(record.projectId) ? record.projectId : machineKey(machineOf(record.appId));
     byProject.set(key, [...(byProject.get(key) ?? []), record]);
   }
   const sorted = (list: SessionRecord[] = []) =>
@@ -55,7 +61,8 @@ export function overviewGroups({ records, digests, projects, rows }: OverviewInp
       .sort((a, b) => latestTurn(b, digests.get(b.appId)) - latestTurn(a, digests.get(a.appId)) || byTitle(a, b))
       .map((r) => r.appId);
   for (const p of ordered) groups.push({ id: p.id, title: p.name, sessions: sorted(byProject.get(p.id)) });
-  groups.push({ id: 'other', title: 'Other sessions', sessions: sorted(byProject.get('other')) });
+  const machines = [...byProject.keys()].map(machineOfRow).filter((m) => m !== null);
+  for (const m of machines.sort(machineOrder(local, machineName))) groups.push({ id: machineKey(m), title: machineName(m), sessions: sorted(byProject.get(machineKey(m))) });
   return groups.filter((group) => group.sessions.length > 0);
 }
 

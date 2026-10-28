@@ -5,13 +5,16 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BROWSER_ACTIVITIES_KEPT } from '@shared/browser/activity';
 import type { AppSessionId } from '@shared/graph/ids';
 import { fakeClient, type FakeClient } from '../../../../../../test/support/fake-client';
+import { at } from '../../../../../../test/support/machine';
 import { deferred, installFakeMain, ok } from '../../../test-support/code';
 import { browserActivityOf, connectBrowserActivity, listBrowserActivity, resetBrowserActivity } from './activity';
 
 type Answer = Awaited<ReturnType<Parameters<typeof installFakeMain>[0]>>;
 
-const A = 'App-A' as AppSessionId;
-const B = 'App-B' as AppSessionId;
+// P5 O6 M2: the page's ids are addresses; main (installFakeMain) is asked and answers with MAIN_A.
+const MAIN_A = 'App-A' as AppSessionId;
+const A = at(MAIN_A);
+const B = at('App-B' as AppSessionId);
 const TAB = 'b_000000000001';
 
 let fake: FakeClient;
@@ -38,7 +41,7 @@ describe('the browser activity store', () => {
     expect(a[0]!.seq).toBeLessThan(a[1]!.seq);
     expect(a[0]).toMatchObject({ appSessionId: A, tabId: TAB, at: '2026-10-08T10:00:00.000Z' });
     expect(browserActivityOf(B).map((entry) => entry.activity)).toEqual([{ kind: 'typed', chars: 2 }]);
-    expect(browserActivityOf('App-none' as AppSessionId)).toEqual([]);
+    expect(browserActivityOf(at('App-none' as AppSessionId))).toEqual([]);
   });
 
   it('keeps only the latest entries of a session', () => {
@@ -66,7 +69,7 @@ describe('the browser activity store', () => {
 // (`browser.agent.activities.list`, oldest first) and the store merges it under what the live events already brought,
 // so a window reload or a re-mount shows the rows again.
 describe('listing a session’s activity', () => {
-  const entry = (at: string, chars: number) => ({ appSessionId: A, tabId: TAB, at, activity: { kind: 'typed' as const, chars } });
+  const entry = (at: string, chars: number) => ({ appSessionId: MAIN_A, tabId: TAB, at, activity: { kind: 'typed' as const, chars } });
   let main: ReturnType<typeof installFakeMain>;
   let listed: ReturnType<typeof deferred<Answer>>;
   let stop: () => void;
@@ -83,7 +86,7 @@ describe('listing a session’s activity', () => {
 
   it('fills a fresh store from main, oldest first', async () => {
     const loading = listBrowserActivity(A);
-    expect(main.callsOf('browser.agent.activities.list')).toEqual([{ appSessionId: A }]);
+    expect(main.callsOf('browser.agent.activities.list')).toEqual([{ appSessionId: MAIN_A }]);
     listed.resolve(ok({ activities: [entry('2026-10-08T10:00:01.000Z', 1), entry('2026-10-08T10:00:02.000Z', 2)] }));
     await loading;
     expect(browserActivityOf(A).map((e) => e.activity)).toEqual([{ kind: 'typed', chars: 1 }, { kind: 'typed', chars: 2 }]);

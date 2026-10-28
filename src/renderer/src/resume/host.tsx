@@ -9,6 +9,8 @@ import { useMemo, useRef } from 'react';
 import { create } from 'zustand';
 import type { ProjectId } from '@shared/graph/ids';
 import { WIDGET_DIALOG_BOX } from '../composer/WidgetDialog';
+import { orgKeyOf } from '../stores/org-projects';
+import { useSessions } from '../stores/sessions';
 import { RESUME_COPY } from './copy';
 import { ResumeChooser } from './ResumeChooser';
 
@@ -29,7 +31,10 @@ function returnFocus(opener: HTMLElement): void {
 
 export function ResumeChooserHost() {
   const open = useResumeChooser((s) => s.open);
-  const context = useMemo(() => (open === null ? null : { projectId: open.projectId, exclude: null }), [open]);
+  // P5 O6 M5: the row the project is listed under, which scopes the chooser to every checkout it groups
+  const project = useSessions((s) => (open === null ? undefined : s.projects.get(open.projectId)));
+  const row = project === undefined ? undefined : orgKeyOf(project);
+  const context = useMemo(() => (open === null ? null : { projectId: open.projectId, row, exclude: null }), [open, row]);
   const opened = useRef(false); // the close opened a session
   if (open === null || context === null) return null;
   const close = (reason?: 'opened') => {

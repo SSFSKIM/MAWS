@@ -8,6 +8,7 @@ import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
+import { at, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
 import { useLayout } from '../../../stores/layout';
 import { installDisk, type DiskFile } from '../../../test-support/code-disk';
@@ -16,12 +17,13 @@ import { openFile } from '../open-file';
 import { FileViewer } from '../viewer/FileViewer';
 import { useViewer } from '../viewer/viewer-store';
 
-const A = 'app-a' as AppSessionId;
+const A = at('app-a' as AppSessionId); // P5 O6 M2: the page's address; its file tabs name their machine
+const FILE = (path: string) => `file:${TEST_MACHINE}:${path}`;
 const APP = '/r/app.ts';
 const LIB = '/r/lib.ts';
 
-const fileTab = (path: string): Extract<TabRef, { kind: 'file' }> => ({ id: `file:${path}`, kind: 'file', path, line: null, appSessionId: A, pinned: false });
-const entry = (path: string) => useViewer.getState().entries.get(`file:${path}`)!;
+const fileTab = (path: string): Extract<TabRef, { kind: 'file' }> => ({ id: FILE(path), kind: 'file', path, line: null, appSessionId: A, machine: TEST_MACHINE, pinned: false });
+const entry = (path: string) => useViewer.getState().entries.get(FILE(path))!;
 
 describe('unsaved files for the quit guard', () => {
   const offs: (() => void)[] = [];
@@ -66,7 +68,7 @@ describe('unsaved files for the quit guard', () => {
     await waitFor(() => expect(pushes()).toEqual([[LIB], [APP, LIB]]));
     act(() => view(APP).dispatch({ changes: { from: 0, to: '// app\n'.length, insert: '' } })); // back to the disk's text
     await waitFor(() => expect(pushes()).toEqual([[LIB], [APP, LIB], [LIB]]));
-    act(() => useLayout.getState().closeTab(`file:${LIB}`)); // a dirty tab closed (its guard asked)
+    act(() => useLayout.getState().closeTab(FILE(LIB))); // a dirty tab closed (its guard asked)
     cleanup(); // its viewer unmounts with it, and the store prunes the entry
     await waitFor(() => expect(pushes()).toEqual([[LIB], [APP, LIB], [LIB], []]));
   });
@@ -169,7 +171,7 @@ describe('unsaved files for the quit guard', () => {
     const { disk, type } = await openBoth();
     type(APP, '// app\n');
     const write = disk.hold('files.write');
-    const first = useViewer.getState().save(`file:${APP}`);
+    const first = useViewer.getState().save(FILE(APP));
     await waitFor(() => expect(entry(APP).saving).toBe(true));
     act(() => disk.emit('layout.saveAll', { requestId: 'r3' }));
     await waitFor(() => expect(disk.callsOf('layout.saveAllDone')).toEqual([{ requestId: 'r3', failed: [{ path: APP, message: 'Saving…' }] }]));

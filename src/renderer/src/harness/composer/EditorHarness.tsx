@@ -4,9 +4,11 @@
 // editor's own dispatch (`session.send`, `session.bash`, …) and are recorded for the test beside what the host wrote.
 // Playwright drives it through `window.__maws_editor`, since main blocks navigation within a launch. The frame, the
 // submit control and the strip are M4's; this page shows the "+" menu and the attachments' names beside the editor.
+// P5 O6 M2: `show` takes the raw bridge's bare session id, which the page holds as the local machine's address.
 import { WidgetDialogHost } from '../../composer/WidgetDialog'; // W3 (C6)
 import { useEffect, useRef, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import { addressOf } from '@shared/machine/address';
 import { ipc } from '../../ipc/client';
 import { connectKeys } from '../../keymap/dispatcher';
 import { attachmentsOf, type ComposerDoc } from '../../composer/editor/doc';
@@ -59,7 +61,7 @@ export function EditorHarness() {
   }, []);
 
   // The session's transcript, so ArrowUp recalls its prompts and the placeholder knows a turn happened.
-  const appSessionId = (pane?.appSessionId ?? null) as AppSessionId | null;
+  const appSessionId = pane ? addressOf(ipc.localMachine, pane.appSessionId as AppSessionId) : null;
   useEffect(() => {
     if (appSessionId === null) return;
     const store = useTranscriptStore.getState();

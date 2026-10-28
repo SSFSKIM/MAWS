@@ -19,6 +19,7 @@
 // MAWS_LIVE_SLIDE_MODEL (haiku when unset, the cheapest that drives the publish). Run on purpose only:
 //   MAWS_LIVE=1 pnpm e2e:presentations-provisional-live
 // Evidence: test-results/presentations-provisional-live/live-run.txt (the scratch root, journal included, is kept).
+import { addressed } from './support/address';
 import { openArtifactInPanel } from './support/shell';
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
@@ -286,7 +287,7 @@ test('the live run: the agent’s publish of a slide is seen as it is written, i
     const pane = page.locator('[data-region="main"] [data-pane="0"]');
     await (await sidebarRow(page, { appSessionId: id })).click();
     await page.mouse.move(700, 20);
-    await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();
+    await expect(pane.locator(`[data-composer="${await addressed(page, id)}"]`)).toBeVisible();
 
     // the owner's deck, seeded from files, open in the panel's Artifacts tool beside the composer, its slide on the stage
     const { artifact } = value(await invoke(page, 'artifacts.create', { kind: 'presentation', title: TITLE }));

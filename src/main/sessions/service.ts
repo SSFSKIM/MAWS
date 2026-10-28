@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { AppSessionId, MessageUuid, ProjectId } from '@shared/graph/ids';
+import type { PtyId } from '@shared/ipc/schema/pty';
 import type { SessionRecord } from '@shared/graph/session';
 import { worktreeDirName } from '@shared/sessions/worktree';
 import type { FirstMessage, ForkTarget, Location, SetupIntent, SetupIntentPatch } from '@shared/sessions/intent';
@@ -549,7 +550,7 @@ export class SessionService {
 
   // `session.takeOver`: ends the foreign holder the owner confirmed and waits for the registry to clear (take-over.ts).
   // Refused while a start of this id is in flight; the resume that follows is the renderer's `session.start`.
-  async takeOverPane(pid: number): Promise<{ ptyId: string; label: string } | null> {
+  async takeOverPane(pid: number): Promise<{ ptyId: PtyId; label: string } | null> {
     await this.ready();
     const target = await findPane(this.s.dispatch, pid);
     return target ? { ptyId: target.pane.ptyId, label: target.pane.label } : null;

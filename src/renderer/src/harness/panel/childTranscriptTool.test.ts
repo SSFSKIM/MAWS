@@ -5,7 +5,7 @@ import { childTranscriptTool } from './childTranscriptTool';
 import { fakeId } from './fakeSessions';
 import { loadedSession, summaryProbes } from './summaryProbes';
 
-const playerKeys = () => Object.keys(useTranscriptStore.getState().entries).filter((key) => /^harness:\d+$/.test(key));
+const playerKeys = () => Object.keys(useTranscriptStore.getState().entries).filter((key) => /^[^/]+\/harness:\d+$/.test(key)); // P5 O6 M2: a player key is an address of the local machine
 
 const A = fakeId('A');
 const init = { appSessionId: A, session: null, instanceId: 'child:test', params: undefined };

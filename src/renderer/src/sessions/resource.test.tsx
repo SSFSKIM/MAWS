@@ -9,12 +9,15 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { Component, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { EngineSessionStatus } from '@shared/engine/status';
+import { EngineSessionStatusSchema, type EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import { compileAddressing } from '@shared/machine/address';
 import { digest, record } from '../../../../test/support/builders';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { loadScenario } from '../../../../test/support/scenario';
+import { pageScenario } from '../test-support/shell-stores';
 import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { ContextRing } from '../composer/frame/ContextRing';
 import { slashWidget, WIDGET_COMMANDS } from '../composer/mentions/widgets';
@@ -37,7 +40,11 @@ import { registerAllWidgets } from '../widgets';
 import { useReadLoads } from '../widgets/read';
 
 const ROOT = join(__dirname, '../../../..');
-const ID = 'app-7412a115' as AppSessionId;
+// P5 O6 M2: the page holds addresses (the scenario lifted, as the client lifts main's answers); the backend, standing for
+// main, is asked and answers with the bare ids
+const BARE_ID = 'app-7412a115' as AppSessionId;
+const ID = at(BARE_ID);
+const liftStatus = (status: EngineSessionStatus) => compileAddressing(EngineSessionStatusSchema).lift(status, TEST_MACHINE) as EngineSessionStatus;
 const STARTS = ['session.acquire', 'session.start', 'session.launch'];
 
 let backend: WidgetBackend;
@@ -53,10 +60,11 @@ beforeEach(() => {
   backend.script('marketplaces.list', () => ({ marketplaces: [] }));
   backend.script('session.observedFacts', () => null);
   window.maws = backend.bridge();
-  const filler = Array.from({ length: 200 - scenario.sessions.length }, (_, i) => record(`app-idx-${i}`));
-  records = [...scenario.sessions, ...filler];
+  const page = pageScenario(scenario);
+  const filler = Array.from({ length: 200 - scenario.sessions.length }, (_, i) => record(at(`app-idx-${i}`)));
+  records = [...page.sessions, ...filler];
   // every status the app run knows has exited; the rest of the index never ran here
-  const exited = new Map<AppSessionId, EngineSessionStatus>(scenario.engine.map((s) => [s.appSessionId, { ...s, process: 'exited', turn: null }]));
+  const exited = new Map<AppSessionId, EngineSessionStatus>(page.engine.map((s) => [s.appSessionId, { ...s, process: 'exited', turn: null }]));
   useSessions.setState({ engine: exited, records: new Map(records.map((r) => [r.appId, r])), digests: new Map(records.map((r) => [r.appId, digest(r.appId, { availability: 'resumable' })])) });
   off = registerAllWidgets();
   registerAppTools();
@@ -69,7 +77,7 @@ afterEach(() => {
   resetCatalogStore();
   useSessions.setState({ engine: new Map(), records: new Map(), digests: new Map() });
   useReadLoads.setState({ loads: new Map() });
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
   vi.useRealTimers();
 });
 
@@ -166,13 +174,13 @@ describe('mounted surfaces on exited sessions start nothing (G5)', () => {
 
   it('a mounted session the budget released is not relaunched by its widgets, nor by Session info’s 30 s refetch', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const ready = { ...backend.status(ID), process: 'ready' as const };
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: ready }));
+    const ready = { ...liftStatus(backend.status(BARE_ID)), process: 'ready' as const };
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: ready }, TEST_MACHINE));
     mount(ID);
     await settle();
     const reads = backend.calls.length;
     expect(reads).toBeGreaterThan(0); // live: the widgets read
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...ready, process: 'exited', exit: { code: 0, signal: null, reason: 'budget', at: ready.launchedAt, release: { limitKiB: 1, totalKiB: 2 } } } }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...ready, process: 'exited', exit: { code: 0, signal: null, reason: 'budget', at: ready.launchedAt, release: { limitKiB: 1, totalKiB: 2 } } } }, TEST_MACHINE));
     await act(async () => void vi.advanceTimersByTime(INFO_REFRESH_MS * 2 + 1_000));
     await settle();
     expect(starts()).toEqual([]);

@@ -8,6 +8,7 @@ import { runAction } from './actions-runtime';
 import { currentSet } from '../stores/layout-model';
 import { useLayout } from '../stores/layout';
 import { resetShellStores } from '../test-support/shell-stores';
+import { at } from '../../../../test/support/machine';
 import { TabStrip } from '../main/TabStrip';
 import { connectKeys } from './dispatcher';
 
@@ -41,10 +42,10 @@ function Regions() {
 
 function openTabs() {
   const layout = useLayout.getState();
-  layout.openTab({ kind: 'session', appSessionId: 'chat-a' as AppSessionId });
+  layout.openTab({ kind: 'session', appSessionId: at('chat-a' as AppSessionId) });
   layout.openTab({ kind: 'diagnostics' });
-  layout.openTab({ kind: 'session', appSessionId: 'chat-b' as AppSessionId });
-  layout.activateTab('session:chat-a');
+  layout.openTab({ kind: 'session', appSessionId: at('chat-b' as AppSessionId) });
+  layout.activateTab(`session:${at('chat-a')}`);
 }
 
 // Menu-sink actions receive their effective accelerator from the table, then arrive as layout.action.
@@ -134,24 +135,24 @@ describe('strip-order navigation', () => {
     act(() => frames.splice(0).forEach((fn) => fn(0)));
     expect(document.activeElement).toBe(screen.getByRole('tab', { selected: true }));
     pressMenu({ key: ']', code: 'BracketRight', metaKey: true, altKey: true });
-    expect(active()).toBe('session:chat-b');
+    expect(active()).toBe(`session:${at('chat-b')}`);
     pressMenu({ key: ']', code: 'BracketRight', metaKey: true, altKey: true });
-    expect(active()).toBe('session:chat-a');
+    expect(active()).toBe(`session:${at('chat-a')}`);
     pressMenu({ key: '[', code: 'BracketLeft', metaKey: true, altKey: true });
-    expect(active()).toBe('session:chat-b');
+    expect(active()).toBe(`session:${at('chat-b')}`);
   });
 
   it('keeps session navigation separate and honors a rebound or unbound strip accelerator', () => {
     openTabs();
     expect(pressMenu({ key: ']', code: 'BracketRight', metaKey: true, shiftKey: true })).toBe('session.next');
-    expect(active()).toBe('session:chat-a'); // no sidebar sessions, so session navigation has no target
+    expect(active()).toBe(`session:${at('chat-a')}`); // no sidebar sessions, so session navigation has no target
     const next = { 'tab.stripNext': 'Cmd+Alt+Right' } as KeymapOverrides;
     expect(pressMenu({ key: ']', code: 'BracketRight', metaKey: true, altKey: true }, next)).toBeUndefined();
     expect(pressMenu({ key: 'ArrowRight', code: 'ArrowRight', metaKey: true, altKey: true }, next)).toBe('tab.stripNext');
     expect(active()).toBe('diagnostics');
     expect(pressMenu({ key: ']', code: 'BracketRight', metaKey: true, altKey: true }, { 'tab.stripNext': null } as KeymapOverrides)).toBeUndefined();
     act(() => runAction('tab.next'));
-    expect(active()).toBe('session:chat-b'); // Ctrl+Tab's existing action still cycles
+    expect(active()).toBe(`session:${at('chat-b')}`); // Ctrl+Tab's existing action still cycles
   });
 
   it('steps the pane owning DOM focus instead of moving a different pane', () => {
@@ -166,7 +167,7 @@ describe('strip-order navigation', () => {
     const set = currentSet(useLayout.getState().main);
     expect(set.focusedPane).toBe(1);
     expect(set.panes[0].activeTabId).toBe('diagnostics');
-    expect(set.panes[1]?.activeTabId).toBe('session:chat-a');
+    expect(set.panes[1]?.activeTabId).toBe(`session:${at('chat-a')}`);
   });
 });
 

@@ -9,6 +9,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
+import { bareOf } from '@shared/machine/address';
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import type { LibraryFilter, LibraryRow } from '@shared/ipc/schema/library';
 import { heldArtifactEditorState, registerArtifactEditor, resetArtifactEditors, type ArtifactEditorProps } from '../../artifacts/registry';
 import { connectLibrary, resetLibrary, watchLibraryRow } from '../../library/store';
@@ -22,6 +24,10 @@ import { A, B, heldBridge, hydrateHeld, panelOf, persisted, resetPanelStores, Te
 import { ARTIFACTS_TOOL_ID, artifactsTool, openArtifactInPanel, type ArtifactsHandle, type ArtifactsParams } from './ArtifactsTool';
 import { ArtifactsSummary } from './Summary';
 import { resetOpenRequests, useOpenRequest } from './viewers/requests';
+
+// P5 O6 M2: main's rows and the filters it is asked with hold bare ids; the page's A and B are addresses.
+const MAIN_A = bareOf(A);
+const MAIN_B = bareOf(B);
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const NOW = Date.now();
@@ -41,7 +47,7 @@ function row(n: number, over: Partial<LibraryRow> = {}): LibraryRow {
     revision: 1,
     lastEditor: { kind: 'human' },
     lastEditedAt: NOW - n * MIN,
-    sessions: [{ appSessionId: A, title: 'Fix the dashboard', roles: ['created'], lastAt: NOW - n * MIN }],
+    sessions: [{ appSessionId: MAIN_A, title: 'Fix the dashboard', roles: ['created'], lastAt: NOW - n * MIN }],
     ...over,
   };
 }
@@ -52,7 +58,7 @@ const PAGE = row(2, { kind: 'html', title: 'Pricing page', lastEditor: { kind: '
 const DECK = row(3, { kind: 'presentation', title: 'Q3 deck' });
 const SPEC = row(4, { title: 'Spec' });
 const CSV = row(5, { kind: 'file', title: 'data.csv' });
-const OTHER = row(6, { title: 'Other session’s doc', sessions: [{ appSessionId: B, title: 'Other work', roles: ['created'], lastAt: NOW }] });
+const OTHER = row(6, { title: 'Other session’s doc', sessions: [{ appSessionId: MAIN_B, title: 'Other work', roles: ['created'], lastAt: NOW }] });
 
 // happy-dom has no layout: the list's scroller gets a viewport (tall enough for every fixture unless a test shrinks it)
 // so the virtualiser mounts its lines, and every line a height, which the virtualiser measures it by (as
@@ -170,7 +176,7 @@ function testEditor({ guarded = false } = {}) {
 describe('the list', () => {
   it('shows the session’s lineage grouped by kind in the kinds’ order, newest first, each row with its title and session relationship', async () => {
     await mount();
-    expect(listFilters()).toEqual([{ appSessionId: A, lineage: true }]);
+    expect(listFilters()).toEqual([{ appSessionId: MAIN_A, lineage: true }]);
     expect(groups()).toEqual([
       ['document', 'Documents'],
       ['presentation', 'Presentations'],
@@ -186,8 +192,8 @@ describe('the list', () => {
 
 
   it('keeps read-only context distinct from the session’s edits, while All preserves real human authorship', async () => {
-    rows = [row(1, { sessions: [{ appSessionId: A, title: 'Agent', roles: ['viewed'], lastAt: NOW }] }),
-      row(2, { sessions: [{ appSessionId: A, title: 'Agent', roles: ['edited', 'viewed'], lastAt: NOW }] })];
+    rows = [row(1, { sessions: [{ appSessionId: MAIN_A, title: 'Agent', roles: ['viewed'], lastAt: NOW }] }),
+      row(2, { sessions: [{ appSessionId: MAIN_A, title: 'Agent', roles: ['edited', 'viewed'], lastAt: NOW }] })];
     await mount();
     expect(rowOf(1).textContent).toContain('Read');
     expect(rowOf(2).textContent).toContain('Edited');
@@ -200,7 +206,7 @@ describe('the list', () => {
   it('All suppresses installation attribution only, keeping built-in provenance alongside genuine edits', async () => {
     rows = [row(1, { kind: 'design_system', builtIn: true, seedOnly: true }),
       row(2, { kind: 'design_system', builtIn: true }),
-      row(3, { kind: 'design_system', builtIn: true, lastEditor: { kind: 'session', appSessionId: B }, lastEditorTitle: 'Improve house' })];
+      row(3, { kind: 'design_system', builtIn: true, lastEditor: { kind: 'session', appSessionId: MAIN_B }, lastEditorTitle: 'Improve house' })];
     await mount();
     fireEvent.click(button('All')!);
     await settle();
@@ -378,7 +384,7 @@ describe('the record view', () => {
     expect(editor.createState).toHaveBeenCalledWith({ artifactId: NOTES.id, kind: 'document', surface: 'panel' });
     expect(editorHostOf(SCOPE)?.title).toBe('Editing 1');
     await waitFor(() => expect(main.callsOf('artifacts.markViewed')).toEqual([{ artifactId: NOTES.id }]));
-    expect(handle.snapshot().view).toEqual({ kind: 'record', artifactId: NOTES.id });
+    expect(handle.snapshot().view).toEqual({ kind: 'record', artifactId: NOTES.id, machine: TEST_MACHINE });
 
     fireEvent.click(button('Back')!);
     await settle();
@@ -447,10 +453,10 @@ describe('the record view', () => {
 
     fireEvent.click(button('Back')!);
     await settle();
-    expect(handle.snapshot().view, 'the guard kept it').toEqual({ kind: 'record', artifactId: NOTES.id });
+    expect(handle.snapshot().view, 'the guard kept it').toEqual({ kind: 'record', artifactId: NOTES.id, machine: TEST_MACHINE });
     act(() => artifactsTool.open!(handle, { target: SPEC.id }));
     await settle();
-    expect(handle.snapshot().view).toEqual({ kind: 'record', artifactId: NOTES.id });
+    expect(handle.snapshot().view).toEqual({ kind: 'record', artifactId: NOTES.id, machine: TEST_MACHINE });
     expect(editor.dispose).not.toHaveBeenCalled();
     expect(editorHostOf(SCOPE)?.title).toBe('Editing 1');
 
@@ -492,7 +498,7 @@ describe('the record view', () => {
       artifactsTool.open!(handle, { target: OTHER.id }); // the artifact shown
     });
     await settle();
-    expect(handle.snapshot().view).toEqual({ kind: 'record', artifactId: OTHER.id });
+    expect(handle.snapshot().view).toEqual({ kind: 'record', artifactId: OTHER.id, machine: TEST_MACHINE });
     expect(editor.createState).toHaveBeenCalledTimes(2);
     expect(document.querySelector('[data-asked]')!.textContent).toBe('"latest"');
   });
@@ -507,7 +513,7 @@ describe('the record view', () => {
       artifactsTool.dispose(handle); // the tab closed meanwhile
     });
     await settle();
-    expect(handle.snapshot().view, 'nothing moves after disposal').toEqual({ kind: 'record', artifactId: NOTES.id });
+    expect(handle.snapshot().view, 'nothing moves after disposal').toEqual({ kind: 'record', artifactId: NOTES.id, machine: TEST_MACHINE });
     expect(editor.dispose).toHaveBeenCalledTimes(1);
   });
 
@@ -561,7 +567,7 @@ describe('the record view', () => {
     expect(screen.getByText(/panel editor for/)).toBeTruthy();
     fireEvent.click(button('Back')!);
     await settle();
-    expect(listFilters().at(-1)).toEqual({ appSessionId: B, lineage: true });
+    expect(listFilters().at(-1)).toEqual({ appSessionId: MAIN_B, lineage: true });
     expect(listed()).toEqual([OTHER.id]);
   });
 });
@@ -576,10 +582,10 @@ describe('restore', () => {
     const { handle } = await mount();
     expect(paramsOf(TAB)).toBeUndefined();
     await openRow(1);
-    expect(paramsOf(TAB)).toEqual({ target: NOTES.id });
+    expect(paramsOf(TAB)).toEqual({ target: NOTES.id, machine: TEST_MACHINE });
     act(() => handle.open({ target: SPEC.id }));
     await settle();
-    expect(paramsOf(TAB)).toEqual({ target: SPEC.id });
+    expect(paramsOf(TAB)).toEqual({ target: SPEC.id, machine: TEST_MACHINE });
     fireEvent.click(button('Back')!);
     await settle();
     expect(paramsOf(TAB)).toBeUndefined();
@@ -599,7 +605,7 @@ describe('restore', () => {
       handles.push(handle);
       return handle.snapshot().view;
     };
-    expect(restore({ target: NOTES.id })).toEqual({ kind: 'record', artifactId: NOTES.id });
+    expect(restore({ target: NOTES.id })).toEqual({ kind: 'record', artifactId: NOTES.id, machine: TEST_MACHINE });
     for (const unreadable of [undefined, null, 'x', 7, [], {}, { target: 7 }, { target: '' }, { target: null }]) expect(restore(unreadable), JSON.stringify(unreadable)).toEqual({ kind: 'list' });
   });
 
@@ -709,7 +715,7 @@ describe('the summary (M6b)', () => {
     render(<ArtifactsSummary appSessionId={A} open={open} />);
     await settle();
     expect(document.querySelector('[data-summary="artifacts"]')!.textContent).toContain('5 artifacts · Launch notes');
-    expect(listFilters()).toContainEqual({ appSessionId: A, lineage: true });
+    expect(listFilters()).toContainEqual({ appSessionId: MAIN_A, lineage: true });
     fireEvent.click(screen.getByRole('button', { name: 'Open' }));
     expect(open).toHaveBeenCalledWith();
   });
@@ -762,7 +768,7 @@ describe('in the panel', () => {
     await settle();
     expect(allTabs(useLayout.getState().main).filter((t) => t.kind === 'artifact')).toMatchObject([{ artifactId: NOTES.id }]);
     expect((instanceOf(tabId)!.state as ArtifactsHandle).snapshot().view).toEqual({ kind: 'list' });
-    expect(heldArtifactEditorState({ surface: 'main', tabId: `artifact:${NOTES.id}` })?.state).toBe(editor.createState.mock.results[0]!.value);
+    expect(heldArtifactEditorState({ surface: 'main', tabId: `artifact:${TEST_MACHINE}:${NOTES.id}` })?.state).toBe(editor.createState.mock.results[0]!.value);
     expect(editor.createState).toHaveBeenCalledTimes(1);
     expect(editor.dispose).not.toHaveBeenCalled();
   });

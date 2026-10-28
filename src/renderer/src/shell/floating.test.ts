@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, tabId, type LayoutMain, type LayoutRegions, type TabRef } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { registerShellActions } from '../app/shell-actions';
 import { runAction } from '../keymap/actions-runtime';
 import { useComposerStore } from '../stores/composer';
@@ -13,12 +14,14 @@ import { mainShowing } from '../test-support/panel';
 import { resetShellStores } from '../test-support/shell-stores';
 import { cardHost, cardSession, cardSizeKey, closeCard, dockPanel, dockSplit, EXPAND_COPY, FLOAT_COPY, floatPanel, floatSplit, openCard, placeCard, splitFloat, useFloatingCard } from './floating';
 import type { ProjectId } from '@shared/graph/ids'; // P4-B3 M2
-import { item as attention, T0 } from '../../../../test/support/builders'; // P4-B3 M2
+import { item, T0 } from '../../../../test/support/builders'; // P4-B3 M2
 import { useAttention } from '../stores/attention'; // P4-B3 M2
 import { activeTab } from '../stores/layout-model'; // P4-B3 M2
 import { recordTranscriptScroll, takeTranscriptCarry } from '../transcript/view/scroll-carry'; // P4-B3 M2
 
-const A = 'app-a' as AppSessionId;
+const A = at('app-a' as AppSessionId); // P5 O6 M2: the page's ids are addresses
+// P5 O6 M2: an attention item as the page holds it, its id an address
+const attention = (...args: Parameters<typeof item>) => { const bare = item(...args); return { ...bare, id: at(bare.id) }; };
 type Panel = LayoutRegions['panel'];
 type Name = 'docked' | 'maximized' | 'collapsed' | 'floating, card open' | 'floating, pill';
 
@@ -97,7 +100,7 @@ describe('the transition table', () => {
 // with none (an artifact, Settings, an empty pane in front) put the panel in main's place with no card: main at 0 px, its
 // tab strip gone until Dock. Float is refused there, and a float that meets no session docks.
 describe('a float with no session to draw', () => {
-  const ARTIFACT: TabRef = { id: tabId({ kind: 'artifact', artifactId: 'deck-1' }), kind: 'artifact', artifactId: 'deck-1', pinned: false };
+  const ARTIFACT: TabRef = { id: tabId({ kind: 'artifact', artifactId: 'deck-1', machine: TEST_MACHINE }), kind: 'artifact', artifactId: 'deck-1', machine: TEST_MACHINE, pinned: false };
   const showing = (...tabs: TabRef[]): LayoutMain => ({ ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs, activeTabId: tabs.at(-1)!.id }] } } });
   const notices = () => useNotices.getState().notices.map((n) => n.text);
   const microtasks = () => new Promise<void>((resolve) => queueMicrotask(resolve));
@@ -195,7 +198,7 @@ describe('the floating card’s closed state and focus', () => {
     runAction('panel.float');
     expect(useComposerStore.getState().focusOnMount.has(A)).toBe(true);
     useComposerStore.setState({ focusOnMount: new Set() });
-    useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, sets: { none: { panes: [{ tabs: [{ id: 'file:/x', kind: 'file', path: '/x', line: null, appSessionId: A, pinned: false }], activeTabId: 'file:/x' }], focusedPane: 0, splitRatio: 0.5 } } } });
+    useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, sets: { none: { panes: [{ tabs: [{ id: `file:${TEST_MACHINE}:/x`, kind: 'file', machine: TEST_MACHINE, path: '/x', line: null, appSessionId: A, pinned: false }], activeTabId: `file:${TEST_MACHINE}:/x` }], focusedPane: 0, splitRatio: 0.5 } } } });
     floatPanel();
     useComposerStore.setState({ focusOnMount: new Set() });
     dockPanel();
@@ -284,7 +287,7 @@ describe('the card’s size key', () => {
 // P4-B3 M2 (X37; its Decision Log 7, 8, 12, 13, 14): the split's card. S (session A) on the left beside Diagnostics on
 // the right, at the ratio 0.4, the right pane focused.
 describe('the split’s card', () => {
-  const B = 'app-b' as AppSessionId;
+  const B = at('app-b' as AppSessionId);
   const sessionTab = (id: AppSessionId): TabRef => ({ id: tabId({ kind: 'session', appSessionId: id }), kind: 'session', appSessionId: id, pinned: false });
   const DIAGNOSTICS: TabRef = { id: 'diagnostics', kind: 'diagnostics', pinned: false };
   const SETTINGS: TabRef = { id: 'settings', kind: 'settings', section: null, pinned: false };
@@ -313,7 +316,7 @@ describe('the split’s card', () => {
     useLayout.getState().setPanel({ maximized: true });
     expect([cardHost(layout()), cardSession(layout())], 'the main area is at 0 px under a maximized panel').toEqual([null, null]);
     useLayout.getState().setPanel({ maximized: false });
-    useLayout.getState().setCurrentProject('elsewhere' as ProjectId);
+    useLayout.getState().setCurrentProject(at('elsewhere' as ProjectId));
     expect([cardHost(layout()), cardSession(layout())], 'another tab set: the float stays with its own').toEqual([null, null]);
   });
 
@@ -397,7 +400,7 @@ describe('the split’s card', () => {
     expect(closed()).toBe(false);
     floatSplit(S.id);
     closeCard();
-    useLayout.getState().setCurrentProject('elsewhere' as ProjectId);
+    useLayout.getState().setCurrentProject(at('elsewhere' as ProjectId));
     useLayout.getState().setCurrentProject(null);
     expect(closed()).toBe(false);
     expect(cardHost(layout())).toBe('split');
@@ -562,7 +565,7 @@ describe('the split’s card', () => {
       expand();
       useLayout.getState().openTab({ kind: 'settings', section: null }, { pane: 1 });
       expect(set().floating, 'a tab opened beside the card').toEqual({ sessionTabId: S.id, foldedPanel: true });
-      useLayout.getState().setCurrentProject('elsewhere' as ProjectId);
+      useLayout.getState().setCurrentProject(at('elsewhere' as ProjectId));
       expect(panel(), 'another set: the panel stays folded').toEqual({ ...OPEN, collapsed: true });
       useLayout.getState().setCurrentProject(null);
       expect(set().floating).toEqual({ sessionTabId: S.id, foldedPanel: true });
@@ -614,7 +617,7 @@ describe('the split’s card', () => {
   // M2 review (P3): a file tab of the session has no transcript of it mounted, so neither the panel's float nor its dock
   // over that tab marks a carry (the mark would wait for whatever mount of the session came next)
   it('the panel’s float and dock over a file tab of the session mark no carry', () => {
-    const file: TabRef = { id: 'file:/x', kind: 'file', path: '/x', line: null, appSessionId: A, pinned: false };
+    const file: TabRef = { id: `file:${TEST_MACHINE}:/x`, kind: 'file', machine: TEST_MACHINE, path: '/x', line: null, appSessionId: A, pinned: false };
     takeTranscriptCarry(A);
     recordTranscriptScroll(A, { following: false, offset: 900, signature: '3:r3', anchor: 'r2' });
     useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { panes: [{ tabs: [file], activeTabId: file.id }], focusedPane: 0, splitRatio: 0.5 } } } });

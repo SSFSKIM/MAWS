@@ -4,16 +4,20 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { EngineSessionStatus } from '@shared/engine/status';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, fixtureLine, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { useSessions } from '../stores/sessions';
 import { digest, record } from '../../../../test/support/builders';
 import { trustState } from '../test-support/setup-intents';
 import { readIntoCache, useEngineRead, useReadLoads, WidgetReadPolicyContext, type WidgetReadPolicy } from './read';
 
 const ROOT = join(__dirname, '../../../..');
-const ID = 'app-7412a115' as AppSessionId;
+// P5 O6 M2: the backend is main (bare ids); the page holds the address
+const BARE = 'app-7412a115' as AppSessionId;
+const ID = at(BARE);
+const lifted = (status: EngineSessionStatus): EngineSessionStatus => ({ ...status, appSessionId: at(status.appSessionId) });
 let backend: WidgetBackend;
 let client: QueryClient;
 
@@ -21,11 +25,11 @@ beforeEach(() => {
   backend = createWidgetBackend({ root: ROOT, statuses: loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json')).engine });
   window.maws = backend.bridge();
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+  useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
 });
 afterEach(() => {
   cleanup();
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: unknown }).maws;
   useSessions.setState({ engine: new Map(), records: new Map(), digests: new Map() });
   useReadLoads.setState({ loads: new Map() });
 });
@@ -55,7 +59,7 @@ describe('useEngineRead', () => {
     await new Promise((r) => setTimeout(r, 60));
     expect(reads('session.getSandboxDialog')).toBe(0);
     expect(result.current.state).toBe('loading');
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...backend.status(ID), engineState: 'running' } }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...lifted(backend.status(BARE)), engineState: 'running' } }, TEST_MACHINE));
     await new Promise((r) => setTimeout(r, 10));
     expect(reads('session.getSandboxDialog'), 'a status move while held reads nothing').toBe(0);
     enabled = true;
@@ -80,13 +84,13 @@ describe('useEngineRead', () => {
     expect(reads('session.getSandboxDialog'), 'nothing moved: the fresh answer serves').toBe(1);
     again.unmount();
     // a turn came and went: the facts MOVES_READS compares are where they were, the event seq is not
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...backend.status(ID), lastEventSeq: backend.status(ID).lastEventSeq + 12 } }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...lifted(backend.status(BARE)), lastEventSeq: lifted(backend.status(BARE)).lastEventSeq + 12 } }, TEST_MACHINE));
     renderHook(() => useEngineRead('session.getSandboxDialog', { appSessionId: ID }), { wrapper: wrapper() });
     await waitFor(() => expect(reads('session.getSandboxDialog')).toBe(2));
   });
 
   it('is dormant, and reads nothing, without a ready process', async () => {
-    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]), records: new Map([[ID, record(ID)]]) });
+    useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), process: 'exited' }]]), records: new Map([[ID, record(ID)]]) });
     const { result } = renderHook(() => useEngineRead('session.getSandboxDialog', { appSessionId: ID }), { wrapper: wrapper() });
     expect(result.current.state).toBe('dormant');
     expect(result.current.readAt).toBeNull();
@@ -95,10 +99,10 @@ describe('useEngineRead', () => {
   });
 
   it('reads once when the process becomes ready after the widget opened', async () => {
-    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'initializing' }]]), records: new Map([[ID, record(ID)]]) });
+    useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), process: 'initializing' }]]), records: new Map([[ID, record(ID)]]) });
     const { result } = renderHook(() => useEngineRead('session.getSandboxDialog', { appSessionId: ID }), { wrapper: wrapper() });
     expect(result.current.state).toBe('starting'); // P2-A: a launch in flight
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: backend.status(ID) }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.status(BARE)) }, TEST_MACHINE));
     await waitFor(() => expect(result.current.state).toBe('ready'));
     await new Promise((r) => setTimeout(r, 10));
     expect(reads('session.getSandboxDialog')).toBe(1);
@@ -110,8 +114,8 @@ describe('useEngineRead', () => {
     const answers: ((value: unknown) => void)[] = [];
     backend.script('session.getWorkspaceDiff', () => new Promise((resolve) => answers.push(resolve)));
     const move = () => {
-      backend.emitTurnStarted(ID);
-      act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: backend.status(ID) }));
+      backend.emitTurnStarted(BARE);
+      act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.status(BARE)) }, TEST_MACHINE));
     };
     move(); // the first move refetches
     await waitFor(() => expect(reads('session.getWorkspaceDiff')).toBe(2));
@@ -125,11 +129,11 @@ describe('useEngineRead', () => {
   it('refetches when the session status moves, not when an unrelated field changes', async () => {
     const { result } = renderHook(() => useEngineRead('session.getWorkspaceDiff', { appSessionId: ID }), { wrapper: wrapper() });
     await waitFor(() => expect(result.current.state).toBe('ready'));
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...backend.status(ID), memory: { rssKiB: 1, treeRssKiB: 2, sampledAt: 'x' } } }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...lifted(backend.status(BARE)), memory: { rssKiB: 1, treeRssKiB: 2, sampledAt: 'x' } } }, TEST_MACHINE));
     await new Promise((r) => setTimeout(r, 10));
     expect(reads('session.getWorkspaceDiff')).toBe(1);
-    const turnId = backend.emitTurnStarted(ID);
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: backend.status(ID) }));
+    const turnId = backend.emitTurnStarted(BARE);
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.status(BARE)) }, TEST_MACHINE));
     await waitFor(() => expect(reads('session.getWorkspaceDiff')).toBe(2));
     expect(turnId).toBeTruthy();
   });
@@ -141,7 +145,7 @@ describe('useEngineRead', () => {
     act(() => backend.emitOperation({ ...done, appSessionId: 'app-other' as AppSessionId }));
     await new Promise((r) => setTimeout(r, 10));
     expect(reads('session.mcpStatus')).toBe(1);
-    act(() => backend.emitOperation({ ...done, appSessionId: ID }));
+    act(() => backend.emitOperation({ ...done, appSessionId: BARE }));
     await waitFor(() => expect(reads('session.mcpStatus')).toBe(2));
   });
 
@@ -182,7 +186,7 @@ describe('useEngineRead', () => {
   it('in passive mode issues nothing and renders what the harness read into the cache under its key', async () => {
     const { result } = renderHook(() => useEngineRead('session.getContextUsage', { appSessionId: ID, detail: 'full' }), { wrapper: wrapper({ mode: 'passive' }) });
     await new Promise((r) => setTimeout(r, 10));
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...backend.status(ID), engineState: 'running' } }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...lifted(backend.status(BARE)), engineState: 'running' } }, TEST_MACHINE));
     await new Promise((r) => setTimeout(r, 10));
     expect(reads('session.getContextUsage')).toBe(0);
     expect(result.current.state).toBe('loading');
@@ -195,7 +199,7 @@ describe('useEngineRead', () => {
   // P2-A (2026-10-09; the execution document §5.6): no ready process is dormant, starting or unavailable; only the owner's
   // Load now acquires, and the read follows at ready.
   describe('a session with a record and no ready process', () => {
-    const exited = () => ({ ...backend.status(ID), process: 'exited' as const });
+    const exited = () => ({ ...lifted(backend.status(BARE)), process: 'exited' as const });
     const acquires = () => backend.calls.filter((c) => c.command === 'session.acquire');
 
     it('keeps the cached answer, dated, and reads nothing: not on a status move, an operation, a refetch or a refresh', async () => {
@@ -204,12 +208,12 @@ describe('useEngineRead', () => {
       await waitFor(() => expect(result.current.state).toBe('ready'));
       const readAt = result.current.readAt;
       expect(typeof readAt).toBe('number');
-      act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: exited() }));
+      act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: exited() }, TEST_MACHINE));
       expect(result.current.state).toBe('dormant');
       expect(result.current.data).toBeDefined();
       expect(result.current.readAt).toBe(readAt);
       const done = { opId: 'op-1', command: 'session.mcpReconnect' as const, late: false, outcome: { ok: true as const, value: null } };
-      act(() => backend.emitOperation({ ...done, appSessionId: ID }));
+      act(() => backend.emitOperation({ ...done, appSessionId: BARE }));
       act(() => result.current.refetch());
       await act(async () => void (await result.current.refresh()));
       await new Promise((r) => setTimeout(r, 20));
@@ -227,10 +231,10 @@ describe('useEngineRead', () => {
       let loaded!: Promise<unknown>;
       act(() => void (loaded = result.current.load()));
       expect(result.current.state).toBe('starting');
-      expect(acquires().map((c) => c.input)).toEqual([{ appSessionId: ID, reason: 'read' }]);
+      expect(acquires().map((c) => c.input)).toEqual([{ appSessionId: BARE, reason: 'read' }]);
       await act(async () => {
-        useSessions.getState().applyStatus({ appSessionId: ID, status: backend.status(ID) });
-        answer({ status: 'ready', appSessionId: ID, launched: true, joined: false });
+        useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.status(BARE)) }, TEST_MACHINE);
+        answer({ status: 'ready', appSessionId: BARE, launched: true, joined: false });
         await loaded;
       });
       await waitFor(() => expect(result.current.state).toBe('ready'));
@@ -240,12 +244,12 @@ describe('useEngineRead', () => {
 
     it('a refused Load now is unavailable with its words until the next one', async () => {
       useSessions.setState({ engine: new Map([[ID, exited()]]), records: new Map([[ID, record(ID)]]) });
-      backend.script('session.acquire', () => ({ status: 'missing_directory', appSessionId: ID, directory: '/gone' }));
+      backend.script('session.acquire', () => ({ status: 'missing_directory', appSessionId: BARE, directory: '/gone' }));
       const { result } = renderHook(() => useEngineRead('session.getSandboxDialog', { appSessionId: ID }), { wrapper: wrapper() });
       await act(async () => void (await result.current.load()));
       expect(result.current.state).toBe('unavailable');
       expect(result.current.error).toBe('Directory not found: /gone');
-      backend.script('session.acquire', () => ({ status: 'needs_trust', appSessionId: ID, trust: trustState() }));
+      backend.script('session.acquire', () => ({ status: 'needs_trust', appSessionId: BARE, trust: trustState() }));
       await act(async () => void (await result.current.load()));
       expect(result.current.error).toBe('Trust this folder in the session to continue');
       expect(reads('session.getSandboxDialog')).toBe(0);

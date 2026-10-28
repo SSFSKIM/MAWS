@@ -11,6 +11,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmS
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect } from '@playwright/test';
+import { addressed } from './support/address';
 import { launchMaws, REPO_ROOT, test } from './support/launch';
 import { sidebarOf, sidebarRow } from './support/sidebar';
 import { mainTabById, sessionCards, unfoldSessionCard } from './support/shell';
@@ -96,8 +97,9 @@ test('live: the summary over this repository matches git', async () => {
       await expect(sidebarOf(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
       await (await sidebarRow(page, title)).click();
       const session = scenario.sessions.find((record) => record.title.text === title)!;
-      await expect(mainTabById(page, `session:${session.appId}`)).toHaveAttribute('aria-selected', 'true');
-      await expect(mainTabById(page, `session:${session.appId}`)).toContainText(title);
+      const tab = mainTabById(page, `session:${await addressed(page, session.appId)}`);
+      await expect(tab).toHaveAttribute('aria-selected', 'true');
+      await expect(tab).toContainText(title);
       await unfoldSessionCard(page, 'Environment');
     };
 

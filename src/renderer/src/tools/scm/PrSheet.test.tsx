@@ -11,6 +11,7 @@ import { A, DIR, OTHER_TOKEN, prPlanOf, refusal, scmMain, scmStatusOf, statusOf,
 import { PR_REPLAN_MS, PrSheet } from './PrSheet';
 import { useScm } from './store';
 import { createScmUi, type ScmUi } from './view-state';
+import { at } from '../../../../../test/support/machine';
 
 const openTerminal = vi.hoisted(() => vi.fn(() => 'terminal-1'));
 vi.mock('../terminal', () => ({ openTerminal }));
@@ -21,7 +22,7 @@ let release: () => void = () => {};
 
 function open(status: GitStatus = statusOf(), scm: ScmStatus = scmStatusOf()) {
   ui.setState({ sheet: { kind: 'pr' } });
-  render(<PrSheet appSessionId={A} ui={ui} status={status} scm={scm} directory={DIR} />);
+  render(<PrSheet appSessionId={at(A)} ui={ui} status={status} scm={scm} directory={DIR} />);
   return screen.getByRole('dialog', { name: 'Open pull request' });
 }
 const submitOf = (sheet: HTMLElement) => within(sheet).getByRole('button', { name: 'Create pull request' }) as HTMLButtonElement;
@@ -34,8 +35,8 @@ beforeEach(() => {
   useScm.getState().reset();
   openTerminal.mockClear();
   main = scmMain();
-  ui = createScmUi({ session: A });
-  release = useScm.getState().resume(A);
+  ui = createScmUi({ session: at(A) });
+  release = useScm.getState().resume(at(A));
 });
 afterEach(() => {
   release();
@@ -57,7 +58,7 @@ describe("push and PR sheets show the plan's command and destination and run onl
     fireEvent.click(submitOf(sheet));
     await waitFor(() => expect(main.callsOf('scm.pr.create')).toEqual([{ appSessionId: A, token: TOKEN }]));
     await waitFor(() => expect(ui.getState().sheet).toBeNull());
-    expect(useScm.getState().runs.get(A)).toMatchObject({ token: TOKEN, kind: 'pr', running: true });
+    expect(useScm.getState().runs.get(at(A))).toMatchObject({ token: TOKEN, kind: 'pr', running: true });
   });
 
   it('Open PR: defaults the title to HEAD’s subject when the branch is one commit past the default base', async () => {
@@ -157,7 +158,7 @@ describe("push and PR sheets show the plan's command and destination and run onl
     sheet = open();
     await waitFor(() => expect(within(sheet).getByText('You are not logged into any GitHub hosts. To log in, run: gh auth login')).toBeTruthy());
     fireEvent.click(within(sheet).getByRole('button', { name: 'Sign in' }));
-    expect(openTerminal).toHaveBeenCalledWith({ appSessionId: A, cwd: DIR, command: 'gh auth login' });
+    expect(openTerminal).toHaveBeenCalledWith({ appSessionId: at(A), cwd: DIR, command: 'gh auth login' });
     expect(ui.getState().sheet).toBeNull();
     expect(main.callsOf('scm.pr.create')).toEqual([]);
   });

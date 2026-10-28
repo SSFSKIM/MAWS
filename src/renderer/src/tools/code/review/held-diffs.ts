@@ -7,6 +7,7 @@
 // its mutations overtook (E11).
 import type { CommandName, CommandResult, MawsBridge } from '@shared/ipc/schema';
 import type { GitDiff, GitDiffFile, GitDiffInput } from '@shared/ipc/schema/git';
+import type { MachineRef } from '@shared/machine/ref';
 import type { useGit } from '../../../stores/git';
 import { REVIEW_SCOPE_BYTES_CAP, splitPatch, type PatchFile } from './review-model';
 
@@ -80,7 +81,7 @@ function answered(diff: GitDiff): ScopeDiff {
 }
 
 // `set` is the owning store's: the cache writes only its `diffs` and `files`.
-export function createHeldDiffs<T>(client: MawsBridge, set: (update: (s: HeldDiffState) => Partial<HeldDiffState>) => void, spec: HeldDiffSpec<T>): HeldDiffs<T> {
+export function createHeldDiffs<T extends { machine: MachineRef }>(client: MawsBridge, set: (update: (s: HeldDiffState) => Partial<HeldDiffState>) => void, spec: HeldDiffSpec<T>): HeldDiffs<T> {
   const { keys } = spec;
   const held = new Map<string, Held<T>>();
   const fileLoads = new Map<string, symbol>();
@@ -95,7 +96,7 @@ export function createHeldDiffs<T>(client: MawsBridge, set: (update: (s: HeldDif
     }
     h.reading = true;
     const overtaken = spec.overtaken?.(h.target);
-    const result = await settled(client.invoke('git.diff', spec.input(h.target)));
+    const result = await settled(client.invoke('git.diff', spec.input(h.target), { machine: h.target.machine }));
     h.reading = false;
     if (held.get(key) !== h) return; // released meanwhile
     if (!overtaken?.()) {
@@ -158,7 +159,7 @@ export function createHeldDiffs<T>(client: MawsBridge, set: (update: (s: HeldDif
       const generation = Symbol();
       fileLoads.set(key, generation);
       set((s) => ({ files: mapWith(s.files, key, { status: 'loading' }) }));
-      void settled(client.invoke('git.diff', spec.input(target, path))).then((result) => {
+      void settled(client.invoke('git.diff', spec.input(target, path), { machine: target.machine })).then((result) => {
         if (fileLoads.get(key) !== generation) return; // the scope re-read or was released meanwhile
         const next: FileDiff = result.ok ? { status: 'ok', file: splitPatch(result.value.patch)[0] ?? null } : { status: 'error', message: result.error.message };
         set((s) => ({ files: mapWith(s.files, key, next) }));
@@ -173,15 +174,15 @@ export function createHeldDiffs<T>(client: MawsBridge, set: (update: (s: HeldDif
   };
 }
 
-// A new status C8a's store took for a directory (its git.changed) calls `changed` with it; a watch's first answer does
-// not, since the holds read on their own when they start. Its status objects are replaced, never mutated, so a
-// reference change is a new status.
-export function followGitStatus(git: typeof useGit, changed: (directory: string) => void): void {
+// A new status C8a's store took for a directory (its git.changed) calls `changed` with the store's key for it,
+// `checkoutKey(machine, directory)` (P5 O6 M4); a watch's first answer does not, since the holds read on their own when
+// they start. Its status objects are replaced, never mutated, so a reference change is a new status.
+export function followGitStatus(git: typeof useGit, changed: (checkout: string) => void): void {
   git.subscribe((state, prev) => {
     if (state.entries === prev.entries) return;
-    for (const [directory, entry] of state.entries) {
-      const before = prev.entries.get(directory);
-      if (entry.status && before?.status && entry.status !== before.status) changed(directory);
+    for (const [checkout, entry] of state.entries) {
+      const before = prev.entries.get(checkout);
+      if (entry.status && before?.status && entry.status !== before.status) changed(checkout);
     }
   });
 }

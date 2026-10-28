@@ -13,8 +13,10 @@ import { addThread } from '@artifacts/document/threads';
 import { newDoc } from '@artifacts/yjs';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { LibraryRow } from '@shared/ipc/schema/library';
+import { bareOf } from '@shared/machine/address';
 import { project, record } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
+import { at } from '../../../../../test/support/machine';
 import { NO_SESSION_CONTEXT, type ArtifactSessionContext } from '../../artifacts/session-context';
 import { resetLibrary } from '../../library/store';
 import { useCommentCard } from '../../side/card/store';
@@ -28,11 +30,14 @@ import { resetShellStores } from '../../test-support/shell-stores';
 import { registerCommentComposer, openCommentComposer } from '../code/anchor/anchor';
 import { startCommentSession, useArtifactCommentTarget, usePendingComment } from './comment-session'; // P3-F F4 review B 3: startCommentSession, usePendingComment
 import { useDocumentComments } from './comments';
+import { preloadOf } from '../../test-support/preload-of';
 
-const SHOWN = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
-const OWN = 'a2222222-2222-4222-8222-222222222222' as AppSessionId;
-const STARTED = 'a3333333-3333-4333-8333-333333333333' as AppSessionId;
-const P1 = 'p1' as ProjectId;
+// the page's ids are addresses; the fake bridge, standing for main, is asked and answers with `bare` ones
+const SHOWN = at('a1111111-1111-4111-8111-111111111111' as AppSessionId);
+const OWN = at('a2222222-2222-4222-8222-222222222222' as AppSessionId);
+const STARTED = at('a3333333-3333-4333-8333-333333333333' as AppSessionId);
+const P1 = at('p1' as ProjectId);
+const bare = bareOf;
 const SPACE = '55555555-5555-4555-8555-555555555555';
 const ARTIFACT = '66666666-6666-4666-8666-666666666666';
 const DIRECTORY: ArtifactSessionContext = { kind: 'directory', path: '/work/p1', projectId: P1 };
@@ -56,12 +61,12 @@ beforeEach(() => {
   resetLibrary();
   useSetup.setState({ intents: new Map(), cards: new Map() });
   fake = fakeClient({ 'session.intent.get': null });
-  window.maws = fake.client;
+  window.maws = preloadOf(fake);
   offComposer = registerCommentComposer(openComment);
   const s = useSessions.getState();
   useSessions.setState({
     records: new Map([[OWN, record(OWN, { projectId: P1, title: { text: 'Own plan', source: 'user' } })]]),
-    projects: new Map([[P1, project('p1', 0)]]),
+    projects: new Map([[P1, project(P1, 0, { name: 'p1', directory: '/work/p1' })]]),
     recordsVersion: s.recordsVersion + 1,
     projectsVersion: s.projectsVersion + 1,
   });
@@ -74,14 +79,14 @@ afterEach(() => {
 });
 
 const intent = (appSessionId: AppSessionId) => ({
-  appSessionId, projectId: P1, createdAt: 't', updatedAt: 't', kind: 'create', source: null, location: { kind: 'directory', path: '/work/p1' }, additionalDirectories: [],
+  appSessionId: bare(appSessionId), projectId: bare(P1), createdAt: 't', updatedAt: 't', kind: 'create', source: null, location: { kind: 'directory', path: '/work/p1' }, additionalDirectories: [],
   model: null, effort: null, permissionMode: null, gateway: 'gateway', trust: 'unanswered', trustKey: null, message: null, draft: null,
   progress: { engineSessionId: null, worktree: null, trustRecorded: false, bootstrap: null, launch: null, send: null, lastFailure: null },
 });
-const ready = (appSessionId: AppSessionId) => ({ appSessionId, phase: 'ready', detail: null, outcome: { kind: 'ready', engineSessionId: 's', firstTurn: 'none' } });
+const ready = (appSessionId: AppSessionId) => ({ appSessionId: bare(appSessionId), phase: 'ready', detail: null, outcome: { kind: 'ready', engineSessionId: 's', firstTurn: 'none' } });
 // P3-F F4: an untrusted folder's trust state as main answers a start that needs it (TrustStateSchema)
 const TRUST = { directory: '/work/p1', trustKey: '/work/p1', keyKind: 'directory', configPath: '/config/.claude.json', trusted: false, source: null, isHome: false, found: [] } as const;
-const needsTrust = (appSessionId: AppSessionId) => ({ status: 'needs_trust', appSessionId, trust: TRUST });
+const needsTrust = (appSessionId: AppSessionId) => ({ status: 'needs_trust', appSessionId: bare(appSessionId), trust: TRUST });
 const sessionCalls = () => fake.calls.filter((call) => /^invoke session\.(create|start|acquire)$/.test(call));
 
 // ---- the target ----------------------------------------------------------------------------------------------------
@@ -111,7 +116,7 @@ describe('the comment target of a document on a tab', () => {
     render(<Target />);
     await act(async () => {});
     expect(target()).toBeNull();
-    await act(() => fake.reply('library.get', { row: row({ createdBy: { kind: 'session', appSessionId: OWN }, projectId: P1 }) }));
+    await act(() => fake.reply('library.get', { row: row({ createdBy: { kind: 'session', appSessionId: bare(OWN) }, projectId: bare(P1) }) }));
     expect(target()).toEqual({ context: { kind: 'session', appSessionId: OWN } });
   });
 
@@ -178,7 +183,7 @@ function mount(given: Given) {
   };
 }
 const OTHER: ArtifactSessionContext = { kind: 'directory', path: '/work/p2', projectId: null };
-const LATER = 'a4444444-4444-4444-8444-444444444444' as AppSessionId;
+const LATER = at('a4444444-4444-4444-8444-444444444444' as AppSessionId);
 const second = { threadId: 'p7q1w3ze', tabId: 'tab1', tabTitle: 'Main', quote: 'with design review' };
 const card = () => document.querySelector<HTMLElement>('[data-comment-card]');
 const notice = () => document.querySelector<HTMLElement>('[data-comment-context]');
@@ -278,10 +283,10 @@ describe('a comment from a document with no chat beside it', () => {
     comment();
     await act(async () => {});
     expect(notice()!.dataset.commentContext).toBe('starting');
-    expect(fake.invoked('session.create')).toEqual([{ projectId: P1, location: { kind: 'directory', path: '/work/p1' } }]);
-    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
-    expect(fake.invoked('session.start')).toEqual([{ appSessionId: STARTED, message: null, options: { requireEmptyMessage: true } }]);
-    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+    expect(fake.invoked('session.create')).toEqual([{ projectId: bare(P1), location: { kind: 'directory', path: '/work/p1' } }]);
+    await act(() => fake.reply('session.create', { appSessionId: bare(STARTED), intent: intent(STARTED) }));
+    expect(fake.invoked('session.start')).toEqual([{ appSessionId: bare(STARTED), message: null, options: { requireEmptyMessage: true } }]);
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: bare(STARTED) }));
     expect(card()).toBeNull();
     await act(async () => fake.event('session.setup', ready(STARTED)));
     expect(notice()).toBeNull();
@@ -295,8 +300,8 @@ describe('a comment from a document with no chat beside it', () => {
     const { comment } = mount({ context: DIRECTORY });
     comment();
     await act(async () => {});
-    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
-    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+    await act(() => fake.reply('session.create', { appSessionId: bare(STARTED), intent: intent(STARTED) }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: bare(STARTED) }));
     await act(async () => fake.event('session.setup', ready(STARTED)));
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
     const s = useSessions.getState();
@@ -304,8 +309,8 @@ describe('a comment from a document with no chat beside it', () => {
     comment();
     await act(async () => {});
     expect(fake.invoked('session.create')).toHaveLength(1);
-    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: STARTED, reason: 'read', options: { requireEmptyMessage: true } }]);
-    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: STARTED, launched: false, joined: false }));
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: bare(STARTED), reason: 'read', options: { requireEmptyMessage: true } }]);
+    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: bare(STARTED), launched: false, joined: false }));
     expect(useCommentCard.getState().open).toMatchObject({ parent: STARTED });
   });
 
@@ -313,7 +318,7 @@ describe('a comment from a document with no chat beside it', () => {
     const { reach, comment } = mount({ context: DIRECTORY });
     comment();
     await act(async () => {});
-    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
+    await act(() => fake.reply('session.create', { appSessionId: bare(STARTED), intent: intent(STARTED) }));
     await act(() => fake.fail('session.start', 'the directory is gone'));
     expect(notice()!.dataset.commentContext).toBe('refused');
     expect(notice()!.textContent).toContain('the directory is gone');
@@ -331,7 +336,7 @@ describe('a comment from a document with no chat beside it', () => {
     const { reach, comment } = mount({ context: DIRECTORY });
     comment();
     await act(async () => {});
-    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
+    await act(() => fake.reply('session.create', { appSessionId: bare(STARTED), intent: intent(STARTED) }));
     await act(() => fake.reply('session.start', needsTrust(STARTED)));
     expect(notice()!.dataset.commentContext).toBe('trust');
     expect(notice()!.textContent).toContain(TRUST.directory);
@@ -341,7 +346,7 @@ describe('a comment from a document with no chat beside it', () => {
     expect(card()).toBeNull();
     expect(reach.discard, 'the comment’s draft is kept').not.toHaveBeenCalled();
     expect(reach.setActive).toHaveBeenLastCalledWith(passage.threadId);
-    expect(fake.invoked('session.start'), 'no decision sent without the owner’s click').toEqual([{ appSessionId: STARTED, message: null, options: { requireEmptyMessage: true } }]);
+    expect(fake.invoked('session.start'), 'no decision sent without the owner’s click').toEqual([{ appSessionId: bare(STARTED), message: null, options: { requireEmptyMessage: true } }]);
   });
 
   // P3-F F4 fix wave (review B 1): the consent says what the answer records, as the composer's card says it: a folder in a
@@ -350,9 +355,9 @@ describe('a comment from a document with no chat beside it', () => {
     const { comment } = mount({ context: DIRECTORY });
     comment();
     await act(async () => {});
-    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
+    await act(() => fake.reply('session.create', { appSessionId: bare(STARTED), intent: intent(STARTED) }));
     const nested = { ...TRUST, directory: '/work/p1/docs', trustKey: '/work/p1', keyKind: 'repo', found: [{ file: '.claude/settings.json', summary: '2 hooks' }, { file: '.mcp.json', summary: '1 MCP server' }] };
-    await act(() => fake.reply('session.start', { status: 'needs_trust', appSessionId: STARTED, trust: nested }));
+    await act(() => fake.reply('session.start', { status: 'needs_trust', appSessionId: bare(STARTED), trust: nested }));
     const words = notice()!.textContent!;
     expect(words).toContain('/work/p1/docs');
     expect(words).toContain('Trust is recorded for the repository at /work/p1');
@@ -366,7 +371,7 @@ describe('a comment from a document with no chat beside it', () => {
       const { reach, comment } = mount({ context: DIRECTORY });
       comment();
       await act(async () => {});
-      await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
+      await act(() => fake.reply('session.create', { appSessionId: bare(STARTED), intent: intent(STARTED) }));
       await act(() => fake.reply('session.start', needsTrust(STARTED)));
       expect(useSetup.getState().cards.get(STARTED)).toMatchObject({ kind: 'trust', message: null });
       await userEvent.click(screen.getByRole('button', { name: choice }));
@@ -374,10 +379,10 @@ describe('a comment from a document with no chat beside it', () => {
       expect(useSetup.getState().cards.has(STARTED), 'the composer’s card for the same question goes as it is answered').toBe(false);
       expect(fake.invoked('session.create'), 'the same session, never another').toHaveLength(1);
       expect(fake.invoked('session.start')).toEqual([
-        { appSessionId: STARTED, message: null, options: { requireEmptyMessage: true } },
-        { appSessionId: STARTED, message: null, options: { requireEmptyMessage: true, trust } },
+        { appSessionId: bare(STARTED), message: null, options: { requireEmptyMessage: true } },
+        { appSessionId: bare(STARTED), message: null, options: { requireEmptyMessage: true, trust } },
       ]);
-      await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+      await act(() => fake.reply('session.start', { status: 'starting', appSessionId: bare(STARTED) }));
       await act(async () => fake.event('session.setup', ready(STARTED)));
       expect(notice()).toBeNull();
       expect(useCommentCard.getState().open).toMatchObject({ parent: STARTED, target: { threadId: passage.threadId } });
@@ -390,8 +395,8 @@ describe('a comment from a document with no chat beside it', () => {
     const { reach, comment } = mount({ context: DIRECTORY });
     comment();
     await act(async () => {});
-    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
-    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+    await act(() => fake.reply('session.create', { appSessionId: bare(STARTED), intent: intent(STARTED) }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: bare(STARTED) }));
     await act(async () => fake.event('session.setup', ready(STARTED)));
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
     const s = useSessions.getState();
@@ -402,10 +407,10 @@ describe('a comment from a document with no chat beside it', () => {
     expect(notice()!.dataset.commentContext).toBe('trust');
     await userEvent.click(screen.getByRole('button', { name: 'Trust and start' }));
     expect(fake.invoked('session.acquire')).toEqual([
-      { appSessionId: STARTED, reason: 'read', options: { requireEmptyMessage: true } },
-      { appSessionId: STARTED, reason: 'read', options: { requireEmptyMessage: true, trust: 'accepted' } },
+      { appSessionId: bare(STARTED), reason: 'read', options: { requireEmptyMessage: true } },
+      { appSessionId: bare(STARTED), reason: 'read', options: { requireEmptyMessage: true, trust: 'accepted' } },
     ]);
-    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: STARTED, launched: true, joined: false }));
+    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: bare(STARTED), launched: true, joined: false }));
     expect(useCommentCard.getState().open).toMatchObject({ parent: STARTED, target: { threadId: second.threadId } });
     expect(useSetup.getState().cards.has(STARTED)).toBe(false);
     expect(reach.discard).not.toHaveBeenCalledWith(second.threadId);
@@ -424,7 +429,7 @@ describe('a comment from a document with no chat beside it', () => {
     const open = vi.fn();
     act(() => startCommentSession({ hostId: 'stale-host', artifactId, threadId: passage.threadId, label: 'Q3 plan, Main', context: DIRECTORY, open }));
     await act(async () => {});
-    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
+    await act(() => fake.reply('session.create', { appSessionId: bare(STARTED), intent: intent(STARTED) }));
     await act(() => fake.reply('session.start', needsTrust(STARTED)));
     const asked = latest!.notice;
     if (asked.status !== 'trust') throw new Error(`the notice asks no trust: ${asked.status}`);
@@ -441,8 +446,8 @@ describe('a comment from a document with no chat beside it', () => {
     const { comment } = mount({ context: DIRECTORY });
     comment();
     await act(async () => {});
-    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
-    await act(() => fake.reply('session.start', { status: 'relay_unreachable', appSessionId: STARTED, health: { url: 'http://127.0.0.1:1', ok: false, status: null, latencyMs: null, checkedAt: 't', error: 'refused' } }));
+    await act(() => fake.reply('session.create', { appSessionId: bare(STARTED), intent: intent(STARTED) }));
+    await act(() => fake.reply('session.start', { status: 'relay_unreachable', appSessionId: bare(STARTED), health: { url: 'http://127.0.0.1:1', ok: false, status: null, latencyMs: null, checkedAt: 't', error: 'refused' } }));
     expect(notice()!.dataset.commentContext).toBe('card');
     expect(screen.getByRole('button', { name: 'Open session' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Trust and start' })).toBeNull();
@@ -454,8 +459,8 @@ describe('a comment from a document with no chat beside it', () => {
     await act(async () => {});
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(reach.discard).toHaveBeenCalledWith(passage.threadId);
-    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
-    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+    await act(() => fake.reply('session.create', { appSessionId: bare(STARTED), intent: intent(STARTED) }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: bare(STARTED) }));
     await act(async () => fake.event('session.setup', ready(STARTED)));
     expect(useCommentCard.getState().open).toBeNull();
     expect(notice()).toBeNull();
@@ -468,8 +473,8 @@ describe('a comment from a document with no chat beside it', () => {
     act(() => openCommentComposer({ kind: 'file-line', locator: '/x.ts#L1', label: 'x.ts:1', path: '/x.ts', line: 1 }, { appSessionId: OWN, placement: { kind: 'card', host: 'browser', hostId: 'elsewhere' } }));
     expect(notice()).toBeNull();
     expect(reach.discard).toHaveBeenCalledWith(passage.threadId);
-    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
-    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+    await act(() => fake.reply('session.create', { appSessionId: bare(STARTED), intent: intent(STARTED) }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: bare(STARTED) }));
     await act(async () => fake.event('session.setup', ready(STARTED)));
     expect(useCommentCard.getState().open).toMatchObject({ parent: OWN, hostId: 'elsewhere' });
   });
@@ -478,8 +483,8 @@ describe('a comment from a document with no chat beside it', () => {
     const { comment, move } = mount({ context: DIRECTORY });
     comment();
     await act(async () => {});
-    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
-    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+    await act(() => fake.reply('session.create', { appSessionId: bare(STARTED), intent: intent(STARTED) }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: bare(STARTED) }));
     await act(async () => fake.event('session.setup', ready(STARTED)));
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
     const s = useSessions.getState();
@@ -489,11 +494,11 @@ describe('a comment from a document with no chat beside it', () => {
     await act(async () => {});
     expect(fake.invoked('session.acquire'), 'the old directory’s session is not this one’s').toEqual([]);
     expect(fake.invoked('session.create')).toEqual([
-      { projectId: P1, location: { kind: 'directory', path: '/work/p1' } },
+      { projectId: bare(P1), location: { kind: 'directory', path: '/work/p1' } },
       { projectId: null, location: { kind: 'directory', path: '/work/p2' } },
     ]);
-    await act(() => fake.reply('session.create', { appSessionId: LATER, intent: intent(LATER) }));
-    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: LATER }));
+    await act(() => fake.reply('session.create', { appSessionId: bare(LATER), intent: intent(LATER) }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: bare(LATER) }));
     await act(async () => fake.event('session.setup', ready(LATER)));
     expect(useCommentCard.getState().open).toMatchObject({ parent: LATER });
   });
@@ -506,9 +511,9 @@ describe('a comment from a document with no chat beside it', () => {
     await act(async () => {});
     expect(reach.discard, 'the replaced comment’s draft withdrawn').toHaveBeenCalledWith(passage.threadId);
     expect(fake.invoked('session.create'), 'one creation for both').toHaveLength(1);
-    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
+    await act(() => fake.reply('session.create', { appSessionId: bare(STARTED), intent: intent(STARTED) }));
     expect(fake.invoked('session.start')).toHaveLength(1);
-    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: bare(STARTED) }));
     await act(async () => fake.event('session.setup', ready(STARTED)));
     expect(useCommentCard.getState().open).toMatchObject({ parent: STARTED, target: { threadId: second.threadId } });
     expect(reach.discard).not.toHaveBeenCalledWith(second.threadId);
@@ -519,13 +524,13 @@ describe('a comment from a document with no chat beside it', () => {
     const { comment, move } = mount({ context: DIRECTORY });
     comment();
     await act(async () => {});
-    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
-    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+    await act(() => fake.reply('session.create', { appSessionId: bare(STARTED), intent: intent(STARTED) }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: bare(STARTED) }));
     move({ context: OTHER });
     comment(second);
     await act(async () => {});
-    await act(() => fake.reply('session.create', { appSessionId: LATER, intent: intent(LATER) }));
-    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: LATER }));
+    await act(() => fake.reply('session.create', { appSessionId: bare(LATER), intent: intent(LATER) }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: bare(LATER) }));
     await act(async () => fake.event('session.setup', ready(LATER)));
     expect(useCommentCard.getState().open).toMatchObject({ parent: LATER, target: { threadId: second.threadId } });
     await act(async () => fake.event('session.setup', ready(STARTED))); // the old directory's, late
@@ -536,7 +541,7 @@ describe('a comment from a document with no chat beside it', () => {
     useSessions.setState({ records: new Map([...s.records, [STARTED, record(STARTED)], [LATER, record(LATER)]]), recordsVersion: s.recordsVersion + 1 });
     comment();
     await act(async () => {});
-    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: LATER, reason: 'read', options: { requireEmptyMessage: true } }]);
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: bare(LATER), reason: 'read', options: { requireEmptyMessage: true } }]);
   });
 
   // The panel's follow-up: a pending comment belongs to the target it was made for. The target moving on, with no other
@@ -550,8 +555,8 @@ describe('a comment from a document with no chat beside it', () => {
     expect(notice(), 'withdrawn without another Comment').toBeNull();
     expect(reach.discard).toHaveBeenCalledWith(passage.threadId);
     expect(reach.setActive).toHaveBeenLastCalledWith(null);
-    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
-    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+    await act(() => fake.reply('session.create', { appSessionId: bare(STARTED), intent: intent(STARTED) }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: bare(STARTED) }));
     await act(async () => fake.event('session.setup', ready(STARTED)));
     expect(useCommentCard.getState().open, 'no card on the old directory’s session').toBeNull();
     expect(notice()).toBeNull();
@@ -561,7 +566,7 @@ describe('a comment from a document with no chat beside it', () => {
     comment();
     await act(async () => {});
     expect(fake.invoked('session.create'), 'back in its directory, the session it made is the one reused').toHaveLength(1);
-    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: STARTED, reason: 'read', options: { requireEmptyMessage: true } }]);
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: bare(STARTED), reason: 'read', options: { requireEmptyMessage: true } }]);
   });
 
   it('a context that moves away and back while its start runs: the old comment stays withdrawn, a new Comment joins the same start', async () => {
@@ -575,8 +580,8 @@ describe('a comment from a document with no chat beside it', () => {
     comment(second);
     await act(async () => {});
     expect(fake.invoked('session.create'), 'one start for the directory').toHaveLength(1);
-    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
-    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+    await act(() => fake.reply('session.create', { appSessionId: bare(STARTED), intent: intent(STARTED) }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: bare(STARTED) }));
     await act(async () => fake.event('session.setup', ready(STARTED)));
     expect(useCommentCard.getState().open).toMatchObject({ parent: STARTED, target: { threadId: second.threadId } });
   });
@@ -588,8 +593,8 @@ describe('a comment from a document with no chat beside it', () => {
     move({ appSessionId: SHOWN });
     expect(notice()).toBeNull();
     expect(reach.discard).toHaveBeenCalledWith(passage.threadId);
-    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
-    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+    await act(() => fake.reply('session.create', { appSessionId: bare(STARTED), intent: intent(STARTED) }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: bare(STARTED) }));
     await act(async () => fake.event('session.setup', ready(STARTED)));
     expect(useCommentCard.getState().open).toBeNull();
   });
@@ -611,8 +616,8 @@ describe('a comment from a document with no chat beside it', () => {
     await act(async () => {});
     move({ context: { projectId: P1, path: '/work/p1', kind: 'directory' } });
     expect(notice()!.dataset.commentContext).toBe('starting');
-    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
-    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+    await act(() => fake.reply('session.create', { appSessionId: bare(STARTED), intent: intent(STARTED) }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: bare(STARTED) }));
     await act(async () => fake.event('session.setup', ready(STARTED)));
     expect(useCommentCard.getState().open).toMatchObject({ parent: STARTED, target: { threadId: passage.threadId } });
     expect(reach.discard).not.toHaveBeenCalled();
@@ -625,8 +630,8 @@ describe('a comment from a document with no chat beside it', () => {
     view.unmount();
     await act(async () => {});
     expect(reach.discard).toHaveBeenCalledWith(passage.threadId);
-    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
-    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+    await act(() => fake.reply('session.create', { appSessionId: bare(STARTED), intent: intent(STARTED) }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: bare(STARTED) }));
     await act(async () => fake.event('session.setup', ready(STARTED)));
     expect(useCommentCard.getState().open).toBeNull();
   });

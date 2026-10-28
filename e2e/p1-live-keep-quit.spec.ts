@@ -38,6 +38,7 @@ import { ownerPlugins } from '../test/support/claude-env';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { compareA15 } from '../test/support/owner-file';
 import { relaySkipReason } from '../test/support/relay-health';
+import { addressed } from './support/address';
 import { journal } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';
 import { journalSpend } from './support/c12-prerun';
@@ -174,7 +175,7 @@ test('S5: a keep-quit mid-turn on the packaged build; the relaunch lists the ses
       const row = await sidebarRow(page, { appSessionId: id });
       await expect(row).toBeVisible({ timeout: 2_000 });
       await row.click();
-      await expect(page.locator(`[data-region="main"] [data-composer="${id}"]`)).toBeVisible({ timeout: 2_000 });
+      await expect(page.locator(`[data-region="main"] [data-composer="${await addressed(page, id)}"]`)).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 30_000 });
   };
 
@@ -289,7 +290,7 @@ test('S5: a keep-quit mid-turn on the packaged build; the relaunch lists the ses
     expect(new Set(eventIds).size, 'no event id twice in the host’s stream').toBe(eventIds.length);
     const records = value(await invoke(second.page, 'session.list', { includeArchived: true })).sessions.filter((s) => s.engineSessionId === engineId);
     expect(records, 'one record of the session').toHaveLength(1);
-    const sidebarRows = await sidebarOf(second.page).locator(`[role="treeitem"][data-menu="session:${id}"]`).count();
+    const sidebarRows = await sidebarOf(second.page).locator(`[role="treeitem"][data-menu="session:${await addressed(second.page, id)}"]`).count();
     const rendered = await pane.locator('[data-row-id]').evaluateAll((rows) => rows.map((r) => r.getAttribute('data-row-id') ?? ''));
     expect(new Set(rendered).size, 'no transcript row rendered twice').toBe(rendered.length);
     const doneRows = await pane.locator('[data-row-id]').filter({ hasText: DONE }).evaluateAll((rows) => rows.map((r) => r.getAttribute('data-row-id') ?? ''));

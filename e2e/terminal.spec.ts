@@ -14,6 +14,7 @@ import { withNativeClipboard } from './support/clipboard';
 import { test } from './support/launch';
 import { latencyBudgets, MEASURED_WAIT_MS } from './support/latency';
 import { openSurface, pinSurfaceForSessions, showSessionCards, surface } from './support/shell';
+import { bareOf } from '../src/shared/machine/address'; // P5 O6 M2: the page's pty ids are addresses; the raw bridge's are bare
 
 // The parent-session variables a terminal must never inherit (§4.1), two engine-launch ones (D-19) and an Electron
 // switch a launcher sets (`ELECTRON_RENDERER_URL` itself would make the built app a dev-server client), set to fake
@@ -394,7 +395,7 @@ test('asks before closing a busy terminal', async ({ maws }) => {
   const pid = (await h.info(id))!.pid!;
 
   await h.run(id, 'sleep 1000');
-  await expect.poll(async () => (await h.page.evaluate(async (ptyId) => window.maws.invoke('pty.foreground', { ptyId: ptyId as never }), (await h.info(id))!.ptyId))).toMatchObject({ ok: true, value: { busy: true } });
+  await expect.poll(async () => (await h.page.evaluate(async (ptyId) => window.maws.invoke('pty.foreground', { ptyId: ptyId as never }), bareOf((await h.info(id))!.ptyId!)))).toMatchObject({ ok: true, value: { busy: true } });
   await h.tab(tabId).getByRole('button', { name: 'Close Terminal' }).click();
   const confirm = h.page.getByRole('alert', { name: 'close confirmation' });
   await expect(confirm).toHaveText(/^A command is running: sleep\. Close anyway\?/);

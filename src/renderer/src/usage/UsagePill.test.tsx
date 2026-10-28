@@ -6,7 +6,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { join } from 'node:path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MawsBridge, UsageAction, UsageActionResult, UsageControlsAnswer } from '@shared/ipc/schema';
+import type { PreloadBridge, UsageAction, UsageActionResult, UsageControlsAnswer } from '@shared/ipc/schema';
 import { validateCommandInput } from '@shared/ipc/validate';
 import type { UsageSnapshot } from '@shared/usage/types';
 import { ClaudeUsageReader } from '../../../main/usage/claude-usage-reader';
@@ -19,6 +19,7 @@ import { READ_ONLY_CONTROLS, useUsageControlState } from './controls';
 import { registerUsage } from '.';
 import { UsagePill, useUsagePopover } from './UsagePill';
 import { REL } from '../test-support/relative-time';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 
 const NOW = Date.parse('2026-09-29T07:36:17Z');
 const HINT = "Routing controls arrive when ClaudeUsage exposes its control route; use ClaudeUsage's own panel for now";
@@ -43,6 +44,7 @@ beforeEach(() => {
   controls = { available: false, reason: 'no_route', state: null };
   answerAction = () => ({ ok: false, reason: 'no_route', message: 'not there' });
   window.maws = {
+    localMachine: TEST_MACHINE,
     invoke: vi.fn(async (name: string, input: unknown) => {
       calls.push({ name, input });
       const checked = validateCommandInput(name as never, input);
@@ -67,7 +69,7 @@ beforeEach(() => {
       return () => void (usageChanged = usageChanged.filter((l) => l !== listener));
     },
     pathForFile: () => '',
-  } as unknown as MawsBridge;
+  } as unknown as PreloadBridge;
 });
 afterEach(() => {
   cleanup();
@@ -78,7 +80,7 @@ afterEach(() => {
   useUsagePopover.setState({ open: false });
   useUsageControlState.setState({ answer: null, notice: null, busy: false });
   closeDialog();
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 const settle = () => act(() => vi.advanceTimersByTimeAsync(0));

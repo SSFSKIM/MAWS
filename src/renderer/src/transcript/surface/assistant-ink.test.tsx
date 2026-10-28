@@ -1,8 +1,11 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it } from 'vitest';
+import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
+import { bareOf } from '@shared/machine/address';
 import { status } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
+import { at } from '../../../../../test/support/machine';
 import { connectEngineSurface } from '../../engine-surface/site';
 import { invalidateSession, resetSurfaceRegistry } from '../../engine-surface/registry';
 import { useSessions } from '../../stores/sessions';
@@ -11,9 +14,21 @@ import { expandedTurnRows, turnDerivations } from '../model/derive';
 import { api, builder } from '../model/test-events';
 import { Disclosures, TranscriptProvider, NO_ACTIONS } from '../view/context';
 import { RowView } from '../view/rows/Row';
-import { storeWith } from '../view/rows/test-support';
+import type { TranscriptSource } from '../source/types';
+import { preloadOf } from '../../test-support/preload-of';
 
 afterEach(() => { cleanup(); resetSurfaceRegistry(); });
+
+// P5 O6 M2: a session's store key is its id, an address on the page (rows/test-support's `storeWith` keys bare ids, which
+// the client refuses to send), so these sessions' stores are keyed by addresses.
+let keys = 0;
+async function sessionStoreWith(events: SessionEvent[]) {
+  const key = at(`ink-${++keys}`);
+  let listener: ((batch: SessionEvent[]) => void) | null = null;
+  const source: TranscriptSource = { subscribe(l) { listener = l; return () => (listener = null); }, snapshot: () => Promise.resolve(events) };
+  await useTranscriptStore.getState().attach(key, source);
+  return { key, rows: () => useTranscriptStore.getState().rows(key), push: (batch: SessionEvent[]) => listener?.(batch) };
+}
 
 function Transcript({ storeKey, hideCommentary = false, hideDivider = false, variant = 'session' }: { storeKey: string; hideCommentary?: boolean; hideDivider?: boolean; variant?: 'session' | 'child' }) {
   const rows = useTranscriptStore((s) => s.entries[storeKey].rows);
@@ -24,9 +39,9 @@ it('keeps the first expanded commentary drawing mounted when ink promotes it to 
   const b = builder(); b.turn('u'); b.text('first', 0, 'Update');
   b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
   b.text('last', 0, 'Answer'); b.end(['u']);
-  const store = await storeWith(b.events); const id = store.key as AppSessionId;
+  const store = await sessionStoreWith(b.events); const id = store.key as AppSessionId;
   useTranscriptStore.getState().expandAll(store.key);
-  const fake = fakeClient(); window.maws = fake.client;
+  const fake = fakeClient(); window.maws = preloadOf(fake);
   useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
   render(<Transcript storeKey={store.key} />);
   expect(screen.getByText('Update').closest('.transcript-commentary')).not.toBeNull();
@@ -45,8 +60,8 @@ it.each([false, true])('probes folded assistant text, preserves ink in order at 
   const b = builder(); b.turn('u'); b.text('first', 0, 'Update');
   b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
   b.text('last', 0, 'Answer'); b.end(['u']);
-  const store = await storeWith(b.events); const id = store.key as AppSessionId;
-  const fake = fakeClient(); window.maws = fake.client;
+  const store = await sessionStoreWith(b.events); const id = store.key as AppSessionId;
+  const fake = fakeClient(); window.maws = preloadOf(fake);
   useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
   const off = connectEngineSurface(fake.client);
   render(<Transcript storeKey={store.key} />);
@@ -77,9 +92,9 @@ it.each([{ hooked: false, expanded: false }, { hooked: true, expanded: false }, 
   const b = builder(); b.turn('u'); b.text('first', 0, 'Update');
   b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
   b.text('last', 0, 'Answer'); b.end(['u']);
-  const store = await storeWith(b.events); const id = store.key as AppSessionId;
+  const store = await sessionStoreWith(b.events); const id = store.key as AppSessionId;
   if (expanded) useTranscriptStore.getState().expandAll(store.key);
-  const fake = fakeClient({ 'session.ui.press': { handled: true } }); window.maws = fake.client;
+  const fake = fakeClient({ 'session.ui.press': { handled: true } }); window.maws = preloadOf(fake);
   useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
   render(<Transcript storeKey={store.key} />);
   const asks = fake.invoked('session.ui.render') as { component: string; props: { text?: string } }[];
@@ -96,7 +111,7 @@ it.each([{ hooked: false, expanded: false }, { hooked: true, expanded: false }, 
   expect(store.rows().find((r) => r.kind === 'assistant_text' && r.markdown === 'Update')).toMatchObject({ forHuman: true });
   fireEvent.pointerUp(button, { button: 0 });
   fireEvent.click(button);
-  expect(fake.invoked('session.ui.press')).toEqual([{ appSessionId: id, plugin: 'test-mod', handle: 7, key: 'accept' }]);
+  expect(fake.invoked('session.ui.press')).toEqual([{ appSessionId: bareOf(id), plugin: 'test-mod', handle: 7, key: 'accept' }]);
   await act(() => new Promise((resolve) => setTimeout(resolve, 1)));
   expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
   expect(store.rows().filter((r) => r.kind === 'assistant_text')).toHaveLength(expanded ? 2 : 1);
@@ -108,8 +123,8 @@ it('hands presentation back to the folded probe when a pressed row virtualizes a
   const b = builder(); b.turn('u'); b.text('first', 0, 'Update');
   b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
   b.text('last', 0, 'Answer'); b.end(['u']);
-  const store = await storeWith(b.events); const id = store.key as AppSessionId;
-  const fake = fakeClient(); window.maws = fake.client;
+  const store = await sessionStoreWith(b.events); const id = store.key as AppSessionId;
+  const fake = fakeClient(); window.maws = preloadOf(fake);
   useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
   const view = render(<Transcript storeKey={store.key} />);
   const asks = fake.invoked('session.ui.render') as { component: string; props: { text?: string } }[];
@@ -157,8 +172,8 @@ it.each([false, true])('does not derive large folded history during live token b
   }
   b.turn('live');
   b.emit('assistant.block.delta', { apiMessageId: api('live'), blockIndex: 0, blockType: 'text', textDelta: 'start', thinkingDelta: null, inputJsonDelta: null, userMessageUuid: null });
-  const store = await storeWith(b.events.slice()); const id = store.key as AppSessionId;
-  const fake = fakeClient(); window.maws = fake.client;
+  const store = await sessionStoreWith(b.events.slice()); const id = store.key as AppSessionId;
+  const fake = fakeClient(); window.maws = preloadOf(fake);
   useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: attached ? { clientId: 'maws-main' } : undefined }]]) });
   const view = render(<Transcript storeKey={store.key} />);
   const before = turnDerivations.count;
@@ -178,8 +193,8 @@ it.each(['session', 'child'] as const)('R4 presents detached marked commentary o
   const b = builder(); b.turn('u'); b.text('first', 0, 'Working notes.\n<to-human>Report.</to-human>');
   b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
   b.text('last', 0, 'Answer'); b.end(['u']);
-  const store = await storeWith(b.events);
-  const fake = fakeClient(); window.maws = fake.client; useSessions.setState({ engine: new Map() });
+  const store = await sessionStoreWith(b.events);
+  const fake = fakeClient(); window.maws = preloadOf(fake); useSessions.setState({ engine: new Map() });
   const view = render(<Transcript storeKey={store.key} variant={variant} />);
   expect(screen.getByText('Report.').closest('.transcript-answer')).not.toBeNull();
   expect(store.rows().find((r) => r.kind === 'assistant_text' && r.markdown.includes('Report.'))).toMatchObject({ forHuman: true });
@@ -192,7 +207,7 @@ it.each(['session', 'child'] as const)('R4 presents detached marked commentary o
 
 it('keeps a mixed answer intact without inventing a within-message fold', async () => {
   const b = builder(); b.turn('u'); b.text('only', 0, 'Private notes.\n<to-human>Report.</to-human>'); b.end(['u']);
-  const store = await storeWith(b.events); useSessions.setState({ engine: new Map() });
+  const store = await sessionStoreWith(b.events); useSessions.setState({ engine: new Map() });
   render(<Transcript storeKey={store.key} />);
   expect(screen.getByText('Report.')).toBeTruthy();
   expect(screen.getByText('Private notes.').closest('.transcript-answer')).not.toBeNull();
@@ -203,7 +218,7 @@ it('R4 keeps detached ordinary commentary folded and ordinary answers native', a
   const b = builder(); b.turn('u'); b.text('first', 0, 'Working notes.');
   b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
   b.text('last', 0, 'Native answer'); b.end(['u']);
-  const store = await storeWith(b.events); useSessions.setState({ engine: new Map() });
+  const store = await sessionStoreWith(b.events); useSessions.setState({ engine: new Map() });
   const view = render(<Transcript storeKey={store.key} />);
   expect(screen.queryByText('Working notes.')).toBeNull();
   expect(screen.getByText('Native answer').closest('.transcript-answer')).not.toBeNull();
@@ -214,8 +229,8 @@ it.each([false, true])('R4 retains local promotion through resume with its divid
   const b = builder(); b.turn('u'); b.text('first', 0, '<to-human>Local report.</to-human>');
   b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
   b.text('last', 0, 'Native answer'); b.end(['u']);
-  const store = await storeWith(b.events); const id = store.key as AppSessionId;
-  const fake = fakeClient(); window.maws = fake.client; useSessions.setState({ engine: new Map() });
+  const store = await sessionStoreWith(b.events); const id = store.key as AppSessionId;
+  const fake = fakeClient(); window.maws = preloadOf(fake); useSessions.setState({ engine: new Map() });
   const off = connectEngineSurface(fake.client);
   try {
     const view = render(<Transcript storeKey={store.key} />);
@@ -257,8 +272,8 @@ it.each([
   const b = builder(); b.turn('u'); b.text('first', 0, text);
   b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
   b.text('last', 0, 'Native answer'); b.end(['u']);
-  const store = await storeWith(b.events); const id = store.key as AppSessionId;
-  const fake = fakeClient(); window.maws = fake.client;
+  const store = await sessionStoreWith(b.events); const id = store.key as AppSessionId;
+  const fake = fakeClient(); window.maws = preloadOf(fake);
   useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
   const off = connectEngineSurface(fake.client);
   try {
@@ -291,8 +306,8 @@ it('R4 yields exclusively to an attached surface, including native fallback, and
   const b = builder(); b.turn('u'); b.text('first', 0, '<to-human>Local report.</to-human>');
   b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');
   b.text('last', 0, 'Native answer'); b.end(['u']);
-  const store = await storeWith(b.events); const id = store.key as AppSessionId;
-  const fake = fakeClient(); window.maws = fake.client; useSessions.setState({ engine: new Map() });
+  const store = await sessionStoreWith(b.events); const id = store.key as AppSessionId;
+  const fake = fakeClient(); window.maws = preloadOf(fake); useSessions.setState({ engine: new Map() });
   const view = render(<Transcript storeKey={store.key} />);
   expect(screen.getByText('Local report.')).toBeTruthy();
   act(() => useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) }));

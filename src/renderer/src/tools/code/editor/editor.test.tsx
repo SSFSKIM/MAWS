@@ -8,6 +8,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { FILES_READ_MAX_LENGTH } from '@shared/ipc/schema/files';
 import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
+import { at, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
 import { useLayout } from '../../../stores/layout';
 import { allTabs } from '../../../stores/layout-model';
@@ -17,13 +18,18 @@ import { openFile } from '../open-file';
 import { FileViewer } from '../viewer/FileViewer';
 import { useViewer, VIEWER_ENTRIES_MAX } from '../viewer/viewer-store';
 
-const A = 'app-a' as AppSessionId;
-const B = 'app-b' as AppSessionId;
+// P5 O6 M2: the page's ids are addresses and its file tabs name their machine; the fake disk (main) is asked and
+// answers with the bare MAIN_A and MAIN_B.
+const MAIN_A = 'app-a' as AppSessionId;
+const MAIN_B = 'app-b' as AppSessionId;
+const A = at(MAIN_A);
+const B = at(MAIN_B);
+const FILE = (path: string) => `file:${TEST_MACHINE}:${path}`;
 const MiB = 1024 * 1024;
 const APP = '/r/app.ts';
 
-const fileTab = (path: string, appSessionId: AppSessionId = A): Extract<TabRef, { kind: 'file' }> => ({ id: `file:${path}`, kind: 'file', path, line: null, appSessionId, pinned: false });
-const entry = (path = APP) => useViewer.getState().entries.get(`file:${path}`)!;
+const fileTab = (path: string, appSessionId: AppSessionId = A): Extract<TabRef, { kind: 'file' }> => ({ id: FILE(path), kind: 'file', path, line: null, appSessionId, machine: TEST_MACHINE, pinned: false });
+const entry = (path = APP) => useViewer.getState().entries.get(FILE(path))!;
 const viewer = () => document.querySelector('[data-file-viewer]')!;
 const view = () => EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement)!;
 const doc = () => view().state.doc.toString();
@@ -67,7 +73,7 @@ describe('editor', () => {
     await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
     return { disk, shown };
   }
-  const changed = (disk: ReturnType<typeof installDisk>, path = APP) => act(() => disk.emit('files.changed', { appSessionId: A, path, kind: 'changed' }));
+  const changed = (disk: ReturnType<typeof installDisk>, path = APP) => act(() => disk.emit('files.changed', { appSessionId: MAIN_A, path, kind: 'changed' }));
 
   describe('code view editing', () => {
     it('reads every chunk with its hash and edits a complete text, read-only until it is', async () => {
@@ -197,7 +203,7 @@ describe('editor', () => {
       await waitFor(() => expect(saveButton()).not.toBeNull());
       fireEvent.click(saveButton()!);
       await waitFor(() => expect(entry().dirty).toBe(false));
-      expect(disk.callsOf('files.write')).toEqual([{ appSessionId: A, path: APP, content: '// typed\nconst a = 1;\n', expectedHash: fakeHash('const a = 1;\n') }]);
+      expect(disk.callsOf('files.write')).toEqual([{ appSessionId: MAIN_A, path: APP, content: '// typed\nconst a = 1;\n', expectedHash: fakeHash('const a = 1;\n') }]);
       expect(disk.files[APP]).toBe('// typed\nconst a = 1;\n');
       expect(entry()).toMatchObject({ text: '// typed\nconst a = 1;\n', hash: fakeHash('// typed\nconst a = 1;\n'), saving: false, theirs: null });
       expect(saveButton()).toBeNull();
@@ -408,7 +414,7 @@ describe('editor', () => {
       fireEvent.click(saveButton()!);
       await waitFor(() => expect(entry()).toMatchObject({ theirs: { text: 'const a = 2;\n', hash: fakeHash('const a = 2;\n'), view: 'merge' }, saving: false }));
       expect(disk.callsOf('files.read')).toHaveLength(reads + 1);
-      expect(disk.callsOf('files.read').at(-1)).toEqual({ appSessionId: A, path: APP, offset: 0, length: FILES_READ_MAX_LENGTH, hash: true });
+      expect(disk.callsOf('files.read').at(-1)).toEqual({ appSessionId: MAIN_A, path: APP, offset: 0, length: FILES_READ_MAX_LENGTH, hash: true });
     });
 
     it('withdraws theirs when a save’s conflict read finds the disk back at the baseline; the next save lands', async () => {
@@ -611,7 +617,7 @@ describe('editor', () => {
       disk.files[APP] = 'const a = 3;\n'; // no event
       fireEvent.click(saveButton()!);
       await waitFor(() => expect(entry().theirs).toEqual({ text: 'const a = 3;\n', hash: fakeHash('const a = 3;\n'), view: 'merge' }));
-      expect(disk.callsOf('files.read').at(-1)).toEqual({ appSessionId: A, path: APP, offset: 0, length: FILES_READ_MAX_LENGTH, hash: true });
+      expect(disk.callsOf('files.read').at(-1)).toEqual({ appSessionId: MAIN_A, path: APP, offset: 0, length: FILES_READ_MAX_LENGTH, hash: true });
       expect(entry().saving).toBe(false);
     });
 
@@ -637,12 +643,12 @@ describe('editor', () => {
 
     it('answers noop to a save while one runs, and to a clean tab', async () => {
       const { disk } = await open({ [APP]: 'const a = 1;\n' });
-      expect(await useViewer.getState().save(`file:${APP}`)).toBe('noop');
+      expect(await useViewer.getState().save(FILE(APP))).toBe('noop');
       type('x');
       const write = disk.hold('files.write');
       let first!: Promise<string>;
-      act(() => void (first = useViewer.getState().save(`file:${APP}`)));
-      expect(await useViewer.getState().save(`file:${APP}`)).toBe('noop');
+      act(() => void (first = useViewer.getState().save(FILE(APP))));
+      expect(await useViewer.getState().save(FILE(APP))).toBe('noop');
       await act(async () => write.release());
       expect(await first).toBe('ok');
       expect(disk.callsOf('files.write')).toHaveLength(1);
@@ -652,7 +658,7 @@ describe('editor', () => {
       const { disk } = await open({ [APP]: 'const a = 1;\n' });
       type('// mine\n');
       delete disk.files[APP];
-      act(() => disk.emit('files.changed', { appSessionId: A, path: APP, kind: 'removed' }));
+      act(() => disk.emit('files.changed', { appSessionId: MAIN_A, path: APP, kind: 'removed' }));
       await waitFor(() => expect(entry().removed).toBe(true));
       expect(view().state.facet(EditorView.editable)).toBe(true);
       fireEvent.click(saveButton()!);
@@ -683,8 +689,8 @@ describe('editor', () => {
       for (let i = 1; i < VIEWER_ENTRIES_MAX + 3; i++) render(<FileViewer tab={fileTab(`/r/f${i}.ts`)} />).unmount();
       expect(useViewer.getState().entries.size).toBe(VIEWER_ENTRIES_MAX);
       expect(entry('/r/f0.ts').dirty).toBe(true); // the least recently used, passed over
-      act(() => useLayout.getState().closeTab('file:/r/f0.ts'));
-      expect(useViewer.getState().entries.has('file:/r/f0.ts')).toBe(false);
+      act(() => useLayout.getState().closeTab(FILE('/r/f0.ts')));
+      expect(useViewer.getState().entries.has(FILE('/r/f0.ts'))).toBe(false);
     });
 
     // E11 W-D (tracker row E5 "dirty file tab pruned silently"): no path but a guarded close drops a file tab; its
@@ -695,7 +701,7 @@ describe('editor', () => {
       await waitFor(() => expect(entry().dirty).toBe(true));
       shown.unmount();
       act(() => useLayout.getState().dropSession(A));
-      expect(allTabs(useLayout.getState().main).map((tab) => tab.id)).toContain(`file:${APP}`);
+      expect(allTabs(useLayout.getState().main).map((tab) => tab.id)).toContain(FILE(APP));
       expect(entry()).toMatchObject({ dirty: true, text: 'const a = 1;\n' });
       render(<FileViewer tab={fileTab(APP)} />);
       await waitFor(() => expect(doc()).toBe('// mine\nconst a = 1;\n'));
@@ -717,8 +723,8 @@ describe('editor', () => {
       await act(async () => read.release());
       await waitFor(() => expect(theirsNotice()).toBe('Changed on disk'));
       expect(disk.calls.filter((call) => call.name !== 'files.unwatch').map((call) => [call.name, call.input.appSessionId])).toEqual([
-        ['files.watch', B],
-        ['files.read', B],
+        ['files.watch', MAIN_B],
+        ['files.read', MAIN_B],
       ]);
       expect(entry()).toMatchObject({ appSessionId: B, text: 'const a = 1;\n', dirty: true, theirs: { text: 'const a = 2;\n', view: 'notice' } });
       expect(doc()).toBe('// mine\nconst a = 1;\n');
@@ -734,12 +740,12 @@ describe('editor', () => {
         await waitFor(() => expect(entry().dirty).toBe(true));
         const write = disk.hold('files.write');
         let saved!: Promise<string>;
-        act(() => void (saved = useViewer.getState().save(`file:${APP}`)));
+        act(() => void (saved = useViewer.getState().save(FILE(APP))));
         await waitFor(() => expect(disk.callsOf('files.write')).toHaveLength(1));
         expect(disk.files[APP]).toBe('// mine\nconst a = 1;\n'); // the fake disk writes when the call arrives
         shown.unmount();
-        act(() => useLayout.getState().closeTab(`file:${APP}`)); // Don't save: the entry goes with the tab
-        expect(useViewer.getState().entries.has(`file:${APP}`)).toBe(false);
+        act(() => useLayout.getState().closeTab(FILE(APP))); // Don't save: the entry goes with the tab
+        expect(useViewer.getState().entries.has(FILE(APP))).toBe(false);
 
         const read = disk.hold('files.read');
         openFile(A, APP);
@@ -772,10 +778,10 @@ describe('editor', () => {
       disk.files[APP] = 'const a = 3;\n'; // no event: the save conflicts and reads the file whole
       const conflictRead = disk.hold('files.read');
       let saved!: Promise<string>;
-      act(() => void (saved = useViewer.getState().save(`file:${APP}`)));
+      act(() => void (saved = useViewer.getState().save(FILE(APP))));
       await waitFor(() => expect(disk.callsOf('files.read').at(-1)?.length).toBe(FILES_READ_MAX_LENGTH));
       shown.unmount();
-      act(() => useLayout.getState().closeTab(`file:${APP}`));
+      act(() => useLayout.getState().closeTab(FILE(APP)));
       openFile(A, APP);
       render(<FileViewer tab={fileTab(APP)} />);
       await waitFor(() => expect(entry()?.editable).toBe(true));

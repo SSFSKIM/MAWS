@@ -6,6 +6,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
 import type { FsReadSpillInput, FsReadSpillOutput } from '@shared/ipc/schema/fs';
+import type { MachineRef } from '@shared/machine/ref';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { instanceOf, panelHost, setTitle, usePanelHost } from '../../../panel/host';
 import type { PanelToolContext } from '../../../panel/tool';
@@ -39,7 +40,7 @@ function numberedLines(bytes: number): string {
 function spillOver(text: string) {
   const file = new TextEncoder().encode(text);
   const reads: FsReadSpillInput[] = [];
-  const readSpill = vi.fn(async (input: FsReadSpillInput): Promise<FsReadSpillOutput> => {
+  const readSpill = vi.fn(async (_machine: MachineRef, input: FsReadSpillInput): Promise<FsReadSpillOutput> => {
     reads.push(input);
     const offset = input.offset ?? 0;
     let end = Math.min(file.length, offset + (input.length ?? 1024 * 1024));

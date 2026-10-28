@@ -5,6 +5,8 @@ import { EffortSchema } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { aliasOf, chipLabel } from '@shared/sessions/model-label';
+import { useMachineMark } from '../../app/machine-mark';
+import { checkoutKey, machineFor } from '../../ipc/machine';
 import { useCommand } from '../../ipc/query';
 import { NOT_A_REPOSITORY } from '../../sessions/branch-label'; // C4's message (W9: one constant for every reader)
 import { useGit, type GitEntry } from '../../stores/git';
@@ -15,12 +17,13 @@ import { PushState } from './PushState';
 import { Row, ToolButton, ToolSummary, useToolSummary } from './Section';
 
 export function Environment({ appSessionId, record, directory }: { appSessionId: AppSessionId; record: SessionRecord; directory: string }) {
-  const entry = useGit((s) => s.entries.get(directory));
+  const entry = useGit((s) => s.entries.get(checkoutKey(machineFor(appSessionId), directory)));
   const reviewSummary = useToolSummary('review');
   const status = entry?.status ?? null;
+  const machine = useMachineMark(appSessionId); // P5 O6 M5: where it runs, this Mac's as before, another's by name
   return (
     <FloatingCard title="Environment" summary={status ? (status.branch ?? SUMMARY_COPY.detached(status.head)) : watchFailure(entry)}>
-      <Row><span className="text-fg-muted">This Mac</span></Row>
+      <Row><span className="text-fg-muted">{machine.local ? 'This Mac' : machine.offline ? `${machine.name} · offline` : machine.name}</span></Row>
       <Row action={<ToolButton toolId="files" label="Files" appSessionId={appSessionId} />}>
         <span className="block truncate" title={directory}>{directory}</span>
       </Row>
@@ -49,7 +52,7 @@ export function Environment({ appSessionId, record, directory }: { appSessionId:
 // `engine.models` read the chip makes), with the exact id the engine reported in the tooltip; Session info has the rest.
 function ModelLine({ record, directory }: { record: SessionRecord; directory: string }) {
   const route = record.gateway.routed === null ? null : record.gateway.routed ? 'gateway' : 'direct';
-  const catalogue = useCommand('engine.models', route === null ? { refresh: false } : { refresh: false, gateway: route, cwd: directory }, { staleTime: 60_000 });
+  const catalogue = useCommand('engine.models', route === null ? { refresh: false } : { refresh: false, gateway: route, cwd: directory }, { staleTime: 60_000 }, { machine: machineFor(record.appId) });
   const id = record.model.resolved ?? record.model.requested;
   const alias = aliasOf(id, catalogue.data?.models ?? []);
   return (

@@ -11,6 +11,8 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, NO_PROJECT, tabId, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
 import { item as attention, record, T0 } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { at } from '../../../../test/support/machine';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { registerShellActions } from '../app/shell-actions';
 import { Shell } from '../app/Shell';
 import { registerSlot, resetSlots } from '../app/slots';
@@ -34,8 +36,9 @@ import { Transcript } from '../transcript/view/Transcript';
 
 vi.mock('../app/Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
-const A = 'app-a' as AppSessionId;
-const B = 'app-b' as AppSessionId;
+const A = at('app-a' as AppSessionId); // P5 O6 M2: the page's ids are addresses
+const B = at('app-b' as AppSessionId);
+const permissionOfA = () => { const item = attention(A, 'permission', T0); return { ...item, id: at(item.id) }; };
 const W = 1500;
 const S: TabRef = { id: tabId({ kind: 'session', appSessionId: A }), kind: 'session', appSessionId: A, pinned: false };
 const SETTINGS: TabRef = { id: 'settings', kind: 'settings', section: null, pinned: false };
@@ -82,7 +85,7 @@ beforeEach(() => {
   ({ resize } = installResizeObserver());
   resetShellStores();
   resetEditorHosts();
-  useSessions.setState({ records: new Map([[A, { ...record('app-a'), title: { text: 'Alpha session', source: 'user' } }], [B, record('app-b')]]) });
+  useSessions.setState({ records: new Map([[A, { ...record(A), title: { text: 'Alpha session', source: 'user' } }], [B, record(B)]]) });
   useLayout.setState({ main: splitOf() });
   useFloatingCard.setState({ closed: false, column: null, columnDrag: null, pillHost: null, rect: null, host: null });
   useComposerStore.setState({ focusTargets: new Map(), focusOnMount: new Set() });
@@ -246,7 +249,7 @@ describe('the split’s floating card in the Shell', () => {
     expect([shown.dataset.floatingPill, compact.style.right, compact.style.bottom]).toEqual(['floating', '16px', '16px']);
     expect(mainRegion().contains(shown)).toBe(true);
     expect(shown.querySelector('[aria-label="Unread"]')).toBeNull();
-    act(() => useSessions.setState({ records: new Map([[A, { ...record('app-a'), title: { text: 'Alpha session', source: 'user' }, unread: true }]]) }));
+    act(() => useSessions.setState({ records: new Map([[A, { ...record(A), title: { text: 'Alpha session', source: 'user' }, unread: true }]]) }));
     expect(shown.querySelector('[aria-label="Unread"]')).not.toBeNull();
     focused.splice(0);
     await user.click(shown);
@@ -255,7 +258,7 @@ describe('the split’s floating card in the Shell', () => {
     await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
     expect(document.activeElement).toBe(pill());
     focused.splice(0);
-    act(() => useAttention.setState({ bySession: new Map([[A, [attention('app-a', 'permission', T0)]]]) }));
+    act(() => useAttention.setState({ bySession: new Map([[A, [permissionOfA()]]]) }));
     expect(card()).not.toBeNull();
     expect(focused, 'the raise hands the compact surface’s keyboard to its replacement').toEqual([A]);
   });
@@ -269,7 +272,7 @@ describe('the split’s floating card in the Shell', () => {
     act(() => elsewhere.focus());
     expect(document.activeElement).toBe(elsewhere);
     focused.splice(0);
-    act(() => useAttention.setState({ bySession: new Map([[A, [attention('app-a', 'permission', T0)]]]) }));
+    act(() => useAttention.setState({ bySession: new Map([[A, [permissionOfA()]]]) }));
     expect(card()).not.toBeNull();
     expect(focused, 'a request must not move the keyboard out of another surface').toEqual([]);
     expect(document.activeElement).toBe(elsewhere);
@@ -321,7 +324,7 @@ describe('the split’s floating card in the Shell', () => {
     act(() => void fireEvent.pointerDown(within(shown).getByTestId('composer')));
     expect(set().focusedPane).toBe(0);
 
-    act(() => useLayout.getState().setCurrentProject('elsewhere' as ProjectId));
+    act(() => useLayout.getState().setCurrentProject(at('elsewhere' as ProjectId)));
     expect(card()).toBeNull();
     expect(composers()).toEqual([]);
     act(() => useLayout.getState().setCurrentProject(null));
@@ -483,7 +486,7 @@ describe('the round trip with the real transcript and composer', () => {
       'session.history.list': { entries: [] },
       'session.drafts.get': (input: { appSessionId: string }) => drafts.get(input.appSessionId) ?? null,
       'session.drafts.set': (input: { appSessionId: string; draft: unknown }) => void drafts.set(input.appSessionId, input.draft),
-    }).client;
+    }).client as unknown as PreloadBridge; // P5 O6 M2: main's side, keyed by the bare ids
     registerSlot('transcript', TranscriptOver);
     registerSlot('composer', RealComposer);
   });
