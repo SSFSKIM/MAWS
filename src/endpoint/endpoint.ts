@@ -431,7 +431,7 @@ export class Endpoint implements EndpointModule {
       try {
         this.#key = await importSigningKey(state.machineKey.jwk);
       } catch (error) {
-        log(`endpoint: refusing its state: the machine key in ${services.machine.stateDir} does not import (${(error as Error).message})`);
+        log(`endpoint: refusing its state: the machine key in ${services.machine.stateDir} does not import: ${(error as Error).message}`); // no `import (` in a string: the bundle guard reads one as a dynamic import
         this.links.refusing = 'state-malformed';
         return;
       }

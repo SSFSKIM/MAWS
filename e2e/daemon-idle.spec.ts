@@ -31,13 +31,18 @@
 // bound (P5 Decision Logs 54 and 57); it writes test-results/daemon-idle-floor.json. The third (P5 O2 M5, Decision Log
 // 57's early check) is `mawsd` alone, idle with no hosts and no app; it writes test-results/daemon-idle-mawsd.json.
 //
-// Four measured groups (gate.yml's MEASURED_E2E), one case each, chosen by title: `pnpm e2e:daemon-idle` (the
+// The fourth (P5 O10 M10, Decision Log 114) is the increment an enrolled endpoint adds to the daemon shape: the first
+// case's scene measured unenrolled, then with its mawsd enrolled in an org on desk-hub's local runner; it writes
+// test-results/daemon-idle-enrolled.json.
+//
+// Five measured groups (gate.yml's MEASURED_E2E), one case each, chosen by title: `pnpm e2e:daemon-idle` (the
 // scene, on the daemon shape since M9), `pnpm e2e:daemon-idle-baseline` (the same case under MAWS_HOST_MODE=detached,
 // today's supervisor alone, recording only: the baseline is re-measured from it on the tree under test when a landing
-// misses), `pnpm e2e:daemon-idle-floor` (the floor, which needs no build) and `pnpm e2e:daemon-idle-mawsd` (mawsd
-// alone). Each sets MAWS_DAEMON_IDLE_PERF=1, and the gate runs it only when named, on the mini's exclusive instance
-// behind the measured-job guard. None spends anything or touches a keychain: a replay runs no engine, and mawsd alone
-// wakes no host.
+// misses), `pnpm e2e:daemon-idle-floor` (the floor, which needs no build), `pnpm e2e:daemon-idle-mawsd` (mawsd
+// alone) and `pnpm e2e:daemon-idle-enrolled` (the enrolled endpoint, recording only). Each sets MAWS_DAEMON_IDLE_PERF=1,
+// and the gate runs it only when named, on the mini's exclusive instance behind the measured-job guard. None spends
+// anything or touches a keychain: a replay runs no engine, mawsd alone wakes no host, and the enrolled endpoint's hub
+// is a local one on loopback, its machine key a file of the scratch profile.
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -48,13 +53,14 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import { daemonPaths } from '@shared/daemon/files';
 import { machineSettingsDefaults } from '@shared/settings/defaults';
-import { boundMisses, cpuSeconds, DAEMON_IDLE_BOUND, floorLine, IDLE_RUN, idleLine, invalidReasons, mawsdLine, measured, median, readerMismatches, readFootprints, readTopMem, type MeasuredProcess, type TopMem } from '../test/support/daemon-idle';
+import { boundMisses, cpuSeconds, DAEMON_IDLE_BOUND, ENROLLED_INCREMENT_BUDGET_KIB, enrolledLine, floorLine, IDLE_RUN, idleLine, invalidReasons, mawsdLine, measured, median, readerMismatches, readFootprints, readTopMem, type MeasuredProcess, type ShapeReading, type TopMem } from '../test/support/daemon-idle';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { startLocalOrg, type LocalOrg, type Ran } from './support/local-org';
 import { isAlive, killScratchProcesses, processesNaming, ps } from './support/processes';
 import { tmpSocketDirOf } from './support/supervisor-socket';
 
-test.skip(process.env.MAWS_DAEMON_IDLE_PERF !== '1', 'the idle-cost measurement runs under pnpm e2e:daemon-idle, e2e:daemon-idle-baseline, e2e:daemon-idle-floor and e2e:daemon-idle-mawsd (MAWS_DAEMON_IDLE_PERF=1)');
+test.skip(process.env.MAWS_DAEMON_IDLE_PERF !== '1', 'the idle-cost measurement runs under pnpm e2e:daemon-idle, e2e:daemon-idle-baseline, e2e:daemon-idle-floor, e2e:daemon-idle-mawsd and e2e:daemon-idle-enrolled (MAWS_DAEMON_IDLE_PERF=1)');
 test.describe.configure({ timeout: 20 * 60_000 }); // about 13 minutes: the scene, the settle and the window
 
 // C3's permission round trip: a prompt, ~44 rows, a Bash `can_use_tool` (seq 49) the replay holds at until it is
@@ -100,9 +106,13 @@ const lockOf = (userData: string): { pid: number; socketPath: string } | null =>
   }
 };
 
-test('daemon idle: the physical footprint and CPU of what stays behind holding one kept idle session after the app has quit', async () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-di-')));
-  const userData = join(root, 'ud');
+// The processes the scene leaves behind, filled in as they start, so the cleanup ends whatever started.
+interface Held { maws: MawsLaunch | null; supervisor: number | null; daemon: number | null }
+
+// The scene up to its idle: the app launched on the shape, the seeded session's turn played to its request, the answer
+// given, the app quit mid-turn with the keep answer, and the turn ended with no app connected, the session held at its
+// next prompt. Answers the session's id and the Electron version every measured process runs as Node.
+async function keptIdleScene(root: string, userData: string, held: Held): Promise<{ id: AppSessionId; electron: string }> {
   const repo = join(root, 'repo');
   mkdirSync(repo, { recursive: true });
   // No idle release and no idle exit (null: never), so the kept session holds through the window.
@@ -115,57 +125,65 @@ test('daemon idle: the physical footprint and CPU of what stays behind holding o
   const seeded = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: 'daemon idle session' }, uuid: randomUUID(), timestamp: '2026-10-27T10:00:00.000Z', cwd: repo, sessionId: engineId, version: '2.1.283' };
   writeFileSync(join(project, `${engineId}.jsonl`), `${JSON.stringify(seeded)}\n`);
 
-  let maws: MawsLaunch | null = null;
-  let supervisor: number | null = null;
-  let daemon: number | null = null; // the daemon shape's private mawsd
+  const maws = (held.maws = await launchMaws({
+    userData, keepConfigHome: true,
+    env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: SHAPE, MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_ROW_MS: ROW_MS, MAWS_E2E_QUIT_ANSWER: 'keep' },
+  }));
+  const { page, app } = maws;
+  const child = app.process();
+  let output = '';
+  child.stdout?.on('data', (chunk) => (output += String(chunk)));
+  child.stderr?.on('data', (chunk) => (output += String(chunk)));
+  const exited = new Promise<void>((resolve) => (child.exitCode !== null || child.signalCode !== null ? resolve() : child.once('exit', () => resolve())));
+
+  await expect.poll(async () => {
+    const status = await invoke(page, 'host.status', undefined);
+    if (!status.ok || status.value.state !== 'ready' || status.value.supervisor?.mode !== 'detached') return null;
+    if (DAEMON && (status.value.transport !== 'daemon' || status.value.daemon?.kind !== 'private')) return null;
+    held.daemon = status.value.daemon?.pid ?? null;
+    return status.value.supervisor.pid;
+  }, { timeout: 30_000, message: DAEMON ? 'main is connected to the engine host through a private mawsd' : 'main is connected to a detached supervisor' }).not.toBeNull();
+  const supervisor = (held.supervisor = lockOf(userData)!.pid);
+  const electron = await app.evaluate(() => process.versions.electron); // the binary every measured process runs as Node
+  let id = '' as AppSessionId;
+  await expect.poll(async () => (id = (value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === engineId)?.appId ?? '') as AppSessionId), { timeout: 20_000, message: 'the seeded session has a record' }).not.toBe('');
+
+  // The session holds at its request; the answer is given, and the app quits with the keep answer mid-turn.
+  await launchReady(page, id, PERMISSION, { cwd: repo });
+  value(await invoke(page, 'session.send', { appSessionId: id, content: firstPrompt() }));
+  let requested: SessionEvent | undefined;
+  await expect.poll(async () => (requested = value(await invoke(page, 'session.events', { appSessionId: id, afterSeq: null, limit: null })).events.find((e) => e.kind === 'permission.requested')) !== undefined, { timeout: 60_000, message: 'the request is pending' }).toBe(true);
+  const { requestId } = requested as Extract<SessionEvent, { kind: 'permission.requested' }>;
+  value(await invoke(page, 'session.answer', { appSessionId: id, requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
+  await app.evaluate(({ app: electron }) => electron.quit());
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`MAWS did not quit; it said ${JSON.stringify(output.split('\n').filter((l) => l.startsWith('quit-guard:')))}`)), 20_000)));
+  await Promise.race([exited, late]).finally(() => clearTimeout(timer));
+  expect(output.split('\n'), 'the quit was asked mid-turn and answered keep').toContain('quit-guard: 1 mid-turn, auto-answered keep, 1 session kept');
+  expect(isAlive(supervisor), 'the supervisor outlives the app').toBe(true);
+  if (DAEMON) expect(isAlive(held.daemon!), 'mawsd outlives the app').toBe(true);
+  await expect.poll(() => turnEnded(journal(userData, id)), { timeout: 60_000, message: 'the turn ends with no app connected' }).toBe(true);
+  expect(launchEnded(journal(userData, id)), 'the kept session holds at its next prompt').toBe(false);
+  return { id, electron };
+}
+
+// The scene's processes after the settle: the profile's supervisor, and on the daemon shape its mawsd beside it.
+async function settledProcesses(root: string, held: Held): Promise<MeasuredProcess[]> {
+  await sleep(IDLE_RUN.settleS * 1_000);
+  const procs: MeasuredProcess[] = measured(processesNaming(root), root, MEASURED);
+  expect(procs.map((p) => p.pid), "the profile's supervisor is what is measured").toContain(held.supervisor);
+  if (DAEMON) expect(procs.map((p) => p.pid), "the profile's mawsd is measured beside it").toContain(held.daemon);
+  return procs;
+}
+
+test('daemon idle: the physical footprint and CPU of what stays behind holding one kept idle session after the app has quit', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-di-')));
+  const userData = join(root, 'ud');
+  const held: Held = { maws: null, supervisor: null, daemon: null };
   let leftover: unknown;
   try {
-    maws = await launchMaws({
-      userData, keepConfigHome: true,
-      env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: SHAPE, MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_ROW_MS: ROW_MS, MAWS_E2E_QUIT_ANSWER: 'keep' },
-    });
-    const { page, app } = maws;
-    const child = app.process();
-    let output = '';
-    child.stdout?.on('data', (chunk) => (output += String(chunk)));
-    child.stderr?.on('data', (chunk) => (output += String(chunk)));
-    const exited = new Promise<void>((resolve) => (child.exitCode !== null || child.signalCode !== null ? resolve() : child.once('exit', () => resolve())));
-
-    await expect.poll(async () => {
-      const status = await invoke(page, 'host.status', undefined);
-      if (!status.ok || status.value.state !== 'ready' || status.value.supervisor?.mode !== 'detached') return null;
-      if (DAEMON && (status.value.transport !== 'daemon' || status.value.daemon?.kind !== 'private')) return null;
-      daemon = status.value.daemon?.pid ?? null;
-      return status.value.supervisor.pid;
-    }, { timeout: 30_000, message: DAEMON ? 'main is connected to the engine host through a private mawsd' : 'main is connected to a detached supervisor' }).not.toBeNull();
-    supervisor = lockOf(userData)!.pid;
-    const electron = await app.evaluate(() => process.versions.electron); // the binary every measured process runs as Node
-    let id = '' as AppSessionId;
-    await expect.poll(async () => (id = (value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === engineId)?.appId ?? '') as AppSessionId), { timeout: 20_000, message: 'the seeded session has a record' }).not.toBe('');
-
-    // The session holds at its request; the answer is given, and the app quits with the keep answer mid-turn.
-    await launchReady(page, id, PERMISSION, { cwd: repo });
-    value(await invoke(page, 'session.send', { appSessionId: id, content: firstPrompt() }));
-    let requested: SessionEvent | undefined;
-    await expect.poll(async () => (requested = value(await invoke(page, 'session.events', { appSessionId: id, afterSeq: null, limit: null })).events.find((e) => e.kind === 'permission.requested')) !== undefined, { timeout: 60_000, message: 'the request is pending' }).toBe(true);
-    const { requestId } = requested as Extract<SessionEvent, { kind: 'permission.requested' }>;
-    value(await invoke(page, 'session.answer', { appSessionId: id, requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
-    await app.evaluate(({ app: electron }) => electron.quit());
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`MAWS did not quit; it said ${JSON.stringify(output.split('\n').filter((l) => l.startsWith('quit-guard:')))}`)), 20_000)));
-    await Promise.race([exited, late]).finally(() => clearTimeout(timer));
-    expect(output.split('\n'), 'the quit was asked mid-turn and answered keep').toContain('quit-guard: 1 mid-turn, auto-answered keep, 1 session kept');
-    expect(isAlive(supervisor), 'the supervisor outlives the app').toBe(true);
-    if (DAEMON) expect(isAlive(daemon!), 'mawsd outlives the app').toBe(true);
-    await expect.poll(() => turnEnded(journal(userData, id)), { timeout: 60_000, message: 'the turn ends with no app connected' }).toBe(true);
-    expect(launchEnded(journal(userData, id)), 'the kept session holds at its next prompt').toBe(false);
-
-    await sleep(IDLE_RUN.settleS * 1_000);
-
-    const procs: MeasuredProcess[] = measured(processesNaming(root), root, MEASURED);
-    expect(procs.map((p) => p.pid), "the profile's supervisor is what is measured").toContain(supervisor);
-    if (DAEMON) expect(procs.map((p) => p.pid), "the profile's mawsd is measured beside it").toContain(daemon);
-    const measurement = await measureWindow(procs);
+    const { id, electron } = await keptIdleScene(root, userData, held);
+    const measurement = await measureWindow(await settledProcesses(root, held));
     const sessionEnded = launchEnded(journal(userData, id));
 
     const reasons = invalidReasons({ loads: measurement.samples.map((s) => s.load), measured: measurement.names, lost: measurement.lost, sessionEnded, mismatches: measurement.mismatches });
@@ -176,7 +194,7 @@ test('daemon idle: the physical footprint and CPU of what stays behind holding o
     report('daemon-idle.json', line, reasons, { shape: SHAPE, electron, bound, misses, ...measurement.record, sessionEnded });
     expect(misses, `the daemon shape's processes together are within DAEMON_IDLE_BOUND (${line})`).toEqual([]);
   } finally {
-    leftover = await removeScratch(root, userData, maws, [supervisor, daemon]);
+    leftover = await removeScratch(root, userData, held.maws, [held.supervisor, held.daemon]);
   }
   if (leftover !== null) throw leftover; // the body passed: a process of the scratch outliving it is the case's failure
 });
@@ -190,7 +208,7 @@ test('daemon idle runtime floor: the physical footprint and CPU of the bare Elec
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-dif-')));
   const script = join(root, 'floor.js');
   writeFileSync(script, 'setInterval(() => {}, 1 << 30);\n');
-  const binary = join(REPO_ROOT, 'node_modules', 'electron', 'dist', readFileSync(join(REPO_ROOT, 'node_modules', 'electron', 'path.txt'), 'utf8').trim());
+  const binary = electronBinary();
   const env = { ELECTRON_RUN_AS_NODE: '1', PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: root };
   const electron = execFileSync(binary, ['-p', 'process.versions.electron'], { env, encoding: 'utf8' }).trim();
   let floor: ChildProcess | null = null;
@@ -225,7 +243,7 @@ test('daemon idle mawsd alone: the physical footprint and CPU of mawsd idle with
   mkdirSync(profile, { recursive: true });
   const script = join(REPO_ROOT, 'out', 'main', 'mawsd.js');
   expect(existsSync(script), 'the build has out/main/mawsd.js (scripts/e2e-build.sh plain)').toBe(true);
-  const binary = join(REPO_ROOT, 'node_modules', 'electron', 'dist', readFileSync(join(REPO_ROOT, 'node_modules', 'electron', 'path.txt'), 'utf8').trim());
+  const binary = electronBinary();
   const env = { ELECTRON_RUN_AS_NODE: '1', PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: root, MAWS_USER_DATA: profile };
   const log = () => (existsSync(join(profile, 'mawsd', 'mawsd.log')) ? readFileSync(join(profile, 'mawsd', 'mawsd.log'), 'utf8') : '');
   let mawsd: ChildProcess | null = null;
@@ -249,6 +267,79 @@ test('daemon idle mawsd alone: the physical footprint and CPU of mawsd idle with
   }
   if (leftover !== null) throw leftover;
 });
+
+// P5 O10 M10 and Decision Log 114: the increment an enrolled endpoint adds to the daemon shape. The first case's scene,
+// its window read unenrolled (mawsd has not loaded its endpoint, endpoint-seam.ts), then the scene's mawsd enrolled with
+// its code on stdin through the command line, listed by the member of an org on desk-hub's local runner
+// (./support/local-org.ts; wrangler dev on loopback, its heartbeat the deployed hub's 15 s), and, once its hub link is
+// up, the same settle and window again over the same processes. The local hub runs through both windows, so both read
+// the same machine. Valid when both windows are, the kept session holds through both, and the hub link is still up at
+// the end. Its line names the increment in footprint and CPU, each process's share, the budget's verdict, the validity
+// and both loads, and asserts no bound; it writes test-results/daemon-idle-enrolled.json. `pnpm e2e:daemon-idle-enrolled`
+// runs this case alone, on the daemon shape (about 27 minutes: two settles and two windows). Its unenrolled window is
+// this scene's own baseline, raised by the local hub running beside it (M10's readings: mawsd 34.0 and 41.7 MiB there,
+// 31.2 to 31.8 in the first case's scene), and is never compared with DAEMON_IDLE_BOUND, which the first case reads.
+test('daemon idle enrolled endpoint: the footprint and CPU an enrolled, listed endpoint adds to the daemon shape holding one kept idle session', async () => {
+  test.skip(!DAEMON, 'the enrolled endpoint is measured on the daemon shape (pnpm e2e:daemon-idle-enrolled)');
+  test.setTimeout(40 * 60_000);
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-die-')));
+  const userData = join(root, 'ud');
+  const held: Held = { maws: null, supervisor: null, daemon: null };
+  // The command line of the scene's mawsd, as the app's own binary runs it as Node, on the scene's profile.
+  const env = { ELECTRON_RUN_AS_NODE: '1', PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: root, TMPDIR: process.env.TMPDIR ?? tmpdir(), MAWS_USER_DATA: userData };
+  const cli = (args: string[], input = '') =>
+    new Promise<Ran>((done) => {
+      const child = spawn(electronBinary(), [join(REPO_ROOT, 'out', 'main', 'mawsd.js'), ...args], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (chunk) => (stdout += String(chunk)));
+      child.stderr.on('data', (chunk) => (stderr += String(chunk)));
+      child.once('exit', (status) => done({ status, stdout, stderr }));
+      child.stdin.end(input);
+    });
+  const hubConnected = async () => {
+    const status = await cli(['endpoint', 'status', '--json']);
+    return status.status === 0 && (JSON.parse(status.stdout) as { hub: { connected: boolean } }).hub.connected;
+  };
+  let org: LocalOrg | null = null;
+  let leftover: unknown;
+  try {
+    org = await startLocalOrg(root, { heartbeatMs: 15_000 });
+    const { id, electron } = await keptIdleScene(root, userData, held);
+    const procs = await settledProcesses(root, held);
+    const unenrolled = await measureWindow(procs);
+    const unenrolledEnded = launchEnded(journal(userData, id));
+
+    const enrolling = await org.enroll('idle-scene', (code) => cli(['enroll', '--name', 'idle-scene', '--wait', '60', '--json'], `${code}\n`));
+    expect(JSON.parse(enrolling.stdout), 'the scene’s mawsd is enrolled and listed').toMatchObject({ enrollment: 'org-listed', name: 'idle-scene' });
+    await expect.poll(hubConnected, { timeout: 60_000, message: 'the enrolled endpoint’s hub link is up' }).toBe(true);
+    const enrolled = await measureWindow(await settledProcesses(root, held));
+    const sessionEnded = launchEnded(journal(userData, id));
+    const linkUp = await hubConnected(); // after the window's last reading, so the command's own cost is outside it
+
+    const validity = (run: typeof unenrolled, ended: boolean) => invalidReasons({ loads: run.samples.map((s) => s.load), measured: run.names, lost: run.lost, sessionEnded: ended, mismatches: run.mismatches });
+    const reasons = [
+      ...validity(unenrolled, unenrolledEnded).map((reason) => `unenrolled: ${reason}`),
+      ...validity(enrolled, sessionEnded).map((reason) => `enrolled: ${reason}`),
+      ...(linkUp ? [] : ['the enrolled endpoint’s hub link was down at the window’s end']),
+    ];
+    const reading = (run: typeof unenrolled): ShapeReading | null =>
+      run.footprintKiB === null || run.cpuS === null ? null : { footprintKiB: run.footprintKiB, cpuS: run.cpuS, samples: run.whole, load: run.load, processes: run.perProcess.map((p) => ({ ...p, cpuS: p.cpuS! })) };
+    const [before, after] = [reading(unenrolled), reading(enrolled)];
+    const line = before === null || after === null ? null : enrolledLine({ unenrolled: before, enrolled: after, reasons });
+    const increment = before === null || after === null ? null : { footprintKiB: Math.round(after.footprintKiB) - Math.round(before.footprintKiB), cpuS: Math.round((after.cpuS - before.cpuS) * 100) / 100 };
+    report('daemon-idle-enrolled.json', line, reasons, { shape: 'daemon, enrolled', electron, budgetKiB: ENROLLED_INCREMENT_BUDGET_KIB, increment, linkUp, sessionEnded, unenrolled: unenrolled.record, enrolled: enrolled.record });
+  } finally {
+    leftover = await removeScratch(root, userData, held.maws, [held.supervisor, held.daemon]);
+    await org?.stop().catch((error: unknown) => console.error(error));
+  }
+  if (leftover !== null) throw leftover;
+});
+
+// The Electron binary every measured process runs as Node (ELECTRON_RUN_AS_NODE=1), as its `electron` package names it.
+function electronBinary(): string {
+  return join(REPO_ROOT, 'node_modules', 'electron', 'dist', readFileSync(join(REPO_ROOT, 'node_modules', 'electron', 'path.txt'), 'utf8').trim());
+}
 
 // The window over the measured processes: their start times, then a sample every 30 s on a fixed schedule, each
 // process's footprint (proc_pid_rusage) and `ps -o rss=` summed per sample and the 1-minute load, top's cross-check at
@@ -291,7 +382,8 @@ async function measureWindow(procs: readonly MeasuredProcess[]) {
   const summed = (of: (s: Sample) => Record<number, number | null>) => (whole.length === 0 ? null : median(whole.map((s) => procs.reduce((sum, p) => sum + of(s)[p.pid]!, 0))));
   const footprintKiB = summed((s) => s.footprintKiB);
   const rssKiB = summed((s) => s.rssKiB);
-  const perProcess = whole.length === 0 ? [] : procs.map((p) => ({ argv0: p.argv0, pid: p.pid, footprintKiB: median(whole.map((s) => s.footprintKiB[p.pid]!)) }));
+  const cpuOf = (pid: number) => (cpuAtEnd.has(pid) ? Math.round((cpuAtEnd.get(pid)! - cpuAtStart.get(pid)!) * 100) / 100 : null);
+  const perProcess = whole.length === 0 ? [] : procs.map((p) => ({ argv0: p.argv0, pid: p.pid, footprintKiB: median(whole.map((s) => s.footprintKiB[p.pid]!)), cpuS: cpuOf(p.pid) }));
   const cpuS = lost.length > 0 ? null : Math.round(procs.reduce((sum, p) => sum + cpuAtEnd.get(p.pid)! - cpuAtStart.get(p.pid)!, 0) * 100) / 100;
   const load = Math.max(...samples.map((s) => s.load));
   const processes = procs.map((p) => ({ ...p, started: started.get(p.pid), cpuStartS: cpuAtStart.get(p.pid), cpuEndS: cpuAtEnd.get(p.pid) ?? null }));

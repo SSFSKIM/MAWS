@@ -27,7 +27,7 @@ function hostedReports(log) {
   try {
     writeFileSync(join(dir, 'gh'), fakeGh);
     chmodSync(join(dir, 'gh'), 0o755);
-    const reports = join(dir, 'reports');
+    const reports = join(dir, 'ci-12345678-4242-callA', 'reports');
     const stdout = execFileSync('bash', ['-c', 'set -uo pipefail; source "$0"; hosted_reports "$1" "$2"', join(root, 'scripts/ci-gate-hosted.sh'), log.join('\n'), reports], {
       encoding: 'utf8',
       env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },

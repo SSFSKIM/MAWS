@@ -148,10 +148,13 @@ env:
   # as Node, the share of mawsd's footprint that is the runtime's: a diagnostic, outside the bound.
   # daemon-idle-mawsd (P5 O2 M5, Decision Log 57's early check), the spec's third case, is mawsd alone, idle with no hosts
   # and no app: its footprint beside what the combined bound leaves it once the engine host's baseline is counted.
+  # daemon-idle-enrolled (P5 O10 M10, Decision Log 114), the spec's fourth case, is the increment an enrolled endpoint
+  # adds to the daemon shape: the same scene's window unenrolled, then with its mawsd enrolled and listed in an org on
+  # desk-hub's local runner (wrangler dev on loopback), recorded without a bound; about 27 minutes, two windows.
   # A group with a timing bound turns its timed cases on with a switch, MAWS_<name>_PERF or MAWS_<name>_SCALE set to 1 in
   # its package script, each such spec skipping without it or asserting its bounds only under it (presentations-drag's
   # one class-1 trial in e2e:presentations logs its p95), and is on this list: ci-kit's VM contract above rests on it.
-  MEASURED_E2E: artifacts-perf daemon-idle daemon-idle-baseline daemon-idle-floor daemon-idle-mawsd dashboard-scale design-scale document-scale document-scale-repeat local-latency local-latency-daemon presentations-drag presentations-scale tool-time-heavy-live
+  MEASURED_E2E: artifacts-perf daemon-idle daemon-idle-baseline daemon-idle-floor daemon-idle-mawsd daemon-idle-enrolled dashboard-scale design-scale document-scale document-scale-repeat local-latency local-latency-daemon presentations-drag presentations-scale tool-time-heavy-live
   # The Mac jobs that may run beside another: e2e groups, and `unit:darwin`, that ask for ci-kit's shared instances
   # ([ci-kit-mac-shared], their only label), which run two jobs at a time on the mini's one desktop (ci-kit's mac-lane
   # concurrency spec, SSFSKIM/ci-kit docs/doperpowers/specs/2026-10-21-mac-lane-concurrency-design.md). Every other Mac

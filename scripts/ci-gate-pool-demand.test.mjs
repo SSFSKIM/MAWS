@@ -2,7 +2,7 @@
 // gate.yml's static job collects this file with scripts/*.test.mjs.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
@@ -42,8 +42,8 @@ function fixture(run) {
   }
 }
 
-function demand(tree, sha, trailers, vars = variables) {
-  return spawnSync(process.execPath, [cli, '--git-dir', tree, '--sha', sha], {
+function demand(tree, sha, trailers, vars = variables, script = cli) {
+  return spawnSync(process.execPath, [script, '--git-dir', tree, '--sha', sha], {
     cwd: tmpdir(), // neither package.json nor gate.yml may come from the caller's cwd
     encoding: 'utf8',
     env: { ...process.env, ...vars, HEAD_MESSAGE: message(trailers) },
@@ -119,6 +119,15 @@ for (const [name, trailers, expected] of scenarios) {
   }));
 }
 
+// Node canonicalizes import.meta.url but leaves argv[1] as spelled, so a symlinked checkout path must still run the CLI.
+test('the CLI prints its demand when invoked through a symlinked directory', () => fixture(({ dir, tree, sha }) => {
+  const linked = join(dir, 'linked-scripts');
+  symlinkSync(join(root, 'scripts'), linked);
+  const result = demand(tree, sha, 'Gates: static,unit,probes', variables, join(linked, 'ci-gate-pool-demand.mjs'));
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '16x1 8x4 2x1\n');
+}));
+
 test('the CLI reads scripts and env lists at the pushed sha, ignoring dirty files and ambient workflow inputs', () => fixture(({ tree, sha, put, git }) => {
   const changedScripts = JSON.parse(packageJson);
   changedScripts.scripts['e2e:document-app'] = 'scripts/e2e-build.sh harness && playwright test';
@@ -189,7 +198,7 @@ test('the CLI refuses an unreadable tree or invalid plan without emitting a hint
 // A real local origin captures the pushed empty commit; gh and sleep alone are fake. No Actions run is created, so
 // ci-gate ends at "no run" (exit 1) after the push, and --keep leaves the message available for inspection.
 function pushedGate(args, { failure = '', affected = false } = {}) {
-  return fixture(({ dir, tree, git, put, sha }) => {
+  return fixture(({ dir, tree, git, put }) => {
     const origin = join(dir, 'origin.git');
     execFileSync('git', ['init', '--quiet', '--bare', origin]);
     git('remote', 'add', 'origin', origin);
@@ -198,7 +207,6 @@ function pushedGate(args, { failure = '', affected = false } = {}) {
       put('src/shared/pool-demand.ts', 'export const value = 2;\n');
       git('add', '.');
       git('commit', '--quiet', '-m', 'source change');
-      sha = git('rev-parse', 'HEAD');
     }
     if (failure === 'workflow') put('.github/workflows/gate.yml', 'env:\n  MAC_VM_E2E: [cannot, read]\n');
     if (failure === 'missing-planner') rmSync(join(tree, '.github/scripts/gate-plan.mjs'));
@@ -206,7 +214,6 @@ function pushedGate(args, { failure = '', affected = false } = {}) {
     if (['workflow', 'missing-planner', 'unsupported-planner'].includes(failure)) {
       git('add', '.');
       git('commit', '--quiet', '-m', 'target cannot provide a pool hint');
-      sha = git('rev-parse', 'HEAD');
     }
     // Dirty caller files must not affect the hint, even for --gates all.
     put('package.json', '{}');
@@ -227,8 +234,10 @@ esac
     const result = spawnSync('bash', [join(root, 'scripts/ci-gate.sh'), tree, ...args, '--keep'], {
       cwd: tmpdir(), encoding: 'utf8', env: { ...process.env, ...identity, PATH: `${dir}:${process.env.PATH}`, MAWS_GATE_IGNORE_ALERTS: '1', MAWS_GATE_RUNNER: '' },
     });
-    const pushed = git('--git-dir', origin, 'log', '-1', '--format=%B', `refs/heads/ci/demand-${sha.slice(0, 8)}`);
-    rmSync(`/tmp/maws-review/gates/ci-${sha.slice(0, 8)}.log`, { force: true });
+    const ref = / as (ci\/\S+)/.exec(result.stdout)?.[1];
+    const pushed = git('--git-dir', origin, 'log', '-1', '--format=%B', `refs/heads/${ref}`);
+    const transcript = /^ci-gate: transcript in (.+)$/m.exec(result.stdout)?.[1];
+    if (transcript) rmSync(dirname(transcript), { recursive: true, force: true });
     assert.equal(result.status, 1, result.stdout + result.stderr);
     assert.match(result.stdout, /ci-gate: no run of/);
     return { message: pushed, calls: readFileSync(join(dir, 'gh-calls'), 'utf8') };

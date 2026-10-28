@@ -12,7 +12,10 @@
 // M1), read the code from a hidden prompt at a terminal, else from stdin to its end, never from argv, since it carries a
 // token and a pairing secret (a provisioning code a delegation's private key too): an argument the command does not know
 // is refused without being echoed. The code travels only as `daemon.endpoint`'s `secret`, over machine.sock (0600), and
-// nothing here prints or logs it. Each waits for the module as long as its `--wait` lets the module wait.
+// nothing here prints or logs it. Each waits for the module as long as its `--wait` lets the module wait. The commands
+// that take a `<file|->` (`endpoint revoke` and `grant`, P5 O10 M10) are the daemon's to read but the caller's to name:
+// `-` is read from stdin here and travels as the same `secret`, and a relative path is made absolute against the
+// caller's working directory, since the daemon's is its own.
 import { closeSync, fstatSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { daemonPaths, type DaemonPaths } from '@shared/daemon/files';
@@ -23,7 +26,6 @@ import { readTolerant } from '@shared/ipc/tolerant';
 import { IDENTITY_FILE, readMachineRef } from '@shared/machine/identity-file';
 import { SUPERVISOR_FILES } from '../engine-host/supervisor-files';
 import { PTY_HOST_FILES } from '../pty-host/files';
-import { NO_ENDPOINT_MODULE } from './endpoint-seam';
 import { installDaemon, resolveLabel, uninstallDaemon, unitFor, type InstallDeps } from './install';
 import { reachMachine, REQUEST_TIMEOUT_MS, type MachineLink } from './machine-client';
 import { releasesRoot, type InstalledRelease } from './release';
@@ -44,6 +46,7 @@ export const USAGE = `usage: mawsd <command> [--profile <dir>] [--label <label>]
   endpoint <command> [<argument>…] a command of the endpoint module (P5 O10)
   endpoint provision [--name <name>] [--wait [<seconds>]] [--json]
                                    the provisioning code is read from stdin or a prompt (P5 O14)
+  endpoint revoke|grant <file|->   a signed org state or grant, from a file or on stdin
   install [--delegation-id <id>] [--runtime <node>] [--entry <mawsd.js>]
                                    on Linux the default profile's unit installs the pack it runs from (pnpm mawsd:pack)
   uninstall
@@ -220,7 +223,7 @@ function statusText(status: DaemonStatus, wire: string, label: string | null, no
     `engine host  ${hostText(status.hosts['engine-host'])}`,
     `pty host     ${hostText(status.hosts['pty-host'])}`,
     `clients      ${clients.length > 0 ? clients.join(' · ') : 'none'}`,
-    `endpoint     ${status.endpoint.present ? JSON.stringify(status.endpoint.detail) : 'none (arrives with P5 O10)'}`,
+    `endpoint     ${JSON.stringify(status.endpoint.detail)}`,
     '',
   ].join('\n');
 }
@@ -398,17 +401,21 @@ async function endpoint(context: Context, args: readonly string[]): Promise<numb
   return withDaemon(context, async (link) => answered(context.deps, await link.request('daemon.endpoint', { command, args: [...rest] })));
 }
 
-// The commands that read a secret, each with the flags it passes to the module and how long the module waits when no
-// `--wait` is given (null: it does not wait, and the request keeps its default deadline).
+// The commands that read a secret. A code's (`code`): the flags it passes to the module and how long the module waits
+// when no `--wait` is given (null: it does not wait, and the request keeps its default deadline). A source's (`source`):
+// its one `<file|->`, the content `-` names read from stdin to its end.
 const SECRET_COMMANDS = {
   enroll: { code: 'enrollment code', flags: ['--replace', '--json'], usage: '--name <name>, --replace, --wait [<seconds>] and --json', unwaitedS: null },
   provision: { code: 'provisioning code', flags: ['--json'], usage: '--name <name>, --wait [<seconds>] and --json', unwaitedS: WAIT_DEFAULT_S },
+  revoke: { source: 'signed org state' },
+  grant: { source: 'signed grant' },
 } as const;
 type SecretCommand = keyof typeof SECRET_COMMANDS;
+type CodeCommand = { [K in SecretCommand]: (typeof SECRET_COMMANDS)[K] extends { code: string } ? K : never }[SecretCommand];
 
 // The flags a secret-reading command passes to the module, `--wait` with its seconds made explicit, and how long the
 // module may wait; anything else is refused, unechoed, since it may be the code itself.
-function secretFlags(command: SecretCommand, args: readonly string[]): { args: string[]; waitS: number | null } {
+function secretFlags(command: CodeCommand, args: readonly string[]): { args: string[]; waitS: number | null } {
   const spec = SECRET_COMMANDS[command];
   const refused = new Usage(`${command} takes ${spec.usage}; the ${spec.code} is read from stdin or a prompt, never from the command line`);
   const out: string[] = [];
@@ -431,8 +438,10 @@ function secretFlags(command: SecretCommand, args: readonly string[]): { args: s
 
 async function withSecret(context: Context, command: SecretCommand, rawArgs: readonly string[]): Promise<number> {
   const { deps } = context;
-  const { code } = SECRET_COMMANDS[command];
-  const { args, waitS } = secretFlags(command, rawArgs);
+  const spec = SECRET_COMMANDS[command];
+  if ('source' in spec) return withSource(context, command, spec.source, rawArgs);
+  const { code } = spec;
+  const { args, waitS } = secretFlags(command as CodeCommand, rawArgs);
   return withDaemon(context, async (link) => {
     const question = `${code[0]!.toUpperCase()}${code.slice(1)}: `;
     const secret = (deps.stdin.isTTY ? await deps.stdin.prompt(question) : await deps.stdin.read()).trim();
@@ -442,22 +451,25 @@ async function withSecret(context: Context, command: SecretCommand, rawArgs: rea
   });
 }
 
-async function keys(context: Context, args: readonly string[]): Promise<number> {
+// A `<file|->` command: `-`'s content from stdin as the `secret` (a terminal's typing ends at ^D), a file by the
+// caller's path. Anything else beside the one source is the module's to refuse, so a flag passes as it is.
+async function withSource(context: Context, command: SecretCommand, what: string, args: readonly string[]): Promise<number> {
   const { deps } = context;
+  const sources = args.filter((arg) => arg === '-' || !arg.startsWith('-'));
+  if (sources.length > 1) throw new Usage(`${command} takes one <file|->: the ${what}, from a file or on stdin`);
   return withDaemon(context, async (link) => {
-    const answer = await link.request('daemon.endpoint', { command: 'keys', args: [...args] });
-    if (!(answer.ok && isNoModule(answer.value))) return answered(deps, answer);
-    // no endpoint module (until P5 O10): the machine ref, and no key
-    const ref = profileRef(context) ?? 'none';
-    if (args.includes('--json')) deps.out(`${JSON.stringify({ machine: ref, enrollment: 'none', key: null })}\n`);
-    else deps.out(`machine ${ref}\nno machine key: not enrolled\n`);
-    return EXIT.done;
+    if (sources[0] !== '-') {
+      const named = args.map((arg) => (arg === sources[0] ? resolve(deps.cwd, arg) : arg));
+      return answered(deps, await link.request('daemon.endpoint', { command, args: named }));
+    }
+    const content = await deps.stdin.read();
+    if (content.trim() === '') return failed(deps, `no ${what} came on stdin`);
+    return answered(deps, await link.request('daemon.endpoint', { command, args: [...args], secret: content }));
   });
 }
 
-function isNoModule(value: unknown): boolean {
-  const answer = value as { code?: unknown; out?: unknown } | null;
-  return answer?.code === EXIT.unavailable && answer.out === NO_ENDPOINT_MODULE;
+async function keys(context: Context, args: readonly string[]): Promise<number> {
+  return withDaemon(context, async (link) => answered(context.deps, await link.request('daemon.endpoint', { command: 'keys', args: [...args] })));
 }
 
 // The module's answer: its output (stdout for 0 and 4, else stderr) and its exit code.

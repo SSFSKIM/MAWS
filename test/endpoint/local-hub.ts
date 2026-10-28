@@ -45,8 +45,11 @@ const answers = (port: number) =>
     socket.on('error', () => done(false));
   });
 
-/** Starts the runner on a free port pair and waits (60 s at most) until the hub answers through its stand-in. */
-export async function startLocalHub(): Promise<LocalHub> {
+/**
+ * Starts the runner on a free port pair and waits (60 s at most) until the hub answers through its stand-in. `heartbeatMs`
+ * is the machine stream's (the runner's own default, 2 s, unless given; the deployed hub's is 15 s).
+ */
+export async function startLocalHub(options: { heartbeatMs?: number } = {}): Promise<LocalHub> {
   const state = fs.mkdtempSync(join(tmpdir(), 'endpoint-hub-'));
   let child: ChildProcess | null = null;
   let url = '';
@@ -54,7 +57,7 @@ export async function startLocalHub(): Promise<LocalHub> {
   for (let attempt = 0; attempt < 5 && child === null; attempt++) {
     const port = 20_000 + 2 * Math.floor(Math.random() * 15_000);
     if ((await answers(port)) || (await answers(port + 1))) continue;
-    const started = spawn(process.execPath, ['--experimental-strip-types', '--disable-warning=ExperimentalWarning', RUNNER, '--port', String(port), '--state', state], {
+    const started = spawn(process.execPath, ['--experimental-strip-types', '--disable-warning=ExperimentalWarning', RUNNER, '--port', String(port), '--state', state, ...(options.heartbeatMs === undefined ? [] : ['--heartbeat-ms', String(options.heartbeatMs)])], {
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
       env: { ...process.env, WRANGLER_SEND_METRICS: 'false' },
