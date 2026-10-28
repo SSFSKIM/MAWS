@@ -70,9 +70,17 @@ export async function startProxy(options: {
   }
 
   server.on('upgrade', (req: IncomingMessage, socket: Socket, head: Buffer) => {
+    // Node's server takes its own error listener off a socket before it emits 'upgrade', so the socket's errors are
+    // this handler's from here, a refusal's included. With none, a client's reset before the socket was piped (an
+    // endpoint stopping its hub link with the stand-in's refusal unread) threw, and ended the whole local hub. The
+    // socket's close, a reset's included, ends the hub's side, upgraded or not.
+    let hubSide: { destroy(): void } | null = null;
+    socket.on('error', () => {}); // the close that follows ends the hub's side
+    socket.on('close', () => hubSide?.destroy());
     void (async () => {
       const url = new URL(req.url ?? '/', `http://${req.headers.host ?? host}`);
       const admission = await standin.admit(url.pathname, req.headers);
+      if (socket.destroyed) return;
       if (admission.kind === 'refuse') {
         const { status, contentType, body } = admission;
         socket.end(`HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\ncontent-type: ${contentType}\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
@@ -83,7 +91,9 @@ export async function startProxy(options: {
       headers.connection = 'Upgrade';
       headers.upgrade = req.headers.upgrade ?? 'websocket';
       const up = httpRequest({ host: target.hostname, port: target.port, method: req.method, path: req.url, headers, agent: false });
+      hubSide = up;
       up.on('upgrade', (upRes, upSocket, upHead) => {
+        hubSide = upSocket;
         const lines = [`HTTP/1.1 ${upRes.statusCode} ${upRes.statusMessage}`];
         for (let i = 0; i < upRes.rawHeaders.length; i += 2) lines.push(`${upRes.rawHeaders[i]}: ${upRes.rawHeaders[i + 1]}`);
         socket.write(`${lines.join('\r\n')}\r\n\r\n`);
@@ -91,8 +101,6 @@ export async function startProxy(options: {
         if (head.length) upSocket.write(head);
         upSocket.pipe(socket).pipe(upSocket);
         upSocket.on('error', () => socket.destroy());
-        socket.on('error', () => upSocket.destroy());
-        socket.on('close', () => upSocket.destroy());
         upSocket.on('close', () => socket.destroy());
       });
       // The hub answered without upgrading (a refusal): pass its answer on and close.

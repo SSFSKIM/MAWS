@@ -11,6 +11,7 @@ import { dirname, join } from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
 import { URL, fileURLToPath } from 'node:url';
+import { planOf } from '../.github/scripts/gate-plan.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
@@ -80,8 +81,48 @@ function gate(args, { alerts = false, base = {}, change } = {}) {
 const trailers = (message) => {
   const lines = message.trimEnd().split('\n\n').at(-1).split('\n');
   assert.match(lines[0], /^Nonce: \d+-\d+$/);
-  return lines.slice(1).filter((line) => !line.startsWith('E2E-Coverage:'));
+  return lines.slice(1).filter((line) => !/^(E2E|Unit)-Coverage:/.test(line));
 };
+
+test('omitting unit warns for non-doc changes, including fixture additions, deletes and moves into docs, without refusing the push', () => {
+  const base = { 'fixtures/recording.json': '{}', 'docs/note.md': 'note' };
+  for (const [gates, change] of [
+    ['probes', (tree) => writeFileSync(join(tree, 'fixtures/new.json'), '{}')],
+    ['static,unit:darwin', (tree) => rmSync(join(tree, 'fixtures/recording.json'))],
+    ['probes', (_tree, git) => git('mv', 'fixtures/recording.json', 'docs/recording.json')],
+    ['static', (tree) => writeFileSync(join(tree, 'README.md'), 'changed')],
+  ]) {
+    const result = gate(['--gates', gates, '--peer', 'none'], { base, change });
+    assert.equal(result.refs.length, 1, result.stdout + result.stderr);
+    assert.match(result.stdout, /ci-gate: warning: unit omitted;.*outside docs\//);
+    assert.match(result.message, /^Unit-Coverage: unit omitted;.*outside docs\//m);
+    assert.deepEqual(trailers(result.message), [`Gates: ${gates}`]);
+    const planned = planOf({ HEAD_MESSAGE: result.message }, { e2e: 'playwright test' });
+    assert.match(planned.summary, /Unit-Coverage: unit omitted;/);
+    assert.equal(planned.outputs.unit, 'false');
+  }
+});
+
+test('unit coverage is quiet for docs-only or empty diffs and for unit or all selections', () => {
+  const base = { 'fixtures/recording.json': '{}', 'docs/note.md': 'note' };
+  for (const [gates, change] of [
+    ['probes', (tree) => writeFileSync(join(tree, 'docs/note.md'), 'changed')],
+    ['probes', () => {}],
+    ['static, unit, probes', (tree) => writeFileSync(join(tree, 'fixtures/new.json'), '{}')],
+    ['all', (tree) => writeFileSync(join(tree, 'fixtures/new.json'), '{}')],
+  ]) {
+    const result = gate(['--gates', gates, '--peer', 'none'], { base, change });
+    assert.equal(result.refs.length, 1, result.stdout + result.stderr);
+    assert.doesNotMatch(result.stdout + result.stderr + result.message, /unit omitted|Unit-Coverage:/);
+  }
+});
+
+test('an unreadable unit diff warns but still pushes', () => {
+  const result = gate(['--gates', 'probes', '--peer', 'none']); // no origin/master
+  assert.equal(result.refs.length, 1);
+  assert.match(result.stdout, /warning: unit coverage failed; going ahead/);
+  assert.match(result.message, /^Unit-Coverage: note: unit coverage failed; no advice available$/m);
+});
 
 test('omitted spec-import coverage warns before push and travels in the pushed commit without adding gates', () => {
   const result = gate(['--gates', 'static', '--peer', 'none'], {
