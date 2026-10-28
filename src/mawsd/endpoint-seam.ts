@@ -1,7 +1,7 @@
 // The endpoint seam (P5 O2 M5; docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, Interfaces "The endpoint seam"; its shape
-// settled with O10, which owns the module behind it, src/endpoint/). `mawsd` holds `endpoint: EndpointModule | null`;
-// at O2 there is none, and O10 replaces `loadEndpointModule`'s body. `DaemonServices` is O10's `EndpointServices` field
-// for field (P5 Decision Log 45; endpoint-seam.test.ts holds the two types equal).
+// settled with O10, which owns the module behind it, src/endpoint/). `mawsd` holds `endpoint: EndpointModule | null`:
+// O10's module since O10 M10 (`loadEndpointModule`), null only where a test brings none. `DaemonServices` is O10's
+// `EndpointServices` field for field (P5 Decision Log 45; endpoint-seam.test.ts holds the two types equal).
 //
 // When it runs: as soon as `mawsd`'s own sockets are up (start step 7), so the machine is reachable from outside even
 // while both hosts are parked; a remote request that needs a host wakes it through `dispatch`. It stops first in the
@@ -12,10 +12,12 @@ import type { DocumentsOpen } from '@shared/host/socket-protocol';
 import type { ClientRef } from '@shared/ipc/client';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import type { MachineRef } from '@shared/machine/ref';
+import { createEndpoint } from '../endpoint/index';
 
 export const ENDPOINT_STOP_MS = 2_500;
-// `daemon.endpoint`'s answer while there is no module, `{code: 2, out: NO_ENDPOINT_MODULE}`, for every command; the
-// command line (cli.ts) reads it to answer `keys` with the machine ref alone (P5 O2 M6).
+// `daemon.endpoint`'s answer while there is no module (a daemon a test starts with none), `{code: 2, out:
+// NO_ENDPOINT_MODULE}`, for every command; the command line (cli.ts) reads it to answer `keys` with the machine ref alone
+// (P5 O2 M6).
 export const NO_ENDPOINT_MODULE = 'this daemon has no endpoint module yet (P5 O10)';
 // The document channels of the one upstream link are split between its two users until O3: the app's below 2^31, the
 // endpoint's at 2^31 and above. A value convention inside the existing `Channel` range, enforced here and never as a
@@ -48,7 +50,9 @@ export interface EndpointModule {
   cli(command: string, args: readonly string[], secret?: string): Promise<{ code: number; out: string }>;
 }
 
-// null at O2: this daemon has no endpoint module yet (P5 O10 binds it here).
-export function loadEndpointModule(): EndpointModule | null {
-  return null;
+// O10's endpoint module (P5 O10 M10), one for each daemon, unstarted; `build` is the daemon's build id, which RL1's hello
+// and RL2's h2 name. It is bundled into mawsd.js with its `ws` (the bundle guard bars a dynamic import), and an
+// unenrolled one starts no hub link, binds no listener and serves no RL10 socket.
+export function loadEndpointModule(build: string): EndpointModule {
+  return createEndpoint({ build });
 }

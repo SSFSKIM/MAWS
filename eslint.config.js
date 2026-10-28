@@ -213,6 +213,13 @@ module.exports = defineConfig(
       'no-restricted-syntax': ['error', CLIENT_PORT_DYNAMIC, YJS_DYNAMIC],
     },
   },
+  // P5 O10 M10: the built mawsd's endpoint scene is proved with the endpoint's own harness (its hub, carriers, org
+  // fixtures and fake sminos), which reach inside the module, so it leaves out ENDPOINT_PATTERNS as the module's own
+  // suites do; the rest of mawsd's block stands. Only the suite: mawsd's code reaches the module through its entry.
+  {
+    files: ['src/mawsd/process-endpoint.test.ts'],
+    rules: { 'no-restricted-imports': ['error', { paths: [{ name: 'electron', message: CLIENT_PORT }], patterns: [{ group: ['**/open-external'], message: CLIENT_PORT }, ...YJS_PATTERNS] }] },
+  },
   // Outside src/: the suites (but the module's own) and the e2e specs reach the module through its entry too.
   {
     files: ['test/**/*.{ts,tsx}', 'e2e/**/*.ts'],

@@ -72,7 +72,7 @@ export interface DaemonOptions {
   // (default stderr) takes the refusal.
   openLog?(dir: string): (line: string) => void;
   refuse?(line: string): void;
-  endpoint?: EndpointModule | null; // loadEndpointModule() unless a test brings one
+  endpoint?: EndpointModule | null; // loadEndpointModule(<this build's id>) unless a test brings one (or none)
   // test seams
   detached?: Partial<Omit<DetachedTransportOptions, 'modulePath'>>; // spawn, processes, timing: both hosts' transports
   runCommand?(command: string, args: string[]): { status: number | null; stdout: string };
@@ -169,7 +169,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const execPath = options.execPath ?? process.execPath;
   const identity: SupervisorIdentity = { protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, buildId, capabilities: WIRE_CAPABILITIES, wire: wireFingerprint(), pid: process.pid, startedAt };
   const engineIdentity = appIdentity(options.modules.engineHost, env, 'detached'); // the e2e seams stand in, as for main
-  const endpoint = options.endpoint === undefined ? loadEndpointModule() : options.endpoint;
+  const endpoint = options.endpoint === undefined ? loadEndpointModule(buildId) : options.endpoint;
 
   // --- the upstreams --------------------------------------------------------------------------------------------------
   let stopping: Promise<void> | null = null;
