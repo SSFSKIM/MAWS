@@ -304,6 +304,7 @@ async function app(chain: SignedOrgState[], options: AppOptions = {}): Promise<A
       link: (ref) => machines.get(ref) ?? null,
       view: () => held,
       timing: { ...(options.maxBytes === undefined ? {} : { DELIVERY_MAX_BYTES: options.maxBytes }), ...(options.retryMs === undefined ? {} : { DELIVERY_RETRY_MS: options.retryMs }) },
+      now: () => NOW,
       log: () => {},
     });
     closers.push(() => deliveries.close());
