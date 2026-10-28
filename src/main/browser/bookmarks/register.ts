@@ -1,7 +1,7 @@
-// Main's handlers for `browser.bookmarks.*` (cua board #90's spec, Interfaces "IPC"): the tree the index holds for a
-// partition, and a sync of an imported profile's bookmarks now. Only the app window's top frame reaches them (the
-// router's `isAppSender`), every input past its strict schema. A failing index answers an empty tree: the bar is a
-// convenience, and the page under it still works.
+// Main's handlers for `browser.bookmarks.*` (cua board #90's spec, Interfaces "IPC"): the tree the browser's database
+// holds for a partition (the index's until P5 O3-A), and a sync of an imported profile's bookmarks now. Only the app
+// window's top frame reaches them (the router's `isAppSender`), every input past its strict schema. A failing store
+// answers an empty tree: the bar is a convenience, and the page under it still works.
 import { emptyBookmarkTree } from '@shared/browser/bookmarks';
 import type { BrowserBookmarksStore } from '../data/bookmarks';
 import type { registerMainHandler } from '../../ipc/router';
