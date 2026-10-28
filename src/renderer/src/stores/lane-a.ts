@@ -5,6 +5,8 @@
 // strip: the sends whose fate was not known when `laneA.send` answered (`unconfirmed` in the composer), kept with their
 // text by their delivery key until the state's `deliveries` say they entered, or until the person dismisses them.
 //
+// P5 O9 M7: the composer's uploads, each file with its state as the bridge's `media` op messages say it.
+//
 // P5 O9 M6: the settlements this page's answers were told (`laneA.answer`'s `not_pending`), beside those the state carries,
 // so a card whose answer lost the race says who won.
 //
@@ -28,10 +30,19 @@ export interface PendingSend {
   reason: string | null;
 }
 
+// P5 O9 M7: one upload the composer sent, each file with its state as the bridge says it (`queued` until it says one;
+// DX4's `MediaState`: `pending`, `claimed`, `read`, `forwarded`, `aborted`, `failed`) and the reason of an `aborted` or a
+// `failed` one.
+export interface LaneAUpload {
+  upload: string;
+  files: readonly { name: string; state: string; reason: string | null }[];
+}
+
 export interface LaneAStore {
   states: ReadonlyMap<AppSessionId, LaneAState>;
   catalogs: ReadonlyMap<AppSessionId, LaneACatalog>; // the body for the state's fingerprint, once read
   pendingSends: ReadonlyMap<AppSessionId, readonly PendingSend[]>;
+  uploads: ReadonlyMap<AppSessionId, readonly LaneAUpload[]>; // M7: the composer's uploads, until they went on or are dismissed
   usage: ReadonlyMap<AppSessionId, LaneAUsage>; // the latest `usage` a watch of this page heard (its snapshot's, then each turn's)
   jobs: ReadonlyMap<AppSessionId, readonly Job[]>; // the latest jobs a watch of this page heard (its snapshot's, then each `subagents`)
   told: ReadonlyMap<AppSessionId, ReadonlyMap<string, RequestSettlement>>; // M6: settlements an answer of this page was told, by request
@@ -52,7 +63,7 @@ export interface LaneAUsage {
   cost: { usd: number } | null;
 }
 
-const empty = (): LaneAStore => ({ states: new Map(), catalogs: new Map(), pendingSends: new Map(), usage: new Map(), jobs: new Map(), told: new Map() });
+const empty = (): LaneAStore => ({ states: new Map(), catalogs: new Map(), pendingSends: new Map(), uploads: new Map(), usage: new Map(), jobs: new Map(), told: new Map() });
 
 export const useLaneA = create<LaneAStore>()(empty);
 
@@ -177,6 +188,36 @@ export const useLaneAJobs = (appSessionId: AppSessionId): readonly Job[] | null 
 // P5 O9 M6: what an answer was told of its request's settlement (`not_pending`), kept while the session is in lane A.
 export function noteLaneASettlement(appSessionId: AppSessionId, request: string, settlement: RequestSettlement): void {
   useLaneA.setState((s) => ({ told: new Map(s.told).set(appSessionId, new Map(s.told.get(appSessionId)).set(request, settlement)) }));
+}
+
+// M7: the composer's upload, each file `queued` until the bridge says more (src/renderer/src/lane-a/uploads.ts follows it).
+export function holdUpload(appSessionId: AppSessionId, upload: string, names: readonly string[]): void {
+  const held: LaneAUpload = { upload, files: names.map((name) => ({ name, state: 'queued', reason: null })) };
+  useLaneA.setState((s) => ({ uploads: new Map(s.uploads).set(appSessionId, [...(s.uploads.get(appSessionId) ?? []).filter((u) => u.upload !== upload), held]) }));
+}
+
+// The upload as one `media` op message says it: its `attachments` are the whole upload as it stands. Answers the upload
+// as it now stands, or null when it is not held.
+export function noteUploadStates(appSessionId: AppSessionId, upload: string, attachments: readonly { index: number; state: string; reason?: string }[]): LaneAUpload | null {
+  const held = useLaneA.getState().uploads.get(appSessionId)?.find((u) => u.upload === upload);
+  if (!held) return null;
+  const files = held.files.map((file, index) => {
+    const said = attachments.find((a) => a.index === index);
+    return said ? { name: file.name, state: said.state, reason: said.reason ?? null } : file;
+  });
+  const next = { upload, files };
+  useLaneA.setState((s) => ({ uploads: new Map(s.uploads).set(appSessionId, (s.uploads.get(appSessionId) ?? []).map((u) => (u.upload === upload ? next : u))) }));
+  return next;
+}
+
+export function dismissUpload(appSessionId: AppSessionId, upload: string): void {
+  useLaneA.setState((s) => {
+    const left = (s.uploads.get(appSessionId) ?? []).filter((u) => u.upload !== upload);
+    const uploads = new Map(s.uploads);
+    if (left.length === 0) uploads.delete(appSessionId);
+    else uploads.set(appSessionId, left);
+    return { uploads };
+  });
 }
 
 export function dismissPendingSend(appSessionId: AppSessionId, key: DeliveryKey): void {

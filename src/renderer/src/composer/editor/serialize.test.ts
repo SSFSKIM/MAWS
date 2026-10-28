@@ -154,6 +154,11 @@ describe('serializeDraft maps docs to user content', () => {
     expect(alone).toMatchObject({ display: '[Image #1]', empty: false });
   });
 
+  it('names the attachments in their blocks’ order, images first (P5 O9 M7: lane A names its upload’s files so)', () => {
+    expect(serializeDraft(real(docOf([paragraph(textNode('x'))], [pdf, png])), ctx).attachmentNames).toEqual(['shot.png', 'spec.pdf']);
+    expect(serializeDraft(real(docOf([paragraph(textNode('x'))])), ctx).attachmentNames).toBeUndefined();
+  });
+
   it('is empty with no text and no attachments', () => {
     expect(serializeDraft(real(docOf([paragraph(textNode('  ')), paragraph()])), ctx)).toMatchObject({ empty: true, content: '', display: '' });
   });

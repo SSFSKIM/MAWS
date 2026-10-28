@@ -41,6 +41,7 @@ import { heldWords, useSessionControls } from '../session/controls/controls-for'
 import { holderWords } from '../sessions/holder-words'; // P2-A
 import { DictationNotice } from './dictation/MicControl'; // E9
 import { PendingSends } from './PendingSends'; // P5 O9 M5
+import { PendingUploads } from './PendingUploads'; // P5 O9 M7
 import { useSettling } from '../lane-a/race'; // P5 O9 M6
 import { useDockedCards } from './docked/registry';
 import { swapOf } from './docked/swap';
@@ -404,6 +405,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       {!unstarted && <QueueList appSessionId={appSessionId} queue={queue} busy={isBusy(status, queue.entries)} sessionId={sessionId} cwd={cwd} client={client} />}
       {/* P5 O9 M5: lane A's sends whose fate was not known when the bridge answered, each with its text */}
       {!unstarted && <PendingSends appSessionId={appSessionId} client={client} />}
+      {/* P5 O9 M7: the images and PDFs lane A handed to the bridge, each with its state */}
+      {!unstarted && <PendingUploads appSessionId={appSessionId} />}
       {rewoundEdit && <ResubmitLine resubmit={resubmit} onSend={() => void sendInlineEdit(client, appSessionId)} onLeave={() => cancelInlineEdit(appSessionId)} />}
       {swap.notice && <RequestCard key={swap.notice.id} item={swap.notice} request={null} placement="docked" paneIndex={paneIndex} />}
       {/* R2: a plugin's band above the frame, only while a plugin draws one */}

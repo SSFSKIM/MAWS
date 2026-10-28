@@ -9,6 +9,10 @@
 // - Send is the bridge's `deliver` in either turn state (main's delivery lane); a `/` text goes by its slash route, run
 //   through `laneA.command` when the bridge's catalog says it runs, refused with the route's reason otherwise. A send
 //   whose fate `laneA.send` could not name yet is handed to the pending-send strip by its key (`unconfirmed`).
+// - M7: a send's image and document blocks go first, as `laneA.media`'s files under the composer's names (main saves them
+//   and hands them to the bridge's `media` op), its text after them as the words; the upload's states are followed into
+//   the composer's upload strip (`lane-a/uploads.ts`). Nothing goes unless all of it can: the count, a `/` text, media's
+//   capability and the words' are checked first.
 // - The model chip lists the catalog's models (with `fable`, which the bridge takes though the catalog leaves it out)
 //   and the five efforts, names the bridge's override when set and the session's model otherwise, and sends only what
 //   changed. The mode and the directories are closed: no bridge op sets them.
@@ -32,6 +36,7 @@ import type { HumanPromptResult } from '../../composer/submit/send-human-prompt'
 import { WIDGET_COMMANDS } from '../../composer/mentions/widgets';
 import { commandRoute, slashItems } from '../../lane-a/conversation/catalog';
 import { announceCommand } from '../../lane-a/outcomes';
+import { followUpload } from '../../lane-a/uploads';
 import { watchLaneA } from '../../lane-a/watches';
 import { branchLabel, recordBranch } from '../../sessions/branch-label';
 import { canTakeOver } from '../../sessions/holder-words'; // not record-ops: its imports reach the terminal stack
@@ -53,7 +58,11 @@ export const LANE_A_WORDS = {
   location: 'Where the terminal runs this session',
   reopen: 'The session is live in the terminal',
   takeOver: 'Only an interactive terminal or a named background job can be taken over',
-  attachments: "An image or a PDF isn't sent to a terminal session yet",
+  tooManyFiles: 'A terminal session takes at most 4 images or PDFs in one message',
+  commandWithFiles: 'A command goes without images or PDFs: send them as a message',
+  unknownMedia: 'The images or PDFs may have reached the session: check the transcript before sending them again',
+  wordsAfterFiles: (reason: string) => `The images or PDFs went, but the words were not sent: ${reason}`,
+  otherContent: 'A terminal session takes words, images and PDFs only',
   widget: 'Not available for a terminal session',
   catalog: 'The command catalog has not arrived yet',
   unknownCommand: 'The command may have run: check the transcript before running it again',
@@ -68,9 +77,9 @@ type BridgeEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'; // the bridge's
 // The widgets a lane A read or op backs in O9 (M5): the model selector's three names, compact, MCP and the side question.
 const BACKED_WIDGETS = new Set(['model', 'effort', 'fast', 'compact', 'mcp', 'btw']);
 const OP_OF: Partial<Record<ControlKey, string>> = { send: 'deliver', interrupt: 'interrupt', command: 'command', 'stop-task': 'stop' };
-const CONTROLLED = new Set<ControlKey>(['decide', 'decide.scope', 'decide.interrupt', 'decide.addDirectory', 'model', 'btw', 'compact', 'mcp.enable', 'mcp.disable', 'mcp.reconnect', 'stop-agent', 'tell', 'forget', 'rewind-files', 'elicitation.answer']);
+const CONTROLLED = new Set<ControlKey>(['decide', 'decide.scope', 'decide.interrupt', 'decide.addDirectory', 'model', 'btw', 'compact', 'mcp.enable', 'mcp.disable', 'mcp.reconnect', 'stop-agent', 'tell', 'media', 'forget', 'rewind-files', 'elicitation.answer']);
 // A gap MAWS words itself, whatever the bridge says (Q2).
-const OWN_WORDS: Partial<Record<ControlKey, string>> = { mode: LANE_A_WORDS.mode, queue: LANE_A_WORDS.queue, rewind: LANE_A_WORDS.rewind, 'elicitation.answer': LANE_A_WORDS.elicitation, reopen: LANE_A_WORDS.reopen, media: LANE_A_WORDS.attachments };
+const OWN_WORDS: Partial<Record<ControlKey, string>> = { mode: LANE_A_WORDS.mode, queue: LANE_A_WORDS.queue, rewind: LANE_A_WORDS.rewind, 'elicitation.answer': LANE_A_WORDS.elicitation, reopen: LANE_A_WORDS.reopen };
 
 const AVAILABLE: Capability = { available: true };
 const closed = (reason: string): Capability => ({ available: false, reason });
@@ -101,12 +110,27 @@ export function modelRows(catalog: Catalog | null): ModelInfo[] {
   });
 }
 
-// A text the person typed as its words, or null when it holds what lane A can't send yet (an image, a document).
-function textOf(content: string | readonly { type: string; text?: unknown }[]): string | null {
-  if (typeof content === 'string') return content;
-  if (content.some((block) => block.type !== 'text')) return null;
-  return content.map((block) => String(block.text ?? '')).join('\n');
+type Block = { type: string; text?: unknown; source?: { type?: unknown; media_type?: unknown; data?: unknown } };
+type MediaFile = { name: string; mediaType: string; data: string };
+
+// A send's words and its files (M7): the text blocks joined, and each base64 image or document block as `laneA.media`
+// takes it, named as the composer named it (`attachmentNames`, in the blocks' order), else by its kind and place. A name
+// keeps the bridge's rule: no control character or line separator, at most 128 characters.
+// Null: a block that is neither (no caller sends one), which nothing here may drop unsaid.
+function partsOf(content: string | readonly Block[], names: readonly string[] = []): { text: string; files: MediaFile[] } | null {
+  if (typeof content === 'string') return { text: content, files: [] };
+  const files: MediaFile[] = [];
+  for (const block of content) {
+    if (block.type === 'text') continue;
+    if ((block.type !== 'image' && block.type !== 'document') || block.source?.type !== 'base64') return null;
+    const mediaType = String(block.source.media_type ?? '');
+    const given = (names[files.length] ?? '').replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, '').slice(0, 128).trim();
+    const name = given !== '' ? given : `${block.type}-${files.length + 1}.${mediaType === 'application/pdf' ? 'pdf' : (mediaType.split('/')[1] ?? 'bin').replace('jpeg', 'jpg')}`;
+    files.push({ name, mediaType, data: String(block.source.data ?? '') });
+  }
+  return { text: content.filter((block) => block.type === 'text').map((block) => String(block.text ?? '')).join('\n'), files };
 }
+const FILES_MAX = 4; // the bridge's MEDIA_FILES_MAX
 
 // Whether lane A carries a card's answer on this request, and why not (Interfaces §D): the same rules main's driver
 // applies before it posts (src/main/lane-a/decisions.ts), checked here before the option is offered.
@@ -237,16 +261,37 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
     },
     async send(content, options) {
       if (options.current?.() === false || options.precheck?.() === false) return { disposition: 'refused', started: false };
-      const text = textOf(content);
-      if (text === null) return { disposition: 'refused', started: false, reason: LANE_A_WORDS.attachments };
+      const refuse = (reason: string): HumanPromptResult => ({ disposition: 'refused', started: false, reason });
+      const parts = partsOf(content as string | readonly Block[], options.attachmentNames);
+      if (parts === null) return refuse(LANE_A_WORDS.otherContent);
+      const { text, files } = parts;
+      const words = files.length === 0 || text.trim() !== '';
       const sendable = capability('send');
-      if (!sendable.available) return { disposition: 'refused', started: false, reason: sendable.reason };
+      if (words && !sendable.available) return refuse(sendable.reason);
+      // M7: the files first, so they are queued for the turn the words start; nothing goes unless all of it can
+      if (files.length > 0) {
+        if (files.length > FILES_MAX) return refuse(LANE_A_WORDS.tooManyFiles);
+        if (text.trimStart().startsWith('/')) return refuse(LANE_A_WORDS.commandWithFiles);
+        const media = capability('media');
+        if (!media.available) return refuse(media.reason);
+        const release = holdWatch(); // the upload's states are followed from its op messages
+        const uploaded = await control(client.invoke('laneA.media', { appSessionId, files })).finally(release);
+        if (uploaded.state === 'refused') return refuse(sentence(uploaded.message));
+        if (uploaded.state === 'unknown') return refuse(LANE_A_WORDS.unknownMedia);
+        const upload = (uploaded.result as { upload?: unknown } | null | undefined)?.upload;
+        if (typeof upload === 'string') followUpload(appSessionId, upload, files.map((f) => f.name), client);
+        if (!words) return { disposition: stateNow().turn.running ? 'steered' : 'sent', started: false };
+      }
       if (text.trimStart().startsWith('/')) return slashSend(text);
       const result = await client.invoke('laneA.send', { appSessionId, text });
+      if (!result.ok && files.length > 0) return refuse(LANE_A_WORDS.wordsAfterFiles(result.error.message));
       if (!result.ok) throw new Error(result.error.message); // the composer shows the error with its Retry, as lane B's host error
       const out = result.value;
       if (out.state === 'entered') return { disposition: stateNow().turn.running ? 'steered' : 'sent', started: false, ...(out.uuid !== undefined && { messageUuid: out.uuid as MessageUuid }) };
-      if (out.state === 'refused') return { disposition: 'refused', started: false, reason: out.reason ?? 'The session did not take the message' };
+      if (out.state === 'refused') {
+        const reason = out.reason ?? 'The session did not take the message';
+        return refuse(files.length > 0 ? LANE_A_WORDS.wordsAfterFiles(reason) : reason);
+      }
       if (out.key !== null) holdPendingSend(appSessionId, out.key, text); // its fate arrives in the state's deliveries
       return { disposition: 'unconfirmed', started: false };
     },

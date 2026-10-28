@@ -92,7 +92,7 @@ export async function submitHumanSerialized(controls: SessionControls, client: M
     return !tooLarge;
   };
   try {
-    const result = await controls.send(s.content, { origin: 'composer', display: s.display, pastedContents: s.pastedContents, precheck: fits });
+    const result = await controls.send(s.content, { origin: 'composer', display: s.display, pastedContents: s.pastedContents, precheck: fits, ...(s.attachmentNames !== undefined && { attachmentNames: s.attachmentNames }) });
     if (result.disposition === 'held') return false;
     if (result.disposition === 'refused') {
       if (tooLarge) return false; // the pre-check said why

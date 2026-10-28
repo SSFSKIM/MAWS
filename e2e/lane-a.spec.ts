@@ -6,6 +6,8 @@
 // that turn aborted with no `step end`. M6 (acceptance 3 and 5): the requests the bridge raises, as attention items and
 // docked cards answered through the port, each decision's body as the fake receives it, and the race with the terminal.
 import { randomUUID } from 'node:crypto';
+import { readFileSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import { FULL_CAPABILITIES, startFakeBridge, type FakeBridge } from '../test/support/fake-bridge';
@@ -247,6 +249,77 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(held).toHaveCount(1);
     await held.getByRole('button', { name: 'Dismiss' }).click();
     await expect(strip(page)).toHaveCount(0);
+  });
+
+  // M7 (acceptance 7): files dropped on the real composer go through its serialization, `laneA.media` and main's save,
+  // and the fake receives `media {upload, root, files}` naming files under the root that hold the bytes, then the words.
+  test('attachments: an image and a PDF dropped on the composer reach the bridge’s media op as saved files, then the words; each file’s state shows', async () => {
+    test.setTimeout(120_000);
+    const c = await begin();
+    const { page } = c;
+    const { bridge } = await drive(c);
+    const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const PDF = Buffer.from('%PDF-1.4\n1 0 obj << >> endobj\n%%EOF\n');
+    const drop = (files: { name: string; type: string; base64: string }[]) =>
+      editor(page).evaluate((target, given) => {
+        const data = new DataTransfer();
+        for (const f of given) data.items.add(new File([Uint8Array.from(atob(f.base64), (ch) => ch.charCodeAt(0))], f.name, { type: f.type }));
+        const box = target.getBoundingClientRect();
+        target.dispatchEvent(new DragEvent('drop', { dataTransfer: data, clientX: box.left + 5, clientY: box.top + 5, bubbles: true, cancelable: true }));
+      }, files);
+    const attached = main(page).getByRole('list', { name: 'attachments' });
+    const uploads = main(page).getByRole('list', { name: 'Images and PDFs sent to the terminal session' });
+    const fileRow = (name: string) => uploads.locator('[data-upload-state]', { hasText: name });
+
+    await drop([{ name: 'shot.png', type: 'image/png', base64: PNG }, { name: 'notes.pdf', type: 'application/pdf', base64: PDF.toString('base64') }]);
+    await expect(attached.getByText('shot.png')).toBeVisible();
+    await expect(attached.getByText('notes.pdf')).toBeVisible();
+    await typeAndSend(page, 'what are these?');
+    await expect.poll(() => bodies(bridge, 'deliver').map((b) => b.text), { timeout: 10_000 }).toEqual(['what are these?']);
+    expect(bridge.commands.map((cmd) => cmd.op).filter((op) => op === 'media' || op === 'deliver'), 'the files first, then the words').toEqual(['media', 'deliver']);
+    await expect(attached).toHaveCount(0);
+
+    const [media] = bodies(bridge, 'media') as { upload: string; root: string; files: { n: number; path: string; name: string; mediaType: string }[] }[];
+    const root = join(realpathSync(c.repo.root), '.claude', 'desk-uploads', c.sid);
+    expect(media).toEqual({
+      op: 'media', upload: expect.stringMatching(/^[A-Za-z0-9_-]{22}$/) as unknown, root,
+      files: [
+        { n: 0, path: join(root, `${media!.upload}.0.png`), name: 'shot.png', mediaType: 'image/png' },
+        { n: 1, path: join(root, `${media!.upload}.1.pdf`), name: 'notes.pdf', mediaType: 'application/pdf' },
+      ],
+    });
+    expect(readFileSync(media!.files[0]!.path).subarray(0, 8), 'the composer’s image, a PNG').toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    expect(readFileSync(media!.files[1]!.path), 'the PDF as dropped').toEqual(PDF);
+    expect(readFileSync(join(c.repo.root, '.git', 'info', 'exclude'), 'utf8')).toContain('**/.claude/desk-uploads/');
+
+    // each file's state as the bridge says it: read, then one sent on to the model and one that failed, which stays
+    await expect(fileRow('shot.png')).toHaveAttribute('data-upload-state', 'queued');
+    const { upload } = media!;
+    const said = (index: number, state: string, phase: 'start' | 'end', attachments: { index: number; state: string; reason?: string }[]) =>
+      bridge.emit({ type: 'media', id: upload, upload, index, state, phase, attachments, ...(attachments[index]?.reason !== undefined && { reason: attachments[index]!.reason }) });
+    said(0, 'read', 'start', [{ index: 0, state: 'read' }, { index: 1, state: 'pending' }]);
+    await expect(fileRow('shot.png')).toContainText('Read', { timeout: 5_000 });
+    const reason = 'the Read returned no image or document';
+    said(1, 'failed', 'start', [{ index: 0, state: 'read' }, { index: 1, state: 'failed', reason }]);
+    said(0, 'forwarded', 'end', [{ index: 0, state: 'forwarded' }, { index: 1, state: 'failed', reason }]);
+    await expect(fileRow('shot.png')).toContainText('Sent to the model', { timeout: 5_000 });
+    await expect(fileRow('notes.pdf')).toContainText(`Not read: ${reason}`);
+
+    // an image alone: no words go, and once it went on to the model its entry leaves by itself; the upload with a file
+    // that did not go on stays until dismissed
+    await drop([{ name: 'again.png', type: 'image/png', base64: PNG }]);
+    await expect(attached.getByText('again.png')).toBeVisible();
+    await editor(page).press('Enter');
+    await expect.poll(() => bodies(bridge, 'media').length, { timeout: 10_000 }).toBe(2);
+    expect(bodies(bridge, 'deliver')).toHaveLength(1);
+    const second = (bodies(bridge, 'media')[1] as { upload: string }).upload;
+    bridge.emit({ type: 'media', id: second, upload: second, index: 0, state: 'forwarded', phase: 'end', attachments: [{ index: 0, state: 'forwarded' }] });
+    await expect(fileRow('again.png')).toContainText('Sent to the model', { timeout: 5_000 });
+    await expect(fileRow('again.png')).toHaveCount(0, { timeout: 10_000 });
+    await expect(fileRow('notes.pdf'), 'a file that did not go on stays until dismissed').toHaveCount(1);
+    await uploads.getByRole('button', { name: 'Dismiss' }).click();
+    await expect(uploads).toHaveCount(0);
+    expect(c.maws.consoleErrors()).toEqual([]);
   });
 
   test('each control reaches the bridge with its body: the model chip, a slash command, interrupt, compact with instructions, MCP reconnect and enable, a side question answered from its op’s end, and the agent and shell stops', async () => {

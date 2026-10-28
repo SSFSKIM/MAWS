@@ -34,6 +34,9 @@ export interface HumanPromptOptions {
   // this call makes carries main's guard, which refuses while a first message is retained there and leaves it in place;
   // absent, an acquisition keeps today's semantics (a retained resume message goes first).
   requireEmptyMessage?: true;
+  // P5 O9 M7: the attachments' names as the person gave them, in the order of `content`'s image and document blocks; lane
+  // A names its upload's files by them (a block carries no name), lane B reads nothing of it
+  attachmentNames?: readonly string[];
 }
 export interface HumanPromptResult {
   // P5 O9 M5: 'unconfirmed', lane A's alone: the bridge took the words and had not said whether they entered when it

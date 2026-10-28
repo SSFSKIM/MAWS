@@ -11,6 +11,7 @@ import { at } from '../../../../../test/support/machine';
 import { EMPTY_CATALOG } from '../../stores/catalog';
 import { applyLaneAState, resetLaneAStore, useLaneA } from '../../stores/lane-a';
 import { laneACatalog, laneAState } from '../../lane-a/test-support/lane-a-state';
+import { resetUploadFollows } from '../../lane-a/uploads';
 import { resetLaneAWatches } from '../../lane-a/watches';
 import { laneAAnswerCapability, laneAControls, LANE_A_WORDS } from './lane-a';
 
@@ -21,6 +22,7 @@ const rec = record(APP, { holder: terminal, directory: '/work/here' });
 beforeEach(() => {
   resetLaneAStore();
   resetLaneAWatches();
+  resetUploadFollows();
 });
 
 function port(over: Partial<LaneAState> = {}, given: Parameters<typeof fakeClient>[0] = {}) {
@@ -48,6 +50,7 @@ describe('capability', () => {
     expect(controls.capability('mcp.reconnect')).toEqual({ available: true });
     expect(controls.capability('subagent-rows')).toEqual({ available: true });
     expect(controls.capability('take-over')).toEqual({ available: true });
+    expect(controls.capability('media')).toEqual({ available: true }); // M7
   });
 
   it('names why each gap is closed, none hidden', () => {
@@ -105,11 +108,67 @@ describe('send', () => {
     expect(fake.invoked('laneA.send')).toEqual([]);
   });
 
-  it('refuses an attachment, and honours the caller’s own checks', async () => {
+  it('honours the caller’s own checks', async () => {
     const { fake, controls } = port();
-    expect(await controls.send([{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AA==' } }, { type: 'text', text: 'look' }] as never, { origin: 'composer' })).toMatchObject({ disposition: 'refused', reason: LANE_A_WORDS.attachments });
     expect(await controls.send('x', { origin: 'composer', precheck: () => false })).toEqual({ disposition: 'refused', started: false });
     expect(fake.calls.filter((c) => c.startsWith('invoke laneA.send'))).toEqual([]);
+  });
+});
+
+// P5 O9 M7: the image and document blocks of a send go as `laneA.media`'s files, its text after them as the words.
+describe('attachments', () => {
+  const image = (data: string, mediaType = 'image/png') => ({ type: 'image', source: { type: 'base64', media_type: mediaType, data } });
+  const pdf = (data: string) => ({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } });
+  const done = { state: 'done', result: { upload: 'up-1', root: '/work/here/.claude/desk-uploads/e', paths: [] } };
+  const entered = { key: { writer: 'maws/m', seq: 1 }, state: 'entered', uuid: 'row-1' };
+
+  it('sends the files through laneA.media under the composer’s names, then the words, and follows the upload', async () => {
+    const { fake, controls } = port({}, { 'laneA.media': done, 'laneA.send': entered });
+    const content = [image('iVBO'), pdf('JVBE'), { type: 'text', text: 'what are these?' }];
+    expect(await controls.send(content as never, { origin: 'composer', attachmentNames: ['shot.png', 'notes.pdf'] })).toEqual({ disposition: 'sent', started: false, messageUuid: 'row-1' });
+    expect(fake.invoked('laneA.media')).toEqual([{ appSessionId: APP, files: [{ name: 'shot.png', mediaType: 'image/png', data: 'iVBO' }, { name: 'notes.pdf', mediaType: 'application/pdf', data: 'JVBE' }] }]);
+    expect(fake.invoked('laneA.send')).toEqual([{ appSessionId: APP, text: 'what are these?' }]);
+    const order = fake.calls.filter((c) => c === 'invoke laneA.media' || c === 'invoke laneA.send');
+    expect(order).toEqual(['invoke laneA.media', 'invoke laneA.send']);
+    expect(useLaneA.getState().uploads.get(APP)).toEqual([{ upload: 'up-1', files: [{ name: 'shot.png', state: 'queued', reason: null }, { name: 'notes.pdf', state: 'queued', reason: null }] }]);
+  });
+
+  it('sends files alone with no words, and names a file the composer left unnamed by its kind and place', async () => {
+    const { fake, controls } = port({}, { 'laneA.media': done });
+    expect(await controls.send([image('/9j/', 'image/jpeg'), pdf('JVBE')] as never, { origin: 'composer', attachmentNames: ['\u0007\n'] })).toEqual({ disposition: 'sent', started: false });
+    expect((fake.invoked('laneA.media')[0] as { files: { name: string }[] }).files.map((f) => f.name)).toEqual(['image-1.jpg', 'document-2.pdf']);
+    expect(fake.invoked('laneA.send')).toEqual([]);
+  });
+
+  it('refuses before anything goes: a fifth file, media the bridge closes, a slash command with files, words the bridge can’t take', async () => {
+    const five = port({}, { 'laneA.media': done });
+    expect(await five.controls.send([1, 2, 3, 4, 5].map(() => image('iVBO')) as never, { origin: 'composer' })).toMatchObject({ disposition: 'refused', reason: LANE_A_WORDS.tooManyFiles });
+    const closed = port({ controls: { media: { available: false, reason: 'this engine takes no desk uploads' } } }, { 'laneA.media': done });
+    expect(await closed.controls.send([image('iVBO')] as never, { origin: 'composer' })).toMatchObject({ disposition: 'refused', reason: 'This engine takes no desk uploads' });
+    const slash = port({}, { 'laneA.media': done });
+    expect(await slash.controls.send([image('iVBO'), { type: 'text', text: '/rename x' }] as never, { origin: 'composer' })).toMatchObject({ disposition: 'refused', reason: LANE_A_WORDS.commandWithFiles });
+    const noDeliver = port({ ops: ['media'] }, { 'laneA.media': done });
+    expect(await noDeliver.controls.send([image('iVBO'), { type: 'text', text: 'look' }] as never, { origin: 'composer' })).toMatchObject({ disposition: 'refused' });
+    for (const p of [five, closed, slash, noDeliver]) expect(p.fake.invoked('laneA.media')).toEqual([]);
+  });
+
+  it('keeps the draft when the upload is refused or may have gone, sending no words', async () => {
+    const refused = port({}, { 'laneA.media': { state: 'refused', code: 'unsafe', message: 'the upload was not saved: .claude is a link' } });
+    expect(await refused.controls.send([image('iVBO'), { type: 'text', text: 'look' }] as never, { origin: 'composer' })).toEqual({ disposition: 'refused', started: false, reason: 'The upload was not saved: .claude is a link' });
+    const unknown = port({}, { 'laneA.media': { state: 'unknown', why: 'timeout', id: 'up-9' } });
+    expect(await unknown.controls.send([image('iVBO'), { type: 'text', text: 'look' }] as never, { origin: 'composer' })).toEqual({ disposition: 'refused', started: false, reason: LANE_A_WORDS.unknownMedia });
+    expect([...refused.fake.invoked('laneA.send'), ...unknown.fake.invoked('laneA.send')]).toEqual([]);
+  });
+
+  it('says the files went when the words then are refused', async () => {
+    const { controls } = port({}, { 'laneA.media': done, 'laneA.send': { key: null, state: 'refused', reason: 'too many messages waiting for this session', code: 'busy' } });
+    expect(await controls.send([image('iVBO'), { type: 'text', text: 'look' }] as never, { origin: 'composer' })).toEqual({ disposition: 'refused', started: false, reason: LANE_A_WORDS.wordsAfterFiles('too many messages waiting for this session') });
+  });
+
+  it('refuses a block that is neither words nor a base64 image or PDF, sending nothing', async () => {
+    const { fake, controls } = port({}, { 'laneA.media': done });
+    expect(await controls.send([{ type: 'image', source: { type: 'url', url: 'https://x' } }, { type: 'text', text: 'look' }] as never, { origin: 'composer' })).toEqual({ disposition: 'refused', started: false, reason: LANE_A_WORDS.otherContent });
+    expect([...fake.invoked('laneA.media'), ...fake.invoked('laneA.send')]).toEqual([]);
   });
 });
 
