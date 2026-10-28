@@ -12,20 +12,28 @@
 // 120 s settle, and a 600 s window: every 30 s each measured process's physical footprint (proc_pid_rusage, P5 Decision
 // Log 48) and `ps -o rss=` (each summed per sample; the RSS is a diagnostic) and the 1-minute load, and `ps -o time=` at
 // the window's start and end. At the first sample top's MEM column reads the footprint a second, independent way. The
-// measured processes are those of the profile whose argv0 is `maws-supervisor` (M9 adds the daemon shape's); the replay
-// has no `claude` child, and a real one is the session's cost, not the daemon's.
+// measured processes are those of the profile whose argv0 is `maws-supervisor`; the replay has no `claude` child, and a
+// real one is the session's cost, not the daemon's.
+//
+// The scene runs on the shape `MAWS_HOST_MODE` names, as e2e/supervisor.spec.ts does. `detached` is M1's, which recorded
+// the baseline; `daemon` is M9's (acceptance 7): main reaches the engine host through a private `mawsd` on the profile,
+// and what stays behind is `mawsd` and the engine host (and the pty host if it runs), measured together against
+// DAEMON_IDLE_BOUND. The settings' `idleExitMinutes: null` reaches `mawsd` as `host.configure`'s, so neither its park
+// clock nor its own idle exit arms.
 //
 // A run is valid when the load stays under 5 throughout the window, every measured process lives through it, the
 // kept session is still held at its end and the two footprint readers agree; an invalid run fails, saying why. It
-// prints one line, adds it as an annotation, and writes the samples to test-results/daemon-idle.json. Until M9 it
-// records only: no bound is asserted.
+// prints one line naming each process's footprint and the app's Electron version against the runtime floor's, adds it
+// as an annotation, and writes the samples to test-results/daemon-idle.json. On the daemon shape the line states the
+// bound's verdict and a valid run outside the bound fails; the detached shape records only.
 //
 // The second case is the runtime floor, the footprint of the bare runtime `mawsd` runs on, a diagnostic outside the
 // bound (P5 Decision Logs 54 and 57); it writes test-results/daemon-idle-floor.json. The third (P5 O2 M5, Decision Log
 // 57's early check) is `mawsd` alone, idle with no hosts and no app; it writes test-results/daemon-idle-mawsd.json.
 //
 // Three measured groups (gate.yml's MEASURED_E2E), one case each, chosen by title: `pnpm e2e:daemon-idle` (the
-// supervisor), `pnpm e2e:daemon-idle-floor` (the floor, which needs no build) and `pnpm e2e:daemon-idle-mawsd` (mawsd
+// scene, on the daemon shape since M9; M1's detached form is the same case under MAWS_HOST_MODE=detached, and its
+// baseline is re-recorded from runs at M1's commit), `pnpm e2e:daemon-idle-floor` (the floor, which needs no build) and `pnpm e2e:daemon-idle-mawsd` (mawsd
 // alone). Each sets MAWS_DAEMON_IDLE_PERF=1, and the gate runs it only when named, on the mini's exclusive instance
 // behind the measured-job guard. None spends anything or touches a keychain: a replay runs no engine, and mawsd alone
 // wakes no host.
@@ -37,8 +45,9 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
+import { daemonPaths } from '@shared/daemon/files';
 import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
-import { cpuSeconds, floorLine, IDLE_RUN, idleLine, invalidReasons, mawsdLine, measured, median, readerMismatches, readFootprints, readTopMem, type MeasuredProcess, type TopMem } from '../test/support/daemon-idle';
+import { boundMisses, cpuSeconds, DAEMON_IDLE_BOUND, floorLine, IDLE_RUN, idleLine, invalidReasons, mawsdLine, measured, median, readerMismatches, readFootprints, readTopMem, type MeasuredProcess, type TopMem } from '../test/support/daemon-idle';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { isAlive, killScratchProcesses, processesNaming, ps } from './support/processes';
@@ -53,6 +62,10 @@ const PERMISSION = 'spikes/protocol-probe/fixtures/permission-roundtrip.jsonl';
 const ROW_MS = '500'; // about 22 s from the answer to the result: the quit lands mid-turn
 const FLOOR_ARGV0 = 'maws-runtime-floor';
 const MAWSD_ARGV0 = 'mawsd'; // P5 O2 M5
+// P5 O2 M9: the scene's shape, one switch as in e2e/supervisor.spec.ts; `daemon` measures what the daemon shape leaves
+const DAEMON = process.env.MAWS_HOST_MODE === 'daemon';
+const SHAPE = DAEMON ? 'daemon' : 'detached';
+const MEASURED = DAEMON ? [MAWSD_ARGV0, 'maws-supervisor', 'maws-pty-host'] : ['maws-supervisor'];
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 interface JournalRow { seq: number; direction: string; frame: Record<string, unknown> }
@@ -86,7 +99,7 @@ const lockOf = (userData: string): { pid: number; socketPath: string } | null =>
   }
 };
 
-test('daemon idle: the physical footprint and CPU of the detached supervisor holding one kept idle session after the app has quit', async () => {
+test('daemon idle: the physical footprint and CPU of what stays behind holding one kept idle session after the app has quit', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-di-')));
   const userData = join(root, 'ud');
   const repo = join(root, 'repo');
@@ -103,11 +116,12 @@ test('daemon idle: the physical footprint and CPU of the detached supervisor hol
 
   let maws: MawsLaunch | null = null;
   let supervisor: number | null = null;
+  let daemon: number | null = null; // the daemon shape's private mawsd
   let leftover: unknown;
   try {
     maws = await launchMaws({
       userData, keepConfigHome: true,
-      env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: 'detached', MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_ROW_MS: ROW_MS, MAWS_E2E_QUIT_ANSWER: 'keep' },
+      env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: SHAPE, MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_ROW_MS: ROW_MS, MAWS_E2E_QUIT_ANSWER: 'keep' },
     });
     const { page, app } = maws;
     const child = app.process();
@@ -118,9 +132,13 @@ test('daemon idle: the physical footprint and CPU of the detached supervisor hol
 
     await expect.poll(async () => {
       const status = await invoke(page, 'host.status', undefined);
-      return status.ok && status.value.state === 'ready' && status.value.supervisor?.mode === 'detached' ? status.value.supervisor.pid : null;
-    }, { timeout: 30_000, message: 'main is connected to a detached supervisor' }).not.toBeNull();
+      if (!status.ok || status.value.state !== 'ready' || status.value.supervisor?.mode !== 'detached') return null;
+      if (DAEMON && (status.value.transport !== 'daemon' || status.value.daemon?.kind !== 'private')) return null;
+      daemon = status.value.daemon?.pid ?? null;
+      return status.value.supervisor.pid;
+    }, { timeout: 30_000, message: DAEMON ? 'main is connected to the engine host through a private mawsd' : 'main is connected to a detached supervisor' }).not.toBeNull();
     supervisor = lockOf(userData)!.pid;
+    const electron = await app.evaluate(() => process.versions.electron); // the binary every measured process runs as Node
     let id = '' as AppSessionId;
     await expect.poll(async () => (id = (value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === engineId)?.appId ?? '') as AppSessionId), { timeout: 20_000, message: 'the seeded session has a record' }).not.toBe('');
 
@@ -137,22 +155,27 @@ test('daemon idle: the physical footprint and CPU of the detached supervisor hol
     await Promise.race([exited, late]).finally(() => clearTimeout(timer));
     expect(output.split('\n'), 'the quit was asked mid-turn and answered keep').toContain('quit-guard: 1 mid-turn, auto-answered keep, 1 session kept');
     expect(isAlive(supervisor), 'the supervisor outlives the app').toBe(true);
+    if (DAEMON) expect(isAlive(daemon!), 'mawsd outlives the app').toBe(true);
     await expect.poll(() => turnEnded(journal(userData, id)), { timeout: 60_000, message: 'the turn ends with no app connected' }).toBe(true);
     expect(launchEnded(journal(userData, id)), 'the kept session holds at its next prompt').toBe(false);
 
     await sleep(IDLE_RUN.settleS * 1_000);
 
-    const procs: MeasuredProcess[] = measured(processesNaming(root), root);
+    const procs: MeasuredProcess[] = measured(processesNaming(root), root, MEASURED);
     expect(procs.map((p) => p.pid), "the profile's supervisor is what is measured").toContain(supervisor);
+    if (DAEMON) expect(procs.map((p) => p.pid), "the profile's mawsd is measured beside it").toContain(daemon);
     const measurement = await measureWindow(procs);
     const sessionEnded = launchEnded(journal(userData, id));
 
     const reasons = invalidReasons({ loads: measurement.samples.map((s) => s.load), measured: measurement.names, lost: measurement.lost, sessionEnded, mismatches: measurement.mismatches });
     const { footprintKiB, rssKiB, cpuS, load } = measurement;
-    const line = footprintKiB === null || rssKiB === null || cpuS === null ? null : idleLine({ footprintKiB, rssKiB, samples: measurement.whole, cpuS, measured: measurement.names, load });
-    report('daemon-idle.json', line, reasons, { shape: 'detached', ...measurement.record, sessionEnded });
+    const bound = DAEMON ? DAEMON_IDLE_BOUND : null;
+    const line = footprintKiB === null || rssKiB === null || cpuS === null ? null : idleLine({ footprintKiB, rssKiB, samples: measurement.whole, cpuS, processes: measurement.perProcess, bound, electron, load });
+    const misses = bound === null || footprintKiB === null || cpuS === null ? [] : boundMisses({ footprintKiB, cpuS }, bound);
+    report('daemon-idle.json', line, reasons, { shape: SHAPE, electron, bound, misses, ...measurement.record, sessionEnded });
+    expect(misses, `the daemon shape's processes together are within DAEMON_IDLE_BOUND (${line})`).toEqual([]);
   } finally {
-    leftover = await removeScratch(root, userData, maws, supervisor);
+    leftover = await removeScratch(root, userData, maws, [supervisor, daemon]);
   }
   if (leftover !== null) throw leftover; // the body passed: a process of the scratch outliving it is the case's failure
 });
@@ -267,12 +290,13 @@ async function measureWindow(procs: readonly MeasuredProcess[]) {
   const summed = (of: (s: Sample) => Record<number, number | null>) => (whole.length === 0 ? null : median(whole.map((s) => procs.reduce((sum, p) => sum + of(s)[p.pid]!, 0))));
   const footprintKiB = summed((s) => s.footprintKiB);
   const rssKiB = summed((s) => s.rssKiB);
+  const perProcess = whole.length === 0 ? [] : procs.map((p) => ({ argv0: p.argv0, pid: p.pid, footprintKiB: median(whole.map((s) => s.footprintKiB[p.pid]!)) }));
   const cpuS = lost.length > 0 ? null : Math.round(procs.reduce((sum, p) => sum + cpuAtEnd.get(p.pid)! - cpuAtStart.get(p.pid)!, 0) * 100) / 100;
   const load = Math.max(...samples.map((s) => s.load));
   const processes = procs.map((p) => ({ ...p, started: started.get(p.pid), cpuStartS: cpuAtStart.get(p.pid), cpuEndS: cpuAtEnd.get(p.pid) ?? null }));
   return {
-    samples, lost, mismatches, names, whole: whole.length, footprintKiB, rssKiB, cpuS, load,
-    record: { run: IDLE_RUN, footprintKiB, rssKiB, cpuS, load, processes, crossCheck, mismatches, lost, samples },
+    samples, lost, mismatches, names, whole: whole.length, footprintKiB, rssKiB, perProcess, cpuS, load,
+    record: { run: IDLE_RUN, footprintKiB, rssKiB, perProcess, cpuS, load, processes, crossCheck, mismatches, lost, samples },
   };
 }
 
@@ -290,15 +314,18 @@ function report(file: string, line: string | null, reasons: string[], record: Re
   expect(reasons, 'the run is valid').toEqual([]);
 }
 
-// The app closed if it is still open, then every process of the scratch killed (the supervisor by its lock's pid too),
-// then the supervisor's socket directory and the scratch removed. A survivor is answered, after the files are removed.
-async function removeScratch(root: string, userData: string, maws: MawsLaunch | null, supervisor: number | null): Promise<unknown> {
+// The app closed if it is still open, then every process of the scratch killed (the supervisor by its lock's pid too,
+// and on the daemon shape `mawsd` by the pid main reported), then the supervisor's socket directory, `mawsd`'s sockets'
+// $TMPDIR fallback when they took it, and the scratch removed. A survivor is answered, after the files are removed.
+async function removeScratch(root: string, userData: string, maws: MawsLaunch | null, pids: readonly (number | null)[]): Promise<unknown> {
   const lock = lockOf(userData);
   await maws?.cleanup().catch((error: unknown) => console.error(error));
   let leftover: unknown = null;
-  await killScratchProcesses(root, [lock?.pid, supervisor].filter((pid): pid is number => typeof pid === 'number')).catch((error: unknown) => (leftover = error));
+  await killScratchProcesses(root, [lock?.pid, ...pids].filter((pid): pid is number => typeof pid === 'number')).catch((error: unknown) => (leftover = error));
   const socketDir = lock ? tmpSocketDirOf(userData, lock.socketPath) : null;
   if (socketDir !== null) rmSync(socketDir, { recursive: true, force: true });
+  const daemonSockets = daemonPaths(userData).socketDir; // the daemon shape's, when its sockets took the fallback
+  if (!daemonSockets.startsWith(root)) rmSync(daemonSockets, { recursive: true, force: true });
   rmSync(root, { recursive: true, force: true });
   return leftover;
 }

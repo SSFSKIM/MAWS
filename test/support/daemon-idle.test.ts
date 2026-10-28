@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   baselineProblems,
+  boundMisses,
   cpuSeconds,
   DAEMON_IDLE_BASELINE,
   DAEMON_IDLE_BOUND,
@@ -185,13 +186,46 @@ describe('the baseline, the runtime floor and the bound (acceptance 7; P5 accept
   });
 });
 
+describe('the daemon shape against the bound (P5 O2 M9, acceptance 7)', () => {
+  const bound = { footprintKiB: 96_721, cpuS: 1.11 };
+
+  it('misses nothing at or under the bound, rounding the footprint as the line prints it', () => {
+    expect(boundMisses({ footprintKiB: 90_950, cpuS: 0.2 }, bound)).toEqual([]);
+    expect(boundMisses({ footprintKiB: 96_721.4, cpuS: 1.11 }, bound)).toEqual([]);
+  });
+
+  it('names each measure over the bound, and by how much', () => {
+    expect(boundMisses({ footprintKiB: 97_950, cpuS: 0.2 }, bound)).toEqual(['the footprint 97950 KiB is 1229 KiB over the bound 96721 KiB']);
+    expect(boundMisses({ footprintKiB: 96_722, cpuS: 1.5 }, bound)).toEqual([
+      'the footprint 96722 KiB is 1 KiB over the bound 96721 KiB',
+      'the cpu 1.50 s is 0.39 s over the bound 1.11 s',
+    ]);
+  });
+
+  it('is held against the recorded bound when none is given', () => {
+    expect(boundMisses({ footprintKiB: DAEMON_IDLE_BOUND.footprintKiB + 1, cpuS: 0 })).toHaveLength(1);
+  });
+});
+
 describe('the printed line', () => {
-  it('reads as the document quotes it: the footprint measured, the RSS beside it as a diagnostic', () => {
-    expect(idleLine({ footprintKiB: 61_440, rssKiB: 98_304, samples: 21, cpuS: 0.41, measured: ['maws-supervisor'], load: 1.83 })).toBe(
-      '[daemon-idle] footprint 61440 KiB (median of 21) · rss 98304 KiB · cpu 0.41 s over 600 s · processes maws-supervisor · load 1.8',
+  const supervisor = [{ argv0: 'maws-supervisor', footprintKiB: 61_440.2 }];
+
+  it("reads as the document quotes it: the footprint measured and each process's own, the RSS beside it as a diagnostic, the Electron version against the runtime floor's", () => {
+    expect(idleLine({ footprintKiB: 61_440, rssKiB: 98_304, samples: 21, cpuS: 0.41, processes: supervisor, bound: null, electron: '44.4.5', load: 1.83 })).toBe(
+      "[daemon-idle] footprint 61440 KiB (median of 21) · rss 98304 KiB · cpu 0.41 s over 600 s · processes maws-supervisor 61440 KiB · electron 44.4.5, the runtime floor's · load 1.8",
     );
-    expect(idleLine({ footprintKiB: 80_000.5, rssKiB: 120_000.5, samples: 21, cpuS: 1, measured: ['mawsd', 'maws-supervisor'], load: 0.04 })).toBe(
-      '[daemon-idle] footprint 80001 KiB (median of 21) · rss 120001 KiB · cpu 1.00 s over 600 s · processes mawsd, maws-supervisor · load 0.0',
+    expect(idleLine({ footprintKiB: 61_440, rssKiB: 98_304, samples: 21, cpuS: 0.41, processes: supervisor, bound: null, electron: '45.0.1', load: 1.83 })).toContain(
+      "· electron 45.0.1, not the runtime floor's 44.4.5 ·",
+    );
+  });
+
+  it("on the daemon shape names every process's footprint, so a miss names its hop, and says whether the run is within the bound", () => {
+    const processes = [{ argv0: 'mawsd', footprintKiB: 26_480.6 }, { argv0: 'maws-supervisor', footprintKiB: 64_470 }];
+    expect(idleLine({ footprintKiB: 90_950.5, rssKiB: 160_000, samples: 21, cpuS: 0.2, processes, bound: { footprintKiB: 96_721, cpuS: 1.11 }, electron: '44.4.5', load: 0.04 })).toBe(
+      "[daemon-idle] footprint 90951 KiB (median of 21) · rss 160000 KiB · cpu 0.20 s over 600 s · processes mawsd 26481 KiB, maws-supervisor 64470 KiB · within the bound 96721 KiB and 1.11 s · electron 44.4.5, the runtime floor's · load 0.0",
+    );
+    expect(idleLine({ footprintKiB: 97_950, rssKiB: 160_000, samples: 21, cpuS: 1.5, processes, bound: { footprintKiB: 96_721, cpuS: 1.11 }, electron: '44.4.5', load: 3 })).toContain(
+      '· over the bound 96721 KiB and 1.11 s: the footprint 97950 KiB is 1229 KiB over the bound 96721 KiB; the cpu 1.50 s is 0.39 s over the bound 1.11 s ·',
     );
   });
 

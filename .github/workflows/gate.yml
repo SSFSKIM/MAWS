@@ -132,8 +132,9 @@ env:
   # trip in detached mode, held to the baseline test/support/local-latency.ts records from three runs on the mini.
   # local-latency-daemon (P5 O2 M7) is the same bench on the daemon shape, `mawsd`'s relay on the measured path, held to
   # the same baseline and budget.
-  # daemon-idle (P5 O2, acceptance 14) is the idle cost of what stays behind with the app quit: the detached supervisor's
-  # physical footprint and CPU holding one kept idle session over 600 s, the baseline test/support/daemon-idle.ts records and bounds.
+  # daemon-idle (P5 O2, acceptance 14) is the idle cost of what stays behind with the app quit: on the daemon shape since
+  # O2's M9, mawsd and the engine host's physical footprint and CPU holding one kept idle session over 600 s, held to the
+  # bound test/support/daemon-idle.ts derives from the detached supervisor's recorded baseline.
   # daemon-idle-floor (P5 Decision Logs 54 and 57), the same spec's other case, is the bare Electron runtime's footprint
   # as Node, the share of mawsd's footprint that is the runtime's: a diagnostic, outside the bound.
   # daemon-idle-mawsd (P5 O2 M5, Decision Log 57's early check), the spec's third case, is mawsd alone, idle with no hosts

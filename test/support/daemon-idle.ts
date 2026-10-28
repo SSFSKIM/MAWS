@@ -219,9 +219,33 @@ export function floorLine(run: { footprintKiB: number; rssKiB: number; samples: 
   return `[daemon-idle] runtime floor footprint ${Math.round(run.footprintKiB)} KiB (median of ${run.samples}) · rss ${Math.round(run.rssKiB)} KiB · cpu ${run.cpuS.toFixed(2)} s · electron ${run.electron} · load ${run.load.toFixed(1)}`;
 }
 
-// The job log's line; `load` is the highest 1-minute load the window read.
-export function idleLine(run: { footprintKiB: number; rssKiB: number; samples: number; cpuS: number; measured: readonly string[]; load: number }): string {
-  return `[daemon-idle] footprint ${Math.round(run.footprintKiB)} KiB (median of ${run.samples}) · rss ${Math.round(run.rssKiB)} KiB · cpu ${run.cpuS.toFixed(2)} s over ${IDLE_RUN.windowS} s · processes ${run.measured.join(', ')} · load ${run.load.toFixed(1)}`;
+// P5 O2 M9: where the daemon shape's processes together exceed the bound, each one line; empty when within it. The
+// footprint is compared in whole KiB, as the line prints it and the bound is derived.
+export function boundMisses(run: { footprintKiB: number; cpuS: number }, bound: DaemonIdleBound = DAEMON_IDLE_BOUND): string[] {
+  const misses: string[] = [];
+  const footprint = Math.round(run.footprintKiB);
+  if (footprint > bound.footprintKiB) misses.push(`the footprint ${footprint} KiB is ${footprint - bound.footprintKiB} KiB over the bound ${bound.footprintKiB} KiB`);
+  if (run.cpuS > bound.cpuS) misses.push(`the cpu ${run.cpuS.toFixed(2)} s is ${(run.cpuS - bound.cpuS).toFixed(2)} s over the bound ${bound.cpuS.toFixed(2)} s`);
+  return misses;
+}
+
+export interface ProcessFootprint {
+  argv0: string;
+  footprintKiB: number; // the median of this process's own samples over the window
+}
+
+// The job log's line; `load` is the highest 1-minute load the window read. Each measured process is named with its own
+// footprint (a miss then names its hop; the per-process medians need not sum to the summed median). `bound` is the
+// daemon shape's (M9), whose verdict the line states; null for the supervisor's scene, which records only. The Electron
+// version is compared with the runtime floor's, a diagnostic: a floor recorded on another Electron says less.
+export function idleLine(run: { footprintKiB: number; rssKiB: number; samples: number; cpuS: number; processes: readonly ProcessFootprint[]; bound: DaemonIdleBound | null; electron: string; load: number }): string {
+  const processes = run.processes.map((p) => `${p.argv0} ${Math.round(p.footprintKiB)} KiB`).join(', ');
+  const limit = run.bound === null ? null : `the bound ${run.bound.footprintKiB} KiB and ${run.bound.cpuS.toFixed(2)} s`;
+  const misses = run.bound === null ? [] : boundMisses(run, run.bound);
+  const verdict = limit === null ? '' : misses.length === 0 ? ` · within ${limit}` : ` · over ${limit}: ${misses.join('; ')}`;
+  const floor = DAEMON_IDLE_RUNTIME_FLOOR.electron;
+  const electron = run.electron === floor ? `${run.electron}, the runtime floor's` : `${run.electron}, not the runtime floor's ${floor}`;
+  return `[daemon-idle] footprint ${Math.round(run.footprintKiB)} KiB (median of ${run.samples}) · rss ${Math.round(run.rssKiB)} KiB · cpu ${run.cpuS.toFixed(2)} s over ${IDLE_RUN.windowS} s · processes ${processes}${verdict} · electron ${electron} · load ${run.load.toFixed(1)}`;
 }
 
 // P5 O2 M5 (P5 Decision Log 57's early check): `mawsd` alone, idle, with no hosts and no app. The line names its
