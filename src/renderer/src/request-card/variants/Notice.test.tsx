@@ -4,28 +4,29 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { item } from '../../../../../test/support/builders';
+import { at } from '../../../../../test/support/machine';
 import { NoticeBody } from './Notice';
 import { REL } from '../../test-support/relative-time';
 
-const APP = 'app-notice';
+const APP = 'app-notice'; // main's (bare): what the fake bridge is asked; the item the page holds is addressed
 const DAY = 86_400_000;
 let fake: FakeClient;
 
 beforeEach(() => {
   fake = fakeClient({ 'attention.acknowledge': undefined });
-  window.maws = fake.client;
+  window.maws = fake.client as unknown as PreloadBridge;
 });
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 const error = (over: Partial<AttentionItem> = {}) =>
-  item(APP, 'error', new Date(Date.now() - 14 * DAY).toISOString(), { id: `${APP}:error:e1` as never, summary: 'The turn ended with an error', request: { requestId: null, toolUseId: null, taskId: null, agentId: null }, ...over });
+  item(at(APP), 'error', new Date(Date.now() - 14 * DAY).toISOString(), { id: at(`${APP}:error:e1`) as never, summary: 'The turn ended with an error', request: { requestId: null, toolUseId: null, taskId: null, agentId: null }, ...over });
 const acknowledged = () => fake.invoked('attention.acknowledge');
 
 describe('an error notice', () => {
@@ -128,7 +129,7 @@ describe('an error notice', () => {
     expect(acknowledged()).toEqual([]);
     expect(screen.getByRole('button', { name: 'Dismiss' })).toBeTruthy();
     cleanup();
-    await act(async () => void render(<NoticeBody item={item(APP, 'auto_mode_unavailable', new Date(Date.now() - 5 * 60_000).toISOString())} seenHere />));
+    await act(async () => void render(<NoticeBody item={item(at(APP), 'auto_mode_unavailable', new Date(Date.now() - 5 * 60_000).toISOString(), { id: at('att-auto') as never })} seenHere />));
     expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
     expect(screen.getByText(`waiting ${REL.amount(5, 'minute')}`)).toBeTruthy();
     expect(acknowledged()).toEqual([]);

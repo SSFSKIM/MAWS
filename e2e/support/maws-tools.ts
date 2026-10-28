@@ -17,6 +17,7 @@ import type { CommandResult } from '@shared/ipc/schema';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
 import type { DeliverableRecord } from '../../src/shared/maws/deliverable';
+import { addressed } from './address';
 import { invoke, launchReady, value } from './c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './launch';
 import { sidebarRow } from './sidebar';
@@ -268,7 +269,7 @@ export async function scene(opts: { titles: string[]; repo?: string; folders?: s
 export async function show(s: Scene, id: string): Promise<void> {
   await (await sidebarRow(s.page, { appSessionId: id })).click();
   await s.page.mouse.move(700, 20);
-  await expect(s.pane.locator(`[data-composer="${id}"]`)).toBeVisible();
+  await expect(s.pane.locator(`[data-composer="${await addressed(s.page, id)}"]`)).toBeVisible();
 }
 
 // The fixture launched under the session's id (with the scratch directory as its cwd) and its prompt sent as recorded.

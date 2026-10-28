@@ -1,0 +1,301 @@
+// Two machines, one app (P5 O6, docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md; OX2, OX3): two MAWS
+// profiles on this Mac stand in for two machines. Profile B's app, started with MAWS_MACHINE_SERVE=1, serves its machine
+// services on a same-uid socket in its serve directory; profile A's app, started with MAWS_LOCAL_MACHINES naming that
+// directory, reaches them through its connection manager. At O3 the scene starts B's mawsd instead of a second app.
+// M6's scene, in five phases, each asserted before the next (the document's acceptance 3 and 5 to 8):
+//   1. Setup. One repository with `origin` set, whose main checkout A adds and whose linked worktree (on another branch)
+//      B adds; each profile seeds a session in its own checkout; B seeds one in a folder nobody adds; A adds a plain
+//      folder with a session in it. A's machines.list shows B up with B's ref (M3), and session.list naming B's ref is
+//      B's index.
+//   2. The sidebar. One `shared` row holds both checkouts' sessions, B's chipped `@standin-b` and A's chipped not at all
+//      (T1, P5 Decision Log 28); A's folder is a row of its own; B's machine row, `standin-b`, holds the session of the
+//      folder nobody added; hovering B's session names B.
+//   3. The draft. B's `shared` session opened in A shows its transcript (B's engine config alone holds it) and its
+//      branch (only B's checkout is on it); a draft typed into its composer is written to B's index.
+//   4. The departure. B quits: within 2 s it is down, and its rows and its tab grey while A's rows are as they were. A
+//      session is seeded into B's config while B is down; B relaunches over its profile, and within 5 s of its window
+//      loading its rows are live again with no duplicate, and the new session, which B's restarted index stamps from a
+//      counter that starts again at zero, is listed (M4's generation reset).
+//   5. The relaunches. A relaunched with B up restores B's tab and its draft, read from B; A relaunched with B down keeps
+//      the tab, greyed.
+// Run by `pnpm e2e:machines` (MAWS_MACHINES_E2E=1).
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { expect, test, type Page } from '@playwright/test';
+import type { MachineState } from '../src/shared/ipc/schema/machines';
+import { addressOf } from '../src/shared/machine/address';
+import type { MachineRef } from '../src/shared/machine/ref';
+import { isolatedGitEnv } from '../test/support/git-env';
+import { localRef } from './support/address';
+import { launchMaws, type MawsLaunch } from './support/launch';
+import { seedTranscripts } from './support/maws-tools';
+import { mainTabById, sessionCards, unfoldSessionCard } from './support/shell';
+import { showProjectList, sidebarOf } from './support/sidebar';
+
+test.skip(process.env.MAWS_MACHINES_E2E !== '1', 'the two-machine scenes run under pnpm e2e:machines (MAWS_MACHINES_E2E=1)');
+test.setTimeout(300_000);
+
+const SERVE_DIR = 'machine-serve'; // src/main/machines/serve-standin.ts
+const ORIGIN = 'https://github.com/example/shared.git';
+const A_BRANCH = 'main';
+const B_BRANCH = 'standin-b';
+const [A_NAME, B_NAME] = ['standin-a', 'standin-b'];
+const DRAFT = 'a draft typed in A, kept on B';
+const OFFLINE = ', machine offline'; // the end of a greyed row's accessible name (src/renderer/src/app/machine-mark.ts)
+const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: isolatedGitEnv() }).trim();
+
+// The raw bridge's answer, or the test fails with the error it carried.
+async function invoke<T>(page: Page, name: string, input: unknown, machine?: MachineRef): Promise<T> {
+  const result = await page.evaluate(([n, i, m]) => window.maws.invoke(n as never, i as never, (m ?? undefined) as never), [name, input, machine ?? null] as const);
+  if (!(result as { ok: boolean }).ok) throw new Error(`${name}: ${JSON.stringify((result as { error: unknown }).error)}`);
+  return (result as { value: T }).value;
+}
+const machinesOf = (page: Page) => invoke<{ machines: MachineState[] }>(page, 'machines.list', undefined).then(({ machines }) => machines);
+const stateOf = async (page: Page, ref: MachineRef) => (await machinesOf(page)).find((m) => m.ref === ref)?.state;
+type Listed = { appId: string; engineSessionId: string | null; projectId: string | null };
+const sessionsOn = (page: Page, machine?: MachineRef) => invoke<{ sessions: Listed[] }>(page, 'session.list', {}, machine).then(({ sessions }) => sessions);
+// The session a seeded transcript became in a machine's index, once indexed (bare ids, as the raw bridge speaks them).
+async function indexed(page: Page, engineId: string, machine?: MachineRef): Promise<Listed> {
+  let found: Listed | undefined;
+  await expect.poll(async () => (found = (await sessionsOn(page, machine)).find((s) => s.engineSessionId === engineId)) !== undefined, { timeout: 30_000, message: `session ${engineId} is indexed` }).toBe(true);
+  return found!;
+}
+// Main's own lines about the index and the machine links, per launched page, which a failure below quotes.
+const mainLines = new WeakMap<Page, string[]>();
+function keepMainLines(launch: MawsLaunch): void {
+  const lines: string[] = [];
+  mainLines.set(launch.page, lines);
+  const keep = (chunk: Buffer) => lines.push(...chunk.toString('utf8').split('\n').filter((line) => /\[(index|machines|machine)\]/.test(line)));
+  launch.app.process().stdout?.on('data', keep);
+  launch.app.process().stderr?.on('data', keep);
+}
+type Project = { id: string; directory: string; org?: { key: string; name: string } };
+// A directory added as a project on the page's own machine, once its machine has derived its org project (M5).
+async function addProject(page: Page, directory: string): Promise<Project> {
+  const added = await invoke<Project>(page, 'session.projects.add', { directory });
+  let project: Project | undefined;
+  try {
+    await expect
+      .poll(async () => (project = (await invoke<{ projects: Project[] }>(page, 'session.projects.list', undefined)).projects.find((p) => p.id === added.id))?.org?.key, { timeout: 30_000, message: `${directory} has its org project` })
+      .toBeTruthy();
+  } catch (error) {
+    throw new Error(`${(error as Error).message}\nthe project: ${JSON.stringify(project ?? added)}\nmain said:\n${(mainLines.get(page) ?? []).join('\n')}`, { cause: error });
+  }
+  return project!;
+}
+
+const projectRowByKey = (page: Page, key: string) => sidebarOf(page).locator(`[data-kind="project"][data-tree-id="p:${key}"]`);
+const sessionRowIn = (page: Page, key: string, address: string) => projectRowByKey(page, key).locator(`[role="treeitem"][data-menu="session:${address}"]`);
+// Expands a project row (read back until it holds: a restored layout may expand it under the click).
+async function expanded(page: Page, key: string): Promise<void> {
+  await showProjectList(page);
+  const row = projectRowByKey(page, key);
+  await expect(async () => {
+    if ((await row.getAttribute('aria-expanded')) !== 'true') await row.locator('[data-project-line]').click();
+    await expect(row).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
+}
+// Every session row of a machine as the sidebar draws it, and the Needs-you entries: its name, greying and status glyph.
+const rowsOfMachine = (page: Page, ref: MachineRef) =>
+  page.evaluate((prefix) => {
+    const rows = Array.from(document.querySelectorAll<HTMLElement>(`[data-region="sidebar"] [data-kind="session"][data-menu^="session:${prefix}"]`));
+    const needs = Array.from(document.querySelectorAll<HTMLElement>(`[data-region="sidebar"] [data-needs-you^="${prefix}"]`));
+    const glyphs = (el: HTMLElement) => Array.from(el.querySelectorAll('[role="img"]'), (img) => img.getAttribute('aria-label'));
+    return {
+      rows: rows.map((el) => ({ id: el.dataset.menu, name: el.getAttribute('aria-label'), offline: el.dataset.offline ?? null, glyphs: glyphs(el) })).sort((x, y) => x.id!.localeCompare(y.id!)),
+      needsYou: needs.map((el) => el.getAttribute('aria-label')),
+    };
+  }, `${ref}/`);
+const composerOf = (page: Page) => page.locator('[data-region="main"]').getByRole('textbox', { name: 'Message' });
+const draftText = (draft: unknown) => JSON.stringify(draft ?? null);
+
+test('two machines in one sidebar by org project; one leaving greys only its rows and comes back whole; its tab and draft follow it across A’s relaunches', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-machines-')));
+  // The profiles stay short and are the test's (each launch over them leaves them in place): B's serve socket path
+  // must fit a socket address, and both profiles outlive a quit for the relaunches.
+  const [aUserData, bUserData] = ['a', 'b'].map((name) => mkdtempSync(join(tmpdir(), `maws-${name}-`)));
+  const launches = new Set<MawsLaunch>();
+  const launchA = async (prepare?: (paths: { claudeConfigDir: string }) => void) => {
+    const launch = await launchMaws({ userData: aUserData, keepConfigHome: prepare === undefined, env: { MAWS_LOCAL_MACHINES: join(bUserData!, SERVE_DIR), MAWS_MACHINE_NAME: A_NAME }, prepare });
+    launches.add(launch);
+    keepMainLines(launch);
+    return launch;
+  };
+  const launchB = async (prepare?: (paths: { claudeConfigDir: string }) => void) => {
+    const launch = await launchMaws({ userData: bUserData, keepConfigHome: prepare === undefined, env: { MAWS_MACHINE_SERVE: '1', MAWS_MACHINE_NAME: B_NAME }, prepare });
+    launches.add(launch);
+    keepMainLines(launch);
+    return launch;
+  };
+  const quit = async (launch: MawsLaunch) => {
+    await launch.cleanup();
+    launches.delete(launch);
+  };
+  try {
+    // 1. Setup: the repository, its two checkouts on two branches, a folder B never adds and a plain folder A adds. The
+    // commit holds no file, so the index keeps the linked worktree a checkout of its own rather than folding it into the
+    // main checkout (src/main/index/projects.ts, holdsHead).
+    const shared = join(root, 'shared');
+    const worktree = join(root, 'shared-b');
+    const [loose, notes] = ['loose-b', 'notes'].map((name) => join(root, name));
+    for (const dir of [shared, loose!, notes!]) mkdirSync(dir);
+    git(shared, 'init', '--quiet', '-b', A_BRANCH);
+    git(shared, '-c', 'commit.gpgsign=false', 'commit', '--quiet', '--allow-empty', '-m', 'the first commit');
+    git(shared, 'remote', 'add', 'origin', ORIGIN);
+    git(shared, 'worktree', 'add', '--quiet', '-b', B_BRANCH, worktree);
+
+    let bConfig = '';
+    let bSeeded: { shared: string; loose: string } = { shared: '', loose: '' };
+    let aSeeded: { shared: string; notes: string } = { shared: '', notes: '' };
+    let b = await launchB(({ claudeConfigDir }) => {
+      bConfig = claudeConfigDir;
+      bSeeded = { shared: seedTranscripts(claudeConfigDir, worktree, ['B’s shared session'])[0]!, loose: seedTranscripts(claudeConfigDir, loose!, ['B’s loose session'])[0]! };
+    });
+    const bRef = await localRef(b.page);
+    const bShared = await indexed(b.page, bSeeded.shared);
+    const bLoose = await indexed(b.page, bSeeded.loose);
+    const bCheckout = await addProject(b.page, worktree);
+
+    let a = await launchA(({ claudeConfigDir }) => {
+      aSeeded = { shared: seedTranscripts(claudeConfigDir, shared, ['A’s shared session'])[0]!, notes: seedTranscripts(claudeConfigDir, notes!, ['A’s notes session'])[0]! };
+    });
+    const aRef = await localRef(a.page);
+    expect(aRef).not.toBe(bRef);
+    const aShared = await indexed(a.page, aSeeded.shared);
+    const aNotes = await indexed(a.page, aSeeded.notes);
+    const aCheckout = await addProject(a.page, shared);
+    const aFolder = await addProject(a.page, notes!);
+    expect(aCheckout.org!.key, 'both checkouts derive one org project, by the remote').toBe(bCheckout.org!.key);
+    expect(aFolder.org!.key).toMatch(/^folder:/);
+    const sharedKey = aCheckout.org!.key;
+
+    await expect.poll(() => stateOf(a.page, bRef), { timeout: 15_000 }).toBe('up');
+    const machines = await machinesOf(a.page);
+    expect(machines[0]).toMatchObject({ ref: aRef, local: true, state: 'up', name: A_NAME });
+    expect(machines.find((m) => m.ref === bRef)).toMatchObject({ local: false, name: B_NAME, generation: 1 });
+    const onB = (await sessionsOn(a.page, bRef)).map((s) => s.engineSessionId);
+    expect(onB, 'session.list naming B’s ref is B’s index').toEqual(expect.arrayContaining([bSeeded.shared, bSeeded.loose]));
+    expect(onB).not.toContain(aSeeded.shared);
+
+    const [bSharedAt, bLooseAt, aSharedAt, aNotesAt] = [addressOf(bRef, bShared.appId), addressOf(bRef, bLoose.appId), addressOf(aRef, aShared.appId), addressOf(aRef, aNotes.appId)];
+    const bMachineKey = `machine:${bRef}`;
+
+    await test.step('2. the sidebar: one row per org project across machines, a folder’s own row, B’s machine row', async () => {
+      await expanded(a.page, sharedKey);
+      await expect(projectRowByKey(a.page, sharedKey)).toHaveAttribute('aria-label', 'shared');
+      const bRow = sessionRowIn(a.page, sharedKey, bSharedAt);
+      const aRow = sessionRowIn(a.page, sharedKey, aSharedAt);
+      await expect(bRow, 'B’s session is in the shared row').toBeVisible({ timeout: 15_000 });
+      await expect(aRow, 'A’s session is in the shared row').toBeVisible();
+      await expect(bRow.locator('[data-machine-chip]'), 'B’s row carries B’s chip').toHaveText(`@${B_NAME}`);
+      await expect(aRow.locator('[data-machine-chip]'), 'this machine’s rows carry none (T1)').toHaveCount(0);
+
+      await expanded(a.page, aFolder.org!.key);
+      await expect(projectRowByKey(a.page, aFolder.org!.key)).toHaveAttribute('aria-label', 'notes');
+      await expect(sessionRowIn(a.page, aFolder.org!.key, aNotesAt), 'A’s folder is a row of its own').toBeVisible();
+
+      await expanded(a.page, bMachineKey);
+      await expect(projectRowByKey(a.page, bMachineKey)).toHaveAttribute('aria-label', B_NAME);
+      await expect(sessionRowIn(a.page, bMachineKey, bLooseAt), 'B’s machine row holds the session of the folder nobody added').toBeVisible();
+      expect((await invoke<{ projects: Project[] }>(b.page, 'session.projects.list', undefined)).projects.find((p) => p.directory === realpathSync(loose!))).toMatchObject({ discovered: true });
+
+      const card = a.page.locator('[data-hover-card]');
+      await expect(async () => {
+        await a.page.mouse.move(700, 400);
+        await bRow.hover();
+        await expect(card.getByTestId('hover-machine'), 'hovering B’s session names B').toHaveText(B_NAME, { timeout: 2_000 });
+      }).toPass({ timeout: 10_000 });
+      await a.page.mouse.move(700, 400);
+      await expect(card).toHaveCount(0);
+    });
+
+    await test.step('3. the draft: B’s session opened in A is B’s, and its draft is written to B', async () => {
+      await sessionRowIn(a.page, sharedKey, bSharedAt).click();
+      await expect(mainTabById(a.page, `session:${bSharedAt}`), 'the tab’s DOM id is the address').toHaveAttribute('aria-selected', 'true');
+      const pane = a.page.locator('[data-region="main"] [data-pane="0"]');
+      await expect(pane.getByRole('region', { name: 'Your message' }).filter({ hasText: 'B’s shared session' }), 'its transcript, which only B’s engine config holds').toBeVisible({ timeout: 15_000 });
+      await unfoldSessionCard(a.page, 'Environment');
+      await expect(sessionCards(a.page).getByRole('region', { name: 'Environment', exact: true }), 'its branch, which only B’s checkout is on').toContainText(`⎇ ${B_BRANCH}`, { timeout: 15_000 });
+
+      await composerOf(a.page).click();
+      await a.page.keyboard.type(DRAFT);
+      await expect.poll(async () => draftText(await invoke(b.page, 'session.drafts.get', { appSessionId: bShared.appId })), { timeout: 10_000, message: 'the draft is in B’s index' }).toContain(DRAFT);
+      await expect
+        .poll(async () => JSON.stringify(await invoke<{ value: unknown }>(a.page, 'layout.get', { key: 'main.tabs' })), { message: 'A’s layout holds the tab by its address' })
+        .toContain(`"session:${bSharedAt}"`);
+      await a.page.mouse.move(700, 400);
+    });
+
+    await test.step('4. the departure: B’s rows and tab grey within 2 s and A’s stay as they were; B comes back within 5 s, whole', async () => {
+      const aBefore = await rowsOfMachine(a.page, aRef);
+      expect(aBefore.rows.map((r) => r.id).sort()).toEqual([`session:${aNotesAt}`, `session:${aSharedAt}`].sort());
+
+      let exitedAt = 0;
+      b.app.process().once('exit', () => (exitedAt = Date.now()));
+      await quit(b);
+      await expect.poll(() => stateOf(a.page, bRef), { timeout: 2_000 }).toBe('down');
+      const down = (await machinesOf(a.page)).find((m) => m.ref === bRef)!;
+      expect(exitedAt).toBeGreaterThan(0);
+      expect(Date.parse(down.since) - exitedAt, 'B down within 2 s of its exit').toBeLessThanOrEqual(2_000);
+      await expect(sessionRowIn(a.page, sharedKey, bSharedAt), 'B’s rows grey').toHaveAttribute('aria-label', `B’s shared session${OFFLINE}`, { timeout: 2_000 });
+      await expect(sessionRowIn(a.page, bMachineKey, bLooseAt)).toHaveAttribute('aria-label', `B’s loose session${OFFLINE}`);
+      await expect(projectRowByKey(a.page, bMachineKey), 'B’s machine row greys with its machine').toHaveAttribute('aria-label', `${B_NAME}${OFFLINE}`);
+      await expect(projectRowByKey(a.page, sharedKey), 'the shared row has A’s checkout, so stays live').toHaveAttribute('aria-label', 'shared');
+      await expect(sessionRowIn(a.page, sharedKey, bSharedAt).locator('[data-machine-chip]')).toHaveText('offline');
+      const tab = mainTabById(a.page, `session:${bSharedAt}`);
+      await expect(tab, 'B’s open tab stays').toBeVisible();
+      await expect(tab.locator('span.text-fg-faint', { hasText: 'B’s shared session' }), 'its title in the disabled token (T5)').toBeVisible();
+      await expect(a.page.locator('[data-region="main"] [data-machine-offline]'), 'its content says B is offline').toHaveText(`${B_NAME} is offline`);
+      expect(await rowsOfMachine(a.page, aRef), 'A’s rows, statuses and Needs-you entries are as they were').toEqual(aBefore);
+      await expect(invoke(a.page, 'session.list', {}, bRef)).rejects.toThrow(/host_unavailable/);
+
+      // While B is down, B's engine config gains a session; B relaunches over its profile and comes back as a new
+      // generation, whose index stamps from zero again
+      const later = seedTranscripts(bConfig, loose!, ['B’s later session'])[0]!;
+      b = await launchB();
+      const loadedAt = Date.now();
+      expect(await localRef(b.page), 'B’s ref survives its relaunch').toBe(bRef);
+      await expect.poll(() => stateOf(a.page, bRef), { timeout: 15_000 }).toBe('up');
+      await expect(sessionRowIn(a.page, sharedKey, bSharedAt)).toHaveAttribute('aria-label', 'B’s shared session', { timeout: 15_000 });
+      const liveAt = Date.now();
+      expect(liveAt - loadedAt, 'B’s rows live within 5 s of its window loading').toBeLessThanOrEqual(5_000);
+      await expect(sessionRowIn(a.page, bMachineKey, bLooseAt)).toHaveAttribute('aria-label', 'B’s loose session');
+      await expect(projectRowByKey(a.page, bMachineKey)).toHaveAttribute('aria-label', B_NAME);
+      expect((await machinesOf(a.page)).find((m) => m.ref === bRef)).toMatchObject({ state: 'up', generation: 2 });
+      const bLater = await indexed(b.page, later);
+      await expect(sessionRowIn(a.page, bMachineKey, addressOf(bRef, bLater.appId)), 'the session seeded while B was down is listed').toBeVisible({ timeout: 15_000 });
+      for (const at of [bSharedAt, bLooseAt]) await expect(sidebarOf(a.page).locator(`[data-kind="session"][data-menu="session:${at}"]`), 'no duplicate').toHaveCount(1);
+      await expect(sidebarOf(a.page).locator(`[data-kind="project"][data-tree-id="p:${bMachineKey}"]`)).toHaveCount(1);
+      await expect(a.page.locator('[data-region="main"] [data-machine-offline]'), 'the kept tab is B’s session again').toHaveCount(0);
+      expect(await rowsOfMachine(a.page, aRef)).toEqual(aBefore);
+    });
+
+    await test.step('5. the relaunches: A with B up restores B’s tab and draft, read from B; A with B down keeps the tab, greyed', async () => {
+      await quit(a);
+      a = await launchA();
+      await expect(mainTabById(a.page, `session:${bSharedAt}`), 'B’s tab is restored').toBeVisible({ timeout: 20_000 });
+      await expect.poll(() => stateOf(a.page, bRef), { timeout: 15_000 }).toBe('up');
+      await expect(composerOf(a.page), 'its draft is in the composer').toHaveText(DRAFT, { timeout: 15_000 });
+      await expect(invoke(a.page, 'session.drafts.get', { appSessionId: bShared.appId }), 'A’s own index has no such session: the draft came from B').rejects.toThrow();
+      expect(draftText(await invoke(b.page, 'session.drafts.get', { appSessionId: bShared.appId }))).toContain(DRAFT);
+
+      await quit(a);
+      await quit(b);
+      a = await launchA();
+      const tab = mainTabById(a.page, `session:${bSharedAt}`);
+      await expect(tab, 'B’s tab is kept with B down').toBeVisible({ timeout: 20_000 });
+      await expect(a.page.locator('[data-region="main"] [data-machine-offline]'), 'greyed: its content says B is offline').toHaveText(`${B_NAME} is offline`, { timeout: 15_000 });
+      // its title in the disabled token (T5): the session's own, which the tab kept, since B has not loaded in this run
+      await expect(tab.locator('span.text-fg-faint', { hasText: 'B’s shared session' })).toBeVisible();
+      expect(await stateOf(a.page, bRef)).not.toBe('up');
+      await a.page.waitForTimeout(1_000); // past the layout's write delay: a drop would have been written
+      expect(JSON.stringify(await invoke(a.page, 'layout.get', { key: 'main.tabs' })), 'nothing dropped').toContain(`"session:${bSharedAt}"`);
+      await expect(tab).toBeVisible();
+    });
+  } finally {
+    for (const launch of [...launches].reverse()) await launch.cleanup().catch((error: unknown) => console.error('[e2e] cleanup failed', error));
+    for (const dir of [root, aUserData!, bUserData!]) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});

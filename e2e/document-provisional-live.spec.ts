@@ -17,6 +17,7 @@
 // Spends money within MAWS_LIVE_DOCUMENT_MAX_USD (US$1.00 when unset); the model is MAWS_LIVE_DOCUMENT_MODEL (haiku when
 // unset). Run on purpose only: MAWS_LIVE_DOCUMENT=1 pnpm e2e:document-live
 // Evidence: test-results/document-provisional-live/live-run.txt (the scratch root is kept for inspection).
+import { addressed } from './support/address';
 import { openArtifactInPanel } from './support/shell';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -324,7 +325,7 @@ test('the live run: the agent’s edit on a 200-page document is seen as it is w
     const panel = page.locator('[data-region="panel"]');
     await (await sidebarRow(page, { appSessionId: id })).click();
     await page.mouse.move(700, 20);
-    await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();
+    await expect(pane.locator(`[data-composer="${await addressed(page, id)}"]`)).toBeVisible();
 
     // the 200-page document, created by the owner and seeded through the host's seam
     const seam = new PerfSeam(join(maws.userData, 'document-perf'));

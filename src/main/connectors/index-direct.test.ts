@@ -10,6 +10,7 @@ import { eventChannel } from '@shared/ipc/schema';
 import type { DirectOperationOutcome } from '@shared/ipc/schema/connectors';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 import { clientOf } from '../ipc/clients';
+import { TEST_MACHINE } from '../../../test/support/machine'; // P5 O6 M2: a main handler's ctx names its target
 import type { MainContext } from '../ipc/router';
 import { startConnectors } from '.';
 import { electronWindowShown } from '../client/window-shown';
@@ -181,7 +182,7 @@ afterEach(() => {
 async function invoke(name: CommandName, input: unknown): Promise<unknown> {
   const checked = validateCommandInput(name, input);
   if (!checked.ok) throw new Error(`invalid input for ${name}`);
-  return handlers.get(name)!(checked.value, { client: clientOf(me as never) });
+  return handlers.get(name)!(checked.value, { client: clientOf(me as never), target: TEST_MACHINE });
 }
 const settle = async () => {
   for (let i = 0; i < 6; i++) await vi.advanceTimersByTimeAsync(0);

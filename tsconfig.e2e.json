@@ -104,6 +104,7 @@
     "test/support/latency-engine.ts", // P5 O1 M1: the local-latency bench's engine wrapper and markers
     "test/support/local-latency.ts", // P5 O1 M1: the local-latency bench's statistics, baseline and budget
     "test/support/live-seed.ts",
+    "test/support/machine.ts", // P5 O6 M2: through widget-backend.ts
     "test/support/owner-file.ts",
     "test/support/panel-child-tail.ts",
     "test/support/plugin-cli-stub.ts",

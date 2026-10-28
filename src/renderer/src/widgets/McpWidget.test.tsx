@@ -3,26 +3,30 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { EngineSessionStatus } from '@shared/engine/status';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, fixtureLine, syntheticFixture, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
+import { at } from '../../../../test/support/machine';
 import { useSessions } from '../stores/sessions';
 import { McpWidget, toggleView } from './McpWidget';
 
 const ROOT = join(__dirname, '../../../..');
-const ID = 'app-7412a115' as AppSessionId;
+// P5 O6 M2: the backend is main (bare ids); the page holds the address
+const BARE = 'app-7412a115' as AppSessionId;
+const ID = at(BARE);
+const lifted = (status: EngineSessionStatus): EngineSessionStatus => ({ ...status, appSessionId: at(status.appSessionId) });
 const DOCS = 'openaiDeveloperDocs';
 let backend: WidgetBackend;
 
 beforeEach(() => {
   backend = createWidgetBackend({ root: ROOT, statuses: loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json')).engine });
   window.maws = backend.bridge();
-  useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+  useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
 });
 afterEach(() => {
   cleanup();
   useSessions.setState({ engine: new Map() });
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: unknown }).maws;
 });
 
 const mount = () =>
@@ -47,7 +51,7 @@ describe('mcp reconnect runs as an operation', () => {
     mount();
     fireEvent.click(within(await row(DOCS)).getByRole('button', { name: 'Reconnect' }));
     await waitFor(() => expect((within(document.body).getAllByRole('status').find((s) => s.textContent === 'Working…'))).toBeTruthy());
-    expect(backend.calls.find((c) => c.subtype === 'mcp_reconnect')?.input).toEqual({ appSessionId: ID, serverName: DOCS });
+    expect(backend.calls.find((c) => c.subtype === 'mcp_reconnect')?.input).toEqual({ appSessionId: BARE, serverName: DOCS });
     expect(reads()).toBe(1);
     act(() => void backend.settleOperations());
     await waitFor(() => expect(reads()).toBe(2));
@@ -64,7 +68,7 @@ describe('mcp toggle discloses persistence and reads its state back after either
     expect((await row(DOCS)).textContent).toContain('Recorded by the engine for this project in ~/.claude.json');
     fireEvent.click(docs);
     await waitFor(async () => expect((await statusOf(DOCS)).textContent).toBe('Working…'));
-    expect(backend.calls.find((c) => c.subtype === 'mcp_toggle')?.input).toEqual({ appSessionId: ID, serverName: DOCS, enabled: false });
+    expect(backend.calls.find((c) => c.subtype === 'mcp_toggle')?.input).toEqual({ appSessionId: BARE, serverName: DOCS, enabled: false });
     expect(reads()).toBe(1);
     act(() => void backend.settleOperations());
     await waitFor(async () => expect((await serverSwitch(DOCS)).getAttribute('aria-checked')).toBe('false'));
@@ -96,7 +100,7 @@ describe('mcp toggle discloses persistence and reads its state back after either
     fireEvent.click(docs);
     await waitFor(async () => expect((await statusOf(DOCS)).textContent).toBe('On · not connected · Connection failed'));
     expect((await serverSwitch(DOCS)).getAttribute('aria-checked')).toBe('true');
-    expect(backend.calls.find((c) => c.subtype === 'mcp_toggle')?.input).toEqual({ appSessionId: ID, serverName: DOCS, enabled: true });
+    expect(backend.calls.find((c) => c.subtype === 'mcp_toggle')?.input).toEqual({ appSessionId: BARE, serverName: DOCS, enabled: true });
   });
 
   it('when the read-back fails the switch reads Unconfirmed with the outcome’s words, and Read again reads once more', async () => {

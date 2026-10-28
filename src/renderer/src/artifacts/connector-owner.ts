@@ -3,7 +3,7 @@
 // `.reconnect`, `.disconnect` and its targeted `connectors.serversChanged`. A separate owner dependency of the Connectors
 // sheet, never part of the ArtifactHost or a page's surface: no page reaches MAWS's OAuth.
 import type { ConnectorToolRef } from '@shared/artifacts/connectors';
-import type { CommandInput, CommandName, CommandOutput, MawsBridge } from '@shared/ipc/schema';
+import type { CommandInput, CommandName, CommandOutput, InvokeRest, MawsBridge } from '@shared/ipc/schema';
 import type { ConnectorOwnerAck, ConnectorServers } from '@shared/ipc/schema/connectors';
 import { ipc } from '../ipc/client';
 import { ArtifactCommandError } from './command-error';
@@ -18,8 +18,8 @@ export interface ConnectorsOwner {
 }
 
 export function createConnectorsOwner(bridge: Pick<MawsBridge, 'invoke' | 'on'>): ConnectorsOwner {
-  const call = async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> => {
-    const result = await bridge.invoke(name, input);
+  const call = async <N extends CommandName>(name: N, input: CommandInput<N>, ...opts: InvokeRest<N>): Promise<CommandOutput<N>> => {
+    const result = await bridge.invoke(name, input, ...opts);
     if (!result.ok) throw new ArtifactCommandError(result.error);
     return result.value;
   };

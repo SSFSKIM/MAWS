@@ -10,8 +10,11 @@ import { resetOwnerChannelStore, useOwnerChannelStore } from '../../stores/owner
 import { useSessions } from '../../stores/sessions';
 import { OwnerReport } from './OwnerReport';
 import { answerOf } from './QuestionCard';
+import { at } from '../../../../../test/support/machine';
 
-const APP = 'app-owner' as AppSessionId;
+// P5 O6 M2: the page holds the session's address; main's mark ids are built on its bare id
+const MAIN_APP = 'app-owner' as AppSessionId;
+const APP = at(MAIN_APP);
 const UUID = 'm-1' as MessageUuid;
 const anchor = { messageUuid: UUID, blockIndex: 0 };
 
@@ -22,10 +25,10 @@ afterEach(() => {
 });
 
 const question = (span: number, state: QuestionState, item = true): OwnerMark => ({
-  id: markIdOf(APP, 'need-input', { ...anchor, span }), kind: 'need-input', anchor: { ...anchor, span }, head: 'Which?', at: '2026-10-09T10:00:00.000Z', item, question: state,
+  id: markIdOf(MAIN_APP, 'need-input', { ...anchor, span }), kind: 'need-input', anchor: { ...anchor, span }, head: 'Which?', at: '2026-10-09T10:00:00.000Z', item, question: state,
 });
 const essential = (span: number, state: 'unread' | 'read', item = true): OwnerMark => ({
-  id: markIdOf(APP, 'essential', { ...anchor, span }), kind: 'essential', anchor: { ...anchor, span }, head: 'Mind it.', at: '2026-10-09T10:00:00.000Z', item, essential: { state, readAt: state === 'read' ? '2026-10-09T10:01:00.000Z' : null },
+  id: markIdOf(MAIN_APP, 'essential', { ...anchor, span }), kind: 'essential', anchor: { ...anchor, span }, head: 'Mind it.', at: '2026-10-09T10:00:00.000Z', item, essential: { state, readAt: state === 'read' ? '2026-10-09T10:01:00.000Z' : null },
 });
 function withMarks(marks: OwnerMark[]) {
   const state: OwnerChannelState = { appSessionId: APP, lane: { on: true, override: 'inherit', applied: 'maws-contract', pending: null, mismatch: null }, marks };

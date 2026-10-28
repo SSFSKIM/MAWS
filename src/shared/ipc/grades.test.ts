@@ -81,6 +81,7 @@ describe('the routing classes', () => {
       'presentations.present', 'artifacts.downloadAsset', 'library.saveAs', 'pty.openLink', 'pty.hostState',
       // the rubric's row leaves it out; survey §2 keeps it with the client, as pty.hostState (the report's decisions)
       'engine.hostState',
+      'machines.list', // P5 O6 M3: the app's own connection manager
     ].sort());
   });
 });

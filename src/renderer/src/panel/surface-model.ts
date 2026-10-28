@@ -1,11 +1,11 @@
 // UX2-L: visible surfaces are a selection over the existing panel refs, never a second owner of tool instances.
 import type { AppSessionId } from '@shared/graph/ids';
-import type { LayoutMain, PanelSurfaces, PanelTabRef } from '@shared/ipc/schema/layout';
+import { NO_SESSION_SCOPE, type LayoutMain, type PanelSurfaces, type PanelTabRef } from '@shared/ipc/schema/layout';
 import type { LayoutState } from '../stores/layout';
 import { activeTab, currentSet, sessionOfTab } from '../stores/layout-model';
 
 type SurfaceState = Pick<LayoutState, 'panelPinned' | 'panelBySession' | 'panelActiveNoSession' | 'panelSurfaces'>;
-export const surfaceScope = (session: AppSessionId | null): string => session ?? '@none';
+export const surfaceScope = (session: AppSessionId | null): string => session ?? NO_SESSION_SCOPE;
 
 type ContextState = Pick<LayoutState, 'main' | 'panelSurfaces' | 'knownSession'>;
 

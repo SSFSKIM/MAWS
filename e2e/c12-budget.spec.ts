@@ -8,6 +8,7 @@
 // C10's disclosure; and the banner going when the flag clears. Each state is photographed in both themes, into the
 // evidence pack under MAWS_C12_SHOTS=1 and into the test's output otherwise. Run by `pnpm e2e:c12`
 // (MAWS_C12_E2E=1), part of `pnpm verify`.
+import { addressed } from './support/address';
 import { openSurface } from './support/shell';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -98,7 +99,7 @@ test('a release reads idle and marked, offers resume on Send; over budget with n
     await expect(send).toBeEnabled();
     await expect(send).toHaveAttribute('aria-description', 'Starts this session'); // P2-A: every eligible record, released or not
     await openSurface(page, 'Session info');
-    const info = page.locator(`[data-session-info="${RELEASED}"]`);
+    const info = page.locator(`[data-session-info="${await addressed(page, RELEASED)}"]`);
     await expect(dd(info, 'Memory budget')).toHaveText('2.6 GB of 2 GB · 3 sessions');
     await expect(dd(info, 'Process')).toHaveText(new RegExp(`^Released at ${CLOCK} to stay under 2 GB$`));
     await shoot(page, testInfo, 'session-info');

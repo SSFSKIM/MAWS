@@ -4,9 +4,10 @@ import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { registerFocusTarget } from '../stores/composer';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import type { Availability } from '@shared/ipc/schema/session';
 import { digest, record } from '../../../../test/support/builders';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { NOT_RUNNING } from '../statusline';
 import { useSessions } from '../stores/sessions';
 import { useReadLoads } from './read';
@@ -15,11 +16,13 @@ import { REL } from '../test-support/relative-time';
 
 afterEach(() => {
   cleanup();
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: unknown }).maws;
   useSessions.setState({ engine: new Map(), records: new Map(), digests: new Map() });
   useReadLoads.setState({ loads: new Map() });
 });
-const ID = 'app-1' as AppSessionId;
+// P5 O6 M2: the page holds the address; the fake bridge below is main, asked with the bare id
+const BARE = 'app-1' as AppSessionId;
+const ID = at(BARE);
 
 describe('WidgetFrame', () => {
   // E11's sitting (owner-notes 00-consolidated-plan §2.2): no provenance foot; what a change writes is said in its sheet.
@@ -96,7 +99,7 @@ describe('WidgetFrame', () => {
 
     it('dormant with nothing read: "Not read yet." and Load now, which acquires for a read; mounting acquires nothing', async () => {
       invoke.mockClear();
-      window.maws = { invoke, on: () => () => {}, pathForFile: () => '' } as unknown as MawsBridge;
+      window.maws = { localMachine: TEST_MACHINE, invoke, on: () => () => {}, pathForFile: () => '' } as unknown as PreloadBridge;
       setRecord();
       render(frame({ state: 'dormant', readAt: null }));
       expect(screen.getByText('Not read yet.')).toBeTruthy();
@@ -104,7 +107,7 @@ describe('WidgetFrame', () => {
       expect(screen.queryByText(NOT_RUNNING)).toBeNull();
       expect(acquires()).toHaveLength(0);
       fireEvent.click(screen.getByRole('button', { name: 'Load now' }));
-      await vi.waitFor(() => expect(acquires()).toEqual([['session.acquire', { appSessionId: ID, reason: 'read' }]]));
+      await vi.waitFor(() => expect(acquires()).toEqual([['session.acquire', { appSessionId: BARE, reason: 'read' }, TEST_MACHINE]]));
     });
 
     it('dormant with a cached answer: the body under "Read <when>" and Refresh; without a date, Load now and no body', () => {

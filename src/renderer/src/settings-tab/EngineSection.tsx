@@ -151,7 +151,7 @@ function SubagentModel({ settings }: { settings: Settings }) {
   const list = useId();
   const saved = settings.engine.subagentModel;
   const [, field] = useCommittedDraft(saved, (next) => writeSettings({ engine: { subagentModel: next } }));
-  const models = useCommand('engine.models', { refresh: false, gateway: settings.gateway.defaultRoute }, { staleTime: 60_000 });
+  const models = useCommand('engine.models', { refresh: false, gateway: settings.gateway.defaultRoute }, { staleTime: 60_000 }, { machine: ipc.localMachine }); // P5 O6 M4: this machine's engine
   const suggestions = (models.data?.models ?? []).filter((m) => !isGatewayModel(m.value));
   return (
     <Setting label={ENGINE.subagent} note={ENGINE.subagentNote}>

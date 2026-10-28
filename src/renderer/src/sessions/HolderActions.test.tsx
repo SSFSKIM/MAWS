@@ -7,9 +7,12 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import type { HostState, MawsBridge } from '@shared/ipc/schema';
+import type { HostState, PreloadBridge } from '@shared/ipc/schema';
 import { record } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { at, OTHER_MACHINE } from '../../../../test/support/machine';
+import { addressOf } from '@shared/machine/address';
+import { ipc } from '../ipc/client';
 import { runSessionAction, sessionActionsFor } from '../app/session-actions';
 import { instanceOf, panelHost, registerPanelTool, resetPanelHost } from '../panel/host';
 import { HolderNotice } from '../session/HolderNotice';
@@ -19,6 +22,7 @@ import { useSessions } from '../stores/sessions';
 import type { TerminalInfo } from '../terminal/registry';
 import { resetPanelStores } from '../test-support/panel';
 import { resetSetupStore } from '../test-support/setup-intents';
+import { preloadOf } from '../test-support/preload-of';
 
 const registry = vi.hoisted(() => {
   let infos: TerminalInfo[] = [];
@@ -41,7 +45,7 @@ const registry = vi.hoisted(() => {
     // the page (re)gains the tab's terminal: re-adopted after a reload, or a fresh shell started after an app restart
     start(label: string, appSessionId: string) {
       const id = `t${++next}`;
-      infos = [...infos, { id, appSessionId, label, cwd: '/work/repo', ptyId: `pty-${id}`, status: 'running' } as unknown as TerminalInfo];
+      infos = [...infos, { id, appSessionId, label, cwd: '/work/repo', ptyId: at(`pty-${id}`), status: 'running' } as unknown as TerminalInfo];
       notify();
     },
     terminals: {
@@ -53,7 +57,7 @@ const registry = vi.hoisted(() => {
       },
       open: vi.fn((init: { appSessionId: string; label: string; cwd: string; command?: string }) => {
         const id = `t${++next}`;
-        infos = [...infos, { id, appSessionId: init.appSessionId, label: init.label, cwd: init.cwd, ptyId: `pty-${id}`, status: 'running' } as unknown as TerminalInfo];
+        infos = [...infos, { id, appSessionId: init.appSessionId, label: init.label, cwd: init.cwd, ptyId: at(`pty-${id}`), status: 'running' } as unknown as TerminalInfo];
         notify();
         return id;
       }),
@@ -75,7 +79,10 @@ const { forgetAttachTabs } = await import('./attach');
 const { registerSessionActions } = await import('./actions');
 const { resumeSession } = await import('./setup-actions');
 
-const A = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
+// P5 O6 M2: the page holds addresses (the registry mock is the page's, so its pty ids are too); the fake `window.maws`
+// (main) is asked and answers with the bare ids
+const BARE_A = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
+const A = at(BARE_A);
 const ENGINE = 'e1111111-1111-4111-8111-111111111111' as SessionId;
 const PINNED = '/Users/new/.local/share/claude/versions/2.1.283';
 const COMMAND = `'${PINNED}' attach e6dcd828`;
@@ -108,7 +115,7 @@ function answerWith(over: Parameters<typeof fakeClient>[0] = {}): void {
   };
   for (const [name, answer] of Object.entries(over)) if (answer === null) delete answers[name as keyof typeof answers];
   fake = fakeClient(answers);
-  window.maws = fake.client;
+  window.maws = preloadOf(fake);
 }
 const renderNotice = (r: SessionRecord) => render(<HolderNotice appSessionId={A} holder={r.holder as Extract<SessionRecord['holder'], { kind: 'terminal' | 'background_job' }>} />);
 const opened = () => registry.terminals.open.mock.calls.map(([init]) => init);
@@ -123,14 +130,14 @@ beforeEach(() => {
   useNotices.setState({ notices: [] });
   forgetAttachTabs();
   persisted = null;
-  holders = [{ sessionId: ENGINE, appSessionId: A, holder: JOB, cwd: '/work/repo/.claude/worktrees/job' }];
+  holders = [{ sessionId: ENGINE, appSessionId: BARE_A, holder: JOB, cwd: '/work/repo/.claude/worktrees/job' }];
   answerWith();
   offs = [registerPanelTool(terminalTool), registerSessionActions()];
 });
 afterEach(() => {
   cleanup();
   offs.forEach((off) => off());
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 describe('held outcomes and the attach command', () => {
@@ -144,6 +151,21 @@ describe('held outcomes and the attach command', () => {
     const tabs = useLayout.getState().panelTabsOf(A);
     expect(tabs.map((t) => [t.id, t.toolId])).toEqual([[init!.label, 'terminal']]); // the pty's label is the tab id
     expect(useLayout.getState().panelBySession.get(A)?.activeTabId).toBe(init!.label);
+  });
+
+  // The branch review: Attach runs on the session's machine, so the binary it types, and the installed version the notice
+  // compares, are that machine's.
+  it('attaches to a job on another machine with that machine’s binary, and compares that machine’s installed version', async () => {
+    const onB = addressOf(OTHER_MACHINE, BARE_A);
+    const r = record(onB, { engineSessionId: ENGINE, directory: '/work/repo', holder: JOB, engineVersion: '2.1.283' });
+    useSessions.setState({ records: new Map([[onB, r]]) });
+    render(<HolderNotice appSessionId={onB} holder={JOB} />);
+    await userEvent.click(attachButton());
+    await waitFor(() => expect(opened()).toHaveLength(1));
+    expect(opened()[0]).toMatchObject({ appSessionId: onB, command: COMMAND });
+    expect(fake.machines('fs.holders')).toEqual([OTHER_MACHINE]);
+    expect(fake.machines('engine.binaryInfo').length).toBeGreaterThan(0);
+    expect(new Set(fake.machines('engine.binaryInfo')), 'every binary read is B’s').toEqual(new Set([OTHER_MACHINE]));
   });
 
   it('starts in the session directory when the registry does not name the job’s cwd', async () => {
@@ -194,7 +216,7 @@ describe('held outcomes and the attach command', () => {
     await userEvent.click(attachButton());
     await waitFor(() => expect(opened()).toHaveLength(1));
     const first = opened()[0]!.label;
-    expect(persisted).toEqual({ version: 1, tabs: [{ tabId: first, appSessionId: A, jobId: 'e6dcd828' }] });
+    expect(persisted).toEqual({ version: 2, tabs: [{ tabId: first, appSessionId: A, jobId: 'e6dcd828' }] });
     forgetAttachTabs(); // a reload: the key is read again from main
     act(() => panelHost.showSummary());
     await userEvent.click(attachButton());
@@ -246,8 +268,8 @@ describe('held outcomes and the attach command', () => {
   });
 
   it('a failed read of the key is not taken for "no tabs": a later Attach reads it again and keeps what it holds', async () => {
-    const B = 'b2222222-2222-4222-8222-222222222222' as AppSessionId;
-    persisted = { version: 1, tabs: [{ tabId: 'terminal:other', appSessionId: B, jobId: 'aaaa1111' }] };
+    const B = at('b2222222-2222-4222-8222-222222222222' as AppSessionId);
+    persisted = { version: 2, tabs: [{ tabId: 'terminal:other', appSessionId: B, jobId: 'aaaa1111' }] };
     useLayout.getState().setPanelTabs(B, { tabs: [{ id: 'terminal:other', toolId: 'terminal', pinned: false }], activeTabId: null });
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     answerWith({ 'layout.get': null });
@@ -264,7 +286,7 @@ describe('held outcomes and the attach command', () => {
     await fake.reply('layout.get', { value: persisted }); // read again, not the cached failure
     await waitFor(() => expect(opened()).toHaveLength(2));
     expect(persisted).toEqual({
-      version: 1,
+      version: 2,
       tabs: [
         { tabId: 'terminal:other', appSessionId: B, jobId: 'aaaa1111' },
         { tabId: opened()[1]!.label, appSessionId: A, jobId: 'e6dcd828' },
@@ -273,9 +295,10 @@ describe('held outcomes and the attach command', () => {
   });
 
   it('two Attaches for different sessions at once both keep their tab in the key', async () => {
-    const B = 'b2222222-2222-4222-8222-222222222222' as AppSessionId;
+    const BARE_B = 'b2222222-2222-4222-8222-222222222222' as AppSessionId;
+    const B = at(BARE_B);
     const ENGINE_B = 'e2222222-2222-4222-8222-222222222222' as SessionId;
-    holders.push({ sessionId: ENGINE_B, appSessionId: B, holder: { kind: 'background_job', pid: 4343, jobId: 'bbbb2222' }, cwd: '/work/b' });
+    holders.push({ sessionId: ENGINE_B, appSessionId: BARE_B, holder: { kind: 'background_job', pid: 4343, jobId: 'bbbb2222' }, cwd: '/work/b' });
     const a = record(A, { engineSessionId: ENGINE, directory: '/work/repo', holder: JOB });
     const b = record(B, { engineSessionId: ENGINE_B, directory: '/work/b', holder: { kind: 'background_job', pid: 4343, jobId: 'bbbb2222' } });
     useSessions.setState({ records: new Map([[A, a], [B, b]]) });
@@ -333,7 +356,7 @@ describe('held outcomes and the attach command', () => {
     const { unmount } = renderNotice(held({ kind: 'terminal', pid: 7 }));
     expect(screen.queryByRole('button', { name: 'Attach in a terminal tab' })).toBeNull();
     await userEvent.click(screen.getByRole('button', { name: 'Fork a copy' }));
-    await waitFor(() => expect(fake.invoked('session.fork')).toEqual([{ appSessionId: A, target: { kind: 'inPlace' }, message: null, rewindTo: null }]));
+    await waitFor(() => expect(fake.invoked('session.fork')).toEqual([{ appSessionId: BARE_A, target: { kind: 'inPlace' }, message: null, rewindTo: null }]));
     await waitFor(() => expect(toasts().map((n) => n.text)).toEqual(['a turn is running']));
     unmount();
     renderNotice(held({ kind: 'background_job', pid: 9, jobId: null }));
@@ -363,7 +386,7 @@ describe('held outcomes and the attach command', () => {
 
   it("Resume answered held offers the job's Attach in its toast, with the command main named", async () => {
     held({ kind: 'none' });
-    answerWith({ 'session.acquire': { status: 'held', appSessionId: A, holder: JOB, attach: { jobId: 'e6dcd828', command: COMMAND } } }); // P2-A: Resume acquires
+    answerWith({ 'session.acquire': { status: 'held', appSessionId: BARE_A, holder: JOB, attach: { jobId: 'e6dcd828', command: COMMAND } } }); // P2-A: Resume acquires
     await act(() => resumeSession(A));
     const [toast] = toasts();
     expect(toast).toMatchObject({ level: 'warning', text: 'Held by bg · e6dcd828' });
@@ -375,7 +398,7 @@ describe('held outcomes and the attach command', () => {
 
   it('a terminal holder’s held answer toasts without an Attach', async () => {
     held({ kind: 'none' });
-    answerWith({ 'session.acquire': { status: 'held', appSessionId: A, holder: { kind: 'terminal', pid: 7 }, attach: null } }); // P2-A
+    answerWith({ 'session.acquire': { status: 'held', appSessionId: BARE_A, holder: { kind: 'terminal', pid: 7 }, attach: null } }); // P2-A
     await act(() => resumeSession(A));
     expect(toasts()).toMatchObject([{ text: 'Held by terminal · 7', actions: [] }]);
   });
@@ -383,10 +406,10 @@ describe('held outcomes and the attach command', () => {
   it("the engine's own refusal of a resume (a setup failed held) toasts the holder with Attach, before the registry has the job", async () => {
     held({ kind: 'none' });
     holders = []; // MAWS's read lost the race: the job's registry record is not there yet
-    const disconnect = connectSessions(fake.client); // the composition, which hands the setup store the Attach toast
+    const disconnect = connectSessions(ipc); // the composition (P5 O6 M2: through the client, so main's bare event arrives lifted), which hands the setup store the Attach toast
     await waitFor(() => expect(fake.invoked('session.intent.list')).toHaveLength(1));
     act(() =>
-      fake.event('session.setup', { appSessionId: A, phase: 'failed', detail: null, outcome: { kind: 'held', holder: { kind: 'background_job', pid: null, jobId: 'e6dcd828' }, attach: { jobId: 'e6dcd828', command: COMMAND } } }),
+      fake.event('session.setup', { appSessionId: BARE_A, phase: 'failed', detail: null, outcome: { kind: 'held', holder: { kind: 'background_job', pid: null, jobId: 'e6dcd828' }, attach: { jobId: 'e6dcd828', command: COMMAND } } }),
     );
     const [toast] = toasts();
     expect(toast).toMatchObject({ level: 'warning', text: 'Held by bg · e6dcd828' });
@@ -422,14 +445,14 @@ describe('take over a session another process holds', () => {
   });
 
   it('confirms naming the holder and the loss, asks main to end it, then resumes the session here', async () => {
-    answerWith({ 'session.takeOver': { status: 'released' }, 'session.acquire': { status: 'ready', appSessionId: A, launched: true, joined: false } }); // P2-A
+    answerWith({ 'session.takeOver': { status: 'released' }, 'session.acquire': { status: 'ready', appSessionId: BARE_A, launched: true, joined: false } }); // P2-A
     renderNotice(held({ kind: 'terminal', pid: 7 }));
     await userEvent.click(screen.getByRole('button', { name: 'Take over here' }));
     const asked = await answerConfirm(true);
     expect(asked.title).toBe('Take over this session?');
     expect(asked.body).toBe('MAWS ends the terminal process that holds this session (pid 7) and resumes the session here. A turn in progress there is lost.');
-    await waitFor(() => expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'resume' }])); // P2-A: the resume is an acquisition
-    expect(fake.invoked('session.takeOver')).toEqual([{ appSessionId: A, holder: { kind: 'terminal', pid: 7 } }]);
+    await waitFor(() => expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: BARE_A, reason: 'resume' }])); // P2-A: the resume is an acquisition
+    expect(fake.invoked('session.takeOver')).toEqual([{ appSessionId: BARE_A, holder: { kind: 'terminal', pid: 7 } }]);
   });
 
   it('names an own pane, keeps the loss warning and does not start a second resume after main reached ready', async () => {

@@ -86,8 +86,8 @@ export function connectAsks(client: MawsBridge = ipc): () => void {
       if (shownSession() === id) openSheet(id, opened.at(-1)!);
       else waiting.set(id, [...(waiting.get(id) ?? []), ...opened]); // every one: a later one may be settled first
     }),
-    client.on('engine.hostState', (host) => {
-      if (host.state === 'ready') reloadAsks(client);
+    client.on('engine.hostState', (host, from) => {
+      if (host.state === 'ready') reloadAsks(client, from.machine);
     }),
     useLayout.subscribe((state, before) => {
       const now = shownSession(state.main);

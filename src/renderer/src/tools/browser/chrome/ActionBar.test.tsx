@@ -12,6 +12,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { browserTab, T1, T2 } from '../../../test-support/browser';
 import { RECORD } from '../../../test-support/browser-import';
 import { installFakeMain, ok } from '../../../test-support/code';
+import { createClient } from '../../../ipc/client';
 import { useLayout } from '../../../stores/layout';
 import { browserImport, connectBrowserImport, resetBrowserImport } from '../import/store';
 import { connectBrowser, resetBrowser } from '../store';
@@ -51,7 +52,7 @@ beforeEach(() => {
     }
   });
   browserImport.setState({ records: [{ ...RECORD, profileDir: 'Profile 1', partition: WORK }], listed: true });
-  disconnect = connectBrowser(main.bridge);
+  disconnect = connectBrowser(createClient(() => main.bridge)); // P5 O6 M2: main's fake behind the page's client
   addressWidth = 400;
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     if (this.matches('[data-address-box]')) return DOMRect.fromRect({ x: 100, y: 30, width: addressWidth, height: 36 });
@@ -155,7 +156,7 @@ describe('the extensions action bar', () => {
     unmount();
     actions = [];
     const { queries } = show();
-    const off = connectBrowserImport(main.bridge, queries);
+    const off = connectBrowserImport(createClient(() => main.bridge), queries);
     await vi.waitFor(() => expect(main.callsOf('browser.extensions.actions')).toHaveLength(1));
     expect(bar()).toBeNull();
     actions = [{ extensionId: PROBE, name: 'MAWS probe extension', title: 'MAWS probe', icon: null, hasPopup: true, hasOptions: true }];

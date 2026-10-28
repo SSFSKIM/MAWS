@@ -9,19 +9,21 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { useSessions } from '../stores/sessions';
 import { useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
-import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { at } from '../../../../test/support/machine';
 import { Sidebar } from '../sidebar/Sidebar';
 import { projectNodeId } from '../sidebar/tree';
 import { ipc } from '../ipc/client';
 import { openConversationSearch, CommandPalette, paletteEntries, usePalette } from './CommandPalette';
 
-const nine = scenarioFile('nine-sessions');
+const file = scenarioFile('nine-sessions');
+const nine = pageScenario(file); // P5 O6 M2: the scenario as the page holds it
 const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title)!.appId;
 const offs: (() => void)[] = [];
 
 beforeEach(() => {
   resetShellStores();
-  fillStores(nine);
+  fillStores(file);
   usePalette.setState({ open: false });
   offs.push(registerShellActions({ invoke: vi.fn(async () => ({ ok: true, value: undefined })), on: vi.fn(() => () => {}) } as never));
 });
@@ -175,7 +177,7 @@ describe('palette entries', () => {
 
 it('bounds mounted results for 3,279 sessions while searching the entire index', async () => {
   const template = nine.sessions[0];
-  const records = Array.from({ length: 3279 }, (_, n) => ({ ...template, appId: `large-${n}` as AppSessionId, title: { ...template.title, text: `Indexed session ${n}` } }));
+  const records = Array.from({ length: 3279 }, (_, n) => ({ ...template, appId: at(`large-${n}` as AppSessionId), title: { ...template.title, text: `Indexed session ${n}` } }));
   useSessions.setState({ records: new Map(records.map((r) => [r.appId, r])) });
   const user = await openAndType('');
   expect(within(group('Sessions')!).getAllByRole('option').length).toBeLessThanOrEqual(50);

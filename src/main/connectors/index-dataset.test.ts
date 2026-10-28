@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandName, EventName } from '@shared/ipc/schema';
 import { validateCommandInput, validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
 import { clientOf } from '../ipc/clients';
+import { TEST_MACHINE } from '../../../test/support/machine'; // P5 O6 M2: a main handler's ctx names its target
 import type { MainContext } from '../ipc/router';
 import { startConnectors } from '.';
 import { electronWindowShown } from '../client/window-shown';
@@ -128,7 +129,7 @@ afterEach(() => {
 async function invoke(name: CommandName, input: unknown): Promise<unknown> {
   const checked = validateCommandInput(name, input);
   if (!checked.ok) throw new Error(`invalid input for ${name}`);
-  const value = await handlers.get(name)!(checked.value, { client: clientOf(sender as never) });
+  const value = await handlers.get(name)!(checked.value, { client: clientOf(sender as never), target: TEST_MACHINE });
   expect(validateCommandOutput(name, value).ok, `${name} output: ${JSON.stringify(value)}`).toBe(true);
   return value;
 }

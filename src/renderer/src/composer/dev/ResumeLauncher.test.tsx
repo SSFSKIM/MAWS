@@ -2,30 +2,33 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { launchDefaults } from '@shared/composer/launch-defaults';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
+import { at } from '../../../../../test/support/machine';
 import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
 import { parseExtraSettings, resumeSpec, type Resumable } from './resume-spec';
 import { ResumeLauncher } from './ResumeLauncher';
 
-const A = 'app-a' as AppSessionId;
+// P5 O6 M2: the store's records hold the page's ids (`A`); `fake`, installed as `window.maws`, stands for main (`A_ID`).
+const A_ID = 'app-a' as AppSessionId;
+const A = at(A_ID);
 const scratch = record(A, { directory: '/tmp/maws-scratch', additionalDirectories: ['/tmp/extra'], engineSessionId: '7c0e2d1a-4b3f-4c5d-8e6f-9a0b1c2d3e4f' as SessionId }) as Resumable;
 let fake: FakeClient;
 
 beforeEach(() => {
   resetShellStores();
-  fake = fakeClient({ 'session.launch': { status: 'launching', session: status(A) } });
-  window.maws = fake.client;
-  const archived = record('app-archived', { archived: true });
-  const unsaved = record('app-new', { engineSessionId: null });
+  fake = fakeClient({ 'session.launch': { status: 'launching', session: status(A_ID) } });
+  window.maws = fake.client as unknown as PreloadBridge;
+  const archived = record(at('app-archived'), { archived: true });
+  const unsaved = record(at('app-new'), { engineSessionId: null });
   useSessions.setState({ records: new Map([[A, scratch], [archived.appId, archived], [unsaved.appId, unsaved]]), recordsVersion: 1, loaded: true });
 });
 afterEach(() => {
   cleanup();
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 describe('the dev-only resume launcher', () => {
@@ -59,7 +62,7 @@ describe('the dev-only resume launcher', () => {
     await user.paste('{ "permissions": { "ask": ["Bash(git log:*)"] } }');
     await user.click(within(list).getByRole('button', { name: 'Resume live' }));
     await waitFor(() => expect(fake.invoked('session.launch')).toHaveLength(1));
-    expect(fake.invoked('session.launch')[0]).toEqual({ spec: resumeSpec(scratch, { direct: true, permissionMode: 'default', extraSettings: { permissions: { ask: ['Bash(git log:*)'] } } }) });
+    expect(fake.invoked('session.launch')[0]).toEqual({ spec: { ...resumeSpec(scratch, { direct: true, permissionMode: 'default', extraSettings: { permissions: { ask: ['Bash(git log:*)'] } } }), appSessionId: A_ID } }); // main is asked with the bare id
     await waitFor(() => expect(within(list).getByRole('status').textContent).toBe('launching'));
   });
 

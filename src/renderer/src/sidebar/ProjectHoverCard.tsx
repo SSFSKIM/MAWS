@@ -14,6 +14,8 @@ import { ipc } from '../ipc/client';
 import { branchLabel } from '../sessions/branch-label';
 import type { ProjectEntry } from './derive';
 import { SidebarHoverCard } from './HoverCard';
+import { machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 
 export interface ProjectHoverCardProps {
   entry: ProjectEntry & { project: ProjectRecord };
@@ -51,7 +53,7 @@ function Body({ entry }: { entry: ProjectEntry & { project: ProjectRecord } }) {
       <p data-testid="project-activity" className="m-0 text-fg-muted tabular-nums">
         {elapsed === null ? 'No activity yet' : elapsed < 60_000 ? 'Active now' : `Last active ${formatAgo(elapsed, { narrow: true })}`}
       </p>
-      <Worktrees directory={project.directory} />
+      <Worktrees machine={machineOf(project.id)} directory={project.directory} />
     </div>
   );
 }
@@ -59,18 +61,18 @@ function Body({ entry }: { entry: ProjectEntry & { project: ProjectRecord } }) {
 type Read = { state: 'reading' } | { state: 'read'; worktrees: WorktreeInfo[] } | { state: 'none' };
 
 // The checkouts of the project's repository in git's order, the main one first; nothing for a folder git does not know.
-function Worktrees({ directory }: { directory: string }) {
+function Worktrees({ machine, directory }: { machine: MachineRef; directory: string }) {
   const [read, setRead] = useState<Read>({ state: 'reading' });
   useEffect(() => {
     let live = true;
-    void ipc.invoke('git.worktree.list', { repoRoot: directory }).then(
+    void ipc.invoke('git.worktree.list', { repoRoot: directory }, { machine }).then(
       (result) => live && setRead(result.ok ? { state: 'read', worktrees: result.value.worktrees } : { state: 'none' }),
       () => live && setRead({ state: 'none' }),
     );
     return () => {
       live = false;
     };
-  }, [directory]);
+  }, [machine, directory]);
 
   if (read.state === 'none') return null;
   return (

@@ -12,8 +12,11 @@ import { newDoc, type Doc } from '@artifacts/yjs';
 import { AnchorSchema } from '@shared/anchor/anchor';
 import { anchoredMessage, parseAnchoredText } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import { bareOf } from '@shared/machine/address';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
+import { at } from '../../../../../test/support/machine';
 import type { sendHumanPrompt } from '../../composer/submit/send-human-prompt'; // P3-F (L154)
 import { sendComment } from '../../side/actions';
 import { useCommentCard } from '../../side/card/store';
@@ -30,7 +33,7 @@ import { artifactCommentAnchor, forgetCardActivation, useDocumentComments } from
 const seam = vi.hoisted(() => vi.fn<typeof sendHumanPrompt>());
 vi.mock('../../composer/submit/send-human-prompt', async (original) => ({ ...(await original<typeof import('../../composer/submit/send-human-prompt')>()), sendHumanPrompt: seam }));
 
-const PARENT = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
+const PARENT = at('a1111111-1111-4111-8111-111111111111' as AppSessionId);
 const ARTIFACT = 'art-0001';
 const HOST_BOX = { width: 800, height: 900 };
 const PASSAGE = { x: 120, y: 200, width: 140, height: 20 };
@@ -50,7 +53,7 @@ beforeEach(() => {
   resetShellStores();
   useNotices.setState({ notices: [] });
   fake = fakeClient({ 'side.sendToMain': { messageUuid: null, disposition: 'sent' }, 'session.intent.get': null });
-  window.maws = fake.client;
+  window.maws = fake.client as unknown as PreloadBridge;
   offComposer = registerCommentComposer(openComment);
   const s = useSessions.getState();
   useSessions.setState({ records: new Map([[PARENT, record(PARENT)]]), engine: new Map([[PARENT, status(PARENT, { process: 'ready' } as never)]]), recordsVersion: s.recordsVersion + 1 });
@@ -88,11 +91,11 @@ describe('the artifact-comment anchor', () => {
   it('goes to the agent by both routes unchanged, its tag round-tripping', async () => {
     const anchor = artifactCommentAnchor({ artifactId: ARTIFACT, title: 'Q3 plan', ...passage });
     await expect(sendComment('main', { parent: PARENT, anchor, text: 'Should this be monthly?', screenshot: null })).resolves.toEqual({ ok: true, disposition: 'sent' });
-    expect(fake.invoked('side.sendToMain')).toEqual([{ appSessionId: PARENT, anchor, text: 'Should this be monthly?', screenshot: null }]);
+    expect(fake.invoked('side.sendToMain')).toEqual([{ appSessionId: bareOf(PARENT), anchor, text: 'Should this be monthly?', screenshot: null }]);
     const sent = sendComment('thread', { parent: PARENT, anchor, text: 'Should this be monthly?', screenshot: null }, { reveal: () => false });
     await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: 'c3333333-3333-4333-8333-333333333333' }));
     await sent;
-    expect(fake.invoked('side.thread.open')).toEqual([{ appSessionId: PARENT, from: { kind: 'comment', anchor, text: 'Should this be monthly?', screenshot: null } }]);
+    expect(fake.invoked('side.thread.open')).toEqual([{ appSessionId: bareOf(PARENT), from: { kind: 'comment', anchor, text: 'Should this be monthly?', screenshot: null } }]);
     for (const destination of ['thread', 'main'] as const) {
       expect(parseAnchoredText(anchoredMessage({ anchor, text: 'Should this be monthly?', destination, screenshot: false }))).toEqual({ anchor, text: 'Should this be monthly?', destination });
     }
@@ -474,7 +477,8 @@ describe('the compose card in the margin and the draft rule', () => {
 // whatever becomes of its card or its host, and the comment is recorded in it when the send went. Only a draft nothing
 // was sent in, or whose send was refused, is withdrawn.
 describe('a comment on its way outlives its card', () => {
-  const CHILD = 'b2222222-2222-4222-8222-222222222222';
+  const CHILD_BARE = 'b2222222-2222-4222-8222-222222222222'; // as main answers it
+  const CHILD = at(CHILD_BARE);
   const second = { threadId: 'p7q1w3ze', tabId: 'tab1', tabTitle: 'Main', quote: 'with design review' };
 
   // The editor's reach over a real threads map, as DocumentEditor's records and discards.
@@ -508,7 +512,7 @@ describe('a comment on its way outlives its card', () => {
     await sendSideThread('Please explain');
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(getThread(doc, passage.threadId), 'withdrawn under the send').not.toBeNull();
-    await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: CHILD }));
+    await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: CHILD_BARE }));
     expect(bodies(doc, passage.threadId)).toEqual(['Please explain']);
   });
 
@@ -521,7 +525,7 @@ describe('a comment on its way outlives its card', () => {
     await act(async () => {});
     expect(useCommentCard.getState().open?.target).toMatchObject({ threadId: second.threadId });
     expect(getThread(doc, passage.threadId), 'withdrawn under the send').not.toBeNull();
-    await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: CHILD }));
+    await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: CHILD_BARE }));
     expect(bodies(doc, passage.threadId)).toEqual(['Please explain']);
   });
 
@@ -532,7 +536,7 @@ describe('a comment on its way outlives its card', () => {
     await sendSideThread('Please explain');
     view.unmount();
     expect(getThread(doc, passage.threadId), 'withdrawn under the send').not.toBeNull();
-    await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: CHILD }));
+    await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: CHILD_BARE }));
     expect(bodies(doc, passage.threadId)).toEqual(['Please explain']);
   });
 
@@ -560,7 +564,7 @@ describe('a comment on its way outlives its card', () => {
     expect(active).toBe(2); // the overlay's release waits for its queued withdrawal
     await act(async () => {});
     expect(active).toBe(1); // the send's stays
-    await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: CHILD }));
+    await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: CHILD_BARE }));
     expect(bodies(doc, passage.threadId)).toEqual(['Please explain']);
     expect(active).toBe(0);
   });
@@ -571,7 +575,7 @@ describe('a comment on its way outlives its card', () => {
     await act(async () => {});
     await sendSideThread('Please explain');
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
-    await act(() => fake.reply('side.thread.open', { status: 'refused', appSessionId: CHILD, reason: 'no_engine_session', message: 'Not yet' }));
+    await act(() => fake.reply('side.thread.open', { status: 'refused', appSessionId: CHILD_BARE, reason: 'no_engine_session', message: 'Not yet' }));
     expect(getThread(doc, passage.threadId)).toBeNull();
     expect(useNotices.getState().notices).toHaveLength(1);
   });
@@ -588,7 +592,7 @@ describe('a comment on its way outlives its card', () => {
     await act(async () => {});
     await sendSideThread('Please explain');
     act(() => useSessions.setState({ records: new Map(useSessions.getState().records).set(CHILD as AppSessionId, record(CHILD as AppSessionId)) }));
-    await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: CHILD }));
+    await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: CHILD_BARE }));
     expect(card()!.dataset.cardPhase).toBe('thread');
     const replyField = () => screen.getByRole('textbox', { name: 'Reply' }) as HTMLTextAreaElement;
     expect(replyField().disabled).toBe(false);
@@ -609,7 +613,7 @@ describe('a comment on its way outlives its card', () => {
     comment();
     await act(async () => {});
     await sendSideThread('Please explain');
-    await act(() => fake.reply('side.thread.open', { status: 'refused', appSessionId: CHILD, reason: 'no_engine_session', message: 'Not yet' }));
+    await act(() => fake.reply('side.thread.open', { status: 'refused', appSessionId: CHILD_BARE, reason: 'no_engine_session', message: 'Not yet' }));
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
     expect(bodies(doc, passage.threadId)).toEqual([]);
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));

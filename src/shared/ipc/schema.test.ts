@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { MachineRef } from '../machine/ref'; // P5 O6 M2
 import { IpcErrorSchema } from './errors';
 import { NAMES, MAIN_ONLY_COMMANDS } from './names';
 import { commandChannel, commands, eventChannel, events, HOST_EVENTS, NAMESPACES, type Namespace } from './schema';
@@ -67,9 +68,11 @@ import * as connectors from './schema/connectors'; // P3-H H3b
 import * as delivery from './schema/delivery'; // P4-B5
 import * as customization from './schema/customization'; // UX2-K
 import * as catalog from './schema/catalog'; // P4-AGG M2
+import * as machine from './schema/machine'; // P5 O6 M1
+import * as machines from './schema/machines'; // P5 O6 M3
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */, delivery /* P4-B5 */, customization /* UX2-K */, catalog /* P4-AGG M2 */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */, delivery /* P4-B5 */, customization /* UX2-K */, catalog /* P4-AGG M2 */, machine /* P5 O6 M1 */, machines /* P5 O6 M3 */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -588,11 +591,16 @@ describe('ipc schema validates both directions', () => {
   // C10 start: the attach tabs' layout key (C10 execution document, M5)
   describe('C10 layout entries', () => {
     it('takes sessions.attachTabs as a layout key, outside the panel namespace, and holds its value to its shape', () => {
-      const value = { version: 1, tabs: [{ tabId: 'terminal:abc', appSessionId: 'a1111111-1111-4111-8111-111111111111', jobId: 'e6dcd828' }] };
+      // P5 O6 M2: version 2 holds addresses; version 1, from before O6, reads lifted with the local machine
+      const local = 'LocalMachineRef0000000' as MachineRef;
+      const bare = { tabId: 'terminal:abc', appSessionId: 'a1111111-1111-4111-8111-111111111111', jobId: 'e6dcd828' };
+      const value = { version: 2, tabs: [{ ...bare, appSessionId: `${local}/${bare.appSessionId}` }] };
       expect(validateCommandInput('layout.set', { key: 'sessions.attachTabs', value })).toEqual({ ok: true, value: { key: 'sessions.attachTabs', value } });
       expect(layout.AttachTabsSchema.safeParse(value).success).toBe(true);
-      expect(layout.AttachTabsSchema.safeParse({ version: 1, tabs: [{ ...value.tabs[0], command: 'x' }] }).success).toBe(false);
-      expect(layout.AttachTabsSchema.safeParse({ version: 2, tabs: [] }).success).toBe(false);
+      expect(layout.AttachTabsSchema.safeParse({ version: 2, tabs: [{ ...value.tabs[0], command: 'x' }] }).success).toBe(false);
+      expect(layout.AttachTabsSchema.safeParse({ version: 3, tabs: [] }).success).toBe(false);
+      expect(layout.storedAttachTabsSchema(local).parse({ version: 1, tabs: [bare] })).toEqual(value);
+      expect(layout.storedAttachTabsSchema(local).parse(value)).toEqual(value);
     });
   });
   // C10 end
@@ -605,7 +613,7 @@ describe('ipc schema validates both directions', () => {
       // added since; E2's `deliverables` was too, until P3-L's cutover removed it).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */, 'delivery' /* P4-B5 */, 'customization' /* UX2-K */, 'catalog' /* P4-AGG M2 */]);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */, 'delivery' /* P4-B5 */, 'customization' /* UX2-K */, 'catalog' /* P4-AGG M2 */, 'machine' /* P5 O6 M1 */, 'machines' /* P5 O6 M3 */]);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });

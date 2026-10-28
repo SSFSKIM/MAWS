@@ -3,10 +3,12 @@ import type { ProjectRecord } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import { SECONDARY } from '../sessions/ui';
 import { projectLabels } from '../sidebar/project-labels';
+import { MachineChip } from '../app/MachineChip';
 import { isSidebarProject, projectGroups } from '../sidebar/project-groups';
 import { runAddProject, runProjectAction, useAddProjectEnabled, useProjectActionEnabled } from '../sidebar/project-actions';
 import { useSessions } from '../stores/sessions';
 import { SearchField } from '../widgets/plugins/LibraryHeader';
+import { machineOf } from '@shared/machine/address';
 
 // UX2-K: UX1's Add-project chooser as an app destination. Discovery is a choice, not sidebar membership;
 // only the add command promotes it. Removal and the native chooser keep the shell's existing action paths.
@@ -28,7 +30,7 @@ export function ProjectsView() {
     setBusy(true);
     setError(null);
     try {
-      const result = await ipc.invoke('session.projects.add', { directory: project.directory });
+      const result = await ipc.invoke('session.projects.add', { directory: project.directory }, { machine: machineOf(project.id) });
       if (!result.ok) setError(result.error.message);
       // The revisioned project-list event updates membership, never this unrevisioned response.
     } finally { setBusy(false); }
@@ -67,7 +69,10 @@ export function ProjectsView() {
                     return (
                       <li key={project.id} aria-label={label} className="flex min-w-0 items-center gap-4 py-3 @max-lg/projects:flex-col @max-lg/projects:items-start @max-lg/projects:gap-2">
                         <div className="min-w-0 flex-1 @max-lg/projects:w-full">
-                          <div className="truncate font-medium" title={label}>{label}</div>
+                          <div className="flex min-w-0 items-baseline gap-[5px]">
+                            <span className="truncate font-medium" title={label}>{label}</span>
+                            <MachineChip address={project.id} />{/* P5 O6 M5 (T1): another machine's checkout */}
+                          </div>
                           <div className="mt-0.5 truncate text-ui-sm text-fg-muted @max-lg/projects:break-all @max-lg/projects:whitespace-normal" title={project.directory}>{project.directory}</div>
                         </div>
                         <button

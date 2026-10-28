@@ -11,6 +11,7 @@ import { DEFAULT_PARTITION, profilePartition } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { at } from '../../../../../../test/support/machine';
 import { useLayout } from '../../../stores/layout';
 import { browserTab, T2 } from '../../../test-support/browser';
 import { RECORD } from '../../../test-support/browser-import';
@@ -20,7 +21,9 @@ import { coverPane, resetCovering } from '../covering';
 import { browserImport, resetBrowserImport } from '../import/store';
 import { PartitionPill } from './PartitionPill';
 
-const A = 'app-a' as AppSessionId;
+// P5 O6 M2: the page's id is an address; main (installFakeMain) is asked and answers with the bare MAIN_A.
+const MAIN_A = 'app-a' as AppSessionId;
+const A = at(MAIN_A);
 const PERSON = profilePartition('Default');
 const PICTURE = 'data:image/png;base64,iVBORw0KGgo=';
 const LIST: BrowserProfileListItem[] = [
@@ -40,7 +43,7 @@ beforeEach(() => {
       case 'browser.profiles.list':
         return ok({ profiles: LIST });
       case 'browser.tabs.open':
-        return ok({ tab: browserTab(T2, A, { url: '', partition: profilePartition('Profile 1') }), reused: false });
+        return ok({ tab: browserTab(T2, MAIN_A, { url: '', partition: profilePartition('Profile 1') }), reused: false });
       case 'browser.bookmarks.sync':
         return ok({ syncedAt: new Date().toISOString(), count: 46 });
       case 'settings.set':
@@ -134,7 +137,7 @@ describe('an imported profile’s popover', () => {
     const order = main.calls.map((call) => call.name).filter((name) => name === 'settings.set' || name === 'browser.tabs.open');
     expect(order).toEqual(['settings.set', 'browser.tabs.open']);
     expect(main.callsOf('settings.set')).toEqual([{ browser: { profile: 'Profile 1' } }]);
-    expect(main.callsOf('browser.tabs.open')).toEqual([{ appSessionId: A, url: null, select: true }]);
+    expect(main.callsOf('browser.tabs.open')).toEqual([{ appSessionId: MAIN_A, url: null, select: true }]);
     expect(main.calls.filter((call) => ['browser.tabs.navigate', 'browser.tabs.close', 'browser.tabs.select'].includes(call.name))).toEqual([]);
     expect(screen.queryByRole('dialog')).toBeNull();
   });

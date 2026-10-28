@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react';
 import type * as z from 'zod';
 import { ipc } from '../ipc/client';
 import { SHARED } from './copy';
+import type { MachineRef } from '@shared/machine/ref';
 
 export const num = (n: number): string => n.toLocaleString('en-US');
 
@@ -86,10 +87,11 @@ export const Mono = ({ children }: { children: ReactNode }) => <code className="
 
 // Shows a file or folder in Finder through `settings.reveal`, which main admits only under the engine's config home and
 // the session's directories (ruled 2026-09-29); a refusal is said beside the button, the path stays on screen to copy.
-export function RevealButton({ path, children }: { path: string; children: ReactNode }) {
+// P5 O6 M4: `machine` is the machine whose answer named the path (the session's), which reveals it in its own Finder.
+export function RevealButton({ path, machine, children }: { path: string; machine: MachineRef; children: ReactNode }) {
   const [refused, setRefused] = useState(false);
   const reveal = async () => {
-    const result = await ipc.invoke('settings.reveal', { path });
+    const result = await ipc.invoke('settings.reveal', { path }, { machine });
     setRefused(!result.ok || !result.value.revealed);
   };
   return (

@@ -15,7 +15,7 @@ const PROJECTS = ['codex_somersault', 'claude-usage-menubar', 'MAWS'];
 let maws: MawsLaunch;
 test.beforeAll(async () => {
   maws = await launchMaws({ env: SHELL_ENV });
-  await expect(maws.page.locator('[data-region="sidebar"] [data-kind="project"]')).toHaveCount(4, { timeout: 15_000 }); // Other sessions is a row
+  await expect(maws.page.locator('[data-region="sidebar"] [data-kind="project"]')).toHaveCount(4, { timeout: 15_000 }); // the machine's own row is one (P5 O6 M5)
 });
 test.afterAll(async () => maws.cleanup());
 

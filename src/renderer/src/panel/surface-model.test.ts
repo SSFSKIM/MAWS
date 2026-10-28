@@ -2,10 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMain, type PanelSurfaces, type TabRef } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { createLayoutStore, LAYOUT_WRITE_DELAY_MS, persistLayout } from '../stores/layout';
 import { surfaceSession, surfaceTabs } from './surface-model';
 
-const A = 'app-a' as AppSessionId;
+const A = at('app-a' as AppSessionId);
 const files = { id: 'files-1', toolId: 'files', pinned: false };
 const terminal = { id: 'terminal-1', toolId: 'terminal', pinned: false };
 const browser = { id: 'browser-1', toolId: 'browser', pinned: false };
@@ -75,9 +76,11 @@ describe('surface stacks', () => {
   });
 });
 
-const B = 'app-b' as AppSessionId;
-const X = 'project-x' as ProjectId;
-const Y = 'project-y' as ProjectId;
+const B = at('app-b' as AppSessionId);
+const X = at('project-x' as ProjectId);
+const Y = at('project-y' as ProjectId);
+const UNFILED = at('unfiled' as AppSessionId);
+const doc: TabRef = { id: `artifact:${TEST_MACHINE}:doc`, kind: 'artifact', artifactId: 'doc', machine: TEST_MACHINE, pinned: false };
 const session = (id: AppSessionId): TabRef => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false });
 const mainWith = (tabs: TabRef[], activeTabId: string): LayoutMain => ({
   ...LAYOUT_DEFAULTS.main,
@@ -103,15 +106,15 @@ describe('surface context and restore', () => {
     s().openSession(A, { how: 'tab' });
     s().openSession(B, { how: 'tab' });
     s().activateTab(session(A).id);
-    s().openTab({ kind: 'artifact', artifactId: 'doc' });
+    s().openTab({ kind: 'artifact', artifactId: 'doc', machine: TEST_MACHINE });
     expect(surfaceSession(s())).toBe(A);
     expect(s().panelSurfaces.contexts[X]).toBe(A);
     s().setCurrentProject(null);
     store.setState({ projectOf: () => null });
-    s().openSession('unfiled' as AppSessionId);
+    s().openSession(UNFILED);
     s().openTab({ kind: 'diagnostics' });
-    expect(surfaceSession(s())).toBe('unfiled');
-    expect(s().panelSurfaces.contexts[NO_PROJECT]).toBe('unfiled');
+    expect(surfaceSession(s())).toBe(UNFILED);
+    expect(s().panelSurfaces.contexts[NO_PROJECT]).toBe(UNFILED);
     s().setCurrentProject(X);
     expect(surfaceSession(s())).toBe(A);
     s().closeTab(session(A).id);
@@ -141,9 +144,8 @@ describe('surface context and restore', () => {
   });
 
   it('ignores stale contexts and stack ids only when deriving, without resetting other stored scopes', async () => {
-    const doc: TabRef = { id: 'artifact:doc', kind: 'artifact', artifactId: 'doc', pinned: false };
     const saved: PanelSurfaces = {
-      version: 1,
+      version: 2,
       stacks: { [A]: ['gone', files.id], [B]: [browser.id], '@none': [] },
       pinnedTools: ['files', 'not-registered-yet'],
       contexts: { [X]: 'gone' as AppSessionId, [Y]: B },
@@ -164,9 +166,8 @@ describe('surface context and restore', () => {
 
   it('deduplicates restored tools without altering their saved ids and follows live known-session changes', async () => {
     const another = { ...files, id: 'files-2' };
-    const doc: TabRef = { id: 'artifact:doc', kind: 'artifact', artifactId: 'doc', pinned: false };
     let live = true;
-    const saved: PanelSurfaces = { version: 1, stacks: { [A]: [files.id, another.id] }, pinnedTools: [], contexts: { [X]: A } };
+    const saved: PanelSurfaces = { version: 2, stacks: { [A]: [files.id, another.id] }, pinnedTools: [], contexts: { [X]: A } };
     const { store } = await restored({
       'main.tabs': mainWith([session(A), doc], doc.id),
       [`panel.${A}`]: { tabs: [files, another], activeTabId: another.id },
@@ -180,7 +181,7 @@ describe('surface context and restore', () => {
   });
 
   it('replays an early icon preference over saved preferences rather than replacing the saved surface state', async () => {
-    const saved: PanelSurfaces = { version: 1, stacks: { [B]: [browser.id] }, pinnedTools: ['terminal'], contexts: { [Y]: B } };
+    const saved: PanelSurfaces = { version: 2, stacks: { [B]: [browser.id] }, pinnedTools: ['terminal'], contexts: { [Y]: B } };
     const fake = fakeClient({
       'layout.list': { keys: ['panelTools.surfaces'] },
       'layout.get': ({ key }: { key: string }) => ({ value: key === 'panelTools.surfaces' ? saved : null }),
@@ -211,7 +212,7 @@ describe('surface context and restore', () => {
       const writes = fake.invoked('layout.set') as { key: string; value: unknown }[];
       const surfaces = writes.filter((write) => write.key === 'panelTools.surfaces');
       expect(surfaces).toEqual([{ key: 'panelTools.surfaces', value: {
-        version: 1, stacks: { [A]: [files.id, terminal.id], '@none': [] }, pinnedTools: ['browser'], contexts: { [X]: A },
+        version: 2, stacks: { [A]: [files.id, terminal.id], '@none': [] }, pinnedTools: ['browser'], contexts: { [X]: A },
       } }]);
       const { store: again } = await restored(Object.fromEntries(writes.map(({ key, value }) => [key, value])));
       expect(surfaceSession(again.getState())).toBe(A);

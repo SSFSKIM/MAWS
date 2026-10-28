@@ -5,7 +5,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { MawsBridge, Settings } from '@shared/ipc/schema';
+import type { PreloadBridge, Settings } from '@shared/ipc/schema';
 import type { InstalledPlugin } from '@shared/ipc/schema/plugins';
 import type { LaunchProfile } from '@shared/engine/launch-profile';
 import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
@@ -59,7 +59,7 @@ afterEach(() => {
   cleanup();
   useSettings.setState({ state: null });
   useNotices.setState({ notices: [] });
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 describe('Settings › Engine › the launch profile', () => {
