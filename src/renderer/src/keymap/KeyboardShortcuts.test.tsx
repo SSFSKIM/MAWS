@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { ACTION_IDS, ACTIONS, effectiveChord, type KeymapOverrides } from '@shared/keymap/actions';
 import { matchesChord, parseChord } from '@shared/keymap/chord';
-import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
 import { registerShellActions } from '../app/shell-actions';
 import { useSettings } from '../stores/settings';
 import { runAction } from './actions-runtime';
@@ -18,7 +18,7 @@ afterEach(() => {
 });
 
 function setKeymap(keymap: KeymapOverrides) {
-  act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V18, keymap }, resolvedTheme: 'light' } }));
+  act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V19, keymap }, resolvedTheme: 'light' } }));
 }
 function openSheet() {
   render(<><button>Opener</button><KeyboardShortcuts /></>);

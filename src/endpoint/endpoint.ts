@@ -27,9 +27,15 @@
 // them, each keeping its ledger: the engine host (lane B), sminos (lane A, over RL10) or the endpoint itself
 // (`endpoint.grant`, `endpoint.state`, under `<stateDir>/ops.jsonl`). A query routes to the executor it names and is
 // answered against the binding the executor stored.
+//
+// Subscriptions and reads (M8): a `sub` is registered at once and authorized by the gate, then streamed by its lane's
+// plane (lane A from sminos's session plane over RL10, lane B from the engine host's events and journal); each is
+// authorized again at every record change and every new head. A `call` the gate lets through is read by calls.ts. A
+// device's lane B subscriptions are interest (OX5).
 import { homedir, networkInterfaces } from 'node:os';
 import { importSigningKey, isListingGone, stateHash, type MachineIdentity, type OrgState, type Right, type Rl1Refusal, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { Authorizer, type AuthorizeContext } from './authorize';
+import { Calls } from './calls';
 import { Channels } from './channels';
 import { DirectListener, type DirectListenerOptions } from './direct-listener';
 import { Actions } from './actions';
@@ -41,15 +47,19 @@ import { Gate } from './gate';
 import { acceptGrant, dropRevokedGrants, machineOwnerMembers, machineRights } from './grants';
 import type { HubDeps } from './hub-http';
 import { HubLink } from './hub-link';
+import { Interest } from './interest';
 import { EndpointRecords, Listings, RecordRetries, type RecordsContext } from './listings';
 import { Notifier } from './notify';
 import { EndpointOrg, type OrgChange } from './org-sync';
+import { PlaneA } from './plane-a';
+import { PlaneB } from './plane-b';
 import { EndpointPolicy, settingsDefaultMode } from './policy';
 import { Queries } from './queries';
 import { Rl10 } from './rl10/link';
 import type { EndpointModule, EndpointServices } from './services';
-import type { CheckoutSource, RecordSource } from './sources';
+import type { CheckoutSource, RecordSource, SessionTarget } from './sources';
 import { EndpointState } from './state/store';
+import { Subscriptions } from './subscriptions';
 import { endpointStatus, NO_LINKS, type EndpointLinks, type EndpointStatus } from './status';
 import { directPort, type InterfaceTable } from './tailnet';
 
@@ -70,6 +80,8 @@ export type EndpointOptions = {
   pingMs?: readonly [number, number];
   direct?: { interfaces?(): InterfaceTable } & Pick<DirectListenerOptions, 'listen' | 'limits' | 'rescanMs'>;
   authorization?: { records?: RecordSource; checkouts?: CheckoutSource; settingsMode?(): string } & Pick<AuthorizeContext, 'offers' | 'gradeOf' | 'registry'>;
+  /** The suites' seams for subscriptions: the resume window, lane A's ring and the unsent stream's bound. */
+  subscriptions?: { resumeMs?: number; ringBytes?: number; backlogBytes?: number; recheckRetryMs?: readonly number[]; transmitDeadlineMs?: number };
 };
 
 /** The whole handshake of a direct connection is this long at most (M4). */
@@ -103,6 +115,15 @@ export class Endpoint implements EndpointModule {
   readonly own: EndpointActions;
   /** RL4's queries (M7), answered against the binding the executor stored. */
   readonly queries: Queries;
+  /** Subscriptions (M8): the table, lane A's and lane B's planes, and the interest they report. */
+  readonly subscriptions: Subscriptions;
+  readonly planeA: PlaneA;
+  readonly planeB: PlaneB;
+  readonly interest: Interest;
+  /** Remote reads (M8). */
+  readonly calls: Calls;
+  /** What `start` subscribed to on mawsd's seam, let go at `stop`. */
+  readonly #unseam: Array<() => void> = [];
   readonly #options: EndpointOptions;
   #direct: DirectListener | null = null;
   #directStarted = false;
@@ -290,9 +311,73 @@ export class Endpoint implements EndpointModule {
       log,
     });
     this.rl10.onResult((result) => this.actions.result(result));
-    this.gate.setExecutors({ act: (channel, m, decision) => this.actions.execute(channel, m, decision) });
+    const seams = options.subscriptions ?? {};
+    const recordSource = authorization.records ?? this.rl10.members;
+    this.interest = new Interest({ interest: () => this.#services?.interest ?? null, log, resumeMs: seams.resumeMs });
+    this.planeA = new PlaneA({
+      send: (frame) => this.rl10.send(frame),
+      connected: () => this.rl10.connected,
+      member: (session) => {
+        const member = this.rl10.members.get(session);
+        return member === null ? null : { project: member.project, lane: member.lane, ...(member.launch === undefined ? {} : { launch: member.launch }) };
+      },
+      log,
+      ringBytes: seams.ringBytes,
+      backlogBytes: seams.backlogBytes,
+      resumeMs: seams.resumeMs,
+    });
+    this.planeB = new PlaneB({ dispatch, log, backlogBytes: seams.backlogBytes });
+    this.rl10.onSession((message) => this.planeA.message(message));
+    this.rl10.onPending((project, raised) => this.planeA.pendingSet(project, raised));
+    this.rl10.onLink((connected) => connected || this.planeA.linkLost());
+    this.subscriptions = new Subscriptions({
+      recheckRetryMs: seams.recheckRetryMs,
+      transmitDeadlineMs: seams.transmitDeadlineMs,
+      authorize: (request, who, now) => this.authorizer.authorize(request, who, now),
+      planes: { A: this.planeA, B: this.planeB },
+      interest: this.interest,
+      records: recordSource,
+      now: this.deps.now,
+      log,
+    });
+    this.calls = new Calls({
+      dispatch,
+      subscription: (channel, sub) => this.subscriptions.get(channel, sub),
+      upstreamOf: (sub) => this.planeA.upstreamOf(sub),
+      toSminos: (frame) => this.rl10.send(frame),
+      members: () =>
+        this.rl10.members.sessions().flatMap((session) => {
+          const member = this.rl10.members.get(session);
+          if (member === null) return [];
+          const listingId = this.rl10.members.listingId(session);
+          const target: SessionTarget = member.lane === 'A' ? { lane: 'A', session } : { lane: 'B', session, appSessionId: listingId ?? '' };
+          return [{ member, listingId, target }];
+        }),
+      records: recordSource,
+      machineOwners: () => {
+        const org = this.#org;
+        if (!org?.ready || this.#services === null) return Promise.resolve([]);
+        return machineOwnerMembers(org.head().state, org.certificates(), this.#services.machine.ref, new Date(this.deps.now()));
+      },
+      recordFor: (report) => this.listings.recordFor(report),
+      offers: authorization.offers,
+      log,
+    });
+    this.gate.setExecutors({
+      act: (channel, m, decision) => this.actions.execute(channel, m, decision),
+      call: (channel, m) => this.calls.execute(channel, m),
+      sub: (channel, m, decision) => this.subscriptions.start(channel, m, decision),
+      subRefused: (channel, m, reason) => this.subscriptions.refused(channel, m, reason),
+    });
     const gated = this.gate.routes();
-    this.channels.setRoutes({ ...gated, act: (channel, m) => this.actions.receive(channel, m, gated.act), query: (channel, m) => this.queries.route(channel, m) });
+    this.channels.setRoutes({
+      ...gated,
+      act: (channel, m) => this.actions.receive(channel, m, gated.act),
+      query: (channel, m) => this.queries.route(channel, m),
+      sub: (channel, m) => this.subscriptions.receive(channel, m, gated.sub),
+      credit: (channel, m) => this.subscriptions.credit(channel, m),
+      unsub: (channel, m) => this.subscriptions.unsub(channel, m),
+    });
   }
 
   async start(services: EndpointServices): Promise<void> {
@@ -307,6 +392,11 @@ export class Endpoint implements EndpointModule {
     });
     this.#state = state;
     this.#org = org;
+    // Lane B's live events and the app's attachment (none at start, O2's seam), for the subscriptions.
+    this.#unseam.push(
+      services.onEvent((owner, message) => this.planeB.event(owner, message)),
+      services.onAttachment((attached) => this.planeB.attachment(attached)),
+    );
     this.notifier.restore();
     if (state.refusing !== null) return;
     this.own.open();
@@ -339,8 +429,10 @@ export class Endpoint implements EndpointModule {
     this.#retries.clear();
     if (this.#timer !== null) clearInterval(this.#timer);
     this.#timer = null;
-    // No action more; those in flight record their results first (up to 2 s), then the channels close.
+    // No action more; those in flight record their results first (up to 2 s), then the subscriptions and channels close.
     await this.actions.stop();
+    this.subscriptions.stop();
+    for (const off of this.#unseam.splice(0)) off();
     // Each channel's sealed `restart` goes out before the carriers end: the hub link and the listener close after.
     await this.channels.closeAll('restart');
     await this.#direct?.stop();
@@ -554,6 +646,8 @@ export class Endpoint implements EndpointModule {
     void this.listings.refresh();
     // sminos hears the head's revocation set and directory where they changed.
     void this.rl10.adopted();
+    // Every subscription, and every resumable cursor, is authorized again under the new head (M8).
+    this.subscriptions.recheck();
   }
 
   /**

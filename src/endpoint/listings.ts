@@ -174,6 +174,25 @@ export class Listings {
     }).then(() => sent);
   }
 
+  /**
+   * The signed listing of a session as it stands now, for a member's `endpoint.listings` (M8): the one held and sent to
+   * the hub when it is current, else one signed for the asker alone (a private session's, one in a project the endpoint
+   * doesn't relay, one not listed yet), kept nowhere and sent nowhere, at a revision past any held. Null with no key or
+   * head.
+   */
+  async recordFor(report: SessionReport): Promise<Signed<Listing> | null> {
+    const key = this.#ctx.key();
+    const head = this.#ctx.head();
+    if (key === null || head === null) return null;
+    const owners = await resolveOwners(report.owners, head.state, this.#ctx.ref(), head.certificates, new Date(this.#ctx.now()));
+    const fields: Listing['fields'] = { owners, project: report.project, lane: report.lane, state: report.state, title: report.title };
+    const held = this.#ctx.store.read()[report.session];
+    if (held !== undefined && !isListingGone(held.record.body) && held.hash === hashOf(fields) && this.#current(held.record)) return held.record;
+    const now = this.#ctx.now();
+    const body: Listing = { org: head.state.org, machine: this.#ctx.ref(), session: report.session, revision: Math.max((held?.revision ?? 0) + 1, now), issued: new Date(now).toISOString(), fields };
+    return signRecord(SIGNING_DOMAINS.listing, body, key.key.privateKey, key.key.pub);
+  }
+
   /** Judges each of `sessions` again, `listed()` naming none of them until its judgment is done. */
   #judge(sessions: string[]): Promise<void> {
     for (const session of sessions) this.#judging.set(session, (this.#judging.get(session) ?? 0) + 1);

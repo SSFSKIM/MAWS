@@ -1,10 +1,11 @@
 import { expect, it } from 'vitest';
 import { SettingsPatchSchema } from '../ipc/schema/settings';
-import { applySettingsPatch, migrateSettings, SETTINGS_DEFAULTS_V18 } from './defaults';
+import { applySettingsPatch, migrateSettings, SETTINGS_DEFAULTS_V19 } from './defaults';
 
 it('keeps existing installs opted out and persists only the chosen inactivity threshold', () => {
-  const saved = structuredClone(SETTINGS_DEFAULTS_V18) as Record<string, unknown>;
+  const saved = structuredClone(SETTINGS_DEFAULTS_V19) as Record<string, unknown>;
   saved.version = 17;
+  saved.engine = { ...SETTINGS_DEFAULTS_V19.engine, launchProfile: { ...SETTINGS_DEFAULTS_V19.engine.launchProfile, outputStyle: 'user' } }; // a v17 file's profile had a style
   delete saved.sessions;
   const migrated = migrateSettings(saved);
   expect(migrated.sessions).toEqual({ archiveInactiveDays: null });
