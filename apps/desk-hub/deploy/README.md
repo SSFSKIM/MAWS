@@ -271,7 +271,7 @@ fresh from the Mac with this command and an admin device of its own. It acts on 
 apply, and no agent runs it against production. Against the suites' local hub, `--hub <loopback url> --user <email>`
 signs in through the stand-in instead, and only there may `--yes` answer its confirmations.
 
-    pnpm --filter desk-hub deployment admin <init | genesis | adopt | refresh | pair | devices | remove-device>
+    pnpm --filter desk-hub deployment admin <init | genesis | adopt | refresh | pair | devices | remove-device | root add>
         [--config deploy/<file>.json] [--keys <file>] [--recovery <path | paper>] [--media-check] [--class web-cards|native-mac] [--ttl <s>] [<device id>]
 
 - `--keys <file>` (or `DESK_ADMIN_KEYS`): the admin device's keys, `{"device": "<id>", "keys": {"<id>.channel": <JWK>,
@@ -313,6 +313,12 @@ signs in through the stand-in instead, and only there may `--yes` answer its con
   device, endorsed by this device, and prints `listed: version n`.
 - `devices` lists the member's devices; `remove-device <id>` asks, then signs a successor dropping the device, its keys
   into `revoked` and its step-up key out of the root set if it was a root. Machines learn it at the hub's `state` notice, within its 10-minute poll at worst.
+- `root add <id>` makes a device of the signed-in member a root beside this one (P5 O8 M3: the owner's MAWS, whose
+  Settings › Org shows its id and fingerprint): a native-mac device with a step-up key, as this device is; a web-cards
+  device, another member's, one the head doesn't list or one already a root is refused. It asks `make <device> of
+  <email> (fingerprint <xxxxx-xxxxx>, step-up <kid>) a root of <org>? [y/N]` (the fingerprint `pair` showed for the
+  device, to compare with the app's), then signs a successor adding the step-up key's kid to `root.keys`. Either root
+  then signs any successor alone, and `remove-device` takes the added root out again.
 
 Where it writes: the deployment's own org, under the anchor `<keys>.org.json` (`{hub, org, genesis, version, roots,
 recoveryPub, pending?}`, 0600, each write synced and renamed into place), which `genesis` or `adopt` writes; every
@@ -328,8 +334,8 @@ again (`pending version n is not at the hub: sent again`); the hub holding anoth
 hub's other successor and refuses `fork`, which is the owner's to take to whoever runs the hub (or to the other admin
 device that signed it). Each subcommand but `init` holds `<keys>.org.json.lock` from its first read to its last write;
 a second one is refused, naming the holder's pid, host and start time, and a lock left by a run that died is removed by
-hand once nothing runs (`run-lock.ts`, never taken over). Against a deployment, `genesis`, `pair` and `remove-device` open
-`/dev/tty` before any request and confirm there: a shell with no controlling terminal stops at that open
+hand once nothing runs (`run-lock.ts`, never taken over). Against a deployment, `genesis`, `pair`, `remove-device` and `root add`
+open `/dev/tty` before any request and confirm there: a shell with no controlling terminal stops at that open
 (`Device not configured`) and sends nothing.
 
 ### The cutover's verbs (P5 O14 M2)
@@ -699,7 +705,7 @@ hands it to a command, and never printed or passed as an argument; output goes t
     go to stdout. The step refuses the mode when its stdout is a terminal. `code strip-legacy` reads no token and no
     keys.
 
-  The steps that change production (`access-sync`; `admin genesis`, `pair`, `remove-device`, `refresh`, `enroll`,
+  The steps that change production (`access-sync`; `admin genesis`, `pair`, `remove-device`, `root add`, `refresh`, `enroll`,
   `delegation`, `machine drop`, `provisioning revoke`, `keys`) say so in their first line, before they read any credential, and
   stop at the first one they lack.
 

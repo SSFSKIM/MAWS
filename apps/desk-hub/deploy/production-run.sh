@@ -21,8 +21,8 @@
 #                       signs the delegation into the admin device's pending proposal, which `admin delegation publish`
 #                       alone posts (once the stored code decodes under `code inspect`); every other signing verb
 #                       refuses until then.
-# The steps that change production (access-sync; admin genesis, pair, remove-device, refresh, enroll, delegation,
-# machine drop, provisioning revoke, keys) say so first.
+# The steps that change production (access-sync; admin genesis, pair, remove-device, root add, refresh, enroll,
+# delegation, machine drop, provisioning revoke, keys) say so first.
 # Environment (README "Production runs"):
 #   DESK_PRODUCTION_SECRETS  the directory holding CF_ACCESS_SETUP_TOKEN (access-sync)
 #   DESK_PRODUCTION_DIR      logs and state (default ~/.local/state/desk-hub-production, 0700): one log per access-sync
@@ -147,6 +147,7 @@ case $step in
       genesis) say "admin genesis changes production: it roots the org $PRODUCTION_ORG at $URL (a signed genesis), asking on the terminal first" ;;
       pair) say "admin pair changes production: it adds a device to $PRODUCTION_ORG's org state (a signed successor), asking on the terminal first" ;;
       remove-device) say "admin remove-device changes production: it revokes a device in $PRODUCTION_ORG's org state (a signed successor), asking on the terminal first" ;;
+      root) say "admin $verb changes production's roots: it makes a device a root of $PRODUCTION_ORG's org state beside this admin device (a signed successor), asking on the terminal first" ;;
       refresh) say "admin refresh changes production: it posts a no-change successor of $PRODUCTION_ORG's org state" ;;
       enroll) say "admin enroll changes production: it mints an enrollment and lists the machine in $PRODUCTION_ORG's org state (a signed successor), asking on the terminal first" ;;
       delegation)

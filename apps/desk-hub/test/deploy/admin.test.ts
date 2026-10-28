@@ -31,7 +31,7 @@ import { deviceEntry, successor } from '../../deploy/org-admin.ts';
 import type { PendingDevice } from '../../src/protocol/identity';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from '../support/local';
 import { adminKeysFile } from '../support/local-person';
-import { endorsed, genesis as genesisOf, next, signedBy, type TestDevice } from '../support/org';
+import { endorsed, genesis as genesisOf, memberId, next, signedBy, type TestDevice } from '../support/org';
 
 const APP = join(import.meta.dirname, '../..');
 const BIN = join(APP, 'deploy/bin.ts');
@@ -164,7 +164,7 @@ describe('the options', () => {
     }
     const f = fake();
     expect(await runAdmin(['forge', '--keys', keys], f.io)).toBe(2);
-    expect(f.err[0]).toMatch(/^usage: deployment admin <init \| genesis \| adopt \| refresh \| pair \| devices \| remove-device \| show \| enroll \| delegation \| machine \| code \| provisioning \| keys \| abandon-pending>/);
+    expect(f.err[0]).toMatch(/^usage: deployment admin <init \| genesis \| adopt \| refresh \| pair \| devices \| remove-device \| root \| show \| enroll \| delegation \| machine \| code \| provisioning \| keys \| abandon-pending>/);
   });
 });
 
@@ -187,7 +187,7 @@ describe('against a deployment', () => {
       child.on('close', (code) => (clearTimeout(timer), resolve({ code, stdout, stderr })));
     });
 
-  it('stops genesis, pair and remove-device at /dev/tty when the shell has none, before any request', async () => {
+  it('stops genesis, pair, remove-device and root add at /dev/tty when the shell has none, before any request', async () => {
     const config = unreachableConfig();
     const keys = join(dir('keys'), 'keys.json');
     const recovery = join(dir('volume'), 'recovery.json');
@@ -195,10 +195,11 @@ describe('against a deployment', () => {
       detached(['genesis', '--config', config, '--keys', keys, '--recovery', recovery]),
       detached(['pair', '--class', 'web-cards', '--config', config, '--keys', keys]),
       detached(['remove-device', 'phone-1', '--config', config, '--keys', keys]),
+      detached(['root', 'add', 'app-mac', '--config', config, '--keys', keys]),
     ]);
     for (const run of runs) {
       expect(run.code).toBe(1);
-      expect(run.stderr).toMatch(/cannot open \/dev\/tty \(Device not configured: no controlling terminal\): (genesis|pair|remove-device) asks the owner there before it signs anything; nothing was sent/);
+      expect(run.stderr).toMatch(/cannot open \/dev\/tty \(Device not configured: no controlling terminal\): (genesis|pair|remove-device|root add) asks the owner there before it signs anything; nothing was sent/);
       expect(run.stdout).toBe('');
     }
     expect(existsSync(recovery)).toBe(false);
@@ -607,6 +608,168 @@ describe('a root device revoked', () => {
     const head = ((await hub.fetchAs(ADMIN, '/api/org/state').then((r) => r.json())) as { head: SignedOrgState }).head;
     expect(head.state.root.keys).toEqual([await keyId(admin.stepUp.pub)]);
     expect(head.state.revoked.map((r) => r.keyId).sort()).toEqual([await keyId(second.channelPub), kid].sort());
+  });
+});
+
+describe('root add', () => {
+  // The owner's co-root step (P5 O8 M3, "The co-root"): the app's device, paired under the owner, made a root beside
+  // this admin device by the one verb that adds a root. Each successor of a two-root head needs one root's signature.
+  let hub: LocalHub;
+  const keys = join(scratch, 'root-add-keys', 'keys.json');
+  const asLocal = () => ['--hub', hub.url, '--user', ADMIN, '--keys', keys];
+  const served = async () => ((await hub.fetchAs(ADMIN, '/api/org/state').then((r) => r.json())) as { head: SignedOrgState }).head;
+  const postState = async (signed: SignedOrgState) => {
+    const response = await hub.fetchAs(ADMIN, '/api/org/state', { body: signed });
+    return { status: response.status, error: ((await response.json()) as { error?: string }).error };
+  };
+  let member: string;
+  let adminKid: string;
+  /** The app's device as M1 registers it (its id the channel key's kid), its step-up key in hand to sign as the app does. */
+  let app: { device: Omit<Device, 'endorsement'>; stepUp: Awaited<ReturnType<typeof generateSigningKey>>; kid: string; fingerprint: string };
+  /** A second admin member's native-mac device, its step-up key in hand. */
+  let other: { member: string; device: Device; stepUp: Awaited<ReturnType<typeof generateSigningKey>> };
+
+  /** `pair --class <cls>` answered by `device` (its MAC under the printed code's `k`); `pair`'s output. */
+  async function paired(device: Omit<Device, 'endorsement'>): Promise<string[]> {
+    const f = fake();
+    const running = runAdmin(['pair', '--class', device.class, '--ttl', '20', ...asLocal(), '--yes'], f.io);
+    const deadline = Date.now() + 15_000;
+    let line: string | undefined;
+    while (!(line = f.out.find((l) => l.startsWith('pairing code: '))) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+    const code = decodePairingCode(line!.slice('pairing code: '.length))!;
+    const { id, ...rest } = device;
+    const mac = await pairingMac(base64urlDecode(code.k), { org: code.org, member: code.member, device });
+    expect((await hub.fetchAs(ADMIN, '/api/devices/pending', { body: { deviceId: id, ...rest, mac } })).status).toBe(201);
+    expect(await running).toBe(0);
+    return f.out;
+  }
+
+  beforeAll(async () => {
+    hub = await startLocalHub();
+    expect(await runAdmin(['init', '--keys', keys], fake().io)).toBe(0);
+    expect(await runAdmin(['genesis', '--recovery', join(dir('volume'), 'recovery.json'), ...asLocal(), '--yes'], fake().io)).toBe(0);
+    const admin = await readAdminKeys(keys);
+    adminKid = await keyId(admin.stepUp.pub);
+    member = ((await hub.fetchAs(ADMIN, '/api/me').then((r) => r.json())) as { member: { id: string } }).member.id;
+
+    // The app's device, paired as native-mac; `pair`'s fingerprint line kept for the comparison.
+    const channel = await generateSigningKey();
+    const stepUp = await generateSigningKey();
+    const device: Omit<Device, 'endorsement'> = { id: await keyId(channel.pub), class: 'native-mac', keyStorage: 'software', channelPub: channel.pub, stepUpPub: stepUp.pub };
+    const shown = (await paired(device)).find((l) => l.startsWith(`pending: ${device.id} `))!;
+    app = { device, stepUp, kid: await keyId(stepUp.pub), fingerprint: / fingerprint (\S+)$/.exec(shown)![1] };
+
+    // A phone (web-cards: no step-up key), paired the same way.
+    const passkey = await generateSigningKey();
+    await paired({
+      id: 'root-phone',
+      class: 'web-cards',
+      keyStorage: 'webcrypto',
+      channelPub: (await generateSigningKey()).pub,
+      passkey: { credentialId: base64urlEncode(crypto.getRandomValues(new Uint8Array(16))), publicKey: passkey.pub, rpId: new URL(hub.url).hostname },
+    });
+
+    // A second admin, whose Mac carries a step-up key: a device under another member than the deployment admin's.
+    const otherStepUp = await generateSigningKey();
+    const otherDevice: Device = { id: 'other-admin-mac', class: 'native-mac', keyStorage: 'software', channelPub: (await generateSigningKey()).pub, stepUpPub: otherStepUp.pub };
+    other = { member: memberId(), device: otherDevice, stepUp: otherStepUp };
+    const added = await signOrgState(await successor((await served()).state, (s) => void s.members.push({ id: other.member, email: 'second-admin@example.com', role: 'admin', devices: [otherDevice] })), [admin.stepUp]);
+    expect(await postState(added)).toMatchObject({ status: 201 });
+    // The admin's anchor follows the head the test signed.
+    expect(await runAdmin(['devices', ...asLocal()], fake().io)).toBe(0);
+  });
+  afterAll(() => hub?.close());
+
+  it("refuses a web-cards device, another member's device (a second admin's), an unknown id and a declined confirmation, signing nothing", async () => {
+    const before = (await served()).state.version;
+    for (const [id, why] of [
+      ['root-phone', /^admin: root-phone is a web-cards device: only a native-mac device with a step-up key signs org states$/],
+      ['other-admin-mac', new RegExp(`^admin: ${member} has no device other-admin-mac in the head \\(version ${before}\\)$`)],
+      ['no-such-device', new RegExp(`^admin: ${member} has no device no-such-device in the head \\(version ${before}\\)$`)],
+    ] as const) {
+      const f = fake();
+      expect(await runAdmin(['root', 'add', id, ...asLocal(), '--yes'], f.io), id).toBe(1);
+      expect(f.err, id).toEqual([expect.stringMatching(why)]);
+      expect(f.out.some((l) => l.startsWith('make ')), id).toBe(false);
+    }
+    const declined = fake(['n']);
+    expect(await runAdmin(['root', 'add', app.device.id, ...asLocal()], declined.io)).toBe(1);
+    expect(declined.err).toEqual(['admin: not made a root: nothing was signed']);
+    expect((await served()).state.version).toBe(before);
+    expect((await served()).state.root.keys).toEqual([adminKid]);
+    const bare = fake();
+    expect(await runAdmin(['root', 'add', ...asLocal()], bare.io)).toBe(1);
+    expect(bare.err).toEqual(['admin: root add <device id>']);
+  });
+
+  it("confirms with the device, its member, pair's fingerprint and the step-up kid, then adds the kid to the root set", async () => {
+    const before = await served();
+    const f = fake();
+    expect(await runAdmin(['root', 'add', app.device.id, ...asLocal(), '--yes'], f.io)).toBe(0);
+    // The fingerprint over the head's entry (its endorsement dropped) is the line `pair` printed for the device.
+    const listed = before.state.members.find((m) => m.id === member)!.devices.find((d) => d.id === app.device.id)!;
+    expect(listed.endorsement).toBeDefined();
+    expect(await pairingFingerprint(ORG, member, listed)).toBe(app.fingerprint);
+    expect(f.out).toEqual([
+      `head version ${before.state.version}, issued 0 days ago`,
+      `make ${app.device.id} native-mac software rpId - of ${ADMIN} (fingerprint ${app.fingerprint}, step-up ${app.kid}) a root of ${ORG}? [y/N] yes (--yes)`,
+      `root added: ${app.device.id}, step-up ${app.kid} (version ${before.state.version + 1})`,
+    ]);
+    const after = await served();
+    expect(after.state.root.keys).toEqual([adminKid, app.kid]);
+    const { root, version, prev, issued, ...rest } = after.state;
+    const { root: r0, version: v0, prev: p0, issued: i0, ...was } = before.state;
+    expect([root.recoveryPub === r0.recoveryPub, version, prev === p0, prev, issued >= i0]).toEqual([true, v0 + 1, false, await stateHash(before.state), true]);
+    expect(rest).toEqual(was);
+
+    const again = fake();
+    expect(await runAdmin(['root', 'add', app.device.id, ...asLocal(), '--yes'], again.io)).toBe(1);
+    expect(again.err).toEqual([`admin: ${app.device.id} is a root already (step-up ${app.kid})`]);
+    expect((await served()).state.version).toBe(after.state.version);
+  });
+
+  it('accepts a successor of the two-root head signed by either root alone, and refuses one signed by a key outside the set', async () => {
+    const admin = await readAdminKeys(keys);
+    const byAdmin = await signOrgState(await successor((await served()).state, () => {}), [admin.stepUp]);
+    expect(await verifySuccessor(await served(), byAdmin, [])).toEqual({ ok: true });
+    expect(await postState(byAdmin)).toMatchObject({ status: 201 });
+    const byApp = await signOrgState(await successor(byAdmin.state, () => {}), [app.stepUp]);
+    expect(await verifySuccessor(byAdmin, byApp, [])).toEqual({ ok: true });
+    expect(await postState(byApp)).toMatchObject({ status: 201 });
+    const outsider = await signOrgState(await successor(byApp.state, () => {}), [await generateSigningKey()]);
+    expect(await verifySuccessor(byApp, outsider, [])).toEqual({ ok: false, code: 'not-root-signed' });
+    expect(await postState(outsider)).toEqual({ status: 409, error: 'not-root-signed' });
+    // The deployment admin verifies the app's successor in its chain and signs on top of it.
+    const f = fake();
+    expect(await runAdmin(['refresh', ...asLocal()], f.io)).toBe(0);
+    expect(f.out.at(-1)).toBe(`refreshed: version ${byApp.state.version + 1} (no change)`);
+  });
+
+  it('refuses a successor signed only by a root key that the same successor adds (the parent root set decides)', async () => {
+    const head = await served();
+    const otherKid = await keyId(other.stepUp.pub);
+    const selfAdded = await successor(head.state, (s) => void s.root.keys.push(otherKid));
+    // The second admin's step-up key is a well-formed root of the successor: only the signer's root is in question.
+    const signedBySelf = await signOrgState(selfAdded, [other.stepUp]);
+    expect(await verifySuccessor(head, signedBySelf, [])).toEqual({ ok: false, code: 'not-root-signed' });
+    expect(await postState(signedBySelf)).toEqual({ status: 409, error: 'not-root-signed' });
+    expect(await verifySuccessor(head, await signOrgState(selfAdded, [(await readAdminKeys(keys)).stepUp]), [])).toEqual({ ok: true });
+    expect((await served()).state.version).toBe(head.state.version);
+  });
+
+  it("removes the app's device as any device, leaving the admin device the one root, and never the admin's own", async () => {
+    const admin = await readAdminKeys(keys);
+    expect((await served()).state.root.keys).toEqual([adminKid, app.kid]);
+    const self = fake();
+    expect(await runAdmin(['remove-device', admin.id, ...asLocal(), '--yes'], self.io)).toBe(1);
+    expect(self.err.join('\n')).toMatch(/is this admin device/);
+    const f = fake();
+    expect(await runAdmin(['remove-device', app.device.id, ...asLocal(), '--yes'], f.io)).toBe(0);
+    const head = await served();
+    expect(head.state.root.keys).toEqual([adminKid]);
+    expect(head.state.revoked.map((r) => r.keyId).sort()).toEqual([await keyId(app.device.channelPub), app.kid].sort());
+    // The app no longer signs: its successor is refused by the root set it left.
+    expect(await verifySuccessor(head, await signOrgState(await successor(head.state, () => {}), [app.stepUp]), [])).toEqual({ ok: false, code: 'not-root-signed' });
   });
 });
 

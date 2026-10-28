@@ -497,6 +497,7 @@ describe.skipIf(!zsh)('production-run.sh', () => {
       [['keys', 'retire'], /^admin keys retire changes production: it signs a successor of .* retiring the legacy org key/],
       [['keys', 'retire', '--undo'], /^admin keys retire changes production: .*--undo: taking the retirement back/],
       [['keys', 'purge'], /^admin keys purge changes production: it deletes every wrapped copy of .*'s org key at .*, which cannot be undone/],
+      [['root', 'add', 'app-mac'], /^admin root add changes production's roots: it makes a device a root of .*'s org state beside this admin device \(a signed successor\), asking on the terminal first$/],
     ])('admin %s says first what it changes, before it reads any credential', (args, first) => {
       const w = world();
       const run = w.run('production-run.sh', ['admin', ...args]);
