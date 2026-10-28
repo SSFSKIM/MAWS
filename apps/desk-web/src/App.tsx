@@ -1,6 +1,8 @@
 // The desk's frame: sign-in (Access admits the person; `/api/me` names the member), the device's org key, the grid's
 // socket, the route — the grid, every session of the org, or a project — and the PWA's part: the service worker, this device's notifications
-// handed to the hub again at start, and the card a tapped notification opens. A phone draws a compact top bar.
+// handed to the hub again at start, and the card a tapped notification opens. A phone draws a compact top bar. This
+// browser as a `web-cards` device (P5 O13 M3: its record, the org state it verified, the listings, the push binding) is
+// started with the member, and its Device panel is reached from the top bar and the phone's menu.
 //
 // The first load is the grid's: the project view (with MAWS's Markdown and request cards) and the dialogs load as
 // chunks of their own when first opened, so the phone's first screen does not wait on them. So does the latency
@@ -12,10 +14,7 @@ import { fetchMe, SignInError, type Me } from './hub/me';
 import { useAccess, watchAccess } from './hub/access';
 import { loadDeviceKey, useKeyHolder } from './key/holder';
 import { hubBase } from './hub/base';
-import { recordPushOutcome } from './push/outcome';
-import { browserPushEnv, resyncPush } from './push/device';
 import { orgWaiting, showBadge } from './pwa/badge';
-import { registerServiceWorker } from './pwa/service-worker';
 import { followHistory, useDeskLayout } from './shell/layout';
 import { usePhoneProject } from './shell/phone';
 import { useNarrow } from './shell/viewport';
@@ -31,6 +30,7 @@ const LatencyOverlay = lazy(() => loadChunk(() => import('./latency/LatencyOverl
 const KeyDialog = lazy(() => loadChunk(() => import('./views/key/KeyDialog').then((m) => ({ default: m.KeyDialog }))));
 const MachinesDialog = lazy(() => loadChunk(() => import('./views/machines/MachinesDialog').then((m) => ({ default: m.MachinesDialog }))));
 const NotificationsDialog = lazy(() => loadChunk(() => import('./views/notifications/NotificationsDialog').then((m) => ({ default: m.NotificationsDialog }))));
+const DevicePanel = lazy(() => loadChunk(() => import('./views/cards/DevicePanel').then((m) => ({ default: m.DevicePanel }))));
 
 const queries = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
 
@@ -70,7 +70,7 @@ function SignedIn() {
   return <Desk me={me.data} />;
 }
 
-type Panel = 'key' | 'machines' | 'notifications' | 'menu' | null;
+type Panel = 'key' | 'machines' | 'notifications' | 'device' | 'menu' | null;
 
 function Desk({ me }: { me: Me }) {
   const route = useDeskLayout((s) => s.route);
@@ -86,11 +86,21 @@ function Desk({ me }: { me: Me }) {
   useEffect(() => watchAccess(), []);
   useEffect(() => startGrid(hubBase()), []);
   useEffect(() => void loadDeviceKey(me.org.id), [me.org.id]);
-  // A device already subscribed hands its subscription to the hub again; what came of it is kept for the
+  // The device's record and org state, read once the member is known. A device already subscribed hands its
+  // subscription to the hub again (bound to the device while the org lists it); what came of it is kept for the
   // Notifications panel, which shows a refusal and offers Retry.
+  // Its modules (the protocol package's verification with them) load as a chunk of their own, after the first screen.
   useEffect(() => {
-    void recordPushOutcome(resyncPush(browserPushEnv(registerServiceWorker())));
-  }, []);
+    let live = true;
+    let stop: (() => void) | null = null;
+    void loadChunk(() => import('./cards/start')).then((m) => {
+      if (live) stop = m.startDevice(me);
+    });
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, [me]);
   // The app icon's badge follows the grid while the app is open (a push sets it from its payload while it is not), so
   // a request answered anywhere clears it.
   const gridLoaded = useGrid((s) => s.loaded);
@@ -116,6 +126,7 @@ function Desk({ me }: { me: Me }) {
         {(panel === 'key' || (secondMethodDue && panel === null)) && <KeyDialog me={me} onClose={close} />}
         {panel === 'machines' && <MachinesDialog me={me} onClose={close} />}
         {panel === 'notifications' && <NotificationsDialog onClose={close} />}
+        {panel === 'device' && <DevicePanel me={me} onClose={close} />}
       </Suspense>
       {panel === 'menu' && <PhoneMenu me={me} open={setPanel} onClose={close} />}
     </div>
@@ -202,6 +213,9 @@ function TopBar({ me, open }: { me: Me; open: (panel: Panel) => void }) {
         <button type="button" onClick={() => open('notifications')} className="rounded-sm px-1 hover:bg-bg-hover hover:text-fg">
           Notifications
         </button>
+        <button type="button" onClick={() => open('device')} className="rounded-sm px-1 hover:bg-bg-hover hover:text-fg">
+          Device
+        </button>
         <button type="button" onClick={() => open('machines')} className="rounded-sm px-1 hover:bg-bg-hover hover:text-fg">
           Machines
         </button>
@@ -262,6 +276,9 @@ function PhoneMenu({ me, open, onClose }: { me: Me; open: (panel: Panel) => void
       <div role="dialog" aria-modal="true" aria-label="Menu" className="w-full rounded-t-lg border-t border-border-strong bg-bg-overlay p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] text-fg shadow-lg">
         <button type="button" className={row} onClick={() => open('notifications')}>
           Notifications
+        </button>
+        <button type="button" className={row} onClick={() => open('device')}>
+          Device
         </button>
         <button type="button" className={row} onClick={() => open('key')}>
           Org key
