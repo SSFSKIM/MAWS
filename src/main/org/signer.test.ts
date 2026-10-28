@@ -572,13 +572,17 @@ describe('the pending slot', () => {
     expect(next.prompts).toHaveLength(1);
   });
 
-  it('posts nothing when a sibling is adopted while the exposure is written: the proposal reads as the fork it now is', async () => {
+  // A sibling of the pending state arrives (the feed, a link's handshake) and the held view adopts it, moving its head
+  // in memory, while one of the slot's writes is held open: the slot's first write (before the post captures the head
+  // it plans on), or the exposure write (after it). Either way the proposal is not posted, and reads as the fork it is.
+  it.each([
+    { write: 'the slot\'s first write', exposed: false },
+    { write: 'the exposure write', exposed: true },
+  ])('posts nothing when a sibling is adopted during $write: the proposal reads as the fork it now is', async ({ exposed }) => {
     const h = await harness();
     const theirs = await adminSuccessor(h.genesis);
-    // The exposure write is held open; meanwhile a sibling of the pending state arrives (the feed, a link's handshake)
-    // and the held view adopts it, moving its head before the write lands.
     h.gates.write = async (name, value) => {
-      if (name !== SIGNING_FILE || (value as SigningFile).pending?.exposed.hub !== true) return;
+      if (name !== SIGNING_FILE || (value as SigningFile).pending?.exposed.hub !== exposed) return;
       h.gates.write = null;
       h.hub.states.push(theirs);
       await h.held.adoptServed({ chain: [theirs], head: null, transitions: [], certificates: null });
@@ -587,7 +591,20 @@ describe('the pending slot', () => {
     expect(outcome).toMatchObject({ ok: false, reason: 'hub' });
     expect(h.hub.posts).toEqual([]);
     expect(h.held.head()).toEqual(theirs);
-    await vi.waitFor(() => expect(h.signer.pending()).toMatchObject({ version: 2, exposed: true, fork: true }));
+    await vi.waitFor(() => expect(h.signer.pending()).toMatchObject({ version: 2, exposed, fork: true }));
+  });
+
+  it('a settle posts nothing for a slot whose parent is no longer the held head (a sibling adopted with no hub read)', async () => {
+    const h = await harness({ hub: false });
+    expect(await h.signer.sign(noChangeEdit())).toMatchObject({ ok: false, reason: 'hub' });
+    const theirs = await adminSuccessor(h.genesis);
+    h.hub.states.push(theirs);
+    h.online = true;
+    // The settle's read of the hub brings the sibling; the hub's head is not the parent, so nothing is posted.
+    await h.signer.settle();
+    expect(h.hub.posts).toEqual([]);
+    expect(h.held.head()).toEqual(theirs);
+    await vi.waitFor(() => expect(h.signer.pending()).toMatchObject({ version: 2, exposed: false, fork: true }));
   });
 
   it('still names a rejected proposal the hub kept and serves later', async () => {

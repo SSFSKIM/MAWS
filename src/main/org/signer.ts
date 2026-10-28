@@ -321,9 +321,19 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     const unsent = `version ${version} was not posted, and stays pending until this Mac signs in again`;
     if (!live(asked)) return stopped(unsent);
     if (deps.hub() === null) return { ok: false, reason: 'hub', detail: 'no hub: the state stays pending until it can be posted' };
-    // The held line the post is made on: an adoption while the exposure is written (a sibling, a recovery) moves it.
+    // The held line the post is made on, and the proposal must still be its successor: an adoption between the slot's
+    // write and here (a sibling whose in-memory head moved before its anchor's turn in the commit queue, a recovery)
+    // leaves a proposal that can only fork. It is not posted, and `judgePending` reads it as the fork it is. An
+    // adoption while the exposure is written is caught by the identity check after it.
     const view = deps.held();
     const head = view?.head() ?? null;
+    const parent = head === null ? null : await stateHash(head.state);
+    const onLine = view !== null && deps.held() === view && view.head() === head && head !== null && head.state.version === version - 1 && parent === signed.state.prev;
+    if (!onLine) {
+      if (await clearIfHeld()) return { ok: true, version };
+      log(`version ${version}: the held head is not its parent; nothing was posted`);
+      return { ok: false, reason: 'hub', detail: `the held org state is no longer version ${version}'s parent: nothing was posted, and it stays pending` };
+    }
     try {
       await store.update((file) => ({ next: withExposure(file, signed, { hub: true }), value: undefined }));
     } catch (error) {
