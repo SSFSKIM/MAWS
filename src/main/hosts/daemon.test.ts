@@ -20,7 +20,7 @@ import { daemonStatus } from '../../../test/support/builders';
 import { FakeManagers } from '../../../test/support/fake-units';
 import { procStartOf } from '../../engine-host/supervisor-files';
 import { HELLO_TIMEOUT_MS, reachMachine } from '../../mawsd/machine-client';
-import type { HostMode } from './mode';
+import { DEFAULT_PROFILE_REFUSAL, type HostMode } from './mode';
 import {
   awaitDaemonWelcome,
   type AwaitDaemonDeps,
@@ -54,6 +54,14 @@ afterEach(() => rmSync(home, { recursive: true, force: true }));
 
 const logs: string[] = [];
 beforeEach(() => (logs.length = 0));
+// The process's exit, which never returns: a test sees it as this error, its code recorded.
+class Exited extends Error {
+  constructor(readonly code: number) {
+    super(`exit ${code}`);
+  }
+}
+const exits: number[] = [];
+beforeEach(() => (exits.length = 0));
 const deps = (over: Partial<LaunchDeps> = {}): LaunchDeps => ({
   platform: 'darwin',
   run: managers.run,
@@ -65,6 +73,11 @@ const deps = (over: Partial<LaunchDeps> = {}): LaunchDeps => ({
   leaveDaemon: async () => void logs.push('left the daemon shape'),
   awaitDaemon: async () => {}, // the unit's mawsd up at once, unless a test says otherwise
   log: (line) => void logs.push(line),
+  exit: (code, line) => {
+    logs.push(line);
+    exits.push(code);
+    throw new Exited(code);
+  },
   ...over,
 });
 const settle = async (launch: LaunchShape | Promise<LaunchShape>) => await launch;
@@ -102,6 +115,16 @@ describe('the mode table', () => {
               it(name, async () => {
                 if (unit) await installUnit();
                 const env = { ...harness, ...(asked ? { MAWS_HOST_MODE: asked } : {}) };
+                if (Object.keys(harness).length > 0 && isDefault) {
+                  // a test or harness launch never plans against the default profile (testLaunchRefusal)
+                  logs.length = 0;
+                  expect(() => resolveLaunch({ env, shape, packaged, profileDir: defaultProfile(), program: packaged ? PACKAGED : CHECKOUT }, deps({ env }))).toThrow(Exited);
+                  expect(exits).toEqual([1]);
+                  expect(managers.changes(), 'no unit is written, loaded or removed').toEqual([]);
+                  expect(existsSync(plistPath())).toBe(unit);
+                  expect(logs).toEqual([DEFAULT_PROFILE_REFUSAL]);
+                  return;
+                }
                 const launch = await settle(resolveLaunch({ env, shape, packaged, profileDir: isDefault ? defaultProfile() : scratchProfile(), program: packaged ? PACKAGED : CHECKOUT }, deps({ env })));
                 const want = expected(asked, Object.keys(harness).length > 0, shape, packaged, isDefault, unit);
                 expect(launch).toEqual(want.launch);
@@ -115,6 +138,43 @@ describe('the mode table', () => {
                 expect(logs.includes('left the daemon shape')).toBe(want.uninstall);
               });
             }
+});
+
+// P5 O2 landing (O3's planner, P9): a test launch with no MAWS_USER_DATA lands on the default profile, where the owner's
+// mawsd may be up. Planned like any launch, an embedded plan would end that mawsd and its pty host (their terminals and
+// kept sessions with them), and a packaged one install or uninstall the owner's unit. It exits first, with one line.
+describe('a test or harness launch on the default profile', () => {
+  for (const harness of [{ MAWS_E2E: '1' }, { MAWS_HARNESS: '1' }])
+    for (const asked of [undefined, 'utility', 'detached', 'daemon'] as const)
+      for (const shape of ['embedded', 'daemon'] as const)
+        for (const packaged of [false, true])
+          it(`${Object.keys(harness)[0]} MAWS_HOST_MODE=${asked ?? '(unset)'} shape ${shape} ${packaged ? 'packaged' : 'unpackaged'}: exits non-zero before touching the owner's unit or daemon`, async () => {
+            await installUnit(); // the owner's LaunchAgent, loaded
+            const paths = daemonPaths(defaultProfile()); // the owner's mawsd and socket-mode pty host up
+            mkdirSync(paths.ptyHost, { recursive: true });
+            writeLock(join(paths.dir, 'mawsd.lock'), process.pid, 'owner');
+            writeLock(join(paths.ptyHost, 'host.lock'), process.pid, 'owner');
+            logs.length = 0;
+            const reached: string[] = [];
+            const env = { ...harness, ...(asked ? { MAWS_HOST_MODE: asked } : {}) };
+            const launch = () =>
+              resolveLaunch(
+                { env, shape, packaged, profileDir: defaultProfile(), program: packaged ? PACKAGED : CHECKOUT },
+                deps({ env, leaveDaemon: async () => void reached.push('leaveDaemon'), awaitDaemon: async () => void reached.push('awaitDaemon') }),
+              );
+            expect(launch).toThrow(Exited);
+            expect(exits).toEqual([1]);
+            expect(logs).toEqual([DEFAULT_PROFILE_REFUSAL]);
+            expect(reached, 'the owner’s daemon is never left or awaited').toEqual([]);
+            expect(managers.changes(), 'the owner’s unit is never installed, started or uninstalled').toEqual([]);
+            expect(existsSync(plistPath())).toBe(true);
+          });
+
+  it('the same launch on a scratch profile plans as before', async () => {
+    const launch = await settle(resolveLaunch({ env: { MAWS_E2E: '1' }, shape: 'daemon', packaged: false, profileDir: scratchProfile(), program: CHECKOUT }, deps({ env: { MAWS_E2E: '1' } })));
+    expect(launch).toEqual({ mode: 'utility', daemon: null, unavailable: null });
+    expect(exits).toEqual([]);
+  });
 });
 
 describe('the default profile’s unit', () => {

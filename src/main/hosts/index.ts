@@ -19,11 +19,12 @@ import { appIdentity } from '@shared/host/identity';
 import type { MainBuild } from '@shared/ipc/schema/host'; // E11 §2.7
 import type { SupervisorShape } from '@shared/ipc/schema/settings';
 import { buildIdOf, SUPERVISOR_FILES } from '../../engine-host/supervisor-files';
-import { unitFor, type InstallDeps } from '../../mawsd/install';
+import { isDefaultProfile, unitFor, type InstallDeps } from '../../mawsd/install';
 import { DEFAULT_LABEL, type UnitProgram } from '../../mawsd/units/unit';
 import { emit } from '../ipc/events';
 import { registerMainHandler } from '../ipc/router';
 import { daemonHostSpecs, daemonStart, resolveLaunch, unitRunsThisApp, watchDaemon, type LaunchShape } from './daemon';
+import { testLaunchRefusal } from './mode'; // P5 O2 landing
 import { startHostStatus, type HostStatusService } from './status';
 import { createHostSupervisor, type HostSupervisor } from './supervisor';
 
@@ -59,7 +60,20 @@ const unitDeps = (): InstallDeps => ({
 // The launch's shape from the setting `supervisor.shape`, read once, with the unit work it needs done before any host
 // exists; synchronous when there is none (every profile but the default one).
 export function prepareLaunch(shape: SupervisorShape): LaunchShape | Promise<LaunchShape> {
-  return resolveLaunch({ env: process.env, shape, packaged: app.isPackaged, profileDir: app.getPath('userData'), program: program() }, { ...unitDeps(), log: (line) => console.log(line) });
+  return resolveLaunch({ env: process.env, shape, packaged: app.isPackaged, profileDir: app.getPath('userData'), program: program() }, { ...unitDeps(), log: (line) => console.log(line), exit: refuse });
+}
+
+// P5 O2 landing: a test or harness launch on the default profile (testLaunchRefusal) ends here, before the profile's
+// machine identity, settings or hosts are touched; prepareLaunch holds the same line.
+export function refuseTestLaunchOnDefaultProfile(): void {
+  const deps = unitDeps();
+  const refusal = testLaunchRefusal(process.env, isDefaultProfile(app.getPath('userData'), deps.platform, deps.env, deps.home));
+  if (refusal !== null) refuse(1, refusal);
+}
+
+function refuse(code: number, line: string): never {
+  console.error(line);
+  process.exit(code);
 }
 
 export function createHosts(mainBuild: MainBuild, launch: LaunchShape): HostSupervisor {

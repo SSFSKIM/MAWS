@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { hostModeFromEnv } from './mode';
+import { DEFAULT_PROFILE_REFUSAL, hostModeFromEnv, testLaunchRefusal } from './mode';
 
 describe('hostModeFromEnv', () => {
   // P5 O2 M7: with no override and no harness the shape decides
@@ -38,5 +38,26 @@ describe('hostModeFromEnv', () => {
   it('reads the flags as exactly "1"', () => {
     expect(hostModeFromEnv({ MAWS_E2E: '0' }, 'embedded')).toBe('detached');
     expect(hostModeFromEnv({ MAWS_HARNESS: 'true' }, 'daemon')).toBe('daemon');
+  });
+});
+
+// P5 O2 landing (O3's planner, P9): a test or harness launch on the default profile would plan against the owner's
+// daemon (leave it, or install or uninstall the owner's unit), so it refuses before any host work, whatever the mode
+describe('testLaunchRefusal', () => {
+  const MODES = [undefined, 'utility', 'detached', 'daemon', 'socket'] as const;
+  const HARNESSES: NodeJS.ProcessEnv[] = [{}, { MAWS_E2E: '1' }, { MAWS_HARNESS: '1' }, { MAWS_E2E: '1', MAWS_HARNESS: '1' }, { MAWS_E2E: '0', MAWS_HARNESS: 'true' }];
+  for (const asked of MODES)
+    for (const harness of HARNESSES)
+      for (const defaultProfile of [false, true]) {
+        const refused = (harness.MAWS_E2E === '1' || harness.MAWS_HARNESS === '1') && defaultProfile;
+        it(`${refused ? 'refuses' : 'lets'} ${JSON.stringify(harness)} MAWS_HOST_MODE=${asked ?? '(unset)'} on ${defaultProfile ? 'the default' : 'another'} profile`, () => {
+          const env = { ...harness, ...(asked ? { MAWS_HOST_MODE: asked } : {}) };
+          expect(testLaunchRefusal(env, defaultProfile)).toBe(refused ? DEFAULT_PROFILE_REFUSAL : null);
+        });
+      }
+
+  it('says so in one line naming MAWS_USER_DATA', () => {
+    expect(DEFAULT_PROFILE_REFUSAL).toContain('MAWS_USER_DATA');
+    expect(DEFAULT_PROFILE_REFUSAL).not.toContain('\n');
   });
 });

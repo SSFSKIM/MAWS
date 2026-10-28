@@ -10,7 +10,7 @@ import { hostname, totalmem } from 'node:os'; // C12: the default memory budget;
 import { app, BrowserWindow, dialog, screen } from 'electron';
 import type { ClientRef } from '@shared/ipc/client';
 import { pageOf } from './ipc/clients';
-import { createHosts, prepareLaunch, type LaunchShape } from './hosts'; // P5 O2 M7: prepareLaunch
+import { createHosts, prepareLaunch, refuseTestLaunchOnDefaultProfile, type LaunchShape } from './hosts'; // P5 O2 M7: prepareLaunch; the landing: the refusal
 import { dispatchLocal, installRouter } from './ipc/router'; // P5 O6 M3: dispatchLocal, the local link's and the stand-in's
 import { startSettings, type SettingsService } from './settings';
 import { startWithProfileLock } from './files/profile-lock';
@@ -174,6 +174,9 @@ process.on('SIGUSR1', () => {});
 
 // A fresh profile for the end-to-end smoke (and anyone else who wants one); must be set before the app is ready.
 if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DATA);
+// P5 O2 landing: a test or harness launch never runs on the default profile, whose daemon and LaunchAgent are the
+// owner's; it exits here, before the profile lock, the machine identity, the settings or a host (hosts/mode.ts).
+refuseTestLaunchOnDefaultProfile();
 // The smoke runs unattended, so nothing may wait on a person: Chromium keeps its storage key in a mock keychain
 // instead of asking the login keychain, whose access prompt an unsigned or re-signed build can raise.
 if (process.env.MAWS_E2E) app.commandLine.appendSwitch('use-mock-keychain');

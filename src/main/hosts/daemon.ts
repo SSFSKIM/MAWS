@@ -41,7 +41,7 @@ import { HELLO_TIMEOUT_MS, reachMachine } from '../../mawsd/machine-client';
 import { DEFAULT_LABEL, readIfPresent, UnitError, type Unit, type UnitProgram, type UnitState } from '../../mawsd/units/unit';
 import { isAlive, isSameProcess, procStartOf, readLock } from '../../engine-host/supervisor-files';
 import { PTY_HOST_FILES } from '../../pty-host/files';
-import { hostModeFromEnv, type HostMode } from './mode';
+import { hostModeFromEnv, testLaunchRefusal, type HostMode } from './mode';
 
 // ---- the shape ---------------------------------------------------------------------------------------------------------
 
@@ -136,6 +136,7 @@ export interface LaunchDeps extends InstallDeps {
   leaveDaemon?(paths: DaemonPaths): Promise<void>; // leaveDaemonShape unless a test brings its own
   awaitDaemon?(paths: DaemonPaths): Promise<void>; // awaitDaemonWelcome unless a test brings its own
   log(line: string): void;
+  exit(code: number, line: string): never; // the process ends, saying why on its last line (testLaunchRefusal)
 }
 
 // The default profile's unit, or none where there is no unit manager (the app runs on a Mac; a test may run on Linux).
@@ -148,10 +149,13 @@ function defaultUnit(deps: InstallDeps): Unit | null {
   }
 }
 
-// The mode table (mode.ts, then planShape) over the launch's facts, and the plan's unit work, before any host exists.
+// The mode table (mode.ts, then planShape) over the launch's facts, and the plan's unit work, before any host exists. A
+// test or harness launch on the default profile exits first, before the unit is read (testLaunchRefusal).
 export function resolveLaunch(input: LaunchInput, deps: LaunchDeps): LaunchShape | Promise<LaunchShape> {
-  const mode = hostModeFromEnv(input.env, input.shape);
   const defaultProfile = isDefaultProfile(input.profileDir, deps.platform, deps.env, deps.home);
+  const refusal = testLaunchRefusal(input.env, defaultProfile);
+  if (refusal !== null) deps.exit(1, refusal);
+  const mode = hostModeFromEnv(input.env, input.shape);
   const unit = defaultProfile ? defaultUnit(deps) : null;
   const plan = planShape({ mode, shape: input.shape, packaged: input.packaged, defaultProfile, unit: unit?.state() ?? { installed: false, loaded: false } });
   const target = { profileDir: input.profileDir, label: DEFAULT_LABEL };
