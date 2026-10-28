@@ -38,7 +38,7 @@ export interface DocPorts {
 }
 
 export interface ArtifactHostDeps {
-  ipc: Pick<MawsBridge, 'invoke' | 'on'>;
+  ipc: Pick<MawsBridge, 'invoke' | 'on' | 'localMachine'>;
   ports: DocPorts;
   log?: (line: string) => void;
 }
@@ -65,7 +65,10 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     lostOnResync.clear();
   });
 
-  ipc.on('engine.hostState', (state) => {
+  // P5 O6: the documents are this machine's (O7 spans artifacts across machines), and `engine.hostState` crosses machine
+  // links, so only this machine's engine host speaks for their ports, and only its revisions count.
+  ipc.on('engine.hostState', (state, from) => {
+    if (from.machine !== ipc.localMachine) return;
     if (state.revision <= hostRevision) return;
     hostRevision = state.revision;
     hostIsReady = state.state === 'ready';
