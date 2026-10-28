@@ -423,7 +423,7 @@ The Org page's final shape, where it lives and what more it shows are the owner'
 
 **Touches.**
 - New, under `src/main/org/`: `signer.ts` (the signer and its pending slot), `checks.ts` (the checks before signing, and the superseded offer), `weekly.ts` (the weekly successor's asking), `deliveries.ts` (direct revocation delivery), and their tests.
-- Changed, `src/main/org/`: `org-session.ts` (the signer's composition, `rekey`, the status's `signer` part), `hub-client.ts` (`postState`), `files.ts` (`signing.json`, `deliveries.json` and their validators), `register.ts` (the new commands), `timing.ts` (§H's M3 rows).
+- Changed, `src/main/org/`: `org-session.ts` (the signer's composition, `rekey`, the status's `signer` part), `hub-client.ts` (`postState`), `files.ts` (`signing.json` and its validator; `registration.json`'s `signing` and `rekey`), `register.ts` (the new commands), `timing.ts` (§H's M3 rows).
 - Changed, `src/main/device/`: `step-up.ts` (`createStateSigner`), `keys.ts` (the next keys, their promotion and the retired file's destruction).
 - Shared: `src/shared/ipc/schema/org.ts` (`OrgSignerStatus` on `registered`; `org.resign`, `org.revokeSuperseded`, `org.rekey`, `org.discardPending`; refusals).
 - Renderer: `settings-tab/OrgSection.tsx` and its test (the signer's lines and buttons), `settings-tab/copy.ts`.
@@ -436,31 +436,53 @@ The Org page's final shape, where it lives and what more it shows are the owner'
 **Decisions.**
 
 *Who signs, and with what.*
-- **This device is a root exactly when the held head's `root.keys` holds `keyId(keys.stepUp.pub)`.** The package makes a root an admin member's device's step-up key (`rootKeys`, `stateInvariants`), so the owner's app, paired under the owner, qualifies once `root add` lists it. Not a root, every sign is refused `not-root` and nothing is shown that would sign.
+- **This device is a root when the held head's `root.keys` holds `keyId(keys.stepUp.pub)`, and it may sign only when it is a root and its key file carries `excludedFromBackupAtCreation`.** The package makes a root an admin member's device's step-up key (`rootKeys`, `stateInvariants`), so the owner's app, paired under the owner, qualifies once `root add` lists it. The mark is a local fact nothing signed can carry (`loadDeviceKeys` continues after a failed exclusion and `fromFile` keeps the missing mark, `keys.ts:65-76`, `:155-159`), so it is checked here: an unmarked device is refused `unmarked` for every sign, even when the head lists it as a root, and the Org section offers new keys (below) instead of the `root add` guidance. Not a root, every sign is refused `not-root` and nothing is shown that would sign.
 - **The key stays in the device module** (P5 Decision Log 53). `step-up.ts` gains `createStateSigner({key, confirm})`, whose `sign(state, prompt)` runs the same Touch ID confirmation step-up uses (`promptTouchIDConfirmation`) and only then `signOrgState(state, [key])`. Main injects it into the session as it injects `stepUp`; the signer never sees the key. Rejected: handing `src/main/org/` the `CryptoKey`.
 - **Successors are composed in `signer.ts`** as `deploy/org-admin.ts`'s `successor()` does: a structured clone of the head's state, `version + 1`, `prev = stateHash(head.state)`, `issued = max(now, head.state.issued)`, then the edit. Before Touch ID, the unsigned state runs the checks; after signing, the signed state must pass `verifySuccessor(head, signed, transitions)` or it is refused `invalid` and never kept or sent. Rejected: moving `successor()` into `org-protocol` for six lines whose correctness the package's verifier already decides (the architect's ruling).
 
-*The pending slot* (`<userData>/org/signing.json`, §C), as `deployment admin`'s anchor keeps `pending`.
-- **Order.** Signed, the state is written to the slot with `files.write` (synced, renamed, the directory synced) before it goes anywhere: the hub or a machine.
-- **Posting.** `POST /api/org/state` with the signed state. `201` adopts it (`adoptServed` with the hub's chain since the held head), then clears the slot. `409 not-head` or `rollback`: the app reads the hub's chain and adopts it; if the hub's chain holds the pending state it is settled, else if the pending state was never delivered to a machine the slot is cleared and the edit is offered again on the new head (the weekly successor is simply dropped if the new head is under 7 days old), else the slot stays and the status reads `pending-fork`. Any other answer, or no answer, leaves it pending and the status says so.
-- **Settling** runs at start, at each feed open, and before any sign: the held chain holds the pending state → cleared; the hub holds no successor of its parent → the same bytes are posted again; another state holds its version → `pending-fork`. `org.discardPending` clears a `pending-fork` slot only while the hub's chain doesn't hold it, and only for a state no machine acknowledged, as `abandon-pending` does.
-- All slot writes run in M1's commit queue, after the session's other durable writes, never inside the held view's adoption queue (M1's rule).
+*The signing file* (`<userData>/org/signing.json`, §C): the pending slot, the delivery obligations and the weekly asking's dates, in one file with one writer.
+- **One writer, read-modify-write.** Every change to it (a new pending state, an exposure, a settlement, an acknowledgement, `lastAsked`, `lastNotified`) runs in M1's commit queue as read, change, write (`files.write`: synced, renamed, the directory synced), so no write replaces another's with an older snapshot. Never inside the held view's adoption queue (M1's rule).
+- **It fails closed**, unlike §C's other files. `registration.json` gains `signing: true` when the file is first written. A missing or unreadable `signing.json` while that flag is set is `problem: 'signing'`: every sign is refused `signing`, and only `org.resetSigning` (the owner's explicit act, with the line that a successor sent before the damage could still surface as a fork) writes a fresh file. Rejected: §C's "treated as absent", which after an unanswered post would let a second successor of the same parent be signed.
+
+*The pending slot*, as `deployment admin`'s anchor keeps `pending`.
+- **Order.** Signed, the state is written as `pending: {signed, parent, exposed: {hub: false, machines: []}}`, with its delivery obligation (below) in the same write, before it goes anywhere.
+- **Exposure is written before each send.** `exposed.hub` is set before the `POST`, and a machine's ref joins `exposed.machines` before its `endpoint.state` act. A send whose answer never came counts as exposed.
+- **Posting.** `POST /api/org/state` with the signed state. `201` adopts it (`adoptServed` with the hub's chain since the held head) and clears `pending`.
+  - `409 not-head` or `rollback`: the app reads the hub's chain and adopts it. If the hub's chain holds the pending state, it is settled. Otherwise the slot stays, and the status reads `pending-fork`, because an exposed proposal may be retained and served by the hub or a machine whatever their answers said.
+  - Any other answer, or no answer, leaves it pending, and the status says so.
+- **Settling** runs at start, at each feed open, and before any sign:
+  - the held chain holds the pending state → cleared;
+  - the hub holds no successor of its parent → the same bytes are posted again;
+  - another state holds its version → `pending-fork`.
+- **`org.discardPending`** clears a `pending-fork` slot only while the hub's chain doesn't hold it, and only after the owner confirms the Org section's line in `abandon-pending`'s words (`admin.ts:1155-1168`): a hub or machine that kept the proposal can still show it as a fork. The weekly successor that lost a race to the deployment admin therefore waits for that confirmation. It is rare once the owner stops `refresh`.
+- **Rejected:** clearing an exposed proposal on `409` because no machine acknowledged it, which the round showed unsafe. The hub has the bytes, and an applied delivery can lose its answer.
 
 *The checks before signing* (`checks.ts`; P5 Decision Logs 26, 30, 31). `checkSuccessor(head, next, superseded, now)` returns every finding, each `refuse` or `warn`:
 | Finding | Level | Rule |
 |---|---|---|
 | `revives-revoked` | refuse | a key id in `head.revoked` is a device's, machine's, root's or delegation's key in `next` (the package refuses it too; the app names it first) |
-| `prefix-equal`, `prefix-nested`, `prefix-covers` | refuse | a new delegation's prefix (compared by `machineNameKey`) equals, is a `<prefix>/…` of, or has as `<it>/…` another delegation's prefix, live or revoked (`deploy/admin.ts`'s `prefixProblem`, which the package's `stateInvariants` also enforces) |
-| `prefix-names-machine` | refuse | a machine's name, or a retained name in `machineNames`, falls under the new prefix |
+| `prefix-equal`, `prefix-nested`, `prefix-covers` | refuse | with `n` the new prefix and `p` another delegation's, live or revoked, both case-folded by `machineNameKey`: `n === p`; `n.startsWith(p)`; `p.startsWith(n)`. Raw string prefixes, as `stateInvariants` (`org-state.ts:101-104`) and `prefixProblem` (`admin.ts:817-820`) compare them, so `dc-` and `dc-prod-` collide; names have no `/` |
+| `prefix-names-machine` | refuse | `machineNameKey(name).startsWith(n)` for a machine's name or a retained name in `machineNames` |
 | `delegation-id-used` | refuse | a new delegation's id is a live or revoked delegation's |
-| `renew-expired` | refuse | a delegation's `expires` changes while the old value is not later than `next.issued` (the package's `keysAccounted` rule, named first) |
+| `renew-expired`, `renew-not-extension` | refuse | a delegation's `expires` changes and either the old or the new value is not later than `next.issued` (`keysAccounted`, `org-state.ts:202-206`), or the new value is not later than the old (P5 Decision Log 30: renewal extends) |
 | `drops-delegation` | warn | a delegation leaves `next.delegations`: shown in the prompt, its certificates' keys moving to `revoked` |
 | `superseded-keys` | warn | `head` was reached by a root transition and keys first listed in `superseded` states are not in `next.revoked` |
 
-A `refuse` finding ends the attempt with its code before Touch ID; `warn` findings are lines in the prompt. `supersededRevocations(head, superseded)` gives the keys the superseded states added that the head neither lists nor has retired or revoked; `org.revokeSuperseded` signs one successor revoking them all. M3's own edits are the no-change successor and that revocation; the delegation and device edits are M4's, and run these checks unchanged.
+A `refuse` finding ends the attempt with its code before Touch ID; `warn` findings are lines in the prompt.
+
+*The superseded states' revocations* (P5 Decision Log 30). A recovery rewinds the chain to a base below the head the app held, so a revocation signed honestly on the discarded branch is lost, and its key may be current again on the new line.
+- **Candidates** (`supersededRevocations(head, superseded)`): each entry of a superseded state's `revoked` that `head.revoked` lacks.
+- **For each candidate:**
+  - its key is current in `head` (a device's channel or step-up key, a machine's key, a delegation's `pub`): the successor removes its holder (the device from its member, the machine from `machines`, the delegation from `delegations`, a step-up kid from `root.keys`) and appends the entry;
+  - it is in `head.retired`: the entry moves from `retired` to `revoked`;
+  - neither: the head never trusts the key, so nothing is offered. `keysAccounted` (`org-state.ts:194-199`) refuses a new non-machine revocation of a key the predecessor neither held nor retired, and a key added only on the discarded branch is in that case.
+- **Never offered:** a candidate that would remove this device's own keys or empty `root.keys`. It is named in the offer for the owner to settle by other means.
+- **`org.revokeSuperseded`** signs one successor with them all, each listed in the prompt.
+
+M3's own edits are the no-change successor and that revocation. The delegation and device edits are M4's, and run these checks unchanged.
 
 *The weekly successor* (`weekly.ts`; Q6).
-- **Due**: this device is a root, no state is pending, and the held head's `issued` is at least `WEEKLY_DUE_DAYS` (7) days old.
+- **Due**: this device may sign (a root, its keys marked, `signing.json` readable), no state is pending, and the held head's `issued` is at least `WEEKLY_DUE_DAYS` (7) days old.
 - **Asking**: at the first `browser-window-focus` while due, if `lastAsked` in `signing.json` is not within `ASK_GAP_MS` (24 h), `lastAsked` is written first, then the signer signs the no-change successor, and Touch ID asks "re-sign the org state (no change)". A cancel ends it for the day; the quiet line stays.
 - **Notifying**: every `WEEKLY_CHECK_MS` (1 h), while due and no app window is focused, if `lastNotified` is not within `ASK_GAP_MS`, one notification ("The org state is N days old. MAWS will ask for Touch ID when you next open it."), `lastNotified` written first. A click focuses the app, which may ask.
 - **The quiet line** in the Org section while due: "Org state is N days old" with "Re-sign now", which signs at once (`org.resign`).
@@ -468,47 +490,67 @@ A `refuse` finding ends the attempt with its code before Touch ID; `warn` findin
 
 *Direct delivery* (`deliveries.ts`; RL §5.2).
 - **Which states.** One that moves any key id into `revoked` or `retired` relative to its parent. The weekly successor ends nothing and is never delivered.
-- **To whom.** Each machine of the roster at signing, less a machine the state itself removes. Kept in `deliveries.json` as `{version, owed: ref[]}` per state, written before the first send.
-- **How.** `link.act({action: 'endpoint.state', args: {states: view.since(max(1, version - DELIVERY_SPAN)).states up to and including the state, transitions: those since}, stepUp: 'never'})`, `DELIVERY_SPAN` 16, so a machine a little behind adopts the run (the endpoint's `#deliver` adopts what verifies and answers `{version}` or `not-newer`). `done`, or `failed` with `not-newer`, acknowledges. Anything else stays owed, sent again at that machine's next link up and every `DELIVERY_RETRY_MS` (1 h). A machine that leaves the roster is no longer owed.
-- The status lists the machines still owing an acknowledgement per version; M4's page shows them.
+- **To whom.** Each machine of the roster at signing, less a machine the state itself removes.
+- **The obligation is durable before anything is sent.** `signing.json`'s `deliveries` gains `{signed, owed: ref[]}` in the same write as the pending slot. It keeps the signed bytes, so delivery never depends on the hub having accepted the state: while the hub withholds it, the payload is the verified ancestry the held view holds plus the pending state itself. Publication (the slot) and delivery (the obligation) settle apart. The slot clears at the hub's acceptance, and the obligation clears when its last machine acknowledges or leaves the roster. A crash between them loses neither.
+- **The payload.** `link.act({action: 'endpoint.state', args: {states, transitions}, stepUp: 'never'})`, where `states` is a contiguous run ending at the delivered state and `transitions` are the held ones over it.
+  - The run starts `DELIVERY_SPAN` (16) states back.
+  - If the machine's answer is `not-newer` (the endpoint found no successor of its head in the run, `org-sync.ts:258-260`), it is sent again from genesis, or from the oldest state that keeps the act under `DELIVERY_MAX_BYTES` (512 KiB).
+  - The endpoint's `#deliver` (`endpoint.ts:671-682`) adopts what verifies from its own head.
+- **Acknowledgement.** Only an outcome `done` whose result's `version` is at least the delivered state's version. `not-newer` alone proves nothing: a machine far behind answers it too. Anything else stays owed, sent again at that machine's next link up and every `DELIVERY_RETRY_MS` (1 h). A machine that leaves the roster is no longer owed.
+- The status lists the machines still owing an acknowledgement per version, and M4's page shows them. A machine too far behind for the byte bound stays owed and catches up through its own hub sync. The status names it.
 
 *New keys* (P5 Decision Log 71; M1's `removed` refusal said M3 builds it).
 - **Offered** when `keys.json` lacks `excludedFromBackupAtCreation` (status `signer.rekey: 'unmarked'`) or the session reads `removed`.
-- **`org.rekey {code}`** runs M1's registration with a fresh pairing code for the registration's org and member, against a second key file: `createNextDeviceKeys(profile)` writes `device/keys.next.json` after excluding `device/` from backup, so it carries the mark. The old device stays signed in, and `current()` keeps answering for it, until the held head lists the new entry.
-- **Done**: in the commit queue, `promoteNextDeviceKeys(profile)` renames `keys.json` to `keys.retired.json` and `keys.next.json` to `keys.json`, the directory synced; then `registration.json`'s `device` changes; then `onChanged` fires and the links re-key. A crash between the renames finishes the promotion at the next load (`keys.json` absent, `keys.next.json` present).
+- **`org.rekey {code}`** runs M1's registration with a fresh pairing code for the registration's org and member, against a second key file. `createNextDeviceKeys(profile)` writes `device/keys.next.json` only after excluding `device/` from backup succeeds, so it carries the mark. A failed exclusion refuses `keys` and writes nothing. The old device stays signed in, and `current()` keeps answering for it, until the held head lists the new entry.
+- **Done: one recoverable transaction across the keys and the registration**, in the commit queue, fenced by the attempt's generation as M1's sign-in is (a sign-out or cancel advances it, and the attempt then deletes `keys.next.json` and writes nothing else).
+  1. `registration.json` gains `rekey: {device: <new id>}`.
+  2. `keys.json` is renamed to `keys.retired.json`.
+  3. `keys.next.json` is renamed to `keys.json`, and the directory is synced.
+  4. `registration.json`'s `device` becomes the new id and `rekey` is removed.
+  5. `onChanged` fires, and the links re-key.
+- **The replay** runs at load, before the missing-keys check and before `current()` is computed (`org-session.ts:574-584` returns `keys` today when `keys.json` is absent). It runs whenever `registration.json` holds `rekey`:
+  - The file whose `keyId(channel.pub)` equals `rekey.device` is found among `keys.json` and `keys.next.json`.
+  - The renames are completed as far as they got.
+  - Step 4 is written.
+  - If no file holds that id (the next keys were lost before step 2), `rekey` is removed and the old registration stands.
+  - Every boundary is tested, both renames done with the registration still old included.
 - **The old device** stays listed until a root removes it: the status names its id and the command (`… admin remove-device <old id>`; M4's page later). Once the held head lists neither of its keys outside `revoked` and `retired`, `destroyRetiredDeviceKeys(profile)` deletes `keys.retired.json`.
 - A cancel or refusal deletes `keys.next.json` and leaves the old registration as it was.
 
 *The co-root* (the owner's sitting; the desk track's owner reviews this hunk at the PR on the four points below).
-- `deployment admin root add <device id>`: through `anchored(ctx, true)` and `amend`, it finds the device under a member of the anchored head, refuses as `remove-device` and `delegation create` refuse, in their words (`refuse('…')`, "nothing was signed"), then appends `keyId(device.stepUpPub)` to `root.keys`. It is in `CONFIRMING`, and production-run.sh's verb list says it changes production's roots.
-- **(1) Which devices may be a root.** Only a device that signs org states as genesis's device does: class `native-mac` with a `stepUpPub` (genesis's is `deviceEntry`'s `native-mac`/`software`, `deploy/org-admin.ts:56`). Any other class is refused ("`<id>` is a `<class>` device: only a native-mac device with a step-up key signs org states"). A `web-cards` device can't carry a `stepUpPub` at all (`shapes.ts:81`), so its passkey device could never sign one; the refusal names it rather than leaving it to the package's `malformed`. Also refused: a device under a member who isn't `admin` (`rootKeys` counts admin members' devices only), no such device in the head, and a device already a root.
+- `deployment admin root add <device id>`: through `anchored(ctx, true)` and `amend`, it finds the device under the deployment admin's own member (`from.me.member.id`), as `remove-device` looks only there (`admin.ts:698-704`), so any root it adds is one `remove-device` can remove. A device under another member is refused ("`<member>` has no device `<id>` in the head"). The app is paired under the owner, the deployment admin's member, so this costs nothing now; a second admin's device becomes a root through M4's page. It refuses as `remove-device` and `delegation create` refuse, in their words (`refuse('…')`, "nothing was signed"), then appends `keyId(device.stepUpPub)` to `root.keys`. It is in `CONFIRMING`, and production-run.sh's verb list says it changes production's roots.
+- **(1) Which devices may be a root.** Only a device that signs org states as genesis's device does: class `native-mac` with a `stepUpPub` (genesis's is `deviceEntry`'s `native-mac`/`software`, `deploy/org-admin.ts:56`). Any other class is refused ("`<id>` is a `<class>` device: only a native-mac device with a step-up key signs org states"). A `web-cards` device can't carry a `stepUpPub` at all (`shapes.ts:81`), so its passkey device could never sign one; the refusal names it rather than leaving it to the package's `malformed`. Also refused: no such device under the deployment admin's member (the member is an `admin`, as `rootKeys` requires), and a device already a root.
 - **(2) What a successor needs once there are two roots.** One signature. `verifySuccessor` checks the successor with `rootSigned(after, next.sigs, rootKeys(before))`, which accepts when at least one of the successor's signatures verifies under any key of the parent's root set (`org-state.ts:255-267`, `:355`). So either root alone signs any successor, the other root's removal included; adding a root adds a signer, never a quorum. The test signs successors of a two-root head with each root alone, and one with a key outside the set refused `not-root-signed`.
 - **(3) The confirmation** names what `pair` names, so the owner compares it with the app's screen: "make `<describeEntry(device)>` of `<email>` (fingerprint `<pairingFingerprint(org, member, device)>`, step-up `<kid>`) a root of `<org>`? [y/N]". The fingerprint over the state's entry, its `endorsement` dropped, equals the one `pair` printed when the device was approved (`pairing.ts:138` drops it), and M3's Org section shows this device's fingerprint and id beside "Make this Mac a root: run `… admin root add <id>`".
 - **(4) Removing a root.** `remove-device` has no last-root guard: it refuses only the admin's own device ("`<id>` is this admin device: …", `admin.ts:701`), and removing a device filters its step-up kid out of `root.keys` (`:712`). With two roots that stays right: removing the app's device (a lost Mac) leaves the deployment admin the one root, and the deployment admin can never remove itself, so `stateInvariants`' non-empty root set always holds. Tests: two roots, `remove-device <app device>` accepted and `root.keys` back to the admin's kid alone, the app then reading `not-root`; the admin's own device still refused.
 - From then on two signers share the chain (finding F1). A deployment admin verb that races the app's successor gets `not-head`, and its next run refuses `fork` until the owner runs `abandon-pending`. Rare, visible, recoverable; residue.
 
-**Does not touch.** The Org page and its edits (M4): M3 exposes only re-sign, revoke-superseded, rekey and discard-pending. Revoking the deployment admin (M8). `apps/org-protocol/src/`, `apps/desk-hub/src/`, `src/endpoint/`, `apps/desk-web/`. `apps/desk-hub/deploy/` beyond `root add`.
+**Does not touch.** The Org page and its edits (M4): M3 exposes only re-sign, revoke-superseded, rekey, discard-pending and reset-signing. Revoking the deployment admin (M8). `apps/org-protocol/src/`, `apps/desk-hub/src/`, `src/endpoint/`, `apps/desk-web/`. `apps/desk-hub/deploy/` beyond `root add`.
 
 **Proves.** Acceptance 3, each test named by the behaviour it pins.
 - `signer.test.ts`, over fakes:
-  - refused `not-root` without a root key, and nothing signed;
+  - refused `not-root` without a root key, and `unmarked` for an unmarked device the head lists as a root, nothing signed in either;
   - the composed successor's version, `prev` and `issued` (never backwards against a head issued in the future);
   - checks run before Touch ID, a `refuse` ending it with no prompt; `invalid` when the signed state fails `verifySuccessor`;
-  - the slot written before the post, then cleared at `201`; a crash after the slot write settled at the next start by each of the three rules; `not-head` with the slot never delivered cleared and the edit offered on the new head; `not-head` after a delivery read as `pending-fork`; `discardPending` refused while the hub holds the state or a machine acknowledged it;
+  - the slot and the delivery obligation written in one write before any send; exposure written before the post and before each act; cleared at `201`; a crash after the slot write, and after the post before its answer was recorded, each settled at the next start by the three rules; `not-head` on an exposed proposal reading `pending-fork`, never cleared by itself; `discardPending` refused while the hub holds the state, and otherwise only after the owner's confirmation;
+  - a hub retaining a rejected proposal and serving it later: the app's slot still names it;
+  - `signing.json` unreadable or missing after its first write: every sign refused `signing` until `resetSigning`; a weekly date write racing a pending write, neither lost;
   - nothing signed while a state is pending.
-- `checks.test.ts`: each row of the table, each with a state built by `org-protocol`'s helpers, and each refuse also refused by the package where it refuses; `supersededRevocations` after a rewind.
-- `weekly.test.ts`: due only as a root at 7 days with nothing pending; the first focus asking once and `lastAsked` written first; a second focus the same day not asking; a cancel; the hourly notification only unfocused and once a day; "Re-sign now".
-- `deliveries.test.ts`: which states are delivered; owed machines written before sending; acknowledged by `done` and `not-newer`; retried at link up and on the clock; a machine leaving the roster no longer owed; a removed machine never sent to.
-- `keys.test.ts` (the device module's): the next keys carry the mark; promotion and a crash between its renames; destruction.
-- `org-session.test.ts`: `rekey` end to end over fakes, the old device answering `current()` until the new entry is listed, a cancel restoring nothing changed; the status's `signer` part.
-- `apps/desk-hub/test/deploy/admin.test.ts`: `root add` adds the kid; refuses a `web-cards` device, a non-admin member's device, an unknown id and a device already a root, each in its siblings' words; confirms with the device, its member, its fingerprint (equal to `pair`'s line for that device) and the kid; with two roots, successors signed by either root alone accepted by the package and the local hub; `remove-device` of the app's device leaving the admin the one root, and the admin's own device still refused.
+- `checks.test.ts`: each row of the table with states built by `org-protocol`'s helpers, each refuse also refused by the package where it refuses (`dc-` against `dc-prod-`, a machine `dc-prod-1` under a new `dc-`; a renewal at or before `issued`, and one shortening `expires`); `supersededRevocations` after a rewind: an honest revocation of a device present before the base and current again after the recovery offered, with the device removed; a device added only on the discarded branch not offered; a retired key moved to `revoked`; this device's own key never offered.
+- `weekly.test.ts`: due only when the device may sign, at 7 days, with nothing pending; the first focus asking once and `lastAsked` written first; a second focus the same day not asking; a cancel; the hourly notification only unfocused and once a day; "Re-sign now".
+- `deliveries.test.ts`: which states are delivered; the payload's run ending at the pending state while the hub withholds it; acknowledged only by `done` with a version at least the state's; `not-newer` resent from genesis under the byte bound, and still owed if the machine stays behind; retried at link up and on the clock; a machine leaving the roster no longer owed; a removed machine never sent to; the obligation outliving the slot's clearing across a crash.
+- `keys.test.ts` (the device module's): the next keys carry the mark, and a failed exclusion refuses with nothing written; promotion; destruction.
+- `org-session.test.ts`: `rekey` end to end over fakes, the old device answering `current()` until the new entry is listed; a cancel and a sign-out during it leaving the old registration and no next keys; the replay at each boundary of the transaction (after step 1, after each rename, both renames done with the registration still old) reaching the new device signed in; the status's `signer` part.
+- `apps/desk-hub/test/deploy/admin.test.ts`: `root add` adds the kid; refuses a `web-cards` device, another member's device (a second admin's included), an unknown id and a device already a root, each in its siblings' words; confirms with the device, its member, its fingerprint (equal to `pair`'s line for that device) and the kid; with two roots, successors signed by either root alone accepted by the package and the local hub; `remove-device` of the app's device leaving the admin the one root, and the admin's own device still refused.
 - `test/org/signer.local.test.ts`, on the Miniflare hub with O13's real admin (`runAdmin`) and an endpoint enrolled as `rows.local.test.ts` does:
   - the app registered (M1), `root add` run by the admin, the app reading itself a root;
   - the weekly successor signed by the app (Touch ID injected), accepted by the hub, adopted by the admin's next `show`;
-  - an admin `refresh` racing the app's: the loser `not-head`, the app re-offering on the new head;
+  - an admin `refresh` racing the app's: the app's proposal `not-head` and held as `pending-fork` until the owner's discard;
   - a superseded-key revocation delivered to the endpoint over the link and acknowledged, and the endpoint's held head carrying it;
   - `rekey`: new keys registered with a second `pair`, `remove-device` of the old id by the admin, the retired file destroyed.
-- `OrgSection.test.tsx`: the root line, the quiet line and Re-sign now, the superseded offer, owing machines, `pending-fork` with Discard, the rekey offer with its code field.
+  - a delivery to an endpoint more than 16 states behind, adopted through the genesis fallback and acknowledged;
+  - a delivery while the local hub refuses the post, the endpoint adopting the pending state over the link.
+- `OrgSection.test.tsx`: the root line, and no `root add` guidance for an unmarked device; the quiet line and Re-sign now; the superseded offer; owing machines; `pending-fork` with Discard behind its confirmation; `signing` with Reset behind its confirmation; the rekey offer with its code field.
 
 ### M4 — The Org page *(advisory; taste: Q1, answered)*
 
@@ -554,16 +596,19 @@ It settles P5 Decision Log 34: an admin enrolls a member's first device directly
 **Decisions.**
 
 *Names.* The signed state's members carry `id`, `email`, `role` and `devices`, and no name (`isMember` takes those four fields alone). A first name is derived from the email: its local part's first run of letters, split at `.`, `_`, `-`, `+` or a digit, capitalized ("ana.lopez@…" reads "Ana"). Two members of the head whose derived names collide both read their whole local part. An owner id the head doesn't list reads "former member". Rejected: a signed `name` field, which changes RL5's closed member shape for the hub, the endpoint and sminos; showing emails on rows, which crowds the row.
-- Main sends `OrgRows.members`: `{id, email, name}` for every member id that some row names, from the held head, so the renderer never derives from state it doesn't hold.
+- Main sends `OrgRows.members`: `{id, email, name}` for every member id that some row names, from the held head, so the renderer never derives from state it doesn't hold. And `OrgRows.member`: the signed-in member's id, null signed out, in the same payload as the rows, so "you" is always judged against the identity the rows were computed for (`rows()` holds it in main today, `rows.ts:401`, and sends only `mine`).
 
-*The label* (`ownersLabel(owners, me, members)`). `null` when the owners are exactly you. Otherwise "you" first when you are an owner, then the others' names in the listing's order, two shown and "+N" past them. After the title and before the machine chip, in `MachineChip`'s style (`text-ui-sm text-fg-muted`, faint when offline). Truncated with the title, never the chip.
+*The label* (`ownersLabel(owners, me, members)`, `me` being `OrgRows.member`). `null` when the owners are exactly you. Otherwise "you" first when you are an owner, then the others' names in the listing's order, two shown and "+N" past them. After the title and before the machine chip, in `MachineChip`'s style (`text-ui-sm text-fg-muted`, faint when offline). Truncated with the title, never the chip.
 - **Which rows.** Listed rows. A local record has no owners (`SessionRecordSchema` has none), so a local session's row is unchanged; a record drawn at a listed address (M2's yield rule) takes the listing's owners for its label and hover card.
 
 *The People toggle* (Q3; O6's T6).
 - **Where it's remembered.** The layout key `sidebar.people`, `{version: 1, on: RowKey[]}`, read once and written 250 ms after the last change, as `summary.sections` is. A key needs no layout version: `LayoutKeySchema` is a union of literals and main's `layout.set` stores any value for a key it lists (not `panel.…`). Rejected: a field on `SidebarRegionSchema`, which an older build reading the new value fails to parse, losing width, sort and expanded projects.
-- **Filing.** `projectList` files a row not `mine` with `rowOfListed` as M2 files any row. Its project draws it when the project's key is in the toggle's set, else counts it in the entry's `others`. A record at the row's address still wins.
-- **Rollups** count your sessions only: others' `waiting` and `busy` rows draw their glyphs but don't add to the project's waiting or working counts, which say what needs you. Rejected: counting others' waiting, which a toggle would turn into a false "needs you".
-- **Search** matches drawn rows only, so others' rows match while the toggle is on.
+- **Ownership comes first, then the presentation.** For every address `projectList` meets, a record's or a listing's, it is *others'* when a listing at that address exists and isn't `mine`, and *yours* otherwise (a local record with no listing is yours; records carry no owners). Then:
+  - **Filing.** It is filed by `rowOfSession` for a record and `rowOfListed` for a listing, as M2 files them, and a record at a listed address still wins as the row that's drawn.
+  - **Visibility.** Others' rows are drawn, as the record or the listing, only while their row key is in the toggle's set; otherwise they count in the entry's `others`. So a session of someone else's that a lane opened into a record leaves the list when People goes off. (`projectList` files records unconditionally today, `derive.ts:95-108`, which this changes.)
+  - **Rollups** count yours only: others' `waiting` and `busy` rows draw their glyphs but don't add to the project's waiting or working counts, which say what needs you. Rejected: counting others' waiting, which the toggle would turn into a false "needs you".
+  - **Search** matches drawn rows only, so others' rows match while the toggle is on.
+  - **Machine rows** with `others` above zero stay in the list even with nothing of yours drawn (the pruning at `derive.ts:141` keeps them), so "+N others" and the menu's toggle stay reachable.
 - **The hover action.** A fourth `ProjectActions` button (lucide `Users`), "Show people's sessions" or "Hide people's sessions", pressed while on. **The menu** gains "Show people's sessions" with a check while on, after "Mark all read", for project and machine rows alike (machine rows have no hover actions).
 - **"+N others"**: `text-ui-sm text-fg-faint`, after the name, while the toggle is off and `others` is above zero, hidden on hover as the rollups are.
 
@@ -573,9 +618,9 @@ It settles P5 Decision Log 34: an admin enrolls a member's first device directly
 - `member-name.test.ts`: the derivation's cases, and collisions.
 - `rows.test.ts`: `members` names every owner a row lists, from the held head; an unlisted id reads "former member".
 - `owners.test.ts`: `null` for you alone; "you, Ana"; "Ana, Ben +3"; former members.
-- `derive.test.ts`: others counted while off, drawn under People on; a record at a listed address winning; rollups counting yours only; search over drawn rows; the toggle's set per row key, machine rows included.
+- `derive.test.ts`: others counted while off, drawn under People on; a record at an others' listed address hidden while off and counted, drawn while on, never in the rollups; a record at your listed address winning as today; rollups counting yours only; search over drawn rows; a machine with only others' sessions kept with its `others`; the toggle's set per row key, machine rows included.
 - `Sidebar.test.tsx`: the label on a co-owned and a foreign row and none on yours; "+N others" faint and hidden on hover; the hover action and the menu item toggling and persisting through `layout.set` (and restored from `layout.get`); others' rows in activity order with owners and chips; the hover card listing every owner with emails.
-- `events.test.ts` or the store's test: `members` applied with the rows.
+- `events.test.ts` or the store's test: `members` and `member` applied with the rows; a co-owned-only dataset labelled "you, …"; a change of signed-in member relabelling every row from the new payload.
 
 ### M5b — Add owner *(later; waits on O10 and O12)*
 
@@ -909,6 +954,7 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
 | `WEEKLY_CHECK_MS` | 3 600 000 | — |
 | `DELIVERY_SPAN` | 16 states | — |
 | `DELIVERY_RETRY_MS` | 3 600 000 | — |
+| `DELIVERY_MAX_BYTES` | 524 288 | an eighth of RL2's `MESSAGE_MAX_BYTES` (4 MiB, `channel.ts:50`) |
 
 **§I. Contract requests** (for P5's writer to carry; each says what O8 needs, not how).
 
@@ -934,7 +980,7 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
 **§J. Contract additions.**
 - **Now (M1):** `OrgSessionService` and `createOrgSession` (§A), which implement O7 §B; `org.status`, `org.register`, `org.signIn`, `org.reanchor`, `org.cancel`, `org.signOut` and `org.changed` (§B); `<userData>/org/` (§C); `HeldOrg` (§D); the login and `MAWS_DEV_STANDIN_USER` (§E); the Registry feed (§F); `tweetnacl` 1.0.3. No `WIRE_MINOR`, no settings version, no e2e group.
 - **Now (M2):** `RemoteRow`, `OrgRows`, `org.rows` and `org.rows.changed`; the listed partition, `rowOfListed` and `registerRemoteOpener` (§G); `listings.json`.
-- **M3 (executable):** §K: `createStateSigner`, the next keys, `checks.ts`, the signer and its pending slot, the weekly asking, deliveries, `postState`, `OrgStatus`'s `signer`, `org.resign`, `org.revokeSuperseded`, `org.rekey`, `org.discardPending`, `signing.json` and `deliveries.json`; `deployment admin root add`. No `WIRE_MINOR`, settings version, `IpcError` code or e2e group.
+- **M3 (executable):** §K: `createStateSigner`, the next keys, `checks.ts`, the signer and its pending slot, the weekly asking, deliveries, `postState`, `OrgStatus`'s `signer` and `problem: 'signing'`, `org.resign`, `org.revokeSuperseded`, `org.rekey`, `org.discardPending`, `org.resetSigning`, `signing.json` (failing closed) and `registration.json`'s `signing` and `rekey`; `deployment admin root add`. No `WIRE_MINOR`, settings version, `IpcError` code or e2e group.
 - **M5 (executable):** §L: `memberName`, `OrgMember`, `OrgRows.members`, the `sidebar.people` layout key, `ownersLabel`. No layout version, `WIRE_MINOR` or settings version.
 - **Later (advisory):** the Org page (M4); owner changes as acts through O10's row and O12's executor (M5b, M6); the project channel's sockets (M7).
 
@@ -948,29 +994,32 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
     export function createStateSigner(deps: { key: SigningKey; confirm?: Confirm }): StateSigner;   // Touch ID first, then signOrgState(state, [key])
 
     // src/main/device/keys.ts
-    export function createNextDeviceKeys(profile: string, deps: Parameters<typeof loadDeviceKeys>[1]): Promise<DeviceKeys>;  // device/keys.next.json, marked
+    export function createNextDeviceKeys(profile: string, deps: DeviceKeysDeps): Promise<DeviceKeys>;  // device/keys.next.json, marked
     export function promoteNextDeviceKeys(profile: string): Promise<void>;          // keys.json → keys.retired.json, keys.next.json → keys.json
     export function destroyRetiredDeviceKeys(profile: string): Promise<void>;
     //   loadDeviceKeys finishes a promotion a crash cut off (keys.json absent, keys.next.json present)
 
     // src/main/org/checks.ts
     export type CheckCode = 'revives-revoked' | 'prefix-equal' | 'prefix-nested' | 'prefix-covers' | 'prefix-names-machine'
-      | 'delegation-id-used' | 'renew-expired' | 'drops-delegation' | 'superseded-keys';
+      | 'delegation-id-used' | 'renew-expired' | 'renew-not-extension' | 'drops-delegation' | 'superseded-keys';
     export type Finding = { level: 'refuse' | 'warn'; code: CheckCode; detail: string };
     export function checkSuccessor(head: OrgState, next: OrgState, superseded: readonly SignedOrgState[], now: Date): Promise<Finding[]>;
-    export function supersededRevocations(head: OrgState, superseded: readonly SignedOrgState[]): Promise<RevokedKey[]>;
+    export type SupersededOffer = { revoke: RevokedKey[]; removeHolders: RevokedKey['holder'][]; unretire: string[]; withheld: RevokedKey[] };   // withheld: own keys, the last root
+    export function supersededRevocations(head: OrgState, superseded: readonly SignedOrgState[], self: { channelKid: string; stepUpKid: string }): Promise<SupersededOffer>;
 
     // src/main/org/signer.ts
     export type Edit = { summary: string; lines: string[]; apply(draft: OrgState): void | Promise<void> };
     export type SignOutcome = { ok: true; version: number }
-      | { ok: false; reason: 'not-root' | 'cancelled' | 'pending' | 'invalid' | 'hub' | 'busy'; detail?: string }
+      | { ok: false; reason: 'not-root' | 'unmarked' | 'signing' | 'cancelled' | 'pending' | 'invalid' | 'hub' | 'busy'; detail?: string }
       | { ok: false; reason: 'refused'; findings: Finding[] };
     export interface OrgSigner {
       isRoot(): boolean;
-      pending(): { version: number; delivered: boolean; fork: boolean } | null;
+      maySign(): boolean;                                                             // root, marked, signing.json readable
+      pending(): { version: number; exposed: boolean; fork: boolean } | null;
       sign(edit: Edit): Promise<SignOutcome>;                                         // composes, checks, prompts, slots, posts, adopts
       settle(): Promise<void>;                                                        // the slot's three rules
-      discardPending(): Promise<{ ok: boolean; reason?: 'held' | 'delivered' }>;
+      discardPending(confirmed: true): Promise<{ ok: boolean; reason?: 'held' }>;    // only after the owner's confirmation
+      resetSigning(confirmed: true): Promise<void>;                                    // only in problem 'signing'
     }
     export function createOrgSigner(deps: { session: OrgSession; held: () => HeldOrg | null; signer: () => StateSigner | null;
       hub: () => HubClient | null; files: OrgFiles; commit<T>(body: () => Promise<T>): Promise<T>; deliveries: Deliveries;
@@ -983,7 +1032,8 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
 
     // src/main/org/deliveries.ts
     export interface Deliveries {
-      deliver(signed: SignedOrgState, parent: OrgState): Promise<void>;              // owed written first, then sent
+      obligation(signed: SignedOrgState, parent: OrgState): { owed: MachineRef[] } | null;   // written with the slot, in one write
+      send(): Promise<void>;                                                          // each owed machine; exposure written before each act
       owing(): Array<{ version: number; machines: MachineRef[] }>;
       close(): void;
     }
@@ -993,9 +1043,9 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
     // src/main/org/hub-client.ts
     postState(signed: SignedOrgState, signal?: AbortSignal): Promise<HubResult<{ version: number }>>;   // 409's `error` is the verdict code
 
-    // src/shared/ipc/schema/org.ts: `registered` gains
+    // src/shared/ipc/schema/org.ts: `registered` gains (and `problem` gains 'signing')
     signer: {
-      root: boolean;                                                                  // this device's step-up kid is in root.keys
+      root: boolean; maySign: boolean;                                                                  // this device's step-up kid is in root.keys
       fingerprint: string; stepUpKid: string;                                         // for `root add`'s confirmation
       due: boolean; ageDays: number | null;
       pending: { version: number; fork: boolean } | null;
@@ -1004,12 +1054,16 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
       rekey: 'unmarked' | null; oldDevice: string | null;                            // oldDevice: still listed after a rekey
     } | null;                                                                         // null until a head is held
     // commands: 'org.resign' (void → SignResult), 'org.revokeSuperseded' (void → SignResult),
-    //           'org.rekey' ({code} → {ok: true} | {ok: false, reason: OrgRefusal}), 'org.discardPending' (void → {ok, reason?})
-    // SignResult = {ok: true, version} | {ok: false, reason: 'not-root' | 'cancelled' | 'pending' | 'invalid' | 'hub' | 'busy' | 'refused', detail?}
+    //           'org.rekey' ({code} → {ok: true} | {ok: false, reason: OrgRefusal}), 'org.discardPending' ({confirmed: true} → {ok, reason?}),
+    //           'org.resetSigning' ({confirmed: true} → void)
+    // SignResult = {ok: true, version} | {ok: false, reason: 'not-root' | 'unmarked' | 'signing' | 'cancelled' | 'pending' | 'invalid' | 'hub' | 'busy' | 'refused', detail?}
 
     // §C gains
-    signing.json     { "version": 1, "pending": SignedOrgState | null, "delivered": <boolean>, "lastAsked": "<ISO>" | null, "lastNotified": "<ISO>" | null }
-    deliveries.json  { "version": 1, "owed": { "<version>": ["<ref>", …] } }
+    signing.json     { "version": 1,
+                       "pending": { "signed": SignedOrgState, "parent": "<stateHash>", "exposed": { "hub": <boolean>, "machines": ["<ref>"] } } | null,
+                       "deliveries": [ { "signed": SignedOrgState, "owed": ["<ref>", …] } ],
+                       "lastAsked": "<ISO>" | null, "lastNotified": "<ISO>" | null }      // fails closed once registration.json says signing: true
+    registration.json  gains "signing": true (once signing.json is first written) and "rekey": { "device": "<new id>" } (during a rekey's promotion)
 
 **§L. Owners and the People toggle** (M5).
 
@@ -1019,7 +1073,7 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
 
     // src/shared/ipc/schema/org.ts
     export interface OrgMember { id: string; email: string | null; name: string }    // email null: an id the head doesn't list ("former member")
-    // OrgRows gains `members: OrgMember[]`: every member id some row's owners name
+    // OrgRows gains `members: OrgMember[]` (every member id some row's owners name) and `member: string | null` (the signed-in member, null signed out)
 
     // src/shared/ipc/schema/layout.ts: LayoutKeySchema gains z.literal('sidebar.people'); value { version: 1, on: RowKey[] }
 
@@ -1242,6 +1296,21 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
     - emails on rows;
     - a `SidebarRegionSchema` field, which an older build fails to parse, losing the sidebar's layout;
     - counting others' waiting rows as needing you.
+  Date/Author: 2026-10-28, O8's planner.
+
+- Decision: The re-plan's first buildability round is folded in (doperpowers:adversarial-reviewer on dc39ef6f1: 6 P1 and 5 P2, each checked against the code and adopted).
+  1. The superseded offer revokes what the superseded states revoked and the head lacks, removing the holder where the key is current again. It no longer revokes keys added on the discarded branch, which `keysAccounted` refuses.
+  2. A delivery is acknowledged only by `done` with a version at least the state's. `not-newer` is resent from genesis under a byte bound, since a far-behind endpoint also answers `not-newer` (`org-sync.ts:258-260`).
+  3. The delivery obligation keeps the signed bytes in the same write as the pending slot, so a withheld hub doesn't stop direct delivery (RL §5.2), and publication and delivery settle apart.
+  4. A rekey is one recoverable transaction: a `rekey` intent in `registration.json` before the renames, replayed before the missing-keys check.
+  5. `signing.json` fails closed once written, and the weekly dates share its single read-modify-write writer.
+  6. An exposed proposal is never cleared by itself: exposure is written before each send, and discard takes the owner's confirmation, as `abandon-pending` does.
+  7. Signing needs the backup mark as well as the root key.
+  8. The prefix checks use the raw case-folded relation (`dc-` against `dc-prod-`), and renewal must extend a live delegation to a live date.
+  9. `OrgRows.member` carries the signed-in member for "you".
+  10. Ownership is classified before presentation, so an opened record of another's session follows the toggle and stays out of the rollups, and a machine with only others' sessions keeps its row.
+  11. `root add` takes only a device under the deployment admin's own member, which `remove-device` can remove.
+  Rationale: each was reproduced against the cited code or the package's rules. Each is now named in M3's or M5's Proves.
   Date/Author: 2026-10-28, O8's planner.
 
 ## Outcomes & Retrospective
