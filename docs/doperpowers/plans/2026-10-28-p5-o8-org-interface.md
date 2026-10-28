@@ -44,7 +44,7 @@ Items 1 and 2 are the first milestone and executable now. Items 3 to 8 restate P
    - The held org state follows each version the hub announces, refuses a rollback and a fork, adopts a recovery transition, and survives a relaunch with no network. A relaunch is signed in again with no browser while the Access token lives.
    - `OrgSession.current()` is non-null exactly while the held head lists this device, under its member, with this profile's channel and step-up keys. `onChanged` fires at sign-in, sign-out, each adopted head (a link's `advance` included) and each change of the hub's credentials. While it is non-null, O7's links come up to the listed machines. An Access token that expires sets `hub` to null and leaves the device signed in, so the links keep the direct carrier.
    - A head that removes the device makes `current()` null, and the Org section says so. A hub that stops admitting the member (a `4403` close, `403 not-a-member`) reads `denied` and changes no trust state until a verified head does.
-   - A damaged held chain fails closed: the hub's chain is taken again only if it reaches the anchored version and head, and otherwise only a fresh pairing code re-anchors. Sign-out survives a crash at any point of it.
+   - A damaged held chain fails closed: the hub's chain is taken again only if it holds the anchored version and head, and otherwise only an explicit re-anchor with a fresh pairing code opens it; an ordinary sign-in never moves the anchor. A rewind, and sign-out, each survive a crash at any point.
    - Proved by `src/main/org/*.test.ts` and `test/org/sign-in.local.test.ts` (the Miniflare hub, O13's real `pair`), and live on staging at the owner's hand.
 2. **The remote rows (M2).** P5 acceptance 3's remote half, and O9's R1 to R6 (its Interfaces §G).
    - Every listing the hub holds for a machine in O7's RL2 roster that verifies against the held head is a row. One that fails is not, and is tried again at the next head.
@@ -130,7 +130,7 @@ M1 runs now and lands by its own PR. M2 needs M1 and O7 M1 on master, and lands 
 *Signing in starts from a pairing code.*
 - **The code is the trust anchor.** It carries the hub, the org, the member, the root key ids and the recovery key (RL §5.3), so the app verifies the hub's chain from genesis against pins it got by hand, never from the hub. Rejected: signing in by Access alone and trusting the hub's chain on first use, which lets a hostile hub hand the app an org of its own making.
 - **What makes the code acceptable.** `decodePairingCode(text.trim())` must return a code whose `hub` is `https:`, or `http:` on a loopback host only in an unpackaged build where `MAWS_DEV_STANDIN_USER` names a person (the stand-in, §E); otherwise the attempt is refused `bad-code`. If this profile holds a registration, the code must name its org and hub; otherwise it is refused `other-org`. A refusal writes nothing.
-- **A held registration makes the code a sign-in.** If this profile holds a registration for the code's org, a code is read as "sign in" (the login transfer alone). The held pins and chain stay.
+- **A held registration makes the code a sign-in.** If this profile holds a registration for the code's org, a code given to `register` is read as "sign in" (the login transfer alone). The held pins, chain and anchor stay; only `reanchor` (below) replaces them.
 
 *The registration, step by step* (the `registering` steps of the status in §B).
 1. **`browser`.** The login (§E) runs against `code.hub` and yields a hub credential.
@@ -171,9 +171,15 @@ M1 runs now and lands by its own PR. M2 needs M1 and O7 M1 on master, and lands 
 - `since(version)` answers the held states after `version` and the transitions from it, for a peer that is behind.
 - `certificates()` answers the set the hub last served. Its consumers verify it (`machineKeys`, `verifyListing`), as the endpoint keeps it.
 - **The whole chain is kept,** from genesis, with `superseded`, `accepted` and the transitions. At P5's scale that is a few kilobytes a week. The later admin duties need it: the superseded states' revocations after a root transition (P5 Decision Log 30), and a check of each new state against its predecessor. Rejected: the endpoint's 30-day window, which would lose what M3 offers. Also rejected: moving `EndpointOrg`'s adoption into `org-protocol` now, which changes O10's landed module for no behaviour of its own. One adoption shared by the endpoint and the app is a debt row (Decision Log).
-- **The anchor.** `registration.json` keeps `anchor {genesis, version, head}`: the genesis state's hash, and the held head's version and hash. It is the trust that outlives `chain.json`, as `deployment admin`'s anchor file is for its device (`verifiedHead`). It is set at registration and moved after each adoption: `chain.json` is written first, then the anchor, so a crash between leaves an anchor behind a good chain, which the next load moves up. A rewind moves it to the new head.
-- **At load,** the held chain is checked as one run from the anchored genesis, not pinned again: `chain[0]` hashes to `anchor.genesis`, `verifyGenesis(chain[0])` passes, `advanceHead(chain[0], rest, transitions)` adopts every state held, the run's last state is the held head, and the head's version is at least `anchor.version`. The pins are not checked again: a recovery may have rewound below the state the code's roots first signed, and `verifyPinnedChain` would then refuse a chain `verifyRewind` admitted (round 1's finding, reproduced against the package).
-- **A held chain that fails that check, or doesn't read, fails closed.** `current()` is null and `problem` names it. The app reads the hub's chain from genesis and takes it only if it passes the same one-run check from `anchor.genesis` and reaches `anchor.version` with `anchor.head` as its state there, or holds a recovery transition from below it that `verifyRewind` admits, adopted then as a rewind. Anything else stays closed until the owner pastes a fresh pairing code, which re-anchors on that code's pins: an explicit act, since it gives up the old high-water mark. Rejected: re-reading from genesis against the pins alone, which lets a stale or hostile hub restore an older chain, removed devices and machines included.
+- **The anchor.** `registration.json` keeps `anchor {genesis, version, head}`: the genesis state's hash, and the held head's version and hash. It is the trust that outlives `chain.json`, as `deployment admin`'s anchor file is for its device (`verifiedHead`). It is set at registration and moved after each adoption, a rewind's included: `chain.json` is written first, then the anchor (`saveAnchor`), so a crash between leaves the anchor naming a state the new `chain.json` either still holds or records as superseded, and the next load moves it up.
+- **At load,** the held chain is checked as one run from the anchored genesis, not pinned again:
+  - `chain[0]` hashes to `anchor.genesis`, and `verifyGenesis(chain[0])` passes;
+  - `advanceHead(chain[0], rest, transitions)` adopts every state held, and the run's last state is the held head;
+  - the anchored state is accounted for: the chain holds `anchor.version` with hash `anchor.head`, or `superseded` holds it, in which case a transition in `accepted` with a `fromVersion` below `anchor.version` authorized the held chain's state at `fromVersion + 1` (which the one-run check verified through it), and the superseded states hash-chain from that same base. The second case is a rewind whose anchor write a crash cut off.
+
+  The pins are not checked again: a recovery may have rewound below the state the code's roots first signed, and `verifyPinnedChain` would then refuse a chain `verifyRewind` admitted (round 1's finding, reproduced against the package).
+- **A held chain that fails that check, or doesn't read, fails closed.** `current()` is null, and the status's `problem` is `held-chain`. The app reads the hub's chain from genesis and takes it only if it passes the same one-run check from `anchor.genesis` and holds `anchor.version` with hash `anchor.head` on its own line of states. A served chain that a recovery rewound below the anchor is not taken: the history `verifyRewind` needs (the accepted transitions and the authenticated base) went with the damaged file, and an old genuine recovery replayed without it would pass (round 2's finding). Anything else stays closed until the owner re-anchors (`reanchor`, below): an explicit act, since it gives up the old high-water mark. Rejected: re-reading from genesis against the pins alone, which lets a stale or hostile hub restore an older chain, removed devices and machines included.
+- **Re-anchoring** (`org.reanchor {code}`; the service's `reanchor`) is the one way out of `held-chain`, and it is refused `busy` in any other state. It takes a pairing code for the registration's org and member, from a device the owner trusts. It runs registration's `checking` step with that code's pins: the login only when no live credential is held; `/api/me`; the chain from genesis verified by `verifyPinnedChain`; and the head must list this device under the member with these keys, else `removed`. Then it writes `chain.json` and a new anchor in that order. Ordinary `register` and `signIn` never write the anchor. The Org section shows, in `held-chain`, the problem in words, a "Pairing code" field and a Re-anchor button, with one line saying it replaces the org state this Mac trusted.
 
 *Following the hub.*
 - While signed in with a hub credential, the Registry feed (§F) holds the `?app=1` socket. At its open, and at each `state {version}` above the held head, the session reads `?since=<held version>`, every page, and adopts it.
@@ -237,8 +243,9 @@ The Org page's final shape, where it lives and what more it shows are the owner'
 - `held.test.ts`:
   - each row of the rules table (the endpoint's `test/endpoint/org-sync.test.ts` cases, carried over where they apply), persistence before notification, and `since`;
   - a recovery that rewinds below the state the pinned root first signed, followed by an offline restart that loads the held chain;
-  - a crash between `chain.json` and the anchor, the next load moving the anchor up;
-  - a damaged `chain.json` with the hub serving an authentic chain from before a removal the app had adopted: it stays closed; with the hub serving the anchored head or later: it loads.
+  - a crash between `chain.json` and the anchor after a forward adoption, and after a rewind to a lower version, each loading and moving the anchor up;
+  - a damaged `chain.json` with the hub serving an authentic chain from before a removal the app had adopted: it stays closed; with the hub serving a chain that holds the anchored state: it loads; with the hub serving a chain an old, genuine recovery rewound below the anchor: it stays closed;
+  - `reanchor` refused outside `held-chain`; in it, re-anchoring on a fresh code's pins; `register` with a code for the held org never moving the anchor.
 - `org-session.test.ts`, over fakes:
   - each registration step and each refusal reason;
   - the file order, with a crash between files;
@@ -260,7 +267,7 @@ The Org page's final shape, where it lives and what more it shows are the owner'
   - an admin `remove-device` making `current()` null;
   - the member removed from the org (a second member, as `OrgAdmin` adds one), its app reading `denied` and keeping its held head;
   - **O7 §B met exactly:** `connectChannel(dial, signedIn.identity, signedIn.view, {machine})` completing against the endpoint harness's listener (`test/endpoint/sub-harness.ts`), the endpoint enrolled in the same local org.
-- `OrgSection.test.tsx`: each status drawn; Sign in sends `org.register` with the trimmed code; Cancel, Sign out and Sign in again; the fingerprint shown; no prop carries a token.
+- `OrgSection.test.tsx`: each status drawn; Sign in sends `org.register` with the trimmed code; Cancel, Sign out and Sign in again; the fingerprint shown; in `held-chain`, the code field and Re-anchor sending `org.reanchor`; no prop carries a token.
 - The grades test passes with `org.*` declared `client`.
 
 ### M2 — The remote rows
@@ -289,7 +296,14 @@ The Org page's final shape, where it lives and what more it shows are the owner'
 
 *Where rows come from.*
 - **The hub's listings, through the `?app=1` socket.** At open the feed brings `listings` pages. Their records, once `last` arrives, replace the held rows: a held record with a higher revision than the page's is kept (a live frame raced the snapshot), and a held record the snapshot lacks leaves the rows, since withdrawn listings are never in pages. Each `listing` frame then replaces its key's record when its revision is higher, and a `gone` one removes the row.
-- **A high-water mark per key outlives its row.** Each key (`<ref>/<session>`) keeps the highest revision the app has accepted, apart from the visible rows, with the verified `gone` record when that was the last. A record at or below its key's mark is ignored, whether it comes live, in a snapshot or from the cache, and a row a snapshot omits keeps its mark. So revision 10, then `gone` at 11, then a replayed 10 never brings the row back, across a reconnect or a relaunch; `src/endpoint/listings.ts` keeps its signed withdrawals for the same reason. The marks persist in `listings.json` (§C). A machine that leaves the org state drops its marks, and past `HIGH_WATER_MAX` keys the oldest by `issued` go. A session listed again comes at a higher revision (RL6), so a mark never hides it.
+- **A high-water mark per key outlives its row.** Each key (`<ref>/<session>`) keeps, apart from the visible rows, a mark of the newest record the app accepted for it: its revision, the SHA-256 of its canonical form (`canonicalize`), the key id that signed it (`sig.kid`), and whether it was `gone`. A record is judged against its key's mark:
+  - below the mark's revision: ignored;
+  - at the mark's revision and byte-identical to the marked record (same hash): taken as the same record. A live mark's row is restored or kept, which is what a cache load, a reconnect's snapshot and an unchanged resend bring (the endpoint re-signs nothing unchanged and resends the same bytes). A `gone` mark's key stays without a row;
+  - at the mark's revision with another hash: ignored and logged, as a conflict;
+  - above it: verified, and if it verifies it becomes the row (or removes it, if `gone`) and the new mark.
+
+  A row a snapshot omits leaves the rows and keeps its mark. So revision 10, then `gone` at 11, then a replayed 10 never brings the row back, across a reconnect or a relaunch; `src/endpoint/listings.ts` keeps its signed withdrawals for the same reason. The marks persist in `listings.json` (§C).
+- **A mark is dropped only once the records it guards can no longer verify:** when its machine has left the org state, or when the key that signed it (`kid`) is no longer a key `machineKeys` gives for that machine (a re-enrollment), since `verifyListing` accepts only a machine's current key. There is no count cap: dropping a mark by age or count would let a still-verifiable old revision return (round 2's finding). A mark is a few dozen bytes, and a machine's sessions over a key's life stay in the thousands at P5's scale. A session listed again comes at a higher revision (RL6), so a mark never hides it.
 - **Every record is verified** with `verifyListing(head.state, record, certificates, now)` against the session's current view. One that fails waits in a bounded set (1024, newest kept) and is tried again at each `onChanged`. At each new head every held record is verified again, so a machine the org removed, or whose key it revoked, loses its rows at once.
 - **The cache.** `<userData>/org/listings.json` (§C) is written a second after a change. At load each record is verified against the held head (the org must match) and held under its key's mark. So a relaunch with the hub down still shows rows, greyed while their machines are not `up` (T2).
 - **Rejected: `endpoint.listings` over each link now.** It is the path for `private` sessions (to their owners and shares) and needs polling, since it is a call. No session is private until sminos sends `access` (Orientation), so M6 adds it when visibility exists. Also rejected: `GET /api/listings` polling, which the socket replaces.
@@ -339,8 +353,9 @@ The Org page's final shape, where it lives and what more it shows are the owner'
 
 *The snapshot rule* (`connectShell`).
 - A machine in the latest `OrgRows.machines` (the RL2 roster) takes no record snapshot, since all five reads are refused there.
-- **Coverage is apart from the roster.** `OrgRows.complete` is true only once this run's feed has delivered the hub's `listings` snapshot through its `last` page and the rows have applied it. Rows from the cache alone, or before the feed opens, come with `complete: false`.
-- A roster machine counts as loaded (`setLoaded`, `settleMachine`) only at the first `org.rows` with `complete: true`. Until then its restored tabs stay: `knownTab` protects an unknown session only while its machine is unloaded, and `settleMachine` drops what is unknown. With the hub down all session, the machine stays unloaded and its tabs stay.
+- **Coverage is apart from the roster.** `OrgRows.complete` is true only once this run's feed has delivered the hub's `listings` snapshot through its `last` page, the rows have applied it, and the held head has reached the version the feed's `state` notice announced at open (if it announced one), so the page is judged against the state it was sent beside. Rows from the cache alone, or before the feed opens, come with `complete: false`.
+- **A machine with records awaiting verification is not covered.** `OrgRows.pending` names each roster machine with a record in the waiting set: one that failed `verifyListing`, perhaps because a key rotation's state hasn't been adopted yet.
+- A roster machine counts as loaded (`setLoaded`, `settleMachine`) only at an `org.rows` with `complete: true` that doesn't name it in `pending`. A machine whose records never verify stays unloaded, and its tabs stay; that costs only the tabs' pruning. Until it loads, its restored tabs stay: `knownTab` protects an unknown session only while its machine is unloaded, and `settleMachine` drops what is unknown. With the hub down all session, the machine stays unloaded and its tabs stay.
 - A machine the rows don't name yet snapshots as today and fails softly, as under O7 M1.
 - `knownTab` also keeps a tab whose address is listed.
 - O7 M2 replaces this rule for lane B when it brings its own reads.
@@ -357,9 +372,11 @@ The Org page's final shape, where it lives and what more it shows are the owner'
   - the snapshot's replace rule, with a raced higher revision kept;
   - revision order, and `gone` removing;
   - a replay of a lower revision after `gone` ignored live, after a reconnect whose snapshot omits the key, and after a relaunch from the cache;
-  - a machine leaving the org dropping its marks, and the cap dropping the oldest;
+  - a live row restored from the cache at its mark's revision, and kept across repeated unchanged snapshots with the marks loaded; a `gone` mark's identical record leaving no row; another record at a mark's revision ignored as a conflict;
+  - marks dropped when their machine leaves the org and when the machine's key changes, never by count: a replay after many thousand marks still ignored;
   - the cache verified at load, and another org's cache discarded;
-  - `complete` false from the cache alone and before the snapshot's `last` page, true after it;
+  - `complete` false from the cache alone, before the snapshot's `last` page, and while the held head is below the version announced at open; true after all three;
+  - `pending` naming a machine whose newly keyed listings arrive before the state that rotated its key, and clearing once that state is adopted;
   - the roster filter;
   - `mine`;
   - the join for `smns`, for `remote:` through `repoProjectId` with the signed-in org, and none;
@@ -380,7 +397,7 @@ The Org page's final shape, where it lives and what more it shows are the owner'
   - each state's glyph, and the rollup counts;
   - caps and Show more over both kinds;
   - a click with and without an opener.
-- `events.test.ts`: `org.rows` applied; a machine the rows name taking no snapshot reads; restored tabs of that machine kept through rows with `complete: false` (a delayed cache, a multi-page snapshot still arriving) and the machine loading only at `complete: true`; a listed tab kept.
+- `events.test.ts`: `org.rows` applied; a machine the rows name taking no snapshot reads; restored tabs of that machine kept through rows with `complete: false` (a delayed cache, a multi-page snapshot still arriving) and while it is in `pending` (the last page in before a delayed key-rotation state, its open session unverifiable), the machine loading only at `complete: true` with it out of `pending`; a listed tab kept.
 
 ### M3 — The app as the org's signer: a co-root, the weekly successor, the signing checks *(advisory)*
 
@@ -518,6 +535,7 @@ The live check runs at the first cut-over machine (O14's B1 VM), in the owner's 
       onStatus(listener: (status: OrgStatus) => void): () => void;
       register(code: string): { ok: true } | { ok: false; reason: OrgRefusal };    // starts; progress and the outcome arrive as statuses
       signIn(): { ok: true } | { ok: false; reason: OrgRefusal };                  // a held registration: the login transfer alone
+      reanchor(code: string): { ok: true } | { ok: false; reason: OrgRefusal };    // only in `held-chain`; else refused `busy`
       cancel(): void;
       signOut(): Promise<void>;
       attach(feed: RegistryFeedHooks): () => void;                                   // §F's notices: open, state, removed, credentials ended
@@ -554,11 +572,11 @@ The live check runs at the first cut-over machine (O14's B1 VM), in the owner's 
           session: 'signed-in' | 'signed-out' | 'removed';
           hubAccess: 'connected' | 'connecting' | 'expired' | 'denied' | 'unreachable' | 'signing-in';
           head: { version: number; issued: string } | null;                         // null until a held chain verifies
-          problem: string | null;                                                    // rollback, fork, a held chain re-read, a refused sign-in
+          problem: 'held-chain' | 'rollback' | 'fork' | 'directory' | null;         // held-chain: closed until a re-anchor; directory: <userData>/org/ refused
           refused?: OrgRefusal };
 
     commands: 'org.status' (void → OrgStatus), 'org.register' ({code: string} → {ok: true} | {ok: false, reason: OrgRefusal}),
-              'org.signIn' (void → same), 'org.cancel' (void → void), 'org.signOut' (void → void),
+              'org.signIn' (void → same), 'org.reanchor' ({code: string} → same), 'org.cancel' (void → void), 'org.signOut' (void → void),
               'org.rows' (void → OrgRows; M2)
     events:   'org.changed' (OrgStatus), 'org.rows.changed' (OrgRows; M2)
 
@@ -576,7 +594,7 @@ The live check runs at the first cut-over machine (O14's B1 VM), in the owner's 
     access.json        { "version": 1, "hub": "<origin>", "kind": "access", "token": "<app token>", "expires": "<ISO>", "email": "<email>" }
                      | { "version": 1, "hub": "http://127.0.0.1:<port>", "kind": "standin", "user": "<email>" }
     listings.json      { "version": 1, "org": "<org id>", "records": Signed<Listing>[],                           (M2)
-                         "highWater": { "<ref>/<session>": { "revision": <n>, "issued": "<ISO>", "gone": Signed<Listing> | null } } }
+                         "marks": { "<ref>/<session>": { "revision": <n>, "hash": "<SHA-256 of the canonical record, B64>", "kid": "<sig.kid>", "gone": <boolean> } } }
 
 The directory is excluded from Time Machine at its creation, best effort. Nothing in it is a key: the device's keys stay in `<userData>/device/` (O10 M9).
 
@@ -590,8 +608,15 @@ The directory is excluded from Time Machine at its creation, best effort. Nothin
       onAdopted(listener: () => void): () => void;                                    // after the file is written
       superseded(): readonly SignedOrgState[];
     }
-    export function startHeldOrg(input: { file: string; pins: OrgPins; first?: { chain: SignedOrgState[]; transitions: Signed<RootTransition>[];
-      certificates: Certificates }; log(line: string): void; now?(): number }): Promise<HeldOrg | null>;   // null: no verified chain (load failed)
+    export type Anchor = { genesis: string; version: number; head: string };       // stateHash values (B64)
+    export function startHeldOrg(input: {
+      file: string;                                                                   // chain.json
+      anchor: Anchor | null;                                                          // registration.json's; null only at registration and re-anchoring
+      saveAnchor(anchor: Anchor): void;                                               // writes registration.json; called after each chain.json write
+      pins?: OrgPins;                                                                 // with `first`: the code's, for verifyPinnedChain
+      first?: { chain: SignedOrgState[]; transitions: Signed<RootTransition>[]; certificates: Certificates };
+      log(line: string): void; now?(): number;
+    }): Promise<HeldOrg | null>;                                                      // null: no chain passed the load rule (held-chain)
 
 `advance` (OrgView's) is `adoptServed` with no served head.
 
@@ -657,7 +682,8 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
     export interface OrgRows {
       machines: MachineRef[];                                                         // the RL2 roster: these take no record snapshot
       rows: RemoteRow[];
-      complete: boolean;                                                              // this run's hub snapshot applied through its last page
+      complete: boolean;                                                              // this run's hub snapshot applied, the announced head adopted
+      pending: MachineRef[];                                                          // roster machines with records awaiting verification
     }
     // In the zod schema `session` is a plain string, never AppSessionIdSchema, so O6's codec lifts nothing in a row;
     // the renderer forms the address with `addressOf(machine, session)`.
@@ -692,7 +718,6 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
 | `HEAD_WARN_DAYS` | 21 | the phone's warning (O13) |
 | `ROWS_COALESCE_MS` | 100 | — |
 | `ROWS_CACHE_WRITE_MS` | 1 000 | — |
-| `HIGH_WATER_MAX` | 10 000 keys | — |
 | `UNVERIFIED_MAX` | 1 024 records | — |
 
 **§I. Contract requests** (for P5's writer to carry; each says what O8 needs, not how).
@@ -717,7 +742,7 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
 *To O9*: M2's rows meet R1, R2, R4, R5 and R6 as asked. R3 is met as far as a listing can say: a lane A row reads `availability: 'foreign_held'`, carries no holder kind or pid (RL6 has none: finding F6), and offers no action. O9 M9 registers `registerRemoteOpener('A', …)`. A contract question for O9 M9 (finding F8): a remote lane A session is a `ListedSession`, and no source produces a `SessionRecord` for it before O3 (its plane's `presence` is not one), so `controlsFor(record, …)` and the pane need either a remote variant that takes the `ListedSession` with the watch's `LaneAState`, or O3's per-member read.
 
 **§J. Contract additions.**
-- **Now (M1):** `OrgSessionService` and `createOrgSession` (§A), which implement O7 §B; `org.status`, `org.register`, `org.signIn`, `org.cancel`, `org.signOut` and `org.changed` (§B); `<userData>/org/` (§C); `HeldOrg` (§D); the login and `MAWS_DEV_STANDIN_USER` (§E); the Registry feed (§F); `tweetnacl` 1.0.3. No `WIRE_MINOR`, no settings version, no e2e group.
+- **Now (M1):** `OrgSessionService` and `createOrgSession` (§A), which implement O7 §B; `org.status`, `org.register`, `org.signIn`, `org.reanchor`, `org.cancel`, `org.signOut` and `org.changed` (§B); `<userData>/org/` (§C); `HeldOrg` (§D); the login and `MAWS_DEV_STANDIN_USER` (§E); the Registry feed (§F); `tweetnacl` 1.0.3. No `WIRE_MINOR`, no settings version, no e2e group.
 - **Now (M2):** `RemoteRow`, `OrgRows`, `org.rows` and `org.rows.changed`; the listed partition, `rowOfListed` and `registerRemoteOpener` (§G); `listings.json`.
 - **Later (advisory):** the signer and its pending slot (M3); the Org page (M4); owner changes as acts, and offer-table rows through O10 (M5, M6); the project channel's sockets (M7).
 
@@ -791,6 +816,10 @@ Each is built as its recommendation when its milestone is re-planned, unless the
   Rationale: each finding was real against the code (`org-view.ts` `verifyPinnedChain`, `admin.ts` `verifiedHead`, `src/endpoint/listings.ts`'s kept withdrawals, `SessionPresence`, `events.ts` `knownTab` and `layout.ts` `settleMachine`, `Registry.submitState` and the Worker's member resolution, O7 §B's `hub: null`). The verdict found O7's type seam and O9's listing fields aligned.
   Date/Author: 2026-10-28, O8's planner.
 
+- Decision: The second round (2 P1 and 4 P2 on 158416956, each checked against the code and adopted) is folded in. (1) Taking a served chain that a recovery rewound below the anchor needs the accepted transitions and the authenticated base the damaged file held; the reviewer showed an old genuine recovery passes `verifyRewind` with an empty barrier. That exception is gone: a damaged chain reopens only on a served chain holding the anchored state, or by re-anchoring. (2) A count cap on listing marks let an old revision return; marks now drop only when their machine leaves the org or their signing key is no longer the machine's. (3) The anchor's two-file commit broke a rewind cut by a crash; the load rule now accepts an anchored state recorded as superseded by a verified rewind, and `startHeldOrg` takes the anchor and `saveAnchor`. (4) Re-anchoring had no path; `org.reanchor` is the one way out of `held-chain`, with its own field and button there, and `register` and `signIn` never move the anchor. (5) A mark at an equal revision hid an unchanged live row; equality is now by the record's hash, and a different record at that revision is a conflict. (6) The snapshot's last page could arrive before the state that verifies it; `complete` now waits for the announced head, and `pending` keeps a machine with unverified records from loading.
+  Rationale: verified against `org-state.ts` `verifyRewind` (its `accepted` barrier), `EndpointOrg.#rewind` and `#commit`, `records.ts` `verifyListing` (current keys only, no age), `Listings.#evaluate` (no re-sign when unchanged), and `Registry.fetch` (the state notice, then every listings page, at once). The verdict found the round-1 fixes for `denied` and the remote-record gap sound.
+  Date/Author: 2026-10-28, O8's planner.
+
 The residue for P5's Decision Log. Each item is decided where it binds (M1 or M2 unless marked), with the alternative it rejected:
 
 1. P5 Decision Log 92's first milestone is built as two milestones, M1 (the org session) and M2 (the remote rows), each its own PR. Rejected: one milestone, which holds O7 M1's production value until the rows are built and puts two verification strategies and two state owners in one review.
@@ -812,9 +841,9 @@ The residue for P5's Decision Log. Each item is decided where it binds (M1 or M2
 17. M7's log-plane reader may land before the channel's look is settled, so O14's B4 never waits on Q5 (M7). Rejected: one landing for the whole channel.
 18. No new e2e group in M1 or M2; their live proofs are the owner's staging sitting and the first cut-over machine. Rejected: `e2e:org`, which would need a hub and an approving device in the hosted lane.
 19. `tweetnacl` 1.0.3 for the transfer's sealed box. Rejected: `@noble/ciphers` and `@noble/curves`, two packages for one call that the spike ran with `tweetnacl`.
-20. The registration keeps an anchor (the genesis hash and the held head's version and hash), moved after each adoption; at load the held chain is checked as one run from the anchored genesis, not pinned again; a damaged chain fails closed unless the hub's chain reaches the anchor, and only a fresh pairing code re-anchors. Rejected: re-pinning at load, which refuses a legitimate recovery; re-reading from genesis against the pins, which loses rollback protection.
-21. A listing's key keeps its highest accepted revision, and its `gone` record, apart from its row and persisted, so a withdrawn session's earlier revision never returns. Rejected: deleting a withdrawn row's key with it.
-22. A machine counts as loaded only once this run's hub snapshot has applied (`OrgRows.complete`); the roster alone only suppresses its record reads. Rejected: loading a machine on its first rows, which can drop restored tabs on an empty or cached start.
+20. The registration keeps an anchor (the genesis hash and the held head's version and hash), written after each `chain.json` write, a rewind's included; at load the held chain is checked as one run from the anchored genesis, the anchored state held or recorded as superseded by a verified rewind, not pinned again; a damaged chain fails closed unless the hub's chain holds the anchored state, and only `org.reanchor` with a fresh pairing code opens it. Rejected: re-pinning at load, which refuses a legitimate recovery; re-reading from genesis against the pins, which loses rollback protection; taking a served chain rewound below the anchor, whose check needs the history the damaged file held.
+21. A listing's key keeps a mark of its newest accepted record (revision, hash, signing key, `gone`), apart from its row and persisted: a lower revision is ignored, the same record restores or keeps its row, another record at that revision is a conflict. A mark is dropped only when its machine leaves the org or its signing key is no longer the machine's. Rejected: deleting a withdrawn row's key with it; a count cap, which lets a still-verifiable old revision return.
+22. A machine counts as loaded only once this run's hub snapshot has applied with the announced head adopted (`OrgRows.complete`) and none of its records await verification (`OrgRows.pending`); the roster alone only suppresses its record reads. Rejected: loading a machine on its first rows, or on the snapshot's last page alone, either of which can drop restored tabs.
 23. A hub that stops admitting the member (`4403`, `403 not-a-member`) is `denied`, not a removal: the app changes no trust state until a verified head does. Rejected: reading the unsigned close as the removal.
 24. Sign-out's commit point is the `signedOut` marker, written before the token is deleted, and a running sign-in is fenced. Rejected: deleting the token first.
 25. M2 promises no record for a remote session; the opening lane draws its pane from the `ListedSession` and its own subscription, or waits for O3's read (finding F8). Rejected: naming lane A's plane presence as a record's source.
