@@ -178,11 +178,12 @@ describe('the settings route each field to its owner’s file', () => {
 
   it('a machine field changes only machine-settings.json, a client field only settings.json, and each set publishes once', async () => {
     start();
-    expect(() => bytes(file)).toThrow(); // a first run writes no client file until a client field is set
+    expect(JSON.parse(bytes(file))).toEqual(clientSettingsDefaults()); // a first run writes the client file's defaults (P5 O3-A: the version fence)
     const machineBytes = bytes(machineFile()); // the split's defaults
     await invoke('settings.set', { theme: 'dark' });
     expect(bytes(machineFile())).toBe(machineBytes);
     const client = bytes(file);
+    expect(JSON.parse(client)).toEqual({ ...clientSettingsDefaults(), theme: 'dark' });
     clearRecords();
     const archived = await invoke('settings.set', { sessions: { archiveInactiveDays: 7 }, supervisor: { idleExitMinutes: 30 } });
     expect(archived).toMatchObject({ ok: true, value: { settings: { sessions: { archiveInactiveDays: 7 }, supervisor: { idleExitMinutes: 30, keepRunningDefault: true, shape: 'daemon' } } } });

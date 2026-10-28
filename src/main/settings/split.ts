@@ -7,7 +7,7 @@
 // authoritative, and the next start finishes the client file from the unified one. Electron-free (the spine's).
 import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { isUnifiedSettings, machineSettingsDefaults, migrateClientSettings, migrateSettings, settingsVersionOf, splitSettings } from '@shared/settings/defaults';
+import { clientSettingsDefaults, isUnifiedSettings, machineSettingsDefaults, migrateClientSettings, migrateSettings, settingsVersionOf, splitSettings } from '@shared/settings/defaults';
 import type { MachineSettings } from '@shared/ipc/schema/settings';
 import { atomicWriteFileSync } from '../files/atomic-write';
 
@@ -94,14 +94,20 @@ export function splitSettingsFiles(paths: SettingsPaths, io: SplitIo = nodeSplit
       return false;
     }
   };
+  // The version fence (§2): a profile whose settings were never changed has no settings.json, which a build before the
+  // split would take for a first run and write a unified file into, later read here as a split in progress whose
+  // machine fields lose to the machine file. The client file at 21 makes such a build run on its defaults with writes
+  // refused, so it is written whenever the machine file is (a write that fails is tried again at the next start).
+  const clientAbsent = clientText === null && unreadable === null;
   if (machinePresent) {
+    if (clientAbsent) writeClient(JSON.stringify(clientSettingsDefaults()));
     if (unified === null) return done('none');
     if (writeClient(JSON.stringify(splitSettings(unified).client)))
       log(`[settings] finished the split of ${paths.client} (version ${String(version)}): rewritten as the client file; ${SETTINGS_FILES.machine} was already written`);
     return done('finished');
   }
   if (unreadable !== null) return { outcome: 'none', machineRefused: `${unreadable}; ${SETTINGS_FILES.machine} is not created over it`, unsplit: null };
-  const { client, machine } = unified === null ? { client: null, machine: machineSettingsDefaults() } : splitSettings(unified);
+  const { client, machine } = unified === null ? { client: clientAbsent ? clientSettingsDefaults() : null, machine: machineSettingsDefaults() } : splitSettings(unified);
   try {
     io.write(paths.machine, JSON.stringify(machine));
   } catch (error) {
@@ -109,8 +115,8 @@ export function splitSettingsFiles(paths: SettingsPaths, io: SplitIo = nodeSplit
     // the defaults alone are a first run's, which the machine store writes on its first update as any store does
     return unified === null ? done('none') : { outcome: 'none', machineRefused: failed(paths.machine, error), unsplit: machine };
   }
-  if (client === null) return done('machine');
-  if (writeClient(JSON.stringify(client)))
+  if (client === null) return done('machine'); // a client file already there
+  if (writeClient(JSON.stringify(client)) && unified !== null)
     log(`[settings] split ${paths.client} (version ${String(version)}) into ${SETTINGS_FILES.machine} (version ${machine.version}) and the client file (version ${client.version})`);
-  return done('split');
+  return done(unified === null ? 'machine' : 'split');
 }

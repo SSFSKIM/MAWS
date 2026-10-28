@@ -765,7 +765,7 @@ export class DirectCalls {
 }
 
 // What main learns of a verified source: its provenance and HTTP resource, never its entry or digest.
-function publicSource(source: VerifiedConnectorSource): DirectSource {
+export function publicSource(source: VerifiedConnectorSource): DirectSource {
   return {
     directory: source.cwd, sourceId: source.sourceId, generation: source.generation, server: source.server, scope: source.scope, transport: source.transport,
     path: source.path, entryPath: [...source.entryPath], observedAt: source.observedAt, ...(source.url !== undefined && { resourceUrl: source.url }),

@@ -179,13 +179,15 @@ describe('settings persistence regressions', () => {
 });
 
 describe('settings store', () => {
-  it('defaults to light when there is no file yet, silently and without writing one', () => {
+  it('defaults to light when there is no file yet, silently, writing only the defaults of the two files', () => {
     const warn = vi.spyOn(console, 'warn');
     expect(DEFAULT_SETTINGS).toEqual(v3('light'));
     expect(open().settings).toEqual(DEFAULT_SETTINGS);
     expect(warn).not.toHaveBeenCalled();
-    // P5 O3-A: the machine file is written with its defaults, so a profile any split build started always has one
-    expect(readdirSync(dir)).toEqual(['machine-settings.json']);
+  // P5 O3-A: both files with their defaults: the machine file, so a profile any split build started has one; the client
+  // file at 21, the version fence a build before the split refuses to write over
+    expect(readdirSync(dir).sort()).toEqual(['machine-settings.json', 'settings.json']);
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(clientSettingsDefaults());
     expect(JSON.parse(readFileSync(machineFile, 'utf8'))).toEqual(machineSettingsDefaults());
   });
 
@@ -625,6 +627,24 @@ describe('the settings split', () => {
       expect(readdirSync(dir)).toEqual(['settings.json']);
       expect(readFileSync(file, 'utf8')).toBe(text);
     }
+  });
+
+  // The fence where no setting was ever changed (high review, round 1): without a client file a build before the split
+  // takes the profile for a first run and writes a unified file, whose machine fields a later split would lose to the
+  // machine file. With it, that build reads defaults and refuses the write, and nothing is lost.
+  it('a profile with no settings.json gets the client file at 21 beside the machine file, so a build before the split writes nothing over them', () => {
+    const preSplit = SettingsSchema.extend({ version: z.literal(20) });
+    const preSplitStore = () =>
+      openSettingsFile(file, { read: (raw) => ({ value: preSplit.parse(raw) }), defaults: () => ({ ...SETTINGS_DEFAULTS_V21, version: 20 as const }), validate: (value) => preSplit.parse(value) });
+    expect(splitSettingsFiles(paths(), undefined, () => {}).outcome).toBe('machine');
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(clientSettingsDefaults());
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(() => preSplitStore().update((settings) => ({ ...settings, gateway: { ...settings.gateway, defaultRoute: 'direct' } }))).toThrow();
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(clientSettingsDefaults());
+    // and a profile whose machine file is there but whose client file is not (a crash before it was written) gets it too
+    rmSync(file);
+    expect(splitSettingsFiles(paths(), undefined, () => {}).outcome).toBe('none');
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(clientSettingsDefaults());
   });
 
   it('a client file whose machine file has gone gains the machine defaults, and keeps its own bytes', () => {
