@@ -65,7 +65,17 @@ export default defineConfig(({ command }) => {
     // its aliases, defines and externals: node-pty stays a real file under node_modules, for `asarUnpack`.
     main: {
       resolve: { alias },
-      define: { __MAWS_DEV_CSP_NONCE__: JSON.stringify(devNonce), __MAWS_VERSION__: JSON.stringify(version), __MAWS_BUILD__: JSON.stringify(build) },
+      // P5 O10 M10: `ws` is bundled (main's remote links, mawsd's endpoint) and its optional native helpers, `bufferutil`
+      // and `utf-8-validate`, are installed nowhere. The bundler stands an empty object in for each, which `ws`'s
+      // `try { require(...) }` takes as present, so its first masked frame of 48 bytes or more calls a `mask` that isn't
+      // there. `ws`'s own switches, defined here, keep it on its JavaScript paths (bundle-guard.test.ts holds the graph to it).
+      define: {
+        __MAWS_DEV_CSP_NONCE__: JSON.stringify(devNonce),
+        __MAWS_VERSION__: JSON.stringify(version),
+        __MAWS_BUILD__: JSON.stringify(build),
+        'process.env.WS_NO_BUFFER_UTIL': JSON.stringify('1'),
+        'process.env.WS_NO_UTF_8_VALIDATE': JSON.stringify('1'),
+      },
       // P5 O2 M5: `mawsd` (out/main/mawsd.js) is main's second input, so its `?modulePath` imports of the hosts emit the
       // files main's do and one build has one build id; src/engine-host/bundle-guard.test.ts holds its graph to Node's
       // builtins and the hosts' externals (no `electron`)

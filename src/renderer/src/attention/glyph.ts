@@ -52,3 +52,23 @@ export function glyphFor(record: SessionRecord, digest: SessionDigest | null, pe
   }
   return record.unread ? glyph('●', 'faint', 'Idle, unread') : glyph('○', 'faint', 'Idle');
 }
+
+// P5 O8 M2 ("Drawing", the state table): another machine's listed session, by its listing's state word (sminos's), drawn
+// with the glyphs above. O9's Q1 (how a terminal session's glyph reads) governs lane A rows too; until it is answered they
+// read these live glyphs.
+export function listedGlyph(state: string): Glyph {
+  switch (state) {
+    case 'busy':
+      return glyph('●', 'accent', 'Working', true);
+    case 'waiting':
+      return glyph('◐', 'warning', 'Needs you');
+    case 'failed':
+      return glyph('✕', 'danger', 'Failed');
+    case 'done':
+    case 'stopped':
+    case 'retired':
+      return glyph('✓', 'faint', 'Done');
+    default:
+      return glyph('○', 'faint', 'Idle');
+  }
+}

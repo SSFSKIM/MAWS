@@ -6,11 +6,14 @@ import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
 import { addressOf } from '@shared/machine/address';
 import { machineKey, type OrgKey } from '@shared/machine/org-key';
 import type { MachineRef } from '@shared/machine/ref';
-import { digest, item, project, record } from '../../../../test/support/builders';
+import type { RemoteRow } from '@shared/ipc/schema/org';
+import { digest, item, project, record, remoteRow } from '../../../../test/support/builders';
 import { TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { at as addr, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { loadScenario } from '../../../../test/support/scenario';
-import { holderLine, needsYou, waitingItem } from '../attention/derive';
+import { holderLine, needsYou, waitingItem, type NeedsYouRow } from '../attention/derive';
+import { listedGlyph } from '../attention/glyph';
+import type { ListedSession } from '../stores/sessions';
 import { orderProjects } from '../overview/derive';
 import { pageScenario } from '../test-support/shell-stores';
 import {
@@ -18,7 +21,10 @@ import {
   formatAge,
   itemAge,
   lineageCaption,
+  listedTitle,
+  nestItems,
   nestLineage,
+  projectItems,
   needsYouAge,
   projectList,
   projectSessions,
@@ -194,6 +200,101 @@ describe('the project list across machines', () => {
   it('keeps a project its machine has not derived yet a row of its own, keyed by its address', () => {
     const fresh = projectOn(OTHER_MACHINE, 'fresh', 1);
     expect(list([fresh], recs()).map((e) => [e.key, e.name])).toEqual([[fresh.id, 'fresh']]);
+  });
+});
+
+// P5 O8 M2 ("Drawing"): another machine's listed sessions beside this Mac's records.
+describe('listed rows in the project list', () => {
+  const ORG = 'repo:maws' as OrgKey;
+  const here = projectOn(TEST_MACHINE, 'maws', 0, { name: 'MAWS', org: repo('maws', 'MAWS') });
+  const listedOn = (session: string, over: Partial<RemoteRow> = {}): ListedSession => ({ ...remoteRow(OTHER_MACHINE, session, over), appId: there(session) as AppSessionId });
+  const listedMap = (...list: ListedSession[]) => new Map(list.map((l) => [l.appId, l]));
+  const recs = (...list: SessionRecord[]) => new Map(list.map((r) => [r.appId, r]));
+  const local = sessionOn(TEST_MACHINE, 's1', { projectId: here.id, updatedAt: '2026-10-28T09:00:00Z' });
+  const list = (listed: Map<AppSessionId, ListedSession>, over: Partial<ProjectListInput> = {}) =>
+    projectList(input({ records: recs(local), digests: new Map(), projects: mapOf([here]), rows: [], listed, ...over }));
+  const shape = (entries: ReturnType<typeof list>) => entries.map((e) => [e.key, e.sessions.map((r) => r.appId), e.listed.map((l) => l.appId)]);
+
+  it('joins its org project beside the local rows; one whose project is not listed sits under its machine’s row', () => {
+    const joined = listedOn('b1', { orgKey: ORG, issued: '2026-10-28T10:00:00Z' });
+    const elsewhere = listedOn('b2', { orgKey: 'repo:unknown' as OrgKey });
+    const none = listedOn('b3');
+    const entries = list(listedMap(joined, elsewhere, none));
+    expect(shape(entries)).toEqual([
+      [ORG, [addr('s1')], [there('b1')]],
+      [machineKey(OTHER_MACHINE), [], [there('b2'), there('b3')]],
+    ]);
+    expect(entries[0].lastActivity).toBe(Date.parse('2026-10-28T10:00:00Z')); // its issue is the row's latest movement
+    expect(entries[1].name).toBe('Studio');
+  });
+
+  it('files an all-hidden project’s row nowhere, and a row of a key with no checkout under its machine’s row', () => {
+    const row = listedOn('b1', { orgKey: ORG });
+    expect(shape(list(listedMap(row), { projects: mapOf([{ ...here, hidden: true }]), records: new Map() }))).toEqual([]);
+    expect(shape(list(listedMap(row), { projects: mapOf([{ ...here, discovered: true }]), records: new Map() }))).toEqual([[machineKey(OTHER_MACHINE), [], [there('b1')]]]);
+  });
+
+  it('draws only the member’s own rows, and none whose address has a record (the record’s row is drawn)', () => {
+    const recorded = sessionOn(OTHER_MACHINE, 'b1', { projectId: null });
+    const entries = list(listedMap(listedOn('b1'), listedOn('b2', { mine: false }), listedOn('b3')), { records: recs(local, recorded) });
+    expect(shape(entries)).toEqual([[ORG, [addr('s1')], []], [machineKey(OTHER_MACHINE), [there('b1')], [there('b3')]]]);
+  });
+
+  it('adds listed rows waiting and busy to the waiting and working counts', () => {
+    const states = ['waiting', 'busy', 'busy', 'idle', 'failed'];
+    const entries = list(listedMap(...states.map((state, i) => listedOn(`b${i}`, { orgKey: ORG, state }))), {
+      digests: new Map([[local.appId, digest(local.appId, { phase: 'working' })]]),
+    });
+    expect(entries[0].rollup).toEqual({ waiting: 1, working: 3 });
+  });
+
+  it('a search finds a listed row by its title', () => {
+    const entries = list(listedMap(listedOn('b1', { orgKey: ORG, title: 'Remote refactor' }), listedOn('b2', { title: 'Studio chores' })));
+    expect(filterProjectList(entries, 'chores', byId).map((e) => e.key)).toEqual([machineKey(OTHER_MACHINE)]);
+    expect(filterProjectList(entries, 'refactor', byId).map((e) => e.key)).toEqual([ORG]);
+  });
+
+  it('reads each state through the existing glyphs', () => {
+    const read = (state: string) => { const g = listedGlyph(state); return [g.char, g.tone, g.label, g.pulse]; };
+    expect(read('busy')).toEqual(['●', 'accent', 'Working', true]);
+    expect(read('waiting')).toEqual(['◐', 'warning', 'Needs you', false]);
+    expect(read('failed')).toEqual(['✕', 'danger', 'Failed', false]);
+    for (const state of ['done', 'stopped', 'retired']) expect(read(state)).toEqual(['✓', 'faint', 'Done', false]);
+    for (const state of ['idle', 'unknown-word', '']) expect(read(state)).toEqual(['○', 'faint', 'Idle', false]);
+    expect(listedTitle({ title: '  ' })).toBe('New chat');
+  });
+});
+
+describe('an expanded project’s records and listed rows in one ordering', () => {
+  const minute = (m: number) => `2026-10-28T10:${String(m).padStart(2, '0')}:00.000Z`;
+  const rec = (id: string, m: number, over: Partial<SessionRecord> = {}) => record(id, { updatedAt: minute(m), ...over });
+  const lst = (id: string, m: number): ListedSession => ({ ...remoteRow(OTHER_MACHINE, id, { issued: minute(m) }), appId: there(id) as AppSessionId });
+  const ids = (items: ReturnType<typeof projectItems>) => items.map((i) => (i.kind === 'record' ? i.record.appId : `@${i.listed.session}`));
+  const items = (sorted: SessionRecord[], listed: ListedSession[], sort: 'priority' | 'recency' = 'recency', over: { rows?: NeedsYouRow[] } = {}) =>
+    projectItems({ sorted, listed, digests: new Map(), rows: over.rows ?? [], sort });
+
+  it('merges by last activity, records by `lastActivity`, listed rows by `issued`; pinned records stay on top', () => {
+    expect(ids(items([rec('r9', 9), rec('r5', 5), rec('r1', 1)], [lst('l7', 7), lst('l3', 3), lst('l0', 0)]))).toEqual(['r9', '@l7', 'r5', '@l3', 'r1', '@l0']);
+    expect(ids(items([rec('p', 0, { pinned: true }), rec('r5', 5)], [lst('l7', 7)]))).toEqual(['p', '@l7', 'r5']);
+  });
+
+  it('under priority, the records ranked by attention, unread or work lead; the listed rows merge among the rest', () => {
+    const waitingOld = rec('w', 1);
+    const unread = rec('u', 2, { unread: true });
+    const rows = needsYou(new Map([[waitingOld.appId, [item('w', 'permission', minute(1))]]]), new Map([[waitingOld.appId, waitingOld]]));
+    expect(ids(items([waitingOld, unread, rec('r5', 5), rec('r3', 3)], [lst('l9', 9), lst('l4', 4)], 'priority', { rows }))).toEqual(['w', 'u', '@l9', 'r5', '@l4', 'r3']);
+  });
+
+  it('nests lineage among records only, and caps count a listed row as one tree: five, then eight after Show more', () => {
+    const parent = rec('a', 9);
+    const child = rec('a-t', 2, { lineage: { kind: 'fork', parentAppSessionId: 'a' as AppSessionId, parentEngineSessionId: null, openedBy: 'fork' } });
+    const merged = items([parent, child, ...Array.from({ length: 4 }, (_, i) => rec(`r${i}`, 4 - i))], Array.from({ length: 5 }, (_, i) => lst(`l${i}`, 8 - i)));
+    const trees = nestItems(merged);
+    expect(trees.map((t) => t.rows.map((r) => ('listed' in r ? `@${r.listed.session}` : r.nestedUnder === null ? r.record.appId : `${r.record.appId}<${r.nestedUnder}`)))).toEqual([
+      ['a', 'a-t<a'], ['@l0'], ['@l1'], ['@l2'], ['@l3'], ['@l4'], ['r0'], ['r1'], ['r2'], ['r3'],
+    ]);
+    expect(trees.slice(0, shownCount(trees.length, false)).flatMap((t) => t.rows)).toHaveLength(6);
+    expect(trees.slice(0, shownCount(trees.length, true)).flatMap((t) => t.rows)).toHaveLength(9);
   });
 });
 

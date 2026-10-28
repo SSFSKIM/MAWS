@@ -27,7 +27,8 @@ const fake = vi.hoisted(() => {
     quit: vi.fn(),
     exit: vi.fn(),
   };
-  const emit = (event: string) => (listeners.get(event) ?? []).forEach((listener) => listener());
+  // an event as Electron passes one (will-quit's is held by a step's promise: P5 O8 M2's rows cache)
+  const emit = (event: string) => (listeners.get(event) ?? []).forEach((listener) => listener({ preventDefault: () => {} }));
   return { listeners, windows, hosts, app, appPath, emit, createWindow: vi.fn(() => void windows.push({})), showMessageBox: vi.fn(async () => ({ response: 1 })) };
 });
 
@@ -54,7 +55,7 @@ vi.mock('./dashboard/export', () => ({ registerDashboardExporters: vi.fn(() => (
 vi.mock('./presentations/present', () => ({ registerPresenter: vi.fn(() => ({ end: vi.fn() })) })); // P3-C M6: the presenter's windows
 vi.mock('./browser/import', () => ({ ImportedProfiles: { open: () => ({ list: () => [] }) }, sweepBrowserImports: vi.fn(), startBrowserImport: () => ({ stop: vi.fn() }) })); // E4b: the Chrome import's main side
 vi.mock('./ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: vi.fn() /* C3 */, registerMachineHandler: vi.fn() /* P5 O6 M1 */, interceptCommand: vi.fn(), dispatchLocal: vi.fn() /* P5 O6 M3 */, CommandFailure: Error /* C11 */ }));
-vi.mock('./machines', () => ({ startMachines: vi.fn(() => ({ dispatch: vi.fn(), serve: vi.fn(), stop: vi.fn() })) })); // P5 O6 M3: no links, no stand-in
+vi.mock('./machines', () => ({ startMachines: vi.fn(() => ({ dispatch: vi.fn(), serve: vi.fn(), stop: vi.fn(), onRemote: vi.fn(() => () => {}) /* P5 O8 M2: the rows read the roster */ })) })); // P5 O6 M3: no links, no stand-in
 vi.mock('./machine/identity', () => ({ startMachineIdentity: vi.fn(() => ({ ref: 'TestMachineRef00000000' })) })); // P5 O6 M1: no machine.json under the fixed getPath; M2: main binds its ref
 // C3 start: main's attention service and its store, started from index.ts, are replaced like the other wired modules
 vi.mock('./attention/service', () => ({ startAttentionService: vi.fn() }));

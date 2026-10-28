@@ -16,13 +16,14 @@ import { registerSessionCreator } from '../keymap/actions-runtime';
 import { closeDialog, useDialogs } from '../sessions/dialogs';
 import { SessionDialogs } from '../sessions/SessionDialogs';
 import { Toolbar } from '../app/Toolbar';
-import { digest, item, project, record, status } from '../../../../test/support/builders';
+import { digest, item, project, record, remoteRow, status } from '../../../../test/support/builders';
+import { registerRemoteOpener } from '../sessions/remote-openers'; // P5 O8 M2
 import { registerAction } from '../keymap/actions-runtime'; // C11
 import { useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
 import { activeTab, currentSet } from '../stores/layout-model';
-import { useSessions } from '../stores/sessions';
+import { useSessions, type ListedSession } from '../stores/sessions';
 import { fileTabsByProject, fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import type { ProjectKey } from './derive';
 import { registerProjectAction } from './project-actions';
@@ -1378,5 +1379,134 @@ describe('the sidebar across machines', () => {
     expect(sessionRows(row('MAWS'))).toEqual(['Studio build']);
     expect(row('MAWS').getAttribute('data-menu')).toBe(`project:${studio('maws-b')}`);
     expect((within(row('MAWS')).getByRole('button', { name: 'New chat in MAWS' }) as HTMLButtonElement).disabled).toBe(true); // another machine's: O7
+  });
+});
+
+// P5 O8 M2 (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, "Drawing"): another machine's sessions as their
+// listings say them, beside this Mac's records.
+describe('listed rows from another machine', () => {
+  const studio = (id: string) => addressOf(OTHER_MACHINE, id) as AppSessionId;
+  const ORG = 'repo:maws' as OrgKey;
+  const maws = project(at('maws'), 0, { name: 'MAWS', org: { key: ORG, name: 'MAWS', source: 'remote', smnsId: null } });
+  const notes = project(at('notes'), 1, { name: 'notes', hidden: true, org: { key: 'repo:notes' as OrgKey, name: 'notes', source: 'remote', smnsId: null } });
+  const here = record(at('here'), { projectId: maws.id, title: { text: 'Sidebar pass', source: 'user' }, updatedAt: '2026-10-28T09:00:00Z' });
+  const listedOn = (id: string, over: Partial<ListedSession> = {}): ListedSession => ({ ...remoteRow(OTHER_MACHINE, id, { orgKey: ORG, issued: '2026-10-28T10:00:00Z' }), appId: studio(id), ...over });
+  const fill = (listed: ListedSession[], sessions: SessionRecord[] = [here]) =>
+    useSessions.setState({ loaded: true, projects: new Map([maws, notes].map((p) => [p.id, p])), records: new Map(sessions.map((r) => [r.appId, r])), listed: new Map(listed.map((l) => [l.appId, l])) });
+  const roster = (studioState: 'up' | 'down') =>
+    useMachines.getState().applyRoster([
+      { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-10-28T10:00:00Z', generation: 0 },
+      { ref: OTHER_MACHINE, name: 'Studio', local: false, state: studioState, since: '2026-10-28T10:00:00Z', generation: 0 },
+    ]);
+  const drawn = (el: HTMLElement) => within(el).queryAllByRole('treeitem').filter((t) => t.dataset.kind === 'session' || t.dataset.kind === 'listed').map((t) => [label(t), t.dataset.kind]);
+  const chip = (title: string) => row(title).querySelector('[data-machine-chip]')?.textContent ?? null;
+  const expandAll = () => act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG, machineKey(OTHER_MACHINE)] as ProjectKey[] }));
+  beforeEach(() => {
+    useAttention.setState({ loaded: true });
+    roster('up');
+  });
+  afterEach(() => useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() }));
+
+  it('draws its rows under their org project with @name beside the local rows, under its machine’s row when the project is not listed, and nowhere for an all-hidden one', () => {
+    fill([listedOn('b1', { title: 'Studio build' }), listedOn('b2', { title: 'Studio chores', orgKey: null }), listedOn('b3', { title: 'Hidden notes', orgKey: 'repo:notes' as OrgKey })]);
+    expandAll();
+    render(<Sidebar />);
+    expect(projectRows()).toEqual(['MAWS', 'Studio']);
+    expect(drawn(row('MAWS'))).toEqual([['Studio build', 'listed'], ['Sidebar pass', 'session']]); // the listing issued later
+    expect(drawn(row('Studio'))).toEqual([['Studio chores', 'listed']]);
+    expect(chip('Studio build')).toBe('@Studio');
+    expect(chip('Sidebar pass')).toBeNull();
+    expect(screen.queryByRole('treeitem', { name: 'Hidden notes' })).toBeNull();
+    expect(row('Studio build').querySelector('[data-session-age]')?.textContent).not.toBe('');
+  });
+
+  it('greys its rows in place, "offline" where the chip was, while its machine is not up', () => {
+    fill([listedOn('b1', { title: 'Studio build' })]);
+    roster('down');
+    expandAll();
+    render(<Sidebar />);
+    const offline = row('Studio build, machine offline');
+    expect(offline.dataset.offline).toBe('true');
+    expect(chip('Studio build, machine offline')).toBe('offline');
+    expect(offline.querySelector('[data-session-title]')!.className).toContain('text-fg-faint');
+  });
+
+  it('draws one row where a record holds a listed address, and none for a row the member does not own', () => {
+    const recorded = record(studio('b1'), { projectId: null, title: { text: 'Studio build (record)', source: 'user' } });
+    fill([listedOn('b1', { title: 'Studio build (listing)' }), listedOn('b2', { title: 'Someone else’s', mine: false })], [here, recorded]);
+    expandAll();
+    render(<Sidebar />);
+    expect(drawn(row('MAWS'))).toEqual([['Sidebar pass', 'session']]);
+    expect(drawn(row('Studio'))).toEqual([['Studio build (record)', 'session']]);
+    expect(screen.queryByRole('treeitem', { name: 'Studio build (listing)' })).toBeNull();
+    expect(screen.queryByRole('treeitem', { name: 'Someone else’s' })).toBeNull();
+  });
+
+  it('draws each state’s glyph, and counts waiting and busy rows in the collapsed project’s rollups', async () => {
+    const states = ['busy', 'waiting', 'failed', 'done', 'stopped', 'retired', 'idle'];
+    fill(states.map((state, i) => listedOn(`b${i}`, { state, title: `state ${state}`, issued: `2026-10-28T10:0${9 - i}:00Z` })));
+    render(<Sidebar />);
+    expect(within(row('MAWS')).getByLabelText('1 waiting').textContent).toBe('◐1');
+    expect(within(row('MAWS')).getByLabelText('1 working').textContent).toBe('●1');
+    act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG] as ProjectKey[] }));
+    await userEvent.click(screen.getByRole('treeitem', { name: 'Show more' }));
+    const glyph = (state: string) => within(row(`state ${state}`)).getByRole('img').getAttribute('aria-label');
+    expect(states.map(glyph)).toEqual(['Working', 'Needs you', 'Failed', 'Done', 'Done', 'Done', 'Idle']);
+  });
+
+  it('caps an expanded project at five over both kinds, then eight after Show more', async () => {
+    const records = Array.from({ length: 5 }, (_, i) => record(at(`r${i}`), { projectId: maws.id, title: { text: `local ${i}`, source: 'user' }, updatedAt: `2026-10-28T09:${10 + 2 * i}:00Z` }));
+    const listed = Array.from({ length: 5 }, (_, i) => listedOn(`l${i}`, { title: `remote ${i}`, issued: `2026-10-28T09:${11 + 2 * i}:00Z` }));
+    fill(listed, records);
+    act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG] as ProjectKey[] }));
+    render(<Sidebar />);
+    expect(drawn(row('MAWS')).map(([name]) => name)).toEqual(['remote 4', 'local 4', 'remote 3', 'local 3', 'remote 2']);
+    await userEvent.click(screen.getByRole('treeitem', { name: 'Show more' }));
+    expect(drawn(row('MAWS')).map(([name]) => name)).toEqual(['remote 4', 'local 4', 'remote 3', 'local 3', 'remote 2', 'local 2', 'remote 1', 'local 1']);
+    expect(screen.queryByRole('treeitem', { name: 'Show more' })).toBeNull();
+  });
+
+  it('a search finds a listed row by its title', async () => {
+    fill([listedOn('b1', { title: 'Remote refactor' }), listedOn('b2', { title: 'Studio chores' })]);
+    render(<Sidebar />);
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search projects and sessions' }), 'refactor');
+    expect(projectRows()).toEqual(['MAWS']);
+    expect(drawn(row('MAWS'))).toEqual([['Remote refactor', 'listed']]);
+  });
+
+  it('a click calls its lane’s opener; with none the row is selected and its card shows, opening nothing and offering no menu', async () => {
+    fill([listedOn('b1', { title: 'Studio build', lane: 'A' })]);
+    act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG] as ProjectKey[] }));
+    render(<Sidebar />);
+    const tabsBefore = useLayout.getState().main;
+    await userEvent.click(row('Studio build'));
+    expect(row('Studio build').getAttribute('aria-selected')).toBe('true');
+    const card = await screen.findByRole('dialog', { name: 'Studio build' });
+    expect(within(card).getByTestId('hover-meta').textContent).toMatch(/^Idle · updated /);
+    expect(within(card).getByTestId('hover-machine').textContent).toBe('Studio');
+    expect(useLayout.getState().main).toBe(tabsBefore);
+    fireEvent.contextMenu(row('Studio build'));
+    expect(screen.queryByRole('menu')).toBeNull();
+
+    const open = vi.fn();
+    offs.push(registerRemoteOpener('A', open));
+    await userEvent.click(row('Studio build'));
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({ appId: studio('b1'), lane: 'A' }));
+    expect(useLayout.getState().main).toBe(tabsBefore);
+  });
+
+  it('a selected listed row stays unselected once the shown tab changes, even when the tab it was picked over returns', async () => {
+    const other = record(at('other'), { projectId: maws.id, title: { text: 'Other pass', source: 'user' }, updatedAt: '2026-10-28T08:00:00Z' });
+    fill([listedOn('b1', { title: 'Studio build', lane: 'A' })], [here, other]);
+    act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG] as ProjectKey[] }));
+    act(() => useLayout.getState().openSession(here.appId));
+    render(<Sidebar />);
+    await userEvent.click(row('Studio build'));
+    expect(row('Studio build').getAttribute('aria-selected')).toBe('true');
+    act(() => useLayout.getState().openSession(other.appId));
+    expect(row('Other pass').getAttribute('aria-selected')).toBe('true');
+    act(() => useLayout.getState().openSession(here.appId));
+    expect(row('Sidebar pass').getAttribute('aria-selected')).toBe('true');
+    expect(row('Studio build').getAttribute('aria-selected')).not.toBe('true');
   });
 });
