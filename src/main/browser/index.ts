@@ -4,13 +4,16 @@
 // `window.open`, the context menu, the keyboard), the input attribution over each tab's TabDebugger (with focus
 // emulation when it is on), the memory sample and its soft cap, `browser.*`, and under MAWS_E2E=1 the e2e's seam
 // (inspect.ts). Tabs belong to sessions (P-21): a session whose record is deleted closes its tabs, and at boot a tab
-// whose session the index does not know is dropped from the file. Main never waits on the renderer.
+// whose session the index does not know is dropped from the file. Main never waits on the renderer. The history,
+// bookmarks and agent activity are the browser's own database since P5 O3-A (data/), opened by main before the browser
+// starts and told here the sessions the spine knows.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { app, BrowserWindow, session } from 'electron';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { BrowserSettings } from '@shared/ipc/schema/settings';
 import type { Index } from '../index/index';
+import type { BrowserData } from './data';
 import type { registerMainHandler } from '../ipc/router';
 import { isAppWindow } from '../windows';
 import { attachContextMenu } from './context-menu';
@@ -56,7 +59,10 @@ export interface BrowserDeps {
   // Settings 11's `browser` section, read when a tab opens (the profile: a change applies to tabs opened afterwards) and
   // when a page opens a window (`linkTarget`, at the moment of the open).
   settings(): BrowserSettings;
-  index: Pick<Index, 'sessions' | 'unavailable' | 'browserHistory' | 'browserActivity' | 'browserBookmarks' /* cua #90 */>;
+  index: Pick<Index, 'sessions' | 'unavailable'>;
+  // P5 O3-A: the history, bookmarks and agent activity (data/index.ts), and the snapshot and changes of the spine's
+  // sessions it keeps the activity by
+  data: Pick<BrowserData, 'history' | 'bookmarks' | 'activity' | 'reattach' | 'sessionChanged'>;
   register: typeof registerMainHandler;
   emit: BrowserEmit;
   env: NodeJS.ProcessEnv; // MAWS_BROWSER_FOCUS_EMULATION; MAWS_E2E with MAWS_E2E_OPEN_LOG (seam.ts) and MAWS_E2E_SAVE_PATH
@@ -81,7 +87,7 @@ export interface Browser {
   extensions: Pick<ExtensionUi, 'removing'>; // cua #90: the action bar's popups and options tabs, for a profile's removal
 }
 
-export function startBrowser({ userData, settings, index, register, emit, env, profiles: listProfiles, /* E4c */ hosts }: BrowserDeps): Browser {
+export function startBrowser({ userData, settings, index, data, register, emit, env, profiles: listProfiles, /* E4c */ hosts }: BrowserDeps): Browser {
   const dir = join(userData, 'browser');
   mkdirSync(dir, { recursive: true });
   const tabsFile = join(dir, 'tabs.json');
@@ -137,7 +143,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     agent: { owns: (entry) => cua.downloads.owns(entry), started: (entry, download) => cua.downloads.started(entry, download) },
   });
   const favicons = new Favicons((partition, url, init) => partitions.session(partition).fetch(url, init));
-  const navigator = new Navigator({ store, history: index.browserHistory, favicons, emit, seam });
+  const navigator = new Navigator({ store, history: data.history, favicons, emit, seam });
   const childPreferences = tabWebPreferences();
   store.onViewCreated((entry) => {
     navigator.attach(entry);
@@ -152,11 +158,11 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   // cua #90 start: the bookmarks bar's menus (recorded for the e2e's seam under MAWS_E2E=1) and its commands
   const menus = new NativeMenus({ e2e: env.MAWS_E2E === '1' });
   const confirmOpenAll = openAllConfirmation(env);
-  const bar = new BookmarkBar({ tabs: store, navigator, bookmarks: index.browserBookmarks, menus, confirmOpenAll });
+  const bar = new BookmarkBar({ tabs: store, navigator, bookmarks: data.bookmarks, menus, confirmOpenAll });
   // cua #90 end
   registerBrowserHandlers({
-    store, views, navigator, downloads, history: index.browserHistory, profiles, register,
-    bookmarks: index.browserBookmarks, bar, windowOf, favicons, avatars: new ProfileAvatars(userData), // cua #90
+    store, views, navigator, downloads, history: data.history, profiles, register,
+    bookmarks: data.bookmarks, bar, windowOf, favicons, avatars: new ProfileAvatars(userData), // cua #90
   });
   // cua #90: the extensions action bar (its list, popups, options tabs and menus)
   const extensionUi = startExtensionUi({ store, views, partitions, leaveInternal: (entry, url) => void navigator.leaveInternal(entry, url), records: profiles, menus, windowOf, emit, register, linkTarget: () => settings().linkTarget, seam, env });
@@ -177,7 +183,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     peer: { addon: peerAddon, trustedRoots },
     ...(controls && cursor && { presence: { controls, cursor } }),
     emit,
-    activityStore: index.browserActivity, // cua board #93
+    activityStore: data.activity, // cua board #93
     recordDownload: async (download) => {
       if (!hosts) return;
       const result = await hosts.dispatch('engine-host', 'maws.download.recorded', download);
@@ -192,8 +198,8 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     userData,
     version: app.getVersion(),
   });
-  // the session's agent activity, which a transcript lists when it mounts (M3 fix wave), kept across restarts in the
-  // index since cua board #93
+  // the session's agent activity, which a transcript lists when it mounts (M3 fix wave), kept across restarts since cua
+  // board #93 (in the browser's own database since P5 O3-A)
   register('browser.agent.activities.list', ({ appSessionId }) => ({ activities: cua.activities(appSessionId as AppSessionId) }));
   // every status of a known session names its engine to the socket's peer check (the pid while it runs, none once exited)
   const stopCuaStatus = hosts?.onEvent('session.status', ({ appSessionId, status }) => {
@@ -211,11 +217,15 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     callback();
   };
   app.on('select-client-certificate', refuseUnownedCertificate);
+  // P5 O3-A: every change tells the browser's data which sessions the spine knows (a removal takes the session's activity
+  // rows), and the snapshot taken once that listener is in place reconciles the rows against the index's records
   const stopSessions = index.sessions.onChange((record, cause) => {
+    data.sessionChanged(record.appId, cause === 'removed');
     if (cause !== 'removed') return;
     store.removeSession(record.appId);
     cua.closeSession(record.appId); // E13
   });
+  data.reattach(sessionSnapshot(index));
   const inspector = env.MAWS_E2E === '1' ? browserInspector({ store, emit }) : null;
   if (inspector) globalThis.__maws_browser = inspector;
   // E13: the e2e's fake host reads the socket and the leases; `trustRoot` makes a process (the test's own) a root beside
@@ -269,6 +279,18 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
       for (const { view } of store.all()) if (view && !view.webContents.isDestroyed()) view.webContents.close();
     },
   };
+}
+
+// P5 O3-A: every record's id, the spine's sessions as the browser's data reconciles against them; null when the index
+// cannot be read, which reconciles nothing.
+function sessionSnapshot(index: BrowserDeps['index']): string[] | null {
+  if (index.unavailable !== null) return null;
+  try {
+    return index.sessions.appIds();
+  } catch (error) {
+    console.warn(`[browser] the index's sessions could not be read: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
 }
 
 // E13: whether the index has a record under the id (a trust bootstrap's id never has one); false when it cannot be read.

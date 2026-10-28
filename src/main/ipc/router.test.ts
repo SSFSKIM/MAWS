@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import type { MachineRef } from '@shared/machine/ref';
 import type { HostDispatch, MainContext, RemoteDispatch } from './router';
 
@@ -55,7 +55,7 @@ const invoke = (event: unknown, name: string, input?: unknown, ...machine: [unkn
   return handler(event, input, ...machine);
 };
 
-const LIGHT = { settings: { ...SETTINGS_DEFAULTS_V20, theme: 'light' }, resolvedTheme: 'light' } as const;
+const LIGHT = { settings: { ...SETTINGS_DEFAULTS_V21, theme: 'light' }, resolvedTheme: 'light' } as const;
 
 describe('main ipc router', () => {
   beforeEach(async () => {

@@ -68,7 +68,7 @@ describe('startBrowserImport (E4b Interfaces "Main"; Decision Log 31, 32, 34)', 
     const started = startBrowserImport({
       userData,
       settings: () => ({ profile }),
-      index: { browserHistory: {} as never, browserBookmarks: {} as never },
+      data: { history: {} as never, bookmarks: {} as never },
       register: (name, handler) => void handlers.set(name, handler),
       emit: vi.fn(),
       env,

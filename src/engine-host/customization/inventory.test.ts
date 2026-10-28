@@ -6,8 +6,11 @@ import type { HostOn } from '@shared/host/runtime';
 import { commands, type CommandOutput } from '@shared/ipc/schema';
 import { isBridgedCommandName } from '@shared/ipc/names';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
-import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
+import { clientSettingsDefaults, machineSettingsDefaults, SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { INVENTORY_BOUNDS, readCustomizationInventory, readServerEndpoints, registerCustomizationInventory } from './inventory';
+
+// P5 O3-A: a machine-settings.json holding these app MCP servers
+const appServers = (mcpServers: { name: string; type: 'http'; url: string }[]) => ({ ...machineSettingsDefaults(), engine: { ...machineSettingsDefaults().engine, mcpServers } });
 
 let root: string;
 let home: string;
@@ -42,8 +45,8 @@ describe('cold customization inventory', () => {
       process: { command: 'COMMAND_SECRET', args: ['ARG_SECRET'], env: { TOKEN: 'ENV_SECRET' } },
     }, projects: { [home]: { mcpServers: { notSelected: { command: 'no' } } } } };
     await json(global, user);
-    const appFile = join(userData, 'settings.json');
-    await json(appFile, { ...SETTINGS_DEFAULTS_V20, engine: { ...SETTINGS_DEFAULTS_V20.engine, mcpServers: [{ name: 'shared', type: 'http', url: 'https://app.test/?token=APP_SECRET' }] } });
+    const appFile = join(userData, 'machine-settings.json'); // P5 O3-A: MAWS's own servers are the machine's
+    await json(appFile, appServers([{ name: 'shared', type: 'http', url: 'https://app.test/?token=APP_SECRET' }]));
     const before = await Promise.all([readFile(global, 'utf8'), readFile(appFile, 'utf8'), readFile(path, 'utf8')]);
 
     const answer = await read();
@@ -198,8 +201,23 @@ describe('cold customization inventory', () => {
     expect(JSON.stringify(answer)).not.toContain('NOT_EXECUTED');
   });
 
+  // P5 O3-A (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §3; O3-A acceptance 4)
+  it('reads MAWS’s servers from machine-settings.json, from a unified settings.json while no split build has run, and none from a client file', async () => {
+    const servers = [{ name: 'app', type: 'http' as const, url: 'https://app.test/' }];
+    const unified = await json(join(userData, 'settings.json'), { ...SETTINGS_DEFAULTS_V21, version: 20, engine: { ...SETTINGS_DEFAULTS_V21.engine, mcpServers: servers } });
+    const appRows = async () => (await readCustomizationInventory(null, { userData, captureEnv: async () => { throw new Error('none'); } })).servers;
+    expect(await appRows()).toEqual([{ name: 'app', scope: 'app', path: unified, transport: 'http' }]);
+    const machine = await json(join(userData, 'machine-settings.json'), appServers([{ name: 'split', type: 'http', url: 'https://app.test/' }]));
+    expect(await appRows()).toEqual([{ name: 'split', scope: 'app', path: machine, transport: 'http' }]); // the machine file outranks a unified one
+    await json(join(userData, 'settings.json'), clientSettingsDefaults());
+    await rm(machine);
+    const answer = await readCustomizationInventory(null, { userData, captureEnv: async () => { throw new Error('none'); } });
+    expect(answer.servers).toEqual([]);
+    expect(answer.warnings).toEqual(['User configuration environment could not be read.']); // a client file is not invalid app settings
+  });
+
   it('retains app configuration when the user environment is unavailable', async () => {
-    const path = await json(join(userData, 'settings.json'), { ...SETTINGS_DEFAULTS_V20, engine: { ...SETTINGS_DEFAULTS_V20.engine, mcpServers: [{ name: 'app', type: 'http', url: 'https://app.test/' }] } });
+    const path = await json(join(userData, 'machine-settings.json'), appServers([{ name: 'app', type: 'http', url: 'https://app.test/' }]));
     const answer = await readCustomizationInventory(null, { userData, captureEnv: async () => { throw new Error('CAPTURE_SECRET'); } });
     expect(answer).toEqual({ skills: [], servers: [{ name: 'app', scope: 'app', path, transport: 'http' }], warnings: ['User configuration environment could not be read.'], serversRead: false });
   });
@@ -221,7 +239,7 @@ describe('cold customization inventory', () => {
   it('main alone reads each configured server with its URL, row for row with the inventory', async () => {
     const global = join(configHome, '.claude.json');
     await json(global, { mcpServers: { linear: { type: 'http', url: 'https://mcp.linear.app/mcp?token=QUERY_SECRET' }, process: { command: 'run' } } });
-    const appFile = await json(join(userData, 'settings.json'), { ...SETTINGS_DEFAULTS_V20, engine: { ...SETTINGS_DEFAULTS_V20.engine, mcpServers: [{ name: 'app', type: 'http', url: 'https://app.test/' }] } });
+    const appFile = await json(join(userData, 'machine-settings.json'), appServers([{ name: 'app', type: 'http', url: 'https://app.test/' }]));
     expect(await readServerEndpoints(null, { userData, captureEnv: environment })).toEqual({ servers: [
       { name: 'app', scope: 'app', path: appFile, transport: 'http', url: 'https://app.test/' },
       { name: 'linear', scope: 'user', path: global, transport: 'http', url: 'https://mcp.linear.app/mcp?token=QUERY_SECRET' },

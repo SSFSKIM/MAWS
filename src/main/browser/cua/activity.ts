@@ -13,14 +13,14 @@
 // never activities, so a storm of them costs nothing; a burst beyond the bound is dropped). What was told is kept per
 // session, the last BROWSER_ACTIVITIES_KEPT, for `browser.agent.activities.list`: a window lists them when a session's
 // transcript mounts, so a reload or a second window shows the rows again. Since cua board #93 they are also written to
-// the index (src/main/index/browser-activity.ts), and a session's are loaded from it on first use, so an app restart
-// shows them too. The store is never in the way of a live row: what a tick told is written in one transaction on the
-// next turn of the event loop (or as the index closes, which a quit does before the browser stops), after the CDP
-// handler that produced it returned, over a connection that fails at once rather than wait for a lock; a failed read or
-// write is logged, once, and its rows are kept live only.
+// a store (the browser's own database since P5 O3-A, src/main/browser/data/activity.ts), and a session's are loaded
+// from it on first use, so an app restart shows them too. The store is never in the way of a live row: what a tick told
+// is written in one transaction on the next turn of the event loop (or as the store closes), after the CDP handler that
+// produced it returned, over a connection that fails at once rather than wait for a lock; a failed read or write is
+// logged, once, and its rows are kept live only.
 import type { AppSessionId } from '@shared/graph/ids';
 import { BROWSER_ACTIVITIES_KEPT, BROWSER_ACTIVITY_KEY_MAX_CHARS, BROWSER_ACTIVITY_LABEL_MAX_CHARS, type BrowserActivity, type BrowserAgentActivity } from '@shared/browser/activity';
-import type { BrowserActivityStore } from '../../index/browser-activity';
+import type { BrowserActivityStore } from '../data/activity';
 import type { BrowserEmit } from '../tabs';
 
 export const ACTIVITY_MAX_PER_SECOND = 20;
@@ -148,7 +148,7 @@ export class ActivityFeed {
   constructor(private readonly deps: ActivityFeedDeps) {
     this.now = deps.now ?? Date.now;
     this.log = deps.log ?? ((line) => console.warn(`[browser] ${line}`));
-    this.stopFlushing = deps.store?.beforeClose(() => this.write()) ?? (() => {}); // the index closes before the browser stops at a quit
+    this.stopFlushing = deps.store?.beforeClose(() => this.write()) ?? (() => {}); // what is still held, written as the store closes
   }
 
   // One activity (or one still being named: a click's label); what was typed before it on the tab is told first.
@@ -207,14 +207,14 @@ export class ActivityFeed {
     const told = this.unwritten;
     if (told.length === 0) return;
     this.unwritten = [];
-    this.stored(() => this.deps.store?.append(told, BROWSER_ACTIVITIES_KEPT), `write ${told.length} activities to the index`);
+    this.stored(() => this.deps.store?.append(told, BROWSER_ACTIVITIES_KEPT), `write ${told.length} activities to the store`);
   }
 
   // The session's kept activities, loaded from the store on first use (cua board #93).
   private keptOf(appSessionId: AppSessionId): BrowserAgentActivity[] {
     let kept = this.kept.get(appSessionId);
     if (!kept) {
-      kept = this.stored(() => this.deps.store?.list(appSessionId, BROWSER_ACTIVITIES_KEPT), `read the activity of ${appSessionId} from the index`) ?? [];
+      kept = this.stored(() => this.deps.store?.list(appSessionId, BROWSER_ACTIVITIES_KEPT), `read the activity of ${appSessionId} from the store`) ?? [];
       this.kept.set(appSessionId, kept);
     }
     return kept;

@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 
 // Loads the real `src/main/index.ts` against a fake Electron `app` that records its listeners, with the modules it
 // wires (hosts, router, settings, window) replaced, so what is under test is the app lifecycle alone.
@@ -61,7 +61,12 @@ vi.mock('./machine/identity', () => ({ startMachineIdentity: vi.fn(() => ({ ref:
 vi.mock('./attention/service', () => ({ startAttentionService: vi.fn() }));
 vi.mock('./attention/file-attention-store', () => ({ FileAttentionStore: vi.fn() }));
 // C3 end
-vi.mock('./settings', () => ({ startSettings: () => ({ state: () => ({ settings: SETTINGS_DEFAULTS_V20, resolvedTheme: 'light' }), onChange: vi.fn(() => vi.fn()) }) }));
+vi.mock('./client/settings', () => ({ startSettings: () => ({ state: () => ({ settings: SETTINGS_DEFAULTS_V21, resolvedTheme: 'light' }), onChange: vi.fn(() => vi.fn()) }) })); // P5 O3-A: the client half
+// P5 O3-A: the spine's lock and the settings split, held and done (no profile directory under the fixed getPath)
+const spineLock = vi.hoisted(() => ({ release: vi.fn() }));
+vi.mock('./settings/spine-lock', () => ({ takeSpineLock: async () => ({ refused: null, holder: null, release: spineLock.release }) }));
+vi.mock('./settings/split', () => ({ settingsPaths: (profile: string) => ({ client: `${profile}/settings.json`, machine: `${profile}/machine-settings.json` }), splitSettingsFiles: () => ({ outcome: 'none', machineRefused: null, unsplit: null }) }));
+vi.mock('./settings/machine', () => ({ startMachineSettings: () => ({}) }));
 vi.mock('./window', () => ({ appUrl: 'file:///index.html', createWindow: fake.createWindow, installContentSecurityPolicy: vi.fn() }));
 // C4: the index and its session source are replaced too; the lifecycle only has to open, start and close them.
 const c4 = vi.hoisted(() => ({ close: vi.fn(), stopSource: vi.fn(), stopAttention: vi.fn(), started: 0 }));
@@ -117,7 +122,7 @@ beforeAll(async () => {
   vi.stubGlobal('__MAWS_VERSION__', '0.0.0');
   vi.stubGlobal('__MAWS_BUILD__', { commit: 'test0000', builtAt: '2026-10-08T00:00:00.000Z' });
   await import('./index');
-  await Promise.resolve(); // let `whenReady().then(...)` run
+  await new Promise((resolve) => setImmediate(resolve)); // let `whenReady().then(...)` run, and the start it waits for (P5 O3-A: the spine lock first)
 });
 
 describe('app lifecycle (macOS, D-11)', () => {
@@ -179,6 +184,8 @@ describe('app lifecycle (macOS, D-11)', () => {
     expect(c4.started).toBe(1);
     expect(c4.stopSource).toHaveBeenCalledOnce();
     expect(c4.close).toHaveBeenCalledOnce();
+    // P5 O3-A: spine.lock outlives the will-quit steps (their promises settle after them); the process's exit releases it
+    expect(spineLock.release).not.toHaveBeenCalled();
     // The source reads the index, so it stops (C5's sessions.stop) before the index closes.
     expect(c4.stopSource.mock.invocationCallOrder[0]).toBeLessThan(c4.close.mock.invocationCallOrder[0]);
     expect(c4.stopAttention).toHaveBeenCalledOnce();

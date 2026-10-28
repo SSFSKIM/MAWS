@@ -34,7 +34,7 @@ import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../tes
 import { probeTool, ref, resetPanelStores } from '../test-support/panel';
 import { registerPanelTool } from '../panel/host';
 import { PanelHost } from '../panel/PanelHost';
-import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { preloadOf } from '../test-support/preload-of';
 
 vi.mock('./Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
@@ -297,7 +297,7 @@ describe('toolbar', () => {
   });
 
   it('shows a rebound chord in the tooltip', () => {
-    useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V20, keymap: { 'sidebar.toggle': 'Cmd+Alt+S' } }, resolvedTheme: 'light' } });
+    useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, keymap: { 'sidebar.toggle': 'Cmd+Alt+S' } }, resolvedTheme: 'light' } });
     renderShell();
     expect(screen.getByRole('button', { name: 'Toggle sidebar' }).getAttribute('title')).toBe('Toggle sidebar · ⌘⌥S');
     useSettings.setState({ state: null });
