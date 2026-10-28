@@ -56,7 +56,8 @@ describe('isMadeUpFinalAnswer', () => {
   it('is not a model that writes the same sentence, another hook’s answer, or the answer with more in it', () => {
     const { answeredWithoutRequest: _flag, ...unflagged } = madeUp;
     void _flag;
-    expect(isMadeUpFinalAnswer({ ...unflagged, requestId: 'req_011CStagesC' })).toBe(false);
+    const written: Record<string, unknown> = { ...unflagged, requestId: 'req_011CStagesC' };
+    expect(isMadeUpFinalAnswer(written)).toBe(false);
     expect(isMadeUpFinalAnswer(withText('Sent to the reviewer.'))).toBe(false);
     expect(isMadeUpFinalAnswer(withText('Message sent to the human.', [{ type: 'text', text: 'And more.' }]))).toBe(false);
     expect(isMadeUpFinalAnswer({ ...madeUp, type: 'user' })).toBe(false);

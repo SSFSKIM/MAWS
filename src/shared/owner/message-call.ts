@@ -34,7 +34,8 @@ export const messageCallState = (result: { isError: boolean } | null | undefined
 // and the transcript keeps that answer as the turn's last assistant record: one text block, `Message sent to the
 // human.`, the engine's `answeredWithoutRequest` flag, no `requestId`, a `msg_hook_` message id. The plugin's view draws
 // it as nothing, and no MAWS reader shows it, counts it or takes it as a session's last line: the backfill maps it to
-// no event, so no reader of events meets it, and the readers of records (the summary, the search text) pass over it.
+// no event, so no reader of events meets it; the readers of records (the summary, the search text) pass over it, and
+// the desk's reading of what a response read does not count it, since it read nothing.
 // Known as the plugin's view knows it in the file, by the flag and the exact text, so another hook's made-up response
 // and a model that writes the same sentence stay as written. Self-contained: the search text's worker runs its source.
 export function isMadeUpFinalAnswer(record: { type?: unknown; answeredWithoutRequest?: unknown; message?: unknown }): boolean {
