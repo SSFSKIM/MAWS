@@ -1,8 +1,9 @@
 // `/mcp` for a terminal session driven through its bridge (P5 O9 M5, docs/doperpowers/plans/2026-10-28-p5-o9-lane-a.md,
 // "The slash palette"): the bridge's `read mcp`, which sees only the servers connected with tools (it says it is not
 // exact, and so does the widget), each with Reconnect; and a server named to enable, since a disabled one is not in the
-// read. Both run as `command mcp <verb> <name>` through the session's port, gated by its capabilities, and their
-// outcome is the command op's end, worded as the slash palette words it; the list is read again after each.
+// read, and each server's Disable. Each runs as `command mcp <verb> <name>` through the session's port, one at a time,
+// drawn from its own capability: one the bridge can't run stays in place, disabled, with its reason. The outcome is the
+// command op's end, worded as the slash palette words it; the list is read again after each.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OpBody } from 'desk-hub/protocol';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -21,6 +22,7 @@ export const MCP_DRIVEN = {
   inexact: 'Only servers connected with tools are listed; the terminal’s /mcp shows every server',
   enableLabel: 'Server to enable',
   enable: 'Enable',
+  disable: 'Disable',
   working: 'Working…',
 };
 
@@ -43,7 +45,11 @@ export function McpDriven({ appSessionId, controls, close }: { appSessionId: App
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState('');
   const mounted = useRef(true);
-  useEffect(() => () => void (mounted.current = false), []);
+  const running = useRef(false); // a command is out: the next waits for its end (a second Enter included)
+  useEffect(() => {
+    mounted.current = true; // StrictMode runs setup, cleanup, setup
+    return () => void (mounted.current = false);
+  }, []);
 
   const refresh = useCallback(async () => {
     const answer = await readLaneA(appSessionId, 'mcp');
@@ -52,17 +58,21 @@ export function McpDriven({ appSessionId, controls, close }: { appSessionId: App
   }, [appSessionId]);
   useEffect(() => void refresh(), [refresh]);
 
-  const run = async (verb: 'enable' | 'reconnect', server: string) => {
+  const run = async (verb: 'enable' | 'disable' | 'reconnect', server: string) => {
+    if (running.current) return;
+    running.current = true;
     setBusy(true);
     setLine(MCP_DRIVEN.working);
     const result = await controls.command('mcp', `${verb} ${server}`);
     if (result.state !== 'done') {
+      running.current = false;
       setBusy(false);
       setLine(result.state === 'refused' ? result.message : MCP_ACTIONS.unconfirmed(result.why));
       return;
     }
     const id = (result.result as { id?: unknown } | null)?.id;
     const ended = (body: OpBody | null) => {
+      running.current = false;
       if (!mounted.current) return;
       setBusy(false);
       setLine(body ? commandOutcomeText(body).text : MCP_ACTIONS.unconfirmed(MCP_ACTIONS.done));
@@ -74,6 +84,7 @@ export function McpDriven({ appSessionId, controls, close }: { appSessionId: App
 
   const enable = controls.capability('mcp.enable');
   const reconnect = controls.capability('mcp.reconnect');
+  const disable = controls.capability('mcp.disable');
   return (
     <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.mcp} command="mcp" state={read.state} error={read.error} close={close}>
       <div className="flex flex-col gap-2">
@@ -88,9 +99,14 @@ export function McpDriven({ appSessionId, controls, close }: { appSessionId: App
                 main={<span className="font-semibold">{server.name}</span>}
                 note={`${server.status}${server.tools > 0 ? ` · ${MCP.tools(server.tools)}` : ''}`}
                 actions={
-                  <TextButton onClick={() => void run('reconnect', server.name)} disabled={busy || !reconnect.available} title={reconnect.available ? undefined : reconnect.reason}>
-                    {MCP_ACTIONS.reconnect}
-                  </TextButton>
+                  <>
+                    <TextButton onClick={() => void run('reconnect', server.name)} disabled={busy || !reconnect.available} title={reconnect.available ? undefined : reconnect.reason}>
+                      {MCP_ACTIONS.reconnect}
+                    </TextButton>
+                    <TextButton onClick={() => void run('disable', server.name)} disabled={busy || !disable.available} title={disable.available ? undefined : disable.reason}>
+                      {MCP_DRIVEN.disable}
+                    </TextButton>
+                  </>
                 }
               />
             ))}
