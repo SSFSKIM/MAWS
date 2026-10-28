@@ -622,9 +622,11 @@ export class Registry extends DurableObject<Env> {
   /** Every machine, a v2 one with the key it posted and whether the head lists that key for its ref (O11 M4). */
   machines(): MachineView[] {
     return this.sql
-      .exec<MachineRecord>(`SELECT ${MACHINE_COLUMNS} FROM machines ORDER BY name`)
+      .exec<MachineRecord & { online: number; seen: string | null }>(`SELECT ${MACHINE_COLUMNS}, online, seen FROM machines ORDER BY name`)
       .toArray()
-      .map((machine) => {
+      .map(({ online, seen, ...record }) => {
+        // DX2 presence, as the directory's `org` frame carries it (O14 M5a: a cutover's check reads it here).
+        const machine: MachineView = { ...record, online: online === 1, seen };
         const key = this.records.machineKey(machine.enrollment);
         if (!key) return machine;
         const listed = this.sql.exec('SELECT 1 FROM state_machines WHERE ref = ? AND pub = ?', key.ref, key.pub).toArray().length > 0;
