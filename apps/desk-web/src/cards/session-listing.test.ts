@@ -121,6 +121,23 @@ describe('following a session’s listing for its cards view', () => {
     expect(g.told).toEqual([{ state: 'none' }]);
   });
 
+  it('adds nothing once a snapshot already being judged leaves the session out, though the read answers first', async () => {
+    const read = later();
+    const f = follow(read.read);
+    const other = await listingOf('app-2', 1);
+    const departed = await listingOf('app-1', 4);
+    f.store.opened();
+    const snapshot = f.store.page([other], true); // being verified while the read answers
+    const n = f.told.length;
+    read.answer([departed]);
+    await snapshot;
+    await toldMore(f, n);
+    await until(() => f.told.length >= n + 2);
+    expect(f.store.loaded).toBe(true);
+    expect([...f.store.listings().keys()]).toEqual([`${MINI}/app-2`]);
+    expect(f.told.slice(n).every((l) => l.state === 'none')).toBe(true);
+  });
+
   it('takes the store’s listing without waiting on the read, and none once its snapshot is in without one', async () => {
     const read = later();
     const f = follow(read.read);

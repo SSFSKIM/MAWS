@@ -1,16 +1,16 @@
 // An answer from the phone (P5 O13 M4, §D; RL4, RL §5.10): the one kind of action a `web-cards` device sends. Exactly
-// six forms, nothing else built (the endpoint refuses the rest `class`, O10 §G):
+// seven forms, nothing else built (the endpoint refuses the rest `class`, O10 §G):
 //   lane A question     sminos.answer   args { session, answers, digest }
 //   lane A permission   sminos.decide   args { session, decision: 'allow' | 'deny', digest }        no scope, no message
-//   lane A decline      sminos.decide   args { session, decision: 'deny', digest }                  a native question's,
-//                         as DX6 and Esc in the terminal decline it; an async question is answered, never declined
+//   lane A decline      sminos.decide   args { session, decision: 'deny', digest }                  a native question's
 //   lane B              session.answer  args { appSessionId, requestId, answer }, the answer one of
 //                         { kind: 'permission', decision: 'allow', scope: 'once' }   Allow
-//                         { kind: 'permission', decision: 'deny' }                    Deny: no scope (the schema forbids it)
+//                         { kind: 'permission', decision: 'deny' }                    Deny: no scope (the schema forbids it),
+//                                                                                     and a question's decline
 //                         { kind: 'question', answers }                               keyed by question text
-// A lane B question is not declined from here: its decline is a permission deny, which the endpoint refuses a
-// `web-cards` device on a pending question (`class`, src/endpoint/authorize.ts). Each answer goes with its session's
-// context (lane A `{lane, session, launch}`, lane B `{lane, launchId, engineSessionId}`) and the request digest the
+// A question is declined as DX6 and Esc in the terminal decline it: on lane B the plain deny the engine reads as the
+// question skipped (`isQuestionSkip`), which the endpoint admits a `web-cards` device on a pending native question
+// alone; an async question is answered, never declined. Each answer goes with its session's context (lane A `{lane, session, launch}`, lane B `{lane, launchId, engineSessionId}`) and the request digest the
 // card drew. An answer seals its operation with a fresh nonce and time and a WebAuthn assertion
 // whose challenge is the action's digest (one gesture each), sends `act`, and reads `ack` then `done`.
 //
@@ -69,12 +69,11 @@ export function operationFor(identity: DeviceIdentity, machine: string, card: Ca
       ? { ...common, action: 'sminos.answer', args: { session, answers: given.answers, digest } }
       : { ...common, action: 'sminos.decide', args: { session, decision: given.kind === 'decline' ? 'deny' : given.decision, digest } };
   }
-  if (given.kind === 'decline') throw new AnswerError('this question is declined in MAWS, not from here');
   const appSessionId = card.item.appSessionId;
   const answer: RequestAnswer =
     given.kind === 'question'
       ? { kind: 'question', answers: given.answers }
-      : given.decision === 'allow'
+      : given.kind === 'decision' && given.decision === 'allow'
         ? { kind: 'permission', decision: 'allow', scope: 'once' }
         : { kind: 'permission', decision: 'deny' };
   return {

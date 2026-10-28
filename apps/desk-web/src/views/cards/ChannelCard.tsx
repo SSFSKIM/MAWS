@@ -2,7 +2,7 @@
 // pieces (RequestCard.tsx's adapters and MAWS's variant pieces as RequestCard imports them: the question stepper, the
 // tool preview, the controls) and its copy, answered with the device's passkey. A permission offers Allow and Deny and
 // nothing more: no reason (a `message` is refused `class`) and no scope (a lane B Allow is `once`). A question offers
-// Skip and Submit, and every question skipped declines a native lane A question, as DX6's card does. Before the passkey
+// Skip and Submit, and every question skipped declines it, as DX6's card does (an async one excepted). Before the passkey
 // prompt the card says what the gesture approves, since the prompt shows nothing of the request (RL §5.10); while an
 // answer is retained for a Retry the card draws that answer's request, labelled so, and a lane A input the bridge
 // capped says so, as today's card does. Its state is the adapter's (cards/card-state.ts).
@@ -135,14 +135,13 @@ function QuestionPart({ card, asynchronous, answerable, draftId, onAnswer, onNot
     );
   }
   // An answer to at least one question is sent. One with every question skipped is the question declined, as DX6's card
-  // and Esc in the terminal decline it, for a native lane A question; an async question is answered, never declined,
-  // and a lane B question's decline is refused the phone (`class`), so for those nothing is sent and the card says why.
+  // and Esc in the terminal decline it; an async question is answered, never declined, so for it nothing is sent and
+  // the card says why.
   const submit = (given: RequestAnswer) => {
     if (given.kind === 'question' && Object.keys(given.answers).length > 0) {
       onNote(null);
       onAnswer({ kind: 'question', answers: given.answers });
     } else if (asynchronous) onNote('Nothing was sent: an async question waits for an answer to at least one of its questions, and cannot be declined.');
-    else if (card.lane === 'B') onNote('Nothing was sent: answer at least one question. This question is declined in MAWS, not from here.');
     else {
       onNote(null);
       onAnswer({ kind: 'decline' });

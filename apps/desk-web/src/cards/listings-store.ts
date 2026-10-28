@@ -101,6 +101,19 @@ export class ListingsStore {
     });
   }
 
+  /**
+   * Records read from the hub at a landing, before a snapshot is in: taken as frames are, oldest first, unless a
+   * snapshot has come in by their turn (a snapshot is the whole set: a read it outran has nothing to add).
+   */
+  landing(records: Signed<Listing>[]): Promise<void> {
+    return this.#serial(async () => {
+      if (this.#loaded) return;
+      let changed = false;
+      for (const record of [...records].sort((a, b) => a.body.revision - b.body.revision)) changed = (await this.#take(record)) || changed;
+      if (changed) this.#tell();
+    });
+  }
+
   /** The head or the certificates moved: every listing kept is judged again, and every one held. */
   orgChanged(): Promise<void> {
     return this.#serial(async () => {

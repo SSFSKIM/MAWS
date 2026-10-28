@@ -180,6 +180,26 @@ describe('a cold cards subscription, and its answers', () => {
     expect(answeredOnce(`${APP} rq-session`)).toBe(0);
     b.close();
   });
+
+  // A lane B question's decline is the plain permission deny the engine's broker reads as the question skipped
+  // (`isQuestionSkip`, src/engine-host/broker.ts), which the endpoint admits a `web-cards` device on a pending native
+  // question (src/endpoint/authorize.ts `#asPending`).
+  it('declines a lane B question with the plain deny: done, delivered once, the ledger holding one record of it', async () => {
+    world.host.request(APP, 'question', 'rq-decline');
+    const channel = await open();
+    const b = watch(channel, { lane: 'B', id: APP });
+    const card = find(await b.until(has('rq-decline'), 'the question'), 'rq-decline');
+    const { operation, outcome } = await answer(channel, world.phone.identity, card, { kind: 'decline' }, world.phone.assert);
+    expect(outcome).toMatchObject({ state: 'done', result: { outcome: 'delivered' } });
+    expect(JSON.stringify(sentAnswers().at(-1)!.input.answer)).toBe('{"kind":"permission","decision":"deny"}');
+    expect(answeredOnce(`${APP} rq-decline`)).toBe(1);
+    await b.until(lacks('rq-decline'), 'the question settled');
+    const ledger = fs.readFileSync(join(world.services.machine.stateDir, 'cards-host-ops.jsonl'), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { opId: string; claim?: unknown });
+    expect(ledger.filter((r) => r.opId === operation.opId && r.claim !== undefined)).toHaveLength(1);
+    const queried = await reply(channel, { t: 'query', opId: operation.opId, opCreated: operation.opCreated, executor: 'engine-host' }, (m) => m.t === 'queried' && m.opId === operation.opId);
+    expect(queried).toMatchObject({ state: 'done', outcome: { state: 'done', result: { outcome: 'delivered' } } });
+    b.close();
+  });
 });
 
 describe('lane A’s cards as sminos raises them', () => {
@@ -275,21 +295,6 @@ describe('what the endpoint refuses', () => {
     world.host.session(APP).requests.set('rq-changed', { ...event, input: { command: 'rm -rf ~' } } as unknown as SessionEvent);
     expect((await answer(channel, world.phone.identity, find(set, 'rq-changed'), allow, world.phone.assert)).outcome).toEqual({ state: 'refused', reason: 'digest-mismatch' });
     expect(answeredOnce(`${APP} rq-changed`)).toBe(0);
-    b.close();
-  });
-
-  // A lane B question's decline is a permission deny (the engine's broker reads it so, src/engine-host/broker.ts), which
-  // the endpoint's class bound refuses a `web-cards` device on a pending question (src/endpoint/authorize.ts): the
-  // client builds none, and one built anyway is refused, the question still pending.
-  it('refuses a lane B question’s decline `class`', async () => {
-    world.host.request(APP, 'question', 'rq-decline');
-    const channel = await open();
-    const b = watch(channel, { lane: 'B', id: APP });
-    const card = find(await b.until(has('rq-decline'), 'the question'), 'rq-decline');
-    expect(() => operationFor(world.phone.identity, world.ref, card, { kind: 'decline' }, Date.now())).toThrow('declined in MAWS');
-    const decline = await changed(card, left, (op) => void (op.args.answer = { kind: 'permission', decision: 'deny' }));
-    expect(await acted(channel, decline)).toBe('class');
-    expect(answeredOnce(`${APP} rq-decline`)).toBe(0);
     b.close();
   });
 

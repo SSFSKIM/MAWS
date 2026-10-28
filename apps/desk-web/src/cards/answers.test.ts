@@ -1,4 +1,4 @@
-// An answer from the phone (P5 O13 M4, §D; RL4, RL §5.10): the action built in exactly one of §D's five forms or a lane A question's decline, sealed
+// An answer from the phone (P5 O13 M4, §D; RL4, RL §5.10): the action built in exactly one of §D's five forms or a question's decline on either lane, sealed
 // with a fresh nonce and a WebAuthn assertion over its digest, its `ack` and `done` read into the client's `Outcome`
 // (a `done` is an envelope, never a success by itself), and a lost acknowledgement resealed under the operation it
 // retained, which keeps every field the ledgers' fingerprint binds.
@@ -48,7 +48,7 @@ const shape = (op: Record<string, unknown>) => {
   return kept;
 };
 
-describe('the six forms an answer takes, and nothing else', () => {
+describe('the seven forms an answer takes, and nothing else', () => {
   it('lane A: a question is `sminos.answer`, a permission `sminos.decide`, each with the session’s launch and the digest twice', async () => {
     const asked = await laneACard(ASKED, 'L1');
     const raised = await laneACard(RAISED, 'L1');
@@ -74,9 +74,11 @@ describe('the six forms an answer takes, and nothing else', () => {
     expect(() => operationFor(identity, MACHINE, asynchronous, { kind: 'decline' }, NOW)).toThrow(AnswerError);
   });
 
-  it('lane B: a question is not declined from the phone (the endpoint refuses a permission deny on a question `class`)', async () => {
+  it('lane B: a question is declined with the plain permission deny the engine reads as the question skipped, over its own digest', async () => {
     const question = await laneB(QUESTION, 'question');
-    expect(() => operationFor(identity, MACHINE, question, { kind: 'decline' }, NOW)).toThrow(AnswerError);
+    const op = operationFor(identity, MACHINE, question, { kind: 'decline' }, NOW);
+    expect(JSON.stringify((op.args as { answer: unknown }).answer)).toBe('{"kind":"permission","decision":"deny"}');
+    expect(op).toMatchObject({ action: 'session.answer', args: { appSessionId: APP, requestId: 'rq-q' }, requestDigest: requestDigestOf(APP, QUESTION) });
   });
 
   it('lane B: Allow carries scope once, Deny no scope, a question its answers, byte for byte', async () => {

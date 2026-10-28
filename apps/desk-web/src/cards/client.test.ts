@@ -306,7 +306,7 @@ afterEach(() => {
 });
 
 describe('what the phone sends', () => {
-  it('drives every exported function, and nothing crosses but sub, credit, unsub, act of the three answers (a lane A decline among them), pong and close', async () => {
+  it('drives every exported function, and nothing crosses but sub, credit, unsub, act of the three answers (a question’s decline on each lane among them), pong and close', async () => {
     // Every function the client's modules export is one this suite drives: a new one fails here until it is.
     const fns = (module: object) => Object.entries(module).filter(([, v]) => typeof v === 'function').map(([k]) => k).sort();
     expect(fns(client)).toEqual(['cardsIdentity', 'followCards', 'openChannel', 'socketFor', 'subscribeCards']);
@@ -340,6 +340,7 @@ describe('what the phone sends', () => {
       [laneBPermission, { kind: 'decision', decision: 'allow' }],
       [laneBPermission, { kind: 'decision', decision: 'deny' }],
       [laneBQuestion, { kind: 'question', answers: { 'Which?': 'A' } }],
+      [laneBQuestion, { kind: 'decline' }],
     ] as const) {
       const { operation, outcome } = await answers.answer(channel, identity, card, given, assert);
       expect(outcome).toEqual({ state: 'done', result: {} });

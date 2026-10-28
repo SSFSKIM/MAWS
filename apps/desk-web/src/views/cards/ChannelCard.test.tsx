@@ -5,8 +5,8 @@
 // While an answer is retained for a Retry, the card draws the retained request in full, labelled so, never the
 // replacement sminos republished: two edits of one file, or commands alike for 60 characters, would read the same in
 // the gesture line alone. A capped input says so, the retained one's included.
-// A question with every question skipped is declined, as DX6's card and Esc in the terminal decline it, where the phone
-// can decline it: a native lane A question. An async one, or a lane B one, sends nothing and says why.
+// A question with every question skipped is declined, as DX6's card and Esc in the terminal decline it, on either lane;
+// an async one sends nothing and says why.
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
@@ -69,16 +69,17 @@ describe('a question with every question skipped', () => {
     expect(onAnswer).toHaveBeenCalledWith({ kind: 'question', answers: { 'Which way?': 'left' } });
   });
 
-  it('sends nothing for an async question, or a lane B one, and says why', () => {
+  it('is declined, a lane B question', () => {
+    const { onAnswer } = asked(laneB(), 'skip-b');
+    fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
+    expect(onAnswer).toHaveBeenCalledWith({ kind: 'decline' });
+  });
+
+  it('sends nothing for an async question, and says why', () => {
     const async = asked(laneA({ tool: 'mcp__sminos__AskUserQuestion', async: true }), 'skip-async');
     fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
     expect(async.onAnswer).not.toHaveBeenCalled();
     expect(async.onNote).toHaveBeenCalledWith('Nothing was sent: an async question waits for an answer to at least one of its questions, and cannot be declined.');
-    cleanup();
-    const b = asked(laneB(), 'skip-b');
-    fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
-    expect(b.onAnswer).not.toHaveBeenCalled();
-    expect(b.onNote).toHaveBeenCalledWith('Nothing was sent: answer at least one question. This question is declined in MAWS, not from here.');
   });
 });
 

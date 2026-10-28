@@ -43,5 +43,7 @@ describe('what the gesture approves', () => {
     expect(gestureLine(gestureOf(one, { kind: 'decline' }, 'main'))).toBe('Face ID approves: Decline “Which way?” in main');
     const two = laneA('AskUserQuestion', { questions: [{ question: 'Which way?', options: [] }, { question: 'And then?', options: [] }] });
     expect(gestureLine(gestureOf(two, { kind: 'decline' }, 'main'))).toBe('Face ID approves: Decline 2 questions in main');
+    const b = laneB({ kind: 'question.requested', questions: [{ question: 'Which way?', header: '', multiSelect: false, options: [] }] });
+    expect(gestureLine(gestureOf(b, { kind: 'decline' }, 'main'))).toBe('Face ID approves: Decline “Which way?” in main');
   });
 });
