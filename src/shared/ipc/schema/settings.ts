@@ -3,7 +3,7 @@
 // policy, the near-limit threshold, the monospace font and the per-kind notification switches. Version 4 (C12): the
 // memory budget. Version 5 (W2): the transcript's width. Version 6 (W3): the mode a session takes when the engine refuses
 // auto. Version 7 (W7): the memory budget's switch. Version 8 (W13): the engine's pin retired (MAWS runs the installed
-// Claude Code). Version 9 (E9): the dictation recognizer's locale. Version 10 (E10): the background supervisor. Version 11 (E4a): the in-app browser. Version 12 (cua #90): the bookmarks bar's switch. Version 13 (P2-C): the built-in mods and the owner channel's two notification groups. Version 14 (P3-D): the design-system defaults. Version 15 (P4-B1): the documents' comments view. Version 16 (P4-R8): the MCP servers MAWS passes to the sessions it launches. Version 17 (P4-A2): the launch profile those sessions run under. Version 18 (UX1): inactive-session archive and completed-turn notifications. Migrations live in `src/shared/settings/defaults.ts`,
+// Claude Code). Version 9 (E9): the dictation recognizer's locale. Version 10 (E10): the background supervisor. Version 11 (E4a): the in-app browser. Version 12 (cua #90): the bookmarks bar's switch. Version 13 (P2-C): the built-in mods and the owner channel's two notification groups. Version 14 (P3-D): the design-system defaults. Version 15 (P4-B1): the documents' comments view. Version 16 (P4-R8): the MCP servers MAWS passes to the sessions it launches. Version 17 (P4-A2): the launch profile those sessions run under. Version 18 (UX1): inactive-session archive and completed-turn notifications. Version 19: the launch profile's output style removed (the owner's ruling of 2026-10-28). Migrations live in `src/shared/settings/defaults.ts`,
 // run by main's store; the schema never defaults.
 import * as z from 'zod';
 import { ACTION_IDS } from '../../keymap/actions';
@@ -60,9 +60,9 @@ const EngineSettingsSchema = z.strictObject({
   // session; an HTTP server by name and URL, replaced whole by a patch (src/shared/engine/app-mcp-servers.ts)
   mcpServers: AppMcpServersSchema,
   // P4-A2: version 17, the launch profile every session MAWS launches runs under (the owner's ruling of 2026-10-21: one
-  // profile, set here, never chosen per session): which of the user's plugins load, whose output style and hooks apply;
-  // flag-level `--settings` keys only, the user scope by default (src/shared/engine/launch-profile.ts). Replaced whole
-  // by a patch.
+  // profile, set here, never chosen per session): which of the user's plugins load and whose hooks apply (version 19: no
+  // output style, the user's always); flag-level `--settings` keys only, the user scope by default
+  // (src/shared/engine/launch-profile.ts). Replaced whole by a patch.
   launchProfile: LaunchProfileSchema,
 });
 const GatewaySettingsSchema = z.strictObject({
@@ -136,7 +136,7 @@ export type ArtifactsSettings = z.infer<typeof ArtifactsSettingsSchema>;
 export const SessionSettingsSchema = z.strictObject({ archiveInactiveDays: z.union([z.literal(7), z.literal(14), z.literal(30)]).nullable() });
 
 export const SettingsSchema = z.strictObject({
-  version: z.literal(18), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed); E9: version 9 (voice); E10: version 10 (supervisor); E4a: version 11 (browser); cua #90: version 12 (browser.bookmarksBar); P2-C: version 13 (mods, notifications.kinds.asyncInput and .essential); P3-D: version 14 (artifacts); P4-B1: version 15 (artifacts.commentsView); P4-R8: version 16 (engine.mcpServers); P4-A2: version 17 (engine.launchProfile); UX1: version 18 (sessions.archiveInactiveDays, notifications.kinds.turnFinished)
+  version: z.literal(19), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed); E9: version 9 (voice); E10: version 10 (supervisor); E4a: version 11 (browser); cua #90: version 12 (browser.bookmarksBar); P2-C: version 13 (mods, notifications.kinds.asyncInput and .essential); P3-D: version 14 (artifacts); P4-B1: version 15 (artifacts.commentsView); P4-R8: version 16 (engine.mcpServers); P4-A2: version 17 (engine.launchProfile); UX1: version 18 (sessions.archiveInactiveDays, notifications.kinds.turnFinished); version 19 (engine.launchProfile.outputStyle removed)
   theme: ThemeSettingSchema,
   // Overrides only; null unbinds; absent means the default. `partialRecord`, because zod 4's enum-keyed `record` is
   // exhaustive and would reject `{}` and every single override; unknown keys are still rejected.

@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
 import { DEFAULT_SETTINGS, openSettingsStore, resolveTheme } from './store';
 
 let dir: string;
@@ -15,18 +15,21 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-const v3 = (theme: string) => ({ ...SETTINGS_DEFAULTS_V18, theme });
+const v3 = (theme: string) => ({ ...SETTINGS_DEFAULTS_V19, theme });
+// Version 19 (the owner's ruling of 2026-10-28): a version 18 file's launch profile has an output style, the user
+// scope's `user` (and so a version 17 file's).
+const before19 = (theme: string) => ({ ...v3(theme), version: 18, engine: { ...v3(theme).engine, launchProfile: { ...v3(theme).engine.launchProfile, outputStyle: 'user' } } });
 // UX1: v17 has neither policy; earlier fixtures must not inherit current fields.
 const before18 = (theme: string) => {
-  const { sessions: _sessions, ...rest } = v3(theme);
+  const { sessions: _sessions, ...rest } = before19(theme);
   const { turnFinished: _finished, ...kinds } = rest.notifications.kinds;
   void _sessions;
   void _finished;
   return { ...rest, version: 17, notifications: { ...rest.notifications, kinds } };
 };
 const ux1Policies = (earlier: { notifications: { enabled: boolean; sound: boolean; kinds: object } }) => ({ sessions: { archiveInactiveDays: null }, notifications: { ...earlier.notifications, kinds: { ...earlier.notifications.kinds, turnFinished: true } } });
-// P4-A2 (2026-10-21): a version 16 file has no launch profile.
-const USER_SCOPE = { plugins: { off: [] }, outputStyle: 'user', hooks: 'user' };
+// P4-A2 (2026-10-21): a version 16 file has no launch profile; a migrated one has the user scope (version 19: no style).
+const USER_SCOPE = { plugins: { off: [] }, hooks: 'user' };
 const before17 = (theme: string) => {
   const { launchProfile: _profile, ...engine } = before18(theme).engine;
   void _profile;
@@ -160,7 +163,7 @@ describe('settings store', () => {
   it.each([
     ['unparseable JSON', '{"version":3,'],
     ['an unknown theme', JSON.stringify({ ...v3('sepia') })],
-    ['an unknown later version', JSON.stringify({ ...v3('dark'), version: 19 })], // C12: 4 is the current version; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17; UX1: 18
+    ['an unknown later version', JSON.stringify({ ...v3('dark'), version: 20 })], // C12: 4 is the current version; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17; UX1: 18; the style removed: 19
     ['a version 2 file with a version 3 section', JSON.stringify({ version: 2, theme: 'dark', keymap: {}, notifications: { enabled: true, sound: false }, usage: { nearLimitPercent: 90 } })],
     ['an unknown key', JSON.stringify({ ...v3('dark'), font: 'x' })],
     ['a version 1 file that is not valid version 1', '{"version":1,"theme":"sepia"}'],
@@ -206,9 +209,9 @@ describe('settings store', () => {
     const store = openSettingsStore(file);
     store.update({ keymap: { 'attention.next': 'Cmd+Alt+J', 'tab.close': null }, notifications: { enabled: false, sound: true } });
     expect(openSettingsStore(file).settings).toEqual({
-      ...SETTINGS_DEFAULTS_V18,
+      ...SETTINGS_DEFAULTS_V19,
       keymap: { 'attention.next': 'Cmd+Alt+J', 'tab.close': null },
-      notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V18.notifications.kinds },
+      notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V19.notifications.kinds },
     });
   });
 
@@ -226,16 +229,16 @@ describe('settings migrate v1 and v2 to v3', () => {
     writeFileSync(file, readFileSync(join(FIXTURES, 'v1.json')));
     expect(openSettingsStore(file).settings).toEqual(v3('dark'));
     expect(readFileSync(file, 'utf8')).toBe(v3Json('dark'));
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^\[settings\] migrated .*settings\.json from version 1 to 18$/)); // C12: to 4; W2: to 5; W3: to 6; W7: to 7; W13: to 8; E9: to 9; E10: to 10; E4a: to 11; cua #90: to 12; P2-C: to 13; P3-D: to 14; P4-B1: to 15; P4-R8: to 16; P4-A2: to 17; UX1: to 18
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^\[settings\] migrated .*settings\.json from version 1 to 19$/)); // C12: to 4; W2: to 5; W3: to 6; W7: to 7; W13: to 8; E9: to 9; E10: to 10; E4a: to 11; cua #90: to 12; P2-C: to 13; P3-D: to 14; P4-B1: to 15; P4-R8: to 16; P4-A2: to 17; UX1: to 18; the style removed: to 19
   });
 
   it("migrates C5's version 2 file keeping its keymap override and notification policy, and rewrites it once", () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     writeFileSync(file, readFileSync(join(FIXTURES, 'v2.json')));
-    const migrated = { ...v3('system'), keymap: { 'attention.next': 'Cmd+Alt+J' }, notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V18.notifications.kinds } };
+    const migrated = { ...v3('system'), keymap: { 'attention.next': 'Cmd+Alt+J' }, notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V19.notifications.kinds } };
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 2 to 18$/)); // C12: to 4; W2: to 5; W3: to 6; W7: to 7; W13: to 8; E9: to 9; E10: to 10; E4a: to 11; cua #90: to 12; P2-C: to 13; P3-D: to 14; P4-B1: to 15; P4-R8: to 16; P4-A2: to 17; UX1: to 18
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 2 to 19$/)); // C12: to 4; W2: to 5; W3: to 6; W7: to 7; W13: to 8; E9: to 9; E10: to 10; E4a: to 11; cua #90: to 12; P2-C: to 13; P3-D: to 14; P4-B1: to 15; P4-R8: to 16; P4-A2: to 17; UX1: to 18; the style removed: to 19
     log.mockClear();
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(log).not.toHaveBeenCalled();
@@ -248,10 +251,10 @@ describe('settings migrate v1 and v2 to v3', () => {
     void _m;
     void _s;
     writeFileSync(file, JSON.stringify({ ...before6('dark'), version: 3, engine: { ...engineV3, subagentModel: 'haiku' }, appearance: { monoFont: null } }));
-    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V18.engine, subagentModel: 'haiku' } };
+    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V19.engine, subagentModel: 'haiku' } };
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 3 to 18$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 3 to 19$/));
   });
   // C12 end
 
@@ -262,7 +265,7 @@ describe('settings migrate v1 and v2 to v3', () => {
     const migrated = { ...v3('dark'), appearance: { monoFont: 'Hack', transcriptWidth: 768 } };
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 4 to 18$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 4 to 19$/));
   });
   // W2 end
 
@@ -272,7 +275,7 @@ describe('settings migrate v1 and v2 to v3', () => {
     writeFileSync(file, JSON.stringify({ ...before6('dark'), version: 5 }));
     expect(openSettingsStore(file).settings).toEqual(v3('dark'));
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(v3('dark'));
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 5 to 18$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 5 to 19$/));
   });
   // W3 end
 
@@ -281,10 +284,10 @@ describe('settings migrate v1 and v2 to v3', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const v6 = { ...before7('dark'), version: 6, engine: { ...ENGINE_BEFORE_V7, memoryBudgetMiB: 6144 } };
     writeFileSync(file, JSON.stringify(v6));
-    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V18.engine, memoryBudgetMiB: 6144 } };
+    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V19.engine, memoryBudgetMiB: 6144 } };
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 6 to 18$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 6 to 19$/));
   });
   // W7 end
 
@@ -293,10 +296,10 @@ describe('settings migrate v1 and v2 to v3', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const v7 = before8('dark');
     writeFileSync(file, JSON.stringify({ ...v7, engine: { ...v7.engine, binaryPath: '/opt/claude', pinnedVersion: '2.1.290' } }));
-    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V18.engine, binaryPath: '/opt/claude' } };
+    const migrated = { ...v3('dark'), engine: { ...SETTINGS_DEFAULTS_V19.engine, binaryPath: '/opt/claude' } };
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 7 to 18$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 7 to 19$/));
   });
   // W13 end
 
@@ -308,7 +311,7 @@ describe('settings migrate v1 and v2 to v3', () => {
     const migrated = { ...v3('dark'), keymap: { 'attention.next': 'Cmd+Alt+J' }, usage: { nearLimitPercent: 80 }, voice: { locale: null } };
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 8 to 18$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 8 to 19$/));
     log.mockClear();
     expect(openSettingsStore(file).update({ voice: { locale: 'en-US' } }).voice).toEqual({ locale: 'en-US' });
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ ...migrated, voice: { locale: 'en-US' } });
@@ -325,7 +328,7 @@ describe('settings migrate v1 and v2 to v3', () => {
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(migrated.supervisor).toEqual({ idleExitMinutes: 10, keepRunningDefault: true });
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 9 to 18$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 9 to 19$/));
     log.mockClear();
     expect(openSettingsStore(file).update({ supervisor: { idleExitMinutes: null } }).supervisor).toEqual({ idleExitMinutes: null, keepRunningDefault: true });
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ ...migrated, supervisor: { idleExitMinutes: null, keepRunningDefault: true } });
@@ -342,7 +345,7 @@ describe('settings migrate v1 and v2 to v3', () => {
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(migrated.browser).toEqual({ profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app', bookmarksBar: 'shown' });
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 10 to 18$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 10 to 19$/));
     log.mockClear();
     expect(openSettingsStore(file).update({ browser: { linkTarget: 'external' } }).browser).toEqual({ ...migrated.browser, linkTarget: 'external' });
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ ...migrated, browser: { ...migrated.browser, linkTarget: 'external' } });
@@ -358,7 +361,7 @@ describe('settings migrate v1 and v2 to v3', () => {
     const migrated = { ...v3('dark'), browser: { ...v3('dark').browser, linkTarget: 'external' } };
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 11 to 18$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 11 to 19$/));
   });
   // cua #90 end
 
@@ -371,7 +374,7 @@ describe('settings migrate v1 and v2 to v3', () => {
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(migrated.mods).toEqual({ toHuman: { enabled: true } });
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 12 to 18$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 12 to 19$/));
     log.mockClear();
     expect(openSettingsStore(file).update({ mods: { toHuman: { enabled: false } } }).mods).toEqual({ toHuman: { enabled: false } });
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ ...migrated, mods: { toHuman: { enabled: false } } });
@@ -387,7 +390,7 @@ describe('settings migrate v1 and v2 to v3', () => {
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(migrated.artifacts).toEqual({ defaultDesignSystem: null, spaceDesignSystems: {}, commentsView: 'expand' }); // P4-B1: then to 15
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 13 to 18$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 13 to 19$/));
   });
   // P3-D end
 
@@ -399,7 +402,7 @@ describe('settings migrate v1 and v2 to v3', () => {
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(migrated.artifacts.commentsView).toBe('expand');
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 14 to 18$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 14 to 19$/));
   });
   // P4-B1 end
 
@@ -408,10 +411,10 @@ describe('settings migrate v1 and v2 to v3', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const v15 = { ...before16('dark'), engine: { ...before16('dark').engine, binaryPath: '/opt/claude', subagentModel: 'haiku', statefulMcpServers: ['plugin:ptc:ptc'], memoryBudget: { enabled: false } }, artifacts: { ...before16('dark').artifacts, commentsView: 'hide' } };
     writeFileSync(file, JSON.stringify(v15));
-    const migrated = { ...v15, ...ux1Policies(v15), version: 18, engine: { ...v15.engine, mcpServers: [], launchProfile: USER_SCOPE } }; // P4-A2: then to 17
+    const migrated = { ...v15, ...ux1Policies(v15), version: 19, engine: { ...v15.engine, mcpServers: [], launchProfile: USER_SCOPE } }; // P4-A2: then to 17
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 15 to 18$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 15 to 19$/));
     log.mockClear();
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(log).not.toHaveBeenCalled();
@@ -419,16 +422,16 @@ describe('settings migrate v1 and v2 to v3', () => {
   // P4-R8 end
 
   // P4-A2 start (2026-10-21): P4-R8's version 16 file gains the user scope, rewritten once; the profile then persists
-  it('migrates a version 16 file to version 18 with the user scope, keeps every other value and rewrites it once', () => {
+  it('migrates a version 16 file to version 19 with the user scope, keeps every other value and rewrites it once', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const v16 = { ...before17('dark'), engine: { ...before17('dark').engine, binaryPath: '/opt/claude', statefulMcpServers: ['plugin:ptc:ptc'], mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }] }, mods: { toHuman: { enabled: false } } };
     writeFileSync(file, JSON.stringify(v16));
-    const migrated = { ...v16, ...ux1Policies(v16), version: 18, engine: { ...v16.engine, launchProfile: USER_SCOPE } };
+    const migrated = { ...v16, ...ux1Policies(v16), version: 19, engine: { ...v16.engine, launchProfile: USER_SCOPE } };
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 16 to 18$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 16 to 19$/));
     log.mockClear();
-    const launchProfile = { plugins: { off: ['ptc@ptc-tool'] }, outputStyle: 'maws' as const, hooks: 'none' as const };
+    const launchProfile = { plugins: { off: ['ptc@ptc-tool'] }, hooks: 'none' as const };
     expect(openSettingsStore(file).update({ engine: { launchProfile } }).engine).toEqual({ ...migrated.engine, launchProfile });
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ ...migrated, engine: { ...migrated.engine, launchProfile } });
     expect(openSettingsStore(file).settings.engine.launchProfile).toEqual(launchProfile);
@@ -440,16 +443,31 @@ describe('settings migrate v1 and v2 to v3', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const saved = { ...before18('dark'), notifications: { ...before18('dark').notifications, sound: true } };
     writeFileSync(file, JSON.stringify(saved));
-    const migrated = { ...saved, ...ux1Policies(saved), version: 18 };
+    const migrated = { ...saved, ...ux1Policies(saved), version: 19, engine: { ...saved.engine, launchProfile: USER_SCOPE } };
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
-    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 17 to 18$/));
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 17 to 19$/));
     log.mockClear();
     expect(openSettingsStore(file).settings).toEqual(migrated);
     expect(log).not.toHaveBeenCalled();
   });
 
-  it('never rewrites a file that is already version 18, nor writes defaults into it', () => { // C12: version 4; W2: version 5; W3: version 6; W7: version 7; W13: version 8; E9: version 9; E10: version 10; E4a: version 11; cua #90: version 12; P2-C: version 13; P3-D: version 14; P4-B1: version 15; P4-R8: version 16; P4-A2: version 17; UX1: version 18
+  // Version 19 (the owner's ruling of 2026-10-28): a version 18 file drops its launch profile's output style, rewritten
+  // once; a profile that chose MAWS's (the engine's default style) keeps the user's from now on
+  it('migrates a version 18 file to version 19 without the profile’s style, keeps every other value and rewrites it once', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const saved = { ...before19('dark'), engine: { ...before19('dark').engine, launchProfile: { plugins: { off: ['ptc@ptc-tool'] }, outputStyle: 'maws', hooks: 'none' } } };
+    writeFileSync(file, JSON.stringify(saved));
+    const migrated = { ...saved, version: 19, engine: { ...saved.engine, launchProfile: { plugins: { off: ['ptc@ptc-tool'] }, hooks: 'none' } } };
+    expect(openSettingsStore(file).settings).toEqual(migrated);
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(migrated);
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/from version 18 to 19$/));
+    log.mockClear();
+    expect(openSettingsStore(file).settings).toEqual(migrated);
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it('never rewrites a file that is already version 19, nor writes defaults into it', () => { // C12: version 4; W2: version 5; W3: version 6; W7: version 7; W13: version 8; E9: version 9; E10: version 10; E4a: version 11; cua #90: version 12; P2-C: version 13; P3-D: version 14; P4-B1: version 15; P4-R8: version 16; P4-A2: version 17; UX1: version 18; the style removed: version 19
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const text = JSON.stringify({ ...v3('system'), usage: { nearLimitPercent: 80 } }, null, 2); // not the store's own formatting
     writeFileSync(file, text);
