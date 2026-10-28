@@ -24,10 +24,15 @@ import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P
 import { startMachineIdentity } from './machine/identity'; // P5 O6 M1
 import { bindLocalMachine } from './machine/local'; // P5 O6 M2
 import { startMachines } from './machines'; // P5 O6 M3: the connection manager, and the stand-in behind its gate
-import { createStepUp } from './device/step-up'; // P5 O7 M1: the development org session's signer
+import { createStepUp } from './device/step-up'; // P5 O7 M1: the development org session's signer; P5 O8 M1: the production session's
 import { createDevOrgSession } from './org/dev-session'; // P5 O7 M1
-import { signedOut } from './org/session'; // P5 O7 M1
 import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2
+import { powerMonitor } from 'electron'; // P5 O8 M1: the Registry feed reconnects at wake and unlock
+import { openExternalUrl } from './open-external'; // P5 O8 M1: the Access login's browser trip
+import { createOrgSession } from './org/org-session'; // P5 O8 M1
+import { excludeFromBackup } from './device/backup-exclusion';
+import { createRegistryFeed } from './org/registry-feed'; // P5 O8 M1
+import { registerOrgHandlers } from './org/register'; // P5 O8 M1
 // C3 end
 // C4 start (emit comes with C3's imports)
 import { startIndexAttention } from './index/attention-service';
@@ -280,6 +285,42 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
   registerPtyOpenLink();
   // C9 block end
   const hosts = createHosts(MAIN_BUILD, launch); // E11 §2.7: main's build for host.status; P5 O2 M7: the launch's shape
+  // P5 O8 M1: this profile's org session (src/main/org/org-session.ts): the sign-in from a pairing code, the held org
+  // state and the hub's credential, read from <userData>/org/ in the background; a profile that never signs in makes no
+  // keys, files or requests. A development build started with MAWS_DEV_ORG=<dir> runs O7's development session instead
+  // (dev-session.ts), and org.status says so. One Registry feed (?app=1) follows the hub for whichever session runs, and
+  // hands the production session its notices; org.* answers the Org section.
+  const devOrg =
+    process.env.MAWS_DEV_ORG && !app.isPackaged
+      ? createDevOrgSession({
+          dir: process.env.MAWS_DEV_ORG,
+          userData: app.getPath('userData'),
+          packaged: app.isPackaged,
+          build: `${MAIN_BUILD.version}+${MAIN_BUILD.commit}`,
+          stepUp: (keys, device) => createStepUp({ device, key: keys.stepUp }),
+          log: (line) => console.log(line),
+        })
+      : null;
+  const orgSession =
+    devOrg === null
+      ? createOrgSession({
+          userData: app.getPath('userData'),
+          build: `${MAIN_BUILD.version}+${MAIN_BUILD.commit}`,
+          packaged: app.isPackaged,
+          env: process.env,
+          openExternal: (url) => openExternalUrl(url),
+          stepUp: (keys, device) => createStepUp({ device, key: keys.stepUp }),
+          // `<userData>/org/` stays out of Time Machine, as the device keys do: a restored token or chain is no one's
+          excludeFromBackup: (path) => excludeFromBackup(path),
+          log: (line) => console.log(line),
+        })
+      : null;
+  const session = devOrg ?? orgSession!;
+  const orgFeed = createRegistryFeed({ session, log: (line) => console.log(line) });
+  orgSession?.attach(orgFeed);
+  registerOrgHandlers({ register: registerMainHandler, emit: (name, status) => void emit(name, status), service: orgSession, development: devOrg });
+  powerMonitor.on('resume', () => orgFeed.probe());
+  powerMonitor.on('unlock-screen', () => orgFeed.probe());
   // P5 O6 M3: every other machine through the connection manager (one link per machine; MAWS_LOCAL_MACHINES names another
   // profile's serve directory in a build that is not packaged), and machines.list and machines.changed
   const machines = startMachines({
@@ -293,18 +334,8 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
     appRoot: process.cwd(), // the development app root, as the browser's peer check reads the addon's prebuild
     register: registerMainHandler,
     dispatchLocal,
-    // P5 O7 M1: the org session the RL2 links read. Production is signed out until O8's sign-in; a development build
-    // started with MAWS_DEV_ORG=<dir> signs in from that directory (dev-session.ts).
-    session: process.env.MAWS_DEV_ORG
-      ? createDevOrgSession({
-          dir: process.env.MAWS_DEV_ORG,
-          userData: app.getPath('userData'),
-          packaged: app.isPackaged,
-          build: `${MAIN_BUILD.version}+${MAIN_BUILD.commit}`,
-          stepUp: (keys, device) => createStepUp({ device, key: keys.stepUp }),
-          log: (line) => console.log(line),
-        })
-      : signedOut(),
+    // P5 O7 M1: the org session the RL2 links read; P5 O8 M1: production's sign-in, or O7's development session
+    session,
   });
   installRouter({ appUrl, local, dispatchToHost: hosts.dispatch, remote: machines.dispatch });
   // P5 O1 M3 (OX4): the client port, the one way a machine-bound service reaches the person's screen: dialogs, the
@@ -926,4 +957,9 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
   // is ever stopped.
   machines.serve();
   shutdown.add('machines', () => machines.stop());
+  // P5 O8 M1: the feed and the session stop; nothing holds the quit (every org file is written whole and renamed)
+  shutdown.add('org', () => {
+    orgFeed.close();
+    void orgSession?.close();
+  });
 }

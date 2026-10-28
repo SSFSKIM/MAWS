@@ -64,6 +64,7 @@ import * as catalog from './schema/catalog'; // P4-AGG M2
 import * as daemon from './schema/daemon'; // P5 O2 M5
 import * as machine from './schema/machine'; // P5 O6 M1
 import * as machines from './schema/machines'; // P5 O6 M3
+import * as org from './schema/org'; // P5 O8 M1
 export { CustomizationInventorySchema, type CustomizationInventory, type CustomizationSkill, type CustomizationServer, type CustomizationEndpoint } from './schema/customization';
 
 export {
@@ -166,6 +167,7 @@ export const commands = {
   ...daemon.commands, // P5 O2 M5
   ...machine.commands, // P5 O6 M1
   ...machines.commands, // P5 O6 M3
+  ...org.commands, // P5 O8 M1
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -216,6 +218,7 @@ export const events = {
   ...daemon.events, // P5 O2 M5
   ...machine.events, // P5 O6 M1
   ...machines.events, // P5 O6 M3
+  ...org.events, // P5 O8 M1
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;

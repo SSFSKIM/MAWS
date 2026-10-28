@@ -38,6 +38,7 @@ vi.mock('electron', () => {
     BrowserWindow: { getAllWindows: () => fake.windows },
     dialog: { showMessageBox: fake.showMessageBox }, // E11 F2b
     screen: { getAllDisplays: () => [display], getPrimaryDisplay: () => display },
+    powerMonitor: { on: vi.fn() }, // P5 O8 M1: the Registry feed's wake and unlock probes
   };
 });
 vi.mock('./hosts', () => ({ createHosts: () => fake.hosts, prepareLaunch: () => ({ mode: 'utility', daemon: null, unavailable: null }), refuseTestLaunchOnDefaultProfile: () => {} /* P5 O2 landing: a scratch-profile test launch */ })); // P5 O2 M7: the launch's shape, settled at once
@@ -102,6 +103,13 @@ vi.mock('./settings/host-configure', () => ({ startHostConfigure: () => () => {}
 vi.mock('./sessions/interest', () => ({ startInterest: () => () => {}, interestSet: () => [] })); // P5 O2 M2: its sibling
 vi.mock('./widgets/fixture-backend', () => ({ installWidgetBackend: () => null })); // the widget e2e's stand-in, off here
 // C11 end
+// P5 O8 M1: the org session main makes, its deps kept; backup exclusion stubbed, so no test runs osascript
+const org = vi.hoisted(() => ({ deps: [] as Array<{ excludeFromBackup?(path: string): Promise<boolean> }>, exclude: vi.fn<(path: string) => Promise<boolean>>(async () => true) }));
+vi.mock('./device/backup-exclusion', () => ({ excludeFromBackup: org.exclude }));
+vi.mock('./org/org-session', async (original) => {
+  const real = await original<typeof import('./org/org-session')>();
+  return { ...real, createOrgSession: (deps: Parameters<typeof real.createOrgSession>[0]) => (org.deps.push(deps), real.createOrgSession(deps)) };
+});
 
 beforeAll(async () => {
   // E11 §2.7: electron.vite.config.ts defines main's build stamp for its bundle; vitest does not
@@ -112,6 +120,12 @@ beforeAll(async () => {
 });
 
 describe('app lifecycle (macOS, D-11)', () => {
+  it('makes the org session with the backup exclusion, so `<userData>/org/` stays out of Time Machine', async () => {
+    expect(org.deps).toHaveLength(1);
+    expect(await org.deps[0].excludeFromBackup?.('/tmp/maws-lifecycle-test/org')).toBe(true);
+    expect(org.exclude).toHaveBeenCalledWith('/tmp/maws-lifecycle-test/org');
+  });
+
   it('keeps the app, its hosts and their ptys running when the last window closes', () => {
     // Electron quits when the last window closes unless a `window-all-closed` listener exists.
     expect(fake.listeners.get('window-all-closed')).toHaveLength(1);

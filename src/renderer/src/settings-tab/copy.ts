@@ -12,7 +12,8 @@ export const SECTIONS = {
   notifications: 'Notifications',
   sessions: 'Sessions',
   browser: 'Browser', // E4a: Settings › Browser (settings version 11)
-  artifacts: 'Artifacts', // P3-D: Settings › Artifacts (settings version 14), last in the index
+  artifacts: 'Artifacts', // P3-D: Settings › Artifacts (settings version 14)
+  org: 'Org', // P5 O8 M1: Settings › Org, the sign-in to the org, last in the index
 } as const;
 
 export const INDEX = {
@@ -340,3 +341,66 @@ export const ARTIFACTS = {
   readFailed: (why: string) => `Could not read the design systems · ${why}`,
 } as const;
 // P3-D end
+
+// P5 O8 M1 start: Settings › Org (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, "The Org section"), the
+// least a sign-in to the org needs. No words here carry a pairing code: the field's text goes out and is never shown back.
+export const ORG = {
+  reading: 'Reading the org…',
+  readFailed: (why: string) => `Could not read the org · ${why}`,
+  failed: (why: string) => `The org did not answer · ${why}`,
+  org: 'Org',
+  notSignedIn: 'This Mac isn’t signed in to an org.',
+  code: 'Pairing code',
+  codeNote: 'Get one from a device already in the org. Today that is deployment admin pair --class native-mac.',
+  signIn: 'Sign in',
+  signInAgain: 'Sign in again',
+  signOut: 'Sign out',
+  cancel: 'Cancel',
+  signingIn: 'Signing in',
+  steps: { browser: 'Finish signing in in the browser.', checking: 'Checking the org…', approval: 'Waiting for approval.' },
+  approvalUntil: (time: string) => `Waiting for approval until ${time}.`,
+  fingerprint: 'Fingerprint',
+  fingerprintNote: 'Compare it with the approving device, then approve there.',
+  account: 'Account',
+  device: 'This Mac',
+  hub: 'Hub',
+  hubAccess: {
+    connected: 'Connected',
+    connecting: 'Connecting…',
+    expired: 'Sign-in expired',
+    denied: 'The hub no longer admits this account',
+    unreachable: 'Can’t reach the hub',
+    'signing-in': 'Signing in…',
+  },
+  state: 'Org state',
+  version: (version: number, days: number) => `Version ${version} · ${days === 1 ? '1 day' : `${days} days`} old`,
+  unverified: 'Not verified yet',
+  stateNote: (backstop: number) => `Machines stop taking requests once the org state is ${backstop} days old.`,
+  problem: 'Problem',
+  problems: {
+    'held-chain': 'The org state this Mac holds didn’t verify, so the org stays closed here until you re-anchor.',
+    rollback: 'The hub served an older org state than this Mac holds. It was refused.',
+    fork: 'The hub served an org state that conflicts with the one this Mac holds. It was refused.',
+    directory: 'MAWS’s org folder isn’t private to you, so it wasn’t used.',
+  },
+  reanchor: 'Re-anchor',
+  reanchorNote: 'Re-anchoring replaces the org state this Mac trusted with the one the code’s device vouches for.',
+  removed: 'This Mac is no longer in the org.',
+  signedOut: 'Signed out',
+  development: 'Development',
+  developmentNote: 'This session comes from MAWS_DEV_ORG.',
+  refusals: {
+    'bad-code': 'That pairing code isn’t valid.',
+    'other-org': 'That code is for a different org from the one this Mac is in.',
+    access: 'The browser sign-in didn’t finish.',
+    'not-member': (email: string | undefined) => (email ? `${email} isn’t a member of this org.` : 'That account isn’t a member of this org.'),
+    keys: 'This Mac’s device keys couldn’t be used.',
+    chain: 'The org state from the hub didn’t verify.',
+    removed: 'This Mac has been removed from the org.',
+    expired: 'The approval wasn’t given in time. Start again with a new code.',
+    hub: 'Couldn’t reach the hub.',
+    busy: 'Another sign-in is running.',
+    directory: 'MAWS’s org folder isn’t private to you, so nothing could be saved there.',
+  },
+} as const;
+// P5 O8 M1 end
