@@ -188,16 +188,6 @@ async function menu(page: Page, id: string, item: string): Promise<void> {
   await page.getByRole('menuitem', { name: item, exact: true }).click();
 }
 
-// A replayed launch's record carries the route C3's prelude verified, so a fork of it is routed and meets the relay
-// pre-check: when this Mac's relay is down, the fork's tab docks the relay card, and "Run direct" goes on.
-async function passRelay(page: Page): Promise<void> {
-  const health = value(await invoke(page, 'engine.relayHealth', { force: true }));
-  if (health.ok) return;
-  const card = page.getByRole('group', { name: 'Relay not answering' });
-  await expect(card).toBeVisible();
-  await card.getByRole('button', { name: 'Run direct' }).click();
-}
-
 // The fork's app id: its intent while it sets up (or waits on a card), else its record once bound.
 async function forkOf(page: Page, source: string): Promise<string> {
   let fork: string | undefined;
@@ -315,7 +305,9 @@ test.describe('sessions', () => {
 
     await menu(page, source, 'Fork');
     const fork = await forkOf(page, source);
-    await passRelay(page);
+    // The source started Direct. Its replay's custom base URL is a mismatch, not a verified gateway route;
+    // forkIntentOf carries that record's direct route. Relay health cannot tell us whether a card should exist.
+    // Assert the inherited route itself, so a host with no relay exercises the same fork as the mini.
     await untilPhase(page, fork, 'ready');
     const sourceId = fixtureIdentity(FORK_START).sessionId;
     const forkId = fixtureIdentity(FORK_FORK).sessionId;
@@ -326,6 +318,7 @@ test.describe('sessions', () => {
     expect(args[args.indexOf('--session-id') + 1]).toBe(forkId);
     const records = value(await invoke(page, 'session.list', {})).sessions;
     expect(records.map((r) => r.engineSessionId).sort()).toEqual([sourceId, forkId].sort());
+    expect(records.map((r) => r.gateway.routed)).toEqual([false, false]);
     await expect(page.getByRole('tab')).toHaveCount(2); // the source, the fork (W5: the Overview is no tab)
   });
 
