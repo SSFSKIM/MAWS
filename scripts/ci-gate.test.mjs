@@ -252,3 +252,24 @@ test('the alert check sees the peer group a bump adds, and none for an --affecte
   assert.equal(iteration.status, 1, iteration.stdout + iteration.stderr); // pushed; the fake gh finds no run
   assert.match(trailers(iteration.message).join('\n'), /^Selection: affected$/m);
 });
+
+test('--hosted-route writes a validated override, with no trailer when omitted', () => {
+  for (const route of ['direct', 'mirror']) {
+    const result = gate(['--gates', 'e2e:document', '--runner', 'macos', '--hosted-route', route]);
+    assert.equal(result.status, 1, result.stderr);
+    assert.deepEqual(trailers(result.message), ['Gates: e2e:document', 'Runner: macos', `Hosted-Route: ${route}`]);
+  }
+  const bad = gate(['--gates', 'static', '--hosted-route', 'typo']);
+  assert.equal(bad.status, 2);
+  assert.match(bad.stderr, /--hosted-route is direct or mirror/);
+  assert.deepEqual(bad.refs, []);
+  assert.deepEqual(bad.calls, []);
+});
+
+test('a direct packaged/peer admission push is not held by the mini alert', () => {
+  const own = (path) => readFileSync(join(root, path), 'utf8');
+  const base = Object.fromEntries(['.github/scripts/gate-plan.mjs', '.github/scripts/gate-affected.mjs', '.github/workflows/gate.yml', 'package.json'].map((path) => [path, own(path)]));
+  const result = gate(['--gates', 'packaged,e2e:cross-build', '--runner', 'macos', '--lane', 'hosted', '--hosted-route', 'direct', '--peer', 'none'], { alerts: true, base, change: () => {} });
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.ok(result.refs.length > 0);
+});

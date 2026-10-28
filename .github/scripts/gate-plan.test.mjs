@@ -37,6 +37,8 @@ function plan(scenarioEnv) {
         INPUT_EVIDENCE: '',
         INPUT_LIVE: '',
         INPUT_LANE: '',
+        INPUT_HOSTED_ROUTE: '',
+        HOSTED_MAC_ROUTE: '',
         GATE_RUNNER: '',
         GATE_E2E_RUNNER: '',
         CLASS1_E2E: '',
@@ -1090,7 +1092,16 @@ test("gate.yml times every job that can take the exclusive Mac instance by the p
     assert.match(body(job), new RegExp(`\\n {4}timeout-minutes: \\$\\{\\{ fromJSON\\(needs\\.plan\\.outputs\\.timeouts\\)\\.${key} \\}\\}\\n`), job);
   }
   assert.match(body('unit-darwin'), /\n {4}runs-on: \$\{\{ fromJSON\(needs\.plan\.outputs\.unit_darwin_runner\) \}\}\n/);
-  assert.match(body('packaged'), /\n {4}runs-on: \[self-hosted, macOS, ARM64\]\n {4}timeout-minutes: 40 /);
+  const packaged = body('packaged');
+  const evaluate = (key, outputs) => {
+    const expression = new RegExp(`^ {4}${key}: \\$\\{\\{ (.*) \\}\\}$`, 'm').exec(packaged)[1];
+    return Function('needs', 'fromJSON', `return (${expression});`)({ plan: { outputs } }, JSON.parse);
+  };
+  for (const route of ['mirror', 'direct']) {
+    const outputs = plan({ HEAD_MESSAGE: 'Gates: packaged\nRunner: macos', HOSTED_MAC_ROUTE: route }).outputs;
+    assert.deepEqual(evaluate('runs-on', outputs), route === 'direct' ? 'macos-26' : ['self-hosted', 'macOS', 'ARM64']);
+    assert.equal(evaluate('timeout-minutes', outputs), route === 'direct' ? 45 : 40);
+  }
   assert.match(body('plan'), /\n {4}timeout-minutes: \$\{\{ vars\.GATE_RUNNER == 'macos' && 40 \|\| 30 \}\}\n/);
   assert.match(workflow, /\n {6}unit_darwin_runner: \$\{\{ steps\.plan\.outputs\.unit_darwin_runner \}\}\n {6}timeouts: \$\{\{ steps\.plan\.outputs\.timeouts \}\}\n/);
   // H1 of the spec's audit: each runner instance restores and stores its builds in a directory of its own.
@@ -1252,7 +1263,7 @@ test('the walk fails closed: a rewrite that lets a step run after a refused star
     // A checkout that can run after a refused start guards nothing.
     ['    steps:\n      - id: checkout\n', '    steps:\n      - id: checkout\n        if: always()\n', ['static: actions/checkout@v7', 'static: typecheck', 'static: lint', 'static: build', 'static: gate-scripts']],
     // An expression over a variable can name the Mac.
-    ['    runs-on: [self-hosted, macOS, ARM64]\n', "    runs-on: ${{ vars.PACKAGED_RUNNER || 'ubuntu-24.04' }}\n", []],
+    ['    runs-on: ${{ fromJSON(needs.plan.outputs.packaged_runner || \'["self-hosted","macOS","ARM64"]\') }}\n', "    runs-on: ${{ vars.PACKAGED_RUNNER || 'ubuntu-24.04' }}\n", []],
   ];
   for (const [before, after, expected] of mutations) {
     const parts = workflow.split(before);
@@ -1627,4 +1638,121 @@ test('the deferred peer matrix is wired to a hosted verdict job with action-read
   assert.match(body, /PEER_GROUP: \$\{\{ matrix\.group \}\}/);
   assert.match(body, /PEER_WAIT_MINUTES: \$\{\{ matrix\.wait \}\}/);
   assert.match(body, /run: .*node \.github\/scripts\/gate-peer-wait\.mjs/);
+});
+
+// Captured from peer-check-once f85cc954b before direct routing: exact outputs, stdout and summary on all five lanes.
+test('mirror keeps the pre-direct planner byte-identical with the captured admission lists', async () => {
+  const { createHash } = await import('node:crypto');
+  const { planOf } = await import('./gate-plan.mjs');
+  const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  const fixtures = JSON.parse(readFileSync(join(root, '.github/scripts/gate-plan-mirror.fixture.json'), 'utf8'));
+  for (const { env, sha256 } of fixtures) {
+    for (const route of ['', 'mirror']) {
+      const { outputs, summary, stdout } = planOf({ ...env, HOSTED_MAC_ROUTE: route }, scripts);
+      assert.equal(createHash('sha256').update(JSON.stringify({ outputs, summary, stdout })).digest('hex'), sha256, `${env.HEAD_MESSAGE}, ${route}`);
+    }
+  }
+});
+
+test('direct runs the same admitted groups through e2e on macos-26 without a waiter or pool build', () => {
+  const env = { ...ownLists(), HEAD_MESSAGE: 'Gates: e2e:document,e2e:panel,e2e:c7,e2e:terminal,e2e:transcript\nRunner: macos' };
+  const mirror = plan(env).outputs;
+  const direct = plan({ ...env, HOSTED_MAC_ROUTE: 'direct' }).outputs;
+  assert.equal(direct.e2e_host, direct.e2e);
+  assert.deepEqual([direct.e2e_hosted, direct.e2e_vm, direct.e2e_build, direct.pool], ['[]', '[]', '[]', 'false']);
+  assert.deepEqual(JSON.parse(direct.e2e), JSON.parse(mirror.e2e).map((entry) => ({ ...entry, runner: '"macos-26"', timeout: 45 })));
+});
+
+test('the last Hosted-Route trailer overrides the variable; dispatch uses its input rather than a push trailer', () => {
+  const base = { HOSTED_MAC_E2E: 'document', HEAD_MESSAGE: 'Gates: e2e:document\nRunner: macos' };
+  const runner = (env) => JSON.parse(plan(env).outputs.e2e)[0].runner;
+  assert.equal(runner({ ...base, HOSTED_MAC_ROUTE: 'mirror', HEAD_MESSAGE: `${base.HEAD_MESSAGE}\nHosted-Route: mirror\nHosted-Route: direct` }), '"macos-26"');
+  assert.equal(runner({ ...base, HOSTED_MAC_ROUTE: 'direct', HEAD_MESSAGE: `${base.HEAD_MESSAGE}\nHosted-Route: mirror` }), JSON.stringify(waiter));
+  const dispatch = { ...base, EVENT: 'workflow_dispatch', INPUT_GATES: 'e2e:document', INPUT_RUNNER: 'macos', HEAD_MESSAGE: 'Hosted-Route: mirror', HOSTED_MAC_ROUTE: 'direct' };
+  assert.equal(runner(dispatch), '"macos-26"');
+  assert.equal(runner({ ...dispatch, INPUT_HOSTED_ROUTE: 'mirror' }), JSON.stringify(waiter));
+  for (const env of [{ HOSTED_MAC_ROUTE: 'typo' }, { HEAD_MESSAGE: `${base.HEAD_MESSAGE}\nHosted-Route: typo` }, { EVENT: 'workflow_dispatch', INPUT_HOSTED_ROUTE: 'typo' }]) {
+    assert.throws(() => plan({ ...base, ...env }), /no such hosted route/);
+  }
+});
+
+test('only direct can host a peer group; the peer and package script reach the ordinary e2e steps', () => {
+  const peer = 'a12811cd99085a8a3a17a1fb15b773e5639e8eea';
+  const env = { PEER_E2E: 'cross-build', HEAD_MESSAGE: `Gates: e2e:cross-build\nRunner: macos\nLane: hosted\nPeer: ${peer}` };
+  const mirror = plan(env).outputs;
+  const direct = plan({ ...env, HOSTED_MAC_ROUTE: 'direct' }).outputs;
+  const entry = JSON.parse(direct.e2e)[0];
+  assert.equal(entry.runner, '"macos-26"');
+  assert.equal(entry.timeout, 30);
+  assert.equal(entry.peer, peer);
+  assert.equal(entry.script, 'e2e:cross-build');
+  assert.equal(direct.e2e_host, direct.e2e);
+  assert.equal(direct.pool, 'false');
+  assert.equal(JSON.parse(mirror.e2e)[0].runner, JSON.stringify(['self-hosted', 'macOS', 'ARM64']));
+  assert.throws(() => plan({ ...env, HOSTED_MAC_E2E: 'cross-build' }), /cross-build \(peer\)/);
+  assert.equal(plan({ ...env, HOSTED_MAC_ROUTE: 'direct', HOSTED_MAC_E2E: 'cross-build' }).outputs.e2e_host, direct.e2e_host);
+});
+
+test('direct preserves never-hosted, no-hosted, Linux, live and final-ref exclusions', () => {
+  const lists = { ...ownLists(), PEER_E2E: 'cross-build', HOSTED_MAC_ROUTE: 'direct' };
+  const groups = ['default', 'connectors-oauth', 'discover', 'document-scale', 'desk-web'];
+  const { outputs } = plan({ ...lists, HEAD_MESSAGE: `Gates: ${groups.map((g) => `e2e:${g}`).join(',')}\nRunner: macos\nLane: hosted` });
+  assert.ok(JSON.parse(outputs.e2e).every((entry) => !entry.hosted));
+  for (const group of groups) assert.throws(() => plan({ ...lists, HOSTED_MAC_E2E: group }), /HOSTED_MAC_E2E names/);
+  for (const group of ['design-live', 'tool-time-heavy-live']) assert.throws(() => plan({ ...lists, HOSTED_MAC_E2E: group }), /HOSTED_MAC_E2E names/);
+  const live = plan({ ...lists, HEAD_MESSAGE: 'Gates: e2e:design-live\nRunner: macos\nLane: hosted\nLive: yes' }).outputs;
+  assert.ok(JSON.parse(live.e2e).every((entry) => !entry.hosted));
+  const cases = [
+    { HEAD_MESSAGE: 'Gates: e2e:document\nRunner: macos\nLane: no-hosted' },
+    { HEAD_MESSAGE: 'Gates: e2e:library\nRunner: linux\nLane: hosted' },
+    ...FINAL_LABELS.map((label) => ({ HEAD_MESSAGE: 'Gates: e2e:document,e2e:cross-build\nRunner: macos\nLane: hosted', GITHUB_REF: `refs/heads/ci/${label}-test` })),
+  ];
+  for (const env of cases) assert.ok(JSON.parse(plan({ ...lists, ...env }).outputs.e2e).every((entry) => !entry.hosted), JSON.stringify(env));
+});
+
+test('unsigned packaged takes the direct Mac but stays self-hosted under mirror or excluded lanes', () => {
+  const base = { HEAD_MESSAGE: 'Gates: packaged\nRunner: macos', HOSTED_MAC_ROUTE: 'direct' };
+  const output = plan(base).outputs;
+  assert.equal(output.packaged_runner, '"macos-26"');
+  assert.equal(JSON.parse(output.timeouts).packaged, 45);
+  assert.equal(output.pool, 'false');
+  for (const env of [
+    { HOSTED_MAC_ROUTE: 'mirror' },
+    { HEAD_MESSAGE: `${base.HEAD_MESSAGE}\nLane: no-hosted` },
+    { HEAD_MESSAGE: 'Gates: packaged\nRunner: linux' },
+    ...FINAL_LABELS.map((label) => ({ GITHUB_REF_NAME: `ci/${label}-test` })),
+  ]) assert.equal(plan({ ...base, ...env }).outputs.packaged_runner, undefined);
+});
+
+test('direct hosting preserves peer deduplication while explicit admission still runs', () => {
+  const env = { PEER_E2E: 'cross-build', HOSTED_MAC_ROUTE: 'direct', PEER_HELD_BY: '90 succeeded', HEAD_MESSAGE: `Gates: unit\nRunner: macos\nLane: hosted\n${peerTrailers('3.0', '3.1')}` };
+  for (const route of ['direct', 'mirror']) {
+    const deferred = plan({ ...env, HOSTED_MAC_ROUTE: route }).outputs;
+    assert.equal(deferred.e2e, '[]');
+    assert.deepEqual(JSON.parse(deferred.peer_wait), [{ group: 'cross-build', run: '90', timeout: 180, wait: 175 }]);
+    assert.equal(deferred.pool, 'false');
+    assert.deepEqual([deferred.e2e_host, deferred.e2e_hosted, deferred.e2e_vm, deferred.e2e_build], ['[]', '[]', '[]', '[]']);
+  }
+  assert.match(jobBody(readWorkflow(), 'e2e-peer-wait'), /^ {4}runs-on: ubuntu-24\.04$/m);
+  const { outputs } = plan({ ...env, HEAD_MESSAGE: env.HEAD_MESSAGE.replace('Gates: unit', 'Gates: e2e:cross-build') });
+  assert.equal(JSON.parse(outputs.e2e)[0].runner, '"macos-26"');
+  assert.equal(outputs.peer_wait, '[]');
+});
+
+test('hosted packaged keeps the full document-tool setup for its bare Playwright collection', () => {
+  const job = jobBody(readWorkflow(), 'packaged');
+  const setup = job.split('      - uses: ./.github/actions/setup\n')[1].split(/\n {6}- /)[0];
+  const inputs = Object.fromEntries([...setup.matchAll(/^ {10}(libreoffice|poppler): '([^']+)'$/gm)].map(([, key, value]) => [key, value]));
+  assert.deepEqual(inputs, { libreoffice: 'true', poppler: 'true' });
+});
+
+test('route changes only placement of hosted entries across the current lists and VM precedence', () => {
+  for (const lane of ['', 'hosted', 'no-hosted', 'vm', 'vm-trial']) {
+    const env = { ...ownLists(), GATE_RUNNER: 'pool', HEAD_MESSAGE: `Runner: macos${lane ? `\nLane: ${lane}` : ''}` };
+    const mirror = plan(env).outputs;
+    const direct = plan({ ...env, HOSTED_MAC_ROUTE: 'direct' }).outputs;
+    assert.deepEqual(JSON.parse(direct.e2e), JSON.parse(mirror.e2e).map((entry) => entry.hosted ? { ...entry, runner: '"macos-26"', timeout: 45 } : entry), lane);
+    assert.equal(direct.e2e_vm, mirror.e2e_vm, lane);
+    assert.equal(direct.e2e_build, mirror.e2e_build, lane);
+  }
 });

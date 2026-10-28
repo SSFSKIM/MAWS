@@ -88,6 +88,14 @@ runs:
         # Only hosted per-group jobs have a complete dependency signal here. Self-hosted unit, packaged and default
         # jobs can need these tools without setting the per-group inputs, so they keep the declaration's full presence check.
         skip: ${{ runner.os == 'macOS' && runner.environment == 'github-hosted' && format('{0} {1}', inputs.libreoffice != 'true' && 'cask:libreoffice' || '', inputs.poppler != 'true' && 'brew:poppler' || '') || '' }}
+    # An ephemeral hosted Mac must not stop at Gatekeeper on a cask's first launch (as in the mirror workflow).
+    - if: runner.environment == 'github-hosted' && runner.os == 'macOS'
+      name: unquarantine hosted casks
+      shell: bash
+      run: |
+        for app in /Applications/LibreOffice.app "/Applications/Google Chrome.app"; do
+          if [[ -d $app ]]; then xattr -dr com.apple.quarantine "$app" 2>/dev/null || true; echo "unquarantined $app"; fi
+        done
     # Group-specific Linux packages; macOS takes LibreOffice from the declaration.
     - if: runner.os == 'Linux' && (inputs.libreoffice == 'true' || inputs.apt != '')
       shell: bash

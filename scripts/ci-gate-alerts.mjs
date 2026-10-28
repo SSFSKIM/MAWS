@@ -161,7 +161,7 @@ export function workflowEnv(workflow) {
 // ci-kit-mac-home), the shared instances' [ci-kit-mac-shared] and every label set not known here.
 export function runsOn(json) {
   const labels = JSON.parse(json);
-  if (typeof labels === 'string') return /^ubuntu-[\d.]+$|^ubuntu-slim$/.test(labels) ? 'other' : 'host';
+  if (typeof labels === 'string') return /^ubuntu-[\d.]+$|^ubuntu-slim$|^macos-26$/.test(labels) ? 'other' : 'host';
   if (!Array.isArray(labels)) return 'host';
   if (labels.includes('ci-kit-pool')) return 'other';
   if (labels.length === 1 && ['ci-kit-mac-solo', 'ci-kit-mac-vm'].includes(labels[0])) return 'vm';
@@ -196,6 +196,7 @@ export function macPlan({ gitDir, sha, gates = '', runner = '', class1a = '', la
         HEAD_MESSAGE: `ci-gate: alert check\n\n${trailers.join('\n')}`,
         GATE_RUNNER: variables.GATE_RUNNER ?? '',
         GATE_E2E_RUNNER: variables.GATE_E2E_RUNNER ?? '',
+        HOSTED_MAC_ROUTE: variables.HOSTED_MAC_ROUTE ?? '',
         GITHUB_OUTPUT: output,
         GITHUB_STEP_SUMMARY: join(dir, 'github-summary'),
       },
@@ -204,7 +205,7 @@ export function macPlan({ gitDir, sha, gates = '', runner = '', class1a = '', la
     // Keep labels until both host/guest classification and the home-only requirement have been read.
     const placed = [
       ...((variables.GATE_RUNNER ?? '').toLowerCase() === 'macos' ? [['plan', '["self-hosted","macOS","ARM64"]']] : []),
-      ...(out.packaged === 'true' ? [['packaged', '["self-hosted","macOS","ARM64"]']] : []),
+      ...(out.packaged === 'true' ? [['packaged', out.packaged_runner || '["self-hosted","macOS","ARM64"]']] : []),
       ...['static', 'unit', 'probes'].filter((gate) => out[gate] === 'true').map((gate) => [gate, out[`${gate}_runner`]]),
       ...(out.unit_darwin === 'true' ? [['unit:darwin', out.unit_darwin_runner]] : []),
       ...JSON.parse(out.e2e).map((entry) => [`e2e:${entry.group}`, entry.runner]),

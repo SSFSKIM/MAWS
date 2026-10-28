@@ -59,10 +59,10 @@ test('a run needs a Mac exactly when gate-plan.mjs and gate.yml put one of its j
   // The exclusive instance's labels, the shared instances' one (ci-kit's mac-lane concurrency spec, M2), or the VM
   // lane's: solo (the exclusive instance or the guest), the guest alone, its trial slot (V3).
   const macs = ['["self-hosted","macOS","ARM64"]', '["self-hosted","macOS","ARM64","ci-kit-mac-home"]', '["ci-kit-mac-shared"]', '["ci-kit-mac-solo"]', '["ci-kit-mac-vm"]', '["ci-kit-mac-vm-trial"]'];
-  // The placements gate-plan.mjs does not write: the plan job on the Mac under GATE_RUNNER=macos; packaged always on
-  // the Mac. unit:darwin takes the Mac runner the plan writes for it.
+  // The placements outside the legacy plan: the plan job under GATE_RUNNER=macos; packaged's mirror fallback
+  // on the Mac. unit:darwin takes the Mac runner the plan writes for it.
   assert.match(workflow, /\n {2}plan:\n(?: {4}.*\n|\n)*? {4}runs-on: \$\{\{ vars\.GATE_RUNNER == 'macos' && fromJSON\('\["self-hosted","macOS","ARM64"\]'\) \|\| 'ubuntu-slim' \}\}\n/);
-  assert.match(workflow, /\n {2}packaged:\n(?: {4}.*\n)*? {4}runs-on: \[self-hosted, macOS, ARM64\]\n/);
+  assert.match(workflow, /\n {2}packaged:\n(?: {4}.*\n)*? {4}runs-on: \$\{\{ fromJSON\(needs\.plan\.outputs\.packaged_runner \|\| '\["self-hosted","macOS","ARM64"\]'\) \}\}\n/);
   assert.match(workflow, /\n {2}unit-darwin:\n(?: {4}.*\n)*? {4}runs-on: \$\{\{ fromJSON\(needs\.plan\.outputs\.unit_darwin_runner\) \}\}\n/);
   // Each e2e job takes the runner its matrix entry carries, the lane's or, for POOL_E2E, the pool's or hosted Linux.
   assert.match(workflow, /\n {2}e2e:\n(?: {4}.*\n)*? {4}runs-on: \$\{\{ fromJSON\(matrix\.runner\) \}\}\n/);
@@ -261,6 +261,7 @@ test('a runs-on label set is the guest, the trial slot, no Mac, or a host', () =
     ['ubuntu-24.04', 'other'],
     ['ubuntu-slim', 'other'],
     ['macos-latest', 'host'],
+    ['macos-26', 'other'],
     [[], 'host'],
     [null, 'host'],
   ]) assert.equal(runsOn(JSON.stringify(labels)), kind, JSON.stringify(labels));
@@ -581,4 +582,11 @@ test('a failed read warns and goes ahead', () => {
   const garbled = check({ gates: '', runner: '', class1a: '', gh: () => 'not json\n' });
   assert.equal(garbled.stop, false);
   assert.match(garbled.lines[0], /^ci-gate: warning: could not read the repository's variables \(.*JSON.*\); going ahead/);
+});
+
+test('alert planning sees the direct variable and its mirror override, including packaged', () => {
+  const hosted = hostedTree();
+  const ask = (extra = {}) => macPlan({ ...hosted, gates: 'e2e:tools,packaged', runner: 'macos', variables: { ...today, HOSTED_MAC_ROUTE: 'direct' }, ...extra });
+  assert.deepEqual(ask(), { jobs: [], guest: 'none', home: [] });
+  assert.deepEqual(ask({ trailers: 'Hosted-Route: mirror' }), { jobs: ['packaged'], guest: null, home: [] });
 });
