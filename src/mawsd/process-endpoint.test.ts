@@ -235,8 +235,13 @@ describe.skipIf(!existsSync(MAWSD))('the built mawsd with its endpoint', () => {
     const env = { ...base, MAWS_ENDPOINT_DIRECT: '1', MAWS_ENDPOINT_PORT: String(port) };
     const first = await runDaemon(profile, env);
 
-    // Unenrolled, the endpoint holds no link and binds nothing.
+    // Unenrolled, the daemon has not loaded the endpoint (lever (a)): daemon.status says unenrolled from the seam, and
+    // the module's chunk comes with the first endpoint command.
+    const daemonStatus = await cli(env, ['status', '--json']);
+    expect(JSON.parse(daemonStatus.stdout)).toMatchObject({ endpoint: { present: true, detail: { enrollment: 'none', hub: { connected: false }, listener: { bound: false } } } });
+    expect(log(profile)).not.toContain('loading the endpoint');
     expect(await endpointStatus(env)).toMatchObject({ enrollment: 'none', hub: { connected: false }, listener: { bound: false }, rl10: { connected: false } });
+    expect(log(profile)).toContain('loading the endpoint for its first command');
     expect(existsSync(join(profile, 'mawsd', 'endpoint', 'rl10.json'))).toBe(false);
 
     const { ref } = await enroll(profile, env, 'm10-mini');
@@ -303,6 +308,7 @@ describe.skipIf(!existsSync(MAWSD))('the built mawsd with its endpoint', () => {
     // The daemon comes back (as its unit would start it), enrolled from its state, and the device resumes by cursor. A
     // restart loses the endpoint's rings, so each resume is a snapshot under a new epoch: nothing lost, nothing doubled.
     await runDaemon(profile, env, 2);
+    expect(log(profile)).toContain('loading the endpoint: an enrollment is on disk'); // at its start, before any command
     await until(async () => {
       const status = await endpointStatus(env);
       return status.enrollment === 'org-listed' && status.hub.connected && status.listener.bound;

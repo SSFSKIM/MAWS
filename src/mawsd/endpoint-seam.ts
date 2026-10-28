@@ -7,12 +7,18 @@
 // while both hosts are parked; a remote request that needs a host wakes it through `dispatch`. It stops first in the
 // exit order, awaited at most ENDPOINT_STOP_MS. No hub configuration and no tailnet address pass through it: both are the
 // endpoint's own state, under `machine.stateDir`.
+//
+// Loaded when it is needed (O10 M10, the architect's lever (a) on acceptance 14): the module, `ws` and org-protocol are
+// a chunk of their own, which an unenrolled daemon never loads. At start step 7 it is loaded and started when an
+// enrollment is on disk (src/endpoint/presence.ts, a few `lstat`s); otherwise at the first `daemon.endpoint` command,
+// `enroll` included, and started then with the same services before the command runs. Until then `status()` is the
+// unenrolled module's, and the stop order is unchanged (a load in flight is awaited, and what it loaded stopped).
 import type { AppSessionId } from '@shared/graph/ids';
 import type { DocumentsOpen } from '@shared/host/socket-protocol';
 import type { ClientRef } from '@shared/ipc/client';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import type { MachineRef } from '@shared/machine/ref';
-import { createEndpoint } from '../endpoint/index';
+import { enrollmentOnDisk, UNENROLLED_STATUS } from '../endpoint/presence';
 
 export const ENDPOINT_STOP_MS = 2_500;
 // `daemon.endpoint`'s answer while there is no module (a daemon a test starts with none), `{code: 2, out:
@@ -50,9 +56,84 @@ export interface EndpointModule {
   cli(command: string, args: readonly string[], secret?: string): Promise<{ code: number; out: string }>;
 }
 
-// O10's endpoint module (P5 O10 M10), one for each daemon, unstarted; `build` is the daemon's build id, which RL1's hello
-// and RL2's h2 name. It is bundled into mawsd.js with its `ws` (the bundle guard bars a dynamic import), and an
-// unenrolled one starts no hub link, binds no listener and serves no RL10 socket.
+// O10's endpoint module (P5 O10 M10), one for each daemon, loaded when it is needed; `build` is the daemon's build id,
+// which RL1's hello and RL2's h2 name. Its chunk is emitted beside mawsd.js by the same build (the bundle guard admits
+// that load and no other).
 export function loadEndpointModule(build: string): EndpointModule {
-  return createEndpoint({ build });
+  return new LazyEndpoint(build, () => import('../endpoint/index'));
+}
+
+type Loaded = { createEndpoint(options: { build?: string }): EndpointModule };
+
+/** The seam's module until O10's is needed, then O10's; `load` brings the module's chunk (a test's stand-in). */
+export class LazyEndpoint implements EndpointModule {
+  readonly #build: string;
+  readonly #load: () => Promise<Loaded>;
+  #services: DaemonServices | null = null;
+  #module: EndpointModule | null = null;
+  #loading: Promise<EndpointModule | null> | null = null;
+  #stopped = false;
+
+  constructor(build: string, load: () => Promise<Loaded>) {
+    this.#build = build;
+    this.#load = load;
+  }
+
+  async start(services: DaemonServices): Promise<void> {
+    this.#services = services;
+    if (enrollmentOnDisk(services.machine.stateDir)) await this.#ensure(true);
+  }
+
+  async stop(): Promise<void> {
+    this.#stopped = true;
+    const module = this.#module ?? (await this.#loading?.catch(() => null)) ?? null;
+    await module?.stop();
+  }
+
+  status(): unknown {
+    return this.#module === null ? UNENROLLED_STATUS : this.#module.status();
+  }
+
+  async cli(command: string, args: readonly string[], secret?: string): Promise<{ code: number; out: string }> {
+    if (this.#services === null) return { code: 3, out: 'the endpoint has not started' };
+    if (this.#stopped) return { code: 3, out: 'the endpoint has stopped' };
+    let module: EndpointModule | null;
+    try {
+      module = await this.#ensure(false);
+    } catch (error) {
+      return { code: 1, out: `the endpoint module could not be loaded (${error instanceof Error ? error.message : String(error)}); \`mawsd restart\` loads this build's` };
+    }
+    if (module === null) return { code: 3, out: 'the endpoint has stopped' };
+    return module.cli(command, args, secret);
+  }
+
+  /**
+   * The module, loaded and started once (one load at a time; a failed load is tried again by the next caller). A start
+   * that throws is logged and leaves the module loaded, as the daemon's start step 7 does. Null when the daemon stopped
+   * before the module started: it is then never started, so `stop` has nothing to stop.
+   */
+  #ensure(atStart: boolean): Promise<EndpointModule | null> {
+    if (this.#module !== null) return Promise.resolve(this.#module);
+    const services = this.#services!;
+    this.#loading ??= (async () => {
+      let loaded: Loaded;
+      try {
+        loaded = await this.#load();
+      } catch (error) {
+        services.log(`the endpoint module could not be loaded: ${error instanceof Error ? error.message : String(error)}`);
+        throw error;
+      }
+      if (this.#stopped) return null;
+      const module = loaded.createEndpoint({ build: this.#build });
+      services.log(atStart ? 'loading the endpoint: an enrollment is on disk' : 'loading the endpoint for its first command');
+      try {
+        await module.start(services);
+      } catch (error) {
+        services.log(`the endpoint module failed to start: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      this.#module = module;
+      return module;
+    })().finally(() => (this.#loading = null));
+    return this.#loading.then((module) => (this.#stopped ? null : module));
+  }
 }

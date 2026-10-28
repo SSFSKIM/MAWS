@@ -1,7 +1,86 @@
-// P5 Decision Log 45: `mawsd`'s seam and O10's endpoint module agree field for field, and O10 M10 binds the module.
-import { describe, expect, expectTypeOf, it } from 'vitest';
+// P5 Decision Log 45: `mawsd`'s seam and O10's endpoint module agree field for field, and O10 M10 binds the module. The
+// architect's lever (a) on acceptance 14: the module is loaded at the daemon's start only when an enrollment is on disk,
+// else at its first command, and starts then as it would have at the daemon's start.
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, expectTypeOf, it } from 'vitest';
 import type { EndpointModule as O10Module, EndpointServices } from '../endpoint/index';
-import { loadEndpointModule, type DaemonServices, type EndpointModule } from './endpoint-seam';
+import { UNENROLLED_STATUS } from '../endpoint/presence';
+import { LazyEndpoint, loadEndpointModule, type DaemonServices, type EndpointModule } from './endpoint-seam';
+
+let dir: string | null = null;
+afterEach(() => {
+  if (dir) rmSync(dir, { recursive: true, force: true });
+  dir = null;
+});
+
+/** Services over a scratch state directory; the endpoint's log lines kept. */
+function services(enrolled = false): DaemonServices & { lines: string[] } {
+  dir = mkdtempSync(join(tmpdir(), 'maws-seam-'));
+  const stateDir = join(dir, 'mawsd', 'endpoint');
+  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  if (enrolled) writeFileSync(join(stateDir, 'enrollment.json'), '{}', { mode: 0o600 });
+  const lines: string[] = [];
+  const none = () => () => {};
+  return {
+    machine: { ref: 'r'.repeat(22) as never, profileDir: dir, stateDir, kind: 'private' },
+    dispatch: async () => ({ t: 'res', id: '0', ok: true, value: null }),
+    onEvent: none,
+    onAttachment: none,
+    onFrame: none,
+    documents: { open: () => false, close: () => {}, frame: () => false, onClosed: none },
+    onUpstream: none,
+    hold: () => () => {},
+    interest: { report: () => {}, drop: () => {} },
+    log: (line) => void lines.push(line),
+    lines,
+  };
+}
+
+/** A module standing in for O10's, recording what is asked of it. */
+class Module implements EndpointModule {
+  static built: Array<{ build?: string }> = [];
+  static startGate: Promise<void> | null = null;
+  readonly events: string[] = [];
+  started: DaemonServices | null = null;
+  constructor(options: { build?: string }) {
+    Module.built.push(options);
+  }
+  async start(s: DaemonServices): Promise<void> {
+    this.events.push('start');
+    if (Module.startGate) await Module.startGate;
+    this.started = s;
+  }
+  async stop(): Promise<void> {
+    this.events.push('stop');
+  }
+  status(): unknown {
+    return { enrollment: 'loaded' };
+  }
+  async cli(command: string): Promise<{ code: number; out: string }> {
+    this.events.push(`cli ${command}`);
+    return { code: 0, out: command };
+  }
+}
+
+/** A loader of `Module`, counted, that can be held or made to fail. */
+function loader() {
+  const state = { loads: 0, modules: [] as Module[], fail: null as Error | null, gate: null as Promise<void> | null };
+  const load = async () => {
+    state.loads++;
+    if (state.gate) await state.gate;
+    if (state.fail) throw state.fail;
+    return {
+      createEndpoint: (options: { build?: string }) => {
+        const m = new Module(options);
+        state.modules.push(m);
+        return m;
+      },
+    };
+  };
+  return { state, load };
+}
 
 describe('the endpoint seam', () => {
   it('DaemonServices is O10’s EndpointServices, and the two EndpointModule shapes are one', () => {
@@ -9,12 +88,104 @@ describe('the endpoint seam', () => {
     expectTypeOf<EndpointModule>().toEqualTypeOf<O10Module>();
   });
 
-  it('binds O10’s endpoint module: a fresh, unstarted one for each daemon', async () => {
+  it('binds O10’s endpoint module: a fresh one for each daemon, reporting unenrolled until it is loaded', async () => {
     const endpoint = loadEndpointModule('0123456789abcdef');
-    expect(endpoint).not.toBeNull();
     expect(loadEndpointModule('0123456789abcdef')).not.toBe(endpoint);
-    // Unstarted: nothing enrolled, no link, no channel, no listener, and its commands wait for the start.
-    expect(endpoint.status()).toMatchObject({ enrollment: 'none', hub: { connected: false }, channels: { relayed: 0, direct: 0 }, rl10: { connected: false }, listener: { bound: false } });
+    expect(endpoint.status()).toEqual(UNENROLLED_STATUS);
     await expect(endpoint.cli('keys', [])).resolves.toEqual({ code: 3, out: 'the endpoint has not started' });
+  });
+});
+
+describe('the endpoint loaded when it is needed (lever (a))', () => {
+  it('an unenrolled daemon loads nothing at start; the first command loads it once, starts it with the daemon’s services, then runs', async () => {
+    const { state, load } = loader();
+    const endpoint = new LazyEndpoint('b1', load);
+    const s = services();
+    await endpoint.start(s);
+    expect(state.loads).toBe(0);
+    expect(endpoint.status()).toEqual(UNENROLLED_STATUS);
+    const [first, second] = await Promise.all([endpoint.cli('enroll', ['--json'], 'CODE'), endpoint.cli('keys', [])]);
+    expect([first, second]).toEqual([
+      { code: 0, out: 'enroll' },
+      { code: 0, out: 'keys' },
+    ]);
+    expect(state.loads).toBe(1);
+    expect(Module.built.at(-1)).toEqual({ build: 'b1' });
+    const [m] = state.modules;
+    expect(m.started).toBe(s);
+    expect(m.events).toEqual(['start', 'cli enroll', 'cli keys']);
+    expect(endpoint.status()).toEqual({ enrollment: 'loaded' });
+    await endpoint.stop();
+    expect(m.events.at(-1)).toBe('stop');
+  });
+
+  it('a daemon with an enrollment on disk loads and starts it at start, as before', async () => {
+    const { state, load } = loader();
+    const endpoint = new LazyEndpoint('b2', load);
+    await endpoint.start(services(true));
+    expect(state.loads).toBe(1);
+    expect(state.modules[0].events).toEqual(['start']);
+    expect(endpoint.status()).toEqual({ enrollment: 'loaded' });
+  });
+
+  it('stops with nothing loaded; a stop during a load stops what it loaded; nothing loads after a stop', async () => {
+    const quiet = loader();
+    const idle = new LazyEndpoint('b3', quiet.load);
+    await idle.start(services());
+    await idle.stop();
+    expect(await idle.cli('keys', [])).toEqual({ code: 3, out: 'the endpoint has stopped' });
+    expect(quiet.state.loads).toBe(0);
+
+    // Stopped while its chunk loads: never started, so nothing to stop.
+    const held = loader();
+    let release!: () => void;
+    held.state.gate = new Promise<void>((r) => (release = r));
+    const busy = new LazyEndpoint('b4', held.load);
+    await busy.start(services());
+    const command = busy.cli('keys', []);
+    const stopped = busy.stop();
+    release();
+    await stopped;
+    expect(held.state.modules).toEqual([]);
+    expect(await command).toEqual({ code: 3, out: 'the endpoint has stopped' });
+
+    // Stopped while it starts: the stop waits for the start, then stops it, and the command runs nothing.
+    const starting = loader();
+    const late = new LazyEndpoint('b4b', starting.load);
+    await late.start(services());
+    let started!: () => void;
+    Module.startGate = new Promise<void>((r) => (started = r));
+    const run = late.cli('keys', []);
+    await new Promise((r) => setTimeout(r, 0));
+    const ending = late.stop();
+    started();
+    await ending;
+    Module.startGate = null;
+    expect(starting.state.modules[0].events).toEqual(['start', 'stop']);
+    expect(await run).toEqual({ code: 3, out: 'the endpoint has stopped' });
+  });
+
+  it('a module that cannot be loaded is said, logged and tried again at the next command', async () => {
+    const { state, load } = loader();
+    state.fail = new Error("Cannot find module './chunks/index-OLD.js'");
+    const endpoint = new LazyEndpoint('b5', load);
+    const s = services();
+    await endpoint.start(s);
+    const refused = await endpoint.cli('keys', []);
+    expect(refused.code).toBe(1);
+    expect(refused.out).toContain('the endpoint module could not be loaded');
+    expect(refused.out).toContain('mawsd restart');
+    expect(s.lines.some((line) => line.includes("Cannot find module './chunks/index-OLD.js'"))).toBe(true);
+    expect(endpoint.status()).toEqual(UNENROLLED_STATUS);
+    state.fail = null;
+    expect(await endpoint.cli('keys', [])).toEqual({ code: 0, out: 'keys' });
+    expect(state.loads).toBe(2);
+  });
+
+  it('before the daemon starts it, a command answers as an unstarted module does, loading nothing', async () => {
+    const { state, load } = loader();
+    const endpoint = new LazyEndpoint('b6', load);
+    expect(await endpoint.cli('keys', [])).toEqual({ code: 3, out: 'the endpoint has not started' });
+    expect(state.loads).toBe(0);
   });
 });
