@@ -37,4 +37,13 @@ describe('what the gesture approves', () => {
     expect(gestureLine(gestureOf(asked, { kind: 'question', answers: { 'Which way?': 'left' } }, 'main'))).toBe('Face ID approves: Answer “Which way?” with `left` in main');
     expect(gestureLine(gestureOf(asked, { kind: 'question', answers: { 'Which way?': 'left', 'And then?': 'stop' } }, 'main'))).toBe('Face ID approves: Answer 2 questions in main');
   });
+
+  it('names the question a decline declines, or how many', () => {
+    const one = laneA('AskUserQuestion', { questions: [{ question: 'Which way?', options: [{ label: 'left' }] }] });
+    expect(gestureLine(gestureOf(one, { kind: 'decline' }, 'main'))).toBe('Face ID approves: Decline “Which way?” in main');
+    const two = laneA('AskUserQuestion', { questions: [{ question: 'Which way?', options: [] }, { question: 'And then?', options: [] }] });
+    expect(gestureLine(gestureOf(two, { kind: 'decline' }, 'main'))).toBe('Face ID approves: Decline 2 questions in main');
+    const b = laneB({ kind: 'question.requested', questions: [{ question: 'Which way?', header: '', multiSelect: false, options: [] }] });
+    expect(gestureLine(gestureOf(b, { kind: 'decline' }, 'main'))).toBe('Face ID approves: Decline “Which way?” in main');
+  });
 });
