@@ -55,6 +55,11 @@ export interface RemoteChannel {
   readonly closed: boolean;
   /** Sends `message` after everything sent before it; false once the channel is closed. */
   send(message: EndpointMessage): boolean;
+  /**
+   * `send`, resolved once the message is sealed onto the carrier (false: the channel closed first); it never rejects.
+   * A subscription's stream goes through it (stream-window.ts), so the channel's queue holds only a window of it.
+   */
+  transmit(message: EndpointMessage): Promise<boolean>;
   close(reason: string): void;
   onClose(listener: (reason: string) => void): () => void;
 }
@@ -147,6 +152,17 @@ class Remote implements RemoteChannel {
       if (!this.#channel.closed) this.#log(`endpoint: a \`${message.t}\` could not be sent on channel ${this.key}: ${(error as Error).message}`);
     });
     return true;
+  }
+
+  transmit(message: EndpointMessage): Promise<boolean> {
+    if (this.#channel.closed) return Promise.resolve(false);
+    return this.#channel.send(message).then(
+      () => true,
+      (error: unknown) => {
+        if (!this.#channel.closed) this.#log(`endpoint: a \`${message.t}\` could not be sent on channel ${this.key}: ${(error as Error).message}`);
+        return false;
+      },
+    );
   }
 
   close(reason: string): void {

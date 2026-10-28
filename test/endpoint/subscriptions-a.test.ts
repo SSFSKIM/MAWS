@@ -6,7 +6,7 @@
 // A `full` subscription carries every plane message sminos sends for the session, its `host` messages among them; a
 // `cards` one only the session's pending requests and their settlement.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { counter, drop, evs, laneAMember, makeOrg, of, openRemote, plane, PROJECT, serve, snapshot, sminos, startEndpoint, stopAll, subscribe, until, waitFor, type Fixture, type Org, type Remote } from './sub-harness';
+import { counter, drop, evs, laneAMember, makeOrg, of, openRemote, plane, PROJECT, serve, snapshot, snapshots, sminos, startEndpoint, stopAll, subscribe, until, waitFor, type Fixture, type Org, type Remote } from './sub-harness';
 
 let org: Org;
 const started: Fixture[] = [];
@@ -206,5 +206,68 @@ describe('access, re-checked whenever it can change', () => {
     await new Promise((r) => setTimeout(r, 30));
     s.send({ t: 'member', ...laneAMember({ owners: [org.A] }) });
     await s.next((x) => x.t === 'unsubscribe' && x.sub === up.sub, 'the retained upstream dropped');
+  });
+});
+
+// ---- Under pressure (O10 M8 review round 1) -----------------------------------------------------------------------------
+
+const MiB = 1024 * 1024;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+describe('a lane A subscription under pressure', () => {
+  it('starts over under a fresh upstream when more session-wide messages come before sminos’s snapshot than it holds', async () => {
+    const f = await startEndpoint(org, started);
+    const s = await sminos(f);
+    const a = await openRemote(f, org.a1, org.A);
+    const ask = subscribe(a, 's1', { lane: 'A', id: 'la-1' });
+    const first = await s.next((x) => x.t === 'subscribe', 'the first upstream');
+    expect(await ask).toMatchObject({ mode: 'snapshot', epoch: first.sub });
+    // sminos takes its time opening (a bridge it waits on); the session's operations go on meanwhile.
+    for (let i = 0; i < 300; i++) s.send(plane('op', { opId: `op-${i}`, state: 'done' }));
+    await s.next((x) => x.t === 'unsubscribe' && x.sub === first.sub, 'the first upstream ended');
+    const second = await serve(s);
+    await waitFor(a, (m) => m.t === 'subbed' && m.sub === 's1' && m.epoch === second.sub && m.mode === 'snapshot', 'a snapshot under the fresh upstream');
+  });
+
+  it('keeps a cards subscription’s unsent stream bounded while its credit is out, and ends it in the whole pending set', async () => {
+    const f = await startEndpoint(org, started, { subscriptions: { backlogBytes: 64 * 1024 } });
+    const s = await sminos(f);
+    const a = await openRemote(f, org.a1, org.A);
+    expect(await subscribe(a, 'c1', { lane: 'A', id: 'la-1' }, { view: 'cards', credit: 1 })).toMatchObject({ mode: 'snapshot' });
+    await until(() => of(a, 'c1').some((m) => m.t === 'snap'), 'the snapshot');
+    for (let i = 0; i < 1000; i++) s.send(plane('raised', { ...RAISED, request: `toolu_${i}`, input: { command: 'x'.repeat(1024) } }));
+    await until(() => f.endpoint.planeA.pending.of('la-1').length === 1000, 'every raise read', 10_000);
+    // What the device holds once its credit comes: the last snapshot, then the raises after it.
+    const held = () => {
+      const msgs = of(a, 'c1');
+      const at = msgs.findLastIndex((m) => m.t === 'snap' && m.page === 0);
+      const snap = snapshots(a, 'c1').at(-1) as { raised: Array<{ request: string }> };
+      const after = msgs.slice(at).filter((m) => m.t === 'ev').map((m) => ((m.body as { body: { request: string } }).body.request));
+      return new Set([...snap.raised.map((r) => r.request), ...after]);
+    };
+    for (let i = 0; i < 20 && held().size < 1000; i++) {
+      await a.channel.send({ t: 'credit', sub: 'c1', bytes: 4 * MiB });
+      await sleep(40);
+    }
+    expect(held().size).toBe(1000);
+    expect(evs(a, 'c1').length).toBeLessThan(1000);
+  });
+
+  it('brings a cards subscription current after RL10 comes back with a pending set it changed while away', async () => {
+    const f = await startEndpoint(org, started);
+    const s = await sminos(f);
+    s.send({ t: 'pending', project: PROJECT, raised: [] });
+    const a = await openRemote(f, org.a1, org.A);
+    await subscribe(a, 'c1', { lane: 'A', id: 'la-1' }, { view: 'cards' });
+    expect((await snapshot(a, 'c1')).body).toEqual({ raised: [] });
+    s.send(plane('raised', RAISED));
+    await until(() => evs(a, 'c1').length === 1, 'the raise');
+    // RL10 goes; the request settles while it is away; sminos comes back and restates its project's pending set.
+    s.close();
+    await sleep(50);
+    const again = await sminos(f);
+    again.send({ t: 'pending', project: PROJECT, raised: [] });
+    await until(() => snapshots(a, 'c1').length === 2, 'a snapshot of the restated set');
+    expect(snapshots(a, 'c1').at(-1)).toEqual({ raised: [] });
   });
 });

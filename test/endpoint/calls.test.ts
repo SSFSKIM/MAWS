@@ -67,6 +67,34 @@ describe('a call', () => {
     expect(await call(a, 'sminos.rows', { session: 'la-1', sub: 'nope', before: 'r9', limit: 5 })).toMatchObject({ ok: false, error: { code: 'unavailable' } });
     expect(await call(a, 'sminos.diff', { session: 'la-1', sub: 's1', extra: 1 })).toMatchObject({ ok: false, error: { code: 'malformed' } });
   });
+
+  it('refuses `malformed` a lane A read sminos would pass by unanswered, by sminos_plane.py’s own limits, sending nothing down', async () => {
+    const f = await startEndpoint(org, started);
+    const s = await sminos(f);
+    const a = await openRemote(f, org.a1, org.A);
+    const ask = subscribe(a, 's1', { lane: 'A', id: 'la-1' });
+    const up = await s.next((x) => x.t === 'subscribe', 'the upstream subscribe');
+    s.send(plane('snapshot', { rows: [], more: true, subagents: [], presence: { record: null, bridge: true }, streaming: [] }, { sub: up.sub as string, n: 0 }));
+    await ask;
+    const at = { session: 'la-1', sub: 's1' };
+    const refused = [
+      ['sminos.output', { ...at, taskId: 'bash_1', tail: 0 }],
+      ['sminos.output', { ...at, taskId: 'bash_1', tail: 524_289 }],
+      ['sminos.output', { ...at, taskId: 'a/b', tail: 10 }],
+      ['sminos.output', { ...at, taskId: 'x'.repeat(65), tail: 10 }],
+      ['sminos.read', { ...at, id: 'q'.repeat(65), what: 'usage' }],
+      ['sminos.read', { ...at, id: 'q1', what: 'Usage' }],
+      ['sminos.read', { ...at, id: 'q1', what: 'u'.repeat(33) }],
+      ['sminos.read', { ...at, id: 'q1', what: 'usage', args: { text: 'y'.repeat(4096) } }],
+      ['sminos.rows', { ...at, before: 'r9', limit: 0 }],
+    ] as const;
+    for (const [name, input] of refused) expect(await call(a, name, input), `${name} ${JSON.stringify(input).slice(0, 80)}`).toMatchObject({ ok: false, error: { code: 'malformed' } });
+    // At the limits, each goes down.
+    expect(await call(a, 'sminos.output', { ...at, taskId: 'x'.repeat(64), tail: 524_288 })).toMatchObject({ ok: true });
+    expect(await call(a, 'sminos.read', { ...at, id: 'q'.repeat(64), what: 'u'.repeat(32), args: { text: 'y'.repeat(4070) } })).toMatchObject({ ok: true });
+    await s.next((x) => x.t === 'read', 'the read at its limits');
+    expect(s.received.filter((x) => x.t === 'output' || x.t === 'read' || x.t === 'rows')).toHaveLength(2);
+  });
 });
 
 describe('endpoint.listings', () => {

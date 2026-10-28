@@ -12,27 +12,34 @@
 // The stream. What a subscription carries goes out in order through one outbox: `subbed`, which costs nothing, then
 // `snap` pages and `ev`s, each costing its message's bytes against the credit (initially the `sub`'s, topped up by
 // `credit`, never above SUB_CREDIT_MAX). A message goes while any credit is left, so one larger than the credit still
-// goes once and the credit runs negative until topped up. Control messages (`ack`, `done`, `result`, `caps`, `paused`,
-// `resumed`, `ended`) go on the channel directly and never wait behind the stream. A snapshot is replace-whole state: one
-// JSON value, its text cut into `snap` pages of at most SNAP_PAGE_BYTES of plaintext each, `last` on the final one; the
-// device joins the pages' bodies and reads them. An `ev` whose message would be over the channel's limit goes as
+// goes once and the credit runs negative until topped up. The outbox drains through the channel's stream window
+// (stream-window.ts), which keeps only a small window of stream traffic in the channel's own queue, so control messages
+// (`ack`, `done`, `result`, `caps`, `paused`, `resumed`, `ended`), sent on the channel directly, never wait behind the
+// stream. A snapshot is replace-whole state: one JSON value, its text cut into `snap` pages of at most SNAP_PAGE_BYTES of
+// plaintext each, `last` on the final one; the device joins the pages' bodies and reads them. A snapshot of a kind (a
+// lane B part, a cards set) replaces one of its kind not yet begun, so while the device's credit is out only the latest
+// of each kind waits; a snapshot begun is never cut. An `ev` whose message would be over the channel's limit goes as
 // `{omitted: 'too-large', bytes}` at its cursor, so a cursor never skips.
 //
 // Access is re-checked whenever it can change: on every change of a session's record (`RecordSource`) and every new
-// head, each open subscription, and each lane A cursor a dropped channel left resumable, is authorized again; one that
-// no longer qualifies ends `removed` and its upstream subscription and retained cursor are dropped, so a resume can't
-// restore what was withdrawn. A device's lane B subscriptions count as interest (interest.ts).
+// head, each open subscription, and each lane A cursor a dropped channel left resumable, is authorized again. A
+// subscription's stream is held from the change until the check decides, so nothing the session produces meanwhile
+// reaches a viewer who lost it; one that no longer qualifies ends `removed` and its upstream subscription and retained
+// cursor are dropped, so a resume can't restore what was withdrawn. A device's lane B subscriptions count as interest
+// (interest.ts).
 import { MESSAGE_MAX_BYTES, SUB_CREDIT_MAX, type Cursor, type EndpointMessage, type RefusalReason, type SessionRef, type SubMessage, type CreditMessage, type UnsubMessage } from 'org-protocol';
 import type { AuthorizeRequest, Decision, Who } from './authorize';
 import type { RemoteChannel } from './channels';
 import type { Granted } from './gate';
 import type { Interest } from './interest';
 import type { RecordSource, SessionTarget } from './sources';
+import { StreamWindow, type StreamSource } from './stream-window';
 
 /** A `snap` page's message is at most this many bytes of plaintext. */
 export const SNAP_PAGE_BYTES = 256 * 1024;
 /** How many subscriptions one channel may hold at once. */
 export const MAX_SUBS = 64;
+export { STREAM_WINDOW_BYTES } from './stream-window';
 
 export type Mode = 'replay' | 'snapshot' | 'missing';
 /** Where a stream stands: lane A's `(epoch, seq)`, lane B's `(launchId, seq, idx)`. */
@@ -51,10 +58,11 @@ export interface Plane {
   stop(): void;
 }
 
-type Out = { message: EndpointMessage; cost: number };
+/** A queued stream message: its credit cost (`subbed` costs none) and size; a snapshot page, its snapshot and kind. */
+type Out = { message: EndpointMessage; cost: number; bytes: number; group?: number; key?: string };
 
 /** One subscription of one channel. */
-export class Subscription {
+export class Subscription implements StreamSource {
   readonly id: string;
   readonly channel: RemoteChannel;
   readonly who: Who;
@@ -71,9 +79,15 @@ export class Subscription {
   readonly #out: Out[] = [];
   #backlog = 0;
   #ended = false;
+  /** Held while its access is checked again: nothing more goes until a current decision grants it. */
+  #held = false;
+  #groups = 0;
+  /** The snapshot whose first page went and whose last hasn't: never cut, never replaced. */
+  #started: number | null = null;
+  readonly #window: StreamWindow;
   readonly #over: (sub: Subscription) => void;
 
-  constructor(channel: RemoteChannel, message: SubMessage, over: (sub: Subscription) => void) {
+  constructor(channel: RemoteChannel, message: SubMessage, window: StreamWindow, over: (sub: Subscription) => void) {
     this.id = message.sub;
     this.channel = channel;
     this.who = { member: channel.member, device: channel.device, clientClass: channel.clientClass };
@@ -82,6 +96,7 @@ export class Subscription {
     this.cursor = message.cursor;
     this.message = message;
     this.#credit = Math.min(message.credit, SUB_CREDIT_MAX);
+    this.#window = window;
     this.#over = over;
   }
 
@@ -96,31 +111,52 @@ export class Subscription {
 
   credit(bytes: number): void {
     this.#credit = Math.min(this.#credit + bytes, SUB_CREDIT_MAX);
-    this.#drain();
+    this.#window.ready(this);
     this.onCredit?.();
+  }
+
+  /** Its access is being checked again: the stream waits. */
+  hold(): void {
+    this.#held = true;
+  }
+
+  /** A current decision granted it: the stream goes on. */
+  unhold(): void {
+    if (!this.#held) return;
+    this.#held = false;
+    this.#window.ready(this);
   }
 
   /** `subbed` in the stream's order: the position the stream goes on after. */
   subbed(mode: Mode, at: Position): void {
-    this.#push({ t: 'subbed', sub: this.id, mode, ...at }, 0);
+    const message: EndpointMessage = { t: 'subbed', sub: this.id, mode, ...at };
+    this.#push({ message, cost: 0, bytes: byteLength(message) });
   }
 
-  /** Replace-whole state at `at`, in pages. */
-  snap(at: Position, value: unknown): void {
+  /**
+   * Replace-whole state at `at`, in pages. One of a `key` (a kind of state, which each one replaces whole) replaces any of
+   * that key still wholly unsent: only the latest of each kind waits for the device's credit.
+   */
+  snap(at: Position, value: unknown, key?: string): void {
+    if (this.ended) return;
+    if (key !== undefined) this.#unqueue((out) => out.key === key && out.group !== this.#started);
+    const group = ++this.#groups;
     const text = JSON.stringify(value);
-    const pages = pagesOf(text, (body, page, last): EndpointMessage => ({ t: 'snap', sub: this.id, ...at, page, last, body }));
-    for (const page of pages) this.#push(page, byteLength(page));
+    for (const page of pagesOf(text, (body, n, last): EndpointMessage => ({ t: 'snap', sub: this.id, ...at, page: n, last, body }))) {
+      const bytes = byteLength(page);
+      this.#push({ message: page, cost: bytes, bytes, group, ...(key === undefined ? {} : { key }) });
+    }
   }
 
   /** One message of the stream at `at`. */
   ev(at: Position, body: unknown): void {
     let message: EndpointMessage = { t: 'ev', sub: this.id, ...at, body };
-    let cost = byteLength(message);
-    if (cost > MESSAGE_MAX_BYTES - 1024) {
-      message = { t: 'ev', sub: this.id, ...at, body: { omitted: 'too-large', bytes: cost } };
-      cost = byteLength(message);
+    let bytes = byteLength(message);
+    if (bytes > MESSAGE_MAX_BYTES - 1024) {
+      message = { t: 'ev', sub: this.id, ...at, body: { omitted: 'too-large', bytes } };
+      bytes = byteLength(message);
     }
-    this.#push(message, cost);
+    this.#push({ message, cost: bytes, bytes });
   }
 
   /** A control message, now: never behind the stream. */
@@ -128,17 +164,16 @@ export class Subscription {
     if (!this.ended) this.channel.send(message);
   }
 
-  /** Everything queued and unsent is dropped (the stream starts over). */
+  /** What is queued and unsent is dropped (the stream starts over), but for the rest of a snapshot already begun. */
   clear(): void {
-    this.#out.length = 0;
-    this.#backlog = 0;
+    this.#unqueue((out) => out.group === undefined || out.group !== this.#started);
   }
 
   /** The subscription ends with `reason` (`ended`); its plane lets go of it. */
   end(reason: RefusalReason | string): void {
     if (this.#ended) return;
     this.#ended = true;
-    this.clear();
+    this.#drop();
     if (!this.channel.closed) this.channel.send({ t: 'ended', sub: this.id, reason });
     this.#over(this);
   }
@@ -146,25 +181,40 @@ export class Subscription {
   /** Marks it over without a word (replaced, unsubscribed, its channel gone). */
   close(): void {
     this.#ended = true;
-    this.clear();
+    this.#drop();
   }
 
-  #push(message: EndpointMessage, cost: number): void {
+  /** The stream window's turn: the next message, if the device's credit (and no hold) allows one. */
+  next(): { message: EndpointMessage; bytes: number } | null {
+    if (this.ended || this.#held || this.#out.length === 0) return null;
+    const head = this.#out[0];
+    if (head.cost > 0 && this.#credit <= 0) return null;
+    this.#out.shift();
+    this.#backlog -= head.cost;
+    this.#credit -= head.cost;
+    if (head.group !== undefined) this.#started = (head.message as { last?: boolean }).last === true ? null : head.group;
+    return { message: head.message, bytes: head.bytes };
+  }
+
+  #push(out: Out): void {
     if (this.ended) return;
-    this.#out.push({ message, cost });
-    this.#backlog += cost;
-    this.#drain();
+    this.#out.push(out);
+    this.#backlog += out.cost;
+    this.#window.ready(this);
   }
 
-  #drain(): void {
-    while (this.#out.length > 0 && !this.ended) {
-      const next = this.#out[0];
-      if (next.cost > 0 && this.#credit <= 0) return;
-      this.#out.shift();
-      this.#backlog -= next.cost;
-      this.#credit -= next.cost;
-      this.channel.send(next.message);
+  #unqueue(drop: (out: Out) => boolean): void {
+    for (let i = this.#out.length - 1; i >= 0; i--) {
+      if (!drop(this.#out[i])) continue;
+      this.#backlog -= this.#out[i].cost;
+      this.#out.splice(i, 1);
     }
+  }
+
+  #drop(): void {
+    this.#out.length = 0;
+    this.#backlog = 0;
+    this.#started = null;
   }
 }
 
@@ -180,6 +230,7 @@ export type SubscriptionsContext = {
 export class Subscriptions {
   readonly #ctx: SubscriptionsContext;
   readonly #channels = new Map<RemoteChannel, Map<string, Subscription>>();
+  readonly #windows = new Map<RemoteChannel, StreamWindow>();
   /** Re-checks begun per subscription or retained cursor: only the latest one's verdict is taken. */
   readonly #checks = new Map<unknown, number>();
   readonly #off: () => void;
@@ -197,12 +248,13 @@ export class Subscriptions {
       const mine = new Map<string, Subscription>();
       subs = mine;
       this.#channels.set(channel, mine);
+      this.#windows.set(channel, new StreamWindow(channel));
       channel.onClose((reason) => this.#channelClosed(channel, mine, reason));
     }
     const before = subs.get(m.sub);
     if (before !== undefined) this.#close(before, false);
     if (subs.size >= MAX_SUBS) return void channel.send({ t: 'ended', sub: m.sub, reason: 'busy' });
-    subs.set(m.sub, new Subscription(channel, m, (sub) => this.#ended(sub)));
+    subs.set(m.sub, new Subscription(channel, m, this.#windows.get(channel)!, (sub) => this.#ended(sub)));
     authorized(channel, m);
   }
 
@@ -249,7 +301,9 @@ export class Subscriptions {
     for (const subs of this.#channels.values()) {
       for (const sub of subs.values()) {
         if (sub.target === null || sub.ended || (target !== undefined && !concerns(sub.target, target))) continue;
-        this.#check(sub, sub.message, sub.who, (ok) => ok || sub.end('removed'));
+        // Uncertain until decided: what the session produces meanwhile waits, and goes only if access still holds.
+        sub.hold();
+        this.#check(sub, sub.message, sub.who, (ok) => (ok ? sub.unhold() : sub.end('removed')));
       }
     }
     for (const lane of ['A', 'B'] as const) {
@@ -269,6 +323,7 @@ export class Subscriptions {
       this.#ctx.interest.closed(viewerOf(channel));
     }
     this.#channels.clear();
+    this.#windows.clear();
     this.#ctx.planes.A.stop();
     this.#ctx.planes.B.stop();
     this.#ctx.interest.stop();
@@ -285,7 +340,14 @@ export class Subscriptions {
         // An answer the endpoint can't give now (the engine host away) withdraws nothing.
         verdict(decision.ok || decision.reason === 'unavailable');
       })
-      .catch((error: unknown) => this.#ctx.log(`endpoint: a subscription's access could not be checked again: ${(error as Error).message}`));
+      .catch((error: unknown) => {
+        if (this.#checks.get(key) !== n) return;
+        this.#checks.delete(key);
+        this.#ctx.log(`endpoint: a subscription's access could not be checked again: ${(error as Error).message}`);
+        // No decision is no grant: a held subscription ends (the device subscribes again), a retained cursor goes.
+        if (key instanceof Subscription) key.end('unavailable');
+        else verdict(false);
+      });
   }
 
   /** A subscription ended by its plane (`end`): out of the table. */
@@ -308,6 +370,7 @@ export class Subscriptions {
   #channelClosed(channel: RemoteChannel, subs: Map<string, Subscription>, reason: string): void {
     for (const sub of [...subs.values()]) this.#close(sub, reason !== 'removed');
     this.#channels.delete(channel);
+    this.#windows.delete(channel);
     this.#ctx.interest.closed(viewerOf(channel));
   }
 

@@ -9,7 +9,9 @@
 // numbers only the first kind, so the endpoint's `seq` is its own. A sub-less `host` message is not carried: the
 // subscription's own stream has it. Right after the snapshot come the session's requests pending now, as `raised`
 // messages, since sminos's snapshot carries none; session-wide messages that came before the snapshot follow, except
-// the raises and settlements the pending set already reflects.
+// the raises and settlements the pending set already reflects. Those are held up to EARLY_MAX; past it (sminos can take
+// its time opening, waiting on a session's bridge) the subscription starts over under a fresh upstream, since a
+// session-wide message dropped would be lost for good.
 //
 // The upstream's last RING_BYTES of messages stay in a ring. A resubscription with the epoch, by the same member's same
 // device, on the same session, whose `seq` the ring still holds the next of is a `replay`; any other is a `snapshot`
@@ -23,7 +25,10 @@
 // A `cards` subscription needs no upstream: it carries only the session's pending requests (`raised`, which holds the
 // tool and its input) and their settlement (`settled`), from the pending sets sminos restates (`pending`) and the
 // session-wide raises and settlements, never a `host` message, a row or the transcript. Its snapshot is the pending set
-// (`{raised}`), sent again whenever a restated set changes it; every subscription and resume of it is a snapshot.
+// (`{raised}`), sent again whenever a restated set differs from what the device holds (its snapshots and the raises and
+// settlements since), so a restatement after RL10 came back reconciles a settlement missed while it was away; every
+// subscription and resume of it is a snapshot. A cards stream whose credit is out past the backlog gets the whole set
+// in place of what waits, so it stays bounded by the set.
 import { randomBytes } from 'node:crypto';
 import type { Who } from './authorize';
 import type { SessionLaneMessage } from './notify';
@@ -32,7 +37,7 @@ import type { Plane, Position, Subscription } from './subscriptions';
 
 export const RING_BYTES = 2 * 1024 * 1024;
 export const BACKLOG_BYTES = 2 * 1024 * 1024;
-/** Session-wide messages held for an upstream before its snapshot, at most. */
+/** Session-wide messages held for an upstream before its snapshot, at most; past it, the upstream starts over. */
 const EARLY_MAX = 256;
 
 /** A plane message as RL10 carries it (DX4's envelope). */
@@ -54,6 +59,11 @@ export type PlaneAContext = {
 };
 
 type Entry = { seq: number; kind: 'snap' | 'ev'; body: unknown; bytes: number };
+/**
+ * A cards subscription: its epoch and last seq, the pending set the device will hold once what is queued arrives
+ * (`sent`), and whether its stream was dropped for the whole set, owed when credit comes (`stale`).
+ */
+type Card = { epoch: string; seq: number; sent: string; stale: boolean };
 
 class Upstream {
   readonly epoch = randomBytes(16).toString('base64url');
@@ -114,8 +124,8 @@ export class PlaneA implements Plane {
   readonly pending = new PendingSets();
   readonly #upstreams = new Map<string, Upstream>();
   readonly #of = new Map<Subscription, Upstream>();
-  /** `cards` subscriptions: their epoch, last seq and the pending set last sent. */
-  readonly #cards = new Map<Subscription, { epoch: string; seq: number; sent: string }>();
+  /** `cards` subscriptions. */
+  readonly #cards = new Map<Subscription, Card>();
 
   constructor(ctx: PlaneAContext) {
     this.#ctx = ctx;
@@ -181,13 +191,14 @@ export class PlaneA implements Plane {
     if (m.session === null) return;
     if (m.kind === 'raised' || m.kind === 'settled') {
       this.pending.update(m);
-      for (const [sub, card] of this.#cards) if (sub.session.id === m.session && !sub.ended) sub.ev({ epoch: card.epoch, seq: ++card.seq }, m);
+      for (const [sub, card] of this.#cards) if (sub.session.id === m.session && !sub.ended) this.#cardEv(sub, card, m);
     }
     if (m.kind === 'host') return;
-    for (const up of this.#upstreams.values()) {
+    for (const up of [...this.#upstreams.values()]) {
       if (up.session !== m.session || up.project !== m.project) continue;
       if (up.snapshot) this.#add(up, 'ev', m);
       else if (up.early.length < EARLY_MAX) up.early.push(m);
+      else this.#restart(up, 'more session-wide messages came before its snapshot than it holds');
     }
   }
 
@@ -196,11 +207,7 @@ export class PlaneA implements Plane {
     this.pending.set(project, raised);
     for (const [sub, card] of this.#cards) {
       if (sub.ended || this.#ctx.member(sub.session.id)?.project !== project) continue;
-      const set = this.pending.of(sub.session.id);
-      const text = JSON.stringify(set);
-      if (text === card.sent) continue;
-      card.sent = text;
-      sub.snap({ epoch: card.epoch, seq: card.seq }, { raised: set });
+      this.#cardSnap(sub, card);
     }
   }
 
@@ -226,10 +233,53 @@ export class PlaneA implements Plane {
 
   #openCards(sub: Subscription): void {
     const epoch = randomBytes(16).toString('base64url');
-    const set = this.pending.of(sub.session.id);
-    this.#cards.set(sub, { epoch, seq: 0, sent: JSON.stringify(set) });
+    const card: Card = { epoch, seq: 0, sent: '', stale: false };
+    this.#cards.set(sub, card);
+    sub.onCredit = () => {
+      if (card.stale) this.#cardSnap(sub, card);
+    };
     sub.subbed('snapshot', { epoch, seq: 0 });
-    sub.snap({ epoch, seq: 0 }, { raised: set });
+    this.#cardSnap(sub, card);
+  }
+
+  /**
+   * A cards subscription's pending set, whole, unless it already stands so at the device (`sent`: the set as the device
+   * will have it once what is queued arrives, snapshots and the raises and settlements since).
+   */
+  #cardSnap(sub: Subscription, card: Card): void {
+    card.stale = false;
+    const set = this.pending.of(sub.session.id);
+    const text = JSON.stringify(set);
+    if (text === card.sent) return;
+    card.sent = text;
+    sub.snap({ epoch: card.epoch, seq: card.seq }, { raised: set }, 'cards');
+  }
+
+  /**
+   * A raise or a settlement to a cards subscription. One whose unsent stream is past the backlog (its credit out) drops
+   * what waits and owes the whole pending set, sent when credit comes (or a restatement), so a cards stream stays
+   * bounded by the set itself whatever comes meanwhile.
+   */
+  #cardEv(sub: Subscription, card: Card, m: PlaneMessage): void {
+    if (card.stale) return;
+    if (sub.backlog > (this.#ctx.backlogBytes ?? BACKLOG_BYTES)) {
+      sub.clear();
+      card.sent = '';
+      card.stale = true;
+      return;
+    }
+    sub.ev({ epoch: card.epoch, seq: ++card.seq }, m);
+    card.sent = JSON.stringify(this.pending.of(sub.session.id));
+  }
+
+  /** An upstream that can't keep its stream whole starts over: a fresh upstream subscription and its snapshot. */
+  #restart(up: Upstream, why: string): void {
+    const sub = up.sub;
+    this.#ctx.log(`endpoint: a lane A subscription starts over under a fresh upstream: ${why}`);
+    this.#drop(up);
+    if (sub === null || sub.ended) return;
+    sub.clear();
+    this.#fresh(sub);
   }
 
   /** A fresh upstream subscription for `sub`, answered `snapshot` at its new epoch. */
@@ -304,13 +354,8 @@ export class PlaneA implements Plane {
     const sub = up.sub!;
     const at: Position = { epoch: up.epoch, seq: entry.seq };
     if (entry.kind === 'snap') return sub.snap(at, entry.body);
-    if (sub.backlog > (this.#ctx.backlogBytes ?? BACKLOG_BYTES)) {
-      // The device's credit has been out longer than the ring holds: what it lacks is gone, so a fresh snapshot.
-      this.#detach(up);
-      this.#drop(up);
-      sub.clear();
-      return this.#fresh(sub);
-    }
+    // The device's credit has been out longer than the ring holds: what it lacks is gone, so a fresh snapshot.
+    if (sub.backlog > (this.#ctx.backlogBytes ?? BACKLOG_BYTES)) return this.#restart(up, 'its device’s credit was out longer than its ring holds');
     sub.ev(at, entry.body);
   }
 }

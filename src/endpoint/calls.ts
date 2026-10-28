@@ -42,13 +42,31 @@ const isObject = (v: unknown): v is Fields => typeof v === 'object' && v !== nul
 const isText = (v: unknown, max = 256): v is string => typeof v === 'string' && v !== '' && v.length <= max;
 const isInt = (v: unknown, min: number, max: number): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= min && v <= max;
 
-/** Lane A's reads: each one's fields beside `session` and `sub`, and their checks (DX2's frames). */
+/**
+ * Lane A's reads: each one's fields beside `session` and `sub`, and their checks (DX2's frames), held to the limits
+ * sminos's plane holds them to (`sminos_plane.py`: TASK_ID, OUTPUT_TAIL_MAX, READ_ID_MAX, READ_WHAT, READ_ARGS_MAX). A
+ * frame past them sminos passes by unanswered, so it is refused here, `malformed`, rather than said to be asked.
+ */
+const TASK_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const READ_WHAT = /^[a-z-]{1,32}$/;
 const LANE_A: Record<string, { fields: Record<string, (v: unknown) => boolean>; optional?: Record<string, (v: unknown) => boolean>; agent: boolean }> = {
   'sminos.rows': { fields: { before: (v) => isText(v), limit: (v) => isInt(v, 1, 1000) }, agent: true },
   'sminos.diff': { fields: {}, agent: false },
-  'sminos.output': { fields: { taskId: (v) => isText(v), tail: (v) => isInt(v, 0, 16 * 1024 * 1024) }, agent: true },
-  'sminos.read': { fields: { id: (v) => isText(v, 128), what: (v) => isText(v, 64) }, optional: { args: isObject }, agent: true },
+  'sminos.output': { fields: { taskId: (v) => typeof v === 'string' && TASK_ID.test(v), tail: (v) => isInt(v, 1, 524_288) }, agent: true },
+  'sminos.read': { fields: { id: (v) => isText(v, 64), what: (v) => typeof v === 'string' && READ_WHAT.test(v) }, optional: { args: (v) => isObject(v) && pythonJsonLength(v) <= 4096 }, agent: true },
 };
+
+/** The length of `json.dumps(value)` in Python, as sminos measures a read's args: `", "` and `": "`, non-ASCII escaped. */
+function pythonJsonLength(value: unknown): number {
+  if (value === null || typeof value !== 'object') {
+    const text = JSON.stringify(value) ?? 'null';
+    let n = 0;
+    for (const ch of text) n += ch.codePointAt(0)! < 0x80 ? 1 : ch.codePointAt(0)! > 0xffff ? 12 : 6;
+    return n;
+  }
+  const entries = Array.isArray(value) ? value.map((v) => pythonJsonLength(v)) : Object.entries(value).map(([k, v]) => pythonJsonLength(k) + 2 + pythonJsonLength(v));
+  return 2 + entries.reduce((a, b) => a + b, 0) + Math.max(0, entries.length - 1) * 2;
+}
 
 export class Calls {
   constructor(private readonly ctx: CallsContext) {}

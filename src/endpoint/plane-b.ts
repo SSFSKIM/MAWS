@@ -5,26 +5,33 @@
 // therefore goes event by event, each `ev` at its own `(epoch, seq, idx)`, strictly rising.
 //
 // A subscription is answered from the engine host's journal (`session.events`, which returns whole rows after
-// `afterSeq`): a cursor on the current launch reads from its own row (`afterSeq: seq - 1`) and drops that row's events at
-// or below `idx`; it is a `replay` when that row is still there, else `missing` (the rows are gone from the journal). A
-// cursor on another launch, or none, is a `snapshot`. `replay` goes on after the cursor; `snapshot` and `missing` go on
-// from the launch's first event (`seq` 0): lane B has no other copy of the transcript a remote viewer could start from,
-// as DX4's lane A snapshot carries its rows. Every answer carries the session's replace-whole state, which changes
-// outside the journal's sequence: `snap {status, queue, pendingItems, catalog}`, read under a hold of the session's live
-// events, and a live replace-whole event that came while those reads were in flight is read once more after them, so
-// an older read never overwrites a newer change. Later replace-whole events go on as `snap`s of their part.
+// `afterSeq`, from its ring or, for a range the ring dropped, its journal; when the journal can't be read back, from the
+// ring alone, `complete: false`, which may begin inside a row, since the ring drops events, not rows). A cursor on the
+// current launch reads from its own row (`afterSeq: seq - 1`); it is a `replay` only when what comes back goes on from
+// the cursor without a gap (its first event in the cursor's row, no later than the one after the cursor), else
+// `missing`. A cursor on another launch, or none, is a `snapshot`, or `missing` when the launch's start is gone.
+// `replay` goes on after the cursor; `snapshot` and `missing` go on from the launch's first event (`seq` 0): lane B has
+// no other copy of the transcript a remote viewer could start from, as DX4's lane A snapshot carries its rows. Every
+// answer carries the session's replace-whole state, which changes outside the journal's sequence: `snap {status,
+// queue, pendingItems, catalog}`, read under a hold of the session's live events, and a live replace-whole event that
+// came while those reads were in flight is read once more after them, so an older read never overwrites a newer change;
+// when it keeps changing through every re-read, the last value it published stands. Later replace-whole events go on as
+// `snap`s of their part, the latest of each part replacing one still unsent.
 //
 // The events reach the device through one rule: what the journal holds is read in pages while the device's credit
 // keeps the unsent stream under the backlog ("catching up"), and once a read reaches the end the live events take over,
-// each after the last one sent. Live events that come while a read is in flight are held, and kept only if the read
-// reached the end. So a stream whose device stops granting credit just stops taking live events, and reads them from the
-// journal when credit comes back: nothing lost, nothing twice.
+// each after the last one sent. A page ends on a whole row, so the next goes on after its last row (`afterSeq`: that
+// row), as the engine host pages its journal; only a stream standing inside a row (a live batch cut it) reads that row
+// again, and checks it goes on without a gap. Live events that come while a read is in flight are held, up to the
+// backlog, and kept only if the read reached the end; past the backlog they are dropped and read from the journal. So a
+// stream whose device stops granting credit just stops taking live events, and reads them from the journal when credit
+// comes back: nothing lost, nothing twice.
 //
 // Live events come from `onEvent`, which until O3 delivers lane B events only while an app is attached (O2's seam: none
 // is when the endpoint starts, and `onAttachment` says each change). With no app, a subscription is `paused {reason:
 // 'no-app'}`; when one attaches, each catches up from its cursor and its state is read again, as a resume does, then
-// `resumed`. A live event or status of another launch (the session launched again) moves the subscription to a snapshot
-// of the new launch, announced by a new `subbed`.
+// `resumed`. A live event or status of another launch (the session launched again), during an opening too, moves the
+// subscription to a snapshot of the new launch, announced by a new `subbed`.
 //
 // A `cards` subscription carries only the session's pending requests: each broker item that stands for a pending request,
 // hydrated with its originating request (`session.pendingRequest`: the tool and input, or the question and its choices)
@@ -69,16 +76,18 @@ class Stream {
   reading = false;
   /** The next read starts after `queued`'s row (it was a whole page, all of it sent). */
   pastRow = false;
-  /** Live events held while a read is in flight, and live replace-whole parts that changed meanwhile. */
+  /** Live events held while a read is in flight (past the backlog: none, `overflow`), and replace-whole parts that changed meanwhile, with the last value each published. */
   holdEvents = false;
   holdState = false;
   held: SessionEvent[] = [];
+  heldBytes = 0;
+  overflow = false;
   readonly dirty = new Set<Part>();
+  readonly latest = new Map<Part, unknown>();
   /** `subbed` went: a later open is quiet unless it starts the stream over. */
   answered = false;
   /** Bumped by each (re)open: a flow that finds it moved stops. */
   gen = 0;
-  opening = false;
   hydration = 0;
   constructor(
     readonly sub: Subscription,
@@ -147,11 +156,12 @@ export class PlaneB implements Plane {
     if (how === 'resume' && !stream.answered) how = 'sub';
     const gen = ++stream.gen;
     const { sub } = stream;
-    stream.opening = true;
+    const pastRow = stream.pastRow;
     stream.holdEvents = true;
     stream.holdState = true;
-    stream.held = [];
+    this.#unhold(stream);
     stream.dirty.clear();
+    stream.latest.clear();
     stream.catching = false;
     stream.reading = false;
     stream.pastRow = false;
@@ -162,7 +172,7 @@ export class PlaneB implements Plane {
     const launch = String(status.launchId);
     const relaunched = stream.epoch !== null && stream.epoch !== launch;
     stream.epoch = launch;
-    stream.engine = typeof status.engineSessionId === 'string' ? status.engineSessionId : null;
+    stream.engine = engineOf(status);
     if (sub.view === 'cards') return this.#openCards(stream, gen, how === 'resume' && !relaunched);
 
     let mode: Mode = how === 'missing' ? 'missing' : 'snapshot';
@@ -171,6 +181,7 @@ export class PlaneB implements Plane {
     if (how === 'resume' && !relaunched) {
       mode = 'replay';
       from = stream.queued;
+      stream.pastRow = pastRow;
     } else if (how === 'sub' && sub.cursor !== null && sub.cursor.epoch === launch) {
       const cursor: At = { seq: sub.cursor.seq, idx: sub.cursor.idx ?? -1 };
       if (cursor.seq === 0) mode = 'replay';
@@ -178,13 +189,20 @@ export class PlaneB implements Plane {
         const page = await this.#events(stream, cursor.seq - 1);
         if (gen !== stream.gen) return;
         if (page === undefined) return sub.end('unavailable');
-        // The cursor's own row is still in the journal: what follows it is whole.
-        if (page.events[0]?.seq === cursor.seq) {
+        if (this.#continues(stream, page, cursor)) {
           mode = 'replay';
           from = cursor;
           first = page;
         } else mode = 'missing';
       }
+    }
+    if (mode !== 'replay') {
+      // From the launch's first event; one whose start is gone from the journal is `missing`, not a snapshot.
+      const page = await this.#events(stream, null);
+      if (gen !== stream.gen) return;
+      if (page === undefined) return sub.end('unavailable');
+      if (!this.#gapless(stream, page)) mode = 'missing';
+      first = page;
     }
     stream.queued = from;
     const state = await this.#readParts(stream, ['queue', 'pendingItems', 'catalog']);
@@ -193,10 +211,11 @@ export class PlaneB implements Plane {
       sub.subbed(mode, this.#at(stream));
       stream.answered = true;
     }
-    sub.snap(this.#at(stream), { status, ...state });
+    sub.snap(this.#at(stream), { status, ...state }, 'state');
     stream.catching = true;
     if (first !== null) {
       for (const event of first.events) this.#send(stream, event);
+      if (first.events.length > 0) stream.pastRow = true;
       stream.catching = !first.complete;
     }
     if (!(await this.#settle(stream, gen))) return;
@@ -217,7 +236,7 @@ export class PlaneB implements Plane {
       sub.subbed('snapshot', this.#at(stream));
       stream.answered = true;
     }
-    sub.snap(this.#at(stream), { pendingItems: cards });
+    sub.snap(this.#at(stream), { pendingItems: cards }, 'cards');
     if (!(await this.#settle(stream, gen))) return;
     this.#release(stream);
     if (resumed) sub.control({ t: 'resumed', sub: sub.id });
@@ -226,36 +245,75 @@ export class PlaneB implements Plane {
 
   /**
    * Reads again what changed while the state was read (a live replace-whole event came), until a round sees no change;
-   * false when the flow was taken over or the session launched again (which starts over).
+   * a part still changing after SETTLE_ROUNDS stands at the last value it published. False when the flow was taken over
+   * or the session launched again (which starts over).
    */
   async #settle(stream: Stream, gen: number): Promise<boolean> {
     for (let round = 0; round < SETTLE_ROUNDS && stream.dirty.size > 0; round++) {
       const parts = PARTS.filter((p) => stream.dirty.has(p));
       stream.dirty.clear();
+      stream.latest.clear();
       const values = await this.#readParts(stream, parts);
       if (gen !== stream.gen) return false;
-      const status = values.status as { launchId?: unknown; engineSessionId?: unknown } | undefined;
-      if (status !== undefined && status.launchId !== stream.epoch) {
+      if (!this.#apply(stream, values)) return false;
+    }
+    if (stream.dirty.size === 0) return true;
+    this.#ctx.log(`endpoint: a lane B subscription's state kept changing while it was read; it stands at the last change published`);
+    const values: Partial<Record<Part, unknown>> = {};
+    for (const part of PARTS) if (stream.dirty.has(part) && stream.latest.has(part)) values[part] = stream.latest.get(part);
+    // A part marked with no value (the cards' context moved) is read again, once the hold is over.
+    const reread = stream.dirty.has('pendingItems') && !stream.latest.has('pendingItems') && stream.sub.view === 'cards';
+    stream.dirty.clear();
+    stream.latest.clear();
+    if (!this.#apply(stream, values)) return false;
+    if (reread) void this.#rehydrate(stream);
+    return true;
+  }
+
+  /** Parts read or published during an opening, applied: false when the status says the session launched again. */
+  #apply(stream: Stream, values: Partial<Record<Part, unknown>>): boolean {
+    const status = values.status as { launchId?: unknown; engineSessionId?: unknown } | undefined;
+    if (status !== undefined) {
+      if (status.launchId !== stream.epoch) {
         void this.#open(stream, 'relaunch');
         return false;
       }
-      this.#state(stream, values);
+      stream.engine = engineOf(status);
     }
-    if (stream.dirty.size > 0) this.#ctx.log(`endpoint: a lane B subscription's state kept changing while it was read; it goes on with the live changes`);
+    this.#state(stream, values);
     return true;
   }
 
   /** The hold ends: what came live meanwhile goes on (events only if no catch-up is due), the launch checked. */
   #release(stream: Stream): void {
     const held = stream.held;
-    stream.held = [];
+    const overflow = stream.overflow;
+    this.#unhold(stream);
     stream.holdEvents = false;
     stream.holdState = false;
-    stream.opening = false;
+    // What it dropped past the backlog is the journal's to give: it catches up from the last event sent.
+    if (overflow) stream.catching = true;
     for (const event of held) {
       if (this.#otherLaunch(stream, event)) return void this.#open(stream, 'relaunch');
       if (!stream.catching) this.#take(stream, event);
     }
+  }
+
+  /** A live event held while a read is in flight; past the backlog, none is held and the journal gives them after. */
+  #hold(stream: Stream, event: SessionEvent): void {
+    if (stream.overflow) return;
+    stream.held.push(event);
+    stream.heldBytes += Buffer.byteLength(JSON.stringify(event));
+    if (stream.heldBytes <= this.#backlog) return;
+    stream.overflow = true;
+    stream.held = [];
+    stream.heldBytes = 0;
+  }
+
+  #unhold(stream: Stream): void {
+    stream.held = [];
+    stream.heldBytes = 0;
+    stream.overflow = false;
   }
 
   // ---- Live ---------------------------------------------------------------------------------------------------------
@@ -265,7 +323,7 @@ export class PlaneB implements Plane {
     if (name === 'session.eventBatch') {
       if (stream.sub.view === 'cards' || !Array.isArray(payload.events)) return;
       for (const event of payload.events as SessionEvent[]) {
-        if (stream.holdEvents) stream.held.push(event);
+        if (stream.holdEvents) this.#hold(stream, event);
         else if (this.#otherLaunch(stream, event)) return void this.#open(stream, 'relaunch');
         else if (!stream.catching) this.#take(stream, event);
       }
@@ -273,21 +331,27 @@ export class PlaneB implements Plane {
     }
     const part = partOf(name, payload);
     if (part === null) return;
+    // A cards view carries none of the queue or the catalog.
+    if (stream.sub.view === 'cards' && (part.part === 'queue' || part.part === 'catalog')) return;
+    if (stream.holdState) {
+      // An opening: it is read again after (a launch moved included, which starts it over), or stands as published.
+      stream.dirty.add(part.part);
+      stream.latest.set(part.part, part.value);
+      // The cards' context may have moved with a status (the engine said its id, a `/clear`): hydrated again too.
+      if (part.part === 'status' && stream.sub.view === 'cards') stream.dirty.add('pendingItems');
+      return;
+    }
     if (part.part === 'status') {
       const status = part.value as { launchId?: unknown; engineSessionId?: unknown };
-      if (!stream.opening && status.launchId !== stream.epoch) return void this.#open(stream, 'relaunch');
+      if (status.launchId !== stream.epoch) return void this.#open(stream, 'relaunch');
       if (stream.sub.view === 'cards') {
-        // The context an answer needs moved (the engine said its id, a `/clear`): the cards are hydrated again.
-        const engine = typeof status.engineSessionId === 'string' ? status.engineSessionId : null;
+        // The context an answer needs moved: the cards are hydrated again.
+        const engine = engineOf(status);
         if (engine === stream.engine) return;
         stream.engine = engine;
-        if (stream.holdState) return void stream.dirty.add('pendingItems');
         return void this.#rehydrate(stream);
       }
     }
-    if (stream.sub.view === 'cards' && part.part !== 'pendingItems') return;
-    if (stream.holdState) return void stream.dirty.add(part.part);
-    if (stream.sub.view === 'cards') return void this.#rehydrate(stream, part.value);
     this.#state(stream, { [part.part]: part.value });
   }
 
@@ -297,7 +361,8 @@ export class PlaneB implements Plane {
       if (values.pendingItems !== undefined) void this.#rehydrate(stream, values.pendingItems);
       return;
     }
-    if (Object.keys(values).length > 0) stream.sub.snap(this.#at(stream), values);
+    // Each part its own snapshot, replacing one of its part not yet sent.
+    for (const part of PARTS) if (values[part] !== undefined) stream.sub.snap(this.#at(stream), { [part]: values[part] }, part);
   }
 
   async #rehydrate(stream: Stream, items?: unknown): Promise<void> {
@@ -307,7 +372,7 @@ export class PlaneB implements Plane {
     if (n !== stream.hydration || gen !== stream.gen) return;
     const cards = await this.#hydrate(stream, Array.isArray(list) ? list : []);
     if (n !== stream.hydration || gen !== stream.gen || stream.sub.ended) return;
-    stream.sub.snap(this.#at(stream), { pendingItems: cards });
+    stream.sub.snap(this.#at(stream), { pendingItems: cards }, 'cards');
   }
 
   /** Each broker item that stands for a pending request, with the request, its context and its digest. */
@@ -340,6 +405,8 @@ export class PlaneB implements Plane {
       return;
     }
     this.#send(stream, event);
+    // A live batch may have cut its row: a catch-up reads this row again.
+    stream.pastRow = false;
   }
 
   #send(stream: Stream, event: SessionEvent): void {
@@ -349,24 +416,33 @@ export class PlaneB implements Plane {
     stream.queued = at;
   }
 
-  /** Reads the journal on from the last event sent, a page at a time while the unsent stream is under half the backlog. */
+  /**
+   * Reads the journal on from the last event sent, a page at a time while the unsent stream is under half the backlog:
+   * after the last row read when it stands at a row's end (`pastRow`), else from its own row, which must come back
+   * first and go on without a gap.
+   */
   async #pump(stream: Stream): Promise<void> {
     if (!stream.catching || stream.reading || stream.holdEvents || stream.sub.ended || stream.sub.backlog > this.#backlog / 2) return;
     const gen = stream.gen;
     stream.reading = true;
     stream.holdEvents = true;
-    stream.held = [];
+    this.#unhold(stream);
     const from = stream.queued;
     const pastRow = stream.pastRow;
-    const page = await this.#events(stream, from.seq === 0 ? null : pastRow ? from.seq : from.seq - 1);
+    const start = from.seq === 0 && from.idx < 0;
+    const page = await this.#events(stream, start ? null : pastRow ? from.seq : from.seq - 1);
     if (gen !== stream.gen) return;
     stream.reading = false;
     if (page === undefined) {
       stream.holdEvents = false;
       return stream.sub.end('unavailable');
     }
-    // The row the stream stands in must still be there, or rows it needs are gone from the journal.
-    if (from.seq > 0 && !pastRow && page.events[0]?.seq !== from.seq) {
+    if (page.events.length > 0 && this.#otherLaunch(stream, page.events[0])) {
+      stream.holdEvents = false;
+      return void this.#open(stream, 'relaunch');
+    }
+    // Anything but the launch's start must go on from where the stream stands, or what it needs is gone.
+    if (!start && !(pastRow ? this.#gapless(stream, page) : this.#continues(stream, page, from))) {
       stream.holdEvents = false;
       return void this.#open(stream, 'missing');
     }
@@ -377,11 +453,27 @@ export class PlaneB implements Plane {
       }
       this.#send(stream, event);
     }
-    const moved = after(stream.queued, from);
-    stream.pastRow = !page.complete && !moved;
+    // A page ends on a whole row: the next goes on after it.
+    if (page.events.length > 0) stream.pastRow = true;
     if (page.complete || page.events.length === 0) stream.catching = false;
     this.#release(stream);
     void this.#pump(stream);
+  }
+
+  /** A page read from a cursor's own row goes on from it: its first event in that row, no later than the one after it. */
+  #continues(stream: Stream, page: { events: SessionEvent[] }, from: At): boolean {
+    const first = page.events.length > 0 ? this.#cursor(stream, page.events[0]) : null;
+    return first !== null && first.seq === from.seq && first.idx <= from.idx + 1;
+  }
+
+  /**
+   * A page read after a whole row (or from the launch's start) holds every event after it: not the ring alone in place of
+   * a lost journal (`complete` false short of a full page), and not beginning inside a row.
+   */
+  #gapless(stream: Stream, page: { events: SessionEvent[]; complete: boolean }): boolean {
+    if (!page.complete && page.events.length < PAGE_EVENTS) return false;
+    const first = page.events.length > 0 ? this.#cursor(stream, page.events[0]) : null;
+    return page.events.length === 0 || (first !== null && first.idx === 0);
   }
 
   // ---- Reads --------------------------------------------------------------------------------------------------------
@@ -440,6 +532,8 @@ export class PlaneB implements Plane {
     return launch !== undefined && launch !== stream.epoch;
   }
 }
+
+const engineOf = (status: { engineSessionId?: unknown }): string | null => (typeof status.engineSessionId === 'string' ? status.engineSessionId : null);
 
 /** An event's launch, row and index within the row, read from its id; null for an event of no launch. */
 function parse(app: string, event: SessionEvent): { launch: string; seq: number; idx: number } | null {

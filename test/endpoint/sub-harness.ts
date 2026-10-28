@@ -69,8 +69,13 @@ export type HostSession = {
   engineSessionId: string | null;
   /** The launch's journal rows, row `seq` at index `seq - 1`, each its events in emission order. */
   rows: SessionEvent[][];
-  /** The rows before this seq are gone from the journal (pruned): a read from before it answers the ring only. */
-  prunedBefore: number;
+  /**
+   * The engine host's ring, as `SessionStream` keeps it: it dropped every event up to and including `evicted` (null:
+   * none), cutting rows anywhere, so a read from before it is answered from the journal, or, when the journal can't be
+   * read back (`journal` false), from the ring alone, `complete: false`.
+   */
+  evicted: { seq: number; idx: number } | null;
+  journal: boolean;
   items: Array<Record<string, unknown>>;
   requests: Map<string, SessionEvent>;
   queue: Record<string, unknown>;
@@ -123,7 +128,8 @@ export class FakeEngineHost {
       launchId: `launch-${++this.#launches}`,
       engineSessionId,
       rows: [],
-      prunedBefore: 0,
+      evicted: null,
+      journal: true,
       items: [],
       requests: new Map(),
       queue: { entries: [], paused: false, pauseReason: null },
@@ -138,7 +144,8 @@ export class FakeEngineHost {
     const s = this.session(appSessionId);
     s.launchId = `launch-${++this.#launches}`;
     s.rows = [];
-    s.prunedBefore = 0;
+    s.evicted = null;
+    s.journal = true;
     this.emit('session.status', { appSessionId, status: this.status(s) });
     return s;
   }
@@ -274,18 +281,29 @@ export class FakeEngineHost {
     return { appSessionId: s.appSessionId, launchId: s.launchId, engineSessionId: s.engineSessionId, process: 'ready' };
   }
 
-  /** `session.events` as the engine host answers it: whole rows after `afterSeq` up to about `limit` events. */
+  /**
+   * `session.events` as the engine host answers it: every event after `afterSeq`, whole rows at a time up to about
+   * `limit`. From the ring when it holds everything after `afterSeq`; else from the journal; else, the journal lost, from
+   * the ring alone with `complete: false`, which may begin inside a row.
+   */
   events(s: HostSession, afterSeq: number | null, limit: number | null): { events: SessionEvent[]; lastSeq: number; complete: boolean } {
-    const fromRing = s.prunedBefore > 0 && (afterSeq === null || afterSeq < s.prunedBefore - 1);
-    const rows = s.rows.filter((_, i) => i + 1 > (afterSeq ?? 0) && (!fromRing || i + 1 >= s.prunedBefore));
-    const events: SessionEvent[] = [];
-    let complete = !fromRing;
-    for (const [i, row] of rows.entries()) {
-      if (limit !== null && events.length >= limit && i > 0) {
+    const all = s.rows.flat();
+    const ev = s.evicted;
+    const inRing = (e: SessionEvent) => ev === null || e.seq! > ev.seq || (e.seq === ev.seq && Number(e.id.split(':').at(-1)) > ev.idx);
+    let source = all.filter(inRing);
+    let complete = true;
+    if (ev !== null && (afterSeq === null || afterSeq < ev.seq)) {
+      if (s.journal) source = all;
+      else complete = false;
+    }
+    let events = source.filter((e) => afterSeq === null || e.seq! > afterSeq);
+    if (limit !== null && events.length > limit) {
+      let end = limit;
+      while (end < events.length && events[end].seq === events[end - 1].seq) end += 1;
+      if (end < events.length) {
+        events = events.slice(0, end);
         complete = false;
-        break;
       }
-      events.push(...row);
     }
     return { events, lastSeq: events.at(-1)?.seq ?? afterSeq ?? 0, complete };
   }

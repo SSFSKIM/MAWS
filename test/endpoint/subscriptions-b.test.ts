@@ -133,7 +133,9 @@ describe('a lane B subscription', () => {
     drop(a);
     for (let i = 0; i < 3; i++) f.host.row('app-1', 1);
     const s = f.host.session('app-1');
-    s.prunedBefore = 3; // rows 1 and 2 are gone: the ring holds rows 3 and 4
+    // Rows 1 and 2 are gone: the ring holds rows 3 and 4, and the journal can't be read back.
+    s.evicted = { seq: 2, idx: 0 };
+    s.journal = false;
     const b = await openRemote(f, org.a1, org.A);
     expect(await subscribe(b, 's1', { lane: 'B', id: 'app-1' }, { cursor })).toMatchObject({ mode: 'missing', epoch: s.launchId, seq: 0 });
     await snapshot(b, 's1');
@@ -335,5 +337,176 @@ describe('interest (OX5)', () => {
     const viewer = await until(() => f.interest.find((x) => x[0] === 'report')?.[1], 'the report');
     await a.channel.send({ t: 'unsub', sub: 's1' });
     await until(() => f.interest.some((x) => x[0] === 'drop' && x[1] === viewer), 'the drop');
+  });
+});
+
+// ---- Under pressure: a lost journal, a long one, a flood, changes that never settle (O10 M8 review round 1) ------------
+
+const MiB = 1024 * 1024;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const reads = (f: Fixture, name: string) => f.host.calls.filter((c) => c.name === name).length;
+type Card = { item: { request: { requestId: string } }; context: { launchId: string } };
+
+describe('a lane B subscription whose journal can’t give back what it needs', () => {
+  it('answers `missing`, not `replay`, when the ring begins inside the cursor’s row past its next event', async () => {
+    const f = await lab();
+    const s = f.host.session('app-1');
+    const a = await openRemote(f, org.a1, org.A);
+    await subscribe(a, 's1', { lane: 'B', id: 'app-1' });
+    await snapshot(a, 's1');
+    const row = Array.from({ length: 5 }, (_, i) => f.host.event(s, 1, i, { kind: 'note', text: `e${i}` }));
+    s.rows.push(row);
+    f.host.batches('app-1', row.slice(0, 1));
+    await until(() => evs(a, 's1').length === 1, 'the row’s first event');
+    const cursor = lastCursor(a, 's1');
+    drop(a);
+    f.host.batches('app-1', row.slice(1));
+    // The ring dropped (1,0) through (1,2) and the journal is lost: what the device lacks, (1,1) and (1,2), is gone.
+    s.evicted = { seq: 1, idx: 2 };
+    s.journal = false;
+    const b = await openRemote(f, org.a1, org.A);
+    expect(await subscribe(b, 's1', { lane: 'B', id: 'app-1' }, { cursor })).toMatchObject({ mode: 'missing' });
+  });
+
+  it('answers `missing` when its catch-up finds the ring beginning past the next event of its row', async () => {
+    const f = await lab({ subscriptions: { backlogBytes: 1 } });
+    const s = f.host.session('app-1');
+    const a = await openRemote(f, org.a1, org.A);
+    await subscribe(a, 's1', { lane: 'B', id: 'app-1' }, { credit: 1 });
+    await until(() => of(a, 's1').some((m) => m.t === 'snap'), 'the snapshot');
+    await until(() => reads(f, 'session.events') >= 1, 'the first catch-up');
+    await sleep(30);
+    // (1,0) goes into the stream, past the credit; the device's unsent stream is then full, so (1,1) on are left to the
+    // journal, which loses them before the credit comes.
+    f.host.row('app-1', 5);
+    await sleep(30);
+    s.evicted = { seq: 1, idx: 1 };
+    s.journal = false;
+    await a.channel.send({ t: 'credit', sub: 's1', bytes: MiB });
+    await waitFor(a, (m) => m.t === 'subbed' && m.sub === 's1' && m.mode === 'missing', 'a `missing` start-over');
+  });
+});
+
+describe('a lane B subscription reading a long journal', () => {
+  it('pages on from each page’s last row, never reading a page’s rows again', async () => {
+    const f = await lab();
+    const s = f.host.session('app-1');
+    for (let i = 0; i < 1200; i++) f.host.row('app-1', 1, { live: false });
+    s.evicted = { seq: 1200, idx: 0 }; // every row is the journal's
+    const a = await openRemote(f, org.a1, org.A);
+    await subscribe(a, 's1', { lane: 'B', id: 'app-1' });
+    await until(() => evs(a, 's1').length === 1200, 'every event', 10_000);
+    sawExactly(a, 's1', s.rows.flat());
+    expect(f.host.calls.filter((c) => c.name === 'session.events').map((c) => (c.input as { afterSeq: number | null }).afterSeq)).toEqual([null, 500, 1000]);
+  });
+});
+
+describe('a lane B subscription whose access is checked again', () => {
+  it('holds its stream while the check is open: a viewer whose share was removed gets nothing produced meanwhile; one who kept it gets all of it', async () => {
+    const f = await lab();
+    const s = f.host.session('app-1');
+    const shared = { lane: 'B' as const, session: s.engineSessionId!, owners: [org.A], shares: [{ member: org.B, grade: 'view' as const }] };
+    f.records.set(shared, 'app-1');
+    const b = await openRemote(f, org.b1, org.B);
+    await subscribe(b, 's1', { lane: 'B', id: 'app-1' });
+    await snapshot(b, 's1');
+    // A change that keeps the share: held while checked, then delivered.
+    f.host.hold('session.status');
+    let before = reads(f, 'session.status');
+    f.records.set({ ...shared }, 'app-1');
+    await until(() => reads(f, 'session.status') > before, 'the check’s status read');
+    const kept = f.host.row('app-1', 2);
+    await sleep(80);
+    expect(evs(b, 's1')).toEqual([]);
+    f.host.release('session.status');
+    await until(() => evs(b, 's1').length === 2, 'the events held through the check');
+    sawExactly(b, 's1', kept);
+    // The share removed: what comes while the check reads never reaches the device.
+    f.host.hold('session.status');
+    before = reads(f, 'session.status');
+    f.records.set({ lane: 'B', session: s.engineSessionId!, owners: [org.A] }, 'app-1');
+    await until(() => reads(f, 'session.status') > before, 'the second check’s status read');
+    f.host.row('app-1', 2);
+    await sleep(80);
+    f.host.release('session.status');
+    await waitFor(b, (m) => m.t === 'ended' && m.sub === 's1' && m.reason === 'removed', 'ended removed');
+    sawExactly(b, 's1', kept);
+  });
+});
+
+describe('a lane B subscription whose state keeps changing', () => {
+  it('keeps only the latest of each replace-whole part queued while the device’s credit is out', async () => {
+    const f = await lab();
+    const a = await openRemote(f, org.a1, org.A);
+    await subscribe(a, 's1', { lane: 'B', id: 'app-1' }, { credit: 1 });
+    await until(() => of(a, 's1').some((m) => m.t === 'snap' && m.last === true), 'the snapshot');
+    for (let i = 0; i < 100; i++) f.host.setQueue('app-1', { entries: [{ queueId: `q${i}`, text: 'x'.repeat(64 * 1024) }], paused: false, pauseReason: null });
+    const queueId = (snap: Record<string, unknown>) => (snap.queue as { entries: Array<{ queueId: string }> } | undefined)?.entries[0]?.queueId;
+    for (let i = 0; i < 20 && queueId(snapshots(a, 's1').at(-1)!) !== 'q99'; i++) {
+      await a.channel.send({ t: 'credit', sub: 's1', bytes: 4 * MiB });
+      await sleep(40);
+    }
+    expect(queueId(snapshots(a, 's1').at(-1)!)).toBe('q99');
+    expect(snapshots(a, 's1').filter((snap) => !('status' in snap)).length).toBeLessThanOrEqual(2);
+  });
+
+  it('ends in the latest change even when the state changed through every one of its re-reads', async () => {
+    const f = await lab();
+    const queue = (i: number) => ({ entries: [{ queueId: `q${i}` }], paused: false, pauseReason: null });
+    f.host.hold('session.queue.list');
+    const a = await openRemote(f, org.a1, org.A);
+    await a.channel.send({ t: 'sub', sub: 's1', session: { lane: 'B', id: 'app-1' }, cursor: null, credit: 4 * MiB });
+    // Each read is answered with the queue as it was asked; a newer one is published before the answer arrives.
+    for (let k = 1; k <= 6; k++) {
+      await until(() => reads(f, 'session.queue.list') === k, `read ${k}`);
+      f.host.setQueue('app-1', queue(k));
+      f.host.release('session.queue.list');
+      if (k < 6) f.host.hold('session.queue.list');
+    }
+    await until(() => (snapshots(a, 's1').at(-1)?.queue as { entries: Array<{ queueId: string }> } | undefined)?.entries[0]?.queueId === 'q6', 'the latest queue');
+  });
+
+  it('starts a cards subscription over on the new launch when the session is launched again while its cards are hydrated', async () => {
+    const f = await lab();
+    const s = f.host.session('app-1');
+    f.host.request('app-1', 'question', 'rq-old');
+    f.host.hold('session.pendingRequest');
+    const a = await openRemote(f, org.a1, org.A);
+    await a.channel.send({ t: 'sub', sub: 'c1', session: { lane: 'B', id: 'app-1' }, view: 'cards', cursor: null, credit: 4 * MiB });
+    await until(() => reads(f, 'session.pendingRequest') >= 1, 'the hydration in flight');
+    f.host.setItems('app-1', []);
+    f.host.relaunch('app-1');
+    f.host.request('app-1', 'question', 'rq-new');
+    f.host.release('session.pendingRequest');
+    await until(() => {
+      const cards = snapshots(a, 'c1').at(-1)?.pendingItems as Card[] | undefined;
+      return cards?.length === 1 && cards[0].item.request.requestId === 'rq-new';
+    }, 'the new launch’s card');
+    const cards = snapshots(a, 'c1').at(-1)!.pendingItems as Card[];
+    expect(cards[0].context.launchId).toBe(s.launchId);
+    expect(of(a, 'c1').some((m) => m.t === 'subbed' && m.epoch === s.launchId)).toBe(true);
+  });
+
+  it('drops what it held past its bound while it read, and reads that from the journal instead', async () => {
+    const f = await lab({ subscriptions: { backlogBytes: 16 * 1024 } });
+    const a = await openRemote(f, org.a1, org.A);
+    await subscribe(a, 's1', { lane: 'B', id: 'app-1' });
+    await snapshot(a, 's1');
+    const first = f.host.row('app-1', 1);
+    await until(() => evs(a, 's1').length === 1, 'row 1');
+    const cursor = lastCursor(a, 's1');
+    drop(a);
+    f.host.hold('session.catalog');
+    const b = await openRemote(f, org.a1, org.A);
+    await b.channel.send({ t: 'sub', sub: 's1', session: { lane: 'B', id: 'app-1' }, cursor, credit: 4 * MiB });
+    await until(() => reads(f, 'session.catalog') === 2, 'the resume’s state read in flight');
+    const flood: SessionEvent[] = [];
+    for (let i = 0; i < 200; i++) flood.push(...f.host.row('app-1', 1));
+    const journalReads = reads(f, 'session.events');
+    f.host.release('session.catalog');
+    await until(() => evs(b, 's1').length === 200, 'the flood');
+    sawExactly(b, 's1', flood);
+    expect(reads(f, 'session.events')).toBeGreaterThan(journalReads);
+    expect(first).toHaveLength(1);
   });
 });

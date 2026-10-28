@@ -5,11 +5,16 @@ import type { EndpointMessage, SubMessage } from 'org-protocol';
 import { describe, expect, it } from 'vitest';
 import type { RemoteChannel } from '../../src/endpoint/channels';
 import { Interest } from '../../src/endpoint/interest';
-import { Subscriptions, type Plane, type Subscription } from '../../src/endpoint/subscriptions';
+import { STREAM_WINDOW_BYTES, Subscriptions, type Plane, type Subscription } from '../../src/endpoint/subscriptions';
 import { NO_RECORDS } from '../../src/endpoint/sources';
 
-function channel(): RemoteChannel & { sent: EndpointMessage[] } {
+/**
+ * A channel stand-in: `sent` is its queue in order. A stream message handed over by `transmit` is done (sealed and on
+ * the carrier) at once, or, with `hold`, only at `flush`.
+ */
+function channel(options: { hold?: boolean } = {}): RemoteChannel & { sent: EndpointMessage[]; flush(): void } {
   const sent: EndpointMessage[] = [];
+  const waiting: Array<() => void> = [];
   return {
     key: 'direct:1',
     carrier: 'direct',
@@ -20,10 +25,19 @@ function channel(): RemoteChannel & { sent: EndpointMessage[] } {
     closed: false,
     sent,
     send: (message) => (sent.push(message), true),
+    transmit: (message) => {
+      sent.push(message);
+      return options.hold ? new Promise<boolean>((resolve) => waiting.push(() => resolve(true))) : Promise.resolve(true);
+    },
+    flush: () => {
+      for (const done of waiting.splice(0)) done();
+    },
     close: () => {},
     onClose: () => () => {},
-  } as RemoteChannel & { sent: EndpointMessage[] };
+  } as RemoteChannel & { sent: EndpointMessage[]; flush(): void };
 }
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 function table(): { subs: Subscriptions; opened: Subscription[] } {
   const opened: Subscription[] = [];
@@ -57,7 +71,7 @@ describe('the subscription table', () => {
     expect(subs.get(ch, 's1')).toBeNull();
   });
 
-  it('starts only the sub still registered, with the credit that came before its decision', () => {
+  it('starts only the sub still registered, with the credit that came before its decision', async () => {
     const { subs, opened } = table();
     const ch = channel();
     const first = sub(0);
@@ -67,6 +81,7 @@ describe('the subscription table', () => {
     expect(opened).toHaveLength(1);
     // The credit counts: an `ev` goes now.
     opened[0].ev({ epoch: 'e', seq: 1 }, { n: 1 });
+    await settle();
     expect(ch.sent.map((m) => m.t)).toEqual(['ev']);
     const second = sub();
     subs.receive(ch, second, () => {});
@@ -74,7 +89,7 @@ describe('the subscription table', () => {
     expect(opened).toHaveLength(1);
   });
 
-  it('sends a stream message while any credit is left, then holds the rest until credit comes', () => {
+  it('sends a stream message while any credit is left, then holds the rest until credit comes', async () => {
     const { subs, opened } = table();
     const ch = channel();
     const m = sub(10);
@@ -84,13 +99,82 @@ describe('the subscription table', () => {
     s.subbed('snapshot', { epoch: 'e', seq: 0 });
     s.ev({ epoch: 'e', seq: 1 }, { text: 'x'.repeat(100) });
     s.ev({ epoch: 'e', seq: 2 }, { text: 'y' });
+    await settle();
     // `subbed` costs nothing; the first `ev` overdraws the credit, the second waits.
     expect(ch.sent.map((x) => x.t)).toEqual(['subbed', 'ev']);
     expect(s.backlog).toBeGreaterThan(0);
     s.control({ t: 'paused', sub: 's1', reason: 'no-app' });
     expect(ch.sent.map((x) => x.t)).toEqual(['subbed', 'ev', 'paused']);
     subs.credit(ch, { t: 'credit', sub: 's1', bytes: 10_000 });
+    await settle();
     expect(ch.sent.map((x) => x.t)).toEqual(['subbed', 'ev', 'paused', 'ev']);
     expect(s.backlog).toBe(0);
+  });
+
+  it('keeps no more than a small window of stream messages in the channel’s queue, so a control message never waits behind a credited flood', async () => {
+    const { subs, opened } = table();
+    const ch = channel({ hold: true });
+    const m = sub(4 * 1024 * 1024);
+    subs.receive(ch, m, () => {});
+    subs.start(ch, m, { ok: true } as never);
+    const s = opened[0];
+    // 64 events of 64 KiB, all paid for by the credit: 4 MiB the channel would otherwise queue before anything else.
+    for (let i = 1; i <= 64; i++) s.ev({ epoch: 'e', seq: i }, { text: 'z'.repeat(64 * 1024) });
+    await settle();
+    s.control({ t: 'paused', sub: 's1', reason: 'no-app' });
+    const before = ch.sent.findIndex((x) => x.t === 'paused');
+    expect(before).toBeLessThanOrEqual(STREAM_WINDOW_BYTES / (64 * 1024) + 1);
+    // The flood goes on as the channel takes it, every event once, in order.
+    for (let i = 0; i < 200 && ch.sent.filter((x) => x.t === 'ev').length < 64; i++) {
+      ch.flush();
+      await settle();
+    }
+    expect(ch.sent.filter((x) => x.t === 'ev').map((x) => (x as { seq: number }).seq)).toEqual(Array.from({ length: 64 }, (_, i) => i + 1));
+  });
+
+  it('shares the window between a channel’s subscriptions in turn', async () => {
+    const { subs, opened } = table();
+    const ch = channel({ hold: true });
+    for (const id of ['s1', 's2']) {
+      const m = { ...sub(4 * 1024 * 1024), sub: id };
+      subs.receive(ch, m, () => {});
+      subs.start(ch, m, { ok: true } as never);
+    }
+    // s1's flood fills the window before s2 has anything; once the channel takes it, they go in turn.
+    for (const s of opened) for (let i = 1; i <= 16; i++) s.ev({ epoch: 'e', seq: i }, { text: 'z'.repeat(64 * 1024) });
+    await settle();
+    const before = ch.sent.length;
+    ch.flush();
+    await settle();
+    const next = ch.sent.slice(before).map((x) => (x as { sub: string }).sub);
+    expect(next.slice(0, 4)).toEqual(['s1', 's2', 's1', 's2']);
+  });
+
+  it('holds a subscription’s stream while its access is checked again, and lets it go on when the check grants it', async () => {
+    let decide: (ok: boolean) => void = () => {};
+    const opened: Subscription[] = [];
+    const plane: Plane = { open: (s) => void opened.push(s), close: () => {}, stop: () => {} };
+    let authorizing = false;
+    const subs = new Subscriptions({
+      authorize: () => (authorizing ? new Promise((resolve) => (decide = (ok) => resolve((ok ? { ok: true } : { ok: false, reason: 'grade' }) as never))) : Promise.resolve({ ok: true } as never)),
+      planes: { A: plane, B: plane },
+      interest: new Interest({ interest: () => null, log: () => {} }),
+      records: NO_RECORDS,
+      now: () => Date.now(),
+      log: () => {},
+    });
+    const ch = channel();
+    const m = sub();
+    subs.receive(ch, m, () => {});
+    subs.start(ch, m, { ok: true, target: { lane: 'B', session: 'eng-1', appSessionId: 'app-1' } } as never);
+    authorizing = true;
+    subs.recheck();
+    opened[0].ev({ epoch: 'e', seq: 1 }, { n: 1 });
+    await settle();
+    expect(ch.sent).toEqual([]);
+    decide(true);
+    await settle();
+    await settle();
+    expect(ch.sent.map((x) => x.t)).toEqual(['ev']);
   });
 });
