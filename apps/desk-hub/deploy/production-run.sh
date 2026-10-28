@@ -22,7 +22,7 @@
 #                       alone posts (once the stored code decodes under `code inspect`); every other signing verb
 #                       refuses until then.
 # The steps that change production (access-sync; admin genesis, pair, remove-device, refresh, enroll, delegation,
-# machine drop, provisioning revoke) say so first.
+# machine drop, provisioning revoke, keys) say so first.
 # Environment (README "Production runs"):
 #   DESK_PRODUCTION_SECRETS  the directory holding CF_ACCESS_SETUP_TOKEN (access-sync)
 #   DESK_PRODUCTION_DIR      logs and state (default ~/.local/state/desk-hub-production, 0700): one log per access-sync
@@ -159,6 +159,12 @@ case $step in
         fi ;;
       machine) say "admin $verb changes production: it takes a machine out of $PRODUCTION_ORG's org state and deletes its hub row, asking on the terminal first" ;;
       provisioning) say "admin $verb changes production: it revokes a provisioning key at $URL, asking on the terminal first" ;;
+      keys)
+        if [[ $verb == "keys purge" ]]; then
+          say "admin keys purge changes production: it deletes every wrapped copy of $PRODUCTION_ORG's org key at $URL, which cannot be undone, asking on the terminal first"
+        else
+          say "admin $verb changes production: it signs a successor of $PRODUCTION_ORG's org state retiring the legacy org key (--undo: taking the retirement back), asking on the terminal first"
+        fi ;;
       abandon-pending) say "admin abandon-pending changes what this admin device signs next: it drops a proposal production never took, asking on the terminal first" ;;
     esac
     if [[ $sub == init || $verb == "code strip-legacy" ]]; then

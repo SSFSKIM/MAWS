@@ -164,7 +164,7 @@ describe('the options', () => {
     }
     const f = fake();
     expect(await runAdmin(['forge', '--keys', keys], f.io)).toBe(2);
-    expect(f.err[0]).toMatch(/^usage: deployment admin <init \| genesis \| adopt \| refresh \| pair \| devices \| remove-device \| show \| enroll \| delegation \| machine \| code \| provisioning \| abandon-pending>/);
+    expect(f.err[0]).toMatch(/^usage: deployment admin <init \| genesis \| adopt \| refresh \| pair \| devices \| remove-device \| show \| enroll \| delegation \| machine \| code \| provisioning \| keys \| abandon-pending>/);
   });
 });
 

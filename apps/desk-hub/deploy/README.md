@@ -331,7 +331,7 @@ hand once nothing runs (`run-lock.ts`, never taken over). Against a deployment, 
 
 ### The cutover's verbs (P5 O14 M2)
 
-    pnpm --filter desk-hub deployment admin <show | enroll | delegation create|publish|drop | machine drop | provisioning revoke | abandon-pending | code inspect|strip-legacy> …
+    pnpm --filter desk-hub deployment admin <show | enroll | delegation create|publish|drop | machine drop | provisioning revoke | keys retire|purge | abandon-pending | code inspect|strip-legacy> …
 
 The same keys file, anchor, lock and confirmation rule as above: each verb verifies the served chain against the anchor
 before anything else, settles a pending proposal first, and signs through the one `amend` (`delegation create`
@@ -339,7 +339,7 @@ through its no-POST half, `propose`). An `unsent` proposal (`delegation create`'
 it but `delegation publish`; `show` and `devices` name it and go on, and every other verb refuses, signing and sending
 nothing, naming `delegation publish` and `abandon-pending`. Against a deployment each verb that signs, posts or
 deletes (`enroll`, `delegation create`, `delegation publish`, `delegation drop`, `machine drop`, `provisioning revoke`,
-`abandon-pending`) opens `/dev/tty` before any request. The token is `DESK_ACCESS_TOKEN` from the environment when it is
+`keys retire`, `keys purge`, `abandon-pending`) opens `/dev/tty` before any request. The token is `DESK_ACCESS_TOKEN` from the environment when it is
 set there (the runners' `--pipe`), else on stdin.
 
 - `show` prints the age line, the members and their devices, the machines as a table (`NAME STATE REF KEY ONLINE
@@ -394,6 +394,14 @@ set there (the runners' `--pipe`), else on stdin.
   `DELETE /api/machines/<name>` alone. Rerun after a failed DELETE, it finds the row alone and deletes it.
 - `provisioning revoke <id>` revokes a provisioning key at the hub (the phase-1 key at B4) after showing its label,
   prefix and uses; a live delegation's key is refused (`delegation drop` revokes it with the delegation).
+- `keys retire [--undo]` asks, then signs the successor retiring the DX1 org key (`legacyRetired` at its own version
+  and issue time, O14 M5a: machines stop dual-coding), which `show` prints; `--undo` signs the successor dropping it,
+  refused before anything is signed once the hub has purged the wrapped copies (`GET /api/org/keys` `410 retired`; the
+  hub would refuse the successor `409 key-purged`). A head already retiring the key, or retiring none for `--undo`,
+  signs nothing and says so.
+- `keys purge` deletes every wrapped copy of the org key at the hub (`POST /api/org/keys/purge`), which cannot be
+  undone: it refuses unless the head carries `legacyRetired` (as the hub does, `409 not-retired`), shows the number of
+  copies and asks with that consequence. From then the retirement stands. Run again, it says the hub holds none.
 - `abandon-pending` drops the anchor's pending proposal, after showing it and what the hub holds and asking with the
   consequence (a later verb may sign another successor of the same parent, which a hub that kept the abandoned bytes
   could show a machine as a fork): for a proposal the hub refused for good, once you know why. An `unsent` proposal
@@ -582,7 +590,7 @@ hands it to a command, and never printed or passed as an argument; output goes t
     keys.
 
   The steps that change production (`access-sync`; `admin genesis`, `pair`, `remove-device`, `refresh`, `enroll`,
-  `delegation`, `machine drop`, `provisioning revoke`) say so in their first line, before they read any credential, and
+  `delegation`, `machine drop`, `provisioning revoke`, `keys`) say so in their first line, before they read any credential, and
   stop at the first one they lack.
 
 What they read, at run time:

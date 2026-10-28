@@ -72,6 +72,7 @@ import {
   MIN_PROVISIONING_KEY_TTL_S,
   NEVER_OFFLINE,
   NO_USE_CAP,
+  ORG_KEYS_PATH,
   ORG_STATE_PATH,
   PENDING_DEVICE_TTL_S,
   PENDING_DEVICES_PATH,
@@ -107,17 +108,17 @@ import { checkTarget, readDeployConfig, type DeployConfig } from './config';
 import { readSecrets } from './deploy';
 import { Person } from './hub';
 import { certificateViews, machineRows, resolveMachine, table } from './admin-machines';
-import { deviceEntry, successor } from './org-admin';
+import { deviceEntry, purgeOrgKeys, restoreLegacyKey, retireLegacyKey, successor } from './org-admin';
 import { decodeProvisioningCodeV2, encodeProvisioningCodeV2, type ProvisioningCodeV2 } from './provisioning-code';
 import { withRunLock } from './run-lock';
 
-export const SUBCOMMANDS = ['init', 'genesis', 'adopt', 'refresh', 'pair', 'devices', 'remove-device', 'show', 'enroll', 'delegation', 'machine', 'code', 'provisioning', 'abandon-pending'] as const;
+export const SUBCOMMANDS = ['init', 'genesis', 'adopt', 'refresh', 'pair', 'devices', 'remove-device', 'show', 'enroll', 'delegation', 'machine', 'code', 'provisioning', 'keys', 'abandon-pending'] as const;
 /** The subcommands that name a verb of their own after them (`delegation create`). */
-const GROUPS = { delegation: ['create', 'publish', 'drop'], machine: ['drop'], code: ['inspect', 'strip-legacy'], provisioning: ['revoke'] } as const;
+const GROUPS = { delegation: ['create', 'publish', 'drop'], machine: ['drop'], code: ['inspect', 'strip-legacy'], provisioning: ['revoke'], keys: ['retire', 'purge'] } as const;
 type Group = keyof typeof GROUPS;
 type Subcommand = Exclude<(typeof SUBCOMMANDS)[number], Group> | { [G in Group]: `${G} ${(typeof GROUPS)[G][number]}` }[Group];
 /** What signs, posts or deletes only after the owner says so at the terminal. */
-const CONFIRMING: readonly Subcommand[] = ['genesis', 'pair', 'remove-device', 'enroll', 'delegation create', 'delegation publish', 'delegation drop', 'machine drop', 'provisioning revoke', 'abandon-pending'];
+const CONFIRMING: readonly Subcommand[] = ['genesis', 'pair', 'remove-device', 'enroll', 'delegation create', 'delegation publish', 'delegation drop', 'machine drop', 'provisioning revoke', 'keys retire', 'keys purge', 'abandon-pending'];
 /** The verbs whose stdout is a secret code, for a pipe alone: every other line they print goes to stderr. */
 const SECRET_STDOUT: readonly Subcommand[] = ['delegation create', 'code strip-legacy'];
 /** The local transforms: stdin to stdout, no keys, no anchor, no credential and no hub. */
@@ -843,8 +844,7 @@ async function show(ctx: Context): Promise<number> {
     ctx.io.out(`delegation ${d.id} prefix ${d.prefix} expires ${d.expires}${d.maxUses === NO_USE_CAP ? '' : ` max-uses ${d.maxUses}`} owners ${owners}`);
   }
   for (const r of state.revoked) if ('delegation' in r.holder) ctx.io.out(`dropped delegation ${r.holder.delegation} prefix ${r.holder.prefix} (reserved)`);
-  // O14 M5a's field, printed once a head carries it.
-  const retired = (state as OrgState & { legacyRetired?: { version: number; at: string } }).legacyRetired;
+  const retired = state.legacyRetired;
   if (retired) ctx.io.out(`legacyRetired version ${retired.version} at ${retired.at}`);
   return 0;
 }
@@ -1175,6 +1175,66 @@ async function abandonPending(ctx: Context): Promise<number> {
   return 0;
 }
 
+/**
+ * `keys retire [--undo]`: the DX1 org key retired in a signed successor (`legacyRetired`, O14 M5a), or that retirement
+ * undone while the hub still holds the wrapped copies; a head already so signs nothing.
+ */
+async function keysRetire(ctx: Context): Promise<number> {
+  const from = await anchored(ctx, true);
+  const { version, legacyRetired } = from.head.state;
+  if (ctx.values.undo !== true) {
+    if (legacyRetired) {
+      ctx.io.out(`the head (version ${version}) retires the legacy org key already: nothing was signed`);
+      return 0;
+    }
+    if (!(await confirm(ctx, 'retire the legacy org key? Machines stop using it; until keys purge, keys retire --undo takes it back [y/N]'))) refuse('not retired: nothing was signed');
+    const signed = await from.amend(retireLegacyKey);
+    ctx.io.out(`retired: the legacy org key, at version ${signed.state.version}`);
+    return 0;
+  }
+  if (!legacyRetired) {
+    ctx.io.out(`the head (version ${version}) retires no legacy org key: nothing was signed`);
+    return 0;
+  }
+  // The hub refuses the undo once it purged the copies (409 key-purged); asked first, nothing is left pending.
+  if ((await wrappedCopies(from.person, 'signed')) === 'purged') refuse("the hub purged the org key's wrapped copies: the retirement stands (a successor without legacyRetired is refused 409 key-purged); nothing was signed");
+  if (!(await confirm(ctx, `undo the legacy org key's retirement (version ${legacyRetired.version})? [y/N]`))) refuse('not undone: nothing was signed');
+  const signed = await from.amend(restoreLegacyKey);
+  ctx.io.out(`restored: the legacy org key in use again, at version ${signed.state.version}`);
+  return 0;
+}
+
+/** `keys purge`: every wrapped copy of the org key deleted at the hub, on a head that retires it. Irreversible. */
+async function keysPurge(ctx: Context): Promise<number> {
+  const from = await anchored(ctx, false);
+  const { version, legacyRetired } = from.head.state;
+  // The hub refuses it too (409 not-retired); refused here first.
+  if (!legacyRetired) refuse(`the head (version ${version}) does not retire the legacy org key (legacyRetired): keys retire first; nothing was purged`);
+  const held = await wrappedCopies(from.person, 'purged');
+  if (held === 'purged') {
+    ctx.io.out('the hub holds no wrapped copy of the org key: purged already');
+    return 0;
+  }
+  const copies = `${held} wrapped ${held === 1 ? 'copy' : 'copies'}`;
+  if (!(await confirm(ctx, `purge the ${copies} of the org key at ${ctx.hub}? This cannot be undone: the hub keeps no copy, and the retirement can never be taken back [y/N]`))) refuse('not purged: the copies stay');
+  let purged: Awaited<ReturnType<typeof purgeOrgKeys>>;
+  try {
+    purged = await purgeOrgKeys(from.person);
+  } catch (error) {
+    return refuse(`the purge failed (${printable(error instanceof Error ? error.message : String(error))}): keys purge again says whether the hub took it`);
+  }
+  ctx.io.out(`purged: ${copies} of the org key, under version ${purged.purged.version} at ${purged.purged.at}`);
+  return 0;
+}
+
+/** How many wrapped copies of the org key the hub holds, or `purged` (its `410 retired`); `nothing` names what a refusal left undone. */
+async function wrappedCopies(person: Person, nothing: 'signed' | 'purged'): Promise<number | 'purged'> {
+  const held = await answered(person, ORG_KEYS_PATH);
+  if (held.status === 410) return 'purged';
+  if (held.status !== 200) refuse(`the hub did not list the org key's wrapped copies: ${held.said}; nothing was ${nothing}`);
+  return (JSON.parse(held.text) as { keys: unknown[] }).keys.length;
+}
+
 /** A provisioning code read from stdin, or the decoder's refusal. */
 async function stdinCode(ctx: Pick<Context, 'io'>): Promise<ProvisioningCodeV2> {
   try {
@@ -1222,6 +1282,8 @@ const RUN: Record<Subcommand, (ctx: Context) => Promise<number>> = {
   enroll,
   'delegation create': delegationCreate,
   'delegation publish': delegationPublish,
+  'keys retire': keysRetire,
+  'keys purge': keysPurge,
   'delegation drop': delegationDrop,
   'machine drop': machineDrop,
   'provisioning revoke': provisioningRevoke,
@@ -1263,6 +1325,7 @@ async function run(argv: string[], given: AdminIo): Promise<number> {
       'max-uses': { type: 'string' },
       'legacy-from-v1-code': { type: 'boolean' },
       revoke: { type: 'boolean' },
+      undo: { type: 'boolean' },
     },
   });
   const [name, ...more] = positionals;
@@ -1288,6 +1351,7 @@ async function run(argv: string[], given: AdminIo): Promise<number> {
     ['max-uses', ['delegation create']],
     ['legacy-from-v1-code', ['delegation create']],
     ['revoke', ['machine drop']],
+    ['undo', ['keys retire']],
   ];
   for (const [option, subs] of only) if (values[option as keyof typeof values] !== undefined && !subs.includes(sub)) refuse(`--${option} is ${subs.join(' and ')}'s option`);
   // A secret code on stdout: for a pipe alone, named so (`--code-to-stdout`), and every other line on stderr.

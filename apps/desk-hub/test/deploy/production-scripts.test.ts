@@ -494,6 +494,18 @@ describe.skipIf(!zsh)('production-run.sh', () => {
       expect(run.out).toMatch(/no admin device keys at /);
     });
 
+    it.each([
+      [['keys', 'retire'], /^admin keys retire changes production: it signs a successor of .* retiring the legacy org key/],
+      [['keys', 'retire', '--undo'], /^admin keys retire changes production: .*--undo: taking the retirement back/],
+      [['keys', 'purge'], /^admin keys purge changes production: it deletes every wrapped copy of .*'s org key at .*, which cannot be undone/],
+    ])('admin %s says first what it changes, before it reads any credential', (args, first) => {
+      const w = world();
+      const run = w.run('production-run.sh', ['admin', ...args]);
+      expect(run.status).toBe(2);
+      expect(run.out.split('\n')[0]).toMatch(first);
+      expect(run.out).toMatch(/no admin device keys at /);
+    });
+
     it.each(['genesis', 'pair', 'remove-device', 'refresh'])('admin %s: no admin keys, then no Access token', (sub) => {
       const w = world();
       const noKeys = w.run('production-run.sh', ['admin', sub]);

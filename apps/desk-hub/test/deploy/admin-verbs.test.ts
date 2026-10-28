@@ -23,9 +23,10 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { anchorFile, runAdmin, type AdminIo } from '../../deploy/admin.ts';
 import { readAdminKeys, readText, volumeOf } from '../../deploy/admin-device.ts';
-import { successor } from '../../deploy/org-admin.ts';
+import { restoreLegacyKey, successor } from '../../deploy/org-admin.ts';
 import { decodeProvisioningCodeV2, encodeProvisioningCodeV2, type ProvisioningCodeV2 } from '../../deploy/provisioning-code.ts';
 import { enrollDelegated, enrollV2, mintRef } from '../../fake-machine/org';
+import { importOrgKey, keyAuth, keyCheck } from '../../src/protocol/codes';
 import { decodeEnrollmentCodeV2, encodeEnrollmentCodeV2, encodeProvisioningCode, type MachineView, type ProvisioningKeyRecord } from '../../src/protocol/identity';
 import { enroll as enrollV1, provisioningKey } from '../support/clients';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from '../support/local';
@@ -72,6 +73,16 @@ function fake(answers: string[] = [], over: Partial<AdminIo> & { stdin?: string 
   };
   fakes.push(f);
   return f;
+}
+
+/** No fake's stdout or stderr holds anything shaped like a key, a token or a code, or any secret a case handled. */
+function nothingSecretPrinted(): void {
+  const shaped = /smns-(enroll|provision|pair)-v\d\.|eyJ|"d"\s*:/;
+  for (const f of fakes) {
+    const printed = [...f.out, ...f.err].join('\n');
+    expect(printed).not.toMatch(shaped);
+    for (const secret of secrets) expect(printed).not.toContain(secret);
+  }
 }
 
 /** Waits for `probe` to answer, up to 15 s. */
@@ -443,10 +454,11 @@ describe('on the local hub', () => {
     expect(await runAdmin(['show', ...asLocal()], f.io)).toBe(0);
     const text = f.out.join('\n');
     expect(text).toMatch(/^NAME +STATE +REF +KEY +ONLINE +SEEN$/m);
-    expect(text).toMatch(new RegExp(`^m5 +listed +${m5.ref} +${await keyId(m5.key.pub)} +- +-$`, 'm'));
-    expect(text).toMatch(/^m2 +unlisted +[^ ]+ +[^ ]+ +- +-$/m);
+    // The DX2 presence as the hub reports it (O14 M5a): an RL10 machine never opens DX2, so offline, never seen.
+    expect(text).toMatch(new RegExp(`^m5 +listed +${m5.ref} +${await keyId(m5.key.pub)} +false +-$`, 'm'));
+    expect(text).toMatch(/^m2 +unlisted +[^ ]+ +[^ ]+ +false +-$/m);
     expect(text).toMatch(new RegExp(`^vm-x1 +retired ${'\\d{4}-[^ ]+'} +${vm.ref} +${await keyId(vm.key.pub)} +- +-$`, 'm'));
-    expect(text).toMatch(/^vm-x1 +certified +[^ ]+_[^ ]+ +[^ ]+ +- +-$/m);
+    expect(text).toMatch(/^vm-x1 +certified +[^ ]+_[^ ]+ +[^ ]+ +false +-$/m);
     expect(text).toMatch(new RegExp(`^delegation ${delegation.delegation.id} prefix vm- expires [^ ]+ owners ${member}$`, 'm'));
     expect(text).toMatch(/ prefix lg- expires [^ ]+ max-uses 5 owners /);
   });
@@ -531,7 +543,7 @@ describe('on the local hub', () => {
   });
 
   it('refuses every hub-touching verb with no anchor, a chain of another genesis, or a head older than the anchor has seen', async () => {
-    const verbs = [['show'], ['enroll', 'mx'], ['delegation', 'create', '--label', 'x', '--prefix', 'zz-', '--code-to-stdout'], ['delegation', 'drop', 'f'.repeat(32)], ['delegation', 'publish'], ['machine', 'drop', 'mx'], ['provisioning', 'revoke', 'f'.repeat(32)], ['abandon-pending']];
+    const verbs = [['show'], ['enroll', 'mx'], ['delegation', 'create', '--label', 'x', '--prefix', 'zz-', '--code-to-stdout'], ['delegation', 'drop', 'f'.repeat(32)], ['delegation', 'publish'], ['machine', 'drop', 'mx'], ['provisioning', 'revoke', 'f'.repeat(32)], ['keys', 'retire'], ['keys', 'purge'], ['abandon-pending']];
     const unanchored = join(dir('unanchored'), 'keys.json');
     for (const verb of verbs) {
       const f = fake();
@@ -560,12 +572,7 @@ describe('on the local hub', () => {
 
   it('prints nothing shaped like a key, a token or a code on any verb\'s stdout or stderr, but the two secret stdouts', () => {
     expect(secrets.size).toBeGreaterThan(10);
-    const shaped = /smns-(enroll|provision|pair)-v\d\.|eyJ|"d"\s*:/;
-    for (const f of fakes) {
-      const printed = [...f.out, ...f.err].join('\n');
-      expect(printed).not.toMatch(shaped);
-      for (const secret of secrets) expect(printed).not.toContain(secret);
-    }
+    nothingSecretPrinted();
   });
 });
 
@@ -708,6 +715,101 @@ describe('delegation create against a hub that misbehaves', () => {
   });
 });
 
+describe('the legacy org key: keys retire and keys purge', () => {
+  let hub: LocalHub;
+  const keys = join(scratch, 'legacy', 'keys.json');
+  const asLocal = (...extra: string[]) => ['--hub', hub.url, '--user', ADMIN, '--keys', keys, ...extra];
+  const head = async () => ((await hub.fetchAs(ADMIN, '/api/org/state').then((r) => r.json())) as { head: SignedOrgState }).head;
+  const anchor = () => JSON.parse(readFileSync(anchorFile(keys), 'utf8')) as { version: number; pending?: SignedOrgState };
+  const copies = () => hub.fetchAs(ADMIN, '/api/org/keys');
+
+  beforeAll(async () => {
+    hub = await startLocalHub();
+    // Two wrapped copies of an org key at the hub, as DX1 left them.
+    const key = await importOrgKey(crypto.getRandomValues(new Uint8Array(32)));
+    const [check, auth] = [await keyCheck(key), await keyAuth(key)];
+    secrets.add(auth);
+    for (let i = 0; i < 2; i++) {
+      const wrapped = base64urlEncode(crypto.getRandomValues(new Uint8Array(48)));
+      secrets.add(wrapped);
+      const body = { method: 'passphrase', label: `copy ${i}`, kdf: { name: 'argon2id', salt: base64urlEncode(crypto.getRandomValues(new Uint8Array(16))) }, iv: base64urlEncode(crypto.getRandomValues(new Uint8Array(12))), wrapped, check, auth };
+      expect((await hub.fetchAs(ADMIN, '/api/org/keys', { body })).status).toBe(201);
+    }
+    expect(await runAdmin(['init', '--keys', keys], fake().io)).toBe(0);
+    expect(await runAdmin(['genesis', '--recovery', join(dir('volume'), 'recovery.json'), ...asLocal('--yes')], fake().io)).toBe(0);
+  });
+  afterAll(() => hub?.close());
+
+  it('retires the key in a signed successor, which show prints, and undoes it; each a no-op when already so', async () => {
+    const before = (await head()).state.version;
+    const f = fake();
+    expect(await runAdmin(['keys', 'retire', ...asLocal('--yes')], f.io)).toBe(0);
+    expect(f.out).toContain('retire the legacy org key? Machines stop using it; until keys purge, keys retire --undo takes it back [y/N] yes (--yes)');
+    expect(f.out.at(-1)).toBe(`retired: the legacy org key, at version ${before + 1}`);
+    const retired = (await head()).state;
+    expect(retired.legacyRetired).toEqual({ version: before + 1, at: retired.issued });
+    const shown = fake();
+    expect(await runAdmin(['show', ...asLocal()], shown.io)).toBe(0);
+    expect(shown.out).toContain(`legacyRetired version ${before + 1} at ${retired.issued}`);
+    const again = fake();
+    expect(await runAdmin(['keys', 'retire', ...asLocal('--yes')], again.io)).toBe(0);
+    expect(again.out.at(-1)).toBe(`the head (version ${before + 1}) retires the legacy org key already: nothing was signed`);
+
+    const undone = fake();
+    expect(await runAdmin(['keys', 'retire', '--undo', ...asLocal('--yes')], undone.io)).toBe(0);
+    expect(undone.out).toContain(`undo the legacy org key's retirement (version ${before + 1})? [y/N] yes (--yes)`);
+    expect(undone.out.at(-1)).toBe(`restored: the legacy org key in use again, at version ${before + 2}`);
+    expect((await head()).state).not.toHaveProperty('legacyRetired');
+    const plain = fake();
+    expect(await runAdmin(['show', ...asLocal()], plain.io)).toBe(0);
+    expect(plain.out.join('\n')).not.toMatch(/legacyRetired/);
+    const none = fake();
+    expect(await runAdmin(['keys', 'retire', '--undo', ...asLocal('--yes')], none.io)).toBe(0);
+    expect(none.out.at(-1)).toBe(`the head (version ${before + 2}) retires no legacy org key: nothing was signed`);
+    expect(anchor().pending).toBeUndefined();
+  });
+
+  it('refuses keys purge before the head retires the key, then, retired and confirmed, purges every copy for good', async () => {
+    const early = fake();
+    expect(await runAdmin(['keys', 'purge', ...asLocal('--yes')], early.io)).toBe(1);
+    expect(early.err.join('\n')).toMatch(/the head \(version \d+\) does not retire the legacy org key \(legacyRetired\): keys retire first; nothing was purged/);
+    expect(((await (await copies()).json()) as { keys: unknown[] }).keys).toHaveLength(2);
+
+    expect(await runAdmin(['keys', 'retire', ...asLocal('--yes')], fake().io)).toBe(0);
+    const version = (await head()).state.version;
+    const declined = fake(['n']);
+    expect(await runAdmin(['keys', 'purge', ...asLocal()], declined.io)).toBe(1);
+    expect(declined.term.join('')).toContain(`purge the 2 wrapped copies of the org key at ${hub.url}? This cannot be undone: the hub keeps no copy, and the retirement can never be taken back [y/N]`);
+    expect(declined.err.join('\n')).toMatch(/not purged: the copies stay/);
+    expect(((await (await copies()).json()) as { keys: unknown[] }).keys).toHaveLength(2);
+
+    const f = fake();
+    expect(await runAdmin(['keys', 'purge', ...asLocal('--yes')], f.io)).toBe(0);
+    expect(f.out.at(-1)).toMatch(new RegExp(`^purged: 2 wrapped copies of the org key, under version ${version} at \\d{4}-`));
+    expect((await copies()).status).toBe(410);
+    const again = fake();
+    expect(await runAdmin(['keys', 'purge', ...asLocal('--yes')], again.io)).toBe(0);
+    expect(again.out.at(-1)).toBe('the hub holds no wrapped copy of the org key: purged already');
+  });
+
+  it('once purged, refuses keys retire --undo before signing, and the hub refuses a successor dropping the mark 409 key-purged', async () => {
+    const version = (await head()).state.version;
+    const f = fake();
+    expect(await runAdmin(['keys', 'retire', '--undo', ...asLocal('--yes')], f.io)).toBe(1);
+    expect(f.err.join('\n')).toMatch(/the hub purged the org key's wrapped copies: the retirement stands \(a successor without legacyRetired is refused 409 key-purged\); nothing was signed/);
+    expect((await head()).state.version).toBe(version);
+    expect(anchor().pending).toBeUndefined();
+    // The hub's own check, met by a successor signed without the local one.
+    const admin = await readAdminKeys(keys);
+    const dropped = await signOrgState(await successor((await head()).state, restoreLegacyKey), [admin.stepUp]);
+    const answer = await hub.fetchAs(ADMIN, '/api/org/state', { body: dropped });
+    expect(answer.status).toBe(409);
+    expect(await answer.text()).toMatch(/key-purged/);
+  });
+
+  it('prints nothing shaped like a key, a token or a code', () => nothingSecretPrinted());
+});
+
 describe('the local transforms', () => {
   // No keys, no anchor, no credential and no hub: not even --keys is needed.
   const sample = async (legacy = true): Promise<ProvisioningCodeV2> => {
@@ -803,6 +905,9 @@ describe('against a deployment', () => {
       ['delegation', 'create', '--label', 'devcloud', '--prefix', 'dc-', '--code-to-stdout'],
       ['delegation', 'drop', 'f'.repeat(32)],
       ['delegation', 'publish'],
+      ['keys', 'retire'],
+      ['keys', 'retire', '--undo'],
+      ['keys', 'purge'],
       ['machine', 'drop', 'mx'],
       ['provisioning', 'revoke', 'f'.repeat(32)],
       ['abandon-pending'],

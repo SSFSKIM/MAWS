@@ -63,7 +63,7 @@ export type MachineRow = { name: string; state: string; ref: string; key: string
  */
 export async function machineRows(head: OrgState, certs: CertView[], rows: MachineView[]): Promise<MachineRow[]> {
   const presence = (name: string) => {
-    const row = rows.find(named(name)) as (MachineView & { online?: boolean; seen?: string | null }) | undefined;
+    const row = rows.find(named(name));
     return { online: row?.online === undefined ? '-' : String(row.online), seen: row?.seen ?? '-' };
   };
   const out: MachineRow[] = [];
