@@ -662,6 +662,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       log(`exiting (${reason})`);
       for (const server of servers) server.close(); // no new client
       clocks.stop();
+      idle.stop(); // nothing collects through the bounded exit, an entry the last evaluation queued included
       if (endpoint) {
         await Promise.race([endpoint.stop().catch((error: unknown) => log(`the endpoint's stop failed: ${error instanceof Error ? error.message : String(error)}`)), sleep(ENDPOINT_STOP_MS)]);
       }

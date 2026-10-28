@@ -181,6 +181,7 @@ export class PluginsRunner {
   private closed = false; // `stop` ran: nothing new runs
   private queue: Promise<void> = Promise.resolve();
   private readonly idleListeners = new Set<() => void>(); // E10
+  private readonly busyListeners = new Set<() => void>(); // P5 Decision Log 124: the supervisor's quiet
 
   constructor(private readonly deps: PluginsRunnerDeps) {
     this.spawn = deps.spawn ?? nodeSpawn;
@@ -200,7 +201,7 @@ export class PluginsRunner {
     const argv = runnerCommandLine(action, input);
     const i = input as { plugin?: string; source?: string; name?: string };
     const op: Operation = { opId: randomUUID(), action, input, argv, cwd, target: i.plugin ?? i.source ?? i.name ?? '', binary, state: 'queued', abort: null, group: null, latest: null };
-    this.operations.set(op.opId, op);
+    this.hold(() => this.operations.set(op.opId, op));
     this.queue = this.queue
       .then(() => new Promise<void>((resolve) => this.timers.setTimeout(resolve, 0))) // after the receipt's answer is posted
       .then(() => this.run(op))
@@ -224,7 +225,8 @@ export class PluginsRunner {
   }
 
   // E10: whether the runner holds anything (a queued or running operation, a process group a read or a mutation still
-  // owns), which the supervisor's idle exit and exit-when-idle wait for; listeners hear each time it holds nothing again.
+  // owns), which the supervisor's idle exit and exit-when-idle wait for; listeners hear each time it holds nothing again,
+  // and each time it holds something again (the supervisor's quiet, P5 Decision Log 124).
   busy(): boolean {
     return this.operations.size > 0 || this.groups.size > 0;
   }
@@ -234,13 +236,28 @@ export class PluginsRunner {
     return () => this.idleListeners.delete(listener);
   }
 
+  onBusy(listener: () => void): () => void {
+    this.busyListeners.add(listener);
+    return () => this.busyListeners.delete(listener);
+  }
+
+  // `take` adds an operation or a group; listeners hear it when the runner held nothing before.
+  private hold(take: () => void): void {
+    const was = this.busy();
+    take();
+    if (!was) this.tell(this.busyListeners, 'busy');
+  }
+
   private settledOne(): void {
-    if (this.busy()) return;
-    for (const listener of this.idleListeners) {
+    if (!this.busy()) this.tell(this.idleListeners, 'idle');
+  }
+
+  private tell(listeners: Set<() => void>, what: 'busy' | 'idle'): void {
+    for (const listener of listeners) {
       try {
         listener();
       } catch (error) {
-        console.warn(`[engine-host] plugins idle listener failed: ${error instanceof Error ? error.message : String(error)}`);
+        console.warn(`[engine-host] plugins ${what} listener failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   }
@@ -329,7 +346,7 @@ export class PluginsRunner {
         return;
       }
       const group = new OwnedGroup(child, this.timers);
-      this.groups.add(group);
+      this.hold(() => this.groups.add(group));
       if (op) op.group = group;
       const ceiling = this.timers.setTimeout(() => void group.stop('timeout', KILL_GRACE_MS), CLI_TIMEOUT_MS);
       const out: string[] = [];

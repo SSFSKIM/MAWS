@@ -372,16 +372,21 @@ describe('PluginsRunner mutations', () => {
   });
 
   // E10: the supervisor's idle exit and exit-when-idle wait for the runner: a queued or running operation, or a process
-  // group a read still owns, keeps it busy; its listeners hear when it holds nothing again
-  it('is busy while an operation is queued or running or a read owns a group, and tells its listeners once it is idle', async () => {
+  // group a read still owns, keeps it busy; its listeners hear when it holds nothing again, and (the supervisor's quiet,
+  // P5 Decision Log 124) when it holds something again
+  it('is busy while an operation is queued or running or a read owns a group, and tells its listeners each change', async () => {
     behave(`if [ "$2" = "list" ]; then while [ ! -f "${fake}/read" ]; do sleep 0.02; done; echo '[]'; exit 0; fi\nwhile [ ! -f "${fake}/go" ]; do sleep 0.02; done\n${INSTALLED}\n`);
     const { runner } = make();
     let idles = 0;
+    let busies = 0;
     runner.onIdle(() => (idles += 1));
+    runner.onBusy(() => (busies += 1));
     expect(runner.busy()).toBe(false);
     const first = await runner.start('install', { plugin: 'e8-probe@e8-scratch' }, cwd, bin);
+    expect(busies).toBe(1);
     await runner.start('enable', { plugin: 'e8-probe@e8-scratch' }, cwd, bin);
     expect(runner.busy()).toBe(true);
+    expect(busies).toBe(1); // already busy
     writeFileSync(join(fake, 'go'), '');
     await until(() => idles === 1, 'idle after both operations');
     expect(runner.busy()).toBe(false);
@@ -389,6 +394,7 @@ describe('PluginsRunner mutations', () => {
     const read = runner.read(READ_LINES.installed, cwd);
     await until(() => calls().some((line) => line.startsWith('plugin list')), 'the read spawned');
     expect(runner.busy()).toBe(true);
+    expect(busies).toBe(2); // the read's group
     writeFileSync(join(fake, 'read'), '');
     await read;
     expect(runner.busy()).toBe(false);

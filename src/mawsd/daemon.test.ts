@@ -43,6 +43,13 @@ describe('the idle collection (P5 Decision Log 124)', () => {
     await sleep(20);
     expect(scene.collect).toHaveBeenCalledOnce();
   });
+
+  it('collects nothing once its exit began, a collection already queued included', async () => {
+    const daemon = await scene.start(); // its start's entry is queued behind this turn
+    await daemon.stop('test');
+    await sleep(20);
+    expect(scene.collect).not.toHaveBeenCalled();
+  });
 });
 
 describe('the start', () => {

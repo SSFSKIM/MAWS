@@ -425,6 +425,15 @@ describe('pty host coalesces reads into fewer events', () => {
     expect(live).toEqual([1, 2, 1, 0]);
   });
 
+  it('tells a shutdown before it ends any pty, so the last exit’s count comes after it', async () => {
+    const told: string[] = [];
+    const table = createPtyTable({ emit: () => true, environment: Promise.resolve(terminalEnvironment(BASE_ENV, { appVersion: '0' })), onLive: (count) => void told.push(`live ${count}`), onShutdown: () => void told.push('shutdown') });
+    tables.push(table);
+    await table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'read line'] }));
+    await table.shutdown();
+    expect(told).toEqual(['live 1', 'shutdown', 'live 0']);
+  });
+
   it('answers attach with every byte it has read: nextOffset covers what is still waiting to be flushed', async () => {
     const h = harness();
     const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'yes | head -c 1000000'] }));

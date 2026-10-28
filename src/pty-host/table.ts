@@ -70,6 +70,7 @@ export interface PtyTableOptions {
   // because the login-shell capture runs once, asynchronously, at host start.
   environment: Promise<Record<string, string>>;
   onLive?(live: number): void; // the live ptys' count after each spawn and each exit (P5 Decision Log 124's quiet)
+  onShutdown?(): void; // shutdown began, before it ends any pty (the idle collection stops)
 }
 
 export interface PtyTable {
@@ -88,7 +89,7 @@ export interface PtyTable {
   inspect(ptyId: string): { flow: Flow; ringStart: number; reads: number; read: number };
 }
 
-export function createPtyTable({ emit, environment: initial, onLive }: PtyTableOptions): PtyTable {
+export function createPtyTable({ emit, environment: initial, onLive, onShutdown }: PtyTableOptions): PtyTable {
   const entries = new Map<string, PtyEntry>();
   const tellLive = () => onLive?.([...entries.values()].filter((entry) => entry.info.alive).length);
   let environment = initial; // P5 O2 M4: what a spawn waits on; replaced once a recapture resolves
@@ -291,6 +292,7 @@ export function createPtyTable({ emit, environment: initial, onLive }: PtyTableO
 
     async shutdown() {
       closing = true;
+      onShutdown?.();
       const live = [...entries.values()].filter((entry) => entry.info.alive);
       const ended = await Promise.allSettled(live.map((entry) => end(entry.info.ptyId, entry, 'SIGHUP')));
       for (const [i, result] of ended.entries()) if (result.status === 'rejected') console.error(`[pty-host] ${live[i]!.info.ptyId} did not end at shutdown`, result.reason);

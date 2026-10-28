@@ -8,6 +8,8 @@ import { validateCommandOutput, validateEventPayload } from '@shared/ipc/validat
 import { endableClientRef, type ClientRef } from '@shared/ipc/client'; // P5 O2 M2
 import type { MachineRole } from './role'; // P5 O2 M2
 import type { EngineSessionStatus } from '@shared/engine/status';
+import type { BinaryCheck } from './binary-info';
+import { PluginsRunner } from './plugins/runner';
 import { DEFAULT_IDLE_EXIT_MS, RELEASE_WHILE_CONNECTED, SERVER_RELEASE_MS, Supervision, type SupervisorExit, type SupervisorIdentity } from './supervision';
 
 const T0 = new Date('2026-10-06T10:00:00.000Z');
@@ -41,7 +43,7 @@ function harness(mode: 'utility' | 'detached' = 'detached', role: MachineRole = 
   });
   const supervision = new Supervision({
     mode, identity: IDENTITY, table: table as never, role, // P5 O2 M2
-    plugins: { busy: () => plugins.held, onIdle: (listener) => (plugins.idle.add(listener), () => plugins.idle.delete(listener)) },
+    plugins: { busy: () => plugins.held, onIdle: (listener) => (plugins.idle.add(listener), () => plugins.idle.delete(listener)), onBusy: () => () => {} },
     shutdown,
     emit: (status) => {
       const checked = validateEventPayload('host.supervisorStatus', status);
@@ -361,17 +363,26 @@ describe('host.supervisorStatus', () => {
   });
 });
 
-// P5 Decision Log 124's idle collection: the supervisor's quiet, told on each change from the moment it serves.
+// P5 Decision Log 124's idle collection: the supervisor's quiet, told on each change from the moment it serves and its
+// startup has settled, over the real plugin runner.
 describe('the supervisor’s quiet', () => {
+  type Lifecycle = EngineSessionStatus['process'];
   // A row at rest unless `over` says otherwise: the fields E10's isIdleRow reads.
   const resting = (over: Partial<EngineSessionStatus> = {}) => ({ process: 'ready', engineState: 'idle', turn: null, busy: false, backgroundTasks: [], pendingRequests: 0, pendingPlan: null, queue: { length: 0, paused: false }, heldPeerMessages: [], mcpServers: [], ...over }) as unknown as EngineSessionStatus;
 
-  function quietHarness(mode: 'utility' | 'detached' = 'detached') {
-    const rows: { lifecycle: 'starting' | 'ready' | 'exited'; now: EngineSessionStatus; status(): EngineSessionStatus }[] = [];
+  function quietHarness(mode: 'utility' | 'detached' = 'detached', startup?: Promise<unknown>) {
+    const rows: { lifecycle: Lifecycle; now: EngineSessionStatus; status(): EngineSessionStatus }[] = [];
     const listeners = { status: new Set<() => void>(), rows: new Set<() => void>(), interest: new Set<() => void>() };
     let interested = false;
-    const plugins = { held: false, idle: new Set<() => void>() };
-    const told: boolean[] = [];
+    let answerBinary: ((check: BinaryCheck) => void) | null = null;
+    const plugins = new PluginsRunner({
+      binary: () => new Promise<BinaryCheck>((resolve) => (answerBinary = resolve)),
+      captureEnv: async () => ({}),
+      reloadTargets: () => [],
+      emit: () => {},
+      changed: () => {},
+    });
+    const told: (boolean | 'dropped')[] = [];
     const supervision = new Supervision({
       mode, identity: IDENTITY, role: 'laptop',
       table: {
@@ -383,34 +394,46 @@ describe('the supervisor’s quiet', () => {
         interested: () => interested,
         onInterestChanged: (listener: () => void) => (listeners.interest.add(listener), () => listeners.interest.delete(listener)),
       } as never,
-      plugins: { busy: () => plugins.held, onIdle: (listener) => (plugins.idle.add(listener), () => plugins.idle.delete(listener)) },
-      shutdown: async () => ({ stopped: 0, forced: 0 }),
+      plugins,
+      shutdown: () => new Promise(() => {}), // a stop-all's rows still stopping
       emit: () => true,
       log: () => {},
-      quiet: (quiet) => void told.push(quiet),
+      collector: { set: (quiet) => void told.push(quiet), dropped: () => void told.push('dropped') },
+      startup,
     });
+    const handlers = new Map<string, (input: unknown, ctx: { client: ClientRef }) => Promise<unknown>>();
+    supervision.register((name, handler) => void handlers.set(name, handler as (input: unknown, ctx: { client: ClientRef }) => Promise<unknown>), { onConnect: () => {} });
     const fire = (set: Set<() => void>) => set.forEach((listener) => listener());
+    const exits: SupervisorExit[] = [];
     return {
-      supervision, told,
-      start: () => supervision.started(DETACHED, () => {}),
+      supervision, told, exits,
+      start: () => supervision.started(DETACHED, (reason) => void exits.push(reason)),
       launch: (status: EngineSessionStatus) => {
-        const row = { lifecycle: status.process as 'starting' | 'ready', now: status, status: () => row.now };
+        const row = { lifecycle: status.process, now: status, status: () => row.now };
         rows.push(row);
         fire(listeners.rows);
       },
       change: (i: number, status: EngineSessionStatus) => {
         rows[i]!.now = status;
-        rows[i]!.lifecycle = status.process as 'starting' | 'ready' | 'exited';
+        rows[i]!.lifecycle = status.process;
         fire(listeners.status);
       },
       interest: (on: boolean) => {
         interested = on;
         fire(listeners.interest);
       },
-      plugins: (held: boolean) => {
-        plugins.held = held;
-        if (!held) fire(plugins.idle);
+      // A plugin operation, queued at once; `end` lets it run and fail at its binary check, which empties the runner.
+      operation: () => {
+        void plugins.start('install', { plugin: 'probe@scratch' }, '/', '/bin/claude');
+        return {
+          end: async () => {
+            await vi.advanceTimersByTimeAsync(0); // the queue's turn: the operation runs, waiting on the probe
+            answerBinary!({ path: '/bin/claude', testedVersion: '2.1.290', version: null, ok: false, error: 'no engine binary', declaresSystemPromptSnapshot: false });
+            await vi.advanceTimersByTimeAsync(0);
+          },
+        };
       },
+      stopAll: () => void handlers.get('host.stopAll')!({ graceMs: 100 }, { client: endableClientRef('1') }),
     };
   }
 
@@ -427,20 +450,83 @@ describe('the supervisor’s quiet', () => {
     expect(h.told).toEqual([true, false, true, false, true]);
   });
 
-  it('holds while a client holds interest or the plugin runner works, and comes back when each ends', () => {
+  it('holds while a client holds interest, and comes back when it ends', () => {
     const h = quietHarness();
     h.start();
     h.interest(true);
     h.interest(false);
-    h.plugins(true);
-    h.supervision.clientChanged(true); // a refresh reads the runner
-    h.plugins(false);
-    expect(h.told).toEqual([true, false, true, false, true]);
+    expect(h.told).toEqual([true, false, true]);
+  });
+
+  it('holds from the moment the plugin runner takes an operation until it is empty again', async () => {
+    const h = quietHarness();
+    h.start();
+    const op = h.operation();
+    expect(h.told).toEqual([true, false]);
+    await op.end();
+    expect(h.told).toEqual([true, false, true]);
+  });
+
+  it('tells a dropped holding when a live row ends with the host quiet: an idle release, or an engine’s exit', () => {
+    const h = quietHarness();
+    h.start();
+    h.launch(resting());
+    h.launch(resting());
+    h.change(0, resting({ process: 'exiting' })); // the idle release stops it
+    h.change(0, resting({ process: 'exited' }));
+    expect(h.told).toEqual([true, false, true, 'dropped']);
+    h.change(1, resting({ process: 'exited' })); // its engine exited on its own
+    expect(h.told).toEqual([true, false, true, 'dropped', 'dropped']);
+  });
+
+  it('tells no dropped holding for a row that ends while the host is not quiet', () => {
+    const h = quietHarness();
+    h.start();
+    h.launch(resting());
+    h.interest(true);
+    h.change(0, resting({ process: 'exited' }));
+    expect(h.told).toEqual([true, false]);
   });
 
   it('a utility host serves from its register', () => {
     const h = quietHarness('utility');
     h.launch(resting());
     expect(h.told).toEqual([true]);
+  });
+
+  it('waits for the startup gate to settle, resolved or rejected, in either mode', async () => {
+    let resolve!: () => void;
+    const utility = quietHarness('utility', new Promise<void>((done) => (resolve = done)));
+    expect(utility.told).toEqual([]); // still seeding
+    resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(utility.told).toEqual([true]);
+    let reject!: (error: Error) => void;
+    const detached = quietHarness('detached', new Promise<void>((_, fail) => (reject = fail)));
+    detached.start();
+    expect(detached.told).toEqual([]);
+    reject(new Error('the seed failed'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(detached.told).toEqual([true]);
+  });
+
+  it('is told not quiet when it leaves, and stays so', () => {
+    const h = quietHarness();
+    h.start();
+    h.supervision.armExitWhenIdle(true); // nothing live: it leaves at once
+    expect(h.exits).toEqual(['exitWhenIdle']);
+    expect(h.told).toEqual([true, false]);
+    h.interest(true);
+    h.interest(false);
+    expect(h.told).toEqual([true, false]);
+  });
+
+  it('is told not quiet at a stop-all, in a utility host too, and stays so while its rows stop', () => {
+    const h = quietHarness('utility');
+    h.launch(resting());
+    h.stopAll();
+    expect(h.told).toEqual([true, false]);
+    h.change(0, resting({ process: 'exited' }));
+    expect(h.told).toEqual([true, false]);
   });
 });
