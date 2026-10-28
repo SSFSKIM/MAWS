@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import type { AgentId, MessageUuid, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import { AgentMetaSchema, currentChain, parseTranscriptRecord, type TranscriptRecord } from '@shared/wire/transcript';
-import { FIXTURE_DIR, loadEngineJournal, loadJournal, loadTranscript, loadTranscriptFixture } from '../../../test/support/fixtures';
+import { FIXTURE_DIR, loadEngineJournal, loadJournal, loadSyntheticTranscript, loadTranscript, loadTranscriptFixture } from '../../../test/support/fixtures';
 import { Normalizer } from '../normalizer'; // E7
 import { recordedReceiptRecord } from '../../../test/support/agents-events';
 import { createBackfillContext, recordToEvents, SPILL_MARKER, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
@@ -401,6 +401,25 @@ describe('a hook that got in the way, from disk', () => {
     // the marker in a record of its own after the rejected tool's result, as 2.1.283 writes it (w1-steer-next-interrupted.jsonl lines 23 and 25)
     const marker = rec({ type: 'user', uuid: 'm1', parentUuid: 'r1', timestamp: at(3), message: { role: 'user', content: [MARKER] } });
     expect(blockedTurn(mapAll([prompt, toolUse, toolResult(), marker, blocked('b1', 'm1', STEER)]), 'b1')).toEqual(standalone);
+  });
+});
+
+// The to-human plugin's made-up answer after a final message (`@shared/owner/message-call`): no event, so no reader of
+// events meets it; the call before it and the turn's end map as they would without it.
+describe('the to-human plugin’s answer after a final message', () => {
+  it('maps to nothing, and the turn still reads to its end: the final call, its accepted result, then turn.ended', () => {
+    const records = loadSyntheticTranscript('transcript-to-human-final');
+    const ctx = createBackfillContext({ sessionId: SESSION, agent: null });
+    const mapped = records.map((record) => ({ uuid: record.uuid, events: mapAll([record], ctx) }));
+    expect(mapped.filter(({ events }) => events.length === 0).map(({ uuid }) => uuid)).toEqual(['made-up']);
+    const events = mapped.flatMap(({ events }) => events);
+    expect(only(events, 'assistant.block.complete').map((e) => (e.block.type === 'text' ? e.block.text : e.block.type))).toEqual(['Looking first.', 'tool_use', 'tool_use']);
+    expect(only(events, 'tool.use').map((e) => [e.toolName, e.input])).toEqual([
+      ['Bash', { command: 'sh stage.sh', description: 'Run the stages' }],
+      ['mcp__to-human__message', { text: 'Both stages ran; 37 labels are missing.', final: true }],
+    ]);
+    expect(only(events, 'tool.result').map((e) => [e.toolUseId, e.isError])).toEqual([['toolu_01Stage', false], ['toolu_01Final', false]]);
+    expect(only(events, 'turn.ended')).toMatchObject([{ result: 'success', isError: false, userMessageUuids: ['p1'] }]);
   });
 });
 

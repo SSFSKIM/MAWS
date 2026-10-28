@@ -344,4 +344,13 @@ describe('the last assistant line and a message tool’s call', () => {
     expect(lastLine(said('Looking first.'), call('c1', 'Stage 1 is done.'))).toBe('Looking first.');
     expect(lastLine(said('Looking first.'), call('c1', 'Stage 1 is done.'), result('c1', 'MCP error: the server went away', true), bash('b1'))).toBe('Looking first.');
   });
+
+  // The to-human plugin's made-up answer after a final message is the transcript's last assistant record and said
+  // nothing: the line is what the call left, the text before it in MAWS's reading of the plugin's tool, and the message
+  // where the call is MAWS's (the same turn under MAWS's name).
+  it('the to-human plugin’s answer after a final message is no line', () => {
+    const turn = readFileSync(join(TEST_FIXTURE_DIR, 'transcript-to-human-final.jsonl'), 'utf8');
+    expect(lastLine(turn)).toBe('Looking first.');
+    expect(lastLine(turn.replaceAll('mcp__to-human__message', 'mcp__maws__message'))).toBe('Both stages ran; 37 labels are missing.');
+  });
 });

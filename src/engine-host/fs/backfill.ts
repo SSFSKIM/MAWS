@@ -10,6 +10,7 @@ import { slashCommandLine } from '@shared/wire/local-command';
 import { INTERRUPT_MARKER } from '../normalizer-support';
 import { apiRetryOfApiError } from '../normalizer-system';
 import { messageText, parsePeerMessage, peerEventsOf } from '@shared/engine/peer-envelope'; // E7
+import { isMadeUpFinalAnswer } from '@shared/owner/message-call';
 
 // The three engine strings that name a spilled result (SPEC 12.12 and 20.10); the structured field wins when present.
 export const SPILL_MARKER = /(?:Full output saved to|were saved to|was saved to):? (\/[^\r\n]+\.(?:txt|json))(?=[.;\s]|$)/;
@@ -354,6 +355,7 @@ function assistantEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: Backf
   ctx.inToolLoop = false;
   ctx.lastAssistantWasApiError = record.isApiErrorMessage === true;
   if (isNoResponseMarker(record)) return; // resume bookkeeping still resets the assistant context above
+  if (isMadeUpFinalAnswer(record)) return; // the to-human plugin's answer after a final message: no request, nothing said
   content.forEach((block, i) => {
     events.push({
       ...base(),
