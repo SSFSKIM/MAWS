@@ -14,7 +14,8 @@ export function backoff(attempt: number, random: () => number = Math.random): nu
 }
 
 export type HubSocketOptions<Down> = {
-  url: string;
+  /** Read at every connect, so an owner can change where the next connection goes. */
+  url: string | (() => string);
   /** A connection opened: the owner sends what a fresh connection needs. */
   open(): void;
   frame(frame: Down): void;
@@ -77,7 +78,8 @@ export class HubSocket<Down extends { t: string }, Up extends object> {
 
   private connect(): void {
     this.status('connecting');
-    const ws = new WebSocket(this.options.url);
+    const { url } = this.options;
+    const ws = new WebSocket(typeof url === 'string' ? url : url());
     const assembler = new PartAssembler();
     let opened = false;
     this.ws = ws;

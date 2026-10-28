@@ -1,6 +1,8 @@
 // The desk's frame: sign-in (Access admits the person; `/api/me` names the member), the device's org key, the grid's
 // socket, the route — the grid, every session of the org, or a project — and the PWA's part: the service worker, this device's notifications
-// handed to the hub again at start, and the card a tapped notification opens. A phone draws a compact top bar.
+// handed to the hub again at start, and the card a tapped notification opens. A phone draws a compact top bar. This
+// browser as a `web-cards` device (P5 O13 M3: its record, the org state it verified, the listings, the push binding) is
+// started with the member, and its Device panel is reached from the top bar and the phone's menu.
 //
 // The first load is the grid's: the project view (with MAWS's Markdown and request cards) and the dialogs load as
 // chunks of their own when first opened, so the phone's first screen does not wait on them. So does the latency
@@ -16,10 +18,12 @@ import { recordPushOutcome } from './push/outcome';
 import { browserPushEnv, resyncPush } from './push/device';
 import { orgWaiting, showBadge } from './pwa/badge';
 import { registerServiceWorker } from './pwa/service-worker';
+import { bootDevice, isDevice, stopDevice } from './cards/boot';
 import { followHistory, useDeskLayout } from './shell/layout';
 import { usePhoneProject } from './shell/phone';
 import { useNarrow } from './shell/viewport';
 import { startGrid, useGrid } from './state/grid';
+import { useDeskStorage } from './store/idb';
 import { SignInAgainButton } from './views/access/SignInAgain';
 import { GridView } from './views/grid/GridView';
 import { useSecondMethodPrompt } from './views/key/second-method';
@@ -31,6 +35,7 @@ const LatencyOverlay = lazy(() => loadChunk(() => import('./latency/LatencyOverl
 const KeyDialog = lazy(() => loadChunk(() => import('./views/key/KeyDialog').then((m) => ({ default: m.KeyDialog }))));
 const MachinesDialog = lazy(() => loadChunk(() => import('./views/machines/MachinesDialog').then((m) => ({ default: m.MachinesDialog }))));
 const NotificationsDialog = lazy(() => loadChunk(() => import('./views/notifications/NotificationsDialog').then((m) => ({ default: m.NotificationsDialog }))));
+const DevicePanel = lazy(() => loadChunk(() => import('./views/cards/DevicePanel').then((m) => ({ default: m.DevicePanel }))));
 
 const queries = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
 
@@ -70,7 +75,7 @@ function SignedIn() {
   return <Desk me={me.data} />;
 }
 
-type Panel = 'key' | 'machines' | 'notifications' | 'menu' | null;
+type Panel = 'key' | 'machines' | 'notifications' | 'device' | 'menu' | null;
 
 function Desk({ me }: { me: Me }) {
   const route = useDeskLayout((s) => s.route);
@@ -86,14 +91,26 @@ function Desk({ me }: { me: Me }) {
   useEffect(() => watchAccess(), []);
   useEffect(() => startGrid(hubBase()), []);
   useEffect(() => void loadDeviceKey(me.org.id), [me.org.id]);
-  // A device already subscribed hands its subscription to the hub again; what came of it is kept for the
-  // Notifications panel, which shows a refusal and offers Retry.
+  // This browser as a `web-cards` device: started now when it is one already (its record, the org state it verified,
+  // the push binding), else only once the Device panel opens (cards/boot.ts). A device already subscribed hands its
+  // subscription to the hub again — the device's start does that, bound to the device while the org lists it; what came
+  // of it is kept for the Notifications panel, which shows a refusal and offers Retry.
   useEffect(() => {
-    void recordPushOutcome(resyncPush(browserPushEnv(registerServiceWorker())));
-  }, []);
+    let live = true;
+    const resync = () => void recordPushOutcome(resyncPush(browserPushEnv(registerServiceWorker())));
+    isDevice(me.org.id).then(
+      (device) => live && (device ? void bootDevice(me) : resync()),
+      () => live && resync(),
+    );
+    return () => {
+      live = false;
+      stopDevice();
+    };
+  }, [me]);
   // The app icon's badge follows the grid while the app is open (a push sets it from its payload while it is not), so
   // a request answered anywhere clears it.
   const gridLoaded = useGrid((s) => s.loaded);
+  const storageBlocked = useDeskStorage((s) => s.blocked);
   const waiting = useGrid((s) => orgWaiting(s.projects));
   useEffect(() => {
     if (gridLoaded) void showBadge(navigator as Parameters<typeof showBadge>[0], waiting);
@@ -101,6 +118,11 @@ function Desk({ me }: { me: Me }) {
   return (
     <div className="grid h-full grid-rows-[auto_minmax(0,1fr)] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       <TopBar me={me} open={setPanel} />
+      {storageBlocked && (
+        <p className="fixed inset-x-0 top-[var(--toolbar-h)] z-40 m-0 border-b border-border bg-bg-raised px-4 py-2 text-ui-sm text-danger" role="alert" data-testid="storage-blocked">
+          Another desk tab is still open on an older version, and this one can't read its stored keys until it closes. Close the desk's other tabs (and its Home Screen app, if it's open), and this one carries on.
+        </p>
+      )}
       {route.view === 'grid' ? (
         <GridView onEnroll={() => setPanel('machines')} />
       ) : route.view === 'org' ? (
@@ -116,6 +138,7 @@ function Desk({ me }: { me: Me }) {
         {(panel === 'key' || (secondMethodDue && panel === null)) && <KeyDialog me={me} onClose={close} />}
         {panel === 'machines' && <MachinesDialog me={me} onClose={close} />}
         {panel === 'notifications' && <NotificationsDialog onClose={close} />}
+        {panel === 'device' && <DevicePanel me={me} onClose={close} />}
       </Suspense>
       {panel === 'menu' && <PhoneMenu me={me} open={setPanel} onClose={close} />}
     </div>
@@ -202,6 +225,9 @@ function TopBar({ me, open }: { me: Me; open: (panel: Panel) => void }) {
         <button type="button" onClick={() => open('notifications')} className="rounded-sm px-1 hover:bg-bg-hover hover:text-fg">
           Notifications
         </button>
+        <button type="button" onClick={() => open('device')} className="rounded-sm px-1 hover:bg-bg-hover hover:text-fg">
+          Device
+        </button>
         <button type="button" onClick={() => open('machines')} className="rounded-sm px-1 hover:bg-bg-hover hover:text-fg">
           Machines
         </button>
@@ -262,6 +288,9 @@ function PhoneMenu({ me, open, onClose }: { me: Me; open: (panel: Panel) => void
       <div role="dialog" aria-modal="true" aria-label="Menu" className="w-full rounded-t-lg border-t border-border-strong bg-bg-overlay p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] text-fg shadow-lg">
         <button type="button" className={row} onClick={() => open('notifications')}>
           Notifications
+        </button>
+        <button type="button" className={row} onClick={() => open('device')}>
+          Device
         </button>
         <button type="button" className={row} onClick={() => open('key')}>
           Org key
