@@ -7,12 +7,14 @@
 // engine host ends this client's set itself when its connection ends.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
+import type { MachineRef } from '@shared/machine/ref';
 import { sessionsInTabs } from '../layout/open-session-tabs';
 
 export const INTEREST_COALESCE_MS = 250;
 
-export function interestSet(mainTabs: unknown, onScreen: Iterable<AppSessionId>): AppSessionId[] {
-  return [...new Set([...sessionsInTabs(mainTabs), ...onScreen])].sort();
+// P5 O6: the tabs hold addresses; the engine host is this machine's, so the set is the local machine's bare ids.
+export function interestSet(mainTabs: unknown, onScreen: Iterable<AppSessionId>, local: MachineRef): AppSessionId[] {
+  return [...new Set([...sessionsInTabs(mainTabs, local), ...onScreen])].sort();
 }
 
 export interface InterestDeps {

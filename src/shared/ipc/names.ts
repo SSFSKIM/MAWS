@@ -56,6 +56,8 @@ import * as delivery from './names/delivery'; // P4-B5
 import * as customization from './names/customization'; // UX2-K
 import * as catalog from './names/catalog'; // P4-AGG M2
 import * as daemon from './names/daemon'; // P5 O2 M5
+import * as machine from './names/machine'; // P5 O6 M1
+import * as machines from './names/machines'; // P5 O6 M3
 
 export const NAMESPACES = [
   'session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings',
@@ -94,6 +96,8 @@ export const NAMESPACES = [
   'customization', // UX2-K
   'catalog', // P4-AGG M2
   'daemon', // P5 O2 M5
+  'machine', // P5 O6 M1
+  'machines', // P5 O6 M3
 ] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 
@@ -119,6 +123,8 @@ export const NAMES = {
   customization, // UX2-K
   catalog, // P4-AGG M2
   daemon, // P5 O2 M5
+  machine, // P5 O6 M1
+  machines, // P5 O6 M3
 } as const satisfies { [N in Namespace]: { commands: readonly `${N}.${string}`[]; events: readonly `${N}.${string}`[] } };
 
 type Names = typeof NAMES;

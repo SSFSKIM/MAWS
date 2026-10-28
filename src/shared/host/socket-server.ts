@@ -29,11 +29,13 @@
 // identity says, which is WIRE_CAPABILITIES for every host.
 //
 // P5 O2 M5 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, "The handshake reflects the upstream"): a relay (`mawsd`'s
-// engine-host.sock and pty-host.sock) welcomes with its upstream's facts, not its own. With `admit`, a hello that passed
+// engine-host.sock and pty-host.sock) welcomes with its upstream's facts, not its own. With `admitHello`, a hello that passed
 // (1) to (3) waits for its answer, every byte the client sends meanwhile kept for the port: `welcome` (the identity and
 // counts to welcome with; then (4) and (5)), `refuse` (the upstream's refusal line, written as it is, after which the
 // connection is a refused one: one exit honoured, within the hello's deadline), or `close` (nothing written). `onExit`
 // says whether its exit came from a refused connection.
+//
+// P5 O6 M3: an `admit` option checks each accepted connection's peer before any of the above.
 import { timingSafeEqual } from 'node:crypto';
 import type { Server, Socket } from 'node:net';
 import { HostClientGoneSchema, HostReadySchema, HostRequestSchema } from '../ipc/host-protocol';
@@ -92,11 +94,14 @@ export interface SocketServerOptions {
   token(): string;
   onExit(when: 'now' | 'idle', from?: { refused: boolean }): void; // an `exit` line on a connection whose token checked out (P5 O2 M5: `from` says which kind)
   onClient?(connected: boolean): void; // a client was welcomed, or a client left (not called for a replaced one)
-  admit?(peer: WirePeer): Promise<Admission>; // P5 O2 M5: a relay's reflected handshake (above)
+  admitHello?(peer: WirePeer): Promise<Admission>; // P5 O2 M5: a relay's reflected handshake (above)
   log(line: string): void;
   helloTimeoutMs?: number;
   lineCap?: number;
   docHighWater?: number; // P3-A M5: the document channels' reset mark (DOC_HIGH_WATER unless a test lowers it)
+  // P5 O6 M3: a peer check, consulted on each accepted connection before anything is read from it or the hello's deadline
+  // starts; false destroys the connection. The stand-in's (src/main/machines/serve-standin.ts); the supervisor passes none.
+  admit?(socket: Socket): boolean;
 }
 
 export interface SocketClients {
@@ -124,6 +129,10 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
   server.on('connection', (socket) => accept(socket));
 
   function accept(socket: Socket): void {
+    if (options.admit && !options.admit(socket)) {
+      socket.destroy(); // P5 O6 M3: refused before a byte is read
+      return;
+    }
     let phase: 'hello' | 'refused' | 'done' = 'hello';
     let welcome: (() => void) | null = null;
     const deadlineMs = options.helloTimeoutMs ?? HELLO_TIMEOUT_MS;
@@ -255,15 +264,15 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
 
     // (4) replacement, then (5) the welcome `line` builds; the port is built once the splitter has kept the bytes past
     // the hello
-    // P5 O2 M5: with `admit`, the welcome waits for its answer; the splitter, stopped, keeps every byte read meanwhile
+    // P5 O2 M5: with `admitHello`, the welcome waits for its answer; the splitter, stopped, keeps every byte read meanwhile
     function welcomed(peer: WirePeer, appPid: number, line: (counts: { liveSessions: number; rows: number }, identity?: SupervisorIdentity) => ServerWelcome | ServerWelcomeV2): 'stop' {
       phase = 'done';
-      if (!options.admit) {
+      if (!options.admitHello) {
         socket.off('data', onData);
         welcome = () => serve(peer, appPid, line(options.counts()));
         return 'stop';
       }
-      const admit = options.admit;
+      const admit = options.admitHello;
       welcome = () =>
         void admit(peer).then(
           (admission) => admitted(admission, peer, appPid, line),

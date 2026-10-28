@@ -13,6 +13,7 @@ import type { EventPayload } from '@shared/ipc/schema';
 import type { SubagentEntry, WorkflowRun } from '@shared/ipc/schema/fs';
 import type { PersistedTask } from '@shared/wire/store';
 import { record, status } from '../../../../../../test/support/builders';
+import { at } from '../../../../../../test/support/machine';
 import { event, replayed, sidecarsOf, upTo, workflowRunsOf } from '../../../../../../test/support/agents-events';
 import { connectAgentWorkEvents } from '../../../ipc/events';
 import * as query from '../../../ipc/query';
@@ -50,7 +51,7 @@ vi.mock('../../../ipc/query', async (importOriginal) => {
   return { ...actual, useCommand: spies.useCommand.mockImplementation(actual.useCommand) };
 });
 
-const A = 'A' as AppSessionId;
+const A = at('A') as AppSessionId; // the page holds addresses
 const TITLE = 'Fix drag';
 const T = '2026-09-29T10:00:00.000Z';
 
@@ -62,11 +63,11 @@ const tasksChanged = new Set<(payload: EventPayload<'fs.tasksChanged'>) => void>
 const handles: BackgroundHandle[] = [];
 let disconnect: (() => void) | null = null;
 
-const live = (over: Partial<EngineSessionStatus> = {}): EngineSessionStatus => ({ ...status('A'), launchId: 'journal', taskListId: null, ...over });
+const live = (over: Partial<EngineSessionStatus> = {}): EngineSessionStatus => ({ ...status('A'), appSessionId: A, launchId: 'journal', taskListId: null, ...over });
 
 function seedSessions(statusOfA: EngineSessionStatus | null, engineSessionId: string | null = 'eng-A'): void {
   useSessions.setState((s) => ({
-    records: new Map([[A, record('A', { title: { text: TITLE, source: 'user' }, engineSessionId: engineSessionId as SessionId | null })]]),
+    records: new Map([[A, record('A', { appId: A, title: { text: TITLE, source: 'user' }, engineSessionId: engineSessionId as SessionId | null })]]),
     engine: statusOfA ? new Map([[A, statusOfA]]) : new Map(),
     digests: new Map(),
     recordsVersion: s.recordsVersion + 1,
@@ -135,7 +136,7 @@ function unmountAll(): void {
   useTaskGraph.setState({ entries: new Map() });
 }
 
-const push = (events: SessionEvent[]) => act(() => fake.batch('A', events));
+const push = (events: SessionEvent[]) => act(() => fake.batch(A, events));
 const section = (name: string) => document.querySelector<HTMLElement>(`[data-section="${name}"]`);
 // the heading's own text: its toggle (E7: the Tasks heading also holds `Open`)
 const heading = (name: string) => section(name)?.querySelector('h3 > button')?.textContent;
@@ -161,7 +162,7 @@ beforeEach(() => {
   tasksChanged.clear();
   client = {
     ...fake.client,
-    tasks: async (listId) => {
+    tasks: async (_machine, listId) => {
       tasksCalls.push(listId);
       const answer = lists[listId] ?? [];
       if (answer instanceof Error) throw answer;

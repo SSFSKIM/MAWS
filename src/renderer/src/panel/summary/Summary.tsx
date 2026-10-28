@@ -2,6 +2,7 @@
 import { useEffect, type FunctionComponent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import { machineFor } from '../../ipc/machine';
 import { useGit } from '../../stores/git';
 import { useSessions } from '../../stores/sessions';
 import { Artifacts } from './Artifacts';
@@ -25,7 +26,8 @@ export const Summary = FloatingSummary;
 
 function SessionSummary({ appSessionId, record }: { appSessionId: AppSessionId; record: SessionRecord }) {
   const directory = record.worktree?.path ?? record.directory;
-  useEffect(() => useGit.getState().watch(directory), [directory]);
+  const machine = machineFor(appSessionId);
+  useEffect(() => useGit.getState().watch(machine, directory), [machine, directory]);
   return (
     <div aria-label="Session cards" className="flex max-h-full w-70 max-w-full flex-col gap-1.5 overflow-y-auto p-1">
       <Environment appSessionId={appSessionId} record={record} directory={directory} />

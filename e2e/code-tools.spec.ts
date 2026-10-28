@@ -14,6 +14,7 @@ import {
   selectReviewFile, shortWindow, treeRow, withProduct,
 } from './support/code-product';
 import { buildCodeScratch, GENERATED_LINES, generatedLine, MARKER_LINE, SVG_TEXT, type CodeScratch } from './support/code-scratch';
+import { addressed, localRef } from './support/address';
 import { test, type MawsLaunch } from './support/launch';
 import { latencyBudgets, MEASURED_WAIT_MS } from './support/latency';
 import { hideSurfaces, mainTabs, openSurface, pinSurfaceForSessions, unfoldSessionCard } from './support/shell';
@@ -135,12 +136,13 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
     // The column's Transcript renders over the loaded HarnessSession's own keyed source (never an unkeyed `source:`),
     // and Review read the turn under 'A', where C8a's loadTranscript attached the same player.
     const key = await h.code('transcriptKey');
-    expect(key).toMatch(/^harness:\d+$/);
+    expect(key).toMatch(/^[^/]+\/harness:\d+$/); // P5 O6 M2: an address of the local machine
     const keys = await h.code('storeKeys');
-    expect(keys).toEqual(expect.arrayContaining(['A', key!]));
+    const a = await addressed(h.page, 'A'); // the page keys A's transcript by its address
+    expect(keys).toEqual(expect.arrayContaining([a, key!]));
     expect(keys.filter((k) => k.startsWith('source:'))).toEqual([]);
-    expect(await h.code('changedTurns', 'A')).toContain(collapsed.turnId);
-    expect(await h.code('changedTurns', key!)).toEqual(await h.code('changedTurns', 'A'));
+    expect(await h.code('changedTurns', a)).toContain(collapsed.turnId);
+    expect(await h.code('changedTurns', key!)).toEqual(await h.code('changedTurns', a));
 
     await h.code('selectFile', turnFiles[1].path, 'panel');
     await expect.poll(async () => (await h.review('panel'))?.selected).toBe(turnFiles[1].path);
@@ -238,7 +240,7 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
     await withScratch(h, async () => {
       await reviewAppTs(h);
       const panel = (await h.review('panel'))!;
-      await h.code('openTab', { kind: 'diff', ref: 'uncommitted @ src/app.ts', appSessionId: 'A' } as never);
+      await h.code('openTab', { kind: 'diff', ref: 'uncommitted @ src/app.ts', appSessionId: await addressed(h.page, 'A') } as never);
       await expect(h.page.locator('[data-diff-tab="uncommitted @ src/app.ts"] [data-review]')).toBeVisible();
       await expect.poll(async () => (await h.review('tab'))?.selected).toBe('src/app.ts');
       const tab = (await h.review('tab'))!;
@@ -298,9 +300,9 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
           [
             'a viewer tab (a refusal: A reads its harness directory) and the diff tab',
             async () => {
-              await h.code('openTab', { kind: 'file', path: scratch.path('src/app.ts'), line: 5, appSessionId: 'A' } as never);
+              await h.code('openTab', { kind: 'file', path: scratch.path('src/app.ts'), line: 5, appSessionId: await addressed(h.page, 'A'), machine: await localRef(h.page) } as never);
               await expect(h.page.locator('[data-file-viewer] [data-refusal]')).toBeVisible();
-              await h.code('openTab', { kind: 'diff', ref: 'uncommitted @ src/app.ts', appSessionId: 'A' } as never);
+              await h.code('openTab', { kind: 'diff', ref: 'uncommitted @ src/app.ts', appSessionId: await addressed(h.page, 'A') } as never);
               await expect(h.page.locator('[data-diff-tab] [data-review-body] tr[data-state="diff"]').first()).toBeVisible();
             },
           ],
@@ -361,7 +363,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
             return result.ok ? Object.values((result.value.value as Sets).sets).flatMap((set) => set.panes.map((pane) => pane.activeTabId)) : [];
           }),
         )
-        .toContain(`file:${p.scratch.path('src/app.ts')}`);
+        .toContain(`file:${await localRef(p.page)}:${p.scratch.path('src/app.ts')}`);
     });
   });
 
@@ -622,7 +624,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
         type Sets = { sets: Record<string, { panes: { tabs: { id: string; kind: string; line?: number }[] }[] }> }; // W12: every tab set
         return result.ok ? Object.values((result.value.value as Sets).sets).flatMap((set) => set.panes.flatMap((pane) => pane.tabs.filter((t) => t.kind === 'file'))) : [];
       });
-      expect(fileTabs.map((t) => t.id), 'one file tab').toEqual([`file:${p.scratch.path('src/app.ts')}`]);
+      expect(fileTabs.map((t) => t.id), 'one file tab').toEqual([`file:${await localRef(p.page)}:${p.scratch.path('src/app.ts')}`]);
     });
   });
 
@@ -671,7 +673,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
 
   test('Review with a path outside the roots is refused', async () => {
     await withProduct(async (p) => {
-      const id = p.scratch.appSessionId;
+      const id = await addressed(p.page, p.scratch.appSessionId); // the page's tabs hold the session's address
       await expect
         .poll(async () =>
           p.page.evaluate(async () => {

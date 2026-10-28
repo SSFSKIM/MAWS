@@ -35,6 +35,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { BENCH, budgetMisses, clockCheck, invalidReasons, latencyLine, summarize, type ClockBracket } from '../test/support/local-latency';
 import { MARKER_SOURCE, markerOf, writeLatencyEngine } from '../test/support/latency-engine';
 import { machineLoad } from '../test/support/latency-budget';
+import { addressed } from './support/address';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { killScratchProcesses } from './support/processes';
@@ -172,7 +173,7 @@ test('local latency: delta to frame and command round trip of a lane B session o
     await expect(async () => {
       const row = await sidebarRow(page, { appSessionId: id });
       await row.click({ timeout: 2_000 });
-      await expect(page.locator(`[data-region="main"] [data-composer="${id}"]`)).toBeVisible({ timeout: 2_000 });
+      await expect(page.locator(`[data-region="main"] [data-composer="${await addressed(page, id)}"]`)).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: TURN_MS });
     await page.mouse.move(700, 20);
     await observeMarkers(page);

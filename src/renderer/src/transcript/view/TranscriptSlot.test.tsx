@@ -4,11 +4,13 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import { bareOf } from '@shared/machine/address';
 import { askSteerText } from '@shared/maws/ask';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { TEST_MACHINE, at } from '../../../../../test/support/machine';
 import { resetQueueStore } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
 import { applyTaskEvents, emptyGraph } from '../../tools/agents/model/task-graph';
@@ -51,7 +53,7 @@ afterEach(() => {
   for (const dispose of disposers.splice(0)) dispose();
   for (const key of Object.keys(useTranscriptStore.getState().entries)) useTranscriptStore.getState().drop(key);
   resetQueueStore();
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 describe('registerTranscriptActions', () => {
@@ -76,7 +78,7 @@ describe('registerTranscriptActions', () => {
 });
 
 describe('TranscriptSlot', () => {
-  const APP = 'app-slot' as AppSessionId;
+  const APP = at('app-slot' as AppSessionId);
   const EMPTY = { entries: [], paused: false, pauseReason: null, steers: [], withdrawn: [] };
   function history(): SessionEvent[] {
     const b = builder();
@@ -98,11 +100,11 @@ describe('TranscriptSlot', () => {
               : { ok: false, error: { code: 'internal', message: 'unexpected' } },
       ),
     );
-    (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
+    window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
     render(<TranscriptSlot appSessionId={APP} className="slot" />);
     await settle();
     expect(screen.getByRole('region', { name: 'Your message' })).toBeTruthy();
-    expect(invoke).toHaveBeenCalledWith('session.events', { appSessionId: APP, afterSeq: null, limit: null });
+    expect(invoke).toHaveBeenCalledWith('session.events', { appSessionId: bareOf(APP), afterSeq: null, limit: null }, TEST_MACHINE);
     expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toContain('See the file');
 
     const editAndResubmit = vi.fn();
@@ -114,7 +116,7 @@ describe('TranscriptSlot', () => {
     fireEvent.click(screen.getByTitle('Edit here · Send rewinds this session to this message'));
     expect(editAndResubmit).toHaveBeenCalledTimes(1);
     fireEvent.click(document.querySelector<HTMLElement>('[data-chip="path"]')!);
-    expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined);
+    expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined, APP);
 
     const again = vi.fn();
     let dispose = () => {};
@@ -129,7 +131,7 @@ describe('TranscriptSlot', () => {
   });
 
   it('tells the Transcript where the session runs, from its record: a shell call with no cwd shows the worktree’s checkout', async () => {
-    const id = 'app-slot-shell' as AppSessionId;
+    const id = at('app-slot-shell' as AppSessionId);
     const b = builder();
     b.turn('u1', 'List it');
     b.toolUse('t1', 'Bash', { command: 'ls' });
@@ -139,7 +141,7 @@ describe('TranscriptSlot', () => {
     act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project', worktree: { path: '/w/project-wt', branch: 'wt' } } as unknown as SessionRecord]]) }));
     onTestFinished(() => useSessions.setState({ records }));
     const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.queue.list' ? EMPTY : name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 3, complete: true } }));
-    (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
+    window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
     render(<TranscriptSlot appSessionId={id} />);
     await settle();
     expect(useTranscriptStore.getState().entries[id]?.phase).toBe('live');
@@ -150,7 +152,7 @@ describe('TranscriptSlot', () => {
 
   // A child agent's shell may have run in its own worktree, so its transcript names no directory it cannot vouch for.
   it('tells a child agent’s Transcript no session directory', async () => {
-    const id = 'app-slot-child-shell' as AppSessionId;
+    const id = at('app-slot-child-shell' as AppSessionId);
     const agent = 'agent-shell' as AgentId;
     const c = builder();
     c.turn('c1', 'List it');
@@ -166,7 +168,7 @@ describe('TranscriptSlot', () => {
         name === 'session.events' || name === 'session.appEvents' ? { ok: true, value: { events: [], lastSeq: 0, complete: true } } : { ok: true, value: { events, complete: true } },
       ),
     );
-    (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
+    window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
     render(<TranscriptSlot appSessionId={id} agentId={agent} />);
     const key = `${id}:${agent}`;
     await settle();
@@ -182,7 +184,7 @@ describe('TranscriptSlot', () => {
   // session's task graph (what the store holds; the slot opens no watch of its own), pushed again only when the agents
   // it names change.
   it('names an agent the transcript never launched from the session’s task graph, and re-pushes only when the agents change', async () => {
-    const id = 'app-slot-child-lookup' as AppSessionId;
+    const id = at('app-slot-child-lookup' as AppSessionId);
     const agent = 'agent-writer' as AgentId;
     const c = builder();
     c.turn('c1', 'Coordinate');
@@ -194,7 +196,7 @@ describe('TranscriptSlot', () => {
         name === 'session.events' || name === 'session.appEvents' ? { ok: true, value: { events: [], lastSeq: 0, complete: true } } : { ok: true, value: { events, complete: true } },
       ),
     );
-    (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
+    window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
     const entries = useTaskGraph.getState().entries;
     onTestFinished(() => useTaskGraph.setState({ entries }));
     const g = builder();
@@ -221,11 +223,11 @@ describe('TranscriptSlot', () => {
   // The held tail and the withdrawn-steer filter read C7's queue store, which the slot attaches itself: a session's
   // transcript shown without its composer follows the queue as it changes, and lets it go when it unmounts.
   it('attaches the session’s queue itself: mounted alone, its held tail follows the queue’s events', async () => {
-    const id = 'app-slot-queue' as AppSessionId;
+    const id = at('app-slot-queue' as AppSessionId);
     const b = builder();
     b.turn('u1', 'Start the work');
     b.text('m1', 0, 'Working on it.');
-    const held = (queueId: string, content: string) => ({ queueId, appSessionId: id, content, createdAt: '2026-10-01T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false });
+    const held = (queueId: string, content: string) => ({ queueId, appSessionId: bareOf(id), content, createdAt: '2026-10-01T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false });
     const listeners = new Set<(payload: unknown) => void>();
     const invoke = vi.fn((name: string) =>
       Promise.resolve({
@@ -238,17 +240,17 @@ describe('TranscriptSlot', () => {
       listeners.add(listener);
       return () => listeners.delete(listener);
     });
-    (window as { maws?: MawsBridge }).maws = { invoke, on } as unknown as MawsBridge;
+    window.maws = { localMachine: TEST_MACHINE, invoke, on } as unknown as PreloadBridge;
     const { unmount } = render(<TranscriptSlot appSessionId={id} />);
     const heldTexts = () => [...document.querySelectorAll('[data-pending="held"]')].map((bubble) => bubble.querySelector('[data-bubble]')?.textContent);
     await settle();
     expect(heldTexts()).toEqual(['Then run the tests']);
-    expect(invoke).toHaveBeenCalledWith('session.queue.list', { appSessionId: id });
+    expect(invoke).toHaveBeenCalledWith('session.queue.list', { appSessionId: bareOf(id) }, TEST_MACHINE);
 
-    act(() => listeners.forEach((listener) => listener({ appSessionId: id, ...EMPTY, entries: [held('q-1', 'Then run the tests'), held('q-2', 'And commit')] })));
+    act(() => listeners.forEach((listener) => listener({ appSessionId: bareOf(id), ...EMPTY, entries: [held('q-1', 'Then run the tests'), held('q-2', 'And commit')] })));
     await settle();
     expect(heldTexts()).toEqual(['Then run the tests', 'And commit']);
-    act(() => listeners.forEach((listener) => listener({ appSessionId: id, ...EMPTY, entries: [held('q-2', 'And commit')] })));
+    act(() => listeners.forEach((listener) => listener({ appSessionId: bareOf(id), ...EMPTY, entries: [held('q-2', 'And commit')] })));
     await settle();
     expect(heldTexts()).toEqual(['And commit']);
 
@@ -261,7 +263,7 @@ describe('TranscriptSlot', () => {
   // derive draws no bubble for it; the queued envelope is none at the tail either (it stays queued and sends as it is).
   // A held message that answered no capsule here, an envelope naming another ask included, keeps its bubble.
   it('draws no held bubble for an ask’s answer held back into the queue once its capsule reads Answered', async () => {
-    const id = 'app-slot-ask-held' as AppSessionId;
+    const id = at('app-slot-ask-held' as AppSessionId);
     const questions: AskQuestion[] = [{ id: 'q1', question: 'Which colour?', modality: 'choice', options: [{ label: 'Red' }, { label: 'Blue' }] }];
     const answers: AskAnswer[] = [{ id: 'q1', question: 'Which colour?', status: 'answered', value: ['Blue'] }];
     const envelope = askSteerText('toolu_a', questions, answers);
@@ -271,10 +273,10 @@ describe('TranscriptSlot', () => {
     b.result('toolu_a', [{ type: 'text', text: JSON.stringify({ status: 'asked', askId: 'toolu_a' }) }]);
     b.toolUse('t1', 'Bash', { command: 'sleep 1' });
     b.emit('user.message', { messageUuid: uuid('u2'), content: envelope, isReplay: false, isSynthetic: false, origin: 'human', bash: null }); // the answer's steer
-    const held = (queueId: string, content: string) => ({ queueId, appSessionId: id, content, createdAt: '2026-10-01T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false });
+    const held = (queueId: string, content: string) => ({ queueId, appSessionId: bareOf(id), content, createdAt: '2026-10-01T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false });
     const queue = { ...EMPTY, entries: [held('q-1', envelope), held('q-2', 'Then run the tests'), held('q-3', askSteerText('toolu_other', questions, answers))], withdrawn: ['u2'] };
     const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.queue.list' ? queue : name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 9, complete: true } }));
-    (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
+    window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
     render(<TranscriptSlot appSessionId={id} />);
     await settle();
     expect(useTranscriptStore.getState().rows(id).find((row) => row.kind === 'ask')).toMatchObject({ state: 'answered', answers });
@@ -291,8 +293,8 @@ describe('TranscriptSlot', () => {
     b.toolUse('q1', 'AskUserQuestion', { questions: [] });
     b.emit('question.requested', { requestId: request('r1'), toolUseId: tool('q1'), questions: [] });
     const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.queue.list' ? EMPTY : name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 3, complete: true } }));
-    (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
-    render(<TranscriptSlot appSessionId={'app-slot-request' as AppSessionId} />);
+    window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
+    render(<TranscriptSlot appSessionId={at('app-slot-request' as AppSessionId)} />);
     const slot = () => document.querySelector<HTMLElement>('[data-kind="request_slot"]');
     await settle();
     expect(slot()?.textContent).toBe('Waiting for you · AskUserQuestion · answer in the composer');
@@ -318,7 +320,7 @@ describe('TranscriptSlot', () => {
   // answers null, and it is told whether the history is loaded); `actions` override the registered ones for this mount;
   // `presentation` reaches the rows' context. Without them the slot draws exactly as before.
   it('startAt, actions and presentation: the rows from startAt’s index (none while null), the overrides over the registered actions, the presentation on the context', async () => {
-    const id = 'app-slot-card' as AppSessionId;
+    const id = at('app-slot-card' as AppSessionId);
     const b = builder();
     b.turn('u1', 'The parent’s copied prompt');
     b.text('m1', 0, 'The parent’s copied answer.');
@@ -327,7 +329,7 @@ describe('TranscriptSlot', () => {
     b.text('m2', 0, '<to-human>See [the file](src/a.ts).</to-human>');
     b.end(['u2']);
     const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.queue.list' ? EMPTY : name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 9, complete: true } }));
-    (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
+    window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
     const registered = vi.fn();
     const override = vi.fn();
     register({ openFile: registered });
@@ -353,7 +355,7 @@ describe('TranscriptSlot', () => {
     expect(document.body.textContent).not.toContain('The parent’s copied');
     expect(document.querySelector('.owner-message-ink')).not.toBeNull(); // the local presenter
     fireEvent.click(document.querySelector<HTMLElement>('[data-chip="path"]')!);
-    expect(override).toHaveBeenCalledWith('src/a.ts', undefined);
+    expect(override).toHaveBeenCalledWith('src/a.ts', undefined, id);
     expect(registered).not.toHaveBeenCalled();
 
     view.rerender(<TranscriptSlot appSessionId={id} />); // inert by default: every row, the registered action

@@ -4,10 +4,15 @@
 // window, releasing whatever a window holds when it reloads, so this store only has to unwatch symmetrically. It adds
 // no trigger of its own: a content change to an already-dirty file emits `git.changed` (C4's watcher compares each
 // listed file's size and mtime), so the line is as fresh as the events plus one diff each time a watch starts.
+// P5 O6 M4 (docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "Path-keyed stores"): a directory is a machine's,
+// so entries key by `checkoutKey(machine, directory)`, every call goes to that machine, and a `git.changed` reaches only
+// the directories of the machine it came from.
 import { create } from 'zustand';
 import type { CommandName, CommandResult, EventPayload, MawsBridge } from '@shared/ipc/schema';
 import type { GitDiffFile, GitStatus } from '@shared/ipc/schema/git';
+import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../ipc/client';
+import { checkoutKey } from '../ipc/machine';
 
 export interface GitEntry {
   root: string | null; // the status's repoRoot; null until git.watch answers, and after it failed
@@ -17,14 +22,16 @@ export interface GitEntry {
 }
 
 export interface GitStore {
-  entries: Map<string, GitEntry>; // by directory (session.worktree?.path ?? session.directory)
-  watch(directory: string): () => void; // ref-counted here; the first watcher invokes git.watch, then git.diff when dirty
-  applyChanged(event: EventPayload<'git.changed'>): void; // every watched directory of the root takes the status and re-runs git.diff
+  entries: Map<string, GitEntry>; // by checkoutKey(machine, session.worktree?.path ?? session.directory)
+  watch(machine: MachineRef, directory: string): () => void; // ref-counted here; the first watcher invokes git.watch, then git.diff when dirty
+  applyChanged(event: EventPayload<'git.changed'>, machine: MachineRef): void; // every watched directory of the root on that machine takes the status and re-runs git.diff
 }
 
 export const GIT_DIFF_DELAY_MS = 250; // trailing debounce of the diffs git.changed schedules
 
 interface Watched {
+  machine: MachineRef;
+  directory: string;
   count: number;
   landed: Promise<void>; // the git.watch call settled (unwatch waits for it, or main would count the watch after)
   timer: ReturnType<typeof setTimeout> | null;
@@ -46,61 +53,62 @@ async function settled<N extends CommandName>(call: Promise<CommandResult<N>>): 
 
 export function createGitStore(client: MawsBridge, options: { diffDelayMs?: number } = {}) {
   const delay = options.diffDelayMs ?? GIT_DIFF_DELAY_MS;
-  const watched = new Map<string, Watched>();
+  const watched = new Map<string, Watched>(); // by checkoutKey
 
   return create<GitStore>()((set, get) => {
-    const patch = (directory: string, next: Partial<GitEntry>) =>
-      set((s) => ({ entries: new Map(s.entries).set(directory, { ...(s.entries.get(directory) ?? EMPTY), ...next }) }));
+    const patch = (key: string, next: Partial<GitEntry>) =>
+      set((s) => ({ entries: new Map(s.entries).set(key, { ...(s.entries.get(key) ?? EMPTY), ...next }) }));
 
-    const diff = async (directory: string) => {
-      const w = watched.get(directory);
+    const diff = async (key: string) => {
+      const w = watched.get(key);
       if (!w) return;
       if (w.diffing) {
         w.again = true;
         return;
       }
       w.diffing = true;
-      const result = await settled(client.invoke('git.diff', { directory, scope: 'all' }));
+      const result = await settled(client.invoke('git.diff', { directory: w.directory, scope: 'all' }, { machine: w.machine }));
       w.diffing = false;
-      if (watched.get(directory) !== w) return; // released meanwhile
-      if (get().entries.get(directory)?.status?.dirty) {
-        if (result.ok) patch(directory, { uncommitted: { files: result.value.files, at: new Date().toISOString() }, error: null });
-        else patch(directory, { uncommitted: null, error: result.error.message });
+      if (watched.get(key) !== w) return; // released meanwhile
+      if (get().entries.get(key)?.status?.dirty) {
+        if (result.ok) patch(key, { uncommitted: { files: result.value.files, at: new Date().toISOString() }, error: null });
+        else patch(key, { uncommitted: null, error: result.error.message });
       }
       if (w.again) {
         w.again = false;
-        void diff(directory);
+        void diff(key);
       }
     };
 
-    const schedule = (directory: string, w: Watched) => {
+    const schedule = (key: string, w: Watched) => {
       if (w.timer !== null) clearTimeout(w.timer);
       w.timer = setTimeout(() => {
         w.timer = null;
-        void diff(directory);
+        void diff(key);
       }, delay);
     };
 
     // A new status for a watched directory: a dirty tree needs a (fresh) sum, a clean one none.
-    const take = (directory: string, status: GitStatus) => {
-      patch(directory, { root: status.repoRoot, status, error: null, ...(status.dirty ? {} : { uncommitted: null }) });
+    const take = (key: string, status: GitStatus) => {
+      patch(key, { root: status.repoRoot, status, error: null, ...(status.dirty ? {} : { uncommitted: null }) });
     };
 
     return {
       entries: new Map(),
 
-      watch(directory) {
-        let w = watched.get(directory);
+      watch(machine, directory) {
+        const key = checkoutKey(machine, directory);
+        let w = watched.get(key);
         if (w) w.count += 1;
         else {
-          const created: Watched = { count: 1, landed: Promise.resolve(), timer: null, diffing: false, again: false };
+          const created: Watched = { machine, directory, count: 1, landed: Promise.resolve(), timer: null, diffing: false, again: false };
           w = created;
-          watched.set(directory, created);
-          created.landed = settled(client.invoke('git.watch', { directory })).then((result) => {
-            if (watched.get(directory) !== created) return;
-            if (!result.ok) return patch(directory, { root: null, status: null, uncommitted: null, error: result.error.message });
-            take(directory, result.value);
-            if (result.value.dirty) void diff(directory);
+          watched.set(key, created);
+          created.landed = settled(client.invoke('git.watch', { directory }, { machine })).then((result) => {
+            if (watched.get(key) !== created) return;
+            if (!result.ok) return patch(key, { root: null, status: null, uncommitted: null, error: result.error.message });
+            take(key, result.value);
+            if (result.value.dirty) void diff(key);
           });
         }
         const held = w;
@@ -109,23 +117,23 @@ export function createGitStore(client: MawsBridge, options: { diffDelayMs?: numb
           if (released) return;
           released = true;
           if (--held.count > 0) return;
-          watched.delete(directory);
+          watched.delete(key);
           if (held.timer !== null) clearTimeout(held.timer);
           // Forgotten: a re-mount shows nothing of this mount's branch or sum, and no stale root takes a git.changed.
           set((s) => {
             const entries = new Map(s.entries);
-            entries.delete(directory);
+            entries.delete(key);
             return { entries };
           });
-          void held.landed.then(() => settled(client.invoke('git.unwatch', { directory })));
+          void held.landed.then(() => settled(client.invoke('git.unwatch', { directory }, { machine })));
         };
       },
 
-      applyChanged({ repoRoot, status }) {
-        for (const [directory, w] of watched) {
-          if (get().entries.get(directory)?.root !== repoRoot) continue;
-          take(directory, status);
-          if (status.dirty) schedule(directory, w);
+      applyChanged({ repoRoot, status }, machine) {
+        for (const [key, w] of watched) {
+          if (w.machine !== machine || get().entries.get(key)?.root !== repoRoot) continue;
+          take(key, status);
+          if (status.dirty) schedule(key, w);
         }
       },
     };

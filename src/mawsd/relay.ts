@@ -3,7 +3,7 @@
 // socket layer (a second welcome replaces the first, as a supervisor's does), with the host `mawsd` reaches as its
 // upstream (the host supervisor's `owner`).
 //
-// - The handshake reflects the upstream (`admit`): once the upstream is connected, the app is welcomed with its facts
+// - The handshake reflects the upstream (`admitHello`): once the upstream is connected, the app is welcomed with its facts
 //   (its pid, start, build, minor, live counts, and its capabilities with `mawsd`'s), so main's crash detection by pid,
 //   its update banner and Diagnostics read the host, as they do today. While the upstream waits for an incompatible host
 //   still running sessions, the app gets that host's refusal line as received. While the upstream is starting (a parked
@@ -84,7 +84,7 @@ export class Relay implements ServedRuntime {
     this.clients?.closeClient();
   }
 
-  // --- the socket layer's admission (socket-server.ts `admit`) ---------------------------------------------------------
+  // --- the socket layer's admission (socket-server.ts `admitHello`) ----------------------------------------------------
   async admit(): Promise<Admission> {
     const { hosts, owner } = this.options;
     const answered = () => {

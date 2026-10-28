@@ -4,17 +4,18 @@
 import { vi } from 'vitest';
 import { validateCommandInput } from '@shared/ipc/validate';
 import type { BinaryInfo } from '@shared/ipc/schema/engine';
-import type { CommandName, MawsBridge, Settings, SettingsPatch } from '@shared/ipc/schema';
+import type { CommandName, PreloadBridge, Settings, SettingsPatch } from '@shared/ipc/schema';
 import { applySettingsPatch, SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
 import { useSettings } from '../stores/settings';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity'; // P3-D
+import { TEST_MACHINE } from '../../../../test/support/machine';
 
 export const BINARY: BinaryInfo = { path: '/Users/owner/.local/share/claude/versions/2.1.287', testedVersion: '2.1.283', version: '2.1.287', ok: true, error: null }; // W13: the installed one
 
 export const VOICE_HELPER = '/Applications/MAWS.app/Contents/Resources/voice-helper/maws-voice-helper'; // E9
 
 export interface SettingsBridge {
-  bridge: MawsBridge;
+  bridge: PreloadBridge; // P5 O6 M2: installed as `window.maws`, main's side, on `TEST_MACHINE`
   sets: SettingsPatch[];
   calls: { name: string; input: unknown }[];
   answers: Record<string, (input: unknown) => unknown>; // command → the value it answers (throw to answer an error)
@@ -94,6 +95,7 @@ export function settingsBridge(initial: Settings = SETTINGS_DEFAULTS_V20): Setti
     }),
     on: () => () => {},
     pathForFile: () => '',
-  } as unknown as MawsBridge;
+    localMachine: TEST_MACHINE,
+  } as unknown as PreloadBridge;
   return { bridge, sets, calls, answers };
 }

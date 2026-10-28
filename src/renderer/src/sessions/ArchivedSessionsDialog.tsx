@@ -1,10 +1,18 @@
-// A project's archived sessions (C10 execution document, Actions: `project.archived`): a dialog list, not a sidebar
-// section (C5 hides archived rows and C10 adds none). Each row offers Unarchive (C4's `session.update`), Delete, and,
-// for a session in a managed worktree, "Remove worktree…" (the cleanup dialog).
-import { useEffect, useState } from 'react';
+// A row's archived sessions (C10 execution document, Actions: `project.archived`): a dialog list, not a sidebar section
+// (C5 hides archived rows and C10 adds none). Each row offers Unarchive (C4's `session.update`), Delete, and, for a
+// session in a managed worktree, "Remove worktree…" (the cleanup dialog). P5 O6 M5: the list is the sidebar row's, by
+// the row's own filing (`rowOfSession`): a project's org project, every checkout and folder it groups, read on each
+// machine they are on that is up; with no project, a machine's own row (its menu names it; this machine's by default),
+// its sessions of no project and of folders nobody opened there, titled by the machine's name.
+import { useEffect, useMemo, useState } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import { machineOf } from '@shared/machine/address';
+import { machineKey } from '@shared/machine/org-key';
+import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../ipc/client';
+import { selectOffline, useMachines } from '../stores/machines';
+import { machineName, machineOfRow, orgKeyOf, rowName, rowOfSession, rowProjects, selectOrgIndex, type RowKey } from '../stores/org-projects';
 import { useSessions } from '../stores/sessions';
 import { isManagedWorktree } from './ArchiveDialog';
 import { cleanupTargetOf } from './CleanupDialog';
@@ -13,23 +21,40 @@ import { Sheet } from './Sheet';
 import { QUIET, SECONDARY } from './ui';
 import { displayTitle } from './title';
 
-export function ArchivedSessionsDialog({ projectId }: { projectId: ProjectId | null }) {
-  const project = useSessions((s) => (projectId === null ? null : (s.projects.get(projectId) ?? null)));
-  const [rows, setRows] = useState<SessionRecord[] | null>(null);
+export function ArchivedSessionsDialog({ projectId, machine: named }: { projectId: ProjectId | null; machine?: MachineRef }) {
+  const local = ipc.localMachine;
+  const index = useSessions((s) => selectOrgIndex(s, local));
+  const projects = useSessions((s) => s.projects);
+  const machines = useMachines((s) => s.machines);
+  const project = projectId === null ? undefined : projects.get(projectId);
+  const row: RowKey = projectId === null ? machineKey(named ?? local) : project ? orgKeyOf(project) : machineKey(machineOf(projectId));
+  // the machines the row's sessions are on: a machine's row its own, an org project's those of its projects that are up
+  const own = machineOfRow(row);
+  const readOn = own !== null ? own : [...new Set(rowProjects(index, row, (m) => !selectOffline({ machines }, m)).map((p) => machineOf(p.id)))].sort().join(' ');
+  const title = rowName(index, row, (m) => machineName(machines, m, local)) ?? project?.name ?? '';
+  const [lists, setLists] = useState<SessionRecord[][] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(0); // read again after an unarchive
 
   useEffect(() => {
     let live = true;
-    void ipc.invoke('session.list', { includeArchived: true }).then((result) => {
+    const reads = readOn === '' ? [] : readOn.split(' ').map((machine) => ipc.invoke('session.list', { includeArchived: true }, { machine: machine as MachineRef }));
+    void Promise.all(reads).then((results) => {
       if (!live) return;
-      if (!result.ok) return setError(result.error.message);
-      setRows(result.value.sessions.filter((r) => r.archived && r.projectId === projectId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+      const failed = results.find((result) => !result.ok);
+      setError(failed && !failed.ok ? failed.error.message : null);
+      if (failed && results.every((result) => !result.ok)) return;
+      setLists(results.flatMap((result) => (result.ok ? [result.value.sessions] : [])));
     });
     return () => {
       live = false;
     };
-  }, [projectId, version]);
+  }, [readOn, version]);
+  const listed = useMemo(() => new Set([row]), [row]);
+  const rows = useMemo(
+    () => lists?.flat().filter((r) => r.archived && rowOfSession(index, projects, r, listed) === row).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) ?? null,
+    [lists, index, projects, listed, row],
+  );
 
   const unarchive = async (appSessionId: AppSessionId) => {
     const result = await ipc.invoke('session.update', { appSessionId, patch: { archived: false } });
@@ -38,7 +63,7 @@ export function ArchivedSessionsDialog({ projectId }: { projectId: ProjectId | n
   };
 
   return (
-    <Sheet title={`Archived sessions${projectId === null ? ' · Other sessions' : project ? ` · ${project.name}` : ''}`} width="w-[min(560px,92vw)]">
+    <Sheet title={`Archived sessions${title ? ` · ${title}` : ''}`} width="w-[min(560px,92vw)]">
       {rows === null ? (
         <p className="m-0 text-fg-muted">{error ?? 'Loading…'}</p>
       ) : rows.length === 0 ? (

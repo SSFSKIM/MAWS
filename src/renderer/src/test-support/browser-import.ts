@@ -5,7 +5,7 @@
 import type { ExtensionCandidate } from '@shared/browser/import';
 import type { ImportedProfile } from '@shared/browser/profiles';
 import type { BrowserImportInspection } from '@shared/ipc/schema/browser';
-import type { EventName, EventPayload, MawsBridge, Settings } from '@shared/ipc/schema';
+import type { EventName, EventPayload, PreloadBridge, Settings } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
 import { DONE_REPORT } from '../../../../test/support/import-reports';
@@ -102,7 +102,7 @@ export function importBridge(initial: Settings = SETTINGS_DEFAULTS_V20): ImportB
       listeners.get(name)!.add(listener);
       return () => void listeners.get(name)!.delete(listener);
     },
-  } as MawsBridge;
+  } as PreloadBridge;
   const emit: ImportBridge['emit'] = (name, payload) => {
     const checked = validateEventPayload(name, payload);
     if (!checked.ok) throw new Error(`invalid ${name} in a test: ${JSON.stringify(checked.issues)}`);

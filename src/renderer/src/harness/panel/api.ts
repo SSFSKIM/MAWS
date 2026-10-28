@@ -1,7 +1,8 @@
 // The `#panel` harness's automation surface, `window.__maws_harness.panel` (C8a execution document, Interfaces
 // *Harness API*). Types only, so the e2e project can import them. M1 carries the host's half; M2 adds the summary's
 // seams (setSession, setStatus, setDigest, loadTranscript, transcript) and M4 the R7 probes and the width control.
-// The fake sessions' app ids are 'A' and 'B' themselves.
+// The fake sessions are named 'A' and 'B', main's ids for them; the page holds them as the local machine's addresses (P5
+// O6 M2), which is what `session()`, `sessions` and a tab's `home` answer.
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionRecord } from '@shared/graph/session';
 import type { SessionDigest } from '@shared/ipc/schema';

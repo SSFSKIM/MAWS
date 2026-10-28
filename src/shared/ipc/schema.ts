@@ -6,6 +6,8 @@
 import type * as z from 'zod';
 import type { IpcError } from './errors';
 import type { BridgedCommandName, BridgedEventName, MainOnlyCommandName } from './names';
+import type { PathCommandName } from './routes'; // P5 O6 M2
+import type { MachineRef } from '../machine/ref'; // P5 O6 M2
 import * as attention from './schema/attention';
 import type { CommandSpec, Namespace } from './schema/common';
 import * as engine from './schema/engine';
@@ -60,6 +62,8 @@ import * as delivery from './schema/delivery'; // P4-B5
 import * as customization from './schema/customization'; // UX2-K
 import * as catalog from './schema/catalog'; // P4-AGG M2
 import * as daemon from './schema/daemon'; // P5 O2 M5
+import * as machine from './schema/machine'; // P5 O6 M1
+import * as machines from './schema/machines'; // P5 O6 M3
 export { CustomizationInventorySchema, type CustomizationInventory, type CustomizationSkill, type CustomizationServer, type CustomizationEndpoint } from './schema/customization';
 
 export {
@@ -160,6 +164,8 @@ export const commands = {
   ...customization.commands, // UX2-K
   ...catalog.commands, // P4-AGG M2
   ...daemon.commands, // P5 O2 M5
+  ...machine.commands, // P5 O6 M1
+  ...machines.commands, // P5 O6 M3
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -208,6 +214,8 @@ export const events = {
   ...customization.events, // UX2-K
   ...catalog.events, // P4-AGG M2
   ...daemon.events, // P5 O2 M5
+  ...machine.events, // P5 O6 M1
+  ...machines.events, // P5 O6 M3
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;
@@ -259,11 +267,40 @@ export type EventPayload<N extends EventName> = z.output<(typeof events)[N]>;
 
 export type CommandResult<N extends CommandName> = { ok: true; value: CommandOutput<N> } | { ok: false; error: IpcError };
 
-// The whole surface the preload exposes as `window.maws`; nothing else is bridged.
+// P5 O6 M2 (OX2; docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "The bridge types"): every invoke goes to a
+// machine and every event comes from one. `MawsBridge` is the renderer client's surface (`src/renderer/src/ipc/client.ts`),
+// over addresses; `PreloadBridge` is `window.maws`, the raw pipe over bare ids, whose invoke with no machine is the local
+// machine's (the e2e specs' and harness pages' convenience).
+export interface InvokeOptions {
+  machine?: MachineRef;
+}
+// A `path` command's options name its machine (`src/shared/ipc/routes.ts`; M4 required it): a path is no machine's by
+// itself, so every call site names the machine of the session or project it is about. Every other command's options are
+// optional: its addresses name its machine, else it is the local machine's.
+export type MachineOptions<N extends CommandName> = N extends PathCommandName ? [opts: { machine: MachineRef }] : [opts?: InvokeOptions];
+export type InvokeRest<N extends CommandName> = MachineOptions<N>;
+// `invoke` as seen by a wrapper generic over commands whose every input carries an address (a session read, a session
+// operation), which names the machine: TypeScript defers `InvokeRest` over a generic name, so such a wrapper calls this.
+export type AddressedInvoke = <N extends CommandName>(name: N, input: CommandInput<N>) => Promise<CommandResult<N>>;
+export interface EventSource {
+  machine: MachineRef;
+}
+
+// The renderer client's surface over `window.maws`: components and stores use it through `ipc`.
 export interface MawsBridge {
-  invoke<N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandResult<N>>;
-  on<N extends EventName>(name: N, listener: (payload: EventPayload<N>) => void): () => void; // returns unsubscribe
+  readonly localMachine: MachineRef;
+  invoke<N extends CommandName>(name: N, input: CommandInput<N>, ...opts: InvokeRest<N>): Promise<CommandResult<N>>;
+  on<N extends EventName>(name: N, listener: (payload: EventPayload<N>, from: EventSource) => void): () => void; // returns unsubscribe
   pathForFile(file: File): string; // C7: a dropped file's path through Electron's webUtils.getPathForFile; '' when Electron has none (a file dragged from a browser)
+}
+
+// The whole surface the preload exposes as `window.maws`; nothing else is bridged. Typed by name as the client is (the ids
+// it carries are bare, which the same branded types describe), so a spec's raw call reads its answer typed.
+export interface PreloadBridge {
+  readonly localMachine: MachineRef;
+  invoke<N extends CommandName>(name: N, input: CommandInput<N>, machine?: MachineRef): Promise<CommandResult<N>>; // no machine: the local one
+  on<N extends EventName>(name: N, listener: (payload: EventPayload<N>, machine: MachineRef | undefined) => void): () => void;
+  pathForFile(file: File): string;
 }
 
 // The bridged and main-only zod-free lists together cover the registries, without exposing main-only commands.

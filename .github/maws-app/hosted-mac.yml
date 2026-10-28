@@ -139,6 +139,7 @@ jobs:
           path: ${{ steps.build-cache.outputs.staging }}
       - id: build
         name: out/ build (${{ steps.build-cache.outputs.variant }})
+        if: steps.build-cache.outputs.variant != ''
         env:
           DOWNLOAD_OUTCOME: ${{ steps.build-download.outcome }}
         run: node .github/scripts/hosted-build.mjs build

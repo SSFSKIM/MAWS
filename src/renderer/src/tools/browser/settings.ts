@@ -15,7 +15,7 @@ export const useBookmarksBar = (): BrowserSettings['bookmarksBar'] => useSetting
 
 export async function toggleBookmarksBar(client: MawsBridge = ipc): Promise<void> {
   const current = useSettings.getState().state?.settings.browser.bookmarksBar ?? SETTINGS_DEFAULTS_V20.browser.bookmarksBar;
-  const result = await client.invoke('settings.set', { browser: { bookmarksBar: current === 'shown' ? 'hidden' : 'shown' } });
+  const result = await client.invoke('settings.set', { browser: { bookmarksBar: current === 'shown' ? 'hidden' : 'shown' } }, { machine: client.localMachine }); // P5 O6 M4: this machine's settings (O3)
   if (!result.ok) console.error('[browser] the bookmarks bar could not be toggled', result.error);
 }
 // cua #90 end

@@ -45,6 +45,7 @@ function targetOutputs(gitDir, sha) {
       HEAD_MESSAGE: process.env.HEAD_MESSAGE ?? '',
       GATE_RUNNER: process.env.GATE_RUNNER ?? '',
       GATE_E2E_RUNNER: process.env.GATE_E2E_RUNNER ?? '',
+      HOSTED_MAC_ROUTE: process.env.HOSTED_MAC_ROUTE ?? '',
     };
     return JSON.parse(execFileSync(process.execPath, ['--input-type=module', '--eval', `
       import { readFileSync } from 'node:fs';

@@ -52,7 +52,9 @@ vi.mock('./design/export', () => ({ registerDesignExporters: vi.fn() })); // P3-
 vi.mock('./dashboard/export', () => ({ registerDashboardExporters: vi.fn(() => () => {}) })); // P3-E (E2 M5): the dashboard's exporters, registered into the artifacts' registry
 vi.mock('./presentations/present', () => ({ registerPresenter: vi.fn(() => ({ end: vi.fn() })) })); // P3-C M6: the presenter's windows
 vi.mock('./browser/import', () => ({ ImportedProfiles: { open: () => ({ list: () => [] }) }, sweepBrowserImports: vi.fn(), startBrowserImport: () => ({ stop: vi.fn() }) })); // E4b: the Chrome import's main side
-vi.mock('./ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: vi.fn() /* C3 */, interceptCommand: vi.fn(), CommandFailure: Error /* C11 */ }));
+vi.mock('./ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: vi.fn() /* C3 */, registerMachineHandler: vi.fn() /* P5 O6 M1 */, interceptCommand: vi.fn(), dispatchLocal: vi.fn() /* P5 O6 M3 */, CommandFailure: Error /* C11 */ }));
+vi.mock('./machines', () => ({ startMachines: vi.fn(() => ({ dispatch: vi.fn(), serve: vi.fn(), stop: vi.fn() })) })); // P5 O6 M3: no links, no stand-in
+vi.mock('./machine/identity', () => ({ startMachineIdentity: vi.fn(() => ({ ref: 'TestMachineRef00000000' })) })); // P5 O6 M1: no machine.json under the fixed getPath; M2: main binds its ref
 // C3 start: main's attention service and its store, started from index.ts, are replaced like the other wired modules
 vi.mock('./attention/service', () => ({ startAttentionService: vi.fn() }));
 vi.mock('./attention/file-attention-store', () => ({ FileAttentionStore: vi.fn() }));
@@ -61,7 +63,7 @@ vi.mock('./settings', () => ({ startSettings: () => ({ state: () => ({ settings:
 vi.mock('./window', () => ({ appUrl: 'file:///index.html', createWindow: fake.createWindow, installContentSecurityPolicy: vi.fn() }));
 // C4: the index and its session source are replaced too; the lifecycle only has to open, start and close them.
 const c4 = vi.hoisted(() => ({ close: vi.fn(), stopSource: vi.fn(), stopAttention: vi.fn(), started: 0 }));
-vi.mock('./index/index', () => ({ Index: class { close = c4.close; } }));
+vi.mock('./index/index', () => ({ Index: class { close = c4.close; refreshOrgProjects = async () => {}; } }));
 vi.mock('./index/register', () => ({ registerIndexHandlers: vi.fn() }));
 vi.mock('./index/source', () => ({ IndexSessionSource: class { start = () => ((c4.started += 1), c4.stopSource); onScanned = () => () => {}; discoveryCurrent = () => false; } }));
 vi.mock('./index/attention-service', () => ({ startIndexAttention: () => ({ stop: c4.stopAttention }) })); // C3's service over the index

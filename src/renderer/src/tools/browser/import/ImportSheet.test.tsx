@@ -8,7 +8,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ImportedExtension, ImportReport } from '@shared/browser/import';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
 import { CANCELLED_REPORT, NO_SKIPS, WRONG_KEY_REPORT } from '../../../../../../test/support/import-reports';
 import { useSettings } from '../../../stores/settings';
@@ -55,7 +55,7 @@ afterEach(() => {
   disconnect();
   resetBrowserImport();
   useSettings.setState({ state: null });
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 describe('pick', () => {

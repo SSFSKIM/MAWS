@@ -6,10 +6,11 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import type { Availability } from '@shared/ipc/schema/session';
 import type { AcquireOutcome } from '@shared/sessions/setup';
 import { digest, record } from '../../../../../test/support/builders';
+import { at, TEST_MACHINE } from '../../../../../test/support/machine';
 import type { LoadedPlugins } from '../../sessions/observed';
 import { useSessions } from '../../stores/sessions';
 import { loadForRead, useReadLoads } from '../read';
@@ -17,14 +18,16 @@ import { LoadedLine, type LoadedLineProps, type SessionPlugins } from './LoadedL
 import type { Reloads } from './reload';
 import { REL } from '../../test-support/relative-time';
 
-const ID = 'app-line' as AppSessionId;
+// P5 O6 M2: the page holds the address; the fake bridge is main, asked and answering with the bare id
+const BARE = 'app-line' as AppSessionId;
+const ID = at(BARE);
 const NOW = Date.parse('2026-10-09T12:00:00Z');
 const plugin = (name: string) => ({ name, path: `/cfg/plugins/cache/m/${name}/1.0.0`, source: `${name}@m`, version: '1.0.0' });
 const NOW_FACTS: LoadedPlugins = { plugins: [plugin('a'), plugin('b')], errors: [], warnings: [], freshness: { kind: 'now' } };
 const LAST: LoadedPlugins = { plugins: [plugin('a'), plugin('b'), plugin('c')], errors: [{ plugin: 'd', type: 'load', message: 'bad manifest', path: null }], warnings: [], freshness: { kind: 'last', at: new Date(NOW - 2 * 86_400_000).toISOString() } };
 const UNKNOWN: LoadedPlugins = { plugins: [], errors: [], warnings: [], freshness: { kind: 'unknown' } };
 const RELOADS: Reloads = { reloadMods: () => {}, reloadSkills: () => {}, line: null, failed: false, busy: false };
-const READY: AcquireOutcome = { status: 'ready', appSessionId: ID, launched: true, joined: false };
+const READY: AcquireOutcome = { status: 'ready', appSessionId: BARE, launched: true, joined: false };
 
 // what main answers `session.acquire` in a case
 let acquire: () => Promise<AcquireOutcome> = async () => READY;
@@ -39,13 +42,13 @@ const withSession = (availability: Availability, over: Partial<SessionRecord> = 
 beforeEach(() => {
   acquire = async () => READY;
   invoke.mockClear();
-  window.maws = { invoke, on: () => () => {}, pathForFile: () => '' } as unknown as MawsBridge;
+  window.maws = { localMachine: TEST_MACHINE, invoke, on: () => () => {}, pathForFile: () => '' } as unknown as PreloadBridge;
 });
 afterEach(() => {
   cleanup();
   useSessions.setState({ records: new Map(), digests: new Map(), engine: new Map() });
   useReadLoads.setState({ loads: new Map() });
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: unknown }).maws;
 });
 
 const line = (props: Partial<LoadedLineProps>, availability: Availability = props.availability ?? 'resumable') => {
@@ -96,7 +99,7 @@ describe('the loaded line', () => {
     line({});
     expect(acquires()).toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
-    expect(acquires()).toEqual([['session.acquire', { appSessionId: ID, reason: 'read' }]]);
+    expect(acquires()).toEqual([['session.acquire', { appSessionId: BARE, reason: 'read' }, TEST_MACHINE]]);
     expect(screen.getByText('Starting…')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
     await act(async () => answer(READY));
@@ -105,14 +108,14 @@ describe('the loaded line', () => {
   });
 
   it('a refusal shows its words on the line and Refresh stays; a docked trust card is pointed at', async () => {
-    acquire = async () => ({ status: 'refused', appSessionId: ID, reason: 'busy', message: 'The session is busy elsewhere' }) as AcquireOutcome;
+    acquire = async () => ({ status: 'refused', appSessionId: BARE, reason: 'busy', message: 'The session is busy elsewhere' }) as AcquireOutcome;
     const el = line({});
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     await waitFor(() => expect(el.textContent).toContain('The session is busy elsewhere'));
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeTruthy();
     cleanup();
     useReadLoads.setState({ loads: new Map() });
-    acquire = async () => ({ status: 'needs_trust', appSessionId: ID, trust: { directory: '/work/gone', trustKey: '/work/gone', keyKind: 'directory', configPath: '/cfg/.claude.json', trusted: false, source: null, isHome: false, found: [] } }) as AcquireOutcome;
+    acquire = async () => ({ status: 'needs_trust', appSessionId: BARE, trust: { directory: '/work/gone', trustKey: '/work/gone', keyKind: 'directory', configPath: '/cfg/.claude.json', trusted: false, source: null, isHome: false, found: [] } }) as AcquireOutcome;
     const again = line({}, 'needs_trust');
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     await waitFor(() => expect(again.textContent).toContain('Trust this folder in the session to continue'));

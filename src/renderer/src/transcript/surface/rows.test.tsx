@@ -11,7 +11,7 @@ import { BASH_RESULT, builder } from '../model/test-events';
 import { renderRow, rowOf, storeWith } from '../view/rows/test-support';
 
 const holder = vi.hoisted(() => ({ client: null as ReturnType<typeof fakeClient>['client'] | null }));
-vi.mock('../../ipc/client', () => ({ ipc: { invoke: (...args: Parameters<ReturnType<typeof fakeClient>['client']['invoke']>) => holder.client!.invoke(...args) } }));
+vi.mock('../../ipc/client', () => ({ ipc: { invoke: (...args: Parameters<ReturnType<typeof fakeClient>['client']['invoke']>) => (holder.client!.invoke as unknown as (...a: unknown[]) => unknown)(...args) } }));
 let fake: ReturnType<typeof fakeClient>;
 const asks = () => fake.invoked('session.ui.render') as CommandInput<'session.ui.render'>[];
 beforeEach(() => { resetSurfaceRegistry(); fake = fakeClient(); holder.client = fake.client; });

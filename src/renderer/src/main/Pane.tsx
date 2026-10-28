@@ -7,6 +7,7 @@
 import { useId, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import type { TabRef, TabSet } from '@shared/ipc/schema/layout';
 import { Diagnostics } from '../app/Diagnostics';
+import { useMachineMark } from '../app/machine-mark';
 import { useSlot } from '../app/slots';
 import { IconButton, MaximizeIcon, RestoreIcon, useChordHint } from '../app/IconButton';
 import { createSession, focusedProject, NEW_CHAT, runAction, useActionEnabled, useSessionCreatorRegistered } from '../keymap/actions-runtime';
@@ -181,8 +182,11 @@ function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
 // session, one focus target); the main region is at 0 px and inert then, so nothing is lost on screen. Held through the
 // pill too, so closing and reopening the card does not remount the pane behind it. (P4-B3: the split's card draws a
 // pane's session the main area no longer renders, so this holds there with nothing to hide.)
+// P5 O6 M5 (P5 Decision Log 28, T5): a kept tab of an offline machine's session says only that.
 function SessionTab({ tab, paneIndex }: { tab: Extract<TabRef, { kind: 'session' }>; paneIndex: PaneIndex }) {
   const inCard = useLayout((s) => cardSession(s) === tab.appSessionId);
+  const machine = useMachineMark(tab.appSessionId);
+  if (machine.offline) return <p data-machine-offline className="m-0 flex h-full items-center justify-center text-ui text-fg-faint">{`${machine.name} is offline`}</p>;
   return inCard ? <div data-session-in-card className="h-full" /> : <SessionPane appSessionId={tab.appSessionId} paneIndex={paneIndex} />;
 }
 

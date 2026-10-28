@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, CommandResult, EventName, EventPayload, MawsBridge } from '@shared/ipc/schema';
 import type { ReplayFixture, ReplayProgress } from '@shared/ipc/schema/session';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 import { createReplayDiagnosticsStore, describeProgress, describeSpeed } from './replay-diagnostics';
 
 const workflow: ReplayFixture = { id: 'f1', name: 'workflow', kind: 'journal', path: '/repo/spikes/protocol-probe/fixtures/pass2/workflow.jsonl', sessionId: null, addedAt: '2026-09-28T10:00:00.000Z', lastPlayedAt: null };
@@ -13,6 +14,7 @@ function fakeClient(given: Partial<Record<CommandName, (input: unknown) => Comma
   const answers: typeof given = { 'session.replay.fixtures': () => ({ ok: true, value: { fixtures: [] } }) as CommandResult<CommandName>, ...given };
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   const client = {
+    localMachine: TEST_MACHINE,
     invoke: vi.fn(async (name: CommandName, input: unknown) => answers[name]?.(input) ?? ({ ok: true, value: undefined } as CommandResult<CommandName>)),
     on: vi.fn((name: string, listener: (payload: unknown) => void) => {
       if (!listeners.has(name)) listeners.set(name, new Set());
@@ -42,7 +44,7 @@ describe('replay diagnostics', () => {
     expect(store.getState().fixtures).toEqual([workflow, parent]);
 
     await store.getState().start(parent, 'instant');
-    expect(fake.invoke).toHaveBeenCalledWith('session.replay.start', { source: { kind: 'transcript', path: parent.path }, speed: 'instant' });
+    expect(fake.invoke).toHaveBeenCalledWith('session.replay.start', { source: { kind: 'transcript', path: parent.path }, speed: 'instant' }, { machine: TEST_MACHINE });
     expect(store.getState().runs[A]).toMatchObject({ name: 'subagent-parent', progress: null });
 
     fake.event('session.replay.progress', progress({ index: 25, speed: 'instant' }));

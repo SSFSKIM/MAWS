@@ -14,6 +14,7 @@ import type { Effort } from '@shared/engine/launch-spec';
 import { EffortSchema } from '@shared/engine/launch-spec';
 import type { PermissionMode } from '@shared/graph/enums';
 import type { AppSessionId } from '@shared/graph/ids';
+import { machineOf } from '@shared/machine/address';
 import { isGatewayModel } from '@shared/sessions/models';
 import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
 import { useShownEffort } from '../composer/effective-effort';
@@ -171,7 +172,7 @@ function useDormantBinding(appSessionId: AppSessionId): (Binding & { choosing: b
   const status = useSessions((s) => s.engine.get(appSessionId) ?? null);
   const availability = useAvailability(appSessionId);
   const listed = useComposerStore((s) => listedModelsOf(s, appSessionId));
-  const catalogue = useModelCatalogue(routeOf(status, record), false, record?.directory ?? null);
+  const catalogue = useModelCatalogue(machineOf(appSessionId), routeOf(status, record), false, record?.directory ?? null);
   const { facts } = useObservedFacts(appSessionId, { enabled: record !== null && status?.process !== 'ready' });
   // P2-F S chip (review): a model choice is held in the shared request memory (widgets/model.ts), so the composer's
   // chip names it while the session starts; the effort choice stays local

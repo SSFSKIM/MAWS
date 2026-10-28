@@ -25,7 +25,7 @@ import {
   type ConnectorInvalid,
   type ConnectorToolRef,
 } from '@shared/artifacts/connectors';
-import type { CommandInput, CommandName, CommandOutput, MawsBridge } from '@shared/ipc/schema';
+import type { CommandInput, CommandName, CommandOutput, InvokeRest, MawsBridge } from '@shared/ipc/schema';
 import type { ConnectorWatchUpdate } from '@shared/ipc/schema/connectors';
 import { ArtifactCommandError } from './command-error';
 
@@ -43,8 +43,8 @@ const HELD_PER_WATCH = 4; // the latest refreshes held per watch whose start has
 const CLOSED: ConnectorCallOutcome = { ok: false, state: 'paused', reason: 'closed' };
 
 export function createConnectorHost(ipc: Pick<MawsBridge, 'invoke' | 'on'>): ConnectorHost {
-  const call = async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> => {
-    const result = await ipc.invoke(name, input);
+  const call = async <N extends CommandName>(name: N, input: CommandInput<N>, ...opts: InvokeRest<N>): Promise<CommandOutput<N>> => {
+    const result = await ipc.invoke(name, input, ...opts);
     if (!result.ok) throw new ArtifactCommandError(result.error);
     return result.value;
   };

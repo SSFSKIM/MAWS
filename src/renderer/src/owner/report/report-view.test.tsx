@@ -3,8 +3,10 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { status } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
+import { at } from '../../../../../test/support/machine';
 import { resetSurfaceRegistry } from '../../engine-surface/registry';
 import { useSessions } from '../../stores/sessions';
 import { useTranscriptStore } from '../../stores/transcript';
@@ -36,7 +38,7 @@ let keys = 0;
 function pushSource(events: SessionEvent[]) {
   let listener: ((batch: SessionEvent[]) => void) | null = null;
   const source: TranscriptSource = {
-    key: `report-view-${++keys}`,
+    key: at(`report-view-${++keys}`), // P5 O6 M2: the key names the session as the page does
     subscribe(l) {
       listener = l;
       return () => (listener = null);
@@ -244,7 +246,7 @@ describe('the report view', () => {
 describe('the lane with an engine surface attached', () => {
   async function attached(events: SessionEvent[]) {
     const fake = fakeClient();
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     const mount = await mounted(events);
     useSessions.setState({ engine: new Map([[mount.key as AppSessionId, { ...status(mount.key), uiSurface: { clientId: 'maws-main' } }]]) });
     return { ...mount, fake };

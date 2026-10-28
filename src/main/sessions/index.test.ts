@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
 import { clientOf } from '../ipc/clients';
+import { TEST_MACHINE } from '../../../test/support/machine'; // P5 O6 M2: a main handler's ctx names its target
 import type { MainContext } from '../ipc/router';
 import type { AppSessionId } from '@shared/graph/ids';
 import { item } from '../../../test/support/builders';
@@ -42,12 +43,12 @@ describe('visibility belongs to the reporting renderer', () => {
     const sender = fakePage();
     const visible = handlers.get('session.setVisible')!;
     try {
-      visible({ appSessionId: appId, visible: true }, { client: clientOf(sender) });
+      visible({ appSessionId: appId, visible: true }, { client: clientOf(sender), target: TEST_MACHINE });
       sender.emit(event, { url: 'file:///index.html', isMainFrame: true, isSameDocument: false, frame: null });
       listeners.get('fs.sessionChanged')!({ summary: { ...disk, size: disk.size + 100, leafUuid: 'new-leaf', lastRecordAt: '2026-10-02T12:00:00Z' } });
       await new Promise((resolve) => setImmediate(resolve)); // E11: discoveries apply at the end of the burst's turn
       expect(index.sessions.get(appId)?.unread).toBe(true);
-      visible({ appSessionId: appId, visible: true }, { client: clientOf(sender) });
+      visible({ appSessionId: appId, visible: true }, { client: clientOf(sender), target: TEST_MACHINE });
       expect(index.sessions.get(appId)?.unread).toBe(false);
     } finally { sessions.stop(); index.close(); dir.dispose(); }
   });
@@ -60,7 +61,7 @@ describe('visibility belongs to the reporting renderer', () => {
     const sessions = startSessions({ env: {}, packaged: false, appRoot: process.cwd(), hosts, indexSource: { start: () => () => {}, onSetVisible: visibility } });
     const sender = fakePage();
     try {
-      handlers.get('session.setVisible')!({ appSessionId: 'app', visible: true }, { client: clientOf(sender) });
+      handlers.get('session.setVisible')!({ appSessionId: 'app', visible: true }, { client: clientOf(sender), target: TEST_MACHINE });
       sender.emit('did-start-navigation', { url: 'file:///index.html#preview', isMainFrame, isSameDocument, frame: null });
       sender.emit('did-start-loading');
       expect(visibility.mock.calls).toEqual([['app', true]]);
@@ -73,9 +74,9 @@ describe('visibility belongs to the reporting renderer', () => {
     const a = fakePage();
     const b = fakePage();
     const set = handlers.get('session.setVisible')!;
-    set({ appSessionId: 'app', visible: true }, { client: clientOf(a) });
-    set({ appSessionId: 'app', visible: true }, { client: clientOf(b) });
-    set({ appSessionId: 'app', visible: false }, { client: clientOf(a) });
+    set({ appSessionId: 'app', visible: true }, { client: clientOf(a), target: TEST_MACHINE });
+    set({ appSessionId: 'app', visible: true }, { client: clientOf(b), target: TEST_MACHINE });
+    set({ appSessionId: 'app', visible: false }, { client: clientOf(a), target: TEST_MACHINE });
     expect(visibility.mock.calls).toEqual([['app', true]]);
     b.emit('destroyed');
     expect(visibility.mock.calls).toEqual([['app', true], ['app', false]]);

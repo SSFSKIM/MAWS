@@ -7,7 +7,6 @@ export const RESUME_COPY = {
   filters: 'Scope',
   toggles: { allProjects: 'All projects', currentBranch: 'Current branch', allWorktrees: 'All worktrees', archived: 'Archived' },
   allProjects: 'All projects',
-  otherSessions: 'Other sessions',
   list: 'Sessions',
   none: 'No sessions',
   noMatch: 'No sessions match',

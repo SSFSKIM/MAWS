@@ -39,6 +39,7 @@ const TIMING_NODE_TESTS = [
   'test/artifacts/one-schema.test.ts', // P3-B: the portability test's pattern, for the one-schema rule
   'test/one-locale.test.ts', // the same pattern, for the one-locale rule over src/ and the desk's web app
   'test/endpoint/enroll.test.ts', // P5 O10 M2: enrolls against desk-hub's local runner, a wrangler dev child process
+  'test/endpoint/provision.test.ts', // P5 O14 M1: provisions, retires and unenrolls against the same local runner
   'test/endpoint/hub-link.test.ts', // P5 O10 M3: reconnects on the hub link's backoff, timed against a stand-in hub
   'test/endpoint/hub-link.local.test.ts', // P5 O10 M3: RL1 against desk-hub's Worker in Miniflare (cuts, redeploys, leases)
   'test/endpoint/channels.local.test.ts', // P5 O10 M4: RL2 over the hub's multiplex (desk-hub's Worker in Miniflare) and the direct listener
@@ -58,7 +59,7 @@ const ARTIFACTS_DOM_TESTS = 'src/artifacts/**/*.dom.test.{ts,tsx}';
 const ARTIFACTS_DOM_CSS = { include: [/\/document\/editor\/.+\.css/, /\/renderer\/src\/styles\/tokens\.css/, /\/(slides|design)\/editor\/.+\.css\?raw$/, /\/artifacts\/comments\/.+\.css\?raw$/] };
 // Every happy-dom project drops KaTeX's one quirks-mode advisory (happy-dom has no `document.compatMode`, so no doctype
 // silences it); every other warning passes through.
-const HAPPY_DOM_SETUP = ['test/support/artifacts-dom-setup.ts'];
+const HAPPY_DOM_SETUP = ['test/support/artifacts-dom-setup.ts', 'test/support/renderer-machine-setup.ts']; // P5 O6 M2: the page's local machine
 
 // P4 Decision Log 4 (English throughout): the suites of the code that writes what the owner reads (the renderer, the
 // artifacts, and main's and the host's display words in DISPLAY_NODE_TESTS) run under the owner's Korean system locale,
@@ -183,6 +184,7 @@ export default defineConfig({
       // this vitest, so `pnpm test` and the unit job's `--maxWorkers` reach it as they reach every project above.
       'apps/desk-hub/vitest.config.ts',
       'apps/desk-web/vitest.config.ts', // DC5: the web app's client, log, and key, against the DX3 double
+      'apps/desk-web/vitest.local.config.ts', // P5 O13 M4: the cards client against the real endpoint on the local hub (a wrangler dev child)
       'apps/org-protocol/vitest.config.ts', // P5-O11 M1: the protocol package's vectors, in Node and in workerd
     ],
   },

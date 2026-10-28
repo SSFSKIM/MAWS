@@ -24,6 +24,7 @@ import {
 } from '../test-support/panel';
 import type { PanelTool } from './tool';
 import { connectPanelHost, panelHost, pendingAdds, registerPanelTool, restoredLogIds, togglePinned, usePanelHost } from './host';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 import { editorHostOf, registerEditorHost } from './editor-host'; // P3-G
 
 const cleanups: (() => void)[] = [];
@@ -564,7 +565,7 @@ describe('panel host transitions', () => {
         panelHost.addTool('session-info', { appSessionId: A, pin: true });
         kept = panelHost.addTool('terminal', { appSessionId: null, pin: true, activate: false });
         // as connectShell does on session.removed
-        if (useSessions.getState().applyRemoved({ appSessionId: A, revision: 99 })) useLayout.getState().dropSession(A);
+        if (useSessions.getState().applyRemoved({ appSessionId: A, revision: 99 }, TEST_MACHINE)) useLayout.getState().dropSession(A);
       });
       expect(terminal.probe.created.map((i) => i.instanceId)).toEqual([kept]);
       expect(info.probe.created).toEqual([]);

@@ -1,0 +1,122 @@
+[
+  {
+    "env": {
+      "NODE_OPTIONS": "--max-old-space-size=5120",
+      "CLASS1_E2E": "default artifacts library side tools to-human deliverables panel supervisor browser browser-comment browser-import settings transcript terminal code agents widgets c7 scm c12 available document document-app presentations design-systems browser-cua browser-chrome desk-web design dashboard connectors connectors-direct connectors-oauth delivery discover",
+      "LINUX_E2E": "library artifacts available tools agents desk-web",
+      "POOL_E2E": "desk-web",
+      "LIBREOFFICE_E2E": "document presentations",
+      "POPPLER_E2E": "dashboard design design-live design-scale presentations",
+      "LIVE_E2E": "library-live document-live document-provisional-live presentations-live presentations-provisional-live design-systems-live design-live dashboard-live tool-time-heavy-live",
+      "LIVE_GUARD_E2E": "tool-time-heavy-live",
+      "MEASURED_E2E": "artifacts-perf dashboard-scale design-scale document-scale document-scale-repeat local-latency presentations-drag presentations-scale tool-time-heavy-live",
+      "MAC_SHARED_E2E": "",
+      "MAC_VM_E2E": "document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables supervisor browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct",
+      "HOSTED_MAC_E2E": "document-app browser-chrome available artifacts settings connectors connectors-direct delivery to-human widgets side supervisor c12 browser-import document code scm agents library deliverables presentations dashboard design design-systems tools panel browser-cua terminal c7 browser transcript",
+      "MAC_SECRET_E2E": "connectors-oauth discover",
+      "MAC_HOME_E2E": "discover",
+      "PEER_E2E": "cross-build",
+      "EVENT": "push",
+      "GATE_RUNNER": "pool",
+      "GATE_E2E_RUNNER": "macos",
+      "HEAD_MESSAGE": "Runner: macos\n"
+    },
+    "sha256": "bdee45de762a787a5a4b285390bf8b32c0c7c8e394045eb5f79079da9b9da935"
+  },
+  {
+    "env": {
+      "NODE_OPTIONS": "--max-old-space-size=5120",
+      "CLASS1_E2E": "default artifacts library side tools to-human deliverables panel supervisor browser browser-comment browser-import settings transcript terminal code agents widgets c7 scm c12 available document document-app presentations design-systems browser-cua browser-chrome desk-web design dashboard connectors connectors-direct connectors-oauth delivery discover",
+      "LINUX_E2E": "library artifacts available tools agents desk-web",
+      "POOL_E2E": "desk-web",
+      "LIBREOFFICE_E2E": "document presentations",
+      "POPPLER_E2E": "dashboard design design-live design-scale presentations",
+      "LIVE_E2E": "library-live document-live document-provisional-live presentations-live presentations-provisional-live design-systems-live design-live dashboard-live tool-time-heavy-live",
+      "LIVE_GUARD_E2E": "tool-time-heavy-live",
+      "MEASURED_E2E": "artifacts-perf dashboard-scale design-scale document-scale document-scale-repeat local-latency presentations-drag presentations-scale tool-time-heavy-live",
+      "MAC_SHARED_E2E": "",
+      "MAC_VM_E2E": "document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables supervisor browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct",
+      "HOSTED_MAC_E2E": "document-app browser-chrome available artifacts settings connectors connectors-direct delivery to-human widgets side supervisor c12 browser-import document code scm agents library deliverables presentations dashboard design design-systems tools panel browser-cua terminal c7 browser transcript",
+      "MAC_SECRET_E2E": "connectors-oauth discover",
+      "MAC_HOME_E2E": "discover",
+      "PEER_E2E": "cross-build",
+      "EVENT": "push",
+      "GATE_RUNNER": "pool",
+      "GATE_E2E_RUNNER": "macos",
+      "HEAD_MESSAGE": "Runner: macos\nLane: hosted"
+    },
+    "sha256": "098fd3c3b5b4d502057ace09296208e634dcb649745d47c4eb7f8abd1605d90f"
+  },
+  {
+    "env": {
+      "NODE_OPTIONS": "--max-old-space-size=5120",
+      "CLASS1_E2E": "default artifacts library side tools to-human deliverables panel supervisor browser browser-comment browser-import settings transcript terminal code agents widgets c7 scm c12 available document document-app presentations design-systems browser-cua browser-chrome desk-web design dashboard connectors connectors-direct connectors-oauth delivery discover",
+      "LINUX_E2E": "library artifacts available tools agents desk-web",
+      "POOL_E2E": "desk-web",
+      "LIBREOFFICE_E2E": "document presentations",
+      "POPPLER_E2E": "dashboard design design-live design-scale presentations",
+      "LIVE_E2E": "library-live document-live document-provisional-live presentations-live presentations-provisional-live design-systems-live design-live dashboard-live tool-time-heavy-live",
+      "LIVE_GUARD_E2E": "tool-time-heavy-live",
+      "MEASURED_E2E": "artifacts-perf dashboard-scale design-scale document-scale document-scale-repeat local-latency presentations-drag presentations-scale tool-time-heavy-live",
+      "MAC_SHARED_E2E": "",
+      "MAC_VM_E2E": "document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables supervisor browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct",
+      "HOSTED_MAC_E2E": "document-app browser-chrome available artifacts settings connectors connectors-direct delivery to-human widgets side supervisor c12 browser-import document code scm agents library deliverables presentations dashboard design design-systems tools panel browser-cua terminal c7 browser transcript",
+      "MAC_SECRET_E2E": "connectors-oauth discover",
+      "MAC_HOME_E2E": "discover",
+      "PEER_E2E": "cross-build",
+      "EVENT": "push",
+      "GATE_RUNNER": "pool",
+      "GATE_E2E_RUNNER": "macos",
+      "HEAD_MESSAGE": "Runner: macos\nLane: no-hosted"
+    },
+    "sha256": "043bd1e8d9533c58bd263a6895399644404f9bb8067697e1292660b018cd31c0"
+  },
+  {
+    "env": {
+      "NODE_OPTIONS": "--max-old-space-size=5120",
+      "CLASS1_E2E": "default artifacts library side tools to-human deliverables panel supervisor browser browser-comment browser-import settings transcript terminal code agents widgets c7 scm c12 available document document-app presentations design-systems browser-cua browser-chrome desk-web design dashboard connectors connectors-direct connectors-oauth delivery discover",
+      "LINUX_E2E": "library artifacts available tools agents desk-web",
+      "POOL_E2E": "desk-web",
+      "LIBREOFFICE_E2E": "document presentations",
+      "POPPLER_E2E": "dashboard design design-live design-scale presentations",
+      "LIVE_E2E": "library-live document-live document-provisional-live presentations-live presentations-provisional-live design-systems-live design-live dashboard-live tool-time-heavy-live",
+      "LIVE_GUARD_E2E": "tool-time-heavy-live",
+      "MEASURED_E2E": "artifacts-perf dashboard-scale design-scale document-scale document-scale-repeat local-latency presentations-drag presentations-scale tool-time-heavy-live",
+      "MAC_SHARED_E2E": "",
+      "MAC_VM_E2E": "document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables supervisor browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct",
+      "HOSTED_MAC_E2E": "document-app browser-chrome available artifacts settings connectors connectors-direct delivery to-human widgets side supervisor c12 browser-import document code scm agents library deliverables presentations dashboard design design-systems tools panel browser-cua terminal c7 browser transcript",
+      "MAC_SECRET_E2E": "connectors-oauth discover",
+      "MAC_HOME_E2E": "discover",
+      "PEER_E2E": "cross-build",
+      "EVENT": "push",
+      "GATE_RUNNER": "pool",
+      "GATE_E2E_RUNNER": "macos",
+      "HEAD_MESSAGE": "Runner: macos\nLane: vm"
+    },
+    "sha256": "d554a5df88e765013624e5db388e7847c02d3bd3d6b75073ba31a4e1a6e558df"
+  },
+  {
+    "env": {
+      "NODE_OPTIONS": "--max-old-space-size=5120",
+      "CLASS1_E2E": "default artifacts library side tools to-human deliverables panel supervisor browser browser-comment browser-import settings transcript terminal code agents widgets c7 scm c12 available document document-app presentations design-systems browser-cua browser-chrome desk-web design dashboard connectors connectors-direct connectors-oauth delivery discover",
+      "LINUX_E2E": "library artifacts available tools agents desk-web",
+      "POOL_E2E": "desk-web",
+      "LIBREOFFICE_E2E": "document presentations",
+      "POPPLER_E2E": "dashboard design design-live design-scale presentations",
+      "LIVE_E2E": "library-live document-live document-provisional-live presentations-live presentations-provisional-live design-systems-live design-live dashboard-live tool-time-heavy-live",
+      "LIVE_GUARD_E2E": "tool-time-heavy-live",
+      "MEASURED_E2E": "artifacts-perf dashboard-scale design-scale document-scale document-scale-repeat local-latency presentations-drag presentations-scale tool-time-heavy-live",
+      "MAC_SHARED_E2E": "",
+      "MAC_VM_E2E": "document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables supervisor browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct",
+      "HOSTED_MAC_E2E": "document-app browser-chrome available artifacts settings connectors connectors-direct delivery to-human widgets side supervisor c12 browser-import document code scm agents library deliverables presentations dashboard design design-systems tools panel browser-cua terminal c7 browser transcript",
+      "MAC_SECRET_E2E": "connectors-oauth discover",
+      "MAC_HOME_E2E": "discover",
+      "PEER_E2E": "cross-build",
+      "EVENT": "push",
+      "GATE_RUNNER": "pool",
+      "GATE_E2E_RUNNER": "macos",
+      "HEAD_MESSAGE": "Runner: macos\nLane: vm-trial"
+    },
+    "sha256": "1ca77545f24490c4845c3b4c883fed9e605f337079ac965b1e165492111038ac"
+  }
+]

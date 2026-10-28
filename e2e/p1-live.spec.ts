@@ -63,6 +63,7 @@
 // It spends money; run on purpose only (the script builds, the flag runs):
 //   MAWS_P1_LIVE=1 pnpm e2e:p1-live
 // (`pnpm e2e:p1-live` alone builds and reports every case skipped.)
+import { addressed } from './support/address';
 import { activeMainTab, openSurface, surface } from './support/shell';
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -617,12 +618,12 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
       const record = value(await invoke(l.page, 'session.get', { appSessionId: child }));
       const anchor = record?.lineage?.anchor;
       expect(record?.lineage).toMatchObject({ kind: 'side-thread', parentAppSessionId: parent, openedBy: 'comment', anchor: { kind: 'artifact-element', locator: '#title' } });
-      await expect(card.locator(`[data-card-thread="${child}"]`), 'the card draws the thread').toBeVisible();
+      await expect(card.locator(`[data-card-thread="${await addressed(l.page, child)}"]`), 'the card draws the thread').toBeVisible();
       await expect(card.locator('[data-chip="anchor"]').first(), 'the comment under its anchor chip').toHaveAttribute('data-anchor-kind', 'artifact-element');
-      await expect(l.panel.locator(`[data-side-thread-view="${child}"]`), 'no Side pane on the thread').toHaveCount(0);
+      await expect(l.panel.locator(`[data-side-thread-view="${await addressed(l.page, child)}"]`), 'no Side pane on the thread').toHaveCount(0);
       await expect(surface(l.page, 'artifacts'), 'the Artifacts surface stays open').toBeVisible();
 
-      const row = l.page.locator(`[data-region="main"] [data-side-thread="${child}"]`);
+      const row = l.page.locator(`[data-region="main"] [data-side-thread="${await addressed(l.page, child)}"]`);
       const allowed: string[] = [];
       // the thread's turn, or its receipts reaching its allocation, whichever comes first
       const done = async () => mainTurnsEnded(await events(l, child)).length > 0 && (await idleNow(l, child));
@@ -736,7 +737,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     // charged before it is asked: its answer comes as a control response, with no result frame to receipt it
     charge(note, { key: 's3-btw', case: 's3', label: 'the /btw side question (reserved: answered with no result frame)', usd: BTW_RESERVATION_USD, sideQuestionOf: parent });
     await sendFromComposer(l, parent, `/btw ${PROMPTS.btw}`, { typed: true });
-    const view = l.panel.locator(`[data-side-btw-view="${parent}"]`);
+    const view = l.panel.locator(`[data-side-btw-view="${await addressed(l.page, parent)}"]`);
     await expect(view).toBeVisible({ timeout: 30_000 });
     const answered = view.locator('[data-side-exchange="answered"]').first();
     await expect(answered).toBeVisible({ timeout: 120_000 });
@@ -1013,7 +1014,7 @@ test('A-47: a permission request on a session not in front raises the fallback t
     note(`A-47: window focused at the request: ${focused === null ? 'none' : `window ${focused}`}; the main view's tab ${JSON.stringify(shownTab)} (the back session not in front); permission.requested ${requested!.toolName} ${requested!.requestId}; attention.notified delivery ${notified!.delivery} at ${notified!.at}; the toast ${JSON.stringify(toastText)}; session.answer ${JSON.stringify(answer)} ${answeredAt - notifiedAt} ms after the notice; the toast gone ${goneAt - answeredAt} ms after the answer (${goneAt - notifiedAt} ms after the notice; the toast's own timeout is 6 s)`);
     expect(focused, 'no MAWS window focused').toBeNull();
     expect(notified!.delivery, 'the notifier’s fallback (the OS notification refused)').toBe('fallback');
-    expect(shownTab).not.toBe(`session:${back}`);
+    expect(shownTab).not.toBe(`session:${await addressed(live.page, back)}`);
     expect(answer).toEqual({ outcome: 'delivered' });
     // retracted, not timed out: gone inside the toast's own 6 s (TOAST_DURATION_MS), or still shown past it until the answer
     expect(goneAt - notifiedAt < 6_000 || answeredAt - notifiedAt >= 6_000, 'gone by the answer, not by the toast’s own timeout').toBe(true);

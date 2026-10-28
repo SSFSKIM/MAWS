@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
 import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
@@ -48,7 +48,7 @@ afterEach(() => {
   browser.setState({ sessions: new Map() });
   useSettings.setState({ state: null });
   useNotices.setState({ notices: [] });
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 describe('with no imported profile', () => {
@@ -136,7 +136,7 @@ describe('an imported profile', () => {
     b.bridge.invoke = (async (name: string, input: unknown) => {
       if (name === 'browser.import.setExtension') await new Promise<void>((resolve) => (answer = resolve));
       return invoke(name as never, input as never);
-    }) as MawsBridge['invoke'];
+    }) as PreloadBridge['invoke'];
     b.answers['browser.import.setExtension'] = () => {
       throw new Error('not an imported profile');
     };

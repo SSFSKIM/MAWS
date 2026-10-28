@@ -13,12 +13,16 @@
 // E9 (M5): the page mounts the app's dictation key and controller beside ComposerAppKeys, and reads its store; it
 // connects the settings store as App.tsx does, so a keymap override (the dictation key's binding) and the recognition
 // language reach the dispatcher and the controller.
+// P5 O6 M2: the page holds addresses. `window.__maws_cards` speaks the raw bridge's bare ids, as the specs read them from
+// `window.maws`: the page addresses each id it is handed with the local machine, and answers bare ones; its own labels
+// name the bare id.
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
+import { addressOf, bareOf } from '@shared/machine/address';
 import { Composer, ComposerAppKeys, connectComposer, connectInlineEdit, DictationKeys, DockedCardFrame, dockCard, registerSlashWidget, WidgetDialogHost } from '../../composer';
 import { useDictationStore } from '../../composer/dictation/store';
 import { setRewindWindow } from '../../composer/resubmit-seam';
@@ -45,6 +49,12 @@ declare global {
 }
 
 const PLACEMENTS: HarnessPlacement[] = ['docked', 'card', 'hover', 'inline'];
+const local = (id: string): AppSessionId => addressOf(ipc.localMachine, id as AppSessionId);
+// A pane as the page holds it: its session addressed.
+function addressedPane(pane: HarnessPane): HarnessPane {
+  if (pane === null || 'counter' in pane) return pane;
+  return 'composer' in pane ? { ...pane, composer: local(pane.composer) } : { ...pane, appSessionId: local(pane.appSessionId) };
+}
 const at = (item: AttentionItem) => Date.parse(item.createdAt);
 const oldest = (items: AttentionItem[]) => items.reduce<AttentionItem | null>((a, b) => (a === null || at(b) < at(a) ? b : a), null);
 
@@ -57,18 +67,18 @@ function useShown(appSessionId: AppSessionId): AttentionItem | null {
 
 function RequestPane({ appSessionId, placement, index }: { appSessionId: AppSessionId; placement: HarnessPlacement; index: 0 | 1 }) {
   const item = useShown(appSessionId);
-  if (!item) return <p className="m-0 text-fg-faint">No request for {appSessionId}</p>;
+  if (!item) return <p className="m-0 text-fg-faint">No request for {bareOf(appSessionId)}</p>;
   const card = <RequestCard key={item.id} item={item} request={null} placement={placement} paneIndex={index} />;
   switch (placement) {
     case 'card':
       return (
-        <article tabIndex={0} aria-label={`card ${appSessionId}`} className="rounded-md border border-border bg-bg-raised p-3 outline-accent focus-visible:outline-2">
+        <article tabIndex={0} aria-label={`card ${bareOf(appSessionId)}`} className="rounded-md border border-border bg-bg-raised p-3 outline-accent focus-visible:outline-2">
           {card}
         </article>
       );
     case 'hover':
       return (
-        <div role="dialog" aria-label={`hover ${appSessionId}`} className="w-[342px] rounded-md border border-border-strong bg-bg-overlay p-4">
+        <div role="dialog" aria-label={`hover ${bareOf(appSessionId)}`} className="w-[342px] rounded-md border border-border-strong bg-bg-overlay p-4">
           {card}
         </div>
       );
@@ -92,7 +102,7 @@ function initialPanes(): [HarnessPane, HarnessPane] {
   const params = new URLSearchParams(location.search);
   const session = params.get('session');
   const placement = params.get('placement') as HarnessPlacement | null;
-  return [session ? { appSessionId: session, placement: placement && PLACEMENTS.includes(placement) ? placement : 'docked' } : null, null];
+  return [session ? { appSessionId: local(session), placement: placement && PLACEMENTS.includes(placement) ? placement : 'docked' } : null, null];
 }
 
 // A stub card another child would dock (C10's trust card): the docked frame's chrome, focus and keys around it.
@@ -108,10 +118,10 @@ function StubCard({ appSessionId, onAccept }: { appSessionId: AppSessionId; onAc
 const failSend = new Set<string>();
 const composerClient: MawsBridge = {
   ...ipc,
-  invoke: ((name, input) => {
+  invoke: ((name, input, ...opts) => {
     const appSessionId = (input as { appSessionId?: string } | undefined)?.appSessionId;
     if (name === 'session.send' && appSessionId !== undefined && failSend.delete(appSessionId)) return Promise.resolve({ ok: false, error: { code: 'internal', message: 'write_failed: injected by the harness' } });
-    return ipc.invoke(name, input);
+    return ipc.invoke(name, input, ...opts);
   }) as MawsBridge['invoke'],
 };
 
@@ -141,30 +151,32 @@ export function ComposerHarness() {
     window.__maws_cards = {
       // Committed before the call returns: rendered later, the previous placement's card would still be in the page for
       // a test's next step to find (a docked card answering for the inline one it moved to).
-      show: (next) =>
+      show: (shown) =>
         flushSync(() => {
+          const next: [HarnessPane, HarnessPane] = [addressedPane(shown[0]), addressedPane(shown[1])];
           mirrorLayout(next);
           setPanes(next);
         }),
       counted: () => counted.current,
-      intent: (appSessionId, intent) => setStubIntent(appSessionId, intent as Parameters<typeof setStubIntent>[1]),
-      starts: () => [...stubLog.starts],
+      intent: (appSessionId, intent) => setStubIntent(local(appSessionId), intent as Parameters<typeof setStubIntent>[1]),
+      starts: () => stubLog.starts.map((start) => ({ ...start, appSessionId: bareOf(start.appSessionId) })),
       answerStart: (result) => stubLog.pending.shift()?.(result),
-      patches: () => [...stubLog.patches],
-      dockStub: (appSessionId) => {
+      patches: () => stubLog.patches.map((patch) => ({ ...patch, appSessionId: bareOf(patch.appSessionId) })),
+      dockStub: (bare) => {
+        const appSessionId = local(bare);
         stub.current.undock?.();
-        stub.current.undock = dockCard(appSessionId as AppSessionId, { id: 'harness:stub', render: () => <StubCard appSessionId={appSessionId as AppSessionId} onAccept={() => void (stub.current.accepts += 1)} /> });
+        stub.current.undock = dockCard(appSessionId, { id: 'harness:stub', render: () => <StubCard appSessionId={appSessionId} onAccept={() => void (stub.current.accepts += 1)} /> });
       },
       undockStub: () => {
         stub.current.undock?.();
         stub.current.undock = null;
       },
       stubAccepts: () => stub.current.accepts,
-      failNextSend: (appSessionId) => void failSend.add(appSessionId),
+      failNextSend: (appSessionId) => void failSend.add(local(appSessionId)),
       rewindWindow: (ms) => setRewindWindow(ms),
       dictation: () => {
         const capture = useDictationStore.getState().capture;
-        return capture && { phase: capture.phase, appSessionId: capture.appSessionId };
+        return capture && { phase: capture.phase, appSessionId: bareOf(capture.appSessionId) };
       },
       voiceNotice: () => {
         const notice = useDictationStore.getState().notice;

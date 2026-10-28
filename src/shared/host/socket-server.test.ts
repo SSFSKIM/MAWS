@@ -36,7 +36,8 @@ interface StartOptions {
   badToken?: 'refuse' | 'close';
   many?: { runtimeFor(): HostRuntime };
   halfOpen?: boolean;
-  admit?: SocketServerOptions['admit']; // P5 O2 M5
+  admitHello?: SocketServerOptions['admitHello']; // P5 O2 M5
+  admit?: (socket: Socket) => boolean; // P5 O6 M3
 }
 
 async function start(options: StartOptions = {}) {
@@ -65,10 +66,11 @@ async function start(options: StartOptions = {}) {
       if (from?.refused) refusedExits.push(when);
     },
     onClient: (connected) => void changes.push(connected),
-    admit: options.admit, // P5 O2 M5
+    admitHello: options.admitHello, // P5 O2 M5
     log,
     helloTimeoutMs: options.helloTimeoutMs,
     docHighWater: options.docHighWater, // P3-A M5
+    admit: options.admit, // P5 O6 M3
   });
   temp = await listenTemp(server);
   const connect = async () => {
@@ -104,6 +106,27 @@ async function start(options: StartOptions = {}) {
 }
 
 describe('the socket layer handshake (server side)', () => {
+  // P5 O6 M3: the stand-in's peer check enters here (src/main/machines/serve-standin.ts)
+  it('closes a connection its admit refuses before reading a byte or starting the hello deadline, and serves one it admits', async () => {
+    let verdict = false;
+    const admit = vi.fn<(socket: Socket) => boolean>(() => verdict);
+    const host = await start({ admit, helloTimeoutMs: 60 });
+    const refused = await host.connect();
+    refused.send(hello());
+    await refused.closed;
+    expect(admit).toHaveBeenCalledOnce();
+    expect(refused.lines).toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(host.log).not.toHaveBeenCalled(); // no hello was read, and no deadline ran out
+    expect(host.changes).toEqual([]);
+
+    verdict = true;
+    const admitted = await host.connect();
+    admitted.send(hello());
+    expect(await admitted.next()).toEqual(WELCOME);
+    expect(admit).toHaveBeenCalledTimes(2);
+  });
+
   it('welcomes a valid hello with its identity and serves requests; events wait for ready, where the connect hooks run', async () => {
     const order: string[] = [];
     const host = await start({ hooks: [() => void order.push('hook')] });
@@ -378,7 +401,7 @@ describe('the socket layer handshake (server side)', () => {
 });
 
 // P5 O2 M5 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, "The handshake reflects the upstream"): a relay's welcome
-// waits for `admit`, which answers the facts it reflects, a refusal line to write as received, or a close.
+// waits for `admitHello`, which answers the facts it reflects, a refusal line to write as received, or a close.
 describe('the socket layer’s admission (server side, P5 O2 M5)', () => {
   const UPSTREAM = { protocol: 3, minor: 1, buildId: 'upstream-build', capabilities: ['up.cap'], wire: 'wire-1', pid: 5151, startedAt: '2026-10-27T09:00:00.000Z' };
 
@@ -386,7 +409,7 @@ describe('the socket layer’s admission (server side, P5 O2 M5)', () => {
     let admitNow!: () => void;
     const peers: unknown[] = [];
     const host = await start({
-      admit: (peer) => {
+      admitHello: (peer) => {
         peers.push(peer);
         return new Promise((resolve) => (admitNow = () => resolve({ kind: 'welcome', identity: UPSTREAM, counts: { liveSessions: 4, rows: 6 } })));
       },
@@ -406,7 +429,7 @@ describe('the socket layer’s admission (server side, P5 O2 M5)', () => {
 
   it('writes a refusal admit answers as it is, then honours one exit from that connection, marked refused', async () => {
     const line = { t: 'refuse', reason: 'protocol', protocol: 4, buildId: 'newer', wire: 'w', liveSessions: 2 } as const;
-    const host = await start({ admit: async () => ({ kind: 'refuse', line }) });
+    const host = await start({ admitHello: async () => ({ kind: 'refuse', line }) });
     const client = await host.connect();
     client.send(hello());
     expect(await client.next()).toEqual(line);
@@ -418,7 +441,7 @@ describe('the socket layer’s admission (server side, P5 O2 M5)', () => {
   });
 
   it('closes the connection with nothing written when admit answers close', async () => {
-    const host = await start({ admit: async () => ({ kind: 'close', why: 'the upstream did not start within 15 s' }) });
+    const host = await start({ admitHello: async () => ({ kind: 'close', why: 'the upstream did not start within 15 s' }) });
     const client = await host.connect();
     client.send(hello());
     await client.closed;
@@ -428,7 +451,7 @@ describe('the socket layer’s admission (server side, P5 O2 M5)', () => {
 
   it('never asks admit for a wrong token', async () => {
     const admit = vi.fn(async () => ({ kind: 'close' as const, why: 'unused' }));
-    const host = await start({ admit, badToken: 'close' });
+    const host = await start({ admitHello: admit, badToken: 'close' });
     const client = await host.connect();
     client.send(hello({ token: 'b'.repeat(64) }));
     await client.closed;
@@ -441,7 +464,7 @@ describe('the socket layer’s admission (server side, P5 O2 M5)', () => {
       let admitNow!: () => void;
       const host = await start({
         halfOpen,
-        admit: () => new Promise((resolve) => (admitNow = () => resolve({ kind: 'welcome', identity: UPSTREAM, counts: { liveSessions: 0, rows: 0 } }))),
+        admitHello: () => new Promise((resolve) => (admitNow = () => resolve({ kind: 'welcome', identity: UPSTREAM, counts: { liveSessions: 0, rows: 0 } }))),
       });
       const client = await host.connect();
       client.send(hello());
@@ -459,7 +482,7 @@ describe('the socket layer’s admission (server side, P5 O2 M5)', () => {
   });
 
   it('marks an exit on a served connection as not refused', async () => {
-    const host = await start({ admit: async () => ({ kind: 'welcome', identity: UPSTREAM, counts: { liveSessions: 0, rows: 0 } }) });
+    const host = await start({ admitHello: async () => ({ kind: 'welcome', identity: UPSTREAM, counts: { liveSessions: 0, rows: 0 } }) });
     const client = await host.connect();
     client.send(hello());
     await client.next();

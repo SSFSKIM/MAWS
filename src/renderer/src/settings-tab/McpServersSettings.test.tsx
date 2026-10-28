@@ -3,7 +3,7 @@
 // written.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { MawsBridge, Settings } from '@shared/ipc/schema';
+import type { PreloadBridge, Settings } from '@shared/ipc/schema';
 import type { AppMcpServer } from '@shared/engine/app-mcp-servers';
 import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
 import { useNotices } from '../stores/notices';
@@ -36,7 +36,7 @@ afterEach(() => {
   useSettings.setState({ state: null });
   useNotices.setState({ notices: [] });
   vi.restoreAllMocks();
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 describe('Settings › Engine › MCP servers', () => {
@@ -79,7 +79,7 @@ describe('Settings › Engine › MCP servers', () => {
         await new Promise<void>((resolve) => (answer = resolve));
       }
       return invoke(name as never, input as never);
-    }) as MawsBridge['invoke'];
+    }) as PreloadBridge['invoke'];
     type(MCP_SERVERS.name, 'next');
     type(MCP_SERVERS.url, 'https://example.com/mcp');
     const add = within(row()).getByRole('button', { name: MCP_SERVERS.add }) as HTMLButtonElement;
@@ -108,7 +108,7 @@ describe('Settings › Engine › MCP servers', () => {
   it('enables list actions again when a write fails without changing the saved list', async () => {
     renderRow(withServers([NOTION]));
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    b.bridge.invoke = (async () => ({ ok: false, error: { code: 'internal', message: 'disk full' } })) as MawsBridge['invoke'];
+    b.bridge.invoke = (async () => ({ ok: false, error: { code: 'internal', message: 'disk full' } })) as PreloadBridge['invoke'];
     const remove = within(row()).getByRole('button', { name: MCP_SERVERS.remove('notion') }) as HTMLButtonElement;
     fireEvent.click(remove);
     expect(remove.disabled).toBe(true);

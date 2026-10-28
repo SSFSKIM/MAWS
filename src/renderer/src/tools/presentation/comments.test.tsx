@@ -12,8 +12,10 @@ import { listThreads } from '@artifacts/slides/threads';
 import { newDoc, transact, type Doc } from '@artifacts/yjs';
 import { anchoredMessage } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
+import { at } from '../../../../../test/support/machine';
 import { artifactEditorFor, handArtifactViewOver, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
 import { resetLibrary } from '../../library/store';
 import { resetMarkupSurfaces } from '../../markup/surface';
@@ -29,7 +31,7 @@ import { artifactCommentAnchor, useDocumentComments } from '../document/comments
 import { registerPresentationEditor } from './index';
 import type { DeckTabState } from './tab-state';
 
-const PARENT = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
+const PARENT = at('a1111111-1111-4111-8111-111111111111' as AppSessionId);
 const passage = { threadId: 't1', tabId: 's3', tabTitle: 'slide 3: Plan', quote: 'One path' };
 
 let offComposer: () => void;
@@ -99,7 +101,7 @@ describe('a deck’s compose card keeps its draft', () => {
     return doc;
   }
   async function mount() {
-    window.maws = fakeClient({ 'session.intent.get': null, 'library.get': { row: null } }).client;
+    window.maws = fakeClient({ 'session.intent.get': null, 'library.get': { row: null } }).client as unknown as PreloadBridge;
     const doc = deck();
     const document: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false };
     const handle = { doc, awareness: new Awareness(doc), state: () => document, subscribe: () => () => {}, onRestored: () => () => {}, onProvisional: () => () => {}, holdRemote() {}, close() {} } as unknown as DocumentHandle;

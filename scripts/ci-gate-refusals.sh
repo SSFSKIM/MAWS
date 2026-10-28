@@ -23,6 +23,7 @@ refusals() { # <the jobs, "conclusion<TAB>name" lines> <the failed jobs' logs>
   [[ -n $class1a ]] && relaunch+=" --class1a $class1a"
   # A run on a Lane: relaunches there: the guest's own refusals (a dialog in it, a display off its geometry) included.
   [[ -n $lane ]] && relaunch+=" --lane $lane"
+  [[ -n ${hosted_route:-} ]] && relaunch+=" --hosted-route $hosted_route"
   # A live run's groups are refused without --live (Decision Log 75), so its relaunch stays live.
   [[ -n $live ]] && relaunch+=" --live"
   # The peer the run checked against, resolved (its full sha) or `none`: the relaunch checks the same pair, never the

@@ -3,7 +3,7 @@
 // field of `settings.artifacts` through `settings.set`.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { MawsBridge, Settings } from '@shared/ipc/schema';
+import type { PreloadBridge, Settings } from '@shared/ipc/schema';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
 import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
@@ -49,7 +49,7 @@ afterEach(() => {
   useUsage.setState({ snapshot: null });
   useSettings.setState({ state: null });
   useNotices.setState({ notices: [] });
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 describe('Settings › Artifacts', () => {

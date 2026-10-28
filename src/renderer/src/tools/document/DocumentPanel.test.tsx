@@ -12,8 +12,9 @@ import { addTab, createDocument } from '@artifacts/document/tabs';
 import { schemaFor } from '@artifacts/document/schema';
 import type { ArtifactHost } from '@artifacts/host';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { CommandName, MawsBridge } from '@shared/ipc/schema';
+import type { CommandName, MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../../test/support/fake-client';
+import { at } from '../../../../../test/support/machine';
 import { artifactEditorFor, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
 import { markupSurfaceOf, resetMarkupSurfaces } from '../../markup/surface';
 import { editorHostOf, EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
@@ -27,7 +28,7 @@ import type { DocumentTabDeps, DocumentTabState } from './tab-state';
 
 const A = '0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e';
 const SPACE = '5a5a5a5a-4b5a-4968-8778-695a4b3c2d1e';
-const SESSION = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
+const SESSION = at('a1111111-1111-4111-8111-111111111111' as AppSessionId);
 const scope: EditorHostScope = { surface: 'panel', tabId: 'panel-tab-1' };
 
 let memory: MemoryDocumentHost;
@@ -38,7 +39,7 @@ beforeEach(() => {
   resetEditorHosts();
   resetMarkupSurfaces();
   resetArtifactEditors();
-  window.maws = fakeClient({ 'session.intent.get': null }).client;
+  window.maws = fakeClient({ 'session.intent.get': null }).client as unknown as PreloadBridge;
   sent = [];
   noContentMs = undefined;
   versions = [];
@@ -68,7 +69,7 @@ let versions: unknown[] = []; // what `artifacts.versions` answers
 
 function deps(): DocumentTabDeps {
   const ipc: Pick<MawsBridge, 'invoke' | 'on'> = {
-    invoke: (async (name: CommandName) => (sent.push(name), { ok: true, value: name === 'artifacts.get' ? { artifact: { id: A, kind: 'document', title: 'Launch plan', lastViewedAt: null, spaceId: SPACE, revision: 1 } } : name === 'artifacts.versions' ? { versions } : undefined })) as MawsBridge['invoke'],
+    invoke: (async (name: CommandName) => (sent.push(name), { ok: true, value: name === 'artifacts.get' ? { artifact: { id: A, kind: 'document', title: 'Launch plan', lastViewedAt: null, spaceId: SPACE, revision: 1 } } : name === 'artifacts.versions' ? { versions } : undefined })) as unknown as MawsBridge['invoke'],
     on: (() => () => {}) as MawsBridge['on'],
   };
   const editor = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' });
@@ -234,7 +235,7 @@ describe('the document editor in L’s registry', () => {
       'session.intent.get': null,
       'library.spaces': { spaces: [{ id: SPACE, name: 'Launch', createdAt: 1, count: 1 }] },
       'library.get': { row: { id: systemId, kind: 'design_system', title: 'Launch brand', createdBy: { kind: 'human' }, createdAt: 1, updatedAt: 1, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 1, lastEditor: { kind: 'human' }, lastEditedAt: 1, sessions: [] } },
-    }).client;
+    }).client as unknown as PreloadBridge;
     const stop = provideDocumentDesignSystem({ Scope: ({ children }) => children, systemFor: () => ({ id: systemId }) });
     try {
       mount();

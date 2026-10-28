@@ -4,6 +4,7 @@ import type { BudgetState } from '@shared/ipc/schema/engine';
 import type { EngineSessionStatus } from '@shared/engine/status'; // P5 O2 M2
 import { status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { OTHER_MACHINE } from '../../../../test/support/machine';
 import { useNotices } from '../stores/notices';
 import { BUDGET, clockTime, gb, reasonWords } from './copy';
 import { formatClock } from '@shared/app/date-format';
@@ -147,6 +148,18 @@ describe('the budget store across engine host generations', () => {
     off = connectBudget(fake.client);
   });
   afterEach(() => off());
+
+  // The branch review: the budget is this machine's engine host's (`engine.budget` crosses no link), while
+  // `engine.hostState` crosses machine links; another machine's host coming and going leaves it as it is.
+  it('another machine’s engine host leaving or returning keeps this machine’s budget and banner, and reads nothing', async () => {
+    await fake.reply('engine.budget', over([A]));
+    expect(banners()).toHaveLength(1);
+    fake.event('engine.hostState', { state: 'restarting', pid: null, restarts: 1, revision: 40 }, OTHER_MACHINE);
+    fake.event('engine.hostState', { state: 'ready', pid: 9, restarts: 1, revision: 41 }, OTHER_MACHINE);
+    expect(useBudget.getState().state).toEqual(over([A]));
+    expect(banners()).toHaveLength(1);
+    expect(fake.calls.filter((call) => call === 'invoke engine.budget')).toHaveLength(1);
+  });
 
   it('a startup read the host refused is made again once the host is ready', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});

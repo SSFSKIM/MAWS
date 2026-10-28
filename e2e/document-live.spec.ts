@@ -20,6 +20,7 @@
 // MAWS_LIVE_DOCUMENT_MODEL (haiku when unset). Run on purpose only:
 //   MAWS_LIVE_DOCUMENT=1 pnpm e2e:document-live
 // Evidence: test-results/document-live/live-run.txt (plain text; the scratch root is kept for inspection).
+import { addressed } from './support/address';
 import { openArtifactInPanel } from './support/shell';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -456,7 +457,7 @@ test('the live run: the agent creates, reads and edits a document in one batch w
     const panel = page.locator('[data-region="panel"]');
     await (await sidebarRow(page, { appSessionId: id })).click();
     await page.mouse.move(700, 20);
-    await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();
+    await expect(pane.locator(`[data-composer="${await addressed(page, id)}"]`)).toBeVisible();
 
     const spec = { ...launchDefaults(id as AppSessionId, sc.repo), model: MODEL, permissionMode: 'default' as const, subagentModel: 'haiku', maxBudgetUsd: CAP_USD };
     expect(value(await invoke(page, 'session.launch', { spec }))).toMatchObject({ status: 'launching' });

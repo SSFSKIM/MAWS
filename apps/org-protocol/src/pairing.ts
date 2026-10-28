@@ -34,7 +34,7 @@ const CODE_FIELDS = ['hub', 'org', 'member', 'roots', 'recoveryPub', 'k'];
 const LOOPBACK = ['127.0.0.1', 'localhost', '[::1]'];
 
 /** An origin, as a code names its hub: https, or http on a loopback host (the suites' local hub), and nothing after it. */
-function isHubOrigin(hub: unknown): boolean {
+export function isHubOrigin(hub: unknown): boolean {
   if (typeof hub !== 'string') return false;
   let url: URL;
   try {

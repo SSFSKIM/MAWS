@@ -9,6 +9,7 @@ import { eventChannel } from '@shared/ipc/schema';
 import type { DirectOperationOutcome, DirectSource } from '@shared/ipc/schema/connectors';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 import { clientOf } from '../ipc/clients';
+import { TEST_MACHINE } from '../../../test/support/machine'; // P5 O6 M2: a main handler's ctx names its target
 import type { MainContext } from '../ipc/router';
 import { startConnectors, type ConnectorsDeps } from '.';
 import { createDirectRoute, type DirectRouteDeps } from './direct-route';
@@ -148,7 +149,7 @@ afterEach(() => {
 async function invoke(name: CommandName, input: unknown): Promise<unknown> {
   const checked = validateCommandInput(name, input);
   if (!checked.ok) throw new Error(`invalid input for ${name}`);
-  const answer = handlers.get(name)!(checked.value, { client: clientOf(me as never) });
+  const answer = handlers.get(name)!(checked.value, { client: clientOf(me as never), target: TEST_MACHINE });
   for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(0);
   const value = await answer;
   expect(validateCommandOutput(name, value).ok, `${name} output ${JSON.stringify(value)}`).toBe(true);

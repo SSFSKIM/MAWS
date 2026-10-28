@@ -11,7 +11,8 @@ import { schemaFor } from '@artifacts/document/schema';
 import { ynodeToPmnode } from '@artifacts/yjs/prosemirror';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import { newDoc } from '@artifacts/yjs';
-import type { CommandName, EventName, MawsBridge } from '@shared/ipc/schema';
+import type { CommandName, EventName, EventSource, MawsBridge } from '@shared/ipc/schema';
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { useNotices } from '../../stores/notices'; // P3-F (F7)
 import { recordCommentDraft } from './comment-drafts'; // P4-B1
 import { DocumentTabState, type DocumentTabDeps } from './tab-state';
@@ -41,7 +42,7 @@ function world(answers: Partial<Record<CommandName, unknown>> = {}, memory = new
   hosts.push(memory);
   const handles: Array<DocumentHandle & { closed?: boolean }> = [];
   const calls: Array<[string, unknown]> = [];
-  const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  const listeners = new Map<string, Set<(payload: unknown, from: EventSource) => void>>();
   const ipc: Pick<MawsBridge, 'invoke' | 'on'> = {
     invoke: (async (name: CommandName, input: unknown) => {
       calls.push([name, input]);
@@ -50,7 +51,7 @@ function world(answers: Partial<Record<CommandName, unknown>> = {}, memory = new
       if (value instanceof Error) return { ok: false, error: { code: 'internal', message: value.message } };
       return { ok: true, value };
     }) as MawsBridge['invoke'],
-    on: ((name: EventName, listener: (payload: unknown) => void) => {
+    on: ((name: EventName, listener: (payload: unknown, from: EventSource) => void) => {
       const set = listeners.get(name) ?? new Set();
       listeners.set(name, set);
       set.add(listener);
@@ -83,7 +84,7 @@ function world(answers: Partial<Record<CommandName, unknown>> = {}, memory = new
   const confirm = vi.fn(() => false);
   const deps: DocumentTabDeps = { host, ipc, log: () => {}, confirm, sessionTitle: () => undefined, sessions: () => [], ...extra };
   const emit = (name: string, payload: unknown) => {
-    for (const listener of listeners.get(name) ?? []) listener(payload);
+    for (const listener of listeners.get(name) ?? []) listener(payload, { machine: TEST_MACHINE });
   };
   const open = () => {
     const state = new DocumentTabState({ artifactId: A, kind: 'document', surface: 'panel' }, deps);

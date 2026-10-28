@@ -9,6 +9,7 @@ import { importSlide, writeDeckKeys } from '@artifacts/slides/model';
 import { loadSlide } from '@artifacts/slides/parse';
 import { newDoc, transact, type Doc } from '@artifacts/yjs';
 import * as Y from '@artifacts/yjs/slides';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../../test/support/fake-client';
 import { resetLibrary } from '../../library/store';
 import { resetMarkupSurfaces } from '../../markup/surface';
@@ -38,7 +39,7 @@ beforeEach(() => {
   resetLibrary();
   resetEditorHosts();
   resetMarkupSurfaces();
-  window.maws = fakeClient().client; // the library's row and lists stay unanswered: the body's title is its default
+  window.maws = fakeClient().client as unknown as PreloadBridge; // the library's row and lists stay unanswered: the body's title is its default
 });
 afterEach(() => {
   cleanup();

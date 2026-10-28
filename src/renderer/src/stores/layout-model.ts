@@ -5,9 +5,12 @@
 // showing the current one (`main.current`); a tab id exists at most once across every set, and the closed-tab history
 // is shared. A transition works on the current set unless it says otherwise; one that finds its tab in another set
 // works there.
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import { isAddress } from '@shared/machine/address';
+import { machineKey } from '@shared/machine/org-key';
+import type { MachineRef } from '@shared/machine/ref';
 import {
-  EMPTY_TAB_SET, NO_PROJECT, tabId, UNPINNABLE_KINDS, type LayoutMain, type LayoutMainV1, type PaneState, type TabRef, type TabSet, type TabSetKey,
+  EMPTY_TAB_SET, NO_PROJECT, tabId, UNPINNABLE_KINDS, type LayoutMain, type LayoutMainV1, type PaneState, type ProjectKey, type TabRef, type TabSet, type TabSetKey,
   type TabTarget,
 } from '@shared/ipc/schema/layout';
 
@@ -483,18 +486,146 @@ export function dockSplit(main: LayoutMain): LayoutMain {
 
 // W12: a tab whose session's project changed (a New chat given its project, a record refolded into another project)
 // moves to that project's set, after the active tab of its focused pane; when it is what the strip shows, the strip
-// follows it. Nothing moves, nothing changes.
-export function refile(main: LayoutMain, setOf: SetOfTab): LayoutMain {
+// follows it. Nothing moves, nothing changes. P5 O6 M5: nothing leaves a set still keyed from before M5 whose key
+// `rekeyOf` cannot answer yet; that set migrates whole (`rekeySets`), its panes and ratio with it.
+// P5 O6 M2 (M6's scene): each session tab takes its session's title where `titleOf` knows one that differs from the
+// title the tab holds; a session it does not know keeps the title its tab last knew. Nothing differs: `main` itself.
+export function titleTabs(main: LayoutMain, titleOf: (appSessionId: AppSessionId) => string | undefined): LayoutMain {
+  let sets: LayoutMain['sets'] | null = null;
+  for (const key of setKeys(main)) {
+    const set = main.sets[key];
+    if (!set) continue;
+    let changed = false;
+    const panes = set.panes.map((pane) => {
+      let paneChanged = false;
+      const tabs = pane.tabs.map((tab) => {
+        if (tab.kind !== 'session') return tab;
+        const title = titleOf(tab.appSessionId);
+        if (title === undefined || title === tab.title) return tab;
+        paneChanged = true;
+        return { ...tab, title };
+      });
+      if (!paneChanged) return pane;
+      changed = true;
+      return { ...pane, tabs };
+    }) as TabSet['panes'];
+    if (!changed) continue;
+    sets ??= { ...main.sets };
+    sets[key] = { ...set, panes };
+  }
+  return sets === null ? main : { ...main, sets };
+}
+
+export function refile(main: LayoutMain, setOf: SetOfTab, rekeyOf?: RekeyOf): LayoutMain {
+  const waiting = (key: TabSetKey) => rekeyOf !== undefined && isProjectAddress(key) && rekeyOf(key) === 'wait';
   let next = main;
   for (const tab of allTabs(main)) {
     const to = setOf(tab);
     const at = locateTab(next, tab.id);
-    if (to === null || !at || at.set === to) continue;
+    if (to === null || !at || at.set === to || waiting(at.set)) continue;
     const shown = at.set === next.current && activeTab(next)?.id === tab.id;
     next = moveToSet(next, at, to);
     if (shown) next = activateTab(next, tab.id);
   }
   return next;
+}
+
+// ---- P5 O6 M5: project keys to org keys --------------------------------------------------------------------------------
+// (docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "Migrating project-keyed state".) A project key that is
+// an address is from before M5: an org key is never one (its prefix holds a `:`, which a `MachineRef` cannot), so a key
+// still an address is still to migrate, which makes the migration resumable with no version, across machines that load
+// late. `RekeyOf` answers for an address key what it becomes: the key its project's sessions file under now, 'gone' when
+// its machine has loaded and no longer has the project, or 'wait' while its machine's projects (or the project's key)
+// are not known; an address that is what its project files under now answers itself. It is asked of address keys only.
+export type RekeyOf = (key: ProjectId) => TabSetKey | 'gone' | 'wait';
+
+const isProjectAddress = (key: string): key is ProjectId => key !== NO_PROJECT && isAddress(key);
+
+// Whole sets move, not tabs one by one (W12's `refile` moves session tabs only, which would strand a set's file and
+// artifact tabs under a key nothing shows). Sets landing on one key merge: the base is the one that was current, else
+// the first in key order, whose panes, focus, ratio and float stand; every other's tabs, pane by pane, follow in the
+// base's focused pane, with no tab twice. A gone project's session tabs go where `setOf` files them and the rest to the
+// no-project set. `current` follows its set. `bases` names, per key that took sets in, the set it took its panes from
+// (`rekeyContexts`). Nothing to migrate: `main` itself.
+export function rekeySets(main: LayoutMain, rekeyOf: RekeyOf, setOf: SetOfTab): { main: LayoutMain; bases: ReadonlyMap<TabSetKey, TabSetKey> } {
+  const keys = setKeys(main);
+  const target = new Map<TabSetKey, TabSetKey | 'gone'>();
+  for (const key of keys) {
+    if (!isProjectAddress(key)) continue;
+    const to = rekeyOf(key);
+    if (to !== 'wait' && to !== key) target.set(key, to);
+  }
+  const bases = new Map<TabSetKey, TabSetKey>();
+  if (target.size === 0) return { main, bases };
+  // each key's sources, in key order (sorted, not as stored): the sets that stay where they are, and those that move onto it
+  const sources = new Map<TabSetKey, TabSetKey[]>();
+  for (const key of keys) {
+    const to = target.get(key) ?? key;
+    if (to !== 'gone') sources.set(to, [...(sources.get(to) ?? []), key].sort());
+  }
+  const sets: LayoutMain['sets'] = {};
+  let current = main.current;
+  for (const [to, from] of sources) {
+    const base = from.includes(main.current) ? main.current : from[0];
+    if (from.length > 1 || base !== to) bases.set(to, base);
+    if (from.includes(main.current)) current = to;
+    const baseSet = main.sets[base] as TabSet;
+    const others = from.filter((key) => key !== base).flatMap((key) => main.sets[key]?.panes.flatMap((p) => p.tabs) ?? []);
+    if (others.length === 0) {
+      sets[to] = baseSet;
+      continue;
+    }
+    const seen = new Set(baseSet.panes.flatMap((p) => p.tabs.map((t) => t.id)));
+    const focused = paneAt(baseSet, baseSet.focusedPane);
+    const appended = others.filter((t) => !seen.has(t.id) && seen.add(t.id));
+    const panes = baseSet.panes.map((p, i) => (i === baseSet.focusedPane ? { tabs: [...focused.tabs, ...appended], activeTabId: focused.activeTabId || (appended[0]?.id ?? '') } : p));
+    sets[to] = asSet({ ...baseSet, panes: panes as TabSet['panes'] });
+  }
+  let next: LayoutMain = { ...main, current, sets };
+  // a gone project's tabs, re-homed in their order (each after the one before it); the strip follows its shown tab
+  for (const key of keys) {
+    if (target.get(key) !== 'gone') continue;
+    const gone = main.sets[key] as TabSet;
+    const shown = paneAt(gone, gone.focusedPane).activeTabId;
+    const after = new Map<TabSetKey, number>(); // per home, where its next re-homed tab goes
+    for (const tab of gone.panes.flatMap((p) => p.tabs)) {
+      const home = setOf(tab) ?? NO_PROJECT;
+      const into = next.sets[home] ?? EMPTY_TAB_SET;
+      const placed = place({ ...into, closedTabs: [] }, tab, into.focusedPane, after.get(home) ?? 'afterActive', false);
+      after.set(home, paneAt(placed, into.focusedPane).tabs.findIndex((t) => t.id === tab.id) + 1);
+      next = { ...next, sets: { ...next.sets, [home]: asSet(placed) } };
+      if (main.current === key && tab.id === shown) current = home;
+    }
+    if (main.current === key && current === key) current = NO_PROJECT;
+  }
+  return { main: tidy({ ...next, current }), bases };
+}
+
+// `panelTools.surfaces.contexts` (keyed by tab set) by the same map: an address entry moves to its key, a merge keeping
+// the base set's entry (`rekeySets`' `bases`), even over one the key already held, else the first; a gone one goes; a
+// waiting one stays.
+export function rekeyContexts<V>(contexts: Readonly<Record<string, V>>, rekeyOf: RekeyOf, bases: ReadonlyMap<TabSetKey, TabSetKey>): Record<string, V> {
+  const out: Record<string, V> = {};
+  for (const [key, value] of Object.entries(contexts)) {
+    const to = isProjectAddress(key) ? rekeyOf(key) : key;
+    if (to === 'gone') continue;
+    const at = to === 'wait' ? key : to;
+    if (Object.hasOwn(out, at) && bases.get(at as TabSetKey) !== key) continue; // the base's, or the first, stands
+    out[at] = value;
+  }
+  return out;
+}
+
+// `regions.sidebar.expandedProjects`: an address entry to its org key, each once; one gone is dropped (an expanded
+// state costs nothing to lose); a waiting one stays; `'other'` ("Other sessions") is this machine's own row now.
+export function rekeyExpanded(list: readonly ProjectKey[], rekeyOf: RekeyOf, local: MachineRef): ProjectKey[] {
+  const out: ProjectKey[] = [];
+  for (const key of list) {
+    const to = key === 'other' ? machineKey(local) : isProjectAddress(key) ? rekeyOf(key) : key;
+    const at = (to === 'wait' ? key : to) as ProjectKey | 'gone'; // a row's key is never the no-project set's
+    if (at !== 'gone' && !out.includes(at)) out.push(at);
+  }
+  return out;
 }
 
 // Hydration: a session or agent tab whose record no longer exists is dropped silently, a tab id exists once across
@@ -534,5 +665,5 @@ export function fromV1(v1: LayoutMainV1, setOf: SetOfTab): LayoutMain {
     });
     sets[key] = asSet(withPanes(view, panes, v1.focusedPane));
   }
-  return tidy({ version: 2, current, sets, closedTabs: v1.closedTabs });
+  return tidy({ version: 3, current, sets, closedTabs: v1.closedTabs });
 }

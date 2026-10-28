@@ -8,6 +8,8 @@
 // host is `ready` again as the same process (a socket-mode host whose link closed); another pid, or `crashed`, ends it.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EventPayload, HostState, IpcError, MawsBridge, PtyAttach, PtyExit, PtyId, PtyInfo } from '@shared/ipc/schema';
+import { machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 import type * as z from 'zod';
 import { ipc } from '../ipc/client';
 import { runAction } from '../keymap/actions-runtime';
@@ -188,9 +190,11 @@ export class TerminalRegistry {
   private theme: TerminalTheme | null = null;
   private themeKey = '';
   private fontKey: string | null = null; // C11: the font the renderers were last given, so a root `--font-mono` change reaches them
-  private hostState: HostState | null = null;
-  // P5 O2 M4: the pid of the host's last `ready`, and the running terminals waiting through a `restarting` for it
-  private readyPid: number | null = null;
+  // Each machine's pty host, as its `pty.hostState` events say (P5 O6: they cross machine links); `host()` is this one's.
+  private readonly hostStates = new Map<MachineRef, HostState>();
+  // P5 O2 M4: the pid of each machine's pty host at its last `ready`, and the running terminals waiting through a
+  // `restarting` of their machine's host for it
+  private readonly readyPids = new Map<MachineRef, number | null>();
   private readonly waiting = new Set<Entry>();
   private readonly webglBudget: number;
 
@@ -205,7 +209,7 @@ export class TerminalRegistry {
     const { ipc: bridge } = this.deps;
     bridge.on('pty.data', (event) => this.receive(event));
     bridge.on('pty.exit', (event) => this.receiveExit(event));
-    bridge.on('pty.hostState', (state) => this.applyHost(state));
+    bridge.on('pty.hostState', (state, from) => this.applyHost(state, from.machine));
     bridge.on('layout.selectAll', () => this.selectAllFocused());
     bridge.on('settings.changed', () => this.refreshTheme());
     // C11 start: C11's appearance.monoFont is a `style` override of `--font-mono` on the root, set after settings.changed
@@ -213,7 +217,7 @@ export class TerminalRegistry {
     new MutationObserver(() => this.refreshFont()).observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
     // C11 end
     void bridge.invoke('pty.hostState', undefined).then((result) => {
-      if (result.ok) this.applyHost(result.value);
+      if (result.ok) this.applyHost(result.value, bridge.localMachine);
     });
     window.addEventListener('pagehide', () => this.checkpointAll());
     window.addEventListener('keydown', (ev) => ev.key === 'Meta' && (this.metaHeld = true), true);
@@ -261,7 +265,7 @@ export class TerminalRegistry {
   }
 
   host(): HostState | null {
-    return this.hostState;
+    return this.hostStates.get(this.deps.ipc.localMachine) ?? null;
   }
 
   subscribe(cb: (infos: TerminalInfo[], host: HostState | null) => void): () => void {
@@ -577,7 +581,7 @@ export class TerminalRegistry {
     const attached = await this.deps.ipc.invoke('pty.attach', { ptyId });
     if (attempt !== entry.reattaches || entry.disposed || entry.info.ptyId !== ptyId || entry.info.status !== 'running') return;
     if (!attached.ok) {
-      if (attached.error.code === 'host_unavailable' && this.hostState?.state !== 'ready') return void this.waiting.add(entry);
+      if (attached.error.code === 'host_unavailable' && this.hostStates.get(machineOf(entry.info.appSessionId))?.state !== 'ready') return void this.waiting.add(entry);
       console.error(`[terminal] pty.attach failed for ${ptyId} after the pty host reconnected`, attached.error);
       return this.exited(entry, { exitCode: null, signal: null });
     }
@@ -755,31 +759,37 @@ export class TerminalRegistry {
 
   // --- host, theme, publishing ---------------------------------------------------------------------------------
 
-  // A crashed host has taken every pty with it: live handles are lost (the supervisor's `pty.exit` events say the same
-  // and find them lost already). P5 O2 M4: through `restarting` a running terminal waits instead (a starting one is lost
-  // as before), since a socket-mode host may only have lost its link; at the next `ready` the same pid reattaches each
-  // waiting terminal, and another pid (a utility host always comes back new), or no `ready` seen before, ends it.
-  private applyHost(state: HostState): void {
-    if (this.hostState && state.revision < this.hostState.revision) return;
-    this.hostState = state;
+  // A crashed host has taken every pty of its machine with it: that machine's live handles are lost (the supervisor's
+  // `pty.exit` events say the same and find them lost already). A terminal's machine is its owner's, the session whose
+  // address it was opened for (P5 O6), and each machine's revisions are its own host's. P5 O2 M4: through `restarting` a
+  // running terminal waits instead (a starting one is lost as before), since a socket-mode host may only have lost its
+  // link; at that machine's next `ready` the same pid reattaches each waiting terminal, and another pid (a utility host
+  // always comes back new), or no `ready` seen before, ends it.
+  private applyHost(state: HostState, machine: MachineRef): void {
+    const known = this.hostStates.get(machine);
+    if (known && state.revision < known.revision) return;
+    this.hostStates.set(machine, state);
     const lost = (entry: Entry) => this.exited(entry, { exitCode: null, signal: null });
+    const ofMachine = (entry: Entry) => machineOf(entry.info.appSessionId) === machine;
     if (state.state === 'restarting') {
       for (const entry of this.entries.values()) {
+        if (!ofMachine(entry)) continue;
         if (entry.info.status === 'running' && entry.info.ptyId) this.waiting.add(entry);
         else if (entry.info.status === 'starting') lost(entry);
       }
     } else if (state.state === 'crashed') {
-      this.waiting.clear();
-      for (const entry of this.entries.values()) if (entry.info.status === 'running' || entry.info.status === 'starting') lost(entry);
+      for (const entry of [...this.waiting]) if (ofMachine(entry)) this.waiting.delete(entry);
+      for (const entry of this.entries.values()) if (ofMachine(entry) && (entry.info.status === 'running' || entry.info.status === 'starting')) lost(entry);
     } else if (state.state === 'ready') {
-      const same = this.readyPid !== null && state.pid === this.readyPid;
-      const waiting = [...this.waiting].filter((entry) => !entry.disposed && entry.info.status === 'running');
-      this.waiting.clear();
-      for (const entry of waiting) {
+      const readyPid = this.readyPids.get(machine);
+      const same = readyPid !== undefined && readyPid !== null && state.pid === readyPid;
+      const waiting = [...this.waiting].filter(ofMachine);
+      for (const entry of waiting) this.waiting.delete(entry);
+      for (const entry of waiting.filter((e) => !e.disposed && e.info.status === 'running')) {
         if (!same) lost(entry);
         else if (entry.renderer) void this.reattach(entry); // one without a renderer shows nothing and keeps no claim
       }
-      this.readyPid = state.pid;
+      this.readyPids.set(machine, state.pid);
     }
     this.publish();
   }
@@ -843,7 +853,8 @@ export class TerminalRegistry {
 
   private publish(): void {
     const infos = this.list();
-    this.listeners.forEach((cb) => cb(infos, this.hostState));
+    const host = this.host();
+    this.listeners.forEach((cb) => cb(infos, host));
   }
 }
 

@@ -577,7 +577,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     engineClients = serveSocketClients(engineServer, {
       runtime: engineRelay,
       badToken: 'close',
-      admit: () => engineRelay.admit(),
+      admitHello: () => engineRelay.admit(),
       onClientEnd: () => engineRelay.ended(),
       identity: () => identity,
       counts: counts('engine-host'),
@@ -590,7 +590,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     ptyClients = serveSocketClients(ptyServer, {
       runtime: ptyRelay,
       badToken: 'close',
-      admit: () => ptyRelay.admit(),
+      admitHello: () => ptyRelay.admit(),
       identity: () => identity,
       counts: counts('pty-host'),
       token: () => token,

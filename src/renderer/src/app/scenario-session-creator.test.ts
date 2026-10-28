@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import type { ProjectId } from '@shared/graph/ids';
+import { isAddress, machineOf } from '@shared/machine/address';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 import { createSession, isSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
@@ -24,6 +26,7 @@ describe('the scenario’s session creator', () => {
     const ids = [...useSessions.getState().unstarted.keys()];
     expect(ids).toHaveLength(2);
     expect(new Set(ids).size).toBe(2);
+    expect(ids.map((id) => isAddress(id) && machineOf(id))).toEqual([TEST_MACHINE, TEST_MACHINE]); // P5 O6 M2: the client's machine's addresses
     expect(useSessions.getState().records.size).toBe(0);
     off();
     expect(isSessionCreatorRegistered()).toBe(false);

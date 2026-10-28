@@ -5,8 +5,9 @@
 // Overview card or the status line, whatever its flag says.
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { at } from '../../../../test/support/machine';
 import { Overview } from '../overview/Overview';
 import { SessionPane } from '../session/SessionPane';
 import { Sidebar } from '../sidebar/Sidebar';
@@ -23,11 +24,11 @@ function claims(root: HTMLElement): string[] {
 
 beforeEach(() => {
   resetShellStores();
-  window.maws = fakeClient({ 'attention.request': { event: null } }).client;
+  window.maws = fakeClient({ 'attention.request': { event: null } }).client as unknown as PreloadBridge; // P5 O6 M2: main's side
 });
 afterEach(() => {
   cleanup();
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 describe('gateway routing is never read from the record', () => {
@@ -36,7 +37,7 @@ describe('gateway routing is never read from the record', () => {
     const discovered = nine.sessions.map((r) => ({ ...r, gateway: { routed, baseUrl: null, autoModeServer: 'unknown' as const } }));
     fillStores({ ...nine, sessions: discovered });
     expect(useSessions.getState().engine.size).toBe(0);
-    const working = discovered.find((r) => r.title.text === 'Charter + research')!.appId;
+    const working = at(discovered.find((r) => r.title.text === 'Charter + research')!.appId); // P5 O6 M2: the page's id of the file's record
     const { container } = render(
       <>
         <Sidebar />

@@ -14,6 +14,7 @@ import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
 import { browserTab, T1 } from '../../../test-support/browser';
 import { RECORD } from '../../../test-support/browser-import';
 import { installFakeMain, ok } from '../../../test-support/code';
+import { createClient } from '../../../ipc/client';
 import { useSettings } from '../../../stores/settings';
 import { browserImport, connectBrowserImport, resetBrowserImport } from '../import/store';
 import { connectBrowser, resetBrowser } from '../store';
@@ -63,7 +64,7 @@ beforeEach(() => {
   });
   browserImport.setState({ records: [record()], listed: true });
   setSettings();
-  disconnect = connectBrowser(main.bridge);
+  disconnect = connectBrowser(createClient(() => main.bridge)); // P5 O6 M2: main's fake behind the page's client
 });
 afterEach(() => {
   disconnect();
@@ -186,7 +187,7 @@ describe('the bookmarks bar', () => {
 
   it('reads the tree again when main says the partition\'s bookmarks changed', async () => {
     const { queries } = show();
-    const off = connectBrowserImport(main.bridge, queries);
+    const off = connectBrowserImport(createClient(() => main.bridge), queries);
     await vi.waitFor(() => expect(chip(2)?.textContent).toBe('A'));
     tree = fixtureTree();
     tree.bar.children[0] = url(2, 'A2', 'a.example');

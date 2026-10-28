@@ -2,16 +2,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { NO_PROJECT } from '@shared/ipc/schema/layout';
+import { addressOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 import { INTEREST_COALESCE_MS, interestSet, startInterest, type InterestDeps } from './interest';
 
 const id = (n: number) => `00000000-0000-4000-8000-00000000000${n}` as AppSessionId;
 const tab = (kind: 'session' | 'agent' | 'diff', appSessionId: AppSessionId) => ({ id: `${kind}:${appSessionId}`, kind, appSessionId, pinned: false, ...(kind === 'agent' && { agentId: 'a1' }), ...(kind === 'diff' && { ref: 'HEAD' }) });
 const tabs = (...list: ReturnType<typeof tab>[]) => ({ version: 2, current: NO_PROJECT, sets: { [NO_PROJECT]: { panes: [{ tabs: list, activeTabId: '' }], focusedPane: 0, splitRatio: 0.5 } }, closedTabs: [] });
+// P5 O6: version 3 holds addresses; the engine host is this machine's, so the set is the local machine's bare ids
+const LOCAL = 'LocalMachineRef0000000' as MachineRef;
+const OTHER = 'OtherMachineRef0000000' as MachineRef;
+const tabsV3 = (...list: ReturnType<typeof tab>[]) => ({ ...tabs(...list), version: 3 });
 
 describe('the interest set', () => {
   it('is the open session and agent tabs of every project with the sessions on screen, each once, sorted', () => {
-    expect(interestSet(tabs(tab('session', id(3)), tab('agent', id(1)), tab('diff', id(4))), [id(2), id(3)])).toEqual([id(1), id(2), id(3)]);
-    expect(interestSet('not a layout', [id(5)])).toEqual([id(5)]);
+    expect(interestSet(tabs(tab('session', id(3)), tab('agent', id(1)), tab('diff', id(4))), [id(2), id(3)], LOCAL)).toEqual([id(1), id(2), id(3)]);
+    expect(interestSet('not a layout', [id(5)], LOCAL)).toEqual([id(5)]);
+  });
+
+  it('keeps the local machine’s tabs, by their bare ids, and leaves another machine’s out', () => {
+    const value = tabsV3(tab('session', addressOf(LOCAL, id(1))), tab('agent', addressOf(OTHER, id(2))));
+    expect(interestSet(value, [], LOCAL)).toEqual([id(1)]);
   });
 });
 

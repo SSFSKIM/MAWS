@@ -36,6 +36,7 @@
 //       turn going on;
 //   (m) with the app open and a short idle time, a session with no tab is released and one in a tab, one marked Keep
 //       running and one holding a durable cron (fresh and resumed; P5 Decision Logs 46 and 47) are not.
+import { addressed } from './support/address';
 import { openSurface, surface } from './support/shell';
 import { createConnection } from 'node:net'; // P3-A M5
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -425,7 +426,7 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     const budget = value(await invoke(second.page, 'engine.budget', undefined));
     expect(budget.blocked.length + budget.settling + budget.candidates, 'engine.budget counts the kept session').toBe(1);
     await openSurface(second.page, 'Session info');
-    const budgetRow = dd(second.page.locator(`[data-session-info="${id}"]`), 'Memory budget');
+    const budgetRow = dd(second.page.locator(`[data-session-info="${await addressed(second.page, id)}"]`), 'Memory budget');
     await expect(budgetRow, 'Session info reads the budget the renderer holds').toHaveText(/ · 1 session$/);
     log.push(`engine.budget after the relaunch: ${JSON.stringify(budget)}; Session info's Memory budget "${await budgetRow.textContent()}"`);
 
@@ -773,7 +774,7 @@ test('(h) G4: after a keep-quit a restored terminal tab says its shell closed wi
       return (label = ptys[0]?.label ?? '');
     }, { timeout: 15_000, message: 'a shell for the session' }).not.toBe('');
     await expect.poll(async () => {
-      const layout = value(await invoke(first.page, 'layout.get', { key: `panel.${id}` })).value as { tabs: { id: string }[] } | null;
+      const layout = value(await invoke(first.page, 'layout.get', { key: `panel.${await addressed(first.page, id)}` })).value as { tabs: { id: string }[] } | null;
       return layout?.tabs.map((t) => t.id) ?? [];
     }, { message: 'the tab reaches layout.json' }).toContain(label);
     await s.quit(first);

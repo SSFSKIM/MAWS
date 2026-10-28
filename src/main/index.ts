@@ -6,12 +6,12 @@ import { guardStdio } from './stdio-guard'; // cua board #97
 import { disableChromiumFeatures, STARTUP_DISABLED_FEATURES } from './chromium-features'; // P3-F1 fix 3
 import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
 import { join } from 'node:path';
-import { totalmem } from 'node:os'; // C12: the default memory budget
+import { hostname, totalmem } from 'node:os'; // C12: the default memory budget; P5 O6 M1: the machine's name
 import { app, BrowserWindow, dialog, screen } from 'electron';
 import type { ClientRef } from '@shared/ipc/client';
 import { pageOf } from './ipc/clients';
 import { createHosts, prepareLaunch, type LaunchShape } from './hosts'; // P5 O2 M7: prepareLaunch
-import { installRouter } from './ipc/router';
+import { dispatchLocal, installRouter } from './ipc/router'; // P5 O6 M3: dispatchLocal, the local link's and the stand-in's
 import { startSettings, type SettingsService } from './settings';
 import { startWithProfileLock } from './files/profile-lock';
 import { describeMainBuild, loadedBundlePath, olderInstanceNotice, staleBuildCheck, type MainBuild } from './build-identity'; // E11 §2.7; F2b 2.7b
@@ -20,7 +20,11 @@ import { registerPtyOpenLink } from './pty-links'; // C9
 import { appUrl, createWindow, installContentSecurityPolicy, prepareHarness } from './window'; // C9: prepareHarness
 // C3 start (the attention service's imports moved with its start into C4's block: src/main/index/attention-service.ts)
 import { emit } from './ipc/events';
-import { registerMainHandler } from './ipc/router';
+import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P5 O6 M1: registerMachineHandler
+import { startMachineIdentity } from './machine/identity'; // P5 O6 M1
+import { bindLocalMachine } from './machine/local'; // P5 O6 M2
+import { startMachines } from './machines'; // P5 O6 M3: the connection manager, and the stand-in behind its gate
+import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2
 // C3 end
 // C4 start (emit comes with C3's imports)
 import { startIndexAttention } from './index/attention-service';
@@ -233,13 +237,29 @@ function answerSecondLaunch(launched: MainBuild | null): void {
 }
 
 void startWithProfileLock(app, () => {
+  // P5 O6 M1 (OX2): the profile's MachineRef, minted at its first start into <userData>/machine.json and read ever after,
+  // before anything starts or any window opens. A malformed file stops startup, naming its path: a fresh ref would
+  // re-address everything kept under the old one.
+  let local: MachineRef;
+  let localName: string; // P5 O6 M3: a display attribute, for machines.list
+  try {
+    ({ ref: local, name: localName } = startMachineIdentity({ userData: app.getPath('userData'), env: process.env, hostname: hostname(), register: registerMachineHandler }));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[machine] ${message}`);
+    dialog.showErrorBox('MAWS cannot start', message);
+    app.exit(1);
+    return;
+  }
+  bindLocalMachine(local); // P5 O6 M2: the router's, `emit`'s and every app window's local machine
   // P5 O2 M7: the settings are read before the hosts, and the launch's shape (`supervisor.shape`, read once) settled
   // before they are created: the default profile's LaunchAgent installed, repaired or uninstalled first
   const settings = startSettings(join(app.getPath('userData'), 'settings.json'));
   const launch = prepareLaunch(settings.state().settings.supervisor.shape);
-  if (!(launch instanceof Promise)) return startMain(settings, launch);
+  const machine = { local, localName };
+  if (!(launch instanceof Promise)) return startMain(settings, launch, machine);
   void launch.then(
-    (settled) => startMain(settings, settled),
+    (settled) => startMain(settings, settled, machine),
     (error: unknown) => {
       console.error('[hosts] the launch could not settle its shape; quitting', error);
       app.exit(1);
@@ -247,14 +267,28 @@ void startWithProfileLock(app, () => {
   );
 }, { build: MAIN_BUILD, onSecondInstance: answerSecondLaunch }); // E11 §2.7
 
-function startMain(settings: SettingsService, launch: LaunchShape): void {
+function startMain(settings: SettingsService, launch: LaunchShape, { local, localName }: { local: MachineRef; localName: string }): void {
   installContentSecurityPolicy();
   // C9 block begin: the harness's fake session directories; a terminal's links open through pty.openLink
   if (process.env.MAWS_HARNESS === '1') prepareHarness();
   registerPtyOpenLink();
   // C9 block end
   const hosts = createHosts(MAIN_BUILD, launch); // E11 §2.7: main's build for host.status; P5 O2 M7: the launch's shape
-  installRouter({ appUrl, dispatchToHost: hosts.dispatch });
+  // P5 O6 M3: every other machine through the connection manager (one link per machine; MAWS_LOCAL_MACHINES names another
+  // profile's serve directory in a build that is not packaged), and machines.list and machines.changed
+  const machines = startMachines({
+    local,
+    localName,
+    userData: app.getPath('userData'),
+    packaged: app.isPackaged,
+    env: process.env,
+    build: `${MAIN_BUILD.version}+${MAIN_BUILD.commit}`,
+    resourcesPath: process.resourcesPath,
+    appRoot: process.cwd(), // the development app root, as the browser's peer check reads the addon's prebuild
+    register: registerMainHandler,
+    dispatchLocal,
+  });
+  installRouter({ appUrl, local, dispatchToHost: hosts.dispatch, remote: machines.dispatch });
   // P5 O1 M3 (OX4): the client port, the one way a machine-bound service reaches the person's screen: dialogs, the
   // Replace question, Finder, the browser, notifications, the badge and focus. `openWindow` is read when a focus needs it.
   const clientPort = electronClientPort({ env: process.env, openWindow: () => openWindow() });
@@ -275,6 +309,8 @@ function startMain(settings: SettingsService, launch: LaunchShape): void {
   // engine host's store events into it once the host is ready. C5's read model starts the source (its block below:
   // SessionReadModel.register, which refuses it in launch mode scenario) and stops it at will-quit.
   const index = new Index(join(app.getPath('userData'), 'index.sqlite'));
+  // P5 O6 M5: each project's org project, derived again in the background at every start (OX3)
+  void index.refreshOrgProjects({ machine: local });
   registerIndexHandlers(index);
   const indexSource = new IndexSessionSource(index, hosts, { emit });
   // C3's attention service, as C3 started it, with `Index.attention` as its store (C3's file store only when this app
@@ -332,7 +368,7 @@ function startMain(settings: SettingsService, launch: LaunchShape): void {
   });
   const sessionsDir = join(app.getPath('userData'), 'sessions');
   const intents = new FileIntentStore(join(sessionsDir, 'intents'));
-  const stopChatPanels = registerChatPanels(layout, sessions.model, intents);
+  const stopChatPanels = registerChatPanels(layout, sessions.model, intents, local); // P5 O6 M2: local
   shutdown.add('chat panels', stopChatPanels);
   shutdown.add('layout and sessions', () => {
     layout.flush();
@@ -469,7 +505,7 @@ function startMain(settings: SettingsService, launch: LaunchShape): void {
     waiting: (id) => sessions.model.attention(id).some((item) => archiveOpen(item) && archiveActionable(item)),
     archive: (id, eligible, stillEligible) => sessionService.archive(id, { onlyIfIdle: true, eligible, stillEligible }),
     discovered: (engineSessionId) => indexSource.discoveryCurrent(engineSessionId), // a closed app's CLI use is read first
-    open: openSessionTabs(layout, (id) => sessions.model.isVisible(id)), // the sweep keeps what the owner keeps in a tab
+    open: openSessionTabs(layout, local, (id) => sessions.model.isVisible(id)), // the sweep keeps what the owner keeps in a tab (P5 O6 M2: the local machine's)
     activity: (id) => {
       const digest = sessions.model.digest(id);
       const times = [digest?.turnStartedAt, digest?.lastTurnEndedAt].flatMap((at) => at ? [Date.parse(at)] : []).filter(Number.isFinite);
@@ -536,7 +572,7 @@ function startMain(settings: SettingsService, launch: LaunchShape): void {
   shutdown.add('host configure', stopHostConfigure);
   // P5 O2 M2: the sessions this app holds open, which the engine host's idle release never stops
   const stopInterest = startInterest({
-    sessions: () => interestSet(layout.get('main.tabs'), sessions.model.visibleSessions()),
+    sessions: () => interestSet(layout.get('main.tabs'), sessions.model.visibleSessions(), local), // P5 O6: the local machine's
     onChange: (listener) => {
       const offs = [layout.onChange((key) => { if (key === 'main.tabs') listener(); }), sessions.model.on('visible', () => listener())];
       return () => offs.forEach((off) => off());
@@ -867,4 +903,9 @@ function startMain(settings: SettingsService, launch: LaunchShape): void {
   });
   shutdown.add('voice', () => voice.dispose());
   // E9 end
+  // P5 O6 M3: with every handler registered, this profile's machine services for another profile's app (the stand-in,
+  // MAWS_MACHINE_SERVE=1 in a build that is not packaged; O3 replaces it with mawsd). The links stop at quit; no far side
+  // is ever stopped.
+  machines.serve();
+  shutdown.add('machines', () => machines.stop());
 }

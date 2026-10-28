@@ -3,10 +3,10 @@
 // and the project's audit record. Events are kept as received (a `hub/` event with the `writer`, `seq`, and `ts` the hub
 // assigned) and compared by their canonical form, so a second copy of an event differs from the first only if its
 // canonical form does.
-import { isSig } from 'org-protocol';
+import { isSig, machineNameKey, type HistoryLogPage, type StoredEvent } from 'org-protocol';
 import { isBase64urlOf } from '../protocol/base64url';
 import { canonicalize } from '../protocol/canonical';
-import { isHubWriter, isLogSeq, LEGACY_WRITER_PREFIX, questionEffect, type LogEvent, type Vector } from '../protocol/log';
+import { isHubWriter, isLogSeq, LEGACY_WRITER_PREFIX, questionEffect, writerMachine, type LogEvent, type Vector } from '../protocol/log';
 import { FRAME_LIMIT } from '../protocol/parts';
 
 // `open_questions`: one row per async question the log holds open (`questionEffect`), kept as each event is stored.
@@ -180,6 +180,33 @@ export class LogStore {
         after = batch[batch.length - 1].seq;
       }
     }
+  }
+
+  /**
+   * Each writer `<name>/…` whose name is one of `names` (lower-cased keys), with its highest seq whose event carries no
+   * `sig`: a DX1 event, which history re-attestation covers (O14 M4). A writer of v2 events alone is not among them.
+   */
+  dx1Writers(names: ReadonlySet<string>): Array<{ writer: string; upTo: number }> {
+    const out: Array<{ writer: string; upTo: number }> = [];
+    for (const writer of Object.keys(this.vector())) {
+      const name = writerMachine(writer);
+      if (name === null || !names.has(machineNameKey(name))) continue;
+      const upTo = this.sql.exec<{ up_to: number | null }>("SELECT MAX(seq) AS up_to FROM events WHERE writer = ? AND json_extract(body, '$.sig') IS NULL", writer).one().up_to;
+      if (upTo !== null) out.push({ writer, upTo });
+    }
+    return out;
+  }
+
+  /** A writer's events after `after`, in seq order, about `bytes` of them (one at least), and whether more follow. */
+  writerPage(writer: string, after: number, bytes: number): HistoryLogPage {
+    const events: StoredEvent[] = [];
+    let size = 0;
+    for (const row of this.sql.exec<{ body: string }>('SELECT body FROM events WHERE writer = ? AND seq > ? ORDER BY seq', writer, after)) {
+      if (events.length > 0 && size + row.body.length > bytes) return { events, more: true };
+      events.push(JSON.parse(row.body) as StoredEvent);
+      size += row.body.length;
+    }
+    return { events, more: false };
   }
 
   record(kind: AuditKind, entry: Record<string, unknown>): AuditRow {

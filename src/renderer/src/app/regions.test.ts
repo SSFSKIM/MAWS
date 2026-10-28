@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, tabId, type LayoutRegions, type TabRef } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { resetShellStores } from '../test-support/shell-stores';
@@ -36,7 +37,7 @@ describe('regions while floating', () => {
 // P3-F wave S (F6, candidate 58): a float with no session for the card to draw never takes main's column. The owner's
 // case: Float pressed, or a float restored, with an artifact tab in front left main at 0 px and its tab strip hidden.
 describe('a float with no card session', () => {
-  const ARTIFACT: TabRef = { id: tabId({ kind: 'artifact', artifactId: 'deck-1' }), kind: 'artifact', artifactId: 'deck-1', pinned: false };
+  const ARTIFACT: TabRef = { id: tabId({ kind: 'artifact', artifactId: 'deck-1', machine: TEST_MACHINE }), kind: 'artifact', artifactId: 'deck-1', machine: TEST_MACHINE, pinned: false };
   const main = { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [ARTIFACT], activeTabId: ARTIFACT.id }] } } };
 
   it('restored with an artifact tab in front, main keeps its column and is not hidden', async () => {
@@ -56,7 +57,7 @@ describe('a float with no card session', () => {
 describe('a split float', () => {
   it('is never the panel in main: the grid and the sidebar’s room are as docked', () => {
     resetShellStores();
-    const SESSION: TabRef = { id: 'session:app-s', kind: 'session', appSessionId: 'app-s' as AppSessionId, pinned: false };
+    const SESSION: TabRef = { id: `session:${at('app-s')}`, kind: 'session', appSessionId: at('app-s' as AppSessionId), pinned: false };
     const DIAGNOSTICS: TabRef = { id: 'diagnostics', kind: 'diagnostics', pinned: false };
     useLayout.setState({
       main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [SESSION], activeTabId: SESSION.id }, { tabs: [DIAGNOSTICS], activeTabId: DIAGNOSTICS.id }] } } },
