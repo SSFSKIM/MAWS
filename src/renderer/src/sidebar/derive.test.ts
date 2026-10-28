@@ -14,6 +14,7 @@ import { loadScenario } from '../../../../test/support/scenario';
 import { holderLine, needsYou, waitingItem, type NeedsYouRow } from '../attention/derive';
 import { listedGlyph } from '../attention/glyph';
 import type { ListedSession } from '../stores/sessions';
+import type { RowKey } from '../stores/org-projects';
 import { orderProjects } from '../overview/derive';
 import { pageScenario } from '../test-support/shell-stores';
 import {
@@ -277,7 +278,7 @@ describe('other people’s sessions and the People toggle', () => {
   const listedMap = (...list: ListedSession[]) => new Map(list.map((l) => [l.appId, l]));
   const recs = (...list: SessionRecord[]) => new Map(list.map((r) => [r.appId, r]));
   const local = sessionOn(TEST_MACHINE, 's1', { projectId: here.id, updatedAt: '2026-10-28T09:00:00Z' });
-  const list = (listed: Map<AppSessionId, ListedSession>, people: ReadonlySet<string> = new Set(), over: Partial<ProjectListInput> = {}) =>
+  const list = (listed: Map<AppSessionId, ListedSession>, people: ReadonlySet<RowKey> = new Set(), over: Partial<ProjectListInput> = {}) =>
     projectList(input({ records: recs(local), digests: new Map(), projects: mapOf([here]), rows: [], listed, people, ...over }));
   const shape = (entries: ReturnType<typeof list>) => entries.map((e) => [e.key, e.sessions.map((r) => r.appId), e.listed.map((l) => l.appId), e.others]);
   const waitingRow = (appSessionId: AppSessionId) => ({ appSessionId, oldest: item(appSessionId, 'permission', '2026-10-28T09:00:00Z'), count: 1, tier: 1 }) as NeedsYouRow;
