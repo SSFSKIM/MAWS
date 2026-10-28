@@ -5,19 +5,19 @@
 // load or window close makes the page un-announced again.
 import { app, type App, type BrowserWindow, type WebContentsDidStartNavigationEventParams } from 'electron';
 import type { ClientPort } from '@shared/client/port';
-import type { AppSessionId, AttentionId } from '@shared/graph/ids';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { ClientId } from '@shared/ipc/client';
 import type { Settings } from '@shared/ipc/schema';
 import { clientOf } from '../ipc/clients';
 import { emit } from '../ipc/events';
 import { registerMainHandler } from '../ipc/router';
-import type { SessionReadModel } from '../sessions/read-model';
 import { appWindows, isAppWindow } from '../windows'; // E2
 import { createNavigationRelay } from './navigation';
 import type { NotificationActions } from './actions';
-import { startNotifier } from './notifier';
+import { startNotifier, type NotifierView } from './notifier';
 
-export function startAttention(model: SessionReadModel, deps: { actions?: NotificationActions; restoredIds: ReadonlySet<AttentionId>; settings(): Settings; port: Pick<ClientPort, 'notify' | 'badge' | 'focus'> }): () => void {
+// P5 O3-C (reader R1): the notifier reads the spine through its view (`view`), restored items marked silent in band.
+export function startAttention(view: NotifierView, deps: { actions?: NotificationActions; settings(): Settings; port: Pick<ClientPort, 'notify' | 'badge' | 'focus'> }): () => void {
   const viewing = new Map<ClientId, { appSessionId: AppSessionId | null; release(): void }>();
   registerMainHandler('attention.viewing', ({ appSessionId }, { client }) => {
     let page = viewing.get(client.id);
@@ -46,7 +46,7 @@ export function startAttention(model: SessionReadModel, deps: { actions?: Notifi
 
   const isFocused = () => appWindows().some((win) => win.isFocused()); // E2: app windows only
   // Listen immediately, including during store retries; only restored arrivals are silent.
-  const stop = startNotifier(model, { port: deps.port, actions: deps.actions, restoredIds: deps.restoredIds, isFocused, isViewing, navigate: relay.deliver, failure: relay.failure, settings: deps.settings, emit });
+  const stop = startNotifier(view, { port: deps.port, actions: deps.actions, isFocused, isViewing, navigate: relay.deliver, failure: relay.failure, settings: deps.settings, emit });
   return () => { stop(); for (const page of viewing.values()) page.release(); };
 }
 

@@ -15,8 +15,10 @@ interface Dependencies {
   // The index source's freshness (`IndexSessionSource.discoveryCurrent`): a session's last activity is read only once
   // this run's scan has answered and no summary of its transcript waits to be applied.
   discovered(engineSessionId: SessionId | null): boolean;
-  // Whether the owner keeps the session open in a main tab; only the automatic sweep reads it.
-  open?(id: AppSessionId): boolean;
+  // The machine's interest union (OX5; P5 O3-C D11): the sessions some client holds open, which the automatic sweep keeps.
+  // Read at each check; on the embedded shape it is the set main's interest report sends (its tabs and the sessions on
+  // screen), on the daemon shape mawsd's union of every client's.
+  interest(): ReadonlySet<AppSessionId>;
   now?: () => number;
 }
 
@@ -36,8 +38,8 @@ export class InactiveArchive {
     return this.deps.discovered(null);
   }
 
-  // `automatic`: the opt-in sweep, which also keeps every session open in a tab (the owner is keeping it in view); the
-  // project command archives those too, and the renderer closes their tabs.
+  // `automatic`: the opt-in sweep, which also keeps every session the interest set holds (a client keeps it in view);
+  // the project command archives those too, and the renderer closes their tabs.
   async run(days: 7 | 14 | 30, projectId: ProjectId | null, { current = () => true, automatic = false }: { current?: () => boolean; automatic?: boolean } = {}) {
     const { index } = this.deps;
     if (!this.ready()) throw new DiscoveryPendingError();
@@ -55,7 +57,7 @@ export class InactiveArchive {
         const status = this.deps.status(id);
         if (status && (status.process !== 'exited' || status.keepAlive.includes('background_tasks') || status.keepAlive.includes('queued_messages'))) return false;
         const at = Math.max(Date.parse(index.sessions.summaryOf(id)?.lastRecordAt ?? latest.updatedAt), this.deps.activity?.(id) ?? -Infinity);
-        return Number.isFinite(at) && at < cutoff && !(automatic && this.deps.open?.(id));
+        return Number.isFinite(at) && at < cutoff && !(automatic && this.deps.interest().has(id));
       };
       const eligible = async () => {
         if (!eligibleNow()) return false;

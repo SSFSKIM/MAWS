@@ -1,6 +1,6 @@
 import type { ProjectId } from '@shared/graph/ids';
 import { InactiveArchive, scheduleInactiveArchive } from './sessions/inactive-archive';
-import { openSessionTabs } from './layout/open-session-tabs';
+import { createSpineView } from './sessions/spine-view'; // P5 O3-C: the spine's view, in process
 import { isActionable as archiveActionable, isOpen as archiveOpen } from '@shared/attention/kinds';
 import { guardStdio } from './stdio-guard'; // cua board #97
 import { disableChromiumFeatures, STARTUP_DISABLED_FEATURES } from './chromium-features'; // P3-F1 fix 3
@@ -68,7 +68,7 @@ import { restoreWindowState, trackWindowState } from './window-state';
 // C7 start
 import type { AppSessionId } from '@shared/graph/ids';
 import { pickFiles } from './files/pick';
-import { FileLister, listableRoots } from './git/ls-files';
+import { FileLister, followSpineRoots, spineRoots } from './git/ls-files';
 import { onEmitted } from './ipc/events';
 import { createGitRunner } from './git/runner';
 import { claudeConfigDir, PromptHistory } from './history/prompt-history';
@@ -104,7 +104,7 @@ import { captureRegion } from './layout/capture-region'; // P3-G
 import { createClaudeUsageApp, execRunner } from './gateway/claude-usage-app';
 import { startEngineConfigure } from './settings/engine-configure';
 import { startHostConfigure } from './settings/host-configure'; // E10
-import { interestSet, startInterest } from './sessions/interest'; // P5 O2 M2
+import { appInterest, startInterest } from './sessions/interest'; // P5 O2 M2; P5 O3-C: appInterest
 import { revealPath } from './settings/reveal';
 import { sessionSettingsOf } from './settings/session-settings';
 import { knownSessionDirectories } from './settings/session-directories';
@@ -402,29 +402,13 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   // P5 O6 M5: each project's org project, derived again in the background at every start (OX3)
   void index.refreshOrgProjects({ machine: local });
   registerIndexHandlers(index, bus);
-  // P5 O8 M2: other machines' sessions, from their signed listings through the feed, verified against the held org state,
-  // for the machines of O7's RL2 roster (src/main/org/rows.ts); org.rows and org.rows.changed carry them to the sidebar
+  // P5 O8 M2: the roster of other machines, for the org rows composed over the spine's view below
   let roster: readonly MachineRef[] = [];
   const rosterListeners = new Set<() => void>();
   machines.onRemote((refs) => {
     roster = refs;
     for (const listener of [...rosterListeners]) listener();
   });
-  const remoteRows = createRemoteRows({
-    session,
-    feed: orgFeed,
-    roster: () => roster,
-    onRoster: (listener) => {
-      rosterListeners.add(listener);
-      return () => void rosterListeners.delete(listener);
-    },
-    localProjects: async () => index.projects.listWithRemoved(),
-    onLocalProjects: (listener) => onEmitted('session.projects.changed', () => listener()),
-    files: orgDir,
-    emit: (rows) => void emit('org.rows.changed', rows),
-    log: (line) => console.log(`[org-rows] ${line}`),
-  });
-  registerRowsHandler({ register: registerMainHandler, rows: remoteRows });
   const indexSource = new IndexSessionSource(index, hosts, { emit: bus.emit });
   // C3's attention service, as C3 started it, with `Index.attention` as its store (C3's file store only when this app
   // cannot read the index); an archive the index records retires the session's attention.
@@ -484,12 +468,52 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   });
   const sessionsDir = join(app.getPath('userData'), 'sessions');
   const intents = new FileIntentStore(join(sessionsDir, 'intents'));
-  const stopChatPanels = registerChatPanels(layout, sessions.model, intents, local); // P5 O6 M2: local
+  // P5 O3-A: the worktree and session services (intents, bootstraps, deletions, every launch), the owner channel and
+  // the sweep run only while this run holds spine.lock; refused, none starts and their commands have no handler.
+  let sessionService: SessionService | null = null;
+  // P5 O3-C (docs/doperpowers/plans/2026-10-28-p5-o3-c-spine-library.md, Interfaces §B, §C): the spine's view, the one
+  // way the code that stays in the app reads the spine (the notifier, the quit guard, the chat panels, the interest
+  // report, the browser, connectors, the export authors, the org rows, Settings' reveal, and until O3-E files,
+  // `git.lsFiles` and scm), backed here by the spine's own parts: what the renderer is told (D9). In launch mode scenario
+  // it answers the scenario and reports itself unavailable (D10). Its `acquire` is the session service's, below.
+  const spineView = createSpineView({
+    mode: sessions.mode,
+    model: sessions.model,
+    index,
+    intents,
+    tap: bus.onEmitted,
+    restoredIds: attention?.restoredIds ?? new Set(),
+    acquire: (id, reason) => (sessionService ? sessionService.acquire(id, reason) : Promise.reject(new Error(`MAWS cannot reach its sessions this run: ${spine.refused}`))),
+  });
+  const view = spineView.view;
+  // P5 O8 M2: other machines' sessions, from their signed listings through the feed, verified against the held org state,
+  // for the machines of O7's RL2 roster (src/main/org/rows.ts); org.rows and org.rows.changed carry them to the sidebar.
+  // P5 O3-C (reader R10): this machine's projects, as session.projects.list answers them, through the spine's view.
+  const remoteRows = createRemoteRows({
+    session,
+    feed: orgFeed,
+    roster: () => roster,
+    onRoster: (listener) => {
+      rosterListeners.add(listener);
+      return () => void rosterListeners.delete(listener);
+    },
+    localProjects: async () => view.projects(),
+    onLocalProjects: (listener) => view.on('projects', () => listener()),
+    files: orgDir,
+    emit: (rows) => void emit('org.rows.changed', rows),
+    log: (line) => console.log(`[org-rows] ${line}`),
+  });
+  registerRowsHandler({ register: registerMainHandler, rows: remoteRows });
+  const stopChatPanels = registerChatPanels(layout, view, local); // P5 O6 M2: local; P5 O3-C (reader R4): the view
   shutdown.add('chat panels', stopChatPanels);
   shutdown.add('layout and sessions', () => {
     layout.flush();
     sessions.stop();
+    spineView.stop();
   });
+  // P5 O2 M2; P5 O3-C (D11): the sessions this app holds open (its tabs and the sessions on screen), one memoized set the
+  // interest report sends and the inactive sweep keeps
+  const interest = appInterest(layout, view, local); // P5 O6: the local machine's
   // C4 start: registered after C5's will-quit above, so the index source has stopped before the index it reads closes
   shutdown.add('index', () => index.close());
   // C4 end
@@ -539,37 +563,23 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
     registerMainHandler('session.history.list', async ({ appSessionId, limit }) => ({ entries: await (await history).list(appSessionId as AppSessionId, limit) }));
     registerMainHandler('session.history.append', async ({ appSessionId, display, pastedContents, project }) => (await history).append(appSessionId as AppSessionId, display, pastedContents, project ?? null));
   }
-  // listable roots: the directories of every unarchived session the read model holds (both launch modes) or the index
-  // holds, and every indexed project's directory; read again after any session or project change main tells the renderer
-  const roots = () => {
-    let projectDirectories: string[] = [];
-    try {
-      projectDirectories = index.projects.list({ includeHidden: true }).map((p) => p.directory);
-    } catch {
-      // the projects are unavailable; the session walk falls back to the read model on its own (with a warning)
-    }
-    const intentDirectories = intents.list().flatMap((intent) => [
-      ...intent.additionalDirectories,
-      ...(intent.location === null ? [] : [intent.location.kind === 'newWorktree' ? intent.location.repoRoot : intent.location.path]),
-      ...(intent.progress.worktree === null ? [] : [intent.progress.worktree.path]),
-    ]);
-    return listableRoots([...knownSessionDirectories(sessions.model, index, { includeArchived: false }), ...intentDirectories], projectDirectories); // debt wave 4: C11's walk
-  };
-  const files = new FileLister({ run: createGitRunner(), roots });
-  for (const name of ['session.changed', 'session.removed', 'session.projects.changed', 'session.intent.changed'] as const) onEmitted(name, () => files.invalidateRoots());
+  // listable roots: the directories of every unarchived session, every setup intent and every project row, through the
+  // spine's view (P5 O3-C reader R13), read again after any record, project or intent change it reports
+  const files = new FileLister({ run: createGitRunner(), roots: () => spineRoots(view) });
+  followSpineRoots(view, files);
   registerMainHandler('git.lsFiles', (input) => files.list(input));
   // C10: the port's pick answers through the e2e seam under MAWS_E2E=1 (MAWS_E2E_PICK_PATHS or cancelled), else the panel
   registerMainHandler('layout.pickFiles', (input, { client }) => pickFiles(input, client, { port: clientPort }));
   shutdown.add('usage', () => usage.stop());
   // C7 end
-  // C8c start: files.* over each session's own directories (the allowlist is read from the read model, which C4's index
-  // fills in launch mode index and the stub in scenario); watches are released per window inside the handlers.
+  // C8c start: files.* over each session's own directories (the allowlist is read through the spine's view: the records
+  // C4's index fills in launch mode index and the stub in scenario); watches are released per window inside the handlers.
   // E11: an unstarted session (a New chat before its first send) reads its setup intent's location
-  const filesService = registerFilesHandlers(allowlistOf(sessions.model, intents), {
+  const filesService = registerFilesHandlers(allowlistOf(view), {
     bus,
     emit: (payload) => void bus.emit('files.changed', payload),
     port: clientPort, // files.openExternal; E1: files.reveal
-    admitted: fileAdmission(index.unavailable === null ? index.library : null), // E2; P3-L M6b: a File artifact's file outside the roots, from the library's index
+    admitted: fileAdmission(view), // E2; P3-L M6b: a File artifact's file outside the roots, the library's index's (P5 O3-C: through the view)
   });
   shutdown.add('files', () => filesService.dispose());
   // C8c end
@@ -577,9 +587,6 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   // E13: the session's cua socket for its launch (the in-app browser spec of 2026-10-08); the browser starts below, and a
   // launch asked before it (none is expected) carries no socket
   let cuaSockets: Browser['cua'] | null = null;
-  // P5 O3-A: the worktree and session services (intents, bootstraps, deletions, every launch), the owner channel and
-  // the sweep run only while this run holds spine.lock; refused, none starts and their commands have no handler.
-  let sessionService: SessionService | null = null;
   if (spineRuns) {
     // the worktree service (M2): git.worktree.*, every git mutation MAWS makes, with occupancy from holder authority
     // (C3's process table and C4's fresh registry read through the engine host, the index's records).
@@ -631,7 +638,7 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
       waiting: (id) => sessions.model.attention(id).some((item) => archiveOpen(item) && archiveActionable(item)),
       archive: (id, eligible, stillEligible) => service.archive(id, { onlyIfIdle: true, eligible, stillEligible }),
       discovered: (engineSessionId) => indexSource.discoveryCurrent(engineSessionId), // a closed app's CLI use is read first
-      open: openSessionTabs(layout, local, (id) => sessions.model.isVisible(id)), // the sweep keeps what the owner keeps in a tab (P5 O6 M2: the local machine's)
+      interest: () => interest.set(), // the sweep keeps the machine's interest union (P5 O3-C D11: on the embedded shape, this app's)
       activity: (id) => {
         const digest = sessions.model.digest(id);
         const times = [digest?.turnStartedAt, digest?.lastTurnEndedAt].flatMap((at) => at ? [Date.parse(at)] : []).filter(Number.isFinite);
@@ -644,13 +651,13 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   }
   registerObservedFacts(hosts.dispatch, bus); // P2-A (X17): the engine host's observed facts, beside session.digests
   // C10 end
-  // E6 start: source control (E6 execution document, M1, M2): scm.* over the session's checkout, from the read model in
+  // E6 start: source control (E6 execution document, M1, M2): scm.* over the session's checkout, from the spine's view in
   // both launch modes; mutations through the mutating runner under the login-shell capture, which is also the environment
   // its trust gate reads (the engine's); after each mutation C4's watcher re-reads the root, so git.changed tells every
   // surface. Push and gh run only from a confirmed plan, under the same capture with the owner's credential helpers, and
   // stream as scm.remote.output; will-quit stops them. Main's process.env serves only MAWS_GIT and MAWS_GH.
   const scm = new ScmService({
-    records: (id) => sessions.model.record(id),
+    view,
     read: createGitRunner(),
     status: (directory) => git.status(directory),
     mutate: createMutatingRunner({ captured: () => engineEnv }),
@@ -701,16 +708,16 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   }));
   // P5 O2 M2: the sessions this app holds open, which the engine host's idle release never stops
   const stopInterest = startInterest({
-    sessions: () => interestSet(layout.get('main.tabs'), sessions.model.visibleSessions(), local), // P5 O6: the local machine's
-    onChange: (listener) => {
-      const offs = [layout.onChange((key) => { if (key === 'main.tabs') listener(); }), sessions.model.on('visible', () => listener())];
-      return () => offs.forEach((off) => off());
-    },
+    sessions: () => interest.set(),
+    onChange: (listener) => interest.onChange(listener),
     streaming: () => hosts.streaming('engine-host'),
     onStreaming: (listener) => hosts.onStreaming('engine-host', listener),
     dispatch: (input) => hosts.dispatch('engine-host', 'host.interest', input) as Promise<CommandResult<'host.interest'>>,
   });
-  shutdown.add('interest', stopInterest);
+  shutdown.add('interest', () => {
+    stopInterest();
+    interest.stop();
+  });
   // C12 start: the Settings tab's read of the configuration main holds for it
   registerMainHandler('settings.engineApplied', () => (engineConfigure ? engineConfigure.applied() : Promise.reject(new Error(`the engine settings are not applied this run: ${spine.refused}`)))); // P5 O3-A
   // C12 end
@@ -739,7 +746,7 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   registerMainHandler('settings.usageControls', () => usageControl.controls());
   registerMainHandler('settings.usageAction', (action) => usageControl.act(action));
   registerMainHandler('settings.userEngineDefaults', userDefaults); // W3: read only
-  const sessionDirectories = () => knownSessionDirectories(sessions.model, index);
+  const sessionDirectories = () => knownSessionDirectories(view); // P5 O3-C (reader R11)
   registerMainHandler('settings.reveal', ({ path }, { client }) =>
     revealPath(path, client, { configHome: () => claudeConfigDir(process.env, home), sessionDirectories, port: clientPort }),
   );
@@ -777,7 +784,7 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   const browser = startBrowser({
     userData: app.getPath('userData'),
     settings: () => settings.state().settings.browser,
-    index,
+    view, // P5 O3-C (readers R6, R7)
     data: browserData, // P5 O3-A
     register: registerMainHandler,
     emit,
@@ -846,7 +853,7 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   const connectors = startConnectors({
     hosts,
     register: registerMainHandler,
-    index,
+    view, // P5 O3-C (reader R8)
     windowShown: (client) => {
       const win = windowOfClient(client);
       return win && electronWindowShown(win);
@@ -896,7 +903,7 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   shutdown.add('catalog', catalog.stop);
   // P3-B: document × md, html, docx, pdf. P3-D (the P3 spec's Decision Log 61): each run handed its governing design system
   const exportAuthors = {
-    sessionTitle: (appSessionId: string) => index.sessions.get(appSessionId as AppSessionId)?.title.text,
+    sessionTitle: (appSessionId: string) => view.record(appSessionId as AppSessionId)?.title.text, // P5 O3-C (reader R9)
     humanAuthorName: async () => {
       const saved = settings.state().settings.artifacts.exportAuthorName;
       return resolveExportHumanName(saved, saved ? null : await usage.routedAccountName());
@@ -962,9 +969,9 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   // E5 end
 
   // ---- C5: notifications, dock badge and the quit guard ----
-  startAttention(sessions.model, { actions: notificationActions({ dispatch: hosts.dispatch, acquire: (id, reason) => (sessionService ? sessionService.acquire(id, reason) : Promise.reject(new Error(`MAWS cannot reach its sessions this run: ${spine.refused}`))), pending: (id, attentionId) => sessions.model.attention(id).find((item) => item.id === attentionId) }), restoredIds: attention?.restoredIds ?? new Set(), settings: () => settings.state().settings, port: clientPort });
+  startAttention(view, { actions: notificationActions({ dispatch: hosts.dispatch, view }), settings: () => settings.state().settings, port: clientPort }); // P5 O3-C (readers R1, R2)
   // C12: the busy report asks C9's pty host (read only: pty.list and pty.foreground) and publishes Quit when idle's wait
-  const quitGuard = installQuitGuard(sessions.model, {
+  const quitGuard = installQuitGuard(view, { // P5 O3-C (reader R3)
     // C12 start
     pty: {
       list: async () => {

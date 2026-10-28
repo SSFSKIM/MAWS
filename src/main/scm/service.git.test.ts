@@ -18,6 +18,11 @@ import { createGitRunner } from '../git/runner';
 import { GitService } from '../git/service';
 import type { SpawnFn } from './remote-runner';
 import { ScmService } from './service';
+import { record as sessionRecord } from '../../../test/support/builders';
+import { fakeSpineView, type FakeSpineView } from '../../../test/support/fake-spine-view';
+
+// P5 O3-C (reader R15): a session's record as the spine's view holds it, by its directory
+const at = (id: AppSessionId, directory: string, worktree: { path: string; branch: string | null } | null = null) => sessionRecord(id, { directory, worktree });
 
 const ID = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
 
@@ -27,7 +32,7 @@ describe('scm service stages, unstages, discards and commits against a real repo
   let git: GitService;
   let refresh: ReturnType<typeof vi.fn<(directory: string) => void>>;
   let directory: string;
-  let others: Map<AppSessionId, string>; // sessions beside ID, by directory
+  let view: FakeSpineView; // ID's record and the sessions beside it
   let mutating: string[]; // where each mutating git call ran, as it started
 
   function service(): ScmService {
@@ -35,7 +40,7 @@ describe('scm service stages, unstages, discards and commits against a real repo
     const captured = { PATH: '/usr/bin:/bin', HOME: repo.home, CLAUDE_CONFIG_DIR: trust.configHome };
     const mutate = createMutatingRunner({ env: {}, captured: async () => captured });
     return new ScmService({
-      records: (id) => (id === ID ? { directory, worktree: null } : others.has(id) ? { directory: others.get(id)!, worktree: null } : null),
+      view,
       read: createGitRunner({ env: repo.serviceEnv() }),
       status: (d) => git.status(d),
       mutate: (d, args, options) => {
@@ -63,7 +68,7 @@ describe('scm service stages, unstages, discards and commits against a real repo
     trust.write({ [repo.root]: { hasTrustDialogAccepted: true } });
     git = new GitService({ env: repo.serviceEnv() });
     refresh = vi.fn();
-    others = new Map();
+    view = fakeSpineView({ records: [at(ID, directory)] });
     mutating = [];
   });
   afterEach(() => {
@@ -79,7 +84,8 @@ describe('scm service stages, unstages, discards and commits against a real repo
     const SUB = 'c3333333-3333-4333-8333-333333333333' as AppSessionId;
     const SIDE = 'd4444444-4444-4444-8444-444444444444' as AppSessionId;
     const side = await repo.addWorktree('side');
-    others.set(SUB, repo.path('sub')).set(SIDE, side);
+    view.putRecord(at(SUB, repo.path('sub')));
+    view.putRecord(at(SIDE, side));
     // `git add` holds index.lock while it runs this clean filter, which waits for the test's release
     const started = repo.path('.git/filter-started');
     const release = repo.path('.git/filter-release');
@@ -128,7 +134,7 @@ describe('scm service stages, unstages, discards and commits against a real repo
     try {
       await runGit(bare, ['init', '-q', '-b', 'main']);
       trust.write({ [bare]: { hasTrustDialogAccepted: true } });
-      directory = bare;
+      view.putRecord(at(ID, bare));
       writeFileSync(join(bare, 'a.txt'), 'a\n');
       await runGit(bare, ['add', 'a.txt']);
       writeFileSync(join(bare, 'a.txt'), 'a\nmore\n'); // AM: the index differs from the file and there is no HEAD
@@ -258,7 +264,7 @@ describe('scm plans read their destinations under the push’s environment', () 
       return Object.assign(new EventEmitter(), { pid: 1, stdout: new EventEmitter(), stderr: new EventEmitter() }) as unknown as ChildProcess;
     };
     const scm = new ScmService({
-      records: (id) => (id === ID ? { directory: repo.root, worktree: null } : null),
+      view: fakeSpineView({ records: [at(ID, repo.root)] }),
       read: createGitRunner({ env: repo.serviceEnv() }),
       status: (d) => git.status(d),
       mutate: createMutatingRunner({ env: {}, captured: async () => captured }),

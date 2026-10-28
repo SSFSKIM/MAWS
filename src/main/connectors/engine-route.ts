@@ -36,6 +36,8 @@ import { randomUUID } from 'node:crypto';
 import { CONNECTOR_OPERATION_DEADLINE_MS, type ConnectorToolRef } from '@shared/artifacts/connectors'; // E3: the deadline
 import type { CommandInput, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import type { ConnectorDatasetTake } from '@shared/ipc/schema/connectors'; // E3
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { SpineView } from '@shared/spine/view';
 import type { ConnectorRoute, ConnectorRouteAnswer, ConnectorRouteCallContext, ConnectorRouteTarget } from './route';
 import { eligibleSessions, ownSessionOf, type EligibleSession } from './eligibility';
 
@@ -44,8 +46,9 @@ type HostCommand = 'library.entry' | 'spaces.list' | 'engine.sessions' | 'connec
 export interface EngineRouteDeps {
   // the engine host's commands this route sends (main's dispatch, no window's)
   call<N extends HostCommand>(name: N, input: CommandInput<N>): Promise<CommandResult<N>>;
-  sessions: { get(appSessionId: string): { projectId: string | null; directory: string } | null }; // main's index
-  projects: { list(opts: { includeHidden?: boolean }): readonly { id: string; directory: string }[] }; // main's index
+  // the spine's view (P5 O3-C reader R8): the creator's record, and the artifact's project among every row (D8: a
+  // project with no present session is still its directory)
+  view: Pick<SpineView, 'record' | 'project'>;
   realpath(path: string): string | null;
   streaming(): boolean; // the engine host's events reach main (hosts.streaming)
   log?: (line: string) => void;
@@ -108,8 +111,8 @@ export function createEngineRoute(deps: EngineRouteDeps): EngineRoute {
     const { artifact, links } = await host('library.entry', { artifactId });
     if (!artifact) return [];
     const own = ownSessionOf(artifact, links);
-    const record = own === null ? null : deps.sessions.get(own);
-    const project = artifact.projectId === undefined ? null : (deps.projects.list({ includeHidden: true }).find((entry) => entry.id === artifact.projectId) ?? null);
+    const record = own === null ? null : deps.view.record(own as AppSessionId);
+    const project = artifact.projectId === undefined ? null : deps.view.project(artifact.projectId as ProjectId);
     const space = artifact.spaceId === undefined ? null : ((await host('spaces.list', undefined)).spaces.find((entry) => entry.id === artifact.spaceId) ?? null);
     const live = await host('engine.sessions', undefined);
     return eligibleSessions({ artifact, links, space, creator: record && { projectId: record.projectId, directory: record.directory }, project, live, realpath: deps.realpath });

@@ -15,6 +15,11 @@ import { TrustStoreFixture } from '../../../test/support/trust-store';
 import type { GitRun } from '../git/runner';
 import type { KillFn, RemoteSpawnOptions, SpawnFn } from './remote-runner';
 import { ScmService, type ScmServiceDeps } from './service';
+import { record as sessionRecord } from '../../../test/support/builders';
+import { fakeSpineView, type FakeSpineView } from '../../../test/support/fake-spine-view';
+
+// P5 O3-C (reader R15): a session's record as the spine's view holds it, by its directory
+const at = (id: AppSessionId, directory: string, worktree: { path: string; branch: string | null } | null = null) => sessionRecord(id, { directory, worktree });
 
 const ID = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
 const OTHER = 'b2222222-2222-4222-8222-222222222222' as AppSessionId;
@@ -52,7 +57,7 @@ interface GhAnswer {
 
 describe('scm service runs confirmed plans, probes gh and caches PR state', () => {
   let root: string;
-  let directories: Map<AppSessionId, string>; // each session's directory
+  let view: FakeSpineView; // each session's record (its directory)
   let trust: TrustStoreFixture;
   let status: GitStatus;
   let remotes: string;
@@ -97,7 +102,7 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
       throw new Error(`unexpected read: git ${command}`);
     };
     return new ScmService({
-      records: (id) => (directories.has(id) ? { directory: directories.get(id)!, worktree: null } : null),
+      view,
       read,
       // the plans' destination reads answer from the same fake, recording which git and capture they were made for
       pushRead: (program, given) => {
@@ -118,7 +123,7 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
 
   beforeEach(() => {
     root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-scm-remote-')));
-    directories = new Map([[ID, root], [OTHER, root]]);
+    view = fakeSpineView({ records: [at(ID, root), at(OTHER, root)] });
     trust = new TrustStoreFixture();
     trust.write({ [root]: { hasTrustDialogAccepted: true } });
     captured = { HOME: root, CLAUDE_CONFIG_DIR: trust.configHome, PATH: '/nowhere' };
@@ -348,7 +353,8 @@ describe('scm service runs confirmed plans, probes gh and caches PR state', () =
       const SIDE = 'c3333333-3333-4333-8333-333333333333' as AppSessionId;
       mkdirSync(join(root, 'sub'));
       mkdirSync(join(root, 'wt'));
-      directories.set(OTHER, join(root, 'sub')).set(SIDE, join(root, 'wt'));
+      view.putRecord(at(OTHER, join(root, 'sub')));
+      view.putRecord(at(SIDE, join(root, 'wt')));
       await scm.prState({ appSessionId: OTHER, refresh: false });
       await scm.prState({ appSessionId: SIDE, refresh: false });
       expect(ghCalls('pr view')).toHaveLength(2);

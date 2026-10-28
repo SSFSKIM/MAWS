@@ -3,15 +3,16 @@
 // directories only when a live File artifact names it, one linked to the session or a side thread's ancestor of it (an
 // agent's delivery), or one no session is linked to (the owner's own "Add a file…", read by its own viewer under
 // whichever session the window reads it). Each named path is realpathed now and compared with the file's realpath, so
-// exactly that file is admitted, never its directory. The index unavailable admits nothing.
+// exactly that file is admitted, never its directory. P5 O3-C (reader R14): the paths are read through the spine's view
+// (in process, the library's index; at O3-D, an internal `machine` command until O3-E), which answers none while the
+// spine's data cannot be read (a run refused the spine), so nothing is admitted then.
 import { realpath } from 'node:fs/promises';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { LibraryStore } from './store';
+import type { SpineView } from '@shared/spine/view';
 
-export function fileAdmission(library: Pick<LibraryStore, 'fileLinkedPaths'> | null): (appSessionId: AppSessionId, real: string) => Promise<boolean> {
+export function fileAdmission(view: Pick<SpineView, 'fileLinkedPaths'>): (appSessionId: AppSessionId, real: string) => Promise<boolean> {
   return async (appSessionId, real) => {
-    if (library === null) return false;
-    for (const path of library.fileLinkedPaths(appSessionId)) {
+    for (const path of await view.fileLinkedPaths(appSessionId)) {
       if ((await realpath(path).catch(() => null)) === real) return true;
     }
     return false;

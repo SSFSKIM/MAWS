@@ -15,6 +15,11 @@ import type { MainContext } from '../ipc/router';
 import { startConnectors } from '.';
 import { electronWindowShown } from '../client/window-shown';
 import { createDirectRoute } from './direct-route';
+import { project, record } from '../../../test/support/builders';
+import { fakeSpineView } from '../../../test/support/fake-spine-view';
+
+// P5 O3-C (reader R8): the spine's view, holding the artifact's creator and its project
+const ownView = () => fakeSpineView({ records: [record('app-own', { projectId: 'proj' as never, directory: '/repo' })], projects: [project('proj', 0, { directory: '/repo' })] });
 
 const ART = '11111111-1111-4111-8111-111111111111';
 const SOURCE_ID = '22222222-2222-4222-8222-222222222222';
@@ -166,7 +171,7 @@ beforeEach(() => {
   service = startConnectors({
     hosts: { dispatch: fake.dispatch as never, onEvent: fake.onEvent as never, onState: fake.onState as never, onStreaming: fake.onStreaming as never, streaming: fake.streaming as never },
     register: ((name: string, handler: (input: unknown, context: MainContext) => unknown) => void handlers.set(name, handler)) as never,
-    index: { sessions: { get: (id) => (id === 'app-own' ? { projectId: 'proj', directory: '/repo' } : null) }, projects: { list: () => [{ id: 'proj', directory: '/repo' }] } },
+    view: ownView(),
     realpath: (path) => path,
     windowShown: () => electronWindowShown(new FakeWindow() as never),
     port: { openExternal: vi.fn() },

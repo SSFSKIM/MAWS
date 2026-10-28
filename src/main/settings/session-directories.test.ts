@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { record } from '../../../test/support/builders';
+import { fakeSpineView } from '../../../test/support/fake-spine-view';
 import { knownSessionDirectories, recordDirectories } from './session-directories';
 
 describe('knownSessionDirectories', () => {
@@ -12,24 +13,14 @@ describe('knownSessionDirectories', () => {
     expect(recordDirectories(worktree)).toEqual(['/r/b', '/r/b-wt']);
   });
 
-  it('joins the read model with the index, archived included', () => {
-    const list = vi.fn(() => [worktree, archived]);
-    expect(knownSessionDirectories({ allRecords: () => [held] }, { sessions: { list } })).toEqual(['/r/a', '/r/docs', '/r/b', '/r/b-wt', '/r/x']);
-    expect(list).toHaveBeenCalledExactlyOnceWith({ includeArchived: true });
+  // P5 O3-C (reader R11): every record the spine's view holds, archived included; none while it holds none
+  it('names every record of the spine’s view, archived included', () => {
+    expect(knownSessionDirectories(fakeSpineView({ records: [held, worktree, archived] }))).toEqual(['/r/a', '/r/docs', '/r/b', '/r/b-wt', '/r/x']);
+    expect(knownSessionDirectories(fakeSpineView({ unavailable: 'refused' }))).toEqual([]);
   });
 
-  it('answers the read model alone, with a warning, when the index is unavailable', () => {
-    const warn = vi.fn();
-    const index = { sessions: { list: () => { throw new Error('index unavailable: SQLITE_CANTOPEN'); } } };
-    expect(knownSessionDirectories({ allRecords: () => [held] }, index, { warn })).toEqual(['/r/a', '/r/docs']);
-    expect(warn).toHaveBeenCalledExactlyOnceWith('[settings] session directories without the index', expect.any(Error));
-  });
-
-  // Debt wave 4: C7's `@` listing roots read the same walk, unarchived only (from the read model as from the index)
-  it('leaves archived sessions out on request, from the read model and the index alike', () => {
-    const list = vi.fn(() => [worktree]);
-    const heldArchived = { ...archived, directory: '/r/held-archived' };
-    expect(knownSessionDirectories({ allRecords: () => [held, heldArchived] }, { sessions: { list } }, { includeArchived: false })).toEqual(['/r/a', '/r/docs', '/r/b', '/r/b-wt']);
-    expect(list).toHaveBeenCalledExactlyOnceWith({ includeArchived: false });
+  // Debt wave 4: `git.lsFiles`'s listing roots read the same walk, unarchived only
+  it('leaves archived sessions out on request', () => {
+    expect(knownSessionDirectories(fakeSpineView({ records: [held, worktree, archived] }), { includeArchived: false })).toEqual(['/r/a', '/r/docs', '/r/b', '/r/b-wt']);
   });
 });

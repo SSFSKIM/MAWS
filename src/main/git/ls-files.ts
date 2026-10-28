@@ -4,13 +4,16 @@
 // items too; outside a repository, a bounded walk (depth 6, 20,000 entries, never into node_modules, .git, dist or
 // .claude/worktrees). The listing is cached per directory for 10 s and filtered per query by the fuzzy scorer. Only a
 // directory inside one an unarchived session or a project names is listed, so the command cannot enumerate arbitrary
-// paths; that root set is realpathed once and kept until main says a session or project changed (`invalidateRoots`),
-// and read again when a directory falls outside it (a root added since, whose change has not yet arrived).
+// paths; that root set is realpathed once and kept until a session, project or intent changes (`invalidateRoots`), and
+// read again when a directory falls outside it (a root added since, whose change has not yet arrived). P5 O3-C (reader
+// R13): the roots and their changes are read through the spine's view (`spineRoots`, `followSpineRoots`).
 import type { Dirent } from 'node:fs';
 import { readdir, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { rankPaths } from '@shared/composer/fuzzy';
 import type { LsFiles, LsFilesInput } from '@shared/ipc/schema/git';
+import type { SpineView } from '@shared/spine/view';
+import { knownSessionDirectories } from '../settings/session-directories';
 import { NotARepositoryError, type GitRun } from './runner';
 
 export const CACHE_MS = 10_000;
@@ -20,7 +23,7 @@ const SKIPPED = new Set(['node_modules', '.git', 'dist']);
 
 export interface FileListerOptions {
   run: GitRun;
-  roots: () => string[] | Promise<string[]>; // every unarchived session's and every project's directories (listableRoots)
+  roots: () => string[] | Promise<string[]>; // every unarchived session's, intent's and project's directories (spineRoots)
   walkMaxEntries?: number;
 }
 
@@ -28,6 +31,24 @@ export interface FileListerOptions {
 // worktree's) and every project's directory, once each.
 export function listableRoots(sessionDirectories: Iterable<string>, projectDirectories: Iterable<string>): string[] {
   return [...new Set([...sessionDirectories, ...projectDirectories])];
+}
+
+// The listable roots from the spine's view: the directories of every unarchived record, of every setup intent (its
+// additional directories, its location, the worktree its setup made) and of every project row the index holds.
+export function spineRoots(view: Pick<SpineView, 'records' | 'intents' | 'projectRows'>): string[] {
+  const intentDirectories = view.intents().flatMap((intent) => [
+    ...intent.additionalDirectories,
+    ...(intent.location === null ? [] : [intent.location.kind === 'newWorktree' ? intent.location.repoRoot : intent.location.path]),
+    ...(intent.progress.worktree === null ? [] : [intent.progress.worktree.path]),
+  ]);
+  return listableRoots([...knownSessionDirectories(view, { includeArchived: false }), ...intentDirectories], view.projectRows().map((project) => project.directory));
+}
+
+// The root set is read again after any record, project or intent change the view reports; the function returned stops.
+export function followSpineRoots(view: Pick<SpineView, 'on'>, lister: Pick<FileLister, 'invalidateRoots'>): () => void {
+  const invalidate = () => lister.invalidateRoots();
+  const offs = [view.on('record', invalidate), view.on('projects', invalidate), view.on('intent', invalidate)];
+  return () => offs.forEach((off) => off());
 }
 
 interface Listing {

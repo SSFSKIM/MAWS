@@ -34,6 +34,7 @@ const electron = vi.hoisted(() => {
 vi.mock('electron', () => ({ app: electron.app, BrowserWindow: { getAllWindows: () => [] }, ipcMain: { handle: vi.fn() } })); // C12: the sessions feed's imports
 
 const { SessionReadModel } = await import('../sessions/read-model');
+const { fakeSpineView } = await import('../../../test/support/fake-spine-view');
 const { askToQuit, busyReport, installQuitGuard, KILL_PS_TIMEOUT_MS, quitQuestion, SHUTDOWN_BOUND_MS } = await import('./quit-guard');
 const { hostEventSource } = await import('../sessions'); // C12
 const { SAVE_ALL_BOUND_MS, trackUnsavedFiles } = await import('./quit-guard'); // E5
@@ -45,21 +46,11 @@ const NONE = { midTurn: 0, backgroundWork: 0, busyTerminals: 0, terminalsUnknown
 const FIRST = { round: 0, reasons: new Map() }; // E5: a flight's first question, no Save all before it
 const TASK = { taskId: 'b1' as never, taskType: 'local_bash', description: 'sleep 900', ambient: false };
 
-// A read model holding the given engine statuses (C4's index source in the product; `apply` changes one later).
+// The spine's view holding the given engine statuses (P5 O3-C reader R3; the read model's, from C4's index source and C3's
+// statuses, in the product; `apply` changes one later).
 function modelWith(statuses: EngineSessionStatus[]) {
-  const model = new SessionReadModel('index');
-  let writer!: Parameters<Parameters<typeof model.register>[0]['start']>[0];
-  model.register({
-    start(w) {
-      writer = w;
-      for (const s of statuses) {
-        w.observeRecord(record(s.appSessionId));
-        w.applyEngineStatus(s);
-      }
-      return () => {};
-    },
-  });
-  return Object.assign(model, { apply: (s: EngineSessionStatus) => writer.applyEngineStatus(s) });
+  const view = fakeSpineView({ records: statuses.map((s) => record(s.appSessionId)), statuses });
+  return Object.assign(view, { apply: (s: EngineSessionStatus) => view.setStatus(s) });
 }
 const midTurn = (n: number) => Array.from({ length: n }, (_, i) => status(`s${i}` as AppSessionId, { process: 'ready', engineState: 'running', turn: humanTurn }));
 const noEngines = { hostPid: () => null, ps: async () => '', kill: () => {} };

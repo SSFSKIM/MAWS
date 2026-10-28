@@ -10,7 +10,6 @@ import type { LayoutKey } from '@shared/ipc/schema/layout';
 import { addressOf, bareOf, isAddress, machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { registerMainHandler } from '../ipc/router';
-import type { SessionReadModel } from '../sessions/read-model';
 
 export interface LayoutStore {
   get(key: LayoutKey): unknown | null;
@@ -126,34 +125,6 @@ export const panelKeysOf = (local: MachineRef, appSessionId: AppSessionId): Layo
 function panelKeyAllowed(session: string, local: MachineRef, known: (appSessionId: AppSessionId) => boolean): boolean {
   if (!isAddress(session)) return known(session as AppSessionId);
   return machineOf(session) !== local || known(bareOf(session) as AppSessionId);
-}
-
-// A removed session's own panel tabs (`panel.<appSessionId>`) go with it, so layout.json does not keep keys for sessions
-// that no longer exist, with or without a window open. The read model sees a removal before the renderer does (the
-// source coalesces its events), so the key goes once the renderer has heard it, and only if the session is still gone:
-// a record removed and recreated under the same id within one tick keeps its tabs.
-export function dropPanelKeysOfRemovedSessions(model: Pick<SessionReadModel, 'on' | 'record'>, store: LayoutStore, local: MachineRef): () => void {
-  const timers = new Map<AppSessionId, ReturnType<typeof setTimeout>>();
-  const off = model.on('record', (appSessionId: AppSessionId, record) => {
-    if (record !== null || timers.has(appSessionId)) return;
-    const timer = setTimeout(() => {
-      timers.delete(appSessionId);
-      if (model.record(appSessionId) !== null) return;
-      for (const key of panelKeysOf(local, appSessionId)) {
-        try {
-          store.delete(key);
-        } catch (error) {
-          console.error(`[layout] cannot drop ${key}: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
-    }, PANEL_DROP_DELAY_MS);
-    timers.set(appSessionId, timer);
-  });
-  return () => {
-    off();
-    for (const timer of timers.values()) clearTimeout(timer);
-    timers.clear();
-  };
 }
 
 // `layout.get/set/list` for the renderer. `window.main` is main's own key: listed (it exists in the file), but never

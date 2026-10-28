@@ -1031,7 +1031,7 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
   describe('discovery freshness for the inactivity archive', () => {
     const NOW = Date.parse('2026-10-24T00:00:00.000Z');
     const archiverOver = (current: IndexSessionSource) => new InactiveArchive({
-      index, status: () => null, waiting: () => false, git: async () => '', now: () => NOW,
+      index, interest: () => new Set(), status: () => null, waiting: () => false, git: async () => '', now: () => NOW,
       discovered: (engineSessionId) => current.discoveryCurrent(engineSessionId),
       archive: async (id, eligible) => ((await eligible()) ? (index.sessions.update(id, { archived: true }), { archived: true as const }) : { status: 'skipped_ineligible' as const }),
     });

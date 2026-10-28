@@ -34,7 +34,7 @@ import type {
   ScmRunStarted,
   ScmStatus,
 } from '@shared/ipc/schema/scm';
-import type { SessionRecord } from '@shared/graph/session';
+import type { SpineView } from '@shared/spine/view';
 import type { MutateRun } from '../git/mutate';
 import { GitCommandError, NotARepositoryError, type GitRun } from '../git/runner';
 import { withoutUserInfo } from '../git/service';
@@ -53,7 +53,7 @@ const PR_STATE_KEPT_MS = 60_000;
 const GH_PROBE_CWD = '/'; // the probe reads no repository, so it runs in none
 
 export interface ScmServiceDeps {
-  records(appSessionId: AppSessionId): Pick<SessionRecord, 'directory' | 'worktree'> | null; // sessions.model.record
+  view: Pick<SpineView, 'record'>; // the spine's view (P5 O3-C reader R15): a session's checkout, from its record
   read: GitRun; // createGitRunner(): trust's key, remotes, the new commit
   status(directory: string): Promise<GitStatus>; // C4's GitService.status: the fresh status a mutation validates against and answers
   mutate: MutateRun;
@@ -268,7 +268,7 @@ export class ScmService {
   }
 
   private checkout(appSessionId: AppSessionId): string {
-    const record = this.deps.records(appSessionId);
+    const record = this.deps.view.record(appSessionId);
     if (record === null) throw new Error(`unknown app session: ${appSessionId}`);
     return record.worktree?.path ?? record.directory;
   }

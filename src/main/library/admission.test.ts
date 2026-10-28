@@ -8,8 +8,13 @@ import type { ArtifactSessionLink } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LibraryEntry } from '@shared/ipc/schema/library';
 import { summary, tempDir } from '../../../test/support/index-fixture';
+import { fakeSpineView } from '../../../test/support/fake-spine-view';
 import { Index } from '../index/index';
 import { fileAdmission } from './admission';
+
+// P5 O3-C (reader R14): admission reads the linked paths through the spine's view; in process the view answers the
+// library's index (src/main/sessions/spine-view.ts), as here
+const viewOf = (index: Index) => ({ fileLinkedPaths: async (appSessionId: AppSessionId) => index.library.fileLinkedPaths(appSessionId) });
 
 const uuid = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
 const entry = (n: number, over: Partial<LibraryEntry>): LibraryEntry => ({
@@ -46,7 +51,7 @@ describe('fileAdmission (M6b)', () => {
     index.sideThreads.opened(thread, parent, 't1');
     const report = file('report.pdf');
     index.library.reconcile({ artifacts: [entry(1, { linkedPath: report })], links: [link(1, parent)], spaces: [] });
-    const admitted = fileAdmission(index.library);
+    const admitted = fileAdmission(viewOf(index));
 
     expect(await admitted(parent, report)).toBe(true);
     expect(await admitted(thread, report)).toBe(true); // a side thread reads its ancestor's delivered file
@@ -61,7 +66,7 @@ describe('fileAdmission (M6b)', () => {
     const gone = file('gone.txt');
     index.library.reconcile({ artifacts: [entry(1, { linkedPath: mine }), entry(2, { kind: 'html', linkedPath: page }), entry(3, { linkedPath: gone })], links: [], spaces: [] });
     index.library.remove(uuid(3));
-    const admitted = fileAdmission(index.library);
+    const admitted = fileAdmission(viewOf(index));
 
     expect(await admitted(someone, mine)).toBe(true);
     expect(await admitted(someone, page)).toBe(false);
@@ -72,14 +77,18 @@ describe('fileAdmission (M6b)', () => {
     const owner = session('Owner');
     const real = file('notes.md');
     symlinkSync(files, join(dir.path, 'alias'));
-    index.library.reconcile({ artifacts: [entry(1, { linkedPath: join(dir.path, 'alias', 'notes.md') }), entry(2, { linkedPath: join(files, 'missing.md') })], links: [link(1, owner), link(2, owner)], spaces: [] });
-    const admitted = fileAdmission(index.library);
+    const view = fakeSpineView();
+    view.linked.set(owner, [join(dir.path, 'alias', 'notes.md'), join(files, 'missing.md')]);
+    const admitted = fileAdmission(view);
 
     expect(await admitted(owner, real)).toBe(true);
     expect(await admitted(owner, join(files, 'missing.md'))).toBe(false);
   });
 
-  it('admits nothing while the index is unavailable', async () => {
-    expect(await fileAdmission(null)(session('Any'), file('x.txt'))).toBe(false);
+  it('admits nothing while the view is unavailable', async () => {
+    const view = fakeSpineView({ unavailable: 'another MAWS holds spine.lock' });
+    const any = session('Any');
+    view.linked.set(any, [file('x.txt')]);
+    expect(await fileAdmission(view)(any, file('x.txt'))).toBe(false);
   });
 });

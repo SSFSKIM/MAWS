@@ -5,8 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionRecord } from '@shared/graph/session';
 import { LsFilesSchema } from '@shared/ipc/schema/git';
 import { GitFixture } from '../../../test/support/git-fixture';
-import { FileLister, listableRoots, WALK_MAX_ENTRIES } from './ls-files';
-import { knownSessionDirectories } from '../settings/session-directories';
+import { project, record } from '../../../test/support/builders';
+import { fakeSpineView } from '../../../test/support/fake-spine-view';
+import { intentFor } from '../../../test/support/session-host';
+import { FileLister, followSpineRoots, listableRoots, spineRoots, WALK_MAX_ENTRIES } from './ls-files';
 import { createGitRunner } from './runner';
 
 let repo: GitFixture;
@@ -117,15 +119,34 @@ describe('git lsFiles filters and falls back', () => {
     }
   });
 
-  it('lists the directories of unarchived sessions and of projects, once each', () => {
-    const record = (directory: string, archived: boolean, extra: Partial<SessionRecord> = {}) => ({ directory, archived, additionalDirectories: [], worktree: null, ...extra }) as unknown as SessionRecord;
+  // P5 O3-C (reader R13): the roots are read through the spine's view: unarchived records, intents, every project row
+  it('lists the directories of unarchived sessions, of intents and of every project row, once each', () => {
     const sessions = [
-      record('/a', false, { additionalDirectories: ['/a/lib', '/shared'], worktree: { path: '/a/.claude/worktrees/w' } as SessionRecord['worktree'] }),
-      record('/b', false, { additionalDirectories: ['/shared'] }),
-      record('/archived', true, { additionalDirectories: ['/archived-extra'] }),
+      record('app-a', { directory: '/a', additionalDirectories: ['/a/lib', '/shared'], worktree: { path: '/a/.claude/worktrees/w' } as SessionRecord['worktree'] }),
+      record('app-b', { directory: '/b', additionalDirectories: ['/shared'] }),
+      record('app-x', { directory: '/archived', archived: true, additionalDirectories: ['/archived-extra'] }),
     ];
-    // debt wave 4: main's `roots` reads the sessions through C11's `knownSessionDirectories`, unarchived only
-    const unarchived = knownSessionDirectories({ allRecords: () => sessions.slice(0, 1) }, { sessions: { list: () => sessions.slice(1) } }, { includeArchived: false });
-    expect(listableRoots(unarchived, ['/p', '/a'])).toEqual(['/a', '/a/lib', '/shared', '/a/.claude/worktrees/w', '/b', '/p']);
+    const intents = [
+      intentFor('new-dir', { location: { kind: 'directory', path: '/c' }, additionalDirectories: ['/c-extra'] }),
+      intentFor('new-wt', { location: { kind: 'newWorktree', repoRoot: '/r', name: 'n', branch: { kind: 'new', name: 'n', base: 'HEAD' } } as never, progress: { worktree: { path: '/r-n' } } as never }),
+      intentFor('no-project', { location: null }),
+    ];
+    const view = fakeSpineView({ records: sessions, intents, projects: [project('p', 0, { directory: '/p' })], projectRows: [project('p', 0, { directory: '/p' }), project('h', 1, { directory: '/hidden', hidden: true }), project('a', 2, { directory: '/a' })] });
+    expect(spineRoots(view)).toEqual(['/a', '/a/lib', '/shared', '/a/.claude/worktrees/w', '/b', '/c-extra', '/c', '/r', '/r-n', '/p', '/hidden']);
+    expect(listableRoots(['/a', '/a'], ['/p', '/a'])).toEqual(['/a', '/p']);
+  });
+
+  it('reads the roots again after any record, project or intent change the view reports, and stops following', () => {
+    const view = fakeSpineView();
+    const invalidateRoots = vi.fn();
+    const stop = followSpineRoots(view, { invalidateRoots });
+    view.putRecord(record('app-a'));
+    view.removeRecord('app-a' as never);
+    view.setProjects([]);
+    view.putIntent(intentFor('app-n'));
+    view.setVisible('app-a' as never, true); // not a root
+    expect(invalidateRoots).toHaveBeenCalledTimes(4);
+    stop();
+    expect(view.listeners()).toBe(0);
   });
 });

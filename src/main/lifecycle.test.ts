@@ -75,7 +75,7 @@ vi.mock('./index/index', () => ({ Index: class { close = c4.close; refreshOrgPro
 vi.mock('./index/register', () => ({ registerIndexHandlers: vi.fn() }));
 vi.mock('./index/source', () => ({ IndexSessionSource: class { start = () => ((c4.started += 1), c4.stopSource); onScanned = () => () => {}; discoveryCurrent = () => false; } }));
 vi.mock('./index/attention-service', () => ({ startIndexAttention: () => ({ stop: c4.stopAttention }) })); // C3's service over the index
-vi.mock('./ipc/events', () => ({ emit: vi.fn(), onEmitted: vi.fn(() => () => {}) })); // onEmitted: git.lsFiles' root set (C7 block)
+vi.mock('./ipc/events', () => ({ emit: vi.fn(), onEmitted: vi.fn(() => () => {}) })); // onEmitted: the services bus's taps (P5 O3-C)
 vi.mock('./index/replay', () => ({ registerReplayHandlers: () => ({ dispose: vi.fn() }) }));
 vi.mock('./index/replay-fixtures', () => ({ appRoot: (path: string) => path, seedReplayFixtures: vi.fn() }));
 const git = vi.hoisted(() => ({ dispose: vi.fn(), registered: 0 }));
@@ -83,8 +83,9 @@ vi.mock('./git/service', () => ({ GitService: class { dispose = git.dispose; } }
 vi.mock('./git/register', () => ({ registerGitHandlers: () => void (git.registered += 1) }));
 // end C4
 // C5 start: the layout store, the external-link command and the read side
-vi.mock('./layout/store', () => ({ LayoutFileStore: class { flush() {} get() { return null; } set() {} }, registerLayoutHandlers: vi.fn(), dropPanelKeysOfRemovedSessions: vi.fn() }));
+vi.mock('./layout/store', () => ({ LayoutFileStore: class { flush() {} get() { return null; } set() {} }, registerLayoutHandlers: vi.fn() }));
 vi.mock('./sessions/panel-lifetime', () => ({ registerChatPanels: () => () => {} }));
+vi.mock('./sessions/spine-view', () => ({ createSpineView: () => ({ view: { on: () => () => {}, unavailable: () => null, record: () => null, records: () => [], projects: () => [], projectRows: () => [], intents: () => [] }, stop: vi.fn() }) })); // P5 O3-C: the spine's view, empty
 vi.mock('./open-external', () => ({ registerOpenExternal: vi.fn() }));
 // The read model starts C4's index source and stops it with the sessions, at will-quit.
 vi.mock('./sessions', () => ({
@@ -107,7 +108,7 @@ vi.mock('./side/side-threads', () => ({ startSideThreads: () => () => {}, sideTh
 // C11 start: the engine host's binary configuration follows the settings, which this test replaces
 vi.mock('./settings/engine-configure', () => ({ startEngineConfigure: () => ({ stop: () => {} }) })); // C12: the coordinator
 vi.mock('./settings/host-configure', () => ({ startHostConfigure: () => () => {} })); // E10: its sibling
-vi.mock('./sessions/interest', () => ({ startInterest: () => () => {}, interestSet: () => [] })); // P5 O2 M2: its sibling
+vi.mock('./sessions/interest', () => ({ startInterest: () => () => {}, appInterest: () => ({ set: () => new Set(), onChange: () => () => {}, stop: () => {} }) })); // P5 O2 M2: its sibling; P5 O3-C: the app's interest
 vi.mock('./widgets/fixture-backend', () => ({ installWidgetBackend: () => null })); // the widget e2e's stand-in, off here
 // C11 end
 // P5 O8 M1: the org session main makes, its deps kept; backup exclusion stubbed, so no test runs osascript

@@ -28,7 +28,7 @@ it('archives only old safe sessions and keeps pinned, waiting, live, background-
     [records[3].appId, status(records[3].appId)],
     [records[4].appId, { ...status(records[4].appId, { process: 'exited' }), keepAlive: ['background_tasks' as const] }],
   ]);
-  const archiver = new InactiveArchive({ discovered: () => true,
+  const archiver = new InactiveArchive({ discovered: () => true, interest: () => new Set(),
     index: h.index, status: (id) => statuses.get(id) ?? null, waiting: () => false,
     git: async () => ' M changed.txt\n', archive: (id, eligible, stillEligible) => h.service.archive(id, { onlyIfIdle: true, eligible, stillEligible }),
     now: () => Date.parse('2026-10-24T00:00:00.000Z'),
@@ -43,7 +43,7 @@ it('archives only old safe sessions and keeps pinned, waiting, live, background-
 it('rechecks eligibility inside archive after a worktree read, leaving newly pinned work untouched', async () => {
   const record = h.index.sessions.upsertFromSummary(summary({ directory: h.work, lastRecordAt: '2026-09-01T00:00:00.000Z' })).record;
   h.index.sessions.update(record.appId, { worktree: { path: '/clean', branch: 'feature' } });
-  const archiver = new InactiveArchive({ discovered: () => true, index: h.index, status: () => null, waiting: () => false,
+  const archiver = new InactiveArchive({ discovered: () => true, interest: () => new Set(), index: h.index, status: () => null, waiting: () => false,
     git: async () => { h.index.sessions.setPinned(record.appId, true); return ''; },
     archive: (id: AppSessionId, eligible, stillEligible) => h.service.archive(id, { onlyIfIdle: true, eligible, stillEligible }),
     now: () => Date.parse('2026-10-24T00:00:00.000Z'),
@@ -54,7 +54,7 @@ it('rechecks eligibility inside archive after a worktree read, leaving newly pin
 
 it('does nothing until the owner opts in, and stops scheduling when disabled', async () => {
   const record = h.index.sessions.upsertFromSummary(summary({ directory: h.work, lastRecordAt: '2026-09-01T00:00:00.000Z' })).record;
-  const archiver = new InactiveArchive({ discovered: () => true, index: h.index, status: () => null, waiting: () => false, git: async () => '',
+  const archiver = new InactiveArchive({ discovered: () => true, interest: () => new Set(), index: h.index, status: () => null, waiting: () => false, git: async () => '',
     archive: (id, eligible, stillEligible) => h.service.archive(id, { onlyIfIdle: true, eligible, stillEligible }),
     now: () => Date.parse('2026-10-24T00:00:00.000Z'),
   });
@@ -78,7 +78,7 @@ it('does nothing until the owner opts in, and stops scheduling when disabled', a
 it('the automatic sweep waits for the scan, then runs once it answers', async () => {
   const record = h.index.sessions.upsertFromSummary(summary({ directory: h.work, lastRecordAt: '2026-09-01T00:00:00.000Z' })).record;
   let current = false;
-  const archiver = new InactiveArchive({ discovered: () => current, index: h.index, status: () => null, waiting: () => false, git: async () => '',
+  const archiver = new InactiveArchive({ discovered: () => current, interest: () => new Set(), index: h.index, status: () => null, waiting: () => false, git: async () => '',
     archive: (id, eligible, stillEligible) => h.service.archive(id, { onlyIfIdle: true, eligible, stillEligible }),
     now: () => Date.parse('2026-10-24T00:00:00.000Z'),
   });
@@ -96,17 +96,22 @@ it('the automatic sweep waits for the scan, then runs once it answers', async ()
 });
 
 // Coordinator ruling: a session open in a tab is one the owner keeps in view, so the automatic sweep keeps it; the
-// project command archives it (the renderer closes its tab on the archive's change).
-it('the automatic sweep keeps a session open in a tab; the explicit command archives it', async () => {
+// project command archives it (the renderer closes its tab on the archive's change). P5 O3-C (D11): what is kept is the
+// machine's interest union (OX5), read at each check through the `interest` port, with no layout in the sweep's reach.
+it('the automatic sweep keeps a session the interest set holds and archives it once the set no longer does; the explicit command archives it', async () => {
   const old = '2026-09-01T00:00:00.000Z';
-  const [open, closed] = [0, 1].map(() => h.index.sessions.upsertFromSummary(summary({ directory: h.work, lastRecordAt: old })).record);
+  const [kept, closed, left] = [0, 1, 2].map(() => h.index.sessions.upsertFromSummary(summary({ directory: h.work, lastRecordAt: old })).record);
+  let interest: ReadonlySet<AppSessionId> = new Set([kept.appId, left.appId]);
   const archiver = new InactiveArchive({ discovered: () => true, index: h.index, status: () => null, waiting: () => false, git: async () => '',
-    open: (id) => id === open.appId,
+    interest: () => interest,
     archive: (id, eligible, stillEligible) => h.service.archive(id, { onlyIfIdle: true, eligible, stillEligible }),
     now: () => Date.parse('2026-10-24T00:00:00.000Z'),
   });
+  expect(await archiver.run(7, null, { automatic: true })).toEqual({ archived: 1, skipped: 2 });
+  expect([kept, closed, left].map((r) => h.index.sessions.get(r.appId)!.archived)).toEqual([false, true, false]);
+  interest = new Set([kept.appId]); // `left` left the set (its tab closed, or a remote viewer stopped watching)
   expect(await archiver.run(7, null, { automatic: true })).toEqual({ archived: 1, skipped: 1 });
-  expect([open, closed].map((r) => h.index.sessions.get(r.appId)!.archived)).toEqual([false, true]);
+  expect([kept, left].map((r) => h.index.sessions.get(r.appId)!.archived)).toEqual([false, true]);
   expect(await archiver.run(7, null)).toEqual({ archived: 1, skipped: 0 });
-  expect(h.index.sessions.get(open.appId)!.archived).toBe(true);
+  expect(h.index.sessions.get(kept.appId)!.archived).toBe(true);
 });

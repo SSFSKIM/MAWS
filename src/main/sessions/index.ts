@@ -13,7 +13,7 @@ import { isAppSynthesised } from '@shared/sessions/app-events';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
 import { isSideThreadEvent } from '../side/side-threads'; // E3
 import { SessionReadModel, type RestoredCostReader, type SessionSource } from './read-model';
-import { launchMode, scenarioClock, scenarioPath } from './select-source';
+import { launchMode, scenarioClock, scenarioPath, type LaunchMode } from './select-source';
 import { stubSource } from './stub-source';
 import { FoldFilter, resyncDigests } from './resync'; // E10
 
@@ -32,6 +32,7 @@ export interface SessionsOptions {
 
 export interface Sessions {
   model: SessionReadModel;
+  mode: LaunchMode; // P5 O3-C: the launch mode decided once, which the spine's view answers by (D10)
   stop(): void;
 }
 
@@ -171,7 +172,7 @@ export function startSessions({ env, packaged, appRoot, hosts, bus, indexSource,
       console.error('[sessions] the scenario could not be played; no sessions will show', error);
     }
   }
-  return { model, stop: () => {
+  return { model, mode, stop: () => {
     for (const page of pages.values()) page.release();
     stops.forEach((stop) => stop());
   } };

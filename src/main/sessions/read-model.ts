@@ -10,7 +10,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import type { EngineSessionStatus } from '@shared/engine/status';
+import { midTurnCountOf, type EngineSessionStatus } from '@shared/engine/status';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
 import { applyStatusToDigest, costLedger, costOf, emptyDigest, foldEvents, restoreCost, withoutReleased, type CostLedger, type MessageCalls } from './digest'; // C12: withoutReleased
 import type { LaunchMode } from './select-source';
@@ -46,7 +46,6 @@ interface ReadModelEvents {
 const APP_EVENTS_KEPT = 20; // debt wave 5: per session
 const LIVE = new Set<EngineSessionStatus['process']>(['starting', 'initializing', 'ready']);
 const FOLD_LIVE = new Set<EngineSessionStatus['process']>([...LIVE, 'exiting']);
-const LAUNCHING = new Set<EngineSessionStatus['process']>(['starting', 'initializing']);
 
 // What a session's resumed process restored, by its transcript's last `cost-state` (restored-cost.ts): 0 for none, null
 // when it cannot be read. Absent, the cost ledger's own rule stands (digest.ts).
@@ -127,12 +126,9 @@ export class SessionReadModel {
   }
   // C12 end
 
-  // Sessions whose process C3's host owns and that hold a turn, or are still launching (a first message on its way).
-  // The engine status is the process table's truth; the digest is folded from events a stale batch can skew.
+  // Sessions whose process C3's host owns and that hold a turn, or are still launching (@shared/engine/status).
   midTurnCount(): number {
-    let count = 0;
-    for (const s of this.statuses.values()) if (LIVE.has(s.process) && (s.turn !== null || LAUNCHING.has(s.process))) count += 1;
-    return count;
+    return midTurnCountOf(this.statuses.values());
   }
 
   record(appSessionId: AppSessionId): SessionRecord | null {
@@ -141,6 +137,11 @@ export class SessionReadModel {
 
   project(id: ProjectId): ProjectRecord | null {
     return this.projects.get(id) ?? null;
+  }
+
+  // P5 O3-C: every project held (in launch mode scenario, the scenario's: the spine's view answers them there)
+  allProjects(): ProjectRecord[] {
+    return [...this.projects.values()];
   }
 
   // C7 start: every record held, whichever source observed it (C7's git.lsFiles roots in main, scenario sessions included)

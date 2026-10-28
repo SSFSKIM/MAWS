@@ -10,6 +10,11 @@ import type { GitFileStatus, GitStatus } from '@shared/ipc/schema/git';
 import { TrustStoreFixture } from '../../../test/support/trust-store';
 import { GitCommandError, GitTimeoutError, NotARepositoryError } from '../git/runner';
 import { ScmService, type ScmServiceDeps } from './service';
+import { record as sessionRecord } from '../../../test/support/builders';
+import { fakeSpineView, type FakeSpineView } from '../../../test/support/fake-spine-view';
+
+// P5 O3-C (reader R15): a session's record as the spine's view holds it, by its directory
+const at = (id: AppSessionId, directory: string, worktree: { path: string; branch: string | null } | null = null) => sessionRecord(id, { directory, worktree });
 
 // `realpath` as node answers it, except that a test may hold every call for one path until it releases it (a mount
 // that hangs). E11: every file `readFile` was asked for, so a test can say what trust read
@@ -44,7 +49,7 @@ describe('scm service', () => {
   let readStatus: ReturnType<typeof vi.fn<ScmServiceDeps['status']>>;
   let mutate: ReturnType<typeof vi.fn<ScmServiceDeps['mutate']>>;
   let refresh: ReturnType<typeof vi.fn<ScmServiceDeps['refresh']>>;
-  let records: Map<AppSessionId, { directory: string; worktree: { path: string; branch: string | null } | null }>;
+  let view: FakeSpineView;
   let captured: Record<string, string>;
 
   const statusOf = (directory: string): GitStatus => ({
@@ -54,7 +59,7 @@ describe('scm service', () => {
 
   function service(): ScmService {
     return new ScmService({
-      records: (id) => records.get(id) ?? null,
+      view,
       read, status: readStatus, mutate, refresh,
       pushRead: () => read, // E11: status lists remotes through the push's own reader; the fake answers both
       captured: async () => captured,
@@ -71,7 +76,7 @@ describe('scm service', () => {
     captured = { HOME: root, CLAUDE_CONFIG_DIR: trust.configHome };
     files = [file('a.txt', '.M'), file('s.ts', 'M.'), file('new.ts', 'R.', 'old.ts'), file('u.txt', '??'), file('udir/', '??')];
     head = 'abc123';
-    records = new Map([[ID, { directory: root, worktree: null }]]);
+    view = fakeSpineView({ records: [at(ID, root)] });
     read = vi.fn<ScmServiceDeps['read']>(async (directory, args) => {
       // the trust key's read and the chain's key: canonical paths, as `--path-format=absolute` answers them
       if (args[0] === 'rev-parse') {
@@ -139,7 +144,7 @@ describe('scm service', () => {
     it('acts in a linked worktree when the session has one', async () => {
       const worktree = join(root, 'wt');
       mkdirSync(worktree);
-      records.set(ID, { directory: root, worktree: { path: worktree, branch: 'wt' } });
+      view.putRecord(at(ID, root, { path: worktree, branch: 'wt' }));
       // a linked worktree's trust key is its main checkout's root, read from the common dir
       const answer = read.getMockImplementation()!;
       read.mockImplementation(async (directory, args) => (args[0] === 'rev-parse' ? `${worktree}\n${root}/.git\n${root}/.git/worktrees/wt\n` : answer(directory, args)));
@@ -310,7 +315,7 @@ describe('scm service', () => {
     it('lets a checkout whose mount hangs hold up only its own mutations', async () => {
       const other = realpathSync(mkdtempSync(join(tmpdir(), 'maws-scm-other-')));
       trust.write({ [root]: { hasTrustDialogAccepted: true }, [other]: { hasTrustDialogAccepted: true } });
-      records.set(OTHER, { directory: other, worktree: null });
+      view.putRecord(at(OTHER, other));
       let release!: () => void;
       const hung = new Promise<void>((resolve) => { release = resolve; });
       fsGate.path = root; // the root's realpath and every git call in it wait for the release
@@ -341,7 +346,7 @@ describe('scm service', () => {
       const link = join(tmpdir(), `maws-scm-link-${process.pid}-${Date.now()}`);
       symlinkSync(root, link);
       try {
-        records.set(OTHER, { directory: link, worktree: null });
+        view.putRecord(at(OTHER, link));
         let release!: () => void;
         let entered = 0;
         mutate.mockImplementationOnce(async () => {
@@ -425,7 +430,7 @@ describe('scm service', () => {
     it('drops a gh probe that failed, so the next status probes again', async () => {
       let calls = 0;
       const scm = new ScmService({
-        records: (id) => records.get(id) ?? null,
+        view,
         read: async (directory, args) => {
           if (args[0] === 'rev-parse') return `${directory}\n${directory}/.git\n${directory}/.git\n`;
           if (args.join(' ') === 'remote -v') return '';
