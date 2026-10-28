@@ -28,7 +28,7 @@ const until = async (check: () => boolean, ms = 3000) => {
   }
 };
 
-async function org() {
+async function org(expiresInMs = 86_400_000) {
   const a1 = await newDevice('a1');
   const A = memberId();
   const delegation = { id: randomBytes(16).toString('hex'), key: await generateSigningKey() };
@@ -42,7 +42,7 @@ async function org() {
   const head = await successor(s1, [a1], (s) => {
     s.machines.push({ name: 'mini', ref: MINI, pub: keys.mini.pub, owners: [A] }, { name: 'this-mac', ref: LOCAL, pub: keys.local.pub, owners: [A] });
     s.machineNames.push({ name: 'mini', ref: MINI }, { name: 'this-mac', ref: LOCAL });
-    s.delegations.push({ id: delegation.id, pub: delegation.key.pub, prefix: 'vm-', expires: new Date(Date.now() + 86_400_000).toISOString(), maxUses: 10, offlineRevokeS: 0, owners: [A] });
+    s.delegations.push({ id: delegation.id, pub: delegation.key.pub, prefix: 'vm-', expires: new Date(Date.now() + expiresInMs).toISOString(), maxUses: 10, offlineRevokeS: 0, owners: [A] });
   });
   const cert = async (machine: MachineRef, name: string, key: SigningKey) =>
     signRecord(SIGNING_DOMAINS.machineCert, { org: 'org-s', machine, name, pub: key.pub, delegation: delegation.id, use: 1, issued: new Date().toISOString() }, delegation.key.privateKey, delegation.key.pub);
@@ -101,6 +101,18 @@ describe('the roster', () => {
     session.set(null);
     await until(() => source.machines().length === 0);
     expect(heard).toBeGreaterThanOrEqual(2);
+  });
+
+  it('drops a delegated machine when its delegation expires, with no change to the session', async () => {
+    const o = await org(2000);
+    const dir = mkdtempSync(join(tmpdir(), 'maws-source-'));
+    dirs.push(dir);
+    const session = heldOrgSession(await signedIn(o));
+    const source = createRemoteSource({ session, local: o.LOCAL, userData: dir, log: () => {}, linkDeps: { records: { resolve: async () => null } } });
+    closers.push(() => source.close());
+    await until(() => source.machines().some((m) => m.ref === o.LIVE));
+    await until(() => !source.machines().some((m) => m.ref === o.LIVE), 4000);
+    expect(source.machines()).toEqual([{ ref: o.MINI, name: 'mini' }]);
   });
 });
 

@@ -5,7 +5,8 @@
 // The roster: every ref in the held head's `machines` and every `machine` of the view's certificates, this machine's
 // left out, each kept when `machineKeys` answers at least one key for it, the check `openChannel` makes against `h2`, so a
 // contested ref, a dead certificate and a revoked key are all left out. A machine is named by its entry, else by its live
-// certificate's name. It is recomputed at each change of the org session, and is empty signed out.
+// certificate's name. It is recomputed at each change of the org session and at each certificate's delegation expiry,
+// and is empty signed out.
 //
 // The network watch reads the non-internal interface addresses every NETWORK_POLL_MS while any link exists, and probes
 // every link (`network`) when the set changes. Electron-free: wake, unlock and focus reach `probeAll` from index.ts.
@@ -16,7 +17,7 @@ import type { MachineRef } from '@shared/machine/ref';
 import type { OrgSession, SignedIn } from '../../org/session';
 import type { MachineLink } from '../manager';
 import { createEndpointRecords, ENDPOINT_RECORDS_FILE } from './endpoint-records';
-import { createRemoteLink, type ProbeReason, type RemoteLink, type RemoteLinkDeps } from './link';
+import { createRemoteLink, nextCertExpiry, timeoutAt, type ProbeReason, type RemoteLink, type RemoteLinkDeps } from './link';
 import { REMOTE_TIMING } from './timing';
 
 export interface RemoteSource {
@@ -112,12 +113,18 @@ export function createRemoteSource(deps: RemoteSourceDeps): RemoteSource & {
 
   // Recomputed in order, so an older head's roster never lands after a newer one's.
   let recompute: Promise<void> = Promise.resolve();
+  let clearExpiry: (() => void) | null = null;
   function refresh(): void {
     recompute = recompute.then(async () => {
       if (closed) return;
+      const signedIn = deps.session.current();
+      // A certificate leaves the roster when its delegation expires, with no change to the session: recomputed then.
+      clearExpiry?.();
+      const at = signedIn === null ? null : nextCertExpiry(signedIn.view.head().state, signedIn.view.certificates(), now());
+      clearExpiry = at === null ? null : timeoutAt(at, now, refresh);
       let next: Roster;
       try {
-        next = await rosterOf(deps.session.current(), deps.local, new Date(now()));
+        next = await rosterOf(signedIn, deps.local, new Date(now()));
       } catch (error) {
         return log(`the roster could not be read: ${(error as Error).message}`);
       }
@@ -152,6 +159,8 @@ export function createRemoteSource(deps: RemoteSourceDeps): RemoteSource & {
     close() {
       closed = true;
       unsubscribe();
+      clearExpiry?.();
+      clearExpiry = null;
       for (const link of links.values()) link.close();
       links.clear();
       watchNetwork();

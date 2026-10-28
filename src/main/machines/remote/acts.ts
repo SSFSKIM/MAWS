@@ -17,6 +17,8 @@
 //   same opId: an act the endpoint refused is claimed nowhere, so the id runs once.
 // - A `queried {state: 'refused'}` without an outcome is the endpoint's authorization of the asker: `unavailable` (it could
 //   not be answered now) is asked again on the query backoff; any other reason resolves `unknown {reason}`.
+// - An act unsettled OP_HORIZON_S after its creation resolves `unknown expired` (a copy went out) or `refused expired`,
+//   whether or not a channel is current: the ledger no longer answers for it.
 // - Pending acts live in memory: an app quit forgets them, while the machine's ledger keeps each result for a day.
 import { base64urlEncode, isAction, NONCE_BYTES, OP_HORIZON_S, type Action, type ActionContext, type DeviceMessage, type EndpointMessage, type Executor, type RefusalReason, type RequestDigest } from '../../../../apps/org-protocol/src/index.ts';
 import type { MachineRef } from '@shared/machine/ref';
@@ -89,6 +91,8 @@ type Entry = {
   progress: ActProgress;
   listeners: Set<(progress: ActProgress) => void>;
   timers: Set<ReturnType<typeof setTimeout>>;
+  /** At OP_HORIZON_S past its creation, whatever the channel: no ledger answers for it after. */
+  horizon: ReturnType<typeof setTimeout> | null;
   settled: boolean;
   resolve(outcome: ActOutcome): void;
 };
@@ -160,6 +164,7 @@ export class ActTable {
       progress: 'waiting',
       listeners: new Set(),
       timers: new Set(),
+      horizon: null,
       settled: false,
       resolve,
     };
@@ -183,6 +188,14 @@ export class ActTable {
     else if ((request.session !== undefined && request.context === undefined) || !isAction(action)) this.#settle(entry, { state: 'refused', reason: 'malformed' });
     else if (entry.mode === 'required') void this.#sign(entry);
     else this.#trySend(entry);
+    // Past the horizon the executor's ledger no longer answers (`#query`), and a lost channel may never come back to ask.
+    if (!entry.settled) {
+      entry.horizon = setTimeout(
+        () => this.#settle(entry, entry.outstanding ? { state: 'unknown', reason: 'expired' } : { state: 'refused', reason: 'expired' }),
+        createdAt + OP_HORIZON_S * 1000 + 1 - now(),
+      );
+      entry.horizon.unref?.();
+    }
     return handle;
   }
 
@@ -376,6 +389,7 @@ export class ActTable {
     if (entry.settled) return;
     entry.settled = true;
     this.#clearTimers(entry);
+    if (entry.horizon !== null) clearTimeout(entry.horizon);
     this.#entries.delete(entry.opId);
     entry.resolve(outcome);
   }

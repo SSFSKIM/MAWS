@@ -26,8 +26,23 @@
 // presents. A session change that retires a recorded machine key, or changes the identity, raises the trust generation:
 // the current channel is closed and authenticated again at once, and an attempt begun under an older generation is
 // discarded when it completes. The handshake checks the machine's key once, so a channel under a key the org retired
-// would otherwise go on serving.
-import { ChannelError, connectChannel, keyId, machineKeys, readMessage, type ByteDuplex, type CapsMessage, type Channel, type ChannelMessage, type DeviceMessage, type EndpointMessage } from '../../../../apps/org-protocol/src/index.ts';
+// would otherwise go on serving. A delegated machine's key also stops speaking for it when its delegation expires, with
+// no session change: the same check runs at that instant.
+import {
+  ChannelError,
+  connectChannel,
+  keyId,
+  machineKeys,
+  readMessage,
+  type ByteDuplex,
+  type CapsMessage,
+  type Certificates,
+  type Channel,
+  type ChannelMessage,
+  type DeviceMessage,
+  type EndpointMessage,
+  type OrgState,
+} from '../../../../apps/org-protocol/src/index.ts';
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import type { OrgSession, SignedIn } from '../../org/session';
@@ -103,6 +118,35 @@ function sealedOnly(io: ByteDuplex): ByteDuplex {
     close: (reason) => io.close(reason),
     onClose: (listener) => io.onClose?.(() => listener(CARRIER_CLOSED)),
   };
+}
+
+/**
+ * The next instant, strictly after `now`, at which a delegation of one of `certificates` (of machine `ref`'s only, when
+ * given) expires, which `machineKeys` reads as the certificate's key no longer speaking for its machine; null for none.
+ */
+export function nextCertExpiry(state: OrgState, certificates: Certificates, now: number, ref?: string): number | null {
+  let next: number | null = null;
+  for (const cert of certificates.certs) {
+    if (ref !== undefined && cert.body.machine !== ref) continue;
+    const expires = Date.parse(state.delegations.find((d) => d.id === cert.body.delegation)?.expires ?? '');
+    if (expires > now && (next === null || expires < next)) next = expires;
+  }
+  return next;
+}
+
+/** setTimeout's delay overflows past 2^31-1 ms: a later instant is reached in steps of at most a day. */
+const MAX_TIMER_MS = 24 * 3600 * 1000;
+
+/** Runs `run` at the absolute instant `at`, on an unref'd timer; returns its cancel. */
+export function timeoutAt(at: number, now: () => number, run: () => void): () => void {
+  let timer: ReturnType<typeof setTimeout>;
+  const arm = (): void => {
+    const left = at - now();
+    timer = setTimeout(left > MAX_TIMER_MS ? arm : run, Math.max(0, Math.min(left, MAX_TIMER_MS)));
+    timer.unref?.();
+  };
+  arm();
+  return () => clearTimeout(timer);
 }
 
 const relayUrl = (hub: string, ref: MachineRef) => `${hub.replace(/^http/, 'ws').replace(/\/+$/, '')}/api/machines/${encodeURIComponent(ref)}/socket`;
@@ -182,11 +226,12 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
 
   // ---- Attempts ------------------------------------------------------------------------------------------------------
 
-  async function trustOf(signedIn: SignedIn): Promise<Trust> {
+  /** `generation` is the trust generation read before the session was: a change during the computation supersedes it. */
+  async function trustOf(signedIn: SignedIn, generation: number): Promise<Trust> {
     const { keys } = await machineKeys(signedIn.view.head().state, ref, signedIn.view.certificates(), new Date(now()));
     const id = signedIn.identity;
     return {
-      generation: trustGeneration,
+      generation,
       keys: await Promise.all(keys.map((pub) => keyId(pub))),
       identity: `${id.org} ${id.member} ${id.device} ${await keyId(id.channelKey.pub)}`,
     };
@@ -209,9 +254,10 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
 
   /** One attempt: the direct carrier when the record names a tailnet address and the bucket holds a token, else the relay. */
   async function connect(directOnly: boolean): Promise<Attempt> {
+    const generation = trustGeneration;
     const signedIn = deps.session.current();
     if (signedIn === null) return { failed: 'signed out' };
-    const trust = await trustOf(signedIn);
+    const trust = await trustOf(signedIn, generation);
     attemptTrust = trust;
     const direct = await viaDirect(signedIn);
     if (direct !== null) return { channel: direct, carrier: 'direct', trust };
@@ -351,6 +397,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     heard = false;
     unanswered = 0;
     armSilence();
+    armExpiry();
     acts.onCurrent();
     subs.onCurrent();
     flushCalls();
@@ -435,6 +482,8 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     log(`the machine closed the channel ${reason}: no retry until the org session changes or a person acts on this machine`);
     for (const timer of [retryTimer, graceTimer, recheckTimer, silenceTimer, probeTimer]) clear(timer);
     retryTimer = graceTimer = recheckTimer = silenceTimer = probeTimer = null;
+    clearExpiry?.();
+    clearExpiry = null;
     closeRelay();
     subs.close('removed');
     acts.close('removed');
@@ -556,13 +605,13 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
   // ---- The org session -----------------------------------------------------------------------------------------------
 
   let trustCheck: Promise<void> = Promise.resolve();
-  const unsubscribeSession = deps.session.onChanged(() => {
-    if (state === 'closed') return;
-    if (state === 'refused') return lift();
+  /** At each session change and each delegation expiry: retires a channel or an attempt the org no longer trusts. */
+  function checkTrust(): void {
     trustCheck = trustCheck.then(async () => {
       if (state === 'closed' || state === 'refused') return;
       const signedIn = deps.session.current();
-      const next = signedIn === null ? null : await trustOf(signedIn);
+      const next = signedIn === null ? null : await trustOf(signedIn, trustGeneration);
+      armExpiry();
       const channelRetired = current !== null && retired(current.trust, next);
       // An attempt that has not yet recorded its trust may have read the session before this change: discarded too.
       const attemptRetired = attempting && (attemptTrust === null || retired(attemptTrust, next));
@@ -571,6 +620,22 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       log('the org session retired a key this link was authenticated against, or changed this device: authenticating again');
       if (channelRetired && current !== null) current.channel.close('closed');
     });
+  }
+
+  let clearExpiry: (() => void) | null = null;
+  function armExpiry(): void {
+    clearExpiry?.();
+    clearExpiry = null;
+    const signedIn = deps.session.current();
+    if (state === 'closed' || state === 'refused' || signedIn === null) return;
+    const at = nextCertExpiry(signedIn.view.head().state, signedIn.view.certificates(), now(), ref);
+    if (at !== null) clearExpiry = timeoutAt(at, now, checkTrust);
+  }
+
+  const unsubscribeSession = deps.session.onChanged(() => {
+    if (state === 'closed') return;
+    if (state === 'refused') return lift();
+    checkTrust();
   });
 
   // ---- Calls ---------------------------------------------------------------------------------------------------------
@@ -661,6 +726,8 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       unsubscribeSession();
       for (const timer of [retryTimer, graceTimer, recheckTimer, silenceTimer, probeTimer]) clear(timer);
       retryTimer = graceTimer = recheckTimer = silenceTimer = probeTimer = null;
+      clearExpiry?.();
+      clearExpiry = null;
       const was = current;
       current = null;
       subs.close('closed');

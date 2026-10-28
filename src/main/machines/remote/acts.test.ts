@@ -1,5 +1,5 @@
 // The link's acts (P5 O7 M1, "Acts"): the opId lifecycle against a channel the test plays, with fake timers.
-import { generateSigningKey, isAction, type Action, type DeviceMessage, type EndpointMessage } from 'org-protocol';
+import { generateSigningKey, isAction, OP_HORIZON_S, type Action, type DeviceMessage, type EndpointMessage } from 'org-protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MachineRef } from '@shared/machine/ref';
 import type { SignedIn } from '../../org/session';
@@ -233,6 +233,17 @@ describe('after a lost channel', () => {
     expect(h.queries()).toHaveLength(0);
     vi.advanceTimersByTime(1);
     expect(h.queries()).toHaveLength(1);
+  });
+
+  it('resolves `unknown expired` an act lost with its channel when no channel comes back within the operation horizon', async () => {
+    const h = await harness();
+    const handle = h.table.act(SEND, null);
+    h.answer({ t: 'ack', opId: handle.opId, state: 'accepted' });
+    h.drop();
+    vi.advanceTimersByTime(OP_HORIZON_S * 1000);
+    expect(await settled(handle.outcome)).toBeNull();
+    vi.advanceTimersByTime(1);
+    expect(await settled(handle.outcome)).toEqual({ state: 'unknown', reason: 'expired' });
   });
 
   it('refuses `offline`, never sent, an act held past 60 s', async () => {

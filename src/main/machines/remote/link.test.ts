@@ -2,7 +2,7 @@
 // factory (the handshake injected, so no crypto runs on the channel) and fake carriers, with fake timers. The org state is
 // real, signed by the endpoint suites' fixtures, since the trust generation reads the machine's keys from it.
 import { randomBytes } from 'node:crypto';
-import { ChannelError, generateSigningKey, keyId, memoryOrgView, type ByteDuplex, type Channel, type ChannelMessage, type SignedOrgState, type SigningKey } from 'org-protocol';
+import { ChannelError, generateSigningKey, keyId, memoryOrgView, signRecord, SIGNING_DOMAINS, type ByteDuplex, type Certificates, type Channel, type ChannelMessage, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MachineRef } from '@shared/machine/ref';
 import { genesis, memberId, newDevice, successor, type TestDevice } from '../../../../test/endpoint/org-fixtures';
@@ -15,13 +15,35 @@ import type { SubscriptionSink } from './subs';
 // An attempt computes key ids (`trustOf`), which WebCrypto's digest runs on libuv's thread pool. Under a loaded runner
 // that pool is shared with every other worker, so a fixed number of event-loop turns could end before the digest did,
 // and the clock-held steps below raced it. The same ids, computed synchronously, keep the state machine deterministic.
+// `machineKeys` can be held once (`keysGate.hold`), so a test can move the session while an attempt computes its trust.
+const keysGate = vi.hoisted(() => ({ hold: null as Promise<void> | null }));
 vi.mock('../../../../apps/org-protocol/src/index.ts', async (original) => {
   const actual = await original<typeof import('../../../../apps/org-protocol/src/index.ts')>();
   const { createHash } = await import('node:crypto');
-  return { ...actual, keyId: (pub: string) => Promise.resolve(actual.base64urlEncode(new Uint8Array(createHash('sha256').update(actual.base64urlDecode(pub)).digest()).slice(0, actual.KID_BYTES))) };
+  return {
+    ...actual,
+    keyId: (pub: string) => Promise.resolve(actual.base64urlEncode(new Uint8Array(createHash('sha256').update(actual.base64urlDecode(pub)).digest()).slice(0, actual.KID_BYTES))),
+    machineKeys: async (...args: Parameters<typeof actual.machineKeys>) => {
+      const hold = keysGate.hold;
+      keysGate.hold = null;
+      if (hold !== null) await hold;
+      return actual.machineKeys(...args);
+    },
+  };
 });
 
 const realImmediate = setImmediate;
+const realTimeout = setTimeout;
+/** Settles until `check` holds: for steps that run real WebCrypto (a certificate's verification), bounded in real time. */
+async function settleUntil(check: () => boolean, ms = 2000): Promise<void> {
+  const deadline = performance.now() + ms;
+  for (;;) {
+    await settle();
+    if (check()) return;
+    if (performance.now() > deadline) throw new Error('timed out');
+    await new Promise((resolve) => realTimeout(resolve, 5));
+  }
+}
 /** Lets real async work (WebCrypto) and microtasks run, with the clock held. */
 async function settle(rounds = 30): Promise<void> {
   for (let i = 0; i < rounds; i++) {
@@ -88,7 +110,22 @@ class FakeChannel implements Channel {
 const CAPS = { t: 'caps', member: 'm', device: 'd1', clientClass: 'native-mac', machine: { grades: [] }, stateVersion: 2 };
 const NO_JITTER = 0.5;
 
-type Org = { a1: TestDevice; A: string; chain: SignedOrgState[]; machineKey: SigningKey; ref: MachineRef };
+type Org = { a1: TestDevice; A: string; chain: SignedOrgState[]; machineKey: SigningKey; ref: MachineRef; certificates?: Certificates };
+
+/** A machine reached through a delegated certificate whose delegation expires `expiresInMs` from now. */
+async function delegatedOrg(expiresInMs: number): Promise<Org> {
+  const a1 = await newDevice('a1');
+  const A = memberId();
+  const delegation = { id: randomBytes(16).toString('hex'), key: await generateSigningKey() };
+  const ref = `${delegation.id}_${randomBytes(16).toString('base64url')}` as MachineRef;
+  const machineKey = await generateSigningKey();
+  const s1 = await genesis('org-l', A, a1, await generateSigningKey());
+  const s2 = await successor(s1, [a1], (s) => {
+    s.delegations.push({ id: delegation.id, pub: delegation.key.pub, prefix: 'vm-', expires: new Date(Date.now() + expiresInMs).toISOString(), maxUses: 10, offlineRevokeS: 0, owners: [A] });
+  });
+  const cert = await signRecord(SIGNING_DOMAINS.machineCert, { org: 'org-l', machine: ref, name: 'vm-one', pub: machineKey.pub, delegation: delegation.id, use: 1, issued: new Date().toISOString() }, delegation.key.privateKey, delegation.key.pub);
+  return { a1, A, chain: [s1, s2], machineKey, ref, certificates: { certs: [cert], retirements: [] } };
+}
 
 async function org(): Promise<Org> {
   const a1 = await newDevice('a1');
@@ -103,10 +140,10 @@ async function org(): Promise<Org> {
   return { a1, A, chain: [s1, s2], machineKey, ref };
 }
 
-async function harness(options: { addresses?: string[]; hub?: boolean; timing?: RemoteLinkDeps['timing'] } = {}) {
-  const o = await org();
+async function harness(options: { addresses?: string[]; hub?: boolean; timing?: RemoteLinkDeps['timing']; org?: Org } = {}) {
+  const o = options.org ?? (await org());
   const session = heldOrgSession();
-  const view = watchedView(memoryOrgView({ chain: o.chain }), () => session.changed());
+  const view = watchedView(memoryOrgView({ chain: o.chain, certificates: o.certificates }), () => session.changed());
   const signedIn: SignedIn = {
     identity: { org: 'org-l', member: o.A, device: 'a1', clientClass: 'native-mac', channelKey: o.a1.channel, build: 't', capabilities: [] },
     view,
@@ -500,6 +537,35 @@ describe('trust', () => {
     expect(h.channels[0].closedWith).toBe('closed');
     expect(h.channels).toHaveLength(2);
     expect(h.link.state()).toBe('up');
+  });
+
+  it('discards an attempt whose trust was still being computed when the session retired the machine key', async () => {
+    let release!: () => void;
+    keysGate.hold = new Promise<void>((resolve) => (release = resolve));
+    const h = await harness();
+    await settle();
+    expect(h.attempts).toHaveLength(0); // the attempt read the session, and waits in its machineKeys
+    const rotated = await rotate(h.o);
+    await h.view.advance([rotated], []);
+    await settle();
+    expect(h.logs.some((l) => l.includes('retired a key'))).toBe(true);
+    release();
+    await settle();
+    expect(h.channels[0].closedWith).toBe('closed');
+    expect(h.channels).toHaveLength(2);
+    expect(h.link.state()).toBe('up');
+  });
+
+  it('closes the channel when the delegation of the certificate it was made under expires', async () => {
+    const h = await harness({ org: await delegatedOrg(60_000), timing: { PING_SILENCE_MS: [100_000, 100_000] } });
+    await settleUntil(() => h.link.state() === 'up');
+    const first = h.last();
+    await advance(59_000);
+    expect(first.closed).toBe(false);
+    await advance(1000);
+    await settleUntil(() => first.closed);
+    expect(first.closedWith).toBe('closed');
+    expect(h.logs.some((l) => l.includes('retired a key'))).toBe(true);
   });
 
   it('keeps the channel through a session change that retires nothing', async () => {
