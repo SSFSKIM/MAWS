@@ -273,12 +273,14 @@ test("G2: an RPC is drawn forwarded, uncertain when its machine drops, retried u
   await expect(page.getByTestId('machine-offline')).toHaveCount(0);
   await uncertain.getByRole('button', { name: 'Retry' }).click();
   // The hub forwards the retry again (its record says uncertain, the machine is back); the machine queues it behind the
-  // first, which it still holds.
-  await expect.poll(() => fm.frames.filter((f) => f.t === 'rpc').length).toBe(2);
+  // first, which it still holds. After a reconnect that can take past poll's 5 s default on a 3-core hosted Mac.
+  await expect.poll(() => fm.frames.filter((f) => f.t === 'rpc').length, { timeout: 15_000 }).toBe(2);
   release();
   await expect(composer.locator('[data-rpc-state="done"]')).toHaveText(/^Interrupted|^Nothing was running/, { timeout: 15_000 });
   expect(sent.filter((r) => r.rpc === 'interrupt')).toHaveLength(2);
   expect(sent[1]).toEqual(sent[0]); // the same sealed RPC, nonce and all
+  // `done` can be drawn from the first RPC's result alone, before the machine records the retry's ledger answer.
+  await expect.poll(() => fm.rpcs.length, { timeout: 15_000 }).toBe(2);
   expect(fm.rpcs.map((r) => [r.nonce, r.executed])).toEqual([
     [sent[0].nonce, true],
     [sent[0].nonce, false], // answered from the ledger, never run twice

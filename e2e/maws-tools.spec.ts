@@ -18,6 +18,7 @@
 // same recordings with the ask's arguments rewritten (`askFixture`, which says why the replay still holds).
 // Runs under `pnpm e2e:tools` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list). MAWS_E1_SHOTS=1 also
 // writes the replay's screenshots in both themes under docs/doperpowers/evidence/p1-e1/ (`e1-replay-<surface>-<theme>`).
+import { addressed, localRef } from './support/address';
 import { surface, mainTabById } from './support/shell';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -152,7 +153,7 @@ test('a blocking ask: the capsule waits, the sheet holds every modality, the att
 
     // the attention item: in Needs you and on the session's Overview card, compact, with its one button
     const needsYou = sidebarOf(s.page).getByRole('list', { name: 'Needs you' });
-    const questionRow = needsYou.locator(`button[data-needs-you="${id}"]`);
+    const questionRow = needsYou.locator(`button[data-needs-you="${await addressed(s.page, id)}"]`);
     await expect(questionRow).toHaveCount(1);
     await expect(questionRow).toHaveAccessibleName(/ · Question$/); // UX1 keeps the reason in the row's accessible name
     await expect.poll(async () => value(await invoke(s.page, 'attention.list', undefined)).filter((item) => item.appSessionId === id).map((item) => [item.kind, item.state, item.request.requestId]))
@@ -225,7 +226,7 @@ test('a waiting question is answered in its sidebar hover card, never queued as 
     await replay(s, id, askFixture(s.scratch.root, ASK_BLOCKING, args));
     // This old recording contains the redundant approval; launch.test.ts covers its omission on new launches.
     await allowNext(s, id);
-    const row = sidebarOf(s.page).locator(`button[data-needs-you="${id}"]`);
+    const row = sidebarOf(s.page).locator(`button[data-needs-you="${await addressed(s.page, id)}"]`);
     await expect(row).toHaveAccessibleName(/ · Question$/);
     const card = s.page.locator('[data-hover-card]');
     await expect(async () => {
@@ -365,10 +366,10 @@ test('an ask from a session not shown never switches the main view; its sheet op
     // nothing moved: the main view still shows the first session, and no sheet opened for the other
     const [opened] = ofKind(await s.events(asking), 'maws.ask.opened');
     await s.page.waitForTimeout(500);
-    await expect(s.pane.locator(`[data-composer="${shown}"]`)).toBeVisible();
-    await expect(s.pane.locator(`[data-composer="${asking}"]`)).toHaveCount(0);
+    await expect(s.pane.locator(`[data-composer="${await addressed(s.page, shown)}"]`)).toBeVisible();
+    await expect(s.pane.locator(`[data-composer="${await addressed(s.page, asking)}"]`)).toHaveCount(0);
     await expect(sheetOf(s)).toHaveCount(0);
-    const questionRow = sidebarOf(s.page).getByRole('list', { name: 'Needs you' }).locator(`button[data-needs-you="${asking}"]`);
+    const questionRow = sidebarOf(s.page).getByRole('list', { name: 'Needs you' }).locator(`button[data-needs-you="${await addressed(s.page, asking)}"]`);
     await expect(questionRow).toHaveCount(1);
     await expect(questionRow).toHaveAccessibleName(/ · Question$/);
     await expect.poll(async () => value(await invoke(s.page, 'attention.list', undefined)).filter((item) => item.appSessionId === asking).map((item) => [item.kind, item.state, item.request.requestId]))
@@ -671,7 +672,7 @@ test('an artifact link in the agent’s reply: a click opens it in the panel’s
     // ⌘-click: the artifact in a main tab of its own
     await chip('Linked plan').click({ modifiers: ['Meta'] });
     await expect(s.page.locator(`[data-region="main"] [data-artifact-tab="${artifact.id}"]`)).toBeVisible();
-    await expect(mainTabById(s.page, `artifact:${artifact.id}`)).toHaveAttribute('aria-selected', 'true');
+    await expect(mainTabById(s.page, `artifact:${await localRef(s.page)}:${artifact.id}`)).toHaveAttribute('aria-selected', 'true');
   });
 });
 

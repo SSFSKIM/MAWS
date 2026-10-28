@@ -5,6 +5,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
@@ -26,7 +27,8 @@ import { resetLibraryView, setLibraryView } from './view';
 const id = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
 const WORK = id(0xa1);
 const HOME = id(0xa2);
-const S = (n: number) => `app-s${n}` as AppSessionId;
+const S = (n: number) => `app-s${n}` as AppSessionId; // main's (bare); the page holds at(S(n))
+const artifactTab = (artifactId: string) => `artifact:${TEST_MACHINE}:${artifactId}`;
 // One local time for the fixtures and the component's clock (useNow reads Date.now), so the date groups never depend
 // on when the suite runs.
 const NOW = new Date(2026, 9, 13, 12, 0).getTime(); // a local noon
@@ -320,10 +322,10 @@ describe('a row', () => {
     const user = userEvent.setup();
     render(<Library />);
     await user.click(await screen.findByRole('article', { name: 'Launch plan' }));
-    expect(tabIds()).toContain(`artifact:${id(1)}`);
+    expect(tabIds()).toContain(artifactTab(id(1)));
     await user.click(within(article('Launch plan')).getByRole('button', { name: 'Session 1' }));
-    expect(tabIds()).toContain('session:app-s1');
-    expect(tabIds(), 'the artifact tab stays').toContain(`artifact:${id(1)}`);
+    expect(tabIds()).toContain(`session:${at(S(1))}`);
+    expect(tabIds(), 'the artifact tab stays').toContain(artifactTab(id(1)));
   });
 
   it('the keyboard: arrows move between rows, Enter opens, Shift+F10 opens the row’s menu', async () => {
@@ -338,7 +340,7 @@ describe('a row', () => {
     await user.keyboard('{End}');
     await waitFor(() => expect(document.activeElement).toBe(article('Quarterly deck')));
     await user.keyboard('{ArrowUp}{Enter}');
-    expect(tabIds()).toContain(`artifact:${id(4)}`);
+    expect(tabIds()).toContain(artifactTab(id(4)));
     await user.keyboard('{Shift>}{F10}{/Shift}');
     const menu = await screen.findByRole('menu');
     expect(within(menu).getByRole('menuitem', { name: 'Rename…' })).toBeTruthy();
@@ -533,7 +535,7 @@ describe('the row actions', () => {
     await within(sheet).findByRole('button', { name: 'Brief' });
     expect(within(sheet).getByRole('button', { name: 'Deck' })).toBeTruthy();
     await user.click(within(sheet).getByRole('button', { name: 'Deck' }));
-    expect(tabIds()).toContain(`artifact:${id(3)}`);
+    expect(tabIds()).toContain(artifactTab(id(3)));
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
@@ -621,7 +623,7 @@ describe('a late answer to a dismissed sheet', () => {
 describe('Make something new', () => {
   it('a kind with an editor makes an untitled one and opens it; the others ask Claude; HTML only asks Claude; File adds a file', async () => {
     registerArtifactEditor('document', { Panel: () => null });
-    const creator = vi.fn(async () => S(7));
+    const creator = vi.fn(async () => at(S(7)));
     offs.push(registerSessionCreator(creator));
     answers['layout.pickFiles'] = () => ok({ files: [{ path: '/Users/me/report.pdf', name: 'report.pdf', bytes: 10, mediaType: null, data: null }] });
     const user = userEvent.setup();
@@ -636,7 +638,7 @@ describe('Make something new', () => {
 
     await user.click(within(card('Document')).getByRole('button', { name: 'New document' }));
     await waitFor(() => expect(main.callsOf('artifacts.create')).toEqual([{ kind: 'document', title: 'Untitled document' }]));
-    await waitFor(() => expect(tabIds()).toContain(`artifact:${id(99)}`));
+    await waitFor(() => expect(tabIds()).toContain(artifactTab(id(99))));
 
     await user.click(within(card('File')).getByRole('button', { name: 'Add a file…' }));
     await waitFor(() => expect(main.callsOf('artifacts.create')).toContainEqual({ kind: 'file', title: 'report.pdf', content: { path: '/Users/me/report.pdf' } }));
@@ -644,13 +646,13 @@ describe('Make something new', () => {
 
     await user.click(within(card('Presentation')).getByRole('button', { name: 'Ask Claude to make a presentation' }));
     await waitFor(() => expect(creator).toHaveBeenCalledWith(null));
-    expect(useComposerStore.getState().prefills.get(S(7))).toEqual({ text: 'Make a presentation: ' });
-    expect(tabIds()).toContain('session:app-s7');
+    expect(useComposerStore.getState().prefills.get(at(S(7)))).toEqual({ text: 'Make a presentation: ' });
+    expect(tabIds()).toContain(`session:${at(S(7))}`);
   });
 
   // P3-F wave S (F5, the owner's DL13 change): Ask Claude from a Space starts in the Space's folder and names the Space
   it('Ask Claude from a Space starts in its linked folder’s project, else the focused project, and the prefill names the Space', async () => {
-    const creator = vi.fn(async () => S(8));
+    const creator = vi.fn(async () => at(S(8)));
     offs.push(registerSessionCreator(creator));
     const location = { kind: 'directory', path: '/Users/me/work' };
     answers['session.projects.addFolder'] = () => ok({ project: { id: 'p-9', name: 'work', directory: '/Users/me/work', order: 3, createdAt: '2026-10-01T00:00:00.000Z' }, location });
@@ -661,22 +663,22 @@ describe('Make something new', () => {
     const card = (kind: string) => within(section).getByRole('group', { name: kind });
 
     await user.click(await within(card('Presentation')).findByRole('button', { name: 'Ask Claude to make a presentation in the Space “Work”' }));
-    await waitFor(() => expect(creator).toHaveBeenCalledWith('p-9', location));
+    await waitFor(() => expect(creator).toHaveBeenCalledWith(at('p-9'), location));
     expect(main.callsOf('session.projects.addFolder')).toEqual([{ directory: '/Users/me/work' }]);
-    expect(useComposerStore.getState().prefills.get(S(8))).toEqual({ text: 'Make a presentation in the Space “Work”: ' });
+    expect(useComposerStore.getState().prefills.get(at(S(8)))).toEqual({ text: 'Make a presentation in the Space “Work”: ' });
 
     act(() => setLibraryView({ spaceId: HOME })); // a Space with no linked folder
     await user.click(await within(card('Document')).findByRole('button', { name: 'Ask Claude to make a document in the Space “Home”' }));
     await waitFor(() => expect(creator).toHaveBeenCalledTimes(2));
     expect(creator).toHaveBeenLastCalledWith(null);
     expect(main.callsOf('session.projects.addFolder')).toHaveLength(1);
-    expect(useComposerStore.getState().prefills.get(S(8))).toEqual({ text: 'Make a document in the Space “Home”: ' });
+    expect(useComposerStore.getState().prefills.get(at(S(8)))).toEqual({ text: 'Make a document in the Space “Home”: ' });
   });
 
   // P4: before the Spaces list has answered, a narrowed view's Ask Claude would start in the focused project with no
   // Space words; it waits, disabled, until the Space is known, and stays so for a Space the list does not hold
   it('Ask Claude from a narrowed Space is disabled until the Spaces list names the Space, then its prefill names it', async () => {
-    const creator = vi.fn(async () => S(9));
+    const creator = vi.fn(async () => at(S(9)));
     offs.push(registerSessionCreator(creator));
     let answerSpaces: (() => void) | null = null;
     answers['library.spaces'] = () => new Promise((resolve) => (answerSpaces = () => resolve(ok({ spaces }))));
@@ -695,7 +697,7 @@ describe('Make something new', () => {
     expect(ask().getAttribute('aria-label')).toBe('Ask Claude to make a document in the Space “Home”');
     await user.click(ask());
     await waitFor(() => expect(creator).toHaveBeenCalledWith(null));
-    expect(useComposerStore.getState().prefills.get(S(9))).toEqual({ text: 'Make a document in the Space “Home”: ' });
+    expect(useComposerStore.getState().prefills.get(at(S(9)))).toEqual({ text: 'Make a document in the Space “Home”: ' });
 
     act(() => setLibraryView({ spaceId: 'gone' })); // a Space the loaded list does not hold (deleted meanwhile)
     expect((ask() as HTMLButtonElement).disabled).toBe(true);

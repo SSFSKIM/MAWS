@@ -43,7 +43,7 @@ async function addFile(spaceId: string | null): Promise<void> {
 async function askClaude(kind: ArtifactKind, space: LibrarySpace | undefined): Promise<void> {
   let appSessionId: AppSessionId | null;
   if (space?.linkedDir !== undefined) {
-    const added = await ipc.invoke('session.projects.addFolder', { directory: space.linkedDir });
+    const added = await ipc.invoke('session.projects.addFolder', { directory: space.linkedDir }, { machine: ipc.localMachine }); // P5 O6 M4: a Space's folder is this machine's (O7)
     if (!added.ok) return toastFailure(added.error.message);
     appSessionId = await createSession(added.value.project.id, { location: added.value.location });
   } else {

@@ -1,25 +1,30 @@
 // The `#panel` harness's fake sessions (C8a, ruling O1): records A (a plain directory) and B (a worktree), built from
 // the committed harness scenario that main also serves under `MAWS_SESSION_SOURCE=stub:test/fixtures/panel/
 // harness-sessions.json`, so main's read model knows both and `layout.set` accepts their panel keys. The page seeds
-// `useSessions` itself: there is no `connectShell` here, whose snapshot would replace these records.
+// `useSessions` itself: there is no `connectShell` here, whose snapshot would replace these records. P5 O6 M2: the page
+// holds addresses, so the scenario's bare ids are lifted with the local machine, as the client lifts main's answers.
 import * as z from 'zod';
 import { EngineSessionStatusSchema, type EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import { SessionRecordSchema, type SessionRecord } from '@shared/graph/session';
 import { ProjectRecordSchema, SessionDigestSchema, type SessionDigest } from '@shared/ipc/schema';
+import { addressOf, compileAddressing } from '@shared/machine/address';
+import { ipc } from '../../ipc/client';
 import { useSessions } from '../../stores/sessions';
 import scenario from '../../../../../test/fixtures/panel/harness-sessions.json';
 
 export const FAKE_IDS = ['A', 'B'] as const;
 export type FakeId = (typeof FAKE_IDS)[number];
 
-const records = z.array(SessionRecordSchema).parse(scenario.sessions);
-const projects = z.array(ProjectRecordSchema).parse(scenario.projects);
-const digests = z.array(SessionDigestSchema.omit({ revision: true, availability: true })).parse(scenario.digests); // P2-A: availability is main's read model's
+const lifted = <S extends z.ZodType>(schema: S, value: unknown): z.output<S> => compileAddressing(schema).lift(schema.parse(value), ipc.localMachine);
+const records = lifted(z.array(SessionRecordSchema), scenario.sessions);
+const projects = lifted(z.array(ProjectRecordSchema), scenario.projects);
+const digests = lifted(z.array(SessionDigestSchema.omit({ revision: true, availability: true })), scenario.digests); // P2-A: availability is main's read model's
 
 export const FAKE_RECORDS: ReadonlyMap<AppSessionId, SessionRecord> = new Map(records.map((r) => [r.appId, r]));
 
-export const fakeId = (id: FakeId): AppSessionId => id as AppSessionId;
+// The page's id of a fake session: its local address (main, over the raw bridge, knows it as the bare 'A' or 'B').
+export const fakeId = (id: FakeId): AppSessionId => addressOf(ipc.localMachine, id as AppSessionId);
 
 // A's engine status (M2): live in this app, idle, with a shell and a workflow in the background, so the summary's
 // Background work reads `1 shell · 1 workflow`; B has none, so it is disk-only.

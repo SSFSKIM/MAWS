@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2: the router's local machine
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { SessionHarness } from '../../../test/support/session-harness';
@@ -35,7 +36,7 @@ describe('main answers the session service commands through the router', () => {
     const { registerSessionServiceHandlers } = await import('./service-register');
     const { installRouter } = await import('../ipc/router');
     registerSessionServiceHandlers(h.service);
-    installRouter({ appUrl: APP_URL });
+    installRouter({ appUrl: APP_URL, local: 'LocalMachineRef0000000' as MachineRef });
   });
   afterAll(() => h.dispose());
 

@@ -9,6 +9,7 @@ import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { record as sessionRecord, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { at } from '../../../../test/support/machine';
 import { inlineEditOf, resetComposerStore, resubmitRecordOf, setInlineEdit, setInlineText, setResubmit, useComposerStore, type InlineEdit } from '../stores/composer';
 import { prefillToDoc } from './editor/recall';
 import { serializeDraft } from './editor/serialize';
@@ -37,7 +38,7 @@ import {
   startInlineEdit,
 } from './resubmit-seam';
 
-const A = 'app-a' as AppSessionId;
+const A = at('app-a') as AppSessionId; // the page holds addresses
 const u = (s: string) => s as MessageUuid;
 type RewindResult = CommandResult<'session.rewind'>;
 type SendResult = CommandResult<'session.send'>;
@@ -66,14 +67,14 @@ beforeEach(() => {
   held = [];
   client = {
     ...fake.client,
-    invoke: ((name, input) => {
+    invoke: ((name, input, ...rest: unknown[]) => {
       if (name === 'session.send') {
         sent.push(input);
         const answer = (accepted: boolean): SendResult => (accepted ? { ok: true, value: { messageUuid: null, disposition: 'sent', queueId: 'q' } } : { ok: false, error: { code: 'internal', message: 'write failed' } });
         if (holdSends) return new Promise<SendResult>((resolve) => held.push((accepted) => resolve(answer(accepted))));
         return Promise.resolve(answer(!sendFails));
       }
-      if (name !== 'session.rewind') return fake.client.invoke(name, input);
+      if (name !== 'session.rewind') return (fake.client.invoke as unknown as (...a: unknown[]) => Promise<never>)(name, input, ...rest);
       return new Promise<RewindResult>((resolve) => rewinds.push({ input, answer: resolve }));
     }) as MawsBridge['invoke'],
   };

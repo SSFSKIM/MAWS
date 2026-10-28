@@ -8,6 +8,7 @@
 // Reply answer it and an essential's Mark read reads it (M6, `answering.ts`), on a mark main knows.
 import { useMemo, type ReactNode } from 'react';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
+import { bareOf } from '@shared/machine/address';
 import { markIdOf, questionHead, type MarkId } from '@shared/owner/marks';
 import type { OwnerMark } from '@shared/owner/state';
 import type { Choice, Part } from '@shared/owner/to-human-parser';
@@ -44,7 +45,8 @@ export function OwnerReport({ appSessionId, text, live, showRecord, recordKey, a
     return kind === 'terminal' || kind === 'background_job' ? kind : null;
   });
   const markOf = (kind: 'need-input' | 'essential', span: number): OwnerMark | null =>
-    anchor === null ? null : (byId.get(markIdOf(appSessionId, kind, { ...anchor, span }) as MarkId) ?? null);
+    // P5 O6 M2: a mark's id is its machine's, built on the bare session id (main's `markIdOf`); the page's id is an address
+    anchor === null ? null : (byId.get(markIdOf(bareOf(appSessionId), kind, { ...anchor, span }) as MarkId) ?? null);
 
   const items: Item[] = [];
   const spans = { 'need-input': 0, essential: 0 };

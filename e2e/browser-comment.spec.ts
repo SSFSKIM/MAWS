@@ -27,6 +27,7 @@ import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
 import { anchoredMessage, parseAnchoredText } from '../src/shared/anchor/message';
 import { COMMENT_COPY } from '../src/renderer/src/tools/browser/comment/copy';
+import { addressed } from './support/address';
 import { startBrowserServer, type BrowserServer } from './support/browser-server';
 import { address, browserIn, expectOnPane, launchBrowserScene, noticesIn, openBrowser, overflow, pageAt, paneIn, paneRect, tabAt, tabState, tabsOf, viewOf, type BrowserScene } from './support/browser-scene';
 import { invoke, launchReady, value } from './support/c7-replay';
@@ -657,7 +658,7 @@ test('2. a pick sent to main writes [image, anchored text] whose tag round-trips
       // the hand-off: the strip's Open in Side pane closes the card, and the Side pane draws the thread with its request
       await card.locator('[data-needs-you]').getByRole('button', { name: 'Open in Side pane' }).click();
       await expect(card).toHaveCount(0);
-      const pane = s.panel.locator(`[data-side-thread-view="${child}"]`);
+      const pane = s.panel.locator(`[data-side-thread-view="${await addressed(s.page, child)}"]`);
       await expect(pane, 'the Side pane opens on the thread').toBeVisible();
       const request = pane.getByRole('group', { name: 'Approval needed' });
       await expect(request).toContainText('echo the-count');

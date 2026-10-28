@@ -17,6 +17,7 @@ import { useViewer } from '../code/viewer/viewer-store';
 import { ScmShell } from './ScmShell';
 import { connectScmRunEnds, SCM_REFRESH_MS, useScm } from './store';
 import { createScmUi, type ScmUi } from './view-state';
+import { at, TEST_MACHINE } from '../../../../../test/support/machine';
 
 // The highlighter would load shiki's grammars; the diff paints plain until it is ready, which here is never.
 vi.mock('@git-diff-view/shiki', () => ({ getDiffViewHighlighter: () => new Promise(() => {}) }));
@@ -31,7 +32,7 @@ let off: () => void = () => {};
 function renderShell() {
   return render(
     <QueryClientProvider client={queryClient}>
-      <ScmShell appSessionId={A} directory={DIR} ui={ui} />
+      <ScmShell appSessionId={at(A)} directory={DIR} ui={ui} />
     </QueryClientProvider>,
   );
 }
@@ -48,7 +49,7 @@ beforeEach(() => {
   useScm.getState().reset();
   useViewer.getState().reset();
   main = scmMain();
-  ui = createScmUi({ session: A });
+  ui = createScmUi({ session: at(A) });
   const offPanel = connectPanelEvents(); // C4's change events into C8a's store, as App.tsx connects them
   const offRunEnds = connectScmRunEnds(); // a run's end reads the PR state again, as App.tsx connects it
   off = () => {
@@ -195,7 +196,7 @@ describe('source control tool renders groups, selects a file and draws its hunks
       fireEvent.click(screen.getByRole('button', { name: 'Mark f.txt resolved' }));
       await waitFor(() => expect(main.callsOf('scm.stage')).toEqual([{ appSessionId: A, paths: ['f.txt'] }]));
       fireEvent.click(screen.getByRole('button', { name: 'Open f.txt' }));
-      expect(openTab).toHaveBeenCalledWith({ kind: 'file', path: `${DIR}/f.txt`, line: null, appSessionId: A });
+      expect(openTab).toHaveBeenCalledWith({ kind: 'file', path: `${DIR}/f.txt`, line: null, appSessionId: at(A), machine: TEST_MACHINE });
     } finally {
       useLayout.setState({ openTab: original });
     }
@@ -411,7 +412,7 @@ describe('the header’s Push and Open PR open their sheets, and the Output foll
     renderShell();
     await waitFor(() => expect(note()?.textContent).toBe('GitHub CLI not signed in · Sign in'));
     fireEvent.click(within(note() as HTMLElement).getByRole('button', { name: 'Sign in' }));
-    expect(openTerminal).toHaveBeenCalledWith({ appSessionId: A, cwd: DIR, command: 'gh auth login' });
+    expect(openTerminal).toHaveBeenCalledWith({ appSessionId: at(A), cwd: DIR, command: 'gh auth login' });
   });
 
   it('says nothing of gh when it is ready', async () => {
@@ -479,7 +480,7 @@ describe('the diff body’s other states', () => {
       await select('Unstaged', 'src/app.ts');
       await waitFor(() => expect(note()).toBe('Diff too large to display. Open the file'));
       fireEvent.click(screen.getByRole('button', { name: 'Open the file' }));
-      expect(openTab).toHaveBeenCalledWith({ kind: 'file', path: `${DIR}/src/app.ts`, line: 4, appSessionId: A });
+      expect(openTab).toHaveBeenCalledWith({ kind: 'file', path: `${DIR}/src/app.ts`, line: 4, appSessionId: at(A), machine: TEST_MACHINE });
     } finally {
       useLayout.setState({ openTab: original });
     }

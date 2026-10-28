@@ -3,7 +3,7 @@
 // RL10 socket with a fake sminos on it (lane A), and lane B's records in the suite's hands. The engine host keeps
 // journal rows as the real one does: one row yields several events under one `seq`, each event's id is
 // `<appSessionId>:<launchId>:<seq>:<i>`, `session.events` answers whole rows after `afterSeq`, and its live events reach
-// the endpoint only while an app is attached (O2's seam until O3).
+// the endpoint only while an app is attached (O2's seam until O3) and its link to mawsd is up (`onUpstream`).
 //
 // The org: A, an admin who owns the machine (device a1); B, a member (b1); C, a member with a phone (c1, web-cards).
 import * as fs from 'node:fs';
@@ -22,6 +22,7 @@ import { validateCommandInput } from '@shared/ipc/validate';
 import { opCommands } from '../../src/engine-host/ops';
 import { createEndpoint, type Endpoint } from '../../src/endpoint';
 import type { EndpointOptions } from '../../src/endpoint/endpoint';
+import { waitingCount } from '../../src/endpoint/lane-b-pending';
 import { EndpointOrg } from '../../src/endpoint/org-sync';
 import type { RecordSource, SessionRecord, SessionTarget } from '../../src/endpoint/sources';
 import { EndpointState } from '../../src/endpoint/state/store';
@@ -97,12 +98,15 @@ export class FakeEngineHost {
   readonly #failing = new Set<string>();
   readonly #events = new Set<(owner: 'engine-host' | 'pty-host', message: { name: string; payload: unknown }) => void>();
   readonly #attachments = new Set<(attached: boolean) => void>();
+  readonly #upstreams = new Set<(link: { connected: boolean; generation: number }) => void>();
+  #linked = true;
+  #generation = 1;
   #launches = 0;
   #ops: ReturnType<typeof opCommands> | null = null;
   /** Each answer the engine host delivered: `<appSessionId> <requestId>`. */
   readonly answered: string[] = [];
 
-  /** Wires the fake into `services`' dispatch, onEvent and onAttachment, its op ledger in the machine's state directory. */
+  /** Wires the fake into `services`' dispatch, onEvent, onAttachment and onUpstream, its op ledger in the machine's state directory. */
   serve(services: FakeServices): void {
     this.#ops = opCommands({
       ledger: OpLedger.open(services.machine.stateDir, 'host-ops.jsonl'),
@@ -121,6 +125,10 @@ export class FakeEngineHost {
     services.onAttachment = (listener) => {
       this.#attachments.add(listener);
       return () => this.#attachments.delete(listener);
+    };
+    services.onUpstream = (listener) => {
+      this.#upstreams.add(listener);
+      return () => this.#upstreams.delete(listener);
     };
   }
 
@@ -206,15 +214,22 @@ export class FakeEngineHost {
     }
   }
 
-  /** An event to the endpoint, as mawsd forwards it: only while an app is attached (until O3). */
+  /** An event to the endpoint, as mawsd forwards it: only while an app is attached (until O3) and the link is up. */
   emit(name: string, payload: unknown): void {
-    if (!this.attached) return;
+    if (!this.attached || !this.#linked) return;
     for (const listener of this.#events) listener('engine-host', { name, payload });
   }
 
   attach(attached: boolean): void {
     this.attached = attached;
     for (const listener of this.#attachments) listener(attached);
+  }
+
+  /** mawsd's link to the engine host ended (a recycle, a crash, a restart), or a fresh one was welcomed (the next generation). */
+  upstream(connected: boolean): void {
+    this.#linked = connected;
+    if (connected) this.#generation += 1;
+    for (const listener of this.#upstreams) listener({ connected, generation: this.#generation });
   }
 
   /** Answers `name` `host_unavailable` until `heal(name)`. */
@@ -255,6 +270,7 @@ export class FakeEngineHost {
     const { appSessionId, afterSeq, limit, requestId } = (input ?? {}) as { appSessionId?: string; afterSeq?: number | null; limit?: number | null; requestId?: string };
     const s = appSessionId === undefined ? undefined : this.sessions.get(appSessionId);
     if (name === 'engine.sessions') return ok([...this.sessions.values()].map((x) => this.status(x)));
+    if (name === 'engine.pendingItems') return ok({ sessions: [...this.sessions.values()].flatMap((x) => (waitingCount(x.items) > 0 ? [{ appSessionId: x.appSessionId, waiting: waitingCount(x.items) }] : [])) });
     if (s === undefined) return no('internal');
     switch (name) {
       case 'session.status':

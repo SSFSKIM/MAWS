@@ -8,9 +8,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, AttentionId } from '@shared/graph/ids';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import { bareOf } from '@shared/machine/address';
 import { markIdOf } from '@shared/owner/marks';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { item } from '../../../../test/support/builders';
+import { ipc } from '../ipc/client';
 import { swapOf } from '../composer/docked/swap';
 import { RequestCard } from '../request-card/RequestCard';
 import { Sidebar } from '../sidebar/Sidebar';
@@ -19,13 +22,18 @@ import { useLayout } from '../stores/layout';
 import { activeTab, allTabs } from '../stores/layout-model';
 import { tabId } from '@shared/ipc/schema/layout';
 import { useTranscriptStore } from '../stores/transcript';
-import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { BASH_RESULT, builder, uuid } from '../transcript/model/test-events';
 import type { TranscriptSource } from '../transcript/source/types';
 import { openAnchor } from './anchor';
 import { connectAttention } from './navigation';
+import { TEST_MACHINE } from '../../../../test/support/machine';
+import { preloadOf } from '../test-support/preload-of';
 
-const nine = scenarioFile('nine-sessions');
+// P5 O6 M2: `file` is the scenario as main holds it (bare), which `fillStores` lifts into the stores; `nine` is the page's
+// view of it, whose ids are addresses. `fake`, installed as `window.maws`, stands for main and is asked, and speaks, with bare ids.
+const file = scenarioFile('nine-sessions');
+const nine = pageScenario(file);
 const APP = nine.sessions.find((r) => r.title.text === 'Charter + research')!.appId as AppSessionId;
 const active = () => activeTab(useLayout.getState().main);
 const anchor = { messageUuid: uuid('m2-u0'), blockIndex: 0, span: 0 };
@@ -56,10 +64,10 @@ let fake: ReturnType<typeof fakeClient>;
 let disconnect: () => void;
 beforeEach(() => {
   resetShellStores();
-  fillStores(nine);
+  fillStores(file);
   fake = fakeClient({ 'attention.pendingNavigate': { navigate: null }, 'attention.request': () => ({ event: null }), 'ownerChannel.markRead': undefined });
-  window.maws = fake.client;
-  disconnect = connectAttention(fake.client);
+  window.maws = preloadOf(fake);
+  disconnect = connectAttention(ipc);
 });
 afterEach(() => {
   cleanup();
@@ -106,8 +114,8 @@ describe('opening an owner-channel item at its mark', () => {
     await useTranscriptStore.getState().attach(APP, laterSourceNow(history()));
     useTranscriptStore.getState().setOwnerLane(APP, true);
     const question = owner('async_input', 'Question — Which backend?');
-    act(() => useAttention.getState().applyChanged({ appSessionId: APP, items: [question] }));
-    fake.event('attention.navigate', { appSessionId: APP, attentionId: question.id, source: 'notification' });
+    act(() => useAttention.getState().applyChanged({ appSessionId: APP, items: [question] }, TEST_MACHINE));
+    fake.event('attention.navigate', { appSessionId: bareOf(APP), attentionId: bareOf(question.id), source: 'notification' });
     expect(active()).toMatchObject({ appSessionId: APP });
     expect(useTranscriptStore.getState().entries[APP]!.jump).toMatchObject({ rowId: expect.stringContaining('m2') });
   });
@@ -119,7 +127,7 @@ describe('the surfaces', () => {
   it('the Needs-you row reads the item’s summary and opens at its mark', async () => {
     await useTranscriptStore.getState().attach(APP, laterSourceNow(history()));
     useTranscriptStore.getState().setOwnerLane(APP, true);
-    act(() => useAttention.getState().applyChanged({ appSessionId: APP, items: [owner('essential_unread', 'Must read — The README is unverified.')] }));
+    act(() => useAttention.getState().applyChanged({ appSessionId: APP, items: [owner('essential_unread', 'Must read — The README is unverified.')] }, TEST_MACHINE));
     render(<Sidebar />);
     const row = within(screen.getByRole('list', { name: 'Needs you' })).getAllByRole('button').find((b) => b.dataset.needsYou === APP)!;
     expect(row.getAttribute('aria-label')).toContain('Must read — The README is unverified.');
@@ -138,7 +146,7 @@ describe('the surfaces', () => {
     act(() => useLayout.getState().openSession(other));
     await useTranscriptStore.getState().attach(APP, laterSourceNow(history()));
     useTranscriptStore.getState().setOwnerLane(APP, true);
-    act(() => useAttention.getState().applyChanged({ appSessionId: APP, items: [owner('async_input', 'Question — Which backend?')] }));
+    act(() => useAttention.getState().applyChanged({ appSessionId: APP, items: [owner('async_input', 'Question — Which backend?')] }, TEST_MACHINE));
     render(<Sidebar />);
     activate(within(screen.getByRole('list', { name: 'Needs you' })).getAllByRole('button').find((b) => b.dataset.needsYou === APP)!);
     expect(active()).toMatchObject({ appSessionId: APP });
@@ -151,7 +159,7 @@ describe('the surfaces', () => {
     render(<RequestCard item={must} request={null} placement="card" paneIndex={0} />);
     expect(screen.getByText('Must read — Mind the migration.')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Mark read' }));
-    expect(fake.invoked('ownerChannel.markRead')).toEqual([{ appSessionId: APP, markIds: [markIdOf(APP, 'essential', anchor)] }]);
+    expect(fake.invoked('ownerChannel.markRead')).toEqual([{ appSessionId: bareOf(APP), markIds: [markIdOf(bareOf(APP), 'essential', anchor)] }]); // main's mark ids are built on its bare id
     cleanup();
     render(<RequestCard item={owner('async_input', 'Question — Which backend?')} request={null} placement="card" paneIndex={0} />);
     expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Open session']);
@@ -160,10 +168,10 @@ describe('the surfaces', () => {
   it.each(['envelope', 'reject'] as const)('the Overview card’s Mark read that failed says so on the card, which keeps it (%s)', async (how) => {
     window.maws = {
       ...fake.client,
-      invoke: (name: string, input: unknown) =>
-        name !== 'ownerChannel.markRead' ? fake.client.invoke(name as never, input as never)
+      invoke: (name: string, input: unknown, ...rest: unknown[]) =>
+        name !== 'ownerChannel.markRead' ? (fake.client.invoke as unknown as (...a: unknown[]) => Promise<never>)(name, input, ...rest)
           : how === 'reject' ? Promise.reject(new Error('the bridge is gone')) : Promise.resolve({ ok: false, error: { code: 'internal', message: 'the bridge is gone' } }),
-    } as typeof fake.client;
+    } as unknown as PreloadBridge;
     render(<RequestCard item={owner('essential_unread', 'Must read — Mind the migration.')} request={null} placement="card" paneIndex={0} />);
     fireEvent.click(screen.getByRole('button', { name: 'Mark read' }));
     await act(() => new Promise((resolve) => setTimeout(resolve, 0)));

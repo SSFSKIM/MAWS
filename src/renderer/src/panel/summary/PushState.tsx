@@ -12,6 +12,7 @@ import { formatClock } from '@shared/app/date-format';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ipc } from '../../ipc/client';
 import { queryClient } from '../../ipc/query';
+import { checkoutKey, machineFor } from '../../ipc/machine';
 import { useGit } from '../../stores/git';
 import { prStateKey, scmStatusKey, usePrState, useScmStatus } from '../../tools/scm/queries';
 import { openTerminal } from '../../tools/terminal';
@@ -24,7 +25,7 @@ import { actionClass, Row, Section } from './Section';
 const SCM_TOOL_ID = 'source-control'; // E6's tool id (the tool's module stays out of the summary's graph)
 
 export function PushState({ directory, appSessionId, embedded = false }: { directory: string; appSessionId: AppSessionId; embedded?: boolean }) {
-  const status = useGit((s) => s.entries.get(directory)?.status ?? null);
+  const status = useGit((s) => s.entries.get(checkoutKey(machineFor(appSessionId), directory))?.status ?? null);
   const toolRegistered = usePanelHost((s) => s.tools.has(SCM_TOOL_ID));
   if (!status || status.branch === null) return null;
   const push = pushState(status);

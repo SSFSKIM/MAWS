@@ -7,6 +7,7 @@ import { fillStores, resetShellStores, scenarioFile } from '../test-support/shel
 import { BannerHost } from './BannerHost';
 import { Shell } from './Shell';
 import { TOAST_DURATION_MS, ToastHost } from './ToastHost';
+import { at } from '../../../../test/support/machine';
 
 vi.mock('./Diagnostics', () => ({ Diagnostics: () => null }));
 
@@ -46,7 +47,7 @@ describe('banner host', () => {
   it('sits once in the shell outside both panes of a split and survives panel maximization', () => {
     render(<Shell />);
     act(() => {
-      useLayout.getState().openSession(nine.sessions[0].appId, { split: true });
+      useLayout.getState().openSession(at(nine.sessions[0].appId), { split: true });
       banner({ id: 'near-limit', level: 'warning', text: 'near the limit', actions: [], dismissible: true });
     });
     const main = document.querySelector<HTMLElement>('[data-region="main"]')!;

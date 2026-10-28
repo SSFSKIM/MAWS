@@ -5,6 +5,7 @@
 // `plugins.changed`. Owner `engine-host` for every command. The `marketplaces.*` mutations complete on the same event.
 import * as z from 'zod';
 import { OperationReceiptSchema } from '../../engine/operations';
+import { LooseAppSessionIdSchema } from '../../graph/ids';
 import { isPluginsArgument, PLUGINS_ACTIONS, PLUGINS_SCOPES, RUNNER_ACTIONS } from '../../plugins/cli';
 import type { CommandSpec } from './common';
 
@@ -79,7 +80,7 @@ export const PluginsOutcomeSchema = z.union([
 export type PluginsOutcome = z.infer<typeof PluginsOutcomeSchema>;
 
 export const SessionReloadSchema = z.strictObject({
-  appSessionId: z.string(),
+  appSessionId: LooseAppSessionIdSchema, // P5 O6 M1: branded for the address codec; loose, so the wire's JSON Schema stays the plain string's
   outcome: z.enum(['reflected', 'not_reflected', 'no_expectation', 'failed']),
   error: z.string().nullable(),
 });

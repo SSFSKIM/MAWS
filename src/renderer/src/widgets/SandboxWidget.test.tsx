@@ -7,16 +7,20 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { EngineSessionStatus } from '@shared/engine/status';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
+import { at } from '../../../../test/support/machine';
 import { slashWidget } from '../composer/mentions/widgets';
 import { useSessions } from '../stores/sessions';
 import { registerAllWidgets } from './index';
 import { present, SandboxWidget } from './SandboxWidget';
 
 const ROOT = join(__dirname, '../../../..');
-const ID = 'app-7412a115' as AppSessionId;
+// P5 O6 M2: the backend is main (bare ids); the page holds the address
+const BARE = 'app-7412a115' as AppSessionId;
+const ID = at(BARE);
+const lifted = (status: EngineSessionStatus): EngineSessionStatus => ({ ...status, appSessionId: at(status.appSessionId) });
 
 // U3 F4's `get_sandbox_dialog`, as the installed 2.1.295 answered it under a scratch home
 const ANSWER_2_1_295 = {
@@ -50,12 +54,12 @@ beforeEach(() => {
   backend = createWidgetBackend({ root: ROOT, statuses: loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json')).engine });
   backend.script('session.getSandboxDialog', () => ANSWER_2_1_295);
   window.maws = backend.bridge();
-  useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+  useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
 });
 afterEach(() => {
   cleanup();
   useSessions.setState({ engine: new Map() });
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: unknown }).maws;
 });
 
 describe('/sandbox on 2.1.295', () => {

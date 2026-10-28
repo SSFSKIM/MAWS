@@ -9,6 +9,7 @@ import { useSessions } from '../../stores/sessions';
 import { useSetup } from '../../sessions/store';
 import { trustState } from '../../test-support/setup-intents';
 import { sendHumanPrompt } from './send-human-prompt';
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 
 const APP = 'app-human' as AppSessionId;
 const UUID = '11111111-1111-4111-8111-111111111111' as MessageUuid;
@@ -26,7 +27,7 @@ afterEach(() => {
   resetQueueStore();
 });
 
-const ready = (over: Parameters<typeof status>[1] = {}) => useSessions.getState().applyStatus({ appSessionId: APP, status: status(APP, over) });
+const ready = (over: Parameters<typeof status>[1] = {}) => useSessions.getState().applyStatus({ appSessionId: APP, status: status(APP, over) }, TEST_MACHINE);
 
 describe('the human send seam', () => {
   it('sends when idle, returning the host uuid without recording composer history or passing origin to the engine', async () => {

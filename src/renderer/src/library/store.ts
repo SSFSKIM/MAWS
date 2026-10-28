@@ -13,9 +13,11 @@
 import { useEffect } from 'react';
 import { useStore } from 'zustand';
 import { createStore } from 'zustand/vanilla';
-import type { CommandName, CommandResult, MawsBridge } from '@shared/ipc/schema';
+import type { CommandName, CommandResult, InvokeRest, MawsBridge } from '@shared/ipc/schema';
 import type { LibraryCounts, LibraryFilter, LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
 import { ipc } from '../ipc/client';
+import { machineOf } from '@shared/machine/address';
+import { LIBRARY_COPY } from './copy';
 
 export const UNWATCHED_KEPT = 16;
 
@@ -114,13 +116,20 @@ function watch(key: string, reader: Reader, client: MawsBridge): () => void {
 }
 
 const ask =
-  <N extends CommandName>(name: N, input: unknown): Reader =>
+  <N extends CommandName>(name: N, input: unknown, ...opts: InvokeRest<N>): Reader =>
   (client) =>
-    client.invoke(name, input as never) as Promise<CommandResult<N>>;
+    client.invoke(name, input as never, ...opts) as Promise<CommandResult<N>>;
+
+// P5 O6 M4: the library is this machine's while an artifact id names no machine (O7 gives artifacts one). A filter naming
+// another machine's session or project would be routed there by its address, and its rows would then open as this
+// machine's artifacts of the same ids, so such a list is not read: it answers that it is not shown here yet.
+const OTHER_MACHINE_LIST: Reader = async () => ({ ok: false, error: { message: LIBRARY_COPY.otherMachine } });
+const namesAnotherMachine = (filter: LibraryFilter, local: MawsBridge['localMachine']) =>
+  [filter.appSessionId, filter.projectId].some((id) => id !== undefined && machineOf(id) !== local);
 
 export const watchLibraryList = (filter?: LibraryFilter, client: MawsBridge = ipc): (() => void) => {
   const normalized = normalize(filter);
-  return watch(listKey(normalized), ask('library.list', { filter: normalized }), client);
+  return watch(listKey(normalized), namesAnotherMachine(normalized, client.localMachine) ? OTHER_MACHINE_LIST : ask('library.list', { filter: normalized }), client);
 };
 export const watchLibraryRow = (artifactId: string, client: MawsBridge = ipc): (() => void) =>
   watch(rowKey(artifactId), async (c) => {

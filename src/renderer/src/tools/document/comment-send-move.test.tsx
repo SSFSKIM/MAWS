@@ -15,13 +15,14 @@ import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } fr
 import { createDocument } from '@artifacts/document/tabs';
 import { listThreads } from '@artifacts/document/threads';
 import type { ArtifactHost } from '@artifacts/host';
-import type { CommandName, MawsBridge } from '@shared/ipc/schema';
+import type { CommandName, MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import type { LayoutMain, TabRef } from '@shared/ipc/schema/layout';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { library, resetLibrary, rowKey } from '../../library/store';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT } from '@shared/ipc/schema/layout';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { adoptStagedArtifactEditorState, artifactEditorFor, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors, stageArtifactEditorState } from '../../artifacts/registry';
 import { resetMarkupSurfaces } from '../../markup/surface';
 import { askEditorHostClose, EditorHostScopeContext, registerEditorHost, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
@@ -42,7 +43,7 @@ import type { DocumentTabDeps, DocumentTabState } from './tab-state';
 
 const DOC = '0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e';
 const panel: EditorHostScope = { surface: 'panel', tabId: 'panel-tab-1' };
-const main: EditorHostScope = { surface: 'main', tabId: `artifact:${DOC}` };
+const main: EditorHostScope = { surface: 'main', tabId: `artifact:${TEST_MACHINE}:${DOC}` };
 const HOST_BOX = { width: 900, height: 900 };
 
 let memory: MemoryDocumentHost;
@@ -68,7 +69,7 @@ beforeEach(() => {
   resetArtifactEditors();
   asked = [];
   fake = fakeClient({ 'session.intent.get': null });
-  window.maws = fake.client;
+  window.maws = fake.client as unknown as PreloadBridge;
   memory = new MemoryDocumentHost();
   memory.write((doc) => createDocument(doc, { title: 'Launch plan' }));
   offs = [registerDocumentEditor(deps), registerCommentComposer(openComment)];
@@ -90,7 +91,7 @@ afterEach(() => {
 
 function deps(): DocumentTabDeps {
   const ipc: Pick<MawsBridge, 'invoke' | 'on'> = {
-    invoke: (async (name: CommandName) => ({ ok: true, value: name === 'artifacts.get' ? { artifact: { id: DOC, kind: 'document', title: 'Launch plan', lastViewedAt: null, revision: 1 } } : name === 'artifacts.versions' ? { versions: [] } : undefined })) as MawsBridge['invoke'],
+    invoke: (async (name: CommandName) => ({ ok: true, value: name === 'artifacts.get' ? { artifact: { id: DOC, kind: 'document', title: 'Launch plan', lastViewedAt: null, revision: 1 } } : name === 'artifacts.versions' ? { versions: [] } : undefined })) as unknown as MawsBridge['invoke'],
     on: (() => () => {}) as MawsBridge['on'],
   };
   const host = {
@@ -196,7 +197,7 @@ describe('a comment being sent when its document moves', () => {
 });
 
 describe('an unsent comment when its document moves onto a view of it already open (T5, T8)', () => {
-  const DOC_TAB: TabRef = { id: main.tabId, kind: 'artifact', artifactId: DOC, pinned: false };
+  const DOC_TAB: TabRef = { id: main.tabId, kind: 'artifact', artifactId: DOC, machine: TEST_MACHINE, pinned: false };
   const TEXT = 'Keep this unsent comment';
 
   beforeEach(() => {

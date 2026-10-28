@@ -7,19 +7,23 @@ import type { ReactNode } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { runSessionAction, SESSION_ACTIONS, sessionActionsFor, useSessionActionEnabled, type SessionActionId } from '../app/session-actions';
+import { machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../ipc/client';
 import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { openDialog } from '../sessions/dialogs';
+import { orgKeyOf, sessionsOfRow } from '../stores/org-projects';
 import { useSessions } from '../stores/sessions';
 import { PROJECT_ACTION_IDS, PROJECT_ACTIONS, runProjectAction, useProjectActionEnabled, type ProjectActionId } from './project-actions';
 import { openResumeChooser } from '../resume/host'; // P2-D
 
-export type MenuTarget = { kind: 'other' } | { kind: 'session'; appSessionId: AppSessionId } | { kind: 'project'; projectId: ProjectId };
+export type MenuTarget = { kind: 'machine'; machine: MachineRef } | { kind: 'session'; appSessionId: AppSessionId } | { kind: 'project'; projectId: ProjectId };
 
-// The target a `data-menu` attribute names: `session:<appSessionId>`, `project:<projectId>` or `other`.
+// The target a `data-menu` attribute names: `session:<appSessionId>`, `project:<projectId>` (an org project's row, by the
+// checkout its actions act on) or `machine:<ref>` (a machine's own row, P5 O6 M5).
 export function menuTargetOf(element: Element | null): MenuTarget | null {
   const value = element?.closest('[data-menu]')?.getAttribute('data-menu') ?? null;
-  if (value === 'other') return { kind: 'other' };
+  if (value?.startsWith('machine:')) return { kind: 'machine', machine: value.slice('machine:'.length) as MachineRef };
   if (value?.startsWith('session:')) return { kind: 'session', appSessionId: value.slice('session:'.length) as AppSessionId };
   if (value?.startsWith('project:')) return { kind: 'project', projectId: value.slice('project:'.length) as ProjectId };
   return null;
@@ -41,8 +45,8 @@ export function SidebarMenuContent({ target }: { target: MenuTarget | null }) {
   return (
     <ContextMenu.Portal>
       <ContextMenu.Content className="z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
-        {target?.kind === 'other' && (
-          <Item enabled onSelect={() => openDialog({ kind: 'archived', projectId: null })}>
+        {target?.kind === 'machine' && (
+          <Item enabled onSelect={() => openDialog({ kind: 'archived', projectId: null, machine: target.machine })}>
             Archived sessions…
           </Item>
         )}
@@ -74,9 +78,12 @@ const projectRowOf = (projectId: ProjectId): HTMLElement | null =>
   [...document.querySelectorAll<HTMLElement>('[role="treeitem"][data-menu]')].find((el) => el.dataset.menu === `project:${projectId}`) ?? null;
 
 function ProjectItems({ projectId }: { projectId: ProjectId }) {
-  const canCreate = useSessionCreatorRegistered();
+  const canCreate = useSessionCreatorRegistered() && machineOf(projectId) === ipc.localMachine; // a New chat on another machine is O7's picker
   const records = useSessions((s) => s.records);
-  const unread = [...records.values()].filter((r) => r.projectId === projectId && r.unread && !r.archived);
+  const projects = useSessions((s) => s.projects);
+  const project = projects.get(projectId);
+  // the row's sessions, from every machine
+  const unread = project === undefined ? [] : sessionsOfRow({ records, projects }, ipc.localMachine, orgKeyOf(project)).filter((r) => r.unread && !r.archived);
   return (
     <>
       <Item enabled={canCreate} onSelect={() => void createSession(projectId)}>

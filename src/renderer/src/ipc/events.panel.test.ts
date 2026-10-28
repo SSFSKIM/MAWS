@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 import { useGit } from '../stores/git';
 import { connectPanelEvents } from './events';
 import { queryClient } from './query';
@@ -20,7 +21,7 @@ describe('panel events', () => {
 
     const changed = { repoRoot: '/r', status, reason: 'worktree' as const };
     fake.event('git.changed', changed);
-    expect(applyChanged).toHaveBeenCalledWith(changed);
+    expect(applyChanged).toHaveBeenCalledWith(changed, TEST_MACHINE);
     fake.event('fs.workflowChanged', { appSessionId: 'A', runId: 'run-1' });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['maws', 'fs.workflows', { appSessionId: 'A' }] });
 

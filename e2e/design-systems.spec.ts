@@ -35,6 +35,7 @@ import { expect, test, type ElectronApplication, type Page } from '@playwright/t
 import { artifactRefusalOf, type ArtifactRefusal } from '@shared/ipc/schema/artifacts';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import type { AppSessionId } from '@shared/graph/ids';
+import { localRef } from './support/address';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { accentBand, ACCENT_DECK, deckHeadline, highlightMix, insertThroughEditor, markedBand, markedColor, markElement, openFromLibrary, paintedColor, READING_PASSAGE, recolourThroughReplica, unacknowledged } from './support/design-restyle';
@@ -326,7 +327,7 @@ test('the real document and deck editors restyle with their system’s live toke
     // one pane again for the version steps: the deck's tab, focused in the second pane, goes back to the first, and the
     // emptied pane closes the split
     const rightTabs = page.getByRole('tablist', { name: 'Right pane tabs' });
-    await rightTabs.locator(`[data-tab-id="artifact:${deck.id}"]`).click();
+    await rightTabs.locator(`[data-tab-id="artifact:${await localRef(page)}:${deck.id}"]`).click();
     await expect(rightTabs).toHaveAttribute('data-focused', 'true');
     await menu(launch!.app, 'pane.split');
     await expect(rightTabs).toHaveCount(0);

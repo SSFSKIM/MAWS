@@ -74,7 +74,7 @@ export function usePluginManifests(cwd: string | null, items: readonly ManifestR
       for (let at = 0; at < wanted.length; at += BATCH) {
         const batch = wanted.slice(at, at + BATCH);
         // a call that fails (the bridge's promise rejected) is refused like a read the host refused
-        const result = await ipc.invoke('plugins.manifest', { cwd, items: batch.map(refOf) }).catch((thrown: unknown) => ({ ok: false as const, error: { message: wordsOf(thrown) } }));
+        const result = await ipc.invoke('plugins.manifest', { cwd, items: batch.map(refOf) }, { machine: ipc.localMachine }).catch((thrown: unknown) => ({ ok: false as const, error: { message: wordsOf(thrown) } }));
         if (!result.ok) {
           error = result.error.message; // the rows keep the listing's own words; the caller says the read failed
           continue;

@@ -8,6 +8,7 @@ import type { JournalRow } from '@shared/wire/journal';
 import { Normalizer } from '../../../../engine-host/normalizer';
 
 export function journalToEvents(rows: JournalRow[]): SessionEvent[] {
+  // Never crosses IPC: a local normaliser's own label, so it stays bare (P5 O6 M2).
   const normalizer = new Normalizer({ appSessionId: 'replay' as AppSessionId, launchId: 'journal', sessionId: null });
   return rows.flatMap((row) => normalizer.push(row));
 }

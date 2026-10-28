@@ -51,7 +51,7 @@ export function useBuiltInMods(appSessionId: AppSessionId | null, client: MawsBr
     async (id: ModId, enabled: boolean) => {
       void id; // one mod today: the to-human lane's switch
       setFailure(null);
-      const result = await client.invoke('settings.set', { mods: { toHuman: { enabled } } });
+      const result = await client.invoke('settings.set', { mods: { toHuman: { enabled } } }, { machine: client.localMachine }); // P5 O6 M4: this machine's settings (O3)
       if (!result.ok) setFailure(result.error.message);
       again();
     },

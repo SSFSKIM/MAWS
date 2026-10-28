@@ -2,7 +2,7 @@
 // of the member's waiting on it the count the hub's presence gives, the title and lane its verified listing gives.
 import type { Listing, Signed } from 'org-protocol';
 import { describe, expect, it } from 'vitest';
-import { boardOf, waitingOn, type Presences } from './board';
+import { boardOf, movedToMaws, waitingOn, type Presences } from './board';
 import type { CutOverMachine } from './machines';
 
 const ME = 'member-me';
@@ -51,5 +51,19 @@ describe('the cards board', () => {
       ['vm-one', null, 0],
     ]);
     expect(waitingOn(board)).toBe(0);
+  });
+});
+
+// The freeze's seam (P5 O13 M6): a DX session's machine, by the name its log gives, is one of the cut-over machines when a
+// name of theirs is the same without regard to case, as the hub and the org state compare names (`machineNameKey`).
+describe('a machine moved to MAWS', () => {
+  it("is a cut-over machine's name, compared without regard to case", () => {
+    const names = machines.map((m) => m.name);
+    expect(movedToMaws('mini', names)).toBe(true);
+    expect(movedToMaws('MINI', names)).toBe(true);
+    expect(movedToMaws('Vm-One', names)).toBe(true);
+    expect(movedToMaws('SK.local', names)).toBe(false);
+    expect(movedToMaws('min', names)).toBe(false);
+    expect(movedToMaws('mini', [])).toBe(false);
   });
 });

@@ -4,6 +4,7 @@
 // two-argument form, filling the session from the focused pane (C5's Pane focuses on pointerdown, so at click time it
 // is the transcript's).
 import type { AppSessionId } from '@shared/graph/ids';
+import { machineFor } from '../../ipc/machine';
 import { panelHost, shownSession } from '../../panel/host';
 import { useLayout } from '../../stores/layout';
 import { useSessions } from '../../stores/sessions';
@@ -29,7 +30,7 @@ export function normalizeLexically(path: string): string {
 }
 
 export function openFile(appSessionId: AppSessionId | null, path: string, line?: number | null): void {
-  useLayout.getState().openTab({ kind: 'file', path: normalizeLexically(path), line: line ?? null, appSessionId });
+  useLayout.getState().openTab({ kind: 'file', path: normalizeLexically(path), line: line ?? null, appSessionId, machine: machineFor(appSessionId) });
 }
 
 // The session a turn belongs to, for a call outside a click: the transcript store key whose state holds the turn, the
@@ -54,5 +55,5 @@ export const codeTranscriptActions: Pick<TranscriptActions, 'reviewChanges' | 'o
     if (appSessionId === null) return;
     panelHost.addTool('review', { appSessionId, params: { scope: 'turn', turnId, ...(path ? { path } : {}) } });
   },
-  openFile: (path, line) => openFile(shownSession(), path, line),
+  openFile: (path, line, appSessionId) => openFile(appSessionId ?? shownSession(), path, line),
 };

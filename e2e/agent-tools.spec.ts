@@ -19,6 +19,7 @@ import { AGENTS_CRON_TAIL, AGENTS_RELAY_TAIL, AGENTS_STOP_SHELL_TAIL, AGENTS_STO
 import { nextCronMatch, parseCron } from '../src/shared/engine/cron'; // E7
 import { formatIn } from '../src/renderer/src/tools/agents/model/elapsed'; // E7
 import { PANEL_CHILD_TAIL } from '../test/support/panel-child-tail';
+import { addressed } from './support/address';
 import { REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { latencyBudgets } from './support/latency';
 import { otherThemeColours } from './support/panel-support';
@@ -92,11 +93,11 @@ class Harness {
     if (await back.isVisible()) await back.click();
   }
   tabs = () => this.panel('tabs');
-  layoutOf = (id: 'A' | 'B') =>
+  layoutOf = async (id: 'A' | 'B') =>
     this.page.evaluate(async (key) => {
       const result = await window.maws.invoke('layout.get', { key: key as 'regions' });
       return result.ok ? (result.value.value as { tabs: { id: string; toolId: string }[] } | null) : null;
-    }, `panel.${id}`);
+    }, `panel.${await addressed(this.page, id)}`);
 
   expectQuietConsole(): void {
     expect(this.maws.consoleErrors(), 'the console stays free of errors').toEqual([]);

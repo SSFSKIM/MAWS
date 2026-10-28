@@ -4,9 +4,9 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { CommandOutput } from '@shared/ipc/schema';
-import { NO_PROJECT } from '@shared/ipc/schema/layout';
 import { CUSTOMIZATION_INVENTORY_COVERAGE } from '@shared/ipc/schema/customization';
 import { ipc } from '../ipc/client';
+import { localProjectOfSet } from '../stores/org-projects'; // P5 O6 M5
 import { IpcCommandError } from '../ipc/query';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
@@ -30,6 +30,7 @@ import { useCustomizeProject, type CustomizeSection } from './open';
 import { ConnectorsSection } from './connectors/ConnectorsSection';
 import { CONNECTORS } from './connectors/copy';
 import { configuredOf } from './connectors/present';
+import { machineOf } from '@shared/machine/address';
 
 const DIRECTORY_PAGE = '\0directory'; // the selector's value for a directory page: no project id or '' can equal it
 const SECTIONS = { plugins: 'Plugins', skills: 'Skills', mcp: 'Connectors' } as const; // P4-AGG M4: the value `mcp` stays, so saved tabs keep working
@@ -46,20 +47,26 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
   // P4-AGG M4: Connectors too (an add or a removal runs on, its line kept, across a section switch)
   const [visitedConnectors, setVisitedConnectors] = useState(section === 'mcp');
   if (section === 'mcp' && !visitedConnectors) setVisitedConnectors(true);
-  const projects = useSessions((s) => s.projects);
+  // P5 O6 M4: Customize reads and changes this machine's configuration until O4 spans machines, so its pages are this
+  // machine's projects, directories and live sessions only: another machine's project at the same path is never read or
+  // changed here as if it were this one's. (`useCustomizeProject.directory` comes from `openDiscover`, which takes only
+  // this machine's directories.)
+  const allProjects = useSessions((s) => s.projects);
+  const projects = useMemo(() => new Map([...allProjects].filter(([id]) => machineOf(id) === ipc.localMachine)), [allProjects]);
   const records = useSessions((s) => s.records);
   const engine = useSessions((s) => s.engine);
   const current = useLayout((s) => s.main.current);
   const chosen = useCustomizeProject((s) => s.projectId);
   // a directory no project has as its own (Open Discover from a session there, Decision Log 10): the page is that directory
   const directory = useCustomizeProject((s) => s.directory);
-  const projectId = chosen === undefined ? (current === NO_PROJECT ? null : current) : chosen;
+  const focused = chosen === undefined ? (localProjectOfSet({ projects: allProjects }, current, ipc.localMachine)?.id ?? null) : chosen; // P5 O6 M5: the strip's set's checkout here
+  const projectId = focused !== null && projects.has(focused) ? focused : null; // another machine's project: the user configuration
   const project = directory === undefined && projectId ? projects.get(projectId) : undefined;
   const cwd = directory ?? project?.directory ?? null;
   const labels = useMemo(() => projectLabels([...projects.values()]), [projects]);
   // Attach only a ready process in exactly the chosen directory. Project membership alone would also match a worktree
   // with different local configuration. A page never acquires a session, including after an attached process exits.
-  const live = [...engine.values()].filter((status) => status.process === 'ready' && cwd !== null && status.cwd === cwd)
+  const live = [...engine.values()].filter((status) => status.process === 'ready' && cwd !== null && status.cwd === cwd && machineOf(status.appSessionId) === ipc.localMachine)
     .sort((a, b) => a.appSessionId.localeCompare(b.appSessionId));
   const [pickedSession, setPickedSession] = useState<AppSessionId | null>(null);
   const attached = live.find((status) => status.appSessionId === pickedSession) ?? live[0] ?? null;
@@ -69,7 +76,8 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
   const inventory = useQuery({
     queryKey: ['maws', 'customization.inventory', { cwd }],
     queryFn: async () => {
-      const answer = await ipc.invoke('customization.inventory', { cwd });
+      // P5 O6 M4: Customize is this machine's, as its plugin and connector actions are, until O4 spans machines.
+      const answer = await ipc.invoke('customization.inventory', { cwd }, { machine: ipc.localMachine });
       if (!answer.ok) throw new IpcCommandError(answer.error);
       return answer.value;
     },

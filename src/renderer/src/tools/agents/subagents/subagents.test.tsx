@@ -7,7 +7,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import { at as address, TEST_MACHINE } from '../../../../../../test/support/machine';
 import type { SubagentEntry, WorkflowRun } from '@shared/ipc/schema/fs';
 import { digest, item, record, status } from '../../../../../../test/support/builders';
 import { event, recordedTeamListing, replayed, sidecarsOf, workflowRunsOf } from '../../../../../../test/support/agents-events';
@@ -43,8 +44,8 @@ vi.mock('../../../transcript', async (importOriginal) => {
   return { ...actual, ipcSource: ipcSourceSpy.mockImplementation(actual.ipcSource) };
 });
 
-const A = 'A' as AppSessionId;
-const B = 'B' as AppSessionId;
+const A = address('A' as AppSessionId);
+const B = address('B' as AppSessionId);
 const TITLE = 'Fix drag';
 const T = '2026-09-29T10:00:00.000Z';
 const at = (seconds: number) => new Date(Date.parse(T) + seconds * 1000).toISOString();
@@ -59,14 +60,14 @@ const create = (params: SubagentsParams | undefined, appSessionId: AppSessionId 
   return handle;
 };
 
-const live = (over: Partial<EngineSessionStatus> = {}): EngineSessionStatus => ({ ...status('A'), launchId: 'journal', ...over });
+const live = (over: Partial<EngineSessionStatus> = {}): EngineSessionStatus => ({ ...status(A), launchId: 'journal', ...over });
 const openTurn = { id: 'app:journal:1:0', origin: 'human', startedAt: T, acceptedAt: T, userMessageUuids: [] } as unknown as EngineSessionStatus['turn'];
 
 function seedSessions(statusOfA: EngineSessionStatus | null): void {
   useSessions.setState((s) => ({
     records: new Map([
-      [A, record('A', { title: { text: TITLE, source: 'user' } })],
-      [B, record('B', { title: { text: 'Other session', source: 'user' } })],
+      [A, record(A, { title: { text: TITLE, source: 'user' } })],
+      [B, record(B, { title: { text: 'Other session', source: 'user' } })],
     ]),
     engine: statusOfA ? new Map([[A, statusOfA]]) : new Map(),
     digests: new Map(),
@@ -127,7 +128,7 @@ async function mount(opts: MountOptions = {}) {
   return { handle, ...view };
 }
 
-const push = (events: SessionEvent[]) => act(() => fake.batch('A', events));
+const push = (events: SessionEvent[]) => act(() => fake.batch(A, events));
 type Section = 'agents' | 'done' | 'disk'; // E7: the tree's Agents and Done, and On disk
 const section = (name: Section) => document.querySelector<HTMLElement>(`[data-section="${name}"]`);
 const rowsOf = (name: Section) =>
@@ -318,7 +319,7 @@ describe('subagents lists', () => {
   it('badges an agent with an open request of its own: waiting and Approval needed', async () => {
     await mount({ events: [started('a1', 1), started('a2', 2)] });
     act(() =>
-      useAttention.getState().applySnapshot([item('A', 'permission', T, { request: { requestId: 'r1' as RequestId, toolUseId: null, taskId: null, agentId: 'a1' as AgentId } })]),
+      useAttention.getState().applySnapshot([item(A, 'permission', T, { request: { requestId: 'r1' as RequestId, toolUseId: null, taskId: null, agentId: 'a1' as AgentId } })], TEST_MACHINE),
     );
     expect(rowsOf('agents').map((r) => [r.id, r.waiting])).toEqual([['a1', true], ['a2', false]]);
     expect(row('a1').querySelector('[data-part="waiting"]')?.textContent).toBe('waiting');
@@ -412,6 +413,7 @@ function parentStream(child: AgentId, childEvents: SessionEvent[]): SessionEvent
 }
 function installBridge(parent: SessionEvent[], answers: Record<string, unknown> = {}): void {
   window.maws = {
+    localMachine: TEST_MACHINE,
     invoke: async (name: string) =>
       name === 'session.events'
         ? { ok: true, value: { events: parent, lastSeq: parent.length, complete: true } }
@@ -419,7 +421,7 @@ function installBridge(parent: SessionEvent[], answers: Record<string, unknown> 
           ? { ok: true, value: answers[name] }
           : { ok: false, error: { code: 'internal', message: `unexpected ${name}` } },
     on: () => () => {},
-  } as unknown as MawsBridge;
+  } as unknown as PreloadBridge;
 }
 
 describe('drill-in', () => {
@@ -457,7 +459,7 @@ describe('drill-in', () => {
     b.emit('permission.requested', { requestId, toolUseId, toolName, displayName, input, description, decisionReasonType, suggestions, blockedPath });
     installBridge(parentStream(child, b.events), { 'attention.request': { event: { ...perm, sessionId: b.events[0].sessionId } } });
     await mount({ events: [started(child, 1)], params: { agentId: child } });
-    act(() => useAttention.getState().applySnapshot([itemFor(perm, A)]));
+    act(() => useAttention.getState().applySnapshot([itemFor(perm, A)], TEST_MACHINE));
     const drill = document.querySelector<HTMLElement>('[data-view="agent"]')!;
     await waitFor(() => expect(within(drill).getByRole('heading', { name: 'Bash' })).toBeTruthy());
     expect(within(drill).getAllByRole('button').some((button) => /Allow/.test(button.textContent ?? ''))).toBe(true);
@@ -465,7 +467,7 @@ describe('drill-in', () => {
     const openFile = vi.fn();
     const off = registerTranscriptActions({ openFile });
     fireEvent.click(await within(drill).findByTitle('src/a.ts'));
-    expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined);
+    expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined, A);
     off();
   });
 
@@ -485,7 +487,7 @@ describe('drill-in', () => {
     installBridge([]);
     const { handle } = await mount({ params: { toolUseId: 'toolu_01CYiK6ncgQLFUQ2iqC1b4oB' as ToolUseId } });
     expect(handle.snapshot().view.kind).toBe('pending');
-    act(() => fake.subagentsChanged('A', sidecarsOf('subagent-sidecars')));
+    act(() => fake.subagentsChanged(A, sidecarsOf('subagent-sidecars')));
     expect(handle.snapshot().view).toEqual({ kind: 'agent', agentId: 'ad286defbc77bc090' });
   });
 
@@ -817,7 +819,7 @@ describe('subagents tool', () => {
     rerender(<Mounted state={handle} appSessionId={B} />);
     expect(document.querySelector('[data-view="agent"]')).toBeNull();
     expect(handle.snapshot()).toMatchObject({ appSessionId: B, view: { kind: 'lists' }, scrollTop: 0, draft: '', expandedFolds: new Set() });
-    expect(fake.calls).toContain('subagents B');
+    expect(fake.calls).toContain(`subagents ${B}`);
     expect(fake.calls.filter((c) => c === 'off eventBatch')).toHaveLength(1); // A's watch released
   });
   it('a selection for another session makes a tab still on the old one follow it first, keeping the selection', async () => {
@@ -855,7 +857,7 @@ describe('subagents summary', () => {
 
   it('reads the digest’s counts while the graph has not loaded, and the sidecars on disk for a disk-only session', async () => {
     seedSessions(null);
-    act(() => useSessions.setState((s) => ({ digests: new Map([[A, digest('A', { childAgents: { active: 2, done: 1 } })]]), digestsVersion: s.digestsVersion + 1 })));
+    act(() => useSessions.setState((s) => ({ digests: new Map([[A, digest(A, { childAgents: { active: 2, done: 1 } })]]), digestsVersion: s.digestsVersion + 1 })));
     showSummary();
     expect(summary().textContent).toContain('2 working · 1 done');
     await act(async () => {

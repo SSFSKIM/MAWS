@@ -3,8 +3,11 @@
 import { act, cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import { bareOf } from '@shared/machine/address';
 import { digest, record, status } from '../../../../../../test/support/builders';
 import { fakeClient } from '../../../../../../test/support/fake-client';
+import { at } from '../../../../../../test/support/machine';
 import { useSessions } from '../../../stores/sessions';
 import { rowsOf, withAllExpanded } from '../../model/derive';
 import { applyEvents, createState } from '../../model/reduce';
@@ -13,7 +16,7 @@ import { builder, uuid } from '../../model/test-events';
 import type { PeerReply, PeerReplies, TranscriptActions } from '../context';
 import { renderRow, spyActions } from './test-support';
 
-const A = 'A' as AppSessionId;
+const A = at('A' as AppSessionId); // the page's; main (the fake bridge) is asked and answers with bareOf(A)
 const B = 'uds:/tmp/cc-socks/1.sock';
 type Message = Extract<Row, { kind: 'agent_message' }>;
 
@@ -81,7 +84,7 @@ describe('a message from another session', () => {
   // P2-A (2026-10-09; the execution document §5.6): a reply on an exited session starts it (peer), then asks it once
   it('on an exited session the box stays open; Send starts the session first, then asks it once', async () => {
     const fake = fakeClient();
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     useSessions.setState({ engine: new Map([[A, status(A, { process: 'exited' } as never)]]), records: new Map([[A, record(A, { title: { text: 'Session A', source: 'user' } })]]) });
     const actions: TranscriptActions = { ...spyActions(), peerReplies: replies().source };
     renderRow(inbound(), { storeKey: A, actions });
@@ -91,10 +94,10 @@ describe('a message from another session', () => {
     expect(fake.invoked('session.acquire')).toEqual([]);
     fireEvent.change(box, { target: { value: 'on it' } });
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
-    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'peer' }]);
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: bareOf(A), reason: 'peer' }]);
     expect(screen.getByText('Starting…')).toBeTruthy();
     expect(actions.replyToPeer).not.toHaveBeenCalled();
-    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false }));
+    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: bareOf(A), launched: true, joined: false }));
     expect(actions.replyToPeer).toHaveBeenCalledExactlyOnceWith(A, { address: B, name: 'repo-b', mode: 'reply' }, 'on it');
     expect(box.value).toBe('');
     delete (window as { maws?: unknown }).maws;
@@ -102,7 +105,7 @@ describe('a message from another session', () => {
 
   it('a refused start says why and keeps the text; a session a terminal holds is closed with the holder named', async () => {
     const fake = fakeClient();
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     useSessions.setState({ engine: new Map(), records: new Map([[A, record(A, { title: { text: 'Session A', source: 'user' } })]]) });
     const actions: TranscriptActions = { ...spyActions(), peerReplies: replies().source };
     renderRow(inbound(), { storeKey: A, actions });
@@ -110,7 +113,7 @@ describe('a message from another session', () => {
     const box = screen.getByRole('textbox') as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: 'on it' } });
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
-    await act(() => fake.reply('session.acquire', { status: 'missing_directory', appSessionId: A, directory: '/gone' }));
+    await act(() => fake.reply('session.acquire', { status: 'missing_directory', appSessionId: bareOf(A), directory: '/gone' }));
     expect(screen.getByText('Directory not found: /gone')).toBeTruthy();
     expect(actions.replyToPeer).not.toHaveBeenCalled();
     expect(box.value).toBe('on it');
