@@ -89,7 +89,10 @@ function SidebarBody() {
   });
   // P5 O8 M2: a listed row clicked with no opener for its lane is the selection until the shown tab changes or another
   // row is clicked.
+  // Cleared, not just hidden, at the first render with another tab, so the tab it was picked over coming back does not
+  // bring it back (React's state adjusted while rendering: this render is discarded for the one without it).
   const [picked, setPicked] = useState<{ id: AppSessionId; over: AppSessionId | null } | null>(null);
+  if (picked !== null && picked.over !== selectedTab) setPicked(null);
   const selected = picked !== null && picked.over === selectedTab ? picked.id : selectedTab;
 
   const [query, setQuery] = useState('');

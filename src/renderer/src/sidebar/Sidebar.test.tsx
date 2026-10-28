@@ -1471,4 +1471,19 @@ describe('listed rows from another machine', () => {
     expect(open).toHaveBeenCalledWith(expect.objectContaining({ appId: studio('b1'), lane: 'A' }));
     expect(useLayout.getState().main).toBe(tabsBefore);
   });
+
+  it('a selected listed row stays unselected once the shown tab changes, even when the tab it was picked over returns', async () => {
+    const other = record(at('other'), { projectId: maws.id, title: { text: 'Other pass', source: 'user' }, updatedAt: '2026-10-28T08:00:00Z' });
+    fill([listedOn('b1', { title: 'Studio build', lane: 'A' })], [here, other]);
+    act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG] as ProjectKey[] }));
+    act(() => useLayout.getState().openSession(here.appId));
+    render(<Sidebar />);
+    await userEvent.click(row('Studio build'));
+    expect(row('Studio build').getAttribute('aria-selected')).toBe('true');
+    act(() => useLayout.getState().openSession(other.appId));
+    expect(row('Other pass').getAttribute('aria-selected')).toBe('true');
+    act(() => useLayout.getState().openSession(here.appId));
+    expect(row('Sidebar pass').getAttribute('aria-selected')).toBe('true');
+    expect(row('Studio build').getAttribute('aria-selected')).not.toBe('true');
+  });
 });
