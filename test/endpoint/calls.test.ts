@@ -87,13 +87,19 @@ describe('a call', () => {
       ['sminos.read', { ...at, id: 'q1', what: 'u'.repeat(33) }],
       ['sminos.read', { ...at, id: 'q1', what: 'usage', args: { text: 'y'.repeat(4096) } }],
       ['sminos.rows', { ...at, before: 'r9', limit: 0 }],
+      // Under 4096 as JavaScript writes them, over it as Python's json.dumps does: `1e-07`, and DEL escaped `\u007f`.
+      ['sminos.read', { ...at, id: 'q1', what: 'usage', args: { n: Array.from({ length: 600 }, () => 1e-7) } }],
+      ['sminos.read', { ...at, id: 'q1', what: 'usage', args: { text: '\u007f'.repeat(700) } }],
     ] as const;
     for (const [name, input] of refused) expect(await call(a, name, input), `${name} ${JSON.stringify(input).slice(0, 80)}`).toMatchObject({ ok: false, error: { code: 'malformed' } });
     // At the limits, each goes down.
     expect(await call(a, 'sminos.output', { ...at, taskId: 'x'.repeat(64), tail: 524_288 })).toMatchObject({ ok: true });
     expect(await call(a, 'sminos.read', { ...at, id: 'q'.repeat(64), what: 'u'.repeat(32), args: { text: 'y'.repeat(4070) } })).toMatchObject({ ok: true });
     await s.next((x) => x.t === 'read', 'the read at its limits');
-    expect(s.received.filter((x) => x.t === 'output' || x.t === 'read' || x.t === 'rows')).toHaveLength(2);
+    // Python writes 0.00001 shorter (`1e-05`): 550 of them fit under its count though not under JavaScript's.
+    expect(await call(a, 'sminos.read', { ...at, id: 'q2', what: 'usage', args: { n: Array.from({ length: 550 }, () => 0.00001) } })).toMatchObject({ ok: true });
+    await s.next((x) => x.t === 'read', 'the read Python measures under its limit');
+    expect(s.received.filter((x) => x.t === 'output' || x.t === 'read' || x.t === 'rows')).toHaveLength(3);
   });
 });
 

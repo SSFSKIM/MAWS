@@ -23,9 +23,11 @@
 //
 // Access is re-checked whenever it can change: on every change of a session's record (`RecordSource`) and every new
 // head, each open subscription, and each lane A cursor a dropped channel left resumable, is authorized again. A
-// subscription's stream is held from the change until the check decides, so nothing the session produces meanwhile
-// reaches a viewer who lost it; one that no longer qualifies ends `removed` and its upstream subscription and retained
-// cursor are dropped, so a resume can't restore what was withdrawn. A device's lane B subscriptions count as interest
+// subscription's stream is held from the change until a current check grants it, so nothing the session produces
+// meanwhile reaches a viewer who lost it; a check that can't be answered now (`unavailable`) keeps it held and is tried
+// again on RECHECK_RETRY_MS, and one still unanswered after the last ends the subscription `unavailable`, its resume
+// authorized afresh. One that no longer qualifies ends `removed` and its upstream subscription and retained cursor are
+// dropped, so a resume can't restore what was withdrawn. A device's lane B subscriptions count as interest
 // (interest.ts).
 import { MESSAGE_MAX_BYTES, SUB_CREDIT_MAX, type Cursor, type EndpointMessage, type RefusalReason, type SessionRef, type SubMessage, type CreditMessage, type UnsubMessage } from 'org-protocol';
 import type { AuthorizeRequest, Decision, Who } from './authorize';
@@ -73,8 +75,12 @@ export class Subscription implements StreamSource {
   readonly message: SubMessage;
   /** The session as authorization placed it, once authorized. */
   target: SessionTarget | null = null;
-  /** The plane's hook, run when credit arrives (lane B reads more from the journal). */
-  onCredit: (() => void) | null = null;
+  /**
+   * The plane's hook, run when there may be room to send more: credit came, the device took some of the stream, a hold
+   * ended (lane B reads on from the journal; a stale lane A cards view sends its set). Once per turn, after it.
+   */
+  onRoom: (() => void) | null = null;
+  #waking = false;
   #credit: number;
   readonly #out: Out[] = [];
   #backlog = 0;
@@ -112,7 +118,7 @@ export class Subscription implements StreamSource {
   credit(bytes: number): void {
     this.#credit = Math.min(this.#credit + bytes, SUB_CREDIT_MAX);
     this.#window.ready(this);
-    this.onCredit?.();
+    this.#wake();
   }
 
   /** Its access is being checked again: the stream waits. */
@@ -125,6 +131,7 @@ export class Subscription implements StreamSource {
     if (!this.#held) return;
     this.#held = false;
     this.#window.ready(this);
+    this.#wake();
   }
 
   /** `subbed` in the stream's order: the position the stream goes on after. */
@@ -193,7 +200,18 @@ export class Subscription implements StreamSource {
     this.#backlog -= head.cost;
     this.#credit -= head.cost;
     if (head.group !== undefined) this.#started = (head.message as { last?: boolean }).last === true ? null : head.group;
+    this.#wake();
     return { message: head.message, bytes: head.bytes };
+  }
+
+  /** Tells the plane there may be room, once per turn and outside the window's own loop. */
+  #wake(): void {
+    if (this.#waking) return;
+    this.#waking = true;
+    queueMicrotask(() => {
+      this.#waking = false;
+      if (!this.ended) this.onRoom?.();
+    });
   }
 
   #push(out: Out): void {
@@ -218,6 +236,11 @@ export class Subscription implements StreamSource {
   }
 }
 
+/** A re-check answered `unavailable` is tried again after each of these; still unanswered after the last, it ends. */
+export const RECHECK_RETRY_MS: readonly number[] = [1000, 2000, 4000, 8000, 15000];
+/** A stream message the channel hasn't sealed within this ends its carrier (stream-window.ts). */
+export const TRANSMIT_DEADLINE_MS = 30_000;
+
 export type SubscriptionsContext = {
   authorize(request: AuthorizeRequest, who: Who, now: number): Promise<Decision>;
   planes: { A: Plane; B: Plane };
@@ -225,6 +248,9 @@ export type SubscriptionsContext = {
   records: RecordSource;
   now(): number;
   log(line: string): void;
+  /** The suites' seams: the re-check's retry delays, and a stuck send's deadline. */
+  recheckRetryMs?: readonly number[];
+  transmitDeadlineMs?: number;
 };
 
 export class Subscriptions {
@@ -248,7 +274,7 @@ export class Subscriptions {
       const mine = new Map<string, Subscription>();
       subs = mine;
       this.#channels.set(channel, mine);
-      this.#windows.set(channel, new StreamWindow(channel));
+      this.#windows.set(channel, new StreamWindow(channel, { deadlineMs: this.#ctx.transmitDeadlineMs ?? TRANSMIT_DEADLINE_MS, log: this.#ctx.log }));
       channel.onClose((reason) => this.#channelClosed(channel, mine, reason));
     }
     const before = subs.get(m.sub);
@@ -301,9 +327,10 @@ export class Subscriptions {
     for (const subs of this.#channels.values()) {
       for (const sub of subs.values()) {
         if (sub.target === null || sub.ended || (target !== undefined && !concerns(sub.target, target))) continue;
-        // Uncertain until decided: what the session produces meanwhile waits, and goes only if access still holds.
+        // Uncertain until decided: what the session produces meanwhile waits, and goes only once a current check grants
+        // it. One that can't be answered now (`unavailable`) stays held and is tried again; one never answered ends.
         sub.hold();
-        this.#check(sub, sub.message, sub.who, (ok) => (ok ? sub.unhold() : sub.end('removed')));
+        this.#check(sub, sub.message, sub.who, (verdict) => (verdict === 'granted' ? sub.unhold() : verdict === 'refused' ? sub.end('removed') : sub.end('unavailable')));
       }
     }
     for (const lane of ['A', 'B'] as const) {
@@ -311,7 +338,8 @@ export class Subscriptions {
       for (const kept of plane.retained?.() ?? []) {
         if (target !== undefined && !(target.lane === kept.session.lane && (target.session === kept.session.id || (target.lane === 'B' && target.appSessionId === kept.session.id)))) continue;
         const message: SubMessage = { t: 'sub', sub: kept.key, session: kept.session, view: kept.view, cursor: null, credit: 1 };
-        this.#check(kept.key, message, kept.who, (ok) => ok || plane.forget?.(kept.key));
+        // A retained cursor delivers nothing; its resume is authorized afresh. Only a refusal drops it.
+        this.#check(kept.key, message, kept.who, (verdict) => verdict === 'refused' && plane.forget?.(kept.key));
       }
     }
   }
@@ -329,29 +357,40 @@ export class Subscriptions {
     this.#ctx.interest.stop();
   }
 
-  #check(key: unknown, message: SubMessage, who: Who, verdict: (ok: boolean) => void): void {
-    const n = (this.#checks.get(key) ?? 0) + 1;
+  /**
+   * Authorizes `message` again for `who`, only the latest check of `key` counting. `granted` and `refused` are
+   * decisions; an answer the endpoint can't give now (`unavailable`: the engine host away, a read timed out) is asked
+   * again after each of the retry delays, and is `unanswered` after the last, as is a check that failed outright.
+   */
+  #check(key: unknown, message: SubMessage, who: Who, verdict: (verdict: 'granted' | 'refused' | 'unanswered') => void, attempt = 0): void {
+    const n = attempt === 0 ? (this.#checks.get(key) ?? 0) + 1 : this.#checks.get(key)!;
     this.#checks.set(key, n);
+    const current = () => this.#checks.get(key) === n && !(key instanceof Subscription && key.ended);
+    const done = (answer: 'granted' | 'refused' | 'unanswered') => {
+      this.#checks.delete(key);
+      verdict(answer);
+    };
     this.#ctx
       .authorize({ kind: 'sub', name: 'sub', input: message }, who, this.#ctx.now())
       .then((decision) => {
-        if (this.#checks.get(key) !== n) return;
-        this.#checks.delete(key);
-        // An answer the endpoint can't give now (the engine host away) withdraws nothing.
-        verdict(decision.ok || decision.reason === 'unavailable');
+        if (!current()) return;
+        if (decision.ok) return done('granted');
+        if (decision.reason !== 'unavailable') return done('refused');
+        const retries = this.#ctx.recheckRetryMs ?? RECHECK_RETRY_MS;
+        if (attempt >= retries.length) return done('unanswered');
+        const timer = setTimeout(() => current() && this.#check(key, message, who, verdict, attempt + 1), retries[attempt]);
+        timer.unref?.();
       })
       .catch((error: unknown) => {
-        if (this.#checks.get(key) !== n) return;
-        this.#checks.delete(key);
+        if (!current()) return;
         this.#ctx.log(`endpoint: a subscription's access could not be checked again: ${(error as Error).message}`);
-        // No decision is no grant: a held subscription ends (the device subscribes again), a retained cursor goes.
-        if (key instanceof Subscription) key.end('unavailable');
-        else verdict(false);
+        done('unanswered');
       });
   }
 
   /** A subscription ended by its plane (`end`): out of the table. */
   #ended(sub: Subscription): void {
+    this.#checks.delete(sub);
     const subs = this.#channels.get(sub.channel);
     if (subs?.get(sub.id) === sub) subs.delete(sub.id);
     this.#ctx.planes[sub.session.lane].close(sub, false);
@@ -359,6 +398,7 @@ export class Subscriptions {
   }
 
   #close(sub: Subscription, retain: boolean): void {
+    this.#checks.delete(sub);
     const subs = this.#channels.get(sub.channel);
     if (subs?.get(sub.id) === sub) subs.delete(sub.id);
     sub.close();

@@ -510,3 +510,114 @@ describe('a lane B subscription whose state keeps changing', () => {
     expect(first).toHaveLength(1);
   });
 });
+
+// ---- Review round 2 (O10 M8) ---------------------------------------------------------------------------------------------
+
+describe('a lane B subscription paging a journal that is lost between two pages', () => {
+  it('answers `missing` when the engine host says the range it asked for is gone, whatever the page looks like', async () => {
+    const f = await lab();
+    const s = f.host.session('app-1');
+    for (let i = 0; i < 1600; i++) f.host.row('app-1', 1, { live: false });
+    s.evicted = { seq: 1000, idx: 0 }; // rows 1001-1600 in the ring, the rest the journal's
+    f.host.hold('session.events');
+    const a = await openRemote(f, org.a1, org.A);
+    await a.channel.send({ t: 'sub', sub: 's1', session: { lane: 'B', id: 'app-1' }, cursor: null, credit: 4 * MiB });
+    await until(() => reads(f, 'session.events') === 1, 'the first page asked');
+    // The first page (rows 1-500) was read; the journal goes before the next: rows 501-1000 are gone, and the ring's
+    // rows 1001 on make a whole page that begins on a row.
+    s.journal = false;
+    f.host.release('session.events');
+    await waitFor(a, (m) => m.t === 'subbed' && m.sub === 's1' && m.mode === 'missing', 'a `missing` start-over', 0, 10_000);
+    const before = of(a, 's1').findIndex((m) => m.t === 'subbed' && m.mode === 'missing');
+    const seqs = of(a, 's1').slice(0, before).filter((m) => m.t === 'ev').map((m) => m.seq as number);
+    expect(seqs.at(-1)).toBe(500);
+   }, 15_000);
+});
+
+describe('a lane B subscription whose stream drains', () => {
+  it('reads on from the journal as the device takes its stream, not only when credit comes', async () => {
+    const f = await lab();
+    const s = f.host.session('app-1');
+    for (let i = 0; i < 1000; i++) {
+      const event = f.host.event(s, i + 1, 0, { kind: 'note', text: 'w'.repeat(3 * 1024) });
+      s.rows.push([event]);
+    }
+    const a = await openRemote(f, org.a1, org.A);
+    await subscribe(a, 's1', { lane: 'B', id: 'app-1' }, { credit: 1 });
+    await until(() => of(a, 's1').some((m) => m.t === 'snap' && m.last === true), 'the snapshot');
+    await until(() => reads(f, 'session.events') >= 1, 'the first page read');
+    await sleep(50);
+    // One grant covers all of it (about 3 MiB); the first page alone is past half the backlog when the grant comes.
+    await a.channel.send({ t: 'credit', sub: 's1', bytes: 4 * MiB });
+    await until(() => evs(a, 's1').length === 1000, 'every event', 10_000);
+   }, 15_000);
+});
+
+describe('a lane B subscription whose access can’t be checked now', () => {
+  it('stays held while the check answers `unavailable`, and ends `removed` once a retry finds the share gone', async () => {
+    const f = await lab({ subscriptions: { recheckRetryMs: [40, 40, 40, 40, 40, 40, 40, 40] } });
+    const s = f.host.session('app-1');
+    const shared = { lane: 'B' as const, session: s.engineSessionId!, owners: [org.A], shares: [{ member: org.B, grade: 'view' as const }] };
+    f.records.set(shared, 'app-1');
+    const b = await openRemote(f, org.b1, org.B);
+    await subscribe(b, 's1', { lane: 'B', id: 'app-1' });
+    await snapshot(b, 's1');
+    f.host.fail('session.status');
+    const before = reads(f, 'session.status');
+    f.records.set({ lane: 'B', session: s.engineSessionId!, owners: [org.A] }, 'app-1');
+    await until(() => reads(f, 'session.status') > before + 1, 'a retry');
+    f.host.row('app-1', 2);
+    await sleep(120);
+    expect(evs(b, 's1')).toEqual([]);
+    f.host.heal('session.status');
+    await waitFor(b, (m) => m.t === 'ended' && m.sub === 's1' && m.reason === 'removed', 'ended removed');
+    expect(evs(b, 's1')).toEqual([]);
+  });
+
+  it('is not released by an app attaching while it is held', async () => {
+    const f = await lab({ subscriptions: { recheckRetryMs: [40, 40, 40, 40, 40, 40, 40, 40] } });
+    const s = f.host.session('app-1');
+    const a = await openRemote(f, org.a1, org.A);
+    await subscribe(a, 's1', { lane: 'B', id: 'app-1' });
+    await snapshot(a, 's1');
+    f.host.fail('session.status');
+    f.records.set({ lane: 'B', session: s.engineSessionId!, owners: ['@machine'] }, 'app-1');
+    f.host.row('app-1', 2);
+    // The attachment re-opens the stream (a catch-up and its state, queued behind the hold), which goes nowhere: its own
+    // status read fails too, which ends it `unavailable` for the device to subscribe again.
+    f.host.attach(false);
+    f.host.attach(true);
+    await sleep(120);
+    expect(evs(a, 's1')).toEqual([]);
+    expect(of(a, 's1').filter((m) => m.t === 'snap')).toHaveLength(1);
+  });
+
+  it('ends `unavailable` when the check can’t be answered within its retries, so a resume authorizes afresh', async () => {
+    const f = await lab({ subscriptions: { recheckRetryMs: [20, 20] } });
+    const s = f.host.session('app-1');
+    const a = await openRemote(f, org.a1, org.A);
+    await subscribe(a, 's1', { lane: 'B', id: 'app-1' });
+    await snapshot(a, 's1');
+    f.host.fail('session.status');
+    f.records.set({ lane: 'B', session: s.engineSessionId!, owners: ['@machine'] }, 'app-1');
+    f.host.row('app-1', 1);
+    await waitFor(a, (m) => m.t === 'ended' && m.sub === 's1' && m.reason === 'unavailable', 'ended unavailable');
+    expect(evs(a, 's1')).toEqual([]);
+  });
+
+  it('goes on once a retry grants it, with everything produced while it was held', async () => {
+    const f = await lab({ subscriptions: { recheckRetryMs: [40, 40, 40, 40] } });
+    const s = f.host.session('app-1');
+    const a = await openRemote(f, org.a1, org.A);
+    await subscribe(a, 's1', { lane: 'B', id: 'app-1' });
+    await snapshot(a, 's1');
+    f.host.fail('session.status');
+    f.records.set({ lane: 'B', session: s.engineSessionId!, owners: ['@machine'] }, 'app-1');
+    const held = f.host.row('app-1', 2);
+    await sleep(60);
+    expect(evs(a, 's1')).toEqual([]);
+    f.host.heal('session.status');
+    await until(() => evs(a, 's1').length === 2, 'the held events');
+    sawExactly(a, 's1', held);
+  });
+});

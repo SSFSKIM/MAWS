@@ -74,7 +74,10 @@ export const LaunchResultSchema = z.discriminatedUnion('status', [
 ]);
 export type LaunchResult = z.infer<typeof LaunchResultSchema>;
 
-export const EventsSnapshotSchema = z.strictObject({ events: z.array(SessionEventSchema), lastSeq: z.number().int(), complete: z.boolean() });
+// O10 M8: `historyUnavailable` (present only as true) says part of the range asked for is gone: the ring had dropped it
+// and the journal could not be read back, so the answer is the ring's alone. `complete` can't say so, a page's limit
+// setting it false too, and seqs skip, so a reader can't tell a gap from the events alone.
+export const EventsSnapshotSchema = z.strictObject({ events: z.array(SessionEventSchema), lastSeq: z.number().int(), complete: z.boolean(), historyUnavailable: z.literal(true).optional() });
 export type EventsSnapshot = z.infer<typeof EventsSnapshotSchema>;
 
 // C7's `session.catalog` (coordinator, C7's asks): the engine's command catalogue as the wire carries it.

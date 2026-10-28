@@ -61,6 +61,11 @@ export interface RemoteChannel {
    */
   transmit(message: EndpointMessage): Promise<boolean>;
   close(reason: string): void;
+  /**
+   * Ends the carrier under the channel at once, with no sealed close: for a send that never completes, behind which a
+   * sealed close would wait too. The channel closes with `reason`, so its subscriptions' cursors stay resumable.
+   */
+  terminate(reason: string): void;
   onClose(listener: (reason: string) => void): () => void;
 }
 
@@ -121,6 +126,7 @@ type Entry = {
 
 class Remote implements RemoteChannel {
   readonly #channel: Channel;
+  readonly #io: ByteDuplex;
   readonly #log: (line: string) => void;
   readonly key: string;
   readonly carrier: Carrier;
@@ -128,10 +134,11 @@ class Remote implements RemoteChannel {
   readonly device: string;
   readonly clientClass: DeviceClass;
 
-  constructor(key: string, carrier: Carrier, channel: Channel, peer: DevicePeer, log: (line: string) => void) {
+  constructor(key: string, carrier: Carrier, channel: Channel, io: ByteDuplex, peer: DevicePeer, log: (line: string) => void) {
     this.key = key;
     this.carrier = carrier;
     this.#channel = channel;
+    this.#io = io;
     this.member = peer.member;
     this.device = peer.device;
     this.clientClass = peer.clientClass;
@@ -167,6 +174,10 @@ class Remote implements RemoteChannel {
 
   close(reason: string): void {
     this.#channel.close(reason);
+  }
+
+  terminate(reason: string): void {
+    this.#io.close(reason);
   }
 
   onClose(listener: (reason: string) => void): () => void {
@@ -285,7 +296,7 @@ export class Channels {
       } finally {
         clearTimeout(timer);
       }
-      return await this.#admit(key, carrier, channel, peer, epoch, identity.key.pub);
+      return await this.#admit(key, carrier, channel, io, peer, epoch, identity.key.pub);
     } finally {
       this.#pending.delete(io);
     }
@@ -296,7 +307,7 @@ export class Channels {
    * head adopted, the device gone, the endpoint stopped) is read once more here, synchronously with registering it, so
    * nothing falls between the two.
    */
-  async #admit(key: string, carrier: Carrier, channel: Channel, peer: DevicePeer, epoch: number, machinePub: string): Promise<RemoteChannel | null> {
+  async #admit(key: string, carrier: Carrier, channel: Channel, io: ByteDuplex, peer: DevicePeer, epoch: number, machinePub: string): Promise<RemoteChannel | null> {
     let kid: string;
     let grades: Right[];
     try {
@@ -316,7 +327,7 @@ export class Channels {
       this.#ctx.log(`endpoint: a ${carrier} channel was refused: ${reason}`);
       return null;
     }
-    const entry = this.#register(key, carrier, channel, peer, kid, grades, machinePub);
+    const entry = this.#register(key, carrier, channel, io, peer, kid, grades, machinePub);
     entry.remote.send(this.#caps(entry, grades, org.head().state.version));
     if (epoch !== this.#capsEpoch) this.#refresh(entry);
     channel.onMessage((message) => this.#receive(entry, message));
@@ -393,8 +404,8 @@ export class Channels {
     clearTimeout(timer);
   }
 
-  #register(key: string, carrier: Carrier, channel: Channel, peer: DevicePeer, kid: string, grades: Right[], machinePub: string): Entry {
-    const entry: Entry = { remote: new Remote(key, carrier, channel, peer, this.#ctx.log), channel, peer, kid, machinePub, grades, caps: Promise.resolve(), heard: false, unanswered: 0, timer: null };
+  #register(key: string, carrier: Carrier, channel: Channel, io: ByteDuplex, peer: DevicePeer, kid: string, grades: Right[], machinePub: string): Entry {
+    const entry: Entry = { remote: new Remote(key, carrier, channel, io, peer, this.#ctx.log), channel, peer, kid, machinePub, grades, caps: Promise.resolve(), heard: false, unanswered: 0, timer: null };
     // A number the hub gives again on a later connection replaces whatever still closes under it.
     this.#entries.get(key)?.remote.close('endpoint-gone');
     this.#entries.set(key, entry);

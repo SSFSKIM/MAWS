@@ -56,16 +56,35 @@ const LANE_A: Record<string, { fields: Record<string, (v: unknown) => boolean>; 
   'sminos.read': { fields: { id: (v) => isText(v, 64), what: (v) => typeof v === 'string' && READ_WHAT.test(v) }, optional: { args: (v) => isObject(v) && pythonJsonLength(v) <= 4096 }, agent: true },
 };
 
-/** The length of `json.dumps(value)` in Python, as sminos measures a read's args: `", "` and `": "`, non-ASCII escaped. */
+/**
+ * The length of `json.dumps(value)` in Python, as sminos measures a read's args (`len(json.dumps(args))`): `", "` and
+ * `": "` between items, every character outside space..tilde escaped (`\u007f` and non-ASCII as `\uXXXX`, an astral
+ * one as two), and a float as Python's repr writes it (`1e-07`, `1e-05`, where JavaScript writes `1e-7`, `0.00001`).
+ */
 function pythonJsonLength(value: unknown): number {
-  if (value === null || typeof value !== 'object') {
-    const text = JSON.stringify(value) ?? 'null';
-    let n = 0;
-    for (const ch of text) n += ch.codePointAt(0)! < 0x80 ? 1 : ch.codePointAt(0)! > 0xffff ? 12 : 6;
-    return n;
+  if (typeof value === 'string') return pythonStringLength(value);
+  if (typeof value === 'number') return pythonNumber(value).length;
+  if (value === null || typeof value !== 'object') return (JSON.stringify(value) ?? 'null').length;
+  const items = Array.isArray(value) ? value.map((v) => pythonJsonLength(v)) : Object.entries(value).map(([k, v]) => pythonStringLength(k) + 2 + pythonJsonLength(v));
+  return 2 + items.reduce((a, b) => a + b, 0) + Math.max(0, items.length - 1) * 2;
+}
+
+function pythonStringLength(text: string): number {
+  let n = 2;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c === 0x22 || c === 0x5c || c === 0x08 || c === 0x09 || c === 0x0a || c === 0x0c || c === 0x0d) n += 2;
+    else n += c >= 0x20 && c <= 0x7e ? 1 : 6;
   }
-  const entries = Array.isArray(value) ? value.map((v) => pythonJsonLength(v)) : Object.entries(value).map(([k, v]) => pythonJsonLength(k) + 2 + pythonJsonLength(v));
-  return 2 + entries.reduce((a, b) => a + b, 0) + Math.max(0, entries.length - 1) * 2;
+  return n;
+}
+
+/** A JSON number as Python reads and writes it back: an integer as is; a float in repr's form. */
+function pythonNumber(v: number): string {
+  if (Number.isInteger(v)) return String(v);
+  const [mantissa, exponent] = v.toExponential().split('e');
+  const e = Number(exponent);
+  return e < -4 || e >= 16 ? `${mantissa}e${e < 0 ? '-' : '+'}${String(Math.abs(e)).padStart(2, '0')}` : String(v);
 }
 
 export class Calls {

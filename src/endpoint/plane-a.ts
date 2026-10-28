@@ -235,7 +235,8 @@ export class PlaneA implements Plane {
     const epoch = randomBytes(16).toString('base64url');
     const card: Card = { epoch, seq: 0, sent: '', stale: false };
     this.#cards.set(sub, card);
-    sub.onCredit = () => {
+    // Room again (credit came, the stream drained, a hold ended): a stale view gets its whole set.
+    sub.onRoom = () => {
       if (card.stale) this.#cardSnap(sub, card);
     };
     sub.subbed('snapshot', { epoch, seq: 0 });
@@ -256,9 +257,9 @@ export class PlaneA implements Plane {
   }
 
   /**
-   * A raise or a settlement to a cards subscription. One whose unsent stream is past the backlog (its credit out) drops
-   * what waits and owes the whole pending set, sent when credit comes (or a restatement), so a cards stream stays
-   * bounded by the set itself whatever comes meanwhile.
+   * A raise or a settlement to a cards subscription. One whose unsent stream is past the backlog (its credit out, or
+   * held while its access is checked) drops what waits and owes the whole pending set, sent when there is room again
+   * (credit, the stream drained, the hold over) or on a restatement, so a cards stream stays bounded by the set itself.
    */
   #cardEv(sub: Subscription, card: Card, m: PlaneMessage): void {
     if (card.stale) return;

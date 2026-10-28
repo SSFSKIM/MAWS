@@ -81,7 +81,7 @@ export type EndpointOptions = {
   direct?: { interfaces?(): InterfaceTable } & Pick<DirectListenerOptions, 'listen' | 'limits' | 'rescanMs'>;
   authorization?: { records?: RecordSource; checkouts?: CheckoutSource; settingsMode?(): string } & Pick<AuthorizeContext, 'offers' | 'gradeOf' | 'registry'>;
   /** The suites' seams for subscriptions: the resume window, lane A's ring and the unsent stream's bound. */
-  subscriptions?: { resumeMs?: number; ringBytes?: number; backlogBytes?: number };
+  subscriptions?: { resumeMs?: number; ringBytes?: number; backlogBytes?: number; recheckRetryMs?: readonly number[]; transmitDeadlineMs?: number };
 };
 
 /** The whole handshake of a direct connection is this long at most (M4). */
@@ -320,6 +320,8 @@ export class Endpoint implements EndpointModule {
     this.rl10.onPending((project, raised) => this.planeA.pendingSet(project, raised));
     this.rl10.onLink((connected) => connected || this.planeA.linkLost());
     this.subscriptions = new Subscriptions({
+      recheckRetryMs: seams.recheckRetryMs,
+      transmitDeadlineMs: seams.transmitDeadlineMs,
       authorize: (request, who, now) => this.authorizer.authorize(request, who, now),
       planes: { A: this.planeA, B: this.planeB },
       interest: this.interest,

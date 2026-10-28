@@ -6,10 +6,11 @@
 //
 // A subscription is answered from the engine host's journal (`session.events`, which returns whole rows after
 // `afterSeq`, from its ring or, for a range the ring dropped, its journal; when the journal can't be read back, from the
-// ring alone, `complete: false`, which may begin inside a row, since the ring drops events, not rows). A cursor on the
-// current launch reads from its own row (`afterSeq: seq - 1`); it is a `replay` only when what comes back goes on from
-// the cursor without a gap (its first event in the cursor's row, no later than the one after the cursor), else
-// `missing`. A cursor on another launch, or none, is a `snapshot`, or `missing` when the launch's start is gone.
+// ring alone, marked `historyUnavailable`, which may begin inside a row, since the ring drops events, not rows). A
+// cursor on the current launch reads from its own row (`afterSeq: seq - 1`); it is a `replay` only when what comes back
+// goes on from the cursor without a gap (its first event in the cursor's row, no later than the one after the cursor),
+// else `missing`. A cursor on another launch, or none, is a `snapshot`, or `missing` when the launch's start is gone
+// (`historyUnavailable`); a later page read after a whole row is `missing` on the same mark.
 // `replay` goes on after the cursor; `snapshot` and `missing` go on from the launch's first event (`seq` 0): lane B has
 // no other copy of the transcript a remote viewer could start from, as DX4's lane A snapshot carries its rows. Every
 // answer carries the session's replace-whole state, which changes outside the journal's sequence: `snap {status,
@@ -64,6 +65,9 @@ export type PlaneBContext = {
   backlogBytes?: number;
 };
 
+/** A `session.events` answer: whole rows; `historyUnavailable` when part of the range asked for is gone. */
+type Page = { events: SessionEvent[]; complete: boolean; historyUnavailable?: true };
+
 type Card = { item: unknown; request: SessionEvent; context: { launchId: string; engineSessionId: string | null }; requestDigest: unknown };
 
 class Stream {
@@ -111,7 +115,8 @@ export class PlaneB implements Plane {
   open(sub: Subscription): void {
     const stream = new Stream(sub, sub.session.id);
     this.#streams.set(sub, stream);
-    sub.onCredit = () => void this.#pump(stream);
+    // Room to send more (credit came, the device took its stream, a hold ended): the journal reads on.
+    sub.onRoom = () => void this.#pump(stream);
     void this.#open(stream, 'sub');
   }
 
@@ -119,7 +124,7 @@ export class PlaneB implements Plane {
     const stream = this.#streams.get(sub);
     if (stream === undefined) return;
     stream.gen++;
-    sub.onCredit = null;
+    sub.onRoom = null;
     this.#streams.delete(sub);
   }
 
@@ -176,7 +181,7 @@ export class PlaneB implements Plane {
     if (sub.view === 'cards') return this.#openCards(stream, gen, how === 'resume' && !relaunched);
 
     let mode: Mode = how === 'missing' ? 'missing' : 'snapshot';
-    let first: { events: SessionEvent[]; complete: boolean } | null = null;
+    let first: Page | null = null;
     let from: At = START;
     if (how === 'resume' && !relaunched) {
       mode = 'replay';
@@ -201,7 +206,7 @@ export class PlaneB implements Plane {
       const page = await this.#events(stream, null);
       if (gen !== stream.gen) return;
       if (page === undefined) return sub.end('unavailable');
-      if (!this.#gapless(stream, page)) mode = 'missing';
+      if (!this.#gapless(page)) mode = 'missing';
       first = page;
     }
     stream.queued = from;
@@ -442,7 +447,7 @@ export class PlaneB implements Plane {
       return void this.#open(stream, 'relaunch');
     }
     // Anything but the launch's start must go on from where the stream stands, or what it needs is gone.
-    if (!start && !(pastRow ? this.#gapless(stream, page) : this.#continues(stream, page, from))) {
+    if (!start && !(pastRow ? this.#gapless(page) : this.#continues(stream, page, from))) {
       stream.holdEvents = false;
       return void this.#open(stream, 'missing');
     }
@@ -460,20 +465,22 @@ export class PlaneB implements Plane {
     void this.#pump(stream);
   }
 
-  /** A page read from a cursor's own row goes on from it: its first event in that row, no later than the one after it. */
-  #continues(stream: Stream, page: { events: SessionEvent[] }, from: At): boolean {
+  /**
+   * A page read from a cursor's own row goes on from it: its first event in that row, no later than the one after it.
+   * What a lost journal took is before the page's first event, so this holds whatever `historyUnavailable` says.
+   */
+  #continues(stream: Stream, page: Page, from: At): boolean {
     const first = page.events.length > 0 ? this.#cursor(stream, page.events[0]) : null;
     return first !== null && first.seq === from.seq && first.idx <= from.idx + 1;
   }
 
   /**
-   * A page read after a whole row (or from the launch's start) holds every event after it: not the ring alone in place of
-   * a lost journal (`complete` false short of a full page), and not beginning inside a row.
+   * A page read after a whole row (or from the launch's start) holds every event after it unless the engine host says
+   * part of the range is gone (`historyUnavailable`: the ring dropped it and the journal can't give it back). Rows may
+   * skip seqs, so the events alone can't prove it; nor can `complete`, which a page's limit sets false too.
    */
-  #gapless(stream: Stream, page: { events: SessionEvent[]; complete: boolean }): boolean {
-    if (!page.complete && page.events.length < PAGE_EVENTS) return false;
-    const first = page.events.length > 0 ? this.#cursor(stream, page.events[0]) : null;
-    return page.events.length === 0 || (first !== null && first.idx === 0);
+  #gapless(page: Page): boolean {
+    return page.historyUnavailable !== true;
   }
 
   // ---- Reads --------------------------------------------------------------------------------------------------------
@@ -500,7 +507,7 @@ export class PlaneB implements Plane {
     return out;
   }
 
-  async #events(stream: Stream, afterSeq: number | null): Promise<{ events: SessionEvent[]; complete: boolean } | undefined> {
+  async #events(stream: Stream, afterSeq: number | null): Promise<Page | undefined> {
     let response;
     try {
       response = await this.#ctx.dispatch('engine-host', 'session.events', { appSessionId: stream.app, afterSeq, limit: PAGE_EVENTS });
@@ -508,10 +515,10 @@ export class PlaneB implements Plane {
       return undefined;
     }
     if (!response.ok) return undefined;
-    const value = response.value as { events?: unknown; complete?: unknown };
+    const value = response.value as { events?: unknown; complete?: unknown; historyUnavailable?: unknown };
     // Events with no `seq` are the transcript's from disk (no launch here): none of them is the stream's.
     const events = Array.isArray(value.events) ? (value.events as SessionEvent[]).filter((e) => typeof e?.seq === 'number') : [];
-    return { events, complete: value.complete === true };
+    return { events, complete: value.complete === true, ...(value.historyUnavailable === true ? { historyUnavailable: true } : {}) };
   }
 
   // ---- Cursors ------------------------------------------------------------------------------------------------------

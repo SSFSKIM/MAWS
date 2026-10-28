@@ -6,15 +6,17 @@ import { describe, expect, it } from 'vitest';
 import type { RemoteChannel } from '../../src/endpoint/channels';
 import { Interest } from '../../src/endpoint/interest';
 import { STREAM_WINDOW_BYTES, Subscriptions, type Plane, type Subscription } from '../../src/endpoint/subscriptions';
+import { PlaneA } from '../../src/endpoint/plane-a';
 import { NO_RECORDS } from '../../src/endpoint/sources';
 
 /**
  * A channel stand-in: `sent` is its queue in order. A stream message handed over by `transmit` is done (sealed and on
  * the carrier) at once, or, with `hold`, only at `flush`.
  */
-function channel(options: { hold?: boolean } = {}): RemoteChannel & { sent: EndpointMessage[]; flush(): void } {
+function channel(options: { hold?: boolean } = {}): RemoteChannel & { sent: EndpointMessage[]; flush(): void; terminated: string[] } {
   const sent: EndpointMessage[] = [];
   const waiting: Array<() => void> = [];
+  const terminated: string[] = [];
   return {
     key: 'direct:1',
     carrier: 'direct',
@@ -33,16 +35,19 @@ function channel(options: { hold?: boolean } = {}): RemoteChannel & { sent: Endp
       for (const done of waiting.splice(0)) done();
     },
     close: () => {},
+    terminate: (reason: string) => void terminated.push(reason),
+    terminated,
     onClose: () => () => {},
-  } as RemoteChannel & { sent: EndpointMessage[]; flush(): void };
+  } as RemoteChannel & { sent: EndpointMessage[]; flush(): void; terminated: string[] };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-function table(): { subs: Subscriptions; opened: Subscription[] } {
+function table(seams: { transmitDeadlineMs?: number } = {}): { subs: Subscriptions; opened: Subscription[] } {
   const opened: Subscription[] = [];
   const plane: Plane = { open: (sub) => void opened.push(sub), close: () => {}, stop: () => {} };
   const subs = new Subscriptions({
+    ...seams,
     authorize: () => Promise.resolve({ ok: true }) as never,
     planes: { A: plane, B: plane },
     interest: new Interest({ interest: () => null, log: () => {} }),
@@ -176,5 +181,71 @@ describe('the subscription table', () => {
     await settle();
     await settle();
     expect(ch.sent.map((x) => x.t)).toEqual(['ev']);
+  });
+
+  it('wakes its producer when the device takes its stream, when credit comes, and when a hold ends', async () => {
+    const { subs, opened } = table();
+    const ch = channel({ hold: true });
+    const m = sub(4 * 1024 * 1024);
+    subs.receive(ch, m, () => {});
+    subs.start(ch, m, { ok: true } as never);
+    const s = opened[0];
+    let woken = 0;
+    s.onRoom = () => void woken++;
+    for (let i = 1; i <= 8; i++) s.ev({ epoch: 'e', seq: i }, { text: 'z'.repeat(64 * 1024) });
+    await settle();
+    const before = woken;
+    ch.flush();
+    await settle();
+    expect(woken).toBeGreaterThan(before);
+    const held = woken;
+    s.hold();
+    s.unhold();
+    await settle();
+    expect(woken).toBeGreaterThan(held);
+    const credited = woken;
+    subs.credit(ch, { t: 'credit', sub: 's1', bytes: 1 });
+    await settle();
+    expect(woken).toBeGreaterThan(credited);
+  });
+
+  it('ends the carrier under a channel whose send never completes, so its cursors resume elsewhere', async () => {
+    const { subs, opened } = table({ transmitDeadlineMs: 30 });
+    const ch = channel({ hold: true });
+    const m = sub(4 * 1024 * 1024);
+    subs.receive(ch, m, () => {});
+    subs.start(ch, m, { ok: true } as never);
+    opened[0].ev({ epoch: 'e', seq: 1 }, { n: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(ch.terminated).toEqual(['timeout']);
+  });
+
+  it('sends a lane A cards view stale from a hold its whole pending set when the hold ends with credit left', async () => {
+    let decide: (ok: boolean) => void = () => {};
+    let authorizing = false;
+    const planeA = new PlaneA({ send: () => {}, connected: () => true, member: () => ({ project: 'p', lane: 'A' }), log: () => {}, backlogBytes: 4096 });
+    const other: Plane = { open: () => {}, close: () => {}, stop: () => {} };
+    const subs = new Subscriptions({
+      authorize: () => (authorizing ? new Promise((resolve) => (decide = (ok) => resolve((ok ? { ok: true } : { ok: false, reason: 'grade' }) as never))) : Promise.resolve({ ok: true } as never)),
+      planes: { A: planeA, B: other },
+      interest: new Interest({ interest: () => null, log: () => {} }),
+      records: NO_RECORDS,
+      now: () => Date.now(),
+      log: () => {},
+    });
+    const ch = channel();
+    const m: SubMessage = { t: 'sub', sub: 'c1', session: { lane: 'A', id: 'la-1' }, view: 'cards', cursor: null, credit: 4 * 1024 * 1024 };
+    subs.receive(ch, m, () => {});
+    subs.start(ch, m, { ok: true, target: { lane: 'A', session: 'la-1' } } as never);
+    await settle();
+    authorizing = true;
+    subs.recheck();
+    // While held, raises pile up past the backlog: the view goes stale, owing its whole set.
+    for (let i = 0; i < 20; i++) planeA.message({ project: 'p', session: 'la-1', kind: 'raised', sub: null, n: null, body: { request: `r${i}`, session: 'la-1', input: 'x'.repeat(512) } } as never);
+    decide(true);
+    for (let i = 0; i < 5; i++) await settle();
+    const snaps = ch.sent.filter((x) => x.t === 'snap');
+    const last = JSON.parse((snaps.at(-1) as { body: string }).body) as { raised: unknown[] };
+    expect(last.raised).toHaveLength(20);
   });
 });

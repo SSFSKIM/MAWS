@@ -93,6 +93,8 @@ export class FakeEngineHost {
   /** Answers held before they go (a read a test races): resolved by `release`. */
   readonly #held = new Map<string, Array<() => void>>();
   readonly #holding = new Set<string>();
+  /** Commands answered `host_unavailable` (the engine host away, a read timed out) until `heal`. */
+  readonly #failing = new Set<string>();
   readonly #events = new Set<(owner: 'engine-host' | 'pty-host', message: { name: string; payload: unknown }) => void>();
   readonly #attachments = new Set<(attached: boolean) => void>();
   #launches = 0;
@@ -215,6 +217,15 @@ export class FakeEngineHost {
     for (const listener of this.#attachments) listener(attached);
   }
 
+  /** Answers `name` `host_unavailable` until `heal(name)`. */
+  fail(name: string): void {
+    this.#failing.add(name);
+  }
+
+  heal(name: string): void {
+    this.#failing.delete(name);
+  }
+
   /** Holds every answer to `name` until `release(name)`. */
   hold(name: string): void {
     this.#holding.add(name);
@@ -234,7 +245,7 @@ export class FakeEngineHost {
       const checked = validateCommandInput(name, input);
       return checked.ok ? ok(await this.#ops.op(checked.value as CommandInput<'host.op'>, { client: {} } as HandlerContext)) : no('internal');
     }
-    const answer = this.answer(owner, name, input);
+    const answer = this.#failing.has(name) ? no('host_unavailable') : this.answer(owner, name, input);
     if (this.#holding.has(name)) await new Promise<void>((resolve) => this.#held.set(name, [...(this.#held.get(name) ?? []), resolve]));
     return answer;
   }
@@ -286,15 +297,19 @@ export class FakeEngineHost {
    * `limit`. From the ring when it holds everything after `afterSeq`; else from the journal; else, the journal lost, from
    * the ring alone with `complete: false`, which may begin inside a row.
    */
-  events(s: HostSession, afterSeq: number | null, limit: number | null): { events: SessionEvent[]; lastSeq: number; complete: boolean } {
+  events(s: HostSession, afterSeq: number | null, limit: number | null): { events: SessionEvent[]; lastSeq: number; complete: boolean; historyUnavailable?: true } {
     const all = s.rows.flat();
     const ev = s.evicted;
     const inRing = (e: SessionEvent) => ev === null || e.seq! > ev.seq || (e.seq === ev.seq && Number(e.id.split(':').at(-1)) > ev.idx);
     let source = all.filter(inRing);
     let complete = true;
+    let lost = false;
     if (ev !== null && (afterSeq === null || afterSeq < ev.seq)) {
       if (s.journal) source = all;
-      else complete = false;
+      else {
+        complete = false;
+        lost = true;
+      }
     }
     let events = source.filter((e) => afterSeq === null || e.seq! > afterSeq);
     if (limit !== null && events.length > limit) {
@@ -305,7 +320,7 @@ export class FakeEngineHost {
         complete = false;
       }
     }
-    return { events, lastSeq: events.at(-1)?.seq ?? afterSeq ?? 0, complete };
+    return { events, lastSeq: events.at(-1)?.seq ?? afterSeq ?? 0, complete, ...(lost ? { historyUnavailable: true as const } : {}) };
   }
 
   event(s: HostSession, seq: number, i: number, fields: Record<string, unknown>): SessionEvent {

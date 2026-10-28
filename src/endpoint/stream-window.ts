@@ -3,7 +3,10 @@
 // order (RL2), so every stream message handed to it is one a later control message (`ack`, `done`, `result`, `caps`,
 // `paused`, `ended`) waits behind; a device's credit alone allows 64 subscriptions × 4 MiB of them. Here a stream
 // message goes to the channel only while less than STREAM_WINDOW_BYTES of stream traffic is still unsealed in it (one
-// message at least, whatever its size), and the channel's subscriptions take their turns, one message each.
+// message at least, whatever its size), and the channel's subscriptions take their turns, one message each. A message
+// the channel hasn't sealed within its deadline (a carrier that stopped taking bytes while the device's own traffic
+// keeps the channel alive) ends the carrier under it: a sealed close would wait behind the same send. The channel
+// closes, and its subscriptions' cursors resume on the device's next channel.
 import type { EndpointMessage } from 'org-protocol';
 import type { RemoteChannel } from './channels';
 
@@ -18,13 +21,17 @@ export interface StreamSource {
 export class StreamWindow {
   readonly #channel: RemoteChannel;
   readonly #limit: number;
+  readonly #deadlineMs: number;
+  readonly #log: (line: string) => void;
   /** Sources that may have something to send, in turn order. */
   readonly #turns: StreamSource[] = [];
   #inFlight = 0;
 
-  constructor(channel: RemoteChannel, limit = STREAM_WINDOW_BYTES) {
+  constructor(channel: RemoteChannel, options: { deadlineMs: number; log: (line: string) => void; limit?: number }) {
     this.#channel = channel;
-    this.#limit = limit;
+    this.#limit = options.limit ?? STREAM_WINDOW_BYTES;
+    this.#deadlineMs = options.deadlineMs;
+    this.#log = options.log;
   }
 
   /** `source` may have something to send now (a message queued, credit come, its hold over). */
@@ -40,7 +47,13 @@ export class StreamWindow {
       if (next === null) continue;
       this.#turns.push(source);
       this.#inFlight += next.bytes;
+      const stuck = setTimeout(() => {
+        this.#log(`endpoint: channel ${this.#channel.key} sealed no stream message in ${this.#deadlineMs} ms; its carrier is ended`);
+        this.#channel.terminate('timeout');
+      }, this.#deadlineMs);
+      stuck.unref?.();
       void this.#channel.transmit(next.message).then(() => {
+        clearTimeout(stuck);
         this.#inFlight -= next.bytes;
         this.#pump();
       });
