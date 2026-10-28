@@ -113,14 +113,3 @@ export function toSessionRecordPatch(s: EngineSessionStatus): SessionRecordPatch
 // and a stateful MCP server (whose state the other writer has already overtaken).
 const YIELDS_OVER: ReadonlySet<HardReason> = new Set(['queued_messages', 'stateful_mcp']);
 export const canYield = (status: Pick<EngineSessionStatus, 'process' | 'keepAlive'>): boolean => status.process === 'ready' && status.keepAlive.every((reason) => YIELDS_OVER.has(reason));
-
-// Sessions whose process the engine host owns and that hold a turn, or are still launching (a first message on its way):
-// the quit question's mid-turn count. The engine status is the process table's truth; the digest is folded from events a
-// stale batch can skew. Main's read model counts its statuses by it, and so does any other backing of the spine's view.
-const MID_TURN_LIVE = new Set<EngineSessionStatus['process']>(['starting', 'initializing', 'ready']);
-const MID_TURN_LAUNCHING = new Set<EngineSessionStatus['process']>(['starting', 'initializing']);
-export function midTurnCountOf(statuses: Iterable<Pick<EngineSessionStatus, 'process' | 'turn'>>): number {
-  let count = 0;
-  for (const s of statuses) if (MID_TURN_LIVE.has(s.process) && (s.turn !== null || MID_TURN_LAUNCHING.has(s.process))) count += 1;
-  return count;
-}

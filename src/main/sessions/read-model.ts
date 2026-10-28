@@ -10,7 +10,8 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { midTurnCountOf, type EngineSessionStatus } from '@shared/engine/status';
+import type { EngineSessionStatus } from '@shared/engine/status';
+import { midTurnCountOf } from '@shared/engine/mid-turn';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
 import { applyStatusToDigest, costLedger, costOf, emptyDigest, foldEvents, restoreCost, withoutReleased, type CostLedger, type MessageCalls } from './digest'; // C12: withoutReleased
 import type { LaunchMode } from './select-source';
@@ -126,7 +127,7 @@ export class SessionReadModel {
   }
   // C12 end
 
-  // Sessions whose process C3's host owns and that hold a turn, or are still launching (@shared/engine/status).
+  // Sessions whose process C3's host owns and that hold a turn, or are still launching (@shared/engine/mid-turn).
   midTurnCount(): number {
     return midTurnCountOf(this.statuses.values());
   }

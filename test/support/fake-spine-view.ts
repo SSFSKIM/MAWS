@@ -11,7 +11,7 @@ import type { AcquireReason } from '../../src/shared/ipc/schema/session';
 import type { SetupIntent } from '../../src/shared/sessions/intent';
 import type { AcquireOutcome } from '../../src/shared/sessions/setup';
 import type { SpineView, SpineViewEvents } from '../../src/shared/spine/view';
-import { midTurnCountOf } from '../../src/shared/engine/status';
+import { midTurnCountOf } from '../../src/shared/engine/mid-turn';
 
 export interface FakeSpineView extends SpineView {
   setUnavailable(reason: string | null): void; // fires `availability`
