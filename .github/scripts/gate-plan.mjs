@@ -294,9 +294,11 @@ export function planOf(env, scripts) {
       const where = hosted ? (direct ? RUNNERS.macHosted : HOSTED_WAITER) : placed(group);
       const runner = JSON.stringify(where);
       const guest = GUEST.includes(where) ? { variant: variantOf(group) } : {};
-      const minutes = measured.has(group) ? 45 : peerGroups.has(group) ? PEER_MINUTES : 30;
+      // A measured group's guard may wait 15 minutes, and a second after its build when its script builds out/ (gate.yml).
+      const prebuild = measured.has(group) ? variantOf(group) : undefined;
+      const minutes = measured.has(group) ? (prebuild ? 60 : 45) : peerGroups.has(group) ? PEER_MINUTES : 30;
       const timeout = hosted ? (direct ? minutes + HOSTED_MARGIN_MINUTES : HOSTED_TIMEOUT_MINUTES) : timeoutOn(where, minutes);
-      return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), poppler: poppler.has(group), measured: measured.has(group), ...(hosted && { hosted }), runner, timeout, ...guest, ...(peerGroups.has(group) && peer && { peer }) };
+      return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), poppler: poppler.has(group), measured: measured.has(group), ...(prebuild && { prebuild }), ...(hosted && { hosted }), runner, timeout, ...guest, ...(peerGroups.has(group) && peer && { peer }) };
     });
   const e2eHosted = e2e.filter((entry) => entry.hosted && !direct);
   const e2eHost = e2e.filter((entry) => entry.variant === undefined && (!entry.hosted || direct));

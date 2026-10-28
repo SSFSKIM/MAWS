@@ -56,8 +56,9 @@ export interface RemoteChannel {
   /** Sends `message` after everything sent before it; false once the channel is closed. */
   send(message: EndpointMessage): boolean;
   /**
-   * `send`, resolved once the message is sealed onto the carrier (false: the channel closed first); it never rejects.
-   * A subscription's stream goes through it (stream-window.ts), so the channel's queue holds only a window of it.
+   * `send`, resolved once the message is sealed onto the carrier and the carrier has room again (its send buffer under
+   * its soft cap, send-buffer.ts), or the carrier has ended; false: the channel closed first. It never rejects. A subscription's stream goes
+   * through it (stream-window.ts), so the channel's queue, and the socket under it, hold only a window of the stream.
    */
   transmit(message: EndpointMessage): Promise<boolean>;
   close(reason: string): void;
@@ -78,6 +79,9 @@ export type ChannelRoutes = {
   credit(channel: RemoteChannel, message: CreditMessage): void;
   unsub(channel: RemoteChannel, message: UnsubMessage): void;
 };
+
+/** A carrier as a channel runs on it: RL2's duplex and, for one with a send buffer (CarrierDuplex), when it has room. */
+type ChannelCarrier = ByteDuplex & { writable?(): Promise<void> };
 
 /** Until a route is set, nothing is offered. */
 const NOT_OFFERED: ChannelRoutes = {
@@ -126,7 +130,7 @@ type Entry = {
 
 class Remote implements RemoteChannel {
   readonly #channel: Channel;
-  readonly #io: ByteDuplex;
+  readonly #io: ChannelCarrier;
   readonly #log: (line: string) => void;
   readonly key: string;
   readonly carrier: Carrier;
@@ -134,7 +138,7 @@ class Remote implements RemoteChannel {
   readonly device: string;
   readonly clientClass: DeviceClass;
 
-  constructor(key: string, carrier: Carrier, channel: Channel, io: ByteDuplex, peer: DevicePeer, log: (line: string) => void) {
+  constructor(key: string, carrier: Carrier, channel: Channel, io: ChannelCarrier, peer: DevicePeer, log: (line: string) => void) {
     this.key = key;
     this.carrier = carrier;
     this.#channel = channel;
@@ -164,7 +168,10 @@ class Remote implements RemoteChannel {
   transmit(message: EndpointMessage): Promise<boolean> {
     if (this.#channel.closed) return Promise.resolve(false);
     return this.#channel.send(message).then(
-      () => true,
+      async () => {
+        await this.#io.writable?.();
+        return true;
+      },
       (error: unknown) => {
         if (!this.#channel.closed) this.#log(`endpoint: a \`${message.t}\` could not be sent on channel ${this.key}: ${(error as Error).message}`);
         return false;
@@ -185,26 +192,49 @@ class Remote implements RemoteChannel {
   }
 }
 
+/** How a carrier sends: its socket's send and close, and, where it keeps a send buffer (send-buffer.ts), that buffer's state. */
+export type CarrierOut = {
+  send(bytes: Uint8Array): void;
+  close(reason: string): void;
+  /** Resolves once the carrier has room again (under its soft cap), or `signal` aborts (the wait unregistered). */
+  writable?(signal: AbortSignal): Promise<void>;
+  /** The bytes it holds unsent. */
+  buffered?(): number;
+};
+
 /** A carrier's two directions as RL2 needs them: what it delivered and how it ended, and how to send and close. */
 export class CarrierDuplex implements ByteDuplex {
-  readonly #out: { send(bytes: Uint8Array): void; close(reason: string): void };
+  readonly #out: CarrierOut;
   readonly #bytes: Array<(bytes: Uint8Array) => void> = [];
   readonly #ends: Array<(reason: string) => void> = [];
   readonly #waiting: Uint8Array[] = [];
+  /** Aborted at the carrier's end: every wait for room it still has is let go. */
+  readonly #ending = new AbortController();
   #ended: string | null = null;
 
-  constructor(out: { send(bytes: Uint8Array): void; close(reason: string): void }) {
+  constructor(out: CarrierOut) {
     this.#out = out;
+  }
+
+  /** The bytes the carrier holds unsent. */
+  get buffered(): number {
+    return this.#out.buffered?.() ?? 0;
   }
 
   send(bytes: Uint8Array): void {
     if (this.#ended === null) this.#out.send(bytes);
   }
 
+  /** Resolves once the carrier has room again, or has ended: what a channel's stream waits on (`transmit`). */
+  writable(): Promise<void> {
+    return this.#ended === null ? (this.#out.writable?.(this.#ending.signal) ?? Promise.resolve()) : Promise.resolve();
+  }
+
   /** Closes the carrier; what reads it (a handshake waiting for its next message) learns it ended. */
   close(reason: string): void {
     if (this.#ended !== null) return;
     this.#ended = reason;
+    this.#ending.abort();
     this.#out.close(reason);
     for (const listener of this.#ends) listener(reason);
   }
@@ -229,6 +259,7 @@ export class CarrierDuplex implements ByteDuplex {
   end(reason: string): void {
     if (this.#ended !== null) return;
     this.#ended = reason;
+    this.#ending.abort();
     for (const listener of this.#ends) listener(reason);
   }
 }
@@ -262,7 +293,7 @@ export class Channels {
    * Runs RL2's handshake on `io` and admits the device: the admitted channel, or null when it was refused (the carrier
    * is then closed). `deadlineMs` bounds the whole handshake (the direct listener's 10 s).
    */
-  async accept(carrier: Carrier, io: ByteDuplex, options: { key?: string; deadlineMs?: number } = {}): Promise<RemoteChannel | null> {
+  async accept(carrier: Carrier, io: ChannelCarrier, options: { key?: string; deadlineMs?: number } = {}): Promise<RemoteChannel | null> {
     const key = options.key ?? `direct:${++this.#direct}`;
     const identity = this.#ctx.identity();
     const org = this.#ctx.org();
@@ -307,7 +338,7 @@ export class Channels {
    * head adopted, the device gone, the endpoint stopped) is read once more here, synchronously with registering it, so
    * nothing falls between the two.
    */
-  async #admit(key: string, carrier: Carrier, channel: Channel, io: ByteDuplex, peer: DevicePeer, epoch: number, machinePub: string): Promise<RemoteChannel | null> {
+  async #admit(key: string, carrier: Carrier, channel: Channel, io: ChannelCarrier, peer: DevicePeer, epoch: number, machinePub: string): Promise<RemoteChannel | null> {
     let kid: string;
     let grades: Right[];
     try {
@@ -334,8 +365,11 @@ export class Channels {
     return entry.remote;
   }
 
-  /** The hub's multiplex as carriers: each channel the hub opens, numbered by it, is one (`link` is the hub link). */
-  relay(link: { sendChannel(channel: number, payload: Uint8Array): boolean; closeChannel(channel: number): void }): ChannelHandler {
+  /**
+   * The hub's multiplex as carriers: each channel the hub opens, numbered by it, is one (`link` is the hub link). They
+   * share the link's socket, so each has room while the link does.
+   */
+  relay(link: { sendChannel(channel: number, payload: Uint8Array): boolean; closeChannel(channel: number): void; writable?(signal?: AbortSignal): Promise<void> }): ChannelHandler {
     const carriers = new Map<number, CarrierDuplex>();
     return {
       opened: (number, payload) => {
@@ -352,6 +386,7 @@ export class Channels {
             carriers.delete(number);
             link.closeChannel(number);
           },
+          writable: (signal) => link.writable?.(signal) ?? Promise.resolve(),
         });
         carriers.set(number, io);
         void this.accept('relayed', io, { key: `relayed:${number}` });
@@ -404,7 +439,7 @@ export class Channels {
     clearTimeout(timer);
   }
 
-  #register(key: string, carrier: Carrier, channel: Channel, io: ByteDuplex, peer: DevicePeer, kid: string, grades: Right[], machinePub: string): Entry {
+  #register(key: string, carrier: Carrier, channel: Channel, io: ChannelCarrier, peer: DevicePeer, kid: string, grades: Right[], machinePub: string): Entry {
     const entry: Entry = { remote: new Remote(key, carrier, channel, io, peer, this.#ctx.log), channel, peer, kid, machinePub, grades, caps: Promise.resolve(), heard: false, unanswered: 0, timer: null };
     // A number the hub gives again on a later connection replaces whatever still closes under it.
     this.#entries.get(key)?.remote.close('endpoint-gone');
