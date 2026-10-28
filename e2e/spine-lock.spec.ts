@@ -6,7 +6,7 @@
 // by the refused run; host.status names the holder. Once the holder is gone, the next launch breaks the stale lock, takes
 // it, finishes the split, and releases the lock when it quits.
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { expect, test } from '@playwright/test';
@@ -55,9 +55,10 @@ test('beside a live holder of spine.lock a launch writes no spine file and finis
     writeFileSync(join(userData, 'sessions', 'deletions', 'deletion-of-the-holder.json'), '{"held":true}');
     writeFileSync(join(userData, 'prompt-history.jsonl'), '{"display":"a prompt the holder kept"}\n');
     writeFileSync(join(userData, 'attention.json'), '{"items":[]}');
-    // P5 O9: lane A's upload records, with a day-old root that is gone, which a lock-holding start's sweep drops
+    // P5 O9: lane A's upload records, with a day-old root that is gone, which a lock-holding start's sweep drops (its
+    // path through no link: the sweep refuses one, and the temporary directory is under /var, a link on macOS)
     mkdirSync(join(userData, 'lane-a'));
-    writeFileSync(join(userData, 'lane-a', 'uploads.json'), JSON.stringify({ version: 1, roots: [{ path: join(userData, 'upload-of-the-holder'), session: 'engine-session-of-the-holder', at: '2026-01-01T00:00:00.000Z' }] }));
+    writeFileSync(join(userData, 'lane-a', 'uploads.json'), JSON.stringify({ version: 1, roots: [{ path: join(realpathSync(userData), 'upload-of-the-holder'), session: 'engine-session-of-the-holder', at: '2026-01-01T00:00:00.000Z' }] }));
     // the holder's split in progress: its machine file written, settings.json not yet rewritten as the client file
     const unified = JSON.stringify({ ...SETTINGS_DEFAULTS_V21, version: 20, theme: 'dark', gateway: { ...SETTINGS_DEFAULTS_V21.gateway, defaultRoute: 'direct' } });
     writeFileSync(join(userData, 'settings.json'), unified);
