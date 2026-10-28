@@ -16,7 +16,8 @@
 //     1. Recovery first: while the line holds an accepted transition, a machine with no cursor on it gets one run from the
 //        state at the newest transition's `fromVersion` (its base, which the whole held chain keeps), so an endpoint on a
 //        superseded branch rewinds by it (`EndpointOrg`'s rewind needs the base and the state after it). A probe, tried
-//        once per machine per line: any answer records `probed`.
+//        once per machine per line: any answer records `probed`. A probe whose base and next state don't fit the bound
+//        together reads `too-large` and is not sent or counted as tried; head-finding goes on.
 //     2. Finding the head, without a cursor: runs start at the link's `caps().stateVersion` (else genesis) and include
 //        that version's state. `done {version}` (the endpoint adopted states of the run, or holds the run's state at its
 //        head) sets the cursor; `not-newer` or `rollback` moves the next start past the run's last state.
@@ -27,12 +28,16 @@
 // - A `done` whose version is at least the obligation's state's acknowledges the machine. Anything else stays owed,
 //   sent again at the machine's next link up and every DELIVERY_RETRY_MS.
 // - Exposure: a run that carries the pending state writes the machine into the slot's `exposed.machines` before its act,
-//   so a send whose answer never came counts as exposed, and a later discard names the machine under `abandoned`.
+//   so a send whose answer never came counts as exposed, and a later discard names the machine under `abandoned`. After
+//   that write, and synchronously before the act, the held view and head the run was planned on are checked again: an
+//   adoption meanwhile (a sibling of the pending state, a recovery) sends nothing, and the run is planned again.
+// - Recipients: the roster at signing, less the machines the state removes by authenticated evidence (its own entries,
+//   and certificates `verifyMachineCert` accepts under the parent); a machine the state keeps enrolled is never removed.
 //
 // Network calls run outside the signing store's updates. Electron-free; the links, the roster and the held view are
 // injected (main's `Machines.remote`, `onRemote` and the session's held view).
 import { createHash } from 'node:crypto';
-import { canonicalize, stateHash, type Certificates, type OrgState, type RootTransition, type Signed, type SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
+import { canonicalize, stateHash, verifyMachineCert, type Certificates, type OrgState, type RootTransition, type Signed, type SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
 import type { MachineRef } from '@shared/machine/ref';
 import type { ActOutcome, RemoteLink } from '../machines/remote/link';
 import type { Obligation, SigningFile } from './files';
@@ -67,6 +72,8 @@ export type DeliveriesDeps = {
   link(ref: MachineRef): DeliveryLink | null;
   view: () => HeldOrg | null;
   timing?: Partial<OrgTiming>;
+  /** The clock a certificate is verified at. */
+  now?(): number;
   log(line: string): void;
 };
 
@@ -94,8 +101,13 @@ function endsKeys(parent: OrgState, next: OrgState): boolean {
   return next.revoked.some((r) => !revoked.has(r.keyId)) || next.retired.some((r) => !retired.has(r.keyId));
 }
 
-/** The machines `next` takes out of the org: an enrolled one it drops, one whose key it ends without keeping it enrolled, a certificate's whose delegation it drops. */
-function removedMachines(parent: OrgState, next: OrgState, certificates: Certificates): Set<string> {
+/**
+ * The machines `next` takes out of the org, from authenticated evidence only: an enrolled one it drops, one whose key it
+ * ends without keeping it enrolled, and a delegated one whose certificate `verifyMachineCert` accepts under `parent` and
+ * whose delegation `next` drops. A served certificate's fields are the hub's word until verified, so a forged or copied
+ * one can't take a recipient away; and a machine `next` keeps enrolled is never removed.
+ */
+async function removedMachines(parent: OrgState, next: OrgState, certificates: Certificates, now: Date): Promise<Set<string>> {
   const enrolled = new Set(next.machines.map((m) => m.ref));
   const out = new Set<string>(parent.machines.map((m) => m.ref).filter((ref) => !enrolled.has(ref)));
   const revoked = ended(parent.revoked);
@@ -105,7 +117,9 @@ function removedMachines(parent: OrgState, next: OrgState, certificates: Certifi
   }
   const delegations = new Set(next.delegations.map((d) => d.id));
   for (const cert of certificates.certs) {
-    if (parent.delegations.some((d) => d.id === cert.body.delegation) && !delegations.has(cert.body.delegation)) out.add(cert.body.machine);
+    if (enrolled.has(cert.body.machine) || delegations.has(cert.body.delegation) || out.has(cert.body.machine)) continue;
+    if (!parent.delegations.some((d) => d.id === cert.body.delegation)) continue;
+    if ((await verifyMachineCert(parent, cert, now)).ok) out.add(cert.body.machine);
   }
   return out;
 }
@@ -213,12 +227,16 @@ export function createDeliveries(deps: DeliveriesDeps): Deliveries {
   async function deliverTo(hash: string, ref: MachineRef): Promise<void> {
     /** In this pass: where head-finding starts next, once a run has moved it past caps. */
     let hunt: number | null = null;
+    /** In this pass: the probe can't hold its base and the state after it (`too-large`), so head-finding goes on. */
+    let probeTooLarge = false;
     for (;;) {
       if (closed) return;
       const link = deps.link(ref);
       const view = deps.view();
       const file = store.get();
       if (link === null || link.state() !== 'up' || view === null || file === 'damaged') return;
+      // The line the run is planned on: checked again just before the act, since an adoption may land while it is planned.
+      const head = view.head();
       const o = file.deliveries.find((x) => x.hash === hash);
       if (o === undefined || !o.owed.includes(ref)) return;
       const place = await placement(o, file, view);
@@ -235,7 +253,7 @@ export function createDeliveries(deps: DeliveriesDeps): Deliveries {
       if (cursor !== null) {
         kind = 'forward';
         from = cursor + 1;
-      } else if (newest !== null && o.probed[ref] !== line) {
+      } else if (newest !== null && o.probed[ref] !== line && !probeTooLarge) {
         kind = 'probe';
         from = newest.body.fromVersion;
       } else {
@@ -246,6 +264,16 @@ export function createDeliveries(deps: DeliveriesDeps): Deliveries {
       // Past the app's line: the machine is ahead of what the app holds, and waits until the app adopts that far.
       if (from > end) return;
       const states = take(place.states, from, transitions);
+      // A recovery-first run must carry the base and the state after it (`EndpointOrg`'s rewind needs both); the base
+      // alone is no probe, so it is neither sent nor counted as tried.
+      if (kind === 'probe' && states.length < 2) {
+        log(`the recovery from version ${from} and the state after it are over ${timing.DELIVERY_MAX_BYTES} bytes together: ${ref} reads too-large`);
+        await change(hash, (x) => {
+          if (!x.tooLarge.includes(ref)) x.tooLarge.push(ref);
+        });
+        probeTooLarge = true;
+        continue;
+      }
       if (states.length === 0) {
         log(`version ${from} alone is over ${timing.DELIVERY_MAX_BYTES} bytes: ${ref} catches up through its own hub sync`);
         await change(hash, (x) => {
@@ -267,7 +295,9 @@ export function createDeliveries(deps: DeliveriesDeps): Deliveries {
         return { next: withExposure(f, pending, { machine: ref }), value: true };
       });
       if (!go) return;
-
+      // Synchronously from here to the act: the held line the run was planned on must still be the held line. A sibling
+      // adopted while the exposure was written makes the pending state a fork; a recovery moves the held chain. Plan again.
+      if (deps.view() !== view || view.head() !== head) continue;
       const answer = answerOf(await link.act({ action: 'endpoint.state', args: { states, transitions }, stepUp: 'never' }).outcome);
       if (answer.kind === 'none') {
         log(`version ${target} to ${ref}: no answer that judges the run (${answer.why}); sent again later`);
@@ -409,7 +439,7 @@ export function createDeliveries(deps: DeliveriesDeps): Deliveries {
   return {
     async obligation(signed, parent) {
       if (!endsKeys(parent, signed.state)) return null;
-      const removed = removedMachines(parent, signed.state, deps.view()?.certificates() ?? { certs: [], retirements: [] });
+      const removed = await removedMachines(parent, signed.state, deps.view()?.certificates() ?? { certs: [], retirements: [] }, new Date((deps.now ?? Date.now)()));
       const owed = [...new Set<string>(deps.roster())].filter((ref) => !removed.has(ref));
       if (owed.length === 0) return null;
       return { hash: await stateHash(signed.state), signed, owed, known: {}, probed: {}, tooLarge: [] };

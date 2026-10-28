@@ -18,9 +18,12 @@ import {
   keyId,
   NO_CERTIFICATES,
   signOrgState,
+  signRecord,
+  SIGNING_DOMAINS,
   signTransition,
   stateHash,
   verifySuccessor,
+  type Certificates,
   type Device,
   type OrgState,
   type RootTransition,
@@ -250,18 +253,33 @@ type App = {
   adopt(states: SignedOrgState[], transitions?: Signed<RootTransition>[]): Promise<void>;
   /** A next start over the same files: a new held view, store and deliveries. */
   restart(): Promise<App>;
+  /** Holds the next signing.json write until `release`; `reached` resolves once it is waiting. */
+  pauseSigningWrite(): { reached: Promise<void>; release(): void };
 };
 
-type AppOptions = { roster?: MachineRef[]; maxBytes?: number; retryMs?: number };
+type AppOptions = { roster?: MachineRef[]; maxBytes?: number; retryMs?: number; certificates?: Certificates };
 
 async function app(chain: SignedOrgState[], options: AppOptions = {}): Promise<App> {
   const dir = await tempDir('maws-deliveries-');
-  const files = orgFiles({ userData: dir, log: () => {} });
-  expect(await files.ensure()).toEqual({ ok: true });
+  const base = orgFiles({ userData: dir, log: () => {} });
+  expect(await base.ensure()).toEqual({ ok: true });
+  let gate: { open: Promise<void>; arrived(): void } | null = null;
+  const files: typeof base = {
+    ...base,
+    async write(name, value) {
+      if (name === SIGNING_FILE && gate !== null) {
+        const held = gate;
+        gate = null;
+        held.arrived();
+        await held.open;
+      }
+      return base.write(name, value);
+    },
+  };
   let anchor: Parameters<Parameters<typeof startHeldOrg>[0]['saveAnchor']>[0] | null = null;
   const saveAnchor = async (a: NonNullable<typeof anchor>) => void (anchor = a);
   const g = chain[0];
-  const started = await startHeldOrg({ files, anchor: null, saveAnchor, pins: { roots: g.state.root.keys, recoveryPub: g.state.root.recoveryPub }, first: { chain, transitions: [], certificates: NO_CERTIFICATES }, log: () => {} });
+  const started = await startHeldOrg({ files, anchor: null, saveAnchor, pins: { roots: g.state.root.keys, recoveryPub: g.state.root.recoveryPub }, first: { chain, transitions: [], certificates: options.certificates ?? NO_CERTIFICATES }, log: () => {} });
   if (!started.ok) throw new Error(started.reason);
   const registration: { signing?: true } = {};
   const machines = new Map<MachineRef, Machine>();
@@ -316,6 +334,13 @@ async function app(chain: SignedOrgState[], options: AppOptions = {}): Promise<A
         const result = await held.adoptServed({ chain: states, head: null, transitions, certificates: null });
         expect(result.refused).toBeUndefined();
       },
+      pauseSigningWrite() {
+        let arrived!: () => void;
+        let release!: () => void;
+        const reached = new Promise<void>((resolve) => (arrived = resolve));
+        gate = { open: new Promise<void>((resolve) => (release = resolve)), arrived };
+        return { reached, release };
+      },
       async restart() {
         const again = await startHeldOrg({ files, anchor, saveAnchor, log: () => {} });
         if (!again.ok) throw new Error(again.reason);
@@ -359,6 +384,27 @@ describe('which states are delivered, and to whom', () => {
       entry.pub = rotated.pub;
     });
     expect((await a.deliveries.obligation(rotation, g.state))?.owed).toEqual([M1, M2, M3]);
+  });
+
+  it('excludes a delegated machine only by a certificate the parent verifies, and never one the state keeps enrolled', async () => {
+    const g = await genesis();
+    const delegationKey = await generateSigningKey();
+    const id = memberId();
+    const withDelegation = await next(g, NOW - DAY, (s) => void s.delegations.push({ id, pub: delegationKey.pub, prefix: 'vm-', expires: iso(NOW + 30 * DAY), maxUses: 10, offlineRevokeS: 0, owners: 'org' }));
+    const dropping = await next(withDelegation, NOW, async (s) => {
+      s.delegations = [];
+      s.revoked.push({ keyId: await keyId(delegationKey.pub), holder: { delegation: id, prefix: 'vm-' } });
+    });
+    const vm = `${id}_${'v'.repeat(22)}` as MachineRef; // a certificate's ref: the delegation's id, then 128 random bits
+    const cert = (machine: string, name: string, key: SigningKey) =>
+      signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine, name, pub: key.pub, delegation: id, use: 1, issued: iso(NOW - DAY) }, key.privateKey, key.pub);
+    const genuine = await signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine: vm, name: 'vm-one', pub: (await generateSigningKey()).pub, delegation: id, use: 1, issued: iso(NOW - DAY) }, delegationKey.privateKey, delegationKey.pub);
+    // A forged certificate (its own key, not the delegation's) naming an enrolled machine under the dropped delegation,
+    // and a copy genuinely signed by the delegation that claims another enrolled machine.
+    const forged = await cert(M1, 'vm-two', await generateSigningKey());
+    const copied = await signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine: M2, name: 'vm-three', pub: (await generateSigningKey()).pub, delegation: id, use: 2, issued: iso(NOW - DAY) }, delegationKey.privateKey, delegationKey.pub);
+    const a = await app([g, withDelegation], { roster: [M1, M2, M3, vm], certificates: { certs: [forged, copied, genuine], retirements: [] } });
+    expect((await a.deliveries.obligation(dropping, withDelegation.state))?.owed).toEqual([M1, M2, M3]);
   });
 
   it('never owes a machine the state itself removes, nor sends it anything', async () => {
@@ -555,6 +601,24 @@ describe('the pending state', () => {
     expect(a.disk().deliveries).toEqual([]);
   });
 
+  it('sends nothing when a sibling is adopted while the exposure write waits: the run is planned again and suspended', async () => {
+    const g = await genesis();
+    const a = await app([g], { roster: [M1] });
+    const pending = await next(g, NOW, revokeDevice('old'));
+    await pend(a, pending, g);
+    const m = await machine([g]);
+    a.machines.set(M1, m);
+    const pause = a.pauseSigningWrite();
+    const sending = a.deliveries.send();
+    await pause.reached; // the run [1, 2] is planned, the pending state a candidate; its exposure write is on its way
+    await a.adopt([await next(g, NOW - 60_000)]); // the deployment admin's state at version 2: the slot is now a fork
+    pause.release();
+    await sending;
+    expect(m.runs).toEqual([]);
+    expect(await sameHead(m, g)).toBe(true);
+    expect(a.deliveries.owing()).toEqual([{ version: 2, machines: [M1], tooLarge: [] }]);
+  });
+
   it('suspends the pending state’s sends while it is a fork', async () => {
     const g = await genesis();
     const a = await app([g], { roster: [M1] });
@@ -702,25 +766,45 @@ describe('after a recovery', () => {
     expect(a.disk().deliveries).toEqual([]);
   });
 
+  it('reads `too-large` when the probe can’t hold the base with the state after it, never sending the base alone or counting the probe as tried', async () => {
+    const { g, s2, base, forged, t, r4, target } = await recovered();
+    const a = await app([g, s2, base, forged[0], forged[1]], { roster: [M1], maxBytes: runBytes([target], [t]) + 64 }); // one state a run
+    await a.adopt([r4], [t]);
+    await a.adopt([target]);
+    expect(runBytes([base, r4], [t])).toBeGreaterThan(runBytes([target], [t]) + 64);
+    const superseded = await machine([g, s2, base, forged[0], forged[1]], { now: NOW - 50 * DAY }); // head 5°
+    a.machines.set(M1, superseded);
+    await a.oblige(target, r4.state);
+
+    await a.deliveries.send();
+    expect(superseded.runs.filter((r) => r[0] === 3)).toEqual([]);
+    expect(await sameHead(superseded, forged[1])).toBe(true);
+    expect(a.deliveries.owing()).toEqual([{ version: 5, machines: [M1], tooLarge: [M1] }]);
+    expect(a.disk().deliveries[0].probed).toEqual({});
+  });
+
   it('resets every cursor when the app adopts a rewind: the next run is the recovery-first one', async () => {
     const g = await genesis(NOW - 90 * DAY);
-    const target = await next(g, NOW - 80 * DAY, revokeDevice('old'));
-    const s3 = await next(target, NOW - 70 * DAY);
-    const s4 = await next(s3, NOW - 60 * DAY);
-    const t = await recoveryFrom(3);
-    const a = await app([g, target, s3, s4], { roster: [M1], maxBytes: runBytes([s4], [t]) + 64 }); // one state a run, the transition included
+    const s2 = await next(g, NOW - 80 * DAY);
+    const target = await next(s2, NOW - 70 * DAY, revokeDevice('old'));
+    const s4 = await next(target, NOW - 60 * DAY);
+    const s5 = await next(s4, NOW - 50 * DAY);
+    const t = await recoveryFrom(4);
+    const r5 = await next(s4, NOW - DAY, dropAppRoot);
+    const a = await app([g, s2, target, s4, s5], { roster: [M1], maxBytes: runBytes([s4, r5], [t]) + 256 }); // two states a run, the transition included
     const m = await machine([g]);
     m.script = ['deliver', 'offline'];
     a.machines.set(M1, m);
-    await a.oblige(target, g.state);
+    await a.oblige(target, s2.state);
     await a.deliveries.send();
-    expect(m.runs).toEqual([[1], [2]]);
-    expect(a.disk().deliveries[0].known[M1]).toMatchObject({ version: 1 });
+    expect(m.runs).toEqual([[1, 2], [3, 4]]);
+    expect(a.disk().deliveries[0].known[M1]).toMatchObject({ version: 2 });
 
-    // A recovery from version 3 rewinds the app's line above the target; the cursor at 1 no longer stands.
-    await a.adopt([await next(s3, NOW - DAY, dropAppRoot)], [t]);
+    // A recovery from version 4 rewinds the app's line above the target; the cursor at 2 no longer stands, so the next
+    // run is the probe from the base, not the forward run [3, 4].
+    await a.adopt([r5], [t]);
     await a.deliveries.send();
-    expect(m.runs.slice(2)).toEqual([[3], [1], [2]]);
+    expect(m.runs.slice(2)).toEqual([[4, 5], [2, 3]]);
     expect(a.disk().deliveries).toEqual([]);
   });
 

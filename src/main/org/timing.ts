@@ -36,11 +36,13 @@ export interface OrgTiming {
   ASK_GAP_MS: number;
   /** How often the weekly asking checks, while no window is focused, whether to notify. */
   WEEKLY_CHECK_MS: number;
-  /** The states a direct delivery carries back from the state it delivers. */
-  DELIVERY_SPAN: number;
   /** How often an owed delivery is sent again, besides at its machine's next link up. */
   DELIVERY_RETRY_MS: number;
-  /** The most bytes one `endpoint.state` run carries: an eighth of RL2's MESSAGE_MAX_BYTES (4 MiB). */
+  /**
+   * The most bytes one `endpoint.state` run carries, from the receiving side: the run reaches the endpoint as one RL2
+   * message, capped at MESSAGE_MAX_BYTES (4 MiB, org-protocol's channel.ts) and held by the endpoint's calls at that cap
+   * less 1 KiB (src/endpoint/calls.ts). An eighth of it, which leaves margin for the call's envelope and the transitions.
+   */
   DELIVERY_MAX_BYTES: number;
 }
 
@@ -63,7 +65,6 @@ export const ORG_TIMING: Readonly<OrgTiming> = Object.freeze({
   WEEKLY_DUE_DAYS: 7,
   ASK_GAP_MS: 86_400_000,
   WEEKLY_CHECK_MS: 3_600_000,
-  DELIVERY_SPAN: 16,
   DELIVERY_RETRY_MS: 3_600_000,
   DELIVERY_MAX_BYTES: 524_288,
 });
