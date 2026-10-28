@@ -6,8 +6,9 @@ import type { AgentId, AppSessionId, EventId, ParentToolUseId, TaskId } from '@s
 import type { CommandName, CommandResult, EventName, EventPayload, EventSource, MawsBridge } from '@shared/ipc/schema';
 import { act, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { at, TEST_MACHINE } from '../../../../../test/support/machine';
-import { bareOf } from '@shared/machine/address';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
+import { addressOf, bareOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 import { useTranscriptStore } from '../../stores/transcript';
 import { rowsOf } from '../model/derive';
 import { turnId } from '../model/keys';
@@ -28,14 +29,14 @@ const AGENT = 'agent-7' as AgentId;
 // from `appEvents` (what main's read model keeps); events are pushed by name.
 function fakeClient() {
   const listeners = new Map<string, Set<(payload: unknown, from: EventSource) => void>>();
-  const calls: { name: string; input: unknown; answer: (result: CommandResult<CommandName>) => void; answered?: boolean }[] = [];
+  const calls: { name: string; input: unknown; machine?: MachineRef; answer: (result: CommandResult<CommandName>) => void; answered?: boolean }[] = [];
   const appEvents = new Map<AppSessionId, SessionEvent[]>();
   const client: MawsBridge = {
     localMachine: TEST_MACHINE,
-    invoke: ((name: CommandName, input: unknown) =>
+    invoke: ((name: CommandName, input: unknown, opts?: { machine?: MachineRef }) =>
       name === 'session.appEvents'
         ? Promise.resolve({ ok: true, value: { events: appEvents.get((input as { appSessionId: AppSessionId }).appSessionId) ?? [] } })
-        : new Promise((resolve) => calls.push({ name, input, answer: resolve as never }))) as MawsBridge['invoke'],
+        : new Promise((resolve) => calls.push({ name, input, ...(opts?.machine && { machine: opts.machine }), answer: resolve as never }))) as MawsBridge['invoke'],
     on: ((name: EventName, listener: (payload: unknown, from: EventSource) => void) => {
       const set = listeners.get(name) ?? new Set();
       set.add(listener);
@@ -44,8 +45,8 @@ function fakeClient() {
     }) as MawsBridge['on'],
     pathForFile: () => '', // C7: MawsBridge gained pathForFile
   };
-  const emit = <N extends EventName>(name: N, payload: EventPayload<N>) => {
-    for (const listener of listeners.get(name) ?? []) listener(payload, { machine: TEST_MACHINE });
+  const emit = <N extends EventName>(name: N, payload: EventPayload<N>, machine: MachineRef = TEST_MACHINE) => {
+    for (const listener of listeners.get(name) ?? []) listener(payload, { machine });
   };
   return { client, calls, emit, listeners, appEvents };
 }
@@ -1218,6 +1219,33 @@ describe('ipcSource after the engine host is lost (E10)', () => {
     await flush();
     expect(second.fake.calls.map((call) => call.name)).toEqual(['session.events']);
     useTranscriptStore.getState().detach(second.source.key!);
+  });
+
+  // The branch review: `engine.hostState` crosses machine links. Another machine's host leaving says nothing about this
+  // session's process, and a session on another machine reads that machine's table.
+  it('hears only its own machine’s engine host, and reads its own machine’s table', async () => {
+    const { fake, source } = await hydrated(midTurn());
+    fake.emit('engine.hostState', { state: 'restarting' } as never, OTHER_MACHINE);
+    fake.emit('engine.hostState', { state: 'ready' } as never, OTHER_MACHINE);
+    await flush();
+    expect(fake.calls.map((call) => call.name), 'B’s host says nothing of a session on this machine').toEqual(['session.events']);
+    expect(divider().state).toBe('working');
+    useTranscriptStore.getState().detach(source.key!);
+
+    const onB = addressOf(OTHER_MACHINE, 'app-b' as AppSessionId);
+    const other = fakeClient();
+    const bSource = ipcSourceOver(other.client, onB);
+    const attached = useTranscriptStore.getState().attach(bSource.key!, bSource);
+    const events = midTurn().map((event) => ({ ...event, id: (event.id as string).replace(MAIN_APP, 'app-b') as EventId }));
+    other.calls[0].answer({ ok: true, value: { events, lastSeq: events.length, complete: true } } as never);
+    await attached;
+    other.emit('engine.hostState', { state: 'restarting' } as never, TEST_MACHINE);
+    other.emit('engine.hostState', { state: 'ready' } as never, TEST_MACHINE);
+    expect(other.calls.map((call) => call.name), 'this machine’s host says nothing of B’s session').toEqual(['session.events']);
+    other.emit('engine.hostState', { state: 'restarting' } as never, OTHER_MACHINE);
+    other.emit('engine.hostState', { state: 'ready' } as never, OTHER_MACHINE);
+    expect(other.calls.filter((call) => call.name === 'engine.sessions').map((call) => call.machine), 'B’s table, read on B').toEqual([OTHER_MACHINE]);
+    useTranscriptStore.getState().detach(bSource.key!);
   });
 
   it('a table read asked before a later departure says nothing; the next ready asks again', async () => {

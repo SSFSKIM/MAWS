@@ -114,11 +114,14 @@ function withAppEvents(app: SessionEvent[], events: SessionEvent[]): SessionEven
 // source closes it as the reducer closes any crashed process, with an app-synthesised exit (its id under the app id, so
 // the disk-form filter lets it pass; its time the departure's). The exit lives in this transcript's state only: a later
 // hydration reads the session from disk through the successor. A read asked before a later departure says nothing; the
-// next ready asks again.
+// next ready asks again. P5 O6: the host is the session's machine's; another machine's host state crosses its link too,
+// and says nothing of this session.
 function onHostLoss(client: MawsBridge, appSessionId: AppSessionId, running: () => SessionEvent | null, lost: (exit: SessionEvent) => void): () => void {
+  const machine = machineOf(appSessionId);
   let departedAt: string | null = null; // when the host was first heard leaving ready with the process running
   let heard = 0;
-  return client.on('engine.hostState', ({ state }) => {
+  return client.on('engine.hostState', ({ state }, from) => {
+    if (from.machine !== machine) return;
     const asked = ++heard;
     if (state !== 'ready') {
       if (running() !== null) departedAt ??= new Date().toISOString();
@@ -127,7 +130,7 @@ function onHostLoss(client: MawsBridge, appSessionId: AppSessionId, running: () 
     const at = departedAt;
     departedAt = null;
     if (at === null || running() === null) return;
-    void client.invoke('engine.sessions', undefined).then((result) => {
+    void client.invoke('engine.sessions', undefined, { machine }).then((result) => {
       const last = running();
       if (asked !== heard || !result.ok || last === null || result.value.some((status) => status.appSessionId === appSessionId)) return;
       lost({
