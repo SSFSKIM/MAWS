@@ -14,6 +14,11 @@ export const MachineStateSchema = z.strictObject({
   state: z.enum(['connecting', 'up', 'down']),
   since: z.string(), // when it entered this state (ISO-8601)
   generation: z.number().int().nonnegative(),
+  // P5 O7 M1 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §D): how main reaches the machine while
+  // it is `up` (a profile's socket, or an RL2 channel direct over the tailnet or through the hub), and the permanent
+  // verdict holding an RL2 link down (the machine removed this device). Main-to-renderer only; nothing draws them yet.
+  carrier: z.enum(['socket', 'direct', 'relay']).optional(),
+  refusal: z.string().optional(),
 });
 export type MachineState = z.infer<typeof MachineStateSchema>;
 export const MachinesSchema = z.strictObject({ machines: z.array(MachineStateSchema) }); // the whole list, the local machine first
