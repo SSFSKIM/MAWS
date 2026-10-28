@@ -1,0 +1,11 @@
+{
+ "arm": "kill-after-rewind-1s",
+ "sessionId": "d9d0661e-3b2c-475e-8a7e-8a5d3d74608a",
+ "token": "ba68493d",
+ "engine": "2.1.283",
+ "uuids": {
+  "T1": "f2f0f4e4-8a44-419f-ad68-d961247407ba",
+  "T2": "22e292c8-1e12-46ba-8f32-dbba96cd2d59",
+  "T3": "e72e47c2-2b20-4500-aed5-3731cd95e9d8"
+ }
+}

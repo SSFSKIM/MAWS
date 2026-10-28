@@ -1,0 +1,1643 @@
+{
+ "kill-after-rewind": {
+  "live": [
+   {
+    "launch": "l1",
+    "rewinds": [],
+    "after": {
+     "turns": [
+      "T1",
+      "T2"
+     ],
+     "hiddenTurns": [],
+     "hiddenRows": 0,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2"
+     ],
+     "twice": []
+    }
+   },
+   {
+    "launch": "l2",
+    "rewinds": [
+     {
+      "target": "T2",
+      "prefill": "PROMPT_T2"
+     }
+    ],
+    "after": {
+     "turns": [
+      "T1"
+     ],
+     "hiddenTurns": [
+      "T2"
+     ],
+     "hiddenRows": 3,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 3"
+     ],
+     "twice": []
+    }
+   },
+   {
+    "launch": "l3",
+    "rewinds": [],
+    "after": {
+     "turns": [
+      "T1",
+      "T3"
+     ],
+     "hiddenTurns": [
+      "T2"
+     ],
+     "hiddenRows": 3,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 3",
+      "user PROMPT_T3",
+      "text REPLY_T3"
+     ],
+     "twice": []
+    }
+   }
+  ],
+  "disk": [
+   {
+    "snapshot": "l1 l1-end (58 lines)",
+    "follower": {
+     "rewinds": [],
+     "turns": [
+      "T1",
+      "T2"
+     ],
+     "hiddenTurns": [],
+     "hiddenRows": 0,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T2"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T2,REPLY_T2"
+    ]
+   },
+   {
+    "snapshot": "l3 l2-after-kill (60 lines)",
+    "follower": {
+     "rewinds": [],
+     "turns": [
+      "T1",
+      "T2"
+     ],
+     "hiddenTurns": [],
+     "hiddenRows": 0,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T2"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T2,REPLY_T2"
+    ]
+   },
+   {
+    "snapshot": "l3 l3-end (82 lines)",
+    "follower": {
+     "rewinds": [],
+     "turns": [
+      "T1",
+      "T2",
+      "T3"
+     ],
+     "hiddenTurns": [],
+     "hiddenRows": 0,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2",
+      "user PROMPT_T3",
+      "text REPLY_T3"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T2",
+      "PROMPT_T3"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T2,REPLY_T2",
+     "PROMPT_T3,REPLY_T3"
+    ]
+   }
+  ]
+ },
+ "kill-after-rewind-1s": {
+  "live": [
+   {
+    "launch": "l1",
+    "rewinds": [],
+    "after": {
+     "turns": [
+      "T1",
+      "T2"
+     ],
+     "hiddenTurns": [],
+     "hiddenRows": 0,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2"
+     ],
+     "twice": []
+    }
+   },
+   {
+    "launch": "l2",
+    "rewinds": [
+     {
+      "target": "T2",
+      "prefill": "PROMPT_T2"
+     }
+    ],
+    "after": {
+     "turns": [
+      "T1"
+     ],
+     "hiddenTurns": [
+      "T2"
+     ],
+     "hiddenRows": 3,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 3"
+     ],
+     "twice": []
+    }
+   },
+   {
+    "launch": "l3",
+    "rewinds": [],
+    "after": {
+     "turns": [
+      "T1",
+      "T3"
+     ],
+     "hiddenTurns": [
+      "T2"
+     ],
+     "hiddenRows": 3,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 3",
+      "user PROMPT_T3",
+      "text REPLY_T3"
+     ],
+     "twice": []
+    }
+   }
+  ],
+  "disk": [
+   {
+    "snapshot": "l1 l1-end (58 lines)",
+    "follower": {
+     "rewinds": [],
+     "turns": [
+      "T1",
+      "T2"
+     ],
+     "hiddenTurns": [],
+     "hiddenRows": 0,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T2"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T2,REPLY_T2"
+    ]
+   },
+   {
+    "snapshot": "l3 l2-after-kill (61 lines)",
+    "follower": {
+     "rewinds": [
+      "T2"
+     ],
+     "turns": [
+      "T1"
+     ],
+     "hiddenTurns": [
+      "T2"
+     ],
+     "hiddenRows": 3,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 3"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T2"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T2,REPLY_T2"
+    ]
+   },
+   {
+    "snapshot": "l3 l3-end (83 lines)",
+    "follower": {
+     "rewinds": [
+      "T2"
+     ],
+     "turns": [
+      "T1",
+      "T3"
+     ],
+     "hiddenTurns": [
+      "T2"
+     ],
+     "hiddenRows": 3,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 3",
+      "user PROMPT_T3",
+      "text REPLY_T3"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T3"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T3,REPLY_T3"
+    ]
+   }
+  ]
+ },
+ "kill-after-rewind-200ms": {
+  "live": [
+   {
+    "launch": "l1",
+    "rewinds": [],
+    "after": {
+     "turns": [
+      "T1",
+      "T2"
+     ],
+     "hiddenTurns": [],
+     "hiddenRows": 0,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2"
+     ],
+     "twice": []
+    }
+   },
+   {
+    "launch": "l2",
+    "rewinds": [
+     {
+      "target": "T2",
+      "prefill": "PROMPT_T2"
+     }
+    ],
+    "after": {
+     "turns": [
+      "T1"
+     ],
+     "hiddenTurns": [
+      "T2"
+     ],
+     "hiddenRows": 3,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 3"
+     ],
+     "twice": []
+    }
+   },
+   {
+    "launch": "l3",
+    "rewinds": [],
+    "after": {
+     "turns": [
+      "T1",
+      "T3"
+     ],
+     "hiddenTurns": [
+      "T2"
+     ],
+     "hiddenRows": 3,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 3",
+      "user PROMPT_T3",
+      "text REPLY_T3"
+     ],
+     "twice": []
+    }
+   }
+  ],
+  "disk": [
+   {
+    "snapshot": "l1 l1-end (58 lines)",
+    "follower": {
+     "rewinds": [],
+     "turns": [
+      "T1",
+      "T2"
+     ],
+     "hiddenTurns": [],
+     "hiddenRows": 0,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T2"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T2,REPLY_T2"
+    ]
+   },
+   {
+    "snapshot": "l3 l2-after-kill (61 lines)",
+    "follower": {
+     "rewinds": [
+      "T2"
+     ],
+     "turns": [
+      "T1"
+     ],
+     "hiddenTurns": [
+      "T2"
+     ],
+     "hiddenRows": 3,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 3"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T2"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T2,REPLY_T2"
+    ]
+   },
+   {
+    "snapshot": "l3 l3-end (83 lines)",
+    "follower": {
+     "rewinds": [
+      "T2"
+     ],
+     "turns": [
+      "T1",
+      "T3"
+     ],
+     "hiddenTurns": [
+      "T2"
+     ],
+     "hiddenRows": 3,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 3",
+      "user PROMPT_T3",
+      "text REPLY_T3"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T3"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T3,REPLY_T3"
+    ]
+   }
+  ]
+ },
+ "plain-release": {
+  "live": [
+   {
+    "launch": "l1",
+    "rewinds": [],
+    "after": {
+     "turns": [
+      "T1",
+      "T2"
+     ],
+     "hiddenTurns": [],
+     "hiddenRows": 0,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2"
+     ],
+     "twice": []
+    }
+   },
+   {
+    "launch": "l2",
+    "rewinds": [],
+    "after": {
+     "turns": [
+      "T1",
+      "T2",
+      "T3"
+     ],
+     "hiddenTurns": [],
+     "hiddenRows": 0,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2",
+      "user PROMPT_T3",
+      "text REPLY_T3"
+     ],
+     "twice": []
+    }
+   }
+  ],
+  "disk": [
+   {
+    "snapshot": "l1 l1-end (58 lines)",
+    "follower": {
+     "rewinds": [],
+     "turns": [
+      "T1",
+      "T2"
+     ],
+     "hiddenTurns": [],
+     "hiddenRows": 0,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T2"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T2,REPLY_T2"
+    ]
+   },
+   {
+    "snapshot": "l2 l2-end (82 lines)",
+    "follower": {
+     "rewinds": [],
+     "turns": [
+      "T1",
+      "T2",
+      "T3"
+     ],
+     "hiddenTurns": [],
+     "hiddenRows": 0,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2",
+      "user PROMPT_T3",
+      "text REPLY_T3"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T2",
+      "PROMPT_T3"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T2,REPLY_T2",
+     "PROMPT_T3,REPLY_T3"
+    ]
+   }
+  ]
+ },
+ "post": {
+  "live": [
+   {
+    "launch": "l1",
+    "rewinds": [],
+    "after": {
+     "turns": [
+      "T1",
+      "T2"
+     ],
+     "hiddenTurns": [],
+     "hiddenRows": 0,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2"
+     ],
+     "twice": []
+    }
+   },
+   {
+    "launch": "l2",
+    "rewinds": [
+     {
+      "target": "T3",
+      "prefill": "PROMPT_T3"
+     }
+    ],
+    "after": {
+     "turns": [
+      "T1",
+      "T2",
+      "T5"
+     ],
+     "hiddenTurns": [
+      "T3",
+      "T4"
+     ],
+     "hiddenRows": 6,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2",
+      "boundary rewind hiding 6",
+      "user PROMPT_T5",
+      "text REPLY_T5"
+     ],
+     "twice": []
+    }
+   },
+   {
+    "launch": "l3",
+    "rewinds": [],
+    "after": {
+     "turns": [
+      "T1",
+      "T2",
+      "T5",
+      "T6"
+     ],
+     "hiddenTurns": [
+      "T3",
+      "T4"
+     ],
+     "hiddenRows": 6,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2",
+      "boundary rewind hiding 6",
+      "user PROMPT_T5",
+      "text REPLY_T5",
+      "user PROMPT_T6",
+      "text REPLY_T6"
+     ],
+     "twice": []
+    }
+   }
+  ],
+  "disk": [
+   {
+    "snapshot": "l1 l1-end (58 lines)",
+    "follower": {
+     "rewinds": [],
+     "turns": [
+      "T1",
+      "T2"
+     ],
+     "hiddenTurns": [],
+     "hiddenRows": 0,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T2"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T2,REPLY_T2"
+    ]
+   },
+   {
+    "snapshot": "l2 l2-after-rewind (104 lines)",
+    "follower": {
+     "rewinds": [
+      "T3"
+     ],
+     "turns": [
+      "T1",
+      "T2"
+     ],
+     "hiddenTurns": [
+      "T3",
+      "T4"
+     ],
+     "hiddenRows": 6,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2",
+      "boundary rewind hiding 6"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T2",
+      "PROMPT_T3",
+      "PROMPT_T4"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T2,REPLY_T2"
+    ]
+   },
+   {
+    "snapshot": "l2 l2-after-next (129 lines)",
+    "follower": {
+     "rewinds": [
+      "T3"
+     ],
+     "turns": [
+      "T1",
+      "T2",
+      "T5"
+     ],
+     "hiddenTurns": [
+      "T3",
+      "T4"
+     ],
+     "hiddenRows": 6,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2",
+      "boundary rewind hiding 6",
+      "user PROMPT_T5",
+      "text REPLY_T5"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T2",
+      "PROMPT_T5"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T2,REPLY_T2",
+     "PROMPT_T5,REPLY_T5"
+    ]
+   },
+   {
+    "snapshot": "l3 l3-end (152 lines)",
+    "follower": {
+     "rewinds": [
+      "T3"
+     ],
+     "turns": [
+      "T1",
+      "T2",
+      "T5",
+      "T6"
+     ],
+     "hiddenTurns": [
+      "T3",
+      "T4"
+     ],
+     "hiddenRows": 6,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2",
+      "boundary rewind hiding 6",
+      "user PROMPT_T5",
+      "text REPLY_T5",
+      "user PROMPT_T6",
+      "text REPLY_T6"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T2",
+      "PROMPT_T5",
+      "PROMPT_T6"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T2,REPLY_T2",
+     "PROMPT_T5,REPLY_T5",
+     "PROMPT_T6,REPLY_T6"
+    ]
+   }
+  ]
+ },
+ "pre": {
+  "live": [
+   {
+    "launch": "l1",
+    "rewinds": [],
+    "after": {
+     "turns": [
+      "T1",
+      "T2"
+     ],
+     "hiddenTurns": [],
+     "hiddenRows": 0,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2"
+     ],
+     "twice": []
+    }
+   },
+   {
+    "launch": "l2",
+    "rewinds": [
+     {
+      "target": "T2",
+      "prefill": "PROMPT_T2"
+     }
+    ],
+    "after": {
+     "turns": [
+      "T1",
+      "T4"
+     ],
+     "hiddenTurns": [
+      "T2",
+      "T3"
+     ],
+     "hiddenRows": 6,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 6",
+      "user PROMPT_T4",
+      "text REPLY_T4"
+     ],
+     "twice": []
+    }
+   },
+   {
+    "launch": "l3",
+    "rewinds": [],
+    "after": {
+     "turns": [
+      "T1",
+      "T4",
+      "T5"
+     ],
+     "hiddenTurns": [
+      "T2",
+      "T3"
+     ],
+     "hiddenRows": 6,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 6",
+      "user PROMPT_T4",
+      "text REPLY_T4",
+      "user PROMPT_T5",
+      "text REPLY_T5"
+     ],
+     "twice": []
+    }
+   }
+  ],
+  "disk": [
+   {
+    "snapshot": "l1 l1-end (58 lines)",
+    "follower": {
+     "rewinds": [],
+     "turns": [
+      "T1",
+      "T2"
+     ],
+     "hiddenTurns": [],
+     "hiddenRows": 0,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T2"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T2,REPLY_T2"
+    ]
+   },
+   {
+    "snapshot": "l2 l2-after-rewind (83 lines)",
+    "follower": {
+     "rewinds": [
+      "T2"
+     ],
+     "turns": [
+      "T1"
+     ],
+     "hiddenTurns": [
+      "T2",
+      "T3"
+     ],
+     "hiddenRows": 6,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 6"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T2",
+      "PROMPT_T3"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1"
+    ]
+   },
+   {
+    "snapshot": "l2 l2-after-next (104 lines)",
+    "follower": {
+     "rewinds": [
+      "T2"
+     ],
+     "turns": [
+      "T1",
+      "T4"
+     ],
+     "hiddenTurns": [
+      "T2",
+      "T3"
+     ],
+     "hiddenRows": 6,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 6",
+      "user PROMPT_T4",
+      "text REPLY_T4"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T4"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T4,REPLY_T4"
+    ]
+   },
+   {
+    "snapshot": "l3 l3-end (130 lines)",
+    "follower": {
+     "rewinds": [
+      "T2"
+     ],
+     "turns": [
+      "T1",
+      "T4",
+      "T5"
+     ],
+     "hiddenTurns": [
+      "T2",
+      "T3"
+     ],
+     "hiddenRows": 6,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 6",
+      "user PROMPT_T4",
+      "text REPLY_T4",
+      "user PROMPT_T5",
+      "text REPLY_T5"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T4",
+      "PROMPT_T5"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T4,REPLY_T4",
+     "PROMPT_T5,REPLY_T5"
+    ]
+   }
+  ]
+ },
+ "pre-files": {
+  "live": [
+   {
+    "launch": "l1",
+    "rewinds": [],
+    "after": {
+     "turns": [
+      "T1",
+      "T2"
+     ],
+     "hiddenTurns": [],
+     "hiddenRows": 0,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2"
+     ],
+     "twice": []
+    }
+   },
+   {
+    "launch": "l2",
+    "rewinds": [
+     {
+      "target": "T2",
+      "prefill": "PROMPT_T2"
+     }
+    ],
+    "after": {
+     "turns": [
+      "T1",
+      "T4"
+     ],
+     "hiddenTurns": [
+      "T2",
+      "T3"
+     ],
+     "hiddenRows": 6,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 6",
+      "user PROMPT_T4",
+      "text REPLY_T4"
+     ],
+     "twice": []
+    }
+   },
+   {
+    "launch": "l3",
+    "rewinds": [],
+    "after": {
+     "turns": [
+      "T1",
+      "T4",
+      "T5"
+     ],
+     "hiddenTurns": [
+      "T2",
+      "T3"
+     ],
+     "hiddenRows": 6,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 6",
+      "user PROMPT_T4",
+      "text REPLY_T4",
+      "user PROMPT_T5",
+      "text REPLY_T5"
+     ],
+     "twice": []
+    }
+   }
+  ],
+  "disk": [
+   {
+    "snapshot": "l1 l1-end (58 lines)",
+    "follower": {
+     "rewinds": [],
+     "turns": [
+      "T1",
+      "T2"
+     ],
+     "hiddenTurns": [],
+     "hiddenRows": 0,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T2"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T2,REPLY_T2"
+    ]
+   },
+   {
+    "snapshot": "l2 l2-after-rewind (83 lines)",
+    "follower": {
+     "rewinds": [
+      "T2"
+     ],
+     "turns": [
+      "T1"
+     ],
+     "hiddenTurns": [
+      "T2",
+      "T3"
+     ],
+     "hiddenRows": 6,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 6"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T2",
+      "PROMPT_T3"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1"
+    ]
+   },
+   {
+    "snapshot": "l2 l2-after-next (104 lines)",
+    "follower": {
+     "rewinds": [
+      "T2"
+     ],
+     "turns": [
+      "T1",
+      "T4"
+     ],
+     "hiddenTurns": [
+      "T2",
+      "T3"
+     ],
+     "hiddenRows": 6,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 6",
+      "user PROMPT_T4",
+      "text REPLY_T4"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T4"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T4,REPLY_T4"
+    ]
+   },
+   {
+    "snapshot": "l3 l3-end (130 lines)",
+    "follower": {
+     "rewinds": [
+      "T2"
+     ],
+     "turns": [
+      "T1",
+      "T4",
+      "T5"
+     ],
+     "hiddenTurns": [
+      "T2",
+      "T3"
+     ],
+     "hiddenRows": 6,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 6",
+      "user PROMPT_T4",
+      "text REPLY_T4",
+      "user PROMPT_T5",
+      "text REPLY_T5"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T4",
+      "PROMPT_T5"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T4,REPLY_T4",
+     "PROMPT_T5,REPLY_T5"
+    ]
+   }
+  ]
+ },
+ "pre-release": {
+  "live": [
+   {
+    "launch": "l1",
+    "rewinds": [],
+    "after": {
+     "turns": [
+      "T1",
+      "T2"
+     ],
+     "hiddenTurns": [],
+     "hiddenRows": 0,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2"
+     ],
+     "twice": []
+    }
+   },
+   {
+    "launch": "l2",
+    "rewinds": [
+     {
+      "target": "T2",
+      "prefill": "PROMPT_T2"
+     }
+    ],
+    "after": {
+     "turns": [
+      "T1"
+     ],
+     "hiddenTurns": [
+      "T2"
+     ],
+     "hiddenRows": 3,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 3"
+     ],
+     "twice": []
+    }
+   },
+   {
+    "launch": "l3",
+    "rewinds": [],
+    "after": {
+     "turns": [
+      "T1",
+      "T3"
+     ],
+     "hiddenTurns": [
+      "T2"
+     ],
+     "hiddenRows": 3,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 3",
+      "user PROMPT_T3",
+      "text REPLY_T3"
+     ],
+     "twice": []
+    }
+   }
+  ],
+  "disk": [
+   {
+    "snapshot": "l1 l1-end (58 lines)",
+    "follower": {
+     "rewinds": [],
+     "turns": [
+      "T1",
+      "T2"
+     ],
+     "hiddenTurns": [],
+     "hiddenRows": 0,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "user PROMPT_T2",
+      "text REPLY_T2"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T2"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T2,REPLY_T2"
+    ]
+   },
+   {
+    "snapshot": "l2 l2-after-rewind (61 lines)",
+    "follower": {
+     "rewinds": [
+      "T2"
+     ],
+     "turns": [
+      "T1"
+     ],
+     "hiddenTurns": [
+      "T2"
+     ],
+     "hiddenRows": 3,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 3"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T2"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T2,REPLY_T2"
+    ]
+   },
+   {
+    "snapshot": "l3 l2-after-release (64 lines)",
+    "follower": {
+     "rewinds": [
+      "T2"
+     ],
+     "turns": [
+      "T1"
+     ],
+     "hiddenTurns": [
+      "T2"
+     ],
+     "hiddenRows": 3,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 3"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T2"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T2,REPLY_T2"
+    ]
+   },
+   {
+    "snapshot": "l3 l3-end (86 lines)",
+    "follower": {
+     "rewinds": [
+      "T2"
+     ],
+     "turns": [
+      "T1",
+      "T3"
+     ],
+     "hiddenTurns": [
+      "T2"
+     ],
+     "hiddenRows": 3,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 3",
+      "user PROMPT_T3",
+      "text REPLY_T3"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T3"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T3,REPLY_T3"
+    ]
+   }
+  ]
+ },
+ "same-release": {
+  "live": [
+   {
+    "launch": "l1",
+    "rewinds": [
+     {
+      "target": "T2",
+      "prefill": "PROMPT_T2"
+     }
+    ],
+    "after": {
+     "turns": [
+      "T1"
+     ],
+     "hiddenTurns": [
+      "T2"
+     ],
+     "hiddenRows": 3,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 3"
+     ],
+     "twice": []
+    }
+   },
+   {
+    "launch": "l2",
+    "rewinds": [],
+    "after": {
+     "turns": [
+      "T1",
+      "T3"
+     ],
+     "hiddenTurns": [
+      "T2"
+     ],
+     "hiddenRows": 3,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 3",
+      "user PROMPT_T3",
+      "text REPLY_T3"
+     ],
+     "twice": []
+    }
+   }
+  ],
+  "disk": [
+   {
+    "snapshot": "l1 l1-after-rewind (59 lines)",
+    "follower": {
+     "rewinds": [
+      "T2"
+     ],
+     "turns": [
+      "T1"
+     ],
+     "hiddenTurns": [
+      "T2"
+     ],
+     "hiddenRows": 3,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 3"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T2"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1"
+    ]
+   },
+   {
+    "snapshot": "l2 l1-after-release (61 lines)",
+    "follower": {
+     "rewinds": [
+      "T2"
+     ],
+     "turns": [
+      "T1"
+     ],
+     "hiddenTurns": [
+      "T2"
+     ],
+     "hiddenRows": 3,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 3"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T2"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1"
+    ]
+   },
+   {
+    "snapshot": "l2 l2-end (83 lines)",
+    "follower": {
+     "rewinds": [
+      "T2"
+     ],
+     "turns": [
+      "T1",
+      "T3"
+     ],
+     "hiddenTurns": [
+      "T2"
+     ],
+     "hiddenRows": 3,
+     "shown": [
+      "user PROMPT_T1",
+      "text REPLY_T1",
+      "boundary rewind hiding 3",
+      "user PROMPT_T3",
+      "text REPLY_T3"
+     ],
+     "twice": []
+    },
+    "currentChain": {
+     "leaf": "assistant",
+     "prompts": [
+      "PROMPT_T1",
+      "PROMPT_T3"
+     ]
+    },
+    "recentTurns": [
+     "PROMPT_T1,REPLY_T1",
+     "PROMPT_T3,REPLY_T3"
+    ]
+   }
+  ]
+ }
+}

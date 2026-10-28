@@ -1,0 +1,11 @@
+{
+ "arm": "same-release",
+ "sessionId": "2b4c1ab7-6ee9-44d5-bf36-de5998279a8d",
+ "token": "9ad0f5b1",
+ "engine": "2.1.283",
+ "uuids": {
+  "T1": "0c433fce-5e78-403a-8fc6-89f8dbe4e623",
+  "T2": "67e703a1-22dc-4af9-8203-aab9d0eb5694",
+  "T3": "76633ccb-a993-41d4-af35-cca20b861a29"
+ }
+}
