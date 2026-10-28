@@ -25,7 +25,7 @@ import {
   type SignedOrgState,
 } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { anchorFile, ageLine, genesisFile, isRpId, judgeEntry, printable, runAdmin, type AdminIo } from '../../deploy/admin.ts';
+import { anchorFile, ageLine, genesisFile, isRpId, judgeEntry, printable, rootLines, runAdmin, type AdminIo } from '../../deploy/admin.ts';
 import { keysPlacementProblem, machinePlacement, newRecoveryKey, readAdminKeys, readText, recoveryFileText, volumeOf } from '../../deploy/admin-device.ts';
 import { deviceEntry, successor } from '../../deploy/org-admin.ts';
 import type { PendingDevice } from '../../src/protocol/identity';
@@ -702,6 +702,12 @@ describe('root add', () => {
     expect(bare.err).toEqual(['admin: root add <device id>']);
   });
 
+  it('shows the genesis root: its kid and the admin device that holds it', async () => {
+    const f = fake();
+    expect(await runAdmin(['show', ...asLocal()], f.io)).toBe(0);
+    expect(f.out.filter((l) => l.startsWith('root '))).toEqual([`root ${adminKid} (${ADMIN} device ${(await readAdminKeys(keys)).id})`]);
+  });
+
   it("confirms with the device, its member, pair's fingerprint and the step-up kid, then adds the kid to the root set", async () => {
     const before = await served();
     const f = fake();
@@ -726,6 +732,12 @@ describe('root add', () => {
     expect(await runAdmin(['root', 'add', app.device.id, ...asLocal(), '--yes'], again.io)).toBe(1);
     expect(again.err).toEqual([`admin: ${app.device.id} is a root already (step-up ${app.kid})`]);
     expect((await served()).state.version).toBe(after.state.version);
+  });
+
+  it('shows both roots once one is added, each with its device', async () => {
+    const f = fake();
+    expect(await runAdmin(['show', ...asLocal()], f.io)).toBe(0);
+    expect(f.out.filter((l) => l.startsWith('root '))).toEqual([`root ${adminKid} (${ADMIN} device ${(await readAdminKeys(keys)).id})`, `root ${app.kid} (${ADMIN} device ${app.device.id})`]);
   });
 
   it('accepts a successor of the two-root head signed by either root alone, and refuses one signed by a key outside the set', async () => {
@@ -804,6 +816,12 @@ describe('root add', () => {
     expect(await runAdmin(['--config', unreachableConfig(), '--config', unreachableConfig(), ...asLocal(), 'show'], twice.io)).toBe(1);
     expect(twice.err).toEqual(['admin: name one --config and one --keys']);
     expect(twice.out).toEqual([]);
+  });
+
+  it('names a root kid that no listed device holds as having none (a head the hub would refuse, so built here)', async () => {
+    const state = (await served()).state;
+    const ghost = await keyId((await generateSigningKey()).pub);
+    expect(await rootLines({ ...state, root: { ...state.root, keys: [adminKid, ghost] } })).toEqual([`root ${adminKid} (${ADMIN} device ${(await readAdminKeys(keys)).id})`, `root ${ghost} (no listed device)`]);
   });
 });
 
