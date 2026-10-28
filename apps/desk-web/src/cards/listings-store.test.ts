@@ -17,7 +17,7 @@ import {
 } from 'org-protocol';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { memberId, nextOf, rootedOrg, signedBy } from '../../test/org';
-import { ListingsStore } from './listings-store';
+import { ListingsStore, MAX_HELD } from './listings-store';
 
 const ref = (prefix = '') => `${prefix}${base64urlEncode(crypto.getRandomValues(new Uint8Array(16)))}`;
 
@@ -131,6 +131,45 @@ describe("a listing whose machine isn't resolved", () => {
     expect(keys()).toEqual([]);
     read();
     await expect.poll(() => keys()).toEqual([`${vm.ref}/s1`]);
+  });
+
+  it('keeps its genuine record through a forgery of the same revision arriving while the machine is re-read', async () => {
+    let read!: () => void;
+    onResolve = () =>
+      new Promise<void>((resolve) => {
+        read = () => {
+          certificates = { certs: [cert], retirements: [] };
+          void store.orgChanged().then(resolve);
+        };
+      });
+    const genuine = await listingOf(org.org, vm, 's1', 1);
+    await store.listing(genuine);
+    await store.listing(genuine); // the same record again: one candidate
+    await store.listing(await listingOf(org.org, { ref: vm.ref, key: await generateSigningKey() }, 's1', 1));
+    read();
+    await expect.poll(() => store.listings().get(`${vm.ref}/s1`)).toEqual(genuine);
+  });
+
+  it(`holds at most ${MAX_HELD} candidates for a session, the oldest unverified going first`, async () => {
+    let read!: () => void;
+    onResolve = () =>
+      new Promise<void>((resolve) => {
+        read = () => {
+          certificates = { certs: [cert], retirements: [] };
+          void store.orgChanged().then(resolve);
+        };
+      });
+    const forger = { ref: vm.ref, key: await generateSigningKey() };
+    await store.listing(await listingOf(org.org, vm, 's1', 1)); // the oldest candidate: the flood below evicts it
+    for (let i = 0; i < MAX_HELD; i++) await store.listing(await listingOf(org.org, forger, 's1', 50 + i));
+    read();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(keys()).toEqual([]);
+    // The machine's next revision verifies at once, and no forgery displaces what verified.
+    const genuine = await listingOf(org.org, vm, 's1', 2);
+    await store.listing(genuine);
+    await store.listing(await listingOf(org.org, forger, 's1', 900));
+    expect(store.listings().get(`${vm.ref}/s1`)).toEqual(genuine);
   });
 
   it('is dropped when the re-read does not resolve it', async () => {

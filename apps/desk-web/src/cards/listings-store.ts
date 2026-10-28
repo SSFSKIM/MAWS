@@ -15,7 +15,7 @@
 // last read, which moves no version) is held unverified, beside what the session already shows, while the org store
 // re-reads the state for that machine, and dropped if the read does not resolve it. Every change of the head or the
 // certificates judges the kept ones again, so a machine removed from the org takes its sessions with it.
-import { isListingGone, verifyListing, type Certificates, type Listing, type Signed, type SignedOrgState } from 'org-protocol';
+import { canonicalize, isListingGone, verifyListing, type Certificates, type Listing, type Signed, type SignedOrgState } from 'org-protocol';
 
 export type ListingKey = `${string}/${string}`;
 export const listingKey = (listing: Listing): ListingKey => `${listing.machine}/${listing.session}`;
@@ -28,11 +28,18 @@ type Deps = {
   now?: () => Date;
 };
 
+/**
+ * The most unverified candidates held for one session while its machine is re-read. A genuine machine sends one
+ * revision per change of its session, and a re-read is one round trip to the hub, so a handful covers what can arrive
+ * meanwhile; past it the oldest go, so a hub flooding a session can delay it to the next revision, never hold memory.
+ */
+export const MAX_HELD = 8;
+
 export class ListingsStore {
   #verified = new Map<ListingKey, Signed<Listing>>();
   /** The newest revision verified per session, a withdrawal's included: nothing at or below it is taken again. */
   readonly #watermarks = new Map<ListingKey, number>();
-  /** Listings above their session's watermark waiting on their machine's resolution, by session. */
+  /** Listings above their session's watermark waiting on their machine's resolution, by session, in arrival order. */
   readonly #held = new Map<ListingKey, Signed<Listing>[]>();
   /** The sessions whose machine is being re-read. */
   readonly #resolving = new Set<ListingKey>();
@@ -145,24 +152,34 @@ export class ListingsStore {
   }
 
   #hold(key: ListingKey, record: Signed<Listing>, resolve: boolean): void {
-    this.#held.set(key, [...(this.#held.get(key) ?? []).filter((r) => r.body.revision !== record.body.revision), record]);
+    // Two records of one revision are both kept until verification tells the genuine from a forgery; only the same
+    // record again is one candidate. Past the bound the oldest arrivals go.
+    const same = canonicalize(record);
+    const held = [...(this.#held.get(key) ?? []).filter((r) => canonicalize(r) !== same), record];
+    this.#held.set(key, held.slice(-MAX_HELD));
     if (!resolve || this.#resolving.has(key)) return;
     this.#resolving.add(key);
     void this.deps.resolve(record.body.machine).finally(() => this.#settle(key));
   }
 
-  /** Judges the records held for `key` again, oldest first: each that verifies is taken; with `final` the rest go. */
+  /**
+   * Judges the records held for `key` again, lowest revision first: each that verifies is taken; the rest stay held in
+   * their arrival order, or with `final` go.
+   */
   async #tryHeld(key: ListingKey, final: boolean): Promise<boolean> {
-    const held = (this.#held.get(key) ?? []).sort((a, b) => a.body.revision - b.body.revision);
+    const held = this.#held.get(key) ?? [];
     this.#held.delete(key);
     const org = this.deps.org();
+    const waiting = new Set<Signed<Listing>>();
     let changed = false;
-    for (const record of held) {
+    for (const record of [...held].sort((a, b) => a.body.revision - b.body.revision)) {
       if (record.body.revision <= (this.#watermarks.get(key) ?? -Infinity)) continue;
       const verdict = await this.#verifies(org, record);
       if (verdict?.ok) changed = this.#accept(key, record) || changed;
-      else if (!final && (verdict === null || verdict.code === 'not-listed')) this.#hold(key, record, verdict !== null);
+      else if (!final && (verdict === null || verdict.code === 'not-listed')) waiting.add(record);
     }
+    const watermark = this.#watermarks.get(key) ?? -Infinity;
+    for (const record of held) if (waiting.has(record) && record.body.revision > watermark) this.#hold(key, record, org !== null);
     return changed;
   }
 
