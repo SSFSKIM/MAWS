@@ -17,7 +17,8 @@
 // agent never runs it against production), as the signed-in owner: `DESK_ACCESS_TOKEN` from the environment when it is
 // set there (a runner's `--pipe`, whose stdin is the verb's own), else on stdin, as the other commands take it. `--hub
 // <loopback url> --user <email>` acts on the suites' local hub through its stand-in identity instead, where `--yes` may
-// answer the confirmations. Against a deployment every verb that signs, posts or deletes opens /dev/tty before any
+// answer the confirmations and `genesis --media-check` holds the recovery destination to a deployment's volume rules
+// (another volume than the keys', on removable or external media), so a real drive meets them before a deployment does. Against a deployment every verb that signs, posts or deletes opens /dev/tty before any
 // request and confirms there: a shell with no controlling terminal, an agent's, stops at that open and sends nothing.
 // The pairing code, a machine's enrollment code and a paper recovery key go to the terminal alone, never to stdout, so a
 // runner's log never holds them; a provisioning code goes to stdout alone, and only when stdout is not a terminal.
@@ -554,7 +555,7 @@ async function genesis(ctx: Context): Promise<number> {
   if (!recovery) return refuse('genesis --recovery <path on the removable volume | paper>');
   const paper = recovery === 'paper';
   if (!paper) {
-    const problem = recoveryPlacementProblem(recovery, ctx.keysPath, ctx.io.placement, { of: ctx.io.volumeOf, removable: ctx.io.removableVolume, required: !ctx.local });
+    const problem = recoveryPlacementProblem(recovery, ctx.keysPath, ctx.io.placement, { of: ctx.io.volumeOf, removable: ctx.io.removableVolume, required: !ctx.local || ctx.values['media-check'] === true });
     if (problem) refuse(`${problem}: nothing was written`);
   }
   if (readAnchor(ctx.keysPath)) refuse(`${anchorFile(ctx.keysPath)} exists: this device anchors an org already, and genesis runs once`);
@@ -1317,6 +1318,7 @@ async function run(argv: string[], given: AdminIo): Promise<number> {
       user: { type: 'string' },
       yes: { type: 'boolean', default: false },
       recovery: { type: 'string' },
+      'media-check': { type: 'boolean' },
       class: { type: 'string' },
       ttl: { type: 'string' },
       replace: { type: 'boolean' },
@@ -1343,6 +1345,7 @@ async function run(argv: string[], given: AdminIo): Promise<number> {
   }
   const only: Array<[string, Subcommand[]]> = [
     ['recovery', ['genesis']],
+    ['media-check', ['genesis']],
     ['class', ['pair']],
     ['ttl', ['pair', 'enroll', 'delegation create']],
     ['replace', ['enroll']],
@@ -1364,6 +1367,8 @@ async function run(argv: string[], given: AdminIo): Promise<number> {
   if (LOCAL_TRANSFORMS.includes(sub)) return (sub === 'code inspect' ? codeInspect : codeStripLegacy)({ io });
   if ((values.config?.length ?? 0) > 1 || (values.keys?.length ?? 0) > 1) refuse('name one --config and one --keys');
   const local = values.hub !== undefined;
+  // The deployment's volume rules at the local hub: the owner's check of a real drive before a deployment's genesis.
+  if (values['media-check'] && !local) refuse('--media-check is for the local hub (--hub): a deployment checks the recovery destination\'s media always');
   if (values.yes && !local) refuse('--yes answers the confirmations only at the local hub (--hub): against a deployment they are the owner\'s, at /dev/tty');
   if (local !== (values.user !== undefined)) refuse('--hub and --user go together: the local hub and its stand-in identity');
   const keysPath = values.keys?.[0] ?? io.env.DESK_ADMIN_KEYS ?? refuse('--keys <file> (or DESK_ADMIN_KEYS): the admin device\'s keys');
@@ -1437,7 +1442,7 @@ function localHub(text: string): string {
 
 function usage(io: AdminIo): number {
   io.err(`usage: deployment admin <${SUBCOMMANDS.join(' | ')}> [--config deploy/<file>.json] [--keys <file>] [--hub <url> --user <email> [--yes]]`);
-  io.err('  genesis --recovery <path | paper>; pair --class web-cards|native-mac [--ttl <s>]; remove-device <device id>');
+  io.err('  genesis --recovery <path | paper> [--media-check, at --hub]; pair --class web-cards|native-mac [--ttl <s>]; remove-device <device id>');
   io.err('  enroll <name> [--replace] [--ttl <s>] [--wait <s>]; delegation create --label <l> --prefix <p> --code-to-stdout [--ttl <s>] [--max-uses <n>] [--legacy-from-v1-code]');
   io.err('  delegation drop <id>; machine drop <name> [--revoke]; provisioning revoke <id>; code inspect | strip-legacy (stdin to stdout) (deploy/README.md)');
   return 2;

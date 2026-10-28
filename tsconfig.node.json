@@ -125,6 +125,10 @@
   // tsconfig.web.json. P3-D M4: the design system's React and DOM (the apply API's scopes, the page), likewise. P3-C M4:
   // the slide canvas and the deck editor, likewise (M9: `canvas/css.ts` stays in, since the exporters in main write it).
   "exclude": [
+    // P5 O13 M7: the staging phone run drives desk-web's cards client and device code (DOM-typed), so it is typechecked
+    // by apps/desk-web/tsconfig.node.json, as desk-web's own harness over the endpoint (test/local/endpoint.ts) is
+    "test/endpoint/staging/**/*",
+    "test/endpoint/staging-phone.live.test.ts",
     "src/main/artifacts/*.dom.test.tsx",
     "src/artifacts/ui/**/*", // portable React/DOM helpers are typechecked by tsconfig.web.json
     "src/artifacts/document/editor/**/*",

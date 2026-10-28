@@ -46,6 +46,15 @@ export const ANSWER_MS = 10_000;
 /** sminos's `opId` shape (`OP_ID_RE`): sminos answers nothing for another, so none is sent. */
 export const OP_ID = /^[A-Za-z0-9_-]{16,128}$/;
 
+/**
+ * The longest text a `send` carries, in UTF-16 code units: MAWS's own limit on a prompt as typed
+ * (`session.history.append`), so a text within it is within sminos's bound, which counts code points (O9 M1).
+ */
+const SEND_TEXT_MAX = 65_536;
+
+/** Whether a `send`'s text is one the endpoint hands on: a string, not blank, within `SEND_TEXT_MAX`. */
+const isSendText = (text: unknown): boolean => typeof text === 'string' && text.length <= SEND_TEXT_MAX && text.trim() !== '';
+
 export type Identity = { org: string; hub: string; name: string; ref: string; enrolled: string };
 
 export type Rl10Context = {
@@ -242,7 +251,8 @@ export class Rl10 {
    * An authorized lane A action down as DX2's `rpc` (Interfaces §D), or why it can't go: `unavailable` with no sminos
    * connected, no member for its session, or a member with no `launch` (no bridge to fence it: sminos would refuse it
    * unfenced anyway), or a spawn whose checkout no presence lists; `malformed` when the action's own session, context or
-   * digest disagree with its args, or an action on a session carries no lane A context; `context` (M7) when the launch it
+   * digest disagree with its args, an action on a session carries no lane A context, or a `send`'s text is no string, is
+   * blank or is longer than `SEND_TEXT_MAX`; `context` (M7) when the launch it
    * was sealed for is not the session's launch now (the bridge rechecks it at the effect, for a relaunch after this).
    */
   rpc(action: Action, who: { member: string; device: string }, fingerprint: string): { ok: true; frame: Frame } | { ok: false; reason: 'unavailable' | 'malformed' | 'context' } {
@@ -267,6 +277,8 @@ export class Rl10 {
       if (action.session !== undefined && action.session !== session) return { ok: false, reason: 'malformed' };
       if (action.context === undefined || action.context.lane !== 'A' || action.context.session !== session) return { ok: false, reason: 'malformed' };
       if (action.requestDigest !== undefined && JSON.stringify(action.requestDigest) !== JSON.stringify(digest)) return { ok: false, reason: 'malformed' };
+      // A `/` text is graded by its slash command (by-effect.ts) and refused by sminos itself, never here.
+      if (name === 'send' && !isSendText(args.text)) return { ok: false, reason: 'malformed' };
       const member = this.members.get(session);
       if (member === null || member.lane !== 'A' || member.launch === undefined) return { ok: false, reason: 'unavailable' };
       if (action.context.launch !== member.launch) return { ok: false, reason: 'context' };
