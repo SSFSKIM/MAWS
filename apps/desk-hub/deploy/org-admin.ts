@@ -53,7 +53,7 @@ export async function newAdminDevice(id = 'admin'): Promise<AdminDevice> {
   return { id, channel: await generateSigningKey(), stepUp: await generateSigningKey(), recovery: await generateSigningKey() };
 }
 
-export const deviceEntry = (d: AdminDevice): Device => ({ id: d.id, class: 'native-mac', keyStorage: 'software', channelPub: d.channel.pub, stepUpPub: d.stepUp.pub });
+export const deviceEntry = (d: Pick<AdminDevice, 'id' | 'channel' | 'stepUp'>): Device => ({ id: d.id, class: 'native-mac', keyStorage: 'software', channelPub: d.channel.pub, stepUpPub: d.stepUp.pub });
 
 /** Where the admin may write: the deployment's own org under its pinned genesis, or a throwaway org. */
 export type OrgScope = { org: string; pinnedGenesis: string | undefined } | { org: string; throwaway: true };

@@ -88,6 +88,28 @@ describe('the encodings, by a second implementation', () => {
     expect(ab.mac).not.toBe(a.mac);
   });
 
+  it("spell a pairing code, length-prefix its MAC's fields under the domain, and take the fingerprint from that input", () => {
+    const p = VECTORS.pairing;
+    expect(p.code).toBe(`smns-pair-v1.${b64(Buffer.from(jcs(p.decoded), 'utf8'))}`);
+    const base32 = (bytes: Buffer) => {
+      const bits = [...bytes].map((b) => b.toString(2).padStart(8, '0')).join('');
+      return Array.from({ length: 10 }, (_, i) => 'abcdefghijklmnopqrstuvwxyz234567'[parseInt(bits.slice(5 * i, 5 * i + 5), 2)]).join('');
+    };
+    for (const [fields, mac, fingerprint] of [
+      [p.fields, p.mac, p.fingerprint],
+      [p.swapped.fields, p.swapped.mac, p.swapped.fingerprint],
+    ] as const) {
+      const parts = ['smns-pair-mac-v1', fields.org, fields.member, jcs(fields.device)].map((s) => Buffer.from(s, 'utf8'));
+      const input = Buffer.concat(parts.flatMap((part) => [Buffer.from([part.length >>> 24, (part.length >>> 16) & 255, (part.length >>> 8) & 255, part.length & 255]), part]));
+      if (fields === p.fields) expect(b64(input)).toBe(p.input);
+      expect(b64(createHmac('sha256', Buffer.from(p.decoded.k, 'base64url')).update(input).digest())).toBe(mac);
+      const ten = base32(createHash('sha256').update(input).digest());
+      expect(fingerprint).toBe(`${ten.slice(0, 5)}-${ten.slice(5)}`);
+    }
+    expect(p.swapped.fields.device.channelPub).toBe(p.fields.device.channelPub);
+    expect(p.swapped.fingerprint).not.toBe(p.fingerprint);
+  });
+
   it("dual-code an event: DX1's mac covers the v2 sig, and the v2 sig leaves the mac out", () => {
     for (const { project, orgKey, event } of VECTORS.dual) {
       const { mac, ...rest } = event as { mac: { nonce: string; value: string } } & Record<string, unknown>;
