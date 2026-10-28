@@ -506,6 +506,8 @@ Read at authoring, on master `5698b6ef0`, against O3's grounding at `p5-o2`.
   Evidence: M2's executor's report.
 - Observation (M2): `registerChatPanels` had no unit test; only its dead twin `dropPanelKeysOfRemovedSessions` did (D17, D29).
   Evidence: M2's executor's report.
+- Observation (the architect, 2026-10-28, from `p5-o9`): O9 now composes lane A in `startMain` only when the run holds `spine.lock` (`attention !== null`), and adds `lane-a` to `spine-lock.ts`'s `SPINE_PATHS`, since the driver writes `<userData>/lane-a/`. So whichever side folds D20 composes lane A in `startSpine` among the parts a refused run skips, and `<userData>/lane-a/` is a spine file.
+  Evidence: the architect's relay; `p5-o9`'s `src/main/index.ts` and `src/main/settings/spine-lock.ts`.
 
 ## Decision Log
 
