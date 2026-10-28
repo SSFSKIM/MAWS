@@ -78,6 +78,10 @@ export const BY_EFFECT: Readonly<Record<string, EffectRule | typeof NO_RULE>> = 
   'session.queue.promote': () => 'manage',
   'session.queue.setPaused': (input) => (input.paused === true ? 'converse' : 'manage'),
   'session.answer': answer,
+  // P5 O9 M2: main's local lane A driver (main-owned until O3), graded as O10's lane A rows: an answer by its kind (the
+  // driver refuses one that does not fit its request's), a command as the slash command it runs.
+  'laneA.answer': (input) => ((input.answer as { kind?: unknown } | undefined)?.kind === 'question' ? 'converse' : 'approve'),
+  'laneA.command': (input) => (typeof input.name === 'string' ? slashGrade(input.name) : 'manage'),
   'session.acquire': acquire,
   // A project or path file `manage`; the user's own memory, machine-wide, `machine-admin` (P5 Decision Log 36).
   'session.memoryAppend': (input) => ((input.target as { kind?: unknown } | undefined)?.kind === 'user' ? 'machine-admin' : 'manage'),
