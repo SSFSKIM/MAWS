@@ -153,6 +153,29 @@ describe('provision', () => {
     expect(traffic.seen.slice(before).filter((r) => r.startsWith('POST '))).toEqual([]);
   });
 
+  // O14 M5a's rule at an enrollment's first synced state, met by a provisioning: its code's legacy key was written
+  // before the head was read, and is never the machine's in use, so the tombstone keeps no bytes.
+  it('provisions under a head retiring the legacy org key: a tombstone without the code’s key', async () => {
+    await member.amend('the legacy org key retired', (s) => void (s.legacyRetired = { version: s.version, at: s.issued }));
+    try {
+      const { endpoint, services } = await endpointOn({ ref: mintRef(vm.id) });
+      const result = await provision(endpoint, await code(vm, { legacy: true }), 'vm-retired-born');
+      expect(result.code, result.out).toBe(0);
+      const at = (await member.head()).state.legacyRetired!.at;
+      const legacyPath = join(services.machine.stateDir, 'legacy.json');
+      expect(JSON.parse(fs.readFileSync(legacyPath, 'utf8'))).toEqual({ org: 'local', retired: at });
+      expect(fs.readFileSync(legacyPath, 'utf8')).not.toContain(LEGACY_KEY);
+      expect(endpoint.status()).toMatchObject({ enrollment: 'org-listed', delegated: true, legacyKey: false, legacyRetired: true });
+      expect((await endpoint.cli('legacy', ['status'])).out).toBe('purged');
+      // A restart reads the same: the start's follow keeps no bytes it never had.
+      const again = await restart({ endpoint, services });
+      expect(JSON.parse(fs.readFileSync(legacyPath, 'utf8'))).toEqual({ org: 'local', retired: at });
+      expect(again.endpoint.status()).toMatchObject({ legacyKey: false, legacyRetired: true });
+    } finally {
+      await member.amend('the legacy org key back in use', (s) => void delete s.legacyRetired);
+    }
+  });
+
   it('refuses a ref minted under no delegation and a name outside the prefix before any hub call', async () => {
     const used = await uses(vm);
     const stray = await endpointOn();
@@ -482,6 +505,11 @@ describe('unenroll', () => {
     expect(privateKeyFiles(dir)).toEqual([]);
     const aside = join(dir, String(json(undone.out).aside));
     expect(fs.existsSync(join(aside, 'legacy.json'))).toBe(true);
+    // The key moved aside is a stale copy to M5a's `legacy`: reported, and deleted by its purge.
+    const legacyStatus = (await endpoint.cli('legacy', ['status'])).out;
+    expect(legacyStatus).toMatch(/^none \(1 copy .*stale-<time>/);
+    expect((await endpoint.cli('legacy', ['purge'])).out).toBe(`purged: the legacy org key's bytes are deleted from ${join(String(json(undone.out).aside), 'legacy.json')}`);
+    expect(fs.existsSync(join(aside, 'legacy.json'))).toBe(false);
     expect(json((await endpoint.cli('keys', ['--json'])).out)).toMatchObject({ enrollment: 'none', delegated: false, ref: services.machine.ref });
     expect(await machines()).toContain('box-undone');
 

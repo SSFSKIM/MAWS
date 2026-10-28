@@ -103,11 +103,11 @@ export class Rl10 {
     };
     this.#ledger = new SignatureLedger(sub('signatures'));
     this.#index = new InboundIndex(sub('inbound'), ctx.now);
-    // The enrollment's org, listed or not: the first sync's head, which an enrollment adopts before it is listed, is
-    // one `legacy.json` follows (legacy.ts).
+    // The enrollment's org, listed or not, or a pending provisioning's (O14 M1, whose first sync precedes its set): the
+    // first sync's head, which an enrollment adopts before it is listed, is one `legacy.json` follows (legacy.ts).
     this.legacy = new LegacyKey(ctx.state, () => {
       const state = ctx.state();
-      return ctx.identity()?.org ?? (state?.enrolled ? (state.enrollment?.org ?? null) : null);
+      return ctx.identity()?.org ?? (state?.enrolled ? (state.enrollment?.org ?? null) : (state?.provisioning?.redeemed.org ?? null));
     });
     this.members = new Members({ dispatch: ctx.dispatch, listings: ctx.listings, listed: () => ctx.listings.listedSessions(), forget: (s) => ctx.notifier.forget(s), log: ctx.log, now: ctx.now });
     this.relay = new LogRelay({
