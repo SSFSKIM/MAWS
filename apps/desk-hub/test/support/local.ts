@@ -255,9 +255,12 @@ export async function startLocalHub(options: { script?: string } = {}) {
     async projectLife(project: string): Promise<string> {
       return seam('PROJECT', project, PROJECT_LIFE_PATH);
     },
-    /** Keeps one wrapped copy of the org key at the Registry, as a hub from before O14 M5b holds them; answers its id. */
-    async seedWrappedKey(): Promise<string> {
-      return (JSON.parse(await seam('REGISTRY', ORG, WRAPPED_KEY_SEED_PATH, {})) as { id: string }).id;
+    /**
+     * Keeps one wrapped copy of the org key at the Registry, as a hub from before O14 M5b holds them (its bytes and the
+     * key's check `copy`'s where given); answers its id.
+     */
+    async seedWrappedKey(copy: { wrapped?: string; check?: string } = {}): Promise<string> {
+      return (JSON.parse(await seam('REGISTRY', ORG, WRAPPED_KEY_SEED_PATH, copy)) as { id: string }).id;
     },
     /** How many RPC records a project keeps: none since O14 M5b dropped their table (0 for a table that is gone). */
     async projectRpcs(project: string): Promise<number> {

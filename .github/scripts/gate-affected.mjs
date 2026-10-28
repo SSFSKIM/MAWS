@@ -71,10 +71,10 @@ export const SOURCE_READERS = [
   // A writer fixture bundled by esbuild and forked, with the store's modules it imports.
   { trees: ['src/engine-host/', 'src/artifacts/', 'src/shared/'], suites: ['src/engine-host/documents/sigkill.test.ts', 'src/engine-host/documents/retention-crash.test.ts'] },
   // The hub's Worker reaches its suites as a bundle: the global setup's (loaded into Miniflare through local.ts and
-  // hub.ts, so every suite that imports either), the fake machine's bin.ts and local/run.ts, each spawned.
+  // hub.ts, so every suite that imports either), and local/run.ts's, which the endpoint suites' local hub spawns.
   {
     trees: ['apps/desk-hub/src/', 'apps/org-protocol/src/'], // P5-O11 M1: the Worker bundles the protocol package
-    suites: ['apps/desk-hub/test/support/local.ts', 'apps/desk-hub/test/support/hub.ts', 'apps/desk-hub/test/fake-machine/command.test.ts', 'apps/desk-hub/test/stream-close.test.ts'],
+    suites: ['apps/desk-hub/test/support/local.ts', 'apps/desk-hub/test/support/hub.ts', 'test/endpoint/local-hub.ts'],
   },
   // The service worker's import graph walked through fs.
   { trees: ['apps/desk-web/src/sw/'], suites: ['apps/desk-web/src/sw/sw-imports.test.ts'] },

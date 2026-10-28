@@ -1,16 +1,20 @@
-// History re-attestation from the endpoint (O14 M4, `mawsd endpoint attest-history`) against desk-hub's local runner: a
-// Mac wrote two projects on DX2 under its current name and a former one, then cut over (re-enrolled in place, listed);
+// History re-attestation from the endpoint (O14 M4, `mawsd endpoint attest-history`) against desk-hub's Worker in
+// Miniflare with its test seams (miniflare-hub.ts): a Mac wrote two projects on DX2 under its current name and a former
+// one (seeded through the hub's phase-one seam, DX2 having left the hub), then cut over (re-enrolled in place, listed);
 // its endpoint attests each of its writers against the hub's inventory, skipping a writer with an event whose code fails,
 // changes nothing when run again, and `--check` tells `verified`, `mismatch`, `missing` and `uncovered` apart. The hub's
 // altered or withheld answers come through the endpoint's own `fetch`.
 import { base64urlEncode, type HistoryAttestations, type HistoryLogPage } from 'org-protocol';
-import { GENERATION_HEADER, importOrgKey, seal } from 'desk-hub/protocol';
+import { importOrgKey, seal } from 'desk-hub/protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createEndpoint, type Endpoint } from '../../src/endpoint';
 import { fakeServices, type FakeServices } from './fake-services';
-import { LOCAL_ORG, startLocalHub, type LocalHub, type Member } from './local-hub';
+import { Member, StandinPerson } from './local-hub';
+import { ADMIN, ORG, startMiniflareHub, type LocalHub } from './miniflare-hub';
 
 let hub: LocalHub;
+let stopHub: (() => Promise<void>) | null = null;
+let admin: StandinPerson;
 let member: Member;
 const started: Array<{ endpoint: Endpoint; services: FakeServices }> = [];
 
@@ -30,43 +34,24 @@ async function say(project: string, name: string, seq: number, forged = false) {
 }
 
 /**
- * A DX2 machine as sminos was in phase 1: redeems a one-time token under `name`, opens its stream, and for each project
- * says `hello` and uploads its events once the hub's `have` came back. The stream is closed after.
+ * A machine as sminos was in phase 1: redeems a one-time token under `name`, confirmed by its first request, and for
+ * each project says `hello` and uploads its events, handed to the project as DX2's stream handed them (the hub's
+ * `phaseOneFrames` seam: no machine reaches the hub but on RL1 now, whose machines the state lists under their refs).
  */
 async function phaseOne(name: string, writes: Record<string, unknown[]>): Promise<void> {
-  const token = await hub.person().enrollmentToken();
+  const token = await admin.enrollmentToken();
   const redeemed = await fetch(`${hub.url}/machine/enroll`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token, machine: name }) });
   const { client_id, client_secret } = (await redeemed.json()) as { client_id: string; client_secret: string };
-  const headers = { 'CF-Access-Client-Id': client_id, 'CF-Access-Client-Secret': client_secret };
-  const controller = new AbortController();
-  const stream = await fetch(`${hub.url}/machine/stream`, { headers, signal: controller.signal });
-  const reader = stream.body!.getReader();
-  const frames: Array<Record<string, unknown>> = [];
-  let buffer = '';
-  const until = async (match: (f: Record<string, unknown>) => boolean) => {
-    for (let found = frames.find(match); found === undefined; found = frames.find(match)) {
-      const { value, done } = await reader.read();
-      if (done) throw new Error(`${name}'s stream ended`);
-      buffer += new TextDecoder().decode(value);
-      for (let end = buffer.indexOf('\n\n'); end >= 0; end = buffer.indexOf('\n\n')) {
-        const data = /^data: (.*)$/m.exec(buffer.slice(0, end));
-        buffer = buffer.slice(end + 2);
-        if (data) frames.push(JSON.parse(data[1]) as Record<string, unknown>);
-      }
-    }
-    return frames.find(match)!;
-  };
-  const generation = String((await until((f) => f.t === 'welcome')).generation);
-  const post = async (frame: unknown) => {
-    const response = await fetch(`${hub.url}/machine/frames`, { method: 'POST', headers: { ...headers, 'content-type': 'application/x-ndjson', [GENERATION_HEADER]: generation }, body: JSON.stringify(frame) });
-    if (response.status !== 200) throw new Error(`${name}: ${response.status} ${await response.text()}`);
+  const confirmed = await fetch(`${hub.url}/machine/enrollment`, { headers: { 'CF-Access-Client-Id': client_id, 'CF-Access-Client-Secret': client_secret } });
+  if (confirmed.status !== 200) throw new Error(`${name}: ${confirmed.status} ${await confirmed.text()}`);
+  const hand = async (frame: { t: string; project: string }) => {
+    const answered = await hub.phaseOneFrames(frame.project, name, client_id, 1, [frame]);
+    if (answered.applied !== 1 || answered.refused.length) throw new Error(`${name} ${frame.t}: ${JSON.stringify(answered)}`);
   };
   for (const [project, events] of Object.entries(writes)) {
-    await post({ t: 'hello', project, name: `project ${project.slice(0, 2)}`, have: {} });
-    await until((f) => f.t === 'have' && f.project === project);
-    await post({ t: 'events', project, events });
+    await hand({ t: 'hello', project, name: `project ${project.slice(0, 2)}`, have: {} } as never);
+    await hand({ t: 'events', project, events } as never);
   }
-  controller.abort();
 }
 
 /** What the hub answers on its way to the endpoint, for a test to alter, and where it reads it from (`redirect`). */
@@ -94,8 +79,9 @@ async function endpointOn(): Promise<Endpoint> {
 let mini: Endpoint;
 
 beforeAll(async () => {
-  hub = await startLocalHub();
-  member = await hub.admin();
+  ({ hub, stop: stopHub } = await startMiniflareHub());
+  admin = new StandinPerson(hub.url, ADMIN);
+  member = await Member.open(admin, ORG);
   // Phase 1: the Mac as `mini` and, before a rename, as `oldmini`; `other` writes a project of its own.
   await phaseOne('mini', { [P1]: [await say(P1, 'mini', 1), await say(P1, 'mini', 2), await say(P1, 'mini', 3)] });
   await phaseOne('oldmini', { [P1]: [await say(P1, 'oldmini', 1), await say(P1, 'oldmini', 2)], [P2]: [await say(P2, 'oldmini', 1), await say(P2, 'oldmini', 2, true)], [P4]: [await say(P4, 'oldmini', 1)] });
@@ -107,14 +93,14 @@ beforeAll(async () => {
   await member.awaitPosted(issued.enrollment);
   await member.list(issued.enrollment, issued.k);
   expect((await enrolling).code).toBe(0);
-  mini.parts!.state.setLegacy({ org: LOCAL_ORG, key: base64urlEncode(ORG_KEY) });
+  mini.parts!.state.setLegacy({ org: ORG, key: base64urlEncode(ORG_KEY) });
 }, 180_000);
 afterAll(async () => {
   for (const { endpoint, services } of started) {
     await endpoint.stop();
     services.cleanup();
   }
-  await hub?.stop();
+  await stopHub?.();
 });
 
 const lines = (out: string) => out.split('\n');

@@ -304,13 +304,15 @@ export class Registry extends DeployedRegistry {
       }
     }
     if (url.pathname === WRAPPED_KEY_SEED_PATH) {
-      // Every copy is of the org's one key: under its check once there is one.
+      // Every copy is of the org's one key: under its check once there is one. A suite may give the copy's bytes and the
+      // key's check.
+      const given = (await request.json()) as { wrapped?: string; check?: string };
       const held = this.ctx.storage.sql.exec<{ key_check: string | null }>('SELECT key_check FROM org').toArray()[0]?.key_check;
-      const check = held ?? Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) => b.toString(16).padStart(2, '0')).join('');
+      const check = held ?? given.check ?? Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) => b.toString(16).padStart(2, '0')).join('');
       const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
       this.ctx.storage.sql.exec(
         'INSERT INTO wrapped_keys (id, method, label, credential, kdf, iv, wrapped, "check", created_by, created) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)',
-        id, 'passphrase', 'seeded', '{}', 'iv', 'wrapped', check, 'suite', new Date().toISOString(),
+        id, 'passphrase', 'seeded', '{}', 'iv', given.wrapped ?? 'wrapped', check, 'suite', new Date().toISOString(),
       );
       this.ctx.storage.sql.exec('UPDATE org SET key_check = ?', check);
       return Response.json({ id });

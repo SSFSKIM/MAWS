@@ -463,18 +463,10 @@ deletes what it minted, however it ends. It fails if any of that fails.
       printf 'DESK_ACCESS_TOKEN=%s\n' "$(cloudflared access token -app=$HUB)" \
         | pnpm --filter desk-hub deployment probe --retired --config deploy/config.json
 
-  The machine-token half (DX2's two routes) runs on the VM, whose endpoint holds a service token: the script reads it by path from the endpoint's `enrollment.json` (`credentials.clientId`, `credentials.clientSecret`; `${XDG_CONFIG_HOME:-$HOME/.config}/MAWS/mawsd/endpoint/` on Linux) and never prints it. Each answer must be `404 {"error":"not-found"}` under the build step 3's `curl` named; a hub before M5b answers the VM's v2 credential `403 v2-credential` (M5a), and no body is sent:
+  The machine-token half (DX2's two routes) runs on the VM, whose endpoint holds a service token: `deploy/vm-dx2-retired.mjs`, fed to the VM's node on stdin (it imports nothing but node's own modules), reads the token by path from the endpoint's `enrollment.json` (`credentials.clientId`, `credentials.clientSecret`; `${XDG_CONFIG_HOME:-$HOME/.config}/MAWS/mawsd/endpoint/` on Linux) and never prints it. It asks `GET /machine/stream` and `POST /machine/frames` with no body, and passes only when both answer the Worker's `404 {"error":"not-found"}` under `BUILD`, the build step 3's `curl` named; anything else fails it, exit 1: a hub before M5b answering the VM's v2 credential `403 v2-credential` (M5a), another build's answer, or Access's redirect with no build header. `HUB` and `BUILD` reach it as arguments of their own, never spliced into the remote command:
 
-      devcloud vm ssh <vm> -- "HUB=$HUB node --input-type=module -" <<'EOF'
-      import { readFileSync } from 'node:fs';
-      const dir = `${process.env.XDG_CONFIG_HOME ?? `${process.env.HOME}/.config`}/MAWS/mawsd/endpoint`;
-      const { credentials } = JSON.parse(readFileSync(`${dir}/enrollment.json`, 'utf8'));
-      const headers = { 'CF-Access-Client-Id': credentials.clientId, 'CF-Access-Client-Secret': credentials.clientSecret };
-      for (const [method, path] of [['GET', '/machine/stream'], ['POST', '/machine/frames']]) {
-        const response = await fetch(`${process.env.HUB}${path}`, { method, headers, redirect: 'manual' });
-        console.log(method, path, response.status, response.headers.get('x-desk-build'), (await response.text()).slice(0, 200));
-      }
-      EOF
+      BUILD=$(curl -sI -X POST $HUB/machine/enroll | awk 'tolower($1) == "x-desk-build:" { print $2 }' | tr -d '\r')
+      devcloud vm ssh <vm> -- env "HUB=$HUB" "BUILD=$BUILD" node --input-type=module - < apps/desk-hub/deploy/vm-dx2-retired.mjs
 
 - `fake-check`: M4's fake machine, enrolled from a code, replays its recording, and a browser sees every row, request, decision, log event, and outcome, plus one RPC answered.
 - `redeploy-check`: two fake machines and a browser write while the hub is redeployed mid-run, under the same throwaway org. The writing lasts 420 s by default (`--seconds`), because the cut came +314 to +329 s after the deploy. The redeploy is new code, since its build's name is new: Cloudflare restarts objects for new code only. Nothing may be lost or duplicated, and the check fails as "not exercised" when the redeploy cut no machine's stream. See M5's findings in DC3's plan: on 2026-10-15, Cloudflare kept the old version's connections open after a deploy.
