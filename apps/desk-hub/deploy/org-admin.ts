@@ -6,7 +6,7 @@
 // Where it may write is held, before anything is asked of the hub, to a staging hub or the suites' local one, never
 // production, which is refused by name (config.ts, checkTestHub), and within it to two cases:
 // - the deployment's own org, only when it serves a chain whose genesis is the one the configuration pins
-//   (`orgGenesis`, the operator's anchor): a successor, never a genesis. A configuration without a pin (production's)
+//   (`orgGenesis`, the operator's anchor): a successor, never a genesis. A configuration without a pin
 //   is refused, so a test device can never root an org nor sign into one it was not set up for;
 // - a throwaway org (`--test-org`, proof.ts's rule): a genesis when it has no state yet, signed by this device.
 import {

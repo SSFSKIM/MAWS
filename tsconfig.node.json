@@ -38,6 +38,7 @@
     "apps/desk-hub/deploy/admin-machines.ts",
     "apps/desk-hub/deploy/deploy.ts",
     "apps/desk-hub/deploy/run-lock.ts",
+    "apps/desk-hub/deploy/terminal.ts",
     "apps/desk-hub/fake-machine/json-file.ts",
     "apps/desk-hub/fake-machine/link.ts",
     "apps/desk-hub/fake-machine/org.ts",
