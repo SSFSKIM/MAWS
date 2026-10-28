@@ -789,6 +789,10 @@ Each is built provisionally as recommended, unless it says otherwise, and change
   Rationale: each finding was real against the code; the review's verdict otherwise found the signed-out seam, the stable subscription ids, the cursor rules, the tolerant output codec and the no-bump decision sound.
   Date/Author: 2026-10-28, O7's planner.
 
+- Decision: The second round (1 P1) is folded in. A `done` whose outcome is `{state: 'refused'}` no longer settles an ambiguous act either, because a closed ledger refuses `unavailable` before it looks the id up. Only a query settles an ambiguous act, and a query's `unavailable` keeps it ambiguous. The round found the other four fixes complete, and no new contradiction.
+  Rationale: verified against `src/shared/host/op-ledger.ts` `begin`.
+  Date/Author: 2026-10-28, O7's planner.
+
 The residue for P5's Decision Log. Each item is decided where it binds (M1 unless marked), with the alternative it rejected:
 
 1. M1 defines `OrgSession` and holds `signedOut()` in production, plus a development source behind `MAWS_DEV_ORG` in unpackaged builds; O8's sign-in implements it. Rejected: O7 building sign-in, so that two children build it.
