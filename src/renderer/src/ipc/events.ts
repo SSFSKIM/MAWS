@@ -282,9 +282,11 @@ export function connectShell(
   // project changes (a refold) moves its tabs (the layout ignores this until it has hydrated). A session with neither
   // (a removal on its way to closing its tabs, a draft whose intent was just discarded) is not known: its tabs stay put.
   // P5 O6 M5: the set is the session's row's (`stores/org-projects.ts`): its org project's, or its machine's own when no
-  // checkout lists its directory; so a change of any machine's projects can move tabs too.
+  // checkout lists its directory; so a change of any machine's projects can move tabs too. A session of a machine whose
+  // snapshot has not completed this run is not known yet: its records may have landed before its projects, and filing
+  // it then would move its tabs out of their restored set (the branch review), so nothing of it moves until it loads.
   const projectOf = (id: AppSessionId): TabSetKey | null | undefined =>
-    sessionSetKey(sessions(), local, id, () => {
+    !stores.machines.getState().loaded.has(machineOf(id)) ? undefined : sessionSetKey(sessions(), local, id, () => {
       const retention = currentTabRetention();
       const unstarted = retention ? retention.retains(id) : sessions().unstarted.has(id);
       return unstarted ? unstartedProjectOf(id) : undefined;
@@ -306,7 +308,9 @@ export function connectShell(
     if (state.records !== previous.records || state.projects !== previous.projects) stores.layout.getState().refileTabs();
   });
   const offRekey = stores.machines.subscribe((state, previous) => {
-    if (state.loaded !== previous.loaded) stores.layout.getState().rekeyProjects();
+    if (state.loaded === previous.loaded) return;
+    stores.layout.getState().rekeyProjects();
+    stores.layout.getState().refileTabs(); // what waited for the machine's whole snapshot files now
   });
 
   // P5 O6 M4 ("The layout across machines"): a tab is kept when its session is held or retained; a tab of another

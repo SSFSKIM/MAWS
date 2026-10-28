@@ -539,6 +539,32 @@ describe('the shell per machine', () => {
     expect(stores.sessions.getState().records.has(at('a4' as AppSessionId))).toBe(true);
   });
 
+  // The branch review: B's session.list lands before its session.projects.list, so for a moment B's records name projects
+  // the page does not hold yet. A restored org set holding B's sessions stays whole, panes and ratio, through it.
+  it('keeps a restored org set whole while another machine’s records arrive before its projects', async () => {
+    const ORG = 'remote:github.com/example/shared';
+    const org = { key: ORG, name: 'shared', source: 'remote', smnsId: null } as const;
+    const session = (id: string) => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false });
+    const split = { panes: [{ tabs: [session(A)], activeTabId: `session:${A}` }, { tabs: [session(onB('b1'))], activeTabId: `session:${onB('b1')}` }], focusedPane: 1, splitRatio: 0.3 };
+    const { fake, stores } = setup(0, { machines: [LOCAL_ENTRY, other('up', 1)], tabs: { version: 3, current: ORG, sets: { [ORG]: split }, closedTabs: [] } });
+    await fake.reply('session.list', { sessions: [record('a', { projectId: 'p1' as ProjectId })], revision: 1 });
+    await fake.reply('session.projects.list', { projects: [project('p1', 0, { org })], revision: 1 });
+    await fake.reply('session.digests', { digests: [] });
+    await fake.reply('attention.list', []);
+    await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
+    const shape = () => Object.fromEntries(Object.entries(stores.layout.getState().main.sets).map(([key, set]) => [key, { panes: set!.panes.map((p) => p.tabs.map((t) => t.id)), splitRatio: set!.splitRatio }]));
+    const whole = { [ORG]: { panes: [[`session:${A}`], [`session:${onB('b1')}`]], splitRatio: 0.3 } };
+    expect(shape()).toEqual(whole);
+    await fake.reply('session.list', { sessions: [record('b1', { projectId: 'pb' as ProjectId })], revision: 4 }); // B's records first
+    expect(shape(), 'nothing moves while B’s projects are unknown').toEqual(whole);
+    await fake.reply('session.projects.list', { projects: [project('pb', 0, { org })], revision: 4 });
+    await fake.reply('session.digests', { digests: [] });
+    await fake.reply('attention.list', []);
+    await vi.waitFor(() => expect(stores.machines.getState().loaded.has(OTHER_MACHINE)).toBe(true));
+    expect(shape()).toEqual(whole);
+    expect(stores.layout.getState().main.current).toBe(ORG);
+  });
+
   it('keeps another machine’s tabs until that machine has loaded, then drops the ones it does not list', async () => {
     const { fake, stores } = setup(0, { machines: [LOCAL_ENTRY, other('connecting', 0)], tabs: sessionTabs(A, onB('b1'), onB('b9')) });
     await answerSnapshots(fake);
