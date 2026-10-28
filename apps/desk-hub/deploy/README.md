@@ -514,20 +514,12 @@ production's Worker or host, or a preview alias of it (`<alias>-desk-hub.…`), 
     fails unless both checks, the sweep and the restore passed and `/api/me` names `staging-ssfskim` again (read
     within 30 s; a read that fails or times out is `restore check failed: …`). An `INCONCLUSIVE` redeploy-check
     (status 3) fails the step too.
-  - `desk-web <n>`: the same around acceptance 8's desk-web check (`apps/desk-web/e2e-staging`, its own
-    `playwright.staging.config.ts`): Playwright's headless Chromium loads staging's desk-web, sets the throwaway org's
-    key up, enrolls M4's fake machine from the Machines dialog, and screenshots the grid, the session listed, its
-    permission card, the card answered from the page and the decision in the group chat, into `desk-web-<n>/`. The
-    browser holds the owner's Access token as its `CF_Authorization` cookie for the staging host; nothing records a
-    trace, video or HAR, nor the failure context (`error-context.md`, with a snapshot of the page) Playwright writes
-    for a failed test whatever its options say (`e2e-staging/unrecorded.ts`). Afterwards every file the step wrote is
-    searched for the token and for what the check lists in `desk-web-<n>.scan` (the enrollment code it read from the
-    Machines dialog, its one-time token and the org key), which must be in none; the list is removed with the run.
-    The step takes no option to pass on, and Playwright runs in an environment the script builds (`env -i`, no
-    `PWDEBUG`, `PW_*` or `PLAYWRIGHT_*`); `playwright.staging.config.ts` itself refuses any option but naming it and any
-    such variable (`e2e-staging/recording.ts`), so nothing can turn recording back on.
-    Playwright's Chromium must be installed once (`pnpm --filter desk-web exec playwright install chromium`).
-- `staging-sweep.py snapshot|sweep` is the throwaway steps' account sweep: the service tokens and the `desk-hub*`
+  - The secret scan (`secret_scan <list> <paths…>`) is for a step whose run saw secrets, O13 M7's `phone <n>`: it
+    counts the files under the run's paths holding the owner's Access token or any line of the run's list (an
+    enrollment code, its one-time token, a key), the patterns read from a pipe, never an argument; the step fails unless
+    none does. Acceptance 8's `desk-web <n>` check, Playwright against the paused desk-web over DX2, left with DX2's
+    routes (P5 O14 M5b); the phone run supersedes it.
+- `staging-sweep.py snapshot|sweep` is the throwaway step's account sweep: the service tokens and the `desk-hub*`
   Access apps and policies before the run, and after it the deletion of what appeared and is the throwaway org's
   (service tokens `desk-<org>-*`, and the apps and policies the deploy tool makes on staging, by exact name:
   `desk-hub-staging`, `desk-hub-staging public paths`, `desk-hub-staging owner`, `desk-hub-staging machines`). Anything
@@ -549,7 +541,7 @@ What they read, at run time, never printed or passed as an argument:
   `access-sync`.
 
 Where they write: `DESK_STAGING_DIR` (default `~/.local/state/desk-hub-staging`, created 0700): one log per step and
-deploy, `prod/`, the throwaway steps' snapshots and sweeps, `access-sync/` (its checkpoint) and `desk-web-<n>/`.
+deploy, `prod/`, the throwaway step's snapshots and sweeps, and `access-sync/` (its checkpoint).
 `DESK_HEAVY_WRAPPER`, when set, prefixes the web build (a slot limiter on a shared machine).
 
 Production's Access read-back (its apps and policies, GETs only, compared before and after a run) is not among them:
