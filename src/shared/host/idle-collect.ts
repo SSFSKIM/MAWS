@@ -83,12 +83,11 @@ export function idleCollector(options: IdleCollectorOptions): IdleCollector {
   const grown = (before: HeapSize) => floor === null || before.used >= floor.used + GROWTH_BYTES || before.physical >= floor.physical + GROWTH_BYTES;
   const run = () => {
     deferred = false;
-    const force = forced;
-    forced = false;
     if (stopped || idle !== true) return; // exiting, or busy again before the loop turned
     const before = heap();
-    if (!force && !grown(before)) return;
+    if (!forced && !grown(before)) return;
     const started = now();
+    forced = false; // the collection attempt consumes the bypass, even if it fails
     try {
       collect();
     } catch (error) {
@@ -116,6 +115,7 @@ export function idleCollector(options: IdleCollectorOptions): IdleCollector {
     },
     stop() {
       stopped = true;
+      forced = false;
     },
   };
 }

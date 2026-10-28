@@ -87,6 +87,19 @@ describe('the idle collector', () => {
     expect(collect).toHaveBeenCalledTimes(2);
   });
 
+  it('collects a dropped holding at the next idle entry when it was busy before the deferred turn', () => {
+    const { collector, collect, turn } = rig();
+    collector.set(true);
+    turn();
+    collector.dropped();
+    collector.set(false);
+    turn();
+    expect(collect).toHaveBeenCalledOnce();
+    collector.set(true);
+    turn();
+    expect(collect).toHaveBeenCalledTimes(2);
+  });
+
   it('an entry and a dropped holding in one turn collect once, past the guard', () => {
     const { collector, collect, turn, queued } = rig();
     collector.set(true);
