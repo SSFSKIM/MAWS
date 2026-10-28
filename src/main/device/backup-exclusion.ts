@@ -24,9 +24,11 @@ export type BackupExclusionDeps = {
   run?: (file: string, args: string[], timeoutMs: number) => Promise<void>;
 };
 
-export async function excludeFromBackup(path: string, deps: BackupExclusionDeps = {}): Promise<void> {
-  if ((deps.platform ?? process.platform) !== 'darwin') return;
+/** True once the exclusion is set; false where there is no Time Machine to exclude from. Rejects when it could not be set. */
+export async function excludeFromBackup(path: string, deps: BackupExclusionDeps = {}): Promise<boolean> {
+  if ((deps.platform ?? process.platform) !== 'darwin') return false;
   await (deps.run ?? runProgram)(OSASCRIPT, ['-l', 'JavaScript', '-e', SCRIPT, path], TIMEOUT_MS);
+  return true;
 }
 
 function runProgram(file: string, args: string[], timeoutMs: number): Promise<void> {

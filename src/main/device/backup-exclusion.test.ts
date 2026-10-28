@@ -12,7 +12,7 @@ const STICKY_EXCLUSION = 'com.apple.metadata:com_apple_backup_excludeItem';
 describe('excludeFromBackup', () => {
   it('on macOS sets NSURLIsExcludedFromBackupKey on the path, passed as an argument and bounded by a timeout', async () => {
     const runs: { file: string; args: string[]; timeoutMs: number }[] = [];
-    await excludeFromBackup('/profile/device', { platform: 'darwin', run: async (file, args, timeoutMs) => void runs.push({ file, args, timeoutMs }) });
+    expect(await excludeFromBackup('/profile/device', { platform: 'darwin', run: async (file, args, timeoutMs) => void runs.push({ file, args, timeoutMs }) })).toBe(true);
     expect(runs).toHaveLength(1);
     const [{ file, args, timeoutMs }] = runs as [(typeof runs)[number]];
     expect(file).toBe('/usr/bin/osascript');
@@ -23,9 +23,9 @@ describe('excludeFromBackup', () => {
     expect(timeoutMs).toBeGreaterThan(0);
   });
 
-  it('elsewhere does nothing', async () => {
+  it('elsewhere does nothing, and says it excluded nothing', async () => {
     const runs: string[] = [];
-    await excludeFromBackup('/profile/device', { platform: 'linux', run: async (file) => void runs.push(file) });
+    expect(await excludeFromBackup('/profile/device', { platform: 'linux', run: async (file) => void runs.push(file) })).toBe(false);
     expect(runs).toEqual([]);
   });
 

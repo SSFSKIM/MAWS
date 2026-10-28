@@ -13,7 +13,9 @@
 // layer's Decision Log 28), so a root key must not be backed up a second time. Every load excludes `device/` itself, a
 // sticky exclusion that covers whatever is linked into it; it comes before a first load writes the key file, so that
 // file is never eligible, and on later loads it reaches a file written before the exclusion existed. A failed exclusion
-// is logged and the load goes on: the device keeps its keys, and the next load asks again.
+// is logged and the load goes on: the device keeps its keys, and the next load asks again. A file made after its
+// exclusion was set says so (`excludedFromBackupAtCreation: true`), and nothing adds that mark later: a key made before
+// the exclusion, or while it failed, may already sit in a backup, and O8 has it registered afresh before it can be a root.
 import { constants } from 'node:fs';
 import { link, lstat, mkdir, open, rm, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -26,6 +28,8 @@ export type DeviceKeys = {
   channel: SigningKey;
   /** Signs an action's step-up, only through step-up.ts. */
   stepUp: SigningKey;
+  /** The keys were made after `device/` was excluded from Time Machine, so no backup can hold them. */
+  excludedFromBackupAtCreation: boolean;
 };
 
 export type DeviceKeysRefusal = 'symlink' | 'owner' | 'not-private' | 'not-a-directory' | 'not-a-file' | 'malformed';
@@ -43,7 +47,8 @@ export class DeviceKeysError extends Error {
 }
 
 type KeyRecord = { jwk: JsonWebKey; pub: B64; created: string };
-type KeysFile = { version: 1; keyStorage: 'software'; channel: KeyRecord; stepUp: KeyRecord };
+/** `excludedFromBackupAtCreation` is written only as `true`; a file without it (older, or made while the exclusion failed) has no claim. */
+type KeysFile = { version: 1; keyStorage: 'software'; channel: KeyRecord; stepUp: KeyRecord; excludedFromBackupAtCreation?: true };
 
 const DIRECTORY_MODE = 0o700;
 const FILE_MODE = 0o600;
@@ -51,19 +56,20 @@ const FILE_MODE = 0o600;
 /** The device's keys under `profile` (main's userData), made on the first load. */
 export async function loadDeviceKeys(
   profile: string,
-  deps: { uid?: number; now?: () => Date; excludeFromBackup?: (path: string) => Promise<void> } = {},
+  deps: { uid?: number; now?: () => Date; excludeFromBackup?: (path: string) => Promise<boolean> } = {},
 ): Promise<DeviceKeys> {
   const uid = deps.uid ?? process.getuid!();
   const dir = join(profile, 'device');
   await mkdir(dir, { recursive: true, mode: DIRECTORY_MODE });
   await assertPrivateDirectory(dir, uid);
-  await (deps.excludeFromBackup ?? excludeFromBackup)(dir).catch((error: unknown) =>
-    console.warn(`[device-keys] could not exclude ${dir} from Time Machine: ${error instanceof Error ? error.message : String(error)}`),
-  );
+  const excluded = await (deps.excludeFromBackup ?? excludeFromBackup)(dir).catch((error: unknown) => {
+    console.warn(`[device-keys] could not exclude ${dir} from Time Machine: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  });
   const file = join(dir, 'keys.json');
   const existing = await readPrivateFile(file, uid);
   if (existing !== null) return fromFile(existing, file);
-  await createKeysFile(dir, file, (deps.now ?? (() => new Date()))());
+  await createKeysFile(dir, file, (deps.now ?? (() => new Date()))(), excluded);
   // Whichever first load linked its file into place, every load reads that one.
   const created = await readPrivateFile(file, uid);
   if (created === null) throw new DeviceKeysError('malformed', file, 'vanished after it was written');
@@ -100,12 +106,18 @@ async function readPrivateFile(file: string, uid: number): Promise<string | null
   }
 }
 
-async function createKeysFile(dir: string, file: string, now: Date): Promise<void> {
+async function createKeysFile(dir: string, file: string, now: Date, excluded: boolean): Promise<void> {
   const record = async (): Promise<KeyRecord> => {
     const key = await generateSigningKey(true);
     return { jwk: await crypto.subtle.exportKey('jwk', key.privateKey), pub: key.pub, created: now.toISOString() };
   };
-  const contents: KeysFile = { version: 1, keyStorage: 'software', channel: await record(), stepUp: await record() };
+  const contents: KeysFile = {
+    version: 1,
+    keyStorage: 'software',
+    channel: await record(),
+    stepUp: await record(),
+    ...(excluded ? { excludedFromBackupAtCreation: true as const } : {}),
+  };
   const temp = join(dir, `.keys-${process.pid}-${crypto.randomUUID()}.json`);
   const handle = await open(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, FILE_MODE);
   try {
@@ -140,7 +152,12 @@ async function fromFile(text: string, file: string): Promise<DeviceKeys> {
   if (typeof value !== 'object' || value === null || value.version !== 1 || value.keyStorage !== 'software') {
     throw new DeviceKeysError('malformed', file, 'is not a version 1 software key file');
   }
-  return { keyStorage: 'software', channel: await keyOf(value.channel, 'channel', file), stepUp: await keyOf(value.stepUp, 'stepUp', file) };
+  return {
+    keyStorage: 'software',
+    channel: await keyOf(value.channel, 'channel', file),
+    stepUp: await keyOf(value.stepUp, 'stepUp', file),
+    excludedFromBackupAtCreation: value.excludedFromBackupAtCreation === true,
+  };
 }
 
 async function keyOf(record: KeyRecord | undefined, name: string, file: string): Promise<SigningKey> {

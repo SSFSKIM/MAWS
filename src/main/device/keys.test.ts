@@ -134,6 +134,7 @@ describe('the device keys and Time Machine', () => {
     const calls: { path: string; keyFileExisted: boolean }[] = [];
     const excludeFromBackup = async (path: string) => {
       calls.push({ path, keyFileExisted: await lstat(keysFile()).then(() => true, () => false) });
+      return true;
     };
     return { calls, excludeFromBackup };
   };
@@ -146,7 +147,7 @@ describe('the device keys and Time Machine', () => {
   });
 
   it('are kept out of it on every later load, so a key file written before the exclusion existed gets it too', async () => {
-    await loadDeviceKeys(profile, { excludeFromBackup: async () => {} });
+    await loadDeviceKeys(profile, { excludeFromBackup: async () => true });
     const { calls, excludeFromBackup } = recorder();
     await loadDeviceKeys(profile, { excludeFromBackup });
     expect(calls).toEqual([{ path: deviceDir(), keyFileExisted: true }]);
@@ -164,6 +165,48 @@ describe('the device keys and Time Machine', () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  // O8 reads the mark: a key that may already sit in a backup must be registered afresh before it can be an org root.
+  const storedMark = async () => (JSON.parse(await readFile(keysFile(), 'utf8')) as Record<string, unknown>).excludedFromBackupAtCreation;
+
+  it('made with the exclusion in place carry the mark that they never were eligible', async () => {
+    const keys = await loadDeviceKeys(profile, { excludeFromBackup: async () => true });
+    expect(keys.excludedFromBackupAtCreation).toBe(true);
+    expect(await storedMark()).toBe(true);
+    expect((await loadDeviceKeys(profile, { excludeFromBackup: async () => true })).excludedFromBackupAtCreation).toBe(true);
+  });
+
+  it('written before the exclusion existed get it applied but never the mark', async () => {
+    await loadDeviceKeys(profile, { excludeFromBackup: async () => true });
+    const older = JSON.parse(await readFile(keysFile(), 'utf8')) as Record<string, unknown>;
+    delete older.excludedFromBackupAtCreation;
+    await writeFile(keysFile(), JSON.stringify(older), { mode: 0o600 });
+    const before = await readFile(keysFile(), 'utf8');
+    const { calls, excludeFromBackup } = recorder();
+    const keys = await loadDeviceKeys(profile, { excludeFromBackup });
+    expect(calls).toEqual([{ path: deviceDir(), keyFileExisted: true }]);
+    expect(keys.excludedFromBackupAtCreation).toBe(false);
+    expect(await readFile(keysFile(), 'utf8')).toBe(before);
+  });
+
+  it('made when the exclusion failed carry no mark, and a later exclusion does not add it', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const keys = await loadDeviceKeys(profile, { excludeFromBackup: async () => Promise.reject(new Error('timed out')) });
+      expect(keys.excludedFromBackupAtCreation).toBe(false);
+      expect(await storedMark()).toBeUndefined();
+      expect((await loadDeviceKeys(profile, { excludeFromBackup: async () => true })).excludedFromBackupAtCreation).toBe(false);
+      expect(await storedMark()).toBeUndefined();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('made where there is no Time Machine to exclude them from carry no mark', async () => {
+    const keys = await loadDeviceKeys(profile, { excludeFromBackup: async () => false });
+    expect(keys.excludedFromBackupAtCreation).toBe(false);
+    expect(await storedMark()).toBeUndefined();
   });
 
   it('are not touched when the directory is refused', async () => {
