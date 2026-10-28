@@ -10,6 +10,7 @@ import type { ProjectKey } from './derive';
 
 export type TreeNode =
   | { id: string; kind: 'session'; appSessionId: AppSessionId; parent: string }
+  | { id: string; kind: 'listed'; appSessionId: AppSessionId; parent: string } // P5 O8 M2: its row's own Enter activates it
   | { id: string; kind: 'project'; key: ProjectKey; expanded: boolean }
   | { id: string; kind: 'more'; key: ProjectKey | null; parent: string | null }; // key null: the project list's own
 
@@ -45,6 +46,7 @@ export function treeCommand(nodes: TreeNode[], id: string, key: string): TreeCom
       return node.parent === null ? null : { kind: 'focus', id: node.parent };
     case 'Enter':
       if (node.kind === 'session') return { kind: 'open', appSessionId: node.appSessionId };
+      if (node.kind === 'listed') return null;
       return node.kind === 'project' ? { kind: 'toggle', key: node.key } : { kind: 'more', key: node.key };
     case ' ':
       if (node.kind === 'project') return { kind: 'toggle', key: node.key };
@@ -60,6 +62,7 @@ export interface TreeContextValue {
   tabStop: string | null;
   selected: AppSessionId | null;
   onFocusItem(id: string): void;
+  onPick?(id: AppSessionId): void; // P5 O8 M2: a listed row selected with no opener for its lane
 }
 export const TreeContext = createContext<TreeContextValue>({ tabStop: null, selected: null, onFocusItem: () => {} });
 export const useTree = () => useContext(TreeContext);

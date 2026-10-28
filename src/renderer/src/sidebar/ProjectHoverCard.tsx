@@ -36,10 +36,10 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 
 function Body({ entry }: { entry: ProjectEntry & { project: ProjectRecord } }) {
-  const { project, sessions, rollup, lastActivity } = entry;
+  const { project, sessions, listed, rollup, lastActivity } = entry;
   const now = useNow();
   const elapsed = lastActivity === null ? null : Math.max(0, now - lastActivity);
-  const counts = [plural(sessions.length, 'session', 'sessions'), `${rollup.waiting} waiting`, `${rollup.working} working`].join(' · ');
+  const counts = [plural(sessions.length + listed.length, 'session', 'sessions') /* P5 O8 M2: listed rows too */, `${rollup.waiting} waiting`, `${rollup.working} working`].join(' · ');
 
   return (
     <div className="flex flex-col gap-2 text-ui-sm text-fg">
