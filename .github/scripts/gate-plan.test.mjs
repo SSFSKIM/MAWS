@@ -270,12 +270,15 @@ test("every LIVE_E2E group's spec skips on a flag the e2e job sets under live", 
   }
 });
 
-// A measured group's job waits first for ci-kit's measured-job guard on a Mac, and gets the guard's 15-minute bound on
-// top of the usual 30 (Decision Log 75's posture go, automated); on the exclusive Mac instance, both get the 10 minutes
-// its start may wait for the shared instances to stop on top (ci-kit's mac-lane concurrency spec, M2).
+// A measured group's job waits first for ci-kit's measured-job guard on a Mac, and, when its script builds out/, again
+// after that build, before its command; it gets both guards' 15-minute bounds on top of the usual 30 (Decision Log 75's
+// posture go, automated); on the exclusive Mac instance, both get the 10 minutes its start may wait for the shared
+// instances to stop on top (ci-kit's mac-lane concurrency spec, M2).
 test('a MEASURED_E2E group is marked measured in its matrix entry, and gate.yml guards it by that mark and times it by the entry', () => {
   const { outputs } = plan({ MEASURED_E2E: 'artifacts-perf document-scale', HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:artifacts-perf,e2e:library\nRunner: macos' });
-  assert.deepEqual(Object.fromEntries(JSON.parse(outputs.e2e).map((entry) => [entry.group, [entry.measured, entry.timeout]])), { 'artifacts-perf': [true, 55], library: [false, 40] });
+  assert.deepEqual(Object.fromEntries(JSON.parse(outputs.e2e).map((entry) => [entry.group, [entry.measured, entry.timeout]])), { 'artifacts-perf': [true, 70], library: [false, 40] });
+  // The variant its script builds, which the e2e job builds before the second guard; an unmeasured group carries none.
+  assert.deepEqual(Object.fromEntries(JSON.parse(outputs.e2e).map((entry) => [entry.group, entry.prebuild])), { 'artifacts-perf': 'plain', library: undefined });
 
   const workflow = readWorkflow();
   const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
@@ -284,6 +287,9 @@ test('a MEASURED_E2E group is marked measured in its matrix entry, and gate.yml 
   assert.match(job, /\n {4}timeout-minutes: \$\{\{ matrix\.timeout \}\}\n/);
   // The guard is the job's first step, before the checkout, and only for a measured group on a Mac.
   assert.match(job, /\n {4}steps:\n(?: {6}#.*\n)* {6}- if: matrix\.measured && runner\.os == 'macOS'\n {8}uses: SSFSKIM\/ci-kit\/mac\/settle@v1\n {6}- id: checkout\n {8}uses: actions\/checkout@v7\n/);
+  // The second guard: after the build of the entry's variant, on this disk's cache as the command's own build finds it,
+  // and just before the command; it claims nothing, the first guard's claim holding the guest off until the job ends.
+  assert.match(job, /\n {6}- if: matrix\.prebuild && runner\.os == 'macOS'\n {8}env:\n {10}PREBUILD: \$\{\{ matrix\.prebuild \}\}\n {8}run: \|\n {10}export MAWS_E2E_BUILD_CACHE=\$HOME\/Library\/Caches\/maws-e2e-build\/\$RUNNER_NAME MAWS_E2E_BUILD_KEY=\$GITHUB_SHA\n {10}\.github\/scripts\/gate-run\.sh '[^']*' scripts\/e2e-build\.sh "\$PREBUILD"\n {6}- if: matrix\.prebuild && runner\.os == 'macOS'\n {8}uses: SSFSKIM\/ci-kit\/mac\/settle@v1\n {8}with:\n {10}vm: any\n {6}- env:\n {10}SCRIPT: \$\{\{ matrix\.script \}\}\n/);
   // A job refused before its checkout uploads nothing: the Mac's persistent workspace still holds the last job's reports.
   assert.match(job, /\n {6}- if: \(failure\(\) \|\| needs\.plan\.outputs\.evidence == 'true'\) && steps\.checkout\.outcome == 'success'\n {8}uses: actions\/upload-artifact@v7\n/);
 });
@@ -341,7 +347,7 @@ test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; e
   assert.deepEqual(placement(plan({ ...named, HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:composer,e2e:layout\nLane: vm' }).outputs), { composer: [vmMac, 30], layout: [vmMac, 30] });
   // The measured groups, which only a run naming them takes; class 1a on the Mac carries the wait too.
   const measured = plan({ ...own, HEAD_MESSAGE: `ci-gate: test\n\nGates: ${own.MEASURED_E2E.split(/\s+/).filter((group) => !own.LIVE_E2E.includes(group)).map((group) => `e2e:${group}`).join(',')}\nRunner: macos\nClass1a: macos` }).outputs;
-  for (const [group, where] of Object.entries(placement(measured))) assert.deepEqual(where, [homeMac, 55], group);
+  for (const [group, where] of Object.entries(placement(measured))) assert.deepEqual(where, [homeMac, group === 'tool-time-heavy-live' ? 55 : 70], group);
   assert.deepEqual(JSON.parse(measured.timeouts), { static: 40, unit: 40, probes: 40, unit_darwin: 40 });
 });
 
@@ -352,7 +358,7 @@ test('only measured, MAC_HOME_E2E and live e2e jobs ask for the home Mac; other 
     HEAD_MESSAGE: 'Gates: unit:darwin,packaged,e2e:default,e2e:design,e2e:library,e2e:side,e2e:artifacts-perf,e2e:discover\nRunner: macos',
   });
   assert.deepEqual(placement(ordinary.outputs), {
-    default: [mac, 40], design: [mac, 40], library: [sharedMac, 90], side: [soloMac, 40], 'artifacts-perf': [homeMac, 55], discover: [homeMac, 40],
+    default: [mac, 40], design: [mac, 40], library: [sharedMac, 90], side: [soloMac, 40], 'artifacts-perf': [homeMac, 70], discover: [homeMac, 40],
   });
   assert.equal(ordinary.outputs.unit_darwin_runner, JSON.stringify(mac));
   assert.equal(ordinary.outputs.packaged, 'true'); // gate.yml's fixed default labels are checked below.
@@ -401,7 +407,7 @@ test('a MEASURED_E2E or foreground group on MAC_SHARED_E2E stays on the exclusiv
     MAC_SHARED_E2E: 'artifacts-perf widgets default library',
     HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:artifacts-perf,e2e:widgets,e2e:default,e2e:library\nRunner: macos',
   });
-  assert.deepEqual(placement(outputs), { 'artifacts-perf': [homeMac, 55], widgets: [mac, 40], default: [mac, 40], library: [sharedMac, 90] });
+  assert.deepEqual(placement(outputs), { 'artifacts-perf': [homeMac, 70], widgets: [mac, 40], default: [mac, 40], library: [sharedMac, 90] });
   assert.match(summary, /\. Shared Mac instances: e2e:library\. On MAC_SHARED_E2E but measured or foreground, so alone: e2e:artifacts-perf, e2e:widgets, e2e:default\.\n$/);
 });
 
@@ -449,12 +455,12 @@ test('a MEASURED_E2E group on MAC_VM_E2E keeps the home Mac under any Lane:; a g
   const gates = 'Gates: e2e:artifacts-perf,e2e:library,e2e:widgets,e2e:document-app,e2e:side\nRunner: macos';
   const { outputs, summary } = plan({ ...lists, HEAD_MESSAGE: `ci-gate: test\n\n${gates}` });
   // widgets is foreground, so never shared: on MAC_VM_E2E it is solo.
-  assert.deepEqual(placement(outputs), { 'artifacts-perf': [homeMac, 55], library: [sharedMac, 90], widgets: [soloMac, 40], 'document-app': [soloMac, 40], side: [mac, 40] });
+  assert.deepEqual(placement(outputs), { 'artifacts-perf': [homeMac, 70], library: [sharedMac, 90], widgets: [soloMac, 40], 'document-app': [soloMac, 40], side: [mac, 40] });
   assert.match(summary, / Shared Mac instances: e2e:library\. On MAC_SHARED_E2E but measured or foreground, so alone: e2e:widgets\. Solo Mac \(the exclusive instance or the guest, whichever is free\): e2e:widgets, e2e:document-app\. On MAC_VM_E2E but measured, so on the exclusive instance: e2e:artifacts-perf\. Out\/ built on the pool \(e2e-build\) for the guest-eligible jobs: harness, plain\.\n$/);
   for (const [lane, guest] of [['vm', vmMac], ['vm-trial', vmTrialMac]]) {
     for (const scenario of [{ HEAD_MESSAGE: `ci-gate: test\n\n${gates}\nLane: ${lane.toUpperCase()}` }, { EVENT: 'workflow_dispatch', INPUT_GATES: gates.split('\n')[0].slice(7), INPUT_RUNNER: 'macos', INPUT_LANE: lane, HEAD_MESSAGE: 'Lane: vm-trial' }]) {
       const laned = plan({ ...lists, ...scenario });
-      assert.deepEqual(placement(laned.outputs), { 'artifacts-perf': [homeMac, 55], library: [guest, 30], widgets: [guest, 30], 'document-app': [guest, 30], side: [mac, 40] }, `${lane} ${JSON.stringify(scenario)}`);
+      assert.deepEqual(placement(laned.outputs), { 'artifacts-perf': [homeMac, 70], library: [guest, 30], widgets: [guest, 30], 'document-app': [guest, 30], side: [mac, 40] }, `${lane} ${JSON.stringify(scenario)}`);
       assert.match(laned.summary, new RegExp(` Lane: ${lane}, on \\[${guest[0]}\\] alone: e2e:library, e2e:widgets, e2e:document-app\\. On MAC_VM_E2E but measured, so on the exclusive instance: e2e:artifacts-perf\\. Out/ built on the pool \\(e2e-build\\) for the guest-eligible jobs: harness, plain\\.\\n$`), lane);
     }
   }
@@ -721,7 +727,7 @@ test('under Lane: hosted, default, a measured, a live, a secret and a POOL_E2E g
   const gates = 'Gates: e2e:default,e2e:artifacts-perf,e2e:connectors-oauth,e2e:desk-web,e2e:library\nRunner: macos\nClass1a: pool';
   const without = plan({ ...lists, HEAD_MESSAGE: `ci-gate: test\n\n${gates}` }).outputs;
   const { outputs, summary } = plan({ ...lists, HEAD_MESSAGE: `ci-gate: test\n\n${gates}\nLane: hosted` });
-  assert.deepEqual(placement(outputs), { ...placement(without), 'artifacts-perf': [homeMac, 55], library: [waiter, 100] });
+  assert.deepEqual(placement(outputs), { ...placement(without), 'artifacts-perf': [homeMac, 70], library: [waiter, 100] });
   assert.ok(summary.endsWith(`${hostedNote(['library'])} Lane: hosted, but never on a hosted Mac, so where it would be: e2e:default (default), e2e:artifacts-perf (measured), e2e:connectors-oauth (secret), e2e:desk-web (pool).\n`), summary);
   const live = plan({ ...lists, HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:library-live\nRunner: macos\nLive: yes\nLane: hosted' });
   assert.deepEqual(placement(live.outputs), { 'library-live': [homeMac, 40], 'tool-time-heavy-live': [homeMac, 55] });
@@ -901,7 +907,7 @@ test("gate.yml carries ci-kit's VM contract line, and keeps its promise: every t
       assert.ok(entries.length > 0, run);
       // None of them is e2e-vm's, whose steps are the e2e job's, settle first, by alias.
       assert.equal(outputs.e2e_host, outputs.e2e, `${run}${lane}`);
-      for (const entry of entries) assert.deepEqual([entry.group, entry.measured, JSON.parse(entry.runner), entry.timeout], [entry.group, true, homeMac, 55], `${run}${lane}`);
+      for (const entry of entries) assert.deepEqual([entry.group, entry.measured, JSON.parse(entry.runner), entry.timeout], [entry.group, true, homeMac, entry.group === 'tool-time-heavy-live' ? 55 : 70], `${run}${lane}`);
     }
   }
 });
