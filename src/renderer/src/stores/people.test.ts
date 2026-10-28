@@ -46,7 +46,7 @@ describe('people store', () => {
     expect(fake.invoked('layout.set')).toEqual([{ key: 'sidebar.people', value: { version: 1, on: [NOTES, MAWS] } }]);
   });
 
-  it('applies a toggle made before the read answered over what it reads, and writes only after it', async () => {
+  it('applies the state a toggle before the read answered asked for over what it reads, and writes only after it', async () => {
     const fake = fakeClient({ 'layout.set': undefined });
     const store = createPeopleStore(fake.client, { writeDelayMs: DELAY });
     void store.getState().load();
@@ -56,9 +56,33 @@ describe('people store', () => {
     await wait();
     expect(fake.invoked('layout.set')).toEqual([]); // a write now would drop what the read brings
     await fake.reply('layout.get', { value: { version: 1, on: [NOTES, STUDIO] } });
-    expect([...store.getState().on]).toEqual([STUDIO, MAWS]);
+    expect([...store.getState().on]).toEqual([NOTES, STUDIO, MAWS]);
     await wait();
-    expect(fake.invoked('layout.set')).toEqual([{ key: 'sidebar.people', value: { version: 1, on: [STUDIO, MAWS] } }]);
+    expect(fake.invoked('layout.set')).toEqual([{ key: 'sidebar.people', value: { version: 1, on: [NOTES, STUDIO, MAWS] } }]);
+  });
+
+  it('keeps a stored key on when an early toggle asked for it on, and leaves untouched stored keys alone', async () => {
+    const fake = fakeClient({ 'layout.set': undefined });
+    const store = createPeopleStore(fake.client, { writeDelayMs: DELAY });
+    void store.getState().load();
+    store.getState().toggle(MAWS); // shown off before the read, so "Show": the person wants it on
+    await fake.reply('layout.get', { value: { version: 1, on: [MAWS, STUDIO] } });
+    expect(store.getState().on.has(MAWS)).toBe(true);
+    expect(store.getState().on.has(STUDIO)).toBe(true);
+    await wait();
+    expect(fake.invoked('layout.set')).toEqual([{ key: 'sidebar.people', value: { version: 1, on: [MAWS, STUDIO] } }]);
+  });
+
+  it('ends off after an early double toggle, on then off, whatever the read holds', async () => {
+    const fake = fakeClient({ 'layout.set': undefined });
+    const store = createPeopleStore(fake.client, { writeDelayMs: DELAY });
+    void store.getState().load();
+    store.getState().toggle(MAWS);
+    store.getState().toggle(MAWS);
+    await fake.reply('layout.get', { value: { version: 1, on: [MAWS, STUDIO] } });
+    expect([...store.getState().on]).toEqual([STUDIO]);
+    await wait();
+    expect(fake.invoked('layout.set')).toEqual([{ key: 'sidebar.people', value: { version: 1, on: [STUDIO] } }]);
   });
 
   it('flushes a pending write when the page unloads', async () => {

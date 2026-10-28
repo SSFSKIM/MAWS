@@ -2,8 +2,9 @@
 // the sidebar rows (org projects' and machines' row keys) that draw other people's sessions, off by default and
 // remembered per row. Read once through `layout.get` at first use (an absent or invalid value is every toggle off) and
 // written through `layout.set` 250 ms after the last toggle and at once when the page unloads, as `stores/summary.ts`
-// keeps `summary.sections`. A toggle before the read answered is applied over what it reads, and nothing is written
-// until it has, so an early toggle never replaces the stored set with itself alone.
+// keeps `summary.sections`. A toggle before the read answered asks for the state the person saw it reach (on, or off),
+// and that state is applied over what the read brings, each touched key set as last asked and every other stored key
+// kept; nothing is written until the read lands, so an early toggle never replaces the stored set with itself alone.
 import { create } from 'zustand';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { SidebarPeopleSchema } from '@shared/ipc/schema/layout';
@@ -29,7 +30,7 @@ export function createPeopleStore(client: MawsBridge, options: { writeDelayMs?: 
   const delay = options.writeDelayMs ?? PEOPLE_WRITE_DELAY_MS;
   let reading: Promise<void> | null = null;
   let loaded = false;
-  const early: RowKey[] = []; // toggles before the read answered, replayed over what it reads
+  const early = new Map<RowKey, boolean>(); // each key toggled before the read answered: the state last asked for
   let timer: ReturnType<typeof setTimeout> | null = null;
   let unloadHooked = false;
 
@@ -60,19 +61,23 @@ export function createPeopleStore(client: MawsBridge, options: { writeDelayMs?: 
           const stored = result.ok ? result.value.value : null;
           const parsed = stored === null ? null : SidebarPeopleSchema.safeParse(stored);
           if (parsed && !parsed.success) console.warn(`[people] ${PEOPLE_KEY} is not a valid value; every toggle off`);
-          let on: ReadonlySet<RowKey> = new Set(parsed?.success ? (parsed.data.on as RowKey[]) : []);
-          for (const key of early) on = flipped(on, key);
+          const on = new Set(parsed?.success ? (parsed.data.on as RowKey[]) : []);
+          for (const [key, wanted] of early) {
+            if (wanted) on.add(key);
+            else on.delete(key);
+          }
           loaded = true;
           set({ on });
-          if (early.length > 0) schedule();
+          if (early.size > 0) schedule();
         });
         return reading;
       },
 
       toggle(key) {
-        set({ on: flipped(get().on, key) });
+        const on = flipped(get().on, key);
+        set({ on });
         if (loaded) return schedule();
-        early.push(key);
+        early.set(key, on.has(key));
         void get().load();
       },
     };
