@@ -38,7 +38,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [ ] The live check at the first cut-over machine.
 - [ ] M3 — The app as the org's signer: a co-root, the weekly successor, the signing checks — **executable** (re-planned 2026-10-28; needs M1 and O7 M1, both landed); the owner's sitting (`root add` on staging, then production) owed after M1's
   - [x] (2026-10-28) Task 1: `root add` in `deploy/admin.ts`, its `production-run.sh` line, and its proofs in `admin.test.ts`.
-  - [ ] Task 2: `checks.ts` (`checkSuccessor`, `supersededRevocations`) and its proofs, the zero-roots ones included.
+  - [x] (2026-10-28) Task 2: `checks.ts` (`checkSuccessor`, `supersededRevocations`) and its proofs, the zero-roots ones included.
   - [ ] Task 3: the device module, `createStateSigner` and the next keys (create, promote, destroy).
   - [ ] Task 4: `signing-store.ts`, `signer.ts`, `postState`, `signing.json`, §H's M3 rows.
   - [ ] Task 5: `weekly.ts` and `deliveries.ts`.
@@ -1435,6 +1435,18 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   6. The superseded offer is non-null whenever any candidate exists, withheld ones included. Its `lines` empty means nothing to sign: Task 6 hides the offer's button then and still shows the withheld names. `superseded-keys` also warns about withheld candidates.
   7. M3's proof of "one shortening `expires`" was wrong about the package, which refuses only a shortening to or before `issued`. Renewal-extends is the app's own rule (P5 Decision Log 30). The proof line is reworded.
   Rationale: the executor checked each point against `org-state.ts`.
+  Date/Author: 2026-10-28, O8's executor.
+
+- Decision: Task 3 (the device module, 5c866c647) settles the primitives Task 6's rekey transaction builds on.
+  1. `createStateSigner` is async, since `keyId` is.
+  2. Every refused confirmation reads `cancelled`.
+  3. `sign` signs a canonical copy taken before the prompt.
+  4. `DeviceKeysRefusal` gains `not-excluded`, covering a failed exclusion and one that answers `false`.
+  5. Added beyond §K: `discardNextDeviceKeys`, `deviceKeyIds(profile, 'current'|'next'|'retired')` and `findDeviceKeys(profile, device)`.
+  6. `promoteNextDeviceKeys` is idempotent: it completes whichever renames a crash left and syncs the directory. The replay is `findDeviceKeys`, then promote, then step 4.
+  7. A stale `keys.next.json` is replaced. So Task 6 keeps `createNextDeviceKeys` and step 1 under one fence, and a recorded rekey's next keys can't be replaced.
+  8. A second rekey's promotion overwrites a `keys.retired.json` that is still waiting, which destroys the first old device's keys before a root removes that device. Accepted: destroying a key early is the safe direction, and that old device stays listed, removable as before. The rejected alternative refused a second rekey while a retired file waits, which would block the `removed` case that needs it.
+  Rationale: §K's shapes, with what the transaction needs made explicit.
   Date/Author: 2026-10-28, O8's executor.
 
 ## Outcomes & Retrospective
