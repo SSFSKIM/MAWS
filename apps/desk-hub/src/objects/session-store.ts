@@ -1,10 +1,10 @@
 // What a project's session plane keeps in its `Project` object's storage (SQLite), so it survives an eviction while
 // sockets stay open, a hibernation, and a restart (§2): each machine's lease and presence, each session's latest
-// presence, the pending set, the latest delivery outcome per event and recipient, the RPC records by nonce, the
+// presence, the pending set, the latest delivery outcome per event and recipient, the
 // browsers' subscriptions, the machines revoked from the org, and the asks a question was pushed for. The logic that moves these lives in `project.ts`; this is their storage and nothing else.
 import type { Delivery, MachinePresence, Raised, SessionMessage } from '../protocol/session';
-import type { Rpc, RpcOutcome, RpcState } from '../protocol/rpc';
 
+// `rpcs` held DX6's RPC records until O14 M5b retired RPCs through the hub: dropped with what they answered.
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS presence (machine TEXT NOT NULL, session TEXT NOT NULL, message TEXT NOT NULL, PRIMARY KEY (machine, session));
 CREATE TABLE IF NOT EXISTS leases (
@@ -17,10 +17,7 @@ CREATE TABLE IF NOT EXISTS pending (
 CREATE TABLE IF NOT EXISTS deliveries (
   writer TEXT NOT NULL, seq INTEGER NOT NULL, session TEXT NOT NULL, machine TEXT NOT NULL, body TEXT NOT NULL,
   PRIMARY KEY (writer, seq, session));
-CREATE TABLE IF NOT EXISTS rpcs (
-  nonce TEXT PRIMARY KEY, machine TEXT NOT NULL, member TEXT NOT NULL, rpc TEXT NOT NULL, state TEXT NOT NULL,
-  outcome TEXT, generation INTEGER NOT NULL, updated INTEGER NOT NULL);
-CREATE INDEX IF NOT EXISTS rpcs_by_machine ON rpcs (machine, state);
+DROP TABLE IF EXISTS rpcs;
 CREATE TABLE IF NOT EXISTS op_outcomes (
   machine TEXT NOT NULL, session TEXT NOT NULL, rpc TEXT NOT NULL, phase TEXT NOT NULL,
   message TEXT NOT NULL, bytes INTEGER NOT NULL, updated INTEGER NOT NULL,
@@ -35,7 +32,7 @@ CREATE TABLE IF NOT EXISTS subs (
   generation INTEGER NOT NULL);
 `;
 
-/** How long an RPC's record answers a retry of its nonce: a day, as the daemon's ledger keeps its entries. */
+/** How long a command's receipt is kept: a day, as the daemon's ledger keeps its entries. */
 const RPC_RECORD_MS = 24 * 3600 * 1000;
 
 /** How long a settled request's id is kept to recognize its `settled` sent again: a month, past any daemon's restart. */
@@ -56,7 +53,6 @@ type LeaseRow = { machine: string; client: string; generation: number; expires: 
 const leaseOf = (row: LeaseRow): Lease => ({ ...row, online: row.online === 1, closed: row.closed === 1, follow: row.follow === 1 });
 const LEASE_COLUMNS = 'machine, generation, expires, online, closed, follow, client';
 export type PendingRow = { machine: string; raised: Raised; deadline: number | null };
-export type RpcRecord = { nonce: string; machine: string; member: string; rpc: Rpc; state: RpcState; outcome: RpcOutcome | null; generation: number };
 export type Route = { sub: string; socket: string; machine: string; session: string; agentId: string | null; generation: number };
 
 export class SessionStore {
@@ -234,41 +230,6 @@ export class SessionStore {
 
   deliveries(): Delivery[] {
     return this.sql.exec<{ body: string }>('SELECT body FROM deliveries ORDER BY rowid').toArray().map((row) => JSON.parse(row.body) as Delivery);
-  }
-
-  // RPC records, by nonce.
-
-  rpc(nonce: string): RpcRecord | undefined {
-    const row = this.sql
-      .exec<{ nonce: string; machine: string; member: string; rpc: string; state: RpcState; outcome: string | null; generation: number }>(
-        'SELECT nonce, machine, member, rpc, state, outcome, generation FROM rpcs WHERE nonce = ?',
-        nonce,
-      )
-      .toArray()[0];
-    return row && { ...row, rpc: JSON.parse(row.rpc) as Rpc, outcome: row.outcome === null ? null : (JSON.parse(row.outcome) as RpcOutcome) };
-  }
-
-  putRpc(record: RpcRecord, now: number): void {
-    this.sql.exec('DELETE FROM rpcs WHERE updated < ?', now - RPC_RECORD_MS);
-    this.sql.exec(
-      'INSERT OR REPLACE INTO rpcs (nonce, machine, member, rpc, state, outcome, generation, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      record.nonce,
-      record.machine,
-      record.member,
-      JSON.stringify(record.rpc),
-      record.state,
-      record.outcome === null ? null : JSON.stringify(record.outcome),
-      record.generation,
-      now,
-    );
-  }
-
-  /** Every forwarded RPC of `machine` sent on `generation` or an older stream: forwarded, no result yet. */
-  forwarded(machine: string, generation: number): RpcRecord[] {
-    return this.sql
-      .exec<{ nonce: string }>("SELECT nonce FROM rpcs WHERE machine = ? AND state = 'forwarded' AND generation <= ?", machine, generation)
-      .toArray()
-      .map((row) => this.rpc(row.nonce)!);
   }
 
   /** Bounded command receipts, not transcript rows. End wins even if an owed start arrives later. */

@@ -5,14 +5,14 @@
 // and anew after an eviction, never trusted when the head cannot be read.
 import { generateSigningKey, signEvent, type OrgState, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { base64urlEncode } from '../src/protocol/base64url';
 import { importOrgKey, newNonce, seal, verify } from '../src/protocol/codes';
 import type { ProjectDown } from '../src/protocol/browser';
 import type { HumanDraft, HumanEvent, LogEvent, SignedHumanEvent } from '../src/protocol/log';
 import type { DownFrame } from '../src/protocol/machine';
-import { BrowserClient, enroll, MachineClient, waitFor } from './support/clients';
+import { BrowserClient, waitFor } from './support/clients';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from './support/local';
 import { endorsed, genesis, memberId, newDevice, next, revokedDevice, signedBy, type TestDevice } from './support/org';
+import { Rl1Machine, TestOrg } from './support/rl1';
 
 let hub: LocalHub;
 /** The bootstrap admin's member id, whose devices write `hub/<A>`. */
@@ -20,8 +20,8 @@ let A: string;
 let a1: TestDevice;
 let recovery: SigningKey;
 let head: SignedOrgState;
-/** The machine the state lists: its DX2 stream, and the key and ref the state lists it by. */
-let machine: MachineClient;
+/** The machine the state lists, on RL1, and the key the state lists it by. */
+let machine: Rl1Machine;
 let machineKey: SigningKey;
 const KEY = importOrgKey(new Uint8Array(32).fill(5));
 const SESSION = 'e0ad139c-18bc-45bd-9489-be8653145f80';
@@ -61,17 +61,21 @@ beforeAll(async () => {
   A = ((await (await hub.fetchAs(ADMIN, '/api/me')).json()) as { member: { id: string } }).member.id;
   a1 = await newDevice('a1');
   recovery = await generateSigningKey();
-  machine = new MachineClient(hub, 'signer-1', await enroll(hub, ADMIN, 'signer-1'));
+  await accept(await genesis(ORG, A, ADMIN, a1, recovery));
+  const org = TestOrg.of(hub, A, a1, recovery, head);
+  const listed = await org.enroll('signer-1');
+  await accept(
+    await next(head, (s) => {
+      s.machines.push({ name: listed.name, ref: listed.ref, pub: listed.key.pub, owners: 'org' });
+      s.machineNames.push({ name: listed.name, ref: listed.ref });
+    }),
+  );
+  machineKey = listed.key;
+  machine = new Rl1Machine(hub, listed);
   await machine.connect();
-  machineKey = await generateSigningKey();
-  const ref = base64urlEncode(crypto.getRandomValues(new Uint8Array(16)));
-  const g = await genesis(ORG, A, ADMIN, a1, recovery);
-  g.machines.push({ name: machine.name, ref, pub: machineKey.pub, owners: 'org' });
-  g.machineNames.push({ name: machine.name, ref });
-  await accept(g);
 });
 afterAll(async () => {
-  await machine?.close();
+  machine?.close();
   await hub?.close();
 });
 
@@ -111,11 +115,11 @@ async function addMember(email: string): Promise<{ id: string; device: TestDevic
 
 /** Uploads `events` and waits until the hub has answered each: stored (the browser follows the log) or refused. */
 async function upload(project: string, events: LogEvent[]): Promise<void> {
-  const response = await machine.post([{ t: 'events', project, events }]);
-  if (response.status !== 200) throw new Error(`post: ${response.status} ${await response.text()}`);
+  machine.send([{ t: 'events', project, events }]);
+  await machine.settled(project);
 }
 
-/** Uploads `event` and answers the hub's refusal of it, from the machine's stream. */
+/** Uploads `event` and answers the hub's refusal of it, from the machine's socket. */
 async function refusedUpload(project: string, event: LogEvent) {
   const from = machine.frames.length;
   await upload(project, [event]);
@@ -326,20 +330,23 @@ describe('the cached org state', () => {
 });
 
 describe('a check that waits for the head', () => {
-  it("stores nothing of an upload whose stream was revoked while the head was read", async () => {
+  it("stores nothing of an upload whose connection was revoked while the head was read", async () => {
     const { project, browser } = await opened();
     await coldCache(project);
     await hub.stateCache(project, { hold: true });
     const { reads } = await hub.stateCache(project);
-    const posted = machine.post([{ t: 'events', project, events: [await v2Say(project, 1)] }]);
+    machine.send([{ t: 'events', project, events: [await v2Say(project, 1)] }]);
     await waitFor(async () => ((await hub.stateCache(project)).reads > reads ? true : undefined));
     await hub.lease(project, { op: 'forget', machine: machine.name, generation: machine.generation }); // DX7's revocation
     await hub.stateCache(project, { hold: false });
-    expect((await posted).status).toBe(409);
+    // The upload is the revoked connection's: it stores nothing, and the relay ends that connection.
+    await waitFor(() => (machine.endpoint.isOpen ? undefined : true));
     browser.send({ t: 'resume', after: 0 });
     await browser.next((f) => f.t === 'caught-up', 'caught-up', browser.frames.length);
     expect(browser.logged).toEqual([]);
     browser.close();
+    // A newer connection, for the suites after this one.
+    await machine.connect();
   });
 
   it("stores no human, signed or not, of a member removed while one waited for the head", async () => {
@@ -396,7 +403,7 @@ describe('a check that waits for the head', () => {
   });
 });
 
-describe('a DX2 daemon', () => {
+describe('a daemon', () => {
   it('is sent a v2-only event as stored, without a mac, and its rejection of it is recorded', async () => {
     const { project, browser } = await opened();
     const from = machine.frames.length;
@@ -405,8 +412,8 @@ describe('a DX2 daemon', () => {
     const sent = (await machine.next((f) => f.t === 'events' && f.project === project, 'the fan-out', from)) as Extract<DownFrame, { t: 'events' }>;
     expect(sent.events).toEqual([{ ...only, writer: `hub/${A}`, seq: 1, ts: sent.events[0].ts }]);
     expect(sent.events[0].mac).toBeUndefined();
-    // sminos refuses it on import as `bad-code` (no code to check), spends the position and reports it (DX2 `rejected`).
-    await machine.postOk([{ t: 'rejected', project, event: { writer: `hub/${A}`, seq: 1 }, reason: 'bad-code', message: 'its code or nonce is not the canonical base64url of 32 and 16 bytes' }]);
+    // A daemon of phase 1 refuses it on import as `bad-code` (no code to check), spends the position and reports it.
+    machine.send([{ t: 'rejected', project, event: { writer: `hub/${A}`, seq: 1 }, reason: 'bad-code', message: 'its code or nonce is not the canonical base64url of 32 and 16 bytes' }]);
     expect(await browser.next((f) => f.t === 'rejected', 'the rejection')).toMatchObject({ rejection: { machine: machine.name, event: { writer: `hub/${A}`, seq: 1 }, reason: 'bad-code' } });
     browser.close();
   });

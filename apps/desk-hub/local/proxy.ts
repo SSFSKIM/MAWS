@@ -20,8 +20,6 @@ export async function startProxy(options: {
   upstream: () => string;
   port?: number;
   host?: string;
-  /** Extra /standin/ paths answered before the stand-in's own (the code helpers, ./helpers.ts). */
-  extra?: (request: Request) => Promise<Response | null>;
 }): Promise<Proxy> {
   const { standin, upstream } = options;
   const host = options.host ?? '127.0.0.1';
@@ -38,7 +36,7 @@ export async function startProxy(options: {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? host}`);
     if (url.pathname.startsWith('/standin/')) {
       const request = await toRequest(req, url);
-      const own = (await options.extra?.(request.clone())) ?? (await standin.handle(request));
+      const own = await standin.handle(request);
       if (own) return writeResponse(res, own);
     }
     const admission = await standin.admit(url.pathname, req.headers);

@@ -5,8 +5,8 @@
 // its own, so the alarm it reads is the one under test and no earlier test's: a key redemption's, then the sweep's.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { serviceTokenName } from '../src/protocol/identity';
-import type { OrgFrame } from '../src/protocol/machine';
-import { enroll, enrollThrough, MachineClient, provisioningKey, refusal, waitFor, type Credentials } from './support/clients';
+import type { MachineView } from '../src/protocol/identity';
+import { enroll, enrollThrough, provisioningKey, refusal, waitFor, type Credentials } from './support/clients';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from './support/local';
 
 let hub: LocalHub;
@@ -37,11 +37,11 @@ let seq = 0;
 /** One project per machine, whose reports carry its lease. */
 const leaseProjects = new Map<string, string>();
 /** Puts a confirmed machine online or offline in the Registry's view, as its project's lease report does. */
-function leased(name: string, creds: Credentials, online: boolean): Promise<OrgFrame> {
+function leased(name: string, creds: Credentials, online: boolean): Promise<{ machines: MachineView[] }> {
   if (!leaseProjects.has(name)) leaseProjects.set(name, newProject());
   return hub.report(leaseProjects.get(name)!, { machines: 1, machines_online: online ? 1 : 0, working: 0, waiting: 0, seq: ++seq, machines_state: [{ name, online, client: creds.clientId }] });
 }
-/** A machine enrolled through `token` and confirmed by its own record's request, its stream never opened. */
+/** A machine enrolled through `token` and confirmed by its own record's request. */
 async function confirmed(token: string, name: string): Promise<Credentials> {
   const creds = await enrollThrough(hub, token, name);
   expect((await self(creds)).status).toBe(200);
@@ -80,16 +80,12 @@ describe('a redemption through a key', () => {
 describe('the offline sweep', () => {
   it("is scheduled when a key's machine goes offline, and revokes it once offline the key's time, as an admin's revocation would", async () => {
     const { token } = await provisioningKey(hub, ADMIN, { label: 'devcloud', prefix: 'dc-', offline_revoke_s: HOUR });
-    const project = newProject();
-    // A lease far longer than the test, so only the close's grace can put the machine offline.
-    const machine = new MachineClient(hub, 'dc-gone-1', await enrollThrough(hub, token, 'dc-gone-1'));
-    await hub.timing('dc-gone-1', { heartbeatMs: 200, leaseMs: 60_000, graceMs: 200 });
-    await machine.connect();
-    await machine.sync(project);
+    const machine = { creds: await confirmed(token, 'dc-gone-1') };
+    await leased('dc-gone-1', machine.creds, true);
     // Nothing else is pending: the alarm, once cleared, is set again only by the flip offline.
     await waitFor(async () => ((await hub.registryAlarm(true)) === null ? true : undefined));
     const closed = Date.now();
-    await machine.close();
+    await leased('dc-gone-1', machine.creds, false);
     const alarm = await waitFor(async () => (await hub.registryAlarm()) ?? undefined, 10_000);
     expect(alarm).toBeGreaterThanOrEqual(closed + HOUR * 1000);
     expect(alarm).toBeLessThanOrEqual(Date.now() + HOUR * 1000);
@@ -149,8 +145,7 @@ describe('the offline sweep', () => {
     await hub.backdate({ machines: [{ name: 'dc-race-a', confirmed: ago(2 * HOUR) }, { name: 'dc-race-b', confirmed: ago(2 * HOUR) }] });
     await waitFor(async () => ((await hub.revokeHeld('dc-race-a')) ? true : undefined), 10_000);
     expect((await hub.fetchAs(ADMIN, '/api/machines/dc-race-b', { method: 'DELETE' })).status).toBe(200);
-    const replacement = new MachineClient(hub, 'dc-race-b', await enrollThrough(hub, token, 'dc-race-b'));
-    await replacement.connect();
+    const replacement = { creds: await confirmed(token, 'dc-race-b') };
 
     await hub.releaseRevoke('dc-race-a');
     await gone('dc-race-a');
@@ -158,8 +153,7 @@ describe('the offline sweep', () => {
     expect(await refusal(await self(first))).toBe('401 access');
     expect(await listed('dc-race-b')).toMatchObject({ state: 'active', client_id: replacement.creds.clientId });
     expect(tokensNamed('dc-race-b').map((t) => t.client_id)).toEqual([replacement.creds.clientId]);
-    expect(replacement.isEnded).toBe(false);
-    await replacement.close();
+    expect((await self(replacement.creds)).status).toBe(200);
   });
 
   it("does not spare a candidate whose lease report arrives after the sweep read it: the fence is placed", async () => {

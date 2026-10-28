@@ -81,19 +81,6 @@ function withoutSecret(token: ServiceToken): Omit<ServiceToken, 'client_secret'>
   return out as Omit<ServiceToken, 'client_secret'>;
 }
 
-/** DX7's enrollment code as the browser builds it (`smns-enroll-v1.` + base64url of the JSON), for the local command's
- * helper; written here without the protocol module, which Node's type stripping cannot load (extensionless imports). */
-export function enrollmentCode(code: { hub: string; org: string; token: string; machine: string; key: string }): string {
-  const { hub, org, token, machine, key } = code;
-  return `smns-enroll-v1.${Buffer.from(JSON.stringify({ hub, org, token, machine, key })).toString('base64url')}`;
-}
-
-/** A provisioning key's code as the browser builds it (`smns-provision-v1.` + base64url of the JSON), likewise. */
-export function provisioningCode(code: { hub: string; org: string; token: string; prefix: string; key: string }): string {
-  const { hub, org, token, prefix, key } = code;
-  return `smns-provision-v1.${Buffer.from(JSON.stringify({ hub, org, token, prefix, key })).toString('base64url')}`;
-}
-
 /** Cloudflare's v4 envelope; on an error, `result` is the message (the stand-in's error codes are its own). */
 const envelope = (status: number, result: unknown, extra: object = {}) =>
   Response.json(

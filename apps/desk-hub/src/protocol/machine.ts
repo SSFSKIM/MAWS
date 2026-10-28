@@ -46,7 +46,8 @@ export type Refusal = {
     | 'stale-generation'
     | 'not-open' // any frame but `hello` for a project this stream has not opened with `hello`
     | 'bad-signature' // a v2 event whose `sig` the org state does not verify for its writer (the message names the verdict)
-    | 'state-unavailable'; // a v2 event the hub could not check, the org state unreadable: send it again
+    | 'state-unavailable' // a v2 event the hub could not check, the org state unreadable: send it again
+    | 'retired'; // a browser's DX6 `rpc`, answered so since O14 M5b retired RPCs through the hub (`RetiredRefusal`)
   writer?: string;
   seq?: number;
   message: string;

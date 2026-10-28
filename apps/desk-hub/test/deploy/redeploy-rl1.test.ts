@@ -1,8 +1,8 @@
 // redeploy-check's RL1 leg (O11 M8; acceptance 3's deploy clause), against the local hub, whose runtime restart stands
 // in for a redeploy (every object restarts, every connection drops): both the endpoint's RL1 socket and the app's
 // Machine socket drop, the endpoint comes back under a higher generation, a new channel echoes, and the leg says when
-// each dropped and how long each took; then the whole command, DX2's machines and browser beside the leg, passes across
-// the restart and undoes what it made.
+// each dropped and how long each took. (The whole command, whose DX2 machines write beside the leg, ran here until O14
+// M5b took DX2's stream out of the hub: it proves a build before M5b, and no longer runs against this one.)
 import { createServer } from 'node:net';
 import { type SignedOrgState } from 'org-protocol';
 import { RelayApp } from 'org-protocol/test-support';
@@ -12,7 +12,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sleep, until } from '../../deploy/hub.ts';
 import { OrgAdmin, type AdminDevice } from '../../deploy/org-admin.ts';
 import { Cleanup } from '../../deploy/proof.ts';
-import { REDEPLOY_INCONCLUSIVE, redeployCheck } from '../../deploy/redeploy-check.ts';
 import { Rl1Watch, upgradeProbe, type AppOpener } from '../../deploy/rl1-reconnect.ts';
 import { ORG, startLocalHub, type LocalHub } from '../support/local';
 import { adminKeysFile, LocalPerson } from '../support/local-person';
@@ -168,62 +167,6 @@ describe('a failing reconnect, diagnosed', () => {
     expect(await cleanup.run()).toEqual([]);
     expect(await upgradeProbe(hub.url, credentialHeaders(machine.credentials))).toMatch(/^40[13] /);
   });
-});
-
-describe('redeploy-check', () => {
-  it('passes across a restart with its DX2 machines, its browser and its RL1 leg, and undoes what it made', async () => {
-    const out: string[] = [];
-    const log = console.log;
-    console.log = (...args: unknown[]) => void out.push(args.join(' '));
-    const cleanup = new Cleanup();
-    let code: number;
-    try {
-      code = await redeployCheck(person, ORG, { seconds: '10', 'redeploy-at': '2' }, cleanup, () => hub.restart(), device);
-    } finally {
-      console.log = log;
-    }
-    const text = out.join('\n');
-    expect(text).toMatch(/PASS: nothing lost, nothing duplicated across the redeploy/);
-    expect(code).toBe(0);
-    expect(text).toMatch(/rl1: the endpoint's socket closed .* welcomed again under generation/);
-    expect(text).toMatch(/rl1: the app's socket closed .* a new channel to the endpoint echoed/);
-    // Then the leg's own cuts, twice, on the code the redeploy put up.
-    expect(text).toMatch(/rl1: forced cut 1: the endpoint dropped its socket at generation \d+ and was welcomed again under generation \d+ .* a new channel to the endpoint echoed/);
-    expect(text).toMatch(/rl1: forced cut 2: the endpoint dropped its socket at generation \d+ and was welcomed again under generation \d+ .* a new channel to the endpoint echoed/);
-    expect(await cleanup.run()).toEqual([]);
-    const names = await machines();
-    expect(names.filter((n) => n.startsWith('rd-'))).toEqual([]);
-    expect((await head()).machines).toEqual([]);
-  }, 180_000);
-
-  // Acceptance 3 reads "after a staging deploy, both sockets drop": the leg's own cuts prove the reconnect, not the
-  // deploy's cut. A redeploy that cut DX2's streams and neither RL1 socket is no PASS, and no FAIL either: the run says
-  // the deploy's cut was not exercised and ends with its own status.
-  it('is inconclusive, not a pass, when the redeploy cut neither RL1 socket', async () => {
-    const out: string[] = [];
-    const log = console.log;
-    console.log = (...args: unknown[]) => void out.push(args.join(' '));
-    const cleanup = new Cleanup();
-    // The redeploy's stand-in ends the DX2 machines' objects alone; the object holding RL1 (addressed by the ref) stays.
-    const cutDx2Only = async () => {
-      for (const name of (await machines()).filter((n) => /^rd-[ab]-/.test(n))) await hub.terminate(name);
-    };
-    let code: number;
-    try {
-      code = await redeployCheck(person, ORG, { seconds: '10', 'redeploy-at': '2' }, cleanup, cutDx2Only, device);
-    } finally {
-      console.log = log;
-    }
-    const text = out.join('\n');
-    expect(text).toMatch(/rl1: neither socket was cut/);
-    expect(text).toMatch(/rl1: forced cut 2: .* a new channel to the endpoint echoed/);
-    expect(text).not.toMatch(/^PASS/m);
-    expect(text).toMatch(/^INCONCLUSIVE: deploy cut: not exercised \(the redeploy cut neither RL1 socket\); nothing lost or duplicated, and the leg's own cuts came back$/m);
-    expect(code).toBe(REDEPLOY_INCONCLUSIVE);
-    expect(REDEPLOY_INCONCLUSIVE).not.toBe(0);
-    expect(REDEPLOY_INCONCLUSIVE).not.toBe(1);
-    expect(await cleanup.run()).toEqual([]);
-  }, 180_000);
 });
 
 describe('stopping the RL1 leg', () => {

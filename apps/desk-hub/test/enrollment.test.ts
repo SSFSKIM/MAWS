@@ -1,9 +1,11 @@
 // Enrollment (DX7) on the local runtime, through the stand-in for Access and its service-token API: a durable state
-// machine in the Registry that recovers from every lost answer and failure the plan names.
+// machine in the Registry that recovers from every lost answer and failure the plan names. A v1 machine's credential is
+// tried at its own enrollment's route (`GET /machine/enrollment`), the one it still has since O14 M5b took DX2's stream
+// out of the hub; its first request there confirms its enrollment, as any of its requests would.
 import { request as httpRequest } from 'node:http';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { serviceTokenName } from '../src/protocol/identity';
-import { enroll, enrollmentToken, MachineClient, refusal } from './support/clients';
+import { serviceTokenName, type MachineSelf } from '../src/protocol/identity';
+import { enroll, enrollmentToken, refusal, type Credentials } from './support/clients';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from './support/local';
 
 let hub: LocalHub;
@@ -20,6 +22,12 @@ const tokensNamed = (machine: string) => hub.standin.tokens().filter((t) => t.na
 const creds = (body: { client_id: string; client_secret: string }) => ({ clientId: body.client_id, clientSecret: body.client_secret });
 const isCreate = (request: Request) => request.method === 'POST' && new URL(request.url).pathname.endsWith('/access/service_tokens');
 const isDelete = (request: Request) => request.method === 'DELETE';
+/** The machine's own record, its credential admitted: 200 or the test fails. */
+async function admitted(credentials: Credentials): Promise<MachineSelf> {
+  const response = await hub.fetchAs(credentials, '/machine/enrollment');
+  expect(response.status).toBe(200);
+  return (await response.json()) as MachineSelf;
+}
 const machines = async () => ((await (await hub.fetchAs(ADMIN, '/api/machines')).json()) as { machines: Array<{ name: string; state: string }> }).machines;
 
 async function waitFor(check: () => boolean | Promise<boolean>, ms = 8000) {
@@ -31,7 +39,7 @@ async function waitFor(check: () => boolean | Promise<boolean>, ms = 8000) {
 }
 
 describe('a machine enrolls', () => {
-  it('redeems a one-time token for its own service token, which its first connection confirms', async () => {
+  it('redeems a one-time token for its own service token, which its first request confirms', async () => {
     const token = await enrollmentToken(hub, ADMIN);
     const response = await redeem(token, 'mini');
     expect(response.status).toBe(200);
@@ -40,11 +48,8 @@ describe('a machine enrolls', () => {
     expect(tokensNamed('mini').map((t) => t.client_id)).toEqual([body.client_id]);
     expect((await machines()).find((m) => m.name === 'mini')?.state).toBe('pending');
 
-    const machine = new MachineClient(hub, 'mini', creds(body));
-    await machine.connect();
-    expect(machine.generation).toBe(1);
+    expect(await admitted(creds(body))).toMatchObject({ machine: 'mini', state: 'active', confirmed: expect.any(String) as string });
     expect((await machines()).find((m) => m.name === 'mini')?.state).toBe('active');
-    await machine.close();
   });
 
   it('is asked for by an admin only; the token is never shown again', async () => {
@@ -108,9 +113,7 @@ describe('enrollment refuses', () => {
   it('a confirmed token, redeemed again', async () => {
     const token = await enrollmentToken(hub, ADMIN);
     const body = (await (await redeem(token, 'confirmed-1')).json()) as { client_id: string; client_secret: string };
-    const machine = new MachineClient(hub, 'confirmed-1', creds(body));
-    await machine.connect();
-    await machine.close();
+    await admitted(creds(body));
     const again = await redeem(token, 'confirmed-1');
     expect(again.status).toBe(409);
     expect(await again.json()).toMatchObject({ error: 'confirmed' });
@@ -126,81 +129,57 @@ describe('enrollment refuses', () => {
     expect(tokensNamed('beta')).toHaveLength(0);
   });
 
-  it("a revoked machine's connection, at once and afterwards", async () => {
-    const machine = new MachineClient(hub, 'revoked-1', await enroll(hub, ADMIN, 'revoked-1'));
-    await machine.connect();
+  it("a revoked machine's credential, at once", async () => {
+    const credentials = await enroll(hub, ADMIN, 'revoked-1');
+    await admitted(credentials);
     const revoked = await hub.fetchAs(ADMIN, '/api/machines/revoked-1', { method: 'DELETE' });
     expect(revoked.status).toBe(200);
-    await waitFor(() => machine.isEnded);
     expect(tokensNamed('revoked-1')).toHaveLength(0);
     // Its token deleted, Access refuses it before the Worker sees it, with its own page.
-    expect(await refusal(await hub.fetchAs(machine.creds, '/machine/stream'))).toBe('401 access');
+    expect(await refusal(await hub.fetchAs(credentials, '/machine/enrollment'))).toBe('401 access');
     expect((await machines()).map((m) => m.name)).not.toContain('revoked-1');
   });
 
-  it("a request the Worker admitted before a revocation reaches the machine's object after it: refused, the stream and a POST; the name enrolled again is served (scalpel-1#1)", async () => {
-    const old = await enroll(hub, ADMIN, 'revoked-3');
-    const machine = new MachineClient(hub, 'revoked-3', old);
-    await machine.connect();
-    expect((await hub.fetchAs(ADMIN, '/api/machines/revoked-3', { method: 'DELETE' })).status).toBe(200);
-    // The requests the Worker resolved for the revoked credential, delivered now.
-    const late = { 'X-Desk-Client': old.clientId };
-    expect(await hub.machineRequest('revoked-3', '/stream', late)).toBe(403);
-    const hello = JSON.stringify({ t: 'hello', project: '6a1c0a8e-3b2d-4c5e-9f70-000000000001', name: 'p', have: {} });
-    expect(await hub.machineRequest('revoked-3', '/frames', { ...late, 'X-Desk-Generation': String(machine.generation + 1) }, hello)).toBe(403);
-    // Enrolled again under the same name: its own credential is served, the old one still refused.
-    const again = new MachineClient(hub, 'revoked-3', await enroll(hub, ADMIN, 'revoked-3'));
-    await again.connect();
-    expect(await hub.machineRequest('revoked-3', '/stream', late)).toBe(403);
-    expect(again.isEnded).toBe(false);
-    await again.close();
-  });
-
   it('two removals of one machine at once, the name enrolled anew between them: the later one leaves the new machine be', async () => {
-    const project = '6a1c0a8e-3b2d-4c5e-9f70-0000000000a1';
-    const machine = new MachineClient(hub, 'overlap-1', await enroll(hub, ADMIN, 'overlap-1'));
-    await machine.connect();
+    const project = '6a1c0a8e-3b2d-4c5e-9fa1-000000000000';
+    await hub.addProjects(1, '6a1c0a8e-3b2d-4c5e-9fa1');
+    await admitted(await enroll(hub, ADMIN, 'overlap-1'));
     // The first removal's answer from the machine's object is held; the second removes it meanwhile.
     await hub.faultNextRevoke('overlap-1', 'hold');
     const first = hub.fetchAs(ADMIN, '/api/machines/overlap-1', { method: 'DELETE' });
     await waitFor(() => hub.revokeHeld('overlap-1'));
     expect((await hub.fetchAs(ADMIN, '/api/machines/overlap-1', { method: 'DELETE' })).status).toBe(200);
     expect((await machines()).map((m) => m.name)).not.toContain('overlap-1');
-    // Enrolled again under the name, it opens a project and is that project's archive machine.
-    const again = new MachineClient(hub, 'overlap-1', await enroll(hub, ADMIN, 'overlap-1'));
-    await again.connect();
-    await again.sync(project);
+    // Enrolled again under the name, it is a project's archive machine.
+    const again = await enroll(hub, ADMIN, 'overlap-1');
+    await admitted(again);
     expect((await hub.fetchAs(ADMIN, `/api/projects/${project}/archive`, { method: 'PUT', body: { machine: 'overlap-1' } })).status).toBe(200);
     await waitFor(() => tokensNamed('overlap-1').length === 1);
 
     await hub.releaseRevoke('overlap-1');
     expect((await first).status).toBe(200);
     expect((await machines()).find((m) => m.name === 'overlap-1')?.state).toBe('active');
-    expect(tokensNamed('overlap-1').map((t) => t.client_id)).toEqual([again.creds.clientId]);
+    expect(tokensNamed('overlap-1').map((t) => t.client_id)).toEqual([again.clientId]);
     const projects = ((await (await hub.fetchAs(ADMIN, '/api/projects')).json()) as { projects: Array<{ id: string; archive_machine: string | null }> }).projects;
     expect(projects.find((p) => p.id === project)?.archive_machine).toBe('overlap-1');
-    expect(again.isEnded).toBe(false);
-    await again.close();
-    await machine.close();
+    await admitted(again);
   });
 
   it('a revoked machine whose service token outlived the revocation: the hub no longer knows it', async () => {
     const creds1 = await enroll(hub, ADMIN, 'revoked-2');
-    const machine = new MachineClient(hub, 'revoked-2', creds1);
-    await machine.connect();
-    await machine.close();
+    await admitted(creds1);
     hub.faults.push((request) => (isDelete(request) ? 'fail' : null));
     expect((await hub.fetchAs(ADMIN, '/api/machines/revoked-2', { method: 'DELETE' })).status).toBe(200);
     // Access still admits the token (the stand-in holds it); the hub refuses it.
     expect(tokensNamed('revoked-2')).toHaveLength(1);
-    const response = await hub.fetchAs(creds1, '/machine/stream');
+    const response = await hub.fetchAs(creds1, '/machine/enrollment');
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ error: 'not-enrolled' });
     hub.faults.length = 0;
     // The orphan is deleted by name once the API answers again (the next enrollment sweeps orphans); Access refuses it then.
     await enroll(hub, ADMIN, 'sweeper');
     await waitFor(() => tokensNamed('revoked-2').length === 0);
-    expect(await refusal(await hub.fetchAs(creds1, '/machine/stream'))).toBe('401 access');
+    expect(await refusal(await hub.fetchAs(creds1, '/machine/enrollment'))).toBe('401 access');
   });
 });
 
@@ -226,9 +205,7 @@ describe('enrollment recovers', () => {
     expect(answered.status).toBe(200);
     const body = (await answered.json()) as { client_id: string; client_secret: string };
     expect(tokensNamed('twice').map((t) => t.client_id)).toEqual([body.client_id]);
-    const machine = new MachineClient(hub, 'twice', creds(body));
-    await machine.connect();
-    await machine.close();
+    await admitted(creds(body));
   });
 
   it('from a failure of the service-token API: nothing is minted, and the same redemption succeeds after', async () => {
@@ -264,16 +241,12 @@ describe('enrollment recovers', () => {
     const fresh = (await again.json()) as { client_id: string; client_secret: string };
     expect(fresh.client_id).not.toBe(lost.client_id);
     expect(tokensNamed('rotated').map((t) => t.client_id)).toEqual([fresh.client_id]);
-    expect(await refusal(await hub.fetchAs(creds(lost), '/machine/stream'))).toBe('401 access');
-    const machine = new MachineClient(hub, 'rotated', creds(fresh));
-    await machine.connect();
-    await machine.close();
+    expect(await refusal(await hub.fetchAs(creds(lost), '/machine/enrollment'))).toBe('401 access');
+    await admitted(creds(fresh));
   });
 
   it("from a revocation's cleanup racing a new enrollment of the name: the cleanup never deletes the new token", async () => {
-    const old = new MachineClient(hub, 'reused', await enroll(hub, ADMIN, 'reused'));
-    await old.connect();
-    await old.close();
+    await admitted(await enroll(hub, ADMIN, 'reused'));
     const tokenName = serviceTokenName(ORG, 'reused');
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
@@ -295,9 +268,7 @@ describe('enrollment recovers', () => {
     expect(answered.status).toBe(200);
     const body = (await answered.json()) as { client_id: string; client_secret: string };
     expect(tokensNamed('reused').map((t) => t.client_id)).toEqual([body.client_id]);
-    const machine = new MachineClient(hub, 'reused', creds(body));
-    await machine.connect();
-    await machine.close();
+    await admitted(creds(body));
   });
 
   it('from a pending enrollment expiring: its token is deleted, the name released, the token spent', async () => {
@@ -306,7 +277,7 @@ describe('enrollment recovers', () => {
     expect(tokensNamed('lapsed')).toHaveLength(1);
     await waitFor(() => tokensNamed('lapsed').length === 0);
     expect((await machines()).map((m) => m.name)).not.toContain('lapsed');
-    expect(await refusal(await hub.fetchAs(creds(body), '/machine/stream'))).toBe('401 access');
+    expect(await refusal(await hub.fetchAs(creds(body), '/machine/enrollment'))).toBe('401 access');
     const late = await redeem(token, 'lapsed');
     expect(late.status).toBe(410);
     expect(await late.json()).toMatchObject({ error: 'expired' });
@@ -322,15 +293,12 @@ describe('enrollment recovers', () => {
   it('across a restart of the runtime: a pending enrollment is still redeemable, a confirmed machine still admitted', async () => {
     const token = await enrollmentToken(hub, ADMIN);
     expect((await redeem(token, 'restarted')).status).toBe(200);
-    const confirmed = new MachineClient(hub, 'confirmed-before', await enroll(hub, ADMIN, 'confirmed-before'));
-    await confirmed.connect();
-    await confirmed.close();
+    const confirmed = await enroll(hub, ADMIN, 'confirmed-before');
+    await admitted(confirmed);
     await hub.restart();
     const again = await redeem(token, 'restarted');
     expect(again.status).toBe(200);
     expect(tokensNamed('restarted')).toHaveLength(1);
-    await confirmed.connect();
-    expect(confirmed.generation).toBe(2);
-    await confirmed.close();
+    expect(await admitted(confirmed)).toMatchObject({ machine: 'confirmed-before', state: 'active' });
   });
 });
