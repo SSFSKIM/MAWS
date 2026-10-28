@@ -10,7 +10,8 @@
 #
 # Pushes the tree, plus one empty commit, to refs/heads/ci/<label>-<short> (force), waits for the run of
 # .github/workflows/gate.yml on it, prints each job's conclusion, downloads the failed e2e jobs' reports to
-# /tmp/maws-review/gates/ci-<short>/ (a hosted group's from the SSFSKIM/maws-app run its log names), keeps the whole transcript in /tmp/maws-review/gates/ci-<short>.log, deletes the
+# /tmp/maws-review/gates/ci-<short>-<run-id>-<invocation>/reports/ (including hosted reports from SSFSKIM/maws-app),
+# keeps the whole transcript beside it in transcript.log, deletes the
 # ref (unless --keep) and exits with the run's status (0 green, 1 anything else). A job GCE preempted on ci-kit's pool
 # is rerun alone, once per job per run, and the script reports the run's final attempt: the line before the run's status,
 # `ci-gate: run <id> <conclusion>`, is `ci-gate: run <id> attempt <n>`, and a line before those names each preempted job
@@ -75,7 +76,9 @@
 #                      line carries the peer as resolved, its sha or `none`
 #   --hosted-route     override HOSTED_MAC_ROUTE for this run: direct (macos-26 in MAWS) or mirror (maws-app).
 #                      Unset uses the repository variable, which defaults to mirror. Admission and --lane still apply.
-#   --label            the ref's name before the short sha (default: the worktree's branch, else `gate`)
+#   --label            the ref's name before the short sha, sanitized as before. Without it: auto-<branch-or-gate>-
+#                      <gates-and-lane>-<configuration-hash>, bounded and never a reserved final label. Different
+#                      configurations have distinct refs; an identical call may supersede its predecessor
 #   --keep             leave the ci/ ref in place
 #
 # Every invocation pushes a fresh empty commit on top of the sha: its message carries a unique nonce (so the push always
@@ -100,8 +103,27 @@
 # run whose plan puts no job on a Mac (its e2e groups all hosted) goes ahead. A failed read warns and goes ahead
 # (scripts/ci-gate-alerts.mjs).
 #
+# The last two lines always name the transcript and reports directory (also on green or error). Before a run exists,
+# they live under ci-pending.<invocation>/; once found, that directory is renamed to include its run id. Read the
+# printed paths, not a path reconstructed from the sha. Each invocation owns its paths, including identical calls.
+#
 #   MAWS_GATE_IGNORE_ALERTS=1  skip that check, for an alert left open by mistake
 set -uo pipefail
+
+# Start before validation so errors have the same discoverable tail as completed runs.
+out=/tmp/maws-review/gates
+mkdir -p "$out" || exit 2
+invocation=$(mktemp -d "$out/ci-pending.XXXXXX") || exit 2
+invocation_token=${invocation##*.}
+log=$invocation/transcript.log
+reports=$invocation/reports
+mkdir -p "$reports" || exit 2
+exec > >(tee "$log") 2>&1
+print_paths() {
+  echo "ci-gate: transcript in $log"
+  echo "ci-gate: reports in $reports/"
+}
+trap print_paths EXIT
 
 REPO=SSFSKIM/MAWS
 # refusals: the refused against the finished, and the relaunch line, when the mini refused jobs (Decision Log 58(c), 66).
@@ -184,9 +206,9 @@ else
   branch=''
 fi
 
-# Resolve the pushed ref before preflight: reserved final refs stay on the self-hosted Mac.
+# Explicit labels preserve their routing (reserved final refs stay on the self-hosted Mac).
+# The default is derived after peer, affected paths and repository variables are resolved.
 short=${sha:0:8}
-label=${label:-${branch:-gate}}
 label=${label//[^A-Za-z0-9._-]/-}
 ref=ci/$label-$short
 
@@ -205,30 +227,6 @@ fi
 relaunch_peer=$(printf '%s\n' "$peer_trailers" | sed -n 's/^Peer: //p')
 relaunch_peer=${relaunch_peer:-none}
 
-# ci-kit's alert watcher: while no online Mac runner is free of an open alert, a run with Mac jobs is not pushed, its jobs
-# would only be refused. Exit 2, as for the script's other refusals; anything else from the check goes ahead.
-if [[ ${MAWS_GATE_IGNORE_ALERTS:-} == 1 ]]; then
-  alert_check='ci-gate: MAWS_GATE_IGNORE_ALERTS=1, the ci-kit alert check skipped'
-else
-  # the peer's trailers, and an iteration run's Selection, which keeps the peer groups off the run
-  alert_trailers=$peer_trailers
-  [[ -n $hosted_route ]] && alert_trailers+=$'\n'"Hosted-Route: $hosted_route"
-  [[ -n $affected ]] && alert_trailers+=$'\n'"Selection: affected"
-  alert_check=$(node "$(dirname "$0")/ci-gate-alerts.mjs" --gates "$gates_trailer" --runner "$runner" --class1a "$class1a" --lane "$lane" --live "$live" --trailers "$alert_trailers" --git-dir "$git_dir" --sha "$sha" --ref "$ref")
-  case $? in
-    0) ;;
-    2)
-      printf '%s\n' "$alert_check" >&2
-      echo "ci-gate: to push anyway, for an alert left open by mistake: MAWS_GATE_IGNORE_ALERTS=1 scripts/ci-gate.sh ${args[*]}" >&2
-      exit 2 ;;
-    *) alert_check+="${alert_check:+$'\n'}ci-gate: warning: the ci-kit alert check failed; going ahead (the runner's job-started check still refuses jobs under a dialog)" ;;
-  esac
-fi
-out=/tmp/maws-review/gates
-mkdir -p "$out"
-log=$out/ci-$short.log
-exec > >(tee "$log") 2>&1
-[[ -z $alert_check ]] || printf '%s\n' "$alert_check"
 [[ -z $peer_said ]] || printf '%s\n' "$peer_said"
 
 # --affected: the change's paths, from the merge base with origin/master to the tested commit, each as a line of
@@ -274,9 +272,39 @@ fi
 # ci-kit's attempt-1 pre-launch hint: this plan's exact pool jobs, not the shape of a historical run. Advisory only:
 # an unreadable variable, tree or plan omits the hint and leaves the launcher its history fallback. Read the variables
 # now, and the package scripts and workflow env at the sha we push (never the caller's possibly dirty checkout).
-if gate_runner=$(gh variable get GATE_RUNNER -R "$REPO") &&
-   gate_e2e_runner=$(gh variable get GATE_E2E_RUNNER -R "$REPO") &&
-   gate_hosted_route=$(gh variable list -R "$REPO" --json name,value --jq '.[] | select(.name == "HOSTED_MAC_ROUTE") | .value') &&
+variables_ok=true
+gate_runner=$(gh variable get GATE_RUNNER -R "$REPO") || variables_ok=false
+gate_e2e_runner=$(gh variable get GATE_E2E_RUNNER -R "$REPO") || variables_ok=false
+gate_hosted_route=$(gh variable list -R "$REPO" --json name,value --jq '.[] | select(.name == "HOSTED_MAC_ROUTE") | .value') || variables_ok=false
+if [[ -z $label ]]; then
+  label=$(HEAD_MESSAGE="$trailers" GATE_RUNNER="$gate_runner" GATE_E2E_RUNNER="$gate_e2e_runner" HOSTED_MAC_ROUTE="$gate_hosted_route" \
+    node "$(dirname "$0")/ci-gate-identity.mjs" --git-dir "$git_dir" --sha "$sha" --branch "$branch") || exit 2
+  label=${label//[^A-Za-z0-9._-]/-}
+  ref=ci/$label-$short
+fi
+
+# ci-kit's alert watcher: while no online Mac runner is free of an open alert, a run with Mac jobs is not pushed, its jobs
+# would only be refused. Exit 2, as for the script's other refusals; anything else from the check goes ahead.
+if [[ ${MAWS_GATE_IGNORE_ALERTS:-} == 1 ]]; then
+  alert_check='ci-gate: MAWS_GATE_IGNORE_ALERTS=1, the ci-kit alert check skipped'
+else
+  # the peer's trailers, and an iteration run's Selection, which keeps the peer groups off the run
+  alert_trailers=$peer_trailers
+  [[ -n $hosted_route ]] && alert_trailers+=$'\n'"Hosted-Route: $hosted_route"
+  [[ -n $affected ]] && alert_trailers+=$'\n'"Selection: affected"
+  alert_check=$(node "$(dirname "$0")/ci-gate-alerts.mjs" --gates "$gates_trailer" --runner "$runner" --class1a "$class1a" --lane "$lane" --live "$live" --trailers "$alert_trailers" --git-dir "$git_dir" --sha "$sha" --ref "$ref")
+  case $? in
+    0) ;;
+    2)
+      printf '%s\n' "$alert_check" >&2
+      echo "ci-gate: to push anyway, for an alert left open by mistake: MAWS_GATE_IGNORE_ALERTS=1 scripts/ci-gate.sh ${args[*]}" >&2
+      exit 2 ;;
+    *) alert_check+="${alert_check:+$'\n'}ci-gate: warning: the ci-kit alert check failed; going ahead (the runner's job-started check still refuses jobs under a dialog)" ;;
+  esac
+fi
+[[ -z $alert_check ]] || printf '%s\n' "$alert_check"
+
+if [[ $variables_ok == true ]] &&
    pool_demand=$(HEAD_MESSAGE="$trailers" GATE_RUNNER="$gate_runner" GATE_E2E_RUNNER="$gate_e2e_runner" HOSTED_MAC_ROUTE="$gate_hosted_route" \
      node "$(dirname "$0")/ci-gate-pool-demand.mjs" --git-dir "$git_dir" --sha "$sha"); then
   trailers+=$'\n'"Pool-Demand: $pool_demand"
@@ -313,7 +341,6 @@ finish() {
       echo "ci-gate: left $ref (moved by a later push)"
     fi
   fi
-  echo "ci-gate: transcript in $log"
   exit "$status"
 }
 # shellcheck disable=SC2329 # invoked by the trap below
@@ -345,12 +372,18 @@ for _ in $(seq 1 30); do
   sleep 2
 done
 [[ -n $run_id ]] || { echo "ci-gate: no run of $pushed on $ref" >&2; finish 1; }
+# tee keeps the same open file while the invocation directory gains its run id.
+run_dir=$out/ci-$short-$run_id-$invocation_token
+mv "$invocation" "$run_dir" || finish 1
+invocation=$run_dir
+log=$invocation/transcript.log
+reports=$invocation/reports
 echo "ci-gate: https://github.com/$REPO/actions/runs/$run_id"
 
 # A failed watch (an API error mid-poll) is not the end of the run: only the status `completed` is.
 # A run that can no longer be read (credentials revoked, run deleted) would be retried forever, so consecutive read failures are bounded.
 await_run() {
-  local unreadable=0 view_err=$out/ci-$short.err run_status
+  local unreadable=0 view_err=$invocation/view.err run_status
   while :; do
     gh -R "$REPO" run watch "$run_id" --compact --interval 30 >/dev/null 2>&1
     if run_status=$(gh -R "$REPO" run view "$run_id" --json status --jq .status 2>"$view_err"); then
@@ -374,10 +407,9 @@ settle_run
 printf '%s\n' "$jobs"
 
 if [[ $conclusion != success ]]; then
-  rm -rf "$out/ci-$short"
-  if gh -R "$REPO" run download "$run_id" -D "$out/ci-$short" 2>/dev/null; then echo "ci-gate: failed jobs' reports in $out/ci-$short/"; fi
+  if gh -R "$REPO" run download "$run_id" -D "$reports" 2>/dev/null; then echo "ci-gate: failed jobs' reports in $reports/"; fi
   failed_log=$(gh -R "$REPO" run view "$run_id" --log-failed | perl -pe 's/(\e|\^\[)\[[0-9;]*[A-Za-z]//g')
-  hosted_reports "$failed_log" "$out/ci-$short"
+  hosted_reports "$failed_log" "$reports"
   # The failed steps' last lines, each under its job's name, colours and timestamps stripped.
   printf '%s\n' "$failed_log" | perl -pe 's/^([^\t]*)\t[^\t]*\t\S+ /$1  /' | tail -80
 fi

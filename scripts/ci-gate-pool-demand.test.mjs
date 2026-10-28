@@ -227,8 +227,10 @@ esac
     const result = spawnSync('bash', [join(root, 'scripts/ci-gate.sh'), tree, ...args, '--keep'], {
       cwd: tmpdir(), encoding: 'utf8', env: { ...process.env, ...identity, PATH: `${dir}:${process.env.PATH}`, MAWS_GATE_IGNORE_ALERTS: '1', MAWS_GATE_RUNNER: '' },
     });
-    const pushed = git('--git-dir', origin, 'log', '-1', '--format=%B', `refs/heads/ci/demand-${sha.slice(0, 8)}`);
-    rmSync(`/tmp/maws-review/gates/ci-${sha.slice(0, 8)}.log`, { force: true });
+    const ref = / as (ci\/\S+)/.exec(result.stdout)?.[1];
+    const pushed = git('--git-dir', origin, 'log', '-1', '--format=%B', `refs/heads/${ref}`);
+    const transcript = /^ci-gate: transcript in (.+)$/m.exec(result.stdout)?.[1];
+    if (transcript) rmSync(dirname(transcript), { recursive: true, force: true });
     assert.equal(result.status, 1, result.stdout + result.stderr);
     assert.match(result.stdout, /ci-gate: no run of/);
     return { message: pushed, calls: readFileSync(join(dir, 'gh-calls'), 'utf8') };

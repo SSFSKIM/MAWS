@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
 import { URL, fileURLToPath } from 'node:url';
@@ -264,7 +264,7 @@ test("ci-gate.sh names the final attempt on the line before the run's status, wh
   const dir = mkdtempSync(join(tmpdir(), 'ci-gate-preemptions-'));
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, MAWS_GATE_IGNORE_ALERTS: '1', MAWS_GATE_RUNNER: '' };
   for (const role of ['AUTHOR', 'COMMITTER']) Object.assign(env, { [`GIT_${role}_NAME`]: 'ci-gate test', [`GIT_${role}_EMAIL`]: 'ci-gate@test.invalid' });
-  let short = '';
+  let transcript = '';
   try {
     const tree = join(dir, 'tree');
     const git = (...args) => execFileSync('git', args, { encoding: 'utf8', env }).trim();
@@ -272,7 +272,6 @@ test("ci-gate.sh names the final attempt on the line before the run's status, wh
     git('init', '--quiet', '-b', 'preempt', tree);
     git('-C', tree, 'commit', '--quiet', '--allow-empty', '-m', 'tested tree');
     git('-C', tree, 'remote', 'add', 'origin', join(dir, 'origin.git'));
-    short = git('-C', tree, 'rev-parse', '--short=8', 'HEAD');
     // ci-gate.sh's own calls before and around the wait, on top of the retry's.
     const wrapper = String.raw`#!/usr/bin/env bash
 case "$*" in
@@ -289,13 +288,16 @@ esac
     writeFileSync(join(dir, 'scenario.json'), JSON.stringify({ repo: 'SSFSKIM/MAWS', run, jobs: classOneA(preempted('unit')), reruns: { unit: [green('unit')] } }));
     const gate = spawnSync('bash', [join(root, 'scripts/ci-gate.sh'), tree, '--gates', 'static,unit,probes', '--class1a', 'pool'], { encoding: 'utf8', env });
     const lines = gate.stdout.trimEnd().split('\n');
+    transcript = /^ci-gate: transcript in (.+)$/m.exec(gate.stdout)?.[1] ?? '';
+    const ref = / as (ci\/\S+)/.exec(gate.stdout)?.[1];
     assert.equal(gate.status, 0, gate.stdout + gate.stderr);
-    assert.deepEqual(lines.slice(-5), [
+    assert.deepEqual(lines.slice(-6), [
       'ci-gate: preempted by GCE (1): unit; green on its rerun: unit',
       `ci-gate: run ${run} attempt 2`,
       `ci-gate: run ${run} success`,
-      `ci-gate: removed ci/preempt-${short}`,
-      `ci-gate: transcript in /tmp/maws-review/gates/ci-${short}.log`,
+      `ci-gate: removed ${ref}`,
+      `ci-gate: transcript in ${transcript}`,
+      `ci-gate: reports in ${dirname(transcript)}/reports/`,
     ]);
     // The waiters' pattern finds the status line and no line before it, the attempt's included.
     assert.deepEqual(lines.filter((line) => /^ci-gate: run [0-9]+ [a-z_]+$/.test(line)), [`ci-gate: run ${run} success`]);
@@ -303,6 +305,6 @@ esac
     assert.ok(lines.includes('ci-gate: rerunning unit alone as attempt 2'));
   } finally {
     rmSync(dir, { recursive: true, force: true });
-    if (short) rmSync(`/tmp/maws-review/gates/ci-${short}.log`, { force: true });
+    if (transcript) rmSync(dirname(transcript), { recursive: true, force: true });
   }
 });
