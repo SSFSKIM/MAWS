@@ -24,6 +24,8 @@ import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P
 import { startMachineIdentity } from './machine/identity'; // P5 O6 M1
 import { bindLocalMachine } from './machine/local'; // P5 O6 M2
 import { startMachines } from './machines'; // P5 O6 M3: the connection manager, and the stand-in behind its gate
+import { createLaneADriver, registerLaneA } from './lane-a/driver'; // P5 O9 M2: terminal sessions' bridges
+import { sminosHome } from './lane-a/discovery'; // P5 O9 M2
 import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2
 // C3 end
 // C4 start (emit comes with C3's imports)
@@ -328,6 +330,23 @@ void startWithProfileLock(app, () => {
   // The engine's environment (its config directory, where it writes a session's transcript): C7's services below read it too.
   const home = app.getPath('home');
   const engineEnv = captureShellEnvironment();
+  // P5 O9 M2: the local lane A driver. Each session the index holds for a terminal or a `--bg` job is probed for its
+  // sminos bridge, under the sminos home from main's environment, else the login shell's (laneA.*).
+  const laneA = createLaneADriver({
+    machine: local,
+    home: engineEnv.then((shellEnv) => sminosHome(process.env, shellEnv)),
+    userData: app.getPath('userData'),
+    emit: (name, payload) => void emit(name, payload),
+  });
+  registerLaneA(laneA, registerMainHandler);
+  if (index.unavailable === null) {
+    for (const record of index.sessions.list({ includeArchived: true })) laneA.observe(record);
+    const offLaneA = index.sessions.onChange((record, cause) => (cause === 'removed' ? laneA.forget(record.appId) : laneA.observe(record)));
+    shutdown.add('lane A', () => {
+      offLaneA();
+      laneA.stop();
+    });
+  } else shutdown.add('lane A', () => laneA.stop());
   // A relative scenario path is the repository's: the working directory of `pnpm dev`, `pnpm dev:stub` and the smoke's
   // launch alike (`app.getAppPath()` is `out/main` when the built app is launched by file, as the smoke does).
   const sessions = startSessions({

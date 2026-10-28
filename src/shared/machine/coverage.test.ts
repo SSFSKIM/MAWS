@@ -127,6 +127,7 @@ const SPACE_SYSTEMS = 'a Space id (uuid) → its design system id';
 const PASTED = "a paste placeholder's number, as a string (the terminal's key)";
 const SURFACE_PROPS = "an engine surface's prop names";
 const PINS = 'an engine session id → the account uuid it is pinned to';
+const BRIDGE_CONTROLS = "a control's key in the bridge's capabilities.controls (desk-hub/protocol's CONTROL_KEYS)"; // P5 O9 M2
 const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.artifacts.datasetRefreshRequest.output.request.args': TOOL_ARGUMENTS,
   'commands.artifacts.setDefaults.input.spaces': SPACE_SYSTEMS,
@@ -145,6 +146,11 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.fs.agentEvents.output.events[]<kind=usage.sample>.modelUsage': MODEL_USAGE,
   'commands.fs.tasks.output.tasks[].metadata': "a task's metadata, as the engine's task store writes it",
   'commands.host.op.input.input': JSON_OBJECT, // P5 O10 M7: an action's args (main-only, mawsd's ledger)
+  'commands.laneA.list.output.states[].controls': BRIDGE_CONTROLS, // P5 O9 M2
+  'commands.laneA.list.output.states[].pending[].input': TOOL_ARGUMENTS,
+  'commands.laneA.read.input.args': "a bridge read's argument names (DX5 `read`'s args)",
+  'commands.laneA.state.output.controls': BRIDGE_CONTROLS,
+  'commands.laneA.state.output.pending[].input': TOOL_ARGUMENTS,
   'commands.maws.artifact.exported.input.answer<ok=false>.refusal.data': "a refusal's detail fields (ArtifactRefusalSchema.data)",
   'commands.session.appEvents.output.events[]<kind=question.answered>.answers': ANSWERS,
   'commands.session.appEvents.output.events[]<kind=usage.sample>.modelUsage': MODEL_USAGE,
@@ -169,6 +175,8 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.settings.set.output.settings.artifacts.spaceDesignSystems': SPACE_SYSTEMS,
   'commands.settings.usage.output.pinsFor': PINS,
   'events.connectors.watchUpdate.update.result': JSON_OBJECT,
+  'events.laneA.changed.state.controls': BRIDGE_CONTROLS, // P5 O9 M2
+  'events.laneA.changed.state.pending[].input': TOOL_ARGUMENTS,
   'events.plugins.operation.outcome.result': ENGINE_JSON,
   'events.plugins.operation.outcome.error.shownCommand': ENGINE_JSON,
   'events.session.eventBatch.events[]<kind=question.answered>.answers': ANSWERS,

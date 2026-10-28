@@ -33,7 +33,7 @@ const PORTABLE_DYNAMIC_SYNTAX = { selector: `ImportExpression[source.value=/${PO
 // Electron effect): every client-only effect goes through the injected client port (OX4). Four files are allowed, each
 // with its reason below. The imports that reach Electron through main's router, events and windows are O3's to cut.
 const CLIENT_PORT = "A machine-bound service (P5 OX4) imports no Electron and not main's open-external: reach the person's screen through the injected ClientPort (src/shared/client/port.ts).";
-const MACHINE_BOUND = ['src/main/{index,sessions,side,history,attention,owner,git,scm,files,library,connectors,delivery,catalog,settings,usage,gateway,machine}/**/*.{ts,tsx}']; // P5 O6 M1: machine
+const MACHINE_BOUND = ['src/main/{index,sessions,side,history,attention,owner,git,scm,files,library,connectors,delivery,catalog,settings,usage,gateway,machine,lane-a}/**/*.{ts,tsx}']; // P5 O6 M1: machine; P5 O9 M2: lane-a
 const MACHINE_BOUND_ALLOWED = [
   'src/main/attention/index.ts', // the client half: it reads page viewing and window focus
   'src/main/connectors/oauth-root.ts', // safeStorage, O4's to replace (U7)

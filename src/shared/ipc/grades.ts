@@ -23,6 +23,7 @@ import { grades as host } from './grades/host';
 import { grades as layout } from './grades/layout';
 import { grades as machine } from './grades/machine';
 import { grades as machines } from './grades/machines'; // P5 O6 M3
+import { grades as laneA } from './grades/lane-a'; // P5 O9 M2
 import { grades as library } from './grades/library';
 import { grades as marketplaces } from './grades/marketplaces';
 import { grades as maws } from './grades/maws';
@@ -63,7 +64,7 @@ export type NamespaceGrades<C extends string> = GradeSpec | { readonly [K in C]:
 export const NAMESPACE_GRADES = {
   session, engine, fs, git, pty, layout, attention, settings, files, plugins, marketplaces, voice, maws, scm, side, host,
   browser, mods, ownerChannel, artifacts, spaces, library, designSystems, presentations, connectors, delivery,
-  customization, catalog, machine, machines,
+  customization, catalog, machine, machines, laneA,
 } as const satisfies { readonly [N in Namespace]: NamespaceGrades<CommandsOf<N>> };
 
 const isSpec = (declared: NamespaceGrades<string>): declared is GradeSpec =>
