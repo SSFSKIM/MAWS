@@ -691,7 +691,8 @@ describe('DirectCalls with a dataset sink', () => {
     expect(calls.take(operationId)).toBeNull();
     const end = await publish(operationId);
     expect(end).toEqual({ outcome: null, dataset: { status: 'dataset', artifactId, id: 'live', revision: documents.store.revision(artifactId), columns: [{ name: 'v', type: 'number' }], rows: 1 } });
-    expect(JSON.stringify(end)).not.toMatch(/107|structuredContent|content/);
+    // The artifact's random id can hold the digits 107, so it is taken out before the match.
+    expect(JSON.stringify(end).replaceAll(artifactId, '')).not.toMatch(/107|structuredContent|content/);
     expect(live()).toMatchObject({ rows: 1, updated: { by: { kind: 'human' } }, state: { status: 'ok' } });
     expect(documents.store.listAssets(artifactId)).toHaveLength(1);
     expect(take(operationId)).toEqual({ outcome: null });
@@ -854,7 +855,7 @@ describe('DirectCalls with a dataset sink', () => {
     const id = calls.start(start({ dataset: { id: 'live' } })).operationId;
     const end = await publish(id);
     expect(end).toMatchObject({ outcome: null, dataset: { status: 'failed' } });
-    expect(JSON.stringify(end)).not.toMatch(/107|private rows/);
+    expect(JSON.stringify(end).replaceAll(artifactId, '')).not.toMatch(/107|private rows/);
     expect(live()).toMatchObject({ state: { status: 'error' }, source: { snapshot: null } });
   });
 });
