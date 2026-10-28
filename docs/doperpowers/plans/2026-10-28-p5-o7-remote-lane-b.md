@@ -1,6 +1,6 @@
 # P5 O7 — Remote lane B at full depth (2026-10-28)
 
-> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O7**, §"O7: Remote lane B at full depth". Parent pin: blob `685637e6c16ff3739e5fc1795932bc127626f293` at master `12ee346b8` (P5's Decision Logs 1–89).
+> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O7**, §"O7: Remote lane B at full depth". Parent pin: blob `e673d56fda4e1716cf3c1e05bae55595c8747e28` at master `629f1d467` (P5's Decision Logs 1–91; first drafted at `12ee346b8`, re-pinned for Decision Logs 90 and 91, neither of which names O7).
 >
 > **What binds.** O7's section in P5 is this document's design, and P5's approval covers it. Binding with it:
 > - P5 §3 (the connection manager: one connection per machine, RL2 over either carrier, direct tried first with a short timeout, the hub relay as fallback; a machine's departure greys only its sessions) and §5 (the remote surfaces); parent acceptance 4, 5 and 8;
@@ -111,6 +111,7 @@ The items, each with the milestone that proves it. Items 2–7 are restated from
   - A host error `host_unavailable` or `timeout` comes back as code `unavailable`. Other host error codes pass through (`calls.ts`).
   - A lane A read (`sminos.rows`, `diff`, `output`, `read`) must name the caller's own subscription on that session in `input.sub`.
   - Liveness: each side pings after 5–7 s of silence and closes after two unanswered pings (`channels.ts`, `PING_MS`).
+  - A device that stops reading loses its socket. Each carrier's send buffer (`send-buffer.ts`, P5 Decision Log 91) ends the socket past its ceiling or its stall bound, and the link reads that as a transient carrier close.
   - The direct listener allows 3 handshakes in a burst and 5 a minute per source address, and answers `503 busy` at the upgrade past that (`direct-listener.ts`, `HANDSHAKE_LIMITS`). It listens on port 47830 on tailnet addresses only.
   - Lane B's cursor is `(launchId, seq, idx)`. Lane A's is `(epoch, seq)`, the epoch being the endpoint's upstream subscription, which outlives a dropped channel for 120 s (`interest.ts`, `RESUME_MS`).
 - **The hub, for an app** (O11; `apps/desk-hub/src/worker.ts`). Each route takes a member authenticated by Access, or by the local stand-in's header in tests (`credentials(email)` from `apps/desk-hub/test/support/local.ts`).
