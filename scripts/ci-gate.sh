@@ -103,25 +103,25 @@
 # run whose plan puts no job on a Mac (its e2e groups all hosted) goes ahead. A failed read warns and goes ahead
 # (scripts/ci-gate-alerts.mjs).
 #
-# The last two lines always name the transcript and reports directory (also on green or error). Before a run exists,
+# The last two lines name the transcript and reports directory (also on green or error), or explicitly say none
+# when validation/preflight stopped the call before logging. Once preflight succeeds but before a run exists,
 # they live under ci-pending.<invocation>/; once found, that directory is renamed to include its run id. Read the
 # printed paths, not a path reconstructed from the sha. Each invocation owns its paths, including identical calls.
 #
 #   MAWS_GATE_IGNORE_ALERTS=1  skip that check, for an alert left open by mistake
 set -uo pipefail
 
-# Start before validation so errors have the same discoverable tail as completed runs.
-out=/tmp/maws-review/gates
-mkdir -p "$out" || exit 2
-invocation=$(mktemp -d "$out/ci-pending.XXXXXX") || exit 2
-invocation_token=${invocation##*.}
-log=$invocation/transcript.log
-reports=$invocation/reports
-mkdir -p "$reports" || exit 2
-exec > >(tee "$log") 2>&1
+# Preflight errors keep stderr and have no run evidence. Once admitted, every exit names this invocation's paths.
+log=''
+reports=''
 print_paths() {
-  echo "ci-gate: transcript in $log"
-  echo "ci-gate: reports in $reports/"
+  if [[ -n $log ]]; then
+    echo "ci-gate: transcript in $log"
+    echo "ci-gate: reports in $reports/"
+  else
+    echo 'ci-gate: transcript: none (stopped before a run)'
+    echo 'ci-gate: reports: none (stopped before a run)'
+  fi
 }
 trap print_paths EXIT
 
@@ -227,8 +227,6 @@ fi
 relaunch_peer=$(printf '%s\n' "$peer_trailers" | sed -n 's/^Peer: //p')
 relaunch_peer=${relaunch_peer:-none}
 
-[[ -z $peer_said ]] || printf '%s\n' "$peer_said"
-
 # --affected: the change's paths, from the merge base with origin/master to the tested commit, each as a line of
 # `git diff --name-status -M` (status, tab, path, and a rename's new path after another tab). A failed fetch goes ahead:
 # a stale origin/master only widens the set. Above AFFECTED_BOUND paths none is listed and the plan runs the whole suite
@@ -238,6 +236,7 @@ relaunch_peer=${relaunch_peer:-none}
 # 14); a change that size reaches most suites anyway.
 AFFECTED_BOUND=200
 affected_lines=()
+affected_note=''
 if [[ -n $affected ]]; then
   git -C "$git_dir" fetch --quiet origin master || echo 'ci-gate: warning: fetching origin/master failed; the change is taken from the local origin/master'
   base=$(git -C "$git_dir" merge-base origin/master "$sha") || { echo "ci-gate: --affected: no merge base of $short with origin/master" >&2; exit 2; }
@@ -251,7 +250,7 @@ if [[ -n $affected ]]; then
     fi
     affected_lines+=("$change_status"$'\t'"$change_path${change_to:+$'\t'$change_to}")
   done < <(git -C "$git_dir" diff --name-status -M -z "$base" "$sha")
-  echo "ci-gate: --affected: ${#affected_lines[@]} paths from the merge base ${base:0:8} with origin/master$( ((${#affected_lines[@]} > AFFECTED_BOUND)) && echo ", above the bound of $AFFECTED_BOUND, so none is listed and the plan runs the whole suite")"
+  affected_note="ci-gate: --affected: ${#affected_lines[@]} paths from the merge base ${base:0:8} with origin/master$( ((${#affected_lines[@]} > AFFECTED_BOUND)) && echo ", above the bound of $AFFECTED_BOUND, so none is listed and the plan runs the whole suite")"
 fi
 
 # One paragraph of trailers: the nonce makes every pushed sha unique, so pushing the same sha again still triggers a run.
@@ -302,7 +301,17 @@ else
     *) alert_check+="${alert_check:+$'\n'}ci-gate: warning: the ci-kit alert check failed; going ahead (the runner's job-started check still refuses jobs under a dialog)" ;;
   esac
 fi
+out=/tmp/maws-review/gates
+mkdir -p "$out" || exit 2
+invocation=$(mktemp -d "$out/ci-pending.XXXXXX") || exit 2
+invocation_token=${invocation##*.}
+mkdir -p "$invocation/reports" || exit 2
+log=$invocation/transcript.log
+reports=$invocation/reports
+exec > >(tee "$log") 2>&1
 [[ -z $alert_check ]] || printf '%s\n' "$alert_check"
+[[ -z $peer_said ]] || printf '%s\n' "$peer_said"
+[[ -z $affected_note ]] || printf '%s\n' "$affected_note"
 
 if [[ $variables_ok == true ]] &&
    pool_demand=$(HEAD_MESSAGE="$trailers" GATE_RUNNER="$gate_runner" GATE_E2E_RUNNER="$gate_e2e_runner" HOSTED_MAC_ROUTE="$gate_hosted_route" \

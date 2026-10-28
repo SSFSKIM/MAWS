@@ -70,7 +70,6 @@ function gate(args, { alerts = false, base = {}, change } = {}) {
       status: run.status,
       stdout: run.stdout,
       stderr: run.stderr,
-      diagnostics: (run.stdout + run.stderr).replace(/^ci-gate: (transcript|reports) in .*\n/gm, ''),
       calls: existsSync(calls) ? readFileSync(calls, 'utf8').trimEnd().split('\n') : [],
       refs,
       message: refs.length > 0 ? git('--git-dir', origin, 'log', '-1', '--format=%B', refs[0]) : '',
@@ -181,8 +180,8 @@ test('a call that names no gates is refused with exit 2 and the two forms, befor
   for (const args of [['--class1a', 'pool', '--runner', 'macos', '--evidence'], ['--class1a', 'pool']]) {
     const result = gate(args, { alerts: true });
     assert.equal(result.status, 2, args.join(' '));
-    assert.equal(result.diagnostics, 'ci-gate: name the gates: --gates static,unit,probes for class 1a only, --gates all for the whole set\n');
-    assert.match(result.stdout, /ci-gate: transcript in /m);
+    assert.equal(result.stderr, 'ci-gate: name the gates: --gates static,unit,probes for class 1a only, --gates all for the whole set\n');
+    assert.equal(result.stdout, 'ci-gate: transcript: none (stopped before a run)\nci-gate: reports: none (stopped before a run)\n');
     assert.deepEqual(result.calls, []);
     assert.deepEqual(result.refs, []);
   }
@@ -192,7 +191,7 @@ test('a --gates value of commas and spaces names no gates either, since the plan
   for (const value of ['', ',', ' , ']) {
     const result = gate(['--gates', value, '--class1a', 'pool', '--runner', 'macos'], { alerts: true });
     assert.equal(result.status, 2, JSON.stringify(value));
-    assert.equal(result.diagnostics, 'ci-gate: name the gates: --gates static,unit,probes for class 1a only, --gates all for the whole set\n');
+    assert.equal(result.stderr, 'ci-gate: name the gates: --gates static,unit,probes for class 1a only, --gates all for the whole set\n');
     assert.deepEqual(result.refs, []);
   }
 });
@@ -200,7 +199,7 @@ test('a --gates value of commas and spaces names no gates either, since the plan
 test('a live call that names no gates is refused with the live form, since a live run takes its live groups alone', () => {
   const result = gate(['--runner', 'macos', '--live'], { alerts: true });
   assert.equal(result.status, 2);
-  assert.equal(result.diagnostics, "ci-gate: name the gates: a live run takes its live e2e groups alone, --live --gates e2e:<group>,… (gate.yml's LIVE_E2E)\n");
+  assert.equal(result.stderr, "ci-gate: name the gates: a live run takes its live e2e groups alone, --live --gates e2e:<group>,… (gate.yml's LIVE_E2E)\n");
   assert.deepEqual(result.refs, []);
 });
 
@@ -214,7 +213,7 @@ test('--gates all pushes the whole set as the plan reads it: no Gates: trailer, 
 test('--gates all reaches the alert check as the whole set, unit:darwin and the class-1 e2e groups on the Mac', () => {
   const result = gate(['--gates', 'all', '--class1a', 'pool', '--runner', 'macos'], { alerts: true });
   assert.equal(result.status, 2);
-  assert.match(result.diagnostics, /^ci-gate: not pushing: this run puts jobs on a Mac \(unit:darwin, the class-1 e2e groups\) /m);
+  assert.match(result.stderr, /^ci-gate: not pushing: this run puts jobs on a Mac \(unit:darwin, the class-1 e2e groups\) /m);
   assert.deepEqual(result.refs, []);
 });
 
@@ -239,7 +238,7 @@ test('--lane vm, vm-trial, hosted or no-hosted goes through as a Lane: trailer; 
   for (const value of ['host', 'VM', 'vm,vm-trial', 'Hosted', 'nohosted']) {
     const refused = gate(['--gates', 'e2e:document-app', '--lane', value], { alerts: true });
     assert.equal(refused.status, 2, value);
-    assert.equal(refused.diagnostics, `ci-gate: --lane is vm, vm-trial, hosted or no-hosted, not ${value}\n`);
+    assert.equal(refused.stderr, `ci-gate: --lane is vm, vm-trial, hosted or no-hosted, not ${value}\n`);
     assert.deepEqual(refused.calls, []);
     assert.deepEqual(refused.refs, []);
   }
@@ -327,7 +326,7 @@ test('a tree a minor past its merge base pushes the peer and both wires after th
 test('a --peer that names no commit is refused with exit 2 before the alert check and the push', () => {
   const result = gate(['--gates', 'static', '--peer', 'no-such-ref'], { ...bump, alerts: true });
   assert.equal(result.status, 2);
-  assert.equal(result.diagnostics, 'ci-gate: --peer no-such-ref: no such commit\n');
+  assert.equal(result.stderr, 'ci-gate: --peer no-such-ref: no such commit\n');
   assert.deepEqual(result.calls, []);
   assert.deepEqual(result.refs, []);
 });
@@ -339,7 +338,7 @@ test('the alert check sees the peer group a bump adds, and none for an --affecte
   const planned = { ...bump, base: { ...bump.base, '.github/scripts/gate-plan.mjs': own('.github/scripts/gate-plan.mjs'), '.github/scripts/gate-affected.mjs': own('.github/scripts/gate-affected.mjs'), '.github/workflows/gate.yml': own('.github/workflows/gate.yml'), 'package.json': own('package.json') }, alerts: true };
   const held = gate(['--gates', 'static,unit,probes', '--class1a', 'pool'], planned);
   assert.equal(held.status, 2, held.stdout + held.stderr);
-  assert.match(held.diagnostics, /^ci-gate: not pushing: this run puts jobs on a Mac \(e2e:cross-build\) /m);
+  assert.match(held.stderr, /^ci-gate: not pushing: this run puts jobs on a Mac \(e2e:cross-build\) /m);
   assert.deepEqual(held.refs, []);
   const iteration = gate(['--gates', 'unit', '--class1a', 'pool', '--affected'], planned);
   assert.equal(iteration.status, 1, iteration.stdout + iteration.stderr); // pushed; the fake gh finds no run
@@ -354,7 +353,7 @@ test('--hosted-route writes a validated override, with no trailer when omitted',
   }
   const bad = gate(['--gates', 'static', '--hosted-route', 'typo']);
   assert.equal(bad.status, 2);
-  assert.match(bad.diagnostics, /--hosted-route is direct or mirror/);
+  assert.match(bad.stderr, /--hosted-route is direct or mirror/);
   assert.deepEqual(bad.refs, []);
   assert.deepEqual(bad.calls, []);
 });
@@ -375,6 +374,6 @@ test('the reserved final push ref keeps direct packaged on the Mac in the alert 
   base['.github/workflows/gate.yml'] = base['.github/workflows/gate.yml'].replace("HOSTED_MAC_JOBS: ''", 'HOSTED_MAC_JOBS: packaged');
   const result = gate(['--gates', 'packaged', '--runner', 'macos', '--hosted-route', 'direct', '--lane', 'hosted', '--peer', 'none', '--label', 'e1-final'], { alerts: true, base, change: () => {} });
   assert.equal(result.status, 2, result.stdout + result.stderr);
-  assert.match(result.diagnostics, /this run puts jobs on a Mac \(packaged\)/);
+  assert.match(result.stderr, /this run puts jobs on a Mac \(packaged\)/);
   assert.deepEqual(result.refs, []);
 });

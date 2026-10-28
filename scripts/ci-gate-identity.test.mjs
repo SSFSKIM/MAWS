@@ -68,6 +68,7 @@ function fixture(body, branch = 'feature/work') {
       const text = result.stdout + result.stderr;
       outputs.push(text);
       const ref = / as (ci\/\S+)/.exec(text)?.[1];
+      if (args.includes('--gates')) assert.ok(ref, text); // a refusal is not a distinct configuration's ref
       const log = /^ci-gate: transcript in (.+)$/m.exec(text)?.[1];
       const reports = /^ci-gate: reports in (.+)\/$/m.exec(text)?.[1];
       return { ...result, text, ref, log, reports, runId, sha };
@@ -145,9 +146,14 @@ test('green, red, missing-run and validation errors end with discoverable paths'
   for (const [args, outcome, status] of [[staticArgs, 'success', 0], [staticArgs, 'failure', 1], [staticArgs, 'no-run', 1], [[], 'success', 2]]) {
     const result = launch(args, { TEST_RESULT: outcome });
     assert.equal(result.status, status, result.text);
-    assert.match(result.stdout.trimEnd(), /ci-gate: transcript in .+\nci-gate: reports in .+\/$/);
-    assert.ok(existsSync(result.log));
-    assert.ok(existsSync(result.reports));
+    if (status === 2) {
+      assert.match(result.stderr, /ci-gate: name the gates:/);
+      assert.equal(result.stdout, 'ci-gate: transcript: none (stopped before a run)\nci-gate: reports: none (stopped before a run)\n');
+    } else {
+      assert.match(result.stdout.trimEnd(), /ci-gate: transcript in .+\nci-gate: reports in .+\/$/);
+      assert.ok(existsSync(result.log));
+      assert.ok(existsSync(result.reports));
+    }
   }
 }));
 
