@@ -16,8 +16,8 @@ import { launchMaws } from './support/launch';
 
 const HOLDER_BUILD = '9.9.9+e2e-holder';
 
-// Every file at or under the spine's paths (§1's table), with its bytes.
-const SPINE_PATHS = ['index.sqlite', 'index.sqlite-wal', 'index.sqlite-shm', 'machine-settings.json', 'sessions', 'prompt-history.jsonl', 'attention.json'];
+// Every file at or under the spine's paths (§1's table; P5 O9: and lane A's driver files), with its bytes.
+const SPINE_PATHS = ['index.sqlite', 'index.sqlite-wal', 'index.sqlite-shm', 'machine-settings.json', 'sessions', 'prompt-history.jsonl', 'attention.json', 'lane-a'];
 function spineFiles(userData: string): Map<string, string> {
   const files = new Map<string, string>();
   const visit = (path: string) => {
@@ -55,6 +55,9 @@ test('beside a live holder of spine.lock a launch writes no spine file and finis
     writeFileSync(join(userData, 'sessions', 'deletions', 'deletion-of-the-holder.json'), '{"held":true}');
     writeFileSync(join(userData, 'prompt-history.jsonl'), '{"display":"a prompt the holder kept"}\n');
     writeFileSync(join(userData, 'attention.json'), '{"items":[]}');
+    // P5 O9: lane A's upload records, with a day-old root that is gone, which a lock-holding start's sweep drops
+    mkdirSync(join(userData, 'lane-a'));
+    writeFileSync(join(userData, 'lane-a', 'uploads.json'), JSON.stringify({ version: 1, roots: [{ path: join(userData, 'upload-of-the-holder'), session: 'engine-session-of-the-holder', at: '2026-01-01T00:00:00.000Z' }] }));
     // the holder's split in progress: its machine file written, settings.json not yet rewritten as the client file
     const unified = JSON.stringify({ ...SETTINGS_DEFAULTS_V21, version: 20, theme: 'dark', gateway: { ...SETTINGS_DEFAULTS_V21.gateway, defaultRoute: 'direct' } });
     writeFileSync(join(userData, 'settings.json'), unified);
