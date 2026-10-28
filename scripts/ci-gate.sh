@@ -250,7 +250,7 @@ if [[ -n $affected ]]; then
     fi
     affected_lines+=("$change_status"$'\t'"$change_path${change_to:+$'\t'$change_to}")
   done < <(git -C "$git_dir" diff --name-status -M -z "$base" "$sha")
-  affected_note="ci-gate: --affected: ${#affected_lines[@]} paths from the merge base ${base:0:8} with origin/master$( ((${#affected_lines[@]} > AFFECTED_BOUND)) && echo ", above the bound of $AFFECTED_BOUND, so none is listed and the plan runs the whole suite")"
+  affected_note="ci-gate: --affected: ${#affected_lines[@]} paths from the merge base ${base:0:8} with origin/master$(if ((${#affected_lines[@]} > AFFECTED_BOUND)); then echo ", above the bound of $AFFECTED_BOUND, so none is listed and the plan runs the whole suite"; fi)"
 fi
 
 # One paragraph of trailers: the nonce makes every pushed sha unique, so pushing the same sha again still triggers a run.
