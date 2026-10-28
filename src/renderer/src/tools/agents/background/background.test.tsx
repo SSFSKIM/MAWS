@@ -602,6 +602,17 @@ describe('background work', () => {
       expect(fake.inputs.stopTask).toEqual([]); // never the engine's
     });
 
+    // A run's widget follows custody too: the graph MAWS kept from its own run of the session is not live once a terminal
+    // drives it, so no lane B Stop workflow is offered, as the list's card offers none.
+    it('offers no Stop workflow in a run’s widget once a terminal drives the session', async () => {
+      await mount({ events: upTo(stopTask, 229) });
+      openWidget('wkmzd07jp');
+      expect(within(widget()!).getByRole('button', { name: 'Stop workflow' })).toBeTruthy();
+      act(() => holder({ kind: 'terminal', pid: 4242 }));
+      expect(within(widget()!).queryByRole('button', { name: 'Stop workflow' })).toBeNull();
+      expect(within(widget()!).queryByRole('button', { name: 'stopping…' })).toBeNull();
+    });
+
     // A stop whose outcome is unknown may not have happened: said, and Stop offered again once the transcript has not
     // ended the job within the wait.
     it('says a stop with an unknown outcome may not have stopped, and offers Stop again after the wait', async () => {

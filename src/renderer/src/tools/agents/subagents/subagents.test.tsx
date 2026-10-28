@@ -586,6 +586,18 @@ describe('drill-in', () => {
       await waitFor(() => expect(invoked.filter(([name]) => name === 'laneA.stopAgent')).toHaveLength(1));
     };
 
+    it('reads the lists as not live here once a terminal drives the session, whatever engine status was kept', async () => {
+      await mount({ events: [started('a1', 1, { description: 'Long survey' })] });
+      expect(screen.getByText('Live activity · includes nested agents')).toBeTruthy();
+      expect(screen.queryByText('Status is known only while the session runs here')).toBeNull();
+      act(() => {
+        useSessions.setState((s) => ({ records: new Map(s.records).set(A, { ...s.records.get(A)!, holder: { kind: 'terminal', pid: 4242 } }) }));
+        applyLaneAState(A, laneAState(A));
+      });
+      expect(screen.queryByText('Live activity · includes nested agents')).toBeNull();
+      expect(screen.getByText('Status is known only while the session runs here')).toBeTruthy();
+    });
+
     it('stops the agent through the bridge, though an exited engine status is kept', async () => {
       await mountDriven();
       expect(screen.getAllByRole('button', { name: 'Stop agent' })).toHaveLength(1);
