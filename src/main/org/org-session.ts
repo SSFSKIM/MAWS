@@ -39,6 +39,7 @@ import {
   base64urlDecode,
   canonicalize,
   decodePairingCode,
+  isSignedOrgState,
   keyId,
   pairingFingerprint,
   pairingMac,
@@ -576,7 +577,12 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     if (credential !== cred || held !== view) return;
     if (!read.ok) return hubFailed(read);
     const served = read.value;
-    if (served.head !== null && typeof served.head.state?.version === 'number' && served.head.state.version !== view.head().state.version) return sync();
+    // Another head, or another state at the held head's version (a recovery's first state, or a fork): read as the feed's
+    // notices are, so a recovery is taken from its base (`rereadFrom`) rather than judged on the head alone as a fork.
+    if (served.head !== null && typeof served.head.state?.version === 'number') {
+      const heldHead = view.head().state;
+      if (served.head.state.version !== heldHead.version || (isSignedOrgState(served.head) && (await stateHash(served.head.state)) !== (await stateHash(heldHead)))) return sync();
+    }
     await adopt(view, { chain: [], head: served.head, transitions: served.transitions, certificates: served.certificates });
   }
 
@@ -608,8 +614,10 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
         feedOpen = false;
         changed();
       }),
+      // A notice at the held head's version is read too: the hub may hold another state there (a recovery's first
+      // state, whose base `rereadFrom` reads from; or a fork, refused as one). A notice below it says nothing to follow.
       feed.onState((version) => {
-        if (held !== null && held.ready() && version > held.head().state.version) background('following the hub', sync);
+        if (held !== null && held.ready() && version >= held.head().state.version) background('following the hub', sync);
       }),
       feed.onRemoved(() => denied('the feed closed 4403')),
       feed.onCredentialsEnded(() => credentialEnded('Access answered the feed\'s upgrade')),

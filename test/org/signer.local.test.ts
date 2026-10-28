@@ -161,10 +161,11 @@ const owed: Array<NonNullable<OrgSignerStatus>['owing']> = [];
  * A revocation the recovered line loses. Through the hub, the deployment admin adds a member with one device. It then
  * signs that device's removal (both keys into `revoked`) and, instead of posting it, has it delivered straight to the
  * endpoint (RL §5.2), as while the hub is withheld: here over the app's link, since `endpoint.state` carries its
- * authority in the state's own signature. The app learns it from the endpoint at its link's next handshake. Then the recovery: a root transition the org's recovery key signs from the hub's head (the version
- * before the removal), saying the states after it are forged, and two successors under the same roots, the second of
- * which brings the app to read the hub and rewind. The app's chain now holds the removal only as superseded, and the
- * recovered line lists the device again: the superseded offer revokes it.
+ * authority in the state's own signature. The app learns it from the endpoint at its link's next handshake. Then the
+ * recovery: a root transition the org's recovery key signs from the hub's head (the version before the removal), saying
+ * the states after it are forged, and one successor under the same roots, a sibling of the removal at its version,
+ * whose notice brings the app to read the hub and rewind. The app's chain now holds the removal only as superseded, and
+ * the recovered line lists the device again: the superseded offer revokes it.
  *
  * The endpoint keeps the removal, on the superseded branch: its own sync reads the hub from its head on, and a page
  * after the removal's version never holds the recovered line's first state, so only a delivery carrying the recovery
@@ -204,9 +205,8 @@ async function loseRevocation(n: number): Promise<{ member: string; device: Devi
   const transition = await signTransition({ org: ORG, fromVersion: base, newRootKeys, issued: new Date().toISOString() }, key.privateKey, key.pub);
   const posted = await org.hub.fetchAs(ADMIN, '/api/org/transitions', { body: transition });
   expect(posted.status, await posted.clone().text()).toBe(201);
-  // The recovered line's first state is at the removal's version, whose notice the app doesn't follow (it follows a
-  // notice above its head); the second one's notice is above it.
-  await org.amend(() => {});
+  // The recovered line's first state is at the removal's version: its notice, at the app's head's version, is what has
+  // the app read the hub from the recovery's base and rewind.
   await org.amend(() => {});
   await settled(`recovery ${n}`);
   await until(() => (signer().offer?.superseded ?? 0) === 2, `the offer to revoke lost device ${n}`);
@@ -365,18 +365,18 @@ describe('the app as the org’s signer on the local hub', { timeout: 180_000 },
     const sent = runs.length;
 
     const outcome = await app.revokeSuperseded();
-    expect(outcome).toEqual({ ok: true, version: lost.base + 3 });
+    expect(outcome).toEqual({ ok: true, version: lost.base + 2 });
     expect(asked.at(-1)).toMatchObject({ summary: 'revoke the keys a recovery left current' });
-    await until(() => acknowledged() && endpointHead().state.version === lost.base + 3, 'the revocation acknowledged');
+    await until(() => acknowledged() && endpointHead().state.version === lost.base + 2, 'the revocation acknowledged');
 
     const held = endpointHead();
     expect(await same(held, appHead())).toBe(true);
     expect(await same(held, await hubHead())).toBe(true);
     expect(held.state.revoked.map((r) => r.keyId)).toEqual(expect.arrayContaining(lost.kids));
     expect(held.state.members.find((m) => m.id === lost.member)!.devices).toEqual([]);
-    expect(owed).toContainEqual([{ version: lost.base + 3, machines: [ref], tooLarge: [] }]);
+    expect(owed).toContainEqual([{ version: lost.base + 2, machines: [ref], tooLarge: [] }]);
     // Recovery first: one run from the recovery's base rewound the endpoint onto the app's line and was acknowledged.
-    expect(runs.slice(sent)).toEqual([{ versions: [lost.base, lost.base + 1, lost.base + 2, lost.base + 3], bytes: expect.any(Number), outcome: { state: 'done', result: { version: lost.base + 3, rewound: true } } }]);
+    expect(runs.slice(sent)).toEqual([{ versions: [lost.base, lost.base + 1, lost.base + 2], bytes: expect.any(Number), outcome: { state: 'done', result: { version: lost.base + 2, rewound: true } } }]);
     await release();
   });
 

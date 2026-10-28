@@ -995,6 +995,54 @@ describe('following the hub', () => {
     }
   });
 
+  /**
+   * A held head the hub never had (a link's handshake brought it: a state an admin delivered straight to the machines),
+   * and the hub's own state at that version: a recovery's first state, or with no recovery behind it, a fork.
+   */
+  async function siblingAtHead(session: OrgSessionService, recovered: boolean): Promise<{ ours: SignedOrgState; theirs: SignedOrgState }> {
+    const base = hub.head;
+    const ours = await successor(base, [a1], (s) => void s.members.push({ id: memberId(), email: 'direct@example.com', role: 'member', devices: [] }));
+    await session.current()!.view.advance([ours], []);
+    expect(headVersion(session)).toBe(3);
+    const theirs = await successor(base, [a1]);
+    if (recovered) hub.transitions = [await signTransition({ org: ORG, fromVersion: 2, newRootKeys: [a1.stepUp.pub], issued: iso(Date.now()) }, recovery.privateKey, recovery.pub)];
+    hub.chain.push(theirs);
+    return { ours, theirs };
+  }
+  const holds = async (session: OrgSessionService, s: SignedOrgState) => (await stateHash(session.current()!.view.head().state)) === (await stateHash(s.state));
+
+  it('follows a recovery whose first state is at the held head\'s version, announced at that version', async () => {
+    const { session } = await signedIn();
+    const feed = fakeFeed();
+    session.attach(feed.hooks);
+    await followHub(session, feed);
+    const { theirs } = await siblingAtHead(session, true);
+    feed.state(3);
+    await until(() => holds(session, theirs), 'the recovered state adopted');
+    expect(registered(session).problem).toBeNull();
+    expect(session.current()!.view.head().state.version).toBe(3);
+  });
+
+  it('reads a sibling at the held head\'s version with no recovery behind it as a fork, adopting nothing', async () => {
+    const { session } = await signedIn();
+    const feed = fakeFeed();
+    session.attach(feed.hooks);
+    await followHub(session, feed);
+    const { ours } = await siblingAtHead(session, false);
+    feed.state(3);
+    await until(() => registered(session).problem === 'fork', 'the fork refused');
+    expect(await holds(session, ours)).toBe(true);
+  });
+
+  it('the certificate poll follows such a recovery itself, and reads no fork once it has', async () => {
+    const { session } = await signedIn({ timing: { CERTS_REFRESH_MS: 30 } });
+    const { theirs } = await siblingAtHead(session, true);
+    await until(() => holds(session, theirs), 'the recovered state adopted by the poll');
+    await pause(150);
+    expect(registered(session).problem).toBeNull();
+    expect(await holds(session, theirs)).toBe(true);
+  });
+
   it('refuses a served rollback and says so on the status, the device still signed in', async () => {
     const { session } = await signedIn();
     const feed = fakeFeed();
