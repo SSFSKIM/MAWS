@@ -48,6 +48,7 @@ const TIMING_NODE_TESTS = [
   'test/endpoint/rl10/uplink.test.ts', // P5 O10: the log plane's uploads held at a stand-in hub's real socket and RL10's, a burst signed and sent
   'test/machines/remote-link.test.ts', // P5 O7 M1: main's RL2 link against a real endpoint on its direct listener (real sockets, the handshake's WebCrypto)
   'test/machines/remote-link.local.test.ts', // P5 O7 M1: the link over the hub's multiplex (desk-hub's Worker in Miniflare), a relay drop, the switch to direct, the hub away
+  'test/org/sign-in.local.test.ts', // P5 O8 M1: the app's sign-in against desk-hub's Worker in Miniflare, O13's real `pair` approving
 ];
 const TIMING_RENDERER_TESTS = [
   'src/renderer/src/App.test.tsx',

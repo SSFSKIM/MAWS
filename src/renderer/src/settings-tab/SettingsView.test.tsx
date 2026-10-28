@@ -55,9 +55,9 @@ describe('settings tab writes one field per row', () => {
   it('has the eight sections, the index and its footer', () => {
     renderView();
     const index = screen.getByRole('navigation', { name: 'Settings sections' });
-    expect(within(index).getAllByRole('button').map((x) => x.textContent)).toEqual(['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications', 'Sessions', 'Browser', 'Artifacts', 'Plugins, skills and MCP servers ›']);
+    expect(within(index).getAllByRole('button').map((x) => x.textContent)).toEqual(['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications', 'Sessions', 'Browser', 'Artifacts', 'Org', 'Plugins, skills and MCP servers ›']);
     expect(index.textContent).toContain("Stored in MAWS's own Application Support folder. Nothing here writes into ~/.claude.");
-    for (const name of ['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications', 'Sessions', 'Browser', 'Artifacts']) expect(screen.getByRole('region', { name })).toBeTruthy();
+    for (const name of ['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications', 'Sessions', 'Browser', 'Artifacts', 'Org']) expect(screen.getByRole('region', { name })).toBeTruthy();
   });
 
   it('opens the Customize destination from the index without changing settings', () => {
