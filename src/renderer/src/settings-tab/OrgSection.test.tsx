@@ -6,13 +6,24 @@
 // `signing` with Reset behind its confirmation; the rekey offer with its code field; the old device still listed.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { StrictMode } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import type { CommandName, PreloadBridge } from '@shared/ipc/schema';
 import { OrgStatusSchema, type DiscardResult, type OrgAttempt, type OrgSignerStatus, type OrgStatus, type SignResult } from '@shared/ipc/schema/org';
 import { validateCommandInput } from '@shared/ipc/validate';
 import { useNotices } from '../stores/notices';
 import { TEST_MACHINE } from '../../../../test/support/machine';
 import { OrgSection } from './OrgSection';
+
+// The file's own clock: Date is frozen before any module loads, so `app/use-now`'s module-level `now` (read at import,
+// at each first subscribe and at each tick) equals every `Date.now()` here. On the real clock it could lag a test's own
+// reading, and an age of exactly n days floored to n - 1. Only Date is faked; timers stay real for the waits.
+vi.hoisted(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-28T12:00:00Z'));
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 const CODE = 'mawspair-7Hq2xVb9-secret';
 const DEVICE = 'k9F3aQ2mZt7bW1xYc0dE';
