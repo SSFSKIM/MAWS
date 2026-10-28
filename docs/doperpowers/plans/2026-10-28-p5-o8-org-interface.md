@@ -42,7 +42,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-28) Task 3: the device module, `createStateSigner` and the next keys (create, promote, destroy).
   - [x] (2026-10-28) Task 4: `signing-store.ts`, `signer.ts`, `postState`, `signing.json`, §H's M3 rows.
   - [x] (2026-10-28) Task 5, reviewed clean (5448d421b, fixes 34b043605 and 841d36673): `weekly.ts` and `deliveries.ts`.
-  - [ ] Task 6a: the session's composition, the rekey transaction and its replay, the IPC schema and commands, main's wiring.
+  - [x] (2026-10-28) Task 6a, reviewed clean (7fab342f5, fix 65e1310fa): the session's composition, the rekey transaction and its replay, the IPC schema and commands, main's wiring.
   - [ ] Task 6b: the Org section (its lines, buttons and confirmations) and `copy.ts`.
   - [ ] Task 7: `test/org/signer.local.test.ts`.
   - [ ] reviewer-high on the PR, the desk track's review of the `admin.ts` hunk, and the final gate.
@@ -1511,6 +1511,7 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - a failure after step 1 is left to the replay at the next start.
   6. `revokeSuperseded` composes the offer again at signing and refuses `invalid` if it no longer matches what was shown.
   7. The retired key file is destroyed once no listed device holds either old key.
+  8. (Review fixes, 65e1310fa.) Step 4 merges the promotion into the registration as it stands after its write, so a sign-out during that write stays signed out. A queued rekey checks `registration.rekey` again after waiting for the key-file work, and refuses `busy` while an intent waits for its replay.
   Not built: rekey for a profile whose `keys.json` is gone or refused. M1's `keys` problem covers that profile, and its path is to sign out and register afresh. Residue.
   Date/Author: 2026-10-28, O8's executor.
 
