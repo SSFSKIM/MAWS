@@ -67,7 +67,7 @@ function fake(answers: string[] = [], over: Partial<AdminIo> = {}): Fake {
     appDir: APP,
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, Math.min(ms, 50))),
     readStdin: async () => '',
-    secretOut: () => expect.unreachable('no O13 verb writes a secret to stdout'),
+    secretOut: async () => expect.unreachable('no O13 verb writes a secret to stdout'),
     stdoutIsTerminal: false,
     ...over,
   };

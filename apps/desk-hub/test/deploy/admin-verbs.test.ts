@@ -6,6 +6,7 @@
 // that signs, posts or deletes stops at /dev/tty when the shell has none, before any request; and nothing a verb prints
 // on stdout or stderr holds a key, a token or a code, but the code on the two verbs whose stdout is a secret.
 import { spawn } from 'node:child_process';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -65,7 +66,7 @@ function fake(answers: string[] = [], over: Partial<AdminIo> & { stdin?: string 
     appDir: APP,
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, Math.min(ms, 50))),
     readStdin: async () => stdin,
-    secretOut: (text) => void f.stdout.push(text),
+    secretOut: async (text) => void f.stdout.push(text),
     stdoutIsTerminal: false,
     ...rest,
   };
@@ -501,6 +502,110 @@ describe('on the local hub', () => {
 });
 
 const canonicalOf = (value: unknown) => canonicalize(value);
+
+describe('delegation create against a hub that misbehaves', () => {
+  // A proxy between the command and the local hub: `mint` rewrites the provisioning key's answer, `state` holds a
+  // state POST until the case releases it (then forwards it, or drops it as a lost answer).
+  let hub: LocalHub;
+  let proxy: Server;
+  let proxyUrl: string;
+  let mint: ((key: ProvisioningKeyRecord) => ProvisioningKeyRecord) | null = null;
+  let state: 'pass' | { held: () => void; release: Promise<'forward' | 'lose'> } = 'pass';
+  const keys = join(scratch, 'misbehaving', 'keys.json');
+  const via = (...extra: string[]) => ['--hub', proxyUrl, '--user', ADMIN, '--keys', keys, ...extra];
+  const head = async () => ((await hub.fetchAs(ADMIN, '/api/org/state').then((r) => r.json())) as { head: SignedOrgState }).head;
+  const anchor = () => JSON.parse(readFileSync(anchorFile(keys), 'utf8')) as { version: number; pending?: SignedOrgState };
+  const create = (prefix: string, ...extra: string[]) => ['delegation', 'create', '--label', 'devcloud', '--prefix', prefix, '--code-to-stdout', ...extra, ...via('--yes')];
+
+  beforeAll(async () => {
+    hub = await startLocalHub();
+    proxy = createServer((req: IncomingMessage, res: ServerResponse) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk: Buffer) => chunks.push(chunk));
+      req.on('end', async () => {
+        const body = Buffer.concat(chunks);
+        const posting = req.method === 'POST' && req.url === '/api/org/state';
+        if (posting && state !== 'pass') {
+          const held = state;
+          held.held();
+          if ((await held.release) === 'lose') return void res.destroy();
+        }
+        const headers: Record<string, string> = {};
+        for (const name of ['x-desk-standin-user', 'content-type']) if (typeof req.headers[name] === 'string') headers[name] = req.headers[name] as string;
+        const upstream = await fetch(`${hub.url}${req.url}`, { method: req.method, headers, body: body.length ? body : undefined });
+        let answer = Buffer.from(await upstream.arrayBuffer());
+        if (req.method === 'POST' && req.url === '/api/provisioning-keys' && upstream.status === 201 && mint) {
+          const issued = JSON.parse(answer.toString()) as { key: ProvisioningKeyRecord; token: string };
+          answer = Buffer.from(JSON.stringify({ ...issued, key: mint(issued.key) }));
+        }
+        res.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') ?? 'application/json' });
+        res.end(answer);
+      });
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+    proxyUrl = `http://127.0.0.1:${(proxy.address() as { port: number }).port}`;
+    expect(await runAdmin(['init', '--keys', keys], fake().io)).toBe(0);
+    expect(await runAdmin(['genesis', '--recovery', join(dir('volume'), 'recovery.json'), ...via('--yes')], fake().io)).toBe(0);
+  });
+  afterAll(async () => {
+    await new Promise((resolve) => proxy?.close(resolve));
+    await hub?.close();
+  });
+
+  it('signs the policy the owner approved, and refuses a mint answer that disagrees with it before signing anything', async () => {
+    const version = (await head()).state.version;
+    for (const [substitute, why] of [
+      [(k: ProvisioningKeyRecord) => ({ ...k, prefix: 'd' }), /its prefix d, not the dc- you approved/],
+      [(k: ProvisioningKeyRecord) => ({ ...k, expires: '2099-01-01T00:00:00.000Z' }), /it expires at 2099-01-01T00:00:00.000Z, not within 60 s of /],
+      [(k: ProvisioningKeyRecord) => ({ ...k, max_uses: null }), /no use limit, not the 1 you approved/],
+      [(k: ProvisioningKeyRecord) => ({ ...k, id: 'not-an-id' }), /its id not-an-id is not 32 hex/],
+    ] as const) {
+      mint = substitute;
+      const f = fake();
+      expect(await runAdmin(create('dc-', '--ttl', '3600', '--max-uses', '1'), f.io), String(why)).toBe(1);
+      expect(f.err.join('\n'), String(why)).toMatch(why);
+      expect(f.err.join('\n'), String(why)).toMatch(/the hub's answer to the mint disagrees with what you approved .*: nothing was signed; revoke the key it minted \(provisioning revoke /);
+      expect(f.stdout, String(why)).toEqual([]);
+      expect((await head()).state.version, String(why)).toBe(version);
+      expect(anchor().pending, String(why)).toBeUndefined();
+    }
+    mint = null;
+    const f = fake();
+    expect(await runAdmin(create('dc-', '--ttl', '3600', '--max-uses', '1'), f.io)).toBe(0);
+    const [delegation] = (await head()).state.delegations;
+    expect(delegation).toMatchObject({ prefix: 'dc-', maxUses: 1 });
+    expect(Math.abs(Date.parse(delegation.expires) - (Date.now() + 3600_000))).toBeLessThan(60_000);
+  });
+
+  it('writes the code once the proposal is durable, before its POST is answered, so a run killed there loses no key', async () => {
+    let held!: () => void;
+    const posted = new Promise<void>((resolve) => (held = resolve));
+    let release!: (how: 'forward' | 'lose') => void;
+    state = { held, release: new Promise((resolve) => (release = resolve)) };
+    const f = fake();
+    const running = runAdmin(create('lg-'), f.io);
+    await posted;
+    // The POST is at the hub's door, unanswered: the code is already on stdout, and the anchor holds its delegation.
+    expect(f.stdout).toHaveLength(1);
+    const code = decodeProvisioningCodeV2(f.stdout[0].trim());
+    expect(anchor().pending?.state.delegations.map((d) => d.id)).toContain(code.delegation.id);
+    release('lose');
+    state = 'pass';
+    expect(await running).toBe(1);
+    expect(f.stdout).toHaveLength(1);
+    expect(f.err.join('\n')).toMatch(new RegExp(`The code went to stdout when the proposal became durable: delegation ${code.delegation.id} is in effect once the hub holds version \\d+, which the next admin run settles; if it is abandoned instead, provisioning revoke ${code.delegation.id} and delete the stored code`));
+  });
+
+  it("abandoned, such a proposal's minted key is named for revoking, and provisioning revoke takes it", async () => {
+    const id = anchor().pending!.state.delegations.find((d) => d.prefix === 'lg-')!.id;
+    const f = fake(['y']);
+    expect(await runAdmin(['abandon-pending', ...via()], f.io)).toBe(0);
+    expect(f.out).toContain(`the abandoned proposal held delegation ${id} (prefix lg-), never in effect: its provisioning key is minted at the hub and its code may be in your secret store; run provisioning revoke ${id} and delete the stored code`);
+    const revoked = fake();
+    expect(await runAdmin(['provisioning', 'revoke', id, ...via('--yes')], revoked.io)).toBe(0);
+    expect(revoked.out.at(-1)).toBe(`revoked: provisioning key ${id}`);
+  });
+});
 
 describe('the local transforms', () => {
   // No keys, no anchor, no credential and no hub: not even --keys is needed.

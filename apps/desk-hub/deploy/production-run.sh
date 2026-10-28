@@ -62,6 +62,10 @@ filter() { perl -ne 'BEGIN { $| = 1 } print if /^wrangler target / || !/token|se
 # Production's X-Desk-Build, credential-free, within $1 seconds (default 30).
 build() { curl -q -sI --max-time ${1:-30} -X POST $URL/machine/enroll | /usr/bin/grep -i '^x-desk-build:' | tr -d '\r'; }
 deployment() { pnpm -s -C $W --filter desk-hub deployment "$@" --config deploy/config.json; }
+# The same command for the secret-stream mode, launched as the package's `deployment` script launches it but not through
+# pnpm, whose recursive runner writes its own failure lines (ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL, the checkout's path) to
+# stdout even under -s: there stdout is the secret stream, and holds the command's own output alone.
+direct() { ( cd $W/apps/desk-hub && node --experimental-strip-types --disable-warning=ExperimentalWarning deploy/bin.ts "$@" --config deploy/config.json ); }
 step=$1; (( $# )) && shift
 case $step in
   checkout)
@@ -163,9 +167,9 @@ case $step in
       unsetopt multios
       LOG=$O/admin-${sub}-pipe-$(stamp).log
       if [[ $sub == code ]]; then
-        { deployment admin "$@" 2>&1 1>&3 3>&- | filter | tee $LOG >&2; rc=${pipestatus[1]}; } 3>&1
+        { direct admin "$@" 2>&1 1>&3 3>&- | filter | tee $LOG >&2; rc=${pipestatus[1]}; } 3>&1
       else
-        { DESK_ACCESS_TOKEN=$T deployment admin "$@" --keys $H/keys.json 2>&1 1>&3 3>&- | filter | tee $LOG >&2; rc=${pipestatus[1]}; } 3>&1
+        { DESK_ACCESS_TOKEN=$T direct admin "$@" --keys $H/keys.json 2>&1 1>&3 3>&- | filter | tee $LOG >&2; rc=${pipestatus[1]}; } 3>&1
       fi
       unset T
       say "admin exit $rc; log $LOG (stderr alone: stdout went to the pipe)"; exit $rc

@@ -363,9 +363,14 @@ set there (the runners' `--pipe`), else on stdin.
   makes the delegation's key pair, signs the successor holding it, and writes the `smns-provision-v2.` code (the hub,
   the org, the roots, `recoveryPub`, the key's token, the delegation's id, prefix and private JWK) to stdout and
   nothing else there; every other line goes to stderr. With `--legacy-from-v1-code` it reads a v1 provisioning code on
-  stdin (for this hub and org) and copies its org key into the code's `legacy`. The code is written once the signed
-  successor is durable: if the hub's answer is lost, the code still goes out with the refusal, and the delegation is in
-  effect once the next run settles the pending proposal. Its one destination is a pipe into Secret Manager:
+  stdin (for this hub and org) and copies its org key into the code's `legacy`. What it signs is what you approved:
+  the prefix, an expiry `--ttl` from the mint, the use limit; a mint answer that disagrees with them (another prefix,
+  an expiry more than 60 s off, another limit, an id that is not 32 hex) is refused before anything is signed, naming
+  the key to revoke. The code is written, flushed, once the signed successor is pending in the anchor and before its
+  POST: a lost answer, or a run killed mid-POST, has already handed the delegation's key to the pipe, and the delegation
+  is in effect once the next run settles the proposal. Abandoned instead (`abandon-pending`), it never takes effect:
+  the stored code and the minted provisioning key are left, which `abandon-pending` names; `provisioning revoke <id>`
+  and deleting the secret clear them. Its one destination is a pipe into Secret Manager:
   `… | production-run.sh admin --pipe delegation create … | gcloud secrets create <id> --data-file=-`.
 - `delegation drop <id>` asks, then signs the successor revoking the delegation's key by its id and prefix (both
   reserved for the life of the org) and moving every admin retirement of its certificates into `revoked`, then revokes
@@ -382,8 +387,11 @@ set there (the runners' `--pipe`), else on stdin.
   else, and refuses while the hub's chain holds the proposal, which the next run adopts.
 - `code inspect` and `code strip-legacy` are local transforms, stdin to stdout, with no keys, anchor, credential or
   hub request: `inspect` prints a provisioning code's fields, every key and token elided; `strip-legacy` writes the
-  same code without `legacy` (B4), to a pipe alone, refused on a terminal. Run them as
-  `pnpm --silent --filter desk-hub deployment admin code …` (`--silent`, so no banner joins the code).
+  same code without `legacy` (B4), to a pipe alone, refused on a terminal. Run `strip-legacy` as
+  `zsh apps/desk-hub/deploy/production-run.sh admin --pipe code strip-legacy` (no credential read), never through
+  `pnpm … deployment`: pnpm's recursive runner writes its own failure lines to stdout even under `--silent`, which in a
+  pipe would join the stream. `inspect`, whose stdout is the terminal, runs as
+  `pnpm --silent --filter desk-hub deployment admin code inspect`.
 
 Nothing these verbs print on stdout or stderr holds a key, a token or a code, but the code on the two verbs whose stdout
 is one (`delegation create`, `code strip-legacy`); a machine's code goes to the terminal and the clipboard alone. The
@@ -553,8 +561,10 @@ hands it to a command, and never printed or passed as an argument; output goes t
   - `admin --pipe <verb…>` (O14 M2), for `delegation create` and `code strip-legacy` alone, the two verbs whose stdout
     is a secret code: the owner's token goes to the command's environment (`DESK_ACCESS_TOKEN`) instead of its stdin,
     which, with its stdout, passes through untouched and unlogged; its stderr alone is filtered and logged
-    (`admin-<verb>-pipe-<time>.log`), and every line of the step's own goes to stderr. The step refuses the mode when
-    its stdout is a terminal. `code strip-legacy` reads no token and no keys.
+    (`admin-<verb>-pipe-<time>.log`), and every line of the step's own goes to stderr. The command runs as the package's
+    `deployment` script runs it (`node … deploy/bin.ts` in the app's directory), not through pnpm, whose failure lines
+    go to stdout. The step refuses the mode when its stdout is a terminal. `code strip-legacy` reads no token and no
+    keys.
 
   The steps that change production (`access-sync`; `admin genesis`, `pair`, `remove-device`, `refresh`, `enroll`,
   `delegation`, `machine drop`, `provisioning revoke`) say so in their first line, before they read any credential, and

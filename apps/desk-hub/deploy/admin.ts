@@ -55,6 +55,7 @@ import {
   verifyPairingMac,
   verifyPinnedChain,
   type Certificates,
+  type Delegation,
   type Device,
   type OrgState,
   type SignedOrgState,
@@ -63,13 +64,13 @@ import { readJsonFile } from '../fake-machine/json-file';
 import { IDENTITY_HEADER } from '../local/standin';
 import {
   decodeProvisioningCode,
-  delegationFor,
   ENROLLMENT_TTL_S,
   encodeEnrollmentCodeV2,
   MAX_ENROLLMENT_TTL_S,
   MAX_PROVISIONING_KEY_TTL_S,
   MAX_PROVISIONING_KEY_USES,
   MIN_PROVISIONING_KEY_TTL_S,
+  NEVER_OFFLINE,
   NO_USE_CAP,
   ORG_STATE_PATH,
   PENDING_DEVICE_TTL_S,
@@ -155,8 +156,8 @@ export type AdminIo = {
   sleep(ms: number): Promise<void>;
   /** All of stdin, as text: the input of the verbs that read one (a code, a v1 code). */
   readStdin(): Promise<string>;
-  /** Writes `text` to stdout as it is: a secret code, for a pipe alone. */
-  secretOut(text: string): void;
+  /** Writes `text` to stdout as it is, resolving once it is flushed: a secret code, for a pipe alone. */
+  secretOut(text: string): Promise<void>;
   /** Whether stdout is a terminal, where a secret code never goes. */
   stdoutIsTerminal: boolean;
 };
@@ -424,11 +425,13 @@ async function anchored(ctx: Context, needsSigner: boolean) {
   }
 
   /** A successor of the head, changed by `edit`, signed by the admin device, kept as pending, then posted. */
-  async function amend(edit: (state: OrgState) => Promise<void> | void): Promise<SignedOrgState> {
+  /** `durable`, when given, runs once the proposal is in the anchor and before its POST (`delegation create`'s code). */
+  async function amend(edit: (state: OrgState) => Promise<void> | void, durable?: (signed: SignedOrgState) => Promise<void>): Promise<SignedOrgState> {
     const next = await successor(head.state, () => {});
     await edit(next);
     const signed = await signOrgState(next, [keys.stepUp]);
     save({ ...anchor, pending: signed });
+    await durable?.(signed);
     await send(signed);
     head = signed;
     return signed;
@@ -871,11 +874,37 @@ async function enroll(ctx: Context): Promise<number> {
   });
 }
 
+/** How far the hub's clock may stand from this one's when its mint answer states the key's expiry. */
+const MINT_SKEW_MS = 60_000;
+
+/** Where the hub's answer to a provisioning key's mint differs from what the owner approved; empty when it does not. */
+function mintDisagrees(issued: ProvisioningKeyIssued, approved: { prefix: string; ttl: number; maxUses: number | null; before: number; after: number }): string[] {
+  const key = issued?.key;
+  if (typeof key !== 'object' || key === null) return ['no key in it'];
+  const out: string[] = [];
+  if (typeof key.id !== 'string' || !/^[0-9a-f]{32}$/.test(key.id)) out.push(`its id ${printable(String(key.id))} is not 32 hex`);
+  if (key.prefix !== approved.prefix) out.push(`its prefix ${printable(String(key.prefix))}, not the ${approved.prefix} you approved`);
+  const expires = typeof key.expires === 'string' ? Date.parse(key.expires) : NaN;
+  const earliest = approved.before + approved.ttl * 1000 - MINT_SKEW_MS;
+  const latest = approved.after + approved.ttl * 1000 + MINT_SKEW_MS;
+  if (!(expires >= earliest && expires <= latest)) {
+    out.push(`it expires at ${printable(String(key.expires))}, not within ${MINT_SKEW_MS / 1000} s of ${new Date(approved.before + approved.ttl * 1000).toISOString()}`);
+  }
+  if (key.max_uses !== approved.maxUses) {
+    const theirs = key.max_uses === null ? 'no use limit' : `a limit of ${printable(String(key.max_uses))} uses`;
+    out.push(`${theirs}, not the ${approved.maxUses === null ? 'no limit' : approved.maxUses} you approved`);
+  }
+  if (typeof issued.token !== 'string' || issued.token === '') out.push('no token');
+  return out;
+}
+
 /**
  * `delegation create`: the devcloud delegation and its provisioning code (RL §5.3). The owner confirms first; then the
  * provisioning key is minted at the hub, a key pair made for the delegation, and the successor holding it signed. The
- * code goes to stdout and nowhere else: a pipe into Secret Manager. It is written once the signed successor is durable
- * (accepted, or pending in the anchor, which the next run settles), so a lost answer never loses the delegation's key.
+ * code goes to stdout and nowhere else: a pipe into Secret Manager. What is signed is what the owner approved (the
+ * prefix, the expiry, the use limit), and a mint answer that disagrees is refused before anything is signed. The code is
+ * written, flushed, once the signed successor is pending in the anchor and before its POST, so neither a lost answer
+ * nor a run killed mid-POST loses the delegation's key.
  */
 async function delegationCreate(ctx: Context): Promise<number> {
   const label = ctx.values.label;
@@ -901,35 +930,57 @@ async function delegationCreate(ctx: Context): Promise<number> {
   const problem = prefixProblem(from.head.state, prefix);
   if (problem) refuse(`${problem}: nothing was minted`);
   if (!(await confirm(ctx, `delegate ${prefix} for ${ttl} s? [y/N]`))) refuse('not delegated: nothing was minted');
+  const before = Date.now();
   const minted = await answered(from.person, PROVISIONING_KEYS_PATH, { body: { label, prefix, ttl_s: ttl, ...(maxUses === null ? {} : { max_uses: maxUses }) } });
+  const after = Date.now();
   if (minted.status !== 201) refuse(`the hub refused the provisioning key: ${minted.said}`);
   const issued = JSON.parse(minted.text) as ProvisioningKeyIssued;
+  // What is signed is what the owner approved: the hub's answer is checked against it, never signed from.
+  const disagrees = mintDisagrees(issued, { prefix, ttl, maxUses, before, after });
+  if (disagrees.length > 0) {
+    const id = typeof issued.key?.id === 'string' ? printable(issued.key.id) : '<its id>';
+    refuse(`the hub's answer to the mint disagrees with what you approved (${disagrees.join('; ')}): nothing was signed; revoke the key it minted (provisioning revoke ${id})`);
+  }
   const pair = await generateSigningKey(true);
   const jwk = (await crypto.subtle.exportKey('jwk', pair.privateKey)) as JsonWebKey;
-  const delegation = delegationFor(issued.key, pair.pub, [from.me.member.id]);
+  const delegation: Delegation = {
+    id: issued.key.id,
+    pub: pair.pub,
+    prefix,
+    expires: new Date(before + ttl * 1000).toISOString(),
+    maxUses: maxUses ?? NO_USE_CAP,
+    offlineRevokeS: NEVER_OFFLINE,
+    owners: [from.me.member.id],
+  };
   const { root } = from.head.state;
-  const emit = () =>
-    ctx.io.secretOut(
-      `${encodeProvisioningCodeV2({
-        hub: ctx.hub,
-        org: from.anchor.org,
-        roots: root.keys,
-        recoveryPub: root.recoveryPub,
-        token: issued.token,
-        delegation: { id: delegation.id, prefix: delegation.prefix, privateJwk: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y, d: jwk.d } },
-        ...(legacy ? { legacy } : {}),
-      })}\n`,
-    );
+  const code = `${encodeProvisioningCodeV2({
+    hub: ctx.hub,
+    org: from.anchor.org,
+    roots: root.keys,
+    recoveryPub: root.recoveryPub,
+    token: issued.token,
+    delegation: { id: delegation.id, prefix: delegation.prefix, privateJwk: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y, d: jwk.d } },
+    ...(legacy ? { legacy } : {}),
+  })}\n`;
+  // The code goes out, flushed, once the proposal holding its delegation is durable in the anchor and before its POST:
+  // a run killed during the POST, or after the hub took it, has already handed the delegation's key to the pipe.
+  let emitted = false;
   let signed: SignedOrgState;
   try {
-    signed = await from.amend((s) => void s.delegations.push(delegation));
+    signed = await from.amend(
+      (s) => void s.delegations.push(delegation),
+      async () => {
+        await ctx.io.secretOut(code);
+        emitted = true;
+      },
+    );
   } catch (error) {
-    const pending = readAnchor(ctx.keysPath)?.pending;
-    if (!(error instanceof Refusal) || !pending?.state.delegations.some((d) => d.id === delegation.id)) throw error;
-    emit();
-    return refuse(`${error.message}. The code went to stdout all the same: delegation ${delegation.id} is in effect once the hub holds version ${pending.state.version}, which the next admin run settles`);
+    if (!(error instanceof Refusal) || !emitted) throw error;
+    const n = readAnchor(ctx.keysPath)?.pending?.state.version ?? from.head.state.version + 1;
+    return refuse(
+      `${error.message}. The code went to stdout when the proposal became durable: delegation ${delegation.id} is in effect once the hub holds version ${n}, which the next admin run settles; if it is abandoned instead, provisioning revoke ${delegation.id} and delete the stored code`,
+    );
   }
-  emit();
   ctx.io.out(`delegated: ${prefix} as delegation ${delegation.id} (version ${signed.state.version}, expires ${delegation.expires}); its code went to stdout`);
   return 0;
 }
@@ -1044,6 +1095,13 @@ async function abandonPending(ctx: Context): Promise<number> {
   const question = `abandon version ${n} ${hash}? A later verb may sign another successor of version ${n - 1}, which a hub that kept these bytes could show a machine as a fork: abandon it only once you know why the hub refused it [y/N]`;
   if (!(await confirm(ctx, question))) refuse('not abandoned: the proposal stays pending');
   writeAnchor(ctx.keysPath, { ...anchor, pending: undefined, version: Math.max(anchor.version, head.version) });
+  // A delegation the proposal added never took effect, but `delegation create` minted its key and wrote its code.
+  for (const d of proposal.state.delegations) {
+    if (head.delegations.some((x) => x.id === d.id)) continue;
+    ctx.io.out(
+      `the abandoned proposal held delegation ${d.id} (prefix ${d.prefix}), never in effect: its provisioning key is minted at the hub and its code may be in your secret store; run provisioning revoke ${d.id} and delete the stored code`,
+    );
+  }
   ctx.io.out(`abandoned: version ${n} ${hash}`);
   return 0;
 }
@@ -1078,7 +1136,7 @@ async function codeInspect(ctx: Pick<Context, 'io'>): Promise<number> {
 /** `code strip-legacy`: the same code without its `legacy` field, to stdout (a pipe alone). */
 async function codeStripLegacy(ctx: Pick<Context, 'io'>): Promise<number> {
   const { legacy, ...rest } = await stdinCode(ctx);
-  ctx.io.secretOut(`${encodeProvisioningCodeV2(rest)}\n`);
+  await ctx.io.secretOut(`${encodeProvisioningCodeV2(rest)}\n`);
   ctx.io.err(legacy ? 'strip-legacy: the legacy field is dropped' : 'strip-legacy: the code holds no legacy field; it is unchanged');
   return 0;
 }
@@ -1307,7 +1365,7 @@ export function machineIo(): AdminIo {
       for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
       return Buffer.concat(chunks).toString('utf8');
     },
-    secretOut: (text) => void process.stdout.write(text),
+    secretOut: (text) => new Promise<void>((resolve, reject) => void process.stdout.write(text, (error) => (error ? reject(error) : resolve()))),
     stdoutIsTerminal: process.stdout.isTTY === true,
   };
 }

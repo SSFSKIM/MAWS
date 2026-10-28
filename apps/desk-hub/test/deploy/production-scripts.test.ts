@@ -8,7 +8,9 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdir
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import { generateSigningKey, base64urlEncode } from 'org-protocol';
 import { PRODUCTION_HOST, PRODUCTION_WORKER } from '../../deploy/config.ts';
+import { encodeProvisioningCodeV2, type ProvisioningCodeV2 } from '../../deploy/provisioning-code.ts';
 
 const deploy = join(import.meta.dirname, '../../deploy');
 const SCRIPTS = ['production-deploy.sh', 'production-run.sh'];
@@ -46,10 +48,18 @@ if [ "$STUB_PNPM" = deploy ]; then
   esac
 fi
 if [ "$STUB_PNPM" = admin ]; then cat > "$STUB_REC/pnpm.stdin"; echo "head version 1, issued 0 days ago"; [ -z "$STUB_ADMIN_OUT" ] || printf '%s\n' "$STUB_ADMIN_OUT"; exit 0; fi
-# The secret-stream mode: the token it found in its environment recorded, its stdin copied to its stdout and recorded,
-# two diagnostics on stderr (one the filter drops), and STUB_EXIT as its status.
-if [ "$STUB_PNPM" = pipe ]; then printf '%s' "\${DESK_ACCESS_TOKEN-unset}" > "$STUB_REC/pnpm.env"; tee "$STUB_REC/pnpm.stdin"; echo "head version 1, issued 0 days ago" >&2; echo "a line naming a token" >&2; exit \${STUB_EXIT:-0}; fi
 exit 1
+`,
+  // node: the secret-stream mode's launcher (production-run.sh `direct`). Its directory and arguments recorded, the token
+  // it found in its environment recorded, its stdin copied to its stdout and recorded, two diagnostics on stderr (one the
+  // filter drops), and STUB_EXIT as its status.
+  node: `#!/bin/sh
+printf '%s %s\\n' "$(pwd)" "$*" >> "$STUB_REC/node"
+printf '%s' "\${DESK_ACCESS_TOKEN-unset}" > "$STUB_REC/node.env"
+tee "$STUB_REC/node.stdin"
+echo "head version 1, issued 0 days ago" >&2
+echo "a line naming a token" >&2
+exit \${STUB_EXIT:-0}
 `,
   wrangler: `#!/bin/sh\nprintf '%s\\n' "$*" >> "$STUB_REC/wrangler"\nexit 1\n`,
   cloudflared: `#!/bin/sh\nprintf '%s\\n' "$*" >> "$STUB_REC/cloudflared"\n[ -n "$STUB_ACCESS" ] || exit 1\nprintf '%s\\n' "$STUB_ACCESS"\n`,
@@ -622,6 +632,11 @@ describe.skipIf(!zsh)('production-run.sh', () => {
   });
 
   describe('admin --pipe, the secret-stream mode (O14 M2)', () => {
+    // The package's `deployment` script, as the mode's launcher runs it without pnpm: the two must not drift apart.
+    const LAUNCHER = (JSON.parse(readFileSync(join(deploy, '../package.json'), 'utf8')) as { scripts: { deployment: string } }).scripts.deployment.replace(/^node /, '');
+    it('launches the command as the package\'s deployment script does', () => {
+      for (const script of ['production-run.sh', 'staging-run.sh']) expect(readFileSync(join(deploy, script), 'utf8'), script).toContain(`&& node ${LAUNCHER} "$@" --config `);
+    });
     const CREATE = ['delegation', 'create', '--label', 'devcloud', '--prefix', 'dc-', '--code-to-stdout', '--legacy-from-v1-code'];
     // A v1 code in, as B1 step 2 pipes one; a line of its shape the filter would drop, which must pass untouched.
     const INPUT = 'smns-provision-v1.eyJodWIiOiJodHRwczovL3gifQ\nsecond line, no newline at its end';
@@ -639,12 +654,14 @@ describe.skipIf(!zsh)('production-run.sh', () => {
 
     it('hands the token in the environment, not on stdin; passes stdin and stdout byte for byte; filters and logs stderr alone', () => {
       const w = withKeys();
-      const run = piped(w, ['admin', '--pipe', ...CREATE], { STUB_PNPM: 'pipe', STUB_ACCESS: ACCESS });
+      const run = piped(w, ['admin', '--pipe', ...CREATE], { STUB_ACCESS: ACCESS });
       expect(run.status, run.stderr).toBe(0);
       expect(run.stdout).toBe(INPUT);
-      expect(readFileSync(join(w.rec, 'pnpm.stdin'), 'utf8')).toBe(INPUT);
-      expect(readFileSync(join(w.rec, 'pnpm.env'), 'utf8')).toBe(ACCESS);
-      expect(w.calls('pnpm')).toEqual([`-s -C ${w.dir} --filter desk-hub deployment admin ${CREATE.join(' ')} --keys ${w.out}/device/keys.json --config deploy/config.json`]);
+      expect(readFileSync(join(w.rec, 'node.stdin'), 'utf8')).toBe(INPUT);
+      expect(readFileSync(join(w.rec, 'node.env'), 'utf8')).toBe(ACCESS);
+      // The command itself, not pnpm's recursive runner, whose own failure lines would reach the stream.
+      expect(w.calls('pnpm')).toEqual([]);
+      expect(w.calls('node')).toEqual([`${w.dir}/apps/desk-hub ${LAUNCHER} admin ${CREATE.join(' ')} --keys ${w.out}/device/keys.json --config deploy/config.json`]);
       expect(run.stderr.split('\n')[0]).toMatch(/^admin delegation create changes production: /);
       expect(run.stderr).toContain('head version 1, issued 0 days ago');
       expect(run.stderr).not.toContain('naming a token');
@@ -653,29 +670,29 @@ describe.skipIf(!zsh)('production-run.sh', () => {
       expect(readFileSync(join(w.out, logs[0]), 'utf8')).toBe('head version 1, issued 0 days ago\n');
       expect(run.stderr).toMatch(new RegExp(`admin exit 0; log ${w.out}/admin-delegation-pipe-.*\\.log`));
       // The token is nowhere but the command's environment.
-      for (const text of [run.stdout, run.stderr, readFileSync(join(w.out, logs[0]), 'utf8'), ...w.calls('pnpm'), ...w.calls('cloudflared')]) expect(text).not.toContain(ACCESS);
+      for (const text of [run.stdout, run.stderr, readFileSync(join(w.out, logs[0]), 'utf8'), ...w.calls('node'), ...w.calls('cloudflared')]) expect(text).not.toContain(ACCESS);
     });
 
     it("passes the command's status on, and runs code strip-legacy with no token and no keys", () => {
       const failed = withKeys();
-      expect(piped(failed, ['admin', '--pipe', ...CREATE], { STUB_PNPM: 'pipe', STUB_ACCESS: ACCESS, STUB_EXIT: '3' }).status).toBe(3);
+      expect(piped(failed, ['admin', '--pipe', ...CREATE], { STUB_ACCESS: ACCESS, STUB_EXIT: '3' }).status).toBe(3);
       const w = world();
-      const run = piped(w, ['admin', '--pipe', 'code', 'strip-legacy'], { STUB_PNPM: 'pipe' });
+      const run = piped(w, ['admin', '--pipe', 'code', 'strip-legacy'], {});
       expect(run.status, run.stderr).toBe(0);
       expect(run.stdout).toBe(INPUT);
       expect(w.calls('cloudflared')).toEqual([]);
-      expect(readFileSync(join(w.rec, 'pnpm.env'), 'utf8')).toBe('unset');
-      expect(w.calls('pnpm')).toEqual([`-s -C ${w.dir} --filter desk-hub deployment admin code strip-legacy --config deploy/config.json`]);
+      expect(readFileSync(join(w.rec, 'node.env'), 'utf8')).toBe('unset');
+      expect(w.calls('node')).toEqual([`${w.dir}/apps/desk-hub ${LAUNCHER} admin code strip-legacy --config deploy/config.json`]);
     });
 
     it('refuses any other verb, and the two secret verbs outside the mode, with nothing run and nothing on stdout', () => {
       for (const args of [['admin', '--pipe', 'devices'], ['admin', '--pipe', 'delegation', 'drop', 'x'], ['admin', '--pipe'], ['admin', ...CREATE], ['admin', 'code', 'strip-legacy'], ['admin', 'code', 'inspect']]) {
         const w = withKeys();
-        const run = piped(w, args, { STUB_PNPM: 'pipe', STUB_ACCESS: ACCESS });
+        const run = piped(w, args, { STUB_ACCESS: ACCESS });
         expect(run.status, args.join(' ')).toBe(2);
         expect(run.stdout + run.stderr, args.join(' ')).toMatch(/admin --pipe is for delegation create and code strip-legacy alone|writes a secret code to stdout, which this step filters and logs/);
         if (args[1] === '--pipe') expect(run.stdout, args.join(' ')).toBe('');
-        expect(w.calls('pnpm'), args.join(' ')).toEqual([]);
+        expect([...w.calls('pnpm'), ...w.calls('node')], args.join(' ')).toEqual([]);
         expect(w.calls('cloudflared'), args.join(' ')).toEqual([]);
       }
     });
@@ -685,16 +702,58 @@ describe.skipIf(!zsh)('production-run.sh', () => {
       const w = withKeys();
       const r = spawnSync('python3', ['-I', '-c', 'import pty, sys; sys.exit(pty.spawn(sys.argv[1:]) >> 8)', 'zsh', join(w.dir, 'apps/desk-hub/deploy/production-run.sh'), 'admin', '--pipe', ...CREATE], {
         cwd: w.root,
-        env: { ...w.env, STUB_PNPM: 'pipe', STUB_ACCESS: ACCESS },
+        env: { ...w.env, STUB_ACCESS: ACCESS },
         encoding: 'utf8',
         timeout: 60_000,
       });
       expect(r.status, r.stdout + r.stderr).toBe(2);
       expect(r.stdout).toMatch(/admin --pipe: stdout is a terminal, and the code goes only to a pipe/);
-      expect(w.calls('pnpm')).toEqual([]);
+      expect([...w.calls('pnpm'), ...w.calls('node')]).toEqual([]);
       expect(w.calls('cloudflared')).toEqual([]);
     });
   });
+});
+
+/** A provisioning code with a `legacy` field, and the same code without it: what strip-legacy turns one into. */
+async function sampleCode(): Promise<{ text: string; stripped: string }> {
+  const key = await generateSigningKey(true);
+  const jwk = (await crypto.subtle.exportKey('jwk', key.privateKey)) as JsonWebKey;
+  const code: ProvisioningCodeV2 = {
+    hub: 'https://desk-hub.example',
+    org: 'org-x',
+    roots: [base64urlEncode(crypto.getRandomValues(new Uint8Array(16)))],
+    recoveryPub: (await generateSigningKey()).pub,
+    token: base64urlEncode(crypto.getRandomValues(new Uint8Array(32))),
+    delegation: { id: 'a'.repeat(32), prefix: 'dc-', privateJwk: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y, d: jwk.d } },
+  };
+  return { text: encodeProvisioningCodeV2({ ...code, legacy: { org: 'org-x', key: base64urlEncode(crypto.getRandomValues(new Uint8Array(32))) } }), stripped: encodeProvisioningCodeV2(code) };
+}
+
+/**
+ * The runner as it is in this checkout, with its real launcher, for `admin --pipe code strip-legacy`: a local transform
+ * that reads no credential and reaches no deployment (a cloudflared that fails, first on PATH, records any call).
+ * stdout is the secret stream, so it must hold the command's own stdout and nothing else, on success and on refusal.
+ */
+async function realStripLegacy(script: string, env: (dir: string) => Record<string, string>) {
+  const scratchDir = mkdtempSync(join(tmpdir(), 'pipe-real-'));
+  const bin = join(scratchDir, 'bin');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'cloudflared'), `#!/bin/sh\necho called >> '${scratchDir}/cloudflared'\nexit 1\n`, { mode: 0o755 });
+  const run = (input: string) => spawnSync('zsh', [script, 'admin', '--pipe', 'code', 'strip-legacy'], { encoding: 'utf8', input, timeout: 120_000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...env(scratchDir) } });
+  const { text, stripped } = await sampleCode();
+  return { good: run(`${text}\n`), bad: run('not a code\n'), stripped, called: () => existsSync(join(scratchDir, 'cloudflared')) };
+}
+
+describe.skipIf(!zsh)('admin --pipe with the real launcher', () => {
+  it('puts nothing but the command\'s own stdout on the stream: the stripped code, or nothing at all on a refusal', async () => {
+    const { good, bad, stripped, called } = await realStripLegacy(join(deploy, 'production-run.sh'), (dir) => ({ DESK_PRODUCTION_DIR: join(dir, 'state'), DESK_PRODUCTION_DEVICE: join(dir, 'device') }));
+    expect(good.status, good.stderr).toBe(0);
+    expect(good.stdout).toBe(`${stripped}\n`);
+    expect(bad.status, bad.stderr).toBe(1);
+    expect(bad.stdout).toBe('');
+    expect(bad.stderr).toMatch(/admin: stdin: not smns-provision-v2/);
+    expect(called()).toBe(false);
+  }, 240_000);
 });
 
 describe('the README', () => {
