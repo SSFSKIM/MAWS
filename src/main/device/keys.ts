@@ -8,10 +8,17 @@
 // other: a widened key may have been read, and a replaced one would leave the org state listing keys this device no
 // longer holds. A file that is not a key file is refused too, and left for the person to look at. The first load writes
 // the file at a temporary name and links it into place, so two first loads at once keep one pair.
+//
+// The keys stay out of Time Machine: once the device is an org root, the org's recovery key is its backup (the remote
+// layer's Decision Log 28), so a root key must not be backed up a second time. Every load excludes `device/` itself, a
+// sticky exclusion that covers whatever is linked into it; it comes before a first load writes the key file, so that
+// file is never eligible, and on later loads it reaches a file written before the exclusion existed. A failed exclusion
+// is logged and the load goes on: the device keeps its keys, and the next load asks again.
 import { constants } from 'node:fs';
 import { link, lstat, mkdir, open, rm, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 import { generateSigningKey, importSigningKey, type B64, type SigningKey } from '../../../apps/org-protocol/src/index.ts';
+import { excludeFromBackup } from './backup-exclusion';
 
 export type DeviceKeys = {
   keyStorage: 'software';
@@ -42,11 +49,17 @@ const DIRECTORY_MODE = 0o700;
 const FILE_MODE = 0o600;
 
 /** The device's keys under `profile` (main's userData), made on the first load. */
-export async function loadDeviceKeys(profile: string, deps: { uid?: number; now?: () => Date } = {}): Promise<DeviceKeys> {
+export async function loadDeviceKeys(
+  profile: string,
+  deps: { uid?: number; now?: () => Date; excludeFromBackup?: (path: string) => Promise<void> } = {},
+): Promise<DeviceKeys> {
   const uid = deps.uid ?? process.getuid!();
   const dir = join(profile, 'device');
   await mkdir(dir, { recursive: true, mode: DIRECTORY_MODE });
   await assertPrivateDirectory(dir, uid);
+  await (deps.excludeFromBackup ?? excludeFromBackup)(dir).catch((error: unknown) =>
+    console.warn(`[device-keys] could not exclude ${dir} from Time Machine: ${error instanceof Error ? error.message : String(error)}`),
+  );
   const file = join(dir, 'keys.json');
   const existing = await readPrivateFile(file, uid);
   if (existing !== null) return fromFile(existing, file);

@@ -4,7 +4,7 @@
 import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   acceptChannel,
   generateSigningKey,
@@ -125,6 +125,53 @@ describe('the device keys on disk', () => {
     stored.stepUp.pub = (await generateSigningKey()).pub;
     await writeFile(keysFile(), JSON.stringify(stored), { mode: 0o600 });
     expect(await refusal(loadDeviceKeys(profile))).toBe('malformed');
+  });
+});
+
+describe('the device keys and Time Machine', () => {
+  /** Records each exclusion asked for, and whether the key file was there when it was asked. */
+  const recorder = () => {
+    const calls: { path: string; keyFileExisted: boolean }[] = [];
+    const excludeFromBackup = async (path: string) => {
+      calls.push({ path, keyFileExisted: await lstat(keysFile()).then(() => true, () => false) });
+    };
+    return { calls, excludeFromBackup };
+  };
+
+  it('are kept out of it: the first load excludes the device directory before the key file is written into it', async () => {
+    const { calls, excludeFromBackup } = recorder();
+    await loadDeviceKeys(profile, { excludeFromBackup });
+    expect(calls).toEqual([{ path: deviceDir(), keyFileExisted: false }]);
+    expect(await mode(keysFile())).toBe(0o600);
+  });
+
+  it('are kept out of it on every later load, so a key file written before the exclusion existed gets it too', async () => {
+    await loadDeviceKeys(profile, { excludeFromBackup: async () => {} });
+    const { calls, excludeFromBackup } = recorder();
+    await loadDeviceKeys(profile, { excludeFromBackup });
+    expect(calls).toEqual([{ path: deviceDir(), keyFileExisted: true }]);
+  });
+
+  it('are still made and loaded when the exclusion fails, which is logged in one line', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const keys = await loadDeviceKeys(profile, { excludeFromBackup: async () => Promise.reject(new Error('tmutil exited 22')) });
+      const stored = JSON.parse(await readFile(keysFile(), 'utf8')) as { channel: { pub: string } };
+      expect(stored.channel.pub).toBe(keys.channel.pub);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]![0])).toContain(deviceDir());
+      expect(String(warn.mock.calls[0]![0])).toContain('tmutil exited 22');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('are not touched when the directory is refused', async () => {
+    await mkdir(deviceDir(), { mode: 0o755 });
+    await chmod(deviceDir(), 0o755);
+    const { calls, excludeFromBackup } = recorder();
+    expect(await refusal(loadDeviceKeys(profile, { excludeFromBackup }))).toBe('not-private');
+    expect(calls).toEqual([]);
   });
 });
 
