@@ -383,6 +383,8 @@ if [[ $conclusion != success ]]; then
 fi
 [[ -z $preemptions ]] || printf '%s\n' "$preemptions"
 [[ $conclusion == success ]] || refusals "$jobs" "$failed_log"
+# Retry passes are still flakes: keep their locations beside the verdict, also on a green run.
+if [[ $jobs == *e2e:* ]]; then node "$(dirname "$0")/ci-gate-flaky.mjs" "$REPO" "$run_id"; fi
 # The attempt on a line of its own, so the status line stays what every waiter matches (^ci-gate: run [0-9]+ [a-z_]+$).
 echo "ci-gate: run $run_id attempt $run_attempt"
 echo "ci-gate: run $run_id $conclusion"

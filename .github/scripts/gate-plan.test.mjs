@@ -1677,7 +1677,7 @@ test('direct runs the same admitted groups through e2e on macos-26 without a wai
   const direct = plan({ ...env, HOSTED_MAC_ROUTE: 'direct' }).outputs;
   assert.equal(direct.e2e_host, direct.e2e);
   assert.deepEqual([direct.e2e_hosted, direct.e2e_vm, direct.e2e_build, direct.pool], ['[]', '[]', '[]', 'false']);
-  assert.deepEqual(JSON.parse(direct.e2e), JSON.parse(mirror.e2e).map((entry) => ({ ...entry, runner: '"macos-26"', timeout: 45, ...cachedOf(entry.group) })));
+  assert.deepEqual(JSON.parse(direct.e2e), JSON.parse(mirror.e2e).map((entry) => ({ ...entry, runner: '"macos-26"', timeout: 45, retry: true, ...cachedOf(entry.group) })));
 });
 
 // A direct Mac starts empty, so the run shares each out/ variant through the Actions cache: keyed by the commit and the
@@ -1737,7 +1737,7 @@ test('only direct can host a peer group; the peer and package script reach the o
 test('under direct a peer group is hosted without a list entry, on either lane, unless no-hosted, mirror, live or a final ref', () => {
   const env = { PEER_E2E: 'cross-build', HOSTED_MAC_ROUTE: 'direct', HEAD_MESSAGE: `ci-gate: test\n\nGates: static,unit,probes\nClass1a: pool\nRunner: macos\n${peerTrailers('3.3', '3.4')}` };
   const entryOf = (scenario) => JSON.parse(plan(scenario).outputs.e2e).find((entry) => entry.group === 'cross-build');
-  const hostedEntry = { ...peerEntry, hosted: true, cached: 'plain', runner: '"macos-26"', timeout: 30 };
+  const hostedEntry = { ...peerEntry, hosted: true, retry: true, cached: 'plain', runner: '"macos-26"', timeout: 30 };
   assert.deepEqual(entryOf(env), hostedEntry);
   assert.deepEqual(entryOf({ ...env, HEAD_MESSAGE: env.HEAD_MESSAGE.replace('Runner: macos', 'Runner: linux') }), hostedEntry);
   for (const scenario of [
@@ -1809,7 +1809,7 @@ test('route changes only placement of hosted entries across the current lists an
     const env = { ...ownLists(), GATE_RUNNER: 'pool', HEAD_MESSAGE: `Runner: macos${lane ? `\nLane: ${lane}` : ''}` };
     const mirror = plan(env).outputs;
     const direct = plan({ ...env, HOSTED_MAC_ROUTE: 'direct' }).outputs;
-    assert.deepEqual(JSON.parse(direct.e2e), JSON.parse(mirror.e2e).map((entry) => entry.hosted ? { ...entry, runner: '"macos-26"', timeout: 45, ...cachedOf(entry.group) } : entry), lane);
+    assert.deepEqual(JSON.parse(direct.e2e), JSON.parse(mirror.e2e).map((entry) => entry.hosted ? { ...entry, runner: '"macos-26"', timeout: 45, retry: true, ...cachedOf(entry.group) } : entry), lane);
     assert.equal(direct.e2e_vm, mirror.e2e_vm, lane);
     assert.equal(direct.e2e_build, mirror.e2e_build, lane);
   }
