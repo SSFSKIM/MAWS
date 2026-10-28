@@ -27,7 +27,7 @@ Nothing a person sees changes in O3-C. What changes is the code's shape, so the 
 
 - [x] M1 — The services bus: the library stops importing main's IPC (2026-10-28 20:17Z, 87ce79b8e; review clean)
 - [x] M2 — Main's view of the spine, and the sweep on interest (2026-10-28 22:18Z, 5e30b6d80 with the review's test fix bfd956cec; review clean)
-- [ ] M3 — The library moves to `src/services/`, behind its boundary
+- [x] M3 — The library moves to `src/services/`, behind its boundary (2026-10-29 23:56Z, 6328850a2; review clean)
 - [ ] M4 — Two roots and the services entry
 - [ ] M5 — The spine's idle reading (`e2e:daemon-idle-spine`)
 - [ ] M6 — Landing: the acceptance run, O9's half, the bench and the review
