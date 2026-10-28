@@ -47,10 +47,10 @@ const telling = (assert: Assert, made: () => void): Assert => async (challenge) 
 /** Answers `card` on `channel` as `identity` with `given`; the attempt under `key` follows it. */
 export async function answerCard(key: string, channel: MachineChannel, identity: DeviceIdentity, card: Card, given: Answer, assert: Assert): Promise<void> {
   const before = useAttempts.getState().attempts[key] ?? null;
-  put(key, { phase: 'asking', answer: given, operation: null });
+  put(key, { phase: 'asking', answer: given, card, operation: null });
   try {
-    const sent = await answer(channel, identity, card, given, telling(assert, () => put(key, { phase: 'sending', answer: given, operation: null })));
-    put(key, { phase: 'outcome', answer: given, operation: sent.operation, outcome: sent.outcome });
+    const sent = await answer(channel, identity, card, given, telling(assert, () => put(key, { phase: 'sending', answer: given, card, operation: null })));
+    put(key, { phase: 'outcome', answer: given, card, operation: sent.operation, outcome: sent.outcome });
   } catch (error) {
     put(key, before, unsent(error));
   }
@@ -60,11 +60,12 @@ export async function answerCard(key: string, channel: MachineChannel, identity:
 export async function retryCard(key: string, channel: MachineChannel, assert: Assert): Promise<void> {
   const before = useAttempts.getState().attempts[key];
   if (before?.phase !== 'outcome') return;
-  const { answer: given, operation } = before;
-  put(key, { phase: 'asking', answer: given, operation });
+  // The card the operation was built from, kept with it: what the Retry's gesture approves.
+  const { answer: given, card, operation } = before;
+  put(key, { phase: 'asking', answer: given, card, operation });
   try {
-    const outcome = await retry(channel, operation, telling(assert, () => put(key, { phase: 'sending', answer: given, operation })));
-    put(key, { phase: 'outcome', answer: given, operation, outcome });
+    const outcome = await retry(channel, operation, telling(assert, () => put(key, { phase: 'sending', answer: given, card, operation })));
+    put(key, { phase: 'outcome', answer: given, card, operation, outcome });
   } catch (error) {
     put(key, before, unsent(error));
   }

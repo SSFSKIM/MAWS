@@ -4,7 +4,8 @@
 // a fake sminos on RL10 for lane A), and this browser paired as a `web-cards` device through the Device panel, the Mac's
 // approval given as `deployment admin pair` gives it. The browser reaches the machine only through the hub's relay.
 //
-// The list shows the machine's two waiting sessions with their counts; a question's card is drawn with its choices and
+// The list shows the owner's lane A session waiting on the machine with its count (a lane B session's count waits on
+// O10's lane B notifier feed, so lane B's cards are opened from their landing URL); a question's card is drawn with its choices and
 // answered, a permission's with Allow and Deny and denied, on each lane, each through one passkey gesture, each card
 // settling within 5 s and the machine recording one answer; a lane B card whose session has no engine session is not
 // answerable, with its reason; an answer whose `ack` is withheld is uncertain, and Retry settles it; the channel dropped
@@ -79,7 +80,9 @@ test.beforeAll(async ({ browser }) => {
   listLaneB(APP, 'lane B work');
   world.host.request(APP, 'question', 'rq-q');
   world.host.request(APP, 'permission', 'rq-p');
-  world.sminos.restate([question('toolu_q'), permission('toolu_p', 'pnpm test'), permission('toolu_b', 'rm -rf /', 'la-b'), { session: APP }, { session: APP }]);
+  // sminos's pending set holds what bridges raise, lane A's alone: a lane B session's count reaches the hub's presence
+  // only once O10's endpoint feeds it from the engine host's broker, so the list has no lane B row yet.
+  world.sminos.restate([question('toolu_q'), permission('toolu_p', 'pnpm test'), permission('toolu_b', 'rm -rf /', 'la-b')]);
 
   context = await browser.newContext();
   page = await context.newPage();
@@ -121,7 +124,7 @@ test.afterAll(async () => {
   await world?.stop();
 });
 
-test("the list: the machine's two sessions of the owner's waiting, with their counts, reached from the top bar with its dot", async () => {
+test("the list: the owner's lane A session waiting on the machine, with its count, reached from the top bar with its dot", async () => {
   const entry = page.getByRole('button', { name: /^Cards/ });
   await expect(entry.getByTestId('cards-dot')).toBeVisible({ timeout: 15_000 });
   await entry.click();
@@ -129,12 +132,11 @@ test("the list: the machine's two sessions of the owner's waiting, with their co
   const mini = page.locator(`[data-cards-machine="${world.ref}"]`);
   await expect(mini.getByRole('heading')).toContainText('mini');
   await expect(mini.getByTestId('cards-machine-state')).toHaveText('online');
-  const rows = mini.locator('[data-cards-session]');
-  await expect(rows).toHaveCount(2);
   await expect(mini.locator('[data-cards-session="la-1"]')).toHaveAttribute('data-pending', '2');
   await expect(mini.locator('[data-cards-session="la-1"]')).toContainText('main');
-  await expect(mini.locator(`[data-cards-session="${APP}"]`)).toHaveAttribute('data-pending', '2');
-  await expect(mini.locator(`[data-cards-session="${APP}"]`)).toContainText('lane B work');
+  // The lane B session has two requests waiting too, and no count at the hub yet (O10's lane B notifier feed): its cards
+  // open from its landing URL (the next cases), not from a row.
+  await expect(mini.locator('[data-cards-session]')).toHaveCount(1);
   // B's session waits on the same machine, and is not the owner's to see here.
   await expect(mini.locator('[data-cards-session="la-b"]')).toHaveCount(0);
 });
@@ -174,8 +176,8 @@ test('lane A: the question drawn with its choices and answered, the permission o
   expect(decided.map((f) => (f.rpc as { args: { decision: string } }).args.decision)).toEqual(['deny']);
 });
 
-test('lane B: the question answered and the permission allowed, each answer delivered once', async () => {
-  await openSession(page, APP);
+test('lane B, opened from its landing URL: the question answered and the permission allowed, each answer delivered once', async () => {
+  await openSession(page, APP); // a cold load of `/cards/<ref>/<appSessionId>`, as a push's tap lands
   await expect(page.getByTestId('channel-cards-title')).toHaveText('lane B work');
   const asked = cardOf(page, 'rq-q');
   await asked.getByRole('radio', { name: 'right' }).click();

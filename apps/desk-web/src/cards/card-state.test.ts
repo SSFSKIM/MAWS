@@ -22,10 +22,10 @@ const laneB = (fields: { engineSessionId?: string | null; requestId?: string | n
 
 const allow: Answer = { kind: 'decision', decision: 'allow' };
 const operation = { opId: 'op-1' } as Operation;
-const asking: Attempt = { phase: 'asking', answer: allow, operation: null };
-const resealing: Attempt = { phase: 'asking', answer: allow, operation };
-const sending: Attempt = { phase: 'sending', answer: allow, operation: null };
-const ended = (outcome: Outcome, sent: Operation = operation): Attempt => ({ phase: 'outcome', answer: allow, operation: sent, outcome });
+const asking: Attempt = { phase: 'asking', answer: allow, card: laneB(), operation: null };
+const resealing: Attempt = { phase: 'asking', answer: allow, card: laneB(), operation };
+const sending: Attempt = { phase: 'sending', answer: allow, card: laneB(), operation: null };
+const ended = (outcome: Outcome, sent: Operation = operation): Attempt => ({ phase: 'outcome', answer: allow, card: laneB(), operation: sent, outcome });
 /** The operation an answer to `card` built: its request digest and context are the card's. */
 const sentFor = (card: Card): Operation =>
   ({

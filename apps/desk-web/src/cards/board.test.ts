@@ -7,8 +7,8 @@ import type { CutOverMachine } from './machines';
 
 const ME = 'member-me';
 const machines: CutOverMachine[] = [
-  { ref: 'ref-mini', name: 'mini', source: 'entry' },
-  { ref: 'ref-vm', name: 'vm-one', source: 'certificate' },
+  { ref: 'ref-mini', name: 'mini', source: 'entry', until: null },
+  { ref: 'ref-vm', name: 'vm-one', source: 'certificate', until: '2026-11-01T00:00:00.000Z' },
 ];
 const listing = (machine: string, session: string, fields: Partial<Listing['fields']> = {}): Signed<Listing> => ({
   body: { org: 'o', machine, session, revision: 1, issued: '2026-10-28T00:00:00.000Z', fields: { owners: [ME], project: 'p', lane: 'A', state: 'waiting', title: `title ${session}`, ...fields } },

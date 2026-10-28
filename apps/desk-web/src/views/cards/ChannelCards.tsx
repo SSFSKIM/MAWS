@@ -10,7 +10,6 @@
 // when its pending count in the machine's presence moves. No view reads the endpoint's `caps` grades as what this phone
 // may do: the endpoint decides each answer.
 import { useEffect, useState } from 'react';
-import type { Listing, Signed } from 'org-protocol';
 import type { Me } from '../../hub/me';
 import { useDeskLayout } from '../../shell/layout';
 import { useNarrow } from '../../shell/viewport';
@@ -23,41 +22,25 @@ import { cardsIdentity, followCards, openChannel, socketFor, type MachineChannel
 import type { DeviceRecord } from '../../cards/device-store';
 import { orgView } from '../../cards/org-store';
 import { syncOrg, useDevice } from '../../cards/register';
-import { fetchListing } from '../../cards/session-listing';
+import { fetchListing, followSessionListing, type Looked } from '../../cards/session-listing';
 import { deviceOrgStore, listingsStore, refreshOrg } from '../../cards/start';
 import { answerCard, attemptKey, newSet, noteCard, retryCard, useAttempts } from './attempts';
 import { ChannelCard } from './ChannelCard';
 import { DeviceStanding } from './DeviceStanding';
 
-type Looked = { state: 'looking' } | { state: 'found'; listing: Signed<Listing> } | { state: 'none' };
-
-/** The session's verified listing: the store's, or at a landing before its snapshot is in, the hub's. */
+/** The session's verified listing: the store's, or at a landing before its snapshot is in, the hub's (or none). */
 function useSessionListing(machine: string, session: string, loaded: boolean): Looked {
   const [looked, setLooked] = useState<Looked>({ state: 'looking' });
   useEffect(() => {
     const store = listingsStore();
     if (!loaded || store === null) return;
-    let live = true;
-    let fetched = false;
-    const look = () => {
-      const held = store.listings().get(`${machine}/${session}`);
-      if (held !== undefined) return setLooked({ state: 'found', listing: held });
-      if (store.loaded) return setLooked({ state: 'none' });
+    const read = () => {
       const org = deviceOrgStore();
-      if (fetched || org === null || !org.ready) return;
-      fetched = true;
+      if (org === null || !org.ready) return null;
       const project = socketFor(machine).presence()?.pending[session]?.project ?? null;
-      fetchListing(machine, session, project, { head: org.head(), certificates: org.certificates() }).then(
-        (listing) => live && listing !== null && !store.listings().has(`${machine}/${session}`) && setLooked({ state: 'found', listing }),
-        (error: unknown) => console.error('desk: reading the session’s listing', error),
-      );
+      return fetchListing(machine, session, project, { head: org.head(), certificates: org.certificates() });
     };
-    look();
-    const off = store.onChange(look);
-    return () => {
-      live = false;
-      off();
-    };
+    return followSessionListing(`${machine}/${session}`, store, read, setLooked);
   }, [machine, session, loaded]);
   return looked;
 }

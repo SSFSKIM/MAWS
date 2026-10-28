@@ -77,7 +77,7 @@ export function ChannelCard({ card, state, attempt, note, where, machine, draftI
           {note}
         </p>
       )}
-      <StateLine card={card} state={state} attempt={attempt} where={where} machine={machine} onRetry={onRetry} />
+      <StateLine state={state} attempt={attempt} where={where} machine={machine} onRetry={onRetry} />
     </article>
   );
 }
@@ -143,7 +143,7 @@ function GestureLine({ gesture }: { gesture: Gesture }) {
   );
 }
 
-function StateLine({ card, state, attempt, where, machine, onRetry }: { card: Card; state: ChannelCardState; attempt: Attempt | null; where: string; machine: string; onRetry(): void }) {
+function StateLine({ state, attempt, where, machine, onRetry }: { state: ChannelCardState; attempt: Attempt | null; where: string; machine: string; onRetry(): void }) {
   const line = (text: string, tone = 'text-fg-muted') => (
     <p className={`m-0 text-ui-sm ${tone}`} data-testid="card-state-line">
       {text}
@@ -153,7 +153,8 @@ function StateLine({ card, state, attempt, where, machine, onRetry }: { card: Ca
     case 'open':
       return null;
     case 'sending':
-      return attempt?.phase === 'asking' ? <GestureLine gesture={gestureOf(card, attempt.answer, where)} /> : line('Sending…');
+      // The answer's own card, which its operation's digest covers: never the card as a later set redrew it.
+      return attempt?.phase === 'asking' ? <GestureLine gesture={gestureOf(attempt.card, attempt.answer, where)} /> : line('Sending…');
     case 'sent':
       return line(`Sent: waiting for ${machine} to settle it`);
     case 'closed':

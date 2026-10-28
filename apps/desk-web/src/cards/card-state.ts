@@ -20,13 +20,16 @@ import type { CardState } from '../conversation/card-state';
 import type { Answer, Operation, Outcome } from './answers';
 import { unanswerable, type Card, type Unanswerable } from './cards';
 
-/** What this tab did about a card, kept for the tab's life (the retained operation's home). */
+/**
+ * What this tab did about a card, kept for the tab's life (the retained operation's home). `card` is the card the answer
+ * was built from, as it was drawn then: what its gesture approves, a Retry's included, though a later set redrew it.
+ */
 export type Attempt =
   /** The gesture is asked for: a first answer's (no operation yet) or a Retry's (the operation it reseals). */
-  | { phase: 'asking'; answer: Answer; operation: Operation | null }
+  | { phase: 'asking'; answer: Answer; card: Card; operation: Operation | null }
   /** The gesture was made and the act is on its way; its `ack` and `done` not read yet. */
-  | { phase: 'sending'; answer: Answer; operation: Operation | null }
-  | { phase: 'outcome'; answer: Answer; operation: Operation; outcome: Outcome };
+  | { phase: 'sending'; answer: Answer; card: Card; operation: Operation | null }
+  | { phase: 'outcome'; answer: Answer; card: Card; operation: Operation; outcome: Outcome };
 
 export type ChannelCardState =
   | Extract<CardState, { kind: 'open' | 'sending' | 'sent' | 'failed' | 'uncertain' | 'disconnected' | 'closed' }>

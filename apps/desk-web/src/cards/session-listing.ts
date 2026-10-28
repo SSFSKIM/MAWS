@@ -23,3 +23,40 @@ export async function fetchListing(
   }
   return null;
 }
+
+/** What a cards view knows of its session's listing: still looking, the verified listing, or none (ended, or not the member's). */
+export type Looked = { state: 'looking' } | { state: 'found'; listing: Signed<Listing> } | { state: 'none' };
+
+type Store = { readonly loaded: boolean; listings(): Map<string, Signed<Listing>>; onChange(listener: () => void): () => void };
+
+/**
+ * `key`'s listing (`<machine ref>/<session>`) for a cards view, told to `tell` as it is known: the listings store's when
+ * it holds one; none once its snapshot is in without one; before then, one read from the hub (`read`, null while it
+ * cannot read yet), whose answer — a listing, or none when it serves none or cannot be read — stands until the store
+ * says otherwise. Stopped by the function it returns.
+ */
+export function followSessionListing(key: string, store: Store, read: () => Promise<Signed<Listing> | null> | null, tell: (looked: Looked) => void): () => void {
+  let live = true;
+  let asked = false;
+  const look = () => {
+    const held = store.listings().get(key);
+    if (held !== undefined) return tell({ state: 'found', listing: held });
+    if (store.loaded) return tell({ state: 'none' });
+    if (asked) return;
+    const reading = read();
+    if (reading === null) return;
+    asked = true;
+    reading
+      .catch((error: unknown) => (console.error('desk: reading the session’s listing', error), null))
+      .then((listing) => {
+        if (!live || store.listings().has(key) || store.loaded) return;
+        tell(listing === null ? { state: 'none' } : { state: 'found', listing });
+      });
+  };
+  look();
+  const off = store.onChange(look);
+  return () => {
+    live = false;
+    off();
+  };
+}

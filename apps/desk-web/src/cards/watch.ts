@@ -1,7 +1,8 @@
 // The device's watch over the cut-over machines (P5 O13 M5), while the device is listed: the machines the org state
 // resolves (machines.ts), each with its Machine socket open (carrier.ts, one per machine for the tab's life) for the
 // hub's `presence`, and the board (board.ts) drawn again whenever the head, the certificates, a listing or a presence
-// moves. A machine that leaves the org has its socket closed; stopping closes them all and empties the board.
+// moves, and again when a delegated machine's delegation expires (a clock transition no org change announces). A machine
+// that leaves the org has its socket closed; stopping closes them all and empties the board.
 import type { Certificates, Listing, RelayPresence, Signed, SignedOrgState } from 'org-protocol';
 import { boardOf, useCardsBoard, type Presences } from './board';
 import type { MachineSocket } from './carrier';
@@ -13,11 +14,26 @@ export type WatchDeps = {
   listings: { listings(): Map<string, Signed<Listing>>; onChange(listener: () => void): () => void };
   socketFor(ref: string): MachineSocket;
   board?: typeof useCardsBoard;
+  /** The clock and its timer (the browser's by default). */
+  clock?: { now(): Date; after(ms: number, run: () => void): () => void };
+};
+
+/** The longest timer a browser keeps (2^31 - 1 ms, some 24 days): a later expiry is rescheduled from there. */
+const LONGEST_MS = 2 ** 31 - 1;
+
+const browserClock = {
+  now: () => new Date(),
+  after: (ms: number, run: () => void) => {
+    const timer = setTimeout(run, ms);
+    return () => clearTimeout(timer);
+  },
 };
 
 export function watchCards(deps: WatchDeps): () => void {
   const board = deps.board ?? useCardsBoard;
+  const clock = deps.clock ?? browserClock;
   let stopped = false;
+  let expiry: (() => void) | null = null;
   let machines: CutOverMachine[] = [];
   let generation = 0;
   const presences: Presences = new Map();
@@ -36,9 +52,14 @@ export function watchCards(deps: WatchDeps): () => void {
   const resolve = async () => {
     const mine = ++generation;
     if (!deps.org.ready) return;
-    const now = await cutOverMachines(deps.org.head(), deps.org.certificates(), new Date());
+    const at = clock.now();
+    const now = await cutOverMachines(deps.org.head(), deps.org.certificates(), at);
     if (stopped || mine !== generation) return;
     machines = now;
+    expiry?.();
+    expiry = null;
+    const until = Math.min(...now.flatMap((m) => (m.until === null ? [] : [Date.parse(m.until)])));
+    if (Number.isFinite(until)) expiry = clock.after(Math.min(Math.max(0, until - at.getTime()), LONGEST_MS), settle);
     const refs = new Set(now.map((m) => m.ref));
     for (const [ref, { socket, off }] of watched) {
       if (refs.has(ref)) continue;
@@ -63,6 +84,7 @@ export function watchCards(deps: WatchDeps): () => void {
   settle();
   return () => {
     stopped = true;
+    expiry?.();
     offOrg();
     offListings();
     for (const { socket, off } of watched.values()) {
