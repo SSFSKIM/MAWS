@@ -304,6 +304,9 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   }
 
   function closeState(s: Session): void {
+    // A stream closed here (discovery found no bridge, or another state) ends without `onEnd`, so the lane is told
+    // itself: the fates its sends were waiting for went with it.
+    if (s.stream !== null && s.snapshotted) s.lane.streamLost();
     s.stream?.close();
     s.stream = null;
     if (s.reconnect) clearTimeout(s.reconnect);

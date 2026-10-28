@@ -494,6 +494,20 @@ describe('the launch an operation was admitted under', () => {
     expect((await answer).state).not.toBe('refused');
   });
 
+  // Fix wave 2: discovery closing an active state stream is a lost stream too.
+  it('makes a submitted send unconfirmed when discovery drops its bridge and a replacement comes up under the same launch', async () => {
+    const { b, h } = await liveBridge();
+    b.answer('deliver', () => ({ status: 200, body: { ok: true, result: { submitted: true } } })); // no fate follows
+    const answer = h.driver.send(APP, 'words');
+    await expect.poll(() => h.state()?.deliveries[0]?.state).toBe('submitted');
+    rmSync(b.socket); // the socket goes while the old stream stays open: discovery finds no bridge and closes it
+    await expect.poll(() => h.state(), { timeout: 3000 }).toBeNull();
+    await bridge({ launch: 'launch-1' }); // the replacement, under the same launch
+    await h.live();
+    expect(await answer).toMatchObject({ key: { writer, seq: 1 }, state: 'unconfirmed' });
+    expect(h.state()?.deliveries[0]).toMatchObject({ state: 'unconfirmed' });
+  });
+
   it('posts a model change’s read and change under one launch', async () => {
     const { b, h } = await liveBridge();
     b.answer('read', async () => {
