@@ -8,10 +8,12 @@
 //   - `endpoint.listings` answers the signed listing of every session on the machine the member holds `list` or more
 //     on: the one the hub holds when it is current, else one signed for the asker alone. A `private` session's listing
 //     leaves the machine only so, to its owners and shares (RL §6.2).
-//   - `daemon.status` and `machine.identity` are `mawsd`'s (O2, O6), refused `ungraded` before they reach here until
-//     their owners grade them; anything else answers `unavailable`.
+//   - `daemon.status` is `mawsd`'s (O2, graded `list`): its status through `dispatch`, less every field the schema marks
+//     local-only (`remoteDaemonStatus`: file paths). `machine.identity` (O6) is refused `ungraded` before it reaches here
+//     until O6 grades it; anything else answers `unavailable`.
 // A result over the channel's message limit answers `too-large`.
 import { MESSAGE_MAX_BYTES, type CallMessage, type Listing, type Signed } from 'org-protocol';
+import { remoteDaemonStatus, type DaemonStatus } from '@shared/ipc/schema/daemon';
 import type { RemoteChannel } from './channels';
 import { rankAtLeast, sessionRank } from './grades';
 import type { SessionReport } from './listings';
@@ -102,6 +104,7 @@ export class Calls {
     let run: Promise<{ ok: true; output: unknown } | { ok: false; code: string }>;
     if (row?.executor === 'engine-host') run = this.#host(m);
     else if (row?.executor === 'sminos' && Object.hasOwn(LANE_A, m.name)) run = Promise.resolve(this.#laneA(channel, m));
+    else if (row?.executor === 'machine' && m.name === 'daemon.status') run = this.#daemonStatus();
     else if (m.name === 'endpoint.listings') run = this.#listings(channel.member).then((listings) => ({ ok: true as const, output: { listings } }));
     else run = Promise.resolve({ ok: false, code: 'unavailable' });
     run.then(answer, (error: unknown) => {
@@ -115,6 +118,12 @@ export class Calls {
     if (response.ok) return { ok: true, output: response.value ?? null };
     const code = response.error.code === 'host_unavailable' || response.error.code === 'timeout' ? 'unavailable' : response.error.code;
     return { ok: false, code };
+  }
+
+  /** `mawsd`'s status as a remote caller sees it: no file paths (P5 O2). */
+  async #daemonStatus(): Promise<{ ok: true; output: unknown } | { ok: false; code: string }> {
+    const response = await this.ctx.dispatch('machine', 'daemon.status', undefined);
+    return response.ok ? { ok: true, output: remoteDaemonStatus(response.value as DaemonStatus) } : { ok: false, code: 'unavailable' };
   }
 
   /** A lane A read down RL10 on the caller's own upstream subscription of that session. */

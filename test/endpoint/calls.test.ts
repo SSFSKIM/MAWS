@@ -6,6 +6,7 @@
 // `not-offered`.
 import { NO_CERTIFICATES, verifyListing, type Listing, type Signed } from 'org-protocol';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { DaemonStatusSchema, type DaemonStatus } from '@shared/ipc/schema/daemon';
 import { evs, laneAMember, makeOrg, openRemote, plane, PROJECT, sminos, startEndpoint, stopAll, subscribe, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
 
 let org: Org;
@@ -41,8 +42,42 @@ describe('a call', () => {
     expect(await call(a, 'session.send', { appSessionId: 'app-1', content: 'hi' })).toMatchObject({ ok: false, error: { code: 'act-required' } });
     expect(await call(a, 'pty.attach', { ptyId: 'p1' })).toMatchObject({ ok: false, error: { code: 'not-offered' } });
     expect(await call(a, 'documents.open', { channel: 1 })).toMatchObject({ ok: false, error: { code: 'not-offered' } });
-    // O2 grades it and brings `remoteDaemonStatus`; until then it is ungraded here.
-    expect(await call(a, 'daemon.status', null)).toMatchObject({ ok: false, error: { code: 'ungraded' } });
+  });
+
+  // P5 O2: `daemon.status` is graded `list`; a remote caller gets `remoteDaemonStatus`, the local status less every
+  // field the schema marks local-only (its profile and log paths)
+  it('answers daemon.status from mawsd without its local-only fields, and `unavailable` when mawsd cannot answer', async () => {
+    const f = await startEndpoint(org, started);
+    const local: DaemonStatus = {
+      pid: 41022,
+      startedAt: '2026-10-27T10:11:12.000Z',
+      kind: 'unit',
+      build: { version: '0.0.0', commit: 'a1b2c3d4', builtAt: '2026-10-27T10:00:00.000Z', buildId: '0123456789abcdef', engineHostBuildId: 'fedcba9876543210' },
+      machine: f.ref as DaemonStatus['machine'],
+      profile: '/Users/someone/Library/Application Support/MAWS',
+      platform: 'darwin',
+      role: 'laptop',
+      hosts: { 'engine-host': { state: 'ready', pid: 41030, build: '5e6f7a8b9c0d1e2f', liveSessions: 0 }, 'pty-host': { state: 'parked', pid: null, build: null, liveSessions: null } },
+      clients: { engineHost: true, ptyHost: false, machine: 1 },
+      idleExitAt: null,
+      logPath: '/Users/someone/Library/Application Support/MAWS/mawsd/mawsd.log',
+      endpoint: { present: true, detail: { enrolled: true } },
+    };
+    let answering = true;
+    const answer = f.host.answer.bind(f.host);
+    f.host.answer = (owner, name, input) =>
+      owner === 'machine' && name === 'daemon.status' ? (answering ? { t: 'res', id: '0', ok: true, value: local } : { t: 'res', id: '0', ok: false, error: { code: 'internal', message: 'down' } }) : answer(owner, name, input);
+    const a = await openRemote(f, org.a1, org.A);
+    const { profile: _profile, logPath: _logPath, ...remote } = local;
+    void _profile;
+    void _logPath;
+    const result = await call(a, 'daemon.status', null);
+    expect(result).toMatchObject({ ok: true, output: remote });
+    expect(result.output).not.toHaveProperty('profile');
+    expect(result.output).not.toHaveProperty('logPath');
+    expect(DaemonStatusSchema.safeParse(result.output).success).toBe(true);
+    answering = false;
+    expect(await call(a, 'daemon.status', null)).toMatchObject({ ok: false, error: { code: 'unavailable' } });
   });
 
   it('sends lane A’s rows, diff, output and read down RL10 on the caller’s own upstream subscription, the answer in its stream', async () => {
