@@ -73,7 +73,7 @@ describe('the read-only commands, answered before the module is loaded', () => {
     }
   });
 
-  it('leave every other command and argument to the module, and every state directory that holds anything or is not private', () => {
+  it('leave every other command and argument to the module, and every state directory that holds anything or is not private', async () => {
     services = fakeServices();
     const { machine } = services;
     const { stateDir } = machine;
@@ -104,6 +104,24 @@ describe('the read-only commands, answered before the module is loaded', () => {
     fs.chmodSync(stateDir, 0o750);
     expect(unloadedAnswer(machine, 'keys', [])).toBeNull();
     fs.chmodSync(stateDir, 0o700);
+
+    // One the owner can read but not search passes the private check and lists as empty, yet the store cannot lstat
+    // a file inside it: the module's start fails there, so its refusal is the answer (root searches any directory).
+    if (process.getuid?.() !== 0) {
+      fs.chmodSync(stateDir, 0o600);
+      try {
+        expect(unloadedAnswer(machine, 'keys', [])).toBeNull();
+        const endpoint = createEndpoint();
+        await endpoint.start(services).catch(() => undefined);
+        try {
+          expect((await endpoint.cli('keys', [])).code).not.toBe(0);
+        } finally {
+          await endpoint.stop();
+        }
+      } finally {
+        fs.chmodSync(stateDir, 0o700);
+      }
+    }
     expect(unloadedAnswer({ ...machine, stateDir: join(stateDir, 'absent') }, 'keys', [])).toBeNull();
   });
 });

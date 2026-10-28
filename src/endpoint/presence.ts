@@ -4,7 +4,7 @@
 // that holds nothing is answered here, as the module would answer it. So this file is the module's second entry
 // (eslint.config.js), read by `mawsd` before the module is, and imports nothing at run time but Node's `fs` and `path`,
 // the private-path check the store makes, and the pure renderers the module answers with (answers.ts, status.ts).
-import { lstatSync, readdirSync } from 'node:fs';
+import { accessSync, constants, lstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { assertPrivateDirectory } from '@shared/host/private-path';
 import type { MachineRef } from '@shared/machine/ref';
@@ -57,6 +57,7 @@ export function unloadedAnswer(machine: { ref: MachineRef; stateDir: string }, c
 function holdsNothing(stateDir: string): boolean {
   try {
     assertPrivateDirectory(stateDir);
+    accessSync(stateDir, constants.R_OK | constants.X_OK); // the store lstats each file in it: a directory it cannot search fails its start
     return readdirSync(stateDir).length === 0;
   } catch {
     return false; // absent, refused or unreadable: the module's to say
