@@ -979,6 +979,17 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
 - Observation: `pnpm wire:manifest` doesn't move for `ProjectRecord.org`. `session.*` and `layout.*` are main-owned and outside the manifest, so O6's one `WIRE_MINOR` bump stays `machine.identity`'s.
 - Observation: sminos's `os.path.join` lets an absolute part win, and a linked worktree's `.git` file holds an absolute `gitdir:`, so the port follows it with `path.resolve`. A plain join derived `repo:` for a linked worktree of a remote repository.
 - Observation: `e2e/shell.spec.ts:367` and `:50` failed on hosted Macs at O6's heads and at the pre-fix control (runs 40577605822, 40580909588, 40580909622). Each test left Playwright's pointer, or keyboard focus, on a sidebar row, whose hover card opens after 300 ms. On a slow runner the card was open before the next click's hit-test (`:367`) or took the palette's Escape (`:50`). CI-opt diagnosed `:367`; `:50`'s focus cause is inferred, since the artifact had no page snapshot. Test-only fix `18c452b74` (then `5260d0060`): the pointer moves to the composer, and the dragged tab takes focus. No timing changed and no assertion was dropped. Hosted e2e:layout GREEN, runs 40583048072 and 40597601420.
+- Observation: the branch review found the class M2 named in a new shape. Lifecycle events now cross links (`engine.hostState`, `pty.hostState`), and consumers that had only ever seen one machine ignored the event's machine:
+  - the terminal registry marked every terminal lost on any machine's pty host crash;
+  - transcript host-loss recovery read A's process table for B's session;
+  - the page's artifact host dropped local document ports when B's engine host left;
+  - the memory budget blanked, and question sheets re-read, on another machine's host events.
+  Also, Attach built its command from A's engine binary for B's job. A sweep of every renderer listener of the link events followed (task-6-report.md).
+  Evidence: the branch reviewer's reproductions against production handlers, `72041439b..15f17ef1f`.
+- Observation: a restored org-keyed tab set lost its panes when B's `session.list` landed before its `session.projects.list`. A record whose project wasn't yet known was filed to the machine row, and `refile`'s M5 hold covered only address keys, not migrated org keys.
+- Observation: on hosted Macs, B's (the first app's) org derivation sometimes got no answer from git across all four attempts (runs 40615155676, 40619534895). The unconfirmed hypothesis is a cold `/usr/bin/git` xcrun shim slower than the 2 s timeout on a 2-CPU VM, killed before it caches. Main's stderr isn't kept in hosted jobs, so the cause is unconfirmed; `git()` now logs why it got no answer.
+- Observation: when A relaunched with B down, B's kept tab was titled "New chat", because A holds no record for a machine not loaded in the run. Acceptance 7 held, since nothing was dropped, but the title misled. T5 says the tab's title greys, which a tab can only show if it keeps one.
+- Observation: the first `--gates all` at the final head (run 40621861961, `038a66dbc`) failed e2e:desk-web, about 70 tests, each on its page-error check: "[ipc] browser.agent.activities.list: lower: .appSessionId holds a bare id where an address belongs, "desk:…"". desk-web mounts MAWS's `Transcript` over keys of the form `desk:<project>:<session>`. Before O6 its activity listing failed silently, because desk-web has no `window.maws` and `.catch` swallowed it; O6's lowering refuses it loudly. No earlier gate caught it: e2e:desk-web runs only in the Mac `--gates all` set, class 1a's desk-web unit suites never mounted TranscriptPane with an error spy, and no milestone before M6 ran `--gates all`.
 
 ## Decision Log
 
@@ -1092,6 +1103,27 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
     - Numeric `.smns` values whose JSON spelling Python's `str()` keeps and JavaScript's doesn't (`42.0`, `1e3`, `0.000001`, integers above 2^53) derive a different key from sminos's. sminos writes string ids, and an integer or a string id matches.
     - A context-only merge with no open set to supply a base keeps insertion order.
   Date/Author: 2026-10-27, O6's executor (controller), from M5's executor and its task review.
+
+- Decision: M6's fixes, from the branch review and the acceptance runs.
+  - Every consumer of a link's lifecycle events keys by the event's machine:
+    - the terminal registry keeps each machine's pty host apart;
+    - transcript host-loss recovery hears only its session's machine and reads that machine's table;
+    - the page's artifact host, the memory budget and question-sheet re-reads hear only this machine's engine host.
+    - Attach builds its command from the session's machine's binary.
+  - No session of a machine files into a tab set until that machine's snapshot is whole (records and projects), so a restored org set keeps its panes whatever order the reads land in.
+  - An org derivation that git doesn't answer is asked again within the run, at 1, 4 and 15 s. Every derivation (start, new project, retry) shares the four `ORG_CONCURRENCY` slots, and a closed index asks nothing more. The first try keeps 2 s, so a slow git never holds up a start; retries use the git runner's 10 s. `git()` logs why it got no answer.
+  - A session tab in `main.tabs` v3 keeps its session's last-known `title`, an optional field with no version bump (v3 exists only on this branch). It is set at open and at hydrate, and refreshed only when it differs, so a second launch still rewrites nothing. The tab label falls back to it before "New chat", which is the closest reading of T5; the architect approved. Rejected: labelling the tab by its machine, a taste form the owner hasn't answered.
+  - `e2e:machines` joins `HOSTED_MAC_E2E` by gate-offload's admission rule, with the three hosted runs and the no-hosted baseline on the PR head's tree (Outcomes).
+  - desk-web's ids are left as they are, not turned into addresses: `Transcript` gains an additive `browserActivity` prop (default true), and desk-web's TranscriptPane, the desk's only mount, passes false. No `desk:` key reaches the client's addressing, and a bare id in an address slot inside MAWS still throws. A test pins each side.
+    - Why: P5 freezes desk-web's views at O13 and retires them at cutover (P5 Decision Log 1, §9, O13 acceptance 5). Until then O13's "the phone never breaks" needs its current routes. Making desk ids into addresses would carry O6's model into a frozen client.
+    - The architect ruled, scoping the bypass to desk-web's boundary (`38e04607f`).
+  - The last merge of master (`edc0792a7`, 144 commits) takes WIRE_MINOR to 3 under P5's "lands second" rule: O10 had taken it to 2 with `host.op`, `host.opQuery` and `session.pendingItems`. O6's two snapshots are extended to O10's three commands:
+    - `session.pendingItems` is addressed;
+    - `host.opQuery` is machine-wide;
+    - `host.op` is in `PATH_COMMANDS`; it is main-only and never bridged, and it is path because of its `context.engineSessionId`.
+    The fingerprint at the merge is master's (`9592541cad88d7df`), and O6 still moves no engine-host shape. Master's settings version 19 needed no O6 bump.
+  - Test-only: `e2e/shell.spec.ts`'s pointer and focus leave the sidebar row before the next click (`18c452b74`, `5260d0060`).
+  Date/Author: 2026-10-27, O6's executor (controller), from M6's executor and the branch review.
 
 - Decision: the verification.
   - This document gets one `doperpowers:adversarial-reviewer` buildability review before execution (P5 Decision Log 12).
