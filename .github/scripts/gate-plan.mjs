@@ -238,6 +238,14 @@ export function planOf(env, scripts) {
   const poppler = new Set(words(env.POPPLER_E2E));
   // The timing-measured groups: on a Mac their job waits first for the desktop to settle, with a longer timeout.
   const measured = new Set(words(env.MEASURED_E2E));
+  // E2E_MINUTES: a group whose own run needs more than its class's minutes, `name=minutes`, before its runner's start wait
+  // is added. Refused, whatever the run, when an entry is not that form, its minutes not a positive whole number, or its
+  // name no group with a package script.
+  const ownMinutes = new Map(words(env.E2E_MINUTES).map((entry) => {
+    const [, group, minutes] = /^([^=]+)=([1-9]\d*)$/.exec(entry) ?? refuse(`E2E_MINUTES: ${entry} is not <group>=<minutes>, a positive whole number of minutes`);
+    if (!(scriptOf(group) in scripts)) refuse(`E2E_MINUTES names ${group}, which has no ${scriptOf(group)} script`);
+    return [group, Number(minutes)];
+  }));
   // The groups that need what only the mini's exclusive instance has (ClaudeUsage's relay): the home Mac on a macOS lane.
   const home = new Set(words(env.MAC_HOME_E2E));
   // desk-web, the one POOL_E2E group, is one Playwright worker; a cpus-4 box is a c3d-highcpu-4 with 8 GB, where cpus-2's
@@ -302,7 +310,7 @@ export function planOf(env, scripts) {
       const guest = GUEST.includes(where) ? { variant: variantOf(group) } : {};
       // A measured group's guard may wait 15 minutes, and a second after its build when its script builds out/ (gate.yml).
       const prebuild = measured.has(group) ? variantOf(group) : undefined;
-      const minutes = measured.has(group) ? (prebuild ? 60 : 45) : peerGroups.has(group) ? PEER_MINUTES : 30;
+      const minutes = ownMinutes.get(group) ?? (measured.has(group) ? (prebuild ? 60 : 45) : peerGroups.has(group) ? PEER_MINUTES : 30);
       const timeout = hosted ? (direct ? minutes + HOSTED_MARGIN_MINUTES : HOSTED_TIMEOUT_MINUTES) : timeoutOn(where, minutes);
       // The build took 39% of the direct Macs' job time (23 jobs, 2026-10-28: 140 s of 368 s at the median), and a set larger
       // than the account's 5 Macs runs in rounds, whose later jobs can restore what the first ones built.
