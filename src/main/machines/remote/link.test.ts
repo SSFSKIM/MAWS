@@ -12,6 +12,15 @@ import type { EndpointRecords } from './endpoint-records';
 import { createRemoteLink, type RemoteLinkDeps } from './link';
 import type { SubscriptionSink } from './subs';
 
+// An attempt computes key ids (`trustOf`), which WebCrypto's digest runs on libuv's thread pool. Under a loaded runner
+// that pool is shared with every other worker, so a fixed number of event-loop turns could end before the digest did,
+// and the clock-held steps below raced it. The same ids, computed synchronously, keep the state machine deterministic.
+vi.mock('../../../../apps/org-protocol/src/index.ts', async (original) => {
+  const actual = await original<typeof import('../../../../apps/org-protocol/src/index.ts')>();
+  const { createHash } = await import('node:crypto');
+  return { ...actual, keyId: (pub: string) => Promise.resolve(actual.base64urlEncode(new Uint8Array(createHash('sha256').update(actual.base64urlDecode(pub)).digest()).slice(0, actual.KID_BYTES))) };
+});
+
 const realImmediate = setImmediate;
 /** Lets real async work (WebCrypto) and microtasks run, with the clock held. */
 async function settle(rounds = 30): Promise<void> {
