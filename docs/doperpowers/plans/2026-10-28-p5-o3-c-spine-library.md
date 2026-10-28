@@ -25,7 +25,7 @@ Nothing a person sees changes in O3-C. What changes is the code's shape, so the 
 
 ## Progress
 
-- [ ] M1 — The services bus: the library stops importing main's IPC
+- [x] M1 — The services bus: the library stops importing main's IPC (2026-10-28 20:17Z, 87ce79b8e; review clean)
 - [ ] M2 — Main's view of the spine, and the sweep on interest
 - [ ] M3 — The library moves to `src/services/`, behind its boundary
 - [ ] M4 — Two roots and the services entry
