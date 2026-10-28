@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
 import { ConfiguredDeliverySources } from './configured-delivery';
 import type { SourceFiles } from './source-entry';
 import { deferred } from './direct-pool.fixture';
@@ -12,7 +12,7 @@ function scene(captureEnv: () => Promise<Record<string, string>> = async () => (
     exists: async (path) => disk.has(path),
     executable: async () => { throw new Error('cold delivery must not resolve executables'); },
   };
-  const app = (servers = [{ name: 'notion', type: 'http', url: URL }]) => disk.set('/app/settings.json', JSON.stringify({ ...SETTINGS_DEFAULTS_V18, engine: { ...SETTINGS_DEFAULTS_V18.engine, mcpServers: servers } }));
+  const app = (servers = [{ name: 'notion', type: 'http', url: URL }]) => disk.set('/app/settings.json', JSON.stringify({ ...SETTINGS_DEFAULTS_V19, engine: { ...SETTINGS_DEFAULTS_V19.engine, mcpServers: servers } }));
   const user = (mcpServers: Record<string, unknown>) => disk.set('/home/.claude.json', JSON.stringify({ mcpServers }));
   const sources = new ConfiguredDeliverySources({ userData: '/app', captureEnv, files });
   return { disk, files, app, user, sources };

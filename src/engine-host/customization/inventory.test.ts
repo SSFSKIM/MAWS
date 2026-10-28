@@ -6,7 +6,7 @@ import type { HostOn } from '@shared/host/runtime';
 import { commands, type CommandOutput } from '@shared/ipc/schema';
 import { isBridgedCommandName } from '@shared/ipc/names';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
-import { SETTINGS_DEFAULTS_V18 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
 import { INVENTORY_BOUNDS, readCustomizationInventory, readServerEndpoints, registerCustomizationInventory } from './inventory';
 
 let root: string;
@@ -43,7 +43,7 @@ describe('cold customization inventory', () => {
     }, projects: { [home]: { mcpServers: { notSelected: { command: 'no' } } } } };
     await json(global, user);
     const appFile = join(userData, 'settings.json');
-    await json(appFile, { ...SETTINGS_DEFAULTS_V18, engine: { ...SETTINGS_DEFAULTS_V18.engine, mcpServers: [{ name: 'shared', type: 'http', url: 'https://app.test/?token=APP_SECRET' }] } });
+    await json(appFile, { ...SETTINGS_DEFAULTS_V19, engine: { ...SETTINGS_DEFAULTS_V19.engine, mcpServers: [{ name: 'shared', type: 'http', url: 'https://app.test/?token=APP_SECRET' }] } });
     const before = await Promise.all([readFile(global, 'utf8'), readFile(appFile, 'utf8'), readFile(path, 'utf8')]);
 
     const answer = await read();
@@ -199,7 +199,7 @@ describe('cold customization inventory', () => {
   });
 
   it('retains app configuration when the user environment is unavailable', async () => {
-    const path = await json(join(userData, 'settings.json'), { ...SETTINGS_DEFAULTS_V18, engine: { ...SETTINGS_DEFAULTS_V18.engine, mcpServers: [{ name: 'app', type: 'http', url: 'https://app.test/' }] } });
+    const path = await json(join(userData, 'settings.json'), { ...SETTINGS_DEFAULTS_V19, engine: { ...SETTINGS_DEFAULTS_V19.engine, mcpServers: [{ name: 'app', type: 'http', url: 'https://app.test/' }] } });
     const answer = await readCustomizationInventory(null, { userData, captureEnv: async () => { throw new Error('CAPTURE_SECRET'); } });
     expect(answer).toEqual({ skills: [], servers: [{ name: 'app', scope: 'app', path, transport: 'http' }], warnings: ['User configuration environment could not be read.'], serversRead: false });
   });
@@ -221,7 +221,7 @@ describe('cold customization inventory', () => {
   it('main alone reads each configured server with its URL, row for row with the inventory', async () => {
     const global = join(configHome, '.claude.json');
     await json(global, { mcpServers: { linear: { type: 'http', url: 'https://mcp.linear.app/mcp?token=QUERY_SECRET' }, process: { command: 'run' } } });
-    const appFile = await json(join(userData, 'settings.json'), { ...SETTINGS_DEFAULTS_V18, engine: { ...SETTINGS_DEFAULTS_V18.engine, mcpServers: [{ name: 'app', type: 'http', url: 'https://app.test/' }] } });
+    const appFile = await json(join(userData, 'settings.json'), { ...SETTINGS_DEFAULTS_V19, engine: { ...SETTINGS_DEFAULTS_V19.engine, mcpServers: [{ name: 'app', type: 'http', url: 'https://app.test/' }] } });
     expect(await readServerEndpoints(null, { userData, captureEnv: environment })).toEqual({ servers: [
       { name: 'app', scope: 'app', path: appFile, transport: 'http', url: 'https://app.test/' },
       { name: 'linear', scope: 'user', path: global, transport: 'http', url: 'https://mcp.linear.app/mcp?token=QUERY_SECRET' },
