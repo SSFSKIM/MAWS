@@ -40,6 +40,13 @@ import { SigningDamaged, withExposure, type SigningStore } from './signing-store
 /** A change to the org state, in the words the person confirms: `apply` edits the successor's draft. */
 export type Edit = { summary: string; lines: string[]; apply(draft: OrgState): void | Promise<void> };
 
+/**
+ * `beforePrompt`: the caller's last word, awaited once everything before Touch ID has passed; Touch ID is asked
+ * synchronously after it says yes, and not at all after it says no (the outcome then reads `cancelled`, `not asked`).
+ * The weekly asking checks focus there, so no fingerprint is asked for with no window in front.
+ */
+export type SignOptions = { beforePrompt?(): Promise<boolean> };
+
 export type SignOutcome =
   | { ok: true; version: number }
   | { ok: false; reason: 'not-root' | 'unmarked' | 'signing' | 'cancelled' | 'pending' | 'invalid' | 'hub' | 'busy'; detail?: string }
@@ -66,7 +73,7 @@ export interface OrgSigner {
    * that didn't take it (a sign's or a settle's), null while it only waits (no answer, or no hub). */
   pending(): { version: number; exposed: boolean; fork: boolean; hash: string; refused: string | null } | null;
   /** Composes, checks, prompts, slots, posts, adopts. */
-  sign(edit: Edit): Promise<SignOutcome>;
+  sign(edit: Edit, options?: SignOptions): Promise<SignOutcome>;
   /** The slot's three rules. The session calls it at start and at each feed open; `sign` calls it first. */
   settle(): Promise<void>;
   /** Only after the owner's confirmation of the proposal `hash` names, and only while the hub's chain doesn't hold it. */
@@ -399,7 +406,7 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     return null;
   }
 
-  async function signLocked(edit: Edit, asked: number): Promise<SignOutcome> {
+  async function signLocked(edit: Edit, asked: number, options: SignOptions): Promise<SignOutcome> {
     if (!live(asked)) return stopped('nothing was signed');
     const before = standing();
     if (before !== null) return before;
@@ -440,6 +447,9 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
       ...findings.map((f) => `Warning: ${f.detail}`),
     ].join('\n');
     // The edit and the checks above are awaits a sign-out may land in: the person is not asked for it.
+    if (!live(asked)) return stopped('nothing was signed');
+    if (options.beforePrompt !== undefined && !(await options.beforePrompt())) return { ok: false, reason: 'cancelled', detail: 'not asked' };
+    // Synchronously from here to Touch ID.
     if (!live(asked)) return stopped('nothing was signed');
     const answer = await signer.sign(draft, { summary: edit.summary, text });
     if (!answer.ok) return { ok: false, reason: 'cancelled' };
@@ -484,12 +494,12 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     isRoot,
     maySign: () => isRoot() && deps.marked() && store.get() !== 'damaged',
     pending,
-    async sign(edit) {
+    async sign(edit, options = {}) {
       if (signing) return { ok: false, reason: 'busy' };
       signing = true;
       const asked = epoch;
       try {
-        return await exclusive(() => signLocked(edit, asked));
+        return await exclusive(() => signLocked(edit, asked, options));
       } catch (error) {
         // Only the signing store throws here (a damaged file, a failed write): the slot's state is what it reads back.
         if (error instanceof SigningDamaged) return { ok: false, reason: 'signing' };

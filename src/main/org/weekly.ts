@@ -5,9 +5,14 @@
 //
 // - Due: this device may sign (a root, its keys marked, signing.json readable: the signer's `maySign`), no state is
 //   pending, and the held head was issued at least WEEKLY_DUE_DAYS ago.
-// - Asking: at a window's focus while due, if `lastAsked` is not within ASK_GAP_MS, `lastAsked` is written first and
-//   the signer then signs the no-change successor, Touch ID asking. A cancel ends it for the day; the Org section's
-//   quiet line (`due`, `ageDays`) stays, with "Re-sign now" (`resign`), which signs at once.
+// - Asking: at a window's focus while due, if `lastAsked` is not within ASK_GAP_MS, the signer signs the no-change
+//   successor. Its settle, the hub's chain and the checks come first, so the moment Touch ID would ask can be well after
+//   the focus: the signer calls a gate right before it (`beforePrompt`), which asks only while a window is still in
+//   front. The gate checks focus, writes `lastAsked` (before any prompt, so a crash never asks twice a day), and checks
+//   focus again once the write lands, Touch ID following synchronously; focus lost during the write takes the date back.
+//   An ask that never reached Touch ID (no window in front, or the signer ending before it) spends no day: the next
+//   focus asks. A cancel at Touch ID ends it for the day; the Org section's quiet line (`due`, `ageDays`) stays, with
+//   "Re-sign now" (`resign`), which signs at once.
 // - Notifying: every WEEKLY_CHECK_MS, while due and no window is focused, if `lastNotified` is not within ASK_GAP_MS,
 //   `lastNotified` is written first, then one notification. Touch ID is never asked from the timer: a fingerprint is
 //   asked for only with a window in front.
@@ -88,25 +93,49 @@ export function startWeekly(deps: WeeklyDeps): Weekly {
     }
   }
 
-  /** Writes `field` = now unless it is within ASK_GAP_MS, in one store update; whether it was written. */
-  function claim(field: 'lastAsked' | 'lastNotified'): Promise<boolean> {
+  const within = (last: string | null, at: number): boolean => last !== null && Math.abs(at - Date.parse(last)) < timing.ASK_GAP_MS;
+
+  /** Writes `field` = now unless it is within ASK_GAP_MS, in one store update: what it wrote and what it replaced, or null. */
+  function claim(field: 'lastAsked' | 'lastNotified'): Promise<{ at: string; was: string | null } | null> {
     const at = now();
     return deps.store.update((file: SigningFile) => {
-      const last = file[field];
-      if (last !== null && Math.abs(at - Date.parse(last)) < timing.ASK_GAP_MS) return { next: file, value: false };
+      const was = file[field];
+      if (within(was, at)) return { next: file, value: null };
       file[field] = new Date(at).toISOString();
-      return { next: file, value: true };
+      return { next: file, value: { at: file[field]!, was } };
     });
+  }
+
+  /** The day given back: `lastAsked` as it was, unless something wrote it since. */
+  function unclaim(claimed: { at: string; was: string | null }): Promise<void> {
+    return deps.store.update((file: SigningFile) => {
+      if (file.lastAsked === claimed.at) file.lastAsked = claimed.was;
+      return { next: file, value: undefined };
+    });
+  }
+
+  /** The signer's gate, right before Touch ID: a window still in front, and `lastAsked` written while it is. */
+  async function gate(): Promise<boolean> {
+    if (closed || !deps.focused() || !deps.signer.maySign()) return false;
+    const claimed = await claim('lastAsked');
+    if (claimed === null) return false;
+    // Touch ID follows synchronously, so nothing can take the focus between this check and the prompt.
+    if (!closed && deps.focused() && deps.signer.maySign()) return true;
+    await unclaim(claimed);
+    return false;
   }
 
   async function ask(): Promise<void> {
     changed();
     if (closed || asking || !due()) return;
+    const file = deps.store.get();
+    if (file === 'damaged' || within(file.lastAsked, now())) return;
     asking = true;
     try {
-      if (!(await claim('lastAsked'))) return;
-      const outcome = await deps.signer.sign(noChangeEdit());
-      log(outcome.ok ? `the weekly successor signed: version ${outcome.version}` : `the weekly successor was not signed (${outcome.reason}); asked again tomorrow`);
+      let prompted = false;
+      const outcome = await deps.signer.sign(noChangeEdit(), { beforePrompt: async () => (prompted = await gate()) });
+      if (outcome.ok) log(`the weekly successor signed: version ${outcome.version}`);
+      else log(prompted ? `the weekly successor was not signed (${outcome.reason}); asked again tomorrow` : `the weekly successor was not asked (${('detail' in outcome ? outcome.detail : undefined) ?? outcome.reason}); asked at the next focus`);
     } catch (error) {
       log(`asking failed: ${(error as Error).message}`);
     } finally {
@@ -119,7 +148,7 @@ export function startWeekly(deps: WeeklyDeps): Weekly {
     changed();
     if (closed || !due() || deps.focused()) return;
     try {
-      if (!(await claim('lastNotified'))) return;
+      if ((await claim('lastNotified')) === null) return;
       deps.notify(`The org state is ${ageDays()} days old. MAWS will ask for Touch ID when you next open it.`);
     } catch (error) {
       log(`the notification failed: ${(error as Error).message}`);

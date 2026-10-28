@@ -754,7 +754,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
         log,
       });
       const weekly = startWeekly({
-        signer: { maySign: () => maySign(signer), pending: () => signer.pending(), sign: (edit) => signer.sign(edit), onChanged: (listener) => signer.onChanged(listener) },
+        signer: { maySign: () => maySign(signer), pending: () => signer.pending(), sign: (edit, options) => signer.sign(edit, options), onChanged: (listener) => signer.onChanged(listener) },
         head: () => heldView()?.head() ?? null,
         store,
         focused: s.focused,

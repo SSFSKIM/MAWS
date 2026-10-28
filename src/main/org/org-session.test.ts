@@ -1547,6 +1547,39 @@ describe('M3: the signer composed over the session', () => {
     expect(signing.prompts).toEqual([]);
   });
 
+  it('a focus whose window is gone by the time Touch ID would ask asks nothing, and the next focus asks', async () => {
+    // The signer's read of the hub's chain, before Touch ID, is held open while the person switches apps.
+    let armed = false;
+    let release!: () => void;
+    let holding!: () => void;
+    const held = new Promise<void>((resolve) => (holding = resolve));
+    const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (armed && String(input).includes('/api/org/state?since=')) {
+        armed = false;
+        await new Promise<void>((resolve) => ((release = resolve), holding()));
+      }
+      return hub.fetch(input, init);
+    }) as typeof globalThis.fetch;
+    const { session } = await signingRoot({ fetch, timing: { WEEKLY_DUE_DAYS: 0 } });
+    await until(() => signerOf(session).due, 'due');
+    const before = headVersion(session);
+    signing.focused = true;
+    armed = true;
+    signing.focus();
+    await held;
+    signing.focused = false;
+    release();
+    await pause(50);
+    expect(signing.prompts).toEqual([]);
+    expect(hub.posted).toEqual([]);
+    expect((await exists(join(orgDir(), SIGNING_FILE))) ? (await readJson<SigningFile>(SIGNING_FILE)).lastAsked : null).toBeNull();
+
+    signing.focused = true;
+    signing.focus();
+    await until(() => headVersion(session) === before + 1, 'the weekly successor adopted at the next focus');
+    expect(signing.prompts).toHaveLength(1);
+  });
+
   it('re-sign now: the no-change successor signed, posted and adopted, registration.json flagged before signing.json\'s first write', async () => {
     const { session } = await signingRoot();
     const before = headVersion(session);
@@ -1564,6 +1597,7 @@ describe('M3: the signer composed over the session', () => {
     const { session } = await signingRoot({ timing: { WEEKLY_DUE_DAYS: 0 } });
     await until(() => signerOf(session).due, 'due');
     const before = headVersion(session);
+    signing.focused = true;
     signing.focus();
     await until(() => headVersion(session) === before + 1, 'the weekly successor adopted');
     expect(signing.prompts).toHaveLength(1);

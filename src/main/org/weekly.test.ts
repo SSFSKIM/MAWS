@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
-import { orgFiles, SIGNING_FILE, type SigningFile } from './files';
+import { orgFiles, SIGNING_FILE, type OrgFiles, type SigningFile } from './files';
 import type { Edit, OrgSigner, SignOutcome } from './signer';
 import { createSigningStore, type SigningStore } from './signing-store';
 import { startWeekly } from './weekly';
@@ -44,8 +44,17 @@ type Asked = { edit: Edit; lastAsked: string | null; onDisk: string | null };
 async function harness(options: { headAgeDays?: number; checkMs?: number } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'maws-weekly-'));
   profiles.push(dir);
-  const files = orgFiles({ userData: dir, log: () => {} });
-  expect(await files.ensure()).toEqual({ ok: true });
+  const base = orgFiles({ userData: dir, log: () => {} });
+  expect(await base.ensure()).toEqual({ ok: true });
+  /** Runs inside each signing.json write before it lands: a test holds the date's write open here. */
+  const gates = { write: null as ((value: SigningFile) => Promise<void> | void) | null };
+  const files: OrgFiles = {
+    ...base,
+    write: async (name, value) => {
+      if (name === SIGNING_FILE) await gates.write?.(value as SigningFile);
+      return base.write(name, value);
+    },
+  };
   let commits: Promise<unknown> = Promise.resolve();
   const commit = <T>(body: () => Promise<T>): Promise<T> => {
     const turn = commits.then(body);
@@ -82,12 +91,18 @@ async function harness(options: { headAgeDays?: number; checkMs?: number } = {})
     answer: { ok: false, reason: 'cancelled' } as SignOutcome,
     /** Runs while the person is asked, before the answer. */
     during: null as (() => Promise<void>) | null,
+    /** Runs in the signer before its gate (its settle, the hub's chain read, the checks). */
+    before: null as (() => Promise<void>) | null,
+    gates,
     focus: () => [...focus].forEach((listener) => listener()),
   };
   const signer: Pick<OrgSigner, 'maySign' | 'pending' | 'sign' | 'onChanged'> = {
     maySign: () => t.maySign,
     pending: () => t.pending,
-    async sign(edit) {
+    // As the signer does: everything before Touch ID, then the caller's gate right before it; a closed gate asks nothing.
+    async sign(edit, options) {
+      await t.before?.();
+      if (options?.beforePrompt !== undefined && !(await options.beforePrompt())) return { ok: false, reason: 'cancelled', detail: 'not asked' };
       const file = store.get();
       asked.push({ edit, lastAsked: file === 'damaged' ? null : file.lastAsked, onDisk: disk()?.lastAsked ?? null });
       await t.during?.();
@@ -144,6 +159,7 @@ describe('due', () => {
 describe('asking at a focus', () => {
   it('asks once at the first focus while due, `lastAsked` written to disk before Touch ID asks', async () => {
     const h = await harness();
+    h.t.focused = true;
     expect(h.disk()).toBeNull();
     h.focus();
     await until(() => h.asked.length === 1, 'the ask');
@@ -154,6 +170,7 @@ describe('asking at a focus', () => {
 
   it('does not ask again at a second focus the same day, and asks again a day later', async () => {
     const h = await harness();
+    h.t.focused = true;
     h.focus();
     await until(() => h.asked.length === 1, 'the first ask');
     h.clock.now = START + 23 * HOUR;
@@ -168,6 +185,7 @@ describe('asking at a focus', () => {
 
   it('asks once for focuses that arrive together', async () => {
     const h = await harness();
+    h.t.focused = true;
     h.focus();
     h.focus();
     h.focus();
@@ -178,6 +196,7 @@ describe('asking at a focus', () => {
 
   it('a cancel ends it for the day: no second ask, and the quiet line stays due', async () => {
     const h = await harness();
+    h.t.focused = true;
     h.t.answer = { ok: false, reason: 'cancelled' };
     h.focus();
     await until(() => h.asked.length === 1, 'the ask');
@@ -192,9 +211,69 @@ describe('asking at a focus', () => {
 
   it('neither asks nor writes anything at a focus while not due', async () => {
     const h = await harness({ headAgeDays: 3 });
+    h.t.focused = true;
     h.focus();
     h.t.maySign = false;
     h.head.issued = iso(START - 9 * DAY);
+    h.focus();
+    await settle();
+    expect(h.asked).toEqual([]);
+    expect(h.disk()).toBeNull();
+  });
+});
+
+describe('focus at the moment Touch ID would ask', () => {
+  it('asks nothing when no window is in front by then, and the day stays unspent for the next focus', async () => {
+    const h = await harness();
+    h.t.focused = true;
+    // The signer's reads before Touch ID (its settle, the hub's chain) are held open; the person switches apps meanwhile.
+    let release!: () => void;
+    let holding!: () => void;
+    const held = new Promise<void>((resolve) => (holding = resolve));
+    h.t.before = () => new Promise<void>((resolve) => ((release = resolve), holding()));
+    h.focus();
+    await held;
+    h.t.focused = false;
+    release();
+    await settle();
+    expect(h.asked).toEqual([]);
+    expect(h.disk()?.lastAsked ?? null).toBeNull();
+
+    h.t.before = null;
+    h.t.focused = true;
+    h.focus();
+    await until(() => h.asked.length === 1, 'the ask at the next focus');
+    expect(h.asked[0].onDisk).toBe(iso(START));
+  });
+
+  it('focus lost while `lastAsked` is written: the date is taken back and nothing is asked', async () => {
+    const h = await harness();
+    h.t.focused = true;
+    let release!: () => void;
+    let holding!: () => void;
+    const held = new Promise<void>((resolve) => (holding = resolve));
+    h.t.gates.write = (value) => {
+      if (value.lastAsked === null) return;
+      h.t.gates.write = null;
+      return new Promise<void>((resolve) => ((release = resolve), holding()));
+    };
+    h.focus();
+    await held;
+    h.t.focused = false;
+    release();
+    await settle();
+    expect(h.asked).toEqual([]);
+    expect(h.disk()?.lastAsked ?? null).toBeNull();
+
+    h.t.focused = true;
+    h.focus();
+    await until(() => h.asked.length === 1, 'the ask at the next focus');
+  });
+
+  it('a signer that ends before its gate (the hub unread, say) spends no day', async () => {
+    const h = await harness();
+    h.t.focused = true;
+    h.t.before = () => Promise.reject(new Error('the hub did not answer'));
     h.focus();
     await settle();
     expect(h.asked).toEqual([]);
@@ -235,6 +314,7 @@ describe('the notification', () => {
 describe('Re-sign now', () => {
   it('signs the no-change successor at once, whatever the day’s asking', async () => {
     const h = await harness();
+    h.t.focused = true;
     h.focus();
     await until(() => h.asked.length === 1, 'the ask');
     h.t.answer = { ok: true, version: 5 };

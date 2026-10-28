@@ -410,6 +410,19 @@ describe('the checks and the verdict', () => {
     expect(h.disk()).toBeNull();
   });
 
+  it('calls the caller\'s gate once everything before Touch ID has passed, and asks nothing when it says no', async () => {
+    const h = await harness();
+    const seen: Array<{ reads: number; prompts: number }> = [];
+    const closed = await h.signer.sign(noChangeEdit(), { beforePrompt: async () => (seen.push({ reads: h.hub.reads, prompts: h.prompts.length }), false) });
+    expect(closed).toEqual({ ok: false, reason: 'cancelled', detail: 'not asked' });
+    expect(seen).toEqual([{ reads: 1, prompts: 0 }]); // after the hub's chain was read
+    expect(h.prompts).toEqual([]);
+    expect(h.disk()).toBeNull();
+
+    expect(await h.signer.sign(noChangeEdit(), { beforePrompt: async () => true })).toEqual({ ok: true, version: 2 });
+    expect(h.prompts).toHaveLength(1);
+  });
+
   it('refuses `cancelled` when the person declines, keeping nothing', async () => {
     const h = await harness();
     h.answer = { ok: false, reason: 'cancelled' };
