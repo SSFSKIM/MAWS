@@ -89,6 +89,8 @@ export function fakeSpineView(seed: FakeSpineViewSeed = {}): FakeSpineView {
       acquired.push([id, reason]);
       return answer(id, reason);
     },
+    // any reason set is a refused run here: the fake has no launch mode, so it does not model D28's scenario exception
+    // (the backing answers the profile's library in scenario; spine-view.test.ts pins that)
     fileLinkedPaths: async (id) => (unavailable === null ? [...(linked.get(id) ?? [])] : []),
 
     setUnavailable(reason) {

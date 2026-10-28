@@ -195,6 +195,24 @@ describe('the in-process view', () => {
     expect(view.projectRows().map((p) => p.id)).toEqual(['scenario-project']);
     expect(view.project('scenario-project' as ProjectId)).toMatchObject({ id: 'scenario-project' });
   });
+
+  // D28's two exceptions to "[] while unavailable": the scenario's unavailability is not the index's refusal
+  it('in launch mode scenario over a readable index still answers files’ admission from the profile’s library', async () => {
+    const linked = new Map([[A, ['/files/a.pdf']]]);
+    const library = { fileLinkedPaths: (id: AppSessionId) => linked.get(id) ?? [] };
+    const view = createSpineView(deps({ mode: 'scenario', model: new SessionReadModel('scenario'), index: { unavailable: null, projects: index.projects, library } })).view;
+    expect(view.unavailable()).toBe('launch mode scenario: the sessions shown are a scenario’s');
+    await expect(view.fileLinkedPaths(A)).resolves.toEqual(['/files/a.pdf']);
+  });
+
+  it('in launch mode scenario over a refused index names the refusal before the scenario and answers no linked paths', async () => {
+    const refused = new Index(join(dir.path, 'refused.sqlite'), { refused: 'another MAWS holds spine.lock' });
+    const view = createSpineView(deps({ mode: 'scenario', model: new SessionReadModel('scenario'), index: refused })).view;
+    expect(view.unavailable()).toBe(refused.unavailable);
+    expect(view.unavailable()).toContain('another MAWS holds spine.lock');
+    await expect(view.fileLinkedPaths(A)).resolves.toEqual([]);
+    refused.close();
+  });
 });
 
 function mkdirOf(path: string): string {
