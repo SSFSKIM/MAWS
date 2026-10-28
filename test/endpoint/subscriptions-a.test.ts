@@ -167,7 +167,7 @@ describe('a lane A `cards` subscription', () => {
     const up = await serve(s);
     await fullAsk;
     expect(await subscribe(a, 'c1', { lane: 'A', id: 'la-1' }, { view: 'cards' })).toMatchObject({ mode: 'snapshot', seq: 0 });
-    expect((await snapshot(a, 'c1')).body).toEqual({ raised: [RAISED] });
+    expect((await snapshot(a, 'c1')).body).toEqual({ raised: [RAISED], launch: 'L1' });
     s.send(counter()(up.sub as string, 'host', { id: { writer: 'mini/host', seq: 3 }, event: { kind: 'message' } }));
     s.send(plane('host', { event: { kind: 'message', writer: 'mini/host', seq: 3 } }));
     s.send(plane('raised', { ...RAISED, request: 'toolu_2' }));
@@ -259,7 +259,7 @@ describe('a lane A subscription under pressure', () => {
     s.send({ t: 'pending', project: PROJECT, raised: [] });
     const a = await openRemote(f, org.a1, org.A);
     await subscribe(a, 'c1', { lane: 'A', id: 'la-1' }, { view: 'cards' });
-    expect((await snapshot(a, 'c1')).body).toEqual({ raised: [] });
+    expect((await snapshot(a, 'c1')).body).toEqual({ raised: [], launch: 'L1' });
     s.send(plane('raised', RAISED));
     await until(() => evs(a, 'c1').length === 1, 'the raise');
     // RL10 goes; the request settles while it is away; sminos comes back and restates its project's pending set.
@@ -268,6 +268,31 @@ describe('a lane A subscription under pressure', () => {
     const again = await sminos(f);
     again.send({ t: 'pending', project: PROJECT, raised: [] });
     await until(() => snapshots(a, 'c1').length === 2, 'a snapshot of the restated set');
-    expect(snapshots(a, 'c1').at(-1)).toEqual({ raised: [] });
+    expect(snapshots(a, 'c1').at(-1)).toEqual({ raised: [], launch: 'L1' });
+  });
+});
+
+describe('a lane A `cards` subscription’s launch (O13’s phone)', () => {
+  it('carries the session’s launch beside its pending set, sent again when the session is launched again, null with no bridge', async () => {
+    const f = await startEndpoint(org, started);
+    const s = await sminos(f);
+    s.send({ t: 'pending', project: PROJECT, raised: [RAISED] });
+    const a = await openRemote(f, org.a1, org.A);
+    await subscribe(a, 'c1', { lane: 'A', id: 'la-1' }, { view: 'cards' });
+    // What a web-cards act's context needs ({lane: 'A', session, launch}): the phone sees no member frame of its own.
+    expect((await snapshot(a, 'c1')).body).toEqual({ raised: [RAISED], launch: 'L1' });
+    s.send({ t: 'member', ...laneAMember({ launch: 'L2' }) });
+    await until(() => snapshots(a, 'c1').length === 2, 'a snapshot under the new launch');
+    expect(snapshots(a, 'c1').at(-1)).toEqual({ raised: [RAISED], launch: 'L2' });
+    // A member change that leaves the launch as it was sends nothing.
+    s.send({ t: 'member', ...laneAMember({ launch: 'L2', title: 'renamed' }) });
+    await sleep(60);
+    expect(snapshots(a, 'c1')).toHaveLength(2);
+    // A session with no bridge has no launch: null, and an act on it is refused `unavailable` anyway.
+    const bridgeless = laneAMember();
+    delete bridgeless.launch;
+    s.send({ t: 'member', ...bridgeless });
+    await until(() => snapshots(a, 'c1').length === 3, 'a snapshot with no launch');
+    expect(snapshots(a, 'c1').at(-1)).toEqual({ raised: [RAISED], launch: null });
   });
 });

@@ -25,9 +25,10 @@
 // A `cards` subscription needs no upstream: it carries only the session's pending requests (`raised`, which holds the
 // tool and its input) and their settlement (`settled`), from the pending sets sminos restates (`pending`) and the
 // session-wide raises and settlements, never a `host` message, a row or the transcript. Its snapshot is the pending set
-// (`{raised}`), sent again whenever a restated set differs from what the device holds (its snapshots and the raises and
-// settlements since), so a restatement after RL10 came back reconciles a settlement missed while it was away; every
-// subscription and resume of it is a snapshot. A cards stream whose credit is out past the backlog gets the whole set
+// with the session's launch (`{raised, launch}`: a web-cards act's context names it, and the phone sees no member frame),
+// sent again whenever a restated set or the member's launch differs from what the device holds (its snapshots and the
+// raises and settlements since), so a restatement after RL10 came back reconciles a settlement missed while it was
+// away; every subscription and resume of it is a snapshot. A cards stream whose credit is out past the backlog gets the whole set
 // in place of what waits, so it stays bounded by the set.
 import { randomBytes } from 'node:crypto';
 import type { Who } from './authorize';
@@ -50,7 +51,7 @@ export type PlaneAContext = {
   send(frame: object): void;
   connected(): boolean;
   /** The session's member, as sminos reports it. */
-  member(session: string): { project: string; lane: 'A' | 'B' } | null;
+  member(session: string): { project: string; lane: 'A' | 'B'; launch?: string } | null;
   log(line: string): void;
   ringBytes?: number;
   backlogBytes?: number;
@@ -249,11 +250,26 @@ export class PlaneA implements Plane {
    */
   #cardSnap(sub: Subscription, card: Card): void {
     card.stale = false;
-    const set = this.pending.of(sub.session.id);
-    const text = JSON.stringify(set);
+    const body = this.#cardBody(sub);
+    const text = JSON.stringify(body);
     if (text === card.sent) return;
     card.sent = text;
-    sub.snap({ epoch: card.epoch, seq: card.seq }, { raised: set }, 'cards');
+    sub.snap({ epoch: card.epoch, seq: card.seq }, body, 'cards');
+  }
+
+  /**
+   * A cards view's whole state: the session's pending requests, and its launch from sminos's member record, which a
+   * web-cards act's context needs (`{lane: 'A', session, launch}`) and the phone sees no member frame to learn. Null
+   * with no bridge (no launch), where an act is refused `unavailable` anyway. The endpoint never fills a device's
+   * context for it: the launch goes to the phone, which signs it.
+   */
+  #cardBody(sub: Subscription): { raised: Raised[]; launch: string | null } {
+    return { raised: this.pending.of(sub.session.id), launch: this.#ctx.member(sub.session.id)?.launch ?? null };
+  }
+
+  /** A session's member record moved (sminos's `member`): a cards view whose launch moved is sent again. */
+  memberChanged(session: string): void {
+    for (const [sub, card] of this.#cards) if (sub.session.id === session && !sub.ended) this.#cardSnap(sub, card);
   }
 
   /**
@@ -270,7 +286,7 @@ export class PlaneA implements Plane {
       return;
     }
     sub.ev({ epoch: card.epoch, seq: ++card.seq }, m);
-    card.sent = JSON.stringify(this.pending.of(sub.session.id));
+    card.sent = JSON.stringify(this.#cardBody(sub));
   }
 
   /** An upstream that can't keep its stream whole starts over: a fresh upstream subscription and its snapshot. */

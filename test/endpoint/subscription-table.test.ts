@@ -223,7 +223,7 @@ describe('the subscription table', () => {
   it('sends a lane A cards view stale from a hold its whole pending set when the hold ends with credit left', async () => {
     let decide: (ok: boolean) => void = () => {};
     let authorizing = false;
-    const planeA = new PlaneA({ send: () => {}, connected: () => true, member: () => ({ project: 'p', lane: 'A' }), log: () => {}, backlogBytes: 4096 });
+    const planeA = new PlaneA({ send: () => {}, connected: () => true, member: () => ({ project: 'p', lane: 'A', launch: 'L1' }), log: () => {}, backlogBytes: 4096 });
     const other: Plane = { open: () => {}, close: () => {}, stop: () => {} };
     const subs = new Subscriptions({
       authorize: () => (authorizing ? new Promise((resolve) => (decide = (ok) => resolve((ok ? { ok: true } : { ok: false, reason: 'grade' }) as never))) : Promise.resolve({ ok: true } as never)),
