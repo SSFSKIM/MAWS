@@ -5,9 +5,9 @@ import process from 'node:process';
 import { URLSearchParams, fileURLToPath } from 'node:url';
 import console from 'node:console';
 import { planOf } from './gate-plan.mjs';
+import { githubApi, jobsOf } from './gate-peer-api.mjs';
 
 const active = new Set(['queued', 'in_progress', 'waiting']);
-const statuses = new Set([...active, 'pending', 'requested', 'completed']);
 const requireValue = (condition, message) => { if (!condition) throw new Error(message); };
 const runId = (value) => {
   requireValue(/^\d+$/.test(String(value)) && Number.isSafeInteger(Number(value)) && Number(value) > 0, 'invalid run id');
@@ -19,9 +19,6 @@ const headOf = (head) => {
 };
 
 function heldState(jobs, groups) {
-  for (const job of jobs) {
-    requireValue(typeof job.name === 'string' && statuses.has(job.status) && (job.status !== 'completed' || typeof job.conclusion === 'string'), 'invalid job');
-  }
   const peerJobs = groups.map((group) => jobs.find((job) => job.name === `e2e:${group}`));
   // A visible failed/skipped peer job is definitive, even if the plan has not reported completion yet.
   const stateOf = (job) => active.has(job.status) ? job.status : job.status === 'completed' && job.conclusion === 'success' ? 'succeeded' : '';
@@ -57,13 +54,7 @@ export async function peerHeldBy({ env, scripts, event, api, now = new Date(), w
       if (run.event !== 'push' || candidateHead.tree_id !== head.tree_id) continue;
       const candidate = planOf({ ...planning, HEAD_MESSAGE: candidateHead.message, GITHUB_REF: `refs/heads/${run.head_branch}`, GITHUB_REF_NAME: run.head_branch }, scripts).peerCheck;
       if (candidate.peer !== check.peer || !check.groups.every((group) => candidate.groups.includes(group))) continue;
-      const jobs = [];
-      for (let page = 1; ; page++) {
-        const data = await api(`${root}/runs/${run.id}/jobs?filter=latest&per_page=100&page=${page}`);
-        requireValue(Array.isArray(data.jobs), 'invalid jobs response');
-        jobs.push(...data.jobs);
-        if (data.jobs.length < 100) break;
-      }
+      const jobs = await jobsOf(api, `${root}/runs/${run.id}`);
       const state = heldState(jobs, check.groups);
       if (state) return `${run.id} ${state}`;
     }
@@ -79,14 +70,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   try {
     const { scripts } = JSON.parse(readFileSync('package.json', 'utf8'));
     const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
-    held = await peerHeldBy({ env: process.env, scripts, event, api: async (path) => {
-      const response = await globalThis.fetch(`${process.env.GITHUB_API_URL || 'https://api.github.com'}${path}`, {
-        headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${process.env.GITHUB_TOKEN}`, 'X-GitHub-Api-Version': '2022-11-28' },
-        signal: globalThis.AbortSignal.timeout(15_000),
-      });
-      if (!response.ok) throw new Error(`GitHub API ${response.status} for ${path}`);
-      return response.json();
-    } });
+    held = await peerHeldBy({ env: process.env, scripts, event, api: githubApi(process.env) });
   } catch (error) {
     console.warn(`gate-peer-held: warning: ${error.message}; peer groups will join normally`);
   }
