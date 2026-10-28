@@ -23,11 +23,11 @@ import { Group, type BackgroundSection } from '../../../../../src/renderer/src/t
 import { MonitorRow, ShellRow } from '../../../../../src/renderer/src/tools/agents/background/TaskRows';
 import type { TaskNode } from '../../../../../src/renderer/src/tools/agents/model/task-graph';
 import { useTicker } from '../../../../../src/renderer/src/tools/agents/subagents/shared';
-import { jobLists } from '../jobs/job-nodes';
+import { jobLists } from '../../../../../src/renderer/src/lane-a/jobs/job-nodes';
 import { jobStop, latestStops, type JobStop } from '../jobs/job-stops';
-import { JOBS_COPY, noFileNote, shortPath } from '../jobs/jobs-copy';
-import type { OutputView } from '../jobs/output-requests';
-import type { DeskTranscript, DepthTranscriptState } from '../source/desk-transcript';
+import { JOBS_COPY, noFileNote, shortPath } from '../../../../../src/renderer/src/lane-a/jobs/jobs-copy';
+import type { OutputView } from '../../../../../src/renderer/src/lane-a/jobs/output-requests';
+import type { PlaneTranscript, PlaneTranscriptState } from '../../../../../src/renderer/src/lane-a/plane-transcript';
 
 type Section = 'shells' | 'monitors' | 'mcp';
 
@@ -36,7 +36,7 @@ type Section = 'shells' | 'monitors' | 'mcp';
  * main loop's are), drawn above its transcript in the drill-in, a few rows high, and only while it has any: no MCP
  * names, no note for an empty list or an older daemon.
  */
-export function JobsPane({ controller, state, session, scope = 'session' }: { controller: DeskTranscript; state: DepthTranscriptState; session: DeskSession; scope?: 'session' | 'agent' }) {
+export function JobsPane({ controller, state, session, scope = 'session' }: { controller: PlaneTranscript; state: PlaneTranscriptState; session: DeskSession; scope?: 'session' | 'agent' }) {
   const { machine } = session;
   // The session's process is gone (its presence says no process), so no job of it will name a file now.
   const ended = session.presence?.record === null;
@@ -177,7 +177,7 @@ function McpList({ servers }: { servers: McpServer[] }) {
 const ACTION = 'rounded-sm px-1.5 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2';
 
 /** A shell's output under its row: its path, Refresh and Close, then the machine's answer by its variant. */
-function OutputPanel({ taskId, path, view, machine, final, controller }: { taskId: string; path: string | null; view: OutputView; machine: string; final: boolean; controller: DeskTranscript }) {
+function OutputPanel({ taskId, path, view, machine, final, controller }: { taskId: string; path: string | null; view: OutputView; machine: string; final: boolean; controller: PlaneTranscript }) {
   const shown = view.phase === 'ok' ? view.answer : view.phase === 'asking' ? view.last : null;
   const named = shown?.path ?? (view.phase === 'refused' ? view.path : view.phase === 'missing' ? view.path : null) ?? path;
   const pre = useRef<HTMLPreElement>(null);

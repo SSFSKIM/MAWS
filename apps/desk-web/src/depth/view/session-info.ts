@@ -7,7 +7,7 @@
 import { formatCompactCount as compact } from '@shared/app/date-format';
 import type { StatusRead, Usage } from 'desk-hub/protocol';
 import { NEEDS, type Capability } from '../../conversation/capabilities';
-import type { DepthTranscriptState } from '../source/desk-transcript';
+import type { PlaneTranscriptState } from '../../../../../src/renderer/src/lane-a/plane-transcript';
 
 export const UNAVAILABLE = 'unavailable';
 export const NO_BRIDGE = 'unavailable (no bridge)';
@@ -33,7 +33,7 @@ export function costLine(usage: Usage | null | undefined, bridged = false): stri
 export type StatusLines = { engine: string; root: string; repo: string; surfaces: string };
 
 /** The Info tab's engine lines: `can` is the session's `status` capability, `bridged` whether it runs with the bridge. */
-export function statusLines(status: DepthTranscriptState['status'], can: Capability, bridged: boolean): StatusLines {
+export function statusLines(status: PlaneTranscriptState['status'], can: Capability, bridged: boolean): StatusLines {
   const all = (text: string): StatusLines => ({ engine: text, root: text, repo: text, surfaces: text });
   if (!can.can) return all(bridged ? `not available from this plugin (needs sminos ≥ ${NEEDS.status.sminos})` : `${UNAVAILABLE} (${can.reason})`);
   const answer: StatusRead | null = status?.answer ?? null;
@@ -44,6 +44,6 @@ export function statusLines(status: DepthTranscriptState['status'], can: Capabil
 }
 
 /** A Refresh that failed while an earlier answer is kept: said beside the lines, which stay that answer's. */
-export function refreshError(status: DepthTranscriptState['status']): string | null {
+export function refreshError(status: PlaneTranscriptState['status']): string | null {
   return status?.answer && status.error ? `Refresh failed (${status.error}): showing the last answer` : null;
 }

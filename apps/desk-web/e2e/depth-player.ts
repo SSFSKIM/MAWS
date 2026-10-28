@@ -10,7 +10,7 @@
 // `read status`, every other kind `unsupported`; with `status` null the player passes reads by, as an older machine does.
 import type { JsonObject, SessionBodies, SessionMessage, StatusRead, SubagentMeta } from 'desk-hub/protocol';
 import type { HubDouble } from '../test/double/hub-double';
-import { readRecording, rowsBefore, scriptOf, snapshotAt, withTextAnswer, type LiveItem, type ScriptOptions } from '../test/double/session-stream';
+import { readRecording, rowsBefore, scriptOf, snapshotAt, withTextAnswer, type LiveItem, type ScriptOptions } from '../../../src/renderer/src/lane-a/test-support/session-stream';
 
 type Open = { sub: string };
 

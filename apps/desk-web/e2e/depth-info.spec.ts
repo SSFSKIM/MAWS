@@ -17,7 +17,7 @@ import { DepthPlayer, type PlayerOptions } from './depth-player';
 import { expect, seedKey, test } from './fixtures';
 import { PROJECT, S, stageProject } from './scene';
 import type { HubDouble } from '../test/double/hub-double';
-import { readRecording } from '../test/double/session-stream';
+import { readRecording } from '../../../src/renderer/src/lane-a/test-support/session-stream';
 
 const recording = readRecording();
 const DIFF = readFileSync(join(TWO_SUBAGENTS, 'diff.patch'), 'utf8');

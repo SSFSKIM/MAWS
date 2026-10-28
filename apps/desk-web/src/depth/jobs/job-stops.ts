@@ -3,8 +3,8 @@
 // stop ran: the job turns `stopped` on the session's own DX4 body, so the row reads `stopping…` from the press until
 // the body says the job no longer runs, or until the stop fails, when the row keeps its status and says why under it.
 import type { RpcError } from 'desk-hub/protocol';
-import { failureOf } from '../../conversation/outcome';
-import { failureText } from '../../conversation/words';
+import { failureOf } from '../../../../../src/renderer/src/lane-a/conversation/outcome';
+import { failureText } from '../../../../../src/renderer/src/lane-a/conversation/words';
 import type { RpcEntry } from '../../project/conversation';
 
 /**

@@ -14,8 +14,8 @@ import { REVIEW_COPY } from '../../../../../src/renderer/src/tools/code/copy';
 import '../../../../../src/renderer/src/tools/code/code.css';
 import { tooLarge } from '../../../../../src/renderer/src/tools/code/review/review-model';
 import { createReviewUi, selectFile, type ReviewUi } from '../../../../../src/renderer/src/tools/code/review/view-state';
-import { diffFiles, diffTotals, type DiffFile } from '../diff/files';
-import type { DeskTranscript, DepthTranscriptState } from '../source/desk-transcript';
+import { diffFiles, diffTotals, type DiffFile } from '../../../../../src/renderer/src/lane-a/diff/files';
+import type { PlaneTranscript, PlaneTranscriptState } from '../../../../../src/renderer/src/lane-a/plane-transcript';
 
 const ReviewView = lazy(() => loadChunk(() => import('../../../../../src/renderer/src/tools/code/review/ReviewView')));
 
@@ -31,7 +31,7 @@ export function createDiffView(): DiffView {
   return { ui: createReviewUi({ session: null }), wrap: createStore<{ wrap: boolean }>()(() => ({ wrap: false })) };
 }
 
-type Props = { controller: DeskTranscript; state: DepthTranscriptState; view: DiffView };
+type Props = { controller: PlaneTranscript; state: PlaneTranscriptState; view: DiffView };
 
 export function DiffPane({ controller, state, view }: Props) {
   // Asked for when the tab opens; the reader's Refresh asks again.

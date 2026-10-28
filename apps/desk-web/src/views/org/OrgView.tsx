@@ -13,7 +13,7 @@
 // reconnect is invisible to the reader", MAWS #57) — a dropped socket, its backlog read again after the reconnect, a
 // live event still being checked — and keeps its rows as they were; past the grace it is said as it is.
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { QUIET_MS } from '../../depth/source/keeper';
+import { QUIET_MS } from '../../../../../src/renderer/src/lane-a/keeper';
 import { useStore } from 'zustand';
 import type { Me } from '../../hub/me';
 import { useKeyHolder } from '../../key/holder';

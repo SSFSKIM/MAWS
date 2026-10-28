@@ -7,7 +7,7 @@
 // answers is overlaid as well, the log's question or not, and a log with no answer for it takes the transcript's.
 import type { JsonObject, LogEvent } from 'desk-hub/protocol';
 import { askModAnswers } from '../../../../src/renderer/src/transcript/model/ask-mod';
-import { askAnswers } from './ask-answer';
+import { askAnswers } from '../../../../src/renderer/src/lane-a/conversation/ask-answer';
 import { writerSession } from './stream';
 
 export type AskedQuestion = {

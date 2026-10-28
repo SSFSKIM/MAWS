@@ -15,7 +15,7 @@ import { ProjectConnection } from '../../project/connection';
 import { parseRoute, routePath, useDeskLayout } from '../../shell/layout';
 import { useGrid } from '../../state/grid';
 import type { Me } from '../../hub/me';
-import { QUIET_MS } from '../../depth/source/keeper';
+import { QUIET_MS } from '../../../../../src/renderer/src/lane-a/keeper';
 
 const held = new Map<string, ProjectConnection>();
 const acquired: string[] = [];

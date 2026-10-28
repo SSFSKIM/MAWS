@@ -10,7 +10,7 @@ import { DepthPlayer, type AgentTrack, type PlayerOptions } from './depth-player
 import { expect, seedKey, test } from './fixtures';
 import { PROJECT, S, stageProject } from './scene';
 import type { HubDouble } from '../test/double/hub-double';
-import { readRecording, type LiveItem } from '../test/double/session-stream';
+import { readRecording, type LiveItem } from '../../../src/renderer/src/lane-a/test-support/session-stream';
 
 const recording = readRecording();
 const [WORDS, KETTLE] = recording.subagents;

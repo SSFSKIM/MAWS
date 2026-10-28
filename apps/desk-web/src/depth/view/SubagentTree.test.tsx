@@ -7,7 +7,7 @@ import { cleanup, render } from '@testing-library/react';
 import type { SubagentMeta, SubagentStatusFacts } from 'desk-hub/protocol';
 import { afterEach, expect, it } from 'vitest';
 import { setAgentsClock } from '../../../../../src/renderer/src/tools/agents/subagents/shared';
-import { taskGraphOf, withStatuses } from '../agents/task-feed';
+import { taskGraphOf, withStatuses } from '../../../../../src/renderer/src/lane-a/agents/task-feed';
 import { INITIAL_TREE_VIEW, SubagentTree } from './SubagentTree';
 
 const NOW = Date.parse('2026-10-17T10:00:00.000Z');

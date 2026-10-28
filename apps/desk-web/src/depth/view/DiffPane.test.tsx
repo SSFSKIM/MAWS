@@ -3,14 +3,14 @@
 // could not take the diff — why, never an empty "No changes against" with no base.
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { DeskTranscript, DepthTranscriptState } from '../source/desk-transcript';
+import type { PlaneTranscript, PlaneTranscriptState } from '../../../../../src/renderer/src/lane-a/plane-transcript';
 import { createDiffView, DiffPane } from './DiffPane';
 
 afterEach(cleanup);
 
 function pane(answer: { base: string; text: string; error?: string }) {
-  const controller = { target: { machine: 'mini', session: 's', agentId: null }, requestDiff: vi.fn() } as unknown as DeskTranscript;
-  const state = { phase: 'live', diff: { pending: false, answer } } as unknown as DepthTranscriptState;
+  const controller = { target: { machine: 'mini', session: 's', agentId: null }, requestDiff: vi.fn() } as unknown as PlaneTranscript;
+  const state = { phase: 'live', diff: { pending: false, answer } } as unknown as PlaneTranscriptState;
   render(<DiffPane controller={controller} state={state} view={createDiffView()} />);
   return screen.getByTestId('depth-diff');
 }

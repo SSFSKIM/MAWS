@@ -15,7 +15,7 @@ import { FakeMachineReplay } from './fake-machine';
 import { expect, seedKey, test } from './fixtures';
 import { PROJECT, S, stageProject } from './scene';
 import type { HubDouble } from '../test/double/hub-double';
-import { readRecording } from '../test/double/session-stream';
+import { readRecording } from '../../../src/renderer/src/lane-a/test-support/session-stream';
 
 const MACHINE = 'fake';
 const ANSWER = 'You chose blue';

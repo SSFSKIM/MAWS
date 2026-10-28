@@ -14,18 +14,19 @@ import { useEffect, useState } from 'react';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { useTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
 import type { SubagentRef } from '../../../../../src/renderer/src/transcript/model/rows';
-import type { SessionPlane } from '../../shell/session-plane';
+import type { SessionPlane } from '../../../../../src/renderer/src/lane-a/session-plane';
 import type { DeskSession } from '../../shell/sessions';
 import { learnServed, type TranscriptServed } from '../../shell/transcript-served';
-import { DeskTranscript, type TranscriptStoreApi } from '../source/desk-transcript';
-import { reachOf, TranscriptKeeper } from '../source/keeper';
+import type { PlaneTranscript, TranscriptStoreApi } from '../../../../../src/renderer/src/lane-a/plane-transcript';
+import { TranscriptKeeper } from '../../../../../src/renderer/src/lane-a/keeper';
+import { deskTranscript, reachOf } from '../source/desk-source';
 
 /** The agent an `Agent` row asked the column to open: null when the tree does not name it yet (the tree is shown). */
 export type AgentRequest = { agentId: string | null };
 
 export class SessionOwner {
   readonly plane: SessionPlane;
-  readonly main: DeskTranscript;
+  readonly main: PlaneTranscript;
   readonly keeper: TranscriptKeeper;
   /** The open-agent request, until the column takes it. */
   readonly agentRequest: StoreApi<{ request: AgentRequest | null }> = createStore(() => ({ request: null as AgentRequest | null }));
@@ -36,7 +37,7 @@ export class SessionOwner {
   constructor(options: { project: string; machine: string; session: string; plane: SessionPlane; store: TranscriptStoreApi }) {
     this.plane = options.plane;
     this.where = { project: options.project, machine: options.machine, session: options.session };
-    this.main = new DeskTranscript({ plane: options.plane, project: options.project, target: { machine: options.machine, session: options.session, agentId: null }, store: options.store });
+    this.main = deskTranscript({ plane: options.plane, project: options.project, target: { machine: options.machine, session: options.session, agentId: null }, store: options.store });
     this.keeper = new TranscriptKeeper(this.main, options.store);
   }
 

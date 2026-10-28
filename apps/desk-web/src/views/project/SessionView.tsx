@@ -17,7 +17,7 @@
 // A tapped notification lands on its request's card at the tail, brought into the virtualized list wherever the reader
 // was, or on its message's row in the transcript (a `<message>`'s, or a message tool's call drawn as the message), or,
 // for an async question with no request waiting (MAWS's own ask), on its call's row. A send's row draws without its delivery frame line, a peer's send labelled with who sent it
-// (`conversation/delivery-frame.ts`).
+// (`src/renderer/src/lane-a/conversation/delivery-frame.ts`).
 //
 // A decoration of MAWS's view is the desk's own (`styles/app.css`, under `data-session-view`): a gutter that keeps every
 // row, breakouts included, clear of MAWS's floating "Jump to latest". MAWS reads a turn as working until a row ends it,
@@ -43,7 +43,7 @@ import { TranscriptPane, transcriptStatus, useKeptTranscript, type RowIndex } fr
 import { sessionName } from '../../log/projection';
 import { useLanding } from '../../pwa/service-worker';
 import { useDeskLayout } from '../../shell/layout';
-import type { SessionPlane } from '../../shell/session-plane';
+import type { SessionPlane } from '../../../../../src/renderer/src/lane-a/session-plane';
 import type { DeskSession } from '../../shell/sessions';
 import { useTranscriptServed } from '../../shell/transcript-served';
 import { useNarrow } from '../../shell/viewport';

@@ -3,10 +3,10 @@
 // chunk's stamp, a resume's gap, an older page.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTranscriptStore } from '../../../../src/renderer/src/stores/transcript';
-import { Chain, SESSION } from '../../test/double/chain-rows';
-import { FakePlane, mount, settle } from '../../test/double/fake-plane';
-import { readRecording, rowsBefore, scriptOf } from '../../test/double/session-stream';
-import { DeskTranscript } from '../depth/source/desk-transcript';
+import { Chain, SESSION } from '../../../../src/renderer/src/lane-a/test-support/chain-rows';
+import { FakePlane, mount, settle } from '../../../../src/renderer/src/lane-a/test-support/fake-plane';
+import { readRecording, rowsBefore, scriptOf } from '../../../../src/renderer/src/lane-a/test-support/session-stream';
+import { deskTranscript } from '../depth/source/desk-source';
 import { latency, LatencyRecorder, LOG, PENDING, percentile, RING, type LatencyPath } from './latency';
 
 afterEach(() => vi.useRealTimers());
@@ -217,7 +217,7 @@ describe('one transcript’s hops', () => {
   it('times its first rows, a chunk from its stamp, and a resume from its disruption', async () => {
     const plane = new FakePlane('proj');
     const store = createTranscriptStore();
-    const controller = new DeskTranscript({ plane, project: 'proj', target: { machine: 'mini', session: 'sess-1', agentId: null }, store });
+    const controller = deskTranscript({ plane, project: 'proj', target: { machine: 'mini', session: 'sess-1', agentId: null }, store });
     const before = { snapshot: samples('view.snapshot'), first: samples('view.first-rows'), chunk: samples('stream.chunk'), gap: samples('resume.gap'), resumes: latency.report().counts['subscription.resumes'] ?? 0 };
     controller.open();
     const unmount = mount(controller, store);
@@ -245,7 +245,7 @@ describe('one transcript’s hops', () => {
   it('times a live row from its stamp only once its events reach the store: a progress row or a row off the chain gives no sample', async () => {
     const plane = new FakePlane('proj');
     const store = createTranscriptStore();
-    const controller = new DeskTranscript({ plane, project: 'proj', target: { machine: 'mini', session: SESSION, agentId: null }, store });
+    const controller = deskTranscript({ plane, project: 'proj', target: { machine: 'mini', session: SESSION, agentId: null }, store });
     controller.open();
     const unmount = mount(controller, store);
     const c = new Chain();
@@ -271,7 +271,7 @@ describe('one transcript’s hops', () => {
   it('times an older page from its asking until its rows are in', async () => {
     const plane = new FakePlane('proj');
     const store = createTranscriptStore();
-    const controller = new DeskTranscript({ plane, project: 'proj', target: { machine: 'mini', session: 'sess-1', agentId: null }, store, page: 3 });
+    const controller = deskTranscript({ plane, project: 'proj', target: { machine: 'mini', session: 'sess-1', agentId: null }, store, page: 3 });
     controller.open();
     const unmount = mount(controller, store);
     const held = script.findLastIndex((item) => item.kind === 'row') + 1;

@@ -11,4 +11,6 @@ The desk's web app, served by desk-hub's Worker: the owner's phone (and any brow
 
 The seam reads the org state only a listed device holds: a browser that is not one names no machine as moved.
 
+**Lifted into MAWS** — the depth column's DX4 lane A machinery (the plane transcript, its streaming layer and row drawing, the subagent feed, the jobs, diff and view helpers, and the conversation words) lives in MAWS's renderer under `src/renderer/src/lane-a/` since P5 O9 M3, with its unit suites and test doubles (`test-support/`), and is MAWS's lane A code to maintain. desk-web imports it from there; `src/depth/source/desk-source.ts` passes in the desk's store keys, latency marks and model store.
+
 Suites: `e2e/` against the DX3 double (`pnpm --filter desk-web e2e`), `e2e-hub/` against desk-hub's local runner (`playwright.hub.config.ts`; the cards specs load MAWS's endpoint in-process through Vite's `runnerImport`), `e2e-staging/` against staging. Build first (`pnpm --filter desk-web build`); on the Mac run one browser spec at a time, in Playwright's own Chromium (`DESK_E2E_CHANNEL=chromium`).

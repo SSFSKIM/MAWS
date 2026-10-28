@@ -6,7 +6,7 @@
 // while the machine is offline, or while the project socket is down; closed when it left the pending set with no settlement this tab saw (unless a
 // decision on it is `uncertain`: that keeps its Retry).
 import type { Raised, Settled } from 'desk-hub/protocol';
-import { failureOf } from './outcome';
+import { failureOf } from '../../../../src/renderer/src/lane-a/conversation/outcome';
 import type { RequestRecord, RpcEntry } from '../project/conversation';
 import type { Capability } from './capabilities';
 

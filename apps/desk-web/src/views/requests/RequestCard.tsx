@@ -17,7 +17,7 @@ import { toolVerb } from '../../../../../src/renderer/src/request-card/tools';
 import { QuestionBody } from '../../../../../src/renderer/src/request-card/variants/Question';
 import { capabilities } from '../../conversation/capabilities';
 import { cardState, isAsyncQuestion, isQuestion, type CardState } from '../../conversation/card-state';
-import { settledText } from '../../conversation/words';
+import { settledText } from '../../../../../src/renderer/src/lane-a/conversation/words';
 import { sessionName } from '../../log/projection';
 import type { RequestRecord, RpcEntry } from '../../project/conversation';
 import { useConnected, useDesk } from '../conversation/desk-context';

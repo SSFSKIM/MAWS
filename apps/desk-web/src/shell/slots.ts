@@ -5,7 +5,7 @@
 // record a fold unfolded in the center): a direct channel's center is the session view, the center's own.
 import type { ComponentType } from 'react';
 import { create } from 'zustand';
-import type { SessionPlane } from './session-plane';
+import type { SessionPlane } from '../../../../src/renderer/src/lane-a/session-plane';
 import type { DeskSession } from './sessions';
 import { FALLBACKS } from './slot-fallbacks';
 
