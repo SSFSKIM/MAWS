@@ -183,6 +183,7 @@ export default defineConfig({
       // this vitest, so `pnpm test` and the unit job's `--maxWorkers` reach it as they reach every project above.
       'apps/desk-hub/vitest.config.ts',
       'apps/desk-web/vitest.config.ts', // DC5: the web app's client, log, and key, against the DX3 double
+      'apps/desk-web/vitest.local.config.ts', // P5 O13 M4: the cards client against the real endpoint on the local hub (a wrangler dev child)
       'apps/org-protocol/vitest.config.ts', // P5-O11 M1: the protocol package's vectors, in Node and in workerd
     ],
   },
