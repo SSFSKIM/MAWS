@@ -35,7 +35,9 @@ export type PushData = { json(): unknown } | null;
 export async function onPush(scope: WorkerScope, data: PushData): Promise<void> {
   const notice = parseNotice(payloadOf(data));
   const { title, options } = describeNotice(notice);
-  await Promise.all([scope.registration.showNotification(title, options), badge(scope, notice?.waiting)]);
+  // A v2 notice carries no count, so it leaves the badge as it is.
+  const waiting = notice === null || 'v2' in notice ? undefined : notice.waiting;
+  await Promise.all([scope.registration.showNotification(title, options), badge(scope, waiting)]);
 }
 
 /**
