@@ -17,9 +17,10 @@ async function wait(snapshots, options = {}) {
   let poll = 0;
   const lines = [];
   const paths = [];
+  const pauses = [];
   const status = await waitForPeer({
-    repo: 'owner/repo', run: '90', group: 'cross-build', timeoutMs: 90_000,
-    now: () => clock, sleep: async (ms) => { clock += ms; poll++; }, log: (line) => lines.push(line),
+    repo: 'owner/repo', run: '90', group: 'cross-build', timeoutMs: 360_000,
+    now: () => clock, sleep: async (ms) => { pauses.push(ms); clock += ms; poll++; }, log: (line) => lines.push(line),
     api: async (path) => {
       paths.push(path);
       const state = snapshots[Math.min(poll, snapshots.length - 1)];
@@ -27,7 +28,7 @@ async function wait(snapshots, options = {}) {
       return path.includes('/jobs?') ? { jobs: state.jobs } : state.run;
     }, ...options,
   });
-  return { status, lines, paths, poll };
+  return { status, lines, paths, poll, pauses };
 }
 
 test('the stand-in waits through the holder plan and peer job, then passes only with the peer success', async () => {
@@ -36,7 +37,7 @@ test('the stand-in waits through the holder plan and peer job, then passes only 
     snapshot(),
     snapshot('in_progress', null, [plan, job('e2e:cross-build', 'in_progress')]),
     done('success'),
-  ], { timeoutMs: 120_000 });
+  ], { timeoutMs: 480_000 });
   assert.equal(result.status, 0);
   assert.equal(result.poll, 3);
   assert.equal(result.lines.at(-1), 'held by run 90: success');
@@ -119,4 +120,14 @@ test('the workflow entry point exits with the holder verdict, not just a log lin
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+
+test('normal polling fits a sibling batch within the repository API quota; errors retry sooner', async () => {
+  const pending = await wait([snapshot(), snapshot(), done('success')]);
+  assert.equal(pending.status, 0);
+  assert.deepEqual(pending.pauses, [120_000, 120_000]);
+  const retry = await wait([new Error('HTTP 503'), done('success')]);
+  assert.equal(retry.status, 0);
+  assert.deepEqual(retry.pauses, [30_000]);
 });

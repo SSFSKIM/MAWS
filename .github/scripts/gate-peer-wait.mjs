@@ -44,7 +44,9 @@ export async function waitForPeer({ repo, run, group, api, timeoutMs = 175 * 60_
       log(`${lead}API attempt ${errors}/3 failed: ${error.message}`);
       if (errors === 3) return fail('could not read the holder after three API attempts');
     }
-    await pause(Math.min(30_000, Math.max(0, deadline - now())));
+    // Each poll costs two requests from the repository's shared GITHUB_TOKEN budget (1,000/hour). Five deferred
+    // siblings use 300/hour at this pace, leaving room for their plan lookups and other runs; errors retry sooner.
+    await pause(Math.min(errors > 0 ? 30_000 : 120_000, Math.max(0, deadline - now())));
   }
   return fail('timed out; holder was still unfinished');
 }
