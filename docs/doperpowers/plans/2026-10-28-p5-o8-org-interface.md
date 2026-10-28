@@ -30,6 +30,8 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-28) reviewer-high converged: round 1 at ef4bb83cb (3 P1, 5 P2, all fixed at 59edeebe1), round 2 on the fix found nothing. Class 1a green at b5816709a (run 40683146373).
   - [ ] The final gate on the PR's tree, and the owner's staging sitting.
 - [ ] M2 — The remote rows — **executable** once M1 and O7 M1 are on master
+  - [x] (2026-10-28) Built on `p5-o8-m2`, branched from `p5-o8-m1` (the architect lands them in order): `rows.ts`, `org.rows`, main's wiring, the renderer's listed partition and rows; the unit suites and `test/org/rows.local.test.ts` pass locally.
+  - [ ] reviewer-high, the gates, and the live check at the first cut-over machine.
 - [ ] M3 — The app as the org's signer: a co-root, the weekly successor, the signing checks — *advisory*
 - [ ] M4 — The Org page — *advisory; taste (Q1)*
 - [ ] M5 — Owners on rows and the per-project toggle — *advisory; taste (Q2, Q3)*
@@ -886,6 +888,14 @@ Each is built as its recommendation when its milestone is re-planned, unless the
 - Decision: M1's review has converged: round 2 (reviewer-high on 59edeebe1, narrowed to the fix wave) found nothing material. Rounds of 8, then 0.
   Rationale: the stop rule; a round that yields nothing worth changing.
   Date/Author: 2026-10-28, O8 M1's executor.
+
+- Decision: M2's rows source as built (rows.ts), where the document left room. One queue applies every event, starting with the cache's read, so nothing is judged before the persisted marks are held. Records a live `listing` frame brought since this open are kept even when the snapshot lacks them (a session listed after the snapshot was cut), and waiting records of keys the snapshot omits are purged at the last page. A held record that fails verification again leaves the rows and waits, its mark kept. The announced version is the highest `state` notice between the open and the last page. A change of signed-in org clears marks, rows and the waiting set. The cache is written only into an existing, checked `org/` (never created by the rows). A mark's delegation id is the certificate whose key signed the record, when the head lists no machine entry for the ref. The hash is base64url, the package's `B64`. Delegated rows are not re-verified on the clock alone; O7's roster drops a machine at its certificate's expiry.
+  Rationale: the replace rule as written would delete a session listed after the snapshot; the rest follow the mark rule's rounds. Rejected: judging records before the cache's marks are loaded; deleting a re-failing record's mark.
+  Date/Author: 2026-10-28, O8 M2's executor.
+
+- Decision: M2's renderer as built. Listed rows merge by `issued` among the records the sidebar's sort leaves in recency order, after the records it puts first (pinned; under `priority`, waiting, unread or working). `ProjectEntry.sessions` stays records only, with a `listed` field and a sidebar-local merged `items` list carrying the order, search and caps. A listed row's `issued` counts toward its project's activity, and the project card's count includes listed rows. A row whose org key has checkouts but none the index lists goes nowhere (all hidden). With no opener, a click selects the row in the sidebar alone (not persisted, not a tab); listed rows are their own tree-node kind, so no record path opens them, and they carry no menu. A covered machine also skips the `engine.sessions` re-read at host ready, and is settled when it newly becomes covered, not at every rows event; an `org.rows` answer older than an `org.rows.changed` is dropped.
+  Rationale: the existing sort and `ProjectEntry` readers; settling at every event would close tabs as listings churn. Rejected: a pure activity merge (a listed row above a waiting local record); ranking listed rows into the priority tiers (attention across machines is O7 M6's and O3's); a union `sessions` touching every reader; a persisted selection.
+  Date/Author: 2026-10-28, O8 M2's executor.
 
 The residue for P5's Decision Log. Each item is decided where it binds (M1 or M2 unless marked), with the alternative it rejected:
 
