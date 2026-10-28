@@ -27,7 +27,8 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
 
 - [ ] M1 — The app's org session — **executable now** (needs O6, O10 M9, O11 and O13 M2, all landed; O7 M1's `src/main/org/session.ts` by the second-lands-takes-the-file rule)
   - [x] (2026-10-28) Built on `p5-o8-m1`: `org.*`, `<userData>/org/`, the login transfer and stand-in, the hub client, the held view, the Registry feed, the production session, the Org section, main's composition over O7's seam (O7 M1 landed first, #285; its `session.ts` taken, the file this branch had copied byte for byte). The unit suites and `test/org/sign-in.local.test.ts` pass locally.
-  - [ ] reviewer-high, the gates, and the owner's staging sitting.
+  - [x] (2026-10-28) reviewer-high converged: round 1 at ef4bb83cb (3 P1, 5 P2, all fixed at 59edeebe1), round 2 on the fix found nothing. Class 1a green at b5816709a (run 40683146373).
+  - [ ] The final gate on the PR's tree, and the owner's staging sitting.
 - [ ] M2 — The remote rows — **executable** once M1 and O7 M1 are on master
 - [ ] M3 — The app as the org's signer: a co-root, the weekly successor, the signing checks — *advisory*
 - [ ] M4 — The Org page — *advisory; taste (Q1)*
@@ -882,6 +883,10 @@ Each is built as its recommendation when its milestone is re-planned, unless the
   Rationale: each was a concrete interleaving or input against the code; each fix has a test that fails without it. Rejected: per-write ad hoc fences (the round found three windows they left), a default exclusion inside `files.ts`, failing a whole state read for one malformed certificate.
   Date/Author: 2026-10-28, O8 M1's executor.
 
+- Decision: M1's review has converged: round 2 (reviewer-high on 59edeebe1, narrowed to the fix wave) found nothing material. Rounds of 8, then 0.
+  Rationale: the stop rule; a round that yields nothing worth changing.
+  Date/Author: 2026-10-28, O8 M1's executor.
+
 The residue for P5's Decision Log. Each item is decided where it binds (M1 or M2 unless marked), with the alternative it rejected:
 
 1. P5 Decision Log 92's first milestone is built as two milestones, M1 (the org session) and M2 (the remote rows), each its own PR. Rejected: one milestone, which holds O7 M1's production value until the rows are built and puts two verification strategies and two state owners in one review.
@@ -924,4 +929,6 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
+
+Retrospective. The document held: every decision it made stood, and the gaps it left were small (a `directory` refusal, a feed close hook, the chain re-read from below the head for a recovery). What it didn't foresee was the session's write concurrency: four parallel actors (attempts, adoptions from two sources, sign-out, recovery) each writing `registration.json`. Ad hoc fences left three windows, which the review found; one serialized commit queue closed them. A future child holding a trust anchor beside a credential should start from that queue. The test-writing workers found three real bugs each time they were given a module they hadn't written, which paid for the split.
