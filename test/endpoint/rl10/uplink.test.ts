@@ -1,9 +1,9 @@
 // The log plane's uploads against a hub that stops reading (O10, the carriers' bound after M8): sminos's `events` go up
 // RL1 only while the hub link's socket is under its soft cap, waiting in the relay's capped uplink queue; past the cap an
-// upload is dropped, and sminos is asked to send it again once the queue drains. RL10 is read on meanwhile, so what the
-// endpoint handles locally (a `query`'s answer) is never held behind the uplink. Once the hub reads again, or the link
-// gives the stalled connection up and its next welcome compares the hub's `have` with the ledger, every event reaches
-// the hub.
+// upload is let go, and sminos is asked from the first position let go as the queue drains. RL10 is read on meanwhile,
+// so what the endpoint handles locally (a `query`'s answer) is never held behind the uplink. Once the hub reads again, or
+// the link gives the stalled connection up and its next welcome compares the hub's `have` with the ledger, every event
+// reaches the hub, in a run the hub stores with no gap (its acceptance: each writer's next seq only).
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -40,7 +40,9 @@ const UPLOAD = PER_FRAME * TEXT.length;
  * A served RL10 with sminos connected, its relay's uplink on a real hub link to the stand-in hub, the project opened,
  * the hub's socket paused, and sminos's whole burst (24 MiB, frames of 4 events of 64 KiB, its batch being 256 KiB)
  * taken by the endpoint, each frame written once the last was taken (sminos's lane). `answer()` makes the stand-in
- * sminos answer each `resend` from the position asked to its head, as sminos does.
+ * sminos answer each `resend` from the position asked to its head, a later one rewinding it again, as sminos does.
+ * `stored(conn)` is what the hub stores of what reached it, as desk-hub does: the writer's run from seq 1 with no gap,
+ * and the gaps it met (each a `resend` desk-hub would send; the stand-in sends none, so the endpoint must leave none).
  */
 async function scene(limits: SendLimits) {
   const a1 = await newDevice('a1');
@@ -125,28 +127,42 @@ async function scene(limits: SendLimits) {
   await sending;
 
   const answered = new Set<number>();
+  let drawing = 0;
   const answer = () => {
     const timer = setInterval(() => {
       for (const [i, f] of sminos.received.entries()) {
         if (f.t !== 'resend' || answered.has(i)) continue;
         answered.add(i);
+        const mine = ++drawing;
         void (async () => {
-          for (let from = f.from as number; from <= TOTAL; from += PER_FRAME) await upload(from);
+          for (let from = f.from as number; from <= TOTAL && drawing === mine; from += PER_FRAME) await upload(from);
         })();
       }
     }, 10);
     closers.push(() => clearInterval(timer));
   };
-  const seqs = (conn?: number) => new Set(hub.frames('events').filter((r) => conn === undefined || r.conn === conn).flatMap((r) => (r.frame.events as Array<{ seq: number }>).map((e) => e.seq)));
-  return { hub, link, rl10: served, sminos, lines, seen, answer, seqs };
+  const stored = (conn?: number) => {
+    let last = 0;
+    let gaps = 0;
+    for (const r of hub.frames('events')) {
+      if (conn !== undefined && r.conn !== conn) continue;
+      for (const { seq } of r.frame.events as Array<{ seq: number }>) {
+        if (seq === last + 1) last = seq;
+        else if (seq > last + 1) {
+          gaps++;
+          break;
+        }
+      }
+    }
+    return { last, gaps };
+  };
+  return { hub, link, rl10: served, sminos, lines, seen, answer, stored };
 }
-
-const everySeq = Array.from({ length: TOTAL }, (_, i) => i + 1);
 
 describe('the log plane’s uploads, against a hub that stops reading', () => {
   it('wait in a capped queue, never holding RL10’s local control, and all reach the hub once it reads', async () => {
     const limits: SendLimits = { soft: 256 * 1024, budget: 4 * 1024 * 1024, ceiling: 64 * 1024 * 1024, stallMs: 60_000 };
-    const { hub, rl10, sminos, lines, seen, answer, seqs } = await scene(limits);
+    const { hub, rl10, sminos, lines, seen, answer, stored } = await scene(limits);
     // A local question answered now, while the uploads wait on the hub.
     const opId = 'q'.repeat(22);
     const asked = Date.now();
@@ -155,29 +171,30 @@ describe('the log plane’s uploads, against a hub that stops reading', () => {
     sminos.send({ t: 'queried', opId: query.opId, state: 'done' });
     expect((await answering).state).toBe('done');
     expect(Date.now() - asked).toBeLessThan(2000);
-    // What the endpoint holds for the hub is bounded: its queue at its cap, the rest dropped and owed.
+    // What the endpoint holds for the hub is bounded: its queue at its cap, the rest let go and owed.
     expect(rl10.relay.uplinkQueued).toBeLessThanOrEqual(UPLINK_BYTES);
-    expect(lines.some((line) => line.includes('dropped'))).toBe(true);
+    expect(lines.some((line) => line.includes('let go'))).toBe(true);
 
-    // The hub reads again: the queue drains, sminos is asked for what was dropped, and every event reaches the hub.
+    // The hub reads again: the queue drains, sminos is asked for what was let go, and the hub stores every event.
     answer();
     hub.current.resume();
-    await until(() => seqs().size === TOTAL, 'every event at the hub', 20_000);
-    expect([...seqs()].sort((x, y) => x - y)).toEqual(everySeq);
+    await until(() => stored().last === TOTAL, 'every event stored at the hub', 20_000);
+    expect(stored().gaps).toBe(0);
+    expect(sminos.received.filter((f) => f.t === 'resend')).toHaveLength(1);
     // Its socket held the soft cap and about an upload past it (signed, a little larger), the whole time.
     expect(seen.peak).toBeLessThanOrEqual(limits.soft + 2 * UPLOAD);
   }, 60_000);
 
   it('are let go with a connection given up as stalled, and the next welcome’s `have` asks for every one again', async () => {
     const limits: SendLimits = { soft: 256 * 1024, budget: 4 * 1024 * 1024, ceiling: 64 * 1024 * 1024, stallMs: 500 };
-    const { hub, link, rl10, seqs, answer } = await scene(limits);
+    const { hub, link, rl10, stored, answer } = await scene(limits);
     answer();
     await until(() => link.generation === 2, 'a new connection', 15_000);
     expect(rl10.relay.uplinkQueued).toBe(0);
     // The new connection's hello for the project, answered with what the hub holds: nothing, its first socket unread.
     await until(() => hub.frames('hello').some((r) => r.conn > 0 && r.frame.project === P), 'the project’s hello again');
     hub.current.send(JSON.stringify({ t: 'have', project: P, have: {} }));
-    await until(() => seqs(hub.sockets.length - 1).size === TOTAL, 'every event on the new connection', 20_000);
-    expect([...seqs(hub.sockets.length - 1)].sort((x, y) => x - y)).toEqual(everySeq);
+    await until(() => stored(hub.sockets.length - 1).last === TOTAL, 'every event stored from the new connection', 20_000);
+    expect(stored(hub.sockets.length - 1).gaps).toBe(0);
   }, 60_000);
 });

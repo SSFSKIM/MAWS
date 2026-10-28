@@ -1,7 +1,7 @@
 // A carrier's send buffer (send-buffer.ts) over a real WebSocket pair on loopback, its peer pausing its socket to stop
 // reading: the ceiling over every byte held, the budget over capped sends, the stall bound read from frames written (a
-// slow reader that keeps reading is not a stalled one, however the socket batches), and a wait let go when its signal
-// aborts.
+// slow reader that keeps reading is not a stalled one, however the socket batches), a close sent only after what it
+// holds (or the socket ended at the stall bound), and a wait let go when its signal aborts.
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket, { WebSocketServer } from 'ws';
@@ -102,6 +102,33 @@ describe('a send buffer, against a peer that stops reading', () => {
     const { b, ended } = buffer(socket, { soft: 64 * 1024, ceiling: 64 * 1024 * 1024, stallMs: 200 });
     for (let i = 0; i < 128; i++) b.send(frame, { binary: true }); // 16 MiB: past any kernel's socket buffers
     expect(await ended).toBe('stalled');
+  });
+
+  it('closes only once the peer has taken what it holds, refusing every send after the close', async () => {
+    const { socket, peer } = await pair();
+    peer.pause();
+    const { b, endings } = buffer(socket, { soft: 64 * 1024, ceiling: 64 * 1024 * 1024, stallMs: 60_000 });
+    const frames = 64; // 8 MiB: past the kernel's buffers, so most of it is still held here at the close
+    for (let i = 0; i < frames; i++) b.send(frame, { binary: true });
+    b.close(1000, 'done');
+    expect(b.send(frame, { binary: true })).toBe(false);
+    let got = 0;
+    peer.on('message', () => void got++);
+    const closed = new Promise<{ code: number; reason: string; got: number }>((resolve) => peer.once('close', (code: number, reason: Buffer) => resolve({ code, reason: reason.toString(), got })));
+    peer.resume();
+    expect(await closed).toEqual({ code: 1000, reason: 'done', got: frames });
+    expect(endings).toEqual([]);
+  });
+
+  it('ends a closing socket itself when its peer reads nothing for the stall bound', async () => {
+    const { socket, peer } = await pair();
+    peer.pause();
+    const { b, ended } = buffer(socket, { soft: 64 * 1024, ceiling: 64 * 1024 * 1024, stallMs: 200 });
+    for (let i = 0; i < 128; i++) b.send(frame, { binary: true });
+    const gone = new Promise<void>((resolve) => socket.once('close', () => resolve()));
+    b.close(1000, 'done');
+    expect(await ended).toBe('stalled');
+    await gone;
   });
 
   it('lets a writable() wait go when its signal aborts, unregistered, and every other at its end', async () => {

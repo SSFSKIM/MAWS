@@ -25,7 +25,8 @@
 // channels kept. A hub that reads nothing costs its connection, given up as dead and opened again on the backoff: once
 // what the socket holds would pass the ceiling, whatever sent it, or once it has held bytes and written no frame for the
 // stall bound. That is read from the socket's own writes, not from what the hub sends: a hub's `hb-ack` says nothing of
-// whether it read anything else.
+// whether it read anything else. A close the link chooses (a stop, a welcome refused) is sent after what the socket
+// holds, within the same stall bound.
 import {
   CHANNEL_CLOSE,
   CHANNEL_HEADER_BYTES,
@@ -515,7 +516,8 @@ export class HubLink {
     for (const timer of attempt.timers) clearTimeout(timer);
     if (attempt.beat !== null) clearInterval(attempt.beat);
     try {
-      if (code !== undefined) attempt.socket.close(code, ending.kind === 'closed' ? ending.reason : ending.kind);
+      // A close (a stop, a welcome refused) goes after what the socket's buffer holds; any other ending drops it.
+      if (code !== undefined) attempt.buffer.close(code, ending.kind === 'closed' ? ending.reason : ending.kind);
       else attempt.socket.terminate();
     } catch {
       // closed already

@@ -13,7 +13,9 @@
 // DIRECT_SEND_LIMITS says: the channel's stream waits at the soft cap, and the socket is ended (no sealed close, which
 // would wait behind the same bytes) once what it holds would pass the ceiling, or once it has held bytes and written no
 // frame for the stall bound. The channel then closes, its subscriptions' cursors resumable on the device's next
-// one. No WebSocket ping is answered (RL2 has its own), so every byte the socket is sent is one the caps count.
+// one. A channel closed gracefully (its sealed close sent) closes the socket only once the device has taken what it
+// holds, within the same stall bound. No WebSocket ping is answered (RL2 has its own), so every byte the socket is sent
+// is one the caps count.
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { HANDSHAKE_PAGE_BYTES } from 'org-protocol';
@@ -254,7 +256,8 @@ export class DirectListener {
       send: (bytes) => {
         if (ws.readyState === ws.OPEN) buffer.send(bytes, { binary: true });
       },
-      close: (reason) => ws.close(1000, reason.slice(0, 64)),
+      // After what the socket holds, the channel's sealed close the last of it.
+      close: (reason) => buffer.close(1000, reason.slice(0, 64)),
       writable: (signal) => buffer.writable(signal),
       buffered: () => buffer.buffered,
     });

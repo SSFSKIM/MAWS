@@ -437,13 +437,27 @@ describe('the socket’s send buffer, against a hub that stops reading', () => {
     const acks = setInterval(() => first.send(JSON.stringify({ t: 'hb-ack', generation: 1 })), 20);
     try {
       await fill(link);
-      await link.writable();
-      expect(lines.some((line) => line.includes('written nothing'))).toBe(true);
+      // Not `writable()`: a kernel that grows its buffers meanwhile can take the socket back under its soft cap.
+      await until(() => lines.some((line) => line.includes('written nothing')), 'the stall');
       expect(lines.some((line) => line.includes('heartbeats went unanswered') || line.includes('nothing heard'))).toBe(false);
     } finally {
       clearInterval(acks);
     }
     await until(() => link.generation === 2, 'a new connection');
+  });
+
+  it('stops by closing only after what the socket holds: the hub reads every frame, then the close', async () => {
+    const { hub, link } = await stalled();
+    const text = 's'.repeat(64 * 1024);
+    const frames = 64; // 4 MiB: past the kernel's buffers, so most of it is still held at the stop
+    for (let i = 0; i < frames; i++) expect(link.send({ t: 'events', project: 'p1', events: [{ text }] })).toBe(true);
+    expect(link.buffered).toBeGreaterThan(limits.soft);
+    const socket = hub.current;
+    const closed = new Promise<{ code: number; got: number }>((resolve) => socket.once('close', (code: number) => resolve({ code, got: hub.frames('events').length })));
+    const stopped = link.stop();
+    socket.resume();
+    expect(await closed).toEqual({ code: 1000, got: frames });
+    await stopped;
   });
 
   it('answers the hub’s WebSocket ping through its buffer', async () => {

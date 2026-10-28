@@ -392,6 +392,26 @@ describe('the send buffer, against a device that stops reading', () => {
     expect(f.log.some((line) => line.includes('written nothing'))).toBe(true);
   });
 
+  it('closes a channel gracefully only after what its socket holds: the device reads every result, then the sealed close', async () => {
+    const limits: SendLimits = { soft: 64 * 1024, ceiling: 64 * 1024 * 1024, stallMs: 60_000 };
+    const f = await fixture({ sendLimits: limits });
+    const { channel, socket, io, remote } = await connected(f);
+    const got: string[] = [];
+    channel.onMessage((m) => void (m.t === 'result' && got.push(m.id as string)));
+    const closed = new Promise<{ reason: string; got: number }>((resolve) => channel.onClose((reason) => resolve({ reason, got: got.length })));
+    socket.pause();
+    const seen = peakOf(io);
+    const output = 'c'.repeat(128 * 1024);
+    const results = 64; // 8 MiB: past the kernel's buffers, so most of it is still held at the close
+    for (let i = 1; i <= results; i++) remote.send({ t: 'result', id: String(i), ok: true, output });
+    await until(() => seen.sends === results, 'every result sealed and on the carrier');
+    expect(io.buffered).toBeGreaterThan(2 * 1024 * 1024);
+    remote.close('done');
+    socket.resume();
+    expect(await closed).toEqual({ reason: 'done', got: results });
+    expect(got).toEqual(Array.from({ length: results }, (_, i) => String(i + 1)));
+  });
+
   it('answers no WebSocket ping: every byte a connection is sent is the channel’s, which the caps count', async () => {
     const f = await fixture();
     const socket = raw(f);

@@ -13,6 +13,10 @@
 // bytes held would pass the budget, and the carrier decides what that ends. Past the ceiling, which counts every byte
 // held, and when bytes are held with no frame written for the stall bound, the buffer ends and the carrier ends its
 // socket: what a peer that reads nothing costs is its connection, whatever else it keeps sending.
+//
+// A graceful close goes through it too (`close`): it refuses every send after, writes what it holds, and only then
+// hands the socket its close frame, so a channel's sealed close (and the results before it) is not overtaken by the
+// WebSocket's. The stall bound still holds while it writes: a peer that stops reading then has its socket ended here.
 import type WebSocket from 'ws';
 
 export type SendLimits = {
@@ -45,6 +49,8 @@ export class SendBuffer {
   #capped = 0;
   #writing = false;
   #over = false;
+  /** The close to send once everything held is written (`close`). */
+  #closing: { code: number; reason: string } | null = null;
   /** When the socket last wrote a frame, or began holding bytes. */
   #wroteAt = 0;
   #timer: ReturnType<typeof setTimeout> | null = null;
@@ -61,9 +67,9 @@ export class SendBuffer {
     return this.#queued + this.#socket.bufferedAmount;
   }
 
-  /** The buffer ended (past its ceiling, stalled, or its socket closed): it sends nothing more. */
+  /** The buffer ended (past its ceiling, stalled, closing, or its socket closed): it takes nothing more. */
   get ended(): boolean {
-    return this.#over;
+    return this.#over || this.#closing !== null;
   }
 
   /** The `writable()` waits registered now. */
@@ -84,9 +90,20 @@ export class SendBuffer {
     this.#hold({ data, binary: true, pong: true, capped: false });
   }
 
+  /**
+   * Closes the socket with `code` and `reason` once everything held is written; a peer that reads none of it for the
+   * stall bound has its socket ended instead.
+   */
+  close(code: number, reason: string): void {
+    if (this.ended) return;
+    this.#closing = { code, reason };
+    this.#release();
+    this.#finish();
+  }
+
   /** Resolves once the buffer holds less than the soft cap, or has ended, or `signal` aborts (the wait unregistered). */
   writable(signal?: AbortSignal): Promise<void> {
-    if (this.#over || signal?.aborted === true || this.buffered < this.#limits.soft) return Promise.resolve();
+    if (this.ended || signal?.aborted === true || this.buffered < this.#limits.soft) return Promise.resolve();
     return new Promise((resolve) => {
       const done = () => {
         this.#waiting.delete(done);
@@ -99,7 +116,7 @@ export class SendBuffer {
   }
 
   #hold(item: Omit<Held, 'size'>): boolean {
-    if (this.#over) return false;
+    if (this.ended) return false;
     const size = (typeof item.data === 'string' ? Buffer.byteLength(item.data) : item.data.length) + FRAME_HEADER_MAX;
     if (item.capped && this.#capped + size > (this.#limits.budget ?? Infinity)) return false;
     if (this.buffered + size > this.#limits.ceiling) {
@@ -127,9 +144,18 @@ export class SendBuffer {
       this.#wroteAt = Date.now();
       if (this.buffered < this.#limits.soft) this.#release();
       this.#write();
+      this.#finish();
     };
     if (item.pong) this.#socket.pong(item.data, undefined, written);
     else this.#socket.send(item.data, { binary: item.binary }, written);
+  }
+
+  /** The close, once closing and nothing is left to write (the socket's own close goes after what it was handed). */
+  #finish(): void {
+    if (this.#closing === null || this.#over || this.#writing || this.#held.length > 0) return;
+    const { code, reason } = this.#closing;
+    this.#stop();
+    this.#socket.close(code, reason);
   }
 
   #release(): void {
@@ -156,12 +182,16 @@ export class SendBuffer {
     this.#timer.unref?.();
   }
 
-  /** Ends the buffer: the carrier hears why while what it held is still counted, then everything held is let go. */
+  /**
+   * Ends the buffer: the carrier hears why while what it held is still counted, then everything held is let go. A
+   * closing buffer's socket is ended here, its carrier having let it go already.
+   */
   #end(why: SendEnding): void {
     if (this.#over) return;
     this.#over = true;
     this.#ended(why);
     this.#stop();
+    if (this.#closing !== null) this.#socket.terminate();
   }
 
   #stop(): void {
