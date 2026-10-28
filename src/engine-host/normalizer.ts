@@ -331,6 +331,8 @@ export class Normalizer {
       if (attribution.parentToolUseId === null) this.state.lastMessage.final = true;
       return;
     }
+    // a response after it (a Stop hook that blocked the stop) is the turn's again: its result is its own
+    if (attribution.parentToolUseId === null) this.state.lastMessage.final = false;
     const lane = this.state.streaming.get(attribution.parentToolUseId);
     const apiMessageId = frame.message.id as ApiMessageId;
     const messageUuid = frame.uuid as MessageUuid;

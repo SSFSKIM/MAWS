@@ -61,7 +61,7 @@ export const LAUNCH_PROFILE = {
   styleYours: 'Yours',
   styleMaws: "MAWS's",
   hooks: 'Hooks in sessions',
-  hooksNote: "None turns off every hook from your settings and your plugins in MAWS's sessions. Each change on this page applies at a session's next launch, never to a terminal session.", // P4-R7z: MAWS tells a session nothing of messaging; the style does
+  hooksNote: "None turns off every hook from your settings and your plugins in MAWS's sessions, the to-human plugin's included, so they run without MAWS's report. Each change on this page applies at a session's next launch, never to a terminal session.", // P4-R7z: the plugin's message tool needs its hooks
   hooksYours: 'Yours',
   hooksNone: 'None',
 };

@@ -335,6 +335,15 @@ describe('normaliser: the to-human plugin’s answer after a final message (P4-R
     expect(only(second, 'turn.ended')).toMatchObject([{ resultText: null }]); // a made-up answer with no message before it in its turn
   });
 
+  // A Stop hook that blocks the stop the made-up answer asked for runs the model again inside the same turn (the
+  // blocking-hook probe): its reply, not the earlier message, is the turn's result.
+  it('a response after the made-up answer (a Stop hook that blocked the stop) keeps the result’s own text', () => {
+    const correction = 'Correction after the stop check.';
+    const events = feed(make(), [outRow(userOut('u-1')), startedIn('u-1'), inRow(initFrame), call('toolu_f', MESSAGE, 'a-call'), sent('toolu_f'), ...hookMade('msg_hook_7c0e1f52', MADE_UP), assistant('msg_03', [{ type: 'text', text: correction }], 'a-again'), ended(correction)]);
+    expect(texts(events)).toEqual(['tool_use msg_01Call: ', `text msg_03: ${correction}`]);
+    expect(only(events, 'turn.ended')).toMatchObject([{ resultText: correction }]);
+  });
+
   it('a subagent’s message call is none of the main turn’s', () => {
     const lane = { parent_tool_use_id: 'toolu_agent' };
     const events = feed(make(), [outRow(userOut('u-1')), startedIn('u-1'), inRow(initFrame), call('toolu_c', 'From the child.', 'a-child', lane), sent('toolu_c', 'toolu_agent'), ...hookMade('msg_hook_c3', MADE_UP), ended(MADE_UP)]);

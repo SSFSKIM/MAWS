@@ -42,7 +42,7 @@ import type { HostDispatch } from '../ipc/router';
 import { hostCall } from '../sessions/context';
 import { applyEvent, newAnswer, onItsWay, settleAnswers, statusOf, storedOf, type Answer, type PromptEvent } from './answers';
 import { laneOn } from './launch';
-import { laneInEffect, pendingOf } from './mods';
+import { laneInEffect, pendingOf, styleCarriesNoLane } from './mods';
 import { blockMarksOf, ownerItemsOf } from './projection';
 import type { MarkUpdate, OwnerChannelStore, OwnerMarkRow } from './store';
 
@@ -216,12 +216,6 @@ export class OwnerChannelService {
     this.changed(appSessionId);
   }
 
-  // States the session's owner channel again: a decided launch's record (what it applied, what is pending) and its
-  // observed style (the mismatch) are part of it.
-  publish(appSessionId: AppSessionId): void {
-    this.emitState(appSessionId);
-  }
-
   // The seam's result for a question's answer (Design §6, "The card's send").
   answered(input: AnsweredInput): void {
     const appSessionId = input.appSessionId as AppSessionId;
@@ -353,7 +347,8 @@ export class OwnerChannelService {
     };
   }
 
-  // The lane switched (the app's switch, or one session's override): presentation and items follow at once, silently.
+  // The lane switched (the app's switch, one session's override, or a decided launch's record, which carries the style's
+  // part and the observed style): presentation and items follow at once, silently.
   laneChanged(appSessionId?: AppSessionId): void {
     for (const id of appSessionId === undefined ? this.deps.store.markedSessions() : [appSessionId]) {
       this.project(id, true);
@@ -407,7 +402,8 @@ export class OwnerChannelService {
       const enabledAt = row?.enabledAt ?? null;
       const record = this.deps.sessions.get(appSessionId);
       const live = event.seq !== null && laneInEffect(this.deps.appEnabled(), row) && !isForeign(record);
-      const item = enabledAt !== null && Date.parse(event.at) >= Date.parse(enabledAt);
+      // P4-R7z: a mark written while the session's style carried no lane is never an item, though the watermark stands
+      const item = enabledAt !== null && Date.parse(event.at) >= Date.parse(enabledAt) && !styleCarriesNoLane(row);
       for (const mark of marks) {
         added =
           this.deps.store.putMark({

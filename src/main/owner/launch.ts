@@ -2,7 +2,7 @@
 // `session.launch` for every MAWS-owned launch (an intent's new session, fork and side thread, and a record's resume),
 // never for the trust bootstrap. It decides three things:
 // 1. the desired state: `off` when the session's lane is off; else, P4-R7z (the P4 spec's Decision Log 92), by whether
-//    the style the launch selects declares the to-human plugin's message tool (`carriesPluginMessageTool`):
+//    the to-human plugin registers its message tool under the style the launch selects (the resolver's `messageTool`):
 //    `external-style-plus-supplement` when it does, and `off` when it does not, MAWS having no message tool or full
 //    contract of its own (no to-human plugin, no to-human lane);
 // 2. the recorded state: what the engine will reuse, read from the transcript being resumed or forked (./prompt-state.ts);
@@ -21,7 +21,7 @@ import { homedir } from 'node:os';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
-import { carriesPluginMessageTool, TO_HUMAN_SUPPLEMENT_VERSION } from '@shared/owner/contract';
+import { TO_HUMAN_SUPPLEMENT_VERSION } from '@shared/owner/contract';
 import type { ContractSource, LaneOverride } from '@shared/owner/state';
 import { claudeConfigDir } from '../history/prompt-history';
 import type { SessionStore } from '../index/sessions';
@@ -51,10 +51,10 @@ export interface LaunchDecision {
 // The lane's effective value: the session's override when set, else the app's switch.
 export const laneOn = (appEnabled: boolean, override: LaneOverride): boolean => (override === 'inherit' ? appEnabled : override === 'on');
 
-// The desired state of a launch whose lane is `on` and whose style declares `contract` (P2-C2: the shape rule, Decision
-// Log 31). P4-R7z: only a style declaring the plugin's message tool carries the lane, with MAWS's supplement beside it.
-export const desiredSource = (on: boolean, style: { contract: number | null }): ContractSource =>
-  on && carriesPluginMessageTool(style.contract) ? 'external-style-plus-supplement' : 'off';
+// The desired state of a launch whose lane is `on` under `style` (P2-C2: the shape rule, Decision Log 31). P4-R7z: only
+// a style under which the plugin registers its message tool carries the lane, with MAWS's supplement beside it.
+export const desiredSource = (on: boolean, style: { messageTool: boolean }): ContractSource =>
+  on && style.messageTool ? 'external-style-plus-supplement' : 'off';
 
 // The text a desired state appends and the recorded state it leaves in a snapshot; a state without one records none.
 const APPENDS: Partial<Record<ContractSource, { text: AppendedText; records: RecordedState }>> = {

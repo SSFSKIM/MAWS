@@ -115,6 +115,7 @@
     "test/support/shell-home.ts",
     "test/support/store-fixture.ts",
     "test/support/synth-transcript.ts",
+    "test/support/to-human-plugin.ts", // P4-R7z: the to-human spec installs the plugin's style and the plugin in its scratch home
     "test/support/widget-backend.ts",
     // P3-B: e2e/support/document-seed.ts writes the 200-page document through the binding module and the schema module
     "src/artifacts/yjs/*.ts",

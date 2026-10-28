@@ -10,9 +10,9 @@
 // its human through the to-human plugin's `mcp__to-human__message` alone, under the plugin's style, whose body carries
 // the whole message rule (every message through the tool, `final: true` on the one that ends the turn, a `<message>`
 // span only where the tool is missing). MAWS has no message tool and no full contract of its own any more: no to-human
-// plugin means no to-human lane in MAWS. The lane is on only for a style declaring the plugin's message tool (6 and up,
-// `carriesPluginMessageTool`), and MAWS then appends supplement 3, which says only what MAWS owns, its ask tool; any
-// other style, or none, runs with the lane off. MAWS_NATIVE_TO_HUMAN advertises 8, MAWS offering no message tool: the
+// plugin means no to-human lane in MAWS. The lane is on only where the plugin registers its tool, under its own style
+// declaring it (6 and up, `carriesPluginMessageTool`) with the plugin's hooks loading (the resolver's `messageTool`), and
+// MAWS then appends supplement 3, which says only what MAWS owns, its ask tool; anywhere else the lane is off. MAWS_NATIVE_TO_HUMAN advertises 8, MAWS offering no message tool: the
 // plugin registers its tool in a MAWS launch only at 8 or more, and withholds it below. Every MAWS reader takes an
 // accepted call of the plugin's tool as a to-human message at the call's place (`message-call.ts`), and of MAWS's former
 // tool in a recorded session too. A session recorded under an earlier contract or supplement (1, 5 or 7; 1 or 2), or
@@ -41,8 +41,11 @@ export function styleShape(declared: number | null): StyleShape {
 
 // P4-R7z: whether a style declares the plugin's message tool, the one a MAWS session messages through: the plugin's
 // style from 6, and every later declaration of the shape. A message-tool style before it (3 or 4: questions through a
-// tool, messages as spans) came with no such tool.
+// tool, messages as spans) came with no such tool. The plugin registers the tool only under its own style, by this name
+// (the to-human plugin's rule), and only while the `to-human` plugin's hooks load.
 export const PLUGIN_MESSAGE_TOOL_FROM = 6;
+export const PLUGIN_STYLE = 'doperpowers:to-human';
+export const TO_HUMAN_PLUGIN = 'to-human';
 export const carriesPluginMessageTool = (declared: number | null): boolean => declared !== null && styleShape(declared) === 'message-tool' && declared >= PLUGIN_MESSAGE_TOOL_FROM;
 
 // The advertisement (Design §3): set in a launch's settings env, its value the contract version, while the lane is on,

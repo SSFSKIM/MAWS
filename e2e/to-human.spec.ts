@@ -9,6 +9,7 @@ import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT_VERSION, TO_HUM
 import { invoke, value } from './support/c7-replay';
 import { traceForeground } from './support/foreground-trace';
 import { launchMaws } from './support/launch';
+import { installToHumanPlugin } from '../test/support/to-human-plugin'; // P4-R7z
 import { sessionJournal } from './support/live-turns';
 import { clearToasts, metaEvents } from './support/maws-tools';
 import { sidebarRow } from './support/sidebar';
@@ -23,10 +24,9 @@ test('legacy mark text stays unboxed; attention jumps and owner-channel read/ans
   const project = join(config, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
   mkdirSync(project, { recursive: true });
   writeFileSync(join(config, '.claude.json'), `${JSON.stringify({ projects: { [repo]: { hasTrustDialogAccepted: true } } }, null, 2)}\n`);
-  writeFileSync(join(config, 'settings.json'), `${JSON.stringify({ permissions: { defaultMode: 'default' }, outputStyle: TO_HUMAN.style })}\n`); // the replay records no mode change
-  // P4-R7z: the lane runs under a style declaring the to-human plugin's message tool (6), here a user style of that shape
-  mkdirSync(join(config, 'output-styles'));
-  writeFileSync(join(config, 'output-styles', `${TO_HUMAN.style}.md`), `---\nname: ${TO_HUMAN.style}\ndescription: Messages through the plugin's tool\nmaws-to-human-contract: 6\n---\n\nSend every message with mcp__to-human__message.\n`);
+  writeFileSync(join(config, 'settings.json'), `${JSON.stringify({ permissions: { defaultMode: 'default' } })}\n`); // the replay records no mode change
+  // P4-R7z: the lane runs where the to-human plugin registers its tool: its style selected (declaring 6), the plugin on
+  installToHumanPlugin(config);
   // Two sessions on disk: the one that asks (the replay's engine session, which its first Send resumes), and another
   // to leave its tab for.
   const seed = (engineId: string, content: string, at: string) => {
@@ -140,10 +140,10 @@ test('a style declaring the plugin’s message tool (6): the supplement once and
   const project = join(config, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
   mkdirSync(project, { recursive: true });
   writeFileSync(join(config, '.claude.json'), `${JSON.stringify({ projects: { [repo]: { hasTrustDialogAccepted: true } } }, null, 2)}\n`);
-  // The scratch settings home selects a user output style declaring contract 6; the replay records no mode change.
-  writeFileSync(join(config, 'settings.json'), `${JSON.stringify({ permissions: { defaultMode: 'default' }, outputStyle: SUPPLEMENT.style })}\n`);
-  mkdirSync(join(config, 'output-styles'));
-  writeFileSync(join(config, 'output-styles', `${SUPPLEMENT.style}.md`), `---\nname: ${SUPPLEMENT.style}\ndescription: Messages through the plugin's tool, questions through a tool\nmaws-to-human-contract: 6\n---\n\nSend every message with mcp__to-human__message.\n`);
+  // The scratch settings home selects the to-human plugin's style (contract 6) with the plugin on; the replay records no
+  // mode change.
+  writeFileSync(join(config, 'settings.json'), `${JSON.stringify({ permissions: { defaultMode: 'default' } })}\n`);
+  installToHumanPlugin(config);
   const engineId = toHumanSessionId();
   const first = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: 'a session under a message-only style' }, uuid: randomUUID(), timestamp: '2026-10-13T08:00:00.000Z', cwd: repo, sessionId: engineId, version: '2.1.295' };
   writeFileSync(join(project, `${engineId}.jsonl`), `${JSON.stringify(first)}\n`);

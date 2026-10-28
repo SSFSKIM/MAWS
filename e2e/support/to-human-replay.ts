@@ -18,7 +18,7 @@ type Row = { seq: number; direction: 'in' | 'out' | 'meta'; at: string; frame: R
 const rowsOf = (path: string): Row[] => readFileSync(join(REPO_ROOT, path), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Row);
 
 export const TO_HUMAN = {
-  style: 'to-human', // P4-R7z: a style declaring the plugin's message tool carries the lane
+  style: 'doperpowers:to-human', // P4-R7z: the plugin's style, under which it registers its message tool, carries the lane
   first: 'Tell me the one thing I must not miss about the migration.',
   second: 'Ask me which README tone to use, then run the tests.',
   essential: 'The migration drops the legacy_users table. Back it up before you run it.',
@@ -144,7 +144,7 @@ export function toHumanJournal(dir: string, startAt: number): string {
 //      the steer the sheet writes when the person submits; the first turn ends, and the steer's turn replies;
 //   2. a native AskUserQuestion: the engine's `can_use_tool` for it, held until the person answers its request card.
 export const SUPPLEMENT = {
-  style: 'report',
+  style: 'doperpowers:to-human', // P4-R7z: the plugin's style, with its message tool
   first: 'Tell me how the migration went, then ask me whether to go on.',
   message: 'The migration ran: two columns added, nothing dropped.',
   askQuestion: 'Proceed?', // the recorded ask's one question (choices Yes and No)

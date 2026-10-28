@@ -15,6 +15,7 @@ import {
   TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_VERSION,
 } from '@shared/owner/contract';
 import { slugOf } from '../../engine-host/fs/paths';
+import { installToHumanPlugin, PLUGIN_STYLE } from '../../../test/support/to-human-plugin';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from '../index/index';
 import type { HostDispatch } from '../ipc/router';
@@ -78,13 +79,12 @@ describe('decideFlags without the flag: applied stays what the snapshot keeps, u
   });
 });
 
-describe('desiredSource: the lane carried only by a style declaring the plugin’s message tool (P4-R7z)', () => {
-  it.each([6, 7, 9])('lane on, a style declaring %s: the supplement', (contract) => {
-    expect(desiredSource(true, { contract })).toBe('external-style-plus-supplement');
-    expect(desiredSource(false, { contract })).toBe('off');
-  });
-  it.each([1, 2, 3, 4, 5, null])('lane on, a style declaring %s (no plugin message tool): off', (contract) => {
-    expect(desiredSource(true, { contract })).toBe('off');
+describe('desiredSource: the lane carried only where the plugin registers its message tool (P4-R7z)', () => {
+  it('the supplement with the lane on and the tool, off otherwise', () => {
+    expect(desiredSource(true, { messageTool: true })).toBe('external-style-plus-supplement');
+    expect(desiredSource(true, { messageTool: false })).toBe('off');
+    expect(desiredSource(false, { messageTool: true })).toBe('off');
+    expect(desiredSource(false, { messageTool: false })).toBe('off');
   });
 });
 
@@ -156,8 +156,10 @@ describe('ownerChannelLaunch over a scratch config home', () => {
   const transcript = (home: string, lastSegment: string | null) => put(transcriptPath(home), snapshotLine(lastSegment));
   // a later launch rendering anew records another snapshot (the engine only ever appends)
   const recordSnapshot = (home: string, lastSegment: string | null) => appendFileSync(transcriptPath(home), snapshotLine(lastSegment));
-  // A style selected in the settings, declaring `declared`: 6 is the to-human plugin's, with its message tool
-  const style = (home: string, declared = 6, name = 'report') => {
+  // The to-human plugin's style selected, declaring `declared` (6: its message tool), the plugin enabled beside it
+  const style = (home: string, declared = 6) => installToHumanPlugin(home, { declared });
+  // A user style of any other name, declaring `declared`
+  const localStyle = (home: string, name: string, declared: number) => {
     put(join(home, `output-styles/${name}.md`), `---\nname: ${name}\nmaws-to-human-contract: ${declared}\n---\nbody\n`);
     put(join(home, 'settings.json'), { outputStyle: name });
   };
@@ -171,23 +173,27 @@ describe('ownerChannelLaunch over a scratch config home', () => {
     expect(decided.appendSystemPrompt).not.toContain(CONTRACT_HEADER(0).slice(0, -3)); // no contract of MAWS's, of any version
     expect(decided.systemPromptSnapshot ?? null).toBeNull();
     expect(decided.extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: '/sock', [NATIVE_TO_HUMAN_ENV]: ADVERTISED } }); // no SessionStart hook any more
-    expect(decision).toMatchObject({ appSessionId: record, laneOn: true, desired: 'external-style-plus-supplement', recorded: 'unrecorded', appended: true, snapshotOff: false, applied: 'external-style-plus-supplement', style: 'report' });
+    expect(decision).toMatchObject({ appSessionId: record, laneOn: true, desired: 'external-style-plus-supplement', recorded: 'unrecorded', appended: true, snapshotOff: false, applied: 'external-style-plus-supplement', style: PLUGIN_STYLE });
     expect(binaryCalls).toBe(0); // "off" was never wanted
     launches.launched(decision!, { launchId: 'l1', at: AT });
-    expect(index.ownerChannel.session(record)).toMatchObject({ launchId: 'l1', launchedAt: AT, enabledAt: AT, desired: 'external-style-plus-supplement', recorded: 'unrecorded', appended: true, snapshotOff: false, applied: 'external-style-plus-supplement', style: 'report' });
+    expect(index.ownerChannel.session(record)).toMatchObject({ launchId: 'l1', launchedAt: AT, enabledAt: AT, desired: 'external-style-plus-supplement', recorded: 'unrecorded', appended: true, snapshotOff: false, applied: 'external-style-plus-supplement', style: PLUGIN_STYLE });
   });
 
-  // No to-human plugin, no to-human lane: the switch stays on (its watermark set), the launch wants nothing
+  // No to-human plugin's tool, no to-human lane: the switch stays on (its watermark set), the launch wants nothing
   it.each([
-    ['no style (the default)', null],
-    ['a marks style (2)', 2],
-    ['a message-tool style before the plugin’s tool (4)', 4],
-    ['MAWS’s former contract version (5)', 5],
-  ] as const)('a new session under %s runs with the lane off: nothing appended, no variable', async (_, declared) => {
-    if (declared !== null) style(configHome, declared);
-    const { spec: decided, record: decision } = await ownerChannelLaunch(s, spec({ extraSettings: { env: { CUA_BROWSER_BACKENDS: '/sock' } } }), { kind: 'new', transcriptOf: null });
+    ['no style (the default)', () => {}, {}],
+    ['the plugin’s style declaring 2, marks', () => style(configHome, 2), {}],
+    ['the plugin’s style declaring 4, before its tool', () => style(configHome, 4), {}],
+    ['the plugin’s style declaring 5', () => style(configHome, 5), {}],
+    ['the plugin’s style with the to-human plugin off', () => installToHumanPlugin(configHome, { toHuman: false }), {}],
+    ['the plugin’s style with the launch profile’s plugin off', () => style(configHome), { enabledPlugins: { 'to-human@doperpowers': false } }],
+    ['the plugin’s style under the launch profile’s hooks none', () => style(configHome), { disableAllHooks: true }],
+    ['a user style of another name declaring 6', () => localStyle(configHome, 'report', 6), {}],
+  ] as const)('a new session under %s runs with the lane off: nothing appended, no variable', async (_, select, profile) => {
+    select();
+    const { spec: decided, record: decision } = await ownerChannelLaunch(s, spec({ extraSettings: { ...profile, env: { CUA_BROWSER_BACKENDS: '/sock' } } }), { kind: 'new', transcriptOf: null });
     expect(decided.appendSystemPrompt ?? null).toBeNull();
-    expect(decided.extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: '/sock' } });
+    expect(decided.extraSettings).toEqual({ ...profile, env: { CUA_BROWSER_BACKENDS: '/sock' } });
     expect(decision).toMatchObject({ laneOn: true, desired: 'off', recorded: 'unrecorded', appended: false, snapshotOff: false, applied: 'off' });
     launches.launched(decision!, { launchId: 'l1', at: AT });
     expect(index.ownerChannel.session(record)).toMatchObject({ enabledAt: AT, desired: 'off', applied: 'off' });
@@ -320,17 +326,19 @@ describe('ownerChannelLaunch over a scratch config home', () => {
     }
   });
 
-  // P4-R7z: P4-A2's appended alias went with P4-R7y's hook; the launch profile's settings pass as they are
-  it('under hooks none: the supplement alone, the profile’s settings kept, and a recorded supplement reused', async () => {
+  // P4-R7z: under the launch profile's hooks `none` the plugin's hooks do not load, so its tool is not registered: a
+  // session that recorded the supplement drops it, and the profile's own settings pass as they are
+  it('under hooks none the lane is off: nothing appended, the profile’s settings kept, a recorded supplement dropped', async () => {
     style(configHome);
     const hooksNone = { extraSettings: { disableAllHooks: true, hooks: { Stop: [{ hooks: [] }] } } };
     const fresh = await ownerChannelLaunch(s, spec(hooksNone), { kind: 'new', transcriptOf: null });
-    expect(fresh.spec.appendSystemPrompt).toBe(TO_HUMAN_SUPPLEMENT);
-    expect(fresh.spec.extraSettings).toEqual({ disableAllHooks: true, hooks: { Stop: [{ hooks: [] }] }, env: { [NATIVE_TO_HUMAN_ENV]: ADVERTISED } });
+    expect(fresh.spec.appendSystemPrompt ?? null).toBeNull();
+    expect(fresh.spec.extraSettings).toEqual({ disableAllHooks: true, hooks: { Stop: [{ hooks: [] }] } });
+    expect(fresh.record).toMatchObject({ laneOn: true, desired: 'off' });
     transcript(configHome, TO_HUMAN_SUPPLEMENT);
     const resumed = await ownerChannelLaunch(s, resumeSpec(hooksNone), { kind: 'resume', transcriptOf: record });
-    expect(resumed.spec.systemPromptSnapshot ?? null).toBeNull();
-    expect(resumed.record).toMatchObject({ recorded: SUPP, snapshotOff: false, applied: 'external-style-plus-supplement' });
+    expect(resumed.spec.systemPromptSnapshot).toBe('off');
+    expect(resumed.record).toMatchObject({ desired: 'off', recorded: SUPP, snapshotOff: true, applied: 'off' });
   });
 
   it('without the owner channel (no index), the spec goes unchanged and nothing is recorded', async () => {
@@ -340,26 +348,26 @@ describe('ownerChannelLaunch over a scratch config home', () => {
 
   describe('the mismatch check (Design §2)', () => {
     it('records the engine’s style at the decided launch’s first live init, and decides the next launch by it', async () => {
-      style(configHome); // the resolver reads "report", the plugin's tool declared
+      style(configHome); // the resolver reads the plugin's style
       const first = await ownerChannelLaunch(s, spec(), { kind: 'new', transcriptOf: null });
-      expect(first.record).toMatchObject({ style: 'report', decidedBy: 'report', desired: 'external-style-plus-supplement' });
+      expect(first.record).toMatchObject({ style: PLUGIN_STYLE, decidedBy: PLUGIN_STYLE, desired: 'external-style-plus-supplement' });
       launches.launched(first.record!, { launchId: 'l1', at: AT });
       launches.observe(record, [init('default', null)]); // a backfill's init is no observation
       expect(index.ownerChannel.session(record)).toMatchObject({ observedStyle: null, styleMismatch: false });
       launches.observe(record, [init(null)]); // null reads as the default
-      expect(index.ownerChannel.session(record)).toMatchObject({ style: 'report', observedStyle: 'default', styleMismatch: true });
-      launches.observe(record, [init('report', 2)]); // only the first init after the launch counts
+      expect(index.ownerChannel.session(record)).toMatchObject({ style: PLUGIN_STYLE, observedStyle: 'default', styleMismatch: true });
+      launches.observe(record, [init(PLUGIN_STYLE, 2)]); // only the first init after the launch counts
       expect(index.ownerChannel.session(record)).toMatchObject({ observedStyle: 'default', styleMismatch: true });
 
-      // the settings still read "report": the next decision goes by the engine's "default", the resolver's reading kept
+      // the settings still read the plugin's style: the next decision goes by the engine's "default", the resolver's kept
       const second = await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record });
-      expect(second.record).toMatchObject({ style: 'report', decidedBy: 'default', desired: 'off', appended: false });
+      expect(second.record).toMatchObject({ style: PLUGIN_STYLE, decidedBy: 'default', desired: 'off', appended: false });
     });
 
     it('a persistent misreading keeps deciding by the engine’s name, launch after launch, without alternating', async () => {
-      style(configHome); // the resolver reads "report"; the engine keeps reporting the default
+      style(configHome); // the resolver reads the plugin's style; the engine keeps reporting the default
       const first = await ownerChannelLaunch(s, spec(), { kind: 'new', transcriptOf: null });
-      expect(first.record).toMatchObject({ style: 'report', desired: 'external-style-plus-supplement', appended: true });
+      expect(first.record).toMatchObject({ style: PLUGIN_STYLE, desired: 'external-style-plus-supplement', appended: true });
       launches.launched(first.record!, { launchId: 'l1', at: AT });
       launches.observe(record, [init('default', 1)]);
 
@@ -367,32 +375,33 @@ describe('ownerChannelLaunch over a scratch config home', () => {
       for (const [n, recorded] of [[2, SUPP], [3, 'none'], [4, 'none']] as const) {
         const next = await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record });
         // decided by the engine's "default" each time: the lane is off, the supplement switched off once and never again
-        expect(next.record).toMatchObject({ style: 'report', decidedBy: 'default', desired: 'off', recorded, appended: false, snapshotOff: recorded === SUPP, applied: 'off' });
+        expect(next.record).toMatchObject({ style: PLUGIN_STYLE, decidedBy: 'default', desired: 'off', recorded, appended: false, snapshotOff: recorded === SUPP, applied: 'off' });
         launches.launched(next.record!, { launchId: `l${n}`, at: AT });
         launches.observe(record, [init('default', n)]); // the engine agrees with the name the launch decided by, never with the resolver
-        expect(index.ownerChannel.session(record)).toMatchObject({ style: 'report', observedStyle: 'default', styleMismatch: true });
+        expect(index.ownerChannel.session(record)).toMatchObject({ style: PLUGIN_STYLE, observedStyle: 'default', styleMismatch: true });
         if (recorded === SUPP) recordSnapshot(configHome, null); // the session renders anew and records no text of MAWS's
       }
     });
 
     it('a settings change the engine then reports alike clears the mismatch, and the settings decide again', async () => {
-      style(configHome);
+      localStyle(configHome, 'brief', 1); // the resolver reads "brief", which carries no lane
       const first = await ownerChannelLaunch(s, spec(), { kind: 'new', transcriptOf: null });
+      expect(first.record).toMatchObject({ style: 'brief', desired: 'off' });
       launches.launched(first.record!, { launchId: 'l1', at: AT });
       launches.observe(record, [init('default', 1)]);
       transcript(configHome, null);
 
-      // the owner selects another style declaring the plugin's tool, and the engine reads it as the resolver does
-      style(configHome, 6, 'brief');
+      // the owner selects the plugin's style, and the engine reads it as the resolver does
+      style(configHome);
       const second = await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record });
-      expect(second.record).toMatchObject({ style: 'brief', decidedBy: 'default', desired: 'off' }); // agreement not yet observed
+      expect(second.record).toMatchObject({ style: PLUGIN_STYLE, decidedBy: 'default', desired: 'off' }); // agreement not yet observed
       launches.launched(second.record!, { launchId: 'l2', at: AT });
-      launches.observe(record, [init('brief', 2)]);
-      expect(index.ownerChannel.session(record)).toMatchObject({ style: 'brief', observedStyle: 'brief', styleMismatch: false });
+      launches.observe(record, [init(PLUGIN_STYLE, 2)]);
+      expect(index.ownerChannel.session(record)).toMatchObject({ style: PLUGIN_STYLE, observedStyle: PLUGIN_STYLE, styleMismatch: false });
 
       const third = await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record });
       expect(third.record).toMatchObject({
-        style: 'brief', decidedBy: 'brief', desired: 'external-style-plus-supplement', recorded: 'none', snapshotOff: true, applied: 'external-style-plus-supplement',
+        style: PLUGIN_STYLE, decidedBy: PLUGIN_STYLE, desired: 'external-style-plus-supplement', recorded: 'none', snapshotOff: true, applied: 'external-style-plus-supplement',
       });
     });
 

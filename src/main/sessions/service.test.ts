@@ -7,6 +7,7 @@ import type { SetupIntent } from '@shared/sessions/intent';
 import { preAmendmentIndex, sessionIdFor, summary } from '../../../test/support/index-fixture';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { SessionHarness } from '../../../test/support/session-harness';
+import { installToHumanPlugin } from '../../../test/support/to-human-plugin'; // P4-R7z
 import { DOWN_RELAY } from '../../../test/support/session-host';
 import { storeLabel } from './record-actions';
 import { directRouteRefusal } from './start-guards';
@@ -1027,12 +1028,8 @@ describe('P2-C: the to-human lane on the session service’s launches', () => {
   // a session recorded under MAWS's last full contract (P4-R7z: renders anew at its next launch)
   const contractTranscript = (cwd: string, sessionId: SessionId) =>
     h.writeTranscript(cwd, sessionId, `${JSON.stringify({ type: 'attachment', attachment: { type: 'prompt_snapshot', systemPrompt: ['You are an agent.', LEGACY_CONTRACT_7.text] } })}\n`);
-  // P4-R7z: the to-human plugin's style (it declares 6, its message tool), selected in the engine's settings
-  const pluginStyle = () => {
-    mkdirSync(join(h.trust.configHome, 'output-styles'), { recursive: true });
-    writeFileSync(join(h.trust.configHome, 'output-styles', 'to-human.md'), '---\nname: to-human\nmaws-to-human-contract: 6\n---\nbody\n');
-    writeFileSync(join(h.trust.configHome, 'settings.json'), JSON.stringify({ outputStyle: 'to-human' }));
-  };
+  // P4-R7z: the to-human plugin's style (it declares 6, its message tool) selected in the engine's settings, the plugin on
+  const pluginStyle = () => installToHumanPlugin(h.trust.configHome);
 
   it('a new session’s launch under the plugin’s style carries the supplement and the advertisement and is recorded; the trust bootstrap carries neither', async () => {
     pluginStyle();

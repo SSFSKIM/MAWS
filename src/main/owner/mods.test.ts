@@ -2,13 +2,14 @@
 // and, without a session, what a new launch in no project would do; with a session, its override, its last applied
 // state, whether a lane change is still pending and the style mismatch. P4-R7z (the P4 spec's Decision Log 92): only a
 // style declaring the to-human plugin's message tool carries the lane.
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { BUILT_IN_MODS } from '@shared/mods/registry';
 import { summary, tempDir } from '../../../test/support/index-fixture';
+import { installToHumanPlugin } from '../../../test/support/to-human-plugin';
 import { Index } from '../index/index';
 import { laneInEffect, modsList, setSessionOverride, styleCarriesNoLane, type ModsDeps } from './mods';
 import type { LaunchRecord } from './store';
@@ -43,15 +44,8 @@ describe('mods.list and mods.setSessionOverride', () => {
     dir.dispose();
     rmSync(root, { recursive: true, force: true });
   });
-  const put = (path: string, content: string | object) => {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, typeof content === 'string' ? content : JSON.stringify(content));
-  };
-  // a style selected in the user settings, declaring `declared`: 6 is the to-human plugin's, with its message tool
-  const style = (declared: number) => {
-    put(join(configHome, 'output-styles/to-human.md'), `---\nname: to-human\nmaws-to-human-contract: ${declared}\n---\n`);
-    put(join(configHome, 'settings.json'), { outputStyle: 'to-human' });
-  };
+  // the to-human plugin's style selected, declaring `declared` (6: its message tool), the plugin enabled beside it
+  const style = (declared: number) => installToHumanPlugin(configHome, { declared });
 
   describe('without a session: what a new launch in no project would do', () => {
     it('the supplement under the plugin’s style, off when the app switch is off', async () => {
