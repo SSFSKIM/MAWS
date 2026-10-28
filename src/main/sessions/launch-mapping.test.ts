@@ -5,8 +5,8 @@ import type { SetupIntent } from '@shared/sessions/intent';
 import type { TrustState } from '@shared/sessions/trust';
 import { record } from '../../../test/support/builders';
 import { bootstrapSpec, C10_SETTING_DEFAULTS, intentLaunchSpec, readSettings, resumeLaunchSpec, toLaunchSpec, trustMapping, type C10Settings, seedPermissionMode } from './launch-mapping';
-import { hooksOff, withOwnerChannel } from './launch-mapping'; // P2-C; P4-A2: hooksOff
-import { CONTRACT_HEADER, MESSAGE_TOOL_ALIAS, messageToolHookGroup, NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C; P2-C2: the supplement; P4-R7y: the hook; P4-A2: the alias
+import { withOwnerChannel } from './launch-mapping'; // P2-C
+import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C; P2-C2: the supplement
 import { buildLaunch } from '../../engine-host/launch'; // P4-R8: the launch line a spec becomes
 import type { AppMcpServer } from '@shared/engine/app-mcp-servers'; // P4-R8
 import { userScopeProfile, type LaunchProfile } from '@shared/engine/launch-profile'; // P4-A2
@@ -163,20 +163,21 @@ describe('the app\'s MCP servers', () => {
   it('leaves them out of the trust bootstrap, which serves no turn, and keeps them through the owner channel\'s decision', () => {
     const boot = bootstrapSpec({ bootstrapId: BOOT, cwd: REPO, additionalDirectories: [], gateway: 'gateway', trustKey: REPO, replay: null }, withServers);
     expect(boot.mcpConfig).toBeNull();
-    expect(withOwnerChannel(launches(withServers).new, { laneOn: true, append: 'contract', snapshotOff: true }).mcpConfig).toEqual(CONFIG);
+    expect(withOwnerChannel(launches(withServers).new, { laneOn: true, append: 'supplement', snapshotOff: true }).mcpConfig).toEqual(CONFIG);
   });
 
-  // beside P4-R7y: a lane-on launch carries both the app's servers and MAWS's SessionStart hook; the bootstrap neither
-  it('gives a lane-on launch with app servers both --mcp-config and the SessionStart hook in --settings, and the bootstrap neither', () => {
-    const settingsOf = (args: string[]) => JSON.parse(args[args.indexOf('--settings') + 1]!) as { hooks?: unknown };
+  // a lane-on launch carries the app's servers and the advertisement (P4-R7z: no hook of MAWS's); the bootstrap neither
+  it('gives a lane-on launch with app servers both --mcp-config and the advertisement in --settings, and the bootstrap neither', () => {
+    const settingsOf = (args: string[]) => JSON.parse(args[args.indexOf('--settings') + 1]!) as { hooks?: unknown; env?: Record<string, string> };
     for (const [kind, spec] of Object.entries(launches(withServers))) {
-      const args = argsOf(withOwnerChannel(spec, { laneOn: true, append: 'contract', snapshotOff: false }));
+      const args = argsOf(withOwnerChannel(spec, { laneOn: true, append: 'supplement', snapshotOff: false }));
       expect(JSON.parse(args[args.indexOf('--mcp-config') + 1]!), kind).toEqual(CONFIG);
-      expect(settingsOf(args).hooks, kind).toEqual({ SessionStart: [messageToolHookGroup()] });
+      expect(settingsOf(args).env?.[NATIVE_TO_HUMAN_ENV], kind).toBe(String(TO_HUMAN_CONTRACT_VERSION));
+      expect(settingsOf(args).hooks, kind).toBeUndefined();
     }
     const boot = argsOf(bootstrapSpec({ bootstrapId: BOOT, cwd: REPO, additionalDirectories: [], gateway: 'gateway', trustKey: REPO, replay: null }, withServers));
     expect(boot).not.toContain('--mcp-config');
-    expect(settingsOf(boot).hooks).toBeUndefined();
+    expect(settingsOf(boot).env).toBeUndefined();
   });
 });
 
@@ -193,44 +194,34 @@ describe('home directory attests without a bootstrap', () => {
 describe('withOwnerChannel', () => {
   const socket = '/u/browser/cua/a.sock';
   const spec = (extraSettings: Record<string, unknown> | null) => ({ ...toLaunchSpec({ ...base, browserBackend: null }), extraSettings });
-  const HOOKS = { SessionStart: [messageToolHookGroup()] }; // P4-R7y
+  const ADVERTISED = String(TO_HUMAN_CONTRACT_VERSION);
 
-  it('advertises the contract version beside the browser socket while the lane is on, and sets the two keys as decided', () => {
-    const decided = withOwnerChannel(spec({ env: { CUA_BROWSER_BACKENDS: socket }, enableWorkflows: true }), { laneOn: true, append: 'contract', snapshotOff: true });
-    expect(decided.extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: socket, [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) }, hooks: HOOKS, enableWorkflows: true });
-    expect(decided).toMatchObject({ appendSystemPrompt: TO_HUMAN_CONTRACT, systemPromptSnapshot: 'off' });
+  // P2-C2 (Decision Log 31): the plugin's style gets the supplement; P4-R7z: MAWS appends no contract, and no hook goes in
+  it('advertises 8 beside the browser socket while the lane is on, appends the supplement and passes "off" as decided', () => {
+    const decided = withOwnerChannel(spec({ env: { CUA_BROWSER_BACKENDS: socket }, enableWorkflows: true }), { laneOn: true, append: 'supplement', snapshotOff: true });
+    expect(ADVERTISED).toBe('8');
+    expect(decided.extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: socket, [NATIVE_TO_HUMAN_ENV]: ADVERTISED }, enableWorkflows: true });
+    expect(decided).toMatchObject({ appendSystemPrompt: TO_HUMAN_SUPPLEMENT, systemPromptSnapshot: 'off' });
+    expect(decided.appendSystemPrompt).not.toContain(CONTRACT_HEADER(0).slice(0, -3));
     expect(LaunchSpecSchema.parse(decided)).toEqual(decided);
-  });
-
-  it('sets the variable and the hook alone when the lane is on and a compatible style carries the instructions', () => {
-    const decided = withOwnerChannel(spec(null), { laneOn: true, append: null, snapshotOff: false });
-    expect(decided.extraSettings).toEqual({ env: { [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) }, hooks: HOOKS });
-    expect(decided).not.toHaveProperty('appendSystemPrompt');
-    expect(decided).not.toHaveProperty('systemPromptSnapshot');
   });
 
   it('omits the variable when the lane is off, leaving the other settings as they were', () => {
     expect(withOwnerChannel(spec(null), { laneOn: false, append: null, snapshotOff: false }).extraSettings).toBeNull();
     expect(withOwnerChannel(spec({ env: { CUA_BROWSER_BACKENDS: socket } }), { laneOn: false, append: null, snapshotOff: true })).toMatchObject({ extraSettings: { env: { CUA_BROWSER_BACKENDS: socket } }, systemPromptSnapshot: 'off' });
-    expect(withOwnerChannel(spec({ env: { [NATIVE_TO_HUMAN_ENV]: '1' } }), { laneOn: false, append: null, snapshotOff: false }).extraSettings).toBeNull(); // a retried spec
+    expect(withOwnerChannel(spec({ env: { [NATIVE_TO_HUMAN_ENV]: '7' } }), { laneOn: false, append: null, snapshotOff: false }).extraSettings).toBeNull(); // a retried spec
+    expect(withOwnerChannel(spec({ env: { [NATIVE_TO_HUMAN_ENV]: '7' } }), { laneOn: true, append: 'supplement', snapshotOff: false }).extraSettings).toEqual({ env: { [NATIVE_TO_HUMAN_ENV]: ADVERTISED } });
   });
-  // P4-R7y: MAWS's SessionStart group after the caller's hooks, once; out again with the lane off
-  it('adds MAWS’s SessionStart group after the caller’s hooks once, a retried spec included, and takes only it out with the lane off', () => {
-    const own = { hooks: [{ type: 'command', command: 'echo own' }] };
-    const caller = { SessionStart: [own], PostToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo post' }] }] };
-    const on = withOwnerChannel(spec({ hooks: caller }), { laneOn: true, append: null, snapshotOff: false });
-    expect(on.extraSettings?.hooks).toEqual({ ...caller, SessionStart: [own, messageToolHookGroup()] });
-    expect(withOwnerChannel(on, { laneOn: true, append: null, snapshotOff: false }).extraSettings?.hooks).toEqual(on.extraSettings?.hooks); // a retried spec
-    expect(withOwnerChannel(on, { laneOn: false, append: null, snapshotOff: false }).extraSettings).toEqual({ hooks: caller });
-    expect(withOwnerChannel(withOwnerChannel(spec(null), { laneOn: true, append: null, snapshotOff: false }), { laneOn: false, append: null, snapshotOff: false }).extraSettings).toBeNull();
-    expect(LaunchSpecSchema.parse(on)).toEqual(on);
-  });
-  // P2-C2 (Decision Log 31): a message-tool style gets the supplement, the advertisement unchanged
-  it('appends the supplement in place of the contract beside a message-tool style, the variable still the contract version', () => {
-    const decided = withOwnerChannel(spec(null), { laneOn: true, append: 'supplement', snapshotOff: true });
-    expect(decided).toMatchObject({ appendSystemPrompt: TO_HUMAN_SUPPLEMENT, systemPromptSnapshot: 'off', extraSettings: { env: { [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) } } });
-    expect(decided.appendSystemPrompt).not.toContain(CONTRACT_HEADER(TO_HUMAN_CONTRACT_VERSION));
-    expect(LaunchSpecSchema.parse(decided)).toEqual(decided);
+
+  // P4-R7z: P4-R7y's SessionStart group and P4-A2's appended alias are gone; the caller's hooks pass as they are
+  it('leaves the caller’s hooks as they are, with the lane on or off, and adds none of its own', () => {
+    const caller = { SessionStart: [{ hooks: [{ type: 'command', command: 'echo own' }] }], PostToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo post' }] }] };
+    for (const laneOn of [true, false]) {
+      const decided = withOwnerChannel(spec({ hooks: caller, disableAllHooks: true }), { laneOn, append: laneOn ? 'supplement' : null, snapshotOff: false });
+      expect(decided.extraSettings).toEqual({ hooks: caller, disableAllHooks: true, ...(laneOn ? { env: { [NATIVE_TO_HUMAN_ENV]: ADVERTISED } } : {}) });
+      expect(decided.appendSystemPrompt ?? null).toBe(laneOn ? TO_HUMAN_SUPPLEMENT : null);
+      expect(LaunchSpecSchema.parse(decided)).toEqual(decided);
+    }
   });
 });
 // P2-C end
@@ -267,9 +258,9 @@ describe('the launch profile', () => {
       expect(flagOf(argsOf(today[kind])), kind).toBe(kind === 'bootstrap' ? '{"dialogExpiry":"never"}' : '{"dialogExpiry":"never","effortLevel":"high"}');
     }
     expect(launches(C10_SETTING_DEFAULTS, '/u/cua.sock').new.extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: '/u/cua.sock' } });
-    expect(withOwnerChannel(today.new, { laneOn: true, append: 'contract', snapshotOff: false })).toMatchObject({
-      appendSystemPrompt: TO_HUMAN_CONTRACT,
-      extraSettings: { env: { [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) }, hooks: { SessionStart: [messageToolHookGroup()] } },
+    expect(withOwnerChannel(today.new, { laneOn: true, append: 'supplement', snapshotOff: false })).toMatchObject({
+      appendSystemPrompt: TO_HUMAN_SUPPLEMENT,
+      extraSettings: { env: { [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) } },
     });
   });
 
@@ -299,28 +290,17 @@ describe('the launch profile', () => {
     }
   });
 
-  // P4 Decision Log 50 (P4-R7y): `disableAllHooks` silences the flag JSON's own command hooks too (the engine keeps only
-  // policy hooks; spikes/protocol-probe/findings-p4-a2p-profile.txt), so MAWS's start-time context goes through the
-  // appended prompt instead of its SessionStart group
-  it('under hooks none gives MAWS’s start-time context through the appended prompt, after the contract or the supplement, and no SessionStart group', () => {
+  // P4-R7z: under hooks none (`disableAllHooks`, which silences the flag JSON's own command hooks too) MAWS has no
+  // start-time context to give any more: P4 Decision Log 50's alias is gone with its SessionStart group
+  it('under hooks none appends the supplement alone, the profile’s keys kept, and nothing with the lane off', () => {
     const off = launches(withProfile(PROFILE)).new;
-    const lane = String(TO_HUMAN_CONTRACT_VERSION);
-    const contract = withOwnerChannel(off, { laneOn: true, append: 'contract', snapshotOff: false });
-    expect(contract.extraSettings).toEqual({ enabledPlugins: OFF, outputStyle: 'default', disableAllHooks: true, env: { [NATIVE_TO_HUMAN_ENV]: lane } });
-    expect(contract.appendSystemPrompt).toBe(`${TO_HUMAN_CONTRACT}\n\n${MESSAGE_TOOL_ALIAS}`);
-    expect(withOwnerChannel(off, { laneOn: true, append: 'supplement', snapshotOff: true })).toMatchObject({ appendSystemPrompt: `${TO_HUMAN_SUPPLEMENT}\n\n${MESSAGE_TOOL_ALIAS}`, systemPromptSnapshot: 'off' });
-    const alone = withOwnerChannel(off, { laneOn: true, append: null, snapshotOff: false });
-    expect(alone.appendSystemPrompt).toBe(MESSAGE_TOOL_ALIAS);
-    expect(alone.extraSettings).not.toHaveProperty('hooks');
-    expect(LaunchSpecSchema.parse(contract)).toEqual(contract);
-    // with the lane off the plugin's tool is real: no alias, nothing appended
+    const on = withOwnerChannel(off, { laneOn: true, append: 'supplement', snapshotOff: true });
+    expect(on.extraSettings).toEqual({ enabledPlugins: OFF, outputStyle: 'default', disableAllHooks: true, env: { [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) } });
+    expect(on).toMatchObject({ appendSystemPrompt: TO_HUMAN_SUPPLEMENT, systemPromptSnapshot: 'off' });
+    expect(LaunchSpecSchema.parse(on)).toEqual(on);
     const laneOff = withOwnerChannel(off, { laneOn: false, append: null, snapshotOff: false });
     expect(laneOff).not.toHaveProperty('appendSystemPrompt');
     expect(laneOff.extraSettings).toEqual({ enabledPlugins: OFF, outputStyle: 'default', disableAllHooks: true });
-    // a retried spec carries the alias once
-    expect(withOwnerChannel(contract, { laneOn: true, append: 'contract', snapshotOff: false }).appendSystemPrompt).toBe(contract.appendSystemPrompt);
-    expect(hooksOff(off)).toBe(true);
-    expect(hooksOff(launches(C10_SETTING_DEFAULTS).new)).toBe(false);
   });
 });
 // P4-A2 end

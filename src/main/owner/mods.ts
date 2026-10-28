@@ -50,9 +50,18 @@ async function nextLaunchSource(deps: ModsDeps, on: boolean, directory: string |
 // the lane in force now: pending only when that launch wanted `--system-prompt-snapshot off` and the binary lacked it
 // (a lane switch, a compatible style over the contract, or another contract version), until the next compaction; a
 // style selected since that launch is not a lane change and reads nothing. The lane switched since that launch: the next
-// launch, unless what that launch left in effect already matches it.
+// launch, unless what that launch left in effect already matches it. A launch decided with the lane on sets its
+// watermark (`enabledAt`), whatever its style left it to carry (P4-R7z, `styleCarriesNoLane`).
 export function pendingOf(row: OwnerSessionRow | null, on: boolean): LanePending | null {
   if (row === null || row.desired === null || row.applied === null) return on ? 'next-launch' : null;
-  if ((row.desired !== 'off') === on) return row.offUnavailable ? 'next-compaction' : null;
+  if ((row.desired !== 'off' || row.enabledAt !== null) === on) return row.offUnavailable ? 'next-compaction' : null;
   return (row.applied !== 'off') === on ? null : 'next-launch';
 }
+
+// P4-R7z (the P4 spec's Decision Log 92): the session's last decided launch found its lane on but wanted nothing, its
+// style declaring no plugin message tool (`desiredSource`). No to-human plugin means no to-human lane, so the lane reads
+// off for the session's presentation and items until a launch finds the tool, whatever its switch says.
+export const styleCarriesNoLane = (row: OwnerSessionRow | null): boolean => row !== null && row.enabledAt !== null && row.desired === 'off';
+
+// The lane in effect for a session: its switch, unless its style left the lane nothing to carry.
+export const laneInEffect = (appEnabled: boolean, row: OwnerSessionRow | null): boolean => laneOn(appEnabled, row?.override ?? 'inherit') && !styleCarriesNoLane(row);

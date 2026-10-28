@@ -51,9 +51,9 @@ describe('X9: the maws server and its twelve tools', () => {
       // P3-B (M7): the document tools, appended after A's
       'artifact_edit', 'artifact_comments', 'artifact_reply', 'artifact_resolve',
       'artifact_search', // P4-B4: the search tool, after B's
-      'message', // P4-R7: the message tool, after the search tool
     ]);
     expect(MAWS_TOOL_NAMES).not.toContain('artifact_update');
+    expect(MAWS_TOOL_NAMES).not.toContain('message'); // P4-R7z: a session messages through the to-human plugin's tool
     expect(Object.keys(MAWS_TOOLS)).toEqual([...MAWS_TOOL_NAMES]);
     expect(mawsServerInfo('0.9.0')).toEqual({ name: 'maws', version: '0.9.0' });
     expect(MAWS_TOOL_ANNOTATIONS).toEqual({ readOnlyHint: true, openWorldHint: false });
@@ -87,12 +87,12 @@ describe('X9: the maws server and its twelve tools', () => {
       expect(tool).toEqual({ name: tool.name, title: spec.title, description: spec.description, inputSchema: z.toJSONSchema(spec.input), annotations: { ...spec.annotations, title: spec.title }, ...meta });
       expect(tool.inputSchema).toMatchObject({ type: 'object', additionalProperties: false });
     }
-    // Always loaded, whatever tool search defers (P4-B4's probe: the engine honours the key for an SDK server's tool): the
-    // message tool (P4-R7), and the tools an edit of an artifact the session is handed needs (P4-A3), read, the kind's
-    // guide, a document's edit and the file kinds' publish, since a deferred one costs a ToolSearch request before the
-    // first edit; every other tool defers until a session asks for it
+    // Always loaded, whatever tool search defers (P4-B4's probe: the engine honours the key for an SDK server's tool):
+    // the tools an edit of an artifact the session is handed needs (P4-A3), read, the kind's guide, a document's edit and
+    // the file kinds' publish, since a deferred one costs a ToolSearch request before the first edit; every other tool
+    // defers until a session asks for it
     const alwaysLoaded = list.filter((t) => t._meta !== undefined);
-    expect(alwaysLoaded.map((t) => t.name)).toEqual(['artifact_describe_type', 'artifact_read', 'artifact_publish', 'artifact_edit', 'message']);
+    expect(alwaysLoaded.map((t) => t.name)).toEqual(['artifact_describe_type', 'artifact_read', 'artifact_publish', 'artifact_edit']);
     for (const tool of alwaysLoaded) expect(tool._meta, tool.name).toEqual({ 'anthropic/alwaysLoad': true });
     // E2 (Decision Log 4): the two writers are not read-only, so the engine never batches them nor runs them in plan mode
     expect(list.map((t) => [t.name, t.annotations])).toEqual([
@@ -115,7 +115,6 @@ describe('X9: the maws server and its twelve tools', () => {
       ['artifact_reply', { readOnlyHint: false, openWorldHint: false, title: 'Reply to a document comment' }],
       ['artifact_resolve', { readOnlyHint: false, openWorldHint: false, title: 'Resolve a document comment' }],
       ['artifact_search', { readOnlyHint: true, openWorldHint: false, title: 'Search artifacts' }], // P4-B4
-      ['message', { readOnlyHint: true, openWorldHint: false, title: 'Send message' }], // P4-R7: it changes no file, so plan mode runs it too
     ]);
     expect(list.find((t) => t.name === 'show_pane')!.inputSchema).toMatchObject({ properties: { pane: { enum: [...PANE_NAMES] } }, required: ['pane'] });
   });

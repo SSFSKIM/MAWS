@@ -5,10 +5,11 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { CONTRACT_HEADER, messageToolHookGroup, NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '../src/shared/owner/contract';
+import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '../src/shared/owner/contract';
 import { invoke, value } from './support/c7-replay';
 import { traceForeground } from './support/foreground-trace';
 import { launchMaws } from './support/launch';
+import { installToHumanPlugin } from '../test/support/to-human-plugin'; // P4-R7z
 import { sessionJournal } from './support/live-turns';
 import { clearToasts, metaEvents } from './support/maws-tools';
 import { sidebarRow } from './support/sidebar';
@@ -24,6 +25,8 @@ test('legacy mark text stays unboxed; attention jumps and owner-channel read/ans
   mkdirSync(project, { recursive: true });
   writeFileSync(join(config, '.claude.json'), `${JSON.stringify({ projects: { [repo]: { hasTrustDialogAccepted: true } } }, null, 2)}\n`);
   writeFileSync(join(config, 'settings.json'), `${JSON.stringify({ permissions: { defaultMode: 'default' } })}\n`); // the replay records no mode change
+  // P4-R7z: the lane runs where the to-human plugin registers its tool: its style selected (declaring 6), the plugin on
+  installToHumanPlugin(config);
   // Two sessions on disk: the one that asks (the replay's engine session, which its first Send resumes), and another
   // to leave its tab for.
   const seed = (engineId: string, content: string, at: string) => {
@@ -128,7 +131,7 @@ test('legacy mark text stays unboxed; attention jumps and owner-channel read/ans
 });
 
 // P2-C2 start
-test('a style declaring contract 4: the supplement once and never contract 1, the native ask withdrawn, unboxed <message> text and a message tool’s call in source order, an async maws ask answered from its sheet, and a native ask on the wire still drawn', async () => {
+test('a style declaring the plugin’s message tool (6): the supplement once and no contract, the native ask withdrawn, unboxed <message> text and the plugin’s message call in source order, an async maws ask answered from its sheet, and a native ask on the wire still drawn', async () => {
   test.setTimeout(150_000);
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-p2c2-supplement-')));
   const repo = join(root, 'repo');
@@ -137,10 +140,10 @@ test('a style declaring contract 4: the supplement once and never contract 1, th
   const project = join(config, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
   mkdirSync(project, { recursive: true });
   writeFileSync(join(config, '.claude.json'), `${JSON.stringify({ projects: { [repo]: { hasTrustDialogAccepted: true } } }, null, 2)}\n`);
-  // The scratch settings home selects a user output style declaring contract 4; the replay records no mode change.
-  writeFileSync(join(config, 'settings.json'), `${JSON.stringify({ permissions: { defaultMode: 'default' }, outputStyle: SUPPLEMENT.style })}\n`);
-  mkdirSync(join(config, 'output-styles'));
-  writeFileSync(join(config, 'output-styles', `${SUPPLEMENT.style}.md`), `---\nname: ${SUPPLEMENT.style}\ndescription: Messages only, questions through a tool\nmaws-to-human-contract: 4\n---\n\nWrap what is for the human in <message>.\n`);
+  // The scratch settings home selects the to-human plugin's style (contract 6) with the plugin on; the replay records no
+  // mode change.
+  writeFileSync(join(config, 'settings.json'), `${JSON.stringify({ permissions: { defaultMode: 'default' } })}\n`);
+  installToHumanPlugin(config);
   const engineId = toHumanSessionId();
   const first = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: 'a session under a message-only style' }, uuid: randomUUID(), timestamp: '2026-10-13T08:00:00.000Z', cwd: repo, sessionId: engineId, version: '2.1.295' };
   writeFileSync(join(project, `${engineId}.jsonl`), `${JSON.stringify(first)}\n`);
@@ -172,8 +175,8 @@ test('a style declaring contract 4: the supplement once and never contract 1, th
     const message = (text: string) => pane.locator('.owner-message-ink').filter({ hasText: text });
     await expect(message(SUPPLEMENT.message)).toBeVisible({ timeout: 20_000 });
 
-    // P4-R7: the message tool's call stays in flow, between the authored span and the ask, never the
-    // MCP call's row; the host answered it `sent`
+    // P4-R7z: the plugin's message call stays in flow, between the authored span and the ask, never the MCP call's row;
+    // the plugin answered it `sent` inside the engine, so MAWS answered nothing for it
     const called = pane.locator(`[data-row-id="to-human:${SUPPLEMENT.toolMessageId}"]`);
     await expect(called.locator('.owner-message-ink')).toHaveText(new RegExp(SUPPLEMENT.toolMessage.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), { timeout: 20_000 });
     await expect(pane.locator(`[data-cell-id="cell:${SUPPLEMENT.toolMessageId}"]`)).toHaveCount(0);
@@ -182,21 +185,22 @@ test('a style declaring contract 4: the supplement once and never contract 1, th
     expect(at('text:msg_01P2c2Message')).toBeGreaterThanOrEqual(0);
     expect(at(`to-human:${SUPPLEMENT.toolMessageId}`)).toBeGreaterThan(at('text:msg_01P2c2Message'));
     expect(at(`to-human:${SUPPLEMENT.toolMessageId}`)).toBeLessThan(at('ask:'));
-    const answered = rows().find((r) => r.direction === 'out' && frameOf(r).type === 'control_response' && (r.frame as { response: { request_id: string } }).response.request_id === '5d7f1c2a-0000-4000-8000-0000000000a1');
-    expect((answered?.frame as { response: { response: unknown } } | undefined)?.response.response).toEqual({ mcp_response: { jsonrpc: '2.0', id: 3, result: { content: [{ type: 'text', text: 'sent' }] } } });
+    const answeredByMaws = rows().filter((r) => r.direction === 'out' && frameOf(r).type === 'control_response' && JSON.stringify(r.frame).includes('"text":"sent"'));
+    expect(answeredByMaws).toEqual([]);
 
-    // The launch: the supplement passed once, contract 1 and the full contract never, the lane advertised in the settings
-    // env; the decision recorded (no longer pending).
+    // The launch: the supplement passed once, no contract of MAWS's, the lane advertised (8) in the settings env and no
+    // hook of MAWS's there; the decision recorded (no longer pending).
     const spawns = rows().filter((r) => r.direction === 'meta' && frameOf(r).event === 'spawn');
     expect(spawns).toHaveLength(1);
     const { args } = spawns[0]!.frame as { args: string[] };
     expect(args.flatMap((arg, k) => (arg === '--append-system-prompt' ? [args[k + 1]] : []))).toEqual([TO_HUMAN_SUPPLEMENT]);
-    expect(args.filter((arg) => arg.includes(CONTRACT_HEADER(1)) || arg.includes(CONTRACT_HEADER(TO_HUMAN_CONTRACT_VERSION)))).toEqual([]); // nor MAWS's full contract
+    expect(args.filter((arg) => arg.includes(CONTRACT_HEADER(0).slice(0, -3)))).toEqual([]); // no contract of MAWS's, of any version
     expect(args.flatMap((arg, k) => (arg === '--disallowedTools' ? [args[k + 1]] : []))).toEqual(['AskUserQuestion']); // Decision Log 33
-    expect(args.flatMap((arg, k) => (arg === '--allowedTools' ? [args[k + 1]] : []))).toEqual(['mcp__maws__message']); // P4-R7: never a permission card
+    expect(args.flatMap((arg, k) => (arg === '--allowedTools' ? [args[k + 1]] : []))).toEqual(['mcp__maws__ask']); // P4-R7z: the ask alone; the plugin's message tool asks no permission
     const settings = JSON.parse(args[args.indexOf('--settings') + 1]!) as { env?: Record<string, string>; hooks?: unknown };
     expect(settings.env?.[NATIVE_TO_HUMAN_ENV]).toBe(String(TO_HUMAN_CONTRACT_VERSION));
-    expect(settings.hooks).toEqual({ SessionStart: [messageToolHookGroup()] }); // P4-R7y: the context at every start
+    expect(String(TO_HUMAN_CONTRACT_VERSION)).toBe('8');
+    expect(settings.hooks).toBeUndefined(); // P4-R7z: P4-R7y's SessionStart alias is gone
     await expect.poll(async () => { const row = await lane(); return [row.source, row.pending ?? null]; }).toEqual(['external-style-plus-supplement', null]);
 
     // The async ask: acknowledged at once, answered from its sheet, the answer written as a `next` steer.

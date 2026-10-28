@@ -1,12 +1,11 @@
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
-  carriesFullContract, CONTRACT_HEADER, FULL_CONTRACT, LEGACY_CONTRACT_1, LEGACY_CONTRACT_5, LEGACY_SUPPLEMENT_1, MESSAGE_TOOL_ALIAS, messageToolHookGroup, NATIVE_TO_HUMAN_ENV, PLUGIN_MESSAGE_TOOL, STYLE_CONTRACT_KEY, styleShape, SUPPLEMENT, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT,
-  TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_VERSION,
+  carriesPluginMessageTool, CONTRACT_HEADER, LEGACY_CONTRACT_1, LEGACY_CONTRACT_5, LEGACY_CONTRACT_7, LEGACY_MESSAGE_TOOL_ALIAS, LEGACY_SUPPLEMENT_1, LEGACY_SUPPLEMENT_2, NATIVE_TO_HUMAN_ENV, PLUGIN_MESSAGE_TOOL_FROM,
+  STYLE_CONTRACT_KEY, styleShape, SUPPLEMENT, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_VERSION,
 } from './contract';
-import { MAWS_MESSAGE_TOOL } from './message-call';
+import { MAWS_MESSAGE_TOOL, PLUGIN_MESSAGE_TOOL } from './message-call';
 import type { MessageUuid } from '../graph/ids';
 import { marksOf } from './marks';
 
@@ -45,38 +44,36 @@ describe('contract 1 (Design §1), MAWS’s full contract until contract 5', () 
 });
 
 const wordsOf = (text: string) => text.split('\n').slice(1).join(' ').split(/\s+/).filter(Boolean);
-// The message rule as both texts that state it word it (P4-R7): the tool, when, and the reason the model can carry.
+// The message rule as both of P4-R7's texts word it: the tool, when, and the reason the model can carry.
 const MESSAGE_RULE = ['A message you send before another tool call goes through `mcp__maws__message` (its `text` the message, in Markdown), called in the same response as that tool call', 'written as text there, it comes back as a paraphrase that never reaches them'];
 
-// P4-R7 (the P4 spec's Decision Log 46): contract 5 with the message tool, MAWS's full contract from now on.
-describe('the full contract: contract 7', () => {
-  it('is contract 7, of the message-tool shape, opening with its header', () => {
-    expect(FULL_CONTRACT.version).toBe(7);
-    expect(TO_HUMAN_CONTRACT_VERSION).toBe(7);
-    expect(FULL_CONTRACT.text).toBe(TO_HUMAN_CONTRACT);
-    expect(TO_HUMAN_CONTRACT.startsWith(`${CONTRACT_HEADER(7)}\n\n`)).toBe(true);
-    expect(styleShape(FULL_CONTRACT.version)).toBe('message-tool');
+// P4-R7z (the P4 spec's Decision Log 92): MAWS has no full contract of its own; the plugin's style carries the rule.
+describe('MAWS’s contract version: 8, no text of its own', () => {
+  it('advertises 8, MAWS offering no message tool, above the plugin’s 6 and MAWS’s former 7', () => {
+    expect(TO_HUMAN_CONTRACT_VERSION).toBe(8);
+    expect(TO_HUMAN_CONTRACT_VERSION).toBeGreaterThan(LEGACY_CONTRACT_7.version);
   });
 
-  it('states the message rule beside the one mark and MAWS’s ask tool, under 320 words, and reads as no mark itself', () => {
-    expect(wordsOf(TO_HUMAN_CONTRACT).length).toBeLessThan(320); // contract 5 was 249; the rule adds its paragraph
-    for (const needle of [...MESSAGE_RULE, 'Every other message goes inside `<message>…</message>`', 'Where `mcp__maws__message` is missing, a span is the only form', '`mcp__maws__ask`', '`blocking: false`', '`blocking: true`', 'a user message naming the askId', 'native AskUserQuestion only where', 'never in code', 'your answers included']) {
-      expect(TO_HUMAN_CONTRACT).toContain(needle);
-    }
-    for (const retired of ['need-input', 'insight', 'essential', 'to-human>', 'mcp__doperpowers__', 'mcp__sminos__', PLUGIN_MESSAGE_TOOL]) expect(TO_HUMAN_CONTRACT).not.toContain(retired);
-    expect(marksOf(TO_HUMAN_CONTRACT, { messageUuid: 'u' as MessageUuid, blockIndex: 0 })).toEqual([]);
-    expect(TO_HUMAN_CONTRACT.length).toBeLessThanOrEqual(16_384); // the launch spec's bound
-    expect(TO_HUMAN_CONTRACT).toContain(`\`${MAWS_MESSAGE_TOOL}\``); // the readers' name for it
+  it('a style carries the lane from the plugin’s 6 on, every later declaration of its shape too; no earlier one, and no marks style', () => {
+    expect(PLUGIN_MESSAGE_TOOL_FROM).toBe(6);
+    for (const declared of [6, 7, 8, 17]) expect(carriesPluginMessageTool(declared)).toBe(true);
+    for (const declared of [1, 2, 3, 4, 5, 0, 6.5, null]) expect(carriesPluginMessageTool(declared)).toBe(false);
+  });
+});
+
+// Contract 7 (P4-R7), MAWS's full contract until P4-R7z: what sessions recorded under it carry.
+describe('contract 7, recorded by sessions launched before P4-R7z', () => {
+  it('opens with its header, states the message rule through MAWS’s former tool, and reads as no mark itself', () => {
+    expect(LEGACY_CONTRACT_7.version).toBe(7);
+    expect(LEGACY_CONTRACT_7.text.startsWith(`${CONTRACT_HEADER(7)}\n\n`)).toBe(true);
+    for (const needle of [...MESSAGE_RULE, 'Every other message goes inside `<message>…</message>`', 'Where `mcp__maws__message` is missing, a span is the only form', '`mcp__maws__ask`']) expect(LEGACY_CONTRACT_7.text).toContain(needle);
+    expect(LEGACY_CONTRACT_7.text).toContain(`\`${MAWS_MESSAGE_TOOL}\``); // the readers still read its calls
+    expect(marksOf(LEGACY_CONTRACT_7.text, { messageUuid: 'u' as MessageUuid, blockIndex: 0 })).toEqual([]);
   });
 
   it('keeps contract 5’s other paragraphs word for word', () => {
     const tail = (text: string) => text.split('\n\n').slice(2).join('\n\n');
-    expect(tail(TO_HUMAN_CONTRACT)).toBe(tail(LEGACY_CONTRACT_5.text));
-  });
-
-  it('a style declaring exactly contract 7 carries it; no other version does, 5 included', () => {
-    expect(carriesFullContract(7)).toBe(true);
-    for (const declared of [1, 2, 3, 4, 5, 6, 8, null]) expect(carriesFullContract(declared)).toBe(false);
+    expect(tail(LEGACY_CONTRACT_7.text)).toBe(tail(LEGACY_CONTRACT_5.text));
   });
 });
 
@@ -91,17 +88,16 @@ describe('contract 5, recorded by sessions launched before contract 7', () => {
   });
 });
 
-// P2-C2 (the P2 spec's Decision Log 31). P4-R7 adds no boundary: the plugin's 6, which states the message rule, keeps
-// the shape of its 3 and 4, which do not, and supplement 2 states the rule beside either (the architect, 2026-10-21).
+// P2-C2 (the P2 spec's Decision Log 31). P4-R7z draws its boundary inside the shape (`carriesPluginMessageTool`).
 describe('the shape rule: what a style declaring a contract version carries', () => {
   it.each([
     [1, 'marks'],
     [2, 'marks'],
     [3, 'message-tool'],
-    [4, 'message-tool'], // the owner's style today
+    [4, 'message-tool'],
     [5, 'message-tool'], // MAWS's full contract before 7
-    [6, 'message-tool'], // the plugin's style with its message tool
-    [7, 'message-tool'], // MAWS's full contract
+    [6, 'message-tool'], // the plugin's style with its message tool, the owner's style today
+    [7, 'message-tool'], // MAWS's full contract until P4-R7z
     [17, 'message-tool'], // a later key that keeps the shape needs no MAWS change
     [0, 'none'],
     [2.5, 'none'],
@@ -111,46 +107,40 @@ describe('the shape rule: what a style declaring a contract version carries', ()
   });
 });
 
-describe('the supplement: supplement 2 (P4-R7)', () => {
-  it('opens with its own header, beside the contract’s, and is version 2', () => {
-    expect(TO_HUMAN_SUPPLEMENT_VERSION).toBe(2);
+describe('the supplement: supplement 3 (P4-R7z)', () => {
+  it('opens with its own header, beside the contract’s, and is version 3', () => {
+    expect(TO_HUMAN_SUPPLEMENT_VERSION).toBe(3);
     expect(SUPPLEMENT.text).toBe(TO_HUMAN_SUPPLEMENT);
-    expect(SUPPLEMENT_HEADER(2)).toBe('# Messages to the human (MAWS to-human supplement 2)');
-    expect(TO_HUMAN_SUPPLEMENT.startsWith(`${SUPPLEMENT_HEADER(2)}\n\n`)).toBe(true);
+    expect(SUPPLEMENT_HEADER(3)).toBe('# Messages to the human (MAWS to-human supplement 3)');
+    expect(TO_HUMAN_SUPPLEMENT.startsWith(`${SUPPLEMENT_HEADER(3)}\n\n`)).toBe(true);
     expect(TO_HUMAN_SUPPLEMENT.startsWith(CONTRACT_HEADER(1).split('contract')[0]!)).toBe(true); // one family of headers
   });
 
-  // It goes beside a style of 3 or 4, which says nothing of a message tool, and one of 6, which names the plugin's.
-  it('states the message rule, names MAWS’s tools and says the plugin’s message tool is not here, under 170 words', () => {
-    expect(wordsOf(TO_HUMAN_SUPPLEMENT).length).toBeLessThan(170);
-    for (const needle of [...MESSAGE_RULE, 'Every other message goes inside `<message>…</message>`, the one mark here too', `\`${PLUGIN_MESSAGE_TOOL}\` is not available here`, '`mcp__maws__ask`', '`blocking: false`', '`blocking: true`', 'Neither `mcp__sminos__AskUserQuestion` nor `mcp__doperpowers__AskUserQuestion` is available here', 'native AskUserQuestion only where', 'never inside code', 'your answers included']) {
+  // The plugin's style carries the message rule; MAWS says only what it owns, its ask tool in place of the style's.
+  it('names MAWS’s ask tool in place of the style’s, and says nothing of messages, under 80 words', () => {
+    expect(wordsOf(TO_HUMAN_SUPPLEMENT).length).toBeLessThan(80);
+    for (const needle of ['This session runs in MAWS.', '`mcp__maws__ask`', '`blocking: false`', '`blocking: true`', 'a user message naming the askId', 'Neither `mcp__sminos__AskUserQuestion` nor `mcp__doperpowers__AskUserQuestion` is available here', 'native AskUserQuestion only where']) {
       expect(TO_HUMAN_SUPPLEMENT).toContain(needle);
     }
-    for (const retired of ['need-input', 'insight', 'essential', 'to-human>']) expect(TO_HUMAN_SUPPLEMENT).not.toContain(retired);
-  });
-
-  it('quotes its mark in code, so it reads as no mark itself', () => {
+    for (const withdrawn of [MAWS_MESSAGE_TOOL, PLUGIN_MESSAGE_TOOL, '<message>', 'final', 'not available here.', 'report', 'mark']) expect(TO_HUMAN_SUPPLEMENT).not.toContain(withdrawn);
     expect(marksOf(TO_HUMAN_SUPPLEMENT, { messageUuid: 'u' as MessageUuid, blockIndex: 0 })).toEqual([]);
   });
 });
 
-// P4-R7y (the owner's ask of 2026-10-21): the context a lane-on session's SessionStart hook gives at every start.
-describe('the SessionStart context and its hook (P4-R7y)', () => {
-  it('says the plugin’s message tool is MAWS’s here, to call MAWS’s wherever instructions name the plugin’s, and that the input is the same', () => {
-    expect(MESSAGE_TOOL_ALIAS).toContain(`\`${PLUGIN_MESSAGE_TOOL}\` is the \`${MAWS_MESSAGE_TOOL}\` tool`);
-    expect(MESSAGE_TOOL_ALIAS).toContain(`wherever your instructions name \`${PLUGIN_MESSAGE_TOOL}\`, call \`${MAWS_MESSAGE_TOOL}\``);
-    expect(MESSAGE_TOOL_ALIAS).toContain('same input');
-    // supplement 2 names the same two tools: the plugin's not available here, MAWS's the one to message through
-    for (const tool of [PLUGIN_MESSAGE_TOOL, MAWS_MESSAGE_TOOL]) expect(TO_HUMAN_SUPPLEMENT).toContain(`\`${tool}\``);
+// Supplement 2 (P4-R7), what sessions launched beside a message-tool style before P4-R7z recorded.
+describe('supplement 2, recorded by sessions launched before supplement 3', () => {
+  it('opens with its header, states the message rule, names MAWS’s former tool and says the plugin’s was not there', () => {
+    expect(LEGACY_SUPPLEMENT_2.version).toBe(2);
+    expect(LEGACY_SUPPLEMENT_2.text.startsWith(`${SUPPLEMENT_HEADER(2)}\n\n`)).toBe(true);
+    for (const needle of [...MESSAGE_RULE, `\`${PLUGIN_MESSAGE_TOOL}\` is not available here`, '`mcp__maws__ask`', 'never inside code']) expect(LEGACY_SUPPLEMENT_2.text).toContain(needle);
   });
+});
 
-  it('is what the hook prints, run as the engine runs an exec-form hook (no shell): the SessionStart answer, for every source', () => {
-    const group = messageToolHookGroup();
-    expect(group).not.toHaveProperty('matcher');
-    expect(group.hooks).toHaveLength(1);
-    const [hook] = group.hooks;
-    expect(hook!.type).toBe('command');
-    expect(JSON.parse(execFileSync(hook!.command, hook!.args, { encoding: 'utf8', env: {} }))).toEqual({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: MESSAGE_TOOL_ALIAS } });
+// P4-R7y's alias, withdrawn: the text its hook gave, which the prompt-state reader still recognises.
+describe('P4-R7y’s alias, recorded by sessions launched before P4-R7z', () => {
+  it('said the plugin’s message tool was MAWS’s there', () => {
+    expect(LEGACY_MESSAGE_TOOL_ALIAS).toContain(`\`${PLUGIN_MESSAGE_TOOL}\` is the \`${MAWS_MESSAGE_TOOL}\` tool`);
+    expect(TO_HUMAN_SUPPLEMENT).not.toContain(LEGACY_MESSAGE_TOOL_ALIAS);
   });
 });
 
