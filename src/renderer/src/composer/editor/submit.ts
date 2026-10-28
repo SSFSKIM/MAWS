@@ -11,7 +11,8 @@ import { DEFAULT_MEMORY_TARGET, type MemoryTarget } from '../../stores/composer'
 import { toast, useNotices } from '../../stores/notices';
 import { runBash } from '../modes/bash';
 import { appendMemory } from '../modes/memory';
-import { dispatchHumanPrompt, sendHumanPrompt } from '../submit/send-human-prompt';
+import { dispatchHumanPrompt } from '../submit/send-human-prompt';
+import type { SessionControls } from '../../session/controls/types'; // P5 O9 M4
 import { startNoticeId } from '../../sessions/store'; // P2-A
 import { acquireSession, acquisitionWords } from '../../sessions/acquire'; // P2-A
 import { useSessions } from '../../stores/sessions'; // P2-A
@@ -80,7 +81,8 @@ export function appendHistory(client: MawsBridge, appSessionId: AppSessionId, s:
 // text in the draft quietly, the card being on screen; a session with no record refuses quietly, as before.
 // P2-F (L116): the size bound is checked by the seam once it has decided the prompt may go, so a session it refuses by
 // state keeps an oversized draft as quietly as any other.
-export async function submitHumanSerialized(client: MawsBridge, appSessionId: AppSessionId, s: Serialized, retry?: () => void): Promise<boolean> {
+// P5 O9 M4: the prompt goes through the session's controls port (lane B: the seam above).
+export async function submitHumanSerialized(controls: SessionControls, client: MawsBridge, appSessionId: AppSessionId, s: Serialized, retry?: () => void): Promise<boolean> {
   if (s.empty) return false;
   let tooLarge = false;
   const fits = () => {
@@ -88,7 +90,7 @@ export async function submitHumanSerialized(client: MawsBridge, appSessionId: Ap
     return !tooLarge;
   };
   try {
-    const result = await sendHumanPrompt(appSessionId, s.content, { origin: 'composer', display: s.display, pastedContents: s.pastedContents, precheck: fits }, client);
+    const result = await controls.send(s.content, { origin: 'composer', display: s.display, pastedContents: s.pastedContents, precheck: fits });
     if (result.disposition === 'held') return false;
     if (result.disposition === 'refused') {
       if (tooLarge) return false; // the pre-check said why

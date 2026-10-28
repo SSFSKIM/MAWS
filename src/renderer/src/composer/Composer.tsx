@@ -37,6 +37,7 @@ import { useSessionQueue } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
 import { gitAnswerOf } from '../sessions/branch-label'; // W9 (H2)
 import { availabilityIn, useAvailability } from '../sessions/availability'; // P2-A
+import { heldWords, useSessionControls } from '../session/controls/controls-for'; // P5 O9 M4
 import { holderWords } from '../sessions/holder-words'; // P2-A
 import { DictationNotice } from './dictation/MicControl'; // E9
 import { useDockedCards } from './docked/registry';
@@ -49,7 +50,7 @@ import { acquireBeforeMode, submitHumanSerialized, submitSerialized, type Dispat
 import { useEffectiveEffort } from './effective-effort'; // W3
 import { autoFallbackNotice } from '@shared/sessions/models'; // W3
 import { ResubmitLine } from './InlineEdit'; // W3 (B6)
-import { endedBindings, intentBindings, liveBindings, workspaceDirectoriesOf, type FrameBindings } from './frame/bindings';
+import { endedBindings, intentBindings, workspaceDirectoriesOf, type FrameBindings } from './frame/bindings';
 import { ContextRing } from './frame/ContextRing';
 import { Frame } from './frame/Frame';
 import { PluginBand, PluginHint } from './frame/PluginSites'; // R2
@@ -171,7 +172,10 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // W3: an unstarted tab names what the engine will use, the user's own settings included (read only)
   const userDefaults = useCommand('settings.userEngineDefaults', undefined, { enabled: unstarted, staleTime: 30_000 }).data ?? null;
   const availability = useAvailability(appSessionId); // P2-A: what the chips and the submit control may start
-  const bindings: FrameBindings = setup ? intentBindings(setup, { starting }, userDefaults) : status || record ? liveBindings(status, record, reads, client, availability) : endedBindings();
+  // P5 O9 M4: a started session's chips and controls are its port's (lane B: today's live bindings over this frame); a
+  // session no port drives is read-only, its chips refused with who holds it
+  const controls = useSessionControls(appSessionId, { client, frame: { status, reads, availability } });
+  const bindings: FrameBindings = setup ? intentBindings(setup, { starting }, userDefaults) : controls ? controls.bindings() : endedBindings(heldWords(appSessionId));
   // W3 (C5): the engine refused auto and the host set the fallback (requested auto, a refusal, another effective mode)
   const permission = status?.permissionMode ?? null;
   const modeNote = setup ? setup.options.autoModeNote : permission && permission.requested === 'auto' && permission.effective !== 'auto' && permission.refusal !== null ? autoFallbackNotice(permission.effective) : null;
@@ -283,7 +287,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     }
     // P2-0: the human seam owns steer-or-send, the acquisition (P2-A) and state refusals. The submit-state table above
     // still draws the button; `!` and `#` keep their existing mode gating and dispatch.
-    if (s.mode === 'send') return submitHumanSerialized(client, appSessionId, s, retry);
+    if (s.mode === 'send') return controls !== null && submitHumanSerialized(controls, client, appSessionId, s, retry);
     const decided = submitState({ status, intent: null, queue, empty: s.empty, mode: s.mode, availability: availabilityIn(useSessions.getState(), appSessionId), heldBy });
     if (!decided.enabled) return false;
     // P2-A: `!` and `#` on a record with no ready process acquire it first; a card they meet docks without their text,
@@ -295,18 +299,18 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
 
   // The plain stop (the Stop button): nothing runs after it (W1)
   const stop = () =>
-    void client.invoke('session.interrupt', { appSessionId, cancelEngineQueued: false, holdEngineQueued: true }).then((result) => {
+    void controls?.interrupt({ cancelEngineQueued: false, holdEngineQueued: true }).then((result) => {
       if (!result.ok) console.warn('[composer] session.interrupt failed', result.error);
     });
   // Esc's interrupt: a waiting `next` steer runs right after it (W1)
   const interrupt = () =>
-    void client.invoke('session.interrupt', { appSessionId, cancelEngineQueued: false }).then((result) => {
+    void controls?.interrupt({ cancelEngineQueued: false }).then((result) => {
       if (!result.ok) console.warn('[composer] session.interrupt failed', result.error);
     });
   const onPrimary = () => {
     if (decision.primary === 'stop') return stop();
     if (decision.primary === 'resume')
-      return void client.invoke('session.queue.setPaused', { appSessionId, paused: false }).then((result) => {
+      return void controls?.queue()?.setPaused({ paused: false }).then((result) => {
         if (!result.ok) toast({ level: 'warning', text: result.error.message, actions: [], dismissible: true }); // as the queued list does
       });
     handle.current?.submit();
@@ -325,7 +329,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       interrupt();
       return true;
     }
-    void client.invoke('session.queue.promote', { appSessionId, queueId: head.queueId, priority: steerPriority('interrupt_and_send') }).then((result) => {
+    void controls?.queue()?.promote({ queueId: head.queueId, priority: steerPriority('interrupt_and_send') }).then((result) => {
       if (!result.ok) toast({ level: 'warning', text: result.error.message, actions: [], dismissible: true });
     });
     return true;

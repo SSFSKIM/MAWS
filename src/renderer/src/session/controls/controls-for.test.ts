@@ -1,0 +1,87 @@
+// Which implementation of the controls port a session gets (P5 O9 M4): lane B for a session MAWS holds or nobody
+// holds (a contested one included); none yet for a session a terminal or a background job holds, which stays read-only.
+import { beforeEach, describe, expect, it } from 'vitest';
+import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
+import { item, record, status, T0 } from '../../../../../test/support/builders';
+import { fakeClient } from '../../../../../test/support/fake-client';
+import { TEST_MACHINE } from '../../../../../test/support/machine';
+import { resetQueueStore } from '../../stores/queue';
+import { useSessions } from '../../stores/sessions';
+import { answerSession, askSession, compactSession, controlsFor, sendToSession, sessionControls, stopSessionTask } from './controls-for';
+
+const APP = 'app-c' as AppSessionId;
+const UUID = '22222222-2222-4222-8222-222222222222' as MessageUuid;
+const terminal = { kind: 'terminal', pid: 4242 } as const;
+const job = { kind: 'background_job', pid: null, jobId: 'job-1' } as const;
+
+beforeEach(() => {
+  resetQueueStore();
+  useSessions.setState({ engine: new Map(), digests: new Map(), records: new Map() });
+});
+
+const inputs = () => ({ appSessionId: APP, client: fakeClient().client });
+
+describe('controlsFor', () => {
+  it.each<[string, SessionRecord['holder']]>([
+    ['held by MAWS', { kind: 'self' }],
+    ['held by MAWS and contested by a terminal', { kind: 'self', contestedBy: terminal }],
+    ['held by nobody', { kind: 'none' }],
+  ])('gives a session %s lane B', (_name, holder) => {
+    const controls = controlsFor(record(APP, { holder }), null, inputs());
+    expect(controls).not.toBeNull();
+    expect(controls!.queue()).not.toBeNull();
+    expect(controls!.capability('command')).toMatchObject({ available: false });
+  });
+
+  it('gives a session with no record lane B (an id the seam still sends to by its status)', () => {
+    expect(controlsFor(null, null, inputs())).not.toBeNull();
+  });
+
+  it.each<[string, SessionRecord['holder']]>([
+    ['a terminal', terminal],
+    ['a background job', job],
+  ])('gives a session held by %s no port: it stays read-only', (_name, holder) => {
+    expect(controlsFor(record(APP, { holder }), null, inputs())).toBeNull();
+  });
+});
+
+describe('a caller outside the pane', () => {
+  it('reaches the session’s port from the stores', async () => {
+    useSessions.setState({ records: new Map([[APP, record(APP)]]) });
+    useSessions.getState().applyStatus({ appSessionId: APP, status: status(APP) }, TEST_MACHINE);
+    const fake = fakeClient({ 'session.send': { disposition: 'sent', queueId: 'q', messageUuid: UUID }, 'session.queue.list': { entries: [], paused: false } });
+    expect(sessionControls(APP, fake.client)).not.toBeNull();
+    expect(await sendToSession(APP, 'hi', { origin: 'reply' }, fake.client)).toEqual({ disposition: 'sent', started: false, messageUuid: UUID });
+    expect(fake.invoked('session.send')).toEqual([{ appSessionId: APP, content: 'hi' }]);
+  });
+
+  it('is refused in the holder’s words, sending nothing, when a terminal holds the session', async () => {
+    useSessions.setState({ records: new Map([[APP, record(APP, { holder: terminal })]]) });
+    const fake = fakeClient();
+    expect(sessionControls(APP, fake.client)).toBeNull();
+    expect(await sendToSession(APP, 'hi', { origin: 'reply' }, fake.client)).toEqual({ disposition: 'refused', started: false, reason: 'Held by terminal · 4242' });
+    expect(fake.calls).toEqual([]);
+  });
+
+  it('answers, asks, compacts and stops through the port, each refused in the holder’s words when a job holds the session', async () => {
+    const fake = fakeClient({ 'session.answer': { outcome: 'delivered' }, 'session.sideQuestion': { opId: 'op' }, 'session.send': { disposition: 'sent', queueId: 'q', messageUuid: UUID }, 'session.stopTask': undefined });
+    const asked = item(APP, 'permission', T0);
+    const allow = { kind: 'permission', decision: 'allow', scope: 'once' } as const;
+    expect(await answerSession(asked, allow, fake.client)).toEqual({ ok: true, value: { outcome: 'delivered' } });
+    expect(await askSession(APP, 'why?', 'side-1', fake.client)).toEqual({ ok: true, value: { opId: 'op' } });
+    expect(await compactSession(APP, 'keep it short', fake.client)).toMatchObject({ state: 'done' });
+    expect(await stopSessionTask(APP, 'task-1', fake.client)).toEqual({ state: 'done' });
+    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: APP, question: 'why?', retryOf: 'side-1' }]);
+    expect(fake.invoked('session.send')).toEqual([{ appSessionId: APP, content: '/compact keep it short' }]);
+
+    useSessions.setState({ records: new Map([[APP, record(APP, { holder: job })]]) });
+    const none = fakeClient();
+    const held = 'Held by bg · job-1';
+    expect(await answerSession(asked, allow, none.client)).toEqual({ ok: false, error: { code: 'internal', message: held } });
+    expect(await askSession(APP, 'why?', undefined, none.client)).toEqual({ ok: false, error: { code: 'internal', message: held } });
+    expect(await compactSession(APP, undefined, none.client)).toEqual({ state: 'refused', code: 'held', message: held });
+    expect(await stopSessionTask(APP, 'task-1', none.client)).toEqual({ state: 'refused', code: 'held', message: held });
+    expect(none.calls).toEqual([]);
+  });
+});

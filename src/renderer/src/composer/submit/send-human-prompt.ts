@@ -5,6 +5,8 @@
 // acquired first (`session.acquire`, joining a start in flight) and then sent; `started` says this call launched the
 // engine or joined its launch, beside the host's own answer. A trust or relay card holds a composer message (`held`,
 // the text staying in the composer's draft until the host accepts it); no other origin's text is handed to a card.
+// P5 O9 M4: this seam is lane B's `send` behind the session's controls port (`session/controls/`); callers go through
+// the port, never here.
 import type { PastedContent } from '@shared/composer/history-entry';
 import type { SendContent } from '@shared/engine/session-state-store';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';

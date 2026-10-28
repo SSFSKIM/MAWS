@@ -3,13 +3,14 @@
 // as the next message (a headless local command; the compaction boundary follows in the transcript as C6's row) and
 // closes. It refuses while a turn is open (a mid-turn `/compact` would compact a conversation the human has not seen
 // end) and while messages wait in C3's queue, which a send never overtakes, naming why a paused queue paused.
+// P5 O9 M4: Compact now is the session's controls port's `compact` (lane B: that send).
 import { useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { contextTotal } from '@shared/wire/control';
 import { PAUSED_COPY } from '../composer/queue/QueueList';
 import { useSessionQueue } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
-import { ipc } from '../ipc/client';
+import { compactSession } from '../session/controls/controls-for'; // P5 O9 M4
 import { present as presentContext } from './ContextWidget';
 import { COMPACT, CONTEXT, FRAME, WIDGET_TITLE } from './copy';
 import { num } from './parts';
@@ -37,11 +38,13 @@ export function CompactWidget({ appSessionId, args, close }: { appSessionId: App
     setRefused(null);
     setUnanswered(null);
     const text = instructions.trim();
-    const result = await ipc.invoke('session.send', { appSessionId, content: text === '' ? '/compact' : `/compact ${text}` });
+    const result = await compactSession(appSessionId, text === '' ? undefined : text);
     setSending(false);
-    if (result.ok) return close();
-    setRefused(result.error.code === 'timeout' ? COMPACT.unanswered : result.error.message);
-    if (result.error.code === 'timeout') setUnanswered(moved);
+    if (result.state === 'done') return close();
+    // a timeout, or an outcome the session never confirmed, may still run
+    const unknown = result.state === 'unknown' || result.code === 'timeout';
+    setRefused(unknown ? COMPACT.unanswered : result.message);
+    if (unknown) setUnanswered(moved);
   };
 
   return (

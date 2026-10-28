@@ -8,7 +8,7 @@ import type { FirstMessage, SetupIntent, SetupIntentPatch } from '@shared/sessio
 import type { SetupResources, StartOutcome } from '@shared/sessions/setup';
 import { isEmptyDoc, liveDraftDoc } from '../composer/editor/drafts';
 import { appendHistory } from '../composer/editor/submit'; // P2-F (L118)
-import { sendHumanPrompt } from '../composer/submit/send-human-prompt'; // P2-A
+import { sendToSession } from '../session/controls/controls-for'; // P2-A; P5 O9 M4: through the session's controls port
 import { pickDirectModel } from '../gateway/direct-model'; // debt wave 4: the direct route's model refusal
 import { ipc } from '../ipc/client';
 import { clearComposer } from '../stores/composer'; // P2-A
@@ -156,7 +156,7 @@ async function continueRecord(appSessionId: AppSessionId, options: StartOptions,
       // the pasted segments go along: a card the seam's own acquisition docks again keeps them for the history row
       // P2-F F-C1: and `current` goes along, so a card dismissed during the seam's own awaits (a second acquisition, the
       // queue read) sends nothing and docks nothing again (X22: the continuation dies with its card)
-      const sent = await sendHumanPrompt(appSessionId, docked.content, { origin: 'composer', display: docked.display, current, ...(docked.pastedContents !== undefined && { pastedContents: docked.pastedContents }) });
+      const sent = await sendToSession(appSessionId, docked.content, { origin: 'composer', display: docked.display, current, ...(docked.pastedContents !== undefined && { pastedContents: docked.pastedContents }) });
       if (sent.disposition === 'refused' || sent.disposition === 'held') return refuse(sent.reason ?? 'The message was not sent');
       appendHistory(ipc, appSessionId, { display: docked.display, pastedContents: docked.pastedContents ?? {} }); // P2-F (L118): the host accepted it
       if (!current()) return dismissed; // dismissed during the send: the draft is the owner's again, never cleared

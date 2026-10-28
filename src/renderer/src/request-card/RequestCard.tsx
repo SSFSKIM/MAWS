@@ -20,6 +20,7 @@ import { SurfaceRow } from '../engine-surface/SurfaceRow';
 import { useNow } from '../app/use-now';
 import { DockedCardFrame } from '../composer/docked/DockedCardFrame';
 import { ipc } from '../ipc/client';
+import { answerSession } from '../session/controls/controls-for'; // P5 O9 M4
 import { BUTTON_LIKE_INPUTS } from '../keymap/dispatcher';
 import { useKeyChord } from '../keymap/useKeyChord';
 import { itemAge } from '../sidebar/derive';
@@ -72,7 +73,8 @@ const NOT_PENDING_MS = 2_000;
 type Phase = 'pending' | 'answering' | 'delivered' | 'not_pending' | 'closed';
 type Outcome = 'delivered' | 'not_pending' | 'write_failed';
 
-// The one delivery path: `session.answer`, its outcome, and a Retry that sends the same answer again.
+// The one delivery path: the session's controls port (lane B: `session.answer`), its outcome, and a Retry that sends
+// the same answer again.
 function useDelivery(item: AttentionItem, onAnswered: RequestCardProps['onAnswered']) {
   const [phase, setPhase] = useState<Phase>('pending');
   const [what, setWhat] = useState<string | null>(null);
@@ -88,7 +90,7 @@ function useDelivery(item: AttentionItem, onAnswered: RequestCardProps['onAnswer
         inFlight.current = true;
         setPhase('answering');
         setFailed(null);
-        const result = await ipc.invoke('session.answer', { appSessionId: item.appSessionId, requestId, answer });
+        const result = await answerSession(item, answer);
         inFlight.current = false;
         const outcome: Outcome = result.ok ? result.value.outcome : 'write_failed';
         onAnswered?.(outcome);
@@ -105,7 +107,7 @@ function useDelivery(item: AttentionItem, onAnswered: RequestCardProps['onAnswer
       };
       void send();
     },
-    [item.appSessionId, item.request, onAnswered],
+    [item, onAnswered],
   );
 
   useEffect(() => {

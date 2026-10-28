@@ -18,6 +18,7 @@ import { SIDE_ANSWER_CAP, SIDE_QUESTION_CAP } from '@shared/ipc/schema/side';
 import type { SideExchange } from '@shared/side/question';
 import type { SideQuestionResponse } from '@shared/wire/control';
 import { ipc } from '../ipc/client';
+import { askSession } from '../session/controls/controls-for'; // P5 O9 M4
 
 export type SideView = { kind: 'thread'; childAppSessionId: AppSessionId } | { kind: 'btw' };
 
@@ -110,15 +111,15 @@ export async function refreshSide(parent: AppSessionId, client: MawsBridge = ipc
   show(parent, result.value.exchanges);
 }
 
-// Asks the engine a side question beside the running turn: drawn pending at once, sent through the host (which adds
-// the earlier answers as `history`), and listed again once the host took it. `retryOf`: the failed host entry this
+// Asks the engine a side question beside the running turn: drawn pending at once, sent through the session's controls
+// port (lane B: the host, which adds the earlier answers as `history`), and listed again once the host took it. `retryOf`: the failed host entry this
 // question asks again, which the new one is drawn in place of.
 export async function askSide(parent: AppSessionId, question: string, client: MawsBridge = ipc, retryOf?: string): Promise<void> {
   const local: SideExchange = { id: `local:${++localSerial}`, question, state: 'pending', response: null, synthetic: false, error: null, askedAt: new Date().toISOString(), answeredAt: null };
   locals.set(parent, [...localsOf(parent), local]);
   if (retryOf !== undefined) standsIn.set(local.id, retryOf);
   show(parent, hostListed(parent));
-  const result = await client.invoke('session.sideQuestion', { appSessionId: parent, question, ...(retryOf !== undefined && { retryOf }) });
+  const result = await askSession(parent, question, retryOf, client); // P5 O9 M4: the session's controls port
   if (!result.ok) {
     locals.set(parent, localsOf(parent).map((e) => (e.id === local.id ? { ...e, state: 'failed', error: result.error.message, answeredAt: new Date().toISOString() } : e)));
     show(parent, hostListed(parent));

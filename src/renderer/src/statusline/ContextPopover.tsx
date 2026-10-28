@@ -8,7 +8,7 @@
 // on open; its Refresh (M3) is the owner's gesture that starts the session.
 import type { SessionRecord } from '@shared/graph/session';
 import type { GetContextUsageResponse } from '@shared/wire/control';
-import { ipc } from '../ipc/client';
+import { compactSession } from '../session/controls/controls-for'; // P5 O9 M4
 import { useCommand } from '../ipc/query';
 import { FRESHNESS, useObservedFacts } from '../sessions/observed'; // P2-A
 import { useSessionCatalog } from '../stores/catalog';
@@ -68,8 +68,8 @@ export function ContextPopoverBody({ record, close }: { record: SessionRecord; c
 
   const compact = async () => {
     close();
-    const result = await ipc.invoke('session.send', { appSessionId: id, content: '/compact' });
-    if (!result.ok) toast({ level: 'warning', text: `Compact did not start: ${result.error.message}`, actions: [], dismissible: true });
+    const result = await compactSession(id); // P5 O9 M4: the session's controls port (lane B: today's `/compact` send)
+    if (result.state === 'refused') toast({ level: 'warning', text: `Compact did not start: ${result.message}`, actions: [], dismissible: true });
   };
 
   const reading = (context: { percent: number; maxTokens: number }) => `${Math.round(context.percent)}% of ${tokens(context.maxTokens)} used`;

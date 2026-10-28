@@ -20,7 +20,8 @@ import { answerText } from '@shared/owner/answer';
 import type { MarkId } from '@shared/owner/marks';
 import type { AnswerOrigin } from '@shared/owner/state';
 import type { Choice } from '@shared/owner/to-human-parser';
-import { sendHumanPrompt, type HumanPromptResult } from '../../composer/submit/send-human-prompt';
+import type { HumanPromptResult } from '../../composer/submit/send-human-prompt';
+import { sendToSession } from '../../session/controls/controls-for'; // P5 O9 M4
 import { ipc } from '../../ipc/client';
 import { canTakeOver, takeOverSession } from '../../sessions/record-ops';
 import { useComposerStore } from '../../stores/composer';
@@ -71,7 +72,7 @@ export async function sendAnswer(appSessionId: AppSessionId, markId: MarkId, sen
   const sentAt = new Date().toISOString();
   let result: HumanPromptResult;
   try {
-    result = await sendHumanPrompt(appSessionId, send.text, { origin: send.origin }, client);
+    result = await sendToSession(appSessionId, send.text, { origin: send.origin }, client);
   } catch (error) {
     result = { disposition: 'refused', started: false, reason: messageOf(error) };
   }

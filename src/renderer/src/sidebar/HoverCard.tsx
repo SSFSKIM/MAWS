@@ -29,6 +29,7 @@ import { selectEndedWithErrorOf, selectPendingOf, useAttention } from '../stores
 import { useSessions } from '../stores/sessions';
 import { rowBranch, sessionAge } from './derive';
 import { displayTitle } from '../sessions/title';
+import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M4
 import { SidebarInteractionContext } from './interaction';
 import { SIDE_COPY } from '../side/copy'; // E3
 
@@ -163,6 +164,7 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
   });
   const now = useNow();
   const machine = useMachineMark(appSessionId);
+  const controlled = useSessionControls(appSessionId) !== null; // P5 O9 M4: a session held elsewhere takes no reply
   if (!record) return null;
   const glyph = glyphFor(record, digest, pending, ended, now);
   const waiting = waitingItem(pending);
@@ -209,7 +211,7 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
           <Request item={waiting.oldest} />
         </div>
       )}
-      {!pending.some((item) => item.kind === 'question') && !record.archived && record.holder.kind !== 'terminal' && record.holder.kind !== 'background_job' &&
+      {!pending.some((item) => item.kind === 'question') && !record.archived && controlled &&
         <QuickReply record={record} reply={reply} />}
     </div>
   );

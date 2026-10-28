@@ -23,6 +23,7 @@ import { record, status } from '../../../../test/support/builders';
 import { RELAY_POLL_MS } from './SetupCard';
 import { sendHumanPrompt } from '../composer/submit/send-human-prompt';
 import { submitHumanSerialized } from '../composer/editor/submit'; // P2-F (L118)
+import { sessionControls } from '../session/controls/controls-for'; // P5 O9 M4
 import { resetComposerStore, useComposerStore } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
 import { acquireSession } from './acquire';
@@ -603,7 +604,7 @@ describe('a record’s trust card and its continuation', () => {
     render(<Docked />);
     const pastedContents = { '1': { id: 1, type: 'text' as const, content: 'a long paste', contentHash: null, mediaType: null, filename: null } };
     const draft = { mode: 'send' as const, text: 'Look at a long paste', content: 'Look at a long paste', display: 'Look at [Pasted text #1]', pastedContents, omitted: 0, empty: false };
-    expect(await act(() => submitHumanSerialized(ipc, ID, draft))).toBe(false);
+    expect(await act(() => submitHumanSerialized(sessionControls(ID)!, ipc, ID, draft))).toBe(false);
     await waitFor(() => expect(useSetup.getState().cards.get(ID)?.message).toMatchObject({ content: draft.content, display: draft.display }));
     expect(fake.invoked('session.history.append')).toEqual([]);
     await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
@@ -618,7 +619,7 @@ describe('a record’s trust card and its continuation', () => {
     render(<Docked />);
     const pastedContents = { '1': { id: 1, type: 'text' as const, content: 'a long paste', contentHash: null, mediaType: null, filename: null } };
     const draft = { mode: 'send' as const, text: 'Look at a long paste', content: 'Look at a long paste', display: 'Look at [Pasted text #1]', pastedContents, omitted: 0, empty: false };
-    expect(await act(() => submitHumanSerialized(ipc, ID, draft))).toBe(false);
+    expect(await act(() => submitHumanSerialized(sessionControls(ID)!, ipc, ID, draft))).toBe(false);
     await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
     await waitFor(() => expect(fake.invoked('session.acquire')).toHaveLength(3)); // the continuation's, then the seam's again
     await waitFor(() => expect(useSetup.getState().cards.get(ID)?.message).toEqual({ content: draft.content, display: draft.display, pastedContents }));

@@ -1,7 +1,8 @@
 // A session tab's content (§5.4; C10's ask of C5). A session with a record reads as the transcript slot over the
 // composer zone: the docked request (the X4 slot, `placement: 'docked'`) above the composer slot, and nothing under it
-// (W2: §5.5 as amended 2026-10-01, the status line is gone). A foreign-live session gets the holder notice in place of
-// the composer and never a docked request (D-12). A session with no record yet is unstarted: the `newSession` slot
+// (W2: §5.5 as amended 2026-10-01, the status line is gone). A session with no controls port (P5 O9 M4: a foreign-live
+// one, held by a terminal or a background job) gets the holder notice in place of the composer and never a docked
+// request (D-12). A session with no record yet is unstarted: the `newSession` slot
 // (C10's heading and setup) with the composer frame centred beneath it and nothing else; it swaps to the ordinary pane
 // when the record arrives. In both placements the composer sits in the column the transcript's rows use
 // (`.thread-column`, W2: §5.4 as amended 2026-10-01, Codex's shared class), so the frame is exactly the transcript's
@@ -18,6 +19,7 @@ import { ipc } from '../ipc/client';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useSessions } from '../stores/sessions';
 import { HolderNotice } from './HolderNotice';
+import { useSessionControls } from './controls/controls-for'; // P5 O9 M4
 import { SessionTabNotes } from '../sessions/SessionDialogs'; // C10
 import { ReportBar } from '../owner/report/ReportBar'; // P2-C
 
@@ -57,11 +59,11 @@ function StartedPane({ record, paneIndex, compact }: { record: SessionRecord; pa
   const Composer = useSlot('composer');
   const pending = useAttention((s) => selectPendingOf(s, id));
   const { holder } = record;
-  const foreign = holder.kind === 'terminal' || holder.kind === 'background_job';
+  const readOnly = useSessionControls(id) === null; // P5 O9 M4: no port drives the session
   // A docked request is the session's oldest actionable item (the one its Needs-you row shows); held peer messages
   // are not requests.
   const waiting = waitingItem(pending);
-  const docked = !foreign && waiting?.tier === 1 && Composer === FALLBACKS.composer ? waiting.oldest : null; // C7: a registered composer is the one docked swap (it docks the request itself)
+  const docked = !readOnly && waiting?.tier === 1 && Composer === FALLBACKS.composer ? waiting.oldest : null; // C7: a registered composer is the one docked swap (it docks the request itself)
 
   return (
     <div className="flex h-full flex-col">
@@ -77,7 +79,7 @@ function StartedPane({ record, paneIndex, compact }: { record: SessionRecord; pa
           {/* C10 start: an interrupted delete's Finish deleting or Keep, and the card a resume waits on */}
           <SessionTabNotes appSessionId={id} />
           {/* C10 end */}
-          {foreign ? (
+          {readOnly && (holder.kind === 'terminal' || holder.kind === 'background_job') ? (
             // C10: the notice carries the session's id for its actions
             <HolderNotice appSessionId={id} holder={holder} />
           ) : (
