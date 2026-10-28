@@ -8,9 +8,11 @@
 // else the wrapper's MAWS_MAWSD_LABEL for MAWS_USER_DATA's profile, else `dev.maws.mawsd` for the default profile
 // (install.ts). Both options are the command line's own and are taken from any position.
 //
-// The enrollment code is read from a hidden prompt at a terminal, else from stdin to its end, never from argv, since it
-// carries a token and a pairing secret: an argument `enroll` does not know is refused without being echoed. It travels
-// only as `daemon.endpoint`'s `secret`, over machine.sock (0600), and nothing here prints or logs it.
+// The secret-reading commands, `enroll` (its member code) and `endpoint provision` (a `smns-provision-v2.` code, P5 O14
+// M1), read the code from a hidden prompt at a terminal, else from stdin to its end, never from argv, since it carries a
+// token and a pairing secret (a provisioning code a delegation's private key too): an argument the command does not know
+// is refused without being echoed. The code travels only as `daemon.endpoint`'s `secret`, over machine.sock (0600), and
+// nothing here prints or logs it. Each waits for the module as long as its `--wait` lets the module wait.
 import { closeSync, fstatSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { daemonPaths, type DaemonPaths } from '@shared/daemon/files';
@@ -29,7 +31,7 @@ import { USAGE as RUN_USAGE } from './run-args';
 import { DEFAULT_LABEL, UnitError, type CommandRunner, type UnitProgram } from './units/unit';
 
 export const EXIT = { done: 0, failed: 1, unavailable: 2, notRunning: 3, notListed: 4 } as const;
-const ENROLL_WAIT_DEFAULT_S = 300;
+const WAIT_DEFAULT_S = 300; // a bare `--wait`'s seconds, and `provision`'s wait when it is given none (the module's)
 const FOLLOW_INTERVAL_MS = 500;
 
 export const USAGE = `usage: mawsd <command> [--profile <dir>] [--label <label>]
@@ -40,6 +42,8 @@ export const USAGE = `usage: mawsd <command> [--profile <dir>] [--label <label>]
                                    the enrollment code is read from stdin or a prompt
   keys [--json]
   endpoint <command> [<argument>…] a command of the endpoint module (P5 O10)
+  endpoint provision [--name <name>] [--wait [<seconds>]] [--json]
+                                   the provisioning code is read from stdin or a prompt (P5 O14)
   install [--delegation-id <id>] [--runtime <node>] [--entry <mawsd.js>]
                                    on Linux the default profile's unit installs the pack it runs from (pnpm mawsd:pack)
   uninstall
@@ -92,7 +96,7 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
       case 'logs':
         return await logs(context, args);
       case 'enroll':
-        return await enroll(context, args);
+        return await withSecret(context, 'enroll', args);
       case 'keys':
         return await keys(context, args);
       case 'endpoint':
@@ -389,41 +393,52 @@ function readLog(file: string): string | null {
 async function endpoint(context: Context, args: readonly string[]): Promise<number> {
   const [command, ...rest] = args;
   if (command === undefined) throw new Usage('mawsd endpoint needs a command');
-  if (command === 'enroll') return enroll(context, rest);
+  if (Object.hasOwn(SECRET_COMMANDS, command)) return withSecret(context, command as SecretCommand, rest);
   if (command === 'keys') return keys(context, rest);
   return withDaemon(context, async (link) => answered(context.deps, await link.request('daemon.endpoint', { command, args: [...rest] })));
 }
 
-// The flags `enroll` passes to the module, `--wait` with its seconds made explicit; anything else is refused, unechoed,
-// since it may be the code itself.
-function enrollFlags(args: readonly string[]): { args: string[]; waitS: number | null } {
-  const refused = new Usage('enroll takes --name <name>, --replace, --wait [<seconds>] and --json; the enrollment code is read from stdin or a prompt, never from the command line');
+// The commands that read a secret, each with the flags it passes to the module and how long the module waits when no
+// `--wait` is given (null: it does not wait, and the request keeps its default deadline).
+const SECRET_COMMANDS = {
+  enroll: { code: 'enrollment code', flags: ['--replace', '--json'], usage: '--name <name>, --replace, --wait [<seconds>] and --json', unwaitedS: null },
+  provision: { code: 'provisioning code', flags: ['--json'], usage: '--name <name>, --wait [<seconds>] and --json', unwaitedS: WAIT_DEFAULT_S },
+} as const;
+type SecretCommand = keyof typeof SECRET_COMMANDS;
+
+// The flags a secret-reading command passes to the module, `--wait` with its seconds made explicit, and how long the
+// module may wait; anything else is refused, unechoed, since it may be the code itself.
+function secretFlags(command: SecretCommand, args: readonly string[]): { args: string[]; waitS: number | null } {
+  const spec = SECRET_COMMANDS[command];
+  const refused = new Usage(`${command} takes ${spec.usage}; the ${spec.code} is read from stdin or a prompt, never from the command line`);
   const out: string[] = [];
-  let waitS: number | null = null;
+  let waitS: number | null = spec.unwaitedS;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
-    if (arg === '--replace' || arg === '--json') out.push(arg);
+    if ((spec.flags as readonly string[]).includes(arg)) out.push(arg);
     else if (arg === '--name') {
       const name = args[++i];
       if (name === undefined) throw refused;
       out.push(arg, name);
     } else if (arg === '--wait') {
       const next = args[i + 1];
-      waitS = next !== undefined && /^\d+$/.test(next) ? Number(args[++i]) : ENROLL_WAIT_DEFAULT_S;
+      waitS = next !== undefined && /^\d+$/.test(next) ? Number(args[++i]) : WAIT_DEFAULT_S;
       out.push(arg, String(waitS));
     } else throw refused;
   }
   return { args: out, waitS };
 }
 
-async function enroll(context: Context, rawArgs: readonly string[]): Promise<number> {
+async function withSecret(context: Context, command: SecretCommand, rawArgs: readonly string[]): Promise<number> {
   const { deps } = context;
-  const { args, waitS } = enrollFlags(rawArgs);
+  const { code } = SECRET_COMMANDS[command];
+  const { args, waitS } = secretFlags(command, rawArgs);
   return withDaemon(context, async (link) => {
-    const secret = (deps.stdin.isTTY ? await deps.stdin.prompt('Enrollment code: ') : await deps.stdin.read()).trim();
-    if (secret === '') return failed(deps, 'no enrollment code was given (pipe it on stdin, or type it at the prompt)');
+    const question = `${code[0]!.toUpperCase()}${code.slice(1)}: `;
+    const secret = (deps.stdin.isTTY ? await deps.stdin.prompt(question) : await deps.stdin.read()).trim();
+    if (secret === '') return failed(deps, `no ${code} was given (pipe it on stdin, or type it at the prompt)`);
     const timeoutMs = waitS === null ? REQUEST_TIMEOUT_MS : waitS * 1000 + REQUEST_TIMEOUT_MS;
-    return answered(deps, await link.request('daemon.endpoint', { command: 'enroll', args, secret }, timeoutMs));
+    return answered(deps, await link.request('daemon.endpoint', { command, args, secret }, timeoutMs));
   });
 }
 

@@ -8,7 +8,8 @@
 // fetched once per item through `attention.request` and cached in the attention store. P5 O6 M5: the card always names
 // the session's machine, and for an offline machine says so and when it was last seen (the roster's `since`). Opening it answers nothing:
 // approval is an explicit click inside the card, and the slot offers it only for read-only tools. The project row's
-// card is `ProjectHoverCard.tsx`.
+// card is `ProjectHoverCard.tsx`. P5 O8 M2: a listed row's card (`ListedHoverCard`) says what its listing does: the title,
+// the machine, the state and when it was issued; no owners (M5) and no actions.
 import { HoverCard as Radix } from 'radix-ui';
 import { useCallback, useContext, useEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
@@ -22,12 +23,12 @@ import { useSlot } from '../app/slots';
 import { useNow } from '../app/use-now';
 import { holderLine, waitingItem } from '../attention/derive';
 import { GlyphMark } from '../attention/GlyphMark';
-import { glyphFor } from '../attention/glyph';
+import { glyphFor, listedGlyph } from '../attention/glyph';
 import { ipc } from '../ipc/client';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { selectEndedWithErrorOf, selectPendingOf, useAttention } from '../stores/attention';
 import { useSessions } from '../stores/sessions';
-import { rowBranch, sessionAge } from './derive';
+import { listedTitle, rowBranch, sessionAge } from './derive';
 import { displayTitle } from '../sessions/title';
 import { SidebarInteractionContext } from './interaction';
 import { SIDE_COPY } from '../side/copy'; // E3
@@ -211,6 +212,35 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
       )}
       {!pending.some((item) => item.kind === 'question') && !record.archived && record.holder.kind !== 'terminal' && record.holder.kind !== 'background_job' &&
         <QuickReply record={record} reply={reply} />}
+    </div>
+  );
+}
+
+// P5 O8 M2: another machine's listed session. Controlled, so a click on its row with no opener for its lane shows it.
+export function ListedHoverCard({ appId, title, open, onOpenChange, children }: { appId: AppSessionId; title: string; open: boolean; onOpenChange(open: boolean): void; children: ReactNode }) {
+  return <SidebarHoverCard label={title} open={open} onOpenChange={onOpenChange} content={<ListedBody appId={appId} />}>{children}</SidebarHoverCard>;
+}
+
+function ListedBody({ appId }: { appId: AppSessionId }) {
+  const listed = useSessions((s) => s.listed.get(appId));
+  const machine = useMachineMark(appId);
+  const now = useNow();
+  if (!listed) return null;
+  const glyph = listedGlyph(listed.state);
+  const issued = Date.parse(listed.issued);
+  const meta = [glyph.label, Number.isFinite(issued) ? `updated ${formatAgo(Math.max(0, now - issued), { narrow: true })}` : null].filter(Boolean).join(' · ');
+  return (
+    <div className="flex flex-col gap-2 text-ui-sm text-fg">
+      <div className="flex min-w-0 items-start gap-2">
+        <GlyphMark glyph={glyph} className="w-[14px] shrink-0 leading-[18px]" />
+        <h3 className="m-0 line-clamp-2 min-w-0 text-ui leading-[18px] font-semibold break-words">{listedTitle(listed)}</h3>
+      </div>
+      <p data-testid="hover-meta" className="m-0 text-fg-muted tabular-nums">
+        {meta}
+      </p>
+      <p data-testid="hover-machine" className={`m-0 truncate ${machine.offline ? 'text-fg-faint' : 'text-fg-muted'}`}>
+        {machine.offline ? [machine.name, 'offline', lastSeen(machine.since, now)].filter(Boolean).join(' · ') : machine.name}
+      </p>
     </div>
   );
 }

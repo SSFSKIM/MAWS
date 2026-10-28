@@ -1,7 +1,8 @@
 // `mawsd`'s command line (P5 O2 M6; docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M6 "The commands"), against the
 // daemon in this process (test/support/mawsd-scene.ts: stand-in hosts on real sockets) over its real `machine.sock`, and
 // fake unit managers (test/support/fake-units.ts) in a scratch home: what each command prints and exits with, the daemon
-// up and down, and the enrollment code's path (stdin or a prompt, never argv; sent as `secret`; never logged or printed).
+// up and down, and the secret-reading commands' path, `enroll`'s and `endpoint provision`'s (stdin or a prompt, never
+// argv; sent as `secret`; never logged or printed).
 import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
@@ -292,6 +293,44 @@ describe('mawsd enroll, keys and endpoint, through an endpoint module', () => {
     const endpoint = new FakeEndpoint();
     await scene.start({ endpoint });
     expect((await cli(['enroll'], { stdin: { isTTY: false, read: async () => ' \n', prompt: async () => '' } })).code).toBe(1);
+    expect(endpoint.calls).toEqual([]);
+  });
+
+  // `endpoint provision` (P5 O14 M1) reads its code as `enroll` does: a `smns-provision-v2.` code carries a delegation's
+  // private key and the hub's one-time token, so it is never an argument and never printed.
+  it('endpoint provision sends its code from piped stdin as `secret`, with its flags, and nothing logs the code', async () => {
+    const endpoint = new FakeEndpoint();
+    endpoint.answer = { code: 0, out: 'provisioned: d1_vm in o, certified under the delegation d1' };
+    await scene.start({ endpoint });
+    const { code, out, err } = await cli(['endpoint', 'provision', '--name', 'd1_vm', '--wait', '--json'], { stdin: { isTTY: false, read: async () => 'PROVISION-SECRET-1\n', prompt: async () => 'wrong' } });
+    expect(code).toBe(0);
+    expect(out).toBe('provisioned: d1_vm in o, certified under the delegation d1\n');
+    expect(endpoint.calls).toEqual([['provision', ['--name', 'd1_vm', '--wait', '300', '--json'], 'PROVISION-SECRET-1']]);
+    expect(`${out}${err}${scene.logs.join('\n')}`).not.toContain('PROVISION-SECRET-1');
+  });
+
+  it('endpoint provision at a terminal reads its code from a hidden prompt of its own', async () => {
+    const endpoint = new FakeEndpoint();
+    await scene.start({ endpoint });
+    const prompt = vi.fn(async () => 'PROVISION-SECRET-2');
+    const { code } = await cli(['endpoint', 'provision', '--wait', '5'], { stdin: { isTTY: true, read: async () => 'wrong', prompt } });
+    expect(code).toBe(0);
+    expect(prompt).toHaveBeenCalledWith('Provisioning code: ');
+    expect(endpoint.calls).toEqual([['provision', ['--wait', '5'], 'PROVISION-SECRET-2']]);
+  });
+
+  it('endpoint provision refuses what is not one of its flags, `enroll`’s --replace included, never echoing it, and an empty code', async () => {
+    const endpoint = new FakeEndpoint();
+    await scene.start({ endpoint });
+    const { code, out, err } = await cli(['endpoint', 'provision', 'smns-provision-v2.PROVISION-SECRET-3']);
+    expect(code).toBe(1);
+    expect(`${out}${err}`).not.toContain('PROVISION-SECRET-3');
+    expect(err).toContain('provision takes --name <name>, --wait [<seconds>] and --json; the provisioning code is read from stdin or a prompt, never from the command line');
+    expect((await cli(['endpoint', 'provision', '--replace'])).code).toBe(1);
+    expect((await cli(['endpoint', 'provision', '--name'])).code).toBe(1);
+    const empty = await cli(['endpoint', 'provision'], { stdin: { isTTY: false, read: async () => ' \n', prompt: async () => '' } });
+    expect(empty.code).toBe(1);
+    expect(empty.err).toContain('no provisioning code was given');
     expect(endpoint.calls).toEqual([]);
   });
 

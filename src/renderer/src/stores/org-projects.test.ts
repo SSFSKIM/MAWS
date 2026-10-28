@@ -3,9 +3,10 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { ProjectRecord } from '@shared/ipc/schema';
 import { addressOf } from '@shared/machine/address';
 import { machineKey, type OrgKey } from '@shared/machine/org-key';
-import { project, record } from '../../../../test/support/builders';
+import { project, record, remoteRow } from '../../../../test/support/builders';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
-import { localProjectOfSet, machineOrder, orgIndex, primaryCheckout, reachableCheckouts, sessionSetKey } from './org-projects';
+import { localProjectOfSet, machineOrder, orgIndex, primaryCheckout, reachableCheckouts, rowOfListed, sessionSetKey } from './org-projects';
+import type { ListedSession } from './sessions';
 
 // P5 O6 M5 ("Assembly"): every machine's projects grouped by their org key.
 const studio = <T extends string>(id: T): T => addressOf(OTHER_MACHINE, id);
@@ -62,5 +63,17 @@ describe('org projects', () => {
     expect(localProjectOfSet(state([fresh]), fresh.id, TEST_MACHINE)?.id).toBe(fresh.id);
     expect(localProjectOfSet(state([fresh]), 'none', TEST_MACHINE)).toBeUndefined();
     expect(localProjectOfSet(state([there]), there.id as ProjectId, TEST_MACHINE)).toBeUndefined();
+  });
+
+  // P5 O8 M2 ("How a row is filed")
+  it('files a listed session under its org key while listed, nowhere when that key’s checkouts are all hidden, else its machine’s row', () => {
+    const listed = (orgKey: string | null): ListedSession => ({ ...remoteRow(OTHER_MACHINE, 'r', { orgKey: orgKey as OrgKey | null }), appId: studio('r' as AppSessionId) });
+    const index = orgIndex([here, tmp], TEST_MACHINE);
+    expect(rowOfListed(index, listed('repo:maws'))).toBe('repo:maws');
+    expect(rowOfListed(index, listed(null))).toBe(machineKey(OTHER_MACHINE));
+    expect(rowOfListed(index, listed('repo:elsewhere'))).toBe(machineKey(OTHER_MACHINE));
+    expect(rowOfListed(index, listed(`folder:${OTHER_MACHINE}:tmp`))).toBe(machineKey(OTHER_MACHINE)); // a key with no checkout
+    expect(rowOfListed(index, listed(`folder:${OTHER_MACHINE}:tmp`), new Set([`folder:${OTHER_MACHINE}:tmp` as OrgKey]))).toBe(`folder:${OTHER_MACHINE}:tmp`);
+    expect(rowOfListed(orgIndex([{ ...here, hidden: true }], TEST_MACHINE), listed('repo:maws'))).toBeNull();
   });
 });

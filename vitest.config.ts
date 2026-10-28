@@ -49,6 +49,7 @@ const TIMING_NODE_TESTS = [
   'test/machines/remote-link.test.ts', // P5 O7 M1: main's RL2 link against a real endpoint on its direct listener (real sockets, the handshake's WebCrypto)
   'test/machines/remote-link.local.test.ts', // P5 O7 M1: the link over the hub's multiplex (desk-hub's Worker in Miniflare), a relay drop, the switch to direct, the hub away
   'test/org/sign-in.local.test.ts', // P5 O8 M1: the app's sign-in against desk-hub's Worker in Miniflare, O13's real `pair` approving
+  'test/org/rows.local.test.ts', // P5 O8 M2: a real endpoint's listings as rows through desk-hub's Worker in Miniflare and the app's feed
   'src/mawsd/process-endpoint.test.ts', // P5 O10 M10: the built mawsd and its endpoint as processes, enrolling against desk-hub's Worker in Miniflare
 ];
 const TIMING_RENDERER_TESTS = [

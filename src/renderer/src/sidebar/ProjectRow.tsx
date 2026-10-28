@@ -11,7 +11,7 @@
 // sessions from every machine, and it names no machine (T4); its actions act on its checkout (`entry.project`), and New
 // chat only on this machine's (another machine's is O7's picker). Each machine's own row (T3: its name, after the
 // projects) is the same row without hover actions or a card, with a context menu for its archived sessions. A row whose
-// machines are all offline greys (T2).
+// machines are all offline greys (T2). P5 O8 M2: other machines' listed sessions sit among its sessions (`ListedRow.tsx`).
 import { useState } from 'react';
 import type { ProjectId } from '@shared/graph/ids';
 import { machineOf } from '@shared/machine/address';
@@ -21,7 +21,8 @@ import { selectOffline, useMachines } from '../stores/machines';
 import { FolderIcon, Icon, PlusIcon, SearchIcon } from '../app/IconButton';
 import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { DisclosureBody } from '../ui/disclosure';
-import type { ProjectEntry, ProjectKey, SessionTreeRow } from './derive';
+import { isListedRow, type ProjectEntry, type ProjectKey, type SidebarTreeRow } from './derive';
+import { ListedRow } from './ListedRow'; // P5 O8 M2
 import { focusVisible } from './HoverCard';
 import { ProjectHoverCard } from './ProjectHoverCard';
 import { runProjectAction, useProjectActionEnabled } from './project-actions';
@@ -32,7 +33,7 @@ import { moreNodeId, projectNodeId, useTree } from './tree';
 export interface ProjectRowProps {
   entry: ProjectEntry;
   open: boolean;
-  sessions: SessionTreeRow[]; // the rows shown while open (ordered, capped by trees, E3's nested under their parent); empty while closed
+  sessions: SidebarTreeRow[]; // the rows shown while open (ordered, capped by trees, E3's nested under their parent; P5 O8 M2's listed rows among them); empty while closed
   matchCount?: number;
   more: number; // how many more "Show more" reveals; 0: no Show more row
   onToggle(key: ProjectKey): void;
@@ -110,9 +111,13 @@ export function ProjectRow({ entry, open, sessions, more, matchCount, onToggle, 
         line
       )}
       <DisclosureBody open={open} role="group" aria-label={name} className="pt-px pb-2">
-        {shown.sessions.map(({ record, depth }) => (
-          <SessionRow key={record.appId} record={record} level={2 + depth} /* E3: under its lineage parent, at its real depth */ />
-        ))}
+        {shown.sessions.map((row) =>
+          isListedRow(row) ? (
+            <ListedRow key={row.listed.appId} listed={row.listed} level={2} />
+          ) : (
+            <SessionRow key={row.record.appId} record={row.record} level={2 + row.depth} /* E3: under its lineage parent, at its real depth */ />
+          ),
+        )}
         {shown.more > 0 && <ShowMoreRow id={moreNodeId(key)} level={2} onShow={() => onShowMore(key)} />}
       </DisclosureBody>
     </div>

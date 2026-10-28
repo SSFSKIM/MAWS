@@ -9,10 +9,11 @@ import type { NeedsYouRow } from '../attention/derive';
 import { dateFormats, formatAgo } from '@shared/app/date-format';
 import { lastActivity, sortSessions, type SidebarSort } from '../overview/derive';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
-import { displayTitle } from '../sessions/title'; // E3
+import { displayTitle, NEW_CHAT } from '../sessions/title'; // E3
 import { projectLabels } from './project-labels';
 import type { MachineRef } from '@shared/machine/ref';
-import { machineOfRow, machineOrder, machineProject, orgIndex, orgKeyOf, primaryCheckout, rowOfSession, type OrgProject, type RowKey } from '../stores/org-projects'; // P5 O6 M5
+import { machineOfRow, machineOrder, machineProject, orgIndex, orgKeyOf, primaryCheckout, rowOfListed, rowOfSession, type OrgProject, type RowKey } from '../stores/org-projects'; // P5 O6 M5
+import type { ListedSession } from '../stores/sessions'; // P5 O8 M2
 import { SIDE_COPY } from '../side/copy'; // E3
 
 // P5 O6 M5: a row is an org project's, keyed by its org key (an address while its machine has not derived it), or a
@@ -35,6 +36,19 @@ export function sessionMatcher(query: string, projects: ReadonlyMap<ProjectId, P
     (branchLabel(recordBranch(record))?.toLowerCase().includes(q) ?? false); // P2-D
 }
 
+// P5 O8 M2: a listed row's title, "New chat" while its listing has none (as `displayTitle` reads a record's); the search
+// matches a listed row by its title alone.
+export const listedTitle = (listed: Pick<ListedSession, 'title'>): string => (listed.title.trim() === '' ? NEW_CHAT : listed.title);
+export function listedMatcher(query: string): (listed: ListedSession) => boolean {
+  const q = query.trim().toLowerCase();
+  return q === '' ? () => true : (listed) => listedTitle(listed).toLowerCase().includes(q);
+}
+// A listed row's last activity: when its listing was issued.
+const issuedAt = (listed: ListedSession): number => {
+  const at = Date.parse(listed.issued);
+  return Number.isFinite(at) ? at : Number.NEGATIVE_INFINITY;
+};
+
 // ---- the project list --------------------------------------------------------------------------------------------------
 
 export interface ProjectListInput {
@@ -45,6 +59,7 @@ export interface ProjectListInput {
   local: MachineRef;
   machineName(machine: MachineRef): string;
   alsoListed?: ReadonlySet<ProjectKey>; // keys listed for the moment though no checkout lists them (the project filter's)
+  listed?: ReadonlyMap<AppSessionId, ListedSession>; // P5 O8 M2: other machines' listed sessions (the sessions store's)
 }
 
 export interface ProjectEntry {
@@ -54,6 +69,7 @@ export interface ProjectEntry {
   machine: MachineRef | null; // a machine row's machine; null for an org project's
   name: string;
   sessions: SessionRecord[]; // not archived, unsorted
+  listed: ListedSession[]; // P5 O8 M2: the listed rows drawn under it, unsorted
   rollup: { waiting: number; working: number };
   lastActivity: number | null; // W11 (I6): the latest movement of any of its sessions, archived ones included; null without one
 }
@@ -63,17 +79,33 @@ export interface ProjectEntry {
 // counts and its last activity; a hidden project's sessions are in none. Org projects are sorted by recency of activity:
 // the latest movement of any of their sessions (archived ones included, so archiving does not demote a project), one
 // without sessions by when its checkout was added; ties by its checkout's order, then the name.
-export function projectList({ records, digests, projects, rows, local, machineName, alsoListed }: ProjectListInput): ProjectEntry[] {
+//
+// P5 O8 M2 ("Drawing", membership): another machine's listed session the member owns joins the row `rowOfListed` files it
+// under, unless a record holds its address (the yield rule: the record's row is drawn); its issue counts as activity, and
+// a listed row waiting or busy adds to the counts.
+export function projectList({ records, digests, projects, rows, local, machineName, alsoListed, listed: remoteSessions = new Map() }: ProjectListInput): ProjectEntry[] {
   const index = orgIndex(projects.values(), local);
   const waiting = new Set(rows.map((row) => row.appSessionId));
-  const grouped = new Map<ProjectKey, { live: SessionRecord[]; activity: number }>();
+  const grouped = new Map<ProjectKey, { live: SessionRecord[]; listed: ListedSession[]; activity: number }>();
+  const groupOf = (key: ProjectKey) => {
+    let entry = grouped.get(key);
+    if (!entry) grouped.set(key, (entry = { live: [], listed: [], activity: Number.NEGATIVE_INFINITY }));
+    return entry;
+  };
   for (const record of records.values()) {
     const key = rowOfSession(index, projects, record, alsoListed);
     if (key === null) continue; // a hidden project's: nowhere
-    const entry = grouped.get(key) ?? { live: [], activity: Number.NEGATIVE_INFINITY };
-    if (!grouped.has(key)) grouped.set(key, entry);
+    const entry = groupOf(key);
     entry.activity = Math.max(entry.activity, lastActivity(record, digests.get(record.appId)));
     if (!record.archived) entry.live.push(record);
+  }
+  for (const session of remoteSessions.values()) {
+    if (!session.mine || records.has(session.appId)) continue;
+    const key = rowOfListed(index, session, alsoListed);
+    if (key === null) continue; // an all-hidden project's: nowhere
+    const entry = groupOf(key);
+    entry.activity = Math.max(entry.activity, issuedAt(session));
+    entry.listed.push(session);
   }
   const listedKeys = [...index.orgs.keys()].filter((key) => index.listed.has(key) || alsoListed?.has(key));
   const primaries = new Map(listedKeys.flatMap((key) => {
@@ -84,6 +116,8 @@ export function projectList({ records, digests, projects, rows, local, machineNa
   const entryOf = (org: OrgProject, project: ProjectRecord | null, machine: MachineRef | null, name: string): ProjectEntry => {
     const group = grouped.get(org.id);
     const sessions = group?.live ?? [];
+    const remote = group?.listed ?? [];
+    const count = (state: string) => remote.filter((l) => l.state === state).length;
     return {
       key: org.id,
       org,
@@ -91,7 +125,11 @@ export function projectList({ records, digests, projects, rows, local, machineNa
       machine,
       name,
       sessions,
-      rollup: { waiting: sessions.filter((r) => waiting.has(r.appId)).length, working: sessions.filter((r) => isWorking(digests.get(r.appId))).length },
+      listed: remote,
+      rollup: {
+        waiting: sessions.filter((r) => waiting.has(r.appId)).length + count('waiting'),
+        working: sessions.filter((r) => isWorking(digests.get(r.appId))).length + count('busy'),
+      },
       lastActivity: group && Number.isFinite(group.activity) ? group.activity : null,
     };
   };
@@ -100,17 +138,18 @@ export function projectList({ records, digests, projects, rows, local, machineNa
     .sort((a, b) => b.activity - a.activity || a.entry.project!.order - b.entry.project!.order || a.entry.name.localeCompare(b.entry.name))
     .map(({ entry }) => entry);
   const machines = [...new Set([...grouped.keys()].map(machineOfRow).filter((m) => m !== null))].sort(machineOrder(local, machineName));
-  const own = machines.map((machine) => entryOf(machineProject(machine, machineName(machine)), null, machine, machineName(machine))).filter((entry) => entry.sessions.length > 0);
+  const own = machines.map((machine) => entryOf(machineProject(machine, machineName(machine)), null, machine, machineName(machine))).filter((entry) => entry.sessions.length > 0 || entry.listed.length > 0);
   return [...listed, ...own];
 }
 
 
 // The list while searching: the org projects whose name matches, and every row holding a session that matches.
-export function filterProjectList(entries: ProjectEntry[], query: string, projects: ReadonlyMap<ProjectId, ProjectRecord>): ProjectEntry[] {
+export function filterProjectList<E extends ProjectEntry>(entries: E[], query: string, projects: ReadonlyMap<ProjectId, ProjectRecord>): E[] {
   const q = query.trim().toLowerCase();
   if (q === '') return entries;
   const matches = sessionMatcher(query, projects);
-  return entries.filter((e) => (e.machine === null && e.name.toLowerCase().includes(q)) || e.sessions.some(matches));
+  const matchesListed = listedMatcher(query);
+  return entries.filter((e) => (e.machine === null && e.name.toLowerCase().includes(q)) || e.sessions.some(matches) || e.listed.some(matchesListed));
 }
 
 // The projects in order of recency, as the sidebar ranks its rows (a New chat's project picker): the latest movement of
@@ -208,6 +247,66 @@ export function lineageCaption(record: SessionRecord, nested: boolean, parentTit
   return label !== null && label !== displayTitle(record) ? label : null;
 }
 // E3 end
+
+// P5 O8 M2 ("Drawing", membership): an expanded project's records and listed rows in one ordering by last activity (a
+// record's `lastActivity`, a listed row's `issued`), under the same caps and Show more. What the chosen sort puts first
+// stays first: pinned records, and under `priority` the records it ranks by attention, unread or work; the listed rows
+// carry none of those and merge among the rest by recency. Lineage nests records only; a listed row is a tree of one.
+export type SidebarSession = { kind: 'record'; record: SessionRecord } | { kind: 'listed'; listed: ListedSession };
+export interface ListedTreeRow {
+  listed: ListedSession;
+  nestedUnder: null;
+  depth: 0;
+}
+export type SidebarTreeRow = SessionTreeRow | ListedTreeRow;
+export interface SidebarTree {
+  root: SidebarSession;
+  rows: SidebarTreeRow[];
+}
+export const isListedRow = (row: SidebarTreeRow): row is ListedTreeRow => 'listed' in row;
+export const sidebarSessionId = (session: SidebarSession): AppSessionId => (session.kind === 'record' ? session.record.appId : session.listed.appId);
+
+export interface ProjectItemsInput {
+  sorted: readonly SessionRecord[]; // `projectSessions`'s order
+  listed: readonly ListedSession[];
+  digests: ReadonlyMap<AppSessionId, SessionDigest>;
+  rows: NeedsYouRow[];
+  sort: SidebarSort;
+}
+
+export function projectItems({ sorted, listed, digests, rows, sort }: ProjectItemsInput): SidebarSession[] {
+  const waiting = new Set(rows.map((row) => row.appSessionId));
+  const leads = (r: SessionRecord) => r.pinned || (sort === 'priority' && (waiting.has(r.appId) || r.unread || isWorking(digests.get(r.appId))));
+  const split = sorted.findIndex((r) => !leads(r));
+  const head = split === -1 ? sorted : sorted.slice(0, split);
+  const rest = split === -1 ? [] : sorted.slice(split);
+  const remote = [...listed].sort((a, b) => issuedAt(b) - issuedAt(a) || listedTitle(a).localeCompare(listedTitle(b)));
+  const out: SidebarSession[] = head.map((record) => ({ kind: 'record', record }));
+  let i = 0;
+  let j = 0;
+  while (i < rest.length || j < remote.length) {
+    const record = rest[i];
+    if (j >= remote.length || (record !== undefined && lastActivity(record, digests.get(record.appId)) >= issuedAt(remote[j]))) {
+      out.push({ kind: 'record', record });
+      i++;
+    } else {
+      out.push({ kind: 'listed', listed: remote[j] });
+      j++;
+    }
+  }
+  return out;
+}
+
+// The trees the caps count, in the items' order: each record's lineage tree (`nestLineage`) where its root sits, each
+// listed row a tree of one.
+export function nestItems(items: readonly SidebarSession[]): SidebarTree[] {
+  const trees = new Map(nestLineage(items.flatMap((i) => (i.kind === 'record' ? [i.record] : []))).map((tree) => [tree.root.appId, tree]));
+  return items.flatMap((item): SidebarTree[] => {
+    if (item.kind === 'listed') return [{ root: item, rows: [{ listed: item.listed, nestedUnder: null, depth: 0 }] }];
+    const tree = trees.get(item.record.appId);
+    return tree ? [{ root: item, rows: tree.rows }] : [];
+  });
+}
 
 // ---- row text ----------------------------------------------------------------------------------------------------------
 

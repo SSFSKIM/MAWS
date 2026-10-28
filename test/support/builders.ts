@@ -6,6 +6,8 @@ import type { AppSessionId, AttentionId, ProjectId, RequestId, SessionId } from 
 import type { SessionRecord } from '../../src/shared/graph/session';
 import type { EngineSessionStatus } from '../../src/shared/engine/status';
 import type { ProjectRecord, SessionDigest } from '../../src/shared/ipc/schema/session';
+import type { RemoteRow } from '../../src/shared/ipc/schema/org';
+import type { MachineRef } from '../../src/shared/machine/ref';
 import type { DaemonStatus } from '../../src/shared/ipc/schema/daemon'; // P5 O2 M7
 import { expandEngine, type CompactEngine } from './scenario';
 
@@ -23,6 +25,14 @@ export function record(appId: string, over: Partial<SessionRecord> = {}): Sessio
 
 export function project(id: string, order: number, over: Partial<ProjectRecord> = {}): ProjectRecord {
   return { id: id as ProjectId, name: id, directory: `/work/${id}`, order, createdAt: T0, ...over };
+}
+
+// P5 O8 M2: another machine's session as its listing's row says it (main's `org.rows`): lane B, idle, the member's own.
+export function remoteRow(machine: MachineRef, session: string, over: Partial<RemoteRow> = {}): RemoteRow {
+  return {
+    machine, session, lane: 'B', state: 'idle', title: session, owners: ['member-1'], project: null, orgKey: null, availability: null,
+    revision: 1, issued: T0, mine: true, ...over,
+  };
 }
 
 export function item(appSessionId: string, kind: AttentionKind, createdAt: string, over: Partial<AttentionItem> = {}): AttentionItem {
