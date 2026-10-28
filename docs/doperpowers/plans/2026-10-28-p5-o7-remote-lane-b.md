@@ -793,6 +793,10 @@ Each is built provisionally as recommended, unless it says otherwise, and change
   Rationale: verified against `src/shared/host/op-ledger.ts` `begin`.
   Date/Author: 2026-10-28, O7's planner.
 
+- Decision: The third round, narrowed to that fix, found nothing (approve at `edc83be65`). The review has converged: rounds of 5, then 1, then 0 findings.
+  Rationale: the skill's stop rule; a round that yields nothing worth changing.
+  Date/Author: 2026-10-28, O7's planner.
+
 The residue for P5's Decision Log. Each item is decided where it binds (M1 unless marked), with the alternative it rejected:
 
 1. M1 defines `OrgSession` and holds `signedOut()` in production, plus a development source behind `MAWS_DEV_ORG` in unpackaged builds; O8's sign-in implements it. Rejected: O7 building sign-in, so that two children build it.
