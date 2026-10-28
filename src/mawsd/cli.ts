@@ -18,7 +18,7 @@ import { defaultProfileDir } from '@shared/daemon/profile';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import { DaemonStatusSchema, type DaemonHost, type DaemonStatus } from '@shared/ipc/schema/daemon';
 import { readTolerant } from '@shared/ipc/tolerant';
-import { readMachineRef } from '@shared/machine/identity-file';
+import { IDENTITY_FILE, readMachineRef } from '@shared/machine/identity-file';
 import { SUPERVISOR_FILES } from '../engine-host/supervisor-files';
 import { PTY_HOST_FILES } from '../pty-host/files';
 import { NO_ENDPOINT_MODULE } from './endpoint-seam';
@@ -475,6 +475,7 @@ async function install(context: Context, args: readonly string[]): Promise<numbe
   const change = { loaded: 'loaded', unchanged: 'unchanged', updated: 'updated and restarted' }[result.change];
   const linked = result.linked === null ? '' : result.linked === 'other' ? ` · ${join(deps.home, '.local', 'bin', 'mawsd')} is another mawsd, left as it is` : ` · linked from ${result.linked}`;
   const release = result.release === null ? [] : [releaseLine(result.release, deps.home)];
+  if (result.ignoredDelegationId !== null) deps.err(`warning: ${join(profileDir, IDENTITY_FILE)} already holds the machine ref ${result.ref}, which is never re-minted; --delegation-id ${result.ignoredDelegationId} was ignored\n`); // O14 residue 9
   deps.out([...release, `unit ${result.unit.name} ${change} (${result.unit.file})`, `wrapper ${result.wrapper}${linked}`, ...(result.ref ? [`machine ${result.ref}`] : []), ''].join('\n'));
   return EXIT.done;
 }

@@ -342,6 +342,18 @@ describe('mawsd install and uninstall', () => {
     expect(managers.calls).toEqual([]);
   });
 
+  it('warns, naming the existing ref and the id, when --delegation-id meets an identity the profile already has; the install still succeeds (O14 residue 9)', async () => {
+    const label = 'dev.maws.mawsd.e2e-9';
+    const ref = readOrMintMachineRef(scene.root);
+    const installed = await cli(['install', '--label', label, '--delegation-id', '0123456789abcdef0123456789abcdef']);
+    expect(installed.code).toBe(0);
+    expect(installed.out).toContain(`unit ${label} loaded`);
+    expect(installed.err).toContain(ref);
+    expect(installed.err).toContain('0123456789abcdef0123456789abcdef');
+    expect(installed.err).toContain(join(scene.root, 'machine.json'));
+    expect((await cli(['install', '--label', label])).err).toBe(''); // no flag, no warning
+  });
+
   it('refuses to install the default profile’s unit for a build that is not packaged, writing nothing', async () => {
     const refused = await cli(['install'], { env: {} }); // the default profile, so dev.maws.mawsd; this CLI runs from /opt/maws/out
     expect(refused.code).toBe(1);

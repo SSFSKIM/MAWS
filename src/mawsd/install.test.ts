@@ -5,7 +5,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readMachineRef } from '@shared/machine/identity-file';
+import { readMachineRef, readOrMintMachineRef } from '@shared/machine/identity-file';
 import { MachineRefSchema } from '@shared/machine/ref';
 import { fakePack, packProgram } from '../../test/support/fake-pack';
 import { FakeManagers } from '../../test/support/fake-units';
@@ -262,6 +262,18 @@ describe('install --delegation-id', () => {
     const again = await installDaemon({ profileDir, label: 'dev.maws.mawsd', program: linuxProgram(), delegationId: 'fedcba9876543210fedcba9876543210' }, deps('linux'));
     expect(again.ref).toBe(ref); // an existing ref is never rewritten
     expect(readMachineRef(profileDir)).toBe(ref);
+    expect(installed.ignoredDelegationId).toBeNull();
+    expect(again.ignoredDelegationId).toBe('fedcba9876543210fedcba9876543210'); // O14 residue 9: said, not silent
+    const same = await installDaemon({ profileDir, label: 'dev.maws.mawsd', program: linuxProgram(), delegationId: DELEGATION }, deps('linux'));
+    expect(same.ignoredDelegationId).toBeNull(); // the existing ref is already this delegation's
+  });
+
+  it('names an existing unprefixed identity\'s id as ignored too, and an install without the flag ignores nothing', async () => {
+    const profileDir = linuxProfile();
+    const plain = readOrMintMachineRef(profileDir);
+    const installed = await installDaemon({ profileDir, label: 'dev.maws.mawsd', program: linuxProgram(), delegationId: DELEGATION }, deps('linux'));
+    expect(installed).toMatchObject({ ref: plain, ignoredDelegationId: DELEGATION });
+    expect((await installDaemon({ profileDir, label: 'dev.maws.mawsd', program: linuxProgram() }, deps('linux'))).ignoredDelegationId).toBeNull();
   });
 });
 

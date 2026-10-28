@@ -7,7 +7,8 @@
 // (residue 21: never a checkout; on Linux a pack, which M8 installs as the release directory's `current`, release.ts,
 // and the unit runs `current`); the profile's `mawsd/` directory made private (a symlink, another
 // owner or a wider mode refuses the install, writing no unit); with `--delegation-id`, the profile's machine ref minted
-// with the delegation's id as its prefix when it has none (before the unit's first start, so the daemon reads it); the
+// with the delegation's id as its prefix when it has none (before the unit's first start, so the daemon reads it), and
+// an existing ref without that prefix kept and the id reported as ignored (O14 residue 9: the CLI warns); the
 // wrapper `<profile>/mawsd/bin/mawsd` and, for the default profile, its link `~/.local/bin/mawsd`; then the unit applied
 // (units/unit.ts's `apply`: written when changed, loaded, the daemon restarted when a loaded unit changed, or when
 // `current` now names another release). On Linux the release is activated as one transition: a failure after `current`
@@ -114,6 +115,9 @@ export interface InstallResult {
   wrapper: string;
   linked: string | 'other' | null; // the link's path; 'other' when another mawsd is there; null when none is made
   ref: MachineRef | null; // the ref, when --delegation-id asked for one
+  // O14 residue 9: the --delegation-id the profile's existing identity did not take (it is never re-minted); null when
+  // none was given or the ref already carries it as its prefix
+  ignoredDelegationId: string | null;
   release: InstalledRelease | null; // the Linux canonical unit's release (release.ts); null otherwise
 }
 
@@ -128,6 +132,7 @@ export async function installDaemon(options: InstallOptions, deps: InstallDeps):
   mkdirSync(profileDir, { recursive: true, mode: 0o700 });
   makePrivateDirectory(join(profileDir, DAEMON_FILES.dir));
   const ref = delegationId === undefined ? null : readOrMintMachineRef(profileDir, { prefix: delegationId });
+  const ignoredDelegationId = delegationId !== undefined && ref !== null && !ref.startsWith(`${delegationId}_`) ? delegationId : null;
   const flip = pack === null ? null : installRelease(pack, deps.home);
   const spec: UnitSpec = { label, profileDir, program: pack === null ? options.program : releaseProgram(deps.home) };
 
@@ -153,7 +158,7 @@ export async function installDaemon(options: InstallOptions, deps: InstallDeps):
     throw error;
   }
   const release = flip === null ? null : { ...flip, pruned: pruneReleases(deps.home) };
-  return { unit, change, wrapper, linked, ref, release };
+  return { unit, change, wrapper, linked, ref, ignoredDelegationId, release };
 }
 
 export interface UninstallResult {
