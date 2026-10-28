@@ -104,7 +104,7 @@ Applied in M3; M1 and M2 work at today's paths. A file's test moves with it. A c
 | `src/main/side/**`, `src/main/history/**`, `src/main/owner/**` | `src/services/{side,history,owner}/**` | spine |
 | `src/main/attention/{service,store,file-attention-store}.ts` | `src/services/attention/` | spine |
 | `src/main/settings/{machine,split,spine-lock,engine-configure,host-configure,session-settings,user-engine-defaults}.ts` | `src/services/settings/` | spine |
-| `src/main/library/{store,sync,source,register,index}.ts` | `src/services/library/` (`index.ts` without the files part, D22) | spine |
+| `src/main/library/{store,sync,source,register,index}.ts` | `src/services/library/` (`index.ts` without the files part since M1, D22) | spine |
 | `src/main/git/{worktrees,worktrees-register}.ts` | `src/services/git/` | spine |
 | `src/main/artifacts/defaults.ts` | `src/services/artifacts/defaults.ts` | spine |
 | `src/main/machine/identity.ts` | `src/services/machine/identity.ts` (D15) | library, called first by each root as today |
@@ -131,11 +131,11 @@ Applied in M3; M1 and M2 work at today's paths. A file's test moves with it. A c
 
 The order is M1 to M6, each on the one branch. M1 and M2 work in place, so their diffs are logic and stay small; M3 is the mechanical move with nothing else in it; M4 extracts the roots in their final place; M5 needs M4's services entry; M6 lands.
 
-### M1 — The services bus: the library stops importing main's IPC
+### M1 — The services bus: the library stops importing main
 
-**At its end.** No file the disposition table puts in the library imports anything from `src/main/ipc/` or `src/main/hosts/`. Each module that registers a command, installs an intercept, emits an event or taps one takes the bus (Interfaces §A) in its dependencies, and the library's handlers fail with `HostCommandError`. Main's root builds one bus from its router and `emit` and passes it wherever the singletons were imported. The app behaves as before.
+**At its end.** No file the disposition table puts in the library imports anything from `src/main/ipc/` or `src/main/hosts/`, and none composes a client module. Each module that registers a command, installs an intercept, emits an event or taps one takes the bus (Interfaces §A) in its dependencies, and the library's handlers fail with `HostCommandError`. Main's root builds one bus from its router and `emit` and passes it wherever the singletons were imported. The two compositions that straddle the line today are cut in place: main's root composes the library's files (`registerLibraryFiles`, O4's) beside `startLibrary` rather than through it, and composes the design-system defaults relay (`startArtifactDefaults`, gated on the spine running as today) beside `startArtifacts` rather than through it. The app behaves as before.
 
-**Touches.** `src/shared/spine/bus.ts` (new). The value importers: `src/main/index/{register,replay}.ts`, `src/main/sessions/{index,observed,service-register}.ts`, `src/main/git/{register,worktrees-register}.ts`, `src/main/scm/register.ts`, `src/main/files/register.ts`. The type importers: `src/main/index/source.ts`, `src/main/sessions/{context,holders,pane-holder,recovery,resync,setup-steps,stub-source,yield}.ts`, `src/main/owner/{launch,register,service}.ts`, `src/main/library/{index,register,source}.ts`, `src/main/attention/service.ts`. `src/main/index.ts` (the bus, built once beside `installRouter`). Their tests, which today mock `../ipc/router` or `../ipc/events`, take `test/support/fake-bus.ts` (new, Interfaces §G) instead.
+**Touches.** `src/shared/spine/bus.ts` (new). The value importers: `src/main/index/{register,replay}.ts`, `src/main/sessions/{index,observed,service-register}.ts`, `src/main/git/{register,worktrees-register}.ts`, `src/main/scm/register.ts`, `src/main/files/register.ts`. The type importers: `src/main/index/source.ts`, `src/main/sessions/{context,holders,pane-holder,recovery,resync,setup-steps,stub-source,yield}.ts`, `src/main/owner/{launch,register,service}.ts`, `src/main/library/{index,register,source}.ts`, `src/main/attention/service.ts`, `src/main/machine/identity.ts` (its `MachineHandler` becomes `ServiceHandler`; its `register` stays bound to `registerMachineHandler`, since `machine.identity` is `machine`-owned). The straddling compositions: `src/main/library/index.ts` (loses `files`), `src/main/artifacts/index.ts` (loses `relayDefaults` and its import of `./defaults`). `src/main/index.ts` (the bus, built once beside `installRouter`; the two compositions). Their tests, which today mock `../ipc/router` or `../ipc/events`, take `test/support/fake-bus.ts` (new, Interfaces §G) instead.
 
 **Decisions.**
 - The bus is injected through each module's dependencies, the way `startLibrary`, `startOwnerChannel` and `startIndexAttention` already take `register` and `emit` (D4).
@@ -143,11 +143,11 @@ The order is M1 to M6, each on the one branch. M1 and M2 work in place, so their
 - A handler that must fail with a specific `IpcError` throws `HostCommandError` (`@shared/host/runtime`), which main's router already answers intact for any owner and every host runtime answers the same way (D5). Client code keeps `CommandFailure`.
 - `emittedAttentionSource` and `emittedAppEventsSource` (`sessions/index.ts`) take the bus's `onEmitted` as their tap, as they already take a tap parameter.
 - Main's binding is `{ register: registerMainHandler, intercept: interceptCommand, emit, onEmitted }` from `src/main/ipc/`, so every tap main's client code holds (the menu's, the stand-in's) still hears the library's events.
-- `startLibrary` still composes the library's files (O4's `registerLibraryFiles`) until M4 splits them (D22); in between, `registerLibraryFiles` types its `register` as `ServicesBus['register']`, which its handlers satisfy (none reads the target machine).
+- The library's files and the defaults relay are split here rather than in M4 because M3's lint rules refuse both edges (`library/index.ts` importing the client's `library/files.ts`; the client's `artifacts/index.ts` importing the spine's `artifacts/defaults.ts`), and a move cannot make either legal (D22, D23). `registerLibraryFiles` keeps main's `registerMainHandler` and its `readFile` reach; `startArtifactDefaults` keeps reading the merged settings until M4 (D12).
 
 **Does not touch.** File locations. The client modules' own imports of main's IPC. Any command's owner or schema.
 
-**Proves.** The grep in Concrete Steps finds no library-classified file importing `src/main/ipc/` or `src/main/hosts/`. Tests pin: the fake bus answers through the registry's codec as the router does (an input that fails its schema is `invalid_input`; an interceptor runs before the handler; a tap hears a payload only after it validated); every re-pointed suite passes against it.
+**Proves.** The grep in Concrete Steps finds no library-classified file importing `src/main/ipc/` or `src/main/hosts/`, and neither `src/main/library/index.ts` nor `src/main/artifacts/index.ts` imports across the line. Tests pin: the fake bus answers through the registry's codec as the router does (an input that fails its schema is `invalid_input`; an interceptor runs before the handler; a tap hears a payload only after it validated); every re-pointed suite passes against it.
 
 ### M2 — Main's view of the spine, and the sweep on interest
 
@@ -161,13 +161,13 @@ The order is M1 to M6, each on the one branch. M1 and M2 work in place, so their
 - The notifier names a project only when the view's project is not hidden, as it does today (the read model holds visible projects only); it takes an attention change's `silent` set in place of `restoredIds`.
 - The browser reconciles its data (`BrowserData.reattach`) with the view's snapshot (every record's id, or null while `unavailable()`) at its start and at each `availability` event; in process the view's availability never changes after start, so the start is the only reconciliation, as today. Its restored tabs are kept whole while the view is unavailable, as they are while the index is.
 - The sweep's `open` becomes `interest(): ReadonlySet<AppSessionId>` (D11). Main computes one memoized set, `interestSet(layout.get('main.tabs'), view.visibleSessions(), local)`, recomputed when `main.tabs` is written or a visibility changes, and gives the same function to `startInterest` and the sweep. `openSessionTabs` goes; `sessionsInTabs` stays for the set.
-- `git.lsFiles`'s roots: the unarchived records' directories and the intents' directories from the view, the projects' directories from `view.projects()`; it invalidates on the view's `record`, `projects` and `intent` events in place of the four `onEmitted` taps.
+- `git.lsFiles`'s roots: the unarchived records' directories and the intents' directories from the view, the projects' directories from `view.projectRows()` (every row, as today); it invalidates on the view's `record`, `projects` and `intent` events in place of the four `onEmitted` taps.
 - `dropPanelKeysOfRemovedSessions` in `layout/store.ts`, which only its tests call (production uses `registerChatPanels`), is deleted with its tests (D17).
 - Each reader declares the narrowest `Pick<SpineView, …>` it reads, so its tests build only that.
 
 **Does not touch.** What any reader does with what it reads. The spine's own internal reads (the session service reading the index, lane A reading the index). File locations.
 
-**Proves.** Acceptance 4 and 7, and acceptance 3's in-place half. Tests pin: each view member answers its backing's value and each view event fires with its backing's (Interfaces §B's table), including an attention change whose `silent` holds exactly the restored ids among its items, `known` true for an intent with no record, `project` answering a hidden project marked hidden, and `unavailable()` naming the refusal in a refused run and the scenario in launch mode `scenario`; every reader of §C passes its suite against the fake view; the sweep keeps a session while `interest()` holds it and archives it once the set no longer does, with no layout in its dependencies; the browser reconciles at start and again when the fake view fires `availability` with null.
+**Proves.** Acceptance 4 and 7, and acceptance 3's in-place half. Tests pin: each view member answers its backing's value and each view event fires with its backing's (Interfaces §B's table), including an attention change whose `silent` holds exactly the restored ids among its items, `known` true for an intent with no record, `project` answering a hidden project marked hidden, and `unavailable()` naming the refusal in a refused run and the scenario in launch mode `scenario`; over a real index, a discovered project whose only session's transcript was removed (`markTranscriptRemoved`) is absent from `projects()` and present in `projectRows()` and `project(id)`, and route D's fallback to the artifact's project directory (`src/main/connectors/direct-route.test.ts`'s case for a creator gone) resolves through that view; every reader of §C passes its suite against the fake view; the sweep keeps a session while `interest()` holds it and archives it once the set no longer does, with no layout in its dependencies; the browser reconciles at start and again when the fake view fires `availability` with null.
 
 ### M3 — The library moves to `src/services/`, behind its boundary
 
@@ -189,7 +189,7 @@ The order is M1 to M6, each on the one branch. M1 and M2 work in place, so their
 
 **At its end.** `src/services/spine-root.ts` (`openSpineData`, `startSpine`) and `src/services/checkouts-root.ts` (`startCheckouts`) compose their sets from the dependencies of Interfaces §D, and `src/services/entry.ts` exports them. Main's root calls `openSpineData` where `startSpineData` ran, `startSpine` and `startCheckouts` where their parts were built, and from then on holds only `SpineRoot.view`, the checkouts' `readResolved` and the two stop functions. The entry is a third input of main's build, `out/main/services.js`, held by the bundle guard to mawsd's rule. Acceptance 1's test passes under plain Node. Rule B narrows `src/main/index.ts` to the entry. The app behaves as before.
 
-**Touches.** `src/services/{spine-root,checkouts-root,entry}.ts` (new), `src/main/index.ts` (the spine's and the checkouts' composition leave it), `src/services/library/index.ts` (its files part leaves, D22), `src/main/artifacts/index.ts` (the defaults relay leaves, D23), the machine-half readers (`src/services/settings/{engine-configure,host-configure,session-settings}.ts`, `src/services/owner/register.ts`, `src/services/artifacts/defaults.ts`, the sweep's schedule; D12), `electron.vite.config.ts`, `src/engine-host/bundle-guard.test.ts`, `src/main/lifecycle.test.ts`, `src/services/spine-root.test.ts` and `test/support/fake-spine-host.ts` (new), `eslint.config.js`. O9's composition when on master.
+**Touches.** `src/services/{spine-root,checkouts-root,entry}.ts` (new), `src/main/index.ts` (the spine's and the checkouts' composition leave it, the library's derived index and the defaults relay that M1 put there included; `registerLibraryFiles` stays), the machine-half readers (`src/services/settings/{engine-configure,host-configure,session-settings}.ts`, `src/services/owner/register.ts`, `src/services/artifacts/defaults.ts`, the sweep's schedule; D12), `electron.vite.config.ts`, `src/engine-host/bundle-guard.test.ts`, `src/main/lifecycle.test.ts`, `src/services/spine-root.test.ts` and `test/support/fake-spine-host.ts` (new), `eslint.config.js`. O9's composition when on master.
 
 **Decisions.**
 - What each root composes is §5's set exactly; the commands each registers through the bus are pinned by a test in `spine-root.test.ts`, and the lists go into the record for O3-D's retag (D25).
@@ -210,7 +210,7 @@ The order is M1 to M6, each on the one branch. M1 and M2 work in place, so their
 
 **At its end.** A new measured group, on `MEASURED_E2E` only, runs the services entry's `idleReading` (Interfaces §F) under the Electron binary as Node, over the profile-sized fixture of D19, and reports the spine's physical footprint idle while loaded and after its data is released. Three valid runs on the mini are recorded in this document's Decision Log, with the fixture's counts, the per-run numbers and the run URLs.
 
-**Touches.** `src/services/idle-reading.ts` and a unit test that composes it over a small fixture and releases on its signal; `test/support/spine-fixture.ts` and its test (new); `e2e/daemon-idle.spec.ts` (a fourth case, `daemon idle spine alone`); `test/support/daemon-idle.ts` (`spineLine`); `package.json` (the new script, and `|spine alone` added to `e2e:daemon-idle`'s and `e2e:daemon-idle-baseline`'s `--grep-invert`, or both would run the new case); `.github/workflows/gate.yml` (`MEASURED_E2E` gains `daemon-idle-spine`, with a comment line like its neighbours'); `tsconfig.e2e.json` (the fixture's imports); `.github/scripts/e2e-default-specs.test.mjs` only if the static gate says its pin moved.
+**Touches.** `src/services/idle-reading.ts` and a unit test that composes it over a small fixture and releases on its trigger; `src/services/entry.ts` (exports `idleReading`); `test/support/spine-fixture.ts` and its test (new); `e2e/daemon-idle.spec.ts` (a fourth case, `daemon idle spine alone`); `test/support/daemon-idle.ts` (`spineLine`); `package.json` (the new script, and `|spine alone` added to `e2e:daemon-idle`'s and `e2e:daemon-idle-baseline`'s `--grep-invert`, or both would run the new case); `.github/workflows/gate.yml` (`MEASURED_E2E` gains `daemon-idle-spine`, with a comment line like its neighbours'); `tsconfig.e2e.json` (the fixture's imports); `.github/scripts/e2e-default-specs.test.mjs` only if the static gate says its pin moved.
 
 **Decisions.**
 - The case, the windows and the release: D18. The fixture: D19.
@@ -220,7 +220,7 @@ The order is M1 to M6, each on the one branch. M1 and M2 work in place, so their
 
 **Does not touch.** `e2e:daemon-idle`'s, `-baseline`'s, `-floor`'s and `-mawsd`'s cases or bounds. `mawsd`.
 
-**Proves.** Acceptance 5. Tests pin: `idleReading` composes over a fixture, logs `spine idle: composed`, and on its signal stops the root and logs `spine idle: released` with the process still alive; the fixture generator writes the counts it is asked for, deterministically (two runs give the same records).
+**Proves.** Acceptance 5. Tests pin: `idleReading` composes over a fixture, logs `spine idle: composed`, and on its trigger stops the root and logs `spine idle: released` once `released` resolves, its keep-alive timer running until `dispose`; the fixture generator writes the counts it is asked for, deterministically (two runs give the same records).
 
 ### M6 — Landing: the acceptance run, O9's half, the bench and the review
 
@@ -256,6 +256,7 @@ M1's check (expect no output):
       src/main/library/index.ts src/main/git src/main/scm src/main/files/service.ts src/main/files/watch.ts \
       src/main/files/allowlist.ts src/main/files/register.ts src/main/settings/machine.ts src/main/settings/split.ts \
       src/main/settings/spine-lock.ts src/main/settings/engine-configure.ts src/main/settings/host-configure.ts \
+      src/main/machine/identity.ts \
       --include='*.ts' | grep -v '\.test\.ts:' | grep -v '^src/main/sessions/\(interest\|panel-lifetime\)\.ts'
     # add src/main/lane-a to the paths when O9's half is on master
 
@@ -314,8 +315,9 @@ A handler fails with a specific `IpcError` by throwing `HostCommandError` (`@sha
       unavailable(): string | null;                           // null while the spine can be read; else why not
       record(appSessionId: AppSessionId): SessionRecord | null;
       records(): readonly SessionRecord[];                    // every record, archived included; a record's lineage is its `lineage`
-      project(projectId: ProjectId): ProjectRecord | null;
       projects(): readonly ProjectRecord[];                   // as session.projects.list answers: visible, and removed ones marked hidden
+      projectRows(): readonly ProjectRecord[];                // every project row the index holds, hidden or with no present session
+      project(projectId: ProjectId): ProjectRecord | null;    // among projectRows()
       digest(appSessionId: AppSessionId): SessionDigest | null;
       digests(): readonly SessionDigest[];
       attention(appSessionId: AppSessionId): readonly AttentionItem[];
@@ -334,7 +336,7 @@ A handler fails with a specific `IpcError` by throwing `HostCommandError` (`@sha
     export interface SpineViewEvents {
       availability: (unavailable: string | null) => void;
       record: (appSessionId: AppSessionId, record: SessionRecord | null) => void; // null: removed
-      projects: (projects: readonly ProjectRecord[]) => void;
+      projects: () => void;                                   // either project set may have changed; read them again
       digest: (digest: SessionDigest) => void;
       attention: (appSessionId: AppSessionId, items: readonly AttentionItem[], silent: ReadonlySet<AttentionId>) => void;
       engine: (appSessionId: AppSessionId, status: EngineSessionStatus | null) => void;
@@ -350,7 +352,9 @@ The in-process backing, `createSpineView` (`src/services/sessions/spine-view.ts`
 |---|---|
 | `record`, `records`, `digest(s)`, `attention`, `allAttention`, `engineStatuses`, `midTurnCount`, `visibleSessions`; events `record`, `digest`, `engine`, `visible` | the read model (`SessionReadModel`) |
 | `attention` event | the read model's, with `silent` = the item ids in the attention service's `restoredIds` at that moment (empty in a refused run) |
-| `project`, `projects`; event `projects` | `index.projects.listWithRemoved()` at start, then each `session.projects.changed` the bus emits (empty while unavailable) |
+| `projects` | `index.projects.listWithRemoved()` at start, then each `session.projects.changed` the bus emits (empty while unavailable) |
+| `projectRows`, `project` | `index.projects.list({ includeHidden: true })`, read at start and again at each `index.projects.onChange` (empty while unavailable) |
+| event `projects` | either of the two above changing |
 | `intent`, `intents`; event `intent` | the intent store, and each `session.intent.changed` the bus emits |
 | `known` | a record or an intent |
 | `acquire` | the session service's `acquire`; rejects in a refused run as today |
@@ -370,12 +374,12 @@ O3 Decision Log 2's map, re-read on master `5698b6ef0`. Each row's module reads 
 | R5 | the interest report | `src/main/sessions/interest.ts`, wired in main's root | the read model's `visibleSessions` and `visible` event (missing from Decision Log 2's map) | `visibleSessions`, event `visible` |
 | R6 | the browser (restored tabs, each `session.status`, removals, the data's reconciliation) | `src/main/browser/index.ts` | `index.sessions.get`, `onChange`, `appIds`; `index.unavailable` | `record`, `records`, `unavailable`, events `record`, `availability` |
 | R7 | the browser's agent reach (side threads reach their parent's tabs) | `src/main/browser/agent/index.ts`, `browser/cua/connection.ts`'s `reaches` | `index.sessions.get(…).lineage` | `record` |
-| R8 | connectors, routes E and D | `src/main/connectors/{index,engine-route,direct-route}.ts` | `index.sessions.get`; `index.projects.list({ includeHidden: true })` | `record`, `project` (D8) |
+| R8 | connectors, routes E and D | `src/main/connectors/{index,engine-route,direct-route}.ts` | `index.sessions.get`; `index.projects.list({ includeHidden: true })` | `record`, `project` (any row, D8) |
 | R9 | the export authors' `sessionTitle` | main's root | `index.sessions.get(…).title` | `record` |
 | R10 | the org rows' local projects (O8 M2; missing from the map) | main's root, for `src/main/org/rows.ts` | `index.projects.listWithRemoved()`; the `session.projects.changed` tap | `projects`, event `projects` |
 | R11 | `settings.reveal`'s session roots | `src/main/settings/reveal.ts` | `knownSessionDirectories(read model, index)` | `records`, through `src/shared/sessions/directories.ts` |
 | R12 | files' allowlist (checkouts) | `src/services/files/allowlist.ts` | the read model's `record`; the intent store's `get` | `record`, `intent` |
-| R13 | `git.lsFiles`'s roots (checkouts) | `startCheckouts` (`FileLister`) | records from the read model and the index; `index.projects.list({ includeHidden: true })`; `intents.list()`; four `onEmitted` taps for invalidation | `records`, `projects`, `intents`, events `record`, `projects`, `intent` |
+| R13 | `git.lsFiles`'s roots (checkouts) | `startCheckouts` (`FileLister`) | records from the read model and the index; `index.projects.list({ includeHidden: true })`; `intents.list()`; four `onEmitted` taps for invalidation | `records`, `projectRows`, `intents`, events `record`, `projects`, `intent` |
 | R14 | files' admission (checkouts) | `src/services/files/admission.ts` | `index.library.fileLinkedPaths` | `fileLinkedPaths` |
 | R15 | scm's checkout of a session (checkouts) | `src/services/scm/service.ts` | the read model's `record` | `record` |
 
@@ -435,7 +439,7 @@ Main's bindings on the embedded shape: `hosts` its `createHosts(…)`; `bus` §A
 
 #### E. The services entry, the bundle check and the lint rules
 
-- `src/services/entry.ts` exports `openSpineData`, `startSpine`, `startCheckouts`, `startMachineIdentity`, `idleReading` and their types, and nothing else. `electron.vite.config.ts`'s main input becomes `{ index, mawsd, services: resolve(__dirname, 'src/services/entry.ts') }`, emitting `out/main/services.js`.
+- `src/services/entry.ts` exports `openSpineData`, `startSpine`, `startCheckouts`, `startMachineIdentity` and their types from M4, and `idleReading` from M5, and nothing else. `electron.vite.config.ts`'s main input becomes `{ index, mawsd, services: resolve(__dirname, 'src/services/entry.ts') }`, emitting `out/main/services.js`.
 - `src/engine-host/bundle-guard.test.ts` gains `describe('the built services entry and its chunks')` over `graphOf(out/main/services.js)`, skipped when no build is present like its neighbours: no dynamic `import()` in any file of the graph; every external one of Node's builtins, `zod` or the MCP SDK (the `allowed` predicate, no extras); none `electron`.
 - Rule A, the block for `src/services/**/*.{ts,tsx}`: `no-restricted-imports` with `electron` and `**/open-external` (O1's message), the Yjs and endpoint patterns, and the regex `^(\.\./)+(main|mawsd|renderer|preload)(/|$)` with a message naming the bus and the view; `no-restricted-syntax` with the dynamic forms, as `src/mawsd/**`'s block has.
 - Rule B, every block covering `src/main/**/*.{ts,tsx}` but tests (`ignores` the `*.test.{ts,tsx}` files): the regex `^(\.\./)+services(/|$)` with a message naming `@shared/spine/view`. `src/main/index.ts`'s block refuses `^\.\./services/(?!entry$)` instead (M3: no services pattern for it; M4 adds this one).
@@ -447,13 +451,13 @@ Main's bindings on the embedded shape: `hosts` its `createHosts(…)`; `bus` §A
     // client port that answers noClient; an empty interest set; no browser socket; process.env as the shell capture).
     // Logs `spine idle: composed` once `startSpine` has returned, and when released (SIGUSR2 by default; a test passes
     // its own trigger) stops the root, drops every reference to it, runs globalThis.gc twice when the runtime exposes
-    // it, and logs `spine idle: released` with `gc: true|false`. Keeps the process alive either way.
+    // it, and logs `spine idle: released` with `gc: true|false`. A timer keeps the process alive until `dispose`.
     export function idleReading(options: {
       profile: string;
       build: string;
       log(line: string): void;
       onRelease?(release: () => void): void; // default: process.once('SIGUSR2', release)
-    }): Promise<void>;
+    }): Promise<{ released: Promise<void>; dispose(): void }>; // resolves once composed
 
 The spec's case: a scratch root, the fixture written into `<root>/ud` by `test/support/spine-fixture.ts`, then the Electron binary as Node (`ELECTRON_RUN_AS_NODE=1`, `--disable-sigusr1 --expose-gc`, argv0 `maws-spine`, an environment of its own with `HOME` the scratch root and `MAWS_USER_DATA` the profile) running a three-line wrapper written into the scratch root that requires `out/main/services.js` and calls `idleReading`. It waits for `composed`, settles 120 s, measures a 600 s window (21 samples), sends SIGUSR2, waits for `released`, settles 120 s, measures a 300 s window (11 samples), then kills the scratch's processes as the other cases do.
 
@@ -478,8 +482,8 @@ Read at authoring, on master `5698b6ef0`, against O3's grounding at `p5-o2`.
   Evidence: `src/main/index.ts`'s `startInterest` and `createRemoteRows` calls; `grep -rn dropPanelKeysOfRemovedSessions src` lists `store.ts` and `store.test.ts` (and a mock in `lifecycle.test.ts`) only.
 - Observation: in launch mode `scenario`, readers of `index.sessions` (the browser, connectors, the export authors) and readers of the read model (the notifier, the quit guard, the chat panels) see different sessions today: the stub fills the read model, the index stays the profile's.
   Evidence: `src/main/sessions/index.ts` registers the index source unstarted in `scenario`; `startBrowser` reads `index.sessions` directly.
-- Observation: the read model holds visible projects only (`index.projects.list()`), while connectors and `git.lsFiles` read every project row (`list({ includeHidden: true })`) and `session.projects.list` answers the visible ones plus hidden ones that still have a present session (`listWithRemoved()`).
-  Evidence: `src/main/index/source.ts`'s start; `projects.ts`'s `HAS_PROJECT_CONTENT`.
+- Observation: three project sets are read today: the read model holds visible projects with content (`index.projects.list()`); `session.projects.list` and the org rows answer those plus hidden ones with content (`listWithRemoved()`); connectors and `git.lsFiles` read every row (`list({ includeHidden: true })`), and route D's directory fallback needs a row with no present session. `session.projects.changed` carries the second set only.
+  Evidence: `src/main/index/source.ts`'s start; `projects.ts`'s `HAS_PROJECT_CONTENT`; `src/main/connectors/eligibility.ts`'s `artifactDirectories`; `direct-route.test.ts`'s creator-gone case.
 - Observation: the worktree service, which §5 moves at O3-D with the session service, registers `git.worktree.*`, while O3's "Contract additions" retag `git.*` at O3-E; and the spine registers two `settings.*` commands (`settings.engineApplied`, `settings.userEngineDefaults`) that the O3-D retag list does not name. `[parent-impact]`, for O3-D's retag.
   Evidence: `src/main/git/worktrees-register.ts` registers `git.worktree.{add,branch,deleteBranch,list,remove,status}`; `src/main/index.ts` registers the two `settings.*` handlers beside the spine's relays.
 - Observation: `src/engine-host/bundle-guard.test.ts` forbids dynamic `import()` in `mawsd`'s graph, because a running daemon must not load code from a binary replaced under it (E10), while O3 §11 asks for the spine's modules to be "imported only when first needed, never at start". A lazy `require` of `out/main/services.js` meets the same hazard. `[parent-impact]`, for O3-D's cold core.
@@ -502,7 +506,7 @@ Read at authoring, on master `5698b6ef0`, against O3's grounding at `p5-o2`.
 - **D5. Library handlers fail with `HostCommandError`.** Main's router and every host runtime already answer it intact. Rejected: moving `CommandFailure` to `src/shared/` (a second class with the same meaning that `mawsd`'s runtime would have to learn).
 - **D6. `ServicesBus`, `SpineView` and the `MachineSettingsService` interface are types in `src/shared/spine/`.** The library implements the view and the machine half in process; at O3-D main implements both again over the services front (O3X3's "the machine half's service", O3X4's mirror), and both roots bind the bus. Rejected: defining them in `src/services/` (client code would import the library, which rule B forbids).
 - **D7. The view's members are Interfaces §B, which adds the visible set to §7's list.** The interest report reads it (R5); in process the read model holds it. A record's lineage is read from the record; no separate member. Rejected: moving page visibility to the client half with a spine port (it changes `session.setVisible`'s owner, which O3-D's retag of `session.*` assumes). `[parent-impact]`: §7's list gains the visible set, and O3-D's mirror backs it.
-- **D8. The view's projects are what `session.projects.list` answers** (visible, and hidden with a present session, marked). Connectors and `git.lsFiles` lose hidden projects that have no present session, which hold no live session to be eligible for and no composer listing under them. Rejected: a second, wider project lookup that the mirror could not serve from `session.projects.changed`.
+- **D8. The view keeps both project sets the code reads today:** `projects()`, what `session.projects.list` answers (the org rows' listing), and `projectRows()` with `project(id)`, every row the index holds (connectors' lookup, `git.lsFiles`'s roots). Route D needs no live session: an artifact whose creator is gone falls back to its project's directory (`src/main/connectors/eligibility.ts`, `artifactDirectories`), and a discovered project whose sessions' transcripts retention removed is a row `listWithRemoved()` omits. Rejected (review round 1): narrowing connectors and `git.lsFiles` to the listing, which drops that fallback directory. `[parent-impact]`: O3-D's mirror must hold every project row, which `session.projects.changed` does not carry.
 - **D9. In process, the view is backed by what the renderer is told:** the read model, the emitted projects list, the intent store with `session.intent.changed`, the attention service's restored ids, the session service's `acquire`, the library's linked paths (Interfaces §B). Rejected: backing records by the index directly (it differs from the read model only in launch mode `scenario`, and O3-D's mirror can reproduce only what the services front publishes).
 - **D10. In launch mode `scenario` the view answers the scenario's sessions and reports itself unavailable.** Every reader then sees the sessions the renderer shows, and the browser reconciles nothing against a scenario. Rejected: available in `scenario` (a `dev:stub` run on a real profile would delete that profile's agent activity rows at the browser's start).
 - **D11. The sweep reads the interest union through a port, `interest()`, read at each check.** On the embedded shape main binds it to the set its own interest report sends (the tabs of `main.tabs` and the sessions on screen, as `openSessionTabs` computed); at O3-D it is `mawsd`'s union. Rejected: the spine keeping its own union fed by host.interest-like reports on the embedded shape (a second report path that O3-D replaces anyway).
@@ -516,9 +520,10 @@ Read at authoring, on master `5698b6ef0`, against O3's grounding at `p5-o2`.
 - **D19. The profile-sized fixture:** 5,000 sessions (the owner's store held 5,108 transcript summaries, `src/main/index/source.ts`'s header) over 50 project folders (no repositories, so no git runs at start but the org refresh's one per project), 300 attention items of which 40 pending, 1,000 library rows, 50 drafts and 2,000 prompt-history lines, from a seeded generator, written through the index's own API. The counts are recorded with each reading. Rejected: a copy of a real profile (the owner's data on the mini) and raw SQL inserts (rows the code would never write).
 - **D20. O9's local half: whichever lands second keeps both,** by the Constraints' rule: lane A is spine, moves to `src/services/lane-a/`, composes in `startSpine`, registers through the bus. Rejected: holding O3-C until O9 lands (O9's remote half follows its local half, and neither needs the other's code).
 - **D21. Each root's stop is one shutdown step** at its first part's place today, running its parts in today's relative order. Steps run synchronously in one pass after the hosts' drain, so only the order inside a root matters. Rejected: registering every part's step from inside the root (main's step list would depend on the library's internals).
-- **D22. The library's derived index is the spine's; its files are the client's.** `startSpine` composes the store, the sync and `library.list`, `.get`, `.spaces` and `library.changed`; main composes `registerLibraryFiles` (O4's), reaching the files service through `CheckoutsRoot.files`. Rejected: keeping `startLibrary` whole (O4's file code would sit in the spine's root).
-- **D23. The design-system defaults relay is the spine's.** `startSpine` composes `startArtifactDefaults` over the machine half; `startArtifacts` loses `relayDefaults`. Rejected: relaying from the client half (it would read machine fields from the merged settings after O3-D).
+- **D22. The library's derived index is the spine's; its files are the client's.** From M1 `startLibrary` composes the store, the sync and `library.list`, `.get`, `.spaces` and `library.changed` only, and main composes `registerLibraryFiles` (O4's); from M4 `startSpine` composes the former and main reaches the files service through `CheckoutsRoot.files`. Split in M1 because M3's rules refuse the edge between them. Rejected: keeping `startLibrary` whole (O4's file code would sit in the spine's root); splitting in M4 (M3 could not pass its own boundary).
+- **D23. The design-system defaults relay is the spine's.** From M1 main composes `startArtifactDefaults` beside `startArtifacts`, which loses `relayDefaults`; from M4 `startSpine` composes it over the machine half. Rejected: relaying from the client half (it would read machine fields from the merged settings after O3-D); moving it in M4 only (M3's rule B refuses the client's `artifacts/index.ts` importing it).
 - **D24. `settings.userEngineDefaults`, `settings.engineApplied`, `session.recentTurns` and `session.history.*` are registered by `startSpine`.** They answer the machine's engine configuration and the machine's files. Rejected: keeping them in main's root (they read the index and the engine's configuration on the machine, which a remote client asks the machine for).
+- **R1. 2026-10-28, review round 1** (doperpowers:adversarial-reviewer on `84cdd43a9`; 1 P1, 2 P2, each checked against the code and adopted). (1) M3's rules would refuse three edges M3 could not cut by moving: `library/index.ts` composing the client's `library/files.ts`, the client's `artifacts/index.ts` composing the spine's defaults relay, and `machine/identity.ts`'s `MachineHandler` type; M1 now cuts all three in place (D22, D23). (2) Narrowing connectors to `session.projects.list`'s projects broke route D's fallback directory for an artifact whose project has no present session: the view keeps every project row beside the listing (D8). (3) M4's entry exported `idleReading` before M5 creates it: the entry's exports are per milestone (§E).
 - **D25. The commands, intercepts and taps each root installs are pinned by a test,** and M6 records the lists for O3-D's retag. Rejected: leaving O3-D to derive them from the code (the retag list O3 wrote already misses `git.worktree.*` and two `settings.*` commands).
 
 ## Outcomes & Retrospective
