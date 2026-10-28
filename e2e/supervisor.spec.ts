@@ -834,7 +834,7 @@ async function terminalsOutliveTheApp(): Promise<void> {
     await expect.poll(async () => (shell = (await alive(first.page))[0]) !== undefined, { timeout: 15_000, message: 'a shell for the session' }).toBe(true);
     const { label, ptyId, pid: shellPid } = shell!;
     await expect.poll(async () => {
-      const layout = value(await invoke(first.page, 'layout.get', { key: `panel.${id}` })).value as { tabs: { id: string }[] } | null;
+      const layout = value(await invoke(first.page, 'layout.get', { key: `panel.${await addressed(first.page, id)}` })).value as { tabs: { id: string }[] } | null;
       return layout?.tabs.map((t) => t.id) ?? [];
     }, { message: 'the tab reaches layout.json' }).toContain(label);
     value(await invoke(first.page, 'pty.write', { ptyId, data: `sleep ${DELAY_S}; echo m7-closed-$((40+2))\n` }));
