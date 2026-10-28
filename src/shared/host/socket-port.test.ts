@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { listenTemp, type TempSocket } from '../../../test/support/socket-lines';
 import { createHostRuntime, type HostEmit } from './runtime';
 import { SocketPort } from './socket-port';
-import { encodeDocFrame } from './socket-protocol';
+import { encodeDocFrame, PTY_MARK } from './socket-protocol';
 
 // A connected pair over a real Unix socket in a temp directory: `server` is the accepted end, `client` the dialer.
 let temp: TempSocket | null = null;
@@ -131,6 +131,33 @@ describe('SocketPort', () => {
     expect(hostPort.postMessage({ t: 'evt', name: 'x', payload: 4 })).toBe(false); // after the client's end: never counted written
     await clientClosed;
     expect(atClient).toEqual([1, 2, 3].map((n) => ({ t: 'evt', name: 'x', payload: n })));
+  });
+
+  // P5 O2 M3: a relay whose server is half-open hears the departing peer's end before the close, and can still write
+  it('onEnd reports the peer’s FIN before close; on a half-open server a line written after it still reaches the draining peer', async () => {
+    let accept!: (socket: Socket) => void;
+    const accepted = new Promise<Socket>((resolve) => (accept = resolve));
+    temp = await listenTemp(createServer({ allowHalfOpen: true }, (socket) => accept(socket)));
+    const client = createConnection(temp.path);
+    await new Promise((resolve) => client.once('connect', resolve));
+    const relayPort = new SocketPort(await accepted, Buffer.alloc(0), { log: () => {} });
+    const appPort = new SocketPort(client, Buffer.alloc(0));
+    const atApp = receiving(appPort);
+    const order: string[] = [];
+    relayPort.onEnd(() => void order.push('end'));
+    relayPort.onClose(() => void order.push('close'));
+    relayPort.start();
+    appPort.start();
+    const appClosed = new Promise((resolve) => appPort.onClose(resolve));
+    appPort.close({ drain: true });
+    await until(() => order.includes('end'));
+    expect(order).toEqual(['end']); // the FIN, and the relay's side is still open
+    expect(relayPort.postMessage({ t: 'evt', name: 'x', payload: 'after the end' })).toBe(true);
+    relayPort.close();
+    await appClosed;
+    await until(() => order.includes('close'));
+    expect(order).toEqual(['end', 'close']);
+    expect(atApp).toEqual([{ t: 'evt', name: 'x', payload: 'after the end' }]);
   });
 
   it('serves the host protocol through createHostRuntime: req and res, and evt once the client is ready', async () => {
@@ -298,5 +325,84 @@ describe('SocketPort: document frames and bytes (P3-A M5)', () => {
       { t: 'res', id: '1', ok: true, value: { assetId: '11111111-1111-4111-8111-111111111111', ref: 'assets/a.bin' } },
       expect.objectContaining({ t: 'res', id: '2', ok: false, error: expect.objectContaining({ code: 'invalid_input' }) }),
     ]);
+  });
+});
+
+// P5 O2 M4: a port whose peer declared `socket.ptyFrames` writes `pty.data` as a pty frame, and every port reads one back
+// as the event it replaced, in its place among the lines
+describe('SocketPort pty frames (P5 O2 M4)', () => {
+  const payload = (offset: number, text: string) => ({ ptyId: 'pty-1', offset, data: new Uint8Array(Buffer.from(text)) });
+  const event = (offset: number, text: string) => ({ t: 'evt', name: 'pty.data', payload: payload(offset, text) });
+
+  it('writes pty.data as a frame for a peer that reads them and decodes it into the same event, in order with the lines', async () => {
+    const { server, client } = await pair();
+    const bytes: Buffer[] = [];
+    client.on('data', (chunk: Buffer) => void bytes.push(chunk));
+    const hostPort = new SocketPort(server, Buffer.alloc(0), { ptyFrames: true });
+    const clientPort = new SocketPort(client, Buffer.alloc(0));
+    const atClient = receiving(clientPort);
+    clientPort.start();
+    expect(hostPort.postMessage(event(0, 'a\nb'))).toBe(true);
+    expect(hostPort.postMessage({ t: 'evt', name: 'x', payload: 1 })).toBe(true);
+    expect(hostPort.postMessage(event(3, '\u0000c'))).toBe(true);
+    await until(() => atClient.length === 3);
+    expect(atClient).toEqual([event(0, 'a\nb'), { t: 'evt', name: 'x', payload: 1 }, event(3, '\u0000c')]);
+    expect((atClient[0] as { payload: { data: unknown } }).payload.data).toBeInstanceOf(Uint8Array);
+    expect(Buffer.concat(bytes)[0]).toBe(PTY_MARK); // a frame, not a line
+  });
+
+  it('writes JSON lines to a peer that did not declare it, and frames nothing but a plain pty.data', async () => {
+    const { server, client } = await pair();
+    const bytes: Buffer[] = [];
+    client.on('data', (chunk: Buffer) => void bytes.push(chunk));
+    const plain = new SocketPort(server, Buffer.alloc(0));
+    const clientPort = new SocketPort(client, Buffer.alloc(0));
+    const atClient = receiving(clientPort);
+    clientPort.start();
+    plain.postMessage(event(0, 'x'));
+    await until(() => atClient.length === 1);
+    expect(atClient).toEqual([event(0, 'x')]);
+    expect(Buffer.concat(bytes).toString('utf8')).toMatch(/^\{"t":"evt","name":"pty.data"/);
+  });
+
+  it('keeps a pty.data the frame cannot carry whole a line: a key this build does not know, or an id it cannot frame', async () => {
+    const { server, client } = await pair();
+    const bytes: Buffer[] = [];
+    client.on('data', (chunk: Buffer) => void bytes.push(chunk));
+    const hostPort = new SocketPort(server, Buffer.alloc(0), { ptyFrames: true });
+    const clientPort = new SocketPort(client, Buffer.alloc(0));
+    const atClient = receiving(clientPort);
+    clientPort.start();
+    const extra = { t: 'evt', name: 'pty.data', payload: { ...payload(0, 'x'), later: true } };
+    const accented = { t: 'evt', name: 'pty.data', payload: { ...payload(0, 'y'), ptyId: 'pty-é' } };
+    hostPort.postMessage(extra);
+    hostPort.postMessage(accented);
+    await until(() => atClient.length === 2);
+    expect(atClient).toEqual([extra, accented]);
+    expect(Buffer.concat(bytes).includes(PTY_MARK)).toBe(false);
+  });
+
+  it('queues a decoded frame until start(), with the lines', async () => {
+    const { server, client } = await pair();
+    const hostPort = new SocketPort(server, Buffer.alloc(0), { ptyFrames: true });
+    const clientPort = new SocketPort(client, Buffer.alloc(0));
+    const atClient = receiving(clientPort);
+    hostPort.postMessage({ t: 'evt', name: 'x', payload: 0 });
+    hostPort.postMessage(event(0, 'q'));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(atClient).toEqual([]);
+    clientPort.start();
+    expect(atClient).toEqual([{ t: 'evt', name: 'x', payload: 0 }, event(0, 'q')]);
+  });
+
+  it('closes the connection on a broken pty frame', async () => {
+    const { server, client } = await pair();
+    const log = vi.fn<(line: string) => void>();
+    const port = new SocketPort(server, Buffer.alloc(0), { log });
+    const closed = new Promise((resolve) => port.onClose(resolve));
+    port.start();
+    client.write(Buffer.from([0x01, 0, 0, 0, 9, 1, 0x61, 0, 0, 0, 0, 0, 0, 0]));
+    await closed;
+    expect(log).toHaveBeenCalledWith('closed the connection: a pty frame whose id of 1 bytes runs past its length');
   });
 });

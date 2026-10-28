@@ -18,7 +18,7 @@ import type { HandlerContext } from '@shared/ipc/client'; // P5 O10 M7
 import { captureShellEnvironment, SHELL_CAPTURE_GRACE_MS, SHELL_CAPTURE_TIMEOUT_MS } from '@shared/host/shell-env';
 import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
 import type { C3_ENGINE_COMMANDS, O10_ENGINE_COMMANDS /* P5 O10 */ } from '@shared/ipc/schema/engine';
-import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, O10_SESSION_COMMANDS /* P5 O10 M8 */, P2C_SESSION_COMMANDS /* P2-C */, R2_SESSION_COMMANDS } from '@shared/ipc/schema/session';
+import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, O10_SESSION_COMMANDS /* P5 O10 M8 */, P2C_SESSION_COMMANDS /* P2-C */, P5O2_SESSION_COMMANDS /* P5 O2 M2 */, R2_SESSION_COMMANDS } from '@shared/ipc/schema/session';
 import { SURFACE_CLIENT_ID } from '@shared/engine/surface'; // R2
 import { createBinaryProbe, PROBE_BOUND_MS, type BinaryCheck } from './binary-info';
 import { TESTED_ENGINE_VERSION } from './engine-compat'; // W13
@@ -122,6 +122,8 @@ export const E8_DEADLINE_SHAPES: Record<(typeof E8_SESSION_COMMANDS)[number], De
 // P2-C start (2026-10-09): the steer cancel is one `cancel_async_message` round trip, bounded as `session.queue.hold`
 // is; the prompt record's read answers from the host's own journals on disk, as `session.events` does past its ring
 export const P2C_DEADLINE_SHAPES: Record<(typeof P2C_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.steer.cancel': 'bounded', 'session.promptHistory': 'immediate' };
+// P5 O2 M2: the keep mark, one state-file write
+export const P5O2_DEADLINE_SHAPES: Record<(typeof P5O2_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.setKeep': 'immediate' };
 // P5 O10 M8: the broker's items, answered from the session's own list; every session's at once, from each session's
 export const O10_DEADLINE_SHAPES: Record<(typeof O10_SESSION_COMMANDS)[number] | (typeof O10_ENGINE_COMMANDS)[number], DeadlineShape> = { 'session.pendingItems': 'immediate', 'engine.pendingItems': 'immediate' };
 // P2-C end
@@ -137,7 +139,7 @@ export const SIDE_DEADLINE_SHAPES: Record<SideHostCommand, DeadlineShape> = { 's
 type HostHostCommand = { [N in keyof typeof HostCommands]: (typeof HostCommands)[N]['owner'] extends 'engine-host' ? N : never }[keyof typeof HostCommands];
 // P5 O10 M7: `host.op` runs a session command as its own deadline allows (session.interrupt's is bounded), and
 // `host.opQuery` reads the ledger at once; both registered by registerEngineIpc (ops.ts), not Supervision
-export const HOST_DEADLINE_SHAPES: Record<HostHostCommand, DeadlineShape> = { 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.op': 'bounded', 'host.opQuery': 'immediate' };
+export const HOST_DEADLINE_SHAPES: Record<HostHostCommand, DeadlineShape> = { 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.interest': 'immediate' /* P5 O2 M2 */, 'host.op': 'bounded', 'host.opQuery': 'immediate' };
 // P2-A (2026-10-09; X17): the observed-facts read, bounded: a file read, or a journal recovery under its 5 s reading
 // budget (observed-facts.ts), inside the bridge's 10 s
 export const P2A_DEADLINE_SHAPES: Record<'engine.observedFacts', DeadlineShape> = { 'engine.observedFacts': 'bounded' };
@@ -683,6 +685,19 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     emit('session.forgotten', { appSessionId: id });
   });
   // C10 end -------------------------------------------------------------------------------------------------------------
+
+  // P5 O2 M2: the owner's Keep running mark, persisted first (the state file, so it holds across launches), then on the
+  // row the host holds for the session, live or exited, whose status reports it. A session the host has neither a row
+  // nor a state file for is unknown.
+  on('session.setKeep', async ({ appSessionId, keep }) => {
+    const id = appSessionId as AppSessionId;
+    const session = table.get(id);
+    if (!session && !(await store.exists(id))) throw unknownSession(appSessionId);
+    await store.saveKeep(id, keep);
+    table.get(id)?.setKept(keep);
+    log(`${id}: keep running ${keep ? 'set' : 'cleared'}`);
+    return { kept: keep };
+  });
 
   // P2-A start (2026-10-09; X17) ---------------------------------------------------------------------------------------
   // What the engine last reported for a session: a row in the table (live or exited) answers its recorder's facts;

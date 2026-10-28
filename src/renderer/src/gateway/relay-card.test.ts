@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, PreloadBridge, Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
 import { useSetup } from '../sessions/store';
 import { useSessions } from '../stores/sessions'; // P2-A
 import { record } from '../../../../test/support/builders'; // P2-A
@@ -39,7 +39,7 @@ afterEach(() => {
   delete (window as { maws?: PreloadBridge }).maws;
 });
 
-const settings = (relayUnreachable: Settings['gateway']['relayUnreachable']): Settings => ({ ...SETTINGS_DEFAULTS_V19, gateway: { ...SETTINGS_DEFAULTS_V19.gateway, relayUnreachable } });
+const settings = (relayUnreachable: Settings['gateway']['relayUnreachable']): Settings => ({ ...SETTINGS_DEFAULTS_V20, gateway: { ...SETTINGS_DEFAULTS_V20.gateway, relayUnreachable } });
 
 describe("the relay card's policy", () => {
   it("wait makes the ClaudeUsage path the primary; ask and direct keep both (under direct the card shows only for a gateway model)", () => {

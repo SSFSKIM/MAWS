@@ -43,6 +43,7 @@ const PROBE = {
   },
   events: {},
   hostEvents: [],
+  ptyHostEvents: [],
   mainOnly: new Set<string>(),
 } as const satisfies WireRegistry;
 
@@ -226,6 +227,7 @@ describe('the engine host’s envelope (P5 O1 M5)', () => {
     commands: { 'probe.who': { owner: 'engine-host', input: z.undefined(), output: z.string() } },
     events: {},
     hostEvents: [],
+    ptyHostEvents: [],
     mainOnly: new Set<string>(),
   } as const satisfies WireRegistry;
 

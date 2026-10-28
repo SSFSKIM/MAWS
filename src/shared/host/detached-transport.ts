@@ -18,18 +18,35 @@
 // refusal's fingerprint equals this app's, main reconnects with protocol 2's hello and serves it as protocol 2, which
 // carries nothing protocol 2 lacks (main sends a request `client` and `clientGone` only to a `machine` host). Every
 // other refusal takes the path it always did. The answers are read tolerantly (@shared/ipc/tolerant).
+//
+// P5 O2 M3 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md): the transport left main, so a plain Node process
+// (`mawsd`) reaches its hosts with it too, and it reaches any host, not the supervisor alone. Each default is E10's:
+// - `files`: the host's directory, lock, token, socket and log (the supervisor's under `<userData>/supervisor/`); given
+//   files name the socket to connect to, whatever the lock names, since one lock may cover several sockets (`mawsd`'s);
+// - `start`: `spawn` (a command, its arguments, environment and argv0; the engine-host bundle as the supervisor by
+//   default), `unit` (launchd or systemd is asked to start it, and the socket is polled), or `none` (polled only);
+// - `buildPolicy`: `replace` (E10's: another build with nothing live is replaced, with sessions live it is served and
+//   asked to exit when idle) or `serve` (any build of the major is served and never asked to exit);
+// - `relayed`: the lock holder is a relay (`mawsd`), not the host its welcome names, so after `exit now` on a refused
+//   connection the next attempt follows a poll instead of waiting for the lock holder's death, which never comes.
+// It also gains `recycle` (a draining close, then a fresh attempt at once) and `adopt` (one connect, no start). Every
+// local path is checked before it is used (private-path.ts, RL §5.11): the directory before the token is read, the
+// socket before a connect; a path that fails is logged and the host is unreachable.
 import { spawn as spawnProcess, type SpawnOptions } from 'node:child_process';
 import * as fs from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SocketPort } from '@shared/host/socket-port';
-import { HELLO_TIMEOUT_MS } from '@shared/host/socket-server';
+import { makePrivateDirectory } from './private-listen'; // P5 O2 M3
+import { assertPrivateDirectory, assertPrivateSocket, PrivatePathError } from './private-path'; // P5 O2 M3
+import { SocketPort } from './socket-port';
+import { HELLO_TIMEOUT_MS } from './socket-server';
 import {
   ServerRefuseSchema,
   ServerWelcomeSchema,
   ServerWelcomeV2Schema,
   SOCKET_PROTOCOL_V2,
+  PTY_FRAMES_CAPABILITY,
   splitLines,
   type ClientExit,
   type ClientHello,
@@ -37,10 +54,10 @@ import {
   type DocumentsClose,
   type DocumentsOpen,
   type ServerRefuse,
-} from '@shared/host/socket-protocol';
-import type { HostMessage } from '@shared/ipc/host-protocol';
-import { readTolerant, tolerantLog } from '@shared/ipc/tolerant'; // P5 O1 M6
-import type { WirePeer } from '@shared/ipc/wire'; // P5 O1 M6
+} from './socket-protocol';
+import type { HostMessage } from '../ipc/host-protocol';
+import { readTolerant, tolerantLog } from '../ipc/tolerant'; // P5 O1 M6
+import type { WirePeer } from '../ipc/wire'; // P5 O1 M6
 import {
   isAlive,
   isSameProcess,
@@ -53,6 +70,22 @@ import {
   type LockFile,
 } from '../../engine-host/supervisor-files';
 import { appIdentity, type AppIdentity } from './identity'; // E10 Task 2.4
+
+// P5 O2 M3 start (above)
+export type StartStrategy =
+  | { kind: 'spawn'; command: string; args: string[]; env: NodeJS.ProcessEnv; argv0: string }
+  | { kind: 'unit'; start(): Promise<void> } // asks launchd or systemd to start the daemon
+  | { kind: 'none' };
+// `dir` is absolute; `lock`, `token` and `log` are names inside it; `socket` is the absolute path connected to.
+export interface HostFiles {
+  dir: string;
+  lock: string;
+  token: string;
+  socket: string;
+  log: string;
+}
+export type BuildPolicy = 'replace' | 'serve';
+// P5 O2 M3 end
 
 export const CONNECT_TIMEOUT_MS = 1_000;
 export const START_TIMEOUT_MS = 15_000; // one budget for the whole attempt, exit-3 loops included
@@ -100,6 +133,12 @@ export interface DetachedTransportOptions {
   identity?: AppIdentity;
   timing?: Partial<DetachedTiming>;
   log?(line: string): void;
+  // P5 O2 M3 start (above)
+  files?: HostFiles;
+  start?: StartStrategy;
+  buildPolicy?: BuildPolicy;
+  relayed?: boolean;
+  // P5 O2 M3 end
 }
 
 // A served connection as the host supervisor sees it: C1's envelope both ways. P3-A M5 (socket protocol 2): and the
@@ -141,9 +180,15 @@ export interface DetachedEvents {
   lost(loss: DetachedLoss): void;
   exited(exit: ExitInfo): void;
   failed(reason: DetachedFailure, message: string): void;
-  // P5 O1 M6: `wire` when the protocol-2 window was refused on the fingerprint (a protocol-2 supervisor of another
-  // fingerprint), `protocol` for any other major
-  waiting(liveSessions: number, refused: 'wire' | 'protocol'): void;
+  // An incompatible supervisor still runs sessions: its refusal, the whole line (P5 O2 M3), for a relay to reflect;
+  // refusedOn reads what it named
+  waiting(refuse: ServerRefuse): void;
+}
+
+// P5 O1 M6: `wire` when the protocol-2 window was refused on the fingerprint (a protocol-2 supervisor of another
+// fingerprint, which reaches `waiting` only when its fingerprint is not this app's), `protocol` for any other major.
+export function refusedOn(refuse: ServerRefuse): 'wire' | 'protocol' {
+  return refuse.reason === 'wire' || (refuse.reason === 'protocol' && refuse.protocol === SOCKET_PROTOCOL_V2) ? 'wire' : 'protocol';
 }
 
 export interface DetachedTransport {
@@ -164,6 +209,21 @@ export interface DetachedTransport {
   // grace; resolves once it is gone or the start budget is spent (true), false when the lock names no such process.
   killHeld(): Promise<boolean>;
   // E10 end
+  // P5 O2 M3 start
+  // The served connection's draining close: nothing more is written, what the host wrote before it saw the end is still
+  // delivered; once the close has ended (or the socket port's grace ran out), `drained` runs and a fresh attempt starts
+  // at once, with no `disconnected` or `lost`. False (nothing done) when nothing is served.
+  recycle(drained: () => void): boolean;
+  // One connect to a host whose lock names a live process, with no start: true once it is served (`connected` was
+  // reported), false otherwise (nothing reported); another attempt started meanwhile answers false.
+  adopt(): Promise<boolean>;
+  // P5 O2 M3 end
+  // P5 O2 M5: the exit-when-idle asked of the served host is taken back (the host was told so by command): its next
+  // close is read as any other, not as the idle exit. False when nothing is served.
+  disarmIdle(): boolean;
+  // P5 O2 M5: the served host was armed to exit when idle by command (`host.exitWhenIdle {armed: true}`, which writes no
+  // `exit` line): its close once it is gone is the idle exit, deliberate, as after `exit idle`. False when nothing is served.
+  expectIdleExit(): boolean;
   // terminal: the socket closed with no `exit` sent; the supervisor keeps serving; nothing restarts. E11: answers once
   // the draining close has ended (the supervisor closed its side, or the port's grace destroyed the socket), so the
   // quit can wait for the last lines before the process exits; nothing when nothing is served (Decision Log 28)
@@ -180,6 +240,7 @@ interface Served {
   proc: Proc;
   exitAsked: ClientExit['when'] | null; // what main asked of the supervisor, on this connection or an earlier one
   replaced: boolean;
+  recycled: (() => void) | null; // P5 O2 M3: a recycle's draining close, and what runs at its end
 }
 
 // P5 O1 M6: the hello main sends, protocol 3 (the wire's major) or protocol 2 (the window's form)
@@ -195,6 +256,17 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
   const sameProcess = (proc: Proc) => isSameProcess(proc, processes);
   const identity = options.identity ?? appIdentity(options.modulePath, {});
   const logDropped = tolerantLog(log); // P5 O1 M6
+  const buildPolicy = options.buildPolicy ?? 'replace'; // P5 O2 M3
+  // P5 O2 M3: the host's files, read at each attempt (the supervisor's follow userData)
+  const filesOf = (): HostFiles => {
+    if (options.files) return options.files;
+    const userData = options.userData();
+    const dir = join(userData, 'supervisor');
+    return { dir, lock: SUPERVISOR_FILES.lock, token: SUPERVISOR_FILES.token, socket: socketPathFor(dir, userData, tmpdir()), log: SUPERVISOR_FILES.log };
+  };
+  const lockOf = (files: HostFiles) => readLock(files.dir, fs, files.lock);
+  // the supervisor's socket is the one its lock names; given files name their own (above)
+  const socketOf = (files: HostFiles, lock: LockFile | null) => (options.files ? files.socket : (lock?.socketPath ?? files.socket));
 
   let stopped = false;
   let quitting = false; // E10 Task 2.3b: the quit asked; the served connection's close is terminal
@@ -205,8 +277,11 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
   let awaitDeath: Proc | null = null; // the next attempt waits for this process to be gone (a deliberate close)
   let idleArmed: Proc | null = null; // the supervisor main asked to exit when idle: remembered across reconnects to it
   let unserved: Proc | null = null; // the welcomed supervisor whose connection closed while it may live on (quiet)
-  let waitingFor: number | null = null; // while waiting, the live count last reported (reported again only if it changes)
+  // while waiting, the refusal last reported, whole (P5 O2 M3: reported again when any field changes, so a relay never
+  // reflects a replaced incompatible host's stale line)
+  let waitingFor: string | null = null;
   const spawned = new Map<number, ExitInfo | null>(); // candidates this app run started, and how each exited
+  let adopting: ((served: boolean) => void) | null = null; // P5 O2 M3: the adoption under way, answered once
 
   function after(ms: number, run: () => void): void {
     const timer = setTimeout(() => {
@@ -222,25 +297,36 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     timers.clear();
     for (const socket of attemptSockets) socket.destroy();
     attemptSockets.clear();
+    answerAdoption(false); // P5 O2 M3: an adoption that ends without a welcome served nothing
+  }
+
+  function answerAdoption(servedIt: boolean): void {
+    const answer = adopting;
+    adopting = null;
+    answer?.(servedIt);
   }
 
   // `replaceRefused`: the owner asked to restart an incompatible supervisor (replaceIncompatible), for this attempt only.
-  function launch(replaceRefused = false): void {
-    if (stopped || quitting) return;
+  // P5 O2 M3: `adopt`: one connect to a live lock holder's socket, nothing started; answered once at the attempt's end.
+  function launch(replaceRefused = false, adopt: ((served: boolean) => void) | null = null): void {
+    if (stopped || quitting) return adopt?.(false);
     cancelAttempt();
+    adopting = adopt;
     const gen = generation;
     const current = () => gen === generation && !stopped;
     const deadline = Date.now() + timing.startTimeoutMs;
     const pastBudget = () => Date.now() >= deadline;
     const step = (ms: number, run: () => void) => after(ms, () => current() && run());
-    const userData = options.userData();
-    const dir = join(userData, 'supervisor');
-    const defaultSocket = socketPathFor(dir, userData, tmpdir());
+    const files = filesOf();
+    const { dir } = files;
+    const strategy = options.start ?? null; // null: E10's spawn of the supervisor
     let tokenRetried = false;
+    let unitAsked = false; // P5 O2 M3
     let candidate: { proc: Proc; exit: ExitInfo | null } | null = null;
 
     const finish = () => cancelAttempt(); // the attempt is over: its timers and sockets go
     const fail = (reason: DetachedFailure, message: string) => {
+      if (adopting) return giveUp(message); // P5 O2 M3: an adoption reports nothing
       if (candidate && candidate.exit === null) stopCandidate(candidate.proc);
       finish();
       waitingFor = null;
@@ -251,11 +337,33 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       waitingFor = null;
       events.exited(exit);
     };
+    // P5 O2 M3: an adoption that served nothing leaves the host as it was
+    const giveUp = (why: string) => {
+      log(`adopted nothing (${why})`);
+      finish();
+    };
+    // P5 O2 M3: a path that is not private (private-path.ts) makes the host unreachable
+    const unreachable = (error: PrivatePathError) => {
+      log(error.message);
+      fail('other', error.message);
+    };
 
     const dying = awaitDeath;
     awaitDeath = null;
-    if (dying) untilGone(dying, connecting);
+    if (adopt) adoptOnce();
+    else if (dying) untilGone(dying, connecting);
     else connecting();
+
+    // P5 O2 M3: the adoption's one connect, to the socket of a live lock holder
+    function adoptOnce(): void {
+      if (dying && sameProcess(dying)) {
+        awaitDeath = dying; // still exiting: the next launch waits for it
+        return giveUp(`pid ${dying.pid} is still exiting`);
+      }
+      const lock = lockOf(files);
+      if (!lock || !sameProcess(lock)) return giveUp('the lock names no live process');
+      connect(socketOf(files, lock), (socket) => handshaking(socket, lock), () => giveUp(`pid ${lock.pid} does not answer`));
+    }
 
     // Polls a process until it is gone, then goes on; past the budget, a process that will not go holds the lock.
     function untilGone(proc: Proc, then: () => void): void {
@@ -265,8 +373,8 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     }
 
     function connecting(): void {
-      const lock = readLock(dir);
-      connect(lock?.socketPath ?? defaultSocket, (socket) => handshaking(socket, lock), () => {
+      const lock = lockOf(files);
+      connect(socketOf(files, lock), (socket) => handshaking(socket, lock), () => {
         if (lock && sameProcess(lock)) {
           if (pastBudget()) return fail('held_lock', `a supervisor (pid ${lock.pid}) holds the lock and does not answer`);
           return step(timing.pidPollMs, connecting); // between its lock and its listen, or in its exit order
@@ -276,6 +384,19 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     }
 
     function spawning(): void {
+      if (adopting) return giveUp('nothing answered'); // P5 O2 M3
+      // P5 O2 M3: a unit is asked once per attempt and its socket polled within the budget; `none` polls only
+      if (strategy && strategy.kind !== 'spawn') {
+        if (pastBudget()) return fail('other', strategy.kind === 'unit' ? 'the unit started nothing that answered within the start budget' : 'nothing answered within the start budget');
+        if (strategy.kind === 'unit' && !unitAsked) {
+          unitAsked = true;
+          log('asking the unit to start');
+          strategy.start().catch((error: unknown) => {
+            if (current()) fail('other', `the unit could not be started: ${error instanceof Error ? error.message : String(error)}`);
+          });
+        }
+        return step(timing.pidPollMs, connecting);
+      }
       if (candidate) {
         if (candidate.exit === null) return awaitCandidate();
         if (candidate.exit.code !== START_EXIT_HELD) return exited(candidate.exit);
@@ -283,6 +404,13 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
         return connecting();
       }
       if (pastBudget()) return fail('other', 'no supervisor answered within the start budget');
+      try {
+        makePrivateDirectory(dir); // P5 O2 M3: created 0700 when missing, refused when not private
+      } catch (error) {
+        if (error instanceof PrivatePathError) return unreachable(error);
+        log(`the supervisor could not be spawned: ${error instanceof Error ? error.message : String(error)}`);
+        return exited({ code: null, signal: null });
+      }
       const started = spawnCandidate();
       if (!started) return exited({ code: null, signal: null });
       candidate = { proc: started, exit: null };
@@ -297,8 +425,8 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       if (exit) mine.exit = exit;
       if (mine.exit) return spawning();
       if (pastBudget()) return fail('held_lock', `the supervisor it started (pid ${mine.proc.pid}) never answered`);
-      const lock = readLock(dir);
-      connect(lock?.socketPath ?? defaultSocket, (socket) => handshaking(socket, lock), () => step(timing.pidPollMs, awaitCandidate));
+      const lock = lockOf(files);
+      connect(socketOf(files, lock), (socket) => handshaking(socket, lock), () => step(timing.pidPollMs, awaitCandidate));
     }
 
     // P5 O1 M6: `form` is the hello sent: the wire's major, or (once a protocol-2 supervisor of this fingerprint refused
@@ -306,9 +434,11 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     function handshaking(socket: Socket, lock: LockFile | null, form: Form = 'current'): void {
       let token: string;
       try {
-        token = fs.readFileSync(join(dir, SUPERVISOR_FILES.token), 'utf8').trim();
-      } catch {
+        assertPrivateDirectory(dir); // P5 O2 M3: before the token is read
+        token = fs.readFileSync(join(dir, files.token), 'utf8').trim();
+      } catch (error) {
         socket.destroy();
+        if (error instanceof PrivatePathError) return unreachable(error);
         return unanswered(lock, 'no token to present');
       }
       readAnswer(socket, form, (answer) => {
@@ -330,7 +460,8 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     // A hello timeout, a close before `welcome`, or an answer that is not one: retry while the lock's pid lives.
     function unanswered(lock: LockFile | null, why: string): void {
       log(`no welcome (${why})`);
-      const holder = readLock(dir) ?? lock;
+      if (adopting) return giveUp(why); // P5 O2 M3: one connect
+      const holder = lockOf(files) ?? lock;
       if (holder && sameProcess(holder)) {
         if (pastBudget()) return fail('held_lock', `a supervisor (pid ${holder.pid}) holds the lock and does not answer`);
         return step(timing.pidPollMs, connecting);
@@ -343,17 +474,26 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       // §6: another build of the wire's major (P5 O1 M6; through the protocol-2 window, one of the same fingerprint) is
       // replaced at once, unseen, when nothing is live; with sessions live it is served and asked to exit when idle (the
       // update banner reads `matches: 'build'` from its status), so the app moves to its own build once they are idle.
-      const otherBuild = welcome.peer.build !== identity.buildId();
+      // P5 O2 M3: under `serve`, any build is served as it is.
+      const otherBuild = buildPolicy === 'replace' && welcome.peer.build !== identity.buildId();
       if (otherBuild && welcome.liveSessions === 0) {
         log(`supervisor pid ${welcome.pid} runs build ${welcome.peer.build} with nothing live; replacing it`);
+        if (adopting) return replaceLater(socket, proc); // P5 O2 M3: an adoption starts nothing
         return replace(socket, proc);
       }
       attemptSockets.delete(socket);
+      const answer = adopting; // P5 O2 M3: answered once served, not by the attempt's end
+      adopting = null;
       finish();
       serve(socket, leftover, proc, welcome, otherBuild);
+      answer?.(true);
     }
 
     function refused(socket: Socket, refuse: ServerRefuse, lock: LockFile | null, form: Form): void {
+      if (adopting) {
+        socket.destroy();
+        return giveUp(`refused (${refuse.reason})`); // P5 O2 M3: a refusal is the next launch's to handle
+      }
       if (refuse.reason === 'token') {
         socket.destroy();
         if (tokenRetried) return fail('other', 'the supervisor refused the token twice');
@@ -370,21 +510,22 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       if (form === 'current' && protocol2 && refuse.wire === identity.wire()) {
         log(`supervisor ${lock ? `pid ${lock.pid} ` : ''}speaks protocol ${SOCKET_PROTOCOL_V2} with this app's wire ${refuse.wire}; speaking protocol ${SOCKET_PROTOCOL_V2} to it`);
         socket.destroy();
-        return connect(lock?.socketPath ?? defaultSocket, (next) => handshaking(next, lock, 'v2'), () => unanswered(lock, 'the protocol-2 supervisor closed its socket'));
+        return connect(socketOf(files, lock), (next) => handshaking(next, lock, 'v2'), () => unanswered(lock, 'the protocol-2 supervisor closed its socket'));
       }
       // §6: another protocol or wire. With nothing live (or at the owner's Restart now) the old supervisor is asked to
       // exit now and a fresh one started once it is gone; with sessions live it is left to run them, asked once per
       // process to exit when idle (Decision Log b2e4a1b1: the banner's Wait only acknowledges), and main waits.
       // P5 O1 M6: a protocol-2 supervisor of another fingerprint is refused on its wire, as protocol 2 refused it.
-      const on: 'wire' | 'protocol' = refuse.reason === 'wire' || protocol2 ? 'wire' : 'protocol';
-      const holder = readLock(dir) ?? lock;
+      // P5 O2 M3: under `serve` it is never asked to exit when idle (a relay's own clocks decide).
+      const on = refusedOn(refuse);
+      const holder = lockOf(files) ?? lock;
       const speaks = on === 'wire' ? `wire ${refuse.wire}` : `protocol ${refuse.protocol}`;
       if (refuse.liveSessions === 0 || replaceRefused) {
         log(`supervisor ${holder ? `pid ${holder.pid} ` : ''}speaks ${speaks} with ${refuse.liveSessions === 0 ? 'nothing live' : `${refuse.liveSessions} sessions live, restarted as asked`}; replacing it`);
         return replace(socket, holder ? { pid: holder.pid, procStart: holder.procStart } : null);
       }
       const armed = holder !== null && idleArmed !== null && idleArmed.pid === holder.pid && idleArmed.procStart === holder.procStart;
-      if (armed) socket.destroy();
+      if (armed || buildPolicy === 'serve') socket.destroy();
       else {
         // the refused connection stays open for this one line; it closes by itself once the supervisor has read it
         attemptSockets.delete(socket);
@@ -396,23 +537,41 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
         if (holder || waitingFor === null) log(`asked the incompatible supervisor ${holder ? `pid ${holder.pid} ` : ''}to exit when idle`);
       }
       finish();
-      if (waitingFor !== refuse.liveSessions) {
-        waitingFor = refuse.liveSessions;
+      const line = JSON.stringify(refuse);
+      if (waitingFor !== line) {
+        waitingFor = line;
         log(`supervisor ${holder ? `pid ${holder.pid} ` : ''}is incompatible (${on}) and runs ${refuse.liveSessions} sessions; waiting`);
-        events.waiting(refuse.liveSessions, on);
+        events.waiting(refuse);
       }
       after(timing.waitRetryMs, launch);
     }
 
-    // `exit {when: 'now'}`, then a fresh start once the process is gone.
+    // `exit {when: 'now'}`, then a fresh start once the process is gone. P5 O2 M3: relayed, the lock holder is the relay
+    // and stays up while it replaces its host, so the next connect follows a poll, and the relay holds that hello.
     function replace(socket: Socket, proc: Proc | null): void {
       const exit: ClientExit = { t: 'exit', when: 'now' };
       socket.end(`${JSON.stringify(exit)}\n`);
-      if (proc) untilGone(proc, connecting);
+      if (proc && !options.relayed) untilGone(proc, connecting);
       else step(timing.pidPollMs, connecting);
     }
 
+    // P5 O2 M3: an adoption's replacement: `exit now` written, and the next launch waits for the process to be gone.
+    function replaceLater(socket: Socket, proc: Proc): void {
+      attemptSockets.delete(socket);
+      socket.end(`${JSON.stringify({ t: 'exit', when: 'now' } satisfies ClientExit)}\n`);
+      socket.setTimeout(timing.helloTimeoutMs, () => socket.destroy());
+      awaitDeath = proc;
+      giveUp(`asked pid ${proc.pid}, of another build with nothing live, to exit`);
+    }
+
     function connect(path: string, onConnected: (socket: Socket) => void, onRefused: () => void): void {
+      // P5 O2 M3: the socket and its directory are checked first; a path that does not exist is nothing listening
+      try {
+        assertPrivateSocket(path);
+      } catch (error) {
+        if (error instanceof PrivatePathError) return unreachable(error);
+        return onRefused();
+      }
       const socket = createConnection(path);
       attemptSockets.add(socket);
       socket.once('close', () => attemptSockets.delete(socket));
@@ -436,17 +595,25 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     function spawnCandidate(): Proc | null {
       let logFd: number | null = null;
       try {
-        privateDirectory(dir);
-        logFd = fs.openSync(join(dir, SUPERVISOR_FILES.log), 'a', 0o600);
+        logFd = fs.openSync(join(dir, files.log), 'a', 0o600);
         fs.fchmodSync(logFd, 0o600);
         // `--disable-sigusr1`: a same-user SIGUSR1 opens no Node inspector in the supervisor from exec on, before its
         // entry's listener runs (cua spec 2026-10-09-maws-socket-peer-auth-design.md, Decision Log 2026-10-10)
-        const child = spawn(process.execPath, ['--disable-sigusr1', options.modulePath, '--detached', dir], {
+        const how =
+          strategy?.kind === 'spawn'
+            ? strategy
+            : {
+                command: process.execPath,
+                args: ['--disable-sigusr1', options.modulePath, '--detached', dir],
+                env: supervisorEnv(options.env?.() ?? process.env, { userData: options.userData(), packaged: options.packaged() }),
+                argv0: 'maws-supervisor',
+              };
+        const child = spawn(how.command, how.args, {
           detached: true, // its own session and process group: no terminal's SIGHUP or app exit reaches it
           stdio: ['ignore', logFd, logFd], // not connected to main, so it outlives main
-          env: supervisorEnv(options.env?.() ?? process.env, { userData, packaged: options.packaged() }),
+          env: how.env,
           cwd: process.cwd(),
-          argv0: 'maws-supervisor',
+          argv0: how.argv0,
         });
         const pid = child.pid;
         if (pid === undefined) {
@@ -506,9 +673,9 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
   // The welcomed connection: C1's envelope through a SocketPort; the layer's own `refuse replaced` is read here.
   // `otherBuild`: a supervisor of another build still running sessions, asked to exit when idle unless already asked.
   function serve(socket: Socket, leftover: Buffer, proc: Proc, welcome: Welcomed, otherBuild: boolean): void {
-    const port = new SocketPort(socket, leftover, { log: (line) => log(`socket: ${line}`) });
+    const port = new SocketPort(socket, leftover, { log: (line) => log(`socket: ${line}`), ptyFrames: welcome.peer.capabilities.includes(PTY_FRAMES_CAPABILITY) }); // P5 O2 M4: the welcome's capability gate, as the server's
     if (idleArmed && !(idleArmed.pid === proc.pid && idleArmed.procStart === proc.procStart)) idleArmed = null;
-    const connection: Served = { port, proc, exitAsked: idleArmed ? 'idle' : null, replaced: false };
+    const connection: Served = { port, proc, exitAsked: idleArmed ? 'idle' : null, replaced: false, recycled: null };
     served = connection;
     unserved = null;
     waitingFor = null;
@@ -549,6 +716,20 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     if (quitting) {
       stopped = true; // the quit's stop-all ended the supervisor, or it closed first: either way nothing follows
       return events.disconnected();
+    }
+    // P5 O2 M3: a recycle's drain has ended: a fresh attempt at once, with nothing reported. P5 O2 M5: unless the host
+    // was asked to exit now (a stop-all, `exit now`): its close stays deliberate, so an on-demand host parks
+    if (connection.recycled) {
+      connection.recycled();
+      if (connection.exitAsked === null || connection.replaced) return launch();
+      // armed to exit when idle: reconnected while the process still runs (it may be working yet); once it has exited
+      // (looked at one poll later, as below), that was the idle exit asked for, and no successor starts
+      if (connection.exitAsked === 'idle') {
+        return after(timing.pidPollMs, () => {
+          if ((spawned.get(connection.proc.pid) ?? null) === null && sameProcess(connection.proc)) return launch();
+          events.lost('deliberate');
+        });
+      }
     }
     if (connection.replaced) {
       log(`another client replaced this app at supervisor pid ${connection.proc.pid}`);
@@ -599,7 +780,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     const proc = unserved;
     unserved = null;
     if (!proc) return;
-    const lock = readLock(join(options.userData(), 'supervisor'));
+    const lock = lockOf(filesOf());
     if (!lock || lock.pid !== proc.pid || !sameProcess(lock) || !sameProcess(proc)) return;
     log(`stopping supervisor pid ${proc.pid} for the quit: its connection closed and it still runs`);
     signal(proc.pid, 'SIGTERM');
@@ -657,7 +838,7 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
     },
     async killHeld() {
       if (stopped || quitting) return false;
-      const lock = readLock(join(options.userData(), 'supervisor'));
+      const lock = lockOf(filesOf());
       if (!lock || !sameProcess(lock) || (served && served.proc.pid === lock.pid)) return false;
       const proc: Proc = { pid: lock.pid, procStart: lock.procStart };
       log(`stopping the supervisor that holds the lock and does not answer (pid ${proc.pid})`);
@@ -667,6 +848,34 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
       return true;
     },
     // E10 end
+    // P5 O2 M3 start
+    recycle(drained) {
+      if (!served || stopped || quitting || served.recycled) return false;
+      const connection = served;
+      connection.recycled = drained;
+      log(`recycling the connection to pid ${connection.proc.pid}`);
+      connection.port.close({ drain: true });
+      return true;
+    },
+    adopt() {
+      if (served) return Promise.resolve(true);
+      return new Promise((resolve) => launch(false, resolve));
+    },
+    // P5 O2 M3 end
+    expectIdleExit() {
+      if (!served || stopped) return false;
+      if (served.exitAsked !== 'now') served.exitAsked = 'idle';
+      idleArmed = served.proc;
+      log(`supervisor pid ${served.proc.pid} is armed to exit when idle`);
+      return true;
+    },
+    disarmIdle() {
+      if (!served || stopped) return false;
+      idleArmed = null;
+      if (served.exitAsked === 'idle') served.exitAsked = null;
+      log(`supervisor pid ${served.proc.pid} is no longer asked to exit when idle`);
+      return true;
+    },
     stop() {
       if (stopped) return undefined;
       stopped = true;
@@ -692,10 +901,6 @@ export function supervisorEnv(env: NodeJS.ProcessEnv, opts: { userData: string; 
   return out;
 }
 
-function privateDirectory(path: string): void {
-  fs.mkdirSync(path, { recursive: true, mode: 0o700 });
-  fs.chmodSync(path, 0o700);
-}
 
 // P5 O1 M6: a welcome in the hello's own form and of its major (`major`), read tolerantly.
 function parseAnswer(line: string, form: Form, major: number, logDropped: (message: string, dropped: readonly string[]) => void): Answer {

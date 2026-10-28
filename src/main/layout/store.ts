@@ -25,6 +25,7 @@ export const WINDOW_DEBOUNCE_MS = 500;
 export class LayoutFileStore implements LayoutStore {
   private readonly values: Map<string, unknown>;
   private windowTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly changed = new Set<(key: string) => void>(); // P5 O2 M2: main's interest report follows `main.tabs`
 
   constructor(private readonly file: string) {
     this.values = read(file);
@@ -41,6 +42,7 @@ export class LayoutFileStore implements LayoutStore {
     if (key !== WINDOW_KEY) {
       this.write();
       this.cancelWindowWrite(); // the whole file just went out, window key included
+      this.fire(key);
       return;
     }
     this.cancelWindowWrite();
@@ -52,6 +54,13 @@ export class LayoutFileStore implements LayoutStore {
     if (!this.values.delete(key)) return;
     this.write();
     this.cancelWindowWrite();
+    this.fire(key);
+  }
+
+  // P5 O2 M2: a renderer key set or deleted (the window key is main's own and never reported)
+  onChange(listener: (key: string) => void): () => void {
+    this.changed.add(listener);
+    return () => this.changed.delete(listener);
   }
 
   list(): string[] {
@@ -68,6 +77,10 @@ export class LayoutFileStore implements LayoutStore {
     } catch (error) {
       console.error(`[layout] cannot write ${this.file}: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  private fire(key: string): void {
+    for (const listener of this.changed) listener(key);
   }
 
   private cancelWindowWrite(): void {

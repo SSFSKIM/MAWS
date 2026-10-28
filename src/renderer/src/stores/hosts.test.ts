@@ -142,6 +142,8 @@ describe('renderer hosts store: the supervisor’s status', () => {
     reason: null,
     waitingLiveSessions: null,
     lastExit: null,
+    daemon: null, // P5 O2 M7
+    daemonUnavailable: null,
   });
 
   it('is null until main answers, then the snapshot', async () => {

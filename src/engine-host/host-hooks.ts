@@ -1,7 +1,9 @@
 // Host hooks (charter §4.2; C3 execution document, Interfaces "X6", `HostHookRegistry`): hook callbacks the host
-// registers with `initialize.hooks` and answers when the engine sends `hook_callback`. None run in P0 production
-// launches; the conformance and live tests exercise the mechanism. Callback ids are `maws_<event>_<n>`. Host hooks
-// round-trip without lifecycle frames and are absent from `get_hooks_listing` (pass 2 `hooks`).
+// registers with `initialize.hooks` and answers when the engine sends `hook_callback`. Callback ids are
+// `maws_<event>_<n>`. Host hooks round-trip without lifecycle frames and are absent from `get_hooks_listing` (pass 2
+// `hooks`). P5 O2 M2: every launch registers one, the Stop callback the strict idle release reads the session's crons
+// from (work-state.ts); `appHostHooks` is the `initialize.hooks` that gives, which app replays project onto a recording
+// (replay-handshake.ts), as they project the app's other launch-owned fields.
 import type { InitializeRequest } from '@shared/wire/control';
 import type { RequestId } from '@shared/graph/ids';
 
@@ -48,3 +50,20 @@ export class HostHookRegistry {
     return out;
   }
 }
+
+// P5 O2 M2: the Stop callback every EngineSession registers first in its registry (no matcher; 10 s, though it answers
+// `{}` at once and never blocks a stop), and the `initialize.hooks` a session with only it sends.
+export const STOP_HOOK = { event: 'Stop', matcher: null, timeoutSec: 10 } as const;
+
+export function registerStopHook(registry: HostHookRegistry, fn: HostHook): string {
+  return registry.register(STOP_HOOK.event, STOP_HOOK.matcher, fn, STOP_HOOK.timeoutSec);
+}
+
+export function appHostHooks(): NonNullable<InitializeRequest['hooks']> {
+  const registry = new HostHookRegistry();
+  registerStopHook(registry, () => ({}));
+  return registry.forInitialize()!;
+}
+
+// The Stop callback's ids, whose event input the normaliser keeps without the turn's last assistant message.
+export const isStopCallbackId = (callbackId: string): boolean => /^maws_Stop_\d+$/.test(callbackId);

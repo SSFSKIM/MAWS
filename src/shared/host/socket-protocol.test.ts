@@ -8,8 +8,12 @@ import {
   DocumentsClosedSchema,
   DocumentsOpenSchema,
   encodeDocFrame,
+  encodePtyFrame,
   HelloPreambleSchema,
   LINE_CAP,
+  PTY_FRAMES_CAPABILITY,
+  PTY_MARK,
+  type PtyFrame,
   ServerRefuseSchema,
   ServerWelcomeSchema,
   ServerWelcomeV2Schema,
@@ -140,7 +144,7 @@ describe('the socket layer schemas', () => {
 
 // P3-A M5 (docs/doperpowers/plans/2026-10-12-p3-a-store.md; the P3 ledger's X24 binary-channel row): socket protocol 2
 // carries document frames `0x00 | u32 length | u32 channel | payload` beside the JSON lines after the welcome.
-type Record_ = { line: string } | { doc: number; frame: Uint8Array };
+type Record_ = { line: string } | { doc: number; frame: Uint8Array } | { pty: PtyFrame };
 
 function records(lineCap?: number, frameCap?: number) {
   const out: Record_[] = [];
@@ -153,6 +157,11 @@ function records(lineCap?: number, frameCap?: number) {
         expect(frame.byteOffset).toBe(0); // its own buffer, so posting it on a MessagePort ships nothing more
         expect(frame.buffer.byteLength).toBe(frame.length);
         out.push({ doc: channel, frame });
+      },
+      pty: (frame) => {
+        expect(frame.data.byteOffset).toBe(0); // P5 O2 M4: its own buffer, as a doc frame's
+        expect(frame.data.buffer.byteLength).toBe(frame.data.length);
+        out.push({ pty: frame });
       },
       overflow: (why) => void overflows.push(why),
     },
@@ -230,7 +239,7 @@ describe('socket protocol 2: document frames beside the JSON lines (P3-A M5)', (
   it('still caps a line at the line cap, whole or split, and a frame does not count against it', () => {
     const capped = records(8);
     capped.splitter.push(Buffer.concat([Buffer.from('12345678\n'), encodeDocFrame(2, new Uint8Array(100)), Buffer.from('1234')]));
-    expect(capped.out.map((r) => ('line' in r ? r.line : r.doc))).toEqual(['12345678', 2]);
+    expect(capped.out.map((r) => ('line' in r ? r.line : 'doc' in r ? r.doc : r.pty))).toEqual(['12345678', 2]);
     capped.splitter.push(Buffer.from('56789'));
     expect(capped.overflows).toEqual(['a line over 8 bytes']);
 
@@ -257,5 +266,106 @@ describe('socket protocol 2: document frames beside the JSON lines (P3-A M5)', (
     expect(DocumentsCloseSchema.parse({ t: 'documents.close', channel: 4 })).toEqual({ t: 'documents.close', channel: 4 });
     for (const reason of ['host', 'reset'] as const) expect(DocumentsClosedSchema.parse({ t: 'documents.closed', channel: 4, reason }).reason).toBe(reason);
     expect(DocumentsClosedSchema.safeParse({ t: 'documents.closed', channel: 4, reason: 'client' }).success).toBe(false);
+  });
+});
+
+// P5 O2 M4 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, Interfaces "The pty frame"): `pty.data` as
+// `0x01 | u32 L | u8 n | ptyId | u32 offset high | u32 offset low | data`, beside the lines and the doc frames.
+describe('pty frames beside the lines and the doc frames (P5 O2 M4)', () => {
+  const ID = '0b6f1a52-6a43-4d0e-9a4b-51b0d1d0c0de';
+  const big = 2 ** 53 - 1; // the largest offset a frame carries
+  const frame = (ptyId: string, offset: number, data: Uint8Array) => encodePtyFrame({ ptyId, offset, data })!;
+  const MIXED = Buffer.concat([
+    frame(ID, 0, Uint8Array.from([0x0a, 0x00, 0x01, 0x7b])),
+    Buffer.from('{"t":"evt"}\n'),
+    encodeDocFrame(9, Uint8Array.from([0x01, 0x0a])),
+    frame(ID, 2 ** 32 + 5, new Uint8Array(0)),
+    frame('p', big, Uint8Array.from([0xff])),
+    Buffer.from('{"t":"res"}\n'),
+  ]);
+  const MIXED_EXPECTED: Record_[] = [
+    { pty: { ptyId: ID, offset: 0, data: Uint8Array.from([0x0a, 0x00, 0x01, 0x7b]) } },
+    { line: '{"t":"evt"}' },
+    { doc: 9, frame: Uint8Array.from([0x01, 0x0a]) },
+    { pty: { ptyId: ID, offset: 2 ** 32 + 5, data: new Uint8Array(0) } },
+    { pty: { ptyId: 'p', offset: big, data: Uint8Array.from([0xff]) } },
+    { line: '{"t":"res"}' },
+  ];
+
+  it('names its mark and its capability', () => {
+    expect(PTY_MARK).toBe(0x01);
+    expect(PTY_FRAMES_CAPABILITY).toBe('socket.ptyFrames');
+  });
+
+  it('encodes the mark, the length after it, the id’s length and bytes, the offset’s two words and the data', () => {
+    expect([...frame('ab', 2 ** 32 + 3, Uint8Array.from([7, 8]))]).toEqual([0x01, 0, 0, 0, 13, 2, 0x61, 0x62, 0, 0, 0, 1, 0, 0, 0, 3, 7, 8]);
+  });
+
+  it('round-trips through the splitter, interleaved with lines and doc frames, whichever byte a read is cut at', () => {
+    const whole = records();
+    whole.splitter.push(MIXED);
+    expect(whole.out).toEqual(MIXED_EXPECTED);
+    for (let cut = 1; cut < MIXED.length; cut++) {
+      const two = records();
+      two.splitter.push(MIXED.subarray(0, cut));
+      two.splitter.push(MIXED.subarray(cut));
+      expect(two.out, `cut at ${cut}`).toEqual(MIXED_EXPECTED);
+      expect(two.overflows).toEqual([]);
+    }
+    const bytewise = records();
+    for (const byte of MIXED) bytewise.splitter.push(Buffer.from([byte]));
+    expect(bytewise.out).toEqual(MIXED_EXPECTED);
+  });
+
+  it('cannot frame an id that is not ASCII or is past 255 bytes, or an offset outside 0..2^53 - 1: the writer sends a line', () => {
+    const data = new Uint8Array(1);
+    expect(encodePtyFrame({ ptyId: 'é', offset: 0, data })).toBeNull();
+    expect(encodePtyFrame({ ptyId: 'x'.repeat(256), offset: 0, data })).toBeNull();
+    expect(encodePtyFrame({ ptyId: 'x'.repeat(255), offset: 0, data })).not.toBeNull();
+    expect(encodePtyFrame({ ptyId: ID, offset: 2 ** 53, data })).toBeNull();
+    expect(encodePtyFrame({ ptyId: ID, offset: -1, data })).toBeNull();
+    expect(encodePtyFrame({ ptyId: ID, offset: 1.5, data })).toBeNull();
+    expect(encodePtyFrame({ ptyId: ID, offset: 0, data: new Uint8Array(17) }, 16)).toBeNull();
+  });
+
+  it('accepts a frame of exactly the cap and goes deaf at one past it, or at a length too short for its id and offset', () => {
+    // the cap bounds L - 4, as for a doc frame: the whole record is at most the cap plus 9 bytes
+    const cap = 9 + 1 + 16 - 4;
+    const at = records(64, cap);
+    at.splitter.push(frame('p', 0, new Uint8Array(16)));
+    expect(at.out).toHaveLength(1);
+    at.splitter.push(frame('p', 0, new Uint8Array(17)).subarray(0, 9)); // the header alone names the length
+    expect(at.overflows).toEqual(['a pty frame of 27 bytes']);
+    at.splitter.push(Buffer.from('{"later":1}\n'));
+    expect(at.out).toHaveLength(1);
+
+    const short = records();
+    short.splitter.push(Buffer.from([0x01, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0]));
+    expect(short.overflows).toEqual(['a pty frame of 8 bytes']);
+  });
+
+  it('closes on an id running past the frame, an id that is not ASCII, or an offset at 2^53', () => {
+    const past = records();
+    past.splitter.push(Buffer.from([0x01, 0, 0, 0, 9, 1, 0x61, 0, 0, 0, 0, 0, 0, 0]));
+    expect(past.overflows).toEqual(['a pty frame whose id of 1 bytes runs past its length']);
+
+    const latin = records();
+    latin.splitter.push(Buffer.from([0x01, 0, 0, 0, 10, 1, 0xe9, 0, 0, 0, 0, 0, 0, 0, 0]));
+    expect(latin.overflows).toEqual(['a pty frame whose id is not ASCII']);
+
+    const huge = records();
+    huge.splitter.push(Buffer.from([0x01, 0, 0, 0, 10, 1, 0x61, 0, 0x20, 0, 0, 0, 0, 0, 0]));
+    expect(huge.overflows).toEqual(['a pty frame whose offset is past 2^53']);
+    huge.splitter.push(Buffer.from('{"later":1}\n'));
+    expect(huge.out).toEqual([]);
+  });
+
+  it('a frame over DOC_FRAME_CAP closes the connection at the real cap', () => {
+    const { overflows, splitter } = records();
+    const header = Buffer.alloc(9);
+    header[0] = PTY_MARK;
+    header.writeUInt32BE(DOC_FRAME_CAP + 5, 1);
+    splitter.push(header);
+    expect(overflows).toEqual([`a pty frame of ${DOC_FRAME_CAP + 5} bytes`]);
   });
 });

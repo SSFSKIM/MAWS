@@ -1,0 +1,85 @@
+P5 O2 M2: the Stop host callback and the session's crons on MAWS's own wire
+(docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M2 "The spike comes first"; parent
+docs/doperpowers/plans/2026-10-27-p5-org.md, child O2, parent pin blob 063f83c39b873ee8401870c12179a859c0ac31a5;
+2026-10-27)
+
+Question (D-1). M2 sources a session's crons from a Stop hook callback the engine host registers on every launch. On
+the pinned engine over MAWS's wire: when does that callback arrive, what does its `session_crons` hold, and where is it
+blind? The five questions are M2's.
+
+Method. scenarios/pass3/p5-o2-stop-crons.mjs: MAWS's launch line and initialize (p1-common), with
+`initialize.hooks = {Stop: [{hookCallbackIds: ["maws_Stop_1"], timeout: 10}]}` (host-hooks.ts forInitialize: event Stop,
+no matcher, 10 s), every callback answered `{}` at once and every tool allowed. Engine 2.1.283, the fixture pin
+(FIXTURE_ENGINE_VERSION), installed on Linux by the official installer (`install.sh 2.1.283`). The Messages API is a
+scripted stand-in (stub-api.mjs's sseOf) keyed by content: a prompt's `[[P5O2:<plan>]]` marker picks its plan and a
+tool_result continues the plan of the tool_use it answers, so title requests and a subagent's requests never shift the
+script; nothing was spent (the result frames' cost is the engine's own arithmetic on the stub's one-token usage).
+Five launches, fixtures fixtures/p5/p5-o2-stop-crons-*.jsonl, tests in fixtures.test.mjs ("p5 O2"):
+  main              CronCreate, CronDelete, a subagent asked to CronCreate (twice: as the model launches one, then with
+                    run_in_background false), CronList, a turn interrupted in a Bash call after a CronCreate, a plain
+                    turn, a dynamic `/loop` (ScheduleWakeup 60 s), its tick ending without ScheduleWakeup, a plain turn,
+                    CronList
+  durable, session  a fresh session creating an every-minute cron, durable (`durable: true`) or session-only
+  durable-resume, session-resume  `--resume` of each with no prompt until the first Stop (bounded 150 s), then CronList
+Where it ran: a throwaway devcloud VM (GCE e2-highcpu-2, Ubuntu 24.04, lease 4 h, deleted after the recording), as a
+dedicated user with no access to the owner's home, with an empty environment, and with the host's
+/etc/claude-code/managed-settings.json (which routes engines to the relay) moved aside; each fixture's provenance
+records `managedSettings: []`. Never on the owner's MacBook (P5 Decision Log 29).
+
+1. Yes, before the result, and the list is exact. Every turn that completes sends one `hook_callback` (callback_id
+   maws_Stop_1, hook_event_name Stop, stop_hook_active false) before its `result`, and the probe's `{}` reaches the
+   engine before the result too (main `create`: callback seq 40, answer 42, result 44). After CronCreate
+   `0 3 * * *` the list is `[{id: <the job CronCreate named>, schedule: "0 3 * * *", recurring: true, prompt}]`; after
+   CronDelete it is `[]` (main `delete`, seq 71 before result 75). The input always carries `session_crons` and
+   `background_tasks` as arrays, and `last_assistant_message` (every Stop in every fixture). Turns the engine starts
+   itself send it the same way: a cron fire, a loop tick, and the turn that answers a finished subagent's notification
+   (main `subagent` seq 129).
+2. Yes, no Stop. The interrupted turn (CronCreate `0 5 * * *`, then `interrupt` during `sleep 45`) ends with result
+   error_during_execution, terminal_reason aborted_tools (main `interrupt` seq 252) and no callback at all. Its job
+   stands: the next turn's Stop lists it (main `after-interrupt` seq 270). So `turn_ended_without_stop` after a cron
+   tool is the right reading, and the next Stop repairs it.
+3. No keepalive in -p. ScheduleWakeup (60 s, noop false) registers a one-shot that the Stop lists as
+   `{schedule: "<minute> <hour> * * *", recurring: false, prompt: "/loop [[P5O2:LOOP]] check the build"}` (main `loop`
+   seq 301). It fired about 106 s later: the engine started the tick itself (command_lifecycle started for a uuid the
+   probe never sent, seq 310), the tick replied with text only, and the tick's Stop (seq 322, before its result 326)
+   listed no wakeup. Nothing re-armed: no `[loop] keepalive armed` debug line (the only [loop] line is `dynamic wakeup
+   scheduled: 60s`), and the next two Stops and CronList show only the 5 AM job, 15 s and more after the tick. This is
+   SPEC 22 §22.17's reading of the source: the headless/SDK loop "does not … run idle keepalive handling", which lives in
+   the REPL's useScheduledTasks idle effect. The keepalive's own 1,200 s fire was not waited for, since nothing was
+   armed to fire.
+4. A session-only cron: yes, and it can fire first. `--resume` logs `resume: resurrected 1 session cron task(s)` and,
+   with no prompt from the host, the job fired (engine-started turn, seq 9); that fire's Stop (seq 19) is the first
+   Stop of the launch and lists the job under its original id. A durable cron: never listed. A fresh session's
+   CronCreate `durable: true` ("Persisted to .claude/scheduled_tasks.json") is followed by a Stop with `[]`
+   (durable `hold` seq 40), and after `--resume` the job fired before any Stop (seq 9) and both Stops of that launch
+   read `[]` (seq 19, 61) while CronList lists it. The Stop list is the in-memory session store only (2.1.283
+   cli.pretty.js dLt(N_()), read, not probed); durable jobs live in <cwd>/.claude/scheduled_tasks.json.
+5. No, and it cannot arise. A subagent asked to CronCreate is offered no cron tool (every SUBTASK request's tool list
+   held none of CronCreate, CronDelete, CronList, ScheduleWakeup), ToolSearch `select:CronCreate,CronList` answers "No
+   matching deferred tools found", and the call is refused: "No such tool available: CronCreate. CronCreate is disabled
+   for this session, in subagents as well as here." The same with run_in_background false: under MAWS's launch
+   (CLAUDE_CODE_FORK_SUBAGENT) the engine launched it in the background anyway ("Async agent launched successfully").
+   SPEC 18 lists the background subagents' allow-list, which has no cron tool (only an asynchronous teammate gets
+   them). The main thread's Stops read `[]` throughout, and the Stop that ended the launching turn listed the running
+   subagent in `background_tasks` (main `subagent` seq 110).
+
+Verdict for M2.
+- The conditional fourth state (`loop_keepalive`) is not built: question 3 shows no keepalive in -p on 2.1.283.
+- The transition table holds for session-only crons: a Stop's list is exact and arrives before the result, an
+  interrupted turn sends none, a resumed session's resurrected jobs are listed by its first Stop, and a resumed
+  launch can fire before that Stop (so `resumed` starting `unknown('resumed')` is right).
+- It does not hold for durable crons, which no Stop ever lists: a session holding one reads `known([])` after any
+  Stop, and the job fires on its own. This needs the architect's decision (for example, reading
+  <cwd>/.claude/scheduled_tasks.json for jobs whose createdBySessionId is the session, or treating a durable CronCreate
+  as unreadable work); the spike records it and does not choose.
+- A subagent's cron tool use cannot occur under MAWS's launch, so "a cron tool at any depth" costs nothing but adds no
+  case.
+
+Notes.
+- Not probed: a fresh session (no resume) started in a project whose scheduled_tasks.json already holds a durable job
+  (the resumed launch started its scheduler with `hasTasks=true` from the file and fired it, so a fresh one likely
+  does the same); a teammate's crons; a Stop callback that times out or errors; the keepalive under a REPL.
+- A wakeup's Stop entry is a one-shot with a daily cron expression of its target minute; it leaves the list when it
+  fires.
+- Fixtures carry the VM's time zone (America/Los_Angeles) in the wakeup's schedule and the probe user's scratch paths
+  under /tmp.

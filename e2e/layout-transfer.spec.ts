@@ -539,6 +539,7 @@ app.once('ready', () => session.defaultSession.registerPreloadScript({ type: 'fr
 const sawNoOpenTabs = (page: Page) => page.evaluate(() => document.documentElement.hasAttribute('data-e2e-saw-no-open-tabs'));
 
 test('a relaunch brings the pinned Artifacts tab back on its record and never draws "No open tabs"', async () => {
+  test.skip(Boolean(process.env.MAWS_E2E_EXECUTABLE), 'its watch is a requireFirst hook, which cannot be loaded into a packaged app.asar; the unpackaged sets run it');
   test.setTimeout(150_000); // two launches
   const preload = join(scratch!, 'no-open-tabs-preload.js');
   const hook = join(scratch!, 'no-open-tabs-hook.cjs');

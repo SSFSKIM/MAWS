@@ -664,6 +664,15 @@ const p2dCommands = {
 export const P2D_SESSION_COMMANDS = Object.keys(p2dCommands) as (keyof typeof p2dCommands)[];
 // P2-D end --------------------------------------------------------------------------------------------------------------
 
+// P5 O2 M2 start (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M2 "Keep"): the owner's Keep running mark, owner
+// engine-host, persisted in the session's state file so it holds across launches; it exempts the session from the idle
+// release only (never from the memory budget). Answers the mark now held.
+const p5o2Commands = {
+  'session.setKeep': host(input({ keep: z.boolean() }), z.strictObject({ kept: z.boolean() })),
+} as const;
+export const P5O2_SESSION_COMMANDS = Object.keys(p5o2Commands) as (keyof typeof p5o2Commands)[];
+// P5 O2 M2 end ----------------------------------------------------------------------------------------------------------
+
 export const commands = {
   ...c3Commands, // C3
   ...c4Commands, // C4
@@ -676,6 +685,7 @@ export const commands = {
   ...p2cCommands, // P2-C (2026-10-09)
   ...p2aCommands, // P2-A
   ...p2dCommands, // P2-D
+  ...p5o2Commands, // P5 O2 M2
   ...o10Commands, // P5 O10 M8
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 

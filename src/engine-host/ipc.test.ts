@@ -123,14 +123,14 @@ describe('x2 deadlines fit the bridge', () => {
   it('every host.* command the engine host owns has one deadline shape and a Supervision handler; stopAll alone is bounded', () => {
     const hostOwned = Object.entries(hostSchema.commands).filter(([, spec]) => spec.owner === 'engine-host').map(([name]) => name);
     expect(Object.keys(HOST_DEADLINE_SHAPES).sort()).toEqual(hostOwned.sort());
-    expect(HOST_DEADLINE_SHAPES).toEqual({ 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.op': 'bounded', 'host.opQuery': 'immediate' });
+    expect(HOST_DEADLINE_SHAPES).toEqual({ 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.interest': 'immediate' /* P5 O2 M2 */, 'host.op': 'bounded', 'host.opQuery': 'immediate' });
     // P5 O10 M7: lane B's operation ledger is the engine ipc's (ops.ts), not the supervisor's
     const ledgerCommands = ['host.op', 'host.opQuery'];
     expect([...engineHost().handlers.keys()].filter((name) => name.startsWith('host.')).sort()).toEqual(ledgerCommands);
     const registered: string[] = [];
     new Supervision({
-      mode: 'utility', identity: { pid: 1, startedAt: 't', buildId: 'b', protocol: 1, wire: 'w', socketPath: null, logPath: null } as never,
-      table: { onChange: () => () => {}, onRowsChanged: () => () => {}, setIdleRelease: () => {}, list: () => [] } as never,
+      mode: 'utility', identity: { pid: 1, startedAt: 't', buildId: 'b', protocol: 1, wire: 'w', socketPath: null, logPath: null } as never, role: 'laptop',
+      table: { onChange: () => () => {}, onRowsChanged: () => () => {}, setIdleRelease: () => {}, setInterest: () => {}, list: () => [] } as never,
       plugins: { busy: () => false, onIdle: () => () => {} }, shutdown: async () => ({ stopped: 0, forced: 0 }), emit: () => true, log: () => {},
     }).register((name) => void registered.push(name), { onConnect: () => {} });
     expect(registered.sort()).toEqual(hostOwned.filter((name) => !ledgerCommands.includes(name)).sort());
@@ -1294,3 +1294,52 @@ describe('session.steer.cancel and session.promptHistory (P2-C M3)', () => {
   });
 });
 // P2-C end
+
+// P5 O2 M2: the owner's Keep running mark (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M2 "Keep")
+describe('session.setKeep (P5 O2 M2)', () => {
+  it('has one immediate deadline shape and a handler', async () => {
+    const { P5O2_DEADLINE_SHAPES } = await import('./ipc');
+    const { P5O2_SESSION_COMMANDS } = await import('@shared/ipc/schema/session');
+    expect(P5O2_DEADLINE_SHAPES).toEqual({ 'session.setKeep': 'immediate' });
+    expect(Object.keys(P5O2_DEADLINE_SHAPES)).toEqual([...P5O2_SESSION_COMMANDS]);
+    expect(engineHost().handlers.has('session.setKeep')).toBe(true);
+  });
+
+  it('persists the mark in the state file, sets it on the live row, and the status reports it; the next launch reads it', async () => {
+    const store = new FileSessionStateStore(userData);
+    const table = new ProcessTable({ ps: async () => '' });
+    let transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder({ end_session: () => null })) });
+    const host = engineHost({ table, store, spawn: () => transport, binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const id = 'app-ipc' as AppSessionId;
+    await host.call('session.launch', { spec: spec() });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    expect(table.get(id)!.status().kept).toBe(false);
+    expect(await host.call('session.setKeep', { appSessionId: id, keep: true })).toEqual({ kept: true });
+    expect(host.statuses(id).at(-1)!.kept).toBe(true);
+    expect(await store.loadKeep(id)).toBe(true);
+    const stopping = host.call('session.stop', { appSessionId: id, reason: 'stop' });
+    await until(() => transport.requestsOf('end_session').length === 1, 'end_session');
+    transport.exit(0);
+    await stopping;
+    expect(await host.call('session.setKeep', { appSessionId: id, keep: true })).toEqual({ kept: true }); // an exited row takes it too
+    transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder({ end_session: () => null })) });
+    const before = host.statuses(id).length;
+    await host.call('session.launch', { spec: spec({ resume: { sessionId: '44444444-4444-4444-8444-444444444444' as never, fork: false } }) });
+    await until(() => host.statuses(id).slice(before).some((s) => s.process === 'ready'), 'the relaunch ready');
+    expect(host.statuses(id).slice(before).every((s) => s.kept === true)).toBe(true); // read from the state file before its first status
+    const stopAgain = host.call('session.stop', { appSessionId: id, reason: 'stop' });
+    await until(() => transport.requestsOf('end_session').length === 1, 'end_session');
+    transport.exit(0);
+    await stopAgain;
+  });
+
+  it('a session with a state file and no row takes the mark; one the host never saw is unknown', async () => {
+    const store = new MemorySessionStateStore();
+    await store.saveQueue('app-off' as AppSessionId, { entries: [], paused: false });
+    const host = engineHost({ store });
+    expect(await host.call('session.setKeep', { appSessionId: 'app-off' as AppSessionId, keep: true })).toEqual({ kept: true });
+    expect(store.keeps.get('app-off' as AppSessionId)).toBe(true);
+    await expect(host.call('session.setKeep', { appSessionId: 'app-never' as AppSessionId, keep: true })).rejects.toThrow('unknown session app-never');
+    expect(store.keeps.has('app-never' as AppSessionId)).toBe(false);
+  });
+});

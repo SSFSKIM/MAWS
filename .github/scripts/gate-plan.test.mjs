@@ -304,6 +304,9 @@ const workflowList = (workflow, name) => {
   const [, value, folded] = new RegExp(`^ {2}${name}: (.*)\\n((?: {4}\\S.*\\n)*)`, 'm').exec(workflow);
   return (value === '>-' ? folded.trim().split(/\s+/).join(' ') : value).replace(/^''$/, '');
 };
+// The measured groups whose scripts build no out/, so their jobs pass one settle guard (45 minutes plus the wait), not two
+// around a prebuild (60): P4-A2's live tool-time run and P5 O2's bare Electron runtime floor.
+const UNBUILT_MEASURED = new Set(['tool-time-heavy-live', 'daemon-idle-floor']);
 const placement = (outputs) => Object.fromEntries(JSON.parse(outputs.e2e).map((entry) => [entry.group, [JSON.parse(entry.runner), entry.timeout]]));
 
 // V4 waves 1, 2, 2b, 2c, 2d, 3 and 4: only the proven-VM groups leave today's exclusive labels (composer and layout, outside the
@@ -347,7 +350,7 @@ test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; e
   assert.deepEqual(placement(plan({ ...named, HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:composer,e2e:layout\nLane: vm' }).outputs), { composer: [vmMac, 30], layout: [vmMac, 30] });
   // The measured groups, which only a run naming them takes; class 1a on the Mac carries the wait too.
   const measured = plan({ ...own, HEAD_MESSAGE: `ci-gate: test\n\nGates: ${own.MEASURED_E2E.split(/\s+/).filter((group) => !own.LIVE_E2E.includes(group)).map((group) => `e2e:${group}`).join(',')}\nRunner: macos\nClass1a: macos` }).outputs;
-  for (const [group, where] of Object.entries(placement(measured))) assert.deepEqual(where, [homeMac, group === 'tool-time-heavy-live' ? 55 : 70], group);
+  for (const [group, where] of Object.entries(placement(measured))) assert.deepEqual(where, [homeMac, UNBUILT_MEASURED.has(group) ? 55 : 70], group);
   assert.deepEqual(JSON.parse(measured.timeouts), { static: 40, unit: 40, probes: 40, unit_darwin: 40 });
 });
 
@@ -913,7 +916,7 @@ test("gate.yml carries ci-kit's VM contract line, and keeps its promise: every t
       assert.ok(entries.length > 0, run);
       // None of them is e2e-vm's, whose steps are the e2e job's, settle first, by alias.
       assert.equal(outputs.e2e_host, outputs.e2e, `${run}${lane}`);
-      for (const entry of entries) assert.deepEqual([entry.group, entry.measured, JSON.parse(entry.runner), entry.timeout], [entry.group, true, homeMac, entry.group === 'tool-time-heavy-live' ? 55 : 70], `${run}${lane}`);
+      for (const entry of entries) assert.deepEqual([entry.group, entry.measured, JSON.parse(entry.runner), entry.timeout], [entry.group, true, homeMac, UNBUILT_MEASURED.has(entry.group) ? 55 : 70], `${run}${lane}`);
     }
   }
 });
@@ -1677,7 +1680,7 @@ test('direct runs the same admitted groups through e2e on macos-26 without a wai
   const direct = plan({ ...env, HOSTED_MAC_ROUTE: 'direct' }).outputs;
   assert.equal(direct.e2e_host, direct.e2e);
   assert.deepEqual([direct.e2e_hosted, direct.e2e_vm, direct.e2e_build, direct.pool], ['[]', '[]', '[]', 'false']);
-  assert.deepEqual(JSON.parse(direct.e2e), JSON.parse(mirror.e2e).map((entry) => ({ ...entry, runner: '"macos-26"', timeout: 45, ...cachedOf(entry.group) })));
+  assert.deepEqual(JSON.parse(direct.e2e), JSON.parse(mirror.e2e).map((entry) => ({ ...entry, runner: '"macos-26"', timeout: 45, retry: true, ...cachedOf(entry.group) })));
 });
 
 // A direct Mac starts empty, so the run shares each out/ variant through the Actions cache: keyed by the commit and the
@@ -1737,7 +1740,7 @@ test('only direct can host a peer group; the peer and package script reach the o
 test('under direct a peer group is hosted without a list entry, on either lane, unless no-hosted, mirror, live or a final ref', () => {
   const env = { PEER_E2E: 'cross-build', HOSTED_MAC_ROUTE: 'direct', HEAD_MESSAGE: `ci-gate: test\n\nGates: static,unit,probes\nClass1a: pool\nRunner: macos\n${peerTrailers('3.3', '3.4')}` };
   const entryOf = (scenario) => JSON.parse(plan(scenario).outputs.e2e).find((entry) => entry.group === 'cross-build');
-  const hostedEntry = { ...peerEntry, hosted: true, cached: 'plain', runner: '"macos-26"', timeout: 30 };
+  const hostedEntry = { ...peerEntry, hosted: true, retry: true, cached: 'plain', runner: '"macos-26"', timeout: 30 };
   assert.deepEqual(entryOf(env), hostedEntry);
   assert.deepEqual(entryOf({ ...env, HEAD_MESSAGE: env.HEAD_MESSAGE.replace('Runner: macos', 'Runner: linux') }), hostedEntry);
   for (const scenario of [
@@ -1809,7 +1812,7 @@ test('route changes only placement of hosted entries across the current lists an
     const env = { ...ownLists(), GATE_RUNNER: 'pool', HEAD_MESSAGE: `Runner: macos${lane ? `\nLane: ${lane}` : ''}` };
     const mirror = plan(env).outputs;
     const direct = plan({ ...env, HOSTED_MAC_ROUTE: 'direct' }).outputs;
-    assert.deepEqual(JSON.parse(direct.e2e), JSON.parse(mirror.e2e).map((entry) => entry.hosted ? { ...entry, runner: '"macos-26"', timeout: 45, ...cachedOf(entry.group) } : entry), lane);
+    assert.deepEqual(JSON.parse(direct.e2e), JSON.parse(mirror.e2e).map((entry) => entry.hosted ? { ...entry, runner: '"macos-26"', timeout: 45, retry: true, ...cachedOf(entry.group) } : entry), lane);
     assert.equal(direct.e2e_vm, mirror.e2e_vm, lane);
     assert.equal(direct.e2e_build, mirror.e2e_build, lane);
   }

@@ -14,4 +14,5 @@ export const grades = {
   'pty.list': 'shell',
   'pty.foreground': 'shell',
   'pty.openLink': 'client',
+  'pty.recaptureEnv': 'internal', // P5 O2 M4: main's and mawsd's, never a remote caller's
 } as const satisfies CommandGrades<'pty'>;

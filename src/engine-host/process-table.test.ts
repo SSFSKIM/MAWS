@@ -3,6 +3,14 @@ import type { AppSessionId, RequestId } from '@shared/graph/ids'; // C12: Reques
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { handshakeResponder, scriptedSession } from './conformance/session-harness';
 import { parsePsTree, ProcessTable } from './process-table';
+import { endableClientRef } from '@shared/ipc/client'; // P5 O2 M2
+import { evaluate, isIdleRow } from './budget'; // P5 O2 M2
+import { SERVER_RELEASE_MS } from './supervision'; // P5 O2 M2
+import { MemorySessionStateStore } from './store/memory-session-state-store'; // P5 O2 M2
+import { FileSessionStateStore } from './store/file-session-state-store'; // P5 O2 branch review
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'; // P5 O2 branch review
+import { tmpdir } from 'node:os'; // P5 O2 branch review
+import type { CronRecord } from '@shared/engine/session-state-store'; // P5 O2 M2
 import { EngineSession } from './session';
 import type { LiveRow } from './live-ledger'; // E10
 // C12 start
@@ -711,7 +719,7 @@ describe('process table (E10): the idle-row release', () => {
     expect(lifecycle(s.a!)).toBe('ready');
     await vi.advanceTimersByTimeAsync(1);
     expect(lifecycle(s.a!)).toBe('exiting');
-    expect(logs).toEqual(['idle release of a: no hard reason for 60000 ms with no app connected or exit-when-idle armed']);
+    expect(logs).toEqual(['idle release of a: idle for 60000 ms with no interest held']); // P5 O2 M2: re-keyed on interest
     expect(s.a!.transport.requestsOf('end_session').map((r) => r.request.reason)).toEqual(['stop']); // `idle` never goes on the wire
     s.a!.transport.exit(0);
     await s.a!.session.exited;
@@ -882,3 +890,359 @@ describe('process table (E10): the orphan ledger', () => {
   });
 });
 // E10 end
+
+// P5 O2 M2 start: the strict, interest-keyed idle release (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M2 "The
+// release rule"; P5 §2 "Idle release"). A row is eligible when it is ready, the engine is not running or waiting, it holds
+// no hard reason (background work of every kind, a session cron and unreadable work included), it is not kept, and no
+// client holds interest in it; its clock starts at the latest of its eligibility by state, its interest's end, its keep
+// mark's clearing and the release's activation. The memory budget honours the same work through `evaluate`.
+describe('process table (P5 O2 M2): the strict, interest-keyed idle release', () => {
+  const IDLE_MS = 10 * 60_000; // a laptop's default
+  const T0 = new Date('2026-10-27T10:00:00.000Z');
+  type Scripted = ReturnType<typeof scriptedSession>;
+  const tasks = (list: unknown[], uuid: string) => ({ type: 'system', subtype: 'background_tasks_changed', tasks: list, uuid, session_id: 's' });
+  const task = (taskType: string, ambient = false, description = 'work') => ({ task_id: `t-${taskType}`, task_type: taskType, description, ambient });
+  const cron = { id: 'c-1', schedule: '*/5 * * * *', recurring: true, prompt: 'check the build' };
+  const stop = (sessionCrons: unknown, id = 'stop-1') => ({ type: 'control_request', request_id: id, request: { subtype: 'hook_callback', callback_id: 'maws_Stop_1', input: { hook_event_name: 'Stop', session_id: 's', stop_hook_active: false, last_assistant_message: 'Done.', background_tasks: [], session_crons: sessionCrons } } });
+  const assistantTool = (name: string, parent: string | null = null) => ({ type: 'assistant', message: { id: `msg-${name}`, role: 'assistant', content: [{ type: 'tool_use', id: `toolu-${name}`, name, input: {} }] }, parent_tool_use_id: parent, session_id: 's', uuid: `a-${name}` });
+  const RESULT = { type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed' };
+
+  async function releaseTable(names: string[], per: (name: string) => NonNullable<Parameters<typeof scriptedSession>[0]> = () => ({})) {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    vi.setSystemTime(T0);
+    const logs: string[] = [];
+    const table = new ProcessTable({ ps: async () => '', log: (line) => void logs.push(line) });
+    const s: Record<string, Scripted> = {};
+    for (const [i, name] of names.entries()) {
+      const opts = per(name);
+      s[name] = scriptedSession({ ...opts, spec: { appSessionId: name as AppSessionId, ...opts.spec }, transport: { pid: 800 + i }, responder: handshakeResponder({ end_session: () => null }) });
+      table.reserve(name as AppSessionId, () => s[name]!.session);
+    }
+    await Promise.all(Object.values(s).map((x) => x.session.start()));
+    await vi.advanceTimersByTimeAsync(0);
+    return { table, s, logs };
+  }
+  const lifecycle = (x: Scripted) => x.session.lifecycle;
+  // One human turn, its frames pushed between the engine's `started` and its result.
+  async function humanTurn(x: Scripted, frames: unknown[]): Promise<void> {
+    const { messageUuid } = await x.session.send('go');
+    x.transport.push({ type: 'command_lifecycle', command_uuid: messageUuid, state: 'started', uuid: `lc-${messageUuid}`, session_id: 's' });
+    for (const frame of frames) x.transport.push(frame);
+    x.transport.push({ ...RESULT, user_message_uuids: [messageUuid], origin: { kind: 'human' } });
+    x.transport.push({ type: 'command_lifecycle', command_uuid: messageUuid, state: 'completed', uuid: `lc-done-${messageUuid}`, session_id: 's' });
+    await vi.advanceTimersByTimeAsync(0);
+  }
+  // The memory budget's verdict on one row, over its limit and quiet, so a row with nothing held is its candidate.
+  const budgetOf = (x: Scripted) => {
+    x.session.recordMemory({ rssKiB: 1, treeRssKiB: 100, sampledAt: T0.toISOString() });
+    const status = x.session.status();
+    return evaluate({ rows: [status], policy: { enabled: true, limitKiB: 1, statefulMcpServers: [] }, quiet: new Set([status.appSessionId]), releasing: null, previousOverWithoutCandidate: false });
+  };
+
+  // Acceptance 3, first bullet: every non-ambient background task kind, by the idle release and by the memory budget
+  it.each([
+    ['a Bash job', task('local_bash', false, 'sleep 900')],
+    ['a subagent', task('local_agent')],
+    ['a Monitor (the Monitor tool’s local_bash)', task('local_bash', false, 'Monitor: tail -f build.log')],
+    ['a Monitor (monitor_mcp)', task('monitor_mcp')],
+    ['an MCP task', task('mcp_task')],
+    ['a workflow', task('local_workflow')],
+  ])('%s is never released, by the idle release or the memory budget', async (_kind, held) => {
+    const { table, s } = await releaseTable(['a']);
+    s.a!.transport.push(tasks([held], 'b-1'));
+    await vi.advanceTimersByTimeAsync(0);
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('ready');
+    expect(isIdleRow(s.a!.session.status(), new Set())).toBe(false);
+    expect(budgetOf(s.a!)).toMatchObject({ over: true, release: null, blocked: [{ appSessionId: 'a', reasons: ['background_tasks'] }] });
+  });
+
+  it('only ambient tasks (an auto-started monitor_ws watcher, a dream) hold nothing: the session is released, and is the budget’s candidate', async () => {
+    const { table, s } = await releaseTable(['a']);
+    s.a!.transport.push(tasks([task('monitor_ws', true), task('dream', true)], 'b-1'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(budgetOf(s.a!)).toMatchObject({ over: true, release: 'a', blocked: [] });
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('exiting');
+  });
+
+  it('a session whose last Stop listed a session cron is never released; a Stop listing none starts its clock', async () => {
+    const { table, s } = await releaseTable(['a']);
+    await humanTurn(s.a!, [assistantTool('CronCreate'), stop([cron])]);
+    expect(s.a!.session.status()).toMatchObject({ work: { crons: [cron], unknown: null }, keepAlive: ['background_tasks'] });
+    expect(s.a!.transport.writes.filter((w) => w.type === 'control_response').map((w) => (w as { response: unknown }).response)).toContainEqual({ subtype: 'success', request_id: 'stop-1', response: {} }); // answered at once
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('ready');
+    expect(budgetOf(s.a!)).toMatchObject({ release: null, blocked: [{ appSessionId: 'a', reasons: ['background_tasks'] }] });
+    await humanTurn(s.a!, [assistantTool('CronDelete'), stop([], 'stop-2')]);
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('exiting');
+  });
+
+  it('a cron tool (a subagent’s included) in a turn that ended without Stop holds the session until the next Stop', async () => {
+    const { table, s } = await releaseTable(['a']);
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await humanTurn(s.a!, [assistantTool('CronCreate', 'toolu-agent')]); // interrupted: no Stop
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'turn_ended_without_stop' });
+    await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('ready');
+    await humanTurn(s.a!, [stop([])]);
+    await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
+    expect(lifecycle(s.a!)).toBe('ready');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(lifecycle(s.a!)).toBe('exiting');
+  });
+
+  it('a --resume after an exit that was not a release holds the session until its first Stop (a resurrected session-only cron can fire before it)', async () => {
+    const { table, s } = await releaseTable(['a'], () => ({ spec: { resume: { sessionId: '44444444-4444-4444-8444-444444444444' as never, fork: false }, sessionId: null } }));
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed' });
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('ready');
+    await humanTurn(s.a!, [stop([])]);
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('exiting');
+  });
+
+  it('a resume after a release starts known: nothing holds it', async () => {
+    const { table, s } = await releaseTable(['a'], () => ({ spec: { resume: { sessionId: '44444444-4444-4444-8444-444444444444' as never, fork: false }, sessionId: null }, session: { launchKind: 'resumed_after_release' } }));
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null });
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('exiting');
+  });
+
+  // P5 Decision Log 46: the durable crons, in the project's scheduled-tasks file, which no Stop lists
+  const RESUMED = '44444444-4444-4444-8444-444444444444';
+  const durableJob = (createdBySessionId = RESUMED) => ({ id: 'd-1', cron: '0 3 * * *', prompt: 'nightly', createdAt: 1_793_094_929_539, recurring: true, createdBySessionId });
+  const tasksFile = (files: Map<string, string>) => (path: string) => files.get(path) ?? null;
+  const resumeOf = (kind: 'resumed' | 'resumed_after_release', files: Map<string, string>) => () => ({
+    spec: { resume: { sessionId: RESUMED as never, fork: false }, sessionId: null, cwd: '/p' },
+    session: { launchKind: kind, scheduledTasksFile: tasksFile(files) },
+  });
+
+  it.each(['resumed', 'resumed_after_release'] as const)('a durable job created before a resume (%s) holds the session from its launch; its deletion, read at a Stop, frees it', async (kind) => {
+    const files = new Map([['/p/.claude/scheduled_tasks.json', JSON.stringify({ tasks: [durableJob(), durableJob('someone-else')] })]]);
+    const { table, s } = await releaseTable(['a'], resumeOf(kind, files));
+    const job = { id: 'd-1', schedule: '0 3 * * *', recurring: true, prompt: 'nightly' };
+    expect(s.a!.session.status()).toMatchObject({ work: { crons: [job] }, keepAlive: ['background_tasks'] });
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await humanTurn(s.a!, [stop([])]); // the Stop lists no durable job; the file still holds it
+    expect(s.a!.session.status().work).toEqual({ crons: [job], unknown: null });
+    await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('ready');
+    expect(budgetOf(s.a!)).toMatchObject({ release: null, blocked: [{ appSessionId: 'a', reasons: ['background_tasks'] }] });
+    files.set('/p/.claude/scheduled_tasks.json', JSON.stringify({ tasks: [durableJob('someone-else')] })); // CronDelete
+    await humanTurn(s.a!, [assistantTool('CronDelete'), stop([], 'stop-2')]);
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('exiting');
+  });
+
+  it('a scheduled-tasks file that exists but cannot be read holds the session until a read succeeds', async () => {
+    const files = new Map([['/p/.claude/scheduled_tasks.json', '{"tasks": [']]);
+    const { table, s } = await releaseTable(['a'], resumeOf('resumed_after_release', files));
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'durable_unreadable' });
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('ready');
+    files.delete('/p/.claude/scheduled_tasks.json');
+    await humanTurn(s.a!, [stop([])]);
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('exiting');
+  });
+
+  // P5 Decision Log 49: the cron record beside the state file bounds a resume's unknown
+  it('each Stop and each cron tool writes the cron record', async () => {
+    const store = new MemorySessionStateStore();
+    const { s } = await releaseTable(['a'], () => ({ session: { store } }));
+    await humanTurn(s.a!, [assistantTool('CronCreate')]); // interrupted: no Stop
+    expect(await store.loadCronRecord('a' as AppSessionId)).toEqual({ sessionCrons: [], toolSinceStop: true });
+    await humanTurn(s.a!, [stop([cron])]);
+    expect(await store.loadCronRecord('a' as AppSessionId)).toEqual({ sessionCrons: [cron], toolSinceStop: false });
+  });
+
+  it('a failed cron record write fails closed: the record reads as unknown until a write succeeds, and the same Stop is written again once storage recovers', async () => {
+    const store = new MemorySessionStateStore();
+    const { s } = await releaseTable(['a'], () => ({ session: { store } }));
+    await humanTurn(s.a!, [stop([])]);
+    expect(await store.loadCronRecord('a' as AppSessionId)).toEqual({ sessionCrons: [], toolSinceStop: false }); // clean on disk
+    store.cronRecordWriteError = Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
+    await humanTurn(s.a!, [assistantTool('CronCreate'), stop([cron])]);
+    expect(s.a!.logs.filter((line) => line.includes('cron record not saved'))).toHaveLength(2); // the tool's and the Stop's
+    expect(await store.loadCronRecord('a' as AppSessionId)).toBeNull(); // the older, cleaner record was removed
+    // a resume while the record is unconfirmed is unknown, not known-empty
+    const resumed = await releaseTable(['a'], () => ({ spec: { resume: { sessionId: RESUMED as never, fork: false }, sessionId: null }, session: { store } }));
+    expect(resumed.s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed' });
+    // storage recovers: the next Stop, identical to the failed one, is written
+    store.cronRecordWriteError = null;
+    await humanTurn(s.a!, [stop([cron], 'stop-3')]);
+    expect(await store.loadCronRecord('a' as AppSessionId)).toEqual({ sessionCrons: [cron], toolSinceStop: false });
+  });
+
+  const resumeWithRecord = (record: CronRecord | null) => () => {
+    const store = new MemorySessionStateStore();
+    if (record !== null) void store.saveCronRecord('a' as AppSessionId, record);
+    return { spec: { resume: { sessionId: RESUMED as never, fork: false }, sessionId: null }, session: { store } };
+  };
+
+  it('a resume whose record shows no listed cron and no cron tool since starts known and empty, and is released', async () => {
+    const { table, s } = await releaseTable(['a'], resumeWithRecord({ sessionCrons: [], toolSinceStop: false }));
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: null });
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('exiting');
+  });
+
+  it.each<[string, CronRecord | null]>([
+    ['a listed session cron', { sessionCrons: [cron], toolSinceStop: false }],
+    ['a cron tool since the Stop', { sessionCrons: [], toolSinceStop: true }],
+    ['no record', null],
+  ])('a resume whose record shows %s holds the session until its first Stop', async (_case, record) => {
+    const { table, s } = await releaseTable(['a'], resumeWithRecord(record));
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed' });
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('ready');
+  });
+
+  it('a record the state file cannot give (an unreadable file) holds the session too', async () => {
+    const store = new MemorySessionStateStore();
+    store.loadCronRecord = async () => {
+      throw new Error('state file unreadable');
+    };
+    const { table, s } = await releaseTable(['a'], () => ({ spec: { resume: { sessionId: RESUMED as never, fork: false }, sessionId: null }, session: { store } }));
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'resumed' });
+    expect(s.a!.logs).toContainEqual(expect.stringContaining('cron record not loaded'));
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('ready');
+  });
+
+  // Branch review: a durable job an id before a /clear created, its lineage lost with an unreadable state file, read
+  // through the disk store, its cron record clean. Whichever load finds the file unreadable, the job may be the
+  // session's, so the resume stays unknown and is never released.
+  it.each([
+    ['the keep mark\'s load finds the unreadable state file first', false],
+    ['the lineage\'s load finds it first', true],
+  ])('a lineage lost with an unreadable state file holds a resume while another id\'s durable job exists (%s)', async (_case, lineageFirst) => {
+    const userData = await mkdtemp(join(tmpdir(), 'maws-lineage-'));
+    try {
+      const store = new FileSessionStateStore(userData, { warn: () => {} });
+      await store.saveCronRecord('a' as AppSessionId, { sessionCrons: [], toolSinceStop: false }); // clean: alone it would clear the resume's unknown
+      await writeFile(join(userData, 'engine-host', 'state', 'a.json'), '{"version":1,"engineSessionIds":["');
+      if (lineageFirst) store.loadKeep = async () => false; // the keep mark read elsewhere: the lineage's load is the first read
+      const beforeClear = '66666666-6666-4666-8666-666666666666'; // the id the job keeps after a /clear moved the session on
+      const files = new Map([['/p/.claude/scheduled_tasks.json', JSON.stringify({ tasks: [durableJob(beforeClear)] })]]);
+      const { table, s } = await releaseTable(['a'], () => ({ spec: resumeOf('resumed', files)().spec, session: { launchKind: 'resumed', scheduledTasksFile: tasksFile(files), store } }));
+      expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'durable_unreadable' });
+      expect(s.a!.logs).toContainEqual(expect.stringContaining('engine session ids not loaded'));
+      table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+      await humanTurn(s.a!, [stop([])]); // a Stop re-reads the file on the same lost lineage
+      expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'durable_unreadable' });
+      await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+      expect(lifecycle(s.a!)).toBe('ready');
+      expect(budgetOf(s.a!)).toMatchObject({ release: null, blocked: [{ appSessionId: 'a' }] });
+    } finally {
+      await rm(userData, { recursive: true, force: true });
+    }
+  });
+
+  it('an adopted process holds the session until a task snapshot and a Stop have both arrived', async () => {
+    const { table, s } = await releaseTable(['a'], () => ({ session: { launchKind: 'adopted' } }));
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await humanTurn(s.a!, [stop([])]);
+    expect(s.a!.session.status().work).toEqual({ crons: [], unknown: 'adopted' }); // the tasks are not read yet
+    await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('ready');
+    s.a!.transport.push(tasks([], 'b-1'));
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('exiting');
+  });
+
+  it('interest holds a row; its end (a set without it, or the holder gone) starts the clock', async () => {
+    const { table, s } = await releaseTable(['a', 'b']);
+    const app = endableClientRef('1');
+    table.setInterest(app, ['a', 'b'] as AppSessionId[]);
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+    expect([lifecycle(s.a!), lifecycle(s.b!)]).toEqual(['ready', 'ready']);
+    table.setInterest(app, ['b'] as AppSessionId[]); // a's tab closed
+    await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
+    expect(lifecycle(s.a!)).toBe('ready');
+    await vi.advanceTimersByTimeAsync(1);
+    expect([lifecycle(s.a!), lifecycle(s.b!)]).toEqual(['exiting', 'ready']);
+    app.end(); // the client's connection ended
+    await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
+    expect(lifecycle(s.b!)).toBe('ready');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(lifecycle(s.b!)).toBe('exiting');
+  });
+
+  it('interest is the union of its holders; a holder already gone holds nothing', async () => {
+    const { table, s } = await releaseTable(['a']);
+    const gone = endableClientRef('old');
+    gone.end();
+    table.setInterest(gone, ['a'] as AppSessionId[]);
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    const first = endableClientRef('1');
+    const second = endableClientRef('2');
+    table.setInterest(first, ['a'] as AppSessionId[]);
+    table.setInterest(second, ['a'] as AppSessionId[]);
+    first.end();
+    await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('ready');
+    table.setInterest(second, []);
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('exiting');
+  });
+
+  it('a server’s idle time (24 hours) on the same rule; a due time passed while the machine slept releases soon after it wakes', async () => {
+    const { table, s } = await releaseTable(['a', 'b']);
+    s.b!.session.setKept(true);
+    table.setIdleRelease({ idleMs: SERVER_RELEASE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(SERVER_RELEASE_MS - 1);
+    expect(lifecycle(s.a!)).toBe('ready');
+    await vi.advanceTimersByTimeAsync(1);
+    expect([lifecycle(s.a!), lifecycle(s.b!)]).toEqual(['exiting', 'ready']);
+    // b's mark clears; then the wall clock jumps past its due time while no timer runs (the machine slept)
+    s.b!.session.setKept(false);
+    vi.setSystemTime(Date.now() + 2 * SERVER_RELEASE_MS);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(lifecycle(s.b!)).toBe('exiting');
+  });
+
+  it('a kept session is never idle-released, though the memory budget may still release it; clearing the mark starts the clock', async () => {
+    const { table, s } = await releaseTable(['a']);
+    s.a!.session.setKept(true);
+    expect(s.a!.session.status()).toMatchObject({ kept: true, keepAlive: [] });
+    expect(budgetOf(s.a!)).toMatchObject({ release: 'a' }); // keep exempts the idle release only
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('ready');
+    s.a!.session.setKept(false);
+    await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
+    expect(lifecycle(s.a!)).toBe('ready');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(lifecycle(s.a!)).toBe('exiting');
+  });
+
+  it('under an armed exit-when-idle interest is ignored, its clock starting at the arming, and the keep mark is honoured', async () => {
+    const { table, s, logs } = await releaseTable(['a', 'b']);
+    table.setInterest(endableClientRef('1'), ['a', 'b'] as AppSessionId[]);
+    s.b!.session.setKept(true);
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(5 * IDLE_MS);
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true, ignoreInterest: true }); // an old supervisor asked to empty
+    await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
+    expect(lifecycle(s.a!)).toBe('ready');
+    await vi.advanceTimersByTimeAsync(1);
+    expect([lifecycle(s.a!), lifecycle(s.b!)]).toEqual(['exiting', 'ready']);
+    expect(logs).toEqual(['idle release of a: idle for 600000 ms with no interest held (exit-when-idle armed: interest ignored)']);
+  });
+});
+// P5 O2 M2 end

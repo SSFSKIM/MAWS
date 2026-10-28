@@ -14,6 +14,7 @@ class FakePort implements RelayPort {
   posted: unknown[] = [];
   closed = false;
   started = false;
+  closedBy?: RelayPort['closedBy']; // P5 O2 M5
   private messageListeners: ((event: { data: unknown }) => void)[] = [];
   private closeListeners: (() => void)[] = [];
   postMessage(message: unknown) {
@@ -133,5 +134,23 @@ describe('MainDocRelay', () => {
     relay.connect(second.value);
     expect(relay.open(doc(3), new FakePort(), 'page:7.1')).toBe(true);
     expect(second.lines).toEqual([{ t: 'documents.open', channel: 3, artifactId: ID, actor: { kind: 'human' } }]);
+  });
+
+  // P5 O2 M5: `mawsd`'s endpoint channels hear why each ended
+  it('tells a port why it ends: the host’s reason, or upstream when the connection goes', () => {
+    const relay = new MainDocRelay();
+    relay.connect(link().value);
+    const reasons: [number, string][] = [];
+    const ports = [1, 2, 3].map((channel) => {
+      const port = new FakePort();
+      port.closedBy = (reason) => void reasons.push([channel, reason]);
+      relay.open(doc(channel), port, null);
+      return port;
+    });
+    relay.closed(1, 'reset');
+    relay.closed(2, 'host');
+    relay.disconnect();
+    expect(reasons).toEqual([[1, 'reset'], [2, 'host'], [3, 'upstream']]);
+    expect(ports.every((port) => port.closed)).toBe(true);
   });
 });

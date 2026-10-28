@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
 import { engineQuitDeps } from './engine-quit';
 
 // The engine host's half of the quit guard (E10 execution document, §Design 5).
 describe('the engine host at quit', () => {
-  const settingsWith = (extra: Partial<Settings>): Settings => ({ ...SETTINGS_DEFAULTS_V19, ...extra });
+  const settingsWith = (extra: Partial<Settings>): Settings => ({ ...SETTINGS_DEFAULTS_V20, ...extra });
   const hostsIn = (transport: 'utility' | 'detached') => ({ stopAllForQuit: vi.fn<(graceMs: number) => Promise<void>>(async () => {}), facts: vi.fn(() => ({ transport })) });
 
   it('stops every session through the quit’s stop-all with the 5 s grace, in either mode', async () => {
@@ -25,9 +25,9 @@ describe('the engine host at quit', () => {
     let settings = settingsWith({});
     const deps = engineQuitDeps(hostsIn('detached'), () => settings);
     expect(deps.keepDefault()).toBe(true);
-    settings = settingsWith({ supervisor: { idleExitMinutes: 10, keepRunningDefault: false } });
+    settings = settingsWith({ supervisor: { idleExitMinutes: 10, keepRunningDefault: false, shape: 'daemon' } });
     expect(deps.keepDefault()).toBe(false);
-    settings = settingsWith({ supervisor: { idleExitMinutes: null, keepRunningDefault: true } });
+    settings = settingsWith({ supervisor: { idleExitMinutes: null, keepRunningDefault: true, shape: 'daemon' } });
     expect(deps.keepDefault()).toBe(true);
   });
 });

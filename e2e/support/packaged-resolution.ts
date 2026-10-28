@@ -116,7 +116,7 @@ export const resourcesOf = (executable: string) => resolve(dirname(executable), 
 
 // The packaged binary as its supervisor runs (ELECTRON_RUN_AS_NODE=1), with the e2e launch's environment (every inherited
 // CLAUDE* variable dropped; no engine is started, no model or network is used) over the scene's scratch profile, then
-// the scrub main's supervisorEnv (src/main/hosts/detached-transport.ts) makes for a packaged app: no NODE_OPTIONS (a
+// the scrub main's supervisorEnv (src/shared/host/detached-transport.ts) makes for a packaged app: no NODE_OPTIONS (a
 // preload, loader or inspector flag the actual supervisor never receives), no MAWS_HOST_MODE, no dev relay override.
 // Written out here, not imported: that module is main's, and the e2e project compiles only the files it names.
 export function packagedResolution(executable: string, userData: string): Resolution {

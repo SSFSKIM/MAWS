@@ -69,8 +69,13 @@ describe('every command of the registry', () => {
 });
 
 describe('the routing classes', () => {
-  it('give internal to exactly the main-only commands', () => {
-    expect(graded('internal')).toEqual([...MAIN_ONLY_COMMANDS].sort());
+  // P5 O2 M5 (an O1 rubric line, settled with O10): a main-only command a remote caller reaches through the endpoint takes
+  // its effect's grade, not `internal`, so the daemon's status and restart leave the set
+  it('give internal to exactly the main-only commands, less those the endpoint grades by effect', () => {
+    const byEffectOfMainOnly = ['daemon.status', 'daemon.restart'];
+    expect(graded('internal')).toEqual(MAIN_ONLY_COMMANDS.filter((name) => !byEffectOfMainOnly.includes(name)).sort());
+    expect(gradeOf('daemon.status')).toBe('list');
+    expect(gradeOf('daemon.restart')).toBe('machine-admin');
   });
 
   it("give client to exactly the commands that stay with the client (survey §2), as M4's rubric lists them", () => {

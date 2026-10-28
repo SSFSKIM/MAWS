@@ -46,5 +46,6 @@ export const LINK_REGISTRY: WireRegistry = {
   ),
   events: Object.fromEntries(LINK_EVENTS.map((name) => [name, REGISTRY.events[name]])),
   hostEvents: [],
+  ptyHostEvents: [], // P5 O2 M4: as hostEvents, the link serves no host
   mainOnly: new Set(),
 };
