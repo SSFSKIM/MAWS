@@ -124,8 +124,12 @@ export function subscribeCards(channel: Channel, session: CardSession, listener:
     if (message.t === 'ev' && session.lane === 'A' && isObject(message.body)) {
       const { kind, body } = message.body;
       if (kind === 'raised' && isObject(body) && (await laneACards({ raised: [body] })).cards.length === 1) {
-        if (cards.some((c) => c.lane === 'A' && c.raised.request === body.request)) return;
-        return tell([...cards, await laneACard(body as Raised, launch)]);
+        // sminos republishes a request whose body changed under its id, and the endpoint's pending set replaces it: the
+        // card is replaced in place, its digest over the new input. One republished unchanged draws nothing.
+        const held = cards.find((c) => c.lane === 'A' && c.raised.request === body.request);
+        if (held?.lane === 'A' && JSON.stringify(held.raised) === JSON.stringify(body)) return;
+        const card = await laneACard(body as Raised, launch);
+        return tell(held === undefined ? [...cards, card] : cards.map((c) => (c === held ? card : c)));
       }
       if (kind === 'settled' && isObject(body)) return tell(cards.filter((c) => !(c.lane === 'A' && c.raised.request === body.request)));
     }

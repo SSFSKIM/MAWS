@@ -83,6 +83,12 @@ describe('lane A’s cards', () => {
     expect(unanswerable(cards[0])).toMatchObject({ why: 'no-bridge' });
   });
 
+  it('read a question by the tool names desk-web reads one by: the ask mod’s async question and the older spelling too', async () => {
+    const tools = ['AskUserQuestion', 'mcp__sminos__AskUserQuestion', 'mcp__doperpowers__AskUserQuestion', 'Bash', 'AskUserQuestionLater'];
+    const { cards } = await laneACards({ raised: tools.map((tool, i) => ({ ...ASKED, request: `toolu_${i}`, tool })), launch: 'L1' });
+    expect(cards.map(cardKind)).toEqual(['question', 'question', 'question', 'permission', 'permission']);
+  });
+
   it('are answerable with a launch', async () => {
     const { cards } = await laneACards({ raised: [RAISED], launch: 'L1' });
     expect(unanswerable(cards[0])).toBeNull();

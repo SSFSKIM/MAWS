@@ -59,6 +59,10 @@ describe('the five forms an answer takes, and nothing else', () => {
     for (const decision of ['allow', 'deny'] as const) {
       expect(shape(operationFor(identity, MACHINE, raised, { kind: 'decision', decision }, NOW))).toEqual({ ...common, action: 'sminos.decide', args: { session: 'la-1', decision, digest: pDigest }, requestDigest: pDigest });
     }
+    // The ask mod's async question, raised under its MCP name, is answered as a question.
+    const ASYNC = { ...ASKED, tool: 'mcp__sminos__AskUserQuestion' };
+    const aDigest = { ...qDigest, tool: 'mcp__sminos__AskUserQuestion' };
+    expect(shape(operationFor(identity, MACHINE, await laneACard(ASYNC, 'L1'), { kind: 'question', answers: { 'Which way?': 'left' } }, NOW))).toEqual({ ...common, action: 'sminos.answer', args: { session: 'la-1', answers: { 'Which way?': 'left' }, digest: aDigest }, requestDigest: aDigest });
   });
 
   it('lane B: Allow carries scope once, Deny no scope, a question its answers, byte for byte', async () => {

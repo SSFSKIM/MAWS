@@ -10,13 +10,14 @@ import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { actionFingerprint, ChannelError, type Action, type ChannelMessage } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { inputSha256 } from 'desk-hub/protocol';
 import type { SessionEvent } from '@shared/graph/events';
 import { requestDigestOf } from '@shared/host/request-digest';
 import { throughTamper } from '../../../../test/endpoint/carriers';
 import { item as itemOf } from '../../../../test/endpoint/sub-harness';
 import { recording, startWorld, until, type World } from '../../test/local/endpoint';
 import { answer, operationFor, retry, seal, type Answer, type Operation } from './answers';
-import { cardId, laneACard, laneBCards, unanswerable, type Card, type CardSession } from './cards';
+import { cardId, cardKind, laneACard, laneADigest, laneBCards, unanswerable, type Card, type CardSession } from './cards';
 import { followCards, subscribeCards, type MachineChannel } from './client';
 
 let world: World;
@@ -177,6 +178,41 @@ describe('a cold cards subscription, and its answers', () => {
     expect(await acted(channel, session)).toBe('class');
     expect(answeredOnce(`${APP} rq-session`)).toBe(0);
     b.close();
+  });
+});
+
+describe('lane A’s cards as sminos raises them', () => {
+  it('answers the ask mod’s async question, raised under its MCP name, as a question', async () => {
+    const asked = { ...question('toolu_async'), tool: 'mcp__sminos__AskUserQuestion', async: true };
+    world.sminos.raise(asked);
+    const channel = await open();
+    const a = watch(channel, { lane: 'A', id: 'la-1' });
+    const card = find(await a.until(has('toolu_async'), 'the async question'), 'toolu_async');
+    expect(cardKind(card)).toBe('question');
+    expect((await answer(channel, world.phone.identity, card, left, world.phone.assert)).outcome).toMatchObject({ state: 'done' });
+    expect(world.sminos.effects.filter((e) => e.endsWith('toolu_async'))).toEqual(['answer la-1 toolu_async']);
+    await a.until(lacks('toolu_async'), 'the question settled');
+    a.close();
+  });
+
+  it('redraws a card sminos republishes changed under its id, and answers it over the new input’s digest', async () => {
+    const old = { ...permission('toolu_changed'), input: { command: 'old' } };
+    const changed = { ...old, input: { command: 'new' } };
+    world.sminos.raise(old);
+    const channel = await open();
+    const a = watch(channel, { lane: 'A', id: 'la-1' });
+    await a.until(has('toolu_changed'), 'the card');
+    const from = a.sets.length;
+    world.sminos.raise(changed);
+    const redrawn = (set: Card[]) => set.some((c) => c.lane === 'A' && c.raised.request === 'toolu_changed' && (c.raised.input as { command: string }).command === 'new');
+    const card = find(await a.until(redrawn, 'the card redrawn', from), 'toolu_changed') as Extract<Card, { lane: 'A' }>;
+    expect(a.sets.slice(from).map((set) => set.filter((c) => cardId(c) === 'toolu_changed').length)).not.toContain(2);
+    expect(card.digest).toEqual(await laneADigest(changed));
+    expect((await answer(channel, world.phone.identity, card, allow, world.phone.assert)).outcome).toMatchObject({ state: 'done' });
+    const sent = world.sminos.s.received.filter((f) => f.t === 'rpc' && (f.rpc as { args: { digest?: { request: string } } }).args.digest?.request === 'toolu_changed');
+    expect(sent.map((f) => (f.rpc as { args: { digest: { input_sha256: string } } }).args.digest.input_sha256)).toEqual([await inputSha256(changed.input)]);
+    expect(world.sminos.effects.filter((e) => e.endsWith('toolu_changed'))).toEqual(['decide la-1 toolu_changed']);
+    a.close();
   });
 });
 

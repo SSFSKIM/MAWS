@@ -14,6 +14,7 @@
 import { inputSha256, type Digest, type JsonObject, type JsonValue, type Raised as DeskRaised } from 'desk-hub/protocol';
 import { canonicalize } from 'org-protocol';
 import type { AttentionItem } from '@shared/graph/attention';
+import { isQuestion } from '../conversation/card-state';
 import type { SessionEvent } from '@shared/graph/events';
 
 /** A session the phone subscribes to: lane A by its engine session id, lane B by its appSessionId. */
@@ -114,7 +115,7 @@ export function cardId(card: Card): string {
 }
 
 export function cardKind(card: Card): CardKind {
-  if (card.lane === 'A') return card.raised.tool === 'AskUserQuestion' ? 'question' : 'permission';
+  if (card.lane === 'A') return isQuestion(card.raised.tool) ? 'question' : 'permission';
   if (card.request.kind === 'question.requested') return 'question';
   return card.request.kind === 'permission.requested' ? 'permission' : 'other';
 }

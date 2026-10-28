@@ -18,12 +18,13 @@ import {
 } from 'org-protocol';
 import { duplexPair, SoftwareAuthenticator } from 'org-protocol/test-support';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { inputSha256 } from 'desk-hub/protocol';
 import type { SessionEvent } from '@shared/graph/events';
 import { requestDigestOf } from '@shared/host/request-digest';
 import { FakeChannel } from '../../test/channel';
 import { endorsedBy, nextOf, rootedOrg, signedBy } from '../../test/org';
 import * as answers from './answers';
-import { laneACards, laneBCards, type Card } from './cards';
+import { laneACard, laneACards, laneBCards, type Card } from './cards';
 import type { MachineSocket } from './carrier';
 import type { DeviceRecord } from './device-store';
 import * as client from './client';
@@ -89,6 +90,23 @@ describe('a cards subscription', () => {
     await until(() => sets.length === 4, 'four sets');
     expect(sets.map(ids)).toEqual([['toolu_1'], ['toolu_1', 'toolu_3'], ['toolu_3'], ['toolu_3', 'toolu_1']]);
     expect(sets[1][1]).toMatchObject({ lane: 'A', launch: 'L1' });
+  });
+
+  it('replaces a held lane A card a raise republishes changed, its digest over the new input, and draws nothing for one republished unchanged', async () => {
+    const channel = new FakeChannel();
+    const sets: Card[][] = [];
+    subscribeCards(channel, { lane: 'A', id: 'la-1' }, { cards: (set) => sets.push(set), ended: () => {} });
+    const sub = channel.of('sub')[0].sub as string;
+    const old = { ...RAISED, input: { command: 'old' } };
+    for (const m of snap(sub, { raised: [old, ASKED], launch: 'L1' })) channel.deliver(m);
+    channel.deliver({ t: 'ev', sub, epoch: 'e1', seq: 1, body: { kind: 'raised', body: old } }); // unchanged: nothing drawn
+    const changed = { ...RAISED, input: { command: 'new' } };
+    channel.deliver({ t: 'ev', sub, epoch: 'e1', seq: 2, body: { kind: 'raised', body: changed } });
+    await until(() => sets.length === 2, 'two sets');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(sets).toHaveLength(2);
+    expect(sets[1]).toEqual([await laneACard(changed, 'L1'), sets[0][1]]);
+    expect(sets[1][0].lane === 'A' && sets[1][0].digest.input_sha256).toBe(await inputSha256(changed.input));
   });
 
   it('draws lane B’s snapshot with each card’s digests', async () => {
