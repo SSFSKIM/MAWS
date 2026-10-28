@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { daemonPaths } from '../../src/shared/daemon/files';
-import { endProfileProcesses, isAlive, killScratchProcesses, processesNaming, ps, shellsUnder, untilExited, type ProcessIdentity } from '../../e2e/support/processes';
+import { endProfileProcesses, isAlive, killProfileProcessesNow, killScratchProcesses, processesNaming, ps, shellsUnder, untilExited, type ProcessIdentity } from '../../e2e/support/processes';
 
 // Only the PID-reuse case replaces an OS reading; the other cases delegate every command to the real OS.
 vi.mock('node:child_process', async (original) => ({ ...await original<typeof import('node:child_process')>(), execFileSync: vi.fn((await original<typeof import('node:child_process')>()).execFileSync) }));
@@ -178,6 +178,18 @@ describe('endProfileProcesses', () => {
     expect(mawsd.signalCode).toBe('SIGKILL');
     expect(isAlive(other.pid!), 'the other profile’s process runs').toBe(true);
     expect(processesNaming(join(profile, 'mawsd'))).toEqual([]);
+  });
+
+  it('at a worker’s exit, sends SIGKILL at once to what names the profile, and to nothing of a profile it prefixes', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'maws-profile-'));
+    roots.push(root);
+    const [profile, longer] = [join(root, 'ud'), join(root, 'ud2')];
+    const mawsd = await namedChild(join(profile, 'mawsd'));
+    const other = await namedChild(join(longer, 'mawsd'));
+    killProfileProcessesNow(profile);
+    await exited(mawsd);
+    expect(mawsd.signalCode).toBe('SIGKILL');
+    expect(isAlive(other.pid!)).toBe(true);
   });
 
   it('removes the daemon shape’s socket directory outside a profile too long for sun_path, and answers at once for a profile already gone', async () => {

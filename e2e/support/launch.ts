@@ -13,7 +13,7 @@ import { _electron, test as base, type ElectronApplication, type Page } from '@p
 import { writeReplayEngine } from '../../test/support/replay-engine';
 import { writeScratchShellHome } from '../../test/support/shell-home';
 import { writeDiscoverScratch, type DiscoverScratch, type DiscoverScratchOptions } from './discover-scratch'; // P4-AGG M1
-import { endProfileProcesses, processesNaming, shellsUnder, untilExited } from './processes';
+import { endProfileProcesses, killProfileProcessesNow, processesNaming, shellsUnder, untilExited } from './processes';
 import { realEngine, type RealEngine } from './real-engine'; // P4-AGG M1
 import { assertEngineKeychainEnv, assertNoKeychainPrompt, killTree, loginShellEnvironment, watchKeychainPrompt } from './keychain-guard'; // fixB
 import { launchEnvironment } from './scratch-env';
@@ -108,6 +108,14 @@ export async function onLaunched<T>(hook: (app: ElectronApplication) => void, la
 }
 // E4b end
 
+// P5 O3-B: the profiles of this worker's launches whose cleanup has not run (a test that failed or timed out before it,
+// a spec with none), one entry per launch. The daemon shape's private `mawsd` and its hosts outlive an app Playwright
+// closes, so the worker's exit ends what names each of them.
+const uncleaned = new Set<{ userData: string }>();
+process.once('exit', () => {
+  for (const userData of new Set([...uncleaned].map((launch) => launch.userData))) killProfileProcessesNow(userData);
+});
+
 export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLaunch> {
   // P4-AGG M1: verified before anything is created, so a missing engine leaves nothing behind; the scratch is written
   // into the launch's own engine store, which another one named by the test would bypass.
@@ -165,6 +173,8 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   let app: ElectronApplication | null = null;
   let child: ReturnType<ElectronApplication['process']> | null = null;
   let closed = false;
+  const entry = { userData };
+  uncleaned.add(entry);
   const cleanup = async () => {
     const prompted = keychainWatch?.stop() ?? null;
     keychainWatch = null;
@@ -180,6 +190,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
       // P5 O3-B: the daemon shape's private `mawsd` and its hosts outlive the app; they end here, for a given profile too,
       // as the utility shape's hosts ended with the app (processes.ts), and one that will not is the launch's failure
       leftover = await endProfileProcesses(userData).then(() => null, (error: unknown) => error);
+      uncleaned.delete(entry);
       const left = await untilExited(shells, SHELL_EXIT_MS);
       if (left.length > 0) console.error(`[e2e] shells still running ${SHELL_EXIT_MS} ms after the app closed: ${left.map((p) => p.pid).join(', ')}`);
       if (ownsUserData) rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); // C5: a given profile is the caller's

@@ -183,6 +183,18 @@ export async function endProfileProcesses(userData: string, opts: { timeoutMs?: 
   }
 }
 
+// The same end, synchronous and best effort, for a process about to exit (a worker whose test never reached its
+// launch's cleanup): every process naming a path under the profile is sent SIGKILL, and nothing is awaited.
+export function killProfileProcessesNow(userData: string): void {
+  for (const { pid } of processesNaming(join(userData, sep))) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // gone meanwhile
+    }
+  }
+}
+
 function socketFallbacks(userData: string): string[] {
   const daemon = daemonPaths(userData);
   const dirs = [daemon.socketDir, dirname(socketPathFor(join(userData, 'supervisor'), userData, tmpdir())), dirname(ptyHostSocketPath(daemon.ptyHost))];
