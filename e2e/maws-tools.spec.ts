@@ -716,8 +716,6 @@ test('the SDK MCP round trip: the app answers the engine’s handshake with the 
       ['artifact_resolve', { title: 'Resolve a document comment', readOnlyHint: false, openWorldHint: false }],
       // P4-B4 (X33): the search tool, after B's; read-only
       ['artifact_search', { title: 'Search artifacts', readOnlyHint: true, openWorldHint: false }],
-      // P4-R7: the message tool, after the search tool; read-only
-      ['message', { title: 'Send message', readOnlyHint: true, openWorldHint: false }],
     ]);
     const [echo] = mcpCalls(rows);
     expect(mcpResultOf(rows, echo!.requestId)).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('echo_file') }], isError: true });
