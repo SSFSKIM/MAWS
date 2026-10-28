@@ -263,7 +263,7 @@ env:
   # packaged is unsigned but not admitted: run 40637823292 had four bare-suite failures
   # (layout-transfer:416 twice, :540; sessions:301). Admit only after fixes and 3/3 hosted passes.
   # A hosted packaged trial edits this list on its branch; the default stays self-hosted.
-  HOSTED_MAC_JOBS: ''
+  HOSTED_MAC_JOBS: packaged
   # The groups that need a credential or the login keychain's custody, so never go to a hosted Mac, whatever the lane
   # (maws-app holds no secret): connectors-oauth, and discover, whose custody conditions (a), (b) and (c) stand.
   MAC_SECRET_E2E: connectors-oauth discover
