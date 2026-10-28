@@ -5,8 +5,9 @@
 // The keys file is `{device: "<id>", keys: {"<id>.channel": jwk, "<id>.stepUp": jwk}}` (private P-256 JWKs, 0600), the
 // staging test device's shape (org-admin.ts) without the recovery key: a file with no `device` names `a1`, as that one
 // does. It is read here and nowhere printed, a malformed one included (readJsonFile).
+import { execFileSync } from 'node:child_process';
 import { createECDH, randomBytes } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, statSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { base64urlEncode, generateSigningKey, importSigningKey, type SigningKey } from 'org-protocol';
 import { parseJsonFile, readJsonFile } from '../fake-machine/json-file';
@@ -73,34 +74,58 @@ export function keysPlacementProblem(path: string, placement: Placement): string
   return null;
 }
 
-/** Why the recovery key may not be written at `path` (RL DL28: never on the admin key's disk, never in a sync or backup
- * scope), or null. `volumeOf` answers a path's volume; the volume rule holds only against a deployment, since the
- * suites' destination stands for a volume no test mounts. */
-export function recoveryPlacementProblem(
-  path: string,
-  keysFile: string,
-  placement: Placement,
-  volume: { of: (path: string) => unknown; required: boolean },
-): string | null {
+/** What the recovery key's destination rule asks of a volume: its identity, and whether it is removable or external. */
+export type VolumeCheck = { of: (path: string) => unknown; removable: (path: string) => boolean; required: boolean };
+
+/**
+ * Why the recovery key may not be written at `path` (RL DL28: never on the admin key's disk, never in a sync or backup
+ * scope; the owner's medium, 2026-10-28: a removable volume mounted at genesis), or null. The volume rules hold only
+ * against a deployment, since the suites' destination stands for a volume no test mounts: there the destination must be
+ * on another volume than the keys and on removable or external media (an internal disk's second volume is neither).
+ */
+export function recoveryPlacementProblem(path: string, keysFile: string, placement: Placement, volume: VolumeCheck): string | null {
   const real = realPath(path);
   if (within(real, dirname(realPath(keysFile)))) return `${path} is beside the admin keys: the recovery key never shares their disk`;
   const scope = syncScopes(placement.home).find((root) => within(real, root));
   if (scope) return `${path} is under ${scope}, which is synced or backed up off this machine`;
-  if (volume.required && volume.of(path) === volume.of(keysFile)) {
-    return `${path} is on the same volume as the admin keys: name a path on the removable volume mounted for this step`;
+  if (!volume.required) return null;
+  if (volume.of(path) === volume.of(keysFile)) return `${path} is on the same volume as the admin keys: name a path on the removable volume mounted for this step`;
+  let removable: boolean;
+  try {
+    removable = volume.removable(path);
+  } catch (error) {
+    return `could not tell whether ${path} is on removable media (${error instanceof Error ? error.message : String(error)})`;
   }
+  if (!removable) return `${path} is not on removable or external media: name a path on the removable volume (a USB drive, say; not a mounted disk image) mounted for this step`;
   return null;
+}
+
+/** `path`, or its nearest ancestor that exists. */
+function nearestExisting(path: string): string {
+  for (let at = resolve(path); ; at = dirname(at)) {
+    if (existsSync(at)) return at;
+    if (dirname(at) === at) throw new Error(`no volume holds ${path}`);
+  }
 }
 
 /** The volume a path is on: the device of its nearest existing ancestor. */
 export function volumeOf(path: string): number {
-  for (let at = resolve(path); ; at = dirname(at)) {
-    try {
-      return statSync(at).dev;
-    } catch {
-      if (dirname(at) === at) throw new Error(`no volume holds ${path}`);
-    }
-  }
+  return statSync(nearestExisting(path)).dev;
+}
+
+/**
+ * Whether `path` is on removable or external media, as Disk Utility reports its volume (`df` names the device,
+ * `diskutil info -plist` describes it): removable, ejectable, or not internal, and not a mounted disk image. Throws when
+ * it cannot be told.
+ */
+export function isRemovableVolume(path: string): boolean {
+  const device = execFileSync('df', ['-P', nearestExisting(path)], { encoding: 'utf8' }).trim().split('\n').at(-1)!.split(/\s+/)[0];
+  if (!device.startsWith('/dev/')) throw new Error(`${path} is on ${device}, not a disk`);
+  const plist = execFileSync('diskutil', ['info', '-plist', device]);
+  const info = JSON.parse(execFileSync('plutil', ['-convert', 'json', '-o', '-', '-'], { input: plist, encoding: 'utf8' })) as Record<string, unknown>;
+  // A mounted disk image reports itself removable and external, but its file sits on whatever disk holds it.
+  if (info.BusProtocol === 'Disk Image') return false;
+  return info.RemovableMediaOrExternalDevice === true || info.RemovableMedia === true || info.Ejectable === true || info.Internal === false;
 }
 
 /** Writes `text` to a new file at `path`, 0600; an existing file is never written over (EEXIST). */
@@ -113,14 +138,25 @@ export function writeNewFile(path: string, text: string): void {
   }
 }
 
-/** A new admin device's keys file at `path`: a fresh id, channel key and step-up key. Refuses an existing file. */
-export async function writeAdminKeys(path: string): Promise<AdminKeys> {
+/**
+ * A new admin device's keys file at `path`: a fresh id, channel key and step-up key. The file is made empty first (an
+ * exclusive create, 0600) and handed to `exclude` (Time Machine's exclusion) before any key is in it; when `exclude`
+ * throws, the empty file is removed and no key was ever written. Refuses an existing file.
+ */
+export async function writeAdminKeys(path: string, exclude: (path: string) => Promise<void>): Promise<AdminKeys> {
   const id = `deployment-admin-${randomBytes(6).toString('hex')}`;
   const channel = await generateSigningKey(true);
   const stepUp = await generateSigningKey(true);
   const jwk = async (key: SigningKey) => (await crypto.subtle.exportKey('jwk', key.privateKey)) as JsonWebKey;
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  writeNewFile(path, `${JSON.stringify({ device: id, keys: { [`${id}.channel`]: await jwk(channel), [`${id}.stepUp`]: await jwk(stepUp) } })}\n`);
+  writeNewFile(path, '');
+  try {
+    await exclude(path);
+  } catch (error) {
+    rmSync(path, { force: true });
+    throw error;
+  }
+  writeFileSync(path, `${JSON.stringify({ device: id, keys: { [`${id}.channel`]: await jwk(channel), [`${id}.stepUp`]: await jwk(stepUp) } })}\n`, { flag: 'r+' });
   return { id, channel: await importSigningKey(await jwk(channel)), stepUp: await importSigningKey(await jwk(stepUp)) };
 }
 

@@ -37,7 +37,9 @@ export type CapsMessage = { t: 'caps'; member: string; device: string; clientCla
 export type ResultMessage = { t: 'result'; id: string; ok: true; output: unknown } | { t: 'result'; id: string; ok: false; error: { code: string; message?: string } };
 export type AckMessage = { t: 'ack'; opId: string; state: 'accepted' } | { t: 'ack'; opId: string; state: 'refused'; reason: string };
 export type DoneMessage = { t: 'done'; opId: string; outcome: unknown };
-export type QueriedMessage = { t: 'queried'; opId: string; state: QueryState; outcome?: unknown };
+/** `reason`: why the endpoint said nothing of the operation (`grade`, `class`), with `state: 'refused'` and no `outcome`;
+ * a `refused` with an `outcome` is the operation's own refusal by its executing side. */
+export type QueriedMessage = { t: 'queried'; opId: string; state: QueryState; outcome?: unknown; reason?: string };
 export type SubbedMessage = { t: 'subbed'; sub: string; mode: 'replay' | 'snapshot' | 'missing'; epoch: string; seq: number; idx?: number };
 export type EvMessage = { t: 'ev'; sub: string; epoch: string; seq: number; idx?: number; body: unknown };
 export type SnapMessage = { t: 'snap'; sub: string; epoch: string; seq: number; idx?: number; page: number; last: boolean; body: unknown };
@@ -119,7 +121,7 @@ const FROM_ENDPOINT: Record<string, (m: Fields) => boolean> = {
   result: (m) => isText(m.id, 128) && (m.ok === true ? 'output' in m : m.ok === false && isObject(m.error) && isText(m.error.code, 64) && optional(m.error.message, (v) => typeof v === 'string')),
   ack: (m) => isOpId(m.opId) && (m.state === 'accepted' || (m.state === 'refused' && isText(m.reason, 64))),
   done: (m) => isOpId(m.opId) && 'outcome' in m,
-  queried: (m) => isOpId(m.opId) && ['done', 'in-progress', 'refused', 'not-received', 'expired', 'unavailable'].includes(m.state as string),
+  queried: (m) => isOpId(m.opId) && ['done', 'in-progress', 'refused', 'not-received', 'expired', 'unavailable'].includes(m.state as string) && optional(m.reason, (v) => isText(v, 64)),
   subbed: (m) => isText(m.sub, 128) && (m.mode === 'replay' || m.mode === 'snapshot' || m.mode === 'missing') && position(m),
   ev: (m) => isText(m.sub, 128) && position(m) && 'body' in m,
   snap: (m) => isText(m.sub, 128) && position(m) && isCount(m.page) && typeof m.last === 'boolean' && 'body' in m,

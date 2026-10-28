@@ -233,12 +233,11 @@ function TurnSummary({ row, durationMs }: { row: DividerRowData; durationMs: num
 function SummaryText({ row, durationMs }: { row: DividerRowData; durationMs: number }) {
   const { storeKey } = useTranscriptContext();
   const turn = useTranscriptStore((state: { entries: Record<string, TranscriptEntry> }) => state.entries[storeKey]?.state.turns.get(row.turnId as TurnId));
-  const messageTools = useTranscriptStore((state: { entries: Record<string, TranscriptEntry> }) => state.entries[storeKey]?.state.messageTools); // P4-R7: the host's
   const { summary } = row;
   return (
     <p>
       {turnSummaryCopy({
-        state: row.state, cause: row.cause, origin: row.origin, durationMs, toolCalls: summary.toolCalls, model: summary.model, phrases: turn ? turnPhrases(turn, messageTools) : '',
+        state: row.state, cause: row.cause, origin: row.origin, durationMs, toolCalls: summary.toolCalls, model: summary.model, phrases: turn ? turnPhrases(turn) : '',
         denied: summary.denials.filter((denial) => denial.disposition !== 'stopped'), safeguard: summary.safeguard, costUsd: summary.costUsd,
         tokens: tokensOf(summary.usage), childAgents: summary.childAgents,
       })}

@@ -1148,15 +1148,17 @@ describe('ipc schema validates both directions', () => {
     const status = { transport: 'detached', state: 'ready', supervisor, appBuildId: '0123456789abcdef', appWire: 'fedcba9876543210', mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: '2026-10-08T09:05:53.000Z' }, matches: 'same', reason: null, waitingLiveSessions: null, lastExit: null };
 
     it('adds the host namespace: four engine-host commands (three main-only senders), three main-owned, one event each side', () => {
-      expect(Object.keys(host.commands)).toEqual(['host.supervisorStatus', 'host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.status', 'host.restart', 'host.openLog']);
+      // P5 O10 M7: `host.op` and `host.opQuery`, lane B's operation ledger, are the endpoint's (main-only: never a window's)
+      expect(Object.keys(host.commands)).toEqual(['host.supervisorStatus', 'host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.op', 'host.opQuery', 'host.status', 'host.restart', 'host.openLog']);
       const owners = Object.fromEntries(Object.entries(host.commands).map(([name, spec]) => [name, spec.owner]));
       expect(owners).toEqual({
         'host.supervisorStatus': 'engine-host', 'host.configure': 'engine-host', 'host.stopAll': 'engine-host', 'host.exitWhenIdle': 'engine-host',
+        'host.op': 'engine-host', 'host.opQuery': 'engine-host',
         'host.status': 'main', 'host.restart': 'main', 'host.openLog': 'main',
       });
       expect(Object.keys(host.events)).toEqual(['host.supervisorStatus', 'host.status']);
       // only main stops, configures or arms the supervisor: a renderer's stopAll would read as a crash to main's transport
-      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['host.configure', 'host.stopAll', 'host.exitWhenIdle']));
+      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.op', 'host.opQuery']));
       expect([...NAMES.host.commands]).toEqual(['host.supervisorStatus', 'host.status', 'host.restart', 'host.openLog']);
     });
 

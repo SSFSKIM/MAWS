@@ -1,34 +1,33 @@
 // The owner channel's launch decision (the P2-C document, Design §2 and §3; X6): run in main immediately before
 // `session.launch` for every MAWS-owned launch (an intent's new session, fork and side thread, and a record's resume),
 // never for the trust bootstrap. It decides three things:
-// 1. the desired state: `off` when the session's lane is off; else by the shape of the contract the launch's style
-//    declares (P2-C2, Decision Log 31): `external-compatible-style` for MAWS's marks, `external-style-plus-supplement`
-//    for a message-tool style, and `maws-contract` otherwise (an unresolvable style included);
+// 1. the desired state: `off` when the session's lane is off; else, P4-R7z (the P4 spec's Decision Log 92), by whether
+//    the to-human plugin registers its message tool under the style the launch selects (the resolver's `messageTool`):
+//    `external-style-plus-supplement` when it does, and `off` when it does not, MAWS having no message tool or full
+//    contract of its own (no to-human plugin, no to-human lane);
 // 2. the recorded state: what the engine will reuse, read from the transcript being resumed or forked (./prompt-state.ts);
-// 3. the flags: the desired state's text (the contract, or the supplement) is appended whenever it is desired (a no-op
-//    under a snapshot, effective at the next compaction), and `--system-prompt-snapshot off` is passed while the
-//    recorded state differs from the one the desired state records,
-//    only where the binary declares the flag; `applied` is what is in effect after the launch.
-// While the lane is on the launch also advertises MAWS_NATIVE_TO_HUMAN (the contract version) in its settings env, so a
-// plugin drawing its own to-human view can defer, and (P4-R7y) carries the SessionStart hook that tells the model at
-// every start that the plugin's message tool is MAWS's here (P4-A2: under the launch profile's hooks `none`, which
-// silences that hook, the same text is appended to the system prompt instead, and a launch that would reuse a recorded
-// prompt renders it live). The decision is recorded in the index when the host answers
-// `launching`, and the engine's own report of its output style at that launch's first `session.init` is compared with
-// the resolver's reading of the settings (the mismatch check): a mismatch makes the next decisions resolve by the engine's
-// name until a launch's init agrees with the resolver's own reading again. Each record is published as the session's
-// owner channel state (`ownerChannel.changed`), which the report and the mods library read again on.
+// 3. the flags: the supplement is appended whenever it is desired (a no-op under a snapshot, effective at the next
+//    compaction), and `--system-prompt-snapshot off` is passed while the recorded state differs from the one the desired
+//    state records, only where the binary declares the flag; `applied` is what is in effect after the launch. So a
+//    session recorded under an earlier contract, supplement or P4-R7y's alias renders anew at its next launch.
+// While the lane is on and its style carries the tool the launch also advertises MAWS_NATIVE_TO_HUMAN (the contract
+// version, 8: MAWS offers no message tool), on which the plugin registers its tool in MAWS's headless launch and its
+// other hooks defer to MAWS. The decision is recorded in the index when the host answers `launching`, and the engine's
+// own report of its output style at that launch's first `session.init` is compared with the resolver's reading of the
+// settings (the mismatch check): a mismatch makes the next decisions resolve by the engine's name until a launch's init
+// agrees with the resolver's own reading again. Each record is published as the session's owner channel state
+// (`ownerChannel.changed`), which the report and the mods library read again on.
 import { homedir } from 'node:os';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
-import { carriesFullContract, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT_VERSION, type StyleShape } from '@shared/owner/contract';
+import { TO_HUMAN_SUPPLEMENT_VERSION } from '@shared/owner/contract';
 import type { ContractSource, LaneOverride } from '@shared/owner/state';
 import { claudeConfigDir } from '../history/prompt-history';
 import type { SessionStore } from '../index/sessions';
 import type { HostDispatch } from '../ipc/router';
 import { hostCall, transcriptPathOf } from '../sessions/context';
-import { hooksOff, withOwnerChannel, type AppendedText } from '../sessions/launch-mapping';
+import { withOwnerChannel, type AppendedText } from '../sessions/launch-mapping';
 import { recordedState, type RecordedState } from './prompt-state';
 import { lookupStyle, resolveStyle, type ResolvedStyle, type StyleContext } from './resolve-style';
 import type { OwnerChannelStore } from './store';
@@ -36,7 +35,7 @@ import type { OwnerChannelStore } from './store';
 export interface LaunchDecision {
   appSessionId: AppSessionId;
   kind: 'new' | 'fork' | 'resume';
-  laneOn: boolean;
+  laneOn: boolean; // the lane's switch (the override, else the app's); P4-R7z: a style without the plugin's tool leaves it `desired` off
   override: LaneOverride;
   desired: ContractSource;
   recorded: RecordedState;
@@ -52,27 +51,21 @@ export interface LaunchDecision {
 // The lane's effective value: the session's override when set, else the app's switch.
 export const laneOn = (appEnabled: boolean, override: LaneOverride): boolean => (override === 'inherit' ? appEnabled : override === 'on');
 
-// The desired state of a launch whose lane is `on` and whose style declares `contract`, of `shape` (P2-C2: the shape rule,
-// Decision Log 31). A style declaring MAWS's own full contract carries everything the supplement would say: nothing more.
-export const desiredSource = (on: boolean, style: { shape: StyleShape; contract: number | null }): ContractSource => {
-  if (!on) return 'off';
-  if (style.shape === 'marks' || carriesFullContract(style.contract)) return 'external-compatible-style';
-  return style.shape === 'message-tool' ? 'external-style-plus-supplement' : 'maws-contract';
-};
+// The desired state of a launch whose lane is `on` under `style` (P2-C2: the shape rule, Decision Log 31). P4-R7z: only
+// a style under which the plugin registers its message tool carries the lane, with MAWS's supplement beside it.
+export const desiredSource = (on: boolean, style: { messageTool: boolean }): ContractSource =>
+  on && style.messageTool ? 'external-style-plus-supplement' : 'off';
 
 // The text a desired state appends and the recorded state it leaves in a snapshot; a state without one records none.
 const APPENDS: Partial<Record<ContractSource, { text: AppendedText; records: RecordedState }>> = {
-  'maws-contract': { text: 'contract', records: `contract:${TO_HUMAN_CONTRACT_VERSION}` },
   'external-style-plus-supplement': { text: 'supplement', records: `supplement:${TO_HUMAN_SUPPLEMENT_VERSION}` }, // P2-C2
 };
 
-// The decision table (Design §2; P2-C2 adds the supplement's row and column). P4-A2: `viaPrompt`, MAWS's start-time
-// context appended beside the desired text (the launch profile's hooks `none`): after the contract or the supplement a
-// recorded prompt carries no reliable mark of it, so any reuse of one is rendered live. Appended alone it records
-// `alias`, which no desired state records, so a launch without it (the lane off, hooks `user`) renders anew as well.
-export function decideFlags(desired: ContractSource, recorded: RecordedState, declares: boolean, viaPrompt = false): { append: AppendedText | null; off: boolean; offUnavailable: boolean; applied: ContractSource } {
+// The decision table (Design §2; P2-C2 adds the supplement's row and column). P4-R7z: a recorded state no desired state
+// records now (an earlier contract or supplement, P4-R7y's `alias`) differs from every one, so its prompt renders anew.
+export function decideFlags(desired: ContractSource, recorded: RecordedState, declares: boolean): { append: AppendedText | null; off: boolean; offUnavailable: boolean; applied: ContractSource } {
   const appends = APPENDS[desired] ?? null;
-  const wanted = recorded !== 'unrecorded' && (viaPrompt || recorded !== (appends?.records ?? 'none'));
+  const wanted = recorded !== 'unrecorded' && recorded !== (appends?.records ?? 'none');
   const off = wanted && declares;
   // what the snapshot keeps when it is reused: a recorded text stays in force (the contract, or the supplement beside its
   // style); none, or the alias alone (none of MAWS's texts), leaves the desired state less the text it would append,
@@ -81,11 +74,9 @@ export function decideFlags(desired: ContractSource, recorded: RecordedState, de
     ? 'maws-contract'
     : recorded.startsWith('supplement:')
       ? 'external-style-plus-supplement'
-      : desired === 'maws-contract'
-        ? 'off'
-        : desired === 'external-style-plus-supplement'
-          ? 'external-compatible-style'
-          : desired;
+      : desired === 'external-style-plus-supplement'
+        ? 'external-compatible-style'
+        : desired;
   return { append: appends?.text ?? null, off, offUnavailable: wanted && !declares, applied: off || recorded === 'unrecorded' ? desired : kept };
 }
 
@@ -184,15 +175,15 @@ export async function ownerChannelLaunch(
   const style: ResolvedStyle = row?.styleMismatch && row.observedStyle !== null ? await lookupStyle(row.observedStyle, styleContext) : resolved;
   const desired = desiredSource(on, style);
   const recorded = await recordedOf(s, spec, ctx);
-  const viaPrompt = on && hooksOff(spec); // P4-A2: MAWS's start-time context through the appended prompt (withOwnerChannel)
-  let flags = decideFlags(desired, recorded, true, viaPrompt);
-  if (flags.off) flags = decideFlags(desired, recorded, await declaresSnapshotFlag(s), viaPrompt); // the binary is asked only when "off" is wanted
-  if (on && style.unresolved !== null) s.log(`${appSessionId}: ${style.unresolved}; the to-human contract is appended`);
+  let flags = decideFlags(desired, recorded, true);
+  if (flags.off) flags = decideFlags(desired, recorded, await declaresSnapshotFlag(s)); // the binary is asked only when "off" is wanted
+  if (on && style.unresolved !== null) s.log(`${appSessionId}: ${style.unresolved}; the to-human lane is off`);
   const record: LaunchDecision = {
-    appSessionId, kind: ctx.kind, laneOn: on, override, desired, recorded, appended: flags.append !== null || viaPrompt, snapshotOff: flags.off,
+    appSessionId, kind: ctx.kind, laneOn: on, override, desired, recorded, appended: flags.append !== null, snapshotOff: flags.off,
     offUnavailable: flags.offUnavailable, applied: flags.applied, style: resolved.name, decidedBy: style.name, styleUnresolved: style.unresolved,
   };
-  return { spec: withOwnerChannel(spec, { laneOn: on, append: flags.append, snapshotOff: flags.off }), record };
+  // P4-R7z: the advertisement goes only where the lane carries the plugin's tool; under any other style the lane is off
+  return { spec: withOwnerChannel(spec, { laneOn: desired !== 'off', append: flags.append, snapshotOff: flags.off }), record };
 }
 
 // The host answered `launching` for a decided launch (nothing to record for an undecided one).

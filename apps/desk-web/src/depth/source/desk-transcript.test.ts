@@ -129,8 +129,8 @@ describe('the main transcript through the session plane', () => {
     expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rows));
   });
 
-  // P4-R7: MAWS reads its own message tool alone; the desk reads the to-human plugin's too (`../message-tools`), the
-  // sessions it shows messaging their owner through it, so the source it hands MAWS's store names both.
+  // P4-R7: a message tool's accepted call is the message it sends. P4-R7z: MAWS's shared reading names the to-human
+  // plugin's tool and MAWS's former one (`@shared/owner/message-call`), so the desk's source names none of its own.
   it('draws an accepted call of a message tool, MAWS’s or the to-human plugin’s, as the message it sends, as a fresh load does', async () => {
     const answer = recording.session.findLast((row) => row.type === 'assistant')!;
     const result = recording.session.find((row) => row.type === 'user' && JSON.stringify(row.message).includes('"tool_result"'))!;

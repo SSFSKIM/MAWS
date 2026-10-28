@@ -215,9 +215,9 @@ describe('recentTurnsOf', () => {
       expect(answer.turns[0]).toMatchObject({ answer: { text: 'Stage 1 is done.', at: '2026-10-09T11:00:02.000Z' }, toolCalls: 1 });
     });
 
-    // The owner's ruling of 2026-10-21: in MAWS the to-human plugin's tool of the same shape is someone else's tool.
+    // P4-R7z (the P4 spec's Decision Log 92): the to-human plugin's tool, the one a MAWS session messages through.
     it('a call of the to-human plugin’s message tool, accepted, is one of the turn’s tool calls and no answer', () => {
-      expect(turnOf(...stages(resultOf('toolu_m'), 'mcp__to-human__message'))).toEqual([['Looking first.', 2]]);
+      expect(turnOf(...stages(resultOf('toolu_m'), 'mcp__to-human__message'))).toEqual([['Stage 1 is done.', 1]]);
     });
 
     it('a span written after it is the newer answer', () => {
@@ -263,13 +263,11 @@ describe('recentTurnsOf', () => {
     });
 
     // test/fixtures/transcript-to-human-final.jsonl: the turn ends on an accepted final call of the plugin's tool, then
-    // the plugin's made-up answer, which said nothing and is no answer; the call reads as MAWS reads the plugin's tool,
-    // and the same turn under MAWS's name reads its message as the answer.
-    it('the to-human plugin’s answer after a final message is no answer of its turn', () => {
+    // the plugin's made-up answer, which said nothing and is no answer: the final message is.
+    it('the to-human plugin’s answer after a final message is no answer of its turn: the message is', () => {
       const turn = readFileSync(join(ROOT, 'test/fixtures/transcript-to-human-final.jsonl'), 'utf8');
       const answers = (text: string) => recentTurnsOf(text, 5, false).turns.map((t) => [t.prompt?.text ?? null, t.answer?.text ?? null, t.toolCalls]);
-      expect(answers(turn)).toEqual([['Run the stages and tell me how it went.', 'Looking first.', 2]]);
-      expect(answers(turn.replaceAll('mcp__to-human__message', 'mcp__maws__message'))).toEqual([['Run the stages and tell me how it went.', 'Both stages ran; 37 labels are missing.', 1]]);
+      expect(answers(turn)).toEqual([['Run the stages and tell me how it went.', 'Both stages ran; 37 labels are missing.', 1]]);
     });
   });
 

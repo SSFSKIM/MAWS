@@ -3,10 +3,10 @@
 // `artifact_edit`, `artifact_comments`, `artifact_reply` and `artifact_resolve`, the fields a document's
 // `artifact_read` adds, and a document's `artifact_create`, with their descriptions, the limits the tools enforce and
 // the refusals an agent can act on. `./tools` appends these names and entries after A's (its P3-B blocks); this file
-// imports only the leaves `./artifact-id` and `./message-tool`, so the two never import each other. The read and create fields live in `./tools`.
+// imports only the leaves `./artifact-id` and `./always-load`, so the two never import each other. The read and create fields live in `./tools`.
 import * as z from 'zod';
 import { ARTIFACT_ID } from './artifact-id';
-import { ALWAYS_LOAD } from './message-tool'; // P4-A3: the edit tool is always loaded (a leaf: it imports only zod)
+import { ALWAYS_LOAD } from './always-load'; // P4-A3: the edit tool is always loaded
 import type { DashboardDatasetSummary, DashboardViewWarning } from './dashboard-tools'; // P3-E
 
 export const DOCUMENT_TOOL_NAMES = ['artifact_edit', 'artifact_comments', 'artifact_reply', 'artifact_resolve'] as const;

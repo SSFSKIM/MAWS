@@ -76,7 +76,11 @@ export function encodePairingCode(code: PairingCode): string {
 export function decodePairingCode(text: string): PairingCode | null {
   if (typeof text !== 'string' || !text.startsWith(PAIRING_CODE_PREFIX)) return null;
   try {
-    const json = new TextDecoder('utf-8', { fatal: true }).decode(base64urlDecode(text.slice(PAIRING_CODE_PREFIX.length)));
+    const bytes = base64urlDecode(text.slice(PAIRING_CODE_PREFIX.length));
+    // Well-formed UTF-8 only: a decoder replaces a bad sequence, so the text must encode back to the very bytes. (No
+    // `fatal` option: the Workers' types declare the decoder's options otherwise than the DOM's.)
+    const json = new TextDecoder().decode(bytes);
+    if (base64urlEncode(utf8(json)) !== base64urlEncode(bytes)) return null;
     const code: unknown = JSON.parse(json);
     // One spelling per code: a writer's whitespace or key order is not the code.
     return isPairingCode(code) && canonicalize(code) === json ? code : null;

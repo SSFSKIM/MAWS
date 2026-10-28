@@ -11,11 +11,13 @@ import { join } from 'node:path';
 import {
   base64urlDecode,
   base64urlEncode,
+  canonicalize,
   decodePairingCode,
   generateSigningKey,
   keyId,
   pairingFingerprint,
   pairingMac,
+  signOrgState,
   stateHash,
   verifySuccessor,
   type Device,
@@ -23,9 +25,9 @@ import {
   type SignedOrgState,
 } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { anchorFile, ageLine, genesisFile, judgeEntry, runAdmin, type AdminIo } from '../../deploy/admin.ts';
-import { keysPlacementProblem, machinePlacement, readText, volumeOf } from '../../deploy/admin-device.ts';
-import { deviceEntry } from '../../deploy/org-admin.ts';
+import { anchorFile, ageLine, genesisFile, isRpId, judgeEntry, printable, runAdmin, type AdminIo } from '../../deploy/admin.ts';
+import { keysPlacementProblem, machinePlacement, newRecoveryKey, readAdminKeys, readText, recoveryFileText, volumeOf } from '../../deploy/admin-device.ts';
+import { deviceEntry, successor } from '../../deploy/org-admin.ts';
 import type { PendingDevice } from '../../src/protocol/identity';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from '../support/local';
 import { adminKeysFile } from '../support/local-person';
@@ -58,6 +60,7 @@ function fake(answers: string[] = [], over: Partial<AdminIo> = {}): Fake {
     secrets: async () => ({ DESK_ACCESS_TOKEN: 'eyJ.not-a-token' }),
     exec: async (command, args, input) => void f.execs.push({ command, args, input }),
     volumeOf,
+    removableVolume: () => false,
     readText,
     placement,
     env: {},
@@ -93,6 +96,27 @@ describe('init', () => {
     expect(again.err.join('\n')).toMatch(/exists: an admin device's keys are never written over/);
     expect(readFileSync(keys, 'utf8')).toBe(before);
     expect(again.execs).toEqual([]);
+  });
+
+  it('asks Time Machine to leave the file out while it is still empty, and writes no key when it cannot', async () => {
+    const keys = join(dir('keys'), 'keys.json');
+    const seen: string[] = [];
+    const f = fake([], { exec: async (_command, args) => void seen.push(readFileSync(args[1], 'utf8')) });
+    expect(await runAdmin(['init', '--keys', keys], f.io)).toBe(0);
+    expect(seen).toEqual(['']);
+    expect(statSync(keys).mode & 0o777).toBe(0o600);
+    expect((await readAdminKeys(keys)).id).toMatch(/^deployment-admin-/);
+
+    const failing = join(dir('keys'), 'keys.json');
+    const refused = fake([], {
+      exec: async () => {
+        throw new Error('tmutil exited 1: not permitted');
+      },
+    });
+    expect(await runAdmin(['init', '--keys', failing], refused.io)).toBe(1);
+    expect(refused.err.join('\n')).toMatch(/tmutil addexclusion .* failed \(tmutil exited 1: not permitted\): no key was written and the file was removed/);
+    expect(existsSync(failing)).toBe(false);
+    expect(refused.out).toEqual([]);
   });
 
   it('refuses a path a sweep, a commit, a sync or a backup would carry, and writes nothing there', async () => {
@@ -177,14 +201,26 @@ describe('against a deployment', () => {
     expect(existsSync(recovery)).toBe(false);
   }, 120_000);
 
-  it("refuses a recovery destination on the keys' volume, beside them, or in a sync or backup scope, before any request", async () => {
+  it("refuses a recovery destination on the keys' volume, on internal media, beside the keys, or in a sync or backup scope, before any request", async () => {
     const config = unreachableConfig();
     const keys = join(dir('keys'), 'keys.json');
     expect(await runAdmin(['init', '--keys', keys], fake().io)).toBe(0);
     const volume = dir('volume');
     const cases: Array<[string, Partial<AdminIo>, RegExp]> = [
-      [join(volume, 'recovery.json'), {}, /on the same volume as the admin keys/],
-      [join(volume, 'recovery.json'), { volumeOf: (path) => (path.startsWith(volume) ? 'removable' : 'internal') }, /^$/],
+      [join(volume, 'recovery.json'), { removableVolume: () => true }, /on the same volume as the admin keys/],
+      // Another volume, but an internal disk's (a second APFS volume, say) or a mounted disk image: not the owner's medium.
+      [join(volume, 'recovery.json'), { volumeOf: (path) => (path.startsWith(volume) ? 'other' : 'internal') }, /is not on removable or external media/],
+      [
+        join(volume, 'recovery.json'),
+        {
+          volumeOf: (path) => (path.startsWith(volume) ? 'other' : 'internal'),
+          removableVolume: () => {
+            throw new Error('diskutil: no such disk');
+          },
+        },
+        /could not tell whether .* is on removable media \(diskutil: no such disk\)/,
+      ],
+      [join(volume, 'recovery.json'), { volumeOf: (path) => (path.startsWith(volume) ? 'removable' : 'internal'), removableVolume: (path) => path.startsWith(volume) }, /^$/],
       [join(keys, '..', 'recovery.json'), { volumeOf: () => 'any' }, /beside the admin keys/],
       [join(placement.home, '.claude', 'recovery.json'), { volumeOf: (path) => (path.startsWith(placement.home) ? 'removable' : 'internal') }, /synced or backed up/],
     ];
@@ -198,7 +234,7 @@ describe('against a deployment', () => {
       });
       const status = await runAdmin(['genesis', '--config', config, '--keys', keys, '--recovery', recovery], f.io);
       if (why.source === '^$') {
-        // A destination on another volume passes: the run goes on to read the token, which this one lacks.
+        // A destination on another, removable volume passes: the run goes on to read the token, which this one lacks.
         expect(f.err.join('\n')).toMatch(/DESK_ACCESS_TOKEN on stdin/);
         expect(f.requests).toEqual(['secrets']);
         continue;
@@ -326,8 +362,8 @@ describe('on the local hub', () => {
   };
 
   /** `pair` running, and the code it printed once it has. */
-  async function pairing(f: Fake, extra: string[] = ['--yes']) {
-    const running = runAdmin(['pair', '--class', 'web-cards', '--ttl', '20', ...asLocal(keys), ...extra], f.io);
+  async function pairing(f: Fake, extra: string[] = ['--yes'], cls = 'web-cards', ttl = '20') {
+    const running = runAdmin(['pair', '--class', cls, '--ttl', ttl, ...asLocal(keys), ...extra], f.io);
     const deadline = Date.now() + 15_000;
     let line: string | undefined;
     while (!(line = f.out.find((l) => l.startsWith('pairing code: '))) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
@@ -397,13 +433,38 @@ describe('on the local hub', () => {
     expect((await served()).head!.state.version).toBe(before.state.version);
   });
 
+  it("takes no entry whose id or relying party is out of grammar, and prints what the hub supplied with its controls escaped", async () => {
+    const before = (await served()).head!;
+    const f = fake();
+    const { running, code } = await pairing(f, ['--yes'], 'web-cards', '3');
+    // Under a leaked `k`: an id carrying a forged line and the controls that would hide the real one, and a relying
+    // party carrying a color change. Both MACs verify; the hub stores both (its device id and rpId are free text).
+    const forged = '\x1b[2K\rpending: x fingerprint aaaaa-aaaaa\x1b[8m';
+    const hostileId = await phone(code, forged);
+    expect((await hostileId.post()).status).toBe(201);
+    const good = await phone(code, 'rp-phone');
+    const hostileRp = { ...good.device, passkey: { ...good.device.passkey!, rpId: 'evil\x1b[31m.example' } };
+    expect((await good.post(hostileRp)).status).toBe(201);
+    expect(await running).toBe(1);
+    expect(f.err.join('\n')).toMatch(/no web-cards device answered this code within 3 s/);
+    const printed = [...f.out, ...f.err, ...f.term].join('\n');
+    // eslint-disable-next-line no-control-regex -- no control character may reach the screen
+    expect(printed).not.toMatch(/[\x00-\x09\x0b-\x1f\x7f]/);
+    expect(f.out).toContain(`not this pairing's: ${printable(forged)} (its id is outside the device id grammar (base64url))`);
+    expect(f.out).toContain("not this pairing's: rp-phone (its passkey's rpId is not a host name)");
+    expect(f.out.some((line) => line.startsWith('pending: '))).toBe(false);
+    expect((await served()).head!.state.version).toBe(before.state.version);
+    expect(printable('a\x1b[2K\\b\u2028')).toBe('a\\u001b[2K\\u005cb\\u2028');
+    expect([isRpId('127.0.0.1'), isRpId('desk-hub.opencognita-platform.workers.dev'), isRpId('Evil.example'), isRpId('evil..example'), isRpId('a b')]).toEqual([true, true, false, false, false]);
+  });
+
   it('never takes a web-cards entry with a step-up key: the hub refuses it, and the command names it so', async () => {
     const code: PairingCode = { hub: hub.url, org: ORG, member, roots: ['AAAAAAAAAAAAAAAAAAAAAA'], recoveryPub: phoneDevice.channelPub, k: base64urlEncode(new Uint8Array(16)) };
     const k = new Uint8Array(16);
     const stepUp = { ...(await phone(code, 'stepup-phone')).device, stepUpPub: (await generateSigningKey()).pub };
     expect((await postEntry(stepUp, base64urlEncode(new Uint8Array(32)))).status).toBe(400);
     const entry = { deviceId: stepUp.id, class: stepUp.class, keyStorage: stepUp.keyStorage, channelPub: stepUp.channelPub, stepUpPub: stepUp.stepUpPub, passkey: stepUp.passkey, mac: base64urlEncode(new Uint8Array(32)), member, created: '', expires: '' } as PendingDevice;
-    expect(await judgeEntry(entry, { org: ORG, member, k, class: 'web-cards', listed: new Set() })).toEqual({ ok: false, why: 'a web-cards entry with a step-up key, which the class never holds (RL §5.10)' });
+    expect(await judgeEntry(entry, { org: ORG, member, k, class: 'web-cards', listed: new Set() })).toEqual({ ok: false, why: 'a web-cards entry with a step-up key, which the class never holds (RL 5.10)' });
     const native = { ...entry, class: 'native-mac' as const, keyStorage: 'software' as const, passkey: undefined };
     expect(await judgeEntry(native, { org: ORG, member, k, class: 'web-cards', listed: new Set() })).toEqual({ ok: false, why: 'of class native-mac, not web-cards' });
   });
@@ -445,6 +506,232 @@ describe('on the local hub', () => {
     const none = fake();
     expect(await runAdmin(['pair', '--class', 'web-cards', ...asLocal(join(dir('unanchored'), 'keys.json'))], none.io)).toBe(1);
     expect(none.err.join('\n')).toMatch(/no anchor: run genesis or adopt/);
+  });
+});
+
+describe('a root device revoked', () => {
+  let hub: LocalHub;
+  beforeAll(async () => {
+    hub = await startLocalHub();
+  });
+  afterAll(() => hub?.close());
+
+  it("leaves the root set with its device, in the successor that revokes it", async () => {
+    const keys = join(dir('two-roots'), 'keys.json');
+    const asLocal = ['--hub', hub.url, '--user', ADMIN, '--keys', keys];
+    expect(await runAdmin(['init', '--keys', keys], fake().io)).toBe(0);
+    const recovery = join(dir('volume'), 'recovery.json');
+    expect(await runAdmin(['genesis', '--recovery', recovery, ...asLocal, '--yes'], fake().io)).toBe(0);
+    // A second Mac paired as a native-mac device, then made a root by a successor the admin device signs.
+    const f = fake();
+    const running = runAdmin(['pair', '--class', 'native-mac', '--ttl', '20', ...asLocal, '--yes'], f.io);
+    const deadline = Date.now() + 15_000;
+    let line: string | undefined;
+    while (!(line = f.out.find((l) => l.startsWith('pairing code: '))) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+    const code = decodePairingCode(line!.slice('pairing code: '.length))!;
+    const second: Omit<Device, 'endorsement'> = { id: 'second-mac', class: 'native-mac', keyStorage: 'software', channelPub: (await generateSigningKey()).pub, stepUpPub: (await generateSigningKey()).pub };
+    const { id, ...rest } = second;
+    const mac = await pairingMac(base64urlDecode(code.k), { org: code.org, member: code.member, device: second });
+    expect((await hub.fetchAs(ADMIN, '/api/devices/pending', { body: { deviceId: id, ...rest, mac } })).status).toBe(201);
+    expect(await running).toBe(0);
+    const admin = await readAdminKeys(keys);
+    const listed = ((await hub.fetchAs(ADMIN, '/api/org/state').then((r) => r.json())) as { head: SignedOrgState }).head;
+    const kid = await keyId(second.stepUpPub!);
+    const promoted = await signOrgState(await successor(listed.state, (s) => void s.root.keys.push(kid)), [admin.stepUp]);
+    expect((await hub.fetchAs(ADMIN, '/api/org/state', { body: promoted })).status).toBe(201);
+
+    const removed = fake();
+    expect(await runAdmin(['remove-device', 'second-mac', ...asLocal, '--yes'], removed.io)).toBe(0);
+    expect(removed.out.at(-1)).toBe('revoked: version 4');
+    const head = ((await hub.fetchAs(ADMIN, '/api/org/state').then((r) => r.json())) as { head: SignedOrgState }).head;
+    expect(head.state.root.keys).toEqual([await keyId(admin.stepUp.pub)]);
+    expect(head.state.revoked.map((r) => r.keyId).sort()).toEqual([await keyId(second.channelPub), kid].sort());
+  });
+});
+
+describe('no two successors of one parent', () => {
+  // The anchor's `pending` slot (the spec's Decision Log, 2026-10-28): every signed proposal is written there before
+  // its POST and settled before anything else is signed, under the anchor's lock.
+  let hub: LocalHub;
+  let proxy: Server;
+  /** What the proxy does to the next state POST: forwards it (`pass`), forwards it and answers 500 (`stored`), or drops
+   * it before the hub sees it (`lost`). */
+  let post: 'pass' | 'stored' | 'lost' = 'pass';
+  let proxyUrl: string;
+  const keys = join(scratch, 'pending-keys', 'keys.json');
+  // The command always reaches the hub through the proxy (the anchor names one hub): `post` says what the proxy does.
+  const via = () => ['--hub', proxyUrl, '--user', ADMIN, '--keys', keys];
+  const head = async () => ((await hub.fetchAs(ADMIN, '/api/org/state').then((r) => r.json())) as { head: SignedOrgState }).head;
+  const anchor = () => JSON.parse(readFileSync(anchorFile(keys), 'utf8')) as { version: number; pending?: SignedOrgState };
+
+  beforeAll(async () => {
+    hub = await startLocalHub();
+    proxy = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk: Buffer) => chunks.push(chunk));
+      req.on('end', async () => {
+        const body = Buffer.concat(chunks);
+        const isPost = req.method === 'POST' && req.url === '/api/org/state';
+        if (isPost && post === 'lost') return void res.destroy();
+        const headers: Record<string, string> = {};
+        for (const name of ['x-desk-standin-user', 'content-type']) if (typeof req.headers[name] === 'string') headers[name] = req.headers[name] as string;
+        const upstream = await fetch(`${hub.url}${req.url}`, { method: req.method, headers, body: body.length ? body : undefined });
+        const answer = Buffer.from(await upstream.arrayBuffer());
+        if (isPost && post === 'stored' && upstream.status === 201) {
+          res.writeHead(500, { 'content-type': 'application/json' });
+          return void res.end('{"error":"internal"}');
+        }
+        res.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') ?? 'application/json' });
+        res.end(answer);
+      });
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+    proxyUrl = `http://127.0.0.1:${(proxy.address() as { port: number }).port}`;
+    expect(await runAdmin(['init', '--keys', keys], fake().io)).toBe(0);
+    expect(await runAdmin(['genesis', '--recovery', join(dir('volume'), 'recovery.json'), ...via(), '--yes'], fake().io)).toBe(0);
+  });
+  afterAll(async () => {
+    await new Promise((resolve) => proxy?.close(resolve));
+    await hub?.close();
+  });
+
+  it('adopts a proposal the hub stored but answered an error to, and signs no second successor of its parent', async () => {
+    post = 'stored';
+    const failed = fake();
+    expect(await runAdmin(['refresh', ...via()], failed.io)).toBe(1);
+    post = 'pass';
+    const stored = await head();
+    expect(stored.state.version).toBe(2);
+    expect(canonicalize(anchor().pending)).toBe(canonicalize(stored));
+    const f = fake();
+    expect(await runAdmin(['refresh', ...via()], f.io)).toBe(0);
+    expect(f.out).toContain('pending version 2 is the hub\'s: adopted');
+    expect(f.out.at(-1)).toBe('refreshed: version 3 (no change)');
+    const chain = ((await hub.fetchAs(ADMIN, '/api/org/state?since=0').then((r) => r.json())) as { chain: SignedOrgState[] }).chain;
+    expect(chain.map((c) => c.state.version)).toEqual([1, 2, 3]);
+    expect(canonicalize(chain[1])).toBe(canonicalize(stored));
+    expect(chain[2].state.prev).toBe(await stateHash(stored.state));
+    expect(anchor()).toMatchObject({ version: 3 });
+    expect(anchor().pending).toBeUndefined();
+  });
+
+  it('sends a lost proposal again, byte for byte, before it signs anything else', async () => {
+    post = 'lost';
+    const lost = fake();
+    expect(await runAdmin(['refresh', ...via()], lost.io)).not.toBe(0);
+    post = 'pass';
+    expect((await head()).state.version).toBe(3);
+    const pending = anchor().pending!;
+    expect(pending.state.version).toBe(4);
+    const f = fake();
+    expect(await runAdmin(['devices', ...via()], f.io)).toBe(0);
+    expect(f.out).toContain('pending version 4 is not at the hub: sent again');
+    // ECDSA signatures are randomized: the same signature is the same bytes, not a second signing.
+    expect(canonicalize(await head())).toBe(canonicalize(pending));
+    expect(anchor()).toMatchObject({ version: 4 });
+    expect(anchor().pending).toBeUndefined();
+  });
+
+  it("refuses `fork` when the hub's head is another successor of the pending proposal's parent, and changes nothing", async () => {
+    const admin = await readAdminKeys(keys);
+    const parent = await head();
+    const proposal = await signOrgState(await successor(parent.state, () => {}), [admin.stepUp]);
+    const other = await signOrgState(await successor(parent.state, (s) => void s.projects.push({ id: 'p-other', name: 'other' })), [admin.stepUp]);
+    expect((await hub.fetchAs(ADMIN, '/api/org/state', { body: other })).status).toBe(201);
+    writeFileSync(anchorFile(keys), JSON.stringify({ ...anchor(), pending: proposal }), { mode: 0o600 });
+    const held = readFileSync(anchorFile(keys), 'utf8');
+    for (const args of [['refresh'], ['devices'], ['remove-device', 'nothing', '--yes']]) {
+      const f = fake();
+      expect(await runAdmin([...args, ...via()], f.io), args[0]).toBe(1);
+      expect(f.err.join('\n'), args[0]).toMatch(/fork: the hub holds version 5 .* where this device signed .*: nothing was signed/);
+      expect(readFileSync(anchorFile(keys), 'utf8')).toBe(held);
+      expect(canonicalize(await head())).toBe(canonicalize(other));
+    }
+  });
+
+  it('holds the anchor\'s lock for the whole run: a second invocation stops and names the holder, and a held lock is never taken over', async () => {
+    const forked = readFileSync(anchorFile(keys), 'utf8');
+    const settled = { ...JSON.parse(forked), version: 5 };
+    delete settled.pending;
+    writeFileSync(anchorFile(keys), JSON.stringify(settled), { mode: 0o600 });
+    const first = fake();
+    const pairing = runAdmin(['pair', '--class', 'web-cards', '--ttl', '2', ...via(), '--yes'], first.io);
+    const deadline = Date.now() + 15_000;
+    while (!first.out.some((l) => l.startsWith('pairing code: ')) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+    const second = fake();
+    expect(await runAdmin(['refresh', ...via()], second.io)).toBe(1);
+    expect(second.err.join('\n')).toMatch(new RegExp(`another run holds .*keys\\.json\\.org\\.json\\.lock \\(pid ${process.pid} on `));
+    expect(await pairing).toBe(1);
+    // Released once the first ends; a lock left by a run that died is the operator's to remove, never taken over.
+    writeFileSync(`${anchorFile(keys)}.lock`, JSON.stringify({ pid: 99999, host: 'elsewhere', at: '2026-10-28T00:00:00.000Z', token: 't' }));
+    const third = fake();
+    expect(await runAdmin(['refresh', ...via()], third.io)).toBe(1);
+    expect(third.err.join('\n')).toMatch(/another run holds .* \(pid 99999 on elsewhere, since 2026-10-28T00:00:00.000Z\)/);
+    rmSync(`${anchorFile(keys)}.lock`);
+    const fourth = fake();
+    expect(await runAdmin(['refresh', ...via()], fourth.io)).toBe(0);
+    expect(fourth.out.at(-1)).toBe('refreshed: version 6 (no change)');
+  });
+});
+
+describe('a genesis interrupted, then served with a forged head', () => {
+  let server: Server;
+  let serving: { chain: SignedOrgState[]; head: SignedOrgState };
+  const member = 'f9e8d7c6b5a4938271605f4e3d2c1b0a';
+  beforeAll(async () => {
+    // A hub of the test's own: it names the org and the member, and serves whatever chain and head the case sets.
+    server = createServer((req, res) => {
+      res.setHeader('content-type', 'application/json');
+      if (req.url === '/api/me') return res.end(JSON.stringify({ org: { id: 'org-forged' }, member: { id: member, email: ADMIN } }));
+      if (req.url?.startsWith('/api/org/state')) return res.end(JSON.stringify({ head: serving.head, chain: serving.chain, transitions: [], certificates: { certs: [], retirements: [] } }));
+      res.statusCode = 404;
+      res.end('{}');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  });
+  afterAll(() => new Promise((resolve) => server?.close(resolve)));
+
+  it('anchors only a head the verified chain reaches: an unsigned head claiming version 900000 is refused', async () => {
+    const keys = join(dir('forged'), 'keys.json');
+    expect(await runAdmin(['init', '--keys', keys], fake().io)).toBe(0);
+    const admin = await readAdminKeys(keys);
+    const recovery = join(dir('volume'), 'recovery.json');
+    const key = await newRecoveryKey();
+    writeFileSync(recovery, recoveryFileText(key, 'org-forged', 'http://127.0.0.1'), { mode: 0o600 });
+    const genesis = await signOrgState(
+      {
+        org: 'org-forged',
+        version: 1,
+        prev: null,
+        issued: new Date().toISOString(),
+        root: { keys: [await keyId(admin.stepUp.pub)], recoveryPub: key.pub },
+        members: [{ id: member, email: ADMIN, role: 'admin', devices: [deviceEntry(admin)] }],
+        machines: [],
+        machineNames: [],
+        retired: [],
+        revoked: [],
+        delegations: [],
+        projects: [],
+      },
+      [admin.stepUp],
+    );
+    writeFileSync(genesisFile(keys), JSON.stringify(genesis));
+    const forged: SignedOrgState = { state: { ...genesis.state, version: 900_000, prev: await stateHash(genesis.state) }, sigs: genesis.sigs };
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    const run = () => runAdmin(['genesis', '--hub', url, '--user', ADMIN, '--yes', '--keys', keys, '--recovery', recovery], f.io);
+    let f = fake();
+    for (const chain of [[genesis], [genesis, forged]]) {
+      serving = { chain, head: forged };
+      f = fake();
+      expect(await run(), String(chain.length)).toBe(1);
+      expect(f.err.join('\n')).toMatch(/the hub's (head is not its chain's last state|chain breaks at version 2)/);
+      expect(existsSync(anchorFile(keys))).toBe(false);
+    }
+    serving = { chain: [genesis], head: genesis };
+    f = fake();
+    expect(await run()).toBe(0);
+    expect(f.out).toContain(`genesis already at the hub: version 1, orgGenesis ${await stateHash(genesis.state)}`);
+    expect(JSON.parse(readFileSync(anchorFile(keys), 'utf8')).version).toBe(1);
   });
 });
 
@@ -501,6 +788,12 @@ describe('a genesis interrupted between its POST and its anchor', () => {
     const hash = await stateHash(first.chain[0].state);
     expect(existsSync(anchorFile(keys))).toBe(false);
     expect(await stateHash((JSON.parse(readFileSync(genesisFile(keys), 'utf8')) as SignedOrgState).state)).toBe(hash);
+
+    // The killed run's lock stays: it is the operator's to remove, once nothing runs (a held lock is never taken over).
+    const held = fake();
+    expect(await runAdmin(['genesis', '--hub', hub.url, '--user', ADMIN, '--yes', '--keys', keys, '--recovery', recovery], held.io)).toBe(1);
+    expect(held.err.join('\n')).toContain(`another run holds ${anchorFile(keys)}.lock (pid ${child!.pid} on `);
+    rmSync(`${anchorFile(keys)}.lock`);
 
     const f = fake();
     expect(await runAdmin(['genesis', '--hub', hub.url, '--user', ADMIN, '--yes', '--keys', keys, '--recovery', recovery], f.io)).toBe(0);
