@@ -9,7 +9,8 @@
 //   revoke <file|->        a signed org state (or {states, transitions}) delivered by hand, adopted as from the hub
 //   grant <file|->         a signed grant, kept by the ledger's rule (grants.ts)
 //   policy [--read-only on|off] [--ceiling MODE|settings] [--json]
-//   legacy retire          deletes the DX1 org key (O14's final brief)
+//   legacy status          the DX1 org key: held, retired (bytes kept), purged or none (O14 M5a: the org state retires it)
+//   legacy purge           deletes the retired key's bytes for good, the stale copies' too (O14's final brief)
 //
 // `-` reads the file's content from the request's `secret`, as `mawsd`'s client sends stdin. Exit codes are O2's: 0
 // done, 1 failed, 2 not available here, 3 not running, 4 enrolled with the hub but not yet listed in the org state.
@@ -29,7 +30,7 @@ type Out = { code: number; out: string };
 
 const USAGE = `usage: mawsd endpoint enroll [--name N] [--replace] [--wait [s]] [--json] | provision [--name N] [--wait [s]] [--json]
                      | retire [--not-after ISO] [--json] | unenroll [--json] | keys [--json] | status [--json]
-                     | revoke <file|-> | grant <file|-> | policy [--read-only on|off] [--ceiling MODE|settings] | legacy retire`;
+                     | revoke <file|-> | grant <file|-> | policy [--read-only on|off] [--ceiling MODE|settings] | legacy status | legacy purge`;
 /** `--wait` with no number waits this long (O2 M6). */
 const DEFAULT_WAIT_S = 300;
 
@@ -250,11 +251,24 @@ function policy(endpoint: Endpoint, args: readonly string[]): Out {
   return { code: EXIT.done, out: values.json ? JSON.stringify(current) : describePolicy(current) };
 }
 
+/**
+ * The DX1 org key, which the org state retires (`legacyRetired`, O14 M5a) and every endpoint follows: `status` says
+ * what is held of it, `purge` deletes the retired key's bytes for good (O14's final brief). O10's `legacy retire` is
+ * gone: a local deletion was undone at the next RL10 hello, and a machine enrolled later never learned of it.
+ */
 function legacy(endpoint: Endpoint, args: readonly string[]): Out {
   const { positionals } = parse(args, {}, 1);
-  if (positionals[0] !== 'retire') return { code: EXIT.failed, out: USAGE };
-  const { state } = endpoint.parts!;
-  if (!state.legacy) return { code: EXIT.done, out: 'no legacy org key is held' };
-  state.removeLegacy();
-  return { code: EXIT.done, out: 'the legacy org key is deleted: events go out v2-only from now on' };
+  const key = endpoint.rl10.legacy;
+  if (positionals[0] === 'retire') {
+    return { code: EXIT.failed, out: 'the org state retires the legacy org key now (`deployment admin keys retire`); every endpoint follows its head. `legacy purge` deletes the bytes after.' };
+  }
+  if (positionals[0] === 'status') {
+    const { status, stale } = key.status();
+    const copies = stale > 0 && status !== 'retired (bytes kept)' ? ` (${stale} cop${stale === 1 ? 'y' : 'ies'} of an earlier enrollment's under stale-<time>/, which \`legacy purge\` deletes)` : '';
+    return { code: EXIT.done, out: `${status}${copies}` };
+  }
+  if (positionals[0] !== 'purge') return { code: EXIT.failed, out: USAGE };
+  const deleted = key.purge();
+  if (deleted.length === 0) return { code: EXIT.done, out: 'nothing to purge: no bytes of the legacy org key are held' };
+  return { code: EXIT.done, out: `purged: the legacy org key's bytes are deleted from ${deleted.join(', ')}` };
 }

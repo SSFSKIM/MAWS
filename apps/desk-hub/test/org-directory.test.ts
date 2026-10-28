@@ -37,6 +37,10 @@ async function presence(m: MachineClient, project: string): Promise<void> {
   await m.postOk([{ t: 'session', message: { project, machine: m.name, session: null, kind: 'machine', sub: null, n: null, body } as unknown as SessionMessage }]);
 }
 
+/** A machine's row in `GET /api/machines`, whose DX2 presence (O14 M5a) is the directory's. */
+const listedRow = async (name: string) =>
+  ((await (await hub.fetchAs(ADMIN, '/api/machines')).json()) as { machines: Array<{ name: string; online?: boolean; seen?: string | null }> }).machines.find((m) => m.name === name);
+
 const isOrg = (frame: DownFrame): frame is OrgFrame => frame.t === 'org';
 const projectIn = (frame: OrgFrame, id: string) => frame.projects.find((p) => p.id === id);
 const machineIn = (frame: OrgFrame, name: string) => frame.machines.find((m) => m.name === name);
@@ -126,12 +130,14 @@ describe('the org frame', () => {
     await m.postOk([{ t: 'hello', project: followed, name: 'followed', have: {}, follow: true }]);
     await m.next((f) => f.t === 'have' && f.project === followed, 'have');
     const online = machineIn(await nextOrg(watcher, from, (f) => machineIn(f, m.name)?.online === true, 'the machine online'), m.name)!;
+    expect(await listedRow(m.name)).toMatchObject({ online: true, seen: online.seen });
 
     // The daemon stops: its stream closes, the grace runs out in both projects, and the Registry says so.
     from = watcher.frames.length;
     await m.close();
     const offline = machineIn(await nextOrg(watcher, from, (f) => machineIn(f, m.name)?.online === false, 'the machine offline'), m.name)!;
     expect(Date.parse(offline.seen!)).toBeGreaterThan(Date.parse(online.seen!));
+    expect(await listedRow(m.name)).toMatchObject({ online: false, seen: offline.seen });
 
     // It starts again: its next stream's hello brings it back online.
     from = watcher.frames.length;

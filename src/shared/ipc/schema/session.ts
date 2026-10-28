@@ -74,7 +74,10 @@ export const LaunchResultSchema = z.discriminatedUnion('status', [
 ]);
 export type LaunchResult = z.infer<typeof LaunchResultSchema>;
 
-export const EventsSnapshotSchema = z.strictObject({ events: z.array(SessionEventSchema), lastSeq: z.number().int(), complete: z.boolean() });
+// O10 M8: `historyUnavailable` (present only as true) says part of the range asked for is gone: the ring had dropped it
+// and the journal could not be read back, so the answer is the ring's alone. `complete` can't say so, a page's limit
+// setting it false too, and seqs skip, so a reader can't tell a gap from the events alone.
+export const EventsSnapshotSchema = z.strictObject({ events: z.array(SessionEventSchema), lastSeq: z.number().int(), complete: z.boolean(), historyUnavailable: z.literal(true).optional() });
 export type EventsSnapshot = z.infer<typeof EventsSnapshotSchema>;
 
 // C7's `session.catalog` (coordinator, C7's asks): the engine's command catalogue as the wire carries it.
@@ -593,6 +596,15 @@ const p2cCommands = {
 } as const;
 export const P2C_SESSION_COMMANDS = Object.keys(p2cCommands) as (keyof typeof p2cCommands)[];
 // P2-C end --------------------------------------------------------------------------------------------------------------
+// P5 O10 M8 start (docs/doperpowers/plans/2026-10-27-p5-o10-endpoint.md, Interfaces §H) -----------------------------------
+// The broker's items as a read: the list `session.brokerItems` last published (the broker's, then the blocking asks'),
+// which a client otherwise sees only in the connect burst. The endpoint's subscriptions read it at every subscription and
+// resume (M8). Owner engine-host; immediate.
+const o10Commands = {
+  'session.pendingItems': host(input({}), z.strictObject({ items: z.array(AttentionItemSchema) })),
+} as const;
+export const O10_SESSION_COMMANDS = Object.keys(o10Commands) as (keyof typeof o10Commands)[];
+// P5 O10 M8 end ---------------------------------------------------------------------------------------------------------
 // P2-A start (2026-10-09; X16): why an acquisition was asked for, logged by main (`[sessions] acquire <id> (<reason>)`).
 export const ACQUIRE_REASONS = ['send', 'chip', 'read', 'side', 'peer', 'resubmit', 'resume'] as const;
 export type AcquireReason = (typeof ACQUIRE_REASONS)[number];
@@ -651,6 +663,7 @@ export const commands = {
   ...p2cCommands, // P2-C (2026-10-09)
   ...p2aCommands, // P2-A
   ...p2dCommands, // P2-D
+  ...o10Commands, // P5 O10 M8
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

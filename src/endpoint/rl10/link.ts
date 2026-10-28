@@ -6,7 +6,7 @@
 // The hello. sminos's first line carries the token; its `policy` is taken only while the endpoint holds none. The
 // welcome answers with the machine's identity under the head (`org`, `hub`, `name`, `former` as names, `ref`,
 // `enrolled`), the policy and the head's version; then the head's whole revocation set, the org directory, and, while
-// no legacy key is held, `legacy-key?`. After each welcome sminos restates its session-lane state whole and closes it
+// no legacy key is held and the org state has not retired it (legacy.ts), `legacy-key?`. After each welcome sminos restates its session-lane state whole and closes it
 // with `restated {}`, and the restatement replaces what was held (members.ts); the endpoint restates its revocation
 // set and directory whenever the head changes them.
 //
@@ -16,12 +16,14 @@
 //     (M3's notify counts), and `session` messages of every DX4 kind: a `machine` presence gives its project's
 //     checkouts, a sub-less `host` is a to-human event (M3's `wrote`, once per `(writer, seq)`, durably), and every
 //     message goes to the session listeners (M8's subscriptions);
-//   - `words?`, answered `words` (words.ts); `policy-set`, the policy changed and restated; `legacy-key`, kept;
+//   - `words?`, answered `words` (words.ts); `policy-set`, the policy changed and restated; `legacy-key`, kept (logged
+//     and dropped once the org state retires the key);
 //   - `rpc-result`, handed to the result listeners (M7) and acknowledged `rpc-ack {opId, nonce}`; `queried` and
 //     `tombstoned`, the answers to `query` and `tombstone`.
 //
 // What the endpoint sends besides: lane A actions as DX2's `rpc` (`rpc()`, M7's to call), `query` and `tombstone`
-// (answered within `ANSWER_MS`, else `unavailable`), M8's session-lane requests (`send`), and the policy at each change.
+// (answered within `ANSWER_MS`, else `unavailable`), M8's session-lane requests (`send`: `subscribe`, `unsubscribe`,
+// `rows`, `diff`, `output`, `read`, fed by `onSession`, `onPending` and `onLink`), and the policy at each change.
 import type { Action, Certificates, OrgState, SigningKey } from 'org-protocol';
 import type { EndpointPolicy, Policy } from '../policy';
 import { isCeiling } from '../policy';
@@ -81,6 +83,8 @@ export class Rl10 {
   readonly #index: InboundIndex;
   readonly #results = new Set<(result: RpcResult) => void>();
   readonly #sessions = new Set<(message: SessionLaneMessage) => void>();
+  readonly #pendings = new Set<(project: string, raised: readonly unknown[]) => void>();
+  readonly #links = new Set<(connected: boolean) => void>();
   readonly #queries = new Map<string, Waiting[]>();
   readonly #tombstones = new Map<string, Waiting[]>();
   readonly #said = new Set<string>();
@@ -99,7 +103,12 @@ export class Rl10 {
     };
     this.#ledger = new SignatureLedger(sub('signatures'));
     this.#index = new InboundIndex(sub('inbound'), ctx.now);
-    this.legacy = new LegacyKey(ctx.state, () => ctx.identity()?.org ?? null);
+    // The enrollment's org, listed or not: the first sync's head, which an enrollment adopts before it is listed, is
+    // one `legacy.json` follows (legacy.ts).
+    this.legacy = new LegacyKey(ctx.state, () => {
+      const state = ctx.state();
+      return ctx.identity()?.org ?? (state?.enrolled ? (state.enrollment?.org ?? null) : null);
+    });
     this.members = new Members({ dispatch: ctx.dispatch, listings: ctx.listings, listed: () => ctx.listings.listedSessions(), forget: (s) => ctx.notifier.forget(s), log: ctx.log, now: ctx.now });
     this.relay = new LogRelay({
       org: () => {
@@ -122,7 +131,15 @@ export class Rl10 {
       stateDir: ctx.stateDir,
       build: ctx.build,
       log: ctx.log,
-      handlers: { hello: (c, f) => this.#hello(c, f), frame: (c, f) => this.#frame(c, f), closed: () => this.#closed() },
+      handlers: {
+        hello: (c, f) => this.#hello(c, f),
+        frame: (c, f) => this.#frame(c, f),
+        // A connection a newer one replaced closes after the newer one's hello: it ends nothing of the newer one's.
+        closed: (c) => {
+          const current = this.#server.current;
+          if (current === null || current === c) this.#closed();
+        },
+      },
     });
     ctx.policy.onChange((policy) => this.send({ t: 'policy', read_only: policy.read_only, ceiling: policy.ceiling }));
   }
@@ -203,6 +220,21 @@ export class Rl10 {
   onSession(listener: (message: SessionLaneMessage) => void): () => void {
     this.#sessions.add(listener);
     return () => this.#sessions.delete(listener);
+  }
+
+  /** Each project's pending set as sminos restates it (`pending`; M8's `cards` view reads them). */
+  onPending(listener: (project: string, raised: readonly unknown[]) => void): () => void {
+    this.#pendings.add(listener);
+    return () => this.#pendings.delete(listener);
+  }
+
+  /**
+   * sminos's connection: `true` once one is welcomed, `false` when it ends or a new one replaces it (its session-plane
+   * subscriptions go with it; M8's lane A subscriptions end).
+   */
+  onLink(listener: (connected: boolean) => void): () => void {
+    this.#links.add(listener);
+    return () => this.#links.delete(listener);
   }
 
   /**
@@ -313,6 +345,7 @@ export class Rl10 {
     if (policy !== null) this.#ctx.policy.fromSminos(policy);
     // A connection replaced: what the last one held open on RL1 closes, and is opened again by this one's hellos.
     this.relay.closeAll();
+    if (this.#welcomed) this.#link(false);
     this.#told = null;
     const current = this.#ctx.policy.current();
     connection.send({
@@ -325,12 +358,14 @@ export class Rl10 {
       stateVersion: head.state.version,
     });
     this.#welcomed = true;
+    this.#link(true);
     await this.#restate(true);
-    if (!this.legacy.held) this.send({ t: 'legacy-key?' });
+    if (!this.legacy.held && !this.legacy.retired) this.send({ t: 'legacy-key?' });
     this.members.welcome();
   }
 
   #closed(): void {
+    if (this.#welcomed) this.#link(false);
     this.#welcomed = false;
     this.members.stop();
     this.#told = null;
@@ -399,6 +434,23 @@ export class Rl10 {
     const { project, raised } = frame;
     if (typeof project !== 'string' || !Array.isArray(raised)) return this.#ctx.log('endpoint: an RL10 pending frame that is not one was ignored');
     this.#ctx.notifier.pendingSet(project, raised.filter((r): r is { session: string } => typeof r === 'object' && r !== null && typeof (r as { session?: unknown }).session === 'string'));
+    for (const listener of this.#pendings) {
+      try {
+        listener(project, raised);
+      } catch (error) {
+        this.#ctx.log(`endpoint: a pending-set listener failed: ${(error as Error).message}`);
+      }
+    }
+  }
+
+  #link(connected: boolean): void {
+    for (const listener of this.#links) {
+      try {
+        listener(connected);
+      } catch (error) {
+        this.#ctx.log(`endpoint: an RL10 link listener failed: ${(error as Error).message}`);
+      }
+    }
   }
 
   #session(raw: unknown): void {

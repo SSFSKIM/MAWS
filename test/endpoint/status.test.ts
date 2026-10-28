@@ -41,6 +41,7 @@ describe('status()', () => {
       rl10: { connected: false },
       listener: { bound: false },
       legacyKey: false,
+      legacyRetired: false,
       delegated: false,
     });
     await endpoint.stop();
@@ -86,7 +87,7 @@ describe('status()', () => {
     const endpoint = createEndpoint();
     await endpoint.start(services);
     const status = endpoint.status() as Record<string, unknown>;
-    expect(status).toMatchObject({ enrollment: 'org-listed', name: 'mini', org: 'org-local', stateVersion: 2, headHash: await stateHash(head.state), legacyKey: true, delegated: true });
+    expect(status).toMatchObject({ enrollment: 'org-listed', name: 'mini', org: 'org-local', stateVersion: 2, headHash: await stateHash(head.state), legacyKey: true, legacyRetired: false, delegated: true });
     expect(leaks(status)).toEqual([]);
     expect(JSON.stringify(status)).not.toContain(privateJwk.d);
     // The walk itself catches what it should.

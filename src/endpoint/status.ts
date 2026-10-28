@@ -14,7 +14,10 @@ export type EndpointStatus = {
   channels: { relayed: number; direct: number };
   rl10: { connected: boolean };
   listener: { bound: boolean };
+  /** The DX1 org key is in use (dual-coding). */
   legacyKey: boolean;
+  /** The org state retired it (O14 M5a): `legacy.json` is its tombstone. */
+  legacyRetired: boolean;
   /** The machine holds a delegation (O14 M1): it provisioned itself under one, and `retire` is its departure. */
   delegated: boolean;
   refusing?: string;
@@ -51,6 +54,7 @@ export function endpointStatus(state: EndpointState | null, headHash: string | n
     rl10: { ...links.rl10 },
     listener: { ...links.listener },
     legacyKey: state?.legacy ?? false,
+    legacyRetired: state?.legacyRetired ?? false,
     delegated: (state?.delegation ?? null) !== null,
     ...(refusing === undefined ? {} : { refusing }),
     ...(Object.keys(opLedgers).length === 0 ? {} : { opLedgers }),
