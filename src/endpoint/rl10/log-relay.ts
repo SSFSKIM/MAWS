@@ -10,20 +10,10 @@
 // logged, never signed again. An event with no upload form is refused `malformed`; one under a writer not this
 // machine's current name, `writer-not-yours`.
 //
-// The uplink. Signed uploads wait in a queue of at most UPLINK_BYTES for the hub link's socket to have room (its soft
-// cap, send-buffer.ts), and go up in order; RL10 is read on meanwhile, so nothing the endpoint answers locally (`query`,
-// `words?`, `rpc-result`) waits on the uplink. An upload that would take the queue past its cap is let go, its events
-// already in the ledger, leaving each writer in it a hole at its first position let go. The hub stores a writer's events
-// only in one run (each at its next seq, a gap answered by its own `resend`), so nothing of a writer's past its hole is
-// queued until the hole is filled: sminos is asked (`resend`) from one hole at a time, the next once the last is filled
-// and the queue is at most half full. Only an upload of an asked hole fills it (rebuilt byte for byte from the ledger),
-// and it alone may take UPLINK_RESERVE past the cap; past that it is let go, the hole asked for again later. No position
-// is queued twice. So the queue holds at most UPLINK_BYTES and UPLINK_RESERVE (or one upload, while it is empty),
-// whatever sminos sends. The hub's own `resend` for a position the endpoint signed is taken as a hole the same way,
-// asked for once, not passed to sminos with each batch the hub refuses. While RL1 is down the queue is let go, its
-// writers holed and nothing asked: each RL1 welcome checks the hub's `have` against the ledger (below) and asks from
-// there. So a drop costs a resend, never an event, and a backlog however long reaches the hub in about one resend for
-// each half queue of it.
+// The uplink. Signed uploads go up through the uplink (uplink.ts): a capped queue for the hub link's room, which lets
+// an upload past its cap go and asks sminos for it again (`resend`), one hole at a time. The relay hands it each signed
+// upload, every refusal sminos hears (the endpoint's own and the hub's), the hub's `resend`s, and each RL1 welcome's
+// comparison of the hub's `have` with the ledger (below).
 //
 // Down. An arriving event goes to sminos only verified, wrapped `{event, signer, owners?}`:
 //   - under one of this machine's own writers (its current name, or a former one `machineNames` binds to its ref), only
@@ -79,6 +69,7 @@ import type { InboundIndex } from './inbound-index';
 import type { LegacyKey } from './legacy';
 import type { Members } from './members';
 import { bodyHash, uploadForm, type Signature, type SignatureLedger } from './signature-ledger';
+import { Uplink, type UplinkContext } from './uplink';
 
 type Frame = { t: string } & Record<string, unknown>;
 
@@ -94,19 +85,6 @@ type Judged =
   | { deliver: Wrapped }
   | { spent: SpentReason; reason: Rejected['reason']; message: string }
   | { hold: string };
-
-/**
- * The signed uploads waiting for the hub link to have room, at most (one upload past it while the queue is empty): one
- * of sminos's upload passes (`UPLOAD_AHEAD`) and as much again, so a pass that lands while the last still drains waits
- * whole.
- */
-export const UPLINK_BYTES = 8 * 1024 * 1024;
-
-/**
- * The room past UPLINK_BYTES that a hole's filling may take, and only it (one asked for at a time): four of sminos's
- * batches (256 KiB), so the queue holds at most UPLINK_BYTES and this, whatever sminos sends.
- */
-export const UPLINK_RESERVE = 1024 * 1024;
 
 /** How many arriving events the relay holds at most, and how long each, while their verdict waits on the head. */
 export const HOLD_MAX = 1000;
@@ -128,8 +106,8 @@ export type RelayContext = {
   opened(project: string): void;
   now(): number;
   log(line: string): void;
-  /** The uplink queue's cap and its reserve for a hole's filling (UPLINK_BYTES and UPLINK_RESERVE unless given). */
-  uplink?: { bytes: number; reserve: number };
+  /** The uplink's cap, reserve and ask wait (uplink.ts's defaults unless given). */
+  uplink?: UplinkContext['limits'];
 };
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -149,25 +127,21 @@ export class LogRelay {
    * upload at a time, across connections (a replaced connection's upload may still be signing when the new one resends).
    */
   readonly #signing = new Map<string, Promise<unknown>>();
-  /** Signed uploads waiting for the hub link's room, in order, and their bytes. */
-  readonly #uplink: Array<{ project: string; events: Record<string, unknown>[]; bytes: number }> = [];
-  #uplinkBytes = 0;
-  /** The positions in the queue, by `project\nwriter\nseq`: none is queued twice. */
-  readonly #queuedAt = new Set<string>();
-  #draining = false;
-  /**
-   * Each writer's hole, by project, then writer: the first position the hub is owed and the uplink let go, and whether
-   * sminos was asked for it since (only then is an upload of it its filling). Nothing of the writer's past it is queued
-   * until it is filled (see the header).
-   */
-  readonly #holes = new Map<string, Map<string, { from: number; asked: boolean }>>();
-  /** The hole `#ask` asked for last, by `project\nwriter`, until it is filled or let go: the next waits on it. */
-  #asking: string | null = null;
+  readonly #uplink: Uplink;
   /** The arriving events held for a head that can judge them, by project, then `writer\nseq`, in arrival order. */
   readonly #held = new Map<string, Map<string, { event: unknown; since: number }>>();
 
   constructor(ctx: RelayContext) {
     this.#ctx = ctx;
+    this.#uplink = new Uplink({
+      send: (frame) => ctx.hub.send(frame),
+      writable: () => ctx.hub.writable?.() ?? Promise.resolve(),
+      toSminos: (frame) => ctx.toSminos(frame),
+      signed: (project, writer, seq) => ctx.ledger.get(project, writer, seq) !== null,
+      now: () => ctx.now(),
+      log: (line) => ctx.log(line),
+      limits: ctx.uplink,
+    });
   }
 
   /** The newest event time relayed from `name`'s writers, or null. */
@@ -206,134 +180,15 @@ export class LogRelay {
       else {
         const at = position(e);
         this.#ctx.toSminos({ t: 'refused', project, refusal: { reason: signed.reason, ...(at ?? {}), message: signed.message } });
-        // A hole's filling refused: sminos's next welcome asks for it again; the next hole is asked for meanwhile.
-        if (at !== null && this.#asking === `${project}\n${at.writer}` && this.#holes.get(project)?.get(at.writer)?.from === at.seq) this.#asking = null;
+        if (at !== null) this.#uplink.refused(project, at.writer, isLogSeq(at.seq) ? at.seq : 0, signed.reason);
       }
     }
-    if (out.length > 0) this.#upload(project, out);
+    if (out.length > 0) this.#uplink.upload(project, out);
   }
 
   /** The signed uploads' bytes waiting for the hub link's room. */
   get uplinkQueued(): number {
-    return this.#uplinkBytes;
-  }
-
-  get #cap(): number {
-    return this.#ctx.uplink?.bytes ?? UPLINK_BYTES;
-  }
-
-  /**
-   * An upload to the uplink queue, but for what lies past a writer's hole and any position queued already. Past the
-   * cap it is let go, a hole left at each writer's first position in it; an upload that fills a hole sminos was asked
-   * for may take the reserve too, and past that is let go, the hole asked for again later.
-   */
-  #upload(project: string, events: Record<string, unknown>[]): void {
-    const holes = this.#holes.get(project);
-    /** Each holed writer's next position from its hole on, as this upload fills it. */
-    const filling = new Map<string, number>();
-    let fills = false;
-    const admitted = events.filter((e) => {
-      const { writer, seq } = e as { writer: string; seq: number };
-      const queued = this.#queuedAt.has(`${project}\n${writer}\n${seq}`);
-      const hole = holes?.get(writer);
-      if (hole === undefined || seq < hole.from) return !queued;
-      const next = filling.get(writer) ?? hole.from;
-      if (!hole.asked || seq !== next) return false;
-      filling.set(writer, next + 1);
-      if (queued) return false;
-      fills = true;
-      return true;
-    });
-    const bytes = admitted.length === 0 ? 0 : Buffer.byteLength(JSON.stringify({ t: 'events', project, events: admitted }));
-    if (admitted.length > 0 && this.#uplink.length > 0 && this.#uplinkBytes + bytes > this.#cap + (fills ? (this.#ctx.uplink?.reserve ?? UPLINK_RESERVE) : 0)) {
-      if (this.#holes.size === 0) this.#ctx.log(`endpoint: the hub is taking uploads slower than sminos sends them; uploads past ${this.#cap} bytes are let go and asked again from sminos as the uplink drains`);
-      for (const writer of filling.keys()) this.#unask(project, writer);
-      for (const e of admitted) this.#hole(project, (e as { writer: string }).writer, (e as { seq: number }).seq);
-      return;
-    }
-    // sminos sends a writer's positions in order from where it was asked, so the rest follows the hole's filling.
-    for (const writer of filling.keys()) this.#filled(project, writer);
-    if (admitted.length === 0) return;
-    this.#uplink.push({ project, events: admitted, bytes });
-    this.#uplinkBytes += bytes;
-    for (const e of admitted) this.#queuedAt.add(`${project}\n${(e as { writer: string }).writer}\n${(e as { seq: number }).seq}`);
-    void this.#drain();
-  }
-
-  /** A hole at `from` in `writer`'s uploads, to be asked for, unless it holds one no later already. */
-  #hole(project: string, writer: string, from: number): void {
-    let holes = this.#holes.get(project);
-    if (holes === undefined) this.#holes.set(project, (holes = new Map()));
-    const held = holes.get(writer);
-    if (held !== undefined && held.from <= from) return;
-    holes.set(writer, { from, asked: false });
-    if (this.#asking === `${project}\n${writer}`) this.#asking = null;
-  }
-
-  /** `writer`'s hole to be asked for again (its filling let go). */
-  #unask(project: string, writer: string): void {
-    const hole = this.#holes.get(project)?.get(writer);
-    if (hole !== undefined) hole.asked = false;
-    if (this.#asking === `${project}\n${writer}`) this.#asking = null;
-  }
-
-  /** `writer`'s hole filled, or the hub holding all of it: gone, and the next hole asked for once there is room. */
-  #filled(project: string, writer: string): void {
-    const holes = this.#holes.get(project);
-    holes?.delete(writer);
-    if (holes?.size === 0) this.#holes.delete(project);
-    if (this.#asking === `${project}\n${writer}`) this.#asking = null;
-  }
-
-  /** Every hole counted as asked and none waited on: sminos's next welcome asks (RL1, or sminos, gone). */
-  #askedAll(): void {
-    for (const holes of this.#holes.values()) for (const hole of holes.values()) hole.asked = true;
-    this.#asking = null;
-  }
-
-  /**
-   * sminos asked (`resend`) for the next hole not yet asked for, once the last one asked is filled and the queue is at
-   * most half full: the room its filling and what follows go up in, ahead of anything later of that writer's.
-   */
-  #ask(): void {
-    if (this.#asking !== null || this.#uplinkBytes > this.#cap / 2) return;
-    for (const [project, holes] of this.#holes) {
-      for (const [writer, hole] of holes) {
-        if (hole.asked) continue;
-        hole.asked = true;
-        this.#asking = `${project}\n${writer}`;
-        this.#ctx.toSminos({ t: 'resend', project, writer, from: hole.from });
-        return;
-      }
-    }
-  }
-
-  /** Sends the queue up as the hub link has room, asking sminos for the holes as room comes. */
-  async #drain(): Promise<void> {
-    if (this.#draining) return;
-    this.#draining = true;
-    try {
-      while (this.#uplink.length > 0) {
-        await this.#ctx.hub.writable?.();
-        const next = this.#uplink.shift()!;
-        this.#uplinkBytes -= next.bytes;
-        for (const e of next.events) this.#queuedAt.delete(`${next.project}\n${(e as { writer: string }).writer}\n${(e as { seq: number }).seq}`);
-        if (this.#ctx.hub.send({ t: 'events', project: next.project, events: next.events })) {
-          this.#ask();
-          continue;
-        }
-        // RL1 is down: what was queued is let go, a hole left for each writer in it, and nothing is asked now, only
-        // to be lost the same way; the next welcome checks every project's `have` against the ledger and asks then.
-        for (const { project, events } of [next, ...this.#uplink.splice(0)]) {
-          for (const e of events) this.#hole(project, (e as { writer: string }).writer, (e as { seq: number }).seq);
-        }
-        this.#uplinkBytes = 0;
-        this.#queuedAt.clear();
-        this.#askedAll();
-      }
-    } finally {
-      this.#draining = false;
-    }
+    return this.#uplink.queued;
   }
 
   /** sminos's `rejected` (an event it refused on import) on to the hub. */
@@ -348,8 +203,7 @@ export class LogRelay {
     this.#projects.clear();
     this.#fresh.clear();
     this.#held.clear();
-    // What was asked of this connection is lost with it: its successor's hello and `have` ask again.
-    this.#askedAll();
+    this.#uplink.ended();
   }
 
   /** The head, the certificates or the legacy key moved: every held event judged again, in the order it arrived. */
@@ -430,12 +284,11 @@ export class LogRelay {
   async fromHub(frame: { t: string; project: string } & Record<string, unknown>): Promise<void> {
     if (!this.#projects.has(frame.project)) return;
     if (frame.t === 'events') return this.#arrived(frame.project, frame.events);
-    if (frame.t === 'resend' && this.#owed(frame.project, frame.writer, frame.from)) {
-      // A gap the hub names in what the endpoint signed: a hole, asked for once there is room (see the header).
-      this.#hole(frame.project, frame.writer as string, frame.from as number);
-      return this.#ask();
-    }
+    // A gap the hub names in what the endpoint signed: a hole, asked for once there is room (uplink.ts).
+    if (frame.t === 'resend' && typeof frame.writer === 'string' && isLogSeq(frame.from) && this.#uplink.resend(frame.project, frame.writer, frame.from)) return;
     this.#ctx.toSminos(frame);
+    const refusal = frame.t === 'refused' && isObject(frame.refusal) ? frame.refusal : null;
+    if (refusal !== null && typeof refusal.writer === 'string' && typeof refusal.reason === 'string') this.#uplink.refused(frame.project, refusal.writer, isLogSeq(refusal.seq) ? refusal.seq : 0, refusal.reason);
     if (frame.t === 'have' && this.#fresh.delete(frame.project)) this.#behind(frame.project, frame.have);
   }
 
@@ -447,19 +300,8 @@ export class LogRelay {
       const name = writerMachine(writer);
       if (name === null || machineNameKey(name) !== machineNameKey(org.name)) continue;
       const at = typeof have[writer] === 'number' ? (have[writer] as number) : 0;
-      this.#filled(project, writer);
-      if (signed > at) {
-        // Asked here, every such writer at once: their fillings share the reserve, and one let go is asked again.
-        this.#hole(project, writer, at + 1);
-        this.#holes.get(project)!.get(writer)!.asked = true;
-        this.#ctx.toSminos({ t: 'resend', project, writer, from: at + 1 });
-      }
+      this.#uplink.behind(project, writer, signed > at ? at + 1 : null);
     }
-  }
-
-  /** Whether `writer`'s position `from` in `project` is one the endpoint signed (so the hub is owed it). */
-  #owed(project: string, writer: unknown, from: unknown): boolean {
-    return typeof writer === 'string' && isLogSeq(from) && this.#ctx.ledger.get(project, writer, from) !== null;
   }
 
   /** `since` gives a held event's first hold time, when it is judged again. */

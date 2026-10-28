@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { HubLink } from '../../../src/endpoint/hub-link';
 import { EndpointPolicy } from '../../../src/endpoint/policy';
 import { Rl10 } from '../../../src/endpoint/rl10/link';
-import { UPLINK_BYTES } from '../../../src/endpoint/rl10/log-relay';
+import { UPLINK_BYTES } from '../../../src/endpoint/rl10/uplink';
 import type { SendLimits } from '../../../src/endpoint/send-buffer';
 import { EndpointState } from '../../../src/endpoint/state/store';
 import { FakeHub, until } from '../fake-hub';

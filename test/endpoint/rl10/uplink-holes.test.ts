@@ -14,6 +14,7 @@ import { LogRelay } from '../../../src/endpoint/rl10/log-relay';
 import { Members } from '../../../src/endpoint/rl10/members';
 import { SignatureLedger } from '../../../src/endpoint/rl10/signature-ledger';
 import { EndpointState } from '../../../src/endpoint/state/store';
+import { until } from '../fake-hub';
 import { genesis, memberId, newDevice, successor } from '../org-fixtures';
 
 const ORG = 'org-holes';
@@ -36,8 +37,13 @@ afterEach(() => {
 });
 const turn = () => new Promise<void>((resolve) => setImmediate(resolve));
 
-/** A relay signing as `host`, its hub a model of desk-hub's acceptance whose socket takes a frame when `take()`n. */
-async function scene(writers = WRITERS) {
+/**
+ * A relay signing as `host`, its hub a model of desk-hub's acceptance whose socket takes a frame when `take()`n, and
+ * sminos a model of its lane: a cursor for each writer, a `resend` rewinding it, and a writer refused (`HubLog.on_refused`'s
+ * final reasons) uploaded no more, a `resend` at or past where it was refused ignored. `deaf` writers' resends go
+ * unanswered; while `keyless`, the endpoint holds no key and refuses every upload `state-unavailable`.
+ */
+async function scene(writers = WRITERS, askMs?: number) {
   const a1 = await newDevice('a1');
   const machine = await generateSigningKey();
   const A = memberId();
@@ -77,10 +83,14 @@ async function scene(writers = WRITERS) {
 
   // sminos: each writer's cursor (its last uploaded seq), rewound by a `resend`.
   const cursor = new Map<string, number>(writers.map((w) => [w, 0]));
+  /** sminos's `refused` (where each writer was refused, which a resend at or past is ignored) and `stuck` (not uploaded). */
+  const stopped = new Map<string, number>();
+  const stuck = new Set<string>();
+  const sminos = { deaf: new Set<string>(), keyless: false };
   const toSminos: Frame[] = [];
   const relay = new LogRelay({
     org: () => ({ head: head.state, certificates: NO_CERTS, ref: REF, name: NAME }),
-    key: () => ({ key: machine, keyId: 'k' }),
+    key: () => (sminos.keyless ? null : { key: machine, keyId: 'k' }),
     members: new Members({ dispatch: () => Promise.reject(new Error('none')), listings: { report: async () => {}, gone: async () => {} }, listed: () => [], forget: () => {}, log: () => {}, now: Date.now }),
     ledger: new SignatureLedger(() => state.subdirectory('signatures')),
     index: new InboundIndex(() => state.subdirectory('inbound'), Date.now),
@@ -97,12 +107,21 @@ async function scene(writers = WRITERS) {
     },
     toSminos: (frame) => {
       toSminos.push(frame);
-      if (frame.t === 'resend') cursor.set(frame.writer as string, (frame.from as number) - 1);
+      const refusal = frame.refusal as { reason: string; writer?: string; seq?: number } | undefined;
+      if (frame.t === 'refused' && refusal?.writer !== undefined && ['conflict', 'writer-not-yours', 'bad-shape', 'too-large'].includes(refusal.reason)) {
+        stopped.set(refusal.writer, Math.min(refusal.seq ?? 0, stopped.get(refusal.writer) ?? Infinity));
+        stuck.add(refusal.writer);
+      }
+      if (frame.t !== 'resend') return;
+      const writer = frame.writer as string;
+      if (sminos.deaf.has(writer) || (frame.from as number) >= (stopped.get(writer) ?? Infinity)) return;
+      stuck.delete(writer);
+      cursor.set(writer, (frame.from as number) - 1);
     },
     opened: () => {},
     now: Date.now,
     log: () => {},
-    uplink: { bytes: CAP, reserve: RESERVE },
+    uplink: { bytes: CAP, reserve: RESERVE, askMs },
   });
   relay.hello({ t: 'hello', project: P, name: 'maws', have: {} });
 
@@ -117,7 +136,7 @@ async function scene(writers = WRITERS) {
   /** sminos's next frame for `writer` from its cursor, up to `total`; false once it has none. */
   const upload = async (writer: string, total: number) => {
     const from = cursor.get(writer)! + 1;
-    if (from > total) return false;
+    if (from > total || stuck.has(writer)) return false;
     const events = Array.from({ length: Math.min(PER, total - from + 1) }, (_, i) => event(writer, from + i));
     cursor.set(writer, from + events.length - 1);
     await submit(events);
@@ -127,7 +146,20 @@ async function scene(writers = WRITERS) {
   const reply = async () => {
     for (const frame of hub.replies.splice(0)) await relay.fromHub(frame as Frame & { project: string });
   };
-  return { relay, hub, take, upload, submit, event, queue, reply, toSminos, resends: () => toSminos.filter((f) => f.t === 'resend') };
+  /** Passes of sminos uploading each writer, the hub taking a frame each, until `done` holds; a timer's turn when idle. */
+  const run = async (total: number, done: () => boolean, ms = 20_000) => {
+    const deadline = Date.now() + ms;
+    while (!done()) {
+      await reply();
+      let sent = false;
+      for (const writer of writers) sent = (await upload(writer, total)) || sent;
+      take();
+      await (sent ? turn() : new Promise((resolve) => setTimeout(resolve, 5)));
+      if (Date.now() > deadline) throw new Error(`not done within ${ms} ms: the hub holds ${writers.map((w) => s(w)).join(', ')}`);
+    }
+  };
+  const s = (w: string) => hub.last.get(w);
+  return { relay, hub, take, upload, submit, event, queue, reply, run, sminos, toSminos, resends: () => toSminos.filter((f) => f.t === 'resend') };
 }
 
 describe('the uplink’s recovery from a dropped upload', () => {
@@ -234,4 +266,74 @@ describe('the uplink’s recovery from a dropped upload', () => {
     expect(s.queue.peak).toBeLessThanOrEqual(CAP + RESERVE);
     expect(s.resends().length).toBeLessThanOrEqual(writers.length + (writers.length * TOTAL * TEXT.length) / (CAP / 2));
   }, 60_000);
+  describe('a hole sminos won’t fill', () => {
+    const [stuck, healthy] = WRITERS;
+    /** Both writers past the cap, the hub reading only the first upload: a hole in each at 9, the stuck writer's first. */
+    async function holed(askMs?: number) {
+      const s = await scene(WRITERS, askMs);
+      for (let i = 0; i < 4; i++) for (const writer of WRITERS) await s.upload(writer, 40);
+      return s;
+    }
+    /** The hub takes frames until sminos has been asked `n` resends in all. */
+    async function asked(s: Awaited<ReturnType<typeof holed>>, n: number) {
+      for (let i = 0; i < 16 && s.resends().length < n; i++) {
+        s.take();
+        await turn();
+      }
+      expect(s.resends()).toHaveLength(n);
+    }
+    const refuse = (s: Awaited<ReturnType<typeof holed>>) => s.relay.fromHub({ t: 'refused', project: P, refusal: { reason: 'too-large', writer: stuck, seq: 5, message: 'too large' } });
+    const healthyRuns = (s: Awaited<ReturnType<typeof holed>>) => s.run(40, () => s.hub.last.get(healthy) === 40);
+
+    it('never asks a writer the hub refused it at, and asks the healthy writer’s hole at once', async () => {
+      const s = await holed(60_000); // a wait nothing here may lean on
+      await refuse(s);
+      await asked(s, 1);
+      expect(s.resends()).toEqual([{ t: 'resend', project: P, writer: healthy, from: 9 }]);
+      await healthyRuns(s);
+      expect(s.hub.gaps).toBe(0);
+      expect(s.resends().filter((f) => f.writer === stuck)).toEqual([]);
+    }, 30_000);
+
+    it('lets the ask go when the hub refuses the writer asked, and asks the healthy writer’s hole at once', async () => {
+      const s = await holed(60_000);
+      s.sminos.deaf.add(stuck);
+      await asked(s, 1);
+      expect(s.resends()[0]).toMatchObject({ writer: stuck, from: 9 });
+      await refuse(s);
+      expect(s.resends()[1]).toEqual({ t: 'resend', project: P, writer: healthy, from: 9 });
+      await healthyRuns(s);
+      expect(s.hub.gaps).toBe(0);
+    }, 30_000);
+
+    it('asks the next hole at once when the endpoint refuses the first one’s filling, the queue already drained', async () => {
+      const s = await holed(100);
+      await asked(s, 1);
+      expect(s.resends()[0]).toMatchObject({ writer: stuck, from: 9 });
+      for (let i = 0; i < 16 && s.relay.uplinkQueued > 0; i++) {
+        s.take();
+        await turn();
+      }
+      expect(s.relay.uplinkQueued).toBe(0);
+      // The filling, refused: the endpoint holds no key for a moment.
+      s.sminos.keyless = true;
+      await s.upload(stuck, 40);
+      s.sminos.keyless = false;
+      expect(s.toSminos.some((f) => f.t === 'refused')).toBe(true);
+      expect(s.resends()[1]).toEqual({ t: 'resend', project: P, writer: healthy, from: 9 });
+      // Both whole in the end: the refused hole asked again after its wait.
+      await s.run(40, () => WRITERS.every((w) => s.hub.last.get(w) === 40));
+      expect(s.hub.gaps).toBe(0);
+    }, 30_000);
+
+    it('asks the next hole once an ask goes unanswered for its wait, and the unanswered one again after as long', async () => {
+      const s = await holed(100);
+      s.sminos.deaf.add(stuck);
+      await asked(s, 1);
+      await until(() => s.resends().some((f) => f.writer === healthy), 'the healthy writer asked');
+      s.sminos.deaf.delete(stuck);
+      await s.run(40, () => WRITERS.every((w) => s.hub.last.get(w) === 40));
+      expect(s.hub.gaps).toBe(0);
+    }, 30_000);
+  });
 });
