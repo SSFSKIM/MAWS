@@ -42,7 +42,7 @@ import { homedir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
-import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, STYLE_CONTRACT_KEY, styleShape, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_VERSION } from '@shared/owner/contract';
+import { CONTRACT_HEADER, LEGACY_CONTRACT_7, LEGACY_SUPPLEMENT_2, NATIVE_TO_HUMAN_ENV, STYLE_CONTRACT_KEY, styleShape, SUPPLEMENT_HEADER } from '@shared/owner/contract';
 import type { JournalRow } from '@shared/wire/journal';
 import { binaryDeclares, SYSTEM_PROMPT_SNAPSHOT_FLAG } from '../src/engine-host/binary-info';
 import { RELAY_URL } from '../src/engine-host/launch';
@@ -57,9 +57,19 @@ import { promptsEnded, sessionJournal, writtenPrompts } from './support/live-tur
 import { a15Line, a15Reading, installedEngine } from './support/p1-live';
 import { newChatIn, sidebarRow } from './support/sidebar';
 
+// P4-R7z (the P4 spec's Decision Log 92): the arms below read MAWS's full contract (7) and supplement 2, which MAWS no
+// longer appends: a clean home now runs with the to-human lane off, and the owner's style gets supplement 3 beside the
+// plugin's own message tool. They stay as P2-C's and P4-R7's record (docs/doperpowers/evidence/p2-c) and do not run until
+// they are rewritten for the plugin's tool (the tracker's row); the plugin's live MAWS check covers that lane meanwhile
+// (doperpowers #415, to-human/tests/mods/live-maws-check.py).
+const TO_HUMAN_CONTRACT = LEGACY_CONTRACT_7.text;
+const TO_HUMAN_CONTRACT_VERSION = LEGACY_CONTRACT_7.version;
+const TO_HUMAN_SUPPLEMENT = LEGACY_SUPPLEMENT_2.text;
+const TO_HUMAN_SUPPLEMENT_VERSION = LEGACY_SUPPLEMENT_2.version;
 const LIVE = process.env.MAWS_C_LIVE === '1';
 const INSTALLED = join(homedir(), '.local/bin/claude');
 function skipReason(): string | null {
+  if (LIVE) return 'the P2-C live run’s arms predate P4-R7z’s lane and are not rerun until rewritten (the tracker’s row)';
   if (!LIVE) return 'the P2-C live run runs only under MAWS_C_LIVE=1';
   if (!existsSync(INSTALLED)) return `no installed Claude Code at ${INSTALLED}`;
   return relaySkipReason(RELAY_URL);

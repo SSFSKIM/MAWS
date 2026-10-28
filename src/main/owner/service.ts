@@ -42,7 +42,7 @@ import type { HostDispatch } from '../ipc/router';
 import { hostCall } from '../sessions/context';
 import { applyEvent, newAnswer, onItsWay, settleAnswers, statusOf, storedOf, type Answer, type PromptEvent } from './answers';
 import { laneOn } from './launch';
-import { pendingOf } from './mods';
+import { laneInEffect, pendingOf } from './mods';
 import { blockMarksOf, ownerItemsOf } from './projection';
 import type { MarkUpdate, OwnerChannelStore, OwnerMarkRow } from './store';
 
@@ -341,11 +341,12 @@ export class OwnerChannelService {
     const row = this.deps.store.session(appSessionId);
     const override = row?.override ?? 'inherit';
     const on = laneOn(this.deps.appEnabled(), override);
+    const effective = laneInEffect(this.deps.appEnabled(), row); // P4-R7z: a style without the plugin's tool carries no lane
     const unsent = this.live.get(appSessionId)?.unsent;
     return {
       appSessionId,
       lane: {
-        on, override, applied: row?.applied ?? null, pending: pendingOf(row, on),
+        on: effective, override, applied: row?.applied ?? null, pending: pendingOf(row, on),
         mismatch: row?.styleMismatch && row.style !== null && row.observedStyle !== null ? { resolved: row.style, observed: row.observedStyle } : null,
       },
       marks: this.deps.store.marks(appSessionId).map((mark) => ownerMarkOf(mark, unsent?.get(mark.id as MarkId), this.unreadable(appSessionId, mark.id as MarkId))),
@@ -402,9 +403,10 @@ export class OwnerChannelService {
     if (marks.length === 0) return false;
     let added = false;
     try {
-      const enabledAt = this.deps.store.session(appSessionId)?.enabledAt ?? null;
+      const row = this.deps.store.session(appSessionId);
+      const enabledAt = row?.enabledAt ?? null;
       const record = this.deps.sessions.get(appSessionId);
-      const live = event.seq !== null && laneOn(this.deps.appEnabled(), this.deps.store.override(appSessionId)) && !isForeign(record);
+      const live = event.seq !== null && laneInEffect(this.deps.appEnabled(), row) && !isForeign(record);
       const item = enabledAt !== null && Date.parse(event.at) >= Date.parse(enabledAt);
       for (const mark of marks) {
         added =
@@ -725,7 +727,7 @@ export class OwnerChannelService {
     try {
       const record = this.deps.sessions.get(appSessionId);
       if (record !== null) this.held.set(appSessionId, `${isForeign(record)}:${record.archived}`);
-      const on = record !== null && !record.archived && laneOn(this.deps.appEnabled(), this.deps.store.override(appSessionId));
+      const on = record !== null && !record.archived && laneInEffect(this.deps.appEnabled(), this.deps.store.session(appSessionId));
       const { items, quiet } = on
         ? ownerItemsOf(appSessionId, this.deps.store.marks(appSessionId), { sessionId: (record?.engineSessionId ?? null) as SessionId | null, foreignHeld: isForeign(record) })
         : { items: [], quiet: [] };

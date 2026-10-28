@@ -11,10 +11,10 @@
 // An async question with no request waiting at the tail (MAWS's own ask, never raised; or one answered already) lands
 // the same way on its call's row: the log's `question` event's `src` is the call's tool-use id, by which MAWS keys the
 // row (a question's `question:<id>`, MAWS's ask capsule `ask:<id>`), so the view jumps to it as its store's `jumpTo` does.
-// So does a message sent through a message tool (MAWS's or the to-human plugin's, which the desk reads alike,
-// `../../depth/message-tools`; doperpowers' to-human message tool spec, its cross-repo contract): its `message` event's
-// `src` is the call's tool-use id, not a span, and MAWS's store, under the desk's reading, draws the call as the message
-// it sends, a `to_human` row keyed `to-human:<id>` (P4-R7).
+// So does a message sent through a message tool (the to-human plugin's, or MAWS's former one in a recorded session,
+// which MAWS reads alike, `@shared/owner/message-call`; doperpowers' to-human message tool spec, its cross-repo
+// contract): its `message` event's `src` is the call's tool-use id, not a span, and MAWS's store draws the call as the
+// message it sends, a `to_human` row keyed `to-human:<id>` (P4-R7).
 import { useEffect, useRef, useState } from 'react';
 import type { JsonObject } from 'desk-hub/protocol';
 import { useTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
@@ -23,7 +23,6 @@ import { rowId } from '../../../../../src/renderer/src/transcript/model/keys';
 import { marksOfText } from '../../../../../src/renderer/src/transcript/model/owner-marks';
 import type { RowId } from '../../../../../src/renderer/src/transcript/model/rows';
 import type { MessageUuid, ToolUseId } from '@shared/graph/ids';
-import { DESK_MESSAGE_TOOLS } from '../../depth/message-tools';
 import { watchReaderIntent } from '../../depth/view/reader-intent';
 
 const object = (value: unknown): JsonObject | null => (typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as JsonObject) : null);
@@ -71,7 +70,7 @@ export function callRow(src: string, rows: readonly JsonObject[]): RowId | null 
     if (row.type !== 'assistant' || !Array.isArray(content)) continue;
     const use = content.map(object).find((block) => block?.type === 'tool_use' && block.id === src);
     if (!use) continue;
-    switch (presentationOf(String(use.name), DESK_MESSAGE_TOOLS)) {
+    switch (presentationOf(String(use.name))) {
       case 'ask':
         return rowId.ask(src as ToolUseId);
       case 'message':

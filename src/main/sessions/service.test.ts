@@ -13,7 +13,7 @@ import { directRouteRefusal } from './start-guards';
 import { RETRY_DETAIL, RETRY_REASON } from './resume'; // C3 corrective
 import { ScratchRepo } from '../../../test/support/scratch-repo'; // C12
 import { OwnerChannelLaunches } from '../owner/launch'; // P2-C
-import { NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT } from '@shared/owner/contract'; // P2-C
+import { LEGACY_CONTRACT_7, NATIVE_TO_HUMAN_ENV, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C
 import { userScopeProfile } from '@shared/engine/launch-profile'; // P4-A2
 
 // The service is Electron-free (its handlers are service-register.ts's).
@@ -1024,10 +1024,18 @@ describe('P2-C: the to-human lane on the session service’s launches', () => {
     }).start();
   });
   afterEach(() => h.dispose());
+  // a session recorded under MAWS's last full contract (P4-R7z: renders anew at its next launch)
   const contractTranscript = (cwd: string, sessionId: SessionId) =>
-    h.writeTranscript(cwd, sessionId, `${JSON.stringify({ type: 'attachment', attachment: { type: 'prompt_snapshot', systemPrompt: ['You are an agent.', TO_HUMAN_CONTRACT] } })}\n`);
+    h.writeTranscript(cwd, sessionId, `${JSON.stringify({ type: 'attachment', attachment: { type: 'prompt_snapshot', systemPrompt: ['You are an agent.', LEGACY_CONTRACT_7.text] } })}\n`);
+  // P4-R7z: the to-human plugin's style (it declares 6, its message tool), selected in the engine's settings
+  const pluginStyle = () => {
+    mkdirSync(join(h.trust.configHome, 'output-styles'), { recursive: true });
+    writeFileSync(join(h.trust.configHome, 'output-styles', 'to-human.md'), '---\nname: to-human\nmaws-to-human-contract: 6\n---\nbody\n');
+    writeFileSync(join(h.trust.configHome, 'settings.json'), JSON.stringify({ outputStyle: 'to-human' }));
+  };
 
-  it('a new session’s launch carries the contract and the advertisement and is recorded; the trust bootstrap carries neither', async () => {
+  it('a new session’s launch under the plugin’s style carries the supplement and the advertisement and is recorded; the trust bootstrap carries neither', async () => {
+    pluginStyle();
     const { appSessionId: id } = await h.service.create({ projectId: null, location: { kind: 'directory', path: h.work } });
     await h.service.startSession(id, { message: OK_MESSAGE, options: { trust: 'accepted' } });
     expect(await h.settled(id)).toMatchObject({ phase: 'ready' });
@@ -1035,10 +1043,10 @@ describe('P2-C: the to-human lane on the session service’s launches', () => {
     expect(bootstrap!.appSessionId).not.toBe(id);
     expect(bootstrap).not.toHaveProperty('appendSystemPrompt');
     expect(bootstrap!.extraSettings).toBeNull();
-    expect(launch).toMatchObject({ appSessionId: id, appendSystemPrompt: TO_HUMAN_CONTRACT, extraSettings: { env: { [NATIVE_TO_HUMAN_ENV]: '7' } } }); // P2-C2: contract 5; P4-R7: 7
+    expect(launch).toMatchObject({ appSessionId: id, appendSystemPrompt: TO_HUMAN_SUPPLEMENT, extraSettings: { env: { [NATIVE_TO_HUMAN_ENV]: '8' } } }); // P4-R7z: 8, MAWS offering no message tool
     expect(launch).not.toHaveProperty('systemPromptSnapshot');
     const row = h.index.ownerChannel.session(id);
-    expect(row).toMatchObject({ desired: 'maws-contract', recorded: 'unrecorded', appended: true, snapshotOff: false, applied: 'maws-contract' });
+    expect(row).toMatchObject({ desired: 'external-style-plus-supplement', recorded: 'unrecorded', appended: true, snapshotOff: false, applied: 'external-style-plus-supplement' });
     expect(row?.launchId).toEqual(expect.any(String)); // the host's answer to this launch
     expect(row?.enabledAt).not.toBeNull();
   });
