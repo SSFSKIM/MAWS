@@ -3,6 +3,7 @@
 // list goes through as it was given. The script runs whole, against a local origin and a fake `gh` that finds no run, so
 // a call that pushes ends at "no run" with its commit left on the ci/ ref (--keep) to read the trailers from.
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -58,7 +59,7 @@ function gate(args, { alerts = false, base = {}, change } = {}) {
     writeFileSync(join(dir, 'sleep'), '#!/bin/sh\n'); // the 30 polls for the run, at once
     chmodSync(join(dir, 'gh'), 0o755);
     chmodSync(join(dir, 'sleep'), 0o755);
-    const run = spawnSync('bash', [join(root, 'scripts/ci-gate.sh'), tree, ...args, '--keep'], { encoding: 'utf8', env });
+    const run = spawnSync('bash', [join(root, 'scripts/ci-gate.sh'), tree, ...args, '--keep'], { encoding: 'utf8', env, maxBuffer: 8 << 20 });
     const refs = git('--git-dir', origin, 'for-each-ref', '--format=%(refname)').split('\n').filter((ref) => ref && ref !== 'refs/heads/master');
     const calls = join(dir, 'gh-calls');
     return {
@@ -96,6 +97,26 @@ test('omitted spec-import coverage warns before push and travels in the pushed c
   assert.equal(result.refs.length, 1);
   assert.match(result.stdout, /ci-gate: warning: missing e2e:one; specs reach src\/endpoint.ts/);
   assert.match(result.message, /^E2E-Coverage: missing e2e:one; specs reach src\/endpoint.ts$/m);
+  assert.deepEqual(trailers(result.message), ['Gates: static']);
+});
+
+test('an oversized advisory still produces a commit with bounded trailers and a truncation note', () => {
+  const scripts = { e2e: 'playwright test' };
+  for (let i = 0; i < 320; i++) scripts[`e2e:g${i}-${'x'.repeat(4000)}`] = 'playwright test e2e/one.spec.ts';
+  const result = gate(['--gates', 'static', '--peer', 'none'], {
+    base: {
+      'package.json': JSON.stringify({ scripts }),
+      'playwright.config.ts': "export default { testDir: 'e2e' };",
+      'e2e/one.spec.ts': "import '../src/endpoint';",
+      'src/endpoint.ts': 'export const endpoint = 1;',
+    },
+    change(tree) { writeFileSync(join(tree, 'src/endpoint.ts'), 'export const endpoint = 2;'); },
+  });
+  assert.equal(result.refs.length, 1, 'the advisory must not hit the OS argument limit before pushing');
+  const advice = result.message.split('\n').filter((line) => line.startsWith('E2E-Coverage:')).join('\n');
+  assert.ok(Buffer.byteLength(advice) <= 4096);
+  assert.match(advice, /truncated.*stderr/);
+  assert.equal((result.stdout.match(/ci-gate: warning: missing e2e:/g) ?? []).length, 320, 'stderr keeps the full group list');
   assert.deepEqual(trailers(result.message), ['Gates: static']);
 });
 
