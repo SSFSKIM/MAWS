@@ -96,6 +96,7 @@
     "test/support/claude-env.ts",
     "test/support/cua-fake-host.ts",
     "test/support/engine-pin/index.ts",
+    "test/support/fake-bridge.ts", // P5 O9 M5: e2e:lane-a's terminal sessions are served by the fake bridge
     "test/support/file-lock.ts",
     "test/support/fixture-session-id.ts",
     "test/support/git-env.ts",

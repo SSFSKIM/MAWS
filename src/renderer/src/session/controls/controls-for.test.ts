@@ -1,12 +1,15 @@
 // Which implementation of the controls port a session gets (P5 O9 M4): lane B for a session MAWS holds or nobody
-// holds (a contested one included); none yet for a session a terminal or a background job holds, which stays read-only.
+// holds (a contested one included); for a session a terminal or a background job holds, lane A while its bridge is live
+// (M5), none otherwise, which stays read-only.
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { item, record, status, T0 } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
 import { TEST_MACHINE } from '../../../../../test/support/machine';
+import { applyLaneAState, resetLaneAStore } from '../../stores/lane-a';
 import { resetQueueStore } from '../../stores/queue';
+import { laneAState } from '../../lane-a/test-support/lane-a-state';
 import { useSessions } from '../../stores/sessions';
 import { answerSession, askSession, compactSession, controlsFor, sendToSession, sessionControls, stopSessionTask } from './controls-for';
 
@@ -17,6 +20,7 @@ const job = { kind: 'background_job', pid: null, jobId: 'job-1' } as const;
 
 beforeEach(() => {
   resetQueueStore();
+  resetLaneAStore();
   useSessions.setState({ engine: new Map(), digests: new Map(), records: new Map() });
 });
 
@@ -44,6 +48,17 @@ describe('controlsFor', () => {
   ])('gives a session held by %s no port: it stays read-only', (_name, holder) => {
     expect(controlsFor(record(APP, { holder }), null, inputs())).toBeNull();
   });
+
+  it('gives a session held elsewhere lane A while its bridge is live, and none while it starts or can’t be driven (M5)', () => {
+    const held = record(APP, { holder: terminal });
+    const live = controlsFor(held, laneAState(APP), inputs());
+    expect(live).not.toBeNull();
+    expect(live!.queue()).toBeNull();
+    expect(live!.capability('command')).toEqual({ available: true });
+    expect(controlsFor(held, laneAState(APP, { bridge: 'starting', reason: 'the session’s bridge is starting' }), inputs())).toBeNull();
+    expect(controlsFor(held, laneAState(APP, { bridge: 'none', reason: 'update sminos' }), inputs())).toBeNull();
+    expect(controlsFor(record(APP), laneAState(APP), inputs())!.queue(), 'a session MAWS holds stays lane B').not.toBeNull();
+  });
 });
 
 describe('a caller outside the pane', () => {
@@ -62,6 +77,14 @@ describe('a caller outside the pane', () => {
     expect(sessionControls(APP, fake.client)).toBeNull();
     expect(await sendToSession(APP, 'hi', { origin: 'reply' }, fake.client)).toEqual({ disposition: 'refused', started: false, reason: 'Held by terminal · 4242' });
     expect(fake.calls).toEqual([]);
+  });
+
+  it('sends to a bridged terminal session through lane A (M5)', async () => {
+    useSessions.setState({ records: new Map([[APP, record(APP, { holder: terminal })]]) });
+    applyLaneAState(APP, laneAState(APP));
+    const fake = fakeClient({ 'laneA.send': { key: { writer: 'maws/m', seq: 1 }, state: 'entered', uuid: 'row-1' }, 'laneA.catalog': null });
+    expect(await sendToSession(APP, 'hi', { origin: 'reply' }, fake.client)).toEqual({ disposition: 'sent', started: false, messageUuid: 'row-1' });
+    expect(fake.invoked('laneA.send')).toEqual([{ appSessionId: APP, text: 'hi' }]);
   });
 
   it('answers, asks, compacts and stops through the port, each refused in the holder’s words when a job holds the session', async () => {

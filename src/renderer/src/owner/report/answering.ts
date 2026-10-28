@@ -44,13 +44,16 @@ async function failureOf(invoke: () => Promise<{ ok: true } | { ok: false; error
   }
 }
 
-// The prompt went out (sent, steered or queued): an answer main follows. `held` and `refused` sent nothing.
-const wentOut = (result: HumanPromptResult) => result.disposition === 'sent' || result.disposition === 'steered' || result.disposition === 'queued';
+// The prompt went out (sent, steered or queued): an answer main follows. `held` and `refused` sent nothing. P5 O9 M5: a
+// lane A send whose fate was not known yet (`unconfirmed`) went to the session's bridge, and the composer's strip follows it.
+const wentOut = (result: HumanPromptResult) => result.disposition === 'sent' || result.disposition === 'steered' || result.disposition === 'queued' || result.disposition === 'unconfirmed';
 
 // The seam's result as main takes it: X22's five dispositions, as the seam said them, and when the seam was called
-// (`sentAt`: a report made again later is read by main from the host's record since then).
+// (`sentAt`: a report made again later is read by main from the host's record since then). P5 O9 M5: lane A's
+// `unconfirmed` is reported as `sent`, the words having gone to the session's bridge.
 export function reportOf(appSessionId: AppSessionId, markId: MarkId, send: AnswerSend, result: HumanPromptResult, sentAt?: string): AnswerReport {
-  const { disposition, started, messageUuid, queueId, reason } = result;
+  const { started, messageUuid, queueId, reason } = result;
+  const disposition = result.disposition === 'unconfirmed' ? 'sent' : result.disposition;
   return {
     appSessionId, markId, text: send.text, origin: send.origin, disposition, started,
     ...(messageUuid !== undefined && { messageUuid }), ...(queueId !== undefined && { queueId }), ...(reason !== undefined && { reason }),

@@ -99,5 +99,7 @@ export function laneBControls(record: SessionRecord | null, { appSessionId, clie
     stopAgent: () => refusedHere('stop-agent'),
     tell: () => refusedHere('tell'),
     stopTask: async (taskId) => controlResultOf(await client.invoke('session.stopTask', { appSessionId, taskId: taskId as TaskId })),
+    turn: () => null, // C3's status is the session's own
+    slash: (catalog, widgets) => ({ catalog, widgets }), // the engine's catalogue, every registered widget
   };
 }

@@ -8,7 +8,8 @@
 // on open; its Refresh (M3) is the owner's gesture that starts the session.
 import type { SessionRecord } from '@shared/graph/session';
 import type { GetContextUsageResponse } from '@shared/wire/control';
-import { compactSession } from '../session/controls/controls-for'; // P5 O9 M4
+import { compactSession, useSessionControls } from '../session/controls/controls-for'; // P5 O9 M4
+import { contextOfUsage, useLaneAUsage } from '../stores/lane-a'; // P5 O9 M5
 import { useCommand } from '../ipc/query';
 import { FRESHNESS, useObservedFacts } from '../sessions/observed'; // P2-A
 import { useSessionCatalog } from '../stores/catalog';
@@ -64,7 +65,11 @@ export function ContextPopoverBody({ record, close }: { record: SessionRecord; c
   const usage = useCommand('session.getContextUsage', { appSessionId: id, detail: 'full' }, { enabled: live, staleTime: 10_000 });
   const observed = useObservedFacts(id, { enabled: !live }).facts?.contextUsage ?? null; // P2-A
   const catalog = useSessionCatalog(live ? id : null);
-  const compactable = live && catalog.commands.some((c) => c.name === 'compact') && !catalog.terminalOnly.includes('compact');
+  // P5 O9 M5: a terminal session driven through its bridge: the bridge's latest usage, and its compact control
+  const controls = useSessionControls(id);
+  const driven = controls !== null && controls.turn() !== null;
+  const drivenContext = contextOfUsage(useLaneAUsage(id));
+  const compactable = driven ? controls.capability('compact').available : live && catalog.commands.some((c) => c.name === 'compact') && !catalog.terminalOnly.includes('compact');
 
   const compact = async () => {
     close();
@@ -74,7 +79,8 @@ export function ContextPopoverBody({ record, close }: { record: SessionRecord; c
 
   const reading = (context: { percent: number; maxTokens: number }) => `${Math.round(context.percent)}% of ${tokens(context.maxTokens)} used`;
   let body;
-  if (live && usage.data) body = <Breakdown usage={usage.data} />; // P2-A: a cached full read is a live view; dormant, the dated reading below
+  if (driven) body = <p className="text-fg-muted">{drivenContext ? reading(drivenContext) : FRESHNESS.notObserved}</p>; // P5 O9 M5
+  else if (live && usage.data) body = <Breakdown usage={usage.data} />; // P2-A: a cached full read is a live view; dormant, the dated reading below
   else if (!live && observed)
     body = (
       <>
@@ -91,7 +97,7 @@ export function ContextPopoverBody({ record, close }: { record: SessionRecord; c
       {body}
       {live && usage.isError && digest === null && <p className="text-ui-sm text-fg-muted">{usage.error.message}</p>}
       {/* P2-A M3: not live, the owner's Refresh starts the session; the host samples the context at ready and the full read follows */}
-      {!live && <DormantGesture appSessionId={id} label={FRAME.refresh} />}{/* P2-A */}
+      {!live && !driven && <DormantGesture appSessionId={id} label={FRAME.refresh} />}{/* P2-A */}
       {compactable && (
         <button type="button" onClick={() => void compact()} className="self-start rounded-sm border border-border-strong px-2 py-0.5 outline-accent hover:bg-bg-hover focus-visible:outline-2">
           Compact now

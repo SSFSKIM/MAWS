@@ -137,6 +137,9 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       case 'browser.import.list':
         return { profiles: [], fileBroken: false, running: null };
       // E4b end
+      // P5 O9 M5: the lane A store's first list at connect (no terminal session driven through its bridge)
+      case 'laneA.list':
+        return { states: [] };
       case 'pty.spawn':
         return { ptyId: 'p1', pid: 3333 };
       case 'pty.write':

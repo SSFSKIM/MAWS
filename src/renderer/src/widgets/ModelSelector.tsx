@@ -34,6 +34,8 @@ import { NOT_YET } from '../composer/submit/submit-state'; // P2-A
 import { routeOf, useModelCatalogue } from '../composer/list-models'; // P2-A
 import { isStarting, listedModelsOf, rememberListedModels, useComposerStore } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
+import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
+import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M5
 import { useSettings } from '../stores/settings';
 import { useUsage } from '../stores/usage';
 import { FRAME, MODEL, SELECTOR } from './copy';
@@ -78,6 +80,7 @@ interface Binding {
   unstarted: boolean;
   route: { value: Route; choices: Route[]; set(patch: { gateway: Route; model?: string | null; effort?: Effort | null }): Promise<ControlAnswer> } | null;
   observed?: { model: string; at: string } | null; // P2-A: a dormant session's model as the engine last reported it
+  note?: string; // P5 O9 M5: the model view's footnote, in place of "For this session only"
 }
 
 const ok: ControlAnswer = { ok: true };
@@ -158,6 +161,37 @@ function useIntentBinding(appSessionId: AppSessionId): Binding | null {
               return result.ok ? ok : { ok: false, error: result.error, caption: null };
             },
           },
+  };
+}
+
+// P5 O9 M5: a session another process runs, driven through its controls port (lane A): the port's model binding (the
+// bridge's catalog, its override, and a change that sends only what moved). The bridge's override applies to the main
+// loop's requests only, which the footnote says (the owner's Q1). Pending is never shown: the override takes at once.
+function useDrivenBinding(appSessionId: AppSessionId): Binding | null {
+  const controls = useSessionControls(appSessionId);
+  const sessionModel = useLaneAState(appSessionId)?.model ?? null;
+  if (!controls || controls.turn() === null) return null;
+  const bound = controls.bindings().model;
+  const { model, effort } = bound.value;
+  const write = async (next: { model: string | null; effort: Effort | null }): Promise<ControlAnswer> => {
+    const result = await bound.set(next);
+    return result.ok ? ok : { ok: false, error: result.error, caption: null };
+  };
+  return {
+    models: bound.options,
+    current: model,
+    shown: model ?? sessionModel,
+    pending: false,
+    effort,
+    overridden: effort !== null,
+    mode: null,
+    disabled: bound.disabled,
+    setModel: (next) => write({ model: next, effort }),
+    setEffort: (next) => write({ model, effort: next }),
+    fast: null,
+    unstarted: false,
+    route: null,
+    note: SELECTOR.terminalOnly,
   };
 }
 
@@ -566,7 +600,7 @@ function SelectorBody({ name, args, binding, state, error, appSessionId }: { nam
       </div>
       {view === 'model' && gatewayNote}
       {view === 'model' && alert}
-      <p className="m-0 px-2 pt-0.5 text-ui-sm text-fg-faint">{binding.unstarted ? MODEL.unstarted : SELECTOR.sessionOnly}</p>
+      <p className="m-0 px-2 pt-0.5 text-ui-sm text-fg-faint">{binding.note ?? (binding.unstarted ? MODEL.unstarted : SELECTOR.sessionOnly)}</p>
     </div>
   );
 
@@ -581,7 +615,8 @@ function SelectorBody({ name, args, binding, state, error, appSessionId }: { nam
 // `close` is the chip's: the menu stays open through a choice (Codex returns to the effort view) and closes on Esc or outside.
 function ModelSelector({ name, appSessionId, args }: { name: Name; appSessionId: AppSessionId; args: string; close(): void }) {
   const intent = useIntentBinding(appSessionId);
-  const read = useEngineRead('session.listModels', { appSessionId }, { enabled: intent === null });
+  const driven = useDrivenBinding(appSessionId); // P5 O9 M5
+  const read = useEngineRead('session.listModels', { appSessionId }, { enabled: intent === null && driven === null });
   const listed = read.data?.models;
   useEffect(() => {
     if (listed) rememberListedModels(appSessionId, listed); // the composer's model chip names its model from these
@@ -591,10 +626,10 @@ function ModelSelector({ name, appSessionId, args }: { name: Name; appSessionId:
   // mark) until it has applied, then the live binding takes over
   const dormant = useDormantBinding(appSessionId);
   const ready = useSessions((s) => s.engine.get(appSessionId)?.process === 'ready');
-  const binding = intent ?? (dormant && (!ready || dormant.choosing) ? dormant : ready ? live : null);
+  const binding = intent ?? driven ?? (dormant && (!ready || dormant.choosing) ? dormant : ready ? live : null);
   if (!binding) return <p className="m-0 w-[254px] p-3 text-ui-sm text-fg-muted">{NOT_YET}</p>;
-  const state = intent ? 'ready' : binding === dormant ? (read.state === 'unavailable' || read.state === 'starting' ? read.state : 'ready') : read.state;
-  return <SelectorBody name={name} args={args} binding={binding} state={state} error={intent ? null : read.error} appSessionId={appSessionId} />;
+  const state = intent || binding === driven ? 'ready' : binding === dormant ? (read.state === 'unavailable' || read.state === 'starting' ? read.state : 'ready') : read.state;
+  return <SelectorBody name={name} args={args} binding={binding} state={state} error={intent || binding === driven ? null : read.error} appSessionId={appSessionId} />;
 }
 
 // The three palette names, one selector opened at its view.

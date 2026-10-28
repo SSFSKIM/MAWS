@@ -30,8 +30,12 @@ import { useSessions } from '../stores/sessions';
 import { rowBranch, sessionAge } from './derive';
 import { displayTitle } from '../sessions/title';
 import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M4
+import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
 import { SidebarInteractionContext } from './interaction';
 import { SIDE_COPY } from '../side/copy'; // E3
+
+// P5 O9 M5: the hover card's line for a foreign session driven through its bridge (`held`: a background job's own line)
+export const BRIDGED_LINE = (held: string | null) => `${held === null ? 'Running in Terminal' : `Running as ${held}`} · driven through sminos’s bridge`;
 
 export interface SidebarHoverCardProps {
   label: string; // the card's accessible name
@@ -165,12 +169,15 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
   const now = useNow();
   const machine = useMachineMark(appSessionId);
   const controlled = useSessionControls(appSessionId) !== null; // P5 O9 M4: a session held elsewhere takes no reply
+  const bridged = useLaneAState(appSessionId)?.bridge === 'live'; // P5 O9 M5
   if (!record) return null;
   const glyph = glyphFor(record, digest, pending, ended, now);
   const waiting = waitingItem(pending);
   const place = placeOf(record);
   const working = digest?.phase === 'working' || digest?.phase === 'starting';
-  const doing = holderLine(record) ?? (working ? digest?.activity : null) ?? null;
+  const held = holderLine(record);
+  // P5 O9 M5 (the owner's Q1): a foreign session MAWS drives through its bridge says so
+  const doing = (held !== null && bridged ? BRIDGED_LINE(record.holder.kind === 'terminal' ? null : held) : held) ?? (working ? digest?.activity : null) ?? null;
   const meta = [glyph.label, sessionAge(record, digest, now), digest?.context ? `ctx ${Math.round(digest.context.percent)}%` : null].filter(Boolean).join(' · ');
 
   return (

@@ -12,6 +12,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import { FRESHNESS, useObservedFacts } from '../../sessions/observed'; // P2-A
 import { ContextPopoverBody } from '../../statusline/ContextPopover';
 import { tokens } from '../../statusline/format';
+import { contextOfUsage, useLaneAUsage } from '../../stores/lane-a'; // P5 O9 M5
 import { useSessions } from '../../stores/sessions';
 import { CHIP } from './chip-style';
 
@@ -44,8 +45,10 @@ function Ring({ record }: { record: SessionRecord }) {
   const { facts } = useObservedFacts(appSessionId, { enabled: !live });
   const observed = live ? null : (facts?.contextUsage ?? null);
   const [open, setOpen] = useState(false);
-  const ring = contextRingOf(observed?.value ?? sampled);
-  const label = observed ? `${ring.label} · ${FRESHNESS.lastReading(observed.at)}` : ring.label;
+  const driven = contextOfUsage(useLaneAUsage(appSessionId)); // P5 O9 M5
+  const shown = live ? null : driven;
+  const ring = contextRingOf(shown ?? observed?.value ?? sampled);
+  const label = observed && !shown ? `${ring.label} · ${FRESHNESS.lastReading(observed.at)}` : ring.label;
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger aria-label={label} title={label} data-context-ring={ring.percent ?? ''} className={`${CHIP} size-7 justify-center`}>

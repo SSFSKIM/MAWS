@@ -40,6 +40,7 @@ import { availabilityIn, useAvailability } from '../sessions/availability'; // P
 import { heldWords, useSessionControls } from '../session/controls/controls-for'; // P5 O9 M4
 import { holderWords } from '../sessions/holder-words'; // P2-A
 import { DictationNotice } from './dictation/MicControl'; // E9
+import { PendingSends } from './PendingSends'; // P5 O9 M5
 import { useDockedCards } from './docked/registry';
 import { swapOf } from './docked/swap';
 import { attachmentsOf, emptyDoc, isMultiline, type ComposerDoc } from './editor/doc';
@@ -176,6 +177,10 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // session no port drives is read-only, its chips refused with who holds it
   const controls = useSessionControls(appSessionId, { client, frame: { status, reads, availability } });
   const bindings: FrameBindings = setup ? intentBindings(setup, { starting }, userDefaults) : controls ? controls.bindings() : endedBindings(heldWords(appSessionId));
+  // P5 O9 M5: a session another process runs and the port drives (lane A): its turn is that process's, and Send and Stop
+  // go by the port's capabilities
+  const elsewhere = setup ? null : (controls?.turn() ?? null);
+  const driven = elsewhere && controls ? { running: elsewhere.running, send: controls.capability('send'), stop: controls.capability('interrupt') } : null;
   // W3 (C5): the engine refused auto and the host set the fallback (requested auto, a refusal, another effective mode)
   const permission = status?.permissionMode ?? null;
   const modeNote = setup ? setup.options.autoModeNote : permission && permission.requested === 'auto' && permission.effective !== 'auto' && permission.refusal !== null ? autoFallbackNotice(permission.effective) : null;
@@ -196,6 +201,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     mode: draft.mode,
     availability, // P2-A
     heldBy, // P2-A
+    driven, // P5 O9 M5
   });
 
   // ---- the docked swap ---------------------------------------------------------------------------------------------
@@ -288,7 +294,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     // P2-0: the human seam owns steer-or-send, the acquisition (P2-A) and state refusals. The submit-state table above
     // still draws the button; `!` and `#` keep their existing mode gating and dispatch.
     if (s.mode === 'send') return controls !== null && submitHumanSerialized(controls, client, appSessionId, s, retry);
-    const decided = submitState({ status, intent: null, queue, empty: s.empty, mode: s.mode, availability: availabilityIn(useSessions.getState(), appSessionId), heldBy });
+    const decided = submitState({ status, intent: null, queue, empty: s.empty, mode: s.mode, availability: availabilityIn(useSessions.getState(), appSessionId), heldBy, driven });
     if (!decided.enabled) return false;
     // P2-A: `!` and `#` on a record with no ready process acquire it first; a card they meet docks without their text,
     // which stays in the draft (never sent to the model as a prompt by the card's continuation)
@@ -322,6 +328,12 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // is just a stop. Unlike ⌘. it holds nothing back. An uncertain head waits for the human's own decision. Not busy,
   // Esc is not the composer's (W3: but two of them on an empty editor open the rewind picker, below).
   const escapeTurn = (): boolean => {
+    // P5 O9 M5: the bridge holds no MAWS queue, so Esc on a running lane A turn just interrupts
+    if (driven) {
+      if (!driven.running) return false;
+      interrupt();
+      return true;
+    }
     const current = useSessions.getState().engine.get(appSessionId) ?? null;
     if (current?.process !== 'ready' || !isBusy(current, queue.entries)) return false;
     const head = queue.entries.find((e) => e.state === 'queued' && !e.uncertain);
@@ -357,7 +369,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // The editor is read-only while C10 holds the first send (starting, or its message retained behind a card).
   const editorDisabled = setup && (starting || messageHeld) ? decision.reason : null;
   // R2: the prompt requests' view of the composer, and a suggestion gone once a turn runs or the box holds text
-  const working = isBusy(status, queue.entries);
+  const working = driven ? driven.running : isBusy(status, queue.entries); // P5 O9 M5: a driven session's turn is its holder's
   useLayoutEffect(() => {
     promptState.current = { docked, readOnly: editorDisabled !== null || setup !== null, busy: working, disabled: editorDisabled !== null };
   });
@@ -388,6 +400,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         </p>
       )}
       {!unstarted && <QueueList appSessionId={appSessionId} queue={queue} busy={isBusy(status, queue.entries)} sessionId={sessionId} cwd={cwd} client={client} />}
+      {/* P5 O9 M5: lane A's sends whose fate was not known when the bridge answered, each with its text */}
+      {!unstarted && <PendingSends appSessionId={appSessionId} client={client} />}
       {rewoundEdit && <ResubmitLine resubmit={resubmit} onSend={() => void sendInlineEdit(client, appSessionId)} onLeave={() => cancelInlineEdit(appSessionId)} />}
       {swap.notice && <RequestCard key={swap.notice.id} item={swap.notice} request={null} placement="docked" paneIndex={paneIndex} />}
       {/* R2: a plugin's band above the frame, only while a plugin draws one */}

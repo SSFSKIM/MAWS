@@ -82,6 +82,13 @@ export const RELAY_COPY = {
   failed: (message: string) => `Relay failed: ${message}`,
   dropped: (state: 'cancelled' | 'discarded' | 'refused') => `the engine ${state} it before starting it`, // the failed state's message (O1)
   notSent: 'the session ended that turn without sending it', // E7: a peer relay whose steer's own turn ended with no matching SendMessage
+  // P5 O9 M5: a terminal session driven through its bridge tells the agent directly (the bridge's `tell`)
+  driven: {
+    label: (title: string) => `Message ${title}`,
+    told: (title: string) => `Sent to ${title}`,
+    unknown: 'Sent; the terminal did not confirm it arrived',
+    failed: (message: string) => `Not sent: ${message}`,
+  },
 } as const;
 
 export const BACKGROUND_COPY = {

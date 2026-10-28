@@ -13,6 +13,7 @@ import { ipc } from '../ipc/client';
 import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { openDialog } from '../sessions/dialogs';
 import { orgKeyOf, sessionsOfRow } from '../stores/org-projects';
+import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
 import { useSessions } from '../stores/sessions';
 import { PROJECT_ACTION_IDS, PROJECT_ACTIONS, runProjectAction, useProjectActionEnabled, type ProjectActionId } from './project-actions';
 import { openResumeChooser } from '../resume/host'; // P2-D
@@ -59,8 +60,9 @@ export function SidebarMenuContent({ target }: { target: MenuTarget | null }) {
 
 function SessionItems({ appSessionId, dropdown = false }: { appSessionId: AppSessionId; dropdown?: boolean }) {
   const record = useSessions((s) => s.records.get(appSessionId));
+  const bridged = useLaneAState(appSessionId)?.bridge === 'live'; // P5 O9 M5
   if (!record) return null;
-  return sessionActionsFor(record).map((id) => <SessionItem key={id} id={id} record={record} dropdown={dropdown} />);
+  return sessionActionsFor(record, { bridged }).map((id) => <SessionItem key={id} id={id} record={record} dropdown={dropdown} />);
 }
 
 function SessionItem({ id, record, dropdown }: { id: SessionActionId; record: SessionRecord; dropdown?: boolean }) {

@@ -10,7 +10,9 @@ import { contextTotal } from '@shared/wire/control';
 import { PAUSED_COPY } from '../composer/queue/QueueList';
 import { useSessionQueue } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
-import { compactSession } from '../session/controls/controls-for'; // P5 O9 M4
+import { compactSession, useSessionControls } from '../session/controls/controls-for'; // P5 O9 M4
+import { contextOfUsage, useLaneAUsage } from '../stores/lane-a'; // P5 O9 M5
+import { FRESHNESS } from '../sessions/observed'; // P5 O9 M5
 import { present as presentContext } from './ContextWidget';
 import { COMPACT, CONTEXT, FRAME, WIDGET_TITLE } from './copy';
 import { num } from './parts';
@@ -18,7 +20,12 @@ import { isDormant, MOVES_READS, useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
 
 export function CompactWidget({ appSessionId, args, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
-  const read = useEngineRead('session.getContextUsage', { appSessionId, detail: 'summary' });
+  // P5 O9 M5: a terminal session driven through its bridge compacts through its port: its context is the bridge's latest
+  // usage, and its compact control's reason is what blocks it (the bridge keeps no MAWS queue)
+  const controls = useSessionControls(appSessionId);
+  const driven = controls !== null && controls.turn() !== null ? controls.capability('compact') : null;
+  const drivenContext = contextOfUsage(useLaneAUsage(appSessionId));
+  const read = useEngineRead('session.getContextUsage', { appSessionId, detail: 'summary' }, { enabled: driven === null });
   const status = useSessions((s) => s.engine.get(appSessionId) ?? null);
   // C3's sample (the status line's `ctx`) first; the read's own figures, corrected as C3 corrects them, before one arrives
   const sampled = useSessions((s) => s.digests.get(appSessionId)?.context ?? null);
@@ -32,7 +39,7 @@ export function CompactWidget({ appSessionId, args, close }: { appSessionId: App
   const holding = unanswered !== null && unanswered === moved;
 
   const waiting = status?.queue.length ?? 0;
-  const blocked = status?.turn ? COMPACT.waitTurn : waiting > 0 ? (status?.queue.paused ? PAUSED_COPY[queue.pauseReason ?? 'none'] : COMPACT.queuedFirst) : null;
+  const blocked = driven ? (driven.available ? null : driven.reason) : status?.turn ? COMPACT.waitTurn : waiting > 0 ? (status?.queue.paused ? PAUSED_COPY[queue.pauseReason ?? 'none'] : COMPACT.queuedFirst) : null;
   const send = async () => {
     setSending(true);
     setRefused(null);
@@ -48,10 +55,14 @@ export function CompactWidget({ appSessionId, args, close }: { appSessionId: App
   };
 
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.compact} command="compact" state={isDormant(read.state) ? read.state : 'ready'} error={isDormant(read.state) ? read.error : null} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.compact} command="compact" state={driven === null && isDormant(read.state) ? read.state : 'ready'} error={driven === null && isDormant(read.state) ? read.error : null} close={close}>
       <div className="flex flex-col gap-2">
         <p className="m-0 text-fg-muted">
-          {sampled
+          {driven
+            ? drivenContext
+              ? `${Math.round(drivenContext.percent)}% of ${num(drivenContext.maxTokens)}`
+              : FRESHNESS.notObserved
+            : sampled
             ? CONTEXT.line(num(sampled.totalTokens), num(sampled.maxTokens), Math.round(sampled.percent), sampled.autoCompactThreshold === null ? null : num(sampled.autoCompactThreshold))
             : read.data
               ? presentContext({ ...read.data, ...contextTotal(read.data) }).line

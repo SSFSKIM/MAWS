@@ -146,11 +146,12 @@ export async function startFakeBridge(options: FakeBridgeOptions): Promise<FakeB
       const m = streaming.get(stepKey(e));
       if (m) {
         m.upTo = e.chunkIndex;
-        const chunk = (e.chunk ?? {}) as { index?: number; delta?: { text?: string } };
+        // DX5's chunk: `{kind: 'text' | 'thinking', index, text}` (the bridge's own; `lane-a/stream/dx4-stream.json`)
+        const chunk = (e.chunk ?? {}) as { index?: number; kind?: string; text?: string; delta?: { text?: string } };
         const blocks = m.blocks as { index: number; kind: string; text: string; upTo: number }[];
         let block = blocks.find((b) => b.index === chunk.index);
-        if (!block) blocks.push((block = { index: chunk.index ?? 0, kind: 'text', text: '', upTo: -1 }));
-        block.text += chunk.delta?.text ?? '';
+        if (!block) blocks.push((block = { index: chunk.index ?? 0, kind: chunk.kind === 'thinking' ? 'thinking' : 'text', text: '', upTo: -1 }));
+        block.text += chunk.text ?? chunk.delta?.text ?? '';
         block.upTo = Number(e.chunkIndex);
       }
     } else if (type === 'model') override = e.model === null && e.effort === null ? null : { model: e.model ?? null, effort: e.effort ?? null };

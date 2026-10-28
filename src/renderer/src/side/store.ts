@@ -18,7 +18,8 @@ import { SIDE_ANSWER_CAP, SIDE_QUESTION_CAP } from '@shared/ipc/schema/side';
 import type { SideExchange } from '@shared/side/question';
 import type { SideQuestionResponse } from '@shared/wire/control';
 import { ipc } from '../ipc/client';
-import { askSession } from '../session/controls/controls-for'; // P5 O9 M4
+import { askSession, drivenByBridge } from '../session/controls/controls-for'; // P5 O9 M4
+import { followOp, sideAnswerOf } from '../lane-a/outcomes'; // P5 O9 M5
 
 export type SideView = { kind: 'thread'; childAppSessionId: AppSessionId } | { kind: 'btw' };
 
@@ -99,6 +100,7 @@ const hostListed = (parent: AppSessionId): SideExchange[] => (sidePaneOf(useSide
 
 // Lists the host's log again (on the view's mount, when the process returns to ready, after each receipt).
 export async function refreshSide(parent: AppSessionId, client: MawsBridge = ipc): Promise<void> {
+  if (drivenByBridge(parent)) return show(parent, []); // P5 O9 M5: no host log; this window's locals only
   const serial = (listings.get(parent) ?? 0) + 1;
   listings.set(parent, serial);
   const result = await client.invoke('side.question.list', { appSessionId: parent });
@@ -125,9 +127,30 @@ export async function askSide(parent: AppSessionId, question: string, client: Ma
     show(parent, hostListed(parent));
     return;
   }
+  if (drivenByBridge(parent)) return followBridgeAnswer(parent, local.id, result.value.opId, client); // P5 O9 M5
   keepLocals(parent, (e) => e.id !== local.id);
   await refreshSide(parent, client);
 }
+
+// P5 O9 M5 start: a terminal session driven through its bridge keeps no log of side questions, so its exchange stays
+// this window's local, settled from the watch's `op` messages for its id (the end's text, else its reason) and failed
+// when no end arrives; a Retry asks again as a new op.
+function followBridgeAnswer(parent: AppSessionId, localId: string, opId: string, client: MawsBridge): void {
+  followOp(
+    parent,
+    opId,
+    (body) => {
+      const answer = sideAnswerOf(body);
+      const at = new Date().toISOString();
+      const settle = (e: SideExchange): SideExchange =>
+        'response' in answer ? { ...e, state: 'answered', response: answer.response, error: null, answeredAt: at } : { ...e, state: 'failed', error: answer.error, answeredAt: at };
+      locals.set(parent, localsOf(parent).map((e) => (e.id === localId && e.state === 'pending' ? settle(e) : e)));
+      show(parent, hostListed(parent));
+    },
+    client,
+  );
+}
+// P5 O9 M5 end
 
 // Retry on a failed exchange: the same question asked again, standing in for the failed one. A host entry is named to
 // the host; a local one hands on the host entry it stood in for, if any.
@@ -142,6 +165,7 @@ export function retrySide(parent: AppSessionId, exchange: SideExchange, client: 
 // find them), and so does this window.
 export async function clearSide(parent: AppSessionId, client: MawsBridge = ipc): Promise<void> {
   keepLocals(parent, (e) => e.state === 'pending');
+  if (drivenByBridge(parent)) return show(parent, []); // P5 O9 M5
   const result = await client.invoke('side.question.clear', { appSessionId: parent });
   if (!result.ok) console.warn('[side] side.question.clear failed', result.error.message);
   await refreshSide(parent, client);

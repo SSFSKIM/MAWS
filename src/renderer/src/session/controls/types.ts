@@ -12,6 +12,7 @@ import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schem
 import type { ControlResult } from '@shared/ipc/schema/lane-a';
 import type { FrameBindings } from '../../composer/frame/bindings';
 import type { HumanPromptOptions, HumanPromptResult } from '../../composer/submit/send-human-prompt';
+import type { SessionCatalog } from '../../stores/catalog';
 
 export type { ControlResult };
 
@@ -39,6 +40,14 @@ export interface SessionControls {
   stopAgent(agentId: string): Promise<ControlResult>;
   tell(agentId: string, text: string): Promise<ControlResult>;
   stopTask(taskId: string): Promise<ControlResult>;
+  // P5 O9 M5, the two members lane A needs that lane B never produces. The turn of a session another process runs, as
+  // that process reports it (lane A: the bridge's main loop); null where C3's status is the session's own turn (lane B),
+  // which the composer reads instead.
+  turn(): { running: boolean } | null;
+  // What the `/` palette lists and opens for this session, from what the editor read (the engine's catalogue and every
+  // registered widget): lane B's are those; lane A's are its bridge's catalog, with each command it can't run named and
+  // why, and only the widgets a lane A read or op backs.
+  slash(engine: SessionCatalog, registered: ReadonlySet<string>): { catalog: SessionCatalog; widgets: ReadonlySet<string> };
 }
 
 // Today's `QueueList` and Esc operations, unchanged.

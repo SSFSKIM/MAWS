@@ -36,7 +36,9 @@ export interface HumanPromptOptions {
   requireEmptyMessage?: true;
 }
 export interface HumanPromptResult {
-  disposition: 'sent' | 'steered' | 'queued' | 'held' | 'refused';
+  // P5 O9 M5: 'unconfirmed', lane A's alone: the bridge took the words and had not said whether they entered when it
+  // answered; the port keeps them in the composer's pending-send strip by their key until their fate arrives
+  disposition: 'sent' | 'steered' | 'queued' | 'held' | 'refused' | 'unconfirmed';
   started: boolean; // P2-A: this call acquired the engine first (launched it, or joined a launch in flight)
   messageUuid?: MessageUuid; // sent, steered
   queueId?: string; // queued (the host's queue, paused or non-empty)

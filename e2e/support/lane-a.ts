@@ -1,0 +1,71 @@
+// A terminal session MAWS can drive, for `e2e:lane-a` (P5 O9 M5, docs/doperpowers/plans/2026-10-28-p5-o9-lane-a.md,
+// "The fake bridge in e2e"): no `claude` runs. The session's transcript is seeded in the launch's engine store, a live
+// terminal holds it (a registry record naming this test runner's pid, its `procStart` as the engine renders it, as
+// sessions.spec.ts's foreign-live scene writes one), and the fake bridge (test/support/fake-bridge.ts) serves its
+// socket under the launch's scratch sminos home, with a catalog as the bridge pushes one.
+import { execFileSync } from 'node:child_process';
+import { startFakeBridge, type FakeBridge, type FakeBridgeOptions } from '../../test/support/fake-bridge';
+import type { StoreFixture } from '../../test/support/store-fixture';
+
+const run = { class: 'run', enabled: true, measured: '2.1.300' } as const;
+
+// The bridge's catalog: a command that runs with its argument, a panel, one the terminal alone runs, `/mcp` whose
+// argument form runs, and the model widgets' routes; three models with their aliases.
+export const CATALOG = {
+  fingerprint: 'fp-e2e-1',
+  commands: [
+    { name: 'rename', description: 'Rename the session', source: 'builtin', route: { ...run, forms: { args: 'required', hint: '<name>' } } },
+    { name: 'config', description: 'Open config', source: 'builtin', route: { class: 'panel', enabled: true, measured: '2.1.300' } },
+    { name: 'doctor', description: 'Diagnose the install', source: 'builtin', route: { class: 'local', enabled: false, reason: 'runs only in the terminal', measured: '2.1.300' } },
+    { name: 'mcp', description: 'Manage MCP servers', source: 'builtin', route: { class: 'panel', enabled: true, measured: '2.1.300' }, withArgs: { ...run, forms: { args: 'required', pattern: '(enable|disable|reconnect) .+' } } },
+    { name: 'model', description: 'Set the model', source: 'builtin', route: { class: 'routed', to: 'model', enabled: true, measured: '2.1.300' } },
+    { name: 'compact', description: 'Compact the conversation', source: 'builtin', route: { class: 'routed', to: 'compact', enabled: true, measured: '2.1.300' } },
+  ],
+  models: { options: ['opus', 'sonnet', 'haiku'], aliases: { opus: 'claude-opus-4-5', sonnet: 'claude-sonnet-4-5', haiku: 'claude-haiku-4-5', default: null } },
+  measured: '2.1.300',
+  skills: [],
+};
+
+export interface TerminalSession {
+  bridge: FakeBridge;
+  pid: number;
+  close(): Promise<void>; // the bridge's socket goes and the terminal's record with it
+}
+
+// The test runner's process as the engine's registry names a live process: its pid and its start time.
+function liveProcess(): { pid: number; procStart: string } {
+  const pid = process.pid;
+  const procStart = execFileSync('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], { env: { LC_ALL: 'C', TZ: 'UTC' }, encoding: 'utf8' }).trim();
+  return { pid, procStart };
+}
+
+// A terminal holding `sessionId` (its transcript already in `store`), its bridge serving under `sminosHome`.
+export async function terminalSession(opts: { store: StoreFixture; sminosHome: string; sessionId: string; cwd: string; bridge?: Partial<FakeBridgeOptions>; bridged?: boolean }): Promise<TerminalSession> {
+  const { pid, procStart } = liveProcess();
+  const bridge = opts.bridged === false ? null : await startFakeBridge({ home: opts.sminosHome, session: opts.sessionId, pid, sessionInfo: { session: opts.sessionId, cwd: opts.cwd, model: 'claude-opus-4-5', version: '2.1.300' }, ...opts.bridge });
+  bridge?.emit({ type: 'catalog', ...CATALOG });
+  await opts.store.addRegistryRecord(pid, { pid, sessionId: opts.sessionId, cwd: opts.cwd, kind: 'interactive', procStart, status: 'idle' });
+  return {
+    get bridge() {
+      if (!bridge) throw new Error('this terminal session has no bridge');
+      return bridge;
+    },
+    pid,
+    async close() {
+      await bridge?.close();
+      await opts.store.removeRegistryRecord(pid);
+    },
+  };
+}
+
+// A model reply's rows as the engine writes them: a user prompt, and an assistant text answering it.
+export function userRecord(sessionId: string, cwd: string, uuid: string, parentUuid: string | null, text: string, at: string): Record<string, unknown> {
+  return { type: 'user', uuid, parentUuid, cwd, sessionId, timestamp: at, isSidechain: false, userType: 'external', version: '2.1.300', message: { role: 'user', content: text } };
+}
+
+export function assistantRecord(sessionId: string, cwd: string, uuid: string, parentUuid: string, text: string, at: string): Record<string, unknown> {
+  return {
+    type: 'assistant', uuid, parentUuid, cwd, sessionId, timestamp: at, isSidechain: false, userType: 'external', version: '2.1.300',
+    message: { id: `msg_${uuid.slice(0, 8)}`, type: 'message', role: 'assistant', model: 'claude-opus-4-5', content: [{ type: 'text', text }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 20 } },
+  };
+}

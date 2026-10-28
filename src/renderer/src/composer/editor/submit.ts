@@ -81,7 +81,9 @@ export function appendHistory(client: MawsBridge, appSessionId: AppSessionId, s:
 // text in the draft quietly, the card being on screen; a session with no record refuses quietly, as before.
 // P2-F (L116): the size bound is checked by the seam once it has decided the prompt may go, so a session it refuses by
 // state keeps an oversized draft as quietly as any other.
-// P5 O9 M4: the prompt goes through the session's controls port (lane B: the seam above).
+// P5 O9 M4: the prompt goes through the session's controls port (lane B: the seam above). P5 O9 M5: lane A's
+// `unconfirmed` (the bridge took the words and had not said whether they entered) is accepted: the draft clears, and the
+// port has handed the words to the pending-send strip, which keeps them by their key until their fate arrives.
 export async function submitHumanSerialized(controls: SessionControls, client: MawsBridge, appSessionId: AppSessionId, s: Serialized, retry?: () => void): Promise<boolean> {
   if (s.empty) return false;
   let tooLarge = false;

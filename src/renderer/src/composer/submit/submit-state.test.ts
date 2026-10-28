@@ -171,3 +171,32 @@ describe('a session with a record and no ready process: its availability decides
   });
 });
 // P2-A end
+
+// P5 O9 M5: a session another process holds and a port drives (lane A): its turn is the holder's, Send goes in either
+// turn state (the bridge reads a message sent while a turn runs at its next model request), Stop interrupts.
+describe('a session driven through its holder (lane A)', () => {
+  const open = { available: true } as const;
+  const shut = (reason: string) => ({ available: false, reason }) as const;
+  const driven = (running: boolean, over: Partial<NonNullable<SubmitInput['driven']>> = {}) => ({ running, send: open, stop: running ? open : shut('Nothing is running'), ...over });
+  const decided = (over: Partial<SubmitInput>) => {
+    const d = submitState(input({ status: null, availability: 'foreign_held', heldBy: 'terminal · 42', ...over }));
+    return [d.primary, d.label, d.enabled, d.reason, d.detail, d.steer];
+  };
+
+  it('sends while idle, and while a turn runs says the words are read at its next step, never as a steer', () => {
+    expect(decided({ driven: driven(false) })).toEqual(['send', 'Send', true, null, null, false]);
+    expect(decided({ driven: driven(false), empty: true })).toEqual(['send', 'Send', false, null, null, false]);
+    expect(decided({ driven: driven(true) })).toEqual(['send', 'Send', true, null, 'Sends at the next step', false]);
+  });
+
+  it('is Stop on an empty box while a turn runs, when the bridge interrupts', () => {
+    expect(decided({ driven: driven(true), empty: true })).toEqual(['stop', 'Stop', true, null, null, false]);
+    expect(decided({ driven: driven(true, { stop: shut('Not in this session’s sminos') }), empty: true })).toEqual(['send', 'Send', false, null, null, false]);
+  });
+
+  it('says why Send is closed, and that `!` and `#` run in the terminal', () => {
+    expect(decided({ driven: driven(false, { send: shut('Not in this session’s sminos (1.10.0)') }) })).toEqual(['send', 'Send', false, 'Not in this session’s sminos (1.10.0)', null, false]);
+    expect(decided({ driven: driven(false), mode: 'bash' })).toEqual(['send', 'Run', false, 'A terminal session runs `!` and `#` in its terminal', null, false]);
+    expect(decided({ driven: driven(false), mode: 'memory' })[2]).toBe(false);
+  });
+});

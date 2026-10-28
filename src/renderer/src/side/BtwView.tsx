@@ -17,7 +17,7 @@ import { FIELD, PRIMARY, QUIET, SECONDARY } from '../sessions/ui';
 import { useSessions } from '../stores/sessions';
 import { Markdown } from '../transcript'; // lazy.tsx's: the side pane registers from the entry, and a static import would pull Markdown into it
 import { promoteSide } from './actions';
-import { sideBlock, startForSide } from './btw';
+import { sideBlock, startForSide, useDrivenAsk } from './btw';
 import { STARTING_SESSION } from '../sessions/acquire'; // P2-A
 import { SIDE_COPY } from './copy';
 import { askSide, clearSide, promotable, refreshSide, retrySide, sidePaneOf, useSidePane } from './store';
@@ -28,14 +28,15 @@ const SHOWN = 50; // the most recent exchanges kept on screen
 export function BtwView({ parent }: { parent: AppSessionId }) {
   const process = useSessions((s) => s.engine.get(parent)?.process ?? null);
   const exchanges = useSidePane((s) => sidePaneOf(s, parent).exchanges);
-  const ready = process === 'ready';
+  const driven = useDrivenAsk(parent); // P5 O9 M5
+  const ready = process === 'ready' || driven?.available === true;
   const holder = useSessions((s) => s.records.get(parent)?.holder ?? null);
   const availability = useAvailability(parent);
   const [question, setQuestion] = useState('');
   const [promoting, setPromoting] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [starting, setStarting] = useState(false); // P2-A: this view's own start in flight
-  const blocked = ready ? null : sideBlock(availability, holder);
+  const blocked = ready ? null : driven?.available === false ? driven.reason : sideBlock(availability, holder);
   const canAsk = blocked === null && !starting;
   const log = useRef<HTMLDivElement>(null);
 

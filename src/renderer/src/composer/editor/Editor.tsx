@@ -9,12 +9,15 @@
 // attachment strip and the submit control are the Composer's (M4), which drives the editor through its handle.
 import type { EditorView } from '@tiptap/pm/view';
 import { EditorContent, useEditor } from '@tiptap/react';
-import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from 'react';
+import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../../ipc/client';
 import { useKeyChord } from '../../keymap/useKeyChord';
 import { useSessionCatalog } from '../../stores/catalog';
+import { sessionControls } from '../../session/controls/controls-for'; // P5 O9 M5
+import { useLaneA } from '../../stores/lane-a'; // P5 O9 M5
+import { useSessions } from '../../stores/sessions'; // P5 O9 M5
 import { useComposerStore, type Prefill } from '../../stores/composer';
 import { useTranscriptStore } from '../../transcript';
 import { useRegisteredWidgets } from '../mentions/widgets';
@@ -59,8 +62,18 @@ const PLACEHOLDER = [
 export function Editor(props: EditorProps) {
   const { appSessionId, cwd, sessionId, disabled = null, client = ipc } = props;
   const rootRef = useRef<HTMLDivElement>(null);
-  const catalog = useSessionCatalog(appSessionId, client);
-  const widgets = useRegisteredWidgets();
+  const engineCatalog = useSessionCatalog(appSessionId, client);
+  const registered = useRegisteredWidgets();
+  // P5 O9 M5: what the palette lists and opens is the session's port's (lane A: its bridge's catalog, and only the widgets
+  // a lane A read or op backs), worked out again when the session's custody, lane A state or catalog moves
+  const holder = useSessions((s) => s.records.get(appSessionId)?.holder);
+  const laneA = useLaneA((s) => s.states.get(appSessionId));
+  const laneACatalog = useLaneA((s) => s.catalogs.get(appSessionId));
+  const { catalog, widgets } = useMemo(
+    () => sessionControls(appSessionId, client)?.slash(engineCatalog, registered) ?? { catalog: engineCatalog, widgets: registered },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- holder, laneA and laneACatalog are what the port reads
+    [appSessionId, client, engineCatalog, registered, holder, laneA, laneACatalog],
+  );
   const followUp = useTranscriptStore((s) => (s.entries[appSessionId]?.rows ?? []).some((r) => r.kind === 'user'));
   const [mode, setMode] = useState<Serialized['mode']>('send');
   const [commandEmpty, setCommandEmpty] = useState(true);
