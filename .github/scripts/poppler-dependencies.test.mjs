@@ -94,8 +94,8 @@ test('the Poppler flag set equals the specs and imported support collected by ea
   const needing = [];
   const claimed = new Set();
   // Use the planner's script identity, and Playwright's --list for its actual config/env/selection, not a filename
-  // convention. Named live/measured groups count too; default and packaged are never hosted and always keep the full
-  // declaration. The planner refuses e2e:packaged: its separate packaged gate owns that script.
+  // convention. Named live/measured groups count too; default stays self-hosted, and packaged explicitly keeps the
+  // full declaration even on a direct hosted Mac. The planner refuses e2e:packaged: its separate packaged gate owns that script.
   for (const key of Object.keys(scripts).filter((key) => /^e2e:[a-z0-9-]+$/.test(key) && key !== 'e2e:packaged')) {
     const group = key.slice(4);
     const live = (env.LIVE_E2E ?? '').split(/\s+/).includes(group);
