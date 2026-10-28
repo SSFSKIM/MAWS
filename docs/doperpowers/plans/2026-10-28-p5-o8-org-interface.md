@@ -31,7 +31,8 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [ ] The final gate on the PR's tree, and the owner's staging sitting.
 - [ ] M2 — The remote rows — **executable** once M1 and O7 M1 are on master
   - [x] (2026-10-28) Built on `p5-o8-m2`, branched from `p5-o8-m1` (the architect lands them in order): `rows.ts`, `org.rows`, main's wiring, the renderer's listed partition and rows; the unit suites and `test/org/rows.local.test.ts` pass locally.
-  - [ ] reviewer-high, the gates, and the live check at the first cut-over machine.
+  - [x] (2026-10-28) reviewer-high converged: round 1 at 11846ed8a (2 P1, 1 P3, all fixed at f8764a1ca, cf1e4451e and 529ae1522), round 2 on the fixes found nothing.
+  - [ ] The final gate on the PR's tree, and the live check at the first cut-over machine.
 - [ ] M3 — The app as the org's signer: a co-root, the weekly successor, the signing checks — *advisory*
 - [ ] M4 — The Org page — *advisory; taste (Q1)*
 - [ ] M5 — Owners on rows and the per-project toggle — *advisory; taste (Q2, Q3)*
@@ -936,6 +937,10 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
 - **F7.** P5 §8's Org page lists "the recovery key", which is offline and fixed at genesis (RL §5.3). The page can show only its id and the root-transition flow; P5's text should say so.
 - **F8.** No child produces a `SessionRecord` for a session on another machine before O3's per-member read (O7's C5), yet the session pane and O9 M9's `controlsFor(record, …)` take one. O9's remote half (M9) is scheduled before O3. Either O9 M9 and O7 M2 draw remote panes from M2's `ListedSession` and their own subscriptions, or remote panes wait for O3. P5 should name which; O8 recommends the first, since it needs nothing unbuilt.
 - **F9.** The hub refuses a removed member everything, the state that removed them included, so no app can verify its own member's removal from the hub (§I H3).
+
+- Decision: M2's reviewer-high round 1 (on 11846ed8a: 2 P1, 1 P3, each reproduced by the reviewer and fixed test-first) is folded in. (1) A mark's delegation came from the first certificate naming its machine and key, verified or not, so a hub could prepend a copy of a genuine certificate with another delegation, and revoking that delegation dropped the mark and let an older revision return after a relaunch. The delegation now comes only from a certificate `verifyMachineCert` accepts, at the instant the listing verified; two verified ones that disagree record `null`, which keeps the mark until the key itself ends. (2) `retryWaiting` emptied the waiting set before its awaits, so an `org.rows` read during a retry after a new head could say `complete` with nothing `pending` and settle a machine whose restored tab was still being verified; a record now stays waiting until its judgment lands. (3) The sidebar's temporary selection of a listed row was hidden, not cleared, when the shown tab changed, so returning to the tab selected the row again; it is now cleared. Round 2 on the fixes found nothing material.
+  Rationale: (1) and (2) break the mark rule (residue 21) and the coverage rule (residue 22) as written; (3) breaks the selection's stated lifetime. Rejected for (1): asking `verifyListing` for the certificate it used, a change under `apps/org-protocol/src/`, which this child doesn't touch; rejected for (2): a separate in-flight set, when the waiting set already is `pending`'s source.
+  Date/Author: 2026-10-28, O8's executor.
 
 ## Outcomes & Retrospective
 
