@@ -77,9 +77,29 @@ function fake(answers: string[] = [], over: Partial<AdminIo> & { stdin?: string 
   return f;
 }
 
+/**
+ * What a printed key, token or code looks like: a `smns-…` code, a JWK's private `"d"`, or a JWT- or JWK-shaped token,
+ * which is `eyJ` (base64url of `{"`) at a token boundary and then the rest of an encoded JSON object. A bare `eyJ`
+ * would also match inside a hash or an id that is legitimately printed, about once per few thousand characters.
+ */
+const shaped = /smns-(enroll|provision|pair)-v\d\.|(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}|"d"\s*:/;
+
+describe('the shape of a printed secret', () => {
+  const jwt = 'eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln';
+  it('catches a token printed after a space, a quote or `=`', () => {
+    for (const line of [`token ${jwt}`, `"${jwt}"`, `DESK_ACCESS_TOKEN=${jwt}`, jwt, `key: eyJrdHkiOiJFQyJ9`]) expect(line).toMatch(shaped);
+  });
+  it('catches a code and a JWK private part, as before', () => {
+    expect('smns-enroll-v2.abc').toMatch(shaped);
+    expect('{"d": "x"}').toMatch(shaped);
+  });
+  it('does not match `eyJ` inside a longer base64url run, such as a hash or an id', () => {
+    for (const line of ['hash AbC9eyJx_k2', 'id=Zm9vYmFyeyJhbGciOiJFUzI1NiJ9AAAA', 'eyJ', 'eyJ.not-a-token', 'sha256:q-eyJabcdefghijklmnop']) expect(line).not.toMatch(shaped);
+  });
+});
+
 /** No fake's stdout or stderr holds anything shaped like a key, a token or a code, or any secret a case handled. */
 function nothingSecretPrinted(): void {
-  const shaped = /smns-(enroll|provision|pair)-v\d\.|eyJ|"d"\s*:/;
   for (const f of fakes) {
     const printed = [...f.out, ...f.err].join('\n');
     expect(printed).not.toMatch(shaped);
