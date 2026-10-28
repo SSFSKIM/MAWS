@@ -96,12 +96,8 @@ export async function killScratchProcesses(root: string, recorded: Iterable<numb
       continue;
     }
     // Every tracked identity has exited before this snapshot, so children born during the previous kill are visible.
-    // One snapshot captures identity and argv before cwd discovery; C locale keeps lstart parseable and equal to ps().
-    const snapshot = new Map<number, ProcessIdentity & { command: string }>();
-    for (const line of execFileSync('ps', ['-axo', 'pid=,lstart=,command='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } }).split('\n')) {
-      const m = /^\s*(\d+)\s+((?:\S+\s+){4}\S+)\s+(.*)$/.exec(line);
-      if (m && Number(m[1]) !== process.pid) snapshot.set(Number(m[1]), { pid: Number(m[1]), started: m[2]!, command: m[3]! });
-    }
+    // One snapshot captures identity and argv before cwd discovery.
+    const snapshot = processSnapshot();
     const named = [...snapshot.values()].filter((p) => p.command.includes(root));
     const working = new Set(processesWorkingIn(root, snapshot.keys()));
     let signalled = false;
@@ -124,6 +120,17 @@ export async function killScratchProcesses(root: string, recorded: Iterable<numb
 export interface ProcessIdentity {
   pid: number;
   started: string; // `ps -o lstart=`
+}
+
+// Every process but this one, by pid, with its identity and command line, from one `ps` reading; C locale keeps lstart
+// parseable and equal to ps().
+function processSnapshot(): Map<number, ProcessIdentity & { command: string }> {
+  const snapshot = new Map<number, ProcessIdentity & { command: string }>();
+  for (const line of execFileSync('ps', ['-axo', 'pid=,lstart=,command='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } }).split('\n')) {
+    const m = /^\s*(\d+)\s+((?:\S+\s+){4}\S+)\s+(.*)$/.exec(line);
+    if (m && Number(m[1]) !== process.pid) snapshot.set(Number(m[1]), { pid: Number(m[1]), started: m[2]!, command: m[3]! });
+  }
+  return snapshot;
 }
 
 // A shell's name as `ps` reports it (a login shell's carries a leading dash), by its last path component.
@@ -177,22 +184,34 @@ export async function untilExited(processes: readonly ProcessIdentity[], timeout
 export async function endProfileProcesses(userData: string, opts: { timeoutMs?: number; kill?: (pid: number) => void } = {}): Promise<void> {
   if (!existsSync(userData)) return;
   try {
-    await killScratchProcesses(join(userData, sep), [], opts); // the separator: never a profile whose path this one prefixes
+    for (const root of profileRoots(userData)) await killScratchProcesses(root, [], opts);
   } finally {
     for (const dir of socketFallbacks(userData)) rmSync(dir, { recursive: true, force: true });
   }
 }
 
 // The same end, synchronous and best effort, for a process about to exit (a worker whose test never reached its
-// launch's cleanup): every process naming a path under the profile is sent SIGKILL, and nothing is awaited.
+// launch's cleanup): every process naming a path under the profile is sent SIGKILL, and nothing is awaited. A pid whose
+// start time has changed since the listing is another process now, and is left alone.
 export function killProfileProcessesNow(userData: string): void {
-  for (const { pid } of processesNaming(join(userData, sep))) {
+  const roots = profileRoots(userData);
+  for (const p of processSnapshot().values()) {
+    if (!roots.some((root) => p.command.includes(root)) || ps(p.pid, 'lstart') !== p.started) continue;
     try {
-      process.kill(pid, 'SIGKILL');
+      process.kill(p.pid, 'SIGKILL');
     } catch {
       // gone meanwhile
     }
   }
+}
+
+// P5 O3-B: the text a process names the profile by, in each spelling main may have been given: as given and resolved
+// (macOS's /var and /tmp are /private/var and /private/tmp). The /private one is reduced to the shorter, which it
+// contains, so that one matches both. Each ends in the separator: never a profile whose path this one prefixes.
+function profileRoots(userData: string): string[] {
+  const spellings = existsSync(userData) ? [userData, realpathSync(userData)] : [userData];
+  const unaliased = (path: string) => (process.platform === 'darwin' ? path.replace(/^\/private(?=\/(?:var|tmp)\/)/, '') : path);
+  return [...new Set(spellings.map((path) => unaliased(join(path, sep))))];
 }
 
 function socketFallbacks(userData: string): string[] {

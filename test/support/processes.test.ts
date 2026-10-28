@@ -192,6 +192,51 @@ describe('endProfileProcesses', () => {
     expect(isAlive(other.pid!)).toBe(true);
   });
 
+  // A daemon names the profile in the spelling main was given; a reused profile may be cleaned through another. On macOS
+  // tmpdir() is under /var, a symlink to /private/var; on Linux the two spellings are one.
+  const spellings = { given: (path: string) => path, resolved: (path: string) => realpathSync(path) };
+  for (const end of [endProfileProcesses, killProfileProcessesNow]) {
+    for (const [started, cleaned] of [['given', 'resolved'], ['resolved', 'given']] as const) {
+      it(`${end.name}: ends a process naming the profile's ${started} path when cleaned through its ${cleaned} path, and none of a profile it prefixes`, async () => {
+        const root = mkdtempSync(join(tmpdir(), 'maws-profile-'));
+        roots.push(root);
+        const [profile, longer] = [join(root, 'ud'), join(root, 'ud2')];
+        for (const dir of [profile, longer]) mkdirSync(join(dir, 'mawsd'), { recursive: true });
+        const mawsd = await namedChild(join(spellings[started](profile), 'mawsd'));
+        const other = await namedChild(join(spellings[started](longer), 'mawsd'));
+        await end(spellings[cleaned](profile));
+        await expect.poll(() => mawsd.signalCode, { timeout: 1_000 }).toBe('SIGKILL');
+        expect(isAlive(other.pid!), 'the other profile’s process runs').toBe(true);
+      });
+    }
+  }
+
+  it('at a worker’s exit, does not signal a pid whose start identity changed after its snapshot (a reused pid)', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'maws-profile-'));
+    roots.push(root);
+    const child = await namedChild(join(root, 'ud', 'mawsd'));
+    // Real PID reuse cannot be forced safely: the snapshot sees the child naming the profile, and the reading just
+    // before the signal sees another process under its pid.
+    let revalidated = false;
+    const nativeExec = vi.mocked(execFileSync).getMockImplementation()!;
+    vi.mocked(execFileSync).mockImplementation((...args) => {
+      if (args[0] === 'ps' && args[1]?.includes('lstart=') && args[1].includes(String(child.pid))) {
+        revalidated = true;
+        return 'Thu Jan  1 00:00:00 1970';
+      }
+      return nativeExec(...args);
+    });
+    const kill = vi.spyOn(process, 'kill');
+    try {
+      killProfileProcessesNow(join(root, 'ud'));
+      expect(kill).not.toHaveBeenCalledWith(child.pid, 'SIGKILL');
+      expect(revalidated, 'the snapshot listed the child').toBe(true);
+    } finally {
+      kill.mockRestore();
+    }
+    expect(isAlive(child.pid!)).toBe(true);
+  });
+
   it('removes the daemon shape’s socket directory outside a profile too long for sun_path, and answers at once for a profile already gone', async () => {
     const root = mkdtempSync(join(tmpdir(), 'maws-profile-'));
     roots.push(root);
