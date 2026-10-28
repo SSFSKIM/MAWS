@@ -36,8 +36,15 @@ function candidate(name, tree) {
 
 function prepare() {
   const { scripts } = JSON.parse(readFileSync('package.json', 'utf8'));
-  const variant = /^scripts\/e2e-build\.sh (plain|harness) && /.exec((scripts[env.SCRIPT] ?? '').trim())?.[1];
-  if (!variant) throw new Error(`cannot derive build variant from package script ${env.SCRIPT}`);
+  if (!(env.SCRIPT in scripts)) throw new Error(`no package script ${env.SCRIPT}`);
+  const variant = /^scripts\/e2e-build\.sh (plain|harness) && /.exec(scripts[env.SCRIPT].trim())?.[1];
+  // A group that builds another way (desk-web-hub builds in apps/desk-web) has no out/ to reuse: its script builds
+  // what it needs, and the workflow skips the build step on an empty variant.
+  if (!variant) {
+    say(`${env.SCRIPT} builds no e2e-build variant; no out/ to reuse`);
+    write(env.GITHUB_OUTPUT, { variant: '', 'artifact-id': '', 'run-id': '' });
+    return;
+  }
   const tree = git('rev-parse', 'HEAD^{tree}');
   const cache = join(env.RUNNER_TEMP, 'maws-e2e-build');
   const staging = mkdtempSync(join(env.RUNNER_TEMP, 'maws-e2e-download-'));
