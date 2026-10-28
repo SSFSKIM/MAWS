@@ -31,7 +31,7 @@
 // throughout (`run`), `enroll` only around its reads and its signing, never across its wait; so this device never signs
 // two successors of one parent. `genesis` keeps its own `<keys>.genesis.json`: version 1 has no parent, and no anchor
 // exists until the hub holds it. A throwaway org is not an option.
-import { closeSync, existsSync, fsyncSync, openSync, readSync, renameSync, rmSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, openSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -114,6 +114,7 @@ import { Person } from './hub';
 import { certificateViews, machineRows, resolveMachine, table } from './admin-machines';
 import { deviceEntry, purgeOrgKeys, restoreLegacyKey, retireLegacyKey, successor } from './org-admin';
 import { withRunLock } from './run-lock';
+import { openTerminal, type Terminal } from './terminal';
 
 export const SUBCOMMANDS = ['init', 'genesis', 'adopt', 'refresh', 'pair', 'devices', 'remove-device', 'show', 'enroll', 'delegation', 'machine', 'code', 'provisioning', 'keys', 'abandon-pending'] as const;
 /** The subcommands that name a verb of their own after them (`delegation create`). */
@@ -136,8 +137,7 @@ export const ENROLL_WAIT_S = 1800;
 const DAY_MS = 86_400_000;
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
 
-/** Where confirmations, the pairing code and a paper key go: /dev/tty against a deployment. */
-export type Terminal = { write(text: string): void; readLine(): Promise<string> };
+export type { Terminal };
 
 /** What the command reaches beyond the hub, each a suite's to replace. */
 export type AdminIo = {
@@ -1449,30 +1449,6 @@ function usage(io: AdminIo): number {
 }
 
 // ---- The machine's own io ---------------------------------------------------------------------------------------------
-
-/** A line read from `fd`, byte by byte, so nothing after it is consumed. */
-function readLineFrom(fd: number): string {
-  const bytes: number[] = [];
-  const one = Buffer.alloc(1);
-  for (;;) {
-    let n: number;
-    try {
-      n = readSync(fd, one, 0, 1, null);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EAGAIN') continue;
-      throw error;
-    }
-    if (n === 0 || one[0] === 0x0a) return Buffer.from(bytes).toString('utf8');
-    bytes.push(one[0]);
-  }
-}
-
-function openTerminal(deployment: boolean): Terminal {
-  if (!deployment) return { write: (text) => void process.stdout.write(text), readLine: async () => readLineFrom(0) };
-  const fd = openSync('/dev/tty', 'r+');
-  process.once('exit', () => closeSync(fd));
-  return { write: (text) => void writeSync(fd, text), readLine: async () => readLineFrom(fd) };
-}
 
 function exec(command: string, args: string[], input?: string): Promise<void> {
   return new Promise((resolve, reject) => {
