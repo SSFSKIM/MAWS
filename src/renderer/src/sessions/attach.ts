@@ -29,6 +29,7 @@ import { openTerminal } from '../tools/terminal';
 import { toastHeld } from './holder-words';
 import { startNoticeId } from './store'; // P2-A
 import { machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 
 export const ATTACH_TABS_KEY = 'sessions.attachTabs';
 
@@ -160,9 +161,10 @@ async function jobOf(record: SessionRecord, known: KnownJob | null): Promise<{ j
   return { error: 'No background job holds this session now; nothing to attach to' };
 }
 
-async function commandFor(jobId: string, known: KnownJob | null): Promise<string | { error: string }> {
+// The attach runs in a terminal on the session's machine, so it names that machine's binary (P5 O6).
+async function commandFor(jobId: string, known: KnownJob | null, machine: MachineRef): Promise<string | { error: string }> {
   if (known?.jobId === jobId) return known.command;
-  const binary = await ipc.invoke('engine.binaryInfo', undefined);
+  const binary = await ipc.invoke('engine.binaryInfo', undefined, { machine });
   return binary.ok ? attachCommand(binary.value.path, jobId) : { error: binary.error.message };
 }
 
@@ -194,7 +196,7 @@ async function attach(appSessionId: AppSessionId, known: KnownJob | null): Promi
   if (existing !== undefined && state.kind === 'running') {
     const rerun = await atPrompt(state.terminalId);
     if (rerun) {
-      const command = await commandFor(job.jobId, known);
+      const command = await commandFor(job.jobId, known, machineOf(appSessionId));
       if (typeof command !== 'string') return { ok: false, error: command.error };
       const failed = await typeCommand(state.terminalId, command);
       if (failed !== null) return { ok: false, error: failed };
@@ -202,7 +204,7 @@ async function attach(appSessionId: AppSessionId, known: KnownJob | null): Promi
     showTab(appSessionId, existing);
     return { ok: true, tabId: existing, how: rerun ? 'rerun' : 'shown' };
   }
-  const command = await commandFor(job.jobId, known);
+  const command = await commandFor(job.jobId, known, machineOf(appSessionId));
   if (typeof command !== 'string') return { ok: false, error: command.error };
   showPanel();
   const tabId = openTerminal({ appSessionId, cwd: job.cwd, command });

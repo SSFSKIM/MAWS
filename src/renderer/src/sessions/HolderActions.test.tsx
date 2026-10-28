@@ -10,7 +10,8 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { HostState, PreloadBridge } from '@shared/ipc/schema';
 import { record } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { at } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE } from '../../../../test/support/machine';
+import { addressOf } from '@shared/machine/address';
 import { ipc } from '../ipc/client';
 import { runSessionAction, sessionActionsFor } from '../app/session-actions';
 import { instanceOf, panelHost, registerPanelTool, resetPanelHost } from '../panel/host';
@@ -150,6 +151,21 @@ describe('held outcomes and the attach command', () => {
     const tabs = useLayout.getState().panelTabsOf(A);
     expect(tabs.map((t) => [t.id, t.toolId])).toEqual([[init!.label, 'terminal']]); // the pty's label is the tab id
     expect(useLayout.getState().panelBySession.get(A)?.activeTabId).toBe(init!.label);
+  });
+
+  // The branch review: Attach runs on the session's machine, so the binary it types, and the installed version the notice
+  // compares, are that machine's.
+  it('attaches to a job on another machine with that machine’s binary, and compares that machine’s installed version', async () => {
+    const onB = addressOf(OTHER_MACHINE, BARE_A);
+    const r = record(onB, { engineSessionId: ENGINE, directory: '/work/repo', holder: JOB, engineVersion: '2.1.283' });
+    useSessions.setState({ records: new Map([[onB, r]]) });
+    render(<HolderNotice appSessionId={onB} holder={JOB} />);
+    await userEvent.click(attachButton());
+    await waitFor(() => expect(opened()).toHaveLength(1));
+    expect(opened()[0]).toMatchObject({ appSessionId: onB, command: COMMAND });
+    expect(fake.machines('fs.holders')).toEqual([OTHER_MACHINE]);
+    expect(fake.machines('engine.binaryInfo').length).toBeGreaterThan(0);
+    expect(new Set(fake.machines('engine.binaryInfo')), 'every binary read is B’s').toEqual(new Set([OTHER_MACHINE]));
   });
 
   it('starts in the session directory when the registry does not name the job’s cwd', async () => {
