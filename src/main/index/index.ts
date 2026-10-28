@@ -23,6 +23,10 @@ import { OwnerChannelStore } from '../owner/store'; // P2-C (2026-10-09)
 import { LibraryStore } from '../library/store'; // P3-L
 
 const ORG_CONCURRENCY = 4; // the derivations in flight at once, as `warmLinkedWorktrees` keeps its calls
+// A derivation git gave no answer to (its timeout, typically while the machine starts its hosts) is asked again after
+// each of these delays, then left for the next start (P5 O6 M6: on a hosted Mac two apps starting at once left a
+// project underived, so ungrouped, for the whole run).
+const ORG_RETRY_MS = [1_000, 4_000, 15_000] as const;
 
 export class Index {
   readonly sessions: SessionStore;
@@ -90,17 +94,24 @@ export class Index {
   // P5 O6 M5 (docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "Persisting and refreshing"): every project's
   // org project, derived again off main's thread at each start, ORG_CONCURRENCY at a time, each change written to its
   // row and told as a project change; from then on a project made is derived once it is committed. A `.smns` added or a
-  // remote changed mid-run shows at the next start. A derivation that got no answer leaves the row as it was.
+  // remote changed mid-run shows at the next start. A derivation that got no answer leaves the row as it was, and is
+  // asked again after each of ORG_RETRY_MS.
   async refreshOrgProjects({ machine, enrollment = machineEnrollment, derive = deriveOrg }: {
     machine: MachineRef;
     enrollment?: () => Enrollment | null;
     derive?: typeof deriveOrg;
   }): Promise<void> {
     if (this.db.readOnly) return;
-    const one = async (row: OrgRow) => {
+    const one = async (row: OrgRow, attempt = 0): Promise<void> => {
       try {
         const org = await derive({ directory: row.directory, machine, projectId: row.id, name: row.name }, enrollment());
-        if (org !== null && !this.closed) this.projects.setOrg(row.id, org);
+        if (this.closed) return;
+        if (org !== null) this.projects.setOrg(row.id, org);
+        else if (attempt < ORG_RETRY_MS.length) {
+          const delay = ORG_RETRY_MS[attempt]!;
+          console.warn(`[index] git gave no answer for the org project of ${row.directory}; asking again in ${delay} ms`);
+          setTimeout(() => void one(row, attempt + 1), delay).unref();
+        }
       } catch (error) {
         if (!this.closed) console.error(`[index] the org project of ${row.directory} failed:`, error instanceof Error ? error.message : error);
       }

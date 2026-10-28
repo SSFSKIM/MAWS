@@ -5,12 +5,13 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MachineRef } from '@shared/machine/ref';
 import { runGit } from '../../../test/support/git-fixture';
 import { tempDir } from '../../../test/support/index-fixture';
 import { Index } from './index';
 import { deriveOrg, machineProject, machineProjectId, remoteKey, remoteName, repoProjectId, type Enrollment } from './org-project';
+import type { ProjectOrg } from '@shared/ipc/schema/session';
 
 const FIXTURES = join(__dirname, '../../../test/fixtures/sminos');
 const readVectors = <T>(file: string): { namespace: string; vectors: T[] } => JSON.parse(readFileSync(join(FIXTURES, file), 'utf8'));
@@ -184,6 +185,43 @@ describe("the index's org projects", () => {
     await index.refreshOrgProjects({ machine: MACHINE, enrollment: () => ENROLLED });
     expect(columns(added.id)).toMatchObject({ org_key: 'remote:github.com/example/app', org_smns_id: repoProjectId('ssfskim', 'github.com/example/app') });
     expect(changes).toBe(2);
+  });
+
+  // M6 (hosted e2e:machines): git that gives no answer while two apps start (its 2 s timeout) left a project underived
+  // for the whole run. Such a derivation is asked again later in the run, a bounded number of times.
+  it('asks again later in the run when git gave no answer, and stops after its last try', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const path = join(tree.path, 'slow');
+      mkdirSync(path);
+      const added = index.projects.add(path);
+      const org: ProjectOrg = { key: `folder:${MACHINE}:${added.id}` as ProjectOrg['key'], name: 'slow', source: 'folder', smnsId: null };
+      const answers: (ProjectOrg | null)[] = [null, null, org];
+      const derive = vi.fn(async () => answers.shift() ?? null);
+      await index.refreshOrgProjects({ machine: MACHINE, enrollment: () => null, derive });
+      expect(index.projects.list()[0].org).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(derive).toHaveBeenCalledTimes(3);
+      expect(index.projects.list()[0].org).toEqual(org);
+
+      const never = join(tree.path, 'never');
+      mkdirSync(never);
+      const silent = vi.fn(async () => null);
+      const other = new Index(join(dir.path, 'other.sqlite'));
+      try {
+        other.projects.add(never);
+        await other.refreshOrgProjects({ machine: MACHINE, enrollment: () => null, derive: silent });
+        await vi.advanceTimersByTimeAsync(10 * 60_000);
+        expect(silent.mock.calls.length, 'a bounded number of tries').toBeLessThanOrEqual(5);
+        expect(other.projects.list()[0].org).toBeUndefined();
+      } finally {
+        other.close();
+      }
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it('derives a project created after the refresh started, and keeps a folder project’s name with its rename', async () => {
