@@ -230,7 +230,7 @@ describe('sidebar action stability', () => {
 
 describe('sidebar recovery routes', () => {
   it.each(['footer', 'context menu'] as const)('recovers a project-less archive through the %s', async (route) => {
-    const empty = scenarioFile('empty');
+    const empty = { ...scenarioFile('empty'), projects: [project('project-a', 0)] }; // the other archived session's project, listed
     fillStores(route === 'footer' ? empty : { ...empty, sessions: [record('listed-other', { projectId: null })] });
     const archived = record('archived-other', { projectId: null, archived: true, title: { text: 'Recovered notes', source: 'user' } });
     const elsewhere = record('archived-project', { projectId: 'project-a' as ProjectId, archived: true, title: { text: 'Project notes', source: 'user' } });
@@ -1324,6 +1324,28 @@ describe('the sidebar across machines', () => {
     expect(offline.querySelector('[data-session-title]')!.className).toContain('text-fg-faint');
     expect(row('Sidebar pass').dataset.offline).toBeUndefined();
     expect(row('MAWS').dataset.offline).toBeUndefined();
+  });
+
+  it('marks Needs you rows with their machine, greys them in place while it is offline, and names no project by its machine', () => {
+    fill();
+    const waits = [studio('there'), studio('home'), at('home-here')] as AppSessionId[];
+    useAttention.setState({ loaded: true, bySession: new Map(waits.map((id, i) => [id, [item(id, 'permission', `2026-10-27T0${i}:00:00Z`)]])), version: useAttention.getState().version + 1 });
+    render(<Sidebar />);
+    const buttons = () => within(screen.getByRole('list', { name: 'Needs you' })).getAllByRole('button');
+    const chips = () => buttons().map((b) => b.querySelector('[data-machine-chip]')?.textContent ?? null);
+    expect(screen.getByRole('heading', { name: 'Needs you · 3' })).toBeTruthy();
+    expect(buttons().map((b) => b.getAttribute('aria-label'))).toEqual(['maws-b · Studio build · Approval needed', 'Studio · Home errand · Approval needed', 'This Mac · Local errand · Approval needed']);
+    expect(chips()).toEqual(['@Studio', '@Studio', null]);
+    act(() => roster('down'));
+    expect(screen.getByRole('heading', { name: 'Needs you · 3' })).toBeTruthy(); // the count and the order unchanged
+    expect(buttons().map((b) => b.getAttribute('aria-label'))).toEqual([
+      'maws-b · Studio build · Approval needed, machine offline',
+      'Studio · Home errand · Approval needed, machine offline',
+      'This Mac · Local errand · Approval needed',
+    ]);
+    expect(chips()).toEqual(['offline', 'offline', null]);
+    expect(buttons().map((b) => b.dataset.offline ?? null)).toEqual(['true', 'true', null]);
+    expect(within(buttons()[0]).getByText('Studio build').className).toContain('text-fg-faint');
   });
 
   it('shows an org row while one machine’s checkout is listed, without the hidden checkout’s sessions', () => {

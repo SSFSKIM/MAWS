@@ -6,7 +6,9 @@ import type { PreloadBridge } from '@shared/ipc/schema';
 import type { WorktreeStatus } from '@shared/sessions/worktree';
 import { project, record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { addressOf } from '@shared/machine/address';
+import type { OrgKey } from '@shared/machine/org-key';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { REPO, resetSetupStore } from '../test-support/setup-intents';
@@ -345,6 +347,42 @@ describe('dialogs', () => {
     await userEvent.click(within(row).getByRole('button', { name: 'Unarchive' }));
     expect(fake.invoked('session.update')).toEqual([{ appSessionId: BARE_IDLE1, patch: { archived: false } }]);
     expect(fake.invoked('session.list')[0]).toEqual({ includeArchived: true });
+  });
+
+  // P5 O6 M5: a row's archived sessions are the row's, read from each machine its projects are on
+  it('an org project’s archived sessions come from every checkout it groups, each read on its machine', async () => {
+    const org = { key: 'repo:maws' as OrgKey, name: 'MAWS', source: 'remote' as const, smnsId: null };
+    const here = project(at('p1'), 0, { name: 'maws', org });
+    const there = project(addressOf(OTHER_MACHINE, 'p2'), 1, { name: 'maws-b', org: { ...org, name: 'maws-b' } });
+    const lists: Record<string, unknown[]> = {
+      [TEST_MACHINE]: [
+        record(BARE_IDLE1, { projectId: 'p1' as ProjectId, archived: true, title: { text: 'Here', source: 'user' }, updatedAt: '2026-10-01T10:00:00.000Z' }),
+        record(BARE_IDLE2, { projectId: null, archived: true, title: { text: 'Loose', source: 'user' } }),
+      ],
+      [OTHER_MACHINE]: [record(BARE_TERM, { projectId: 'p2' as ProjectId, archived: true, title: { text: 'There', source: 'user' }, updatedAt: '2026-10-02T10:00:00.000Z' })],
+    };
+    withMain({ 'session.list': (_: unknown, machine: string | undefined) => ({ sessions: lists[machine ?? TEST_MACHINE], revision: 1 }) });
+    useSessions.setState({ projects: new Map([here, there].map((p) => [p.id, p])) });
+    render(<SessionDialogs />);
+    act(() => openDialog({ kind: 'archived', projectId: here.id }));
+    const dialog = await screen.findByRole('dialog', { name: 'Archived sessions · MAWS' });
+    await waitFor(() => expect(within(dialog).getAllByRole('listitem').map((li) => li.getAttribute('aria-label'))).toEqual(['There', 'Here']));
+    expect([...fake.machines('session.list')].sort()).toEqual([OTHER_MACHINE, TEST_MACHINE].sort());
+  });
+
+  it('a machine’s archived sessions include those in a folder nobody opened there', async () => {
+    const tmp = project(addressOf(OTHER_MACHINE, 'tmp'), 0, { discovered: true, org: { key: `folder:${OTHER_MACHINE}:tmp` as OrgKey, name: 'tmp', source: 'folder', smnsId: null } });
+    const sessions = [
+      record(BARE_IDLE1, { projectId: 'tmp' as ProjectId, archived: true, title: { text: 'In tmp', source: 'user' }, updatedAt: '2026-10-01T10:00:00.000Z' }),
+      record(BARE_IDLE2, { projectId: null, archived: true, title: { text: 'Loose', source: 'user' }, updatedAt: '2026-10-02T10:00:00.000Z' }),
+    ];
+    withMain({ 'session.list': () => ({ sessions, revision: 1 }) });
+    useSessions.setState({ projects: new Map([[tmp.id, tmp]]) });
+    render(<SessionDialogs />);
+    act(() => openDialog({ kind: 'archived', projectId: null, machine: OTHER_MACHINE }));
+    const dialog = await screen.findByRole('dialog', { name: `Archived sessions · ${OTHER_MACHINE}` });
+    await waitFor(() => expect(within(dialog).getAllByRole('listitem').map((li) => li.getAttribute('aria-label'))).toEqual(['Loose', 'In tmp']));
+    expect(fake.machines('session.list')).toEqual([OTHER_MACHINE]);
   });
 
   // W11 (I5): the projects removed from the sidebar, each shown again by adding its directory

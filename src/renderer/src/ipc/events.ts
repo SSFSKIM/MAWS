@@ -291,12 +291,15 @@ export function connectShell(
     });
   // P5 O6 M5 ("Migrating project-keyed state"): a layout key that is a project's address is from before M5. It becomes
   // the set that project's sessions file under once its machine has loaded and has derived the project's key; a project
-  // its loaded machine no longer lists is gone; anything else waits for that machine's next projects.
+  // its loaded machine no longer lists is gone; anything else waits for that machine's next projects. A project not
+  // derived yet whose sessions file under its address meanwhile (a listed checkout's, `setKeyOfProject`) answers that
+  // address: its set is already where it belongs, and its tabs refile as any set's do.
   const rekeyOf: RekeyOf = (address) => {
     if (!stores.machines.getState().loaded.has(machineOf(address))) return 'wait';
     const project = sessions().projects.get(address);
     if (project === undefined) return 'gone';
-    return project.org === undefined ? 'wait' : setKeyOfProject(selectOrgIndex(sessions(), local), project);
+    const key = setKeyOfProject(selectOrgIndex(sessions(), local), project);
+    return project.org === undefined && key !== address ? 'wait' : key;
   };
   const offRefile = stores.sessions.subscribe((state, previous) => {
     if (state.projects !== previous.projects) stores.layout.getState().rekeyProjects();

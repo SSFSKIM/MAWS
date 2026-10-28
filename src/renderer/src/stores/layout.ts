@@ -396,7 +396,7 @@ export function createLayoutStore() {
         const restored = opened ? model.unfold(stored) : stored;
         // P5 O6 M5: the sets keyed by a project from before M5 migrate first, so the refile files into the keys of now
         const rekeyed = model.rekeySets(model.repairMain(restored, known), rekeyOf, setOfTab);
-        const repaired = model.refile(rekeyed.main, setOfTab);
+        const repaired = model.refile(rekeyed.main, setOfTab, rekeyOf);
         let panelSurfaces = rememberSurfaceContext({ panelSurfaces: rekeySurfaces(storedSurfaces, rekeyed.bases), knownSession: known }, repaired);
         const repairedMain = replayed.reduce((m, change) => {
           const next = change(m);
@@ -504,13 +504,13 @@ export function createLayoutStore() {
       // Called on every records change, so nothing is set (and no subscriber woken) when nothing moves.
       refileTabs() {
         if (!get().hydrated) return;
-        const next = model.refile(get().main, setOfTab);
+        const next = model.refile(get().main, setOfTab, rekeyOf);
         if (next !== get().main) commit(next, get().regions);
       },
       rekeyProjects() {
         if (!get().hydrated) return;
         const { main: rekeyed, bases } = model.rekeySets(get().main, rekeyOf, setOfTab);
-        const nextMain = rekeyed === get().main ? rekeyed : model.refile(rekeyed, setOfTab);
+        const nextMain = rekeyed === get().main ? rekeyed : model.refile(rekeyed, setOfTab, rekeyOf);
         const nextRegions = rekeyRegions(get().regions);
         const nextSurfaces = rekeySurfaces(get().panelSurfaces, bases);
         if (nextSurfaces !== get().panelSurfaces) set({ panelSurfaces: nextSurfaces });

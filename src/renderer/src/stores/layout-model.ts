@@ -486,13 +486,15 @@ export function dockSplit(main: LayoutMain): LayoutMain {
 
 // W12: a tab whose session's project changed (a New chat given its project, a record refolded into another project)
 // moves to that project's set, after the active tab of its focused pane; when it is what the strip shows, the strip
-// follows it. Nothing moves, nothing changes.
-export function refile(main: LayoutMain, setOf: SetOfTab): LayoutMain {
+// follows it. Nothing moves, nothing changes. P5 O6 M5: nothing leaves a set still keyed from before M5 whose key
+// `rekeyOf` cannot answer yet; that set migrates whole (`rekeySets`), its panes and ratio with it.
+export function refile(main: LayoutMain, setOf: SetOfTab, rekeyOf?: RekeyOf): LayoutMain {
+  const waiting = (key: TabSetKey) => rekeyOf !== undefined && isProjectAddress(key) && rekeyOf(key) === 'wait';
   let next = main;
   for (const tab of allTabs(main)) {
     const to = setOf(tab);
     const at = locateTab(next, tab.id);
-    if (to === null || !at || at.set === to) continue;
+    if (to === null || !at || at.set === to || waiting(at.set)) continue;
     const shown = at.set === next.current && activeTab(next)?.id === tab.id;
     next = moveToSet(next, at, to);
     if (shown) next = activateTab(next, tab.id);
@@ -506,7 +508,7 @@ export function refile(main: LayoutMain, setOf: SetOfTab): LayoutMain {
 // still an address is still to migrate, which makes the migration resumable with no version, across machines that load
 // late. `RekeyOf` answers for an address key what it becomes: the key its project's sessions file under now, 'gone' when
 // its machine has loaded and no longer has the project, or 'wait' while its machine's projects (or the project's key)
-// are not known. It is asked of address keys only.
+// are not known; an address that is what its project files under now answers itself. It is asked of address keys only.
 export type RekeyOf = (key: ProjectId) => TabSetKey | 'gone' | 'wait';
 
 const isProjectAddress = (key: string): key is ProjectId => key !== NO_PROJECT && isAddress(key);
@@ -527,11 +529,11 @@ export function rekeySets(main: LayoutMain, rekeyOf: RekeyOf, setOf: SetOfTab): 
   }
   const bases = new Map<TabSetKey, TabSetKey>();
   if (target.size === 0) return { main, bases };
-  // each key's sources, in key order: the sets that stay where they are, and those that move onto it
+  // each key's sources, in key order (sorted, not as stored): the sets that stay where they are, and those that move onto it
   const sources = new Map<TabSetKey, TabSetKey[]>();
   for (const key of keys) {
     const to = target.get(key) ?? key;
-    if (to !== 'gone') sources.set(to, [...(sources.get(to) ?? []), key]);
+    if (to !== 'gone') sources.set(to, [...(sources.get(to) ?? []), key].sort());
   }
   const sets: LayoutMain['sets'] = {};
   let current = main.current;
@@ -552,14 +554,18 @@ export function rekeySets(main: LayoutMain, rekeyOf: RekeyOf, setOf: SetOfTab): 
     sets[to] = asSet({ ...baseSet, panes: panes as TabSet['panes'] });
   }
   let next: LayoutMain = { ...main, current, sets };
-  // a gone project's tabs, re-homed in their order; the strip follows its shown tab
+  // a gone project's tabs, re-homed in their order (each after the one before it); the strip follows its shown tab
   for (const key of keys) {
     if (target.get(key) !== 'gone') continue;
     const gone = main.sets[key] as TabSet;
     const shown = paneAt(gone, gone.focusedPane).activeTabId;
+    const after = new Map<TabSetKey, number>(); // per home, where its next re-homed tab goes
     for (const tab of gone.panes.flatMap((p) => p.tabs)) {
       const home = setOf(tab) ?? NO_PROJECT;
-      next = { ...next, sets: { ...next.sets, [home]: asSet(place({ ...(next.sets[home] ?? EMPTY_TAB_SET), closedTabs: [] }, tab, (next.sets[home] ?? EMPTY_TAB_SET).focusedPane, 'afterActive', false)) } };
+      const into = next.sets[home] ?? EMPTY_TAB_SET;
+      const placed = place({ ...into, closedTabs: [] }, tab, into.focusedPane, after.get(home) ?? 'afterActive', false);
+      after.set(home, paneAt(placed, into.focusedPane).tabs.findIndex((t) => t.id === tab.id) + 1);
+      next = { ...next, sets: { ...next.sets, [home]: asSet(placed) } };
       if (main.current === key && tab.id === shown) current = home;
     }
     if (main.current === key && current === key) current = NO_PROJECT;
@@ -568,18 +574,16 @@ export function rekeySets(main: LayoutMain, rekeyOf: RekeyOf, setOf: SetOfTab): 
 }
 
 // `panelTools.surfaces.contexts` (keyed by tab set) by the same map: an address entry moves to its key, a merge keeping
-// the base set's entry (`rekeySets`' `bases`), else the first; a gone one goes; a waiting one stays.
+// the base set's entry (`rekeySets`' `bases`), even over one the key already held, else the first; a gone one goes; a
+// waiting one stays.
 export function rekeyContexts<V>(contexts: Readonly<Record<string, V>>, rekeyOf: RekeyOf, bases: ReadonlyMap<TabSetKey, TabSetKey>): Record<string, V> {
   const out: Record<string, V> = {};
-  const from = new Map<string, string>(); // the key each moved entry came from
   for (const [key, value] of Object.entries(contexts)) {
     const to = isProjectAddress(key) ? rekeyOf(key) : key;
     if (to === 'gone') continue;
     const at = to === 'wait' ? key : to;
-    const taken = from.get(at);
-    if (taken !== undefined && (taken === at || bases.get(at as TabSetKey) !== key)) continue; // the base's, or the first, stands
+    if (Object.hasOwn(out, at) && bases.get(at as TabSetKey) !== key) continue; // the base's, or the first, stands
     out[at] = value;
-    from.set(at, key);
   }
   return out;
 }

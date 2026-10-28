@@ -71,6 +71,22 @@ describe('the derivation, on real repositories', () => {
     expect(await derive(path)).toMatchObject({ key: 'remote:github.com/example/broken', source: 'remote' });
   });
 
+  // sminos's `read_smns` takes `str(d.get(k) or "")`: a truthy non-string is its Python text, a falsy one is absent
+  it('a .smns field that is no string reads as sminos reads it', async () => {
+    const path = await repo('coerced', [['origin', 'https://github.com/example/coerced.git']]);
+    const smns = (body: object) => writeFileSync(join(path, '.smns'), JSON.stringify(body));
+    smns({ project: 42, name: 123 });
+    expect(await derive(path)).toEqual({ key: 'smns:42', name: '123', source: 'smns', smnsId: '42' });
+    smns({ project: 'p', name: true });
+    expect(await derive(path)).toMatchObject({ key: 'smns:p', name: 'True' });
+    smns({ project: 'p', name: 0 }); // falsy: the project stands for the name
+    expect(await derive(path)).toMatchObject({ key: 'smns:p', name: 'p' });
+    smns({ project: 'p', name: ['a', 1, null] });
+    expect(await derive(path)).toMatchObject({ key: 'smns:p', name: "['a', 1, None]" });
+    smns({ project: false });
+    expect(await derive(path)).toMatchObject({ key: 'remote:github.com/example/coerced', source: 'remote' });
+  });
+
   it("a linked worktree whose head predates the .smns reads its main checkout's", async () => {
     const main = await repo('shared', [['origin', 'https://github.com/example/shared.git']]);
     await runGit(main, ['commit', '-q', '--allow-empty', '-m', 'first']);

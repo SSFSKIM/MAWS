@@ -46,7 +46,7 @@ export interface OrgIndex {
 }
 
 // Local first, then by ref: the order of a key's machines, its checkouts and the machine rows (`machineRows`).
-const byMachine = (local: MachineRef) => (a: MachineRef, b: MachineRef) => (a === local ? -1 : b === local ? 1 : a < b ? -1 : a > b ? 1 : 0);
+const byMachine = (local: MachineRef) => (a: MachineRef, b: MachineRef) => (a === b ? 0 : a === local ? -1 : b === local ? 1 : a < b ? -1 : 1);
 
 export function orgIndex(all: Iterable<ProjectRecord>, local: MachineRef): OrgIndex {
   const order = byMachine(local);
@@ -138,6 +138,16 @@ export function reachableCheckouts(index: OrgIndex, key: RowKey, up: (machine: M
   return (index.projects.get(key) ?? []).filter((p) => isCheckout(p) && !p.hidden && up(machineOf(p.id)));
 }
 
+// The machine a machine's own row stands for (`machine:<ref>`); null for an org project's row.
+const MACHINE_ROW = 'machine:';
+export const machineOfRow = (key: string): MachineRef | null => (key.startsWith(MACHINE_ROW) ? (key.slice(MACHINE_ROW.length) as MachineRef) : null);
+
+// A row's name: a machine's own row is its machine's (T3), an org project's row its org project's.
+export function rowName(index: OrgIndex, key: RowKey, nameOf: (machine: MachineRef) => string): string | null {
+  const machine = machineOfRow(key);
+  return machine !== null ? nameOf(machine) : (index.orgs.get(key)?.name ?? null);
+}
+
 // Every project of a row on the machines that are up, discovered ones included, hidden ones not: where an action over the
 // row's sessions reaches them ("Archive sessions older than a week").
 export function rowProjects(index: OrgIndex, key: RowKey, up: (machine: MachineRef) => boolean): ProjectRecord[] {
@@ -177,5 +187,5 @@ const NO_SET = 'none'; // the layout's NO_PROJECT
 
 // The machine rows in their order: the local machine's first, then the rest by name (T3).
 export function machineOrder(local: MachineRef, nameOf: (machine: MachineRef) => string) {
-  return (a: MachineRef, b: MachineRef) => (a === local ? -1 : b === local ? 1 : nameOf(a).localeCompare(nameOf(b)) || (a < b ? -1 : a > b ? 1 : 0));
+  return (a: MachineRef, b: MachineRef) => (a === b ? 0 : a === local ? -1 : b === local ? 1 : nameOf(a).localeCompare(nameOf(b)) || (a < b ? -1 : a > b ? 1 : 0));
 }

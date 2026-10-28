@@ -647,7 +647,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
       MAWS: ['Charter + research'],
       codex_somersault: ['Somersault terminal run'],
       [USAGE_PROJECT]: ['Usage reset countdown', 'Settings idle probe'],
-      'Other sessions': ['Terminal workflow notes'],
+      [await localName(page)]: ['Terminal workflow notes'], // P5 O6 M5 (T3): its machine's, in place of "Other sessions"
     });
     const fixCard = board.getByRole('article', { name: FIX });
     await expect(fixCard.getByTestId('request-input')).toHaveText('git log --oneline');

@@ -708,10 +708,17 @@ describe('rekeying project sets to org keys', () => {
     expect(LayoutMainSchema.safeParse(main).success).toBe(true);
   });
 
-  it('with no current set among them, the first set in key order is the base', () => {
-    const { main } = loaded(() => rekeySets({ ...v3(), current: NO_PROJECT }, rekeyOf, setOf));
-    expect(main.current).toBe(NO_PROJECT);
-    expect(main.sets[SHARED]).toEqual({ panes: [{ tabs: [sA1], activeTabId: sA1.id }, { tabs: [sA2, sB1, file('/b/readme.md', B)], activeTabId: sA2.id }], focusedPane: 1, splitRatio: 0.3 });
+  it('with no current set among them, the first set in key order is the base, whatever order the sets were stored in', () => {
+    expect(PB < PA).toBe(true); // B's machine ref sorts first
+    const reversed = (main: LayoutMain): LayoutMain => ({ ...main, sets: Object.fromEntries(Object.entries(main.sets).reverse()) });
+    const contexts = { [PA]: `${M}/a1`, [PB]: `${B}/b1` } as unknown as Record<string, AppSessionId>;
+    const stored: LayoutMain[] = [{ ...v3(), current: NO_PROJECT }, reversed({ ...v3(), current: NO_PROJECT })];
+    for (const main of stored) {
+      const { main: rekeyed, bases } = loaded(() => rekeySets(main, rekeyOf, setOf));
+      expect(rekeyed.current).toBe(NO_PROJECT);
+      expect(rekeyed.sets[SHARED]).toEqual({ panes: [{ tabs: [sB1, file('/b/readme.md', B), sA1, sA2], activeTabId: file('/b/readme.md', B).id }], focusedPane: 0, splitRatio: 0.5 });
+      expect(loaded(() => rekeyContexts(contexts, rekeyOf, bases))).toEqual({ [SHARED]: `${B}/b1` });
+    }
   });
 
   it('moves a set of file tabs alone to its key, and re-homes a gone project’s tabs: sessions where they file, the rest to none', () => {
@@ -721,6 +728,13 @@ describe('rekeying project sets to org keys', () => {
     expect(main.sets[OWN]?.panes[0].tabs).toEqual([sG]);
     expect(main.sets[NO_PROJECT]?.panes[0].tabs).toEqual([file('/loose.md'), file('/g/notes.md')]);
     expect(LayoutMainSchema.safeParse(main).success).toBe(true);
+  });
+
+  it('re-homes a gone project’s tabs in their order, onto a set there or a new one', () => {
+    const files = [file('/g/1.md'), file('/g/2.md'), file('/g/3.md')];
+    const gone = (sets: LayoutMain['sets']): LayoutMain => ({ version: 3, current: PA, sets: { [PA]: set([[sA1]]), [PG]: set([files]), ...sets }, closedTabs: [] });
+    expect(rekeySets(gone({}), rekeyOf, setOf).main.sets[NO_PROJECT]?.panes[0].tabs).toEqual(files);
+    expect(rekeySets(gone({ [NO_PROJECT]: set([[file('/loose.md')]]) }), rekeyOf, setOf).main.sets[NO_PROJECT]?.panes[0].tabs).toEqual([file('/loose.md'), ...files]);
   });
 
   it('a gone project’s set that was current hands the strip to where its shown tab went', () => {
@@ -747,6 +761,17 @@ describe('rekeying project sets to org keys', () => {
     expect(loaded(() => rekeyContexts(contexts, rekeyOf, bases))).toEqual({ [SHARED]: `${B}/b1`, [LATE]: `${B}/l1`, [NO_PROJECT]: `${M}/x` });
     // a machine not loaded: kept under the address
     expect(rekeyContexts({ [PB]: `${B}/b1` } as Record<string, AppSessionId>, rekeyOf, new Map())).toEqual({ [PB]: `${B}/b1` });
+  });
+
+  it('a current set that migrates late brings its context over the one its key already held', () => {
+    // B's set is current and shows its readme, a sessionless tab: its context is the session the panel last showed there
+    const first = rekeySets(v3(), rekeyOf, setOf);
+    const held = rekeyContexts({ [PA]: `${M}/a1`, [PB]: `${B}/b1` } as unknown as Record<string, AppSessionId>, rekeyOf, first.bases);
+    expect(held).toEqual({ [SHARED]: `${M}/a1`, [PB]: `${B}/b1` });
+    const { bases } = loaded(() => rekeySets(first.main, rekeyOf, setOf));
+    expect(bases.get(SHARED)).toBe(PB);
+    expect(loaded(() => rekeyContexts(held, rekeyOf, bases))).toEqual({ [SHARED]: `${B}/b1` });
+    expect(loaded(() => rekeyContexts({ [PB]: `${B}/b1`, [SHARED]: `${M}/a1` } as unknown as Record<string, AppSessionId>, rekeyOf, bases))).toEqual({ [SHARED]: `${B}/b1` });
   });
 
   it('rekeys the expanded rows: an address to its org key once, a gone one dropped, a waiting one kept, Other sessions to this machine’s row', () => {

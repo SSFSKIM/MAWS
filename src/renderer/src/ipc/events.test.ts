@@ -110,6 +110,29 @@ describe('shell event subscription', () => {
     expect(tabIds(stores)).toEqual([`session:${A}`]);
   });
 
+  // P5 O6 M5: a set saved under a project's address waits whole while that project is not derived and its sessions file
+  // elsewhere meanwhile (a folder nobody opened, under its machine's row); derived, it moves whole, panes and ratio kept.
+  it('keeps a saved set of a folder not yet derived whole, and moves it whole once the folder is derived', async () => {
+    const session = (id: string) => ({ id: `session:${at(id)}`, kind: 'session', appSessionId: at(id), pinned: false }); // a v3 layout holds addresses
+    const split = { panes: [{ tabs: [session('a')], activeTabId: `session:${A}` }, { tabs: [session('c')], activeTabId: `session:${at('c')}` }], focusedPane: 1, splitRatio: 0.3 };
+    const { fake, stores } = setup(0, { tabs: { version: 3, current: at('pd'), sets: { [at('pd')]: split }, closedTabs: [] } });
+    const folder = project('pd', 0, { discovered: true });
+    await fake.reply('session.list', { sessions: [record('a', { projectId: 'pd' as ProjectId }), record('c', { projectId: 'pd' as ProjectId })], revision: 1 });
+    await fake.reply('session.projects.list', { projects: [folder], revision: 1 });
+    await fake.reply('session.digests', { digests: [] });
+    await vi.waitFor(() => expect(stores.layout.getState().hydrated).toBe(true));
+    await vi.waitFor(() => expect(stores.machines.getState().loaded.has(TEST_MACHINE)).toBe(true));
+    const PD = at('pd');
+    const shape = () => Object.fromEntries(Object.entries(stores.layout.getState().main.sets).map(([key, set]) => [key, { panes: set!.panes.map((p) => p.tabs.map((t) => t.id)), splitRatio: set!.splitRatio }]));
+    const whole = { panes: [[`session:${A}`], [`session:${at('c')}`]], splitRatio: 0.3 };
+    expect(stores.layout.getState().main.current).toBe(PD);
+    expect(shape()).toEqual({ [PD]: whole });
+    const org = { key: `folder:${TEST_MACHINE}:pd`, name: 'pd', source: 'folder', smnsId: null };
+    fake.event('session.projects.changed', { projects: [{ ...folder, org }], revision: 2 });
+    await vi.waitFor(() => expect(stores.layout.getState().main.current).toBe(`machine:${TEST_MACHINE}`));
+    expect(shape()).toEqual({ [`machine:${TEST_MACHINE}`]: whole });
+  });
+
   // The review's F3: the records change of a removal reaches the layout before the removal closes the tab; a session no
   // longer known is not refiled, so its tab closes in its own set and the strip keeps showing that project.
   it('removing the shown session of a project closes its tab there and shows the project’s next tab', async () => {

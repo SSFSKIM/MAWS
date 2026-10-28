@@ -19,7 +19,8 @@ export interface FakeClient {
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-// `auto` answers a command at once: with the value, or with the value a function computes from the input. Main's
+// `auto` answers a command at once: with the value, or with the value a function computes from the input (and the
+// machine it was sent to). Main's
 // `session.appEvents` answers at once with nothing kept unless `auto` says otherwise (debt wave 5: every transcript
 // snapshot reads it after the journal's, and a test staging the journal read has no reason to stage this one too).
 export function fakeClient(given: Partial<Record<CommandName, unknown>> = {}): FakeClient {
@@ -35,10 +36,11 @@ export function fakeClient(given: Partial<Record<CommandName, unknown>> = {}): F
     invoke(name: CommandName, input: unknown, opts?: { machine?: MachineRef } | MachineRef) {
       calls.push(`invoke ${name}`);
       inputs.set(name, [...(inputs.get(name) ?? []), input]);
-      named.set(name, [...(named.get(name) ?? []), typeof opts === 'string' ? opts : opts?.machine]);
+      const machine = typeof opts === 'string' ? opts : opts?.machine;
+      named.set(name, [...(named.get(name) ?? []), machine]);
       if (name in auto) {
         const given = auto[name];
-        return Promise.resolve({ ok: true, value: typeof given === 'function' ? (given as (i: unknown) => unknown)(input) : given });
+        return Promise.resolve({ ok: true, value: typeof given === 'function' ? (given as (i: unknown, m: MachineRef | undefined) => unknown)(input, machine) : given });
       }
       return new Promise<CommandResult<CommandName>>((resolve) => waiting.set(name, [...(waiting.get(name) ?? []), resolve]));
     },

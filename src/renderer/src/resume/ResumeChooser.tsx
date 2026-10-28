@@ -22,6 +22,8 @@ import { availabilityRefusal, useAvailability } from '../sessions/availability';
 import { displayTitle } from '../sessions/title';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
+import { useMachines } from '../stores/machines';
+import { machineName, rowName, selectOrgIndex } from '../stores/org-projects';
 import { useSessions } from '../stores/sessions';
 import { RESUME_COPY as COPY } from './copy';
 import {
@@ -90,6 +92,10 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
   const digests = useSessions((s) => s.digests);
   const projects = useSessions((s) => s.projects);
   const project = context.projectId === null ? null : (projects.get(context.projectId) ?? null);
+  // the scope's name: the row's (an org project's, a machine's own, T3), else the project's
+  const index = useSessions((s) => selectOrgIndex(s, ipc.localMachine));
+  const machines = useMachines((s) => s.machines);
+  const scopeName = (context.row === undefined ? null : rowName(index, context.row, (m) => machineName(machines, m, ipc.localMachine))) ?? project?.name ?? '';
   const branch = useCurrentBranch(project === null ? ipc.localMachine : machineOf(project.id), project?.directory ?? null);
   const [query, setQuery] = useState('');
   const [toggles, setToggles] = useState<ChooserToggles>(() => initialToggles(context));
@@ -100,7 +106,8 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
   const search = useRef<HTMLInputElement>(null);
   const ids = useId();
 
-  const rows = useMemo(() => chooserRows({ records, digests, projects, context, toggles, branch, query }), [records, digests, projects, context, toggles, branch, query]);
+  const local = ipc.localMachine;
+  const rows = useMemo(() => chooserRows({ records, digests, projects, context, toggles, branch, query, local }), [records, digests, projects, context, toggles, branch, query, local]);
   const shown = rows.slice(0, limit);
   const groups = chooserGroups(shown, now);
   // The selection stays on its session while the stores change; one that left the list falls back to the first row. The
@@ -173,7 +180,7 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
     if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !isTextField(event.target) && event.key !== ' ') search.current?.focus();
   };
 
-  const scopeLabel = toggles.allProjects ? COPY.allProjects : context.projectId === null ? COPY.otherSessions : (project?.name ?? '');
+  const scopeLabel = toggles.allProjects ? COPY.allProjects : scopeName;
   const listId = `${ids}-list`;
 
   return (
@@ -378,7 +385,8 @@ function SessionPreview({ row, projects, now, immediate }: PreviewProps) {
   const glyph = glyphFor(record, digest, pending);
   const refusal = useRefusal(record);
   const branch = sessionBranch(record);
-  const projectName = record.projectId === null ? COPY.otherSessions : (projects.get(record.projectId)?.name ?? null);
+  const machineLabel = useMachines((s) => machineName(s.machines, machineOf(record.appId), ipc.localMachine));
+  const projectName = record.projectId === null ? machineLabel : (projects.get(record.projectId)?.name ?? null); // T3: no project, its machine's
   const title = displayTitle(record);
   return (
     <section aria-label="Preview" data-testid="resume-preview" className={PREVIEW_FRAME}>

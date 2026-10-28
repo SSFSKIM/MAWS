@@ -5,7 +5,7 @@ import { addressOf } from '@shared/machine/address';
 import { machineKey, type OrgKey } from '@shared/machine/org-key';
 import { project, record } from '../../../../test/support/builders';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
-import { localProjectOfSet, orgIndex, primaryCheckout, reachableCheckouts, sessionSetKey } from './org-projects';
+import { localProjectOfSet, machineOrder, orgIndex, primaryCheckout, reachableCheckouts, sessionSetKey } from './org-projects';
 
 // P5 O6 M5 ("Assembly"): every machine's projects grouped by their org key.
 const studio = <T extends string>(id: T): T => addressOf(OTHER_MACHINE, id);
@@ -28,6 +28,12 @@ describe('org projects', () => {
     expect(index.orgs.get(`folder:${OTHER_MACHINE}:tmp` as OrgKey)?.checkouts).toEqual([]); // discovered: no checkout
     expect([...index.listed]).toEqual(['repo:maws']);
     expect(orgIndex([there], TEST_MACHINE).orgs.get('repo:maws' as OrgKey)?.name).toBe('MAWS (studio)'); // else the first machine's
+  });
+
+  it('names a key after this machine’s checkout, not a discovered clone of it on this machine', () => {
+    const clone = project(at('maws-clone'), 3, { name: 'maws-clone', discovered: true, org: org('repo:maws', 'maws-clone') });
+    for (const order of [[clone, here], [here, clone]]) expect(orgIndex(order, TEST_MACHINE).orgs.get('repo:maws' as OrgKey)?.name).toBe('MAWS');
+    expect(machineOrder(TEST_MACHINE, () => 'x')(TEST_MACHINE, TEST_MACHINE)).toBe(0); // the machine rows' order: a machine is its own equal
   });
 
   it('acts on the local checkout when there is one, else another machine’s, reaching only machines that are up', () => {

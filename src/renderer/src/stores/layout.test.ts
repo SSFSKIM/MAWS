@@ -3,6 +3,7 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMainV1 } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { addressOf } from '@shared/machine/address';
+import { machineKey } from '@shared/machine/org-key';
 import { at, OTHER_MACHINE, TEST_MACHINE as M } from '../../../../test/support/machine';
 import { createLayoutStore, registerReplaceGuard, type ReplaceVerdict } from './layout';
 import { currentSet, type RekeyOf } from './layout-model';
@@ -688,5 +689,31 @@ describe('rekeying project-keyed state to org keys', () => {
     expect(Object.keys(store.getState().main.sets)).toEqual([ORG]);
     expect(shown(store).panes[0].tabs.map((t) => t.id)).toEqual([`session:${A}`, `session:${B1}`]); // merged into the current set
     expect(store.getState().regions.sidebar.expandedProjects).toEqual([ORG, `machine:${M}`]);
+  });
+
+  it('keeps a set waiting for its key whole, session tabs too, and migrates it whole once the key is known', async () => {
+    // a folder nobody opened, not derived yet: its sessions already file under the machine's row, its set waits
+    const PD = at('pd' as ProjectId);
+    const OWN = machineKey(M);
+    const notes = { id: `file:${M}:/d/notes.md`, kind: 'file', path: '/d/notes.md', line: null, appSessionId: null, machine: M, pinned: false };
+    const split = {
+      panes: [{ tabs: [session(A)], activeTabId: `session:${A}` }, { tabs: [notes], activeTabId: notes.id }],
+      focusedPane: 1,
+      splitRatio: 0.3,
+    };
+    const stored = { 'main.tabs': { version: 3, current: PD, sets: { [PD]: split }, closedTabs: [] } };
+    let derived = false;
+    const rekeyOf: RekeyOf = (key) => (key === PD && derived ? OWN : 'wait');
+    const fake = fakeClient({ 'layout.list': { keys: Object.keys(stored) }, 'layout.get': ({ key }: { key: string }) => ({ value: (stored as Record<string, unknown>)[key] ?? null }) });
+    const store = createLayoutStore();
+    await store.getState().hydrate(fake.client, () => true, { projectOf: (id) => (id === A ? OWN : null), rekeyOf });
+    expect(store.getState().main.current).toBe(PD);
+    expect(store.getState().main.sets).toEqual({ [PD]: split });
+    store.getState().refileTabs(); // a records change meanwhile moves nothing out of it either
+    expect(store.getState().main.sets).toEqual({ [PD]: split });
+    derived = true;
+    store.getState().rekeyProjects();
+    expect(store.getState().main.current).toBe(OWN);
+    expect(store.getState().main.sets).toEqual({ [OWN]: split });
   });
 });

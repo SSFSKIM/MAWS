@@ -230,12 +230,30 @@ function readSmns(path: string): { project: string; name: string } | null {
     return null;
   }
   const file = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
-  const project = typeof file.project === 'string' ? file.project : '';
+  const project = pyText(file.project);
   if (!validName(project)) {
     console.warn(`[index] ignoring ${path}: it names no valid project id`);
     return null;
   }
-  return { project, name: typeof file.name === 'string' && file.name !== '' ? file.name : project };
+  return { project, name: pyText(file.name) || project };
+}
+
+// sminos's `str(value or "")` over a JSON value: a falsy one ("", 0, false, null, [], {}) is "", a truthy one its Python
+// text. A JSON number reads as Python's int when it is whole (JSON.parse cannot tell `42.0` from `42`, which Python
+// would print as `42.0`), else as JavaScript prints it.
+function pyText(value: unknown): string {
+  const falsy = !value || (Array.isArray(value) && value.length === 0) || (typeof value === 'object' && Object.keys(value as object).length === 0);
+  return falsy ? '' : typeof value === 'string' ? value : pyRepr(value);
+}
+
+function pyRepr(value: unknown): string {
+  if (value === null || value === undefined) return 'None';
+  if (value === true) return 'True';
+  if (value === false) return 'False';
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'string') return value.includes("'") && !value.includes('"') ? `"${value}"` : `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+  if (Array.isArray(value)) return `[${value.map(pyRepr).join(', ')}]`;
+  return `{${Object.entries(value as Record<string, unknown>).map(([k, v]) => `${pyRepr(k)}: ${pyRepr(v)}`).join(', ')}}`;
 }
 
 // sminos's `smns_at`: the first `.smns` walking up from the directory; else, for a linked worktree at a head that

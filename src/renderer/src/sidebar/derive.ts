@@ -12,7 +12,7 @@ import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { displayTitle } from '../sessions/title'; // E3
 import { projectLabels } from './project-labels';
 import type { MachineRef } from '@shared/machine/ref';
-import { machineOrder, machineProject, orgIndex, orgKeyOf, primaryCheckout, rowOfSession, type OrgProject, type RowKey } from '../stores/org-projects'; // P5 O6 M5
+import { machineOfRow, machineOrder, machineProject, orgIndex, orgKeyOf, primaryCheckout, rowOfSession, type OrgProject, type RowKey } from '../stores/org-projects'; // P5 O6 M5
 import { SIDE_COPY } from '../side/copy'; // E3
 
 // P5 O6 M5: a row is an org project's, keyed by its org key (an address while its machine has not derived it), or a
@@ -99,14 +99,11 @@ export function projectList({ records, digests, projects, rows, local, machineNa
     .map(([key, project]) => ({ entry: entryOf(index.orgs.get(key)!, project, null, labels.get(project.id)!), activity: grouped.get(key)?.activity ?? Date.parse(project.createdAt) }))
     .sort((a, b) => b.activity - a.activity || a.entry.project!.order - b.entry.project!.order || a.entry.name.localeCompare(b.entry.name))
     .map(({ entry }) => entry);
-  const machines = [...new Set([...grouped.keys()].filter(isMachineKey).map(machineOfKey))].sort(machineOrder(local, machineName));
+  const machines = [...new Set([...grouped.keys()].map(machineOfRow).filter((m) => m !== null))].sort(machineOrder(local, machineName));
   const own = machines.map((machine) => entryOf(machineProject(machine, machineName(machine)), null, machine, machineName(machine))).filter((entry) => entry.sessions.length > 0);
   return [...listed, ...own];
 }
 
-const MACHINE_PREFIX = 'machine:';
-const isMachineKey = (key: ProjectKey): boolean => key.startsWith(MACHINE_PREFIX);
-const machineOfKey = (key: ProjectKey): MachineRef => key.slice(MACHINE_PREFIX.length) as MachineRef;
 
 // The list while searching: the org projects whose name matches, and every row holding a session that matches.
 export function filterProjectList(entries: ProjectEntry[], query: string, projects: ReadonlyMap<ProjectId, ProjectRecord>): ProjectEntry[] {

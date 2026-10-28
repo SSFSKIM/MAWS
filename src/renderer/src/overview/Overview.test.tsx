@@ -41,7 +41,7 @@ describe('overview board', () => {
       'MAWS',
       'codex_somersault',
       'claude-usage-menubar',
-      'Other sessions',
+      'This Mac', // P5 O6 M5 (T3): the sessions of no project are their machine's
     ]);
     expect(cardTitles(group('Needs you'))).toEqual(['Fix sidebar drag', 'Sidebar interaction pass', 'Quota reset recovery']);
     expect(cardTitles(group('claude-usage-menubar'))).toEqual(['Usage reset countdown', 'Settings idle probe']);
