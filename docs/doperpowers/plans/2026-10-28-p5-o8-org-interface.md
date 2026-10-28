@@ -37,7 +37,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-28) The landing gate on the merge with O2's master (fd1d65c44): runs 40716613510 and 40716660100 green, no flaky lines.
   - [ ] The live check at the first cut-over machine.
 - [ ] M3 — The app as the org's signer: a co-root, the weekly successor, the signing checks — **executable** (re-planned 2026-10-28; needs M1 and O7 M1, both landed); the owner's sitting (`root add` on staging, then production) owed after M1's
-  - [ ] Task 1: `root add` in `deploy/admin.ts`, its `production-run.sh` line, and its proofs in `admin.test.ts`.
+  - [x] (2026-10-28) Task 1: `root add` in `deploy/admin.ts`, its `production-run.sh` line, and its proofs in `admin.test.ts`.
   - [ ] Task 2: `checks.ts` (`checkSuccessor`, `supersededRevocations`) and its proofs, the zero-roots ones included.
   - [ ] Task 3: the device module, `createStateSigner` and the next keys (create, promote, destroy).
   - [ ] Task 4: `signing-store.ts`, `signer.ts`, `postState`, `signing.json`, §H's M3 rows.
@@ -566,7 +566,7 @@ M3's own edits are the no-change successor and that revocation. The delegation a
   - through the one composed signing store: a weekly date write racing a pending write, and an acknowledgement racing a new pending state, nothing lost;
   - nothing signed while a state is pending.
 - `checks.test.ts`:
-  - Each row of the table, with states built by `org-protocol`'s helpers. Each refuse is also refused by the package where the package refuses: `dc-` against `dc-prod-`; a machine `dc-prod-1` under a new `dc-`; a renewal at or before `issued`; one shortening `expires`.
+  - Each row of the table, with states built by `org-protocol`'s helpers. Each refuse is also refused by the package where the package refuses: `dc-` against `dc-prod-`; a machine `dc-prod-1` under a new `dc-`; a renewal at or before `issued`. A shortening of `expires` that leaves the delegation live passes the package (`keysAccounted`, `org-state.ts:206`), so `renew-not-extension` is the app's own rule, and its test asserts the package's `ok` beside the app's refusal (Decision Log, 2026-10-28).
   - `supersededRevocations` after a rewind, each offer signed and checked with the real `verifySuccessor`:
     - an honest revocation of a device present before the base and current again after the recovery, with the device removed;
     - a device whose channel key the discarded branch revoked and whose step-up key it retired, the companion accounted;
@@ -1424,6 +1424,17 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   6. The session's composition, the rekey transaction, the IPC commands, main's wiring and the Org section.
   7. `test/org/signer.local.test.ts`.
   Rationale: the milestone spans about a dozen modules, and one context building all of them would carry every earlier task's noise into the later ones. The split follows §K's producers.
+  Date/Author: 2026-10-28, O8's executor.
+
+- Decision: Task 2 (`checks.ts`, ccd09f9d1) settles these points of the checks' contract, which later tasks read.
+  1. `CheckCode` gains `empty-roots`. §K's union predates that row.
+  2. `revives-revoked` reads both `head.revoked` and `next.revoked`, as the package does, and it covers revoked kids in `root.keys`.
+  3. A renewal is judged live at `max(next.issued, now)`.
+  4. `prefix-names-machine` also refuses a new machine name under an existing prefix. The package refuses it too, and M4's enroll would otherwise reach Touch ID first.
+  5. A delegation is new unless the head lists it with the same id, key and prefix.
+  6. The superseded offer is non-null whenever any candidate exists, withheld ones included. Its `lines` empty means nothing to sign: Task 6 hides the offer's button then and still shows the withheld names. `superseded-keys` also warns about withheld candidates.
+  7. M3's proof of "one shortening `expires`" was wrong about the package, which refuses only a shortening to or before `issued`. Renewal-extends is the app's own rule (P5 Decision Log 30). The proof line is reworded.
+  Rationale: the executor checked each point against `org-state.ts`.
   Date/Author: 2026-10-28, O8's executor.
 
 ## Outcomes & Retrospective
