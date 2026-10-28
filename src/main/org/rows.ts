@@ -30,6 +30,7 @@ import {
   isSigned,
   keyId,
   verifyListing,
+  verifyMachineCert,
   type Certificates,
   type Listing,
   type OrgState,
@@ -178,17 +179,27 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
     return current !== null && current.identity.org === dataOrg ? current : null;
   };
 
-  /** The delegation of the certificate a verified record was signed under; null for an enrolled machine's key. */
-  async function delegationOf(state: OrgState, certificates: Certificates, record: Signed<Listing>): Promise<string | null> {
+  /**
+   * The delegation of the certificate a verified record was signed under; null for an enrolled machine's key. Only a
+   * certificate that verifies under the same head counts: the hub's set is only shape-checked, and a copy of a genuine
+   * certificate with its `delegation` altered would otherwise name a delegation whose revocation drops the mark. Two
+   * verified certificates for the machine and key naming different delegations give null too, which keeps the mark
+   * until the key itself is retired or revoked: the barrier errs toward staying.
+   */
+  async function delegationOf(state: OrgState, certificates: Certificates, record: Signed<Listing>, at: Date): Promise<string | null> {
     if (state.machines.some((m) => m.ref === record.body.machine)) return null;
+    let found: string | null = null;
     for (const cert of certificates.certs) {
-      if (cert.body.machine === record.body.machine && (await keyId(cert.body.pub)) === record.sig.kid) return cert.body.delegation;
+      if (cert.body.machine !== record.body.machine || (await keyId(cert.body.pub)) !== record.sig.kid) continue;
+      if (!(await verifyMachineCert(state, cert, at)).ok) continue;
+      if (found !== null && found !== cert.body.delegation) return null;
+      found = cert.body.delegation;
     }
-    return null;
+    return found;
   }
 
-  async function verified(current: SignedIn, record: Signed<Listing>): Promise<boolean> {
-    const verdict = await verifyListing(current.view.head().state, record, current.view.certificates(), now());
+  async function verified(current: SignedIn, record: Signed<Listing>, at: Date): Promise<boolean> {
+    const verdict = await verifyListing(current.view.head().state, record, current.view.certificates(), at);
     return verdict.ok;
   }
 
@@ -227,11 +238,12 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
     }
     const state = current.view.head().state;
     const certificates = current.view.certificates();
-    if (!(await verified(current, record))) {
+    const at = now();
+    if (!(await verified(current, record, at))) {
       wait({ key, hash, record }, state);
       return;
     }
-    accept({ key, hash, record }, await delegationOf(state, certificates, record));
+    accept({ key, hash, record }, await delegationOf(state, certificates, record, at));
   }
 
   /** A hub-supplied record's shape, and its org: anything else never verifies and isn't held. */
@@ -259,7 +271,7 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
   async function reverifyHeld(current: SignedIn): Promise<void> {
     const state = current.view.head().state;
     for (const [key, record] of [...held]) {
-      if (held.get(key) !== record || (await verified(current, record))) continue;
+      if (held.get(key) !== record || (await verified(current, record, now()))) continue;
       held.delete(key);
       wait({ key, hash: listingHash(record), record }, state);
       changed();

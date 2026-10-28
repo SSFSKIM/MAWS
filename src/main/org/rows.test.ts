@@ -478,6 +478,33 @@ describe('the marks', () => {
     await h.rows.close();
     expect(h.cache()!.marks).toEqual({});
   });
+
+  it('take their delegation only from a certificate that verifies, so revoking a forged one drops nothing', async () => {
+    const w = await World.make();
+    let h = await start(w);
+    const ten = await w.list(w.d, 's', 10);
+    await push(h, ten);
+    // the hub serves, ahead of the genuine certificate, a copy naming another delegation
+    const other = { id: hex(), key: await generateSigningKey() };
+    await w.adopt((s) => {
+      s.delegations.push({ id: other.id, pub: other.key.pub, prefix: 'zz-', expires: w.delegation.expires, maxUses: 10, offlineRevokeS: 0, owners: [w.A] });
+    });
+    w.certs = { certs: [{ ...w.d.cert, body: { ...w.d.cert.body, delegation: other.id } }, w.d.cert], retirements: [] };
+    w.session.changed();
+    await push(h, await w.gone(w.d, 's', 11));
+    expect(h.shown()).toEqual([]);
+    h = await relaunch(w, h);
+    expect(h.cache()!.marks[`${w.d.ref}/s`]).toMatchObject({ revision: 11, delegation: w.delegation.id, gone: true });
+    const otherKid = await keyId(other.key.pub);
+    await w.adopt((s) => {
+      s.delegations = s.delegations.filter((d) => d.id !== other.id);
+      s.revoked.push({ keyId: otherKid, holder: { delegation: other.id, prefix: 'zz-' } });
+    });
+    await push(h, ten);
+    expect(h.shown()).toEqual([]);
+    await snapshot(h, [ten]);
+    expect(h.shown()).toEqual([]);
+  });
 });
 
 describe('the cache', () => {
