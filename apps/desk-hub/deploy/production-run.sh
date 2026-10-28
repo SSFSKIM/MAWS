@@ -72,7 +72,8 @@ direct() { ( cd $W/apps/desk-hub && node --experimental-strip-types --disable-wa
 step=$1; (( $# )) && shift
 case $step in
   checkout)
-    P=${${1:-$HOME/.local/share/maws-desk-deploy}:A}
+    # Two steps: zsh 5.9 leaves its Dash token (0x9b) for each '-' of a default word that a nested expansion gives :A.
+    P=${1:-$HOME/.local/share/maws-desk-deploy}; P=${P:A}
     for tmp in /tmp /private/tmp ${TMPDIR:+${TMPDIR:A}}; do
       [[ $P == $tmp || $P == $tmp/* ]] && { print -r -- "$P is under $tmp: a sweep would take it. Name a durable path. Nothing was run."; exit 2; }
     done

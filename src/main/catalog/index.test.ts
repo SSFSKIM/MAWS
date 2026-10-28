@@ -280,6 +280,28 @@ describe('the catalog service', () => {
     }
   });
 
+  // P5 O3-A (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §3; O3-A acceptance 4): MAWS's own servers are the machine's
+  it('watches machine-settings.json for MAWS’s own servers, not the client’s settings.json, and asks for the servers again on its change', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const polled = new Map<string, () => void>();
+      const poll: PollFn = (path, listener) => (polled.set(path, listener), { close: () => void polled.delete(path) });
+      const watch: WatchFn = () => ({ close: () => {}, on: () => undefined });
+      const engine = host(() => recordedEngine(PROJECT_A));
+      const { invoke } = service(engine.call, {}, watch, poll);
+      await invoke('catalog.home', { tab: 'connectors', cwd: PROJECT_A });
+      expect(polled.has(join(userData, 'machine-settings.json'))).toBe(true);
+      expect(polled.has(join(userData, 'settings.json'))).toBe(false);
+      const asks = () => engine.asked.filter((a) => a.name === 'customization.serverEndpoints').length; // the recheck of the configured servers
+      const before = asks();
+      polled.get(join(userData, 'machine-settings.json'))!();
+      await vi.advanceTimersByTimeAsync(1_100);
+      expect(asks()).toBeGreaterThan(before);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('answers each configured server’s posture from the directory record its endpoint matches, from the copy held', async () => {
     endpoints = [
       { name: 'work-tracker', scope: 'user', path: '/x/.claude.json', transport: 'http', url: 'https://mcp.linear.app/mcp' },

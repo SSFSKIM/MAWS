@@ -1,11 +1,12 @@
-// An imported Chrome profile's bookmarks (cua board #90's spec, "Storage"; index migration 7's `browser_bookmarks`): one
-// row per node of the read-only mirror, keyed per partition. A sync replaces a partition's rows whole in one
-// transaction, so the ids are reassigned each time (a node's id is stable only until the next sync); the tree is read
-// back from `(partition, parent_id, position)`, the address field's matches from the URL rows. Like the history, the
-// mirror is a convenience: a read-only index (a newer app's file) lists and suggests nothing, removes nothing, and
-// refuses a replace as `indexUnavailable`, which the sync and the import report.
+// An imported Chrome profile's bookmarks (cua board #90's spec, "Storage"; index migration 7's `browser_bookmarks`, in
+// the browser's own database since P5 O3-A): one row per node of the read-only mirror, keyed per partition. A sync
+// replaces a partition's rows whole in one transaction, so the ids are reassigned each time (a node's id is stable only
+// until the next sync); the tree is read back from `(partition, parent_id, position)`, the address field's matches from
+// the URL rows. Like the history, the mirror is a convenience: browser data not in use (inert: the index not yet at 14,
+// or a newer app's file) lists and suggests nothing, removes nothing, and refuses a replace as `indexUnavailable`, which
+// the sync and the import report.
 import { BOOKMARK_ROOTS, emptyBookmarkTree, type BookmarkFolder, type BookmarkNode, type BookmarkRoot, type BookmarkTree } from '@shared/browser/bookmarks';
-import type { Db } from './db';
+import type { BrowserDb } from './db';
 
 interface Row {
   id: number;
@@ -23,16 +24,16 @@ const likePattern = (query: string) => `%${escapeLike(query)}%`;
 const prefixPattern = (query: string) => `${escapeLike(query)}%`;
 
 export class BrowserBookmarksStore {
-  constructor(private readonly db: Db) {}
+  constructor(private readonly db: BrowserDb) {}
 
-  // A newer app's index, opened read-only: the sync refuses before reading anything.
+  // Not in use (the index not yet at 14, or a newer app's file): the sync refuses before reading anything.
   get readOnly(): boolean {
-    return this.db.readOnly;
+    return this.db.inert;
   }
 
   // The partition's rows replaced by the tree, in one transaction; every node's id is the new row's.
   replace(partition: string, tree: BookmarkTree): void {
-    if (this.db.readOnly) throw Object.assign(new Error('the index is unavailable'), { code: 'indexUnavailable' });
+    if (this.db.inert) throw Object.assign(new Error('the browser data is not in use'), { code: 'indexUnavailable' });
     this.db.transaction(() => {
       this.db.run('DELETE FROM browser_bookmarks WHERE partition = ?', partition);
       const insert = (node: BookmarkNode, root: BookmarkRoot, parentId: number | null, position: number) => {
@@ -46,10 +47,10 @@ export class BrowserBookmarksStore {
     });
   }
 
-  // The partition's tree; empty roots when it has no rows, or the index is read-only.
+  // The partition's tree; empty roots when it has no rows, or the store is inert.
   tree(partition: string): BookmarkTree {
     const tree = emptyBookmarkTree();
-    if (this.db.readOnly) return tree;
+    if (this.db.inert) return tree;
     const rows = this.db.all<Row>(
       'SELECT id, parent_id, root, kind, name, url, added_at_ms FROM browser_bookmarks WHERE partition = ? ORDER BY parent_id, position',
       partition,
@@ -79,7 +80,7 @@ export class BrowserBookmarksStore {
   // else in document order, each URL once (its first bookmark's name); an empty query matches nothing, so an empty field
   // suggests history only.
   suggest(partition: string, query: string, limit: number): { url: string; title: string | null }[] {
-    if (this.db.readOnly || query === '') return [];
+    if (this.db.inert || query === '') return [];
     return this.db
       .all<{ url: string; name: string }>(
         // cua #90 M1b: a name starting with the query, then a name holding it, then a URL holding it (Chrome's omnibox
@@ -95,14 +96,14 @@ export class BrowserBookmarksStore {
 
   // "Remove imported profile", and a cancelled or failed import's rollback.
   removePartition(partition: string): void {
-    if (this.db.readOnly) return;
+    if (this.db.inert) return;
     this.db.run('DELETE FROM browser_bookmarks WHERE partition = ?', partition);
   }
 
   // The boot sweep: every row of a partition `keep` does not list (only an imported profile's partition has rows);
   // answers the rows removed.
   removeExcept(keep: readonly string[]): number {
-    if (this.db.readOnly) return 0;
+    if (this.db.inert) return 0;
     return this.db.run('DELETE FROM browser_bookmarks WHERE partition NOT IN (SELECT value FROM json_each(?))', JSON.stringify(keep));
   }
 }

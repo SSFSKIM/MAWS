@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { saveTextFile } from './save-text';
-import { openSettingsStore } from '../settings/store';
+import { openSettingsFile } from '../settings/store';
+import { clientSettingsRules } from '../client/settings-store'; // P5 O3-A: the client file's rules
 import { LayoutFileStore } from '../layout/store';
 import { writeWhole } from '../sessions/json-files';
 import { FileAttentionStore } from '../attention/file-attention-store';
@@ -25,7 +26,7 @@ it.each(['export', 'settings', 'layout', 'sessions', 'attention'])('%s never fol
   for (const trap of traps) symlinkSync(victim, trap);
   await expect(Promise.resolve().then(async () => {
     if (writer === 'export') await saveTextFile({ defaultName: 'target.json', text: 'replacement' }, null, { downloads: parent, port: { save: async () => ({ path: file }) } });
-    if (writer === 'settings') openSettingsStore(file).update({ theme: 'dark' });
+    if (writer === 'settings') openSettingsFile(file, clientSettingsRules).update((settings) => ({ ...settings, theme: 'dark' }));
     if (writer === 'layout') new LayoutFileStore(file).set('regions', { width: 240 });
     if (writer === 'sessions') await writeWhole(parent, 'target', { changed: true });
     if (writer === 'attention') await new FileAttentionStore(file).retireForSession('app-1' as AppSessionId);

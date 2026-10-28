@@ -5,7 +5,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { useHosts } from '../stores/hosts';
 import { daemonShapeStatus, daemonStatus, hostStatus } from '../test-support/host-status';
-import { DaemonRow, describeDaemon } from './DaemonRow';
+import { DaemonRow, describeDaemon, describeSpine, SpineRow } from './DaemonRow';
 
 describe('the daemon row’s text', () => {
   it('says unknown until main answers', () => {
@@ -48,5 +48,32 @@ describe('the daemon row', () => {
     useHosts.setState({ supervisor: hostStatus({ daemonUnavailable: 'no LaunchAgent is installed' }) });
     render(<DaemonRow />);
     expect(screen.getByRole('status', { name: 'mawsd' }).querySelector('[aria-hidden] span')?.className).toContain('bg-fg-faint');
+  });
+});
+
+// P5 O3-A (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §2): a run refused the spine names the holder in Diagnostics
+describe('the machine data row', () => {
+  const refused = 'spine.lock is held by pid 4242 (build 1.0.0+abc), so this run starts none of the machine’s services and writes none of its files';
+  afterEach(() => {
+    cleanup();
+    useHosts.setState({ supervisor: null });
+  });
+
+  it('says nothing while this run holds the lock, or a build before the lock answers', () => {
+    expect(describeSpine(null)).toBeNull();
+    expect(describeSpine(hostStatus({ spineRefused: null }))).toBeNull();
+    expect(describeSpine(hostStatus())).toBeNull();
+    useHosts.setState({ supervisor: hostStatus({ spineRefused: null }) });
+    render(<SpineRow />);
+    expect(screen.queryByRole('status', { name: 'machine data' })).toBeNull();
+  });
+
+  it('names the holder when refused, with a warning dot', () => {
+    expect(describeSpine(hostStatus({ spineRefused: refused }))).toBe(`machine data · refused this launch · ${refused}`);
+    useHosts.setState({ supervisor: hostStatus({ spineRefused: refused }) });
+    render(<SpineRow />);
+    const row = screen.getByRole('status', { name: 'machine data' });
+    expect(row.textContent).toContain('pid 4242 (build 1.0.0+abc)');
+    expect(row.querySelector('[aria-hidden] span')?.className).toContain('bg-warning');
   });
 });

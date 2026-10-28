@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import type { SessionServiceDeps } from '../sessions/context';
-import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import type { Settings } from '@shared/ipc/schema';
 import type { ConnectorsDeps } from '.';
 import { captureConsole } from '../../../test/support/console-capture';
@@ -31,7 +31,7 @@ vi.mock('../ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: (
 vi.mock('../machines', () => ({ startMachines: vi.fn(() => ({ dispatch: vi.fn(), serve: vi.fn(), stop: vi.fn(), onRemote: vi.fn(() => () => {}) /* P5 O8 M2: the rows read the roster */ })) })); // P5 O6 M3: no links, no stand-in
 vi.mock('@shared/host/shell-env', () => ({ captureShellEnvironment: async () => ({ HOME: join(state.root, 'home'), CLAUDE_CONFIG_DIR: state.shellConfig }) }));
 vi.mock('../hosts', () => ({ createHosts: () => ({ start: vi.fn(), stop: vi.fn(), onState: vi.fn(() => () => {}) /* E3 (merge): the dataset holds follow the host's state */, onEvent: vi.fn(() => () => {}) /* P4-AGG M2: the catalog hears plugins.changed */ }), prepareLaunch: () => ({ mode: 'utility', daemon: null, unavailable: null }), refuseTestLaunchOnDefaultProfile: () => {} /* P5 O2 landing: a scratch-profile test launch */ /* P5 O2 M7: the launch's shape, settled at once */ }));
-vi.mock('../settings', () => ({ startSettings: () => ({ state: () => ({ settings: state.settings, resolvedTheme: 'light' }), onChange: vi.fn(() => vi.fn()) }) }));
+vi.mock('../client/settings', () => ({ startSettings: () => ({ state: () => ({ settings: state.settings, resolvedTheme: 'light' }), onChange: vi.fn(() => vi.fn()) }) }));
 vi.mock('../window', () => ({ installContentSecurityPolicy: vi.fn(), appUrl: '', createWindow: vi.fn() }));
 vi.mock('../index/index', () => ({ Index: class { unavailable = 'test'; sessions = { get: () => null, list: () => [] }; projects = { list: () => [] }; refreshOrgProjects = async () => {}; } }));
 vi.mock('../index/source', () => ({ IndexSessionSource: class { onScanned = () => () => {}; discoveryCurrent = () => false; } }));
@@ -76,7 +76,7 @@ describe('the application root’s connector composition', () => {
     vi.resetModules();
     state.handlers.clear();
     state.connectorDeps = null;
-    state.settings = SETTINGS_DEFAULTS_V20;
+    state.settings = SETTINGS_DEFAULTS_V21;
     state.root = mkdtempSync(join(tmpdir(), 'maws-root-wiring-'));
     state.shellConfig = join(state.root, 'shell-config');
     for (const name of ['userData', 'home', 'shell-config', 'dock-config', 'additional']) mkdirSync(join(state.root, name));

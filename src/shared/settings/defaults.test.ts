@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { SettingsPatchSchema, SettingsSchema, type Settings } from '../ipc/schema/settings';
-import { applySettingsPatch, migrateSettings, SETTINGS_DEFAULTS_V20 } from './defaults';
+import * as z from 'zod';
+import { ClientSettingsSchema, MachineSettingsSchema, SettingsPatchSchema, SettingsSchema, type Settings, type SettingsPatch } from '../ipc/schema/settings';
+import { applyClientPatch, applyMachinePatch, applySettingsPatch, clientSettingsDefaults, isUnifiedSettings, machineSettingsDefaults, mergeSettings, migrateClientSettings, migrateMachineSettings, migrateSettings, SETTINGS_DEFAULTS_V21, splitSettings, splitSettingsPatch } from './defaults';
 
 // P3-D: design-system and Space ids (host UUIDs)
 const DS_A = '6f1c1d2e-0b7a-4c55-9a3e-2f1b0c9d8e71';
@@ -17,10 +18,10 @@ const USER_SCOPE = { plugins: { off: [] }, hooks: 'user' };
 const USER_SCOPE_V18 = { plugins: { off: [] }, outputStyle: 'user', hooks: 'user' };
 // P5 O2 M7: the sections version 19 wrote (version 20 adds the supervisor's shape), and what a migration to 20 adds:
 // the machine daemon
-const { shape: _shape, ...SUPERVISOR_V19 } = SETTINGS_DEFAULTS_V20.supervisor;
+const { shape: _shape, ...SUPERVISOR_V19 } = SETTINGS_DEFAULTS_V21.supervisor;
 void _shape;
-const DEFAULTS_V19 = { ...SETTINGS_DEFAULTS_V20, version: 19, supervisor: SUPERVISOR_V19 };
-const withDaemonShape = <T extends { supervisor: object }>(v19: T) => ({ ...v19, version: 20, supervisor: { ...v19.supervisor, shape: 'daemon' } });
+const DEFAULTS_V19 = { ...SETTINGS_DEFAULTS_V21, version: 19, supervisor: SUPERVISOR_V19 };
+const withDaemonShape = <T extends { supervisor: object }>(v19: T) => ({ ...v19, version: 21, supervisor: { ...v19.supervisor, shape: 'daemon' } });
 const SECTIONS_V18 = { ...DEFAULTS_V19, engine: { ...DEFAULTS_V19.engine, launchProfile: USER_SCOPE_V18 } };
 const { sessions: _sessions, ...SECTIONS_V17_WITH_KINDS } = SECTIONS_V18;
 const { turnFinished: _turnFinished, ...KINDS_V17 } = SECTIONS_V18.notifications.kinds;
@@ -70,7 +71,7 @@ const ARTIFACTS = { artifacts: { defaultDesignSystem: null, spaceDesignSystems: 
 // P3-D: and then the design-system defaults; P4-R8: and the app's MCP servers; P4-A2: and the user scope
 const toV20 = <T extends { engine: object; notifications: { kinds: object }; supervisor: object }>(earlier: T) => ({
   ...earlier,
-  version: 20, // P5 O2 M7: and then v19 → v20
+  version: 21, // P5 O2 M7: and then v19 → v20; P5 O3-A: and v20 → 21
   supervisor: { ...earlier.supervisor, shape: 'daemon' },
   sessions: { archiveInactiveDays: null }, // UX1-A
   // P4-R8: every migration ends at 16; P4-A2: at 17; then at 19, with no output style
@@ -103,8 +104,8 @@ const BROWSER = { browser: { profile: null, searchUrl: 'https://www.google.com/s
 
 describe('settings migrate v1 and v2 to v3', () => {
   it('holds the defaults the document states, and they validate', () => {
-    expect(SETTINGS_DEFAULTS_V20).toEqual({
-      version: 20, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17; UX1: 18; the style removed: 19; P5 O2: 20
+    expect(SETTINGS_DEFAULTS_V21).toEqual({
+      version: 21, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17; UX1: 18; the style removed: 19; P5 O2: 20; P5 O3-A: 21
       theme: 'light',
       sessions: { archiveInactiveDays: null },
       keymap: {},
@@ -120,31 +121,31 @@ describe('settings migrate v1 and v2 to v3', () => {
       mods: { toHuman: { enabled: true } }, // P2-C: the to-human lane on
       artifacts: { defaultDesignSystem: null, spaceDesignSystems: {}, commentsView: 'expand' /* P4-B1 */ }, // P3-D: the house system, no Space defaults
     });
-    expect(SettingsSchema.parse(SETTINGS_DEFAULTS_V20)).toEqual(SETTINGS_DEFAULTS_V20);
+    expect(SettingsSchema.parse(SETTINGS_DEFAULTS_V21)).toEqual(SETTINGS_DEFAULTS_V21);
   });
 
   it('migrates the v1 fixture to the defaults with its theme', () => {
-    expect(migrateSettings(fixture('v1.json'))).toEqual({ ...SETTINGS_DEFAULTS_V20, theme: 'dark' });
+    expect(migrateSettings(fixture('v1.json'))).toEqual({ ...SETTINGS_DEFAULTS_V21, theme: 'dark' });
   });
 
   it('migrates the v2 fixture keeping its theme, its keymap override and its notification policy', () => {
     const migrated = migrateSettings(fixture('v2.json'));
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
     expect(migrated).toEqual({
-      ...SETTINGS_DEFAULTS_V20,
+      ...SETTINGS_DEFAULTS_V21,
       theme: 'system',
       keymap: { 'attention.next': 'Cmd+Alt+J' },
-      notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V20.notifications.kinds },
+      notifications: { enabled: false, sound: true, kinds: SETTINGS_DEFAULTS_V21.notifications.kinds },
     });
   });
 
   // W10: ⌥Enter's hold (`composer.steer`) is gone; a file that overrode it keeps everything else
   it('drops an override of a retired action instead of refusing the file, at the current version and an earlier one', () => {
-    const current = { ...SETTINGS_DEFAULTS_V20, theme: 'dark', keymap: { 'composer.steer': 'Cmd+Enter', 'attention.next': 'Cmd+Alt+J' } };
-    expect(migrateSettings(current)).toEqual({ ...SETTINGS_DEFAULTS_V20, theme: 'dark', keymap: { 'attention.next': 'Cmd+Alt+J' } });
+    const current = { ...SETTINGS_DEFAULTS_V21, theme: 'dark', keymap: { 'composer.steer': 'Cmd+Enter', 'attention.next': 'Cmd+Alt+J' } };
+    expect(migrateSettings(current)).toEqual({ ...SETTINGS_DEFAULTS_V21, theme: 'dark', keymap: { 'attention.next': 'Cmd+Alt+J' } });
     const v2 = { version: 2, theme: 'system', keymap: { 'composer.steer': null }, notifications: { enabled: true, sound: false } };
     expect(migrateSettings(v2).keymap).toEqual({});
-    expect(() => migrateSettings({ ...SETTINGS_DEFAULTS_V20, keymap: { 'composer.nothing': 'Cmd+J' } })).toThrow(); // an unknown id still refuses
+    expect(() => migrateSettings({ ...SETTINGS_DEFAULTS_V21, keymap: { 'composer.nothing': 'Cmd+J' } })).toThrow(); // an unknown id still refuses
   });
 
   // C12 start: version 4 (the memory budget); a v3 object gains the budget's defaults. W2: the identity moves to v5, and
@@ -158,23 +159,25 @@ describe('settings migrate v1 and v2 to v3', () => {
   // earlier object gains the comments view. P4-R8: the identity moves to v16, and every earlier object gains the app's
   // MCP servers, empty. P4-A2: the identity moves to v18, and every earlier object gains the launch profile at the user
   // scope. The style's removal: the identity moves to v19, and every earlier profile loses its output style. P5 O2: the
-  // identity moves to v20, and every earlier object gains the daemon shape.
-  it('is the identity over a v20 object', () => {
+  // identity moves to v20, and every earlier object gains the daemon shape. P5 O3-A: the identity moves to the merged 21,
+  // which a v20 file reaches with every value kept.
+  it('takes a v20 file to the merged 21 with every value kept, and is the identity over a merged 21 object', () => {
     const v20: Settings = {
-      ...SETTINGS_DEFAULTS_V20,
+      ...SETTINGS_DEFAULTS_V21,
       theme: 'dark',
       gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false },
       appearance: { monoFont: 'JetBrainsMono Nerd Font', transcriptWidth: 1280 },
-      engine: { ...SETTINGS_DEFAULTS_V20.engine, memoryBudgetMiB: 6144, statefulMcpServers: ['plugin:ptc:ptc'], memoryBudget: { enabled: false }, mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }] /* P4-R8 */, launchProfile: { plugins: { off: ['ptc@ptc-tool'] }, hooks: 'none' } /* P4-A2 */ },
+      engine: { ...SETTINGS_DEFAULTS_V21.engine, memoryBudgetMiB: 6144, statefulMcpServers: ['plugin:ptc:ptc'], memoryBudget: { enabled: false }, mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }] /* P4-R8 */, launchProfile: { plugins: { off: ['ptc@ptc-tool'] }, hooks: 'none' } /* P4-A2 */ },
       permissions: { autoFallback: 'default' },
       voice: { locale: 'en-US' },
       supervisor: { idleExitMinutes: null, keepRunningDefault: false, shape: 'embedded' }, // E10; P5 O2 M7
       browser: { profile: 'Profile 1', searchUrl: 'https://duckduckgo.com/?q=%s', linkTarget: 'external', bookmarksBar: 'hidden' }, // E4a; cua #90
-      notifications: { ...SETTINGS_DEFAULTS_V20.notifications, kinds: { ...SETTINGS_DEFAULTS_V20.notifications.kinds, asyncInput: false, essential: false } }, // P2-C
+      notifications: { ...SETTINGS_DEFAULTS_V21.notifications, kinds: { ...SETTINGS_DEFAULTS_V21.notifications.kinds, asyncInput: false, essential: false } }, // P2-C
       mods: { toHuman: { enabled: false } }, // P2-C
       artifacts: { defaultDesignSystem: DS_A, spaceDesignSystems: { [SPACE]: DS_B }, commentsView: 'minimize' /* P4-B1 */ }, // P3-D
     };
     expect(migrateSettings(structuredClone(v20))).toEqual(v20);
+    expect(migrateSettings({ ...structuredClone(v20), version: 20 })).toEqual(v20); // P5 O3-A: the last unified file
   });
 
   it('migrates a v3 object to v20 keeping every v3 value, with the budget’s defaults, the default width, the default fallback and the budget on', () => {
@@ -208,7 +211,7 @@ describe('settings migrate v1 and v2 to v3', () => {
   it('takes any engine mode but auto as the fallback', () => {
     expect(SettingsPatchSchema.safeParse({ permissions: { autoFallback: 'plan' } }).success).toBe(true);
     expect(SettingsPatchSchema.safeParse({ permissions: { autoFallback: 'auto' } }).success).toBe(false);
-    expect(applySettingsPatch(SETTINGS_DEFAULTS_V20, { permissions: { autoFallback: 'default' } }).permissions).toEqual({ autoFallback: 'default' });
+    expect(applySettingsPatch(SETTINGS_DEFAULTS_V21, { permissions: { autoFallback: 'default' } }).permissions).toEqual({ autoFallback: 'default' });
   });
   // W3 end
 
@@ -221,8 +224,8 @@ describe('settings migrate v1 and v2 to v3', () => {
   });
 
   it('takes the switch as one object a patch replaces whole, and nothing but a boolean in it', () => {
-    const off = applySettingsPatch(SETTINGS_DEFAULTS_V20, SettingsPatchSchema.parse({ engine: { memoryBudget: { enabled: false } } }));
-    expect(off.engine).toEqual({ ...SETTINGS_DEFAULTS_V20.engine, memoryBudget: { enabled: false } });
+    const off = applySettingsPatch(SETTINGS_DEFAULTS_V21, SettingsPatchSchema.parse({ engine: { memoryBudget: { enabled: false } } }));
+    expect(off.engine).toEqual({ ...SETTINGS_DEFAULTS_V21.engine, memoryBudget: { enabled: false } });
     expect(SettingsPatchSchema.safeParse({ engine: { memoryBudget: {} } }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ engine: { memoryBudget: { enabled: 'off' } } }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ engine: { memoryBudget: { enabled: true, limitMiB: 1 } } }).success).toBe(false);
@@ -243,7 +246,7 @@ describe('settings migrate v1 and v2 to v3', () => {
   it('never shares the defaults object with a migrated result', () => {
     const migrated = migrateSettings(fixture('v1.json'));
     migrated.notifications.kinds.errors = false;
-    expect(SETTINGS_DEFAULTS_V20.notifications.kinds.errors).toBe(true);
+    expect(SETTINGS_DEFAULTS_V21.notifications.kinds.errors).toBe(true);
   });
 });
 
@@ -269,15 +272,15 @@ describe('settings v8 → v9 adds voice and keeps every earlier version', () => 
     ];
     for (const raw of earlier) {
       const migrated = migrateSettings(JSON.parse(JSON.stringify(raw)));
-      expect(migrated.version).toBe(20); // E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17; UX1: 18; the style removed: 19; P5 O2: 20
+      expect(migrated.version).toBe(21); // E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17; UX1: 18; the style removed: 19; P5 O2: 20; P5 O3-A: 21
       expect(migrated.voice).toEqual({ locale: null });
       expect(migrated.engine.launchProfile).toEqual(USER_SCOPE); // P4-A2
     }
   });
 
   it('validates a v9 object as it is and refuses a locale outside its bounds', () => {
-    expect(migrateSettings({ ...SETTINGS_DEFAULTS_V20, voice: { locale: 'ko-KR' } }).voice).toEqual({ locale: 'ko-KR' });
-    const valid = (voice: unknown) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V20, voice }).success;
+    expect(migrateSettings({ ...SETTINGS_DEFAULTS_V21, voice: { locale: 'ko-KR' } }).voice).toEqual({ locale: 'ko-KR' });
+    const valid = (voice: unknown) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V21, voice }).success;
     expect(valid({ locale: null })).toBe(true);
     expect(valid({ locale: 'en' })).toBe(true);
     expect(valid({ locale: 'e' })).toBe(false);
@@ -288,9 +291,9 @@ describe('settings v8 → v9 adds voice and keeps every earlier version', () => 
 
   it('patches the locale alone and leaves every other section as it was', () => {
     const patch = SettingsPatchSchema.parse({ voice: { locale: 'en-US' } });
-    expect(applySettingsPatch(SETTINGS_DEFAULTS_V20, patch)).toEqual({ ...SETTINGS_DEFAULTS_V20, voice: { locale: 'en-US' } });
-    expect(applySettingsPatch({ ...SETTINGS_DEFAULTS_V20, voice: { locale: 'en-US' } }, { voice: { locale: null } }).voice).toEqual({ locale: null });
-    expect(applySettingsPatch(SETTINGS_DEFAULTS_V20, { voice: {} })).toEqual(SETTINGS_DEFAULTS_V20);
+    expect(applySettingsPatch(SETTINGS_DEFAULTS_V21, patch)).toEqual({ ...SETTINGS_DEFAULTS_V21, voice: { locale: 'en-US' } });
+    expect(applySettingsPatch({ ...SETTINGS_DEFAULTS_V21, voice: { locale: 'en-US' } }, { voice: { locale: null } }).voice).toEqual({ locale: null });
+    expect(applySettingsPatch(SETTINGS_DEFAULTS_V21, { voice: {} })).toEqual(SETTINGS_DEFAULTS_V21);
     expect(SettingsPatchSchema.safeParse({ voice: { locale: 'e' } }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ voice: { language: 'en-US' } }).success).toBe(false);
   });
@@ -308,7 +311,7 @@ describe('settings v9 → v10 adds the supervisor section', () => {
   });
 
   it('holds the idle time to whole minutes from 1 to 1440, or null for never, and the quit default to a boolean', () => {
-    const valid = (supervisor: object) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V20, supervisor: { shape: 'daemon', ...supervisor } }).success; // P5 O2 M7: with the shape
+    const valid = (supervisor: object) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V21, supervisor: { shape: 'daemon', ...supervisor } }).success; // P5 O2 M7: with the shape
     expect(valid({ idleExitMinutes: 1, keepRunningDefault: true })).toBe(true);
     expect(valid({ idleExitMinutes: 1440, keepRunningDefault: false })).toBe(true);
     expect(valid({ idleExitMinutes: null, keepRunningDefault: true })).toBe(true);
@@ -321,10 +324,10 @@ describe('settings v9 → v10 adds the supervisor section', () => {
   });
 
   it('patches each field alone and leaves every other section as it was', () => {
-    const never = applySettingsPatch(SETTINGS_DEFAULTS_V20, SettingsPatchSchema.parse({ supervisor: { idleExitMinutes: null } }));
-    expect(never).toEqual({ ...SETTINGS_DEFAULTS_V20, supervisor: { idleExitMinutes: null, keepRunningDefault: true, shape: 'daemon' } });
+    const never = applySettingsPatch(SETTINGS_DEFAULTS_V21, SettingsPatchSchema.parse({ supervisor: { idleExitMinutes: null } }));
+    expect(never).toEqual({ ...SETTINGS_DEFAULTS_V21, supervisor: { idleExitMinutes: null, keepRunningDefault: true, shape: 'daemon' } });
     expect(applySettingsPatch(never, { supervisor: { keepRunningDefault: false } }).supervisor).toEqual({ idleExitMinutes: null, keepRunningDefault: false, shape: 'daemon' });
-    expect(applySettingsPatch(SETTINGS_DEFAULTS_V20, { supervisor: {} })).toEqual(SETTINGS_DEFAULTS_V20);
+    expect(applySettingsPatch(SETTINGS_DEFAULTS_V21, { supervisor: {} })).toEqual(SETTINGS_DEFAULTS_V21);
     expect(SettingsPatchSchema.safeParse({ supervisor: { idleExitMinutes: 0 } }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ supervisor: { idleExitMs: 60_000 } }).success).toBe(false);
   });
@@ -346,7 +349,7 @@ describe('settings v10 → v11 adds the browser section', () => {
   });
 
   it('holds the profile to a name or null, the search URL to an http(s) template with %s, and the link target to its two values', () => {
-    const valid = (browser: Record<string, unknown>) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V20, browser: { ...SETTINGS_DEFAULTS_V20.browser, ...browser } }).success;
+    const valid = (browser: Record<string, unknown>) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V21, browser: { ...SETTINGS_DEFAULTS_V21.browser, ...browser } }).success;
     expect(valid({ profile: 'Profile 1' })).toBe(true);
     expect(valid({ profile: '' })).toBe(false);
     expect(valid({ profile: 'x'.repeat(201) })).toBe(false);
@@ -363,15 +366,15 @@ describe('settings v10 → v11 adds the browser section', () => {
     expect(valid({ linkTarget: 'external' })).toBe(true);
     expect(valid({ linkTarget: 'tab' })).toBe(false);
     expect(valid({ passwords: false })).toBe(false); // strict
-    expect(SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V20, browser: { profile: null, linkTarget: 'in-app' } }).success).toBe(false);
+    expect(SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V21, browser: { profile: null, linkTarget: 'in-app' } }).success).toBe(false);
   });
 
   it('patches each field alone and leaves every other section as it was', () => {
-    const external = applySettingsPatch(SETTINGS_DEFAULTS_V20, SettingsPatchSchema.parse({ browser: { linkTarget: 'external' } }));
-    expect(external).toEqual({ ...SETTINGS_DEFAULTS_V20, browser: { ...SETTINGS_DEFAULTS_V20.browser, linkTarget: 'external' } });
+    const external = applySettingsPatch(SETTINGS_DEFAULTS_V21, SettingsPatchSchema.parse({ browser: { linkTarget: 'external' } }));
+    expect(external).toEqual({ ...SETTINGS_DEFAULTS_V21, browser: { ...SETTINGS_DEFAULTS_V21.browser, linkTarget: 'external' } });
     expect(applySettingsPatch(external, { browser: { profile: 'Profile 1' } }).browser).toEqual({ profile: 'Profile 1', searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'external', bookmarksBar: 'shown' });
-    expect(applySettingsPatch({ ...SETTINGS_DEFAULTS_V20, browser: { ...SETTINGS_DEFAULTS_V20.browser, profile: 'Profile 1' } }, { browser: { profile: null } }).browser.profile).toBeNull();
-    expect(applySettingsPatch(SETTINGS_DEFAULTS_V20, { browser: {} })).toEqual(SETTINGS_DEFAULTS_V20);
+    expect(applySettingsPatch({ ...SETTINGS_DEFAULTS_V21, browser: { ...SETTINGS_DEFAULTS_V21.browser, profile: 'Profile 1' } }, { browser: { profile: null } }).browser.profile).toBeNull();
+    expect(applySettingsPatch(SETTINGS_DEFAULTS_V21, { browser: {} })).toEqual(SETTINGS_DEFAULTS_V21);
     expect(SettingsPatchSchema.safeParse({ browser: { searchUrl: 'https://duckduckgo.com/' } }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ browser: { homepage: 'https://example.com/' } }).success).toBe(false);
   });
@@ -393,11 +396,11 @@ describe('settings v11 → v12 adds the bookmarks bar switch', () => {
   });
 
   it('holds the switch to its two values and patches it alone', () => {
-    const valid = (bookmarksBar: unknown) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V20, browser: { ...SETTINGS_DEFAULTS_V20.browser, bookmarksBar } }).success;
+    const valid = (bookmarksBar: unknown) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V21, browser: { ...SETTINGS_DEFAULTS_V21.browser, bookmarksBar } }).success;
     expect(valid('hidden')).toBe(true);
     expect(valid(false)).toBe(false);
-    const hidden = applySettingsPatch(SETTINGS_DEFAULTS_V20, SettingsPatchSchema.parse({ browser: { bookmarksBar: 'hidden' } }));
-    expect(hidden).toEqual({ ...SETTINGS_DEFAULTS_V20, browser: { ...SETTINGS_DEFAULTS_V20.browser, bookmarksBar: 'hidden' } });
+    const hidden = applySettingsPatch(SETTINGS_DEFAULTS_V21, SettingsPatchSchema.parse({ browser: { bookmarksBar: 'hidden' } }));
+    expect(hidden).toEqual({ ...SETTINGS_DEFAULTS_V21, browser: { ...SETTINGS_DEFAULTS_V21.browser, bookmarksBar: 'hidden' } });
   });
 });
 // cua #90 end
@@ -413,7 +416,7 @@ describe('settings v12 → v13 adds the mods section and two notification groups
     };
     const migrated = migrateSettings(structuredClone(v12));
     expect(migrated).toEqual({
-      ...v12, version: 20, sessions: { archiveInactiveDays: null }, supervisor: { ...v12.supervisor, shape: 'daemon' }, // P5 O2 M7 // P3-D: then v13 → v14; P4-B1: then v14 → v15; P4-R8: then v15 → v16; P4-A2: then v16 → v17
+      ...v12, version: 21, sessions: { archiveInactiveDays: null }, supervisor: { ...v12.supervisor, shape: 'daemon' }, // P5 O2 M7 // P3-D: then v13 → v14; P4-B1: then v14 → v15; P4-R8: then v15 → v16; P4-A2: then v16 → v17
       engine: { ...v12.engine, mcpServers: [], launchProfile: USER_SCOPE },
       notifications: { enabled: false, sound: true, kinds: { ...KINDS_V12, turnFinished: true, questions: false, heldPeerMessages: true, asyncInput: true, essential: true } },
       mods: { toHuman: { enabled: true } },
@@ -430,12 +433,12 @@ describe('settings v12 → v13 adds the mods section and two notification groups
   });
 
   it('patches the to-human switch alone, and each owner-channel group alone, leaving every sibling as it was', () => {
-    const off = applySettingsPatch(SETTINGS_DEFAULTS_V20, SettingsPatchSchema.parse({ mods: { toHuman: { enabled: false } } }));
-    expect(off).toEqual({ ...SETTINGS_DEFAULTS_V20, mods: { toHuman: { enabled: false } } });
+    const off = applySettingsPatch(SETTINGS_DEFAULTS_V21, SettingsPatchSchema.parse({ mods: { toHuman: { enabled: false } } }));
+    expect(off).toEqual({ ...SETTINGS_DEFAULTS_V21, mods: { toHuman: { enabled: false } } });
     expect(applySettingsPatch(off, { mods: {} })).toEqual(off);
     expect(applySettingsPatch(off, { mods: { toHuman: {} } })).toEqual(off);
-    const quiet = applySettingsPatch(SETTINGS_DEFAULTS_V20, SettingsPatchSchema.parse({ notifications: { kinds: { essential: false } } }));
-    expect(quiet.notifications.kinds).toEqual({ ...SETTINGS_DEFAULTS_V20.notifications.kinds, essential: false });
+    const quiet = applySettingsPatch(SETTINGS_DEFAULTS_V21, SettingsPatchSchema.parse({ notifications: { kinds: { essential: false } } }));
+    expect(quiet.notifications.kinds).toEqual({ ...SETTINGS_DEFAULTS_V21.notifications.kinds, essential: false });
     expect(SettingsPatchSchema.safeParse({ mods: { toHuman: { enabled: 'yes' } } }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ mods: { other: { enabled: true } } }).success).toBe(false);
     expect(SettingsPatchSchema.safeParse({ mods: { toHuman: { perSession: 'off' } } }).success).toBe(false); // the override lives in the index
@@ -455,7 +458,7 @@ describe('settings v13 → v14 adds the design-system defaults', () => {
   });
 
   it('holds the defaults to ids: an artifact id or null for the owner, Space id to artifact id for the Spaces', () => {
-    const valid = (artifacts: object) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V20, artifacts: { commentsView: 'expand', ...artifacts } }).success; // P4-B1: the view beside them
+    const valid = (artifacts: object) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V21, artifacts: { commentsView: 'expand', ...artifacts } }).success; // P4-B1: the view beside them
     expect(valid({ defaultDesignSystem: DS_A, spaceDesignSystems: { [SPACE]: DS_B } })).toBe(true);
     expect(valid({ defaultDesignSystem: null, spaceDesignSystems: {} })).toBe(true);
     expect(valid({ defaultDesignSystem: 'maws', spaceDesignSystems: {} })).toBe(false);
@@ -465,7 +468,7 @@ describe('settings v13 → v14 adds the design-system defaults', () => {
   });
 
   it('patches the owner’s default alone, and replaces the Spaces’ record whole', () => {
-    const state: Settings = { ...SETTINGS_DEFAULTS_V20, artifacts: { defaultDesignSystem: DS_A, spaceDesignSystems: { [SPACE]: DS_B }, commentsView: 'expand' /* P4-B1 */ } };
+    const state: Settings = { ...SETTINGS_DEFAULTS_V21, artifacts: { defaultDesignSystem: DS_A, spaceDesignSystems: { [SPACE]: DS_B }, commentsView: 'expand' /* P4-B1 */ } };
     const owner = applySettingsPatch(state, SettingsPatchSchema.parse({ artifacts: { defaultDesignSystem: null } }));
     expect(owner).toEqual({ ...state, artifacts: { defaultDesignSystem: null, spaceDesignSystems: { [SPACE]: DS_B }, commentsView: 'expand' } });
     const spaces = applySettingsPatch(state, SettingsPatchSchema.parse({ artifacts: { spaceDesignSystems: {} } }));
@@ -486,9 +489,9 @@ describe('settings v14 → v15 adds the comments view', () => {
   });
 
   it('holds the view to its three states and patches it alone', () => {
-    for (const commentsView of ['expand', 'minimize', 'hide'] as const) expect(SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V20, artifacts: { ...SETTINGS_DEFAULTS_V20.artifacts, commentsView } }).success).toBe(true);
-    expect(SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V20, artifacts: { ...SETTINGS_DEFAULTS_V20.artifacts, commentsView: 'collapse' } }).success).toBe(false);
-    const state = { ...SETTINGS_DEFAULTS_V20, artifacts: { defaultDesignSystem: DS_A, spaceDesignSystems: { [SPACE]: DS_B }, commentsView: 'expand' as const } };
+    for (const commentsView of ['expand', 'minimize', 'hide'] as const) expect(SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V21, artifacts: { ...SETTINGS_DEFAULTS_V21.artifacts, commentsView } }).success).toBe(true);
+    expect(SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V21, artifacts: { ...SETTINGS_DEFAULTS_V21.artifacts, commentsView: 'collapse' } }).success).toBe(false);
+    const state = { ...SETTINGS_DEFAULTS_V21, artifacts: { defaultDesignSystem: DS_A, spaceDesignSystems: { [SPACE]: DS_B }, commentsView: 'expand' as const } };
     expect(applySettingsPatch(state, { artifacts: { commentsView: 'hide' } }).artifacts).toEqual({ defaultDesignSystem: DS_A, spaceDesignSystems: { [SPACE]: DS_B }, commentsView: 'hide' });
   });
 });
@@ -519,7 +522,7 @@ describe('settings v15 → v16 adds the app MCP servers', () => {
 
   it('replaces the app server list whole, keeps its engine siblings and can clear it', () => {
     const mcpServers = [{ name: 'notion', type: 'http' as const, url: 'https://mcp.notion.com/mcp' }];
-    const state = { ...SETTINGS_DEFAULTS_V20, engine: { ...SETTINGS_DEFAULTS_V20.engine, binaryPath: '/opt/claude', statefulMcpServers: ['plugin:ptc:ptc'] } };
+    const state = { ...SETTINGS_DEFAULTS_V21, engine: { ...SETTINGS_DEFAULTS_V21.engine, binaryPath: '/opt/claude', statefulMcpServers: ['plugin:ptc:ptc'] } };
     const next = applySettingsPatch(state, SettingsPatchSchema.parse({ engine: { mcpServers } }));
     expect(next).toEqual({ ...state, engine: { ...state.engine, mcpServers } });
     expect(applySettingsPatch(next, { engine: { mcpServers: [] } })).toEqual(state);
@@ -558,13 +561,13 @@ describe('settings v16 → v17 adds the launch profile', () => {
     first.engine.launchProfile.plugins.off.push('ptc@ptc-tool');
     expect(migrateSettings({ ...SECTIONS_V16, version: 16 }).engine.launchProfile).toEqual(USER_SCOPE);
     expect(migrateSettings(fixture('v1.json')).engine.launchProfile).toEqual(USER_SCOPE);
-    expect(SETTINGS_DEFAULTS_V20.engine.launchProfile).toEqual(USER_SCOPE);
+    expect(SETTINGS_DEFAULTS_V21.engine.launchProfile).toEqual(USER_SCOPE);
   });
 
   it('replaces the profile whole, keeps its engine siblings, and goes back to the user scope', () => {
     const profile = { plugins: { off: ['ptc@ptc-tool', 'cc-plugin-diff@builtin'] }, hooks: 'none' as const };
     const mcpServers = [{ name: 'notion', type: 'http' as const, url: 'https://mcp.notion.com/mcp' }];
-    const state = { ...SETTINGS_DEFAULTS_V20, engine: { ...SETTINGS_DEFAULTS_V20.engine, binaryPath: '/opt/claude', mcpServers } };
+    const state = { ...SETTINGS_DEFAULTS_V21, engine: { ...SETTINGS_DEFAULTS_V21.engine, binaryPath: '/opt/claude', mcpServers } };
     const next = applySettingsPatch(state, SettingsPatchSchema.parse({ engine: { launchProfile: profile } }));
     expect(next).toEqual({ ...state, engine: { ...state.engine, launchProfile: profile } });
     expect(applySettingsPatch(next, SettingsPatchSchema.parse({ engine: { launchProfile: USER_SCOPE } }))).toEqual(state);
@@ -607,12 +610,12 @@ describe('settings v18 → v19 drops the launch profile’s output style', () =>
 
 describe('settings v3 validates and refuses unknown versions', () => {
   it.each([
-    ['a v21 object', { ...SETTINGS_DEFAULTS_V20, version: 21 }], // W2: v5 is the current version; W3: v6; W7: v7; W13: v8; E9: v9; E10: v10; E4a: v11; cua #90: v12; P2-C: v13; P3-D: v14; P4-B1: v15; P4-R8: v16; P4-A2: v17; UX1: v18; the style removed: v19; P5 O2: v20
+    ['a v22 object', { ...SETTINGS_DEFAULTS_V21, version: 22 }], // W2: v5 is the current version; W3: v6; W7: v7; W13: v8; E9: v9; E10: v10; E4a: v11; cua #90: v12; P2-C: v13; P3-D: v14; P4-B1: v15; P4-R8: v16; P4-A2: v17; UX1: v18; the style removed: v19; P5 O2: v20; P5 O3-A: v21
     ['a v20 file without its shape', { ...DEFAULTS_V19, version: 20 }], // P5 O2 M7: every v20 file writes it
-    ['a v19 file with a shape', { ...SETTINGS_DEFAULTS_V20, version: 19 }], // P5 O2 M7: v19 never had it
+    ['a v19 file with a shape', { ...SETTINGS_DEFAULTS_V21, version: 19 }], // P5 O2 M7: v19 never had it
     ['a v19 file with a launch profile style', { ...SECTIONS_V18, version: 19 }], // v19 never has it
     ['a v18 file without its launch profile style', { ...DEFAULTS_V19, version: 18 }], // every v18 file wrote it
-    ['a v18 file with a shape', { ...SECTIONS_V18, version: 18, supervisor: SETTINGS_DEFAULTS_V20.supervisor }], // P5 O2 M7: v18 never had it
+    ['a v18 file with a shape', { ...SECTIONS_V18, version: 18, supervisor: SETTINGS_DEFAULTS_V21.supervisor }], // P5 O2 M7: v18 never had it
     ['a v18 file with a style it never wrote', { ...SECTIONS_V18, version: 18, engine: { ...SECTIONS_V18.engine, launchProfile: { ...USER_SCOPE_V18, outputStyle: 'default' } } }],
     ['a v17 file without its launch profile style', { ...SECTIONS_V17, version: 17, engine: { ...SECTIONS_V17.engine, launchProfile: USER_SCOPE } }], // every v17 file wrote it
     ['a v17 file without its launch profile', { ...SECTIONS_V16, version: 17 }], // P4-A2: every v17 file writes it
@@ -625,7 +628,7 @@ describe('settings v3 validates and refuses unknown versions', () => {
     ['a v13 file without its mods section', { ...SECTIONS_V12, version: 13 }], // P2-C: every v13 file writes one
     ['a v13 file without the two owner-channel kinds', { ...SECTIONS_V13, version: 13, notifications: SECTIONS_V12.notifications }], // P2-C
     ['a v12 file with a mods section', { ...SECTIONS_V13, version: 12, notifications: SECTIONS_V12.notifications }], // P2-C: v12 never had it
-    ['a v12 file with the two owner-channel kinds', { ...SECTIONS_V12, version: 12, notifications: SETTINGS_DEFAULTS_V20.notifications }], // P2-C
+    ['a v12 file with the two owner-channel kinds', { ...SECTIONS_V12, version: 12, notifications: SETTINGS_DEFAULTS_V21.notifications }], // P2-C
     ['a v11 file without its browser section', { ...SECTIONS_V10, version: 11 }], // E4a: every v11 file writes one
     ['a v10 file with a browser section', { ...SECTIONS_V11, version: 10 }], // E4a: v10 never had it
     ['a v10 file without its supervisor section', { ...SECTIONS_V9, version: 10 }], // E10: every v10 file writes one
@@ -642,14 +645,14 @@ describe('settings v3 validates and refuses unknown versions', () => {
     ['not an object', 'settings'],
     ['an invalid v1 file', { version: 1, theme: 'sepia' }],
     ['a v2 file with a key v2 never had', { version: 2, theme: 'light', keymap: {}, notifications: { enabled: true, sound: false }, engine: {} }],
-    ['a v3 file missing a section', { ...SETTINGS_DEFAULTS_V20, appearance: undefined }],
+    ['a v3 file missing a section', { ...SETTINGS_DEFAULTS_V21, appearance: undefined }],
   ])('refuses %s', (_, raw) => {
     expect(() => migrateSettings(raw)).toThrow();
   });
 
   // C12 start: the budget's fields
   it('holds each v4 field to its range', () => {
-    const bad = (engine: Record<string, unknown>) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V20, engine: { ...SETTINGS_DEFAULTS_V20.engine, ...engine } }).success;
+    const bad = (engine: Record<string, unknown>) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V21, engine: { ...SETTINGS_DEFAULTS_V21.engine, ...engine } }).success;
     expect(bad({ memoryBudgetMiB: 511 })).toBe(false);
     expect(bad({ memoryBudgetMiB: 512 })).toBe(true);
     expect(bad({ memoryBudgetMiB: 1024.5 })).toBe(false);
@@ -662,11 +665,11 @@ describe('settings v3 validates and refuses unknown versions', () => {
   // C12 end
 
   it('holds each v3 field to its range', () => {
-    const bad = (patch: Record<string, unknown>) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V20, ...patch }).success;
+    const bad = (patch: Record<string, unknown>) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V21, ...patch }).success;
     expect(bad({ usage: { nearLimitPercent: 49 } })).toBe(false);
     expect(bad({ usage: { nearLimitPercent: 101 } })).toBe(false);
     expect(bad({ usage: { nearLimitPercent: 90.5 } })).toBe(false);
-    expect(bad({ gateway: { ...SETTINGS_DEFAULTS_V20.gateway, relayUnreachable: 'retry' } })).toBe(false);
+    expect(bad({ gateway: { ...SETTINGS_DEFAULTS_V21.gateway, relayUnreachable: 'retry' } })).toBe(false);
     expect(bad({ appearance: { monoFont: '' } })).toBe(false);
     expect(bad({ appearance: { monoFont: 'x'.repeat(201) } })).toBe(false);
     expect(bad({ appearance: { monoFont: null, transcriptWidth: 800 } })).toBe(false); // W2: Claude Desktop's three widths only
@@ -682,14 +685,14 @@ describe('settings v19 → v20 adds the supervisor shape', () => {
     const v19 = { ...DEFAULTS_V19, theme: 'dark', supervisor: { idleExitMinutes: null, keepRunningDefault: false }, sessions: { archiveInactiveDays: 14 }, engine: { ...DEFAULTS_V19.engine, launchProfile: { plugins: { off: ['ptc@ptc-tool'] }, hooks: 'none' } } };
     const before = structuredClone(v19);
     const migrated = migrateSettings(v19);
-    expect(migrated).toEqual({ ...v19, version: 20, supervisor: { idleExitMinutes: null, keepRunningDefault: false, shape: 'daemon' } });
+    expect(migrated).toEqual({ ...v19, version: 21, supervisor: { idleExitMinutes: null, keepRunningDefault: false, shape: 'daemon' } });
     expect(v19).toEqual(before);
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
     expect(migrateSettings(JSON.parse(JSON.stringify(migrated)))).toEqual(migrated);
   });
 
   it('gives a new profile the daemon shape', () => {
-    expect(SETTINGS_DEFAULTS_V20.supervisor.shape).toBe('daemon');
+    expect(SETTINGS_DEFAULTS_V21.supervisor.shape).toBe('daemon');
     expect(migrateSettings(fixture('v1.json')).supervisor.shape).toBe('daemon');
   });
 
@@ -704,7 +707,7 @@ describe('settings v19 → v20 adds the supervisor shape', () => {
     ['v19', () => ({ ...DEFAULTS_V19 })],
   ] as const)('chains a %s file to v20 under the machine daemon', (_, raw) => {
     const migrated = migrateSettings(JSON.parse(JSON.stringify(raw())));
-    expect(migrated.version).toBe(20);
+    expect(migrated.version).toBe(21); // P5 O3-A
     expect(migrated.supervisor.shape).toBe('daemon');
     expect(migrated.engine.launchProfile).toEqual(USER_SCOPE);
     expect(SettingsSchema.safeParse(migrated).success).toBe(true);
@@ -712,13 +715,13 @@ describe('settings v19 → v20 adds the supervisor shape', () => {
   });
 
   it('holds the shape to embedded or daemon, and patches it alone', () => {
-    const valid = (shape: unknown) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V20, supervisor: { ...SETTINGS_DEFAULTS_V20.supervisor, shape } }).success;
+    const valid = (shape: unknown) => SettingsSchema.safeParse({ ...SETTINGS_DEFAULTS_V21, supervisor: { ...SETTINGS_DEFAULTS_V21.supervisor, shape } }).success;
     expect(valid('embedded')).toBe(true);
     expect(valid('daemon')).toBe(true);
     expect(valid('utility')).toBe(false);
     expect(valid(undefined)).toBe(false);
-    const embedded = applySettingsPatch(SETTINGS_DEFAULTS_V20, SettingsPatchSchema.parse({ supervisor: { shape: 'embedded' } }));
-    expect(embedded).toEqual({ ...SETTINGS_DEFAULTS_V20, supervisor: { ...SETTINGS_DEFAULTS_V20.supervisor, shape: 'embedded' } });
+    const embedded = applySettingsPatch(SETTINGS_DEFAULTS_V21, SettingsPatchSchema.parse({ supervisor: { shape: 'embedded' } }));
+    expect(embedded).toEqual({ ...SETTINGS_DEFAULTS_V21, supervisor: { ...SETTINGS_DEFAULTS_V21.supervisor, shape: 'embedded' } });
     expect(SettingsPatchSchema.safeParse({ supervisor: { shape: 'detached' } }).success).toBe(false);
   });
 });
@@ -742,7 +745,7 @@ describe('settings v17 → v18 integrates the sidebar and notification policies'
     if (batch === 'sidebar') delete saved.notifications.kinds.turnFinished;
     if (batch === 'notifications') delete saved.sessions;
     const migrated = migrateSettings(saved);
-    expect(migrated.version).toBe(20); // P5 O2 M7: and then v19 → v20
+    expect(migrated.version).toBe(21); // P5 O2 M7: and then v19 → v20; P5 O3-A: and v20 → 21
     expect(migrated.sessions.archiveInactiveDays).toBe(batch === 'notifications' ? null : 14);
     expect(migrated.notifications.kinds.turnFinished).toBe(batch === 'sidebar');
   });
@@ -750,7 +753,7 @@ describe('settings v17 → v18 integrates the sidebar and notification policies'
 
 describe('settings patch merges one kind and keeps its siblings', () => {
   const siblings = { turnFinished: false, approvals: false, questions: false, planReviews: false, errors: true, heldPeerMessages: true, asyncInput: false, essential: true /* P2-C */ };
-  const state: Settings = { ...SETTINGS_DEFAULTS_V20, notifications: { enabled: true, sound: false, kinds: siblings } };
+  const state: Settings = { ...SETTINGS_DEFAULTS_V21, notifications: { enabled: true, sound: false, kinds: siblings } };
 
   it('validates a patch of one kind and changes that kind alone', () => {
     const patch = SettingsPatchSchema.parse({ notifications: { kinds: { errors: false } } });
@@ -793,3 +796,116 @@ describe('settings patch merges one kind and keeps its siblings', () => {
     expect(SettingsPatchSchema.safeParse({ appearance: { transcriptWidth: 1000 } }).success).toBe(false);
   });
 });
+
+// P5 O3-A start (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §3, binding): the split by owner
+// A section's fields, or the section itself when it is a value (the theme, the keymap): what a file can hold apart.
+const leavesOf = (shape: Record<string, z.ZodType>): string[] =>
+  Object.entries(shape)
+    .filter(([key]) => key !== 'version')
+    .flatMap(([section, schema]) => (schema instanceof z.ZodObject ? Object.keys(schema.shape).map((field) => `${section}.${field}`) : [section]));
+const MERGED = leavesOf(SettingsSchema.shape);
+const sectionOf = (section: keyof Settings) => MERGED.filter((leaf) => leaf === section || leaf.startsWith(`${section}.`));
+// §3's table as written
+const CLIENT_FIELDS = [
+  ...(['theme', 'keymap', 'notifications', 'appearance', 'voice', 'browser'] as const).flatMap(sectionOf),
+  'usage.nearLimitPercent', 'supervisor.shape', 'supervisor.keepRunningDefault', 'artifacts.commentsView', 'artifacts.exportAuthorName',
+];
+const MACHINE_FIELDS = [
+  'supervisor.idleExitMinutes', ...(['engine', 'gateway'] as const).flatMap(sectionOf), 'permissions.autoFallback', 'mods.toHuman',
+  'artifacts.defaultDesignSystem', 'artifacts.spaceDesignSystems', 'sessions.archiveInactiveDays',
+];
+// Every field away from its default, so a field the split dropped or moved shows.
+const CHOSEN: Settings = {
+  ...SETTINGS_DEFAULTS_V21,
+  theme: 'dark',
+  keymap: { 'attention.next': 'Cmd+Alt+J' },
+  notifications: { enabled: false, sound: true, kinds: { ...SETTINGS_DEFAULTS_V21.notifications.kinds, errors: false } },
+  engine: { ...SETTINGS_DEFAULTS_V21.engine, memoryBudgetMiB: 6144, mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }] },
+  gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false },
+  usage: { nearLimitPercent: 75 },
+  appearance: { monoFont: 'JetBrainsMono Nerd Font', transcriptWidth: 1280 },
+  permissions: { autoFallback: 'plan' },
+  voice: { locale: 'en-GB' },
+  supervisor: { idleExitMinutes: null, keepRunningDefault: false, shape: 'embedded' },
+  browser: { profile: 'Profile 1', searchUrl: 'https://duckduckgo.com/?q=%s', linkTarget: 'external', bookmarksBar: 'hidden' },
+  mods: { toHuman: { enabled: false } },
+  artifacts: { defaultDesignSystem: DS_A, spaceDesignSystems: { [SPACE]: DS_B }, commentsView: 'hide', exportAuthorName: 'Kim Min' },
+  sessions: { archiveInactiveDays: 14 },
+};
+
+describe('the settings split by owner (P5 O3-A)', () => {
+  it('gives each field of the merged settings to exactly one file, as §3’s table does', () => {
+    const client = leavesOf(ClientSettingsSchema.shape);
+    const machine = leavesOf(MachineSettingsSchema.shape);
+    expect(client.toSorted()).toEqual(CLIENT_FIELDS.toSorted());
+    expect(machine.toSorted()).toEqual(MACHINE_FIELDS.toSorted());
+    expect(client.filter((leaf) => machine.includes(leaf))).toEqual([]);
+    expect([...client, ...machine].toSorted()).toEqual(MERGED.toSorted());
+  });
+
+  it('cuts the merged settings into a client file at 21 and a machine file at 1, which merge back to the same settings', () => {
+    const { client, machine } = splitSettings(CHOSEN);
+    expect(ClientSettingsSchema.parse(client)).toEqual(client);
+    expect(MachineSettingsSchema.parse(machine)).toEqual(machine);
+    expect(client.version).toBe(21);
+    expect(machine.version).toBe(1);
+    expect(machine.engine.mcpServers).toEqual(CHOSEN.engine.mcpServers); // the unified file's nesting kept
+    expect(Object.keys(client).filter((key) => key !== 'version').flatMap((section) => Object.keys(machine).includes(section) && !['supervisor', 'artifacts'].includes(section) ? [section] : [])).toEqual([]);
+    expect(mergeSettings(JSON.parse(JSON.stringify(client)), JSON.parse(JSON.stringify(machine)))).toEqual(CHOSEN);
+    expect(mergeSettings(clientSettingsDefaults(), machineSettingsDefaults())).toEqual(SETTINGS_DEFAULTS_V21);
+  });
+
+  it('splits a unified file of the last unified version, and of the oldest, with every value kept', () => {
+    const v20 = { ...CHOSEN, version: 20 };
+    expect(isUnifiedSettings(v20)).toBe(true);
+    expect(mergeSettings(splitSettings(migrateSettings(v20)).client, splitSettings(migrateSettings(v20)).machine)).toEqual(CHOSEN);
+    const v1 = splitSettings(migrateSettings(fixture('v1.json')));
+    expect(v1.client.theme).toBe((fixture('v1.json') as { theme: string }).theme);
+    expect(v1.machine).toEqual(machineSettingsDefaults());
+  });
+
+  it('reads each file only at its own versions: a unified file, a merged object or the other file is refused by each', () => {
+    const { client, machine } = splitSettings(CHOSEN);
+    expect(migrateClientSettings(JSON.parse(JSON.stringify(client)))).toEqual(client);
+    expect(migrateMachineSettings(JSON.parse(JSON.stringify(machine)))).toEqual(machine);
+    for (const raw of [{ ...CHOSEN, version: 20 }, CHOSEN, machine, { ...client, version: 22 }]) expect(() => migrateClientSettings(raw)).toThrow();
+    for (const raw of [{ ...CHOSEN, version: 20 }, CHOSEN, client, { ...machine, version: 2 }]) expect(() => migrateMachineSettings(raw)).toThrow();
+    expect(isUnifiedSettings(client)).toBe(false);
+    expect(isUnifiedSettings(machine)).toBe(true); // a machine file is never read as settings.json: its version names no client file either
+    expect(() => migrateSettings(client)).toThrow(); // a client file has no machine sections
+  });
+
+  it('drops an override of a retired action from a client file, as from a unified one (W10)', () => {
+    const { client } = splitSettings(CHOSEN);
+    expect(migrateClientSettings({ ...client, keymap: { ...client.keymap, 'composer.steer': 'Alt+Enter' } }).keymap).toEqual(client.keymap);
+  });
+
+  it('routes a patch field by field: a machine field to the machine half, a client field to the client half, in the sections both own', () => {
+    expect(splitSettingsPatch({ theme: 'dark', supervisor: { shape: 'embedded', idleExitMinutes: 5 }, artifacts: { commentsView: 'hide', defaultDesignSystem: DS_A }, engine: { subagentModel: 'haiku' } })).toEqual({
+      client: { theme: 'dark', supervisor: { shape: 'embedded' }, artifacts: { commentsView: 'hide' } },
+      machine: { engine: { subagentModel: 'haiku' }, supervisor: { idleExitMinutes: 5 }, artifacts: { defaultDesignSystem: DS_A } },
+    });
+    expect(splitSettingsPatch({ supervisor: { keepRunningDefault: false } })).toEqual({ client: { supervisor: { keepRunningDefault: false } }, machine: null });
+    expect(splitSettingsPatch({ sessions: { archiveInactiveDays: 7 }, permissions: { autoFallback: 'plan' } })).toEqual({ client: null, machine: { sessions: { archiveInactiveDays: 7 }, permissions: { autoFallback: 'plan' } } });
+    expect(splitSettingsPatch({ supervisor: { idleExitMinutes: null } })).toEqual({ client: null, machine: { supervisor: { idleExitMinutes: null } } }); // null is a value
+    expect(splitSettingsPatch({ theme: undefined, artifacts: { exportAuthorName: undefined } })).toEqual({ client: null, machine: null }); // undefined changes nothing
+    expect(splitSettingsPatch({})).toEqual({ client: null, machine: null });
+  });
+
+  it.each<[string, SettingsPatch]>([
+    ['one client field', { theme: 'dark' }],
+    ['one machine field', { gateway: { relayUnreachable: 'direct' } }],
+    ['both halves of the supervisor', { supervisor: { shape: 'embedded', idleExitMinutes: 30, keepRunningDefault: false } }],
+    ['both halves of the artifacts', { artifacts: { spaceDesignSystems: {}, exportAuthorName: null, commentsView: 'minimize' } }],
+    ['one notification kind', { notifications: { kinds: { approvals: false } } }],
+    ['the mods and the archive', { mods: { toHuman: { enabled: true } }, sessions: { archiveInactiveDays: null } }],
+  ])('applies %s to the two halves exactly as the one merge rule applies it to the merged settings', (_, patch) => {
+    const { client, machine } = splitSettings(CHOSEN);
+    const routed = splitSettingsPatch(patch);
+    const next = mergeSettings(routed.client ? applyClientPatch(client, routed.client) : client, routed.machine ? applyMachinePatch(machine, routed.machine) : machine);
+    expect(next).toEqual(applySettingsPatch(CHOSEN, patch));
+    expect(applyClientPatch(client, routed.machine ?? {})).toEqual(client); // a half never takes the other's fields
+    expect(applyMachinePatch(machine, routed.client ?? {})).toEqual(machine);
+  });
+});
+// P5 O3-A end

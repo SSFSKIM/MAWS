@@ -2,10 +2,10 @@
 // agent's work arrives as cua_repl `js` calls, opaque to MAWS, so main synthesizes these from the primitive stream of a
 // leased tab and tells the windows (`browser.agent.activity`), which show them as rows under the session's `js` call.
 // Never an X1 event: main keeps each session's last BROWSER_ACTIVITIES_KEPT, which a window lists when its transcript
-// mounts (`browser.agent.activities.list`), in the index too since cua board #93, so they outlive an app restart and go
-// with the session's record. Typed text never leaves main: a `typed` activity carries only how many characters were
-// typed (a cell can type a substituted secret); a dialog's excerpt and a click's label are page text, capped, shown as
-// plain text.
+// mounts (`browser.agent.activities.list`), stored too since cua board #93 (the browser's own database since P5 O3-A), so
+// they outlive an app restart and go with the session's record. Typed text never leaves main: a `typed` activity carries
+// only how many characters were typed (a cell can type a substituted secret); a dialog's excerpt and a click's label
+// are page text, capped, shown as plain text.
 import * as z from 'zod';
 import { AppSessionIdSchema } from '../graph/ids';
 import { BROWSER_DIALOG_EXCERPT_MAX_CHARS } from './dialog';

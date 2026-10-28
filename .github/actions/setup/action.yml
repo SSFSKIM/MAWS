@@ -42,6 +42,11 @@ runs:
         chmod +x "$displayplacer"
         id=$("$displayplacer" list | sed -n 's/^Persistent screen id: //p' | head -1)
         "$displayplacer" "id:$id res:1920x1080 hz:60 color_depth:7 scaling:off origin:(0,0) degree:0"
+        # Automatic chooses legacy 15px gutters on this VM's input devices. Use overlay scrollbars, as on the
+        # mini's desktop: layout-transfer accounts for the whole document width, with no reserved tools column.
+        echo "AppleShowScrollBars before: $(defaults read -g AppleShowScrollBars 2>/dev/null || echo Automatic)"
+        defaults write -g AppleShowScrollBars -string WhenScrolling
+        echo "AppleShowScrollBars after: $(defaults read -g AppleShowScrollBars)"
         defaults write com.apple.dock autohide -bool true
         killall Dock
         display=$(osascript -l JavaScript -e 'ObjC.import("AppKit"); const s = $.NSScreen.mainScreen; `${s.frame.size.width}x${s.frame.size.height}@${s.backingScaleFactor}x`')

@@ -260,10 +260,10 @@ env:
     supervisor c12 browser-import document code scm agents library deliverables presentations dashboard design
     design-systems tools panel browser-cua terminal c7 browser transcript supervisor-daemon daemon-unit machines
   # Non-e2e jobs admitted to the direct hosted route. Lane: hosted/no-hosted never changes these.
-  # packaged is unsigned but not admitted: run 40637823292 had four bare-suite failures
-  # (layout-transfer:416 twice, :540; sessions:301). Admit only after fixes and 3/3 hosted passes.
-  # A hosted packaged trial edits this list on its branch; the default stays self-hosted.
-  HOSTED_MAC_JOBS: ''
+  # packaged (CI-opt): PR #297 records the admission evidence: 3/3 direct hosted greens on one tree, with the
+  # same counts as its mini baseline, plus hosted settings/document checks after selecting overlay scrollbars.
+  # The unsigned app, daemon-packaged check and launchd sweep are the same on both routes; mirror keeps the mini.
+  HOSTED_MAC_JOBS: packaged
   # The groups that need a credential or the login keychain's custody, so never go to a hosted Mac, whatever the lane
   # (maws-app holds no secret): connectors-oauth, and discover, whose custody conditions (a), (b) and (c) stand.
   MAC_SECRET_E2E: connectors-oauth discover
@@ -533,8 +533,8 @@ jobs:
       - run: .github/scripts/gate-run.sh '^(ℹ|#) (tests|suites|pass|fail|cancelled|skipped|todo) ' pnpm test:probes
 
   # The unsigned packaged app (Decision Log 35): one `pnpm build:app`, then its fuses and the e2e scripts that run against
-  # dist/ (the bare set, the detached supervisor, voice's packaged case). Only by `Gates: packaged`; unsigned, so
-  # HOSTED_MAC_JOBS may admit it to direct macos-26. Unlisted (today), the plan keeps the self-hosted fallback.
+  # dist/ (the bare set, the detached supervisor, the daemon shape and voice's packaged case). Only by `Gates: packaged`;
+  # HOSTED_MAC_JOBS admits it to direct macos-26. Mirror, an unlisted job or a reserved final ref keeps the mini fallback.
   packaged:
     needs: plan
     if: needs.plan.outputs.packaged == 'true'

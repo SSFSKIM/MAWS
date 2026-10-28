@@ -1,14 +1,32 @@
 // The values of MAWS's own settings file (C11 execution document, Interfaces "Settings, version 3"): the current
-// version's defaults (W13: version 8; E9: version 9; E10: version 10; E4a: version 11; cua #90: version 12; P2-C: version 13; P3-D: version 14; P4-B1: version 15; P4-R8: version 16; P4-A2: version 17; UX1: version 18; the launch profile's style removed: version 19; P5 O2: version 20), the one migration from every earlier version, and the one patch merge
-// `settings.set` applies. Pure; main's store (src/main/settings/store.ts) reads, migrates, merges and writes with these,
-// and nothing else does.
+// version's defaults (W13: version 8; E9: version 9; E10: version 10; E4a: version 11; cua #90: version 12; P2-C: version 13; P3-D: version 14; P4-B1: version 15; P4-R8: version 16; P4-A2: version 17; UX1: version 18; the launch profile's style removed: version 19; P5 O2: version 20; P5 O3-A: version 21), the one migration from every earlier version, and the one patch merge
+// `settings.set` applies. Pure; main's stores (src/main/settings/) read, migrate, merge and write with these.
+// P5 O3-A (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §3): version 20 is the last unified file. From version 21 the
+// settings are two files with two writers, the client's `settings.json` and the machine's `machine-settings.json`
+// (their schemas in ../ipc/schema/settings.ts); the merged `Settings` at 21 is what the renderer reads, composed from
+// both. `migrateSettings` still takes a unified file of any version to the merged settings, which `splitSettings` cuts
+// into the two files; the engine host reads a unified file's machine half the same way while no split build has run.
 import * as z from 'zod';
 import { ACTION_IDS, RETIRED_ACTION_IDS } from '../keymap/actions';
-import { BrowserSettingsSchema, ChordSchema, SettingsSchema, SupervisorSettingsSchema, ThemeSettingSchema, type Settings, type SettingsPatch } from '../ipc/schema/settings';
+import {
+  BrowserSettingsSchema,
+  ChordSchema,
+  CLIENT_SETTINGS_VERSION,
+  ClientSettingsSchema,
+  MACHINE_SETTINGS_VERSION,
+  MachineSettingsSchema,
+  SettingsSchema,
+  SupervisorSettingsSchema,
+  ThemeSettingSchema,
+  type ClientSettings,
+  type MachineSettings,
+  type Settings,
+  type SettingsPatch,
+} from '../ipc/schema/settings';
 import { LaunchProfileSchema, userScopeProfile } from '../engine/launch-profile'; // P4-A2
 
-export const SETTINGS_DEFAULTS_V20: Settings = {
-  version: 20, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17; UX1: 18; the launch profile's style removed: 19; P5 O2: 20
+export const SETTINGS_DEFAULTS_V21: Settings = {
+  version: 21, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17; UX1: 18; the launch profile's style removed: 19; P5 O2: 20; P5 O3-A: 21 (the client file's)
   sessions: { archiveInactiveDays: null }, // UX1: opt-in only
   theme: 'light', // light-first (D-4, charter §10 item 10)
   keymap: {},
@@ -33,6 +51,10 @@ const SettingsV2Schema = z.strictObject({
   keymap: z.partialRecord(z.enum(ACTION_IDS), ChordSchema.nullable()),
   notifications: z.strictObject({ enabled: z.boolean(), sound: z.boolean() }),
 });
+
+// P5 O3-A: version 20, the last unified file: every section of the merged settings in one file
+const SettingsV20Schema = SettingsSchema.extend({ version: z.literal(20) });
+type SettingsV20 = z.infer<typeof SettingsV20Schema>;
 
 // P5 O2 M7 start: version 19, as it wrote it: version 20's sections less the supervisor's shape
 const SettingsV19Schema = SettingsSchema.extend({ version: z.literal(19), supervisor: SupervisorSettingsSchema.omit({ shape: true }) });
@@ -135,10 +157,13 @@ const SettingsV3Schema = SettingsV4Schema.extend({
 });
 // C12 end
 
-const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V20);
+const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V21);
 
-// P5 O2 M7: v19 → v20, the machine daemon (P5 §2: the owner's profile moves to it at O2's landing; Settings switches back)
-const fromV19 = (v19: SettingsV19): Settings => ({ ...v19, version: 20, supervisor: { ...v19.supervisor, shape: defaults().supervisor.shape } });
+// P5 O3-A: v20 → 21, every value kept: the merged settings, which the stores split into the two files
+const fromV20 = (v20: SettingsV20): Settings => ({ ...v20, version: 21 });
+// P5 O2 M7: v19 → v20, the machine daemon (P5 §2: the owner's profile moves to it at O2's landing; Settings switches back);
+// P5 O3-A: then v20 → 21
+const fromV19 = (v19: SettingsV19): Settings => fromV20({ ...v19, version: 20, supervisor: { ...v19.supervisor, shape: defaults().supervisor.shape } });
 // v18 → v19, the launch profile's output style dropped: a profile that chose MAWS's (the engine's default style) keeps
 // the user's own from now on, as every profile does; P5 O2 M7: then v19 → v20
 const fromV18 = (v18: SettingsV18): Settings => {
@@ -199,9 +224,10 @@ const fromV4 = (v4: SettingsV4): Settings => fromV5({ ...v4, version: 5, appeara
 // section) → v12 (cua #90: the bookmarks bar's switch) → v13 (P2-C: the mods section and two notification groups) → v14
 // (P3-D: the design-system defaults) → v15 (P4-B1: the comments view) → v16 (P4-R8: the app's MCP servers) → v17 (P4-A2:
 // the launch profile) → v18 (UX1: inactive archive and turn-finished notifications) → v19 (the launch profile's style
-// dropped) → v20 (P5 O2: the supervisor's shape). A version 20 object is validated and returned as it is;
-// anything else (another version, an invalid file of a known version) throws the schema's error, which the store turns
-// into the defaults with a warning. At any version, overrides of a retired action are dropped first (W10).
+// dropped) → v20 (P5 O2: the supervisor's shape) → 21 (P5 O3-A: the merged settings, every value kept). A merged
+// version 21 object is validated and returned as it is; anything else (another version, a client file, which has no
+// machine sections, an invalid file of a known version) throws the schema's error, which a store turns into the
+// defaults with a warning. At any version, overrides of a retired action are dropped first (W10).
 export function migrateSettings(input: unknown): Settings {
   const raw = withoutRetiredActions(input);
   const version = typeof raw === 'object' && raw !== null ? (raw as { version?: unknown }).version : undefined;
@@ -254,10 +280,88 @@ export function migrateSettings(input: unknown): Settings {
       return fromV18(SettingsV18Schema.parse(raw)); // the launch profile's style removed
     case 19:
       return fromV19(SettingsV19Schema.parse(raw)); // P5 O2 M7
+    case 20:
+      return fromV20(SettingsV20Schema.parse(raw)); // P5 O3-A
     default:
       return SettingsSchema.parse(raw);
   }
 }
+
+// P5 O3-A start (the O3 document §3; contract O3X3): the two files. A unified file is any version from 1 to 20; the
+// client file starts at 21 and the machine file's own line at 1. Each file's reader takes only its own versions, so a
+// unified `settings.json` is never read as a client file (the split converts it, once, under the spine lock), and a
+// version this build does not know keeps the store's rule: the defaults in memory, writes refused.
+export const LAST_UNIFIED_SETTINGS_VERSION = 20;
+
+export function settingsVersionOf(raw: unknown): unknown {
+  return typeof raw === 'object' && raw !== null ? (raw as { version?: unknown }).version : undefined;
+}
+
+export function isUnifiedSettings(raw: unknown): boolean {
+  const version = settingsVersionOf(raw);
+  return typeof version === 'number' && Number.isInteger(version) && version >= 1 && version <= LAST_UNIFIED_SETTINGS_VERSION;
+}
+
+// The merged settings cut into the two files, every field to its owner (§3's table).
+export function splitSettings(settings: Omit<Settings, 'version'>): { client: ClientSettings; machine: MachineSettings } {
+  const { theme, keymap, notifications, usage, appearance, voice, browser, engine, gateway, permissions, mods, sessions } = settings;
+  const { idleExitMinutes, ...supervisor } = settings.supervisor;
+  const { defaultDesignSystem, spaceDesignSystems, ...artifacts } = settings.artifacts;
+  return {
+    client: { version: CLIENT_SETTINGS_VERSION, theme, keymap, notifications, usage, appearance, voice, browser, supervisor, artifacts },
+    machine: { version: MACHINE_SETTINGS_VERSION, engine, gateway, permissions, mods, supervisor: { idleExitMinutes }, artifacts: { defaultDesignSystem, spaceDesignSystems }, sessions },
+  };
+}
+
+// The renderer's one `Settings` (its version the client file's), composed from the two files.
+export function mergeSettings(client: ClientSettings, machine: MachineSettings): Settings {
+  const { version, supervisor, artifacts, ...clientSections } = client;
+  const { version: _machineVersion, supervisor: machineSupervisor, artifacts: machineArtifacts, ...machineSections } = machine;
+  void _machineVersion;
+  return { version, ...clientSections, ...machineSections, supervisor: { ...supervisor, ...machineSupervisor }, artifacts: { ...artifacts, ...machineArtifacts } };
+}
+
+export const clientSettingsDefaults = (): ClientSettings => splitSettings(defaults()).client;
+export const machineSettingsDefaults = (): MachineSettings => splitSettings(defaults()).machine;
+
+// `settings.json` as a client file: version 21 is validated and returned (a later client version's migration chains
+// here); anything else throws, a unified file included. Overrides of a retired action are dropped first (W10).
+export function migrateClientSettings(input: unknown): ClientSettings {
+  return ClientSettingsSchema.parse(withoutRetiredActions(input));
+}
+
+// `machine-settings.json`: version 1 is validated and returned; anything else throws.
+export function migrateMachineSettings(input: unknown): MachineSettings {
+  return MachineSettingsSchema.parse(input);
+}
+
+// A patch cut by owner, field by field (`supervisor` and `artifacts` have both kinds): each half holds only its own
+// file's fields, null when the patch has none, so a patch to a machine field changes only the machine file and a
+// client field only the client file.
+export function splitSettingsPatch(patch: SettingsPatch): { client: SettingsPatch | null; machine: SettingsPatch | null } {
+  const { supervisor, artifacts, engine, gateway, permissions, mods, sessions, ...clientSections } = defined(patch);
+  const { idleExitMinutes, ...clientSupervisor } = defined(supervisor ?? {});
+  const { defaultDesignSystem, spaceDesignSystems, ...clientArtifacts } = defined(artifacts ?? {});
+  const client: SettingsPatch = { ...clientSections };
+  if (Object.keys(clientSupervisor).length > 0) client.supervisor = clientSupervisor;
+  if (Object.keys(clientArtifacts).length > 0) client.artifacts = clientArtifacts;
+  const machine: SettingsPatch = defined({ engine, gateway, permissions, mods, sessions });
+  if (idleExitMinutes !== undefined) machine.supervisor = { idleExitMinutes };
+  const machineArtifacts = defined({ defaultDesignSystem, spaceDesignSystems });
+  if (Object.keys(machineArtifacts).length > 0) machine.artifacts = machineArtifacts;
+  return { client: Object.keys(client).length > 0 ? client : null, machine: Object.keys(machine).length > 0 ? machine : null };
+}
+
+// One half's patch applied by the one merge rule (`applySettingsPatch`); the other half's defaults stand in for the
+// fields that half's patch never holds.
+export function applyClientPatch(client: ClientSettings, patch: SettingsPatch): ClientSettings {
+  return splitSettings(applySettingsPatch(mergeSettings(client, machineSettingsDefaults()), patch)).client;
+}
+
+export function applyMachinePatch(machine: MachineSettings, patch: SettingsPatch): MachineSettings {
+  return splitSettings(applySettingsPatch(mergeSettings(clientSettingsDefaults(), machine), patch)).machine;
+}
+// P5 O3-A end
 
 // W10: a keymap override naming an action that no longer exists (⌥Enter's hold) would fail the keymap's schema and
 // reset the whole file to the defaults; it is left out instead, and the file loses it at its next write.

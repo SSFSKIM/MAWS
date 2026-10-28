@@ -41,7 +41,7 @@
     "e2e:code": "scripts/e2e-build.sh harness && MAWS_HARNESS=1 playwright test e2e/code-tools.spec.ts e2e/code-editor.spec.ts",
     "e2e:agents": "scripts/e2e-build.sh harness && MAWS_HARNESS=1 playwright test e2e/agent-tools.spec.ts",
     "e2e:widgets": "scripts/e2e-build.sh harness && MAWS_ENGINE_REPLAY=1 MAWS_E2E_FOREGROUND=1 playwright test e2e/widgets.spec.ts",
-    "e2e:settings": "scripts/e2e-build.sh harness && playwright test e2e/settings.spec.ts e2e/accounts.spec.ts",
+    "e2e:settings": "scripts/e2e-build.sh harness && playwright test e2e/settings.spec.ts e2e/accounts.spec.ts e2e/spine-lock.spec.ts",
     "e2e:c12": "scripts/e2e-build.sh plain && MAWS_C12_E2E=1 playwright test e2e/c12-budget.spec.ts e2e/c12-quit.spec.ts e2e/c12-sweep.spec.ts",
     "e2e:tools": "scripts/e2e-build.sh harness && MAWS_HARNESS=1 playwright test e2e/maws-tools.spec.ts",
     "e2e:deliverables": "scripts/e2e-build.sh harness && MAWS_HARNESS=1 playwright test e2e/deliverables.spec.ts",

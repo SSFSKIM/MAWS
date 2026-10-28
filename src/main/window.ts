@@ -12,7 +12,7 @@ import { showAppWindow } from './window-show';
 import { attributeConsole, guardFrames, guardWindowNavigation, isCspExempt } from './artifacts/policies';
 import { emit } from './ipc/events';
 // E2 end
-import type { ResolvedTheme } from './settings/store';
+import type { ResolvedTheme } from './client/settings-store'; // P5 O3-A: the client half's
 import { localMachineArgument } from '@shared/machine/page-argument'; // P5 O6 M2
 import { localMachine } from './machine/local'; // P5 O6 M2
 
