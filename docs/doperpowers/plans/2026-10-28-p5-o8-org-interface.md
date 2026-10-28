@@ -43,8 +43,9 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-28) Task 4: `signing-store.ts`, `signer.ts`, `postState`, `signing.json`, §H's M3 rows.
   - [x] (2026-10-28) Task 5, reviewed clean (5448d421b, fixes 34b043605 and 841d36673): `weekly.ts` and `deliveries.ts`.
   - [x] (2026-10-28) Task 6a, reviewed clean (7fab342f5, fix 65e1310fa): the session's composition, the rekey transaction and its replay, the IPC schema and commands, main's wiring.
-  - [ ] Task 6b: the Org section (its lines, buttons and confirmations) and `copy.ts`.
-  - [ ] Task 7: `test/org/signer.local.test.ts`.
+  - [x] (2026-10-28) Task 6b, reviewed clean (fbed38051, fixes 37cdbf67d and 1d4bd558c): the Org section (its lines, buttons and confirmations) and `copy.ts`.
+  - [x] (2026-10-28) Task 7, reviewed clean (1e38ae640): `test/org/signer.local.test.ts`, with the shared harness `test/org/local-org.ts`.
+  - [x] (2026-10-28) Task 8, reviewed clean (740f0c46f): the app follows a recovery whose first state is a sibling at its head's version (Task 7's Discovery 2).
   - [ ] reviewer-high on the PR, the desk track's review of the `admin.ts` hunk, and the final gate.
 - [ ] M4 — The Org page — *advisory; Q1 answered; needs M3 and O11's H1*
 - [ ] M5 — Owners on rows and the People toggle — **executable** (re-planned 2026-10-28; needs M2, landed)
@@ -1523,6 +1524,22 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   5. Rekey refusals sit under the rekey field. Rekey and sign-in share `status.refused`, so the section tracks which control sent the attempt; a `refused.attempt` field would make that exact, and is residue for M4.
   6. The weekly line sits on the Signer row. The `root add` line names the full device id, with the fingerprint in the row's note. A discarded proposal shows only when it was exposed.
   7. OrgSection.tsx stays one file, about 440 lines. M4 splits it.
+  8. (Review fixes, 37cdbf67d and 1d4bd558c.) Discard's consent is bound to the proposal.
+     - The status's pending part carries the slot's `hash`. `org.discardPending` takes `{confirmed: true, hash}`, and the signer refuses `stale` when the hash doesn't name the current slot, before any hub read or write.
+     - The sheet closes when its slot settles or is replaced.
+     - The hash is the package's `stateHash`, computed in the slot's write and again at every load, so a stored value never outranks its state. Abandoned rows are keyed by hash.
+     - Rejected: a synchronous copy of `stateHash` for `pending()`, which would make a second definition of a protocol byte.
+  Date/Author: 2026-10-28, O8's executor.
+
+- Decision: Task 7's two adapted proofs and its Discovery 2 (the architect, 2026-10-28).
+  1. The genesis fallback can't be reached on a real link: a link is up only after `caps`, which always carries `stateVersion`. So the local suite proves deep delivery (versions 16 to 35, one run, acknowledged), and `deliveries.test.ts` keeps the literal genesis path.
+  2. "The hub refuses the post" is the fetch seam answering `503 busy`, a real `OrgChain.submit` answer. The real Worker can't refuse a valid successor without it becoming a fork.
+  3. Discovery 2, fixed in M1's session (740f0c46f):
+     - A feed `state` notice at the held head's version is followed through `rereadFrom`, as one above it is.
+     - The certificate poll syncs when the served head is at the same version with another hash, rather than judging it a `fork` alone.
+     - held.ts is unchanged, so only a verified recovery moves the head, and a sibling with no recovery behind it still reads `fork`.
+  4. A notice below the held head is not followed. A recovery below the app's head is followed by the certificate poll within 10 minutes, or when the hub's chain reaches the app's version. A recovery needs the owner's recovery key, so it is rare, and a post the app makes on the abandoned head in that window is refused by the hub, which M3's fork handling covers. Rejected: following such a notice only when the served chain carries a transition the held view hasn't accepted, since it costs a hub read on the common path and raises a false `rollback` when the hub is merely behind. Residue for M3's landing entry.
+  5. Discovery 1 is the desk track's residue (O10): an endpoint's own hub sync reads `?since=<head>`, so it can't take that same recovery. M3's recovery-first delivery covers it until then.
   Date/Author: 2026-10-28, O8's executor.
 
 ## Outcomes & Retrospective
