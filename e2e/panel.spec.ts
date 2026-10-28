@@ -1051,10 +1051,23 @@ async function advanceTo(app: ElectronApplication, ms: number): Promise<void> {
   }, ms);
 }
 
-// A pointer drag of `element` from its centre by `dx`, `dy` px (pointer capture, as a person drags it).
+// A pointer drag of `element` from its centre by `dx`, `dy` px (pointer capture, as a person drags it). The press waits
+// for the element to hold still and for its centre to reach it: a card just floated settles its height once after its
+// content shows, and a hosted Mac read the corner's box before that, 29 px above where it came to rest, so the press
+// fell on the tool behind the card and the drag did nothing (instrumented hosted run 40647343005, 1 miss in 12).
 async function dragBy(page: Page, element: Locator, dx: number, dy = 0): Promise<void> {
-  const box = (await element.boundingBox())!;
-  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  const seen: { centre: [number, number] | null } = { centre: null };
+  await expect
+    .poll(async () => {
+      const box = await element.boundingBox();
+      const centre: [number, number] | null = box && [box.x + box.width / 2, box.y + box.height / 2];
+      const still = centre !== null && seen.centre !== null && centre[0] === seen.centre[0] && centre[1] === seen.centre[1];
+      seen.centre = centre;
+      if (!still) return 'moving';
+      return element.evaluate((el, [x, y]) => (el.contains(document.elementFromPoint(x, y)) ? 'reached' : `covered by ${document.elementFromPoint(x, y)?.outerHTML.slice(0, 120)}`), centre!);
+    }, { message: 'the element holds still and its centre reaches it' })
+    .toBe('reached');
+  const [x, y] = seen.centre!;
   await page.mouse.move(x, y);
   await page.mouse.down();
   await page.mouse.move(x + dx, y + dy, { steps: 8 });
