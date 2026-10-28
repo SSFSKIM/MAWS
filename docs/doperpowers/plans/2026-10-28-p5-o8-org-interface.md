@@ -7,7 +7,7 @@
 > - The remote layer, `docs/doperpowers/specs/2026-10-26-remote-layer-design.md` (blob `437a03eb`), cited *RL §n*: RL5 (the signed org state), RL6 (the session record, its listing and its withdrawal), §5.2 (writers, the backstop, the software root and its end), §5.3 (a device's pairing), §5.6 (step-up), §5.7 (the log plane), §5.9 (what the hub can't do), §6 (owners, visibility, grants).
 > - P5's contracts OX2, OX3, OX8 and OX9, and Decision Logs 26 and 30 (the admin's signing checks), 31 (a delegation's prefix and id used once), 34 (a member's new device), 36 (reader state and drafts per member), 38 (Access's login transfer; the Registry socket's `?app=1`), 50 (an owner add is `record.owners {add: true, member}`), 59 (`gone` listings), 69 (the deployment admin and its end), 71 (the device key's backup mark), 75 and 80 (words v2-only; migrated history by O14's Interfaces §D), 92 (this document's first milestone; the project channel is the app's one reader of the log plane) and 93 (O9's requests of the rows; acceptance 3 closes with this first milestone).
 >
-> **Built on.** O7's document `docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md` (blob `6f67459b`, PR #276), whose M1 is being built in parallel: its Interfaces §B (`OrgSession`, `SignedIn`, `HubAccess`, `signedOut()`), which M1 here implements for production, and §A (`Machines.remote`, `Machines.onRemote`), whose roster M2 reads. O9's document `…-p5-o9-lane-a.md` (blob `f367e8c5`, PR #277): its Interfaces §G, R1 to R6, which M2's rows answer. O6, landed (`…-p5-o6-machine-dimension.md`, blob `f5a91406`): addresses, OX3's org keys and `smnsId`, the sidebar's settled forms T1 to T5. O10 M1–M9, landed (`…-p5-o10-endpoint.md`, blob `315bc8cf`): `src/main/device/` (keys, step-up, the backup mark), the endpoint's listings (`src/endpoint/listings.ts`) and `endpoint.listings`. O11, landed (`…-p5-o11-hub-v2.md`, blob `4c4ac1ff`): the Registry's chain, pairing exchange, listings and app socket. O13, landed (`…-p5-o13-web-cards.md`, blob `04e88ca6`): `deployment admin` (`apps/desk-hub/deploy/admin.ts`), production's root until O8, and the pairing code, MAC and fingerprint in `org-protocol`. O14's Interfaces §D (`…-p5-o14-cutover.md`, blob `572fbd04`) for M7.
+> **Built on.** O7's document `docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md` (blob `6f67459b`, PR #276), whose M1 is being built in parallel: its Interfaces §B (`OrgSession`, `SignedIn`, `HubAccess`, `signedOut()`), which M1 here implements for production, and §A (`Machines.remote`, `Machines.onRemote`), whose roster M2 reads. O9's document `…-p5-o9-lane-a.md` (blob `f367e8c5`, PR #277): its Interfaces §G, R1 to R6, which M2's rows answer. O6, landed (`…-p5-o6-machine-dimension.md`, blob `f5a91406`): addresses, OX3's org keys and `smnsId`, the sidebar's settled forms T1 to T5. O10 M1–M9, landed (`…-p5-o10-endpoint.md`, blob `315bc8cf`): `src/main/device/` (keys, step-up, the backup mark), the endpoint's listings (`src/endpoint/listings.ts`) and `endpoint.listings`. O11, landed (`…-p5-o11-hub-v2.md`, blob `4c4ac1ff`): the Registry's chain, pairing exchange, listings and app socket. O13, landed (`…-p5-o13-web-cards.md`, blob `04e88ca6`): `deployment admin` (`apps/desk-hub/deploy/admin.ts`), production's root until O8, and the pairing code, MAC and fingerprint in `org-protocol`. O14's Interfaces §D (`…-p5-o14-cutover.md`, blob `511deaba`) for M7.
 >
 > **What this file holds.** The execution only. P5 Decision Log 92's first milestone is specified to be built now, as two milestones: **M1, the app's org session** (sign-in, the device's registration, the held org state) and **M2, the remote rows**. M3–M8 are **advisory**: what each needs, adds and proves, not how. Much of them turns on the owner's taste, asked under "Open questions for the owner"; M1 and M2 pre-empt none of those answers. Residue decisions are made where they bind, each with the alternative that lost, and listed in the Decision Log for P5's writer.
 
@@ -43,14 +43,15 @@ Items 1 and 2 are the first milestone and executable now. Items 3 to 8 restate P
    - Signing in with a pairing code from `deployment admin pair --class native-mac`: the app runs Access's login transfer in the system browser, checks that `/api/me` names the code's org and member, reads the org's chain from its genesis and verifies it against the code's pins, posts its device entry with the code's MAC, and shows the entry's fingerprint. The fingerprint equals the one `pair` prints. Once the approving device lists the entry, the app reads signed in.
    - The held org state follows each version the hub announces, refuses a rollback and a fork, adopts a recovery transition, and survives a relaunch with no network. A relaunch is signed in again with no browser while the Access token lives.
    - `OrgSession.current()` is non-null exactly while the held head lists this device, under its member, with this profile's channel and step-up keys. `onChanged` fires at sign-in, sign-out, each adopted head (a link's `advance` included) and each change of the hub's credentials. While it is non-null, O7's links come up to the listed machines. An Access token that expires sets `hub` to null and leaves the device signed in, so the links keep the direct carrier.
-   - A head that removes the device makes `current()` null, and the Org section says so.
+   - A head that removes the device makes `current()` null, and the Org section says so. A hub that stops admitting the member (a `4403` close, `403 not-a-member`) reads `denied` and changes no trust state until a verified head does.
+   - A damaged held chain fails closed: the hub's chain is taken again only if it reaches the anchored version and head, and otherwise only a fresh pairing code re-anchors. Sign-out survives a crash at any point of it.
    - Proved by `src/main/org/*.test.ts` and `test/org/sign-in.local.test.ts` (the Miniflare hub, O13's real `pair`), and live on staging at the owner's hand.
 2. **The remote rows (M2).** P5 acceptance 3's remote half, and O9's R1 to R6 (its Interfaces §G).
    - Every listing the hub holds for a machine in O7's RL2 roster that verifies against the held head is a row. One that fails is not, and is tried again at the next head.
    - A row's address is `<ref>/<listing session>`: lane A's engine session id, lane B's `appSessionId` (R1). It carries its lane (R2), its state and title (R4), its owners as member ids and its listing's project (R5), and the org key that project joins. A lane A row reads `foreign_held` (R3, as far as a listing can say: Decision Log, finding F6). Nothing else (R6).
    - The sidebar files a row under the org project its project joins by `smnsId`, computed with the signed-in org, when that project is listed, and otherwise under its machine's row (OX3). It draws its machine chip (T1), greys it while its machine is not `up` (T2), shows its state's glyph and counts it in its project's waiting and working rollup.
    - Only the signed-in member's own sessions are drawn; other people's wait for M5's toggle. A row whose address has a record is not drawn: the record is.
-   - A `gone` revision removes the row, a higher revision replaces it, and a lower one is ignored. The rows survive a relaunch with the hub down, from a cache verified again at load.
+   - A `gone` revision removes the row, a higher revision replaces it, and a lower one is ignored, after a reconnect or a relaunch too. The rows survive a relaunch with the hub down, from a cache verified again at load, and a machine's restored tabs stay until this run's hub snapshot has applied.
    - Proved by `src/main/org/rows.test.ts`, `test/org/rows.local.test.ts` (a real endpoint's listings through the Miniflare hub), `derive.test.ts` and `Sidebar.test.tsx` (remote rows under org projects with machine chips, beside local rows), and live at the first cut-over machine.
 3. **The app as the org's signer (M3).** The app's device, its key file carrying `excludedFromBackupAtCreation` (else registered again with new keys first), is a root beside the deployment admin. It signs the weekly no-change successor, so the deployment admin's `refresh` stops. Before signing anything it refuses a state that makes a revoked key current again, offers the superseded states' revocations after a root transition, warns before dropping a delegation, refuses a delegation prefix that equals, nests in or covers another or a name, and one whose prefix or id was used before (revoked ones included), and renews a delegation only while it is live (P5 Decision Logs 26, 30 and 31). Each removal it signs is also delivered to every machine and acknowledged (RL §5.2).
 4. **The Org page (M4).** Members and their devices, machines with enrollment codes, per-machine rights, delegations and the recovery key's id, each change shown before it is signed. A re-enrolled machine's grants are re-signed, each shown first. An admin enrolls a member's first device directly (P5 Decision Log 34).
@@ -159,7 +160,7 @@ M1 runs now and lands by its own PR. M2 needs M1 and O7 M1 on master, and lands 
 
 | Offer | Rule |
 |---|---|
-| The first chain (registration, or a re-read after a held chain failed at load) | `verifyPinnedChain` against the registration's pins; the whole served run, or nothing |
+| The first chain, at registration | `verifyPinnedChain` against the code's pins; the whole served run, or nothing; the anchor (below) set from its genesis and head |
 | States from the hub, or from a link's handshake (`advance`) | `advanceHead(head, states, transitions, accepted)` adopts the run that verifies; written to disk, then listeners told |
 | A recovery transition whose `fromVersion` is below the head | `verifyRewind(head, t, pins.recoveryPub, accepted)`; its base is the held state at `fromVersion`; the first state under it must pass `verifySuccessor(base, s, [t])`; the states after `fromVersion` move to `superseded` (kept for M3's offer); the high-water mark follows the new head |
 | A served head below the high-water mark | refused `rollback`, logged; the status's `problem` says so |
@@ -170,12 +171,14 @@ M1 runs now and lands by its own PR. M2 needs M1 and O7 M1 on master, and lands 
 - `since(version)` answers the held states after `version` and the transitions from it, for a peer that is behind.
 - `certificates()` answers the set the hub last served. Its consumers verify it (`machineKeys`, `verifyListing`), as the endpoint keeps it.
 - **The whole chain is kept,** from genesis, with `superseded`, `accepted` and the transitions. At P5's scale that is a few kilobytes a week. The later admin duties need it: the superseded states' revocations after a root transition (P5 Decision Log 30), and a check of each new state against its predecessor. Rejected: the endpoint's 30-day window, which would lose what M3 offers. Also rejected: moving `EndpointOrg`'s adoption into `org-protocol` now, which changes O10's landed module for no behaviour of its own. One adoption shared by the endpoint and the app is a debt row (Decision Log).
-- **At load,** the held chain is verified again with `verifyPinnedChain` against the registration's pins. A file that fails, or doesn't read, is discarded and re-read from the hub from genesis. Until that succeeds, `current()` is null and `problem` says why.
+- **The anchor.** `registration.json` keeps `anchor {genesis, version, head}`: the genesis state's hash, and the held head's version and hash. It is the trust that outlives `chain.json`, as `deployment admin`'s anchor file is for its device (`verifiedHead`). It is set at registration and moved after each adoption: `chain.json` is written first, then the anchor, so a crash between leaves an anchor behind a good chain, which the next load moves up. A rewind moves it to the new head.
+- **At load,** the held chain is checked as one run from the anchored genesis, not pinned again: `chain[0]` hashes to `anchor.genesis`, `verifyGenesis(chain[0])` passes, `advanceHead(chain[0], rest, transitions)` adopts every state held, the run's last state is the held head, and the head's version is at least `anchor.version`. The pins are not checked again: a recovery may have rewound below the state the code's roots first signed, and `verifyPinnedChain` would then refuse a chain `verifyRewind` admitted (round 1's finding, reproduced against the package).
+- **A held chain that fails that check, or doesn't read, fails closed.** `current()` is null and `problem` names it. The app reads the hub's chain from genesis and takes it only if it passes the same one-run check from `anchor.genesis` and reaches `anchor.version` with `anchor.head` as its state there, or holds a recovery transition from below it that `verifyRewind` admits, adopted then as a rewind. Anything else stays closed until the owner pastes a fresh pairing code, which re-anchors on that code's pins: an explicit act, since it gives up the old high-water mark. Rejected: re-reading from genesis against the pins alone, which lets a stale or hostile hub restore an older chain, removed devices and machines included.
 
 *Following the hub.*
 - While signed in with a hub credential, the Registry feed (§F) holds the `?app=1` socket. At its open, and at each `state {version}` above the held head, the session reads `?since=<held version>`, every page, and adopts it.
 - Every `CERTS_REFRESH_MS` it reads `GET /api/org/state` with no `since` for the head, the transitions and the certificates. A changed certificate set fires `onChanged`, since O7's roster includes live certificates. The poll exists because no frame announces a certificate (Interfaces §I asks O11 for one).
-- A close with `4403` re-reads the state at once; the head will show the removal.
+- **A close with `4403`, or `403 not-a-member` on any hub request, is not a verified removal.** The hub closes the sockets of a member a new state removed and then refuses that member everything, `/api/org/state` included, so the removing state can't be read from it. The session reads `hubAccess: 'denied'`: `SignedIn.hub` is null, the feed stops and doesn't retry, and the device's trust doesn't change, since an unsigned close or refusal proves nothing. The held head stays until a verified successor drops the device, carried by a link's handshake (`advance`) or by the hub after a later sign-in. Meanwhile the endpoints, which hold the removing state, refuse the device (O7's sealed `close {removed}`). "Sign in again" retries. A hub route that lets a removed member read the state that removed them is asked of O11 (Interfaces §I, H3).
 - The feed reconnects on its backoff, and at once on a probe: main wires `powerMonitor` `resume` and `unlock-screen` to `feed.probe()`.
 
 *What `current()` answers.* Non-null exactly when all of these hold:
@@ -193,7 +196,7 @@ Its value is:
 `headers()` resolves to `{'cf-access-token': token}`, or the stand-in's `{'x-desk-standin-user': user}` (O7 §B's `headers()` is async). The value object is rebuilt, and `onChanged` fires, at each of O7 §B's triggers. A head that drops the device leaves the registration held and reads `session: 'removed'`.
 
 *Sign out and sign in.*
-- `signOut` deletes `access.json`, sets `signedOut: true` in `registration.json`, closes the feed and fires `onChanged`. The registration, the chain and the keys stay, so signing in again is a browser trip and no new pairing.
+- `signOut` first writes `signedOut: true` to `registration.json`, the commit point; then it deletes `access.json`, closes the feed and fires `onChanged`. A sign-in still running is fenced by a generation counter that `signOut` advances, so its completion writes nothing and can't clear the marker. At startup, a registration marked signed out never reads `access.json` and deletes one it finds. The registration, the chain and the keys stay, so signing in again is a browser trip and no new pairing.
 - `signIn` (or a code for the held registration's org) runs the login alone, the status reading `registered` with `hubAccess: 'signing-in'`. `/api/me` must name the registration's member, else it is refused `not-member` and the old state stands. Success writes `access.json`, clears `signedOut` and fires `onChanged`.
 - A device stays listed in the org until an admin removes it (M4).
 - Removing this profile's registration altogether (a different org on this Mac) is not built; it is a later need, recorded as residue.
@@ -203,7 +206,7 @@ Its value is:
 - `registering`: the step in words (finish in the browser; checking the org; waiting for approval until `expires`) with Cancel. At `approval`, the fingerprint large in the monospace token, with "compare it with the approving device, then approve there".
 - `registered`:
   - which org and email, and this Mac's device id (its first 8 characters);
-  - the hub's state (connected, connecting, sign-in expired with "Sign in again", or unreachable);
+  - the hub's state (connected; connecting; sign-in expired, or the hub no longer admitting this person, each with "Sign in again"; or unreachable);
   - the org state's version and its age in days, in the warning tone from `HEAD_WARN_DAYS` (21), with the 30-day backstop named;
   - the `problem` line when one is held;
   - Sign out.
@@ -231,7 +234,11 @@ The Org page's final shape, where it lives and what more it shows are the owner'
   - the org token dropped, and the app token's `exp` and `email` read;
   - the overall bound and `cancel`;
   - the stand-in honoured only for a loopback hub in an unpackaged build with `MAWS_DEV_STANDIN_USER`.
-- `held.test.ts`: each row of the rules table (the endpoint's `test/endpoint/org-sync.test.ts` cases, carried over where they apply), persistence before notification, `since`, and a held file failing at load.
+- `held.test.ts`:
+  - each row of the rules table (the endpoint's `test/endpoint/org-sync.test.ts` cases, carried over where they apply), persistence before notification, and `since`;
+  - a recovery that rewinds below the state the pinned root first signed, followed by an offline restart that loads the held chain;
+  - a crash between `chain.json` and the anchor, the next load moving the anchor up;
+  - a damaged `chain.json` with the hub serving an authentic chain from before a removal the app had adopted: it stays closed; with the hub serving the anchored head or later: it loads.
 - `org-session.test.ts`, over fakes:
   - each registration step and each refusal reason;
   - the file order, with a crash between files;
@@ -240,6 +247,9 @@ The Org page's final shape, where it lives and what more it shows are the owner'
   - `onChanged` at each trigger, `advance` included;
   - the token's end by its clock and by an Access answer, `hub` null and the device still signed in;
   - sign out and sign in;
+  - a crash after sign-out's marker and before `access.json`'s removal, and a failed marker write, each starting signed out with no token used;
+  - a sign-in that completes after a sign-out writing nothing;
+  - a `403 not-a-member` and a `4403` close reading `denied`, with `current()` unchanged until a verified head drops the device;
   - a never-signed-in profile making no keys, no files and no requests.
 - `registry-feed.test.ts`: parts joined; frames typed; open only while `current()?.hub` is non-null and closed when it turns null; the backoff and its reset on a probe; `4403` passed on; an upgrade refused without `X-Desk-Build` reported as credentials ended.
 - `test/org/sign-in.local.test.ts`, on desk-hub's Worker in Miniflare (`test/endpoint/miniflare-hub.ts`) with the stand-in's identity:
@@ -248,6 +258,7 @@ The Org page's final shape, where it lives and what more it shows are the owner'
   - an admin `refresh` followed through the feed's notice;
   - a served rollback refused;
   - an admin `remove-device` making `current()` null;
+  - the member removed from the org (a second member, as `OrgAdmin` adds one), its app reading `denied` and keeping its held head;
   - **O7 §B met exactly:** `connectChannel(dial, signedIn.identity, signedIn.view, {machine})` completing against the endpoint harness's listener (`test/endpoint/sub-harness.ts`), the endpoint enrolled in the same local org.
 - `OrgSection.test.tsx`: each status drawn; Sign in sends `org.register` with the trimmed code; Cancel, Sign out and Sign in again; the fingerprint shown; no prop carries a token.
 - The grades test passes with `org.*` declared `client`.
@@ -277,9 +288,10 @@ The Org page's final shape, where it lives and what more it shows are the owner'
 **Decisions.**
 
 *Where rows come from.*
-- **The hub's listings, through the `?app=1` socket.** At open the feed brings `listings` pages. Their records, once `last` arrives, replace the held set: a held record with a higher revision than the page's is kept (a live frame raced the snapshot), and a held record the snapshot lacks is dropped, since withdrawn listings are never in pages. Each `listing` frame then replaces its key's record when its revision is higher; one that is `gone` deletes it.
+- **The hub's listings, through the `?app=1` socket.** At open the feed brings `listings` pages. Their records, once `last` arrives, replace the held rows: a held record with a higher revision than the page's is kept (a live frame raced the snapshot), and a held record the snapshot lacks leaves the rows, since withdrawn listings are never in pages. Each `listing` frame then replaces its key's record when its revision is higher, and a `gone` one removes the row.
+- **A high-water mark per key outlives its row.** Each key (`<ref>/<session>`) keeps the highest revision the app has accepted, apart from the visible rows, with the verified `gone` record when that was the last. A record at or below its key's mark is ignored, whether it comes live, in a snapshot or from the cache, and a row a snapshot omits keeps its mark. So revision 10, then `gone` at 11, then a replayed 10 never brings the row back, across a reconnect or a relaunch; `src/endpoint/listings.ts` keeps its signed withdrawals for the same reason. The marks persist in `listings.json` (§C). A machine that leaves the org state drops its marks, and past `HIGH_WATER_MAX` keys the oldest by `issued` go. A session listed again comes at a higher revision (RL6), so a mark never hides it.
 - **Every record is verified** with `verifyListing(head.state, record, certificates, now)` against the session's current view. One that fails waits in a bounded set (1024, newest kept) and is tried again at each `onChanged`. At each new head every held record is verified again, so a machine the org removed, or whose key it revoked, loses its rows at once.
-- **The cache.** `<userData>/org/listings.json` (§C) is written a second after a change, and at load it is verified against the held head (the org must match). So a relaunch with the hub down still shows rows, greyed while their machines are not `up` (T2).
+- **The cache.** `<userData>/org/listings.json` (§C) is written a second after a change. At load each record is verified against the held head (the org must match) and held under its key's mark. So a relaunch with the hub down still shows rows, greyed while their machines are not `up` (T2).
 - **Rejected: `endpoint.listings` over each link now.** It is the path for `private` sessions (to their owners and shares) and needs polling, since it is a call. No session is private until sminos sends `access` (Orientation), so M6 adds it when visibility exists. Also rejected: `GET /api/listings` polling, which the socket replaces.
 
 *Which rows exist.* A held record becomes a row when its machine is in O7's RL2 roster (`Machines.onRemote`), which leaves out the local machine and contested refs. Every row carries `mine`: the signed-in member is among its owners. Signed out, there are no rows (the cache stays).
@@ -301,10 +313,11 @@ The Org page's final shape, where it lives and what more it shows are the owner'
 - `useSessions` gains `listed: ReadonlyMap<AppSessionId, ListedSession>` and `listedMachines: ReadonlySet<MachineRef>`. `applyRows(rows)` replaces both wholesale from `org.rows` and `org.rows.changed`.
 - A `ListedSession` is a `RemoteRow` with its address (`addressOf(machine, session)`) as `appId`.
 - **It is not a `SessionRecord`.** A listing has no directory, model, mode, holder or lineage. A record built from one would plant made-up values in about seventy readers of `directory` alone, which is the class of silent bug P5's Surprises name for O6. Other people's sessions will only ever be listings (M5), so the sidebar needs the listed kind anyway.
-- The pane of an opened remote session needs a record. The lane that opens it supplies one from its own authoritative read: O9 from its watch's presence, O7 M2 from `session.status` and O3's per-member read (O7's C5). It supplies it through the store's per-machine `applyChangedMany`, after which the listed row yields to the record at the same address.
+- **M2 promises no record for a remote session, and none exists before O3.** The session pane takes a `SessionRecord`, and so does O9's `controlsFor(record, …)`, but no source produces one for a remote session today. The listing lacks a record's directory, holder, mode and timestamps. Lane A's plane `presence` (`SessionPresence` in `apps/desk-hub/src/protocol/session.ts`) carries the process status, the bridge and its capabilities, not a record. A per-member `session.get` on the machine is O3's (O7's C5). Until O3, the lane that opens a remote session draws its pane from the `ListedSession` and its own subscription, and where the pane needs a record, the opening lane's re-plan decides: a remote pane variant, or O3's read. That is finding F8, and a contract question to O9 and O7 (Interfaces §I).
+- **The yield rule,** for when a record exists: once any source applies a record at a listed address (the store's per-machine `applyChangedMany`), the record's row is drawn and the listed row is not.
 - Rejected: synthesizing `SessionRecord`s and `SessionDigest`s in main for the snapshot reads, which O7 M1's text left open.
 
-*R3, read honestly.* A lane A row's `availability` is `'foreign_held'`: it is held on its machine, and nothing on this Mac may start a writer on it. A listed row offers no action at all, so nothing here can start a second writer. The listing carries no holder, so the row names no holder kind or pid. O9 takes the holder from its watch's presence when it opens the session. Recorded as finding F6, not worked around. A lane B row's `availability` is null, since O7 M2 owns its pane.
+*R3, read honestly.* A lane A row's `availability` is `'foreign_held'`: it is held on its machine, and nothing on this Mac may start a writer on it. A listed row offers no action at all, so nothing here can start a second writer. The listing carries no holder, so the row names no holder kind or pid; what the watch's presence says of the process is O9's to read once it opens the session. Recorded as finding F6, not worked around. A lane B row's `availability` is null, since O7 M2 owns its pane.
 
 *Drawing* (O6's T1 and T2; the existing glyphs; no new taste).
 - **Membership.** Only `mine` rows are drawn, and a row whose address has a record is not. A row is filed by `rowOfListed`, then joins its project's sessions in one ordering by last activity: a record's `lastActivity`, a listed row's `issued`. Both are under the same caps and Show more. Lineage nesting applies to records only, and search matches a listed row by its title.
@@ -325,10 +338,11 @@ The Org page's final shape, where it lives and what more it shows are the owner'
 - **No menu, drag, pin or unread** on a listed row. Those act on a record.
 
 *The snapshot rule* (`connectShell`).
-- A machine in the latest `OrgRows.machines` takes no record snapshot, since all five reads are refused there.
-- It counts as loaded (`setLoaded`, `settleMachine`) once the first `org.rows` that names it has applied.
+- A machine in the latest `OrgRows.machines` (the RL2 roster) takes no record snapshot, since all five reads are refused there.
+- **Coverage is apart from the roster.** `OrgRows.complete` is true only once this run's feed has delivered the hub's `listings` snapshot through its `last` page and the rows have applied it. Rows from the cache alone, or before the feed opens, come with `complete: false`.
+- A roster machine counts as loaded (`setLoaded`, `settleMachine`) only at the first `org.rows` with `complete: true`. Until then its restored tabs stay: `knownTab` protects an unknown session only while its machine is unloaded, and `settleMachine` drops what is unknown. With the hub down all session, the machine stays unloaded and its tabs stay.
 - A machine the rows don't name yet snapshots as today and fails softly, as under O7 M1.
-- `knownTab` keeps a tab whose address is listed.
+- `knownTab` also keeps a tab whose address is listed.
 - O7 M2 replaces this rule for lane B when it brings its own reads.
 
 *Emission.* Main coalesces changes for `ROWS_COALESCE_MS` and emits the whole `OrgRows`. At P5's scale, a few hundred rows, a whole list is simpler than diffs and cheap.
@@ -342,7 +356,10 @@ The Org page's final shape, where it lives and what more it shows are the owner'
   - a head removing a machine dropping its rows;
   - the snapshot's replace rule, with a raced higher revision kept;
   - revision order, and `gone` removing;
+  - a replay of a lower revision after `gone` ignored live, after a reconnect whose snapshot omits the key, and after a relaunch from the cache;
+  - a machine leaving the org dropping its marks, and the cap dropping the oldest;
   - the cache verified at load, and another org's cache discarded;
+  - `complete` false from the cache alone and before the snapshot's `last` page, true after it;
   - the roster filter;
   - `mine`;
   - the join for `smns`, for `remote:` through `repoProjectId` with the signed-in org, and none;
@@ -363,7 +380,7 @@ The Org page's final shape, where it lives and what more it shows are the owner'
   - each state's glyph, and the rollup counts;
   - caps and Show more over both kinds;
   - a click with and without an opener.
-- `events.test.ts`: `org.rows` applied; a machine the rows name taking no snapshot reads and loading on its rows; a listed tab kept.
+- `events.test.ts`: `org.rows` applied; a machine the rows name taking no snapshot reads; restored tabs of that machine kept through rows with `complete: false` (a delayed cache, a multi-page snapshot still arriving) and the machine loading only at `complete: true`; a listed tab kept.
 
 ### M3 — The app as the org's signer: a co-root, the weekly successor, the signing checks *(advisory)*
 
@@ -535,7 +552,7 @@ The live check runs at the first cut-over machine (O14's B1 VM), in the owner's 
           fingerprint: string | null; expires: string | null }                       // fingerprint and expires at `approval`
       | { state: 'registered'; org: string; hub: string; member: { id: string; email: string }; device: string;
           session: 'signed-in' | 'signed-out' | 'removed';
-          hubAccess: 'connected' | 'connecting' | 'expired' | 'unreachable' | 'signing-in';
+          hubAccess: 'connected' | 'connecting' | 'expired' | 'denied' | 'unreachable' | 'signing-in';
           head: { version: number; issued: string } | null;                         // null until a held chain verifies
           problem: string | null;                                                    // rollback, fork, a held chain re-read, a refused sign-in
           refused?: OrgRefusal };
@@ -551,13 +568,15 @@ The live check runs at the first cut-over machine (O14's B1 VM), in the owner's 
 
     registration.json  { "version": 1, "hub": "<origin>", "org": "<org id>", "member": { "id": "<32 hex>", "email": "<email>" },
                          "device": "<keyId(channelPub)>", "pins": { "roots": ["<key id>"], "recoveryPub": "<B64>" },
+                         "anchor": { "genesis": "<stateHash of version 1>", "version": <the held head's version>, "head": "<its stateHash>" },
                          "registered": "<ISO>", "signedOut": false }
     chain.json         { "version": 1, "chain": SignedOrgState[] /* genesis … head */, "transitions": Signed<RootTransition>[],
                          "accepted": RootTransition[], "certificates": Certificates, "highWater": <version>,
                          "superseded": SignedOrgState[] }
     access.json        { "version": 1, "hub": "<origin>", "kind": "access", "token": "<app token>", "expires": "<ISO>", "email": "<email>" }
                      | { "version": 1, "hub": "http://127.0.0.1:<port>", "kind": "standin", "user": "<email>" }
-    listings.json      { "version": 1, "org": "<org id>", "records": Signed<Listing>[] }                           (M2)
+    listings.json      { "version": 1, "org": "<org id>", "records": Signed<Listing>[],                           (M2)
+                         "highWater": { "<ref>/<session>": { "revision": <n>, "issued": "<ISO>", "gone": Signed<Listing> | null } } }
 
 The directory is excluded from Time Machine at its creation, best effort. Nothing in it is a key: the device's keys stay in `<userData>/device/` (O10 M9).
 
@@ -617,7 +636,7 @@ The transfer, as `cloudflared` 2026.8 does it (`token/transfer.go`, `token/token
     export function createRegistryFeed(deps: { session: OrgSession; socket?: (url: string, headers: Record<string, string>) => WebSocketLike;
       timing?: Partial<OrgTiming>; random?(): number; log(line: string): void }): RegistryFeed;
 
-The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.current().hub.headers()`. It is held while `current()?.hub` is non-null, and re-opened when `onChanged` changes the hub's URL or headers. Unknown frames (`grid`, `summary`, anything new) are ignored.
+The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.current().hub.headers()`. It is held while `current()?.hub` is non-null, and re-opened when `onChanged` changes the hub's URL or headers. After a `4403` close or an upgrade Access answered, it waits for the session's next change (a sign-in) rather than its backoff. Unknown frames (`grid`, `summary`, anything new) are ignored.
 
 **§G. The rows** (M2: `src/shared/ipc/schema/org.ts`, `src/main/org/rows.ts`, the renderer).
 
@@ -635,7 +654,11 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
       issued: string;
       mine: boolean;                                                                  // the signed-in member is an owner
     }
-    export interface OrgRows { machines: MachineRef[]; rows: RemoteRow[] }            // machines: the RL2 roster the rows cover
+    export interface OrgRows {
+      machines: MachineRef[];                                                         // the RL2 roster: these take no record snapshot
+      rows: RemoteRow[];
+      complete: boolean;                                                              // this run's hub snapshot applied through its last page
+    }
     // In the zod schema `session` is a plain string, never AppSessionIdSchema, so O6's codec lifts nothing in a row;
     // the renderer forms the address with `addressOf(machine, session)`.
 
@@ -669,6 +692,7 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
 | `HEAD_WARN_DAYS` | 21 | the phone's warning (O13) |
 | `ROWS_COALESCE_MS` | 100 | — |
 | `ROWS_CACHE_WRITE_MS` | 1 000 | — |
+| `HIGH_WATER_MAX` | 10 000 keys | — |
 | `UNVERIFIED_MAX` | 1 024 records | — |
 
 **§I. Contract requests** (for P5's writer to carry; each says what O8 needs, not how).
@@ -684,12 +708,13 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
 *To O11* (the hub):
 - **H1.** An admin's read of a member's pending device entries (`GET /api/devices/pending?member=<id>` for an admin), so an admin can enroll a member's first device (P5 Decision Log 34; M4).
 - **H2.** An app frame on the `?app=1` socket when a machine certificate or its retirement is stored, so the app needn't poll for a new devcloud VM (M1's `CERTS_REFRESH_MS` until then).
+- **H3.** A way for a member's app to read the state that removed the member: the hub sends it (or its version and the chain since the app's head) before closing `4403`, or answers `GET /api/org/state` for that version to a member it has just dropped. Until then the app reads `denied` and learns the removal from an endpoint (M1).
 
 *To O12* (sminos): `access` and `shares` in `member` frames, and the executors for `record.owners`, access and share RPCs under the opId ledger (M5, M6); the RL2 view of the machine-local to-human store of item 6, for the project channel (M7).
 
-*To O7*: M2's `registerRemoteOpener('B', …)` and the yield rule (a record at a listed address replaces the row), which O7 M2's re-plan adopts; and the snapshot rule for RL2 machines, which O7 M2 replaces for lane B.
+*To O7*: M2's `registerRemoteOpener('B', …)` and the yield rule (a record at a listed address replaces the row), which O7 M2's re-plan adopts; and the snapshot rule for RL2 machines, which O7 M2 replaces for lane B. A contract question for O7 M2's re-plan (finding F8): its pane for a remote lane B session draws from the `ListedSession` and its subscription, or waits for O3's per-member read (C5) to supply a record.
 
-*To O9*: M2's rows meet R1, R2, R4, R5 and R6 as asked. R3 is met as far as a listing can say: a lane A row reads `availability: 'foreign_held'`, carries no holder kind or pid (RL6 has none: finding F6), and offers no action. O9 M9 registers `registerRemoteOpener('A', …)` and supplies the opened session's record from its watch's presence through `applyChangedMany`. A remote lane A session is therefore a `ListedSession` until O9 opens it, and `controlsFor`'s `record` comes from O9's own read.
+*To O9*: M2's rows meet R1, R2, R4, R5 and R6 as asked. R3 is met as far as a listing can say: a lane A row reads `availability: 'foreign_held'`, carries no holder kind or pid (RL6 has none: finding F6), and offers no action. O9 M9 registers `registerRemoteOpener('A', …)`. A contract question for O9 M9 (finding F8): a remote lane A session is a `ListedSession`, and no source produces a `SessionRecord` for it before O3 (its plane's `presence` is not one), so `controlsFor(record, …)` and the pane need either a remote variant that takes the `ListedSession` with the watch's `LaneAState`, or O3's per-member read.
 
 **§J. Contract additions.**
 - **Now (M1):** `OrgSessionService` and `createOrgSession` (§A), which implement O7 §B; `org.status`, `org.register`, `org.signIn`, `org.cancel`, `org.signOut` and `org.changed` (§B); `<userData>/org/` (§C); `HeldOrg` (§D); the login and `MAWS_DEV_STANDIN_USER` (§E); the Registry feed (§F); `tweetnacl` 1.0.3. No `WIRE_MINOR`, no settings version, no e2e group.
@@ -750,12 +775,20 @@ Each is built as its recommendation when its milestone is re-planned, unless the
 - Observation: the root set is the admin devices' step-up keys, so every org state the app signs is a step-up signature, behind Touch ID.
   Evidence: `types.ts` `root: { keys: string[] … }` ("the kids of admin devices' `stepUpPub`"); `admin.ts` `signOrgState(next, [keys.stepUp])`.
 - Observation: U9's spike captured the transfer but not the hub answering `/api/me` through `cf-access-token`; M1's staging check is its first capture.
+- Observation: a chain `verifyRewind` admits can fail `verifyPinnedChain` against the pins it was registered under, when the recovery rewinds below the first state those roots signed; so a held chain is checked at load from its anchored genesis, not pinned again.
+  Evidence: the first buildability round's read-only probe against `apps/org-protocol` (initial pinned run ok; `verifyRewind` and `verifySuccessor` ok; reload `not-root-signed`).
+- Observation: a removed member's app can't read the state that removed it from the hub.
+  Evidence: `Registry.submitState` closes the removed members' sockets with `4403` after rebuilding `members`, and the Worker's `route` resolves the member before any `/api/*` route, answering `403 not-a-member`.
   Evidence: O11's Surprises (2026-10-27): "Not captured: `/api/me` with that token, and renewal without a browser."
 
 ## Decision Log
 
 - Decision: Verification. This document gets one `doperpowers:adversarial-reviewer` buildability round on its execution section, focused on the first milestone (M1 and M2), repeated until a round yields nothing worth changing. M1's and M2's PRs each get doperpowers:reviewer-high. M3–M8 each get their own buildability round when re-planned, and the review rung their re-plan names.
   Rationale: M1 is the device side of the org's trust (a pinned chain, a registered device, a bearer credential) and M2 decides what the app believes about other machines; the advisory milestones can't be reviewed for buildability before their dependencies and the owner's answers exist.
+  Date/Author: 2026-10-28, O8's planner.
+
+- Decision: The first buildability round (doperpowers:adversarial-reviewer on 4362ed440: 3 P1 and 4 P2, each checked against the code and adopted) is folded in. (1) A recovery that rewinds below the state the code's roots first signed made the held chain fail `verifyPinnedChain` at every later load; the reviewer reproduced it against the package. The registration now keeps an anchor, and the load checks one run from the anchored genesis. (2) A damaged chain re-read from genesis would have lost rollback protection; it now fails closed unless the hub's chain reaches the anchor. (3) Deleting a withdrawn listing deleted its replay barrier; each key now keeps its high-water revision and `gone` record, persisted. (4) Lane A's plane presence is not a `SessionRecord`; M2 no longer names one, and the gap is finding F8. (5) The roster was read as listings coverage; `OrgRows.complete` now gates a machine's loading. (6) A removed member can't read the state that removed it; that is now `denied`, with no trust change, and H3 is asked of O11. (7) Sign-out's token deletion came before its marker; the marker is now the commit point, and a running sign-in is fenced. Tests for each are named in M1's and M2's Proves.
+  Rationale: each finding was real against the code (`org-view.ts` `verifyPinnedChain`, `admin.ts` `verifiedHead`, `src/endpoint/listings.ts`'s kept withdrawals, `SessionPresence`, `events.ts` `knownTab` and `layout.ts` `settleMachine`, `Registry.submitState` and the Worker's member resolution, O7 §B's `hub: null`). The verdict found O7's type seam and O9's listing fields aligned.
   Date/Author: 2026-10-28, O8's planner.
 
 The residue for P5's Decision Log. Each item is decided where it binds (M1 or M2 unless marked), with the alternative it rejected:
@@ -779,6 +812,12 @@ The residue for P5's Decision Log. Each item is decided where it binds (M1 or M2
 17. M7's log-plane reader may land before the channel's look is settled, so O14's B4 never waits on Q5 (M7). Rejected: one landing for the whole channel.
 18. No new e2e group in M1 or M2; their live proofs are the owner's staging sitting and the first cut-over machine. Rejected: `e2e:org`, which would need a hub and an approving device in the hosted lane.
 19. `tweetnacl` 1.0.3 for the transfer's sealed box. Rejected: `@noble/ciphers` and `@noble/curves`, two packages for one call that the spike ran with `tweetnacl`.
+20. The registration keeps an anchor (the genesis hash and the held head's version and hash), moved after each adoption; at load the held chain is checked as one run from the anchored genesis, not pinned again; a damaged chain fails closed unless the hub's chain reaches the anchor, and only a fresh pairing code re-anchors. Rejected: re-pinning at load, which refuses a legitimate recovery; re-reading from genesis against the pins, which loses rollback protection.
+21. A listing's key keeps its highest accepted revision, and its `gone` record, apart from its row and persisted, so a withdrawn session's earlier revision never returns. Rejected: deleting a withdrawn row's key with it.
+22. A machine counts as loaded only once this run's hub snapshot has applied (`OrgRows.complete`); the roster alone only suppresses its record reads. Rejected: loading a machine on its first rows, which can drop restored tabs on an empty or cached start.
+23. A hub that stops admitting the member (`4403`, `403 not-a-member`) is `denied`, not a removal: the app changes no trust state until a verified head does. Rejected: reading the unsigned close as the removal.
+24. Sign-out's commit point is the `signedOut` marker, written before the token is deleted, and a running sign-in is fenced. Rejected: deleting the token first.
+25. M2 promises no record for a remote session; the opening lane draws its pane from the `ListedSession` and its own subscription, or waits for O3's read (finding F8). Rejected: naming lane A's plane presence as a record's source.
 
 Findings on P5 for its writer (things in P5 that are wrong or missing):
 
@@ -789,6 +828,8 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
 - **F5.** O8's edges read "Blocked by O6, O11, O12", but its later milestones are also blocked by O3 (per-member state, lane B record changes, lane B's to-human store), O7 M2 and M6 (cards), O14's last machine (words) and O14's B4 (the admin's end). The Ordering table's O8 row should name them per milestone.
 - **F6.** O9's R3 asks a lane A row to read as held by a terminal, but RL6's listing carries no holder. M2's lane A rows read `foreign_held` with no holder kind; O9 takes the holder from its watch.
 - **F7.** P5 §8's Org page lists "the recovery key", which is offline and fixed at genesis (RL §5.3). The page can show only its id and the root-transition flow; P5's text should say so.
+- **F8.** No child produces a `SessionRecord` for a session on another machine before O3's per-member read (O7's C5), yet the session pane and O9 M9's `controlsFor(record, …)` take one. O9's remote half (M9) is scheduled before O3. Either O9 M9 and O7 M2 draw remote panes from M2's `ListedSession` and their own subscriptions, or remote panes wait for O3. P5 should name which; O8 recommends the first, since it needs nothing unbuilt.
+- **F9.** The hub refuses a removed member everything, the state that removed them included, so no app can verify its own member's removal from the hub (§I H3).
 
 ## Outcomes & Retrospective
 
