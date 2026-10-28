@@ -1748,15 +1748,19 @@ describe('M3: the signer composed over the session', () => {
     expect((await again.session.resign()).ok).toBe(true);
   });
 
-  it('offers the superseded states\' revocations after a recovery, withholds this device\'s own, and signs the offer', async () => {
-    const { session, keys, entry } = await signedIn();
+  /**
+   * A recovery that drops revocations: version 3 lists member B's device b1 and makes this device a root beside a1;
+   * version 4, the branch the recovery discards, removes b1 and this device and revokes their keys; the recovery from
+   * version 3 makes this device the one root. The offer: b1's two keys (this device's own two withheld).
+   */
+  async function recoveryOffer(over: Overrides = {}) {
+    const { session, keys, entry } = await signedIn(over);
     const feed = fakeFeed();
     session.attach(feed.hooks);
     const self: TestDevice = { device: entry as Device, channel: keys.channel, stepUp: keys.stepUp };
     const selfKid = await keyId(keys.stepUp.pub);
     const B = memberId();
     const b1 = await newDevice('b1');
-    // Version 3: member B with device b1; this device a root beside a1.
     hub.chain.push(
       await successor(hub.head, [a1], (s) => {
         s.members.push({ id: B, email: 'b@example.com', role: 'member', devices: [b1.device] });
@@ -1764,7 +1768,6 @@ describe('M3: the signer composed over the session', () => {
       }),
     );
     const base = hub.head;
-    // Version 4, the branch a recovery discards: b1 removed, and this device too, their keys revoked.
     const discarded = await successor(base, [a1], async (s) => {
       s.members = s.members.filter((m) => m.id !== B);
       s.members[0].devices = s.members[0].devices.filter((d) => d.id !== entry.id);
@@ -1786,20 +1789,73 @@ describe('M3: the signer composed over the session', () => {
     hub.transitions = [t];
     feed.open();
     await until(() => registered(session).session === 'signed-in' && signerOf(session).offer !== null, 'the offer');
+    await until(() => signerOf(session).maySign, 'may sign');
+    return { session, entry, self, B, b1 };
+  }
+
+  it('offers the superseded states\' revocations after a recovery, withholds this device\'s own, and signs the offer the owner confirmed', async () => {
+    const { session, entry, B, b1 } = await recoveryOffer();
     const offer = signerOf(session).offer!;
     expect(offer.superseded).toBe(2);
     expect(offer.withheld).toHaveLength(2);
     for (const line of offer.withheld) expect(line).toContain(entry.id);
-    await until(() => signerOf(session).maySign, 'may sign');
+    // What the Org section shows before it signs: each revocation and consequence, and the checks' warnings (here the
+    // two withheld keys the successor doesn't revoke).
+    expect(offer.lines.length).toBeGreaterThan(0);
+    expect(offer.lines.join('\n')).toContain(await keyId(b1.channel.pub));
+    expect(offer.lines.join('\n')).toContain(await keyId(b1.stepUp.pub));
+    expect(offer.warnings).toHaveLength(2);
+    for (const warning of offer.warnings) expect(warning).toContain(entry.id);
 
-    expect(await session.revokeSuperseded()).toEqual({ ok: true, version: 5 });
-    expect(signing.prompts.at(-1)?.summary).toBe('revoke the keys a recovery left current');
+    // A confirmation of other words than the offer holds now signs nothing and asks nothing.
+    expect(await session.revokeSuperseded(`${offer.digest.slice(1)}x`)).toMatchObject({ ok: false, reason: 'stale' });
+    expect(signing.prompts).toEqual([]);
+
+    expect(await session.revokeSuperseded(offer.digest)).toEqual({ ok: true, version: 5 });
+    expect(signing.prompts.at(-1)?.summary).toBe('revoke the keys a recovery left current, with 2 warnings shown in Settings › Org');
     const revoked = new Set(hub.head.state.revoked.map((r) => r.keyId));
     expect(revoked.has(await keyId(b1.channel.pub)) && revoked.has(await keyId(b1.stepUp.pub))).toBe(true);
     expect(hub.head.state.members.some((m) => m.id === B && m.devices.length > 0)).toBe(false);
     await until(() => signerOf(session).offer?.superseded === 0, 'the offer signed');
-    expect(signerOf(session).offer?.withheld).toHaveLength(2);
-    expect(await session.revokeSuperseded()).toMatchObject({ ok: false, reason: 'invalid' });
+    const left = signerOf(session).offer!;
+    expect(left).toMatchObject({ lines: [], warnings: [] });
+    expect(left.withheld).toHaveLength(2);
+    expect(await session.revokeSuperseded(left.digest)).toMatchObject({ ok: false, reason: 'invalid' });
+
+    // The weekly no-change successor's Touch ID line counts the withheld keys' warnings, which it would leave unsaid.
+    expect(await session.resign()).toEqual({ ok: true, version: 6 });
+    expect(signing.prompts.at(-1)?.summary).toBe('re-sign the org state (no change), with 2 warnings shown in Settings › Org');
+  });
+
+  it('refuses `stale`, asking nothing, when the offer changes between the confirmation and the signing', async () => {
+    // The sign's read of the hub's chain is held open while another state lands that revokes b1 already.
+    let armed = false;
+    let release!: () => void;
+    let holding!: () => void;
+    const held = new Promise<void>((resolve) => (holding = resolve));
+    const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (armed && String(input).includes('/api/org/state?since=')) {
+        armed = false;
+        await new Promise<void>((resolve) => ((release = resolve), holding()));
+      }
+      return hub.fetch(input, init);
+    }) as typeof globalThis.fetch;
+    const { session, self, B, b1 } = await recoveryOffer({ fetch });
+    const offer = signerOf(session).offer!;
+    armed = true;
+    const signed = session.revokeSuperseded(offer.digest);
+    await held;
+    hub.chain.push(
+      await successor(hub.head, [self], async (s) => {
+        s.members = s.members.filter((m) => m.id !== B);
+        s.revoked.push(...(await revokedDevice(B, b1.device)));
+      }),
+    );
+    release();
+    expect(await signed).toMatchObject({ ok: false, reason: 'stale' });
+    expect(signing.prompts).toEqual([]);
+    expect(hub.posted).toEqual([]);
+    await until(() => signerOf(session).offer?.digest !== offer.digest, 'the offer composed again');
   });
 });
 

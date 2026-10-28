@@ -424,6 +424,7 @@ export const ORG = {
     hub: 'The hub didn’t take it.',
     busy: 'Another signing is running.',
     refused: 'The checks refused it.',
+    stale: 'What would be signed changed since it was shown.',
   },
   pending: 'Pending',
   pendingWaits: (version: number) => `Version ${version} is signed and waits for the hub.`,
@@ -457,7 +458,12 @@ export const ORG = {
   resetConfirm: 'Reset',
   revocations: 'Revocations',
   offer: (keys: number) => `A recovery dropped the revocation of ${keys === 1 ? '1 key' : `${keys} keys`}.`,
-  revoke: 'Revoke again',
+  revoke: 'Revoke again…',
+  // The sheet Revoke again opens: Touch ID shows one line, so everything the signature carries is read here first.
+  revokeTitle: 'Sign these revocations?',
+  revokeIntro: 'One new org state carries all of this, signed with Touch ID:',
+  revokeWarning: (text: string) => `Warning: ${text}`,
+  revokeConfirm: 'Sign',
   withheld: (name: string) => `Not offered: ${name}. Revoking it would remove this Mac’s own keys or the org’s last root, so settle it another way.`,
   deliveries: 'Deliveries',
   owing: (version: number, waiting: string | null, tooLarge: string | null) =>

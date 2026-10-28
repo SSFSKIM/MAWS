@@ -37,6 +37,7 @@ import { join } from 'node:path';
 import {
   advanceHead,
   base64urlDecode,
+  base64urlEncode,
   canonicalize,
   decodePairingCode,
   isSignedOrgState,
@@ -82,13 +83,13 @@ import {
   type OrgFiles,
   type RegistrationFile,
 } from './files';
-import { describeHolder, supersededRevocations } from './checks';
+import { checkSuccessor, describeHolder, supersededRevocations, type SupersededOffer } from './checks';
 import { createDeliveries, type Deliveries, type DeliveryLink } from './deliveries';
 import { rereadFrom, startHeldOrg, type HeldOrg } from './held';
 import { hubClient, type HubClient, type HubResult, type Me, type Served } from './hub-client';
 import type { RegistryFeedHooks } from './registry-feed';
 import type { OrgSession, SignedIn } from './session';
-import { createOrgSigner, supersededEdit, type OrgSigner, type SignOutcome } from './signer';
+import { createOrgSigner, StaleEdit, successorDraft, supersededEdit, type OrgSigner, type SignOutcome } from './signer';
 import { createSigningStore, type SigningStore } from './signing-store';
 import { orgTiming, type OrgTiming } from './timing';
 import { startWeekly, type Weekly } from './weekly';
@@ -111,8 +112,11 @@ export interface OrgSessionService extends OrgSession {
   readonly loaded: Promise<void>;
   /** M3: "Re-sign now": the no-change successor, signed at once (Touch ID asks). */
   resign(): Promise<SignResult>;
-  /** M3: one successor carrying the superseded states' revocations the recovered line lost (P5 Decision Log 30). */
-  revokeSuperseded(): Promise<SignResult>;
+  /**
+   * M3: one successor carrying the superseded states' revocations the recovered line lost (P5 Decision Log 30), signed
+   * only while the offer is the one the owner confirmed (`offer`, the status's `offer.digest`); else refused `stale`.
+   */
+  revokeSuperseded(offer: string): Promise<SignResult>;
   /** M3: new keys, registered with a fresh pairing code beside the old device; offered unmarked or removed. */
   rekey(code: string): OrgAttempt;
   /** M3: the pending slot abandoned, on the owner's confirmation of the proposal `hash` names, while the hub's chain doesn't hold it. */
@@ -775,23 +779,37 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       .finally(() => (composing = false));
   }
 
-  /** The superseded states' revocations as the status shows them (the keys a signature revokes; the withheld, named). */
+  /**
+   * The superseded states' revocations as the owner is shown them before signing (Touch ID shows one line, so the Org
+   * section's sheet is where the closure is seen): the keys a signature revokes, each revocation and consequence
+   * (`lines`), the checks' warnings on that successor, the withheld, named; and `digest`, which names those words, so a
+   * confirmation is of exactly them. Null: nothing superseded, or nothing to offer.
+   */
+  async function shownOffer(view: HeldOrg, f: KeyFacts): Promise<{ shown: NonNullable<typeof offer>; offer: NonNullable<SupersededOffer> } | null> {
+    if (view.superseded().length === 0) return null;
+    const head = view.head();
+    const found = await supersededRevocations(head.state, view.superseded(), { channelKid: f.channelKid, stepUpKid: f.stepUpKid });
+    if (found === null) return null;
+    const at = now();
+    // The successor the signer would draft, so the warnings are the ones its checks find.
+    const draft = await successorDraft(head, at);
+    found.edit(draft);
+    const before = new Set(head.state.revoked.map((r) => r.keyId));
+    const superseded = draft.revoked.filter((r) => !before.has(r.keyId)).length;
+    const warnings = found.lines.length === 0 ? [] : (await checkSuccessor(head.state, draft, view.superseded(), new Date(at))).filter((x) => x.level === 'warn').map((x) => x.detail);
+    const withheld = found.withheld.map((w) => `${describeHolder(head.state, w.holder)} (${w.keyId})`);
+    const words = canonicalize({ lines: found.lines, warnings, withheld });
+    const digest = base64urlEncode(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(words))));
+    return { shown: { superseded, lines: [...found.lines], warnings, withheld, digest }, offer: found };
+  }
+
+  /** The superseded states' revocations as the status shows them (`shownOffer`), recomputed at each change. */
   function refreshOffer(): void {
     const turn = ++offerTurn;
     const view = heldView();
     const f = facts;
     void (async () => {
-      let next: typeof offer = null;
-      if (view !== null && f !== null && view.superseded().length > 0) {
-        const head = view.head().state;
-        const found = await supersededRevocations(head, view.superseded(), { channelKid: f.channelKid, stepUpKid: f.stepUpKid });
-        if (found !== null) {
-          const draft = structuredClone(head);
-          found.edit(draft);
-          const before = new Set(head.revoked.map((r) => r.keyId));
-          next = { superseded: draft.revoked.filter((r) => !before.has(r.keyId)).length, withheld: found.withheld.map((w) => `${describeHolder(head, w.holder)} (${w.keyId})`) };
-        }
-      }
+      const next = view === null || f === null ? null : ((await shownOffer(view, f))?.shown ?? null);
       if (turn !== offerTurn || JSON.stringify(next) === JSON.stringify(offer)) return;
       offer = next;
       changed();
@@ -838,21 +856,24 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     return signResult(await c.weekly.resign());
   }
 
-  async function revokeSuperseded(): Promise<SignResult> {
+  /** `confirmed`: the digest of the offer the owner was shown and confirmed (the status's `offer.digest`). */
+  async function revokeSuperseded(confirmed: string): Promise<SignResult> {
     const c = composed;
     const view = heldView();
     const f = facts;
     if (c === null || view === null || f === null) return notSigning;
-    const self = { channelKid: f.channelKid, stepUpKid: f.stepUpKid };
-    const shown = await supersededRevocations(view.head().state, view.superseded(), self);
-    const edit = supersededEdit(shown);
-    if (edit === null) return { ok: false, reason: 'invalid', detail: 'nothing to revoke: no superseded revocation this Mac can sign' };
-    // Composed again on the head the signer drafts from, and signed only if it still says what the prompt shows.
+    const standing = await shownOffer(view, f);
+    const edit = standing === null ? null : supersededEdit(standing.offer);
+    if (standing === null || edit === null) return { ok: false, reason: 'invalid', detail: 'nothing to revoke: no superseded revocation this Mac can sign' };
+    const stale = 'the revocations changed since they were shown: nothing was signed';
+    if (standing.shown.digest !== confirmed) return { ok: false, reason: 'stale', detail: stale };
+    // Composed again on the head the signer drafts from (the hub's, after its read), and signed only if it still says
+    // what the owner confirmed: the same refusal, `stale`, before Touch ID.
     const apply = async (draft: OrgState): Promise<void> => {
       const at = heldView();
-      const fresh = at === null ? null : await supersededRevocations(at.head().state, at.superseded(), self);
-      if (fresh === null || JSON.stringify(fresh.lines) !== JSON.stringify(shown!.lines)) throw new Error('the superseded revocations changed since they were shown');
-      fresh.edit(draft);
+      const fresh = at === null ? null : await shownOffer(at, f);
+      if (fresh === null || fresh.shown.digest !== confirmed) throw new StaleEdit(stale);
+      fresh.offer.edit(draft);
     };
     return signResult(await c.signer.sign({ ...edit, apply }));
   }

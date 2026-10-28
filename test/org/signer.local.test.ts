@@ -364,7 +364,7 @@ describe('the app as the org’s signer on the local hub', { timeout: 180_000 },
     expect(await same(endpointHead(), lost.removal)).toBe(true);
     const sent = runs.length;
 
-    const outcome = await app.revokeSuperseded();
+    const outcome = await app.revokeSuperseded(signer().offer!.digest);
     expect(outcome).toEqual({ ok: true, version: lost.base + 2 });
     expect(asked.at(-1)).toMatchObject({ summary: 'revoke the keys a recovery left current' });
     await until(() => acknowledged() && endpointHead().state.version === lost.base + 2, 'the revocation acknowledged');
@@ -428,7 +428,7 @@ describe('the app as the org’s signer on the local hub', { timeout: 180_000 },
     await settled('17 states the endpoint lacks');
     const sent = runs.length;
 
-    const outcome = await app.revokeSuperseded();
+    const outcome = await app.revokeSuperseded(signer().offer!.digest);
     expect(outcome).toMatchObject({ ok: true });
     const version = (outcome as { version: number }).version;
     expect(version - behind).toBeGreaterThan(16);
@@ -446,7 +446,7 @@ describe('the app as the org’s signer on the local hub', { timeout: 180_000 },
     refusing = true;
     const parent = await hubHead();
 
-    const outcome = await app.revokeSuperseded();
+    const outcome = await app.revokeSuperseded(signer().offer!.digest);
     expect(outcome).toMatchObject({ ok: false, reason: 'hub' });
     const version = parent.state.version + 1;
     await until(() => acknowledged() && endpointHead().state.version === version, 'the pending state adopted by the endpoint');
@@ -479,7 +479,7 @@ describe('the app as the org’s signer on the local hub', { timeout: 180_000 },
     await settled('the larger states');
     const sent = runs.length;
 
-    const outcome = await app.revokeSuperseded();
+    const outcome = await app.revokeSuperseded(signer().offer!.digest);
     expect(outcome).toMatchObject({ ok: true });
     const version = (outcome as { version: number }).version;
     await until(() => acknowledged() && endpointHead().state.version === version, 'the revocation acknowledged through full runs', 60_000);

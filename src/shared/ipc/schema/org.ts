@@ -37,7 +37,9 @@ const RegisteringSchema = z.strictObject({
  * `stepUpKid` are what `deployment admin root add` confirms. `due` and `ageDays` are the weekly successor's quiet line.
  * `pending`: the state kept and not yet settled (`fork`: another state holds its version; `refused`: the hub's last answer
  * to it this run; `hash`: its state's stateHash, which a discard names). `offer`: the superseded states' revocations, `superseded` the keys a signature would revoke (0: nothing
- * to sign) and `withheld` the ones no offer carries (this device's own, the last root). `owing` and `abandoned`: the
+ * to sign) and `withheld` the ones no offer carries (this device's own, the last root); `lines` each revocation and
+ * each consequence a signature carries, and `warnings` the checks' warnings on that successor, which the Org section
+ * shows before it signs (Touch ID shows one line); `digest` names those words, and `org.revokeSuperseded` carries it. `owing` and `abandoned`: the
  * direct deliveries. `rekey`: new keys offered for an unmarked key file (a removed device reads `session: 'removed'`);
  * `rekeying`: one under way; `oldDevice`: a rekey's old device, still listed in the held head.
  */
@@ -50,7 +52,9 @@ export const OrgSignerStatusSchema = z
     due: z.boolean(),
     ageDays: z.number().int().nullable(),
     pending: z.strictObject({ version: z.number().int().positive(), hash: z.string(), fork: z.boolean(), exposed: z.boolean(), refused: z.string().nullable() }).nullable(),
-    offer: z.strictObject({ superseded: z.number().int().nonnegative(), withheld: z.array(z.string()) }).nullable(),
+    offer: z
+      .strictObject({ superseded: z.number().int().nonnegative(), lines: z.array(z.string()), warnings: z.array(z.string()), withheld: z.array(z.string()), digest: z.string() })
+      .nullable(),
     owing: z.array(z.strictObject({ version: z.number().int().positive(), machines: z.array(z.string()), tooLarge: z.array(z.string()) })),
     abandoned: z.array(z.strictObject({ hash: z.string(), version: z.number().int().positive(), hub: z.boolean(), machines: z.array(z.string()) })),
     rekey: z.literal('unmarked').nullable(),
@@ -85,10 +89,15 @@ const CodeInputSchema = z.strictObject({ code: z.string().max(4096) });
 /** M3's acts that drop or replace signing state run only on the owner's confirmation, which the input carries. */
 const ConfirmedInputSchema = z.strictObject({ confirmed: z.literal(true) });
 /** A discard's confirmation is of one proposal: `hash` names the pending state the owner was shown (its stateHash). */
+/** A revocation's confirmation is of the offer the owner was shown: `offer` is its `digest`. */
+const RevokeInputSchema = z.strictObject({ offer: z.string().min(1).max(128) });
 const DiscardInputSchema = z.strictObject({ confirmed: z.literal(true), hash: z.string().min(1).max(128) });
 
-/** M3: why a sign ended without a new version; `refused` names the checks' refusals in `detail`. */
-export const SIGN_REASONS = ['not-root', 'unmarked', 'signing', 'cancelled', 'pending', 'invalid', 'hub', 'busy', 'refused'] as const;
+/**
+ * M3: why a sign ended without a new version; `refused` names the checks' refusals in `detail`; `stale`: what would be
+ * signed is no longer what the owner was shown (the superseded offer changed), so nothing was asked or signed.
+ */
+export const SIGN_REASONS = ['not-root', 'unmarked', 'signing', 'cancelled', 'pending', 'invalid', 'hub', 'busy', 'refused', 'stale'] as const;
 export const SignResultSchema = z.union([
   z.strictObject({ ok: z.literal(true), version: z.number().int().positive() }),
   z.strictObject({ ok: z.literal(false), reason: z.enum(SIGN_REASONS), detail: z.string().optional() }),
@@ -143,7 +152,7 @@ export const commands = {
   'org.signOut': { input: z.void(), output: z.void(), owner: 'main' },
   'org.rows': { input: z.void(), output: OrgRowsSchema, owner: 'main' }, // M2
   'org.resign': { input: z.void(), output: SignResultSchema, owner: 'main' }, // M3: "Re-sign now"
-  'org.revokeSuperseded': { input: z.void(), output: SignResultSchema, owner: 'main' }, // M3
+  'org.revokeSuperseded': { input: RevokeInputSchema, output: SignResultSchema, owner: 'main' }, // M3: the offer the owner confirmed
   'org.rekey': { input: CodeInputSchema, output: OrgAttemptSchema, owner: 'main' }, // M3: new keys with a fresh pairing code
   'org.discardPending': { input: DiscardInputSchema, output: DiscardResultSchema, owner: 'main' }, // M3
   'org.resetSigning': { input: ConfirmedInputSchema, output: z.void(), owner: 'main' }, // M3

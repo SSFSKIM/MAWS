@@ -7,7 +7,9 @@
 // M3 (the document's M3, "The quiet line", "The pending slot", "New keys", "The co-root") adds this Mac as the org's
 // signer below the held registration: the root line (or, for a key file without the backup mark, the new-keys offer
 // instead), the weekly line with Re-sign now, the pending slot with Discard behind `abandon-pending`'s confirmation,
-// `signing` with Reset behind its own, the superseded states' revocations, the machines still owing a delivery, the
+// `signing` with Reset behind its own, the superseded states' revocations (Revoke again behind a sheet showing each
+// revocation, consequence, warning and withheld name, since Touch ID shows one line; the confirmation names the offer's
+// digest, which main checks against the offer it composes again at signing), the machines still owing a delivery, the
 // discarded proposals a hub or machine may hold, and a rekey's old device still listed. Quiet lines at the rows' weight.
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import type { IpcError } from '@shared/ipc/schema';
@@ -267,6 +269,8 @@ function SignerLines({ signer, device }: { signer: Signer; device: string }) {
   const [outcome, setOutcome] = useState<Outcome>(null);
   // The proposal Discard was pressed for, by its stateHash: the owner's consent is to that one proposal.
   const [confirming, setConfirming] = useState<string | null>(null);
+  // The offer Revoke again was pressed for, by its digest: the owner's consent is to the words the sheet shows.
+  const [revoking, setRevoking] = useState<string | null>(null);
   const machines = useMachines((s) => s.machines);
   const nameOf = (ref: string) => machineName(machines, ref as MachineRef, ipc.localMachine);
 
@@ -279,7 +283,11 @@ function SignerLines({ signer, device }: { signer: Signer; device: string }) {
       else setOutcome(said(result.value));
     });
   };
-  const sign = (name: 'org.resign' | 'org.revokeSuperseded') => act(ipc.invoke(name, undefined), signOutcome);
+  const resign = () => act(ipc.invoke('org.resign', undefined), signOutcome);
+  const revoke = (digest: string) => {
+    setRevoking(null);
+    act(ipc.invoke('org.revokeSuperseded', { offer: digest }), signOutcome);
+  };
   const discard = (slot: Pending) => {
     setConfirming(null);
     act(ipc.invoke('org.discardPending', { confirmed: true, hash: slot.hash }), (result) => discardOutcome(slot.version, result));
@@ -294,6 +302,10 @@ function SignerLines({ signer, device }: { signer: Signer; device: string }) {
   if (confirming !== null && slot?.hash !== confirming) setConfirming(null);
   const asked = slot !== null && slot.hash === confirming ? slot : null;
   const offer = signer.offer;
+  // As Discard's: the sheet closes once the offer changes, so a confirmation never reaches other words (main refuses a
+  // stale digest too).
+  if (revoking !== null && offer?.digest !== revoking) setRevoking(null);
+  const shownOffer = offer !== null && offer.digest === revoking ? offer : null;
   const held = signer.abandoned.filter((a) => a.hub || a.machines.length > 0); // a never-sent proposal can't show as a fork
   return (
     <>
@@ -311,7 +323,7 @@ function SignerLines({ signer, device }: { signer: Signer; device: string }) {
         {weekly !== null && (
           <>
             <span className="text-fg-muted">{ORG.weekly(weekly)}</span>
-            <button type="button" className={TEXT_ACTION} disabled={acting} onClick={() => sign('org.resign')}>
+            <button type="button" className={TEXT_ACTION} disabled={acting} onClick={resign}>
               {ORG.resign}
             </button>
           </>
@@ -338,7 +350,7 @@ function SignerLines({ signer, device }: { signer: Signer; device: string }) {
         <Setting label={ORG.revocations}>
           {offer.superseded > 0 && <span>{ORG.offer(offer.superseded)}</span>}
           {offer.superseded > 0 && signer.maySign && (
-            <button type="button" className={TEXT_ACTION} disabled={acting} onClick={() => sign('org.revokeSuperseded')}>
+            <button type="button" className={TEXT_ACTION} disabled={acting} onClick={() => setRevoking(offer.digest)}>
               {ORG.revoke}
             </button>
           )}
@@ -376,6 +388,26 @@ function SignerLines({ signer, device }: { signer: Signer; device: string }) {
           <span className="text-fg-muted">{ORG.oldDeviceLine}</span>
           <span className="font-mono text-fg select-all">{ORG.removeCommand(signer.oldDevice)}</span>
         </Setting>
+      )}
+      {shownOffer !== null && (
+        <GatewaySheet title={ORG.revokeTitle} onClose={() => setRevoking(null)} canSubmit onSubmit={() => revoke(shownOffer.digest)} submitLabel={ORG.revokeConfirm} cancelLabel={ORG.cancel}>
+          <p className="m-0 text-ui-sm leading-normal text-fg">{ORG.revokeIntro}</p>
+          <ul className="m-0 mt-2 list-disc pl-5 text-ui-sm leading-normal text-fg">
+            {shownOffer.lines.map((line, i) => (
+              <li key={i}>{line}</li>
+            ))}
+          </ul>
+          {shownOffer.warnings.map((warning, i) => (
+            <p key={i} className="m-0 mt-2 text-ui-sm leading-normal text-warning">
+              {ORG.revokeWarning(warning)}
+            </p>
+          ))}
+          {shownOffer.withheld.map((name) => (
+            <p key={name} className="m-0 mt-2 text-ui-sm leading-normal text-fg-muted">
+              {ORG.withheld(name)}
+            </p>
+          ))}
+        </GatewaySheet>
       )}
       {asked !== null && (
         <GatewaySheet title={ORG.discardTitle(asked.version)} onClose={() => setConfirming(null)} canSubmit onSubmit={() => discard(asked)} submitLabel={ORG.discardConfirm} cancelLabel={ORG.cancel}>

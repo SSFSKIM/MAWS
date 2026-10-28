@@ -49,7 +49,7 @@ export type SignOptions = { beforePrompt?(): Promise<boolean> };
 
 export type SignOutcome =
   | { ok: true; version: number }
-  | { ok: false; reason: 'not-root' | 'unmarked' | 'signing' | 'cancelled' | 'pending' | 'invalid' | 'hub' | 'busy'; detail?: string }
+  | { ok: false; reason: 'not-root' | 'unmarked' | 'signing' | 'cancelled' | 'pending' | 'invalid' | 'hub' | 'busy' | 'stale'; detail?: string }
   | { ok: false; reason: 'refused'; findings: Finding[] };
 
 /**
@@ -112,6 +112,25 @@ export type OrgSignerDeps = {
   now?(): number;
   log(line: string): void;
 };
+
+/**
+ * An edit's refusal of itself: what it would sign is no longer what the person was shown (the superseded offer composed
+ * again on the head the signer drafts from). The sign ends `stale` before Touch ID.
+ */
+export class StaleEdit extends Error {}
+
+/**
+ * The successor of `head` an edit applies to, as `deploy/org-admin.ts`'s `successor()` composes it: a copy of its state,
+ * `version + 1`, `prev` its hash, `issued` now but never before the head's.
+ */
+export async function successorDraft(head: SignedOrgState, at: number): Promise<OrgState> {
+  const draft = structuredClone(head.state);
+  draft.version += 1;
+  draft.prev = await stateHash(head.state);
+  const iso = new Date(at).toISOString();
+  draft.issued = iso > head.state.issued ? iso : head.state.issued;
+  return draft;
+}
 
 /** M3's own edit: the weekly no-change successor (Q6). */
 export function noChangeEdit(): Edit {
@@ -428,14 +447,11 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     const view = deps.held()!;
     const signer = deps.signer()!;
     const head = view.head();
-    const draft = structuredClone(head.state);
-    draft.version += 1;
-    draft.prev = await stateHash(head.state);
-    const at = new Date(now()).toISOString();
-    draft.issued = at > head.state.issued ? at : head.state.issued;
+    const draft = await successorDraft(head, now());
     try {
       await edit.apply(draft);
     } catch (error) {
+      if (error instanceof StaleEdit) return { ok: false, reason: 'stale', detail: error.message };
       return { ok: false, reason: 'invalid', detail: `the edit failed: ${(error as Error).message}` };
     }
 
@@ -446,12 +462,17 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
       ...edit.lines,
       ...findings.map((f) => `Warning: ${f.detail}`),
     ].join('\n');
+    // Touch ID shows only its one line (step-up.ts's `promptTouchIDConfirmation`), never `text`: a change's own lines
+    // are shown before it is asked for (the Org section's sheet), and a warning is at least counted here, where it is
+    // read, with where to find it (the superseded-keys warnings are the Org section's Revocations row).
+    const warned = findings.length;
+    const summary = warned === 0 ? edit.summary : `${edit.summary}, with ${warned === 1 ? '1 warning' : `${warned} warnings`} shown in Settings › Org`;
     // The edit and the checks above are awaits a sign-out may land in: the person is not asked for it.
     if (!live(asked)) return stopped('nothing was signed');
     if (options.beforePrompt !== undefined && !(await options.beforePrompt())) return { ok: false, reason: 'cancelled', detail: 'not asked' };
     // Synchronously from here to Touch ID.
     if (!live(asked)) return stopped('nothing was signed');
-    const answer = await signer.sign(draft, { summary: edit.summary, text });
+    const answer = await signer.sign(draft, { summary, text });
     if (!answer.ok) return { ok: false, reason: 'cancelled' };
     const signed = answer.signed;
 

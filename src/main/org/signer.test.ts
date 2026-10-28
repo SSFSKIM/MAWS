@@ -37,7 +37,7 @@ import { CHAIN_FILE, orgFiles, SIGNING_FILE, type Anchor, type Obligation, type 
 import { startHeldOrg, type HeldOrg } from './held';
 import type { HubClient, HubResult, Served } from './hub-client';
 import { heldOrgSession, type SignedIn } from './session';
-import { createOrgSigner, noChangeEdit, type Edit, type OrgSigner, type SignerDeliveries } from './signer';
+import { createOrgSigner, noChangeEdit, StaleEdit, type Edit, type OrgSigner, type SignerDeliveries } from './signer';
 import { createSigningStore, type SigningStore } from './signing-store';
 
 const ORG = 'org-signer';
@@ -421,6 +421,28 @@ describe('the checks and the verdict', () => {
 
     expect(await h.signer.sign(noChangeEdit(), { beforePrompt: async () => true })).toEqual({ ok: true, version: 2 });
     expect(h.prompts).toHaveLength(1);
+  });
+
+  it('refuses `stale`, asking nothing, when the edit finds what it would sign is no longer what the person was shown', async () => {
+    const h = await harness();
+    const moved: Edit = { ...noChangeEdit(), apply: () => Promise.reject(new StaleEdit('the revocations changed since they were shown')) };
+    expect(await h.signer.sign(moved)).toEqual({ ok: false, reason: 'stale', detail: 'the revocations changed since they were shown' });
+    expect(h.prompts).toEqual([]);
+    expect(h.disk()).toBeNull();
+  });
+
+  it('names the checks\' warnings in Touch ID\'s own line, where the prompt\'s text never reaches the person', async () => {
+    const h = await harness();
+    // This Mac removes `old` (version 2); the recovery key then rewinds to version 1, where `old` is listed again with
+    // its keys current: the removal's revocations are on the discarded branch, so a no-change successor warns twice.
+    expect(await h.signer.sign(await removeDevice('old'))).toEqual({ ok: true, version: 2 });
+    const { admin, app, recovery } = await org();
+    const t = await signTransition({ org: ORG, fromVersion: 1, newRootKeys: [admin.stepUp.pub, app.stepUp.pub], issued: iso(NOW) }, recovery.privateKey, recovery.pub);
+    h.hub.states = [h.genesis, await adminSuccessor(h.genesis)];
+    h.hub.transitions = [t];
+    expect(await h.signer.sign(noChangeEdit())).toEqual({ ok: true, version: 3 });
+    expect(h.prompts.map((p) => p.summary)).toEqual(['remove device dev-old', 're-sign the org state (no change), with 2 warnings shown in Settings › Org']);
+    expect(h.prompts[1].text).toContain('was revoked on the branch the recovery discarded');
   });
 
   it('refuses `cancelled` when the person declines, keeping nothing', async () => {

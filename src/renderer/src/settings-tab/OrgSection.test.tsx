@@ -57,6 +57,12 @@ const SIGNER: Signer = {
 };
 const signing = (signer: Partial<Signer>, rest: Partial<Extract<OrgStatus, { state: 'registered' }>> = {}): OrgStatus => ({ ...REGISTERED, ...rest, signer: { ...SIGNER, ...signer } });
 const ROOT: Partial<Signer> = { root: true, maySign: true };
+// the superseded offer as main shows it: each revocation and consequence, the checks' warnings, and the digest naming them
+const OFFER_LINES = ['revoke the step-up key k1 of device b1 of b@example.com: it was revoked before the recovery', 'its channel key k2 is revoked with it'];
+const OFFER_WARNING = 'device 7Hq2xVb9 of owner@example.com (stepUpKid0001) was revoked on the branch the recovery discarded, and this state doesn\u2019t revoke it';
+const DIGEST_A = 'offerDigestA000000000000000000000000000000';
+const DIGEST_B = 'offerDigestB000000000000000000000000000000';
+const offerOf = (offer: Partial<NonNullable<Signer['offer']>>): Signer['offer'] => ({ superseded: 2, lines: OFFER_LINES, warnings: [OFFER_WARNING], withheld: [], digest: DIGEST_A, ...offer });
 
 let calls: { name: string; input: unknown }[];
 let emit: (status: OrgStatus) => void;
@@ -357,22 +363,51 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
 
   it('the superseded offer: Revoke again only when there is something to sign; the withheld names always', async () => {
     const withheld = 'device 7Hq2xVb9 of owner@example.com (stepUpKid0001)';
-    renderSection(signing({ ...ROOT, offer: { superseded: 2, withheld: [withheld] } }));
+    renderSection(signing({ ...ROOT, offer: offerOf({ superseded: 2, withheld: [withheld] }) }));
     const revocations = await found('Revocations');
     expect(within(revocations).getByText('A recovery dropped the revocation of 2 keys.')).toBeTruthy();
     expect(within(revocations).getByText((text) => text.startsWith(`Not offered: ${withheld}.`))).toBeTruthy();
-    fireEvent.click(within(revocations).getByRole('button', { name: 'Revoke again' }));
-    await vi.waitFor(() => expect(sent('org.revokeSuperseded')).toEqual([undefined]));
+    fireEvent.click(within(revocations).getByRole('button', { name: 'Revoke again…' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Sign these revocations?' })).getByRole('button', { name: 'Sign' }));
+    await vi.waitFor(() => expect(sent('org.revokeSuperseded')).toEqual([{ offer: DIGEST_A }]));
     expect(await within(row('Signer')).findByText('Signed version 13.')).toBeTruthy();
 
-    emit(signing({ ...ROOT, offer: { superseded: 0, withheld: [withheld] } }));
+    emit(signing({ ...ROOT, offer: offerOf({ superseded: 0, lines: [], warnings: [], withheld: [withheld] }) }));
     expect(within(row('Revocations')).queryByRole('button')).toBeNull();
     expect(within(row('Revocations')).queryByText(/A recovery dropped/)).toBeNull();
     expect(within(row('Revocations')).getByText((text) => text.startsWith(`Not offered: ${withheld}.`))).toBeTruthy();
 
-    emit(signing({ offer: { superseded: 2, withheld: [] } })); // not a root: nothing shown would sign
+    emit(signing({ offer: offerOf({ superseded: 2 }) })); // not a root: nothing shown would sign
     expect(within(row('Revocations')).getByText('A recovery dropped the revocation of 2 keys.')).toBeTruthy();
     expect(within(row('Revocations')).queryByRole('button')).toBeNull();
+  });
+
+  it('Revoke again shows the whole closure, the warnings and the withheld before it signs; Cancel sends nothing; a changed offer closes the sheet', async () => {
+    const withheld = 'device 7Hq2xVb9 of owner@example.com (stepUpKid0001)';
+    renderSection(signing({ ...ROOT, offer: offerOf({ withheld: [withheld] }) }), { 'org.revokeSuperseded': () => ({ ok: false, reason: 'stale', detail: 'the revocations changed since they were shown: nothing was signed' }) });
+    fireEvent.click(within(await found('Revocations')).getByRole('button', { name: 'Revoke again…' }));
+    let sheet = await screen.findByRole('dialog', { name: 'Sign these revocations?' });
+    for (const line of OFFER_LINES) expect(within(sheet).getByText(line)).toBeTruthy();
+    expect(within(sheet).getByText(`Warning: ${OFFER_WARNING}`)).toBeTruthy();
+    expect(within(sheet).getByText((text) => text.startsWith(`Not offered: ${withheld}.`))).toBeTruthy();
+    expect(sent('org.revokeSuperseded')).toEqual([]);
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(sent('org.revokeSuperseded')).toEqual([]);
+
+    // The offer changes while the sheet is open: it closes, so no confirmation reaches other words.
+    fireEvent.click(within(row('Revocations')).getByRole('button', { name: 'Revoke again…' }));
+    await screen.findByRole('dialog', { name: 'Sign these revocations?' });
+    emit(signing({ ...ROOT, offer: offerOf({ lines: OFFER_LINES.slice(0, 1), digest: DIGEST_B }) }));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    // Main refuses a confirmation of words it no longer holds: the line says so.
+    fireEvent.click(within(row('Revocations')).getByRole('button', { name: 'Revoke again…' }));
+    sheet = await screen.findByRole('dialog', { name: 'Sign these revocations?' });
+    expect(within(sheet).queryByText(OFFER_LINES[1])).toBeNull();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Sign' }));
+    await vi.waitFor(() => expect(sent('org.revokeSuperseded')).toEqual([{ offer: DIGEST_B }]));
+    expect((await within(row('Signer')).findByRole('alert')).textContent).toContain('What would be signed changed since it was shown.');
   });
 
   it('owing machines per version, a too-large one named; a discarded proposal where it may still be held', async () => {
