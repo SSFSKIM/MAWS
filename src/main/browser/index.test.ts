@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
-import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { contextOf } from '../../../test/support/fake-page';
 
 const prepared = vi.hoisted(() => [] as string[]); // what each opened partition was given, in order
@@ -113,9 +113,9 @@ function fakeIndex(known: string[], unavailable: string | null = null) {
   const listeners = new Set<(record: { appId: AppSessionId }, cause: string) => void>();
   const index = {
     unavailable,
-    browserHistory: { visit: () => {}, setTitle: () => {}, suggest: () => [] },
     sessions: {
       get: (id: AppSessionId) => (known.includes(id) ? { appId: id } : null),
+      appIds: () => [...known],
       onChange: (listener: (record: { appId: AppSessionId }, cause: string) => void) => {
         listeners.add(listener);
         return () => void listeners.delete(listener);
@@ -126,8 +126,19 @@ function fakeIndex(known: string[], unavailable: string | null = null) {
   return { index: index as never, change, listeners };
 }
 
+// P5 O3-A: the browser's data as startBrowser tells it the spine's sessions (its stores unused here)
+function fakeData() {
+  const told: unknown[][] = [];
+  const data = {
+    history: { visit: () => {}, setTitle: () => {}, suggest: () => [] },
+    reattach: (sessions: Iterable<string> | null) => void told.push(['reattach', sessions === null ? null : [...sessions]]),
+    sessionChanged: (appSessionId: string, removed: boolean) => void told.push(['changed', appSessionId, removed]),
+  };
+  return { data: data as never, told };
+}
+
 function start(index: never, more: Partial<Parameters<typeof startBrowser>[0]> = {}) {
-  return startBrowser({ userData, settings: () => SETTINGS_DEFAULTS_V20.browser, index, register: () => {}, emit: () => {}, env: {}, ...more });
+  return startBrowser({ userData, settings: () => SETTINGS_DEFAULTS_V21.browser, index, data: fakeData().data, register: () => {}, emit: () => {}, env: {}, ...more });
 }
 
 describe('startBrowser (E4a Design §2, G4)', () => {
@@ -193,6 +204,20 @@ describe('startBrowser (E4a Design §2, G4)', () => {
     browser.stop();
   });
 
+  // P5 O3-A (the O3 document §4): the snapshot at start, taken with the change listener in place, then every change
+  it('tells the browser\'s data the spine\'s sessions at start and each change to them; an unavailable index, none', () => {
+    const { index, change } = fakeIndex([A]);
+    const { data, told } = fakeData();
+    const browser = start(index, { data });
+    change(GONE, 'discovered');
+    change(A, 'removed');
+    expect(told).toEqual([['reattach', [A]], ['changed', GONE, false], ['changed', A, true]]);
+    browser.stop();
+    const unavailable = fakeData();
+    start(fakeIndex([A], 'newer').index, { data: unavailable.data }).stop();
+    expect(unavailable.told).toEqual([['reattach', null]]);
+  });
+
   it('closes a session\'s tabs when its record is removed, and only then', () => {
     const { index, change, listeners } = fakeIndex([A]);
     const browser = start(index);
@@ -217,7 +242,7 @@ describe('startBrowser (E4a Design §2, G4)', () => {
     const handlers = new Map<string, (input: unknown) => unknown>();
     const browser = start(fakeIndex([A]).index, {
       profiles,
-      settings: () => ({ ...SETTINGS_DEFAULTS_V20.browser, profile: 'Profile 1' }),
+      settings: () => ({ ...SETTINGS_DEFAULTS_V21.browser, profile: 'Profile 1' }),
       register: ((name: string, handler: (input: unknown) => unknown) => void handlers.set(name, handler)) as never,
     });
     expect(handlers.get('browser.profiles.list')!(undefined)).toEqual({ profiles: [{ profileDir: 'Profile 1', name: 'Work', gaiaName: null, userName: null, avatar: { kind: 'initials', letter: 'W' } }] }); // cua #90
@@ -227,7 +252,7 @@ describe('startBrowser (E4a Design §2, G4)', () => {
   });
 
   it('reads the profile when a tab opens, so a change applies to tabs opened afterwards (Design §9)', () => {
-    let settings = SETTINGS_DEFAULTS_V20.browser;
+    let settings = SETTINGS_DEFAULTS_V21.browser;
     const profiles = () => [{ profileDir: 'Profile 1', name: 'Work', partition: 'persist:maws-chrome-Profile 1', importedAt: 't', storageDirName: 'x' }];
     const browser = start(fakeIndex([A]).index, { profiles, settings: () => settings });
     const before = browser.store.open({ appSessionId: A, url: null, select: true }).tab;

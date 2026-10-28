@@ -55,6 +55,12 @@ export const DAEMON_ROW = {
   embedded: 'not in use · MAWS runs its hosts itself',
 };
 
+// P5 O3-A: the spine's refusal, beside the daemon row
+export const SPINE_ROW = {
+  label: 'machine data',
+  refused: (why: string) => `refused this launch · ${why}`,
+};
+
 export const SUPERVISOR_NOTICES = {
   updated: (live: number) =>
     `MAWS was updated. ${sessions(live)} ${live === 1 ? 'is' : 'are'} still running on the previous version's supervisor; MAWS moves to the new one when they become idle. Sessions started meanwhile run on it too.`,

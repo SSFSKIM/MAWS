@@ -567,8 +567,8 @@ test('the chain governs the pin: the house system with no defaults, then a docum
   await expect(chemistry).toBeVisible({ timeout: 15_000 });
   await expect(chemistry.locator('option')).toHaveText(['Use my default', ...BUILT_IN]);
   await chemistry.selectOption({ label: 'MAWS' });
-  const settingsFile = join(launch!.userData, 'settings.json');
-  await expect.poll(() => (JSON.parse(readFileSync(settingsFile, 'utf8')) as { artifacts: unknown }).artifacts).toEqual({ defaultDesignSystem: byTitle.Classroom, spaceDesignSystems: { [space.id]: byTitle.MAWS }, commentsView: 'expand' });
+  const settingsFile = join(launch!.userData, 'machine-settings.json'); // P5 O3-A: the design-system defaults are the machine's
+  await expect.poll(() => (JSON.parse(readFileSync(settingsFile, 'utf8')) as { artifacts: unknown }).artifacts).toEqual({ defaultDesignSystem: byTitle.Classroom, spaceDesignSystems: { [space.id]: byTitle.MAWS } });
 
   // main pushes the defaults on every settings change; a pin follows them once the host has them
   await expect.poll(() => pinOf(loose), { timeout: 10_000, message: 'no Space: the owner’s default' }).toBe(byTitle.Classroom);
@@ -581,7 +581,7 @@ test('the chain governs the pin: the house system with no defaults, then a docum
 
   // the Space back on "Use my default": its document follows the owner's
   await chemistry.selectOption({ label: 'Use my default' });
-  await expect.poll(() => (JSON.parse(readFileSync(settingsFile, 'utf8')) as { artifacts: unknown }).artifacts).toEqual({ defaultDesignSystem: byTitle.Classroom, spaceDesignSystems: {}, commentsView: 'expand' });
+  await expect.poll(() => (JSON.parse(readFileSync(settingsFile, 'utf8')) as { artifacts: unknown }).artifacts).toEqual({ defaultDesignSystem: byTitle.Classroom, spaceDesignSystems: {} });
   await expect.poll(() => pinOf(inSpace), { timeout: 10_000, message: 'the Space has none: the owner’s default' }).toBe(byTitle.Classroom);
 
   // a deleted default falls through: the Space's to the owner's, the owner's to the house system, the settings unchanged
@@ -593,7 +593,7 @@ test('the chain governs the pin: the house system with no defaults, then a docum
   await ok(page, 'artifacts.delete', { artifactId: byTitle.Classroom });
   expect(await pinOf(loose), 'the owner’s default deleted: the house system').toBe(byTitle.MAWS);
   expect(await pinOf(inSpace), 'both deleted: the house system').toBe(byTitle.MAWS);
-  expect((JSON.parse(readFileSync(settingsFile, 'utf8')) as { artifacts: unknown }).artifacts).toEqual({ defaultDesignSystem: byTitle.Classroom, spaceDesignSystems: { [space.id]: byTitle.Official }, commentsView: 'expand' });
+  expect((JSON.parse(readFileSync(settingsFile, 'utf8')) as { artifacts: unknown }).artifacts).toEqual({ defaultDesignSystem: byTitle.Classroom, spaceDesignSystems: { [space.id]: byTitle.Official } });
   expect(launch!.consoleErrors()).toEqual([]);
 });
 

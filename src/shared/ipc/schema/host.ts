@@ -62,6 +62,10 @@ export const HostStatusSchema = z.strictObject({
   lastExit: z.strictObject({ code: z.number().int().nullable(), signal: z.string().nullable(), at: z.string(), interrupted: z.number().int() }).nullable(),
   daemon: DaemonStatusSchema.nullable(), // P5 O2 M7
   daemonUnavailable: z.string().nullable(), // P5 O2 M7
+  // P5 O3-A (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §2): why this run does not run the machine's services and
+  // writes none of its files (another live process holds the profile's spine.lock, named by pid and build); null while
+  // it holds the lock. Optional, so the status of a build before O3-A (another profile's, over O6's link) still reads.
+  spineRefused: z.string().nullable().optional(),
 });
 export type HostStatus = z.infer<typeof HostStatusSchema>;
 

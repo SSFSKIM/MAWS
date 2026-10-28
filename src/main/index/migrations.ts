@@ -1,9 +1,16 @@
 // The index's schema history (C4 execution document, Interfaces "Index"; residue *Index schema and location*). An
 // ordered list: version N is the N-th entry, applied once, inside the one transaction that opens a database behind the
 // app, with `PRAGMA user_version` recording the last applied. Never edit a released entry; append.
+import type { DatabaseSync } from 'node:sqlite';
+import { stageBrowserTables } from './browser-staging'; // P5 O3-A
+
 export interface Migration {
   version: number;
   sql: string;
+  // P5 O3-A: work outside the index that must precede `sql`, run by the opener with its connection and the index's path,
+  // in the migration transaction, after the earlier pending entries and only while this entry is pending. A throw rolls
+  // the open back as a failing `sql` does.
+  before?: (db: DatabaseSync, path: string) => void;
 }
 
 // A column a released entry was amended to add after some database had already applied it, so that database lacks it.
@@ -254,6 +261,16 @@ ALTER TABLE projects ADD COLUMN org_name TEXT;
 ALTER TABLE projects ADD COLUMN org_source TEXT CHECK (org_source IN ('smns','remote','repository','folder'));
 ALTER TABLE projects ADD COLUMN org_smns_id TEXT;
 `,
+  },
+  {
+    version: 14,
+    // P5 O3-A (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §4): the browser's tables leave the index, which holds only
+    // the machine's data before it moves, for the client's own database, <profile>/browser/browser.sqlite. `before` first
+    // replaces that database's staging tables with a full copy of these three, committed there before this entry
+    // commits here (browser-staging.ts); the browser promotes staging once it reads the index at 14
+    // (src/main/browser/data/), and keeps `browser_activity`'s cascade to `sessions` itself.
+    sql: 'DROP TABLE IF EXISTS browser_history; DROP TABLE IF EXISTS browser_activity; DROP TABLE IF EXISTS browser_bookmarks;',
+    before: stageBrowserTables,
   },
 ];
 

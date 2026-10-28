@@ -2,7 +2,7 @@ import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { openSettingsStore } from '../settings/store';
+import { openSettingsFiles } from '../../../test/support/settings-files'; // P5 O3-A: the two files
 import { startWithProfileLock, type LockingApp } from './profile-lock';
 
 let dir: string;
@@ -15,7 +15,7 @@ const on = () => {};
 
 it('a second instance quits before any persisted store opens', async () => {
   const app = { requestSingleInstanceLock: () => false, hasSingleInstanceLock: () => false, whenReady: vi.fn(async () => {}), quit: vi.fn(), on };
-  await startWithProfileLock(app, () => openSettingsStore(join(dir, 'settings.json')).update({ theme: 'dark' }), handoff);
+  await startWithProfileLock(app, () => void openSettingsFiles(dir).update({ theme: 'dark' }), handoff);
   expect(app.quit).toHaveBeenCalledOnce();
   expect(app.whenReady).not.toHaveBeenCalled();
   expect(readdirSync(dir)).toEqual([]);
@@ -25,18 +25,18 @@ it('the primary opens stores only after readiness, with the lock still held', as
   let ready!: () => void;
   let held = false;
   const app = { requestSingleInstanceLock: () => (held = true), hasSingleInstanceLock: () => held, whenReady: () => new Promise<void>((resolve) => { ready = resolve; }), quit: vi.fn(), on };
-  const started = startWithProfileLock(app, () => openSettingsStore(join(dir, 'settings.json')).update({ theme: 'dark' }), handoff);
+  const started = startWithProfileLock(app, () => void openSettingsFiles(dir).update({ theme: 'dark' }), handoff);
   expect(held).toBe(true);
   expect(readdirSync(dir)).toEqual([]);
   ready();
   await started;
-  expect(openSettingsStore(join(dir, 'settings.json')).settings.theme).toBe('dark');
+  expect(openSettingsFiles(dir).settings.theme).toBe('dark');
   expect(app.quit).not.toHaveBeenCalled();
 });
 
 it('refuses startup if the lock was released while waiting for readiness', async () => {
   const app = { requestSingleInstanceLock: () => true, hasSingleInstanceLock: () => false, whenReady: async () => {}, quit: vi.fn(), on };
-  await startWithProfileLock(app, () => openSettingsStore(join(dir, 'settings.json')).update({ theme: 'dark' }), handoff);
+  await startWithProfileLock(app, () => void openSettingsFiles(dir).update({ theme: 'dark' }), handoff);
   expect(app.quit).toHaveBeenCalledOnce();
   expect(readdirSync(dir)).toEqual([]);
 });

@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PreloadBridge, Settings } from '@shared/ipc/schema';
 import type { HostStatus, SupervisorStatus } from '@shared/ipc/schema/host';
-import { SETTINGS_DEFAULTS_V20 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { useHosts } from '../stores/hosts';
 import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
@@ -57,7 +57,7 @@ let unsubscribe = () => {};
 const settings = () => useSettings.getState().state!.settings;
 
 // The hosts store connects on mount and reads main's snapshot: the bridge answers it with `initialStatus`.
-async function renderGroup(initialStatus: HostStatus = status(), initial: Settings = SETTINGS_DEFAULTS_V20, whole = false) {
+async function renderGroup(initialStatus: HostStatus = status(), initial: Settings = SETTINGS_DEFAULTS_V21, whole = false) {
   b = settingsBridge(initial);
   b.answers['host.status'] = () => initialStatus;
   window.maws = b.bridge;
@@ -255,7 +255,7 @@ describe('the machine daemon', () => {
   });
 
   it('switched back on while embedded, says it takes effect when MAWS opens again', async () => {
-    await renderGroup(status(), { ...SETTINGS_DEFAULTS_V20, supervisor: { ...SETTINGS_DEFAULTS_V20.supervisor, shape: 'embedded' } });
+    await renderGroup(status(), { ...SETTINGS_DEFAULTS_V21, supervisor: { ...SETTINGS_DEFAULTS_V21.supervisor, shape: 'embedded' } });
     expect(machineDaemon().getAttribute('aria-checked')).toBe('false');
     expect(daemonLine().textContent).toBe('Not in use · MAWS runs its sessions itself');
     fireEvent.click(machineDaemon());
@@ -379,7 +379,7 @@ describe('Stop all', () => {
 
 describe('inside Settings › Engine', () => {
   it('is a Background supervisor group of the Engine section, after the engine rows', async () => {
-    await renderGroup(status(), SETTINGS_DEFAULTS_V20, true);
+    await renderGroup(status(), SETTINGS_DEFAULTS_V21, true);
     const group = screen.getByRole('group', { name: 'Background supervisor' });
     expect(within(group).getByRole('group', { name: 'Status' })).toBeTruthy();
     expect(within(group).getByRole('group', { name: 'Exit when idle' })).toBeTruthy();
