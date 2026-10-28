@@ -4,8 +4,9 @@
 // a fake sminos on RL10 for lane A), and this browser paired as a `web-cards` device through the Device panel, the Mac's
 // approval given as `deployment admin pair` gives it. The browser reaches the machine only through the hub's relay.
 //
-// The list shows the owner's lane A session waiting on the machine with its count (a lane B session's count waits on
-// O10's lane B notifier feed, so lane B's cards are opened from their landing URL); a question's card is drawn with its choices and
+// The list shows the owner's lane A and lane B sessions waiting on the machine, each with its count (lane B's from the
+// engine host's broker, O10's notifier feed), and lane B's cards open from their landing URL as a push's tap lands; a
+// question's card is drawn with its choices and
 // answered, a permission's with Allow and Deny and denied, on each lane, each through one passkey gesture, each card
 // settling within 5 s and the machine recording one answer; a lane B card whose session has no engine session is not
 // answerable, with its reason; an answer whose `ack` is withheld is uncertain, and Retry settles it; the channel dropped
@@ -80,8 +81,8 @@ test.beforeAll(async ({ browser }) => {
   listLaneB(APP, 'lane B work');
   world.host.request(APP, 'question', 'rq-q');
   world.host.request(APP, 'permission', 'rq-p');
-  // sminos's pending set holds what bridges raise, lane A's alone: a lane B session's count reaches the hub's presence
-  // only once O10's endpoint feeds it from the engine host's broker, so the list has no lane B row yet.
+  // sminos's pending set holds what bridges raise, lane A's alone; a lane B session's count reaches the hub's presence
+  // from the engine host's broker items (O10's lane B notifier feed, src/endpoint/lane-b-pending.ts).
   world.sminos.restate([question('toolu_q'), permission('toolu_p', 'pnpm test'), permission('toolu_b', 'rm -rf /', 'la-b')]);
 
   context = await browser.newContext();
@@ -124,7 +125,7 @@ test.afterAll(async () => {
   await world?.stop();
 });
 
-test("the list: the owner's lane A session waiting on the machine, with its count, reached from the top bar with its dot", async () => {
+test("the list: the owner's lane A and lane B sessions waiting on the machine, each with its count, reached from the top bar with its dot", async () => {
   const entry = page.getByRole('button', { name: /^Cards/ });
   await expect(entry.getByTestId('cards-dot')).toBeVisible({ timeout: 15_000 });
   await entry.click();
@@ -134,9 +135,10 @@ test("the list: the owner's lane A session waiting on the machine, with its coun
   await expect(mini.getByTestId('cards-machine-state')).toHaveText('online');
   await expect(mini.locator('[data-cards-session="la-1"]')).toHaveAttribute('data-pending', '2');
   await expect(mini.locator('[data-cards-session="la-1"]')).toContainText('main');
-  // The lane B session has two requests waiting too, and no count at the hub yet (O10's lane B notifier feed): its cards
-  // open from its landing URL (the next cases), not from a row.
-  await expect(mini.locator('[data-cards-session]')).toHaveCount(1);
+  // The lane B session's two requests, counted from the engine host's broker items, under its appSessionId.
+  await expect(mini.locator(`[data-cards-session="${APP}"]`)).toHaveAttribute('data-pending', '2');
+  await expect(mini.locator(`[data-cards-session="${APP}"]`)).toContainText('lane B work');
+  await expect(mini.locator('[data-cards-session]')).toHaveCount(2);
   // B's session waits on the same machine, and is not the owner's to see here.
   await expect(mini.locator('[data-cards-session="la-b"]')).toHaveCount(0);
 });
