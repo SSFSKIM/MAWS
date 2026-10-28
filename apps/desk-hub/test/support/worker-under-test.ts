@@ -165,6 +165,12 @@ export class Registry extends DeployedRegistry {
     return super.memberPushSubscriptions(member);
   }
 
+  /** Armed, refused as a Registry on the code before an admin's read of another member's entries would refuse it. */
+  pendingDevicesOf(member: MemberRecord, of: string): ReturnType<DeployedRegistry['pendingDevicesOf']> {
+    if (this.ctx.storage.kv.get<string>('lacks') === 'pendingDevicesOf') throw new TypeError('The RPC receiver does not implement the method "pendingDevicesOf".');
+    return super.pendingDevicesOf(member, of);
+  }
+
   /** Armed, refused as a Registry on the code before the relay's binding check would refuse it. */
   machineBinds(name: string, ref: string): ReturnType<DeployedRegistry['machineBinds']> {
     if (this.ctx.storage.kv.get<string>('lacks') === 'machineBinds') throw new TypeError('The RPC receiver does not implement the method "machineBinds".');

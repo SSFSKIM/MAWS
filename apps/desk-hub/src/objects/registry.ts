@@ -1451,6 +1451,15 @@ export class Registry extends DurableObject<Env> {
     return ok({ pending: this.chain.pending(member.id) });
   }
 
+  /** Another member's pairing entries, for an admin enrolling that member's first device (O8's H1). A method of its own,
+   * not an argument of `pendingDevices`, which a Registry on the code before it would drop and answer the caller's own. */
+  pendingDevicesOf(member: MemberRecord, of: string): Result<PendingDevices> {
+    const admin = this.current(member, 'admin');
+    if (!admin.ok) return admin;
+    if (this.sql.exec('SELECT 1 FROM members WHERE id = ?', of).toArray().length === 0) return fail(404, 'no-member', 'the org state lists no member by that id');
+    return ok({ pending: this.chain.pending(of) });
+  }
+
   /**
    * `member` as the members table holds them now. The Worker resolved them before it read the request's body, and a
    * state accepted since may have removed or demoted them, so every change the Registry makes for a member checks
