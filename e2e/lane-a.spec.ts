@@ -187,7 +187,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await main(page).getByRole('button', { name: /^Model / }).click();
     await page.getByRole('button', { name: /· Select model$/ }).click(); // the chip opens on the effort view
     await page.getByRole('menuitemradio', { name: /^sonnet/ }).click();
-    await expect.poll(() => bodies(bridge, 'model')).toEqual([{ op: 'model', model: 'sonnet' }]);
+    await expect.poll(() => bodies(bridge, 'model')).toEqual([{ op: 'model', model: 'sonnet', effort: null }]); // main keeps the effort the bridge holds
     await page.keyboard.press('Escape');
 
     // a runnable slash command, its outcome from its op
