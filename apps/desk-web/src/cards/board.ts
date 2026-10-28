@@ -6,7 +6,8 @@
 // is down its last presence stands, so an offline machine keeps its rows.
 //
 // The store is the app's entry's (the top bar's dot reads it) and holds plain data only; the device's part (watch.ts,
-// in its own chunk) fills it.
+// in its own chunk) fills it. The frozen views read its machines' names for the freeze's one seam (M6, `movedToMaws`).
+import { machineNameKey } from 'desk-hub/protocol';
 import type { Listing, RelayPresence, Signed } from 'org-protocol';
 import { create } from 'zustand';
 import type { CutOverMachine } from './machines';
@@ -34,6 +35,15 @@ export function boardOf(machines: CutOverMachine[], presences: Presences, listin
 
 /** How many requests wait on the board, all machines together. */
 export const waitingOn = (board: BoardMachine[]): number => board.reduce((n, m) => n + m.sessions.reduce((k, s) => k + s.pending, 0), 0);
+
+/**
+ * Whether `machine` (a DX session's machine, by the name its log gives) is one of the cut-over machines named `names`:
+ * the same name without regard to case, as the hub and the org state compare names (`machineNameKey`).
+ */
+export function movedToMaws(machine: string, names: readonly string[]): boolean {
+  const key = machineNameKey(machine);
+  return names.some((name) => machineNameKey(name) === key);
+}
 
 export type CardsBoard = {
   /** Whether the device's part is watching (a listed device): until then the list has nothing to say of machines. */

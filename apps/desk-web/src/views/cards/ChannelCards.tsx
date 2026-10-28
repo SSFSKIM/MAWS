@@ -9,6 +9,11 @@
 // subscribe to yet (`grade`: no engine session, never prompted locally) is not yet actionable, and is followed again
 // when its pending count in the machine's presence moves. No view reads the endpoint's `caps` grades as what this phone
 // may do: the endpoint decides each answer.
+//
+// A push's tap lands here (P5 O13 M6, `/cards/<ref>/<session>`), cold or in a window already open. A landing on a
+// machine the org state this phone holds does not resolve — a VM certified since the last read, which moved no version
+// and raised no notice — reads the state again for that machine, at most once a minute (org-store.ts's `refresh`, keyed
+// by the ref as a listing's unresolved signer is), whatever the view's own read on opening found too recent to repeat.
 import { useEffect, useState } from 'react';
 import type { Me } from '../../hub/me';
 import { useDeskLayout } from '../../shell/layout';
@@ -51,7 +56,12 @@ export function ChannelCards({ me, machine, session, onDevice }: { me: Me; machi
   const { loaded, record } = useDevice();
   const listed = record?.state.kind === 'listed';
   const looked = useSessionListing(machine, session, loaded && listed);
-  const name = useCardsBoard((s) => s.machines.find((m) => m.ref === machine)?.name) ?? `${machine.slice(0, 8)}…`;
+  const resolved = useCardsBoard((s) => s.machines.find((m) => m.ref === machine)?.name);
+  const watching = useCardsBoard((s) => s.watching);
+  useEffect(() => {
+    if (watching && resolved === undefined) refreshOrg(machine);
+  }, [machine, watching, resolved]);
+  const name = resolved ?? `${machine.slice(0, 8)}…`;
   const navigate = useDeskLayout((s) => s.navigate);
   const narrow = useNarrow(); // a phone's top bar has the way back
   const title = looked.state === 'found' ? looked.listing.body.fields.title || session.slice(0, 8) : session.slice(0, 8);
