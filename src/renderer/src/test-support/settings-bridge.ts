@@ -73,6 +73,7 @@ export function settingsBridge(initial: Settings = SETTINGS_DEFAULTS_V19): Setti
     'library.list': () => ({ rows: [], counts: Object.fromEntries(ARTIFACT_KINDS.map((kind) => [kind, 0])) }),
     'library.spaces': () => ({ spaces: [] }),
     // P3-D end
+    'org.status': () => ({ state: 'none' }), // P5 O8 M1: Settings › Org reads this Mac's place in the org (none by default)
   };
   const bridge = {
     invoke: vi.fn(async (name: string, input: unknown) => {

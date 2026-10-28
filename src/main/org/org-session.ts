@@ -24,6 +24,7 @@ import { join } from 'node:path';
 import {
   advanceHead,
   base64urlDecode,
+  canonicalize,
   decodePairingCode,
   keyId,
   pairingFingerprint,
@@ -356,10 +357,32 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     const cred = credential;
     const view = held;
     if (closed || reg === null || reg.signedOut || cred === null || !hubLive() || view === null || !view.ready()) return;
-    const read = await client(reg.hub, cred).chain(view.head().state.version);
+    const hub = client(reg.hub, cred);
+    const version = view.head().state.version;
+    let read = await hub.chain(version);
     if (credential !== cred || held !== view) return;
     if (!read.ok) return hubFailed(read);
+    // A recovery from below the held head needs the states from its `fromVersion` on, which `?since=<head>` leaves out;
+    // and a served head below the held one is judged with the whole chain, which tells a rewind from a rollback.
+    const from = rereadFrom(view, read.value);
+    if (from !== null) {
+      read = await hub.chain(from);
+      if (credential !== cred || held !== view) return;
+      if (!read.ok) return hubFailed(read);
+    }
     await adopt(view, read.value);
+  }
+
+  /** The version to read the chain again from, when the served page may carry a recovery from below the held head. */
+  function rereadFrom(view: HeldOrg, served: Served): number | null {
+    const version = view.head().state.version;
+    const known = new Set(view.since(0).transitions.map((t) => canonicalize(t.body)));
+    const below = served.transitions
+      .filter((t) => typeof t?.body?.fromVersion === 'number' && t.body.fromVersion < version && !known.has(canonicalize(t.body)))
+      .map((t) => t.body.fromVersion);
+    if (below.length > 0) return Math.max(0, Math.min(...below));
+    const head = served.head?.state?.version;
+    return typeof head === 'number' && head < version ? 0 : null;
   }
 
   async function refreshCertificates(): Promise<void> {
@@ -371,7 +394,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     if (credential !== cred || held !== view) return;
     if (!read.ok) return hubFailed(read);
     const served = read.value;
-    if (served.head !== null && typeof served.head.state?.version === 'number' && served.head.state.version > view.head().state.version) return sync();
+    if (served.head !== null && typeof served.head.state?.version === 'number' && served.head.state.version !== view.head().state.version) return sync();
     await adopt(view, { chain: [], head: served.head, transitions: served.transitions, certificates: served.certificates });
   }
 

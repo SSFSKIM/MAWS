@@ -20,8 +20,9 @@ export type HubCredential =
 
 export type AccessLogin = (hub: string, options: { signal: AbortSignal }) => Promise<HubCredential>;
 
-/** The suites' stand-in for Access admits this header (apps/desk-hub/local/standin.ts); O7's dev-session.ts exports the same. */
-export const STANDIN_HEADER = 'x-desk-standin-user';
+// The suites' stand-in for Access admits this header (apps/desk-hub/local/standin.ts), as O7's development session sends it.
+import { STANDIN_HEADER } from './dev-session';
+export { STANDIN_HEADER };
 
 export const TRANSFER_STORE = 'https://login.cloudflareaccess.org/';
 
