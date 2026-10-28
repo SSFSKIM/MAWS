@@ -341,7 +341,7 @@ describe('the app as the org’s signer on the local hub', { timeout: 180_000 },
     expect(theirs.state.version).toBe(parent + 1);
     expect(theirs.sigs.map((s) => s.kid)).not.toContain(signer().stepUpKid);
     await until(async () => (await same(appHead(), theirs)) && signer().pending?.fork === true, 'the proposal read as a fork');
-    expect(signer().pending).toEqual({ version: parent + 1, fork: true, exposed: true, refused: 'not-head' });
+    expect(signer().pending).toMatchObject({ version: parent + 1, fork: true, exposed: true, refused: 'not-head' });
     const proposal = signingFile().pending!.signed;
     expect(await same(proposal, theirs)).toBe(false);
 
@@ -352,7 +352,7 @@ describe('the app as the org’s signer on the local hub', { timeout: 180_000 },
     expect(signer().pending).toMatchObject({ version: parent + 1, fork: true });
     expect(signingFile().pending?.signed).toEqual(proposal);
 
-    expect(await app.discardPending(true)).toEqual({ ok: true, unsent: false, hubVersion: parent + 2, forkAt: parent + 1 });
+    expect(await app.discardPending(true, signer().pending!.hash)).toEqual({ ok: true, unsent: false, hubVersion: parent + 2, forkAt: parent + 1 });
     expect(signer()).toMatchObject({ pending: null, abandoned: [{ version: parent + 1, hub: true, machines: [] }] });
     expect(signingFile().pending).toBeNull();
     expect(asked).toHaveLength(2);

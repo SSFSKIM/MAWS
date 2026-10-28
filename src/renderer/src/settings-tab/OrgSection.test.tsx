@@ -34,6 +34,10 @@ const REGISTERED: OrgStatus = {
 type Signer = NonNullable<OrgSignerStatus>;
 const FINGERPRINT = '65u7k-rscy7';
 const OLD_DEVICE = 'Zo1dDevice9xYc0dEk9F3';
+// pending proposals' stateHashes, as the status names them
+const HASH_A = 'aaaaPendingStateHashA0000000000000000000000';
+const HASH_B = 'bbbbPendingStateHashB0000000000000000000000';
+const HASH_C = 'ccccPendingStateHashC0000000000000000000000';
 const MINI = 'maws-mini-ref-000001';
 const VM = 'devcloud-vm-ref-0002';
 const SIGNER: Signer = {
@@ -377,8 +381,8 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
         ...ROOT,
         owing: [{ version: 7, machines: [MINI, VM], tooLarge: [VM] }],
         abandoned: [
-          { version: 5, hub: true, machines: [MINI] },
-          { version: 6, hub: false, machines: [] }, // never sent: nothing can hold it
+          { hash: HASH_A, version: 5, hub: true, machines: [MINI] },
+          { hash: HASH_B, version: 6, hub: false, machines: [] }, // never sent: nothing can hold it
         ],
       }),
     );
@@ -387,13 +391,13 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
     expect(within(row('Discarded')).getByText(`Version 5 · the hub and ${MINI} may still hold it`)).toBeTruthy();
     expect(within(row('Discarded')).queryByText(/Version 6/)).toBeNull();
 
-    emit(signing({ ...ROOT, abandoned: [{ version: 6, hub: false, machines: [] }] }));
+    emit(signing({ ...ROOT, abandoned: [{ hash: HASH_B, version: 6, hub: false, machines: [] }] }));
     expect(screen.queryByRole('group', { name: 'Deliveries' })).toBeNull();
     expect(screen.queryByRole('group', { name: 'Discarded' })).toBeNull();
   });
 
   it('pending-fork: Discard behind a confirmation with the fork warning; Cancel sends nothing; Discard sends it confirmed', async () => {
-    renderSection(signing({ ...ROOT, pending: { version: 13, fork: true, exposed: true, refused: null } }), {
+    renderSection(signing({ ...ROOT, pending: { version: 13, hash: HASH_A, fork: true, exposed: true, refused: null } }), {
       'org.discardPending': () => ({ ok: true, unsent: false, hubVersion: 13, forkAt: 13 }),
     });
     const pending = await found('Pending');
@@ -409,12 +413,12 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
     fireEvent.click(within(row('Pending')).getByRole('button', { name: 'Discard…' }));
     sheet = await screen.findByRole('dialog', { name: 'Discard version 13?' });
     fireEvent.click(within(sheet).getByRole('button', { name: 'Discard' }));
-    await vi.waitFor(() => expect(sent('org.discardPending')).toEqual([{ confirmed: true }]));
+    await vi.waitFor(() => expect(sent('org.discardPending')).toEqual([{ confirmed: true, hash: HASH_A }]));
     expect(await within(row('Signer')).findByText('Discarded version 13. The hub holds another version 13 (a fork); its head is version 13.')).toBeTruthy();
   });
 
   it('a refused slot that isn’t a fork offers Discard too; a never-sent one is worded so; a slot merely waiting offers none', async () => {
-    renderSection(signing({ ...ROOT, pending: { version: 13, fork: false, exposed: true, refused: 'key-purged' } }), {
+    renderSection(signing({ ...ROOT, pending: { version: 13, hash: HASH_A, fork: false, exposed: true, refused: 'key-purged' } }), {
       'org.discardPending': () => ({ ok: true, unsent: true, hubVersion: 12 }),
     });
     expect(within(await found('Pending')).getByText('The hub refused version 13 · key-purged')).toBeTruthy();
@@ -425,7 +429,7 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
     fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 
-    emit(signing({ ...ROOT, pending: { version: 13, fork: false, exposed: false, refused: 'key-purged' } }));
+    emit(signing({ ...ROOT, pending: { version: 13, hash: HASH_B, fork: false, exposed: false, refused: 'key-purged' } }));
     fireEvent.click(within(row('Pending')).getByRole('button', { name: 'Discard…' }));
     sheet = await screen.findByRole('dialog', { name: 'Discard version 13?' });
     expect(within(sheet).getByText('Version 13 was never sent: nothing was posted, so nothing can show it as a fork.')).toBeTruthy();
@@ -433,13 +437,13 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
     fireEvent.click(within(sheet).getByRole('button', { name: 'Discard' }));
     expect(await within(row('Signer')).findByText('Discarded version 13. It was never sent.')).toBeTruthy();
 
-    emit(signing({ ...ROOT, pending: { version: 14, fork: false, exposed: true, refused: null } }));
+    emit(signing({ ...ROOT, pending: { version: 14, hash: HASH_C, fork: false, exposed: true, refused: null } }));
     expect(within(row('Pending')).getByText('Version 14 is signed and waits for the hub.')).toBeTruthy();
     expect(within(row('Pending')).queryByRole('button')).toBeNull();
   });
 
   it('a discard the hub overtook says so, and nothing was discarded', async () => {
-    renderSection(signing({ ...ROOT, pending: { version: 13, fork: true, exposed: true, refused: null } }), { 'org.discardPending': () => ({ ok: false, reason: 'held' }) });
+    renderSection(signing({ ...ROOT, pending: { version: 13, hash: HASH_A, fork: true, exposed: true, refused: null } }), { 'org.discardPending': () => ({ ok: false, reason: 'held' }) });
     fireEvent.click(within(await found('Pending')).getByRole('button', { name: 'Discard…' }));
     fireEvent.click(within(await screen.findByRole('dialog', { name: 'Discard version 13?' })).getByRole('button', { name: 'Discard' }));
     expect((await within(row('Signer')).findByRole('alert')).textContent).toBe('Not discarded · The hub holds version 13 now: it settled.');
@@ -463,6 +467,56 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
     // another problem carries no Reset
     emit(signing(ROOT, { problem: 'rollback' }));
     expect(within(row('Problem')).queryByRole('button')).toBeNull();
+  });
+
+  it('an open Discard confirmation closes when its proposal settles, and when another replaces it: the old hash is never sent', async () => {
+    const fork = { version: 13, hash: HASH_A, fork: true, exposed: true, refused: null };
+    renderSection(signing({ ...ROOT, pending: fork }));
+    fireEvent.click(within(await found('Pending')).getByRole('button', { name: 'Discard…' }));
+    await screen.findByRole('dialog', { name: 'Discard version 13?' });
+    emit(signing({ ...ROOT, pending: null })); // settled while the owner read the sheet
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    emit(signing({ ...ROOT, pending: fork }));
+    fireEvent.click(within(row('Pending')).getByRole('button', { name: 'Discard…' }));
+    await screen.findByRole('dialog', { name: 'Discard version 13?' });
+    // Another proposal at the same version replaces it (discarded elsewhere, signed again): the sheet was for A.
+    emit(signing({ ...ROOT, pending: { ...fork, hash: HASH_B, refused: 'key-purged', fork: false } }));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    // An unrelated status change leaves an open sheet for the slot it names.
+    fireEvent.click(within(row('Pending')).getByRole('button', { name: 'Discard…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Discard version 13?' });
+    emit(signing({ ...ROOT, ageDays: 4, pending: { ...fork, hash: HASH_B, refused: 'key-purged', fork: false } }));
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Discard' }));
+    await vi.waitFor(() => expect(sent('org.discardPending')).toEqual([{ confirmed: true, hash: HASH_B }]));
+  });
+
+  it('a discard main refused as stale (the slot changed since the confirmation) says so', async () => {
+    renderSection(signing({ ...ROOT, pending: { version: 13, hash: HASH_A, fork: true, exposed: true, refused: null } }), { 'org.discardPending': () => ({ ok: false, reason: 'stale' }) });
+    fireEvent.click(within(await found('Pending')).getByRole('button', { name: 'Discard…' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Discard version 13?' })).getByRole('button', { name: 'Discard' }));
+    expect((await within(row('Signer')).findByRole('alert')).textContent).toBe('Not discarded · The pending state changed since you confirmed: nothing was discarded.');
+  });
+
+  it('two discarded proposals of one version are two lines', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      renderSection(
+        signing({
+          ...ROOT,
+          abandoned: [
+            { hash: HASH_A, version: 5, hub: true, machines: [] },
+            { hash: HASH_B, version: 5, hub: false, machines: [MINI] },
+          ],
+        }),
+      );
+      const discarded = await found('Discarded');
+      expect(within(discarded).getByText('Version 5 · the hub may still hold it')).toBeTruthy();
+      expect(within(discarded).getByText(`Version 5 · ${MINI} may still hold it`)).toBeTruthy();
+      expect(errors).not.toHaveBeenCalled(); // no duplicate React keys
+    } finally {
+      errors.mockRestore();
+    }
   });
 
   it('the old device, still listed after a rekey: its id with the remove-device command', async () => {

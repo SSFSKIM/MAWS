@@ -1562,11 +1562,17 @@ describe('M3: the signer composed over the session', () => {
     const before = headVersion(session);
     hub.postAnswer = () => worker(409, { error: 'key-purged' });
     expect(await session.resign()).toMatchObject({ ok: false, reason: 'hub', detail: '409 key-purged' });
-    expect(signerOf(session).pending).toEqual({ version: before + 1, fork: false, exposed: true, refused: '409 key-purged' });
+    const hash = await stateHash(hub.posted[0]!.state);
+    expect(signerOf(session).pending).toEqual({ version: before + 1, hash, fork: false, exposed: true, refused: '409 key-purged' });
 
-    expect(await session.discardPending(true)).toEqual({ ok: true, unsent: false, hubVersion: before });
-    expect(signerOf(session)).toMatchObject({ pending: null, abandoned: [{ version: before + 1, hub: true, machines: [] }] });
-    expect(await session.discardPending(true)).toEqual({ ok: false, reason: 'none' });
+    // A confirmation of another proposal than the slot holds discards nothing.
+    expect(await session.discardPending(true, `${hash.slice(1)}x`)).toEqual({ ok: false, reason: 'stale' });
+    expect(signerOf(session).pending).toMatchObject({ version: before + 1, hash });
+    expect(signerOf(session).abandoned).toEqual([]);
+
+    expect(await session.discardPending(true, hash)).toEqual({ ok: true, unsent: false, hubVersion: before });
+    expect(signerOf(session)).toMatchObject({ pending: null, abandoned: [{ hash, version: before + 1, hub: true, machines: [] }] });
+    expect(await session.discardPending(true, hash)).toEqual({ ok: false, reason: 'none' });
   });
 
   it('a signing.json lost after its first write reads problem `signing` and signs nothing until the owner resets it', async () => {

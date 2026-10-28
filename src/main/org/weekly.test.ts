@@ -134,7 +134,7 @@ describe('due', () => {
     h.t.maySign = false; // not a root, unmarked, or signing.json damaged: the signer's word
     expect(h.weekly.due()).toBe(false);
     h.t.maySign = true;
-    h.t.pending = { version: 5, exposed: true, fork: false };
+    h.t.pending = { version: 5, exposed: true, fork: false, hash: 'pending-5' };
     expect(h.weekly.due()).toBe(false);
     h.t.pending = null;
     expect(h.weekly.due()).toBe(true);
@@ -226,7 +226,7 @@ describe('the notification', () => {
     const h = await harness({ headAgeDays: 6 });
     await settle();
     h.head.issued = iso(START - 9 * DAY);
-    h.t.pending = { version: 5, exposed: false, fork: false };
+    h.t.pending = { version: 5, exposed: false, fork: false, hash: 'pending-5' };
     await settle();
     expect(h.notes).toEqual([]);
   });

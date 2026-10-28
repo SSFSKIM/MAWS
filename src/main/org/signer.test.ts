@@ -449,7 +449,7 @@ describe('the pending slot', () => {
     expect(outcome).toMatchObject({ ok: false, reason: 'hub' });
     expect((outcome as { detail: string }).detail).toContain('not adopted');
     expect(h.held.head().state.version).toBe(1);
-    expect(h.signer.pending()).toEqual({ version: 2, exposed: true, fork: false });
+    expect(h.signer.pending()).toMatchObject({ version: 2, exposed: true, fork: false });
 
     h.faults.chain = false;
     await h.signer.settle();
@@ -464,13 +464,13 @@ describe('the pending slot', () => {
     h.hub.beforePost = () => void (h.hub.states.length === 1 && h.hub.states.push(theirs));
     expect(await h.signer.sign(noChangeEdit())).toMatchObject({ ok: false, reason: 'hub' });
     expect(h.held.head()).toEqual(theirs);
-    expect(h.signer.pending()).toEqual({ version: 2, exposed: true, fork: true });
+    expect(h.signer.pending()).toMatchObject({ version: 2, exposed: true, fork: true });
   });
 
   it('signs nothing while a state is pending', async () => {
     const h = await harness({ hub: false });
     expect(await h.signer.sign(noChangeEdit())).toMatchObject({ ok: false, reason: 'hub' });
-    expect(h.signer.pending()).toEqual({ version: 2, exposed: false, fork: false });
+    expect(h.signer.pending()).toMatchObject({ version: 2, exposed: false, fork: false });
     expect(await h.signer.sign(noChangeEdit())).toEqual({ ok: false, reason: 'pending' });
     expect(h.prompts).toHaveLength(1);
   });
@@ -505,7 +505,7 @@ describe('the pending slot', () => {
     const h = await harness();
     h.hub.mode = 'lost-answer';
     expect(await h.signer.sign(noChangeEdit())).toMatchObject({ ok: false, reason: 'hub' });
-    expect(h.signer.pending()).toEqual({ version: 2, exposed: true, fork: false });
+    expect(h.signer.pending()).toMatchObject({ version: 2, exposed: true, fork: false });
 
     h.hub.mode = 'accept';
     const next = await h.restart();
@@ -521,13 +521,13 @@ describe('the pending slot', () => {
     h.hub.beforePost = () => void (h.hub.states.length === 1 && h.hub.states.push(theirs));
     expect(await h.signer.sign(noChangeEdit())).toEqual({ ok: false, reason: 'hub', detail: 'not-head' });
     expect(h.held.head()).toEqual(theirs);
-    await vi.waitFor(() => expect(h.signer.pending()).toEqual({ version: 2, exposed: true, fork: true }));
+    await vi.waitFor(() => expect(h.signer.pending()).toMatchObject({ version: 2, exposed: true, fork: true }));
 
     await h.signer.settle();
     await h.signer.settle();
     const next = await h.restart();
     await next.signer.settle();
-    expect(next.signer.pending()).toEqual({ version: 2, exposed: true, fork: true });
+    expect(next.signer.pending()).toMatchObject({ version: 2, exposed: true, fork: true });
     expect(next.hub.posts).toHaveLength(1);
     expect(await next.signer.sign(noChangeEdit())).toEqual({ ok: false, reason: 'pending' });
     expect(next.prompts).toHaveLength(1);
@@ -545,7 +545,7 @@ describe('the pending slot', () => {
     expect(h.held.head()).toEqual(theirs);
     expect(h.disk()!.pending!.signed).toEqual(proposal);
     await vi.waitFor(() => expect(h.signer.pending()).toMatchObject({ version: 2, fork: true }));
-    expect(await h.signer.discardPending(true)).toEqual({ ok: false, reason: 'held' });
+    expect(await h.signer.discardPending(true, h.signer.pending()!.hash)).toEqual({ ok: false, reason: 'held' });
     expect(h.disk()!.pending!.signed).toEqual(proposal);
   });
 });
@@ -556,7 +556,7 @@ describe('discarding a pending proposal', () => {
     h.hub.mode = 'lost-answer';
     await h.signer.sign(noChangeEdit());
     h.hub.mode = 'accept';
-    expect(await h.signer.discardPending(true)).toEqual({ ok: false, reason: 'held' });
+    expect(await h.signer.discardPending(true, h.signer.pending()!.hash)).toEqual({ ok: false, reason: 'held' });
     expect(h.disk()!.abandoned).toEqual([]);
     // Held by the hub, so adopted: the slot settles as the hub's.
     expect(h.held.head().state.version).toBe(2);
@@ -571,11 +571,11 @@ describe('discarding a pending proposal', () => {
     const hash = await stateHash(h.hub.posts[0].state);
     expect(h.disk()!.deliveries.map((o) => o.hash)).toEqual([hash]);
 
-    expect(await h.signer.discardPending(false as unknown as true)).toMatchObject({ ok: false });
+    expect(await h.signer.discardPending(false as unknown as true, h.signer.pending()!.hash)).toMatchObject({ ok: false });
     expect(h.disk()!.pending).not.toBeNull();
 
     // Exposed at the hub, which holds the admin's version 2: a fork the Org section words with its warning.
-    expect(await h.signer.discardPending(true)).toEqual({ ok: true, unsent: false, hubVersion: 2, forkAt: 2 });
+    expect(await h.signer.discardPending(true, h.signer.pending()!.hash)).toEqual({ ok: true, unsent: false, hubVersion: 2, forkAt: 2 });
     const file = h.disk()!;
     expect(file.pending).toBeNull();
     expect(file.deliveries).toEqual([]);
@@ -591,8 +591,8 @@ describe('discarding a pending proposal', () => {
     expect(await h.signer.sign(noChangeEdit())).toEqual({ ok: false, reason: 'hub', detail: '409 key-purged' });
     await h.signer.settle();
     expect(h.hub.posts).toHaveLength(2);
-    expect(h.signer.pending()).toEqual({ version: 2, exposed: true, fork: false });
-    expect(await h.signer.discardPending(true)).toEqual({ ok: true, unsent: false, hubVersion: 1 });
+    expect(h.signer.pending()).toMatchObject({ version: 2, exposed: true, fork: false });
+    expect(await h.signer.discardPending(true, h.signer.pending()!.hash)).toEqual({ ok: true, unsent: false, hubVersion: 1 });
     expect(h.disk()!.abandoned).toEqual([{ hash: await stateHash(h.hub.posts[0].state), version: 2, hub: true, machines: [] }]);
   });
 
@@ -605,7 +605,7 @@ describe('discarding a pending proposal', () => {
     h.hub.states.push(two, three);
     h.online = true;
 
-    expect(await h.signer.discardPending(true)).toEqual({ ok: true, unsent: true, hubVersion: 3, forkAt: 2 });
+    expect(await h.signer.discardPending(true, h.signer.pending()!.hash)).toEqual({ ok: true, unsent: true, hubVersion: 3, forkAt: 2 });
     expect(h.held.head()).toEqual(three);
     // The floor is max(the slot's parent version, the hub's head): an older chain is refused as a rollback.
     expect(await h.held.adoptServed({ chain: [], head: h.genesis, transitions: [], certificates: null })).toMatchObject({ adopted: 0, refused: 'rollback' });
@@ -614,13 +614,28 @@ describe('discarding a pending proposal', () => {
     expect(await h.signer.sign(noChangeEdit())).toEqual({ ok: true, version: 4 });
   });
 
+  it('is refused `stale` when the confirmation named another proposal than the slot holds, and the slot stays', async () => {
+    const h = await harness();
+    h.hub.mode = 'purged';
+    await h.signer.sign(noChangeEdit());
+    const slot = h.disk()!.pending!;
+    // The status names the slot by its state's stateHash, the hash the owner's confirmation carries back.
+    expect(h.signer.pending()!.hash).toBe(await stateHash(slot.signed.state));
+    const reads = h.hub.reads;
+    expect(await h.signer.discardPending(true, await stateHash(h.genesis.state))).toEqual({ ok: false, reason: 'stale' });
+    expect(h.hub.reads).toBe(reads); // refused before the hub is read
+    expect(h.disk()!.pending).toEqual(slot);
+    expect(h.disk()!.abandoned).toEqual([]);
+    expect(h.signer.pending()).toMatchObject({ version: 2 });
+  });
+
   it('is refused while the hub can\'t be read, since only the hub says it doesn\'t hold the state', async () => {
     const h = await harness({ hub: false });
     await h.signer.sign(noChangeEdit());
-    expect(await h.signer.discardPending(true)).toEqual({ ok: false, reason: 'hub' });
+    expect(await h.signer.discardPending(true, h.signer.pending()!.hash)).toEqual({ ok: false, reason: 'hub' });
     h.online = true;
     h.hub.mode = 'unreachable';
-    expect(await h.signer.discardPending(true)).toEqual({ ok: false, reason: 'hub' });
+    expect(await h.signer.discardPending(true, h.signer.pending()!.hash)).toEqual({ ok: false, reason: 'hub' });
     expect(h.disk()!.pending).not.toBeNull();
   });
 });

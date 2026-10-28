@@ -64,7 +64,7 @@ export function registerOrgHandlers(deps: {
   deps.register('org.resign', () => service.resign());
   deps.register('org.revokeSuperseded', () => service.revokeSuperseded());
   deps.register('org.rekey', ({ code }) => service.rekey(code));
-  deps.register('org.discardPending', ({ confirmed }) => service.discardPending(confirmed));
+  deps.register('org.discardPending', ({ confirmed, hash }) => service.discardPending(confirmed, hash));
   deps.register('org.resetSigning', ({ confirmed }) => service.resetSigning(confirmed));
   return service.onStatus((status) => deps.emit('org.changed', status));
 }

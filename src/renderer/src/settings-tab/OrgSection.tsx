@@ -265,7 +265,8 @@ function discardOutcome(version: number, result: DiscardResult): Outcome {
 function SignerLines({ signer, device }: { signer: Signer; device: string }) {
   const [acting, setActing] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>(null);
-  const [confirming, setConfirming] = useState<Pending | null>(null); // the slot as it read when Discard was pressed
+  // The proposal Discard was pressed for, by its stateHash: the owner's consent is to that one proposal.
+  const [confirming, setConfirming] = useState<string | null>(null);
   const machines = useMachines((s) => s.machines);
   const nameOf = (ref: string) => machineName(machines, ref as MachineRef, ipc.localMachine);
 
@@ -281,13 +282,17 @@ function SignerLines({ signer, device }: { signer: Signer; device: string }) {
   const sign = (name: 'org.resign' | 'org.revokeSuperseded') => act(ipc.invoke(name, undefined), signOutcome);
   const discard = (slot: Pending) => {
     setConfirming(null);
-    act(ipc.invoke('org.discardPending', { confirmed: true }), (result) => discardOutcome(slot.version, result));
+    act(ipc.invoke('org.discardPending', { confirmed: true, hash: slot.hash }), (result) => discardOutcome(slot.version, result));
   };
 
   const unmarked = signer.rekey === 'unmarked';
   const guide = !unmarked && !signer.root; // the root add guidance, for a marked device not yet a root
   const weekly = signer.root && signer.due && signer.maySign ? signer.ageDays : null; // the age, while the weekly line shows
   const slot = signer.pending;
+  // The sheet closes once its proposal settles or another replaces it, so a confirmation never reaches another slot
+  // (main refuses a stale hash too).
+  if (confirming !== null && slot?.hash !== confirming) setConfirming(null);
+  const asked = slot !== null && slot.hash === confirming ? slot : null;
   const offer = signer.offer;
   const held = signer.abandoned.filter((a) => a.hub || a.machines.length > 0); // a never-sent proposal can't show as a fork
   return (
@@ -323,7 +328,7 @@ function SignerLines({ signer, device }: { signer: Signer; device: string }) {
             {slot.fork ? ORG.pendingFork(slot.version) : slot.refused !== null ? ORG.pendingRefused(slot.version, slot.refused) : ORG.pendingWaits(slot.version)}
           </span>
           {(slot.fork || slot.refused !== null) && (
-            <button type="button" className={TEXT_ACTION} disabled={acting} onClick={() => setConfirming(slot)}>
+            <button type="button" className={TEXT_ACTION} disabled={acting} onClick={() => setConfirming(slot.hash)}>
               {ORG.discard}
             </button>
           )}
@@ -360,7 +365,7 @@ function SignerLines({ signer, device }: { signer: Signer; device: string }) {
       {held.length > 0 && (
         <Setting label={ORG.discardedRow}>
           {held.map((a) => (
-            <span key={a.version} className="basis-full text-fg-muted">
+            <span key={a.hash} className="basis-full text-fg-muted">
               {ORG.abandoned(a.version, inWords([...(a.hub ? [ORG.theHub] : []), ...a.machines.map(nameOf)]))}
             </span>
           ))}
@@ -372,15 +377,15 @@ function SignerLines({ signer, device }: { signer: Signer; device: string }) {
           <span className="font-mono text-fg select-all">{ORG.removeCommand(signer.oldDevice)}</span>
         </Setting>
       )}
-      {confirming !== null && (
-        <GatewaySheet title={ORG.discardTitle(confirming.version)} onClose={() => setConfirming(null)} canSubmit onSubmit={() => discard(confirming)} submitLabel={ORG.discardConfirm} cancelLabel={ORG.cancel}>
-          {confirming.exposed ? (
+      {asked !== null && (
+        <GatewaySheet title={ORG.discardTitle(asked.version)} onClose={() => setConfirming(null)} canSubmit onSubmit={() => discard(asked)} submitLabel={ORG.discardConfirm} cancelLabel={ORG.cancel}>
+          {asked.exposed ? (
             <>
-              <p className="m-0 text-ui-sm leading-normal text-fg">{ORG.discardAtHub(confirming.version, confirming.fork)}</p>
-              <p className="m-0 mt-2 text-ui-sm leading-normal text-fg-muted">{ORG.discardWarning(confirming.version)}</p>
+              <p className="m-0 text-ui-sm leading-normal text-fg">{ORG.discardAtHub(asked.version, asked.fork)}</p>
+              <p className="m-0 mt-2 text-ui-sm leading-normal text-fg-muted">{ORG.discardWarning(asked.version)}</p>
             </>
           ) : (
-            <p className="m-0 text-ui-sm leading-normal text-fg-muted">{ORG.discardUnsent(confirming.version)}</p>
+            <p className="m-0 text-ui-sm leading-normal text-fg-muted">{ORG.discardUnsent(asked.version)}</p>
           )}
         </GatewaySheet>
       )}

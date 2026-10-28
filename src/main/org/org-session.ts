@@ -114,8 +114,8 @@ export interface OrgSessionService extends OrgSession {
   revokeSuperseded(): Promise<SignResult>;
   /** M3: new keys, registered with a fresh pairing code beside the old device; offered unmarked or removed. */
   rekey(code: string): OrgAttempt;
-  /** M3: the pending slot abandoned, on the owner's confirmation, while the hub's chain doesn't hold it. */
-  discardPending(confirmed: true): Promise<DiscardResult>;
+  /** M3: the pending slot abandoned, on the owner's confirmation of the proposal `hash` names, while the hub's chain doesn't hold it. */
+  discardPending(confirmed: true, hash: string): Promise<DiscardResult>;
   /** M3: a fresh signing.json, on the owner's confirmation, in `problem: 'signing'` only. */
   resetSigning(confirmed: true): Promise<void>;
 }
@@ -400,10 +400,10 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       stepUpKid: facts.stepUpKid,
       due: c?.weekly.due() ?? false,
       ageDays: Math.floor((now() - Date.parse(head.issued)) / DAY_MS),
-      pending: slot === null ? null : { version: slot.version, fork: slot.fork, exposed: slot.exposed, refused: pendingRefused?.version === slot.version ? pendingRefused.detail : null },
+      pending: slot === null ? null : { version: slot.version, hash: slot.hash, fork: slot.fork, exposed: slot.exposed, refused: pendingRefused?.version === slot.version ? pendingRefused.detail : null },
       offer,
       owing: c?.deliveries.owing() ?? [],
-      abandoned: file === undefined || file === 'damaged' ? [] : file.abandoned.map((a) => ({ version: a.version, hub: a.hub, machines: [...a.machines] })),
+      abandoned: file === undefined || file === 'damaged' ? [] : file.abandoned.map((a) => ({ hash: a.hash, version: a.version, hub: a.hub, machines: [...a.machines] })),
       rekey: keys !== null && !keys.excludedFromBackupAtCreation ? 'unmarked' : null,
       rekeying,
       oldDevice: retired?.device ?? null,
@@ -862,10 +862,10 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     return signResult(await tracked(c.signer.sign({ ...edit, apply })));
   }
 
-  async function discardPending(confirmed: true): Promise<DiscardResult> {
+  async function discardPending(confirmed: true, hash: string): Promise<DiscardResult> {
     const c = composed;
     if (c === null) return { ok: false, reason: 'none' };
-    const outcome = await c.signer.discardPending(confirmed);
+    const outcome = await c.signer.discardPending(confirmed, hash);
     if (outcome.ok) pendingRefused = null;
     changed();
     return outcome;

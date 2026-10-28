@@ -449,6 +449,7 @@ export const ORG = {
     hub: () => 'Couldn’t read the hub.',
     none: () => 'Nothing is pending.',
     signing: () => 'The record of signed states is damaged.',
+    stale: () => 'The pending state changed since you confirmed: nothing was discarded.',
   },
   reset: 'Reset…',
   resetTitle: 'Reset the signing record?',

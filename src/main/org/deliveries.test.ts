@@ -714,7 +714,7 @@ describe('a removal that loses the hub race', () => {
     hub.online = true;
     await signer.settle();
     expect(signer.pending()).toMatchObject({ version: 2, fork: true });
-    expect(await signer.discardPending(true)).toMatchObject({ ok: true, unsent: false, forkAt: 2 });
+    expect(await signer.discardPending(true, signer.pending()!.hash)).toMatchObject({ ok: true, unsent: false, forkAt: 2 });
     expect(a.disk().deliveries).toEqual([]);
     expect(a.disk().abandoned).toEqual([{ hash: expect.any(String), version: 2, hub: true, machines: [M1] }]);
 

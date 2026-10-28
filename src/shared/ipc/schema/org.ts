@@ -36,7 +36,7 @@ const RegisteringSchema = z.strictObject({
  * key id; `maySign`: a root, signed in, its keys carrying the backup mark, signing.json readable. `fingerprint` and
  * `stepUpKid` are what `deployment admin root add` confirms. `due` and `ageDays` are the weekly successor's quiet line.
  * `pending`: the state kept and not yet settled (`fork`: another state holds its version; `refused`: the hub's last answer
- * to it this run). `offer`: the superseded states' revocations, `superseded` the keys a signature would revoke (0: nothing
+ * to it this run; `hash`: its state's stateHash, which a discard names). `offer`: the superseded states' revocations, `superseded` the keys a signature would revoke (0: nothing
  * to sign) and `withheld` the ones no offer carries (this device's own, the last root). `owing` and `abandoned`: the
  * direct deliveries. `rekey`: new keys offered for an unmarked key file (a removed device reads `session: 'removed'`);
  * `rekeying`: one under way; `oldDevice`: a rekey's old device, still listed in the held head.
@@ -49,10 +49,10 @@ export const OrgSignerStatusSchema = z
     stepUpKid: z.string(),
     due: z.boolean(),
     ageDays: z.number().int().nullable(),
-    pending: z.strictObject({ version: z.number().int().positive(), fork: z.boolean(), exposed: z.boolean(), refused: z.string().nullable() }).nullable(),
+    pending: z.strictObject({ version: z.number().int().positive(), hash: z.string(), fork: z.boolean(), exposed: z.boolean(), refused: z.string().nullable() }).nullable(),
     offer: z.strictObject({ superseded: z.number().int().nonnegative(), withheld: z.array(z.string()) }).nullable(),
     owing: z.array(z.strictObject({ version: z.number().int().positive(), machines: z.array(z.string()), tooLarge: z.array(z.string()) })),
-    abandoned: z.array(z.strictObject({ version: z.number().int().positive(), hub: z.boolean(), machines: z.array(z.string()) })),
+    abandoned: z.array(z.strictObject({ hash: z.string(), version: z.number().int().positive(), hub: z.boolean(), machines: z.array(z.string()) })),
     rekey: z.literal('unmarked').nullable(),
     rekeying: z.strictObject({ step: z.enum(['browser', 'checking', 'approval', 'promoting']), fingerprint: z.string().nullable(), expires: z.string().nullable() }).nullable(),
     oldDevice: z.string().nullable(),
@@ -84,6 +84,8 @@ export type OrgAttempt = z.infer<typeof OrgAttemptSchema>;
 const CodeInputSchema = z.strictObject({ code: z.string().max(4096) });
 /** M3's acts that drop or replace signing state run only on the owner's confirmation, which the input carries. */
 const ConfirmedInputSchema = z.strictObject({ confirmed: z.literal(true) });
+/** A discard's confirmation is of one proposal: `hash` names the pending state the owner was shown (its stateHash). */
+const DiscardInputSchema = z.strictObject({ confirmed: z.literal(true), hash: z.string().min(1).max(128) });
 
 /** M3: why a sign ended without a new version; `refused` names the checks' refusals in `detail`. */
 export const SIGN_REASONS = ['not-root', 'unmarked', 'signing', 'cancelled', 'pending', 'invalid', 'hub', 'busy', 'refused'] as const;
@@ -95,11 +97,12 @@ export type SignResult = z.infer<typeof SignResultSchema>;
 /**
  * M3: a discard in `abandon-pending`'s words: `unsent` (never posted nor sent to a machine, so nothing can show it as a
  * fork), the hub's head when it was read, and `forkAt` when the hub holds another state at the pending version. Refused:
- * `held` (the hub holds it: it settled), `hub` (the hub can't be read), `none` (nothing pending), `signing` (damaged).
+ * `held` (the hub holds it: it settled), `hub` (the hub can't be read), `none` (nothing pending), `signing` (damaged),
+ * `stale` (the slot holds another proposal than the one confirmed).
  */
 export const DiscardResultSchema = z.union([
   z.strictObject({ ok: z.literal(true), unsent: z.boolean(), hubVersion: z.number().int().nonnegative(), forkAt: z.number().int().positive().optional() }),
-  z.strictObject({ ok: z.literal(false), reason: z.enum(['held', 'hub', 'none', 'signing']).optional() }),
+  z.strictObject({ ok: z.literal(false), reason: z.enum(['held', 'hub', 'none', 'signing', 'stale']).optional() }),
 ]);
 export type DiscardResult = z.infer<typeof DiscardResultSchema>;
 
@@ -142,7 +145,7 @@ export const commands = {
   'org.resign': { input: z.void(), output: SignResultSchema, owner: 'main' }, // M3: "Re-sign now"
   'org.revokeSuperseded': { input: z.void(), output: SignResultSchema, owner: 'main' }, // M3
   'org.rekey': { input: CodeInputSchema, output: OrgAttemptSchema, owner: 'main' }, // M3: new keys with a fresh pairing code
-  'org.discardPending': { input: ConfirmedInputSchema, output: DiscardResultSchema, owner: 'main' }, // M3
+  'org.discardPending': { input: DiscardInputSchema, output: DiscardResultSchema, owner: 'main' }, // M3
   'org.resetSigning': { input: ConfirmedInputSchema, output: z.void(), owner: 'main' }, // M3
 } as const satisfies Record<`org.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 

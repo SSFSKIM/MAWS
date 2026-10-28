@@ -24,6 +24,7 @@
 //
 // Network calls and adoptions run outside the signing store's updates (whose queue adoption's anchor write waits on).
 // Electron-free: the state signer is injected (step-up.ts's `createStateSigner`, imported here for its type only).
+import { createHash } from 'node:crypto';
 import { canonicalize, isSignedOrgState, stateHash, verifySuccessor, type OrgState, type SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
 import type { StateSigner } from '../device/step-up';
 import { checkSuccessor, type Finding, type SupersededOffer } from './checks';
@@ -47,23 +48,25 @@ export type SignOutcome =
  * `hubVersion` its head and `forkAt` the version where it holds another state. Refused: the hub holds it, the hub can't
  * be read (or its head couldn't be adopted, so the floor below isn't reached), nothing is pending, or signing.json is
  * damaged. After a discard the held head is at least max(the slot's parent version, `hubVersion`): the floor no lower
- * version passes.
+ * version passes. `stale`: the owner confirmed another proposal than the slot holds now (`hash` names the confirmed
+ * one), so nothing was discarded.
  */
-export type DiscardOutcome = { ok: true; unsent: boolean; hubVersion: number; forkAt?: number } | { ok: false; reason?: 'held' | 'hub' | 'none' | 'signing' };
+export type DiscardOutcome = { ok: true; unsent: boolean; hubVersion: number; forkAt?: number } | { ok: false; reason?: 'held' | 'hub' | 'none' | 'signing' | 'stale' };
 
 export interface OrgSigner {
   /** The held head's `root.keys` holds this device's step-up key id. */
   isRoot(): boolean;
   /** A root, its keys marked, signing.json readable. */
   maySign(): boolean;
-  /** `fork`: the app's line has left it (another state at its version, or its parent off the line). */
-  pending(): { version: number; exposed: boolean; fork: boolean } | null;
+  /** `fork`: the app's line has left it (another state at its version, or its parent off the line). `hash`: its state's
+   * `stateHash`, which the owner's confirmed discard names. */
+  pending(): { version: number; exposed: boolean; fork: boolean; hash: string } | null;
   /** Composes, checks, prompts, slots, posts, adopts. */
   sign(edit: Edit): Promise<SignOutcome>;
   /** The slot's three rules. The session calls it at start and at each feed open; `sign` calls it first. */
   settle(): Promise<void>;
-  /** Only after the owner's confirmation, and only while the hub's chain doesn't hold it. */
-  discardPending(confirmed: true): Promise<DiscardOutcome>;
+  /** Only after the owner's confirmation of the proposal `hash` names, and only while the hub's chain doesn't hold it. */
+  discardPending(confirmed: true, hash: string): Promise<DiscardOutcome>;
   /** Only in `problem: 'signing'`: a fresh signing.json. */
   resetSigning(confirmed: true): Promise<void>;
   /** `pending()` changed (a slot written or cleared, its fork judged), so the status can be emitted again. */
@@ -151,12 +154,17 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     return view !== null && signer !== null && view.head().state.root.keys.includes(signer.kid);
   }
 
+  /** `stateHash` of a state's canonical form, synchronously (SHA-256, unpadded base64url: the package's `B64`). */
+  function slotHash(canonical: string): string {
+    return createHash('sha256').update(canonical).digest('base64url');
+  }
+
   function pending(): ReturnType<OrgSigner['pending']> {
     const file = store.get();
     if (file === 'damaged' || file.pending === null) return null;
     const { signed, exposed } = file.pending;
     const key = canonicalize(signed.state);
-    return { version: signed.state.version, exposed: exposed.hub || exposed.machines.length > 0, fork: judged !== null && judged.key === key && judged.fork };
+    return { version: signed.state.version, exposed: exposed.hub || exposed.machines.length > 0, fork: judged !== null && judged.key === key && judged.fork, hash: slotHash(key) };
   }
 
   function announce(): void {
@@ -441,13 +449,15 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
       await exclusive(settleLocked);
       await refreshNow();
     },
-    async discardPending(confirmed) {
+    async discardPending(confirmed, named) {
       if (confirmed !== true) return { ok: false };
       const outcome = await exclusive(async (): Promise<DiscardOutcome> => {
         const file = store.get();
         if (file === 'damaged') return { ok: false, reason: 'signing' };
         if (file.pending === null) return { ok: false, reason: 'none' };
         const slot = file.pending;
+        // The owner's consent is to the proposal they were shown: a slot replaced since is not theirs to discard.
+        if (slotHash(canonicalize(slot.signed.state)) !== named) return { ok: false, reason: 'stale' };
         const version = slot.signed.state.version;
         if (await clearIfHeld()) return { ok: false, reason: 'held' };
         const hub = deps.hub();
