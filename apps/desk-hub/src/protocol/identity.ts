@@ -169,7 +169,8 @@ export type TransitionAccepted = { fromVersion: number };
 // the pairing code its approving device shows; the member's devices list the entries, and the approving one checks the
 // MAC (the hub never does) before endorsing the device into a successor, whose acceptance drops the entry. Entries are
 // the poster's member's, at most MAX_PENDING_DEVICES, and expire PENDING_DEVICE_TTL_S after they are posted; posting a
-// device id again replaces its entry.
+// device id again replaces its entry. `GET ?member=<id>` of another member is an admin's, to enroll that member's first
+// device (O8's H1): `403 not-admin` for anyone else, `404 no-member` for an id the head doesn't list.
 export const PENDING_DEVICES_PATH = '/api/devices/pending';
 export const PENDING_DEVICE_TTL_S = 600;
 export const MAX_PENDING_DEVICES = 8;
