@@ -106,10 +106,18 @@ describe('the read-only commands, answered before the module is loaded', () => {
     fs.chmodSync(stateDir, 0o700);
 
     // One the owner can read but not search passes the private check and lists as empty, yet the store cannot lstat
-    // a file inside it: the module's start fails there, so its refusal is the answer (root searches any directory).
-    if (process.getuid?.() !== 0) {
-      fs.chmodSync(stateDir, 0o600);
+    // a file inside it: the module's start fails there, so its refusal is the answer. Mode bits alone don't decide
+    // search permission (root searches any directory, and a macOS ACL inherited from the temporary directory can grant
+    // it), so the assertions run only where the process is actually denied.
+    fs.chmodSync(stateDir, 0o600);
+    try {
+      let denied = false;
       try {
+        fs.accessSync(stateDir, fs.constants.X_OK);
+      } catch {
+        denied = true;
+      }
+      if (denied) {
         expect(unloadedAnswer(machine, 'keys', [])).toBeNull();
         const endpoint = createEndpoint();
         await endpoint.start(services).catch(() => undefined);
@@ -118,9 +126,9 @@ describe('the read-only commands, answered before the module is loaded', () => {
         } finally {
           await endpoint.stop();
         }
-      } finally {
-        fs.chmodSync(stateDir, 0o700);
       }
+    } finally {
+      fs.chmodSync(stateDir, 0o700);
     }
     expect(unloadedAnswer({ ...machine, stateDir: join(stateDir, 'absent') }, 'keys', [])).toBeNull();
   });
