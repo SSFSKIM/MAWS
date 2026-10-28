@@ -27,9 +27,10 @@ const NULL_BODY = new Set([101, 204, 205, 304]);
 
 /**
  * A request to the hub, as the machine when `credentials` are given, with a JSON body when `body` is; answered whole (the
- * body read) within `timeoutMs` (at most `REQUEST_MS`), else aborted and failed with `timeout`.
+ * body read) within `timeoutMs` (at most `REQUEST_MS`), else aborted and failed with `timeout`. It is a POST with a body,
+ * a GET without, unless `method` says DELETE.
  */
-export async function hubRequest(deps: HubDeps, hub: string, path: string, init: { credentials?: Credentials; body?: unknown; timeoutMs?: number } = {}): Promise<Response> {
+export async function hubRequest(deps: HubDeps, hub: string, path: string, init: { credentials?: Credentials; body?: unknown; timeoutMs?: number; method?: 'DELETE' } = {}): Promise<Response> {
   const headers: Record<string, string> = {};
   if (init.credentials) Object.assign(headers, { 'CF-Access-Client-Id': init.credentials.clientId, 'CF-Access-Client-Secret': init.credentials.clientSecret });
   if (init.body !== undefined) headers['content-type'] = 'application/json';
@@ -43,7 +44,7 @@ export async function hubRequest(deps: HubDeps, hub: string, path: string, init:
     }, Math.max(1, Math.min(init.timeoutMs ?? REQUEST_MS, REQUEST_MS)));
   });
   try {
-    const request = deps.fetch(`${hub}${path}`, { method: init.body === undefined ? 'GET' : 'POST', headers, body: init.body === undefined ? undefined : JSON.stringify(init.body), redirect: 'manual', signal: controller.signal });
+    const request = deps.fetch(`${hub}${path}`, { method: init.method ?? (init.body === undefined ? 'GET' : 'POST'), headers, body: init.body === undefined ? undefined : JSON.stringify(init.body), redirect: 'manual', signal: controller.signal });
     const response = await Promise.race([request, expired]);
     const body = await Promise.race([response.arrayBuffer(), expired]);
     return new Response(NULL_BODY.has(response.status) ? null : body, { status: response.status, statusText: response.statusText, headers: response.headers });

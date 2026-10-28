@@ -15,6 +15,8 @@ export type EndpointStatus = {
   rl10: { connected: boolean };
   listener: { bound: boolean };
   legacyKey: boolean;
+  /** The machine holds a delegation (O14 M1): it provisioned itself under one, and `retire` is its departure. */
+  delegated: boolean;
   refusing?: string;
   /** The operation ledgers closed (op-ledger.ts): why, as its word; each answers every remote action `unavailable` until
    * its process restarts (mawsd for the endpoint's, the engine host for its own). Absent while both answer. */
@@ -47,6 +49,7 @@ export function endpointStatus(state: EndpointState | null, headHash: string | n
     rl10: { ...links.rl10 },
     listener: { ...links.listener },
     legacyKey: state?.legacy ?? false,
+    delegated: (state?.delegation ?? null) !== null,
     ...(refusing === undefined ? {} : { refusing }),
     ...(Object.keys(opLedgers).length === 0 ? {} : { opLedgers }),
   };
