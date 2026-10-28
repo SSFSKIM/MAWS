@@ -1681,6 +1681,24 @@ describe('M3: the signer composed over the session', () => {
     expect(await session.discardPending(true, hash)).toEqual({ ok: false, reason: 'none' });
   });
 
+  it('a restart with a slot the hub keeps refusing reads `refused` once settling posts it again, so Discard is offered', async () => {
+    const { session } = await signingRoot();
+    const before = headVersion(session);
+    hub.postAnswer = () => worker(409, { error: 'key-purged' });
+    expect(await session.resign()).toMatchObject({ ok: false, reason: 'hub', detail: '409 key-purged' });
+
+    const again = await restart();
+    const feed = fakeFeed();
+    again.session.attach(feed.hooks);
+    feed.open();
+    await until(() => hub.posted.length === 2, 'settled again at the feed\'s open');
+    await until(() => registered(again.session).signer?.pending?.refused === '409 key-purged', 'the refusal on the status');
+    // The Org section's rule for Discard (OrgSection.test.tsx): a fork, or a refused slot that isn't one.
+    const slot = signerOf(again.session).pending!;
+    expect(slot).toMatchObject({ version: before + 1, fork: false, exposed: true });
+    expect(await again.session.discardPending(true, slot.hash)).toEqual({ ok: true, unsent: false, hubVersion: before });
+  });
+
   it('a signing.json lost after its first write reads problem `signing` and signs nothing until the owner resets it', async () => {
     const { session } = await signingRoot();
     expect((await session.resign()).ok).toBe(true);

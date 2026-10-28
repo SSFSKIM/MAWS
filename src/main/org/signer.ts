@@ -62,8 +62,9 @@ export interface OrgSigner {
   /** A root, its keys marked, signing.json readable. */
   maySign(): boolean;
   /** `fork`: the app's line has left it (another state at its version, or its parent off the line). `hash`: its state's
-   * `stateHash`, which the owner's confirmed discard names. */
-  pending(): { version: number; exposed: boolean; fork: boolean; hash: string } | null;
+   * `stateHash`, which the owner's confirmed discard names. `refused`: the hub's last answer to a post of it this run
+   * that didn't take it (a sign's or a settle's), null while it only waits (no answer, or no hub). */
+  pending(): { version: number; exposed: boolean; fork: boolean; hash: string; refused: string | null } | null;
   /** Composes, checks, prompts, slots, posts, adopts. */
   sign(edit: Edit): Promise<SignOutcome>;
   /** The slot's three rules. The session calls it at start and at each feed open; `sign` calls it first. */
@@ -163,6 +164,8 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
 
   /** The fork judgment of the slot `key` names (its state's canonical form), refreshed after each change. */
   let judged: { key: string; fork: boolean } | null = null;
+  /** The hub's last refusal of the state `key` names, from a sign's post or a settle's, so the owner can discard it. */
+  let refusal: { key: string; detail: string } | null = null;
   let judging = 0;
   let shown = 'null';
 
@@ -177,7 +180,13 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     if (file === 'damaged' || file.pending === null) return null;
     const { signed, exposed } = file.pending;
     const key = canonicalize(signed.state);
-    return { version: signed.state.version, exposed: exposed.hub || exposed.machines.length > 0, fork: judged !== null && judged.key === key && judged.fork, hash: file.pending.hash };
+    return {
+      version: signed.state.version,
+      exposed: exposed.hub || exposed.machines.length > 0,
+      fork: judged !== null && judged.key === key && judged.fork,
+      hash: file.pending.hash,
+      refused: refusal !== null && refusal.key === key ? refusal.detail : null,
+    };
   }
 
   function announce(): void {
@@ -307,6 +316,9 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
       return { ok: false, reason: 'hub', detail: `the held org state moved before version ${version} was posted: nothing was posted, and it stays pending` };
     }
     const answer = await hub.postState(signed);
+    // The refusal the status names is the outcome's detail; no answer is no refusal (the slot only waits).
+    const lost = !answer.ok && answer.kind === 'status' && answer.status === 409 && (answer.error === 'not-head' || answer.error === 'rollback');
+    heard(signed, answer.ok || answer.kind === 'unreachable' ? null : lost ? answer.error : describe(answer));
     if (answer.ok) {
       log(`version ${version} accepted by the hub`);
       let why = (await follow(hub))?.why;
@@ -337,6 +349,14 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
       return { ok: false, reason: 'hub', detail: answer.error };
     }
     return { ok: false, reason: 'hub', detail: describe(answer) };
+  }
+
+  /** What the hub said of a post of `signed`: `detail` a refusal the status names, null an acceptance or no answer. */
+  function heard(signed: SignedOrgState, detail: string | null): void {
+    const key = canonicalize(signed.state);
+    if (detail !== null) refusal = { key, detail };
+    else if (refusal?.key === key) refusal = null;
+    announce();
   }
 
   async function settleLocked(asked: number): Promise<void> {
@@ -515,7 +535,7 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
         if (view === null || view.head().state.version < hubVersion) return { ok: false, reason: 'hub' };
         const hash = await stateHash(slot.signed.state);
         const key = canonicalize(slot.signed.state);
-        const done = await store.update((f) => {
+        const done = await store.update<'stopped' | { unsent: boolean } | null>((f) => {
           // A sign-out since the owner confirmed: the hub was read for the lifecycle that ended, so nothing is discarded on it.
           if (!live(asked)) return { next: f, value: 'stopped' as const };
           if (f.pending === null || canonicalize(f.pending.signed.state) !== key) return { next: f, value: null };

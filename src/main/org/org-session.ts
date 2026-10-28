@@ -305,8 +305,6 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   /** The superseded states' revocations, as the status shows them; recomputed at each change of the session. */
   let offer: NonNullable<OrgSignerStatus>['offer'] = null;
   let offerTurn = 0;
-  /** The hub's last refusal of the pending state, this run. */
-  let pendingRefused: { version: number; detail: string } | null = null;
   let rekeying: Rekeying | null = null;
   /** A rekey's old keys (keys.retired.json) while the held head still lists them. */
   let retired: DeviceKeyIds | null = null;
@@ -401,7 +399,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       stepUpKid: facts.stepUpKid,
       due: c?.weekly.due() ?? false,
       ageDays: Math.floor((now() - Date.parse(head.issued)) / DAY_MS),
-      pending: slot === null ? null : { version: slot.version, hash: slot.hash, fork: slot.fork, exposed: slot.exposed, refused: pendingRefused?.version === slot.version ? pendingRefused.detail : null },
+      pending: slot === null ? null : { version: slot.version, hash: slot.hash, fork: slot.fork, exposed: slot.exposed, refused: slot.refused },
       offer,
       owing: c?.deliveries.owing() ?? [],
       abandoned: file === undefined || file === 'damaged' ? [] : file.abandoned.map((a) => ({ hash: a.hash, version: a.version, hub: a.hub, machines: [...a.machines] })),
@@ -735,17 +733,6 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     };
   }
 
-  /** Keeps the hub's refusal of the pending state for the status, so the Org section can say why it waits. */
-  async function tracked(sign: Promise<SignOutcome>): Promise<SignOutcome> {
-    const outcome = await sign;
-    const slot = composed?.signer.pending() ?? null;
-    if (!outcome.ok && outcome.reason === 'hub' && slot !== null) {
-      pendingRefused = { version: slot.version, detail: outcome.detail ?? 'the hub did not take it' };
-      changed();
-    }
-    return outcome;
-  }
-
   /** The signer, the weekly asking and the deliveries over one signing store, once a registration is held. */
   function compose(): void {
     const s = deps.signing;
@@ -767,7 +754,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
         log,
       });
       const weekly = startWeekly({
-        signer: { maySign: () => maySign(signer), pending: () => signer.pending(), sign: (edit) => tracked(signer.sign(edit)), onChanged: (listener) => signer.onChanged(listener) },
+        signer: { maySign: () => maySign(signer), pending: () => signer.pending(), sign: (edit) => signer.sign(edit), onChanged: (listener) => signer.onChanged(listener) },
         head: () => heldView()?.head() ?? null,
         store,
         focused: s.focused,
@@ -867,14 +854,13 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       if (fresh === null || JSON.stringify(fresh.lines) !== JSON.stringify(shown!.lines)) throw new Error('the superseded revocations changed since they were shown');
       fresh.edit(draft);
     };
-    return signResult(await tracked(c.signer.sign({ ...edit, apply })));
+    return signResult(await c.signer.sign({ ...edit, apply }));
   }
 
   async function discardPending(confirmed: true, hash: string): Promise<DiscardResult> {
     const c = composed;
     if (c === null) return { ok: false, reason: 'none' };
     const outcome = await c.signer.discardPending(confirmed, hash);
-    if (outcome.ok) pendingRefused = null;
     changed();
     return outcome;
   }

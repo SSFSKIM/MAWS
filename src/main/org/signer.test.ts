@@ -699,6 +699,25 @@ describe('discarding a pending proposal', () => {
     expect(h.disk()!.abandoned).toEqual([{ hash: await stateHash(h.hub.posts[0].state), version: 2, hub: true, machines: [] }]);
   });
 
+  it('names the hub\'s refusal of a slot that settling posts again, from a fresh start too, so the owner can discard it', async () => {
+    const h = await harness();
+    h.hub.mode = 'purged';
+    expect(await h.signer.sign(noChangeEdit())).toEqual({ ok: false, reason: 'hub', detail: '409 key-purged' });
+    expect(h.signer.pending()).toMatchObject({ version: 2, fork: false, refused: '409 key-purged' });
+
+    const next = await h.restart();
+    expect(next.signer.pending()).toMatchObject({ version: 2, refused: null }); // nothing heard from the hub this run
+    await next.signer.settle();
+    expect(next.hub.posts).toHaveLength(2);
+    expect(next.signer.pending()).toMatchObject({ version: 2, fork: false, exposed: true, refused: '409 key-purged' });
+
+    // A slot only waiting for a hub it can't reach is not refused.
+    const offline = await harness({ hub: false });
+    await offline.signer.sign(noChangeEdit());
+    await offline.signer.settle();
+    expect(offline.signer.pending()).toMatchObject({ version: 2, refused: null });
+  });
+
   it('reads a slot never exposed as unsent, adopts the hub\'s chain first, and accepts no version below that floor after it', async () => {
     const h = await harness({ hub: false });
     expect(await h.signer.sign(noChangeEdit())).toMatchObject({ ok: false, reason: 'hub' });
