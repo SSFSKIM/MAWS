@@ -194,9 +194,8 @@ interface Attached {
 export function createTranscriptStore() {
   const attachments = new Map<string, Attached>();
   const lookups = new Map<string, AgentLookup>(); // L197: each key's host agent lookup, applied to every state it starts
-  // P4-R7: a key's state reads the message tools its source names (MAWS's own when it names none)
-  const fresh = (key: string, agentId: AgentId | null, source: TranscriptSource, ui?: TranscriptUi): TranscriptState => {
-    const state = createState(null, agentId, source.messageTools);
+  const fresh = (key: string, agentId: AgentId | null, ui?: TranscriptUi): TranscriptState => {
+    const state = createState(null, agentId);
     return withAgents(ui === undefined ? state : { ...state, ui }, lookups.get(key));
   };
   let nonce = 0;
@@ -211,7 +210,7 @@ export function createTranscriptStore() {
     // recorded on the key (hydrate.ts has already unsubscribed and cleared its buffer) and `retry` starts over.
     const hydrate = (key: string, attached: Attached): Promise<void> => {
       attached.attachment?.detach();
-      let staged: TranscriptState | null = attached.restartUi === null ? null : fresh(key, attached.agentId, attached.source, attached.restartUi);
+      let staged: TranscriptState | null = attached.restartUi === null ? null : fresh(key, attached.agentId, attached.restartUi);
       let stagedAt = 0;
       const attachment = attachSource(attached.source, {
         apply(events) {
@@ -319,7 +318,7 @@ export function createTranscriptStore() {
         if (existing) release(existing);
         const kept = entry(key);
         if (!kept) {
-          const state = fresh(key, options.agentId ?? null, source);
+          const state = fresh(key, options.agentId ?? null);
           set({ entries: { ...get().entries, [key]: { state, rows: rowsOf(state), phase: 'hydrating', error: null, following: true, sendFollowRequest: 0, working: false, clock: null, jump: null } } });
         } else put(key, { phase: 'hydrating', error: null });
         // Starting a kept key over (no holder left): the snapshot is the whole history, and after an exit or a child's
@@ -333,7 +332,7 @@ export function createTranscriptStore() {
           if (attachments.get(key) !== attached) return;
           attached.restartUi = null; // an explicit reset empties the key at once
           attached.stagedJump = null;
-          const state = fresh(key, attached.agentId, attached.source);
+          const state = fresh(key, attached.agentId);
           put(key, { state, localAssistantInk: undefined, phase: 'hydrating', error: null, clock: null, jump: null });
           hydrate(key, attached);
         }) ?? null;

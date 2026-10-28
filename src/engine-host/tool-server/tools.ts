@@ -15,7 +15,6 @@ import { artifactCreateTool, artifactDescribeTypeTool, artifactListTool, artifac
 import { artifactScreenshotTool, type CaptureBridge } from './artifacts';
 import { askTool } from './ask';
 import type { AskCancelReason, AskTable } from './asks';
-import { messageTool } from './message'; // P4-R7
 import type { PaneBridge } from './panes';
 import { sendFileTool } from './send-file';
 import type { McpToolDefinition } from './server';
@@ -69,6 +68,5 @@ export function mawsTools(deps: {
       ...dashboardThreadTools(documents, designThreadTools(documents, presentationThreadTools(documents, documentTools(documents)))),
     ], genericRead).map(afterImport),
     afterImport(artifactSearchTool(artifacts)), // P4-B4: after the document tools
-    messageTool(), // P4-R7: after the search tool; it reads no store, so it never waits for the import
   ];
 }

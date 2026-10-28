@@ -18,6 +18,7 @@ type Row = { seq: number; direction: 'in' | 'out' | 'meta'; at: string; frame: R
 const rowsOf = (path: string): Row[] => readFileSync(join(REPO_ROOT, path), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Row);
 
 export const TO_HUMAN = {
+  style: 'doperpowers:to-human', // P4-R7z: the plugin's style, under which it registers its message tool, carries the lane
   first: 'Tell me the one thing I must not miss about the migration.',
   second: 'Ask me which README tone to use, then run the tests.',
   essential: 'The migration drops the legacy_users table. Back it up before you run it.',
@@ -89,7 +90,7 @@ export function toHumanJournal(dir: string, startAt: number): string {
   running('running');
   lifecycle(u1, 'queued');
   lifecycle(u1, 'started');
-  push('in', { ...frame(8), permissionMode: 'default' }); // the session's own mode (the test's settings say so): no mode to correct
+  push('in', { ...frame(8), permissionMode: 'default', output_style: TO_HUMAN.style }); // the session's own mode and style (the test's settings say so): nothing to correct
   echo(u1, TO_HUMAN.first);
   const essential = `<essential>\n${TO_HUMAN.essential}\n</essential>`;
   text('msg_01P2cM6Essential', id(2), essential, u1);
@@ -130,25 +131,26 @@ export function toHumanJournal(dir: string, startAt: number): string {
   return write(dir, 'p2c-to-human');
 }
 
-// P2-C2 start: the journal of a session whose user output style declares contract 4 (a message-only style whose
-// questions go through a tool), for e2e/to-human.spec.ts's supplement case. The launch is the decided one, as above.
+// P2-C2 start: the journal of a session whose user output style declares a message-tool contract (P4-R7z: 6, the
+// plugin's, with its message tool), for e2e/to-human.spec.ts's supplement case. The launch is the decided one, as above.
 // The engine reports the style it was given (`output_style`, so no mismatch is recorded) and the host's `maws` server,
 // whose MCP handshake it runs between MAWS's `initialize` and its answer; the handshake, the async ask and the steer
 // the sheet's answer writes are the frames of pass3/p1-maws-ask-async.jsonl (seq 4 to 20, 95, 104 to 107, 120) with only
 // the session id changed, and the native question the frames of question-roundtrip.jsonl (seq 136 to 140) cut to one
 // question. Two human turns:
-//   1. a `<message>`, then (P4-R7) a message through `mcp__maws__message` and an async `mcp__maws__ask` in one response:
-//      the host answers the first `sent` and the second `asked` at once, and the replay holds at
+//   1. a `<message>`, then (P4-R7z) a message through the plugin's `mcp__to-human__message` and an async `mcp__maws__ask`
+//      in one response: the plugin answers the first `sent` inside the engine (no request reaches MAWS: doperpowers #415's
+//      live MAWS check), the host the second `asked` at once, and the replay holds at
 //      the steer the sheet writes when the person submits; the first turn ends, and the steer's turn replies;
 //   2. a native AskUserQuestion: the engine's `can_use_tool` for it, held until the person answers its request card.
 export const SUPPLEMENT = {
-  style: 'report',
+  style: 'doperpowers:to-human', // P4-R7z: the plugin's style, with its message tool
   first: 'Tell me how the migration went, then ask me whether to go on.',
   message: 'The migration ran: two columns added, nothing dropped.',
   askQuestion: 'Proceed?', // the recorded ask's one question (choices Yes and No)
   askReply: 'Going on with the next step.',
-  // P4-R7: a message sent through MAWS's message tool before the ask, in the ask's response (pass3/p4-r7-tool-stages'
-  // shape: the call, its tools/call, the host's `sent`, the engine's echo and the tool result)
+  // P4-R7z: a message sent through the plugin's message tool before the ask, in the ask's response (the call and its
+  // tool result, which the plugin's hook answers inside the engine)
   toolMessage: 'The backup of legacy_users is in backups/legacy_users.sql, in case you want it before the next step.',
   toolMessageId: 'toolu_01P4r7MessageCall',
   second: 'Ask me which colour to use.',
@@ -182,16 +184,11 @@ export function supplementJournal(dir: string, startAt: number): string {
   push('in', init);
   echo(u1, SUPPLEMENT.first);
   text('msg_01P2c2Message', id(2), `<message>\n${SUPPLEMENT.message}\n</message>`, u1);
-  // P4-R7: the message call, in the ask's response before it; the host answers its tools/call itself
+  // P4-R7z: the message call, in the ask's response before it; the plugin answers it inside the engine
   const messageCall = ask(95);
   Object.assign(messageCall, { uuid: id(9), user_message_uuid: u1, user_message_uuids: [u1] });
-  Object.assign(messageCall.message as Record<string, unknown>, { content: [{ type: 'tool_use', id: SUPPLEMENT.toolMessageId, name: 'mcp__maws__message', input: { text: SUPPLEMENT.toolMessage }, caller: { type: 'direct' } }] });
+  Object.assign(messageCall.message as Record<string, unknown>, { content: [{ type: 'tool_use', id: SUPPLEMENT.toolMessageId, name: 'mcp__to-human__message', input: { text: SUPPLEMENT.toolMessage }, caller: { type: 'direct' } }] });
   push('in', messageCall);
-  const messageRequest = '5d7f1c2a-0000-4000-8000-0000000000a1';
-  push('in', { type: 'control_request', request_id: messageRequest, request: { subtype: 'mcp_message', server_name: 'maws', message: { method: 'tools/call', params: { name: 'message', arguments: { text: SUPPLEMENT.toolMessage }, _meta: { 'claudecode/toolUseId': SUPPLEMENT.toolMessageId, progressToken: 3 } }, jsonrpc: '2.0', id: 3 } } });
-  const sent = { mcp_response: { jsonrpc: '2.0', id: 3, result: { content: [{ type: 'text', text: 'sent' }] } } };
-  push('out', { type: 'control_response', response: { subtype: 'success', request_id: messageRequest, response: sent } });
-  push('in', { type: 'control_response', response: { subtype: 'success', request_id: messageRequest, response: sent } });
   push('in', { type: 'user', message: { role: 'user', content: [{ tool_use_id: SUPPLEMENT.toolMessageId, type: 'tool_result', content: [{ type: 'text', text: 'sent' }] }] }, parent_tool_use_id: null, session_id: session, uuid: id(10), timestamp: now(), tool_use_result: [{ type: 'text', text: 'sent' }] });
   const call = ask(95); // the assistant's mcp__maws__ask tool_use (blocking: false)
   Object.assign(call, { uuid: id(3), user_message_uuid: u1, user_message_uuids: [u1] });

@@ -39,7 +39,6 @@ export function getBinaryConfig(): BinaryConfig {
 // P2-C2: the server whose `ask` replaces the native tool, and the native tool's name (the engine's `--disallowedTools`)
 const MAWS_SERVER = 'maws';
 export const NATIVE_ASK_TOOL = 'AskUserQuestion';
-export const MAWS_MESSAGE_TOOL = `mcp__${MAWS_SERVER}__message`; // P4-R7
 export const MAWS_ASK_TOOL = `mcp__${MAWS_SERVER}__ask`;
 
 export const GATEWAY_AUTH_TOKEN = 'claudeusage-local-gateway'; // D-19: a non-secret marker; the relay substitutes the real token
@@ -253,9 +252,11 @@ export function buildLaunch(
   // P2-C2 (the P2 spec's Decision Log 33): where the launch offers the `maws` server, its `ask` is the one ask, so the
   // native AskUserQuestion is withdrawn from the model's view; without the server the native tool stays, the only ask.
   // The request-card path for native asks is untouched (imported and taken-over transcripts carry them).
-  // The message and ask tools communicate with the human; asking permission to ask creates a redundant approval
-  // before the real question (P4 acceptance defects 1/8). These exact tools alone are allowed, not the MAWS server.
-  if ((opts.sdkMcpServers ?? appInitialize().sdkMcpServers ?? []).includes(MAWS_SERVER)) args.push('--disallowedTools', NATIVE_ASK_TOOL, '--allowedTools', MAWS_MESSAGE_TOOL, MAWS_ASK_TOOL);
+  // The ask tool communicates with the human; asking permission to ask creates a redundant approval before the real
+  // question (P4 acceptance defects 1/8). This exact tool alone is allowed, not the MAWS server. P4-R7z: the message
+  // tool left the server; the to-human plugin's `mcp__to-human__message` needs no entry, since the plugin answers its
+  // calls itself and the engine raises no permission request for them (doperpowers #415's live MAWS check).
+  if ((opts.sdkMcpServers ?? appInitialize().sdkMcpServers ?? []).includes(MAWS_SERVER)) args.push('--disallowedTools', NATIVE_ASK_TOOL, '--allowedTools', MAWS_ASK_TOOL);
   args.push('--settings', JSON.stringify(flagSettings));
 
   return {

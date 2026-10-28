@@ -97,7 +97,6 @@ import { isMirrorLine, steerAsDrawn } from './bridge-rows';
 import { withWakeLine } from './bridge-wake';
 import { normalizeInterruptRow, withInterruptEnd } from './interrupt';
 import { drawingOf, drawingsDiffer, isResponse, NONE_OFF, ownerInput, undoneEvents, type Drawing } from './off-chain';
-import { DESK_MESSAGE_TOOLS } from '../message-tools';
 
 /** What the adapter reads of MAWS's transcript store: whether a row's events have been applied under a key. */
 export type TranscriptStoreApi = Pick<ReturnType<typeof createTranscriptStore>, 'getState' | 'subscribe'>;
@@ -245,7 +244,6 @@ const contextFor = (target: SessionTarget, subagents: SubagentLookup): BackfillC
  */
 export function freshSource(rows: readonly JsonObject[], session: string, subagents: SubagentLookup, agentId: string | null = null, off: ReadonlySet<string> = NONE_OFF): TranscriptSource {
   return {
-    messageTools: DESK_MESSAGE_TOOLS,
     subscribe: () => () => {},
     snapshot: async () => {
       const ctx = contextFor({ machine: '', session, agentId }, subagents);
@@ -266,7 +264,6 @@ const deferred = (): Deferred => {
 class RowsSource implements TranscriptSource {
   readonly key: string;
   readonly agentId?: AgentId;
-  readonly messageTools = DESK_MESSAGE_TOOLS;
   private listener: ((events: SessionEvent[]) => void) | null = null;
   private ctx: BackfillContext | null = null;
 

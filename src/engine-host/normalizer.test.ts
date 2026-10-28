@@ -280,6 +280,77 @@ describe('normaliser: tools, blocks and safeguards', () => {
   });
 });
 
+// P4-R7z (the P4 spec's Decision Log 92): a MAWS session messages through the to-human plugin's tool, and a final message
+// ends the turn with an answer the plugin makes up in place of a request. The frames around a `final: true` call are
+// doperpowers #415's live MAWS check (engine 2.1.312, MAWS's launch flags, MAWS_NATIVE_TO_HUMAN=8): the call, its result
+// `sent`, then a `msg_hook_` message streamed and whole (no request id, no `answeredWithoutRequest` on the wire), and a
+// result naming the made-up text.
+describe('normaliser: the to-human plugin’s answer after a final message (P4-R7z)', () => {
+  const MESSAGE = 'Both stages ran; 37 labels are missing.';
+  const MADE_UP = 'Message sent to the human.';
+  const stream = (event: Record<string, unknown>, uuid: string, lane: string | null = null) => inRow({ type: 'stream_event', event, session_id: 'sess-1', parent_tool_use_id: lane, uuid });
+  const assistant = (id: string, content: unknown[], uuid: string, extra: Record<string, unknown> = {}) =>
+    inRow({ type: 'assistant', message: { id, role: 'assistant', model: 'claude-opus-5-5', content, stop_reason: null, usage: { input_tokens: 1, output_tokens: 1 } }, parent_tool_use_id: null, session_id: 'sess-1', uuid, ...extra });
+  const call = (id: string, text: string, uuid: string, extra: Record<string, unknown> = {}) => assistant('msg_01Call', [{ type: 'tool_use', id, name: 'mcp__to-human__message', input: { text, final: true } }], uuid, { request_id: 'req_011Call', ...extra });
+  const sent = (id: string, lane: string | null = null) => inRow({ type: 'user', uuid: `r-${id}`, session_id: 'sess-1', parent_tool_use_id: lane, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text: 'sent' }] }] } });
+  // a response a hook made up, streamed as the engine streams it, then whole
+  const hookMade = (id: string, text: string) => [
+    stream({ type: 'message_start', message: { id, model: 'claude-opus-5-5' } }, `ms-${id}`),
+    stream({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }, `cs-${id}`),
+    stream({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } }, `cd-${id}`),
+    assistant(id, [{ type: 'text', text }], `a-${id}`, { message: { id, role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text }], stop_reason: 'end_turn', usage: { input_tokens: 0, output_tokens: 0 } } }),
+    stream({ type: 'content_block_stop', index: 0 }, `cx-${id}`),
+    stream({ type: 'message_delta', delta: { stop_reason: 'end_turn' } }, `md-${id}`),
+    stream({ type: 'message_stop' }, `mx-${id}`),
+  ];
+  const ended = (text: string) => inRow(result({ result: text, num_turns: 2, stop_reason: 'end_turn' }));
+  const texts = (events: SessionEvent[]) => [
+    ...only(events, 'assistant.block.delta').map((e) => `delta ${e.apiMessageId}: ${e.textDelta}`),
+    ...only(events, 'assistant.block.complete').map((e) => `${e.block.type} ${e.apiMessageId}: ${e.block.type === 'text' ? e.block.text : ''}`),
+  ];
+
+  it('maps the made-up answer to nothing, streamed or whole, and the turn’s reply is the final message', () => {
+    const events = feed(make(), [outRow(userOut('u-1')), startedIn('u-1'), inRow(initFrame), call('toolu_f', MESSAGE, 'a-call'), sent('toolu_f'), ...hookMade('msg_hook_7c0e1f52', MADE_UP), ended(MADE_UP)]);
+    expect(texts(events)).toEqual(['tool_use msg_01Call: ']);
+    expect(only(events, 'tool.use')).toMatchObject([{ toolUseId: 'toolu_f', toolName: 'mcp__to-human__message', input: { text: MESSAGE, final: true } }]);
+    expect(only(events, 'tool.result')).toMatchObject([{ toolUseId: 'toolu_f', isError: false }]);
+    expect(only(events, 'turn.ended')).toMatchObject([{ result: 'success', resultText: MESSAGE }]);
+  });
+
+  it('another hook’s made-up response streams no partials but completes whole; a model writing the same sentence streams and completes', () => {
+    const other = feed(make(), [outRow(userOut('u-1')), startedIn('u-1'), inRow(initFrame), ...hookMade('msg_hook_91aa', 'Checked in with the reviewer.'), ended('Checked in with the reviewer.')]);
+    expect(texts(other)).toEqual(['text msg_hook_91aa: Checked in with the reviewer.']);
+    expect(only(other, 'turn.ended')).toMatchObject([{ resultText: 'Checked in with the reviewer.' }]);
+    const model = feed(make(), [outRow(userOut('u-1')), startedIn('u-1'), inRow(initFrame), ...hookMade('msg_01Model', MADE_UP), ended(MADE_UP)]);
+    expect(texts(model)).toEqual([`delta msg_01Model: ${MADE_UP}`, `text msg_01Model: ${MADE_UP}`]);
+    expect(only(model, 'turn.ended')).toMatchObject([{ resultText: MADE_UP }]);
+  });
+
+  it('a turn whose message was not final keeps the result’s text, and the next turn starts with no message of its own', () => {
+    const n = make();
+    const first = feed(n, [outRow(userOut('u-1')), startedIn('u-1'), inRow(initFrame), call('toolu_a', 'Stage 1 is done.', 'a-a'), sent('toolu_a'), assistant('msg_02', [{ type: 'text', text: 'All done.' }], 'a-done'), ended('All done.')]);
+    expect(only(first, 'turn.ended')).toMatchObject([{ resultText: 'All done.' }]);
+    const second = feed(n, [outRow(userOut('u-2')), startedIn('u-2'), inRow(initFrame), ...hookMade('msg_hook_b2', MADE_UP), ended(MADE_UP)], 20);
+    expect(texts(second)).toEqual([]);
+    expect(only(second, 'turn.ended')).toMatchObject([{ resultText: null }]); // a made-up answer with no message before it in its turn
+  });
+
+  // A Stop hook that blocks the stop the made-up answer asked for runs the model again inside the same turn (the
+  // blocking-hook probe): its reply, not the earlier message, is the turn's result.
+  it('a response after the made-up answer (a Stop hook that blocked the stop) keeps the result’s own text', () => {
+    const correction = 'Correction after the stop check.';
+    const events = feed(make(), [outRow(userOut('u-1')), startedIn('u-1'), inRow(initFrame), call('toolu_f', MESSAGE, 'a-call'), sent('toolu_f'), ...hookMade('msg_hook_7c0e1f52', MADE_UP), assistant('msg_03', [{ type: 'text', text: correction }], 'a-again'), ended(correction)]);
+    expect(texts(events)).toEqual(['tool_use msg_01Call: ', `text msg_03: ${correction}`]);
+    expect(only(events, 'turn.ended')).toMatchObject([{ resultText: correction }]);
+  });
+
+  it('a subagent’s message call is none of the main turn’s', () => {
+    const lane = { parent_tool_use_id: 'toolu_agent' };
+    const events = feed(make(), [outRow(userOut('u-1')), startedIn('u-1'), inRow(initFrame), call('toolu_c', 'From the child.', 'a-child', lane), sent('toolu_c', 'toolu_agent'), ...hookMade('msg_hook_c3', MADE_UP), ended(MADE_UP)]);
+    expect(only(events, 'turn.ended')).toMatchObject([{ resultText: null }]);
+  });
+});
+
 describe('normaliser: requests, responses and boundaries', () => {
   const canUseTool = (request_id: string, extra: Record<string, unknown> = {}) => inRow({ type: 'control_request', request_id, request: { subtype: 'can_use_tool', tool_name: 'Bash', display_name: 'Bash', input: { command: 'ls' }, description: 'List', tool_use_id: 'toolu_1', decision_reason_type: 'rule', ...extra } });
 

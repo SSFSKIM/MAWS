@@ -50,7 +50,9 @@ export function startOwnerChannel(deps: OwnerChannelDeps): OwnerChannel {
     appEnabled,
     log,
     subscribe: (listener) => void deps.onEvent('session.eventBatch', ({ appSessionId, events }) => listener(appSessionId, events)),
-    changed: (appSessionId) => service.publish(appSessionId), // a launch's record and its observed style are the lane's state
+    // a launch's record and its observed style are the lane's state; P4-R7z: a record can move the lane in effect (its
+    // style may carry none), so the session's items are projected again, silently, beside the state
+    changed: (appSessionId) => service.laneChanged(appSessionId),
   });
   const mods: ModsDeps = {
     store: deps.index.ownerChannel,
