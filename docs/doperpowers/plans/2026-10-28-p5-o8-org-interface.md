@@ -39,7 +39,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
 - [ ] M3 — The app as the org's signer: a co-root, the weekly successor, the signing checks — **executable** (re-planned 2026-10-28; needs M1 and O7 M1, both landed); the owner's sitting (`root add` on staging, then production) owed after M1's
   - [x] (2026-10-28) Task 1: `root add` in `deploy/admin.ts`, its `production-run.sh` line, and its proofs in `admin.test.ts`.
   - [x] (2026-10-28) Task 2: `checks.ts` (`checkSuccessor`, `supersededRevocations`) and its proofs, the zero-roots ones included.
-  - [ ] Task 3: the device module, `createStateSigner` and the next keys (create, promote, destroy).
+  - [x] (2026-10-28) Task 3: the device module, `createStateSigner` and the next keys (create, promote, destroy).
   - [ ] Task 4: `signing-store.ts`, `signer.ts`, `postState`, `signing.json`, §H's M3 rows.
   - [ ] Task 5: `weekly.ts` and `deliveries.ts`.
   - [ ] Task 6: the session's composition, the rekey transaction and its replay, the IPC commands, main's wiring, and the Org section.
@@ -1446,6 +1446,7 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   6. `promoteNextDeviceKeys` is idempotent: it completes whichever renames a crash left and syncs the directory. The replay is `findDeviceKeys`, then promote, then step 4.
   7. A stale `keys.next.json` is replaced. So Task 6 keeps `createNextDeviceKeys` and step 1 under one fence, and a recorded rekey's next keys can't be replaced.
   8. A second rekey's promotion overwrites a `keys.retired.json` that is still waiting, which destroys the first old device's keys before a root removes that device. Accepted: destroying a key early is the safe direction, and that old device stays listed, removable as before. The rejected alternative refused a second rekey while a retired file waits, which would block the `removed` case that needs it.
+  9. (Review fix, 7987431af.) Every read and change of a profile's key files runs in one in-process queue per profile, so two finishers of one promotion (or a load finishing it) can't retire the keys the other just installed. Reads are queued too, so `findDeviceKeys` can't answer `null` mid-promotion and make the replay drop a live rekey. Across processes, main's profile lock (`startWithProfileLock`, `index.ts:252`) keeps a second main off the profile. The queue serializes file steps, not the rekey transaction: Task 6's fence spans `createNextDeviceKeys` through step 1.
   Rationale: §K's shapes, with what the transaction needs made explicit.
   Date/Author: 2026-10-28, O8's executor.
 
