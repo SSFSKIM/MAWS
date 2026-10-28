@@ -8,7 +8,8 @@
 // an `ended` watch draws nothing. A block leaves once the row its `block-row` named is in the store (`landed`, read on
 // each batch and whenever the store moves, `settleLanded`), its unnamed blocks at its `step-end` (an aborted reply
 // leaves no text), and a named block whose row has not landed NAMED_ROW_WAIT_MS after its step ended (DX5's consumer
-// rule), so no streamed text outlives its reply.
+// rule), so no streamed text outlives its reply. A step a reset's fresh snapshot no longer streams ended while the
+// stream was down: its named blocks get the same wait from the resume, its row landing still settling them sooner.
 import type { BlockRow, SessionBodies, StepEnd, Streaming } from 'desk-hub/protocol';
 import type { Row, TurnId } from '../../transcript/model/rows';
 import { streamingRows } from '../view/streaming-rows';
@@ -17,6 +18,7 @@ import { StreamingLayer, type StreamBlock } from './layer';
 
 export const NAMED_ROW_WAIT_MS = 5_000;
 
+const stepKey = (s: { turnId: string; agentId?: string | null; step: number }) => `${s.turnId}\u0000${s.agentId ?? ''}\u0000${s.step}`;
 const blockKey = (b: Pick<StreamBlock, 'turnId' | 'agentId' | 'step' | 'index'>) => `${b.turnId}\u0000${b.agentId ?? ''}\u0000${b.step}\u0000${b.index}`;
 
 export class LaneAOverlay {
@@ -45,8 +47,12 @@ export class LaneAOverlay {
     for (const message of event.messages) {
       if (message.kind === 'snapshot') {
         const streaming = ((message.body as { streaming?: Streaming[] }).streaming ?? []) as Streaming[];
-        if (this.resuming) this.layer.resume(streaming, null, () => true);
-        else this.layer.load(streaming);
+        if (this.resuming) {
+          const streams = new Set(streaming.map((s) => stepKey(s)));
+          const drawn = new Map(this.layer.allBlocks().filter((b) => b.settledBy !== null).map((b) => [stepKey(b), { turnId: b.turnId, agentId: b.agentId, step: b.step }]));
+          this.layer.resume(streaming, null, () => true);
+          for (const [key, ended] of drawn) if (!streams.has(key)) this.expireNamed(ended);
+        } else this.layer.load(streaming);
         this.loaded = true;
         this.resuming = false;
         changed = true;

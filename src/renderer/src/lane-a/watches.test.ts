@@ -43,6 +43,27 @@ describe('watchLaneA', () => {
     expect(fake.invoked('laneA.unwatch')).toEqual([{ appSessionId: A, watch: 'w-1' }]);
   });
 
+  it('gives a consumer that comes after the replay bound a fresh snapshot: the watch opens again', async () => {
+    let n = 0;
+    const fake = fakeClient({ 'laneA.watch': () => ({ watch: `w-${++n}` }), 'laneA.unwatch': undefined });
+    applyLaneAState(A, laneAState(A));
+    const first: PlaneEvent[] = [];
+    watchLaneA(A, (e) => first.push(e), { client: fake.client });
+    await settle();
+    fake.event('laneA.plane', { appSessionId: A, watch: 'w-1', messages: [snapshot] });
+    fake.event('laneA.plane', { appSessionId: A, watch: 'w-1', messages: Array.from({ length: 20_001 }, (_, i) => msg('chunk', { i }, i + 1)) });
+    const late: PlaneEvent[] = [];
+    watchLaneA(A, (e) => late.push(e), { client: fake.client, replay: true });
+    await settle();
+    expect(fake.invoked('laneA.unwatch')).toEqual([{ appSessionId: A, watch: 'w-1' }]);
+    expect(fake.invoked('laneA.watch')).toHaveLength(2);
+    expect(first.at(-1)).toEqual({ kind: 'reset' }); // what the first drew no longer follows
+    fake.event('laneA.plane', { appSessionId: A, watch: 'w-1', messages: [msg('chunk', { stale: true })] }); // the old watch's, ignored
+    fake.event('laneA.plane', { appSessionId: A, watch: 'w-2', messages: [snapshot] });
+    expect(late).toEqual([{ kind: 'messages', messages: [snapshot] }]);
+    expect(first.at(-1)).toEqual({ kind: 'messages', messages: [snapshot] });
+  });
+
   it('holds what arrived for its watch before the watch’s id came back', async () => {
     const fake = fakeClient({ 'laneA.unwatch': undefined });
     applyLaneAState(A, laneAState(A));

@@ -3,7 +3,9 @@
 // session's plane (the transcript's streaming overlay, the side question's answers, a command's outcome, the MCP
 // widget). A watch is opened while a consumer holds it and the session's bridge is live or starting (the lane A store
 // says), and let go with its last consumer. Its first message is its own snapshot, so a consumer that comes later asks to
-// be replayed the snapshot and what followed it (`replay`), and starts from the text already streamed; a `reset` (the
+// be replayed the snapshot and what followed it (`replay`), and starts from the text already streamed. Past the replay
+// bound (LOG_MAX messages since the snapshot) there is nothing to replay from, so such a consumer has the watch opened
+// again: the consumers before it hear a reset, and all of them the new watch's snapshot. A `reset` (the
 // stream lost events, or the bridge's stream ended under the watch) is passed on, and the fresh snapshot follows as a
 // message. An `ended` watch is gone: it is opened again once the bridge is live again.
 //
@@ -37,6 +39,7 @@ interface Entry {
   opening: Promise<void> | null; // the open in flight
   early: Payload[]; // what arrived while the open was in flight, its watch id not known yet
   log: SessionMessage[] | null; // the latest snapshot and what followed it, for a consumer that comes later
+  overflowed: boolean; // the log was let go past LOG_MAX: a later consumer needs a fresh snapshot
   off: () => void;
 }
 
@@ -81,15 +84,22 @@ function receive(appSessionId: AppSessionId, entry: Entry, payload: Payload): vo
       const jobs = message.kind === 'snapshot' || message.kind === 'subagents' ? (message.body as { jobs?: unknown }).jobs : undefined;
       if (Array.isArray(jobs)) noteLaneAJobs(appSessionId, jobs as Job[]);
     }
-    if (messages[0]?.kind === 'snapshot') entry.log = [...messages];
-    else if (entry.log !== null) entry.log = entry.log.length + messages.length > LOG_MAX ? null : [...entry.log, ...messages];
+    if (messages[0]?.kind === 'snapshot') {
+      entry.log = [...messages];
+      entry.overflowed = false;
+    } else if (entry.log !== null) {
+      entry.overflowed = entry.log.length + messages.length > LOG_MAX;
+      entry.log = entry.overflowed ? null : [...entry.log, ...messages];
+    }
     tell(entry, { kind: 'messages', messages });
   } else if ('reset' in payload) {
     entry.log = null;
+    entry.overflowed = false; // the fresh snapshot follows
     tell(entry, { kind: 'reset' });
   } else if ('ended' in payload) {
     entry.watch = null;
     entry.log = null;
+    entry.overflowed = false;
     laneAJobsWatchEnded(appSessionId);
     tell(entry, { kind: 'ended', reason: payload.ended });
     open(appSessionId, entry);
@@ -118,7 +128,7 @@ function open(appSessionId: AppSessionId, entry: Entry): void {
 function entryFor(appSessionId: AppSessionId, client: MawsBridge): Entry {
   const held = entries.get(appSessionId);
   if (held) return held;
-  const entry: Entry = { client, watchers: new Set(), watch: null, opening: null, early: [], log: null, off: () => {} };
+  const entry: Entry = { client, watchers: new Set(), watch: null, opening: null, early: [], log: null, overflowed: false, off: () => {} };
   const offPlane = client.on('laneA.plane', (payload) => {
     if (payload.appSessionId !== appSessionId) return;
     if (entry.watch === null) {
@@ -144,6 +154,12 @@ export function watchLaneA(appSessionId: AppSessionId, listener: (event: PlaneEv
   const entry = entryFor(appSessionId, client);
   const watcher: Watcher = { listener };
   if (replay && entry.log !== null) listener({ kind: 'messages', messages: [...entry.log] });
+  else if (replay && entry.overflowed && entry.watch !== null) {
+    void entry.client.invoke('laneA.unwatch', { appSessionId, watch: entry.watch });
+    entry.watch = null;
+    entry.overflowed = false;
+    tell(entry, { kind: 'reset' });
+  }
   entry.watchers.add(watcher);
   open(appSessionId, entry);
   return () => {

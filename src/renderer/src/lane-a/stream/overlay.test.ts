@@ -73,6 +73,35 @@ describe('LaneAOverlay', () => {
     expect(texts()).toEqual([]);
   });
 
+  it('drops a named block 5 s after a reset whose fresh snapshot no longer streams its step, its row never landing', () => {
+    vi.useFakeTimers();
+    overlay.receive({ kind: 'messages', messages: [snapshot(), chunk(0, 0, 'Named'), msg('block-row', { ...step, uuid: ROW, index: 0 })] });
+    overlay.receive({ kind: 'reset' });
+    overlay.receive({ kind: 'messages', messages: [snapshot()] }); // the step ended while the stream was down
+    expect(texts()).toEqual(['Named']);
+    vi.advanceTimersByTime(NAMED_ROW_WAIT_MS - 1);
+    expect(texts()).toEqual(['Named']);
+    vi.advanceTimersByTime(1);
+    expect(texts()).toEqual([]);
+  });
+
+  it('settles such a block early when its row lands, and leaves a step the fresh snapshot still streams', () => {
+    vi.useFakeTimers();
+    overlay.receive({ kind: 'messages', messages: [snapshot(), chunk(0, 0, 'Named'), msg('block-row', { ...step, uuid: ROW, index: 0 })] });
+    overlay.receive({ kind: 'reset' });
+    overlay.receive({ kind: 'messages', messages: [snapshot()] });
+    landed.add(ROW);
+    expect(overlay.settleLanded()).toBe(true);
+    expect(texts()).toEqual([]);
+
+    const next = { ...step, step: 1 }; // the turn's next request
+    overlay.receive({ kind: 'messages', messages: [msg('chunk', { ...next, chunkIndex: 0, chunk: { kind: 'text', index: 0, text: 'Still' } }), msg('block-row', { ...next, uuid: 'row-2', index: 0 })] });
+    overlay.receive({ kind: 'reset' });
+    overlay.receive({ kind: 'messages', messages: [snapshot([{ ...next, upTo: 0, blocks: [{ index: 0, kind: 'text', text: 'Still', upTo: 0, uuid: 'row-2' }] }])] });
+    vi.advanceTimersByTime(NAMED_ROW_WAIT_MS * 2);
+    expect(texts()).toEqual(['Still']); // its step streams on: no step-end yet, so no expiry
+  });
+
   it('draws nothing when the watch ends, and resumes from a reset’s fresh snapshot', () => {
     overlay.receive({ kind: 'messages', messages: [snapshot(), chunk(0, 0, 'Before')] });
     overlay.receive({ kind: 'reset' });

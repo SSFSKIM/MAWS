@@ -297,6 +297,11 @@ export class StreamingLayer {
     return uuids;
   }
 
+  /** Every loop's blocks drawn now (P5 O9 M5: the overlay arms the wait of the steps a resume no longer streams). */
+  allBlocks(): StreamBlock[] {
+    return [...this.requests.values()].flatMap((request) => [...request.blocks.values()]);
+  }
+
   /** One agent's blocks, in the order they are drawn: requests as they first appeared, blocks by index. */
   blocks(agentId: string | null): StreamBlock[] {
     const out: StreamBlock[] = [];
