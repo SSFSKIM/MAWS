@@ -113,7 +113,7 @@ Phase 2's acceptance is P5's O12 items 2, 3, 5, 6 and 8, and item 4's rest, chec
    - each appended host event goes up RL10 as a session-lane `host` message with no subscription (`sub: null`), carrying its stable id `{writer, seq}`, whether or not anyone subscribes: with zero subscribers it still goes; with a cards-only subscriber it goes once and the subscriber's view carries nothing of it; with two full subscribers it goes once sub-less and once in each subscriber's own stream; after a reconnect the session's last 50 go again and the endpoint deduplicates by the id;
    - a fresh full subscription's snapshot carries the session's last 50;
    - on a machine not cut over, and in a git-mirrored project, host events go where they go today.
-9. **The mini** (item 8). After O14's brief cuts the mini over: the mini's `sminos daemon status` says `uplink: RL10 (local-only)` with a sminos at or above 1.27.0 (M7c's version: the frames O10's fixture plays came at 1.26.0, and `sminos daemon owed`, which the cutover's own gate runs, at 1.27.0) and `sminos daemon owed` exiting 0 after it; its unattended seats (the journal, Telegram) show no `retired` or `gone` across the install; from the MacBook, `sminos list --org` shows the mini's sessions with their owners, and a `sminos say` to one of them arrives there labelled. Evidence goes to Outcomes; no step of this document runs `claude` on the mini.
+9. **The mini** (item 8). After O14's brief cuts the mini over: the mini's `sminos daemon status` says `uplink: RL10 (local-only)` with a sminos at or above 1.27.3 (the frames O10's fixture plays came at 1.26.0, `sminos daemon owed`, which the cutover's own gate runs, at 1.27.0, and the operator writer's wait for the upstream's head at a re-enrolment, doperpowers #425, at 1.27.3) and `sminos daemon owed` exiting 0 after it; its unattended seats (the journal, Telegram) show no `retired` or `gone` across the install; from the MacBook, `sminos list --org` shows the mini's sessions with their owners, and a `sminos say` to one of them arrives there labelled. Evidence goes to Outcomes; no step of this document runs `claude` on the mini.
 
 ## Constraints that bind every milestone
 
@@ -572,7 +572,7 @@ It builds on M7a (the nonce-on-claim rule) and on M6 (whose `member` frames it e
 
 ### M9 — The mini
 
-**What exists at its end.** The mini runs this sminos, at or above 1.27.0 (M7c's version, the floor for a cutover: B2's gate runs `sminos daemon owed` on the mini), installed through the mini-ops session at the owner's request near O14's cutover of the mini (RL §9 step 2: the owner's standing rule forbids driving `claude` over ssh there), and once O14's brief has cut it over, its sminos is local-only with its unattended seats intact. This milestone verifies; it builds nothing and runs nothing on the mini itself.
+**What exists at its end.** The mini runs this sminos, at or above 1.27.3 (the floor for a cutover: M7c's 1.27.0 brought `sminos daemon owed`, which B2's gate runs on the mini, and 1.27.3 the operator writer's wait for the upstream's head at the re-enrolment B2 step 5 performs), installed through the mini-ops session at the owner's request near O14's cutover of the mini (RL §9 step 2: the owner's standing rule forbids driving `claude` over ssh there), and once O14's brief has cut it over, its sminos is local-only with its unattended seats intact. This milestone verifies; it builds nothing and runs nothing on the mini itself.
 
 **What it touches.** Nothing in either repository. Its evidence goes to Outcomes & Retrospective.
 
@@ -1204,6 +1204,8 @@ The joint review's second round (`9be0bc941`), 2026-10-27, two P1s, both reprodu
   - **The un-cutover held as written** in both orders; in (b) the supervisor runs a DX2 uplink from `hub.json` for about a second before the probe's welcome, which O14's order avoids.
   Rationale: `daemon owed` is the gate an attended cutover passes only when nothing in flight can be lost, so every doubt reads as owed; the uplink's own resume state is the most it can honestly claim.
   Date/Author: 2026-10-27, M7c's executor and doperpowers:reviewer-high, accepted by O12's phase 2 executor; the gap's bound and the floor the spec owner's.
+- Decision: The floor for a machine's cutover, in M9 and Acceptance 9, is 1.27.3, superseding the 1.27.0 of the entry above; one number everywhere, as O14's Decision Log records the same day. sminos 1.27.3 (doperpowers #425, board #147) makes a machine that enrolls, is cut over or is renamed under a name with history upstream wait to append its operator writer's events until the upstream's head is known, on DX2 and on RL10 alike; without it the mini's re-enrolment at O14's B2 step 5 can fork `<name>/human`.
+  Date/Author: 2026-10-28, p5-desk-track-owner (O12's owner, at doperpowers #425's merge).
 
 ## Outcomes & Retrospective
 
