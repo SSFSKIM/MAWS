@@ -98,7 +98,7 @@ test('a shallow checkout, a single-branch one and a tree with no merge base are 
   git('push', '--quiet', 'origin', 'HEAD:refs/heads/branch');
   const advice = 'so this tree\'s peer cannot be found: pass --peer <ref> (the build to check it against) or --peer none';
   const shallow = clone('--depth=1', '--branch', 'branch');
-  assert.deepEqual(peerAt(head, [], shallow), { status: 2, trailers: [], notes: [`ci-gate: this checkout is shallow, and its merge base with origin/master may lie past its history, ${advice}`] });
+  assert.deepEqual(peerAt(head, [], shallow), { status: 2, trailers: [], notes: ["ci-gate: this checkout is shallow, so the peer's first-parent master state cannot be established; fetch complete history or pass --peer none"] });
   assert.equal(peerAt(head, ['--peer', 'none'], shallow).status, 0);
   assert.equal(peerAt(head, ['--peer', 'HEAD'], shallow).status, 2, 'an explicit unmerged peer is not a master state, even when it equals the tested sha');
   const single = clone('--single-branch', '--branch', 'branch');
@@ -180,4 +180,27 @@ test('explicit draft with no manifest is refused even when its containing master
   assert.equal(result.status, 2);
   assert.deepEqual(result.trailers, []);
   assert.match(result.notes.join('\n'), /has no src\/shared\/ipc\/wire-manifest.json/);
+});
+
+test('a shallow merge cannot silently remap a reachable first-parent peer to the tested tip', (t) => {
+  const { git, write, base, peerAt, clone } = repository(t, { master: { [MANIFEST]: manifest(3, 0) } });
+  // base is a genuine master state. The side branch reaches it in one hop, while master's first-parent
+  // path has three intervening commits: depth 3 retains base through the merge's second parent only.
+  git('checkout', '--quiet', '-b', 'master-line', base);
+  write({ [MANIFEST]: manifest(3, 1) });
+  for (let i = 1; i <= 3; i++) git('commit', '--quiet', '--allow-empty', '-m', `master advance ${i}`);
+  git('merge', '--quiet', '--no-ff', 'branch', '-m', 'merge the short side path');
+  const tip = git('rev-parse', 'HEAD');
+  git('push', '--quiet', 'origin', 'HEAD:refs/heads/master');
+  assert.deepEqual(peerAt(tip, ['--peer', base]).trailers, [`Peer: ${base}`, 'Peer-Wire: 3.0', 'Wire: 3.1']);
+  const shallow = clone('--depth=3', '--branch', 'master');
+  const shallowGit = (...args) => execFileSync('git', ['-C', shallow, ...args], { encoding: 'utf8' }).trim();
+  assert.equal(shallowGit('rev-parse', '--is-shallow-repository'), 'true');
+  shallowGit('merge-base', '--is-ancestor', base, 'origin/master');
+  assert.ok(!shallowGit('rev-list', '--first-parent', 'origin/master').split('\n').includes(base));
+  const result = peerAt(tip, ['--peer', base], shallow);
+  assert.equal(result.status, 2, result.notes.join('\n'));
+  assert.deepEqual(result.trailers, []);
+  assert.match(result.notes.join('\n'), /shallow.*complete history/);
+  assert.deepEqual(peerAt(tip, ['--peer', 'none'], shallow), { status: 0, trailers: [], notes: [] });
 });

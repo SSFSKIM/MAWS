@@ -49,6 +49,12 @@ export function resolvePeer({ git, sha, peer }) {
     say(`${why}, so this tree's peer cannot be found: pass --peer <ref> (the build to check it against) or --peer none`);
     return { trailers: [], notes, status: 2 };
   };
+  // A peer can be reachable through a merge while its earlier first-parent master states are truncated.
+  // Neither explicit refs nor merge bases can establish the first containing state in a shallow checkout.
+  if (git('rev-parse', '--is-shallow-repository') === 'true') {
+    say(`${peer ? `--peer ${peer}: ` : ''}this checkout is shallow, so the peer's first-parent master state cannot be established; fetch complete history or pass --peer none`);
+    return { trailers: [], notes, status: 2 };
+  }
   if (peer) {
     try {
       base = git('rev-parse', '--verify', '--quiet', `${peer}^{commit}`);
@@ -62,8 +68,6 @@ export function resolvePeer({ git, sha, peer }) {
       say(`the peer ${base.slice(0, 8)} (${how}) has no ${MANIFEST}`);
       return { trailers: [], notes, status: 2 };
     }
-  } else if (git('rev-parse', '--is-shallow-repository') === 'true') {
-    return refused('this checkout is shallow, and its merge base with origin/master may lie past its history');
   }
   // Explicit peers need the current master ancestry too, not only the default merge-base selection.
   try {
