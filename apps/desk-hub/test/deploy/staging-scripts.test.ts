@@ -6,9 +6,8 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { base64urlEncode, generateSigningKey } from 'org-protocol';
+import { base64urlEncode, encodeProvisioningCodeV2, generateSigningKey, type ProvisioningCodeV2 } from 'org-protocol';
 import { describe, expect, it } from 'vitest';
-import { encodeProvisioningCodeV2, type ProvisioningCodeV2 } from '../../deploy/provisioning-code.ts';
 
 const deploy = join(import.meta.dirname, '../../deploy');
 const runner = join(deploy, 'staging-run.sh');
@@ -209,7 +208,7 @@ describe.skipIf(!zsh)('admin --pipe with the real launcher', () => {
     expect(good.stdout).toBe(`${stripped}\n`);
     expect(bad.status, bad.stderr).toBe(1);
     expect(bad.stdout).toBe('');
-    expect(bad.stderr).toMatch(/admin: stdin: not smns-provision-v2/);
+    expect(bad.stderr).toMatch(/admin: stdin: provisioning code: not smns-provision-v2/);
     expect(called()).toBe(false);
   }, 240_000);
 });

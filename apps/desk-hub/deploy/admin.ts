@@ -38,7 +38,9 @@ import { parseArgs } from 'node:util';
 import {
   base64urlEncode,
   canonicalize,
+  decodeProvisioningCodeV2,
   encodePairingCode,
+  encodeProvisioningCodeV2,
   endorseDevice,
   generateSigningKey,
   isDevice,
@@ -58,6 +60,7 @@ import {
   type Delegation,
   type Device,
   type OrgState,
+  type ProvisioningCodeV2,
   type SignedOrgState,
 } from 'org-protocol';
 import { readJsonFile } from '../fake-machine/json-file';
@@ -109,7 +112,6 @@ import { readSecrets } from './deploy';
 import { Person } from './hub';
 import { certificateViews, machineRows, resolveMachine, table } from './admin-machines';
 import { deviceEntry, purgeOrgKeys, restoreLegacyKey, retireLegacyKey, successor } from './org-admin';
-import { decodeProvisioningCodeV2, encodeProvisioningCodeV2, type ProvisioningCodeV2 } from './provisioning-code';
 import { withRunLock } from './run-lock';
 
 export const SUBCOMMANDS = ['init', 'genesis', 'adopt', 'refresh', 'pair', 'devices', 'remove-device', 'show', 'enroll', 'delegation', 'machine', 'code', 'provisioning', 'keys', 'abandon-pending'] as const;

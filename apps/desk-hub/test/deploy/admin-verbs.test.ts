@@ -13,18 +13,20 @@ import { join } from 'node:path';
 import {
   base64urlEncode,
   canonicalize,
+  decodeProvisioningCodeV2,
+  encodeProvisioningCodeV2,
   generateSigningKey,
   importSigningKey,
   keyId,
   signOrgState,
   stateHash,
+  type ProvisioningCodeV2,
   type SignedOrgState,
 } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { anchorFile, runAdmin, type AdminIo } from '../../deploy/admin.ts';
 import { readAdminKeys, readText, volumeOf } from '../../deploy/admin-device.ts';
 import { restoreLegacyKey, successor } from '../../deploy/org-admin.ts';
-import { decodeProvisioningCodeV2, encodeProvisioningCodeV2, type ProvisioningCodeV2 } from '../../deploy/provisioning-code.ts';
 import { enrollDelegated, enrollV2, mintRef } from '../../fake-machine/org';
 import { importOrgKey, keyAuth, keyCheck } from '../../src/protocol/codes';
 import { decodeEnrollmentCodeV2, encodeEnrollmentCodeV2, encodeProvisioningCode, type MachineView, type ProvisioningKeyRecord } from '../../src/protocol/identity';
@@ -845,21 +847,37 @@ describe('the local transforms', () => {
     const without = fake([], { stdin: encodeProvisioningCodeV2(await sample(false)) });
     expect(await runAdmin(['code', 'inspect'], without.io)).toBe(0);
     expect(without.out.at(-1)).toBe('legacy none');
-    for (const [stdin, why] of [['smns-provision-v1.e30', /not smns-provision-v2/], ['smns-provision-v2.!!', /damaged/], [encodeV2Raw({ ...code, token: undefined }), /no token/], [encodeV2Raw({ ...code, extra: 1 }), /bad extra/]] as const) {
+    // The package's codec (org-protocol, O14 M1) judges it, and its named refusal is what the owner reads.
+    for (const [stdin, why] of [
+      ['smns-provision-v1.e30', 'not smns-provision-v2'],
+      ['smns-provision-v2.!!', 'damaged'],
+      [encodeV2Raw({ ...code, token: undefined }), 'no token'],
+      [encodeV2Raw({ ...code, extra: 1 }), 'unknown field extra'],
+      [encodeV2Raw({ ...code, delegation: { ...code.delegation, extra: 1 } }), 'unknown field delegation.extra'],
+    ] as const) {
       const bad = fake([], { stdin });
-      expect(await runAdmin(['code', 'inspect'], bad.io)).toBe(1);
-      expect(bad.err.join('\n')).toMatch(why);
+      expect(await runAdmin(['code', 'inspect'], bad.io), why).toBe(1);
+      expect(bad.err, why).toEqual([`admin: stdin: provisioning code: ${why}`]);
     }
+    // A private JWK as WebCrypto exports it, `ext` and `key_ops` included, is a code's.
+    const exported = (await crypto.subtle.exportKey('jwk', (await generateSigningKey(true)).privateKey)) as JsonWebKey;
+    expect(exported).toHaveProperty('key_ops');
+    secrets.add(exported.d!);
+    const webcrypto = fake([], { stdin: encodeV2Raw({ ...code, delegation: { ...code.delegation, privateJwk: exported } }) });
+    expect(await runAdmin(['code', 'inspect'], webcrypto.io)).toBe(0);
   });
 
   it('strips the legacy field and nothing else, to a pipe alone', async () => {
     const code = await sample();
-    const f = fake([], { stdin: `${encodeProvisioningCodeV2(code)}\n` });
+    // Its fields in another order than canonical JSON's: the stripped code is the package's encoding, byte for byte.
+    const reordered = Object.fromEntries(Object.entries(code).reverse());
+    const f = fake([], { stdin: `${encodeV2Raw(reordered)}\n` });
     expect(await runAdmin(['code', 'strip-legacy'], f.io)).toBe(0);
     expect(f.out).toEqual([]);
     expect(f.stdout).toHaveLength(1);
     const { legacy, ...rest } = code;
     expect(legacy).toBeDefined();
+    expect(f.stdout[0]).toBe(`${encodeProvisioningCodeV2(rest)}\n`);
     expect(decodeProvisioningCodeV2(f.stdout[0].trim())).toEqual(rest);
     expect(f.err).toEqual(['strip-legacy: the legacy field is dropped']);
     const terminal = fake([], { stdin: encodeProvisioningCodeV2(code), stdoutIsTerminal: true });

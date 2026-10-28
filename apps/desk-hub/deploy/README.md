@@ -418,7 +418,9 @@ set there (the runners' `--pipe`), else on stdin.
 
 Nothing these verbs print on stdout or stderr holds a key, a token or a code, but the code on the two verbs whose stdout
 is one (`delegation create`, `code strip-legacy`); a machine's code goes to the terminal and the clipboard alone. The
-provisioning code's codec is `provisioning-code.ts` until O14 M1's `org-protocol` codec lands.
+provisioning code's codec is `org-protocol`'s (`encodeProvisioningCodeV2` / `decodeProvisioningCodeV2`, O14 M1): a code
+it refuses is reported as `stdin: provisioning code: <reason>`, and `strip-legacy` writes the package's canonical
+encoding of what remains.
 
 ## `walk-console.js` (the walk's item 8, read into DevTools)
 
