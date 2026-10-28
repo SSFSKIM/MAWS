@@ -142,6 +142,15 @@ function Exchange({ exchange, canRetry, onRetry }: { exchange: SideExchange; can
           {COPY.answering}
         </p>
       )}
+      {/* P5 O9: a terminal session's question the bridge may not have taken: pending still, its doubt said, Retry offered */}
+      {exchange.state === 'pending' && exchange.error !== null && (
+        <div data-side-uncertain="" className="flex flex-wrap items-center gap-2 text-ui-sm text-warning">
+          <span className="min-w-0 flex-1 break-words">{exchange.error}</span>
+          <button type="button" className={SECONDARY} disabled={!canRetry} onClick={onRetry}>
+            {COPY.retry}
+          </button>
+        </div>
+      )}
       {exchange.state === 'answered' && (
         <div className="min-w-0 text-fg">
           {exchange.synthetic && (

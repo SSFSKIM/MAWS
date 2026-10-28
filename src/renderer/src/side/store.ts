@@ -123,8 +123,12 @@ export async function askSide(parent: AppSessionId, question: string, client: Ma
   show(parent, hostListed(parent));
   const result = await askSession(parent, question, retryOf, client); // P5 O9 M4: the session's controls port
   if (!result.ok) {
-    locals.set(parent, localsOf(parent).map((e) => (e.id === local.id ? { ...e, state: 'failed', error: result.error.message, answeredAt: new Date().toISOString() } : e)));
+    // P5 O9: an ask the bridge may have taken (its acknowledgement timed out) stays pending, saying so, its op followed
+    const uncertainOp = drivenByBridge(parent) ? uncertainOpOf(result.error.issues) : null;
+    const settle = (e: SideExchange): SideExchange => (uncertainOp !== null ? { ...e, error: result.error.message } : { ...e, state: 'failed', error: result.error.message, answeredAt: new Date().toISOString() });
+    locals.set(parent, localsOf(parent).map((e) => (e.id === local.id ? settle(e) : e)));
     show(parent, hostListed(parent));
+    if (uncertainOp !== null) followBridgeAnswer(parent, local.id, uncertainOp, client);
     return;
   }
   if (drivenByBridge(parent)) return followBridgeAnswer(parent, local.id, result.value.opId, client); // P5 O9 M5
@@ -134,7 +138,13 @@ export async function askSide(parent: AppSessionId, question: string, client: Ma
 
 // P5 O9 M5 start: a terminal session driven through its bridge keeps no log of side questions, so its exchange stays
 // this window's local, settled from the watch's `op` messages for its id (the end's text, else its reason) and failed
-// when no end arrives; a Retry asks again as a new op.
+// when no end arrives; a Retry asks again as a new op. An ask whose acknowledgement is unknown but names its op (the
+// bridge's 504) is followed the same way, pending with its doubt as its `error` until the op ends; Retry stays offered.
+const uncertainOpOf = (issues: unknown): string | null => {
+  const named = issues !== null && typeof issues === 'object' ? (issues as { unknown?: unknown; opId?: unknown }) : null;
+  return named?.unknown !== undefined && typeof named.opId === 'string' ? named.opId : null;
+};
+
 function followBridgeAnswer(parent: AppSessionId, localId: string, opId: string, client: MawsBridge): void {
   followOp(
     parent,
