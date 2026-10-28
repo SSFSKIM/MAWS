@@ -24,10 +24,10 @@ const deferred = <T>() => {
   return { promise, resolve };
 };
 
-function laneWith(post: (body: Record<string, unknown>) => Promise<PostResult>, data = userData()) {
+function laneWith(post: (body: Record<string, unknown>, launch: string | null) => Promise<PostResult>, data = userData(), launch: { now: string | null } = { now: 'launch-1' }) {
   const seqs = fileSeqStore(join(data, 'lane-a', 'deliveries.json'));
   let changes = 0;
-  const lane = new DeliveryLane({ writer: 'maws/ref', session: 'sess-1', seqs, post, changed: () => void (changes += 1), timing });
+  const lane = new DeliveryLane({ writer: 'maws/ref', session: 'sess-1', seqs, launch: () => launch.now, post, changed: () => void (changes += 1), timing });
   return { lane, data, changes: () => changes };
 }
 
@@ -161,5 +161,58 @@ describe('the delivery lane', () => {
     writeFileSync(file, '{not json');
     const before = Date.now();
     expect(fileSeqStore(file, () => {}).allocate('sess-1')).toBeGreaterThanOrEqual(before);
+  });
+
+  // Fix wave 1 (the task review's findings 1, 3 and 4)
+  it('posts every retry of a send under the launch it was admitted under, whatever the session’s launch is now', async () => {
+    const launch = { now: 'launch-1' as string | null };
+    const launches: (string | null)[] = [];
+    const { lane } = laneWith(async (_body, at) => {
+      launches.push(at);
+      launch.now = launches.length === 1 ? 'launch-2' : null; // rediscovery moves the launch on, then clears it
+      return launches.length < 3 ? { kind: 'lost' } : submitted;
+    }, userData(), launch);
+    void lane.send('one');
+    await expect.poll(() => launches.length).toBe(3);
+    expect(launches).toEqual(['launch-1', 'launch-1', 'launch-1']);
+  });
+
+  it('settles an unconfirmed send with the fate the stream names later, and never posts it again', async () => {
+    let posts = 0;
+    const { lane } = laneWith(async () => {
+      posts += 1;
+      return { kind: 'lost' };
+    });
+    expect(await lane.send('one')).toMatchObject({ state: 'unconfirmed' });
+    lane.fate({ writer: 'maws/ref', seq: 1 }, 'entered', 'row-1');
+    expect(lane.entries()).toEqual([{ key: { writer: 'maws/ref', seq: 1 }, at: expect.any(String) as unknown, state: 'entered', uuid: 'row-1' }]);
+    const { lane: other } = laneWith(async () => ({ kind: 'lost' }));
+    await other.send('two');
+    other.fate({ writer: 'maws/ref', seq: 1 }, 'refused', undefined, 'the prompt was dropped');
+    expect(other.entries()[0]).toMatchObject({ state: 'refused', reason: 'the prompt was dropped' });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(posts).toBe(3);
+  });
+
+  it('makes a send whose post was out when the stream was lost unconfirmed, once the snapshot and the late answer are both in', async () => {
+    const gate = deferred<PostResult>();
+    const { lane } = laneWith(() => gate.promise);
+    const answer = lane.send('one');
+    await expect.poll(() => lane.entries()[0]?.state).toBe('queued');
+    lane.streamLost(); // the post is still out
+    lane.snapshotArrived();
+    gate.resolve(submitted); // the late acknowledgement, no fate with it
+    expect(await answer).toEqual({ key: { writer: 'maws/ref', seq: 1 }, state: 'unconfirmed', reason: 'the bridge’s stream was lost before it said whether this entered' });
+  });
+
+  it('marks a send posted while the stream is down, so it ends unconfirmed at the snapshot, freeing its place', async () => {
+    const { lane } = laneWith(async () => submitted);
+    lane.streamLost();
+    const answers = Array.from({ length: 8 }, (_, i) => lane.send(`m${i}`));
+    await expect.poll(() => lane.entries().filter((d) => d.state === 'submitted').length).toBe(8);
+    expect(await lane.send('ninth')).toMatchObject({ key: null, code: 'busy' });
+    lane.snapshotArrived();
+    expect((await Promise.all(answers)).map((a) => a.state)).toEqual(Array(8).fill('unconfirmed'));
+    expect(await lane.send('tenth')).toMatchObject({ key: { seq: 9 } }); // the stuck ones no longer hold the capacity
   });
 });

@@ -61,8 +61,21 @@ export interface LaneTiming {
 
 export const LANE_TIMING: LaneTiming = { retryDelaysMs: [1000, 3000], answerMs: 5000, keepMs: 60_000, capacity: 8 };
 
-type Send = LaneADelivery & { text: string; lost: boolean; code?: string; waiters: ((answer: LaneASendOutput) => void)[] };
+// `launch`: the one the send was admitted under, carried by every post of it. `lost`: the state stream that would name its
+// fate ended after its post went (or while it was out); `resnapped`: and the fresh snapshot has come since.
+type Send = LaneADelivery & {
+  text: string;
+  launch: string | null;
+  lost: 'no' | 'lost' | 'resnapped';
+  code?: string;
+  waiters: ((answer: LaneASendOutput) => void)[];
+  expiry: NodeJS.Timeout | null;
+};
+// Settled: nothing posts it again. `entered` and `refused` are its fate; `unconfirmed` stops the posting without one, and
+// a fate the stream names later still settles it.
 const FINAL = new Set<LaneADelivery['state']>(['entered', 'refused', 'unconfirmed']);
+const KNOWN = new Set<LaneADelivery['state']>(['entered', 'refused']);
+const LOST_REASON = 'the bridge’s stream was lost before it said whether this entered';
 const sameKey = (a: DeliveryKey, b: { writer?: unknown; seq?: unknown }) => a.writer === b.writer && a.seq === b.seq;
 
 export class DeliveryLane {
@@ -70,13 +83,15 @@ export class DeliveryLane {
   private posting = false;
   private head: Send | null = null; // the send being posted
   private closed = false;
+  private down = false; // the state stream ended, and its fresh snapshot has not come yet
 
   constructor(
     private readonly options: {
       writer: string;
       session: string;
       seqs: SeqStore;
-      post(body: Record<string, unknown>): Promise<PostResult>; // a `deliver` command's answer, or lost (a timeout, a closed socket)
+      launch(): string | null; // the session's launch now: a send is admitted under it
+      post(body: Record<string, unknown>, launch: string | null): Promise<PostResult>; // a `deliver` command's answer, or lost (a timeout, a closed socket)
       changed(): void;
       timing: LaneTiming;
     },
@@ -94,7 +109,7 @@ export class DeliveryLane {
     } catch (error) {
       return Promise.resolve({ key: null, state: 'refused', reason: `the send could not be numbered: ${error instanceof Error ? error.message : String(error)}`, code: 'failed' });
     }
-    const send: Send = { key: { writer: this.options.writer, seq }, at: new Date().toISOString(), state: 'queued', text, lost: false, waiters: [] };
+    const send: Send = { key: { writer: this.options.writer, seq }, at: new Date().toISOString(), state: 'queued', text, launch: this.options.launch(), lost: 'no', waiters: [], expiry: null };
     this.sends.push(send);
     this.options.changed();
     const answer = new Promise<LaneASendOutput>((resolve) => {
@@ -107,20 +122,30 @@ export class DeliveryLane {
     return answer;
   }
 
-  // A `delivered` from the state stream.
+  // A `delivered` from the state stream: the send's fate, while its entry is kept, whatever the posting did (an
+  // `unconfirmed` send gets the fate the stream names later).
   fate(key: { writer?: unknown; seq?: unknown }, outcome: string, uuid?: string, reason?: string): void {
     const send = this.sends.find((s) => sameKey(s.key, key));
-    if (!send || FINAL.has(send.state)) return;
+    if (!send || KNOWN.has(send.state)) return;
     if (outcome === 'entered') this.settle(send, 'entered', { ...(uuid !== undefined && { uuid }) });
     else if (outcome === 'refused') this.settle(send, 'refused', { reason: reason ?? 'the session refused it' });
   }
 
+  // The state stream ended: a submitted send, and the one whose post is out, may have had their fate on it.
   streamLost(): void {
-    for (const s of this.sends) if (s.state === 'submitted') s.lost = true;
+    this.down = true;
+    for (const s of this.sends) if (s.state === 'submitted' || s === this.head) s.lost = 'lost';
   }
 
+  // Its fresh snapshot came: a submitted send whose fate went with the lost stream is unconfirmed; the one whose post is
+  // still out is, once its post answers.
   snapshotArrived(): void {
-    for (const s of this.sends) if (s.lost && s.state === 'submitted') this.settle(s, 'unconfirmed', { reason: 'the bridge’s stream was lost before it said whether this entered' });
+    this.down = false;
+    for (const s of this.sends) {
+      if (s.lost !== 'lost') continue;
+      if (s.state === 'submitted') this.settle(s, 'unconfirmed', { reason: LOST_REASON });
+      else if (s.state === 'queued') s.lost = 'resnapped';
+    }
   }
 
   entries(): LaneADelivery[] {
@@ -162,13 +187,15 @@ export class DeliveryLane {
     for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
       if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, retryDelaysMs[attempt - 1]));
       if (FINAL.has(send.state)) return; // its fate came on the stream meanwhile
-      const posted = await this.options.post({ op: 'deliver', key: send.key, text: send.text });
+      if (this.down) send.lost = 'lost'; // posted with no stream to name its fate
+      const posted = await this.options.post({ op: 'deliver', key: send.key, text: send.text }, send.launch);
       if (FINAL.has(send.state)) return; // the stream named its fate before the post answered
       if (posted.kind === 'lost' || posted.status === 504 || posted.status === 503) continue; // it may have been taken: the same key again
       const body = posted.body ?? {};
       const result = (body.result ?? {}) as Record<string, unknown>;
       if (posted.status === 200 && body.ok === true) {
         if (result.duplicate === true && attempt === 0) this.settle(send, 'refused', { reason: 'the bridge had already taken this key' });
+        else if (send.lost === 'resnapped') this.settle(send, 'unconfirmed', { reason: LOST_REASON });
         else if (send.state === 'queued') {
           send.state = 'submitted';
           this.options.changed();
@@ -184,18 +211,23 @@ export class DeliveryLane {
 
   private settle(send: Send, state: 'entered' | 'refused' | 'unconfirmed', extra: { uuid?: string; reason?: string; code?: string }): void {
     send.state = state;
+    if (state === 'entered') {
+      delete send.reason; // an unconfirmed send's doubt, answered
+      delete send.code;
+    }
     if (extra.uuid !== undefined) send.uuid = extra.uuid;
     if (extra.reason !== undefined) send.reason = extra.reason;
     if (extra.code !== undefined) send.code = extra.code;
     const answer = this.answerOf(send);
     for (const waiter of send.waiters.splice(0)) waiter(answer);
     this.options.changed();
-    const timer = setTimeout(() => {
+    if (send.expiry) clearTimeout(send.expiry); // kept a while from its latest settlement
+    send.expiry = setTimeout(() => {
       const at = this.sends.indexOf(send);
       if (at >= 0) this.sends.splice(at, 1);
       this.options.changed();
     }, this.options.timing.keepMs);
-    timer.unref();
+    send.expiry.unref();
   }
 
   private answerOf(send: Send): LaneASendOutput {

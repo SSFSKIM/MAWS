@@ -412,7 +412,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
       reconnect: null,
       probing: false,
       again: false,
-      lane: new DeliveryLane({ writer, session: hold.engineSessionId, seqs: (seqs ??= fileSeqStore(join(deps.userData, 'lane-a', 'deliveries.json'), log)), post: (body) => post(s, body), changed: () => changed(s), timing: timing.lane }),
+      lane: new DeliveryLane({ writer, session: hold.engineSessionId, seqs: (seqs ??= fileSeqStore(join(deps.userData, 'lane-a', 'deliveries.json'), log)), launch: () => launchOf(s), post: (body, launch) => post(s, body, launch), changed: () => changed(s), timing: timing.lane }),
       watches: new Map(),
       modelChain: Promise.resolve(),
       gone: false,
@@ -431,10 +431,14 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   }
 
   // ---- controls -------------------------------------------------------------------------------------------------------
-  async function post(s: Session, body: Record<string, unknown>): Promise<PostResult> {
-    const launch = typeof s.status?.launch === 'string' ? s.status.launch : undefined;
+  // The launch an operation is admitted under: taken once, when it is admitted, and carried by each of its posts and
+  // retries, so a post after the session's process changed is refused `launch` at the child, never retargeted at the new
+  // process. Null when /status named none (a local caller's, unfenced).
+  const launchOf = (s: Session): string | null => (typeof s.status?.launch === 'string' ? s.status.launch : null);
+
+  async function post(s: Session, body: Record<string, unknown>, launch: string | null): Promise<PostResult> {
     try {
-      const answer = await call(s.socket.path, 'POST', `/command?wait=${timing.commandWaitMs}`, { ...body, ...(launch !== undefined && { launch }) }, timing.commandWaitMs + 2000);
+      const answer = await call(s.socket.path, 'POST', `/command?wait=${timing.commandWaitMs}`, { ...body, ...(launch !== null && { launch }) }, timing.commandWaitMs + 2000);
       return { kind: 'answer', status: answer.status, body: answer.body };
     } catch (error) {
       return { kind: 'lost', why: error instanceof BridgeUnreachable ? error.why : 'gone' };
@@ -467,7 +471,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   async function control(appId: AppSessionId, op: string, body: Record<string, unknown> = {}): Promise<ControlResult> {
     const s = liveFor(appId, op);
     if (!('appId' in s)) return s;
-    return resultOf(await post(s, { op, ...body }));
+    return resultOf(await post(s, { op, ...body }, launchOf(s)));
   }
 
   const notPending = (settled: Record<string, unknown> | null, message: string, terminalOnly?: boolean): LaneAAnswerOutput => ({
@@ -480,6 +484,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   async function answer(appId: AppSessionId, request: string, given: RequestAnswer): Promise<LaneAAnswerOutput> {
     const s = sessions.get(appId);
     if (!s || s.bridge?.bridge !== 'live') return { outcome: 'refused', code: 'no-bridge', message: s?.bridge?.reason ?? NO_BRIDGE };
+    const launch = launchOf(s);
     const path = `/requests/${encodeURIComponent(request)}`;
     let current: BridgeAnswer;
     try {
@@ -495,10 +500,9 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     const controls = (record(record(s.status?.capabilities)?.controls) ?? {}) as Record<string, { available: boolean; reason?: string }>;
     const decision = await decisionFor({ current: current.body, held: s.fold.raised(request), answer: given, controls });
     if (!decision.ok) return { outcome: 'refused', code: decision.code, message: decision.message };
-    const launch = typeof s.status?.launch === 'string' ? s.status.launch : undefined;
     let posted: BridgeAnswer;
     try {
-      posted = await call(s.socket.path, 'POST', `${path}/decision`, { ...decision.body, by: 'maws', ...(launch !== undefined && { launch }) }, timing.decisionMs);
+      posted = await call(s.socket.path, 'POST', `${path}/decision`, { ...decision.body, by: 'maws', ...(launch !== null && { launch }) }, timing.decisionMs);
     } catch (error) {
       return { outcome: 'unknown', why: error instanceof BridgeUnreachable ? error.why : 'gone' };
     }
@@ -512,6 +516,9 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
       return notPending(settled, message, body.terminalOnly === true);
     }
     if (posted.status === 404) return notPending(s.fold.settledOf(request), message);
+    // An async question's answer is relayed to the mod as an `answer` command, whose wait can run out after it went: the
+    // answer may have been taken.
+    if (posted.status === 504) return { outcome: 'unknown', why: 'timeout' };
     if (posted.status === 503) return { outcome: 'unknown', why: 'gone' };
     return { outcome: 'refused', code: posted.status === 400 ? 'bad-args' : 'failed', message };
   }
@@ -519,10 +526,11 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   function model(appId: AppSessionId, change: { model?: string | null; effort?: string | null }): Promise<ControlResult> {
     const s = liveFor(appId, 'model');
     if (!('appId' in s)) return Promise.resolve(s);
+    const launch = launchOf(s);
     // One change at a time per session; the field not being changed is read fresh under that lock and sent as read, since
     // the bridge's `model` op replaces both and a change made in the terminal meanwhile must not be undone.
     const run = async (): Promise<ControlResult> => {
-      const read = await post(s, { op: 'read', what: 'status' });
+      const read = await post(s, { op: 'read', what: 'status' }, launch);
       const result = read.kind === 'answer' && read.status === 200 && read.body?.ok === true ? record(read.body.result) : null;
       if (result === null) return refused('read-failed', 'the session’s model and effort could not be read, so neither was changed');
       const now = record(result.override);
@@ -531,7 +539,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
         op: 'model',
         model: change.model !== undefined ? change.model : current.model,
         effort: change.effort !== undefined ? change.effort : current.effort,
-      }));
+      }, launch));
     };
     const next = s.modelChain.then(run, run);
     s.modelChain = next.catch(() => {});
@@ -544,7 +552,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     if (!('appId' in s)) return { ok: false, code: s.state === 'refused' && s.code === 'unsupported' ? 'unsupported' : 'no-bridge', message: s.state === 'refused' ? s.message : NO_BRIDGE };
     const reads = strings(record(s.status?.capabilities)?.reads);
     if (!reads.includes(kind)) return { ok: false, code: 'unsupported', message: `this session’s bridge serves no ${kind} read` };
-    const posted = await post(s, { op: 'read', what: kind, ...(args !== undefined && { args }) });
+    const posted = await post(s, { op: 'read', what: kind, ...(args !== undefined && { args }) }, launchOf(s));
     if (posted.kind === 'lost') return { ok: false, code: posted.why === 'timeout' ? 'timeout' : 'failed', message: 'the session’s bridge did not answer' };
     if (posted.status === 504) return { ok: false, code: 'timeout', message: 'the session did not answer in time' };
     if (posted.status === 200 && posted.body?.ok === true) return { ok: true, result: posted.body.result ?? null };

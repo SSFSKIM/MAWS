@@ -448,4 +448,61 @@ describe('decisions', () => {
     expect(await h.driver.answer(APP, 'toolu_q', { kind: 'question', answers: { 'Which?': 'A' } })).toEqual({ outcome: 'delivered' });
     expect(b.decisions[0]?.body).toEqual({ behavior: 'allow', updatedInput: { answers: { 'Which?': 'A' } }, by: 'maws', launch: 'launch-1' });
   });
+
+  it('reads a decision answered 504 as unknown: an async question’s answer may have gone to the mod', async () => {
+    const { b, h } = await raised({ request: 'toolu_plugin_1', tool: 'mcp__sminos__AskUserQuestion', input: { questions: [{ question: 'Which?' }] }, async: true });
+    b.answer('decision', () => ({ status: 504, body: { id: 'cmd-9', error: 'the session did not answer within 5000 ms' } }));
+    expect(await h.driver.answer(APP, 'toolu_plugin_1', { kind: 'question', answers: { 'Which?': 'A' } })).toEqual({ outcome: 'unknown', why: 'timeout' });
+  });
+});
+
+// Fix wave 1, finding 1: an operation keeps the launch it was admitted under through every post and retry.
+describe('the launch an operation was admitted under', () => {
+  async function liveBridge() {
+    const b = await bridge();
+    const h = harness(undefined, { lane: { retryDelaysMs: [300, 300], answerMs: 3000, keepMs: 2000, capacity: 8 } });
+    h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: terminal });
+    await h.live();
+    await expect.poll(() => b.subscribers()).toBe(1);
+    return { b, h };
+  }
+  const writer = `maws/${MACHINE}`;
+
+  it('refuses a send’s retry launch once the session’s process changed, never retargeting it', async () => {
+    const { b, h } = await liveBridge();
+    b.answer('deliver', () => {
+      b.setStatus({ launch: 'launch-2' }); // a new process holds the session; rediscovery reads it before the retry
+      b.reset();
+      return { status: 504, body: { error: 'the session did not answer' } };
+    });
+    const answer = h.driver.send(APP, 'words');
+    await expect.poll(() => h.state()?.launch).toBe('launch-2');
+    expect(await answer).toMatchObject({ key: { writer, seq: 1 }, state: 'refused', code: 'launch' });
+    expect(b.commands.filter((c) => c.op === 'deliver')).toHaveLength(1); // the retry was fenced before the mod
+  });
+
+  it('recovers a send whose bridge child restarted within the same launch', async () => {
+    const { b, h } = await liveBridge();
+    let next: FakeBridge | null = null;
+    b.answer('deliver', () => {
+      setTimeout(() => void b.close().then(async () => (next = await bridge({ launch: 'launch-1' }))), 0);
+      return { drop: true };
+    });
+    const answer = h.driver.send(APP, 'words');
+    await expect.poll(() => next?.commands.length ?? 0, { timeout: 3000 }).toBe(1);
+    expect(next!.commands[0]!.body).toEqual({ op: 'deliver', key: { writer, seq: 1 }, text: 'words' });
+    expect((await answer).state).not.toBe('refused');
+  });
+
+  it('posts a model change’s read and change under one launch', async () => {
+    const { b, h } = await liveBridge();
+    b.answer('read', async () => {
+      b.setStatus({ launch: 'launch-2' });
+      b.reset();
+      await expect.poll(() => h.state()?.launch).toBe('launch-2'); // rediscovered between the read and the change
+      return { status: 200, body: { ok: true, result: { override: null } } };
+    });
+    expect(await h.driver.model(APP, { effort: 'low' })).toMatchObject({ state: 'refused', code: 'launch' });
+    expect(b.commands.map((c) => c.op)).toEqual(['read']);
+  });
 });
