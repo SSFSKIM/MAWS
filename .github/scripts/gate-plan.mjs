@@ -76,7 +76,8 @@
 // major the plan adds the peer groups itself to a run that tests code, one whose gates hold unit (or unit:darwin) or an
 // e2e group, so every WIRE_MINOR bump is checked without anyone asking, class 1a and the default set included, while a
 // static or probes check stays quick; not to a live run (its live groups alone) nor a `Selection: affected` one (never
-// landing evidence). A peer group's job fetches the
+// landing evidence). gate-peer-held supplies PEER_HELD_BY when an older run holds this tree and peer's check,
+// suppressing the automatic join but never an explicit request. A peer group's job fetches the
 // peer's one commit and builds it beside this tree (gate.yml), so it takes the Mac's exclusive instance whatever the lane:
 // never a hosted Mac (maws-app holds one filtered tree and no history to fetch a peer from), the shared instances or the
 // guest. Its entry carries the `peer` sha; asked for without a Peer: trailer it has none, and its spec runs nothing.
@@ -189,7 +190,12 @@ export function planOf(env, scripts) {
   const [treeWire, peerWire] = [wireOf('Wire'), wireOf('Peer-Wire')];
   const minorApart = peer !== '' && treeWire !== null && peerWire !== null && treeWire.major === peerWire.major && treeWire.minor !== peerWire.minor;
   const testsCode = [...gates].some((gate) => gate === 'unit' || gate === 'unit:darwin' || gate.startsWith('e2e:'));
-  const peerJoined = minorApart && testsCode && !live && !trailer('Selection') ? [...peerGroups].filter((group) => scriptOf(group) in scripts && !gates.has(`e2e:${group}`)) : [];
+  // Expose eligibility before deduplication to gate-peer-held: a candidate uses this same rule, including when it
+  // explicitly requested a peer group. PEER_HELD_BY suppresses only additions, never a group already in Gates.
+  const peerCheck = { peer, minorApart, groups: minorApart && testsCode && !live && !trailer('Selection') ? [...peerGroups].filter((group) => scriptOf(group) in scripts) : [] };
+  const peerAdditions = peerCheck.groups.filter((group) => !gates.has(`e2e:${group}`));
+  const heldBy = /^(\d+) (queued|in_progress|waiting|succeeded|plan (?:queued|in_progress|waiting|pending|requested))$/.exec(env.PEER_HELD_BY ?? '');
+  const peerJoined = heldBy ? [] : peerAdditions;
   for (const group of peerJoined) gates.add(`e2e:${group}`);
 
   const unknown = [...gates].filter((gate) => !['static', 'unit', 'unit:darwin', 'probes', 'packaged'].includes(gate) && !(gate.startsWith('e2e:') && scriptOf(gate.slice(4)) in scripts));
@@ -338,7 +344,7 @@ export function planOf(env, scripts) {
     said('Out/ built on the pool (e2e-build) for the guest-eligible jobs', e2eBuild) +
     hostedNote;
   // The peer, when a trailer names one, and the groups its minor brought in.
-  const peerLine = peer === '' ? '' : `Peer: ${peer.slice(0, 8)}${peerWire ? `, wire ${peerWire.text}` : ''}${treeWire ? `; this tree's ${treeWire.text}` : ''}${minorApart ? ', a minor apart' : ''}${peerJoined.length > 0 ? `, so ${peerJoined.map((group) => `e2e:${group}`).join(', ')} joined` : minorApart && !testsCode ? ', but the peer groups join only a run with unit or an e2e group' : ''}.`;
+  const peerLine = peer === '' ? '' : `Peer: ${peer.slice(0, 8)}${peerWire ? `, wire ${peerWire.text}` : ''}${treeWire ? `; this tree's ${treeWire.text}` : ''}${minorApart ? ', a minor apart' : ''}${heldBy && peerAdditions.length > 0 ? `; ${peerAdditions.map((group) => `e2e:${group}`).join(', ')} ${peerAdditions.length === 1 ? 'is' : 'are'} checked in run ${heldBy[1]} (${heldBy[2]}), so not here` : peerJoined.length > 0 ? `, so ${peerJoined.map((group) => `e2e:${group}`).join(', ')} joined` : minorApart && !testsCode ? ', but the peer groups join only a run with unit or an e2e group' : ''}.`;
   let summary = `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. Class 1a: ${class1a}. E2e lane: ${lane}${pooledNote}.${evidence ? ' Evidence: yes.' : ''}${live ? ' Live: yes (MAWS_LIVE, MAWS_LIBRARY_LIVE, MAWS_LIVE_DOCUMENT at 1).' : ''}${beside}${macNote}${peerLine && ` ${peerLine}`}\n`;
   let stdout = `${[...gates].join('\n')}\nclass 1a: ${class1a}\nlane: ${lane}${pooledNote}\n${live ? 'live: yes\n' : ''}${defaultBeside.length > 0 ? `default beside: ${defaultBeside.join(' ')}\n` : ''}${macNote ? `${macNote.trim()}\n` : ''}${peerLine && `${peerLine}\n`}`;
   if (selection) {
@@ -350,7 +356,7 @@ export function planOf(env, scripts) {
     summary += `\n${line}\n`;
     stdout += `${line}\n${(selection.related ?? []).map((path) => `  ${path}\n`).join('')}`;
   }
-  return { outputs, summary, stdout };
+  return { outputs, summary, stdout, peerCheck };
 }
 
 // Importing the planner does no I/O. The workflow entry point alone reads its checkout and appends its artifacts.

@@ -1577,3 +1577,22 @@ test("gate.yml lists e2e:cross-build as its peer group, and its e2e job builds t
     assert.ok(body.indexOf('gate-peer.sh prepare') < body.indexOf('MAWS_E2E_PEER_ROOT: ') && body.indexOf('MAWS_E2E_PEER_ROOT: ') < body.indexOf('gate-peer.sh stop'), job);
   }
 });
+
+test('a held peer check omits only the automatic join and names its run in the summary and stdout', () => {
+  const inputs = { PEER_E2E: 'cross-build', HEAD_MESSAGE: `Gates: unit\n${peerTrailers('3.0', '3.1')}` };
+  assert.deepEqual(JSON.parse(plan({ ...inputs, PEER_HELD_BY: '' }).outputs.e2e), [peerEntry]);
+  const { outputs, summary, stdout } = plan({ ...inputs, PEER_HELD_BY: '40631062270 queued' });
+  assert.equal(outputs.unit, 'true');
+  assert.equal(outputs.e2e, '[]');
+  const line = "Peer: 01234567, wire 3.0; this tree's 3.1, a minor apart; e2e:cross-build is checked in run 40631062270 (queued), so not here.";
+  assert.ok(summary.includes(line));
+  assert.ok(stdout.includes(line));
+});
+
+test('a held peer check never suppresses an explicit peer group in Gates or dispatch inputs', () => {
+  for (const extra of [{ HEAD_MESSAGE: `Gates: e2e:cross-build\n${peerTrailers('3.0', '3.1')}` }, { EVENT: 'workflow_dispatch', INPUT_GATES: 'e2e:cross-build' }]) {
+    const { outputs, summary } = plan({ PEER_E2E: 'cross-build', PEER_HELD_BY: '90 succeeded', ...extra });
+    assert.equal(JSON.parse(outputs.e2e)[0].group, 'cross-build');
+    assert.ok(!summary.includes('so not here'));
+  }
+});

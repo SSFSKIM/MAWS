@@ -255,6 +255,9 @@ defaults:
 
 jobs:
   plan:
+    permissions:
+      contents: read
+      actions: read
     # The smallest hosted runner (ubuntu-slim, 1 vCPU; the plan only computes outputs and takes seconds), or the self-hosted Mac
     # when the repository variable GATE_RUNNER is `macos` (§3.6); hosted under `pool`, since it is what makes the pool's box
     # (Decision Log 53). The jobs below take the runners the plan resolves: class 1a's from the `Class1a:` trailer or
@@ -297,6 +300,13 @@ jobs:
             package.json
             .github
           sparse-checkout-cone-mode: false
+      - name: Find an existing peer check
+        env:
+          EVENT: ${{ github.event_name }}
+          GATE_RUNNER: ${{ vars.GATE_RUNNER }}
+          GATE_E2E_RUNNER: ${{ vars.GATE_E2E_RUNNER }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node .github/scripts/gate-peer-held.mjs
       - id: plan
         env:
           EVENT: ${{ github.event_name }}
