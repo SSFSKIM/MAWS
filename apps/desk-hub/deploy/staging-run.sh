@@ -23,6 +23,11 @@
 #                            there, the account swept (staging-sweep.py), staging restored under staging-ssfskim
 #   desk-web <n>             the same around acceptance 8's desk-web check (apps/desk-web/e2e-staging) in place of
 #                            the two commands: screenshots into desk-web-<n>/
+#   phone <n> [--rehearse] [--lane-b] [--device <id>]
+#                            P5 O13 M7: test/endpoint/staging-phone.live.test.ts, MAWS's endpoint module enrolled as
+#                            o13-phone-<n>, the owner's cards answered from the phone (--rehearse: by the run's second
+#                            device in its place); the push sink behind a quick tunnel (three tries); the run's undoing
+#                            run again after it, however it ended; production's X-Desk-Build compared before and after
 # Any further arguments go to the step's command. Environment (README "Staging runs"):
 #   DESK_STAGING_SECRETS  the directory holding CF_ACCESS_SETUP_TOKEN and CF_DESK_HUB_SERVICE_TOKENS
 #   DESK_STAGING_DIR      logs and state (default ~/.local/state/desk-hub-staging): one log per step; prod/; the
@@ -62,6 +67,12 @@ mkdir -p $O || exit 2
 stamp() { date -u +%Y%m%dT%H%M%SZ; }
 # Line by line ($| = 1): a step that asks at /dev/tty (admin pair) shows what it asks about before the question.
 filter() { perl -ne 'BEGIN { $| = 1 } print if /^wrangler target / || !/token|secret|bearer|eyJ/i'; }
+# How many of `paths…` hold any line of the list file <list> (empty lines ignored, so an empty list matches nothing):
+# the search after a run for the secrets it handled. The patterns are read from the list, never an argument.
+secret_scan() {
+  local list=$1; shift
+  /usr/bin/grep -rlF -f <(/usr/bin/grep -v '^$' $list) "$@" 2>/dev/null | wc -l | tr -d ' '
+}
 # A deployment's X-Desk-Build, credential-free; stops the script unless it names a hub build.
 header() {
   local h=$(curl -q -sI --max-time 30 -X POST $1/machine/enroll | /usr/bin/grep -i '^x-desk-build:' | tr -d '\r')
@@ -188,6 +199,92 @@ case $step in
     printf 'DESK_ACCESS_TOKEN=%s\n' "$T" | deployment admin "$@" --keys $H/keys.json 2>&1 | filter | tee -a $LOG
     rc=${pipestatus[2]}; unset T
     print -r -- "admin exit $rc; log $LOG"; exit $rc ;;
+  phone)
+    # P5 O13 M7 (Interfaces §H): test/endpoint/staging-phone.live.test.ts, the real endpoint module enrolled on staging as
+    # o13-phone-<n>, the owner's cards raised there and answered from the phone (or, --rehearse, by the run's second
+    # device in its place), then everything it made undone. The step's own cleanup pass runs however the run ends.
+    n=${1:?a run id}; shift
+    [[ $n =~ '^[a-z0-9-]{1,20}$' ]] || { print -r -- "bad run id $n"; exit 2; }
+    mode=phone laneb=probe device=
+    while (( $# )); do
+      case $1 in
+        --rehearse) mode=rehearse ;;
+        --lane-b) laneb=required ;;
+        --device) [[ $2 =~ '^[A-Za-z0-9_-]{1,64}$' ]] || { print -r -- "--device <the phone's device id>: stop. Nothing was changed."; exit 2; }; device=$2; shift ;;
+        *) print -r -- "phone takes --rehearse, --lane-b and --device <id> (given: $1): stop. Nothing was changed."; exit 2 ;;
+      esac
+      shift
+    done
+    [[ -f $H/keys.json && -f $H/keys.json.org.json ]] || { print -r -- "no admin device keys and anchor at $H/keys.json(.org.json) (DESK_STAGING_DEVICE; admin adopt writes the anchor): stop. Nothing was changed."; exit 2; }
+    LOG=$O/phone-$n-$(stamp).log; : > $LOG
+    # What the run handled besides the token (enrollment and pairing codes, their secrets, the machine's service token),
+    # one a line, for the search below; and the endpoint's scratch profile. Both removed however the step ends.
+    SCAN=$O/phone-$n.scan; : > $SCAN
+    PROFILE=$O/phone-$n.profile; rm -rf $PROFILE; mkdir -m 700 $PROFILE
+    say() { print -r -- "$*" | tee -a $LOG; }
+    owner_token
+    before=$(header $PROD) || exit 3
+    say "production before: $before"
+    # The push sink behind an account-less quick tunnel, tried three times (P5 Decision Log 39: its timeouts were transient).
+    PORT=18744 TUNNEL= PUBLIC=
+    stop_tunnel() {
+      [[ -z $TUNNEL ]] && return
+      kill $TUNNEL 2>/dev/null; wait $TUNNEL 2>/dev/null
+      kill -0 $TUNNEL 2>/dev/null && gone="STILL RUNNING" || gone="process gone"
+      say "tunnel stopped: pid $TUNNEL at $(date -u +%FT%TZ), $gone"
+      TUNNEL=
+    }
+    finalized=0 ran=1
+    finalize() {
+      (( finalized )) && return; finalized=1
+      stop_tunnel
+      # The run's own cleanup ran in the run; this pass finds anything a run killed outright left, and undoes it.
+      DESK_ACCESS_TOKEN=$T DESK_STAGING_PHONE=cleanup DESK_STAGING_PHONE_RUN=$n DESK_STAGING_ADMIN_KEYS=$H/keys.json \
+        pnpm -s -C $W exec vitest run --project node test/endpoint/staging-phone.live.test.ts 2>&1 | filter | /usr/bin/grep -E '^(cleanup|LEFT)|Error' | tee -a $LOG
+      swept=${pipestatus[1]}
+      (( swept == 0 )) || say "the cleanup pass failed (exit $swept): what the run made may still be current; run the step again with the same run id once the cause is fixed (it sweeps first)"
+      after=$(header $PROD) || after="unread"
+      if [[ $after == "$before" ]]; then say "production untouched: $after"; else say "production build CHANGED or unread: $after"; fi
+      leaked=$(secret_scan <(print -r -- "$T"; cat $SCAN) $LOG)
+      unset T
+      rm -rf $SCAN $PROFILE
+      say "files holding the Access token or a secret the run handled: $leaked; log $LOG"
+      (( ran == 0 && swept == 0 && leaked == 0 )) && [[ $after == "$before" ]] && exit 0
+      exit $(( ran ? ran : 1 ))
+    }
+    trap finalize EXIT
+    trap 'exit 130' INT TERM
+    sinkenv=()
+    for try in 1 2 3; do
+      TL=$O/tunnel-$n-$(stamp)-$try.log
+      cloudflared tunnel --no-autoupdate --url http://127.0.0.1:$PORT > $TL 2>&1 &
+      TUNNEL=$! PUBLIC=
+      for i in {1..45}; do
+        PUBLIC=$(/usr/bin/grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' $TL | /usr/bin/grep -v '^https://api\.' | head -1)
+        [[ -n $PUBLIC ]] && /usr/bin/grep -q 'Registered tunnel connection' $TL && break
+        kill -0 $TUNNEL 2>/dev/null || break
+        sleep 1
+      done
+      if [[ -n $PUBLIC ]] && kill -0 $TUNNEL 2>/dev/null; then
+        say "push sink: $PUBLIC -> 127.0.0.1:$PORT (try $try)"
+        sinkenv=(DESK_STAGING_PHONE_SINK=$PUBLIC/staging-run DESK_STAGING_PHONE_SINK_PORT=$PORT)
+        break
+      fi
+      say "the quick tunnel did not come up (try $try): $(/usr/bin/grep -iE 'fail|error' $TL | head -1)"
+      stop_tunnel
+      (( try < 3 )) && sleep 5
+    done
+    (( ${#sinkenv} )) || sinkenv=(DESK_STAGING_PHONE_NO_SINK="tunnel: the quick tunnel did not come up in 3 tries")
+    say "phone run $n ($mode) on staging; the machine o13-phone-$n; log $LOG"
+    [[ $mode == phone ]] && say "on the phone, have staging's desk-web open (or closed: its notifications land on the cards); the run prints WAITING when it is the phone's turn"
+    # The token reaches the suite in its environment alone (a prefix assignment or the builtin export, never an argument).
+    ( export "${sinkenv[@]}"
+      DESK_ACCESS_TOKEN=$T DESK_STAGING_PHONE=1 DESK_STAGING_PHONE_RUN=$n DESK_STAGING_PHONE_MODE=$mode DESK_STAGING_PHONE_LANE_B=$laneb \
+        DESK_STAGING_PHONE_DEVICE=$device DESK_STAGING_ADMIN_KEYS=$H/keys.json DESK_STAGING_PHONE_SCAN=$SCAN DESK_STAGING_PHONE_PROFILE=$PROFILE \
+        pnpm -s -C $W exec vitest run --project node test/endpoint/staging-phone.live.test.ts ) 2>&1 | filter | tee -a $LOG
+    ran=${pipestatus[1]}
+    say "phone run exit $ran"
+    exit $ran ;;
   throwaway|desk-web)
     n=${1:?a run id}; shift
     [[ $n =~ '^[a-z0-9-]{1,20}$' ]] || { print -r -- "bad run id $n"; exit 2; }
@@ -250,5 +347,5 @@ case $step in
       (( holding == 0 )) || checks+=(1)
     fi
     exit 0 ;;
-  *) print -r -- "prod <label> | deploy | build | acceptance [--no-push] | relay-measure | access-sync | admin [--pipe] <args…> | throwaway <n> | desk-web <n>"; exit 2 ;;
+  *) print -r -- "prod <label> | deploy | build | acceptance [--no-push] | relay-measure | access-sync | admin [--pipe] <args…> | throwaway <n> | desk-web <n> | phone <n> [--rehearse] [--lane-b] [--device <id>]"; exit 2 ;;
 esac

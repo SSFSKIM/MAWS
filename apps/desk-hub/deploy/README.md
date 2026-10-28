@@ -272,7 +272,7 @@ apply, and no agent runs it against production. Against the suites' local hub, `
 signs in through the stand-in instead, and only there may `--yes` answer its confirmations.
 
     pnpm --filter desk-hub deployment admin <init | genesis | adopt | refresh | pair | devices | remove-device>
-        [--config deploy/<file>.json] [--keys <file>] [--recovery <path | paper>] [--class web-cards|native-mac] [--ttl <s>] [<device id>]
+        [--config deploy/<file>.json] [--keys <file>] [--recovery <path | paper>] [--media-check] [--class web-cards|native-mac] [--ttl <s>] [<device id>]
 
 - `--keys <file>` (or `DESK_ADMIN_KEYS`): the admin device's keys, `{"device": "<id>", "keys": {"<id>.channel": <JWK>,
   "<id>.stepUp": <JWK>}}`, read and never printed. A file without `device` names `a1`, the staging test device's (so
@@ -292,7 +292,10 @@ signs in through the stand-in instead, and only there may `--yes` answer its con
   on this machine. It refuses a hub that holds a state. The state is written to `<keys>.genesis.json` before its POST:
   a run that stops after the hub took it finishes on a rerun (the volume mounted again, the key checked back again),
   posting nothing new and anchoring only a head the served chain, verified from that genesis, reaches; a rerun never
-  builds a second genesis.
+  builds a second genesis. At the local hub, `--media-check` holds the destination to a deployment's volume rules too
+  (another volume than the keys', on removable or external media), refusing it in the same words: the owner's check
+  that their own drive passes before production's genesis meets it (the staging sitting's step 0, below). It only adds
+  refusals, and is refused against a deployment, which always checks.
 - `adopt` anchors an org rooted before this command (staging's, rooted by O11 M3): the chain verified from the genesis
   the config's `orgGenesis` pins (required), this device listed under the signed-in member and a root key of the head.
 - `refresh` signs and posts a no-change successor. The endpoint refuses every remote action once the head is 30 days
@@ -506,6 +509,36 @@ production's Worker or host, or a preview alias of it (`<alias>-desk-hub.…`), 
     `PWDEBUG`, `PW_*` or `PLAYWRIGHT_*`); `playwright.staging.config.ts` itself refuses any option but naming it and any
     such variable (`e2e-staging/recording.ts`), so nothing can turn recording back on.
     Playwright's Chromium must be installed once (`pnpm --filter desk-web exec playwright install chromium`).
+  - `phone <n> [--rehearse] [--lane-b] [--device <id>]` (P5 O13 M7): `test/endpoint/staging-phone.live.test.ts`, the
+    owner's phone against a real endpoint module. MAWS's endpoint runs in the suite's process over the suites' fake
+    engine host and fake sminos, enrolled the v2 way on `staging-ssfskim` as the scratch machine `o13-phone-<n>` and
+    listed by the admin device. Its sessions are the owner's `la-1` (*o13 staging run <n>: yours to answer*) and `la-2`
+    (the harness's own), the owner's lane B `app-1` and `app-2`, and `la-b`, owned by a second member `o13-b-<n>`
+    (`@staging.invalid`, one `native-mac` device, no sign-in). The owner's second `web-cards` device `o13-c-<n>` (a
+    software passkey) pairs through staging's pairing exchange by M3's code path and subscribes to push at the run's
+    sink, behind a quick tunnel tried three times. The run raises a question and a permission on each of the owner's
+    sessions, and one on `la-b`. `o13-c-<n>` drives acceptance 2's and 3's refusals on the harness's sessions, whose
+    cards are withdrawn after. Then the run waits up to 10 minutes (`WAITING …`) for the phone to answer `la-1`'s two
+    cards: the phone is the owner's one `web-cards` device the run did not make, or `--device <id>`. `--rehearse` has
+    `o13-c-<n>` answer them in the phone's place, which proves the whole run on staging before the owner sits down.
+    It prints a line per check, then `PASS`, `FAIL`, `NOT RUN` or `NOT SHOWN` per item: `registration`, `round-trip
+    lane A`, `round-trip lane B`, `class-bound`, `push-owner-only`, `freeze-seam`.
+    - Lane B: until O10 feeds the endpoint's notifier from the engine host's broker, a lane B session gets no count at
+      the hub, so it has no Cards row and no push. The run looks for that count and otherwise prints `NOT RUN
+      round-trip lane B: waiting on O10's lane B notifier feed`. `--lane-b` makes its absence a failure, for runs after
+      the feed lands.
+    - Cleanup: however the run ends, it takes the machine out of the state (its key retired, its service token revoked
+      at the hub), removes `o13-b-<n>` and `o13-c-<n>` (their keys revoked) and deletes the sink's subscription. The
+      step then runs a cleanup pass of its own (`DESK_STAGING_PHONE=cleanup`), which finds them by name again for a run
+      killed outright, and says `LEFT …` for anything still current. A rerun under the same `<n>` sweeps first. The
+      phone itself is never touched.
+    - Nothing recorded: the owner's token reaches the suite in its environment alone, and the output passes the filter.
+      The suite lists each secret it handles in `phone-<n>.scan`: the enrollment code and its one-time token, the
+      pairing code and its secret, and the machine's service token. After the run the log is searched for the token and
+      for every listed secret, and the step fails if any file holds one. The sink keeps what it receives (encrypted
+      notices) in memory alone. The endpoint's scratch profile, `phone-<n>.profile`, holds the machine's keys and
+      ledgers; it and the list are removed however the step ends. Production's `X-Desk-Build` is compared before and
+      after (`production untouched: …`).
 - `staging-sweep.py snapshot|sweep` is the throwaway steps' account sweep: the service tokens and the `desk-hub*`
   Access apps and policies before the run, and after it the deletion of what appeared and is the throwaway org's
   (service tokens `desk-<org>-*`, and the apps and policies the deploy tool makes on staging, by exact name:
@@ -533,6 +566,68 @@ deploy, `prod/`, the throwaway steps' snapshots and sweeps, `access-sync/` (its 
 
 Production's Access read-back (its apps and policies, GETs only, compared before and after a run) is not among them:
 it reads production's objects with the setup token, which no script here does.
+
+### The owner's sitting: the phone on staging (P5 O13 M7)
+
+The owner's phone joins staging once, at the owner's hand. The steps run in order from a MAWS checkout of the branch
+under test, with `export DESK_STAGING_DEVICE=~/.local/share/dsk-scripts/p5-o11/staging-device` set in the owner's
+terminal: it holds the staging admin's `keys.json` and its anchor, `keys.json.org.json`. `<n>` is a fresh run id
+(`[a-z0-9-]{1,20}`), and `<drive>` is the owner's USB drive as Finder mounts it under `/Volumes`.
+
+0. **The USB drive meets the removable-media check** (the owner, at the terminal; P5 Decision Log 74). This is a
+   loopback genesis onto the drive, so a real drive meets the check before production's genesis does. Everything is
+   scratch: a throwaway local org, its keys under `~/.local/share/desk-usb-check`.
+
+       pnpm --filter desk-hub local --state ~/.local/share/desk-usb-check/hub      # a second terminal; Ctrl-C at the end
+       pnpm --filter desk-hub deployment admin init --keys ~/.local/share/desk-usb-check/keys.json --hub http://127.0.0.1:8747 --user owner@example.com
+       pnpm --filter desk-hub deployment admin genesis --keys ~/.local/share/desk-usb-check/keys.json --hub http://127.0.0.1:8747 --user owner@example.com --media-check --recovery /Volumes/<drive>/desk-usb-check-recovery.json
+
+   The owner sees `keys written: …` and `excluded from Time Machine: …`. Then `head: none`, then `recovery key written to
+   /Volumes/<drive>/desk-usb-check-recovery.json and read back: matches recoveryPub`, then `root local at
+   http://127.0.0.1:8747? [y/N]`. They answer `y` and see `genesis posted: version 1, orgGenesis <hash>`. A refusal
+   naming the drive (`is not on removable or external media`, `could not tell whether … is on removable media`, `on the
+   same volume as the admin keys`) is an M2 defect: stop, and report it with the output of `diskutil info
+   /Volumes/<drive>`. Once the check has passed, the test files are removed (not run until the owner chooses):
+
+       rm /Volumes/<drive>/desk-usb-check-recovery.json     # the throwaway org's recovery key, on the drive
+       rm -r ~/.local/share/desk-usb-check                   # its admin keys, their anchor and lock, the local hub's state
+
+1. **Staging at the branch's build** (the agent): `zsh apps/desk-hub/deploy/staging-run.sh deploy`, then `… build`,
+   which shows `staging: X-Desk-Build: hub@<sha8> web@<branch>.<sha8>`. The owner sees nothing yet.
+2. **The phone** (the owner, on the phone):
+   - open `https://desk-hub-staging.opencognita-platform.workers.dev` in Safari and sign in through Access (the email
+     code);
+   - Share → *Add to Home Screen*, and open the desk from that icon (iOS pushes only to an installed web app);
+   - in the menu, *Notifications*: turn them on, and allow them when iOS asks;
+   - in the menu, *Device*: the panel shows a *Pairing code* field.
+3. **The pairing** (the owner, at the terminal): `zsh apps/desk-hub/deploy/staging-run.sh admin pair --class web-cards`.
+   - The terminal prints the code once, and the code goes to the clipboard (never to the log).
+   - On the phone: paste it into the field (Universal Clipboard; Handoff on, one Apple ID), tap *Pair this device*, and
+     let Face ID save the passkey for the staging host. The panel reads *waiting for approval on your Mac —
+     fingerprint xxxxx-xxxxx* within 2 s.
+   - The terminal shows `pending: <id> web-cards webcrypto rpId desk-hub-staging.opencognita-platform.workers.dev
+     fingerprint xxxxx-xxxxx — compare the fingerprint with the device's, then approve? [y/N]`.
+   - The owner compares the two fingerprints, answers `y`, and sees `listed: version <v>`. Within 10 s the panel reads
+     *Listed, version <v>*.
+4. **The run** (the agent: `zsh apps/desk-hub/deploy/staging-run.sh phone <n>`; the owner, on the phone).
+   - Within about two minutes (the enrollment, then Access admitting the machine's new service token), the phone shows
+     two notifications reading *A session is waiting for your answer*: one for `la-1` and one for the harness's `la-2`.
+     With O10's lane B feed, there are four.
+   - The owner opens *Cards* (or either notification) and the machine `o13-phone-<n>`'s session *o13 staging run <n>:
+     yours to answer*. They answer *o13 staging run <n>: which way?* either way and Allow or Deny `echo o13-phone-<n>
+     permission`, each with Face ID. Each card settles within a few seconds.
+   - The owner leaves the harness's sessions alone: their cards are withdrawn within about half a minute.
+   - The owner takes a screenshot of the notifications, and says what they saw: how many notifications, their text,
+     and none for the second member's session. Nothing of the run records the phone.
+   - The run ends with its `PASS` lines (`round-trip lane B` reads `NOT RUN` until O10's feed lands), its cleanup and
+     `production untouched`.
+5. **Cleanup**: the run's own is automatic (step 4's last lines). The phone stays listed on staging. To take it off:
+   the owner runs `staging-run.sh admin devices` for its id, then `staging-run.sh admin remove-device <id>`, which asks
+   `revoke <id>? [y/N]` at the terminal and prints `revoked: version <v>`. Then *Forget* in the phone's Device panel,
+   and the home-screen icon removed.
+
+Before the owner sits down, the agent runs `zsh apps/desk-hub/deploy/staging-run.sh phone <n> --rehearse`: the same run
+with `o13-c-<n>` answering in the phone's place, and the `registration` item checking `o13-c-<n>`'s own pairing.
 
 ## Production runs: `production-deploy.sh`, `production-run.sh`
 
@@ -612,3 +707,42 @@ Nothing of production's Access objects is read.
 A deploy, in order: `zsh apps/desk-hub/deploy/production-run.sh checkout`, then from the checkout it names
 `zsh <checkout>/apps/desk-hub/deploy/production-deploy.sh --checkout <checkout> --confirm <sha8> --dry-run`, read, and
 the same without `--dry-run`.
+
+### The rollout: hub v2, the org's root and the phone on production (P5 O13 M7)
+
+Each step is the owner's, in order, at the Mac's terminal unless it says otherwise; nothing here is an agent's. It
+follows the staging sitting above, whose step 0 has shown that the owner's USB drive passes the removable-media check.
+
+1. **Hub v2's first production deploy**, with the web build that carries the phone's cards (O13 M3-M6):
+   `zsh apps/desk-hub/deploy/production-run.sh checkout`, then, from the checkout it names,
+   `zsh <checkout>/apps/desk-hub/deploy/production-deploy.sh --checkout <checkout> --confirm <sha8> --dry-run`. Read
+   it, then run the same command without `--dry-run`. The deploy ends when production's `X-Desk-Build` carries
+   `hub@<sha8>` (`production-run.sh build` shows it again). It adds no Durable Object migration, so DX2 and DX6 keep
+   working (O11 acceptance 8). The phone's DX6 cards for the machines not yet moved keep answering through the deploy:
+   acceptance 4 on production, recorded by the owner's use.
+2. **The org's root.**
+   - `zsh apps/desk-hub/deploy/production-run.sh admin init` writes the admin device's keys to
+     `$DESK_PRODUCTION_DEVICE/keys.json` (0600, excluded from Time Machine).
+   - With the USB volume mounted, run `zsh apps/desk-hub/deploy/production-run.sh admin genesis --recovery
+     /Volumes/<drive>/<file>`. It writes the recovery key to the drive alone and reads it back against `recoveryPub`.
+     It then asks `root ssfskim at https://desk-hub.opencognita-platform.workers.dev? [y/N]`, and after `y` prints
+     `genesis posted: version 1, orgGenesis <hash>`.
+   - Eject the drive and keep it offline: only `recoveryPub` stays on the Mac.
+   - Add `"orgGenesis": "<hash>"` to `apps/desk-hub/deploy/config.json`, and commit it.
+   - The genesis lists the owner alone, so Access's policy already matches the head, and no `access-sync` is due. The
+     first `access-sync` runs once O14 enrolls a production machine and its credentials are in
+     `$DESK_PRODUCTION_DEVICE/machine.json`.
+3. **The phone on production.**
+   - On the phone: open production's desk-web, the installed home-screen app already signed in, and open the menu's
+     *Device* panel.
+   - On the Mac: `zsh apps/desk-hub/deploy/production-run.sh admin pair --class web-cards`. Paste the code into the
+     panel and let Face ID save the passkey for `desk-hub.opencognita-platform.workers.dev`.
+   - Compare the two fingerprints, answer `y`, and the panel reads *Listed, version <v>*. Its push subscription is
+     bound to the device from then on.
+4. **The mini's cutover** is O14's mini brief. After it, the first question a session on the mini asks reaches the
+   phone as a v2 push and is answered over the new protocol: acceptance 2 on production. A request pending across the
+   cutover closes on the DX6 side, and the endpoint's first `notify` at its welcome tells it again, so the phone gets
+   one push for it.
+5. **The weekly successor.** Run `zsh apps/desk-hub/deploy/production-run.sh admin refresh` before every 30th day,
+   until O8's app signs the weekly successor. The endpoint refuses every remote action on a head 30 days old, and the
+   Device panel warns from day 21. Every `admin` run prints `head version n, issued d days ago` first.
