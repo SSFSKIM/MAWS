@@ -37,6 +37,14 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-28) The landing gate on the merge with O2's master (fd1d65c44): runs 40716613510 and 40716660100 green, no flaky lines.
   - [ ] The live check at the first cut-over machine.
 - [ ] M3 — The app as the org's signer: a co-root, the weekly successor, the signing checks — **executable** (re-planned 2026-10-28; needs M1 and O7 M1, both landed); the owner's sitting (`root add` on staging, then production) owed after M1's
+  - [ ] Task 1: `root add` in `deploy/admin.ts`, its `production-run.sh` line, and its proofs in `admin.test.ts`.
+  - [ ] Task 2: `checks.ts` (`checkSuccessor`, `supersededRevocations`) and its proofs, the zero-roots ones included.
+  - [ ] Task 3: the device module, `createStateSigner` and the next keys (create, promote, destroy).
+  - [ ] Task 4: `signing-store.ts`, `signer.ts`, `postState`, `signing.json`, §H's M3 rows.
+  - [ ] Task 5: `weekly.ts` and `deliveries.ts`.
+  - [ ] Task 6: the session's composition, the rekey transaction and its replay, the IPC commands, main's wiring, and the Org section.
+  - [ ] Task 7: `test/org/signer.local.test.ts`.
+  - [ ] reviewer-high on the PR, the desk track's review of the `admin.ts` hunk, and the final gate.
 - [ ] M4 — The Org page — *advisory; Q1 answered; needs M3 and O11's H1*
 - [ ] M5 — Owners on rows and the People toggle — **executable** (re-planned 2026-10-28; needs M2, landed)
 - [ ] M5b — Add owner — *later; needs O10's `record.owners` offer row and O12's sminos executor*
@@ -466,6 +474,7 @@ The Org page's final shape, where it lives and what more it shows are the owner'
 | `delegation-id-used` | refuse | a new delegation's id is a live or revoked delegation's |
 | `renew-expired`, `renew-not-extension` | refuse | a delegation's `expires` changes and either the old or the new value is not later than `next.issued` (`keysAccounted`, `org-state.ts:202-206`), or the new value is not later than the old (P5 Decision Log 30: renewal extends) |
 | `drops-delegation` | warn | a delegation leaves `next.delegations`: shown in the prompt, its certificates' keys moving to `revoked` |
+| `empty-roots` | refuse | `next.root.keys` is empty (the package's `stateInvariants`, `org-state.ts:95`; named before Touch ID; the desk track's check, Decision Log 2026-10-28) |
 | `superseded-keys` | warn | `supersededRevocations(head, superseded)` offers revocations that `next.revoked` doesn't carry (shown so an unrelated edit after a recovery says what it leaves out) |
 
 A `refuse` finding ends the attempt with its code before Touch ID; `warn` findings are lines in the prompt.
@@ -566,6 +575,12 @@ M3's own edits are the no-change successor and that revocation. The delegation a
     - a delegation whose certificates the recovered branch retired, those keys moved to `revoked`;
     - a device added only on the discarded branch, not offered;
     - this device's own key, withheld.
+  - No path to zero roots (the desk track's check). M3's own surface removes no device and no root: its edits are the no-change successor and the superseded revocations, whose closure withholds anything that would empty `root.keys`. The package refuses an empty root set in `stateInvariants` (`org-state.ts:95`), which `verifySuccessor` runs on every successor (`:341`). A root kid must also name an admin's device's `stepUpPub` (`:115`). Tests, signed with the real package:
+    - a successor of a two-root head that removes the deployment admin's device and its kid, signed by the app's root: accepted, with the app the one root;
+    - a successor of that state that then removes the app's own device (the last root): refused `malformed` by `verifySuccessor` and refused by `checkSuccessor` as `empty-roots` before Touch ID;
+    - a successor that empties `root.keys` while keeping the devices: refused the same way.
+    `checkSuccessor` gains the `empty-roots` refuse row (a successor whose `root.keys` is empty), so the app names the refusal before Touch ID, as it names `revives-revoked`. M4's removal UI inherits it.
+  - A successor signed only by a key that the same successor adds to `root.keys` is refused `not-root-signed`, because `rootSigned` checks against the parent's root set (`org-state.ts:355`). The desk track's second check.
 - `weekly.test.ts`: due only when the device may sign, at 7 days, with nothing pending; the first focus asking once and `lastAsked` written first; a second focus the same day not asking; a cancel; the hourly notification only unfocused and once a day; "Re-sign now".
 - `deliveries.test.ts`, over a fake link backed by a real `EndpointOrg`:
   - which states are delivered, and that a removed machine is never sent to;
@@ -1393,6 +1408,23 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
 - Decision: The re-plan's fourth buildability round is folded in (on 59b63b5cd: 1 P2). Recovery first is a probe with a defined exit. Any answer other than `done` records the line as probed for that machine and hands it to head-finding and forward catch-up. Two proofs are added: an endpoint below the recovery's base, and one past the first page that already accepted the recovery. The rounds converged at 11, 7, 3, 1.
   Rationale: `org-sync.ts:227` (a transition with `fromVersion` at or above the head is no candidate), `org-state.ts:311` (an accepted transition refused as `rollback`), `org-sync.ts:258-261` (`#refusal`: `not-newer` with no state at head + 1, `rollback` with states below the high-water mark). Without the exit, both machines would stay owed forever, retried hourly with the same run.
   Date/Author: 2026-10-28, O8's planner.
+
+- Decision: The desk track's two further checks for M3's PR (2026-10-28, via the architect) are written into M3's proofs, and `checks.ts` gains an `empty-roots` refuse row.
+  1. No path leaves the org with zero roots. M3's own surface removes nothing that holds a root. The package refuses an empty root set (`stateInvariants`, `org-state.ts:95`, run by `verifySuccessor` at `:341`), and `remove-device` filters a removed device's kid (`admin.ts:712`). The app still names the refusal before Touch ID, so M4's removal UI inherits it. The tests sign the sequence the desk track named with the real package.
+  2. A successor signed only by a root key it adds itself is refused (`rootSigned` against `rootKeys(before)`, `org-state.ts:355`). There is a test.
+  Rationale: the package already holds both rules. The app-side row costs one line, and it turns a late `invalid` after a fingerprint into a named refusal before one.
+  Date/Author: 2026-10-28, O8's executor.
+
+- Decision: M3 is built as seven tasks under subagent-driven-execution, each reviewed at its dependency frontier, then reviewer-high on the PR.
+  1. `root add` and its proofs.
+  2. `checks.ts`.
+  3. The device module: `createStateSigner`, the next keys.
+  4. The signing store, the signer and `postState`.
+  5. `weekly.ts` and `deliveries.ts`.
+  6. The session's composition, the rekey transaction, the IPC commands, main's wiring and the Org section.
+  7. `test/org/signer.local.test.ts`.
+  Rationale: the milestone spans about a dozen modules, and one context building all of them would carry every earlier task's noise into the later ones. The split follows §K's producers.
+  Date/Author: 2026-10-28, O8's executor.
 
 ## Outcomes & Retrospective
 
