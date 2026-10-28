@@ -220,6 +220,20 @@ describe('the settings route each field to its owner’s file', () => {
     expect(bytes(machineFile())).toBe(before);
   });
 
+  // the holder's split in progress: its machine file written, settings.json not yet rewritten as the client file
+  it('a refused run meeting a split in progress reads both halves, finishes nothing and writes neither file', async () => {
+    const unified = JSON.stringify({ ...SETTINGS_DEFAULTS_V21, version: 20, theme: 'dark', gateway: { ...SETTINGS_DEFAULTS_V21.gateway, defaultRoute: 'direct' } });
+    const machineText = JSON.stringify({ ...machineSettingsDefaults(), gateway: { ...machineSettingsDefaults().gateway, defaultRoute: 'direct' } });
+    writeFileSync(file, unified);
+    writeFileSync(machineFile(), machineText);
+    const settings = start({ refused: 'spine.lock is held by pid 4242 (build 1.0.0+abc)' });
+    expect(settings.state().settings).toMatchObject({ version: 21, theme: 'dark', gateway: { defaultRoute: 'direct' } });
+    await expect(invoke('settings.set', { theme: 'light' })).resolves.toMatchObject({ ok: false, error: { message: expect.stringContaining('not written this run') } });
+    await expect(invoke('settings.set', { gateway: { offerDirect: false } })).resolves.toMatchObject({ ok: false, error: { message: expect.stringContaining('pid 4242') } });
+    expect(bytes(file)).toBe(unified);
+    expect(bytes(machineFile())).toBe(machineText);
+  });
+
   it('a refused run over a unified file the split has not converted reads it whole and writes neither file', async () => {
     const unified = JSON.stringify({ ...SETTINGS_DEFAULTS_V21, version: 20, theme: 'dark', engine: { ...SETTINGS_DEFAULTS_V21.engine, subagentModel: 'haiku' } });
     writeFileSync(file, unified);

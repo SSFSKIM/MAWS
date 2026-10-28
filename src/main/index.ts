@@ -579,7 +579,7 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
       replay: ReplaySeam.fromEnv(process.env, process.cwd()), // the e2e seam (MAWS_E2E_REPLAY_FIXTURES)
       settings: () => sessionSettingsOf(settings.state().settings), // C11: the route, the relay policy and the subagent model from settings v3
       userDefaults, // W3: the user's defaultMode seeds a new intent's mode (read only)
-      launchGate: () => engineConfigure.launchGate(), // C12: a launch waits for the host to hold the binary settings name (W13: custody retired)
+      launchGate: () => engineConfigure!.launchGate(), // C12: a launch waits for the host to hold the binary settings name (W13: custody retired)
       browserBackend: (appSessionId) => cuaSockets?.socketPathFor(appSessionId) ?? null, // E13
       ownerChannel: ownerChannel.launches, // P2-C (2026-10-09)
       acquisitions: sessions.model, // P2-A (X16): the digest's availability follows each acquisition
@@ -634,8 +634,11 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   // settings.engine; ClaudeUsage's hand-off and status; the reveal guard; the export's Save as….
   // W13: custody of a pinned copy is retired (charter D-1 as amended 2026-10-01); the copy an earlier run kept under
   // <userData>/engine/ is MAWS's own data, removed here
-  void rm(join(app.getPath('userData'), 'engine'), { recursive: true, force: true }).catch((error: unknown) => console.warn('[engine] could not remove the retired custody copy', error));
-  const engineConfigure = startEngineConfigure({ // C12: the coordinator (C11's stopEngineConfigure is its stop)
+  // P5 O3-A: the machine settings' relays to the engine host (engine.configure and the budget's policy, the idle time,
+  // and the design-system defaults in startArtifacts below) are the spine's: a run refused it pushes none, so nothing it
+  // read before the holder changed a setting can overwrite what the holder pushed; nor does it remove anything here
+  if (spineRuns) void rm(join(app.getPath('userData'), 'engine'), { recursive: true, force: true }).catch((error: unknown) => console.warn('[engine] could not remove the retired custody copy', error));
+  const engineConfigure = !spineRuns ? null : startEngineConfigure({ // C12: the coordinator (C11's stopEngineConfigure is its stop)
     settings: () => settings.state().settings,
     onSettingsChanged: (listener) => onEmitted('settings.changed', (state) => listener(state.settings)),
     hostState: () => hosts.snapshot('engine-host'),
@@ -646,17 +649,16 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
     totalMemBytes: totalmem(),
     // C12 end
   });
-  shutdown.add('engine configure', engineConfigure.stop); // C12: .stop
+  if (engineConfigure) shutdown.add('engine configure', engineConfigure.stop); // C12: .stop
   // E10: the supervisor's idle time, pushed beside engine.configure at every ready
-  const stopHostConfigure = startHostConfigure({
+  if (spineRuns) shutdown.add('host configure', startHostConfigure({
     settings: () => settings.state().settings,
     onSettingsChanged: (listener) => onEmitted('settings.changed', (state) => listener(state.settings)),
     hostState: () => hosts.snapshot('engine-host'),
     onHostState: (listener) => hosts.onState('engine-host', listener),
     dispatch: (input) => hosts.dispatch('engine-host', 'host.configure', input) as Promise<CommandResult<'host.configure'>>,
     env: process.env,
-  });
-  shutdown.add('host configure', stopHostConfigure);
+  }));
   // P5 O2 M2: the sessions this app holds open, which the engine host's idle release never stops
   const stopInterest = startInterest({
     sessions: () => interestSet(layout.get('main.tabs'), sessions.model.visibleSessions(), local), // P5 O6: the local machine's
@@ -670,7 +672,7 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   });
   shutdown.add('interest', stopInterest);
   // C12 start: the Settings tab's read of the configuration main holds for it
-  registerMainHandler('settings.engineApplied', () => engineConfigure.applied());
+  registerMainHandler('settings.engineApplied', () => (engineConfigure ? engineConfigure.applied() : Promise.reject(new Error(`the engine settings are not applied this run: ${spine.refused}`)))); // P5 O3-A
   // C12 end
   // Under the end-to-end harness nothing may activate the owner's ClaudeUsage: `open` answers as if it had.
   const e2e = process.env.MAWS_E2E === '1';
@@ -777,6 +779,7 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
     env: process.env,
     openWindow,
     root: join(app.getPath('userData'), 'artifacts'), // P3-A M7: the store's directory (the host's own rule)
+    relayDefaults: spineRuns, // P5 O3-A: the design-system defaults are the machine's settings, relayed by the spine
   });
   shutdown.add('artifacts', artifacts.stop);
   // P3-H H3b: an artifact page's connector calls and watches and the owner's grants (main's broker; route E through the
