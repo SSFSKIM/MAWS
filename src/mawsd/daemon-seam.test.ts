@@ -116,6 +116,25 @@ describe('the seam’s life', () => {
     await until(() => seen.length === 3);
     expect(seen).toEqual([true, false, true]);
   });
+
+  // P5 O10 M10: an unenrolled daemon starts its endpoint at its first command (lever (a)), maybe with an app attached and
+  // the engine-host link up; a listener that comes then hears the state as it stands, as one at start would have heard it
+  // arrive. At start step 7 neither is on yet, so a listener then hears nothing at once.
+  it('onAttachment and onUpstream tell a listener that comes later the state as it stands', async () => {
+    const { endpoint } = await started();
+    const early: string[] = [];
+    endpoint.s.onAttachment((attached) => void early.push(`attached ${attached}`));
+    endpoint.s.onUpstream((link) => void early.push(`link ${link.connected}`));
+    expect(early).toEqual([]);
+    await scene.app();
+    await until(() => early.includes('attached true') && early.at(-1) === 'link true', 3_000, 'the attach and its link');
+    const late: unknown[] = [];
+    endpoint.s.onAttachment((attached) => void late.push(attached));
+    endpoint.s.onUpstream((link) => void late.push(link));
+    const generation = (late[1] as { generation?: number } | undefined)?.generation;
+    expect(late).toEqual([true, { connected: true, generation }]);
+    expect(generation).toBeGreaterThan(0);
+  });
 });
 
 describe('a private daemon’s holds', () => {
@@ -225,7 +244,8 @@ describe('the endpoint’s document channels', () => {
     });
     scene.lastEngine().supervisor.dropClient(); // a quiet loss: the host lives on
     await until(() => links.length === 3, 3_000, 'the reconnect');
-    expect(order).toEqual(['closed 0 upstream', 'closed 1 upstream', 'upstream false 1', 'upstream true 2']);
+    // the listener came while the link was up, and heard that first (O10 M10)
+    expect(order).toEqual(['upstream true 1', 'closed 0 upstream', 'closed 1 upstream', 'upstream false 1', 'upstream true 2']);
     expect(closed).toEqual([
       [BASE, 'upstream'],
       [BASE + 1, 'upstream'],

@@ -191,7 +191,8 @@ export type RetirementFile = z.infer<typeof RetirementSchema>;
 export type Authority = Omit<z.infer<typeof AuthoritySchema>, 'version'>;
 export type ChainEntry = z.infer<typeof ChainEntrySchema>;
 
-const FILES = {
+/** The state's files by role (presence.ts names the enrollment's among them for mawsd, which reads none). */
+export const FILES = {
   machineKey: 'machine-key.json',
   ledger: 'grants.json',
   enrollment: 'enrollment.json',
