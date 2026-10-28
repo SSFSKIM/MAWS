@@ -38,7 +38,7 @@ import { decisionFor } from './decisions';
 import { DeliveryLane, fileSeqStore, LANE_TIMING, type LaneTiming, type PostResult, type SeqStore } from './deliveries';
 import { bridgeSocket, watchBridgeDir, type BridgeDirWatch } from './discovery';
 import { Reshaper } from './reshape';
-import { classify, SessionFold, type BridgeState } from './state';
+import { classify, SessionFold, type BridgeState, type MainTool } from './state';
 import { TranscriptJobs } from './transcript-jobs';
 
 export interface LaneATiming {
@@ -80,6 +80,16 @@ export interface SessionHold {
   engineSessionId: string | null;
   holder: SessionRecord['holder'];
 }
+
+// What main's own consumers of a bridged session read (P5 O9 M6: its attention items and its digest): its state, whether
+// the state stream holds a current snapshot (`fresh`: false from the stream's end until its next snapshot, while what it
+// said of the pending requests may be out of date), and the main loop's latest tool call. Null: the session left lane A.
+export interface LaneAView {
+  state: LaneAState;
+  fresh: boolean;
+  tool: MainTool | null;
+}
+export type LaneAListener = (appId: AppSessionId, view: LaneAView | null) => void;
 
 type ReadKind = 'usage' | 'config' | 'settings' | 'mcp' | 'status' | 'rows' | 'diff' | 'output';
 type ReadOutput = { ok: true; result: unknown } | { ok: false; code: 'no-bridge' | 'unsupported' | 'timeout' | 'busy' | 'failed'; message: string };
@@ -161,6 +171,7 @@ export interface LaneADriver {
   stopAgent(appId: AppSessionId, agentId: string): Promise<ControlResult>;
   tell(appId: AppSessionId, agentId: string, text: string): Promise<ControlResult>;
   stopTask(appId: AppSessionId, taskId: string): Promise<ControlResult>;
+  onChange(listener: LaneAListener): () => void; // M6: each session's view as it changes, from now on
   stop(): void;
 }
 
@@ -175,6 +186,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   let dirWatch: BridgeDirWatch | null = null;
   let stopped = false;
   const warned = new Set<string>();
+  const listeners = new Set<LaneAListener>();
 
   void Promise.resolve(deps.home).then(
     (resolved) => {
@@ -276,6 +288,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
       onLines: (lines) => {
         if (s.stream !== stream) return;
         let dirty = false;
+        const toolBefore = JSON.stringify(s.fold.mainTool());
         for (const line of lines) {
           if (!s.snapshotted) {
             if (line.type !== 'snapshot') return stateEnded(s, stream, 'the stream did not open with a snapshot');
@@ -293,6 +306,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
           } else if (s.fold.event(line)) dirty = true;
         }
         if (dirty) changed(s);
+        else if (JSON.stringify(s.fold.mainTool()) !== toolBefore) tell(s);
       },
       onEnd: (reason) => stateEnded(s, stream, reason),
     });
@@ -306,6 +320,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     s.backoff.broke();
     if (s.snapshotted) s.lane.streamLost();
     if (s.gone) return;
+    tell(s); // its requests are no longer current
     const delay = s.backoff.next();
     log(`${s.engine}: its state stream ended (${reason}); again in ${delay} ms`);
     s.reconnect = setTimeout(() => {
@@ -462,6 +477,14 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   function changed(s: Session): void {
     if (s.gone) return;
     deps.emit('laneA.changed', { appSessionId: s.appId, state: stateOf(s) });
+    tell(s);
+  }
+
+  // Main's own consumers (M6), told on each change of the state, of the stream's currency or of the main loop's tool.
+  function tell(s: Session): void {
+    const state = stateOf(s);
+    const view = state === null ? null : { state, fresh: s.stream !== null && s.snapshotted, tool: s.fold.mainTool() };
+    for (const listener of listeners) listener(s.appId, view);
   }
 
   // ---- sessions -------------------------------------------------------------------------------------------------------
@@ -498,6 +521,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     s.lane.close('the session left the terminal');
     sessions.delete(s.appId);
     if (s.bridge !== null) deps.emit('laneA.changed', { appSessionId: s.appId, state: null });
+    for (const listener of listeners) listener(s.appId, null);
     syncDirWatch();
   }
 
@@ -697,6 +721,10 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     stopAgent: (appId, agentId) => control(appId, 'stop-agent', { agentId }),
     tell: (appId, agentId, text) => control(appId, 'tell', { agentId, text }),
     stopTask,
+    onChange(listener) {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
     stop() {
       stopped = true;
       for (const s of [...sessions.values()]) drop(s);

@@ -293,3 +293,28 @@ describe('dock badge', () => {
     expect(posted()[0].close).toHaveBeenCalledOnce();
   });
  });
+
+// P5 O9 M6 (the owner's Q5): a terminal session's prompt shows in the terminal the owner may be looking at, so its items
+// join Needs you and the dock badge, with a toast while MAWS is focused, but raise no system notification and no bounce.
+describe('a terminal session’s requests', () => {
+  const TERMINAL = 'app-terminal' as AppSessionId;
+  const held = (w: Writer) => w.observeRecord(record(TERMINAL, { title: { text: 'In the terminal', source: 'user' }, holder: { kind: 'terminal', pid: 4242 } }));
+
+  it('post no notification and bounce nothing while unfocused, and still count in the badge', () => {
+    const h = harness({ before: held });
+    h.set(TERMINAL, [item(TERMINAL, 'permission', T)]);
+    expect(posted()).toHaveLength(0);
+    expect(bounces()).toHaveLength(0);
+    expect(os.badge).toHaveBeenLastCalledWith(null, 1);
+    os.supported = false; // nor the fallback's bounce where OS notifications are unavailable
+    h.set(TERMINAL, [item(TERMINAL, 'permission', T), item(TERMINAL, 'question', T)]);
+    expect(bounces()).toHaveLength(0);
+  });
+
+  it('are told in-app while MAWS is focused, as any session’s', () => {
+    const h = harness({ focused: true, before: held });
+    h.set(TERMINAL, [item(TERMINAL, 'permission', T)]);
+    expect(posted()).toHaveLength(0);
+    expect(emitted(h.emit, 'attention.notified')).toMatchObject([{ appSessionId: TERMINAL, delivery: 'in-app' }]);
+  });
+});

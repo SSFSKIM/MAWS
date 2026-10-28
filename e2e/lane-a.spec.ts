@@ -3,7 +3,8 @@
 // fake-bridge.ts) on the launch's scratch sminos home, and no `claude` running. Each control's body as the fake receives
 // it; sends in order, a refusal keeping its draft, a held send's strip; a side question answered from its op's end; the
 // gaps greyed with their reasons; no bridge as before; the reply streaming, then its row; a pane opened mid-reply, and
-// that turn aborted with no `step end`.
+// that turn aborted with no `step end`. M6 (acceptance 3 and 5): the requests the bridge raises, as attention items and
+// docked cards answered through the port, each decision's body as the fake receives it, and the race with the terminal.
 import { randomUUID } from 'node:crypto';
 import { expect, type Locator, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
@@ -13,7 +14,7 @@ import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
 import { assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, backgroundBashRecords, CATALOG, editTurnRecords, taskNotificationRecord, terminalSession, userRecord, type TerminalSession } from './support/lane-a';
 import { openSurface } from './support/shell';
-import { sidebarRow } from './support/sidebar';
+import { sidebarOf, sidebarRow } from './support/sidebar';
 
 function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
   return page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name as string, input as unknown] as const) as Promise<CommandResult<N>>;
@@ -46,6 +47,18 @@ const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 // The fake's commands of one op, their bodies in order.
 const bodies = (bridge: FakeBridge, op: string) => bridge.commands.filter((c) => c.op === op).map((c) => c.body);
+
+// M6: the pane's request card (docked in the composer's place), and the decisions the fake took, each with its request.
+const card = (page: Page) => main(page).locator('[data-request-card]');
+const decided = (bridge: FakeBridge) => bridge.decisions.map((d) => ({ request: d.request, ...d.body }));
+const AS_MAWS = { by: 'maws', launch: 'launch-1' }; // every decision MAWS posts names itself and the launch it was read under
+const badge = (maws: MawsLaunch) => maws.app.evaluate(({ app }) => app.dock?.getBadge() ?? '');
+
+// MAWS's answer went: the bridge settles the request as MAWS's, and the card leaves at once (only another's win lingers).
+async function settledHere(page: Page, bridge: FakeBridge, request: string, outcome = 'allow'): Promise<void> {
+  bridge.settle(request, 'web', outcome);
+  await expect(card(page)).toHaveCount(0, { timeout: 5_000 });
+}
 
 test.describe('lane A: a terminal session driven through its bridge', () => {
   let current: Case | null = null;
@@ -370,6 +383,167 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(main(page).getByText('Half a story and more', { exact: true })).toBeVisible({ timeout: 10_000 });
     bridge.emit({ type: 'turn', phase: 'complete', turnId: 'turn-m' }); // aborted: no step end, no block-row
     await expect(main(page).getByText('Half a story and more', { exact: true })).toHaveCount(0, { timeout: 10_000 });
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  test('a permission the bridge raised: Needs you and the pane within 1 s, the hover preview, the Overview card and the badge; allowed here, then answered in the terminal, then a late answer reading who won', async () => {
+    test.setTimeout(120_000);
+    const c = await begin();
+    const { page, maws } = c;
+    const { bridge } = await drive(c);
+    const sidebar = sidebarOf(page);
+
+    bridge.raise({ request: 'toolu_allow', tool: 'Bash', input: { command: 'ls -la' } });
+    await expect(card(page).getByRole('button', { name: 'Allow', exact: true }), 'docked in the pane within 1 s').toBeVisible({ timeout: 1_000 });
+    await expect(sidebar.getByRole('heading', { name: 'Needs you · 1' }), 'in Needs you within 1 s').toBeVisible({ timeout: 1_000 });
+    await expect(sidebar.getByRole('list', { name: 'Needs you' }).getByRole('button')).toHaveAccessibleName(/ · Approval needed$/);
+    await expect(card(page), 'the terminal asks it too (Q3)').toContainText('Also asked in the terminal: the first answer wins');
+    await expect.poll(() => badge(maws), 'the dock badge counts it (Q5)').toBe('1');
+
+    // the hover preview and the Overview card show it as any session's
+    const row = await sidebarRow(page, { appSessionId: c.appId });
+    await expect(row.getByRole('img', { name: 'Needs approval' }), 'its open item wins over the holder glyph (Q1)').toBeVisible();
+    const hover = page.locator('[data-hover-card]');
+    await expect(async () => {
+      await page.mouse.move(700, 20);
+      await row.hover();
+      await expect(hover).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 10_000 });
+    await expect(hover.getByRole('group', { name: /^Approval needed/ })).toBeVisible();
+    await page.mouse.move(700, 20);
+    await maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('tab.overview')?.click());
+    const overview = main(page).getByRole('dialog', { name: 'Overview' });
+    await expect(overview.locator(`[data-card="${c.appId}"]`).getByRole('radio', { name: 'Allow once' }), 'the card answers it through the port').toBeVisible({ timeout: 10_000 });
+    await page.keyboard.press('Escape');
+    await expect(overview).toHaveCount(0);
+
+    // allowed in MAWS: the fake takes Interfaces §D's body; its settle takes the item away within 1 s
+    await card(page).getByRole('button', { name: 'Allow', exact: true }).click();
+    await expect.poll(() => decided(bridge)).toEqual([{ request: 'toolu_allow', behavior: 'allow', ...AS_MAWS }]);
+    bridge.settle('toolu_allow', 'web', 'allow');
+    await expect(card(page)).toHaveCount(0, { timeout: 1_000 });
+    await expect(sidebar.getByRole('heading', { name: /^Needs you/ })).toHaveCount(0, { timeout: 1_000 });
+    await expect.poll(() => badge(maws)).toBe('');
+
+    // answered in the terminal first: the card settles in place as such, stays a moment, then leaves
+    bridge.raise({ request: 'toolu_term', tool: 'Bash', input: { command: 'git status' } });
+    await expect(card(page).getByRole('button', { name: 'Allow', exact: true })).toBeVisible({ timeout: 1_000 });
+    bridge.settle('toolu_term', 'terminal', 'allow');
+    await expect(card(page).getByRole('status')).toHaveText('Answered in the terminal: Allowed', { timeout: 2_000 });
+    await expect(card(page).getByRole('button', { name: 'Allow', exact: true })).toHaveCount(0);
+    await expect(card(page)).toHaveCount(0, { timeout: 5_000 });
+
+    // an answer the bridge refuses because another won reads as that settlement, never an error
+    bridge.raise({ request: 'toolu_late', tool: 'Bash', input: { command: 'rm notes.md' } });
+    bridge.answer('decision:toolu_late', () => ({ status: 409, body: { error: 'already settled', settled: { request: 'toolu_late', winner: 'terminal', outcome: 'deny', by: 'terminal' } } }));
+    await card(page).getByRole('button', { name: 'Allow', exact: true }).click();
+    await expect(card(page).getByRole('status')).toHaveText('Answered in the terminal: Denied', { timeout: 5_000 });
+    await expect(card(page).getByRole('alert')).toHaveCount(0);
+    expect(decided(bridge).map((d) => d.request), 'the refused one taken by no one').toEqual(['toolu_allow']);
+    bridge.settle('toolu_late', 'terminal', 'deny');
+    await expect(card(page)).toHaveCount(0, { timeout: 5_000 });
+    expect(maws.consoleErrors()).toEqual([]);
+  });
+
+  test('a permission card’s options: a scoped allow sends the one suggestion with its destination, two suggestions offer no scope, deny-and-interrupt and an edited input are never sent, a background request past its window is the terminal’s', async () => {
+    test.setTimeout(120_000);
+    const c = await begin();
+    const { page } = c;
+    const { bridge } = await drive(c);
+    const one = { type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test' }], behavior: 'allow', destination: 'localSettings' };
+
+    bridge.raise({ request: 'toolu_scoped', tool: 'Bash', input: { command: 'npm test' }, suggestions: [one] });
+    await card(page).getByRole('radio', { name: 'Allow for this session' }).click();
+    await card(page).getByRole('button', { name: 'Allow', exact: true }).click();
+    await expect.poll(() => decided(bridge)).toEqual([{ request: 'toolu_scoped', behavior: 'allow', updatedPermissions: [{ ...one, destination: 'session' }], ...AS_MAWS }]);
+    await settledHere(page, bridge, 'toolu_scoped');
+
+    // two suggestions: no scope; deny-and-interrupt closed with its reason; an edited input refused before the bridge
+    bridge.raise({ request: 'toolu_two', tool: 'Bash', input: { command: 'npm test' }, suggestions: [one, { ...one, destination: 'session' }] });
+    const session = card(page).getByRole('radio', { name: 'Allow for this session' });
+    await expect(session).toBeDisabled({ timeout: 5_000 });
+    await expect(session).toHaveAttribute('title', "A scoped allow takes the request's one suggestion; this request offers 2");
+    await card(page).getByRole('button', { name: 'More deny options' }).click();
+    const stop = page.getByRole('menuitem', { name: 'Deny and stop the turn' });
+    await expect(stop).toHaveAttribute('aria-disabled', 'true');
+    await expect(stop).toHaveAttribute('title', 'Deny-and-interrupt is answered in the terminal');
+    await page.keyboard.press('Escape');
+    const edited = value(await invoke(page, 'laneA.answer', { appSessionId: c.appId, request: 'toolu_two', answer: { kind: 'permission', decision: 'allow', scope: 'once', updatedInput: { command: 'npm test -- --watch' } } }));
+    expect(edited, 'no MAWS control edits an input; the port refuses one').toEqual({ outcome: 'refused', code: 'unsupported', message: 'an edited input is answered in the terminal' });
+    await card(page).getByRole('button', { name: 'Deny', exact: true }).click();
+    await expect.poll(() => decided(bridge).slice(1)).toEqual([{ request: 'toolu_two', behavior: 'deny', ...AS_MAWS }]);
+    await settledHere(page, bridge, 'toolu_two', 'deny');
+
+    // a background subagent's request: answerable in its window, the terminal's once it closes
+    bridge.raise({ request: 'toolu_bg', tool: 'Bash', input: { command: 'make' }, agentId: 'a1e2e000000000002', deadline: Date.now() + 4_000 });
+    const allow = card(page).getByRole('button', { name: 'Allow', exact: true });
+    await expect(allow).toBeEnabled({ timeout: 1_000 });
+    await expect(card(page).getByText('Answer this in the terminal')).toBeVisible({ timeout: 8_000 });
+    for (const name of ['Allow', 'Deny']) {
+      const button = card(page).getByRole('button', { name, exact: true });
+      await expect(button).toBeDisabled();
+      await expect(button).toHaveAttribute('title', 'Answer this in the terminal');
+    }
+    expect(decided(bridge)).toHaveLength(2);
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  test('questions and plans: answers, a native question skipped as a decline, an async one answered and never skipped; a plan implemented, kept with feedback and without, its clear and implement closed', async () => {
+    test.setTimeout(150_000);
+    const c = await begin();
+    const { page } = c;
+    const { bridge } = await drive(c);
+    const asked = (question: string, labels: string[]) => ({ questions: [{ question, header: question.slice(0, 8), options: labels.map((label) => ({ label })), multiSelect: false }] });
+    const pick = async (question: string, label: string) => card(page).getByRole('radiogroup', { name: question }).getByRole('radio', { name: label }).click();
+    let n = 0;
+    const lastDecision = () => decided(bridge).slice(n);
+
+    bridge.raise({ request: 'toolu_q1', tool: 'AskUserQuestion', input: asked('Which colour?', ['Red', 'Blue']) });
+    await pick('Which colour?', 'Red');
+    await card(page).getByRole('button', { name: 'Submit', exact: true }).click();
+    await expect.poll(lastDecision).toEqual([{ request: 'toolu_q1', behavior: 'allow', updatedInput: { answers: { 'Which colour?': 'Red' } }, ...AS_MAWS }]);
+    await settledHere(page, bridge, 'toolu_q1');
+    n = 1;
+
+    // every question skipped on a native question: the request declined
+    bridge.raise({ request: 'toolu_q2', tool: 'AskUserQuestion', input: asked('Which size?', ['Small', 'Large']) });
+    await card(page).getByRole('button', { name: 'Skip', exact: true }).click();
+    await expect.poll(lastDecision).toEqual([{ request: 'toolu_q2', behavior: 'deny', ...AS_MAWS }]);
+    await settledHere(page, bridge, 'toolu_q2', 'deny');
+    n = 2;
+
+    // an async question (the ask mod's): its Skip closed, its answer sent
+    bridge.raise({ request: 'toolu_q3', tool: 'mcp__plugin_sminos_ask__ask', async: true, input: asked('Ship it?', ['Yes', 'Not yet']) });
+    const skip = card(page).getByRole('button', { name: 'Skip', exact: true });
+    await expect(skip).toBeDisabled({ timeout: 5_000 });
+    await expect(skip).toHaveAttribute('title', 'An async question needs an answer');
+    await pick('Ship it?', 'Yes');
+    await card(page).getByRole('button', { name: 'Submit', exact: true }).click();
+    await expect.poll(lastDecision).toEqual([{ request: 'toolu_q3', behavior: 'allow', updatedInput: { answers: { 'Ship it?': 'Yes' } }, ...AS_MAWS }]);
+    await settledHere(page, bridge, 'toolu_q3');
+    n = 3;
+
+    // a plan: clear and implement closed with its reason; Implement allows
+    const plan = { plan: '1. Write the tests.\n2. Ship.' };
+    bridge.raise({ request: 'toolu_p1', tool: 'ExitPlanMode', input: plan });
+    const clear = card(page).getByRole('button', { name: 'Clear context and implement' });
+    await expect(clear).toBeDisabled({ timeout: 5_000 });
+    await expect(clear).toHaveAttribute('title', '/clear runs in the terminal');
+    await card(page).getByRole('button', { name: 'Implement', exact: true }).click();
+    await expect.poll(lastDecision).toEqual([{ request: 'toolu_p1', behavior: 'allow', ...AS_MAWS }]);
+    await settledHere(page, bridge, 'toolu_p1');
+    n = 4;
+
+    // keep planning, with feedback (its message) and without (no message key)
+    for (const [request, feedback] of [['toolu_p2', 'Smaller steps, please.'], ['toolu_p3', '']] as const) {
+      bridge.raise({ request, tool: 'ExitPlanMode', input: plan });
+      await card(page).getByRole('button', { name: 'Keep planning' }).click();
+      if (feedback !== '') await card(page).getByRole('textbox', { name: 'What should change in the plan' }).fill(feedback);
+      await card(page).getByRole('button', { name: 'Send feedback' }).click();
+      await expect.poll(lastDecision).toEqual([{ request, behavior: 'deny', ...(feedback !== '' && { message: feedback }), ...AS_MAWS }]);
+      await settledHere(page, bridge, request, 'deny');
+      n += 1;
+    }
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 });

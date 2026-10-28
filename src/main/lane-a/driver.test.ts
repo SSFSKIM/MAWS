@@ -9,7 +9,7 @@ import type { ClientRef } from '@shared/ipc/client';
 import { endableClientRef } from '@shared/ipc/client';
 import type { LaneAState, PlaneMessage } from '@shared/ipc/schema/lane-a';
 import { FULL_CAPABILITIES, startFakeBridge, type FakeBridge } from '../../../test/support/fake-bridge';
-import { createLaneADriver, type LaneADriver } from './driver';
+import { createLaneADriver, type LaneADriver, type LaneAView } from './driver';
 
 const MACHINE = 'machineref0123456789';
 const APP = 'app-1' as AppSessionId;
@@ -591,5 +591,27 @@ describe('the launch an operation was admitted under', () => {
     });
     expect(await h.driver.model(APP, { effort: 'low' })).toMatchObject({ state: 'refused', code: 'launch' });
     expect(b.commands.map((c) => c.op)).toEqual(['read']);
+  });
+});
+
+// P5 O9 M6: what main's attention and digest read of each session.
+describe('the view main’s own consumers follow', () => {
+  it('tells each change, the stream’s currency and the main loop’s tool, and null when the session leaves', async () => {
+    const b = await bridge();
+    const h = harness();
+    const views: (LaneAView | null)[] = [];
+    h.driver.onChange((appId, view) => appId === APP && views.push(view));
+    h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: terminal });
+    await expect.poll(() => views.at(-1)?.fresh, { timeout: 3000 }).toBe(true);
+    b.raise({ request: 'toolu_r1', tool: 'Bash', input: { command: 'ls' } });
+    await expect.poll(() => views.at(-1)?.state.pending.map((p) => p.request)).toEqual(['toolu_r1']);
+    b.emit({ type: 'turn', phase: 'start', turnId: 't1', agentId: null });
+    b.emit({ type: 'tool', phase: 'call', toolUseId: 'u1', tool: 'Read', agentId: null, input: { file_path: '/a/b.ts' } });
+    await expect.poll(() => views.at(-1)?.tool).toEqual({ tool: 'Read', input: { file_path: '/a/b.ts' }, running: true });
+    b.reset(); // the stream ends: what it said of the requests is no longer current, until its next snapshot
+    await expect.poll(() => views.some((v) => v !== null && !v.fresh && v.state.pending.length === 1)).toBe(true);
+    await expect.poll(() => views.at(-1)?.fresh, { timeout: 3000 }).toBe(true);
+    h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: { kind: 'none' } });
+    expect(views.at(-1)).toBeNull();
   });
 });

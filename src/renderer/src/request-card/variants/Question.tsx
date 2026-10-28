@@ -8,7 +8,9 @@
 // Submit once the question is answered, digits pick its options, and Esc declines the whole request with the plain
 // permission deny the terminal's Escape writes: C3's broker admits it for a question, the engine hands the model
 // `Denied by the user in MAWS.` and the turn goes on (pass3/question-deny seq 108 to 154), and the transcript records
-// the question with no answers.
+// the question with no answers. P5 O9 M6: what the session's port can't carry is drawn disabled in place with its reason
+// and bound to no key (a terminal session's async question is answered, never declined, so neither Esc nor a last Skip
+// that leaves every question unanswered sends).
 import { Checkbox, RadioGroup } from 'radix-ui';
 import { useEffect, useLayoutEffect, useRef, type KeyboardEvent } from 'react';
 import type { Question } from '@shared/graph/events';
@@ -17,7 +19,7 @@ import { normalizeQuestionSelections, questionAnswers, questionValue, toAnswer }
 import { CardButton, Controls } from '../controls';
 import { SandboxedPreview } from '../preview/SandboxedPreview';
 import { advance, answerOf, EMPTY_DRAFT, goTo, pick, setOther, skip, toggle, type QuestionDraft } from '../question-steps';
-import type { VariantProps } from './types';
+import { gated, type VariantProps } from './types';
 
 const OTHER = '\u0000other'; // the Other row's radio value: no option label can be it
 
@@ -139,7 +141,7 @@ function keyOwner(body: HTMLElement, placement: VariantProps<'question.requested
 
 const ARROW = 'rounded-sm px-1 text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
 
-export function QuestionBody({ item, request, placement, busy, submit, bindKeys }: VariantProps<'question.requested'>) {
+export function QuestionBody({ item, request, placement, busy, submit, bindKeys, capability }: VariantProps<'question.requested'>) {
   const { questions } = request;
   const count = questions.length;
   const storedDraft = useAttention((s) => s.drafts.get(item.id)) ?? EMPTY_DRAFT;
@@ -156,21 +158,28 @@ export function QuestionBody({ item, request, placement, busy, submit, bindKeys 
     save(next);
   };
 
+  const replyOf = (final: QuestionDraft) => toAnswer({ kind: 'question', questions, selected: final.selected, other: final.other });
   const reply = (final: QuestionDraft) => {
     const answers = questionAnswers({ kind: 'question', questions, selected: final.selected, other: final.other });
-    submit(toAnswer({ kind: 'question', questions, selected: final.selected, other: final.other }), Object.keys(answers).length > 0 ? 'Submitted' : 'Skipped');
+    submit(replyOf(final), Object.keys(answers).length > 0 ? 'Submitted' : 'Skipped');
   };
+  // M6: on the last step, Submit and Skip send; each is closed where the port can't carry what it would send
+  const forwardGate = gated(last && answered ? capability(replyOf(draft)) : { available: true });
+  const skipGate = gated(last ? capability(replyOf(skip(draft, question, count))) : { available: true });
+  const declining = toAnswer({ kind: 'permission', decision: 'deny', message: '' });
+  const declineGate = gated(capability(declining));
   const forward = () => {
-    if (!answered) return;
+    if (!answered || forwardGate.disabled) return;
     if (last) reply(draft);
     else saveStep(advance(draft, count));
   };
   const skipStep = () => {
+    if (skipGate.disabled) return;
     const skipped = skip(draft, question, count);
     saveStep(skipped);
     if (last) reply(skipped);
   };
-  const decline = () => submit(toAnswer({ kind: 'permission', decision: 'deny', message: '' }), 'Skipped');
+  const decline = () => !declineGate.disabled && submit(declining, 'Skipped');
 
   const onPick = (label: string) => save(pick(draft, question, label));
   const onToggle = (label: string, on: boolean) => save(toggle(draft, question, label, on));
@@ -180,7 +189,7 @@ export function QuestionBody({ item, request, placement, busy, submit, bindKeys 
   useEffect(() => {
     bindKeys({
       accept: forward,
-      decline,
+      decline: declineGate.disabled ? null : decline,
       digit: (n) => {
         const option = question.options[n - 1];
         if (option) {
@@ -230,10 +239,10 @@ export function QuestionBody({ item, request, placement, busy, submit, bindKeys 
       </div>
       <Step key={question.question} question={question} draft={draft} disabled={busy} onPick={onPick} onToggle={onToggle} onOther={onOther} onEnter={forward} />
       <Controls>
-        <CardButton disabled={busy} onClick={skipStep}>
+        <CardButton disabled={busy || skipGate.disabled} title={skipGate.title} onClick={skipStep}>
           Skip
         </CardButton>
-        <CardButton tone="primary" disabled={busy || !answered} title={answered ? undefined : 'Choose an option or skip this question'} onClick={forward}>
+        <CardButton tone="primary" disabled={busy || !answered || forwardGate.disabled} title={!answered ? 'Choose an option or skip this question' : forwardGate.title} onClick={forward}>
           {last ? 'Submit' : 'Next'}
         </CardButton>
       </Controls>

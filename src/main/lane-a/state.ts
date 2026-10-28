@@ -27,6 +27,8 @@ export function classify(status: Record<string, unknown>): BridgeState {
 }
 
 export type FoldView = Pick<LaneAState, 'turn' | 'model' | 'override' | 'catalog' | 'pending' | 'settled'>;
+// The main loop's latest tool call of its running turn (P5 O9 M6: the digest's activity): `running` until its result.
+export type MainTool = { tool: string; input: unknown; running: boolean };
 
 export class SessionFold {
   private mainTurns = new Set<string>();
@@ -36,6 +38,7 @@ export class SessionFold {
   private catalog: LaneACatalog | null = null;
   private pending = new Map<string, LaneARaised>();
   private settled = new Map<string, LaneASettled>();
+  private tool: (MainTool & { toolUseId: unknown }) | null = null;
 
   constructor(private readonly session: string) {}
 
@@ -44,6 +47,7 @@ export class SessionFold {
     const info = record(snap.sessionInfo);
     if (typeof info?.model === 'string') this.model = info.model;
     this.override = overrideOf(snap.override);
+    this.tool = null;
     const catalog = record(snap.catalog);
     this.catalog = catalog && typeof catalog.fingerprint === 'string' ? (catalog as LaneACatalog) : null;
     this.pending = new Map(((snap.pending as Event[] | undefined) ?? []).filter((p) => typeof p.request === 'string').map((p) => [String(p.request), raisedOf(p, this.session)]));
@@ -51,19 +55,27 @@ export class SessionFold {
     for (const s of (snap.settled as Event[] | undefined) ?? []) if (typeof s.request === 'string') this.remember(settledOf(s, this.session));
   }
 
-  // One event; whether the state changed.
+  // One event; whether the state changed. A main-loop tool call or result moves only `mainTool()`, which the state leaves
+  // out, so it answers false.
   event(e: Event): boolean {
     const { type, phase } = e;
     const main = (e.agentId ?? null) === null;
     if (type === 'turn' && main && phase === 'start') {
       this.mainTurns.add(String(e.turnId));
       this.unknown = false;
+      this.tool = null;
       return true;
     }
     if (type === 'turn' && main && phase === 'complete') {
       this.mainTurns.delete(String(e.turnId));
       this.unknown = false;
+      this.tool = null;
       return true;
+    }
+    if (type === 'tool' && main && typeof e.tool === 'string') {
+      if (phase === 'call') this.tool = { toolUseId: e.toolUseId ?? null, tool: e.tool, input: e.input ?? null, running: true };
+      else if (phase === 'result' && this.tool !== null && this.tool.toolUseId === (e.toolUseId ?? null)) this.tool = { ...this.tool, running: false };
+      return false;
     }
     if (type === 'heartbeat') {
       const state = record(e.state);
@@ -108,6 +120,12 @@ export class SessionFold {
       pending: [...this.pending.values()],
       settled: [...this.settled.values()],
     };
+  }
+
+  mainTool(): MainTool | null {
+    if (this.tool === null || this.mainTurns.size === 0) return null;
+    const { tool, input, running } = this.tool;
+    return { tool, input, running };
   }
 
   catalogBody(): LaneACatalog | null {

@@ -1,6 +1,8 @@
 // Session-scoped delivery: OS banners outside MAWS, toasts while another session
 // has focus. Restored requests/turns are silent; live requests retract on resolution. The banners, the dock's badge,
 // its bounce and the window's focus go through the client port (OX4), with no client: no page asked for them.
+// P5 O9 M6 (the owner's Q5): a session a terminal or a background job holds asks in that terminal too, which the owner
+// may be reading, so its items are told in-app only: no OS notification and no bounce; they count in the badge.
 import type { AttentionItem } from '@shared/graph/attention';
 import { isNoClient, type ClientPort, type NotificationHandle, type NotifyEvent, type NotifyRequest } from '@shared/client/port';
 import type { AttentionKind } from '@shared/graph/enums';
@@ -51,6 +53,7 @@ export function startNotifier(model: SessionReadModel, deps: NotifierDeps): () =
   const post = (notice: Notice, allowOnce = false, checked = false) => {
     if (deps.isViewing(notice.appSessionId)) return;
     if (deps.isFocused()) { notified(notice, 'in-app'); return; }
+    if (heldElsewhere(notice.appSessionId)) return; // P5 O9 M6: in-app only
     if (fallback !== null) { fallBack(notice); return; }
     const item = notice.attentionId === null ? undefined : model.attention(notice.appSessionId).find((i) => i.id === notice.attentionId && i.state === 'pending');
     if (notice.attentionId !== null && !item) return;
@@ -98,6 +101,7 @@ export function startNotifier(model: SessionReadModel, deps: NotifierDeps): () =
     handle = answer;
     if (!ended) live.set(handle, notice);
   };
+  const heldElsewhere = (id: AppSessionId) => { const holder = model.record(id)?.holder.kind; return holder === 'terminal' || holder === 'background_job'; };
   const inNeedsYou = (id: AppSessionId) => { const r = model.record(id); return r !== null && !r.archived; };
   const onAttention = (appSessionId: AppSessionId, items: AttentionItem[]) => {
     for (const [handle, notice] of live) {

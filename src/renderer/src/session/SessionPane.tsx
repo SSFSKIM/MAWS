@@ -3,7 +3,8 @@
 // (W2: §5.5 as amended 2026-10-01, the status line is gone). A session with no controls port (P5 O9 M4: a foreign-live
 // one, held by a terminal or a background job) gets the holder notice in place of the composer and never a docked
 // request (D-12); P5 O9 M5: a foreign-live session whose sminos bridge is live gets lane A's port, so the composer, and the
-// notice only while it has none, with the reason its bridge gave when one answered but can't be driven. A session with
+// notice only while it has none, with the reason its bridge gave when one answered but can't be driven; M6: its requests
+// dock as any session's, and one its terminal answered first stays docked 3 s, settled in place (the owner's Q3). A session with
 // no record yet is unstarted: the `newSession` slot
 // (C10's heading and setup) with the composer frame centred beneath it and nothing else; it swaps to the ordinary pane
 // when the record arrives. In both placements the composer sits in the column the transcript's rows use
@@ -20,6 +21,7 @@ import { waitingItem } from '../attention/derive';
 import { ipc } from '../ipc/client';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
+import { useSettling } from '../lane-a/race'; // P5 O9 M6
 import { useSessions } from '../stores/sessions';
 import { HolderNotice } from './HolderNotice';
 import { useSessionControls } from './controls/controls-for'; // P5 O9 M4
@@ -67,7 +69,7 @@ function StartedPane({ record, paneIndex, compact }: { record: SessionRecord; pa
   // A docked request is the session's oldest actionable item (the one its Needs-you row shows); held peer messages
   // are not requests.
   const waiting = waitingItem(pending);
-  const docked = !readOnly && waiting?.tier === 1 && Composer === FALLBACKS.composer ? waiting.oldest : null; // C7: a registered composer is the one docked swap (it docks the request itself)
+  const docked = useSettling(!readOnly && waiting?.tier === 1 && Composer === FALLBACKS.composer ? waiting.oldest : null); // C7: a registered composer is the one docked swap (it docks the request itself)
 
   return (
     <div className="flex h-full flex-col">

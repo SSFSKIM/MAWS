@@ -9,6 +9,11 @@
 // the same owner. E1 M4b: a blocking `maws` ask's item (originating in `maws.ask.opened`) renders compact
 // (`variants/Ask.tsx`), its one action opening the Question sheet; the card never answers it.
 //
+// P5 O9 M6: each option is drawn from the session's controls port (`answerCapability`), disabled in place with its reason
+// where the port can't carry it. A request its session's terminal asks too says so ("Also asked in the terminal: the first
+// answer wins", the owner's Q3), and settles in place as the race ended ("Answered in the terminal: Allowed"), a late
+// answer included; past a background request's window it reads "Answer this in the terminal" (`lane-a/race.ts`).
+//
 // The card imports the docked frame from its own module, never `composer/index.ts`, so no editor code reaches it.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type MouseEvent, type PointerEvent } from 'react';
 import { ATTENTION_HEADINGS, type AttentionTone } from '@shared/attention/headings';
@@ -20,7 +25,9 @@ import { SurfaceRow } from '../engine-surface/SurfaceRow';
 import { useNow } from '../app/use-now';
 import { DockedCardFrame } from '../composer/docked/DockedCardFrame';
 import { ipc } from '../ipc/client';
-import { answerSession } from '../session/controls/controls-for'; // P5 O9 M4
+import { answerSession, useSessionControls } from '../session/controls/controls-for'; // P5 O9 M4
+import type { Capability } from '../session/controls/types'; // P5 O9 M6
+import { RACE, settledWords, useRace } from '../lane-a/race'; // P5 O9 M6
 import { BUTTON_LIKE_INPUTS } from '../keymap/dispatcher';
 import { useKeyChord } from '../keymap/useKeyChord';
 import { itemAge } from '../sidebar/derive';
@@ -69,6 +76,7 @@ export interface RequestCardProps {
 export const HEADINGS = ATTENTION_HEADINGS;
 const TONE: Record<AttentionTone, string> = { warning: 'text-warning', info: 'text-info', danger: 'text-danger', accent: 'text-accent' /* P2-C */ };
 const NOT_PENDING_MS = 2_000;
+const CARRIED: Capability = { available: true }; // no port: today's delivery path refuses it in the holder's words
 
 type Phase = 'pending' | 'answering' | 'delivered' | 'not_pending' | 'closed';
 type Outcome = 'delivered' | 'not_pending' | 'write_failed';
@@ -218,6 +226,10 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   const now = useNow();
   const { phase, what, failed, submit } = useDelivery(item, onAnswered);
   const pointer = usePointerOnly();
+  // P5 O9 M6: what the session's port carries, and how the race with its terminal stands
+  const controls = useSessionControls(item.appSessionId);
+  const capability = useCallback((answer: RequestAnswer): Capability => controls?.answerCapability(item, answer) ?? CARRIED, [controls, item]);
+  const race = useRace(item);
 
   // The requests a docked placement shows: the transcript's slot then renders a pointer to it. A notice with no request
   // read (unreadable, or no longer held) shows nothing to answer, so the transcript keeps its own card.
@@ -234,7 +246,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   }, []);
   const accept = useCallback(() => keys.current.accept?.(), []);
   const decline = useCallback(() => keys.current.decline?.(), []);
-  const live = phase === 'pending' && item.state === 'pending' && !concealed;
+  const live = phase === 'pending' && item.state === 'pending' && !concealed && race.settled === null; // M6: a settled race answers nothing
 
   // Card placement: the focus owner is C5's article (the nearest `tabindex` ancestor), the card root without one.
   const rootRef = useRef<HTMLDivElement>(null);
@@ -265,7 +277,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
     return () => owner.removeEventListener('keydown', onKeyDown);
   }, [live, placement, framed]);
 
-  if (phase === 'closed') return null;
+  if (phase === 'closed' && race.settled === null) return null; // M6: a settlement stays said while its placement shows it
 
   const heading = HEADINGS[item.kind];
   const busy = phase === 'answering';
@@ -273,19 +285,28 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   const { title, subtitle } = titleOf(request, requester);
   const collapsed = phase === 'delivered' || (phase === 'pending' && item.state === 'delivered' && failed === null);
   const hover = placement === 'hover';
-  const canAnswerHover = hover && hoverApproval(item, request) && record?.holder.kind !== 'terminal' && record?.holder.kind !== 'background_job';
+  // P5 O9 M6: by the session's port, which a session held elsewhere has only while its bridge drives it
+  const canAnswerHover = hover && hoverApproval(item, request) && controls !== null
+    && capability({ kind: 'permission', decision: 'allow', scope: 'once' }).available && capability({ kind: 'permission', decision: 'deny' }).available;
   // P2-C start (2026-10-10; M6): a question an agent left or a must-read opens at its mark in the report, and a must-read
   // offers Mark read; neither is answered here (the card in the session answers a question)
   const anchor = ownerAnchorOf(item);
   const openSession = () => (anchor !== null ? openAnchor(item.appSessionId, anchor, (id) => useLayout.getState().openSession(id)) : useLayout.getState().openSession(item.appSessionId));
   // P2-C end
-  const variant = { item, placement, busy: busy || concealed, submit, bindKeys };
+  const variant = { item, placement, busy: busy || concealed, submit, bindKeys, capability };
+  const settled = collapsed ? null : race.settled; // M6: our own delivered answer says itself
 
   let body: ReactNode;
   if (loading) {
     body = (
       <p aria-busy className="m-0 text-fg-faint">
         Loading the request…
+      </p>
+    );
+  } else if (settled !== null) {
+    body = (
+      <p role="status" className="m-0 text-fg-muted">
+        {settledWords(settled)}
       </p>
     );
   } else if (phase === 'not_pending') {
@@ -344,6 +365,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
         <div className="flex flex-col gap-1">
           <h3 className="m-0 text-ui font-semibold">{title}</h3>
           {subtitle && <Muted>{subtitle}</Muted>}
+          {race.asked && settled === null && !collapsed && <Muted>{race.terminalOnly ? RACE.terminal : RACE.asked}</Muted>}
           {hover && <Muted>{[project, record ? displayTitle(record) : null, itemAge(item, now)].filter(Boolean).join(' · ')}</Muted>}
         </div>
       )}

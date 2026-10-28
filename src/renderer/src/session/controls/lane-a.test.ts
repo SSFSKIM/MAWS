@@ -228,4 +228,24 @@ describe('answers', () => {
     expect(await c.answer(asked, { kind: 'permission', decision: 'allow', scope: 'once' })).toEqual({ ok: true, value: { outcome: 'delivered' } });
     expect(fake.invoked('laneA.answer')).toEqual([{ appSessionId: APP, request: 'req-1', answer: { kind: 'permission', decision: 'allow', scope: 'once' } }]);
   });
+
+  // P5 O9 M6: the race (Q3)
+  it('closes every answer past a background request’s window, and when the bridge said the terminal answers it', async () => {
+    const asked = item(APP, 'permission', T0, { request: { requestId: 'req-1' as RequestId, toolUseId: null, taskId: null, agentId: null } });
+    const later = new Date(Date.now() + 60_000).toISOString();
+    const open = port({ pending: [raised({ agentId: 'a1', deadline: later })] }).controls;
+    expect(open.answerCapability(asked, { kind: 'permission', decision: 'allow', scope: 'once' })).toEqual({ available: true });
+    const closedNow = port({ pending: [raised({ agentId: 'a1', deadline: new Date(Date.now() + 100).toISOString() })] }).controls;
+    expect(closedNow.answerCapability(asked, { kind: 'permission', decision: 'deny' })).toEqual({ available: false, reason: 'Answer this in the terminal' });
+    const { controls: told } = port({ pending: [raised()] }, { 'laneA.answer': { outcome: 'not_pending', settled: null, terminalOnly: true, message: 'the terminal answers it' } });
+    expect(await told.answer(asked, { kind: 'permission', decision: 'allow', scope: 'once' })).toEqual({ ok: true, value: { outcome: 'not_pending' } });
+    expect(told.answerCapability(asked, { kind: 'permission', decision: 'allow', scope: 'once' })).toEqual({ available: false, reason: 'Answer this in the terminal' });
+  });
+
+  it('keeps the settlement a late answer was told, so the card says who won', async () => {
+    const asked = item(APP, 'permission', T0, { request: { requestId: 'req-1' as RequestId, toolUseId: null, taskId: null, agentId: null } });
+    const { controls: c } = port({ pending: [raised()] }, { 'laneA.answer': { outcome: 'not_pending', settled: { winner: 'terminal', outcome: 'allow', by: 'terminal' }, message: 'already answered' } });
+    expect(await c.answer(asked, { kind: 'permission', decision: 'allow', scope: 'once' })).toEqual({ ok: true, value: { outcome: 'not_pending' } });
+    expect(useLaneA.getState().told.get(APP)?.get('req-1')).toEqual({ winner: 'terminal', outcome: 'allow', by: 'terminal' });
+  });
 });

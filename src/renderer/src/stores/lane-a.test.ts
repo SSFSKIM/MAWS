@@ -6,7 +6,7 @@ import { fakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address';
 import { laneACatalog, laneAState } from '../lane-a/test-support/lane-a-state';
-import { applyLaneAList, applyLaneAState, connectLaneA, holdPendingSend, dismissPendingSend, resetLaneAStore, useLaneA } from './lane-a';
+import { applyLaneAList, applyLaneAState, connectLaneA, holdPendingSend, dismissPendingSend, noteLaneASettlement, resetLaneAStore, useLaneA } from './lane-a';
 
 const A = at('app-a') as AppSessionId;
 const B = at('app-b') as AppSessionId;
@@ -92,5 +92,19 @@ describe('the pending-send strip', () => {
     holdPendingSend(A, key, 'words');
     applyLaneAState(A, null);
     expect(useLaneA.getState().pendingSends.get(A)?.[0]).toMatchObject({ state: 'unconfirmed' });
+  });
+});
+
+// P5 O9 M6: what a late answer was told of who won, kept while the session is in lane A
+describe('the settlements an answer was told', () => {
+  it('keeps each by its request, and forgets them when the session leaves lane A', () => {
+    applyLaneAState(A, laneAState(A));
+    noteLaneASettlement(A, 'r1', { winner: 'terminal', outcome: 'allow', by: 'terminal' });
+    noteLaneASettlement(A, 'r2', { winner: null, outcome: null, by: null, terminalOnly: true });
+    expect([...(useLaneA.getState().told.get(A) ?? new Map()).keys()]).toEqual(['r1', 'r2']);
+    applyLaneAState(A, laneAState(A, { turn: { running: true, unknown: false } }));
+    expect(useLaneA.getState().told.get(A)?.get('r1')).toEqual({ winner: 'terminal', outcome: 'allow', by: 'terminal' });
+    applyLaneAState(A, null);
+    expect(useLaneA.getState().told.has(A)).toBe(false);
   });
 });

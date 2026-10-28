@@ -73,4 +73,20 @@ describe('the session fold', () => {
     expect(fold.view().catalog).toEqual({ fingerprint: 'fp2' });
     expect(fold.event({ type: 'chunk' })).toBe(false);
   });
+
+  // P5 O9 M6: the digest's activity reads the main loop's latest tool call of its running turn
+  it('follows the main loop’s latest tool call while its turn runs, leaving the state unchanged', () => {
+    const fold = new SessionFold('s');
+    fold.snapshot({ ...snapshot, turns: [] });
+    fold.event({ type: 'turn', phase: 'start', turnId: 't1', agentId: null });
+    expect(fold.mainTool()).toBeNull();
+    expect(fold.event({ type: 'tool', phase: 'call', toolUseId: 'u1', tool: 'Bash', agentId: null, input: { command: 'ls' } })).toBe(false);
+    expect(fold.mainTool()).toEqual({ tool: 'Bash', input: { command: 'ls' }, running: true });
+    fold.event({ type: 'tool', phase: 'call', toolUseId: 'u2', tool: 'Read', agentId: 'a1', input: {} }); // a subagent's
+    expect(fold.mainTool()?.tool).toBe('Bash');
+    fold.event({ type: 'tool', phase: 'result', toolUseId: 'u1', tool: 'Bash', agentId: null });
+    expect(fold.mainTool()).toEqual({ tool: 'Bash', input: { command: 'ls' }, running: false });
+    fold.event({ type: 'turn', phase: 'complete', turnId: 't1', agentId: null });
+    expect(fold.mainTool()).toBeNull();
+  });
 });

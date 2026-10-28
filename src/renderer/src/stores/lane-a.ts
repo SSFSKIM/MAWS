@@ -5,6 +5,9 @@
 // strip: the sends whose fate was not known when `laneA.send` answered (`unconfirmed` in the composer), kept with their
 // text by their delivery key until the state's `deliveries` say they entered, or until the person dismisses them.
 //
+// P5 O9 M6: the settlements this page's answers were told (`laneA.answer`'s `not_pending`), beside those the state carries,
+// so a card whose answer lost the race says who won.
+//
 // M5 lists the local machine only: main's driver serves its own sessions, and a remote machine's lane A states come from
 // O9's remote adapter once a pane watches one (M9). A `laneA.changed` from any machine is applied.
 import type { Job } from 'desk-hub/protocol';
@@ -31,6 +34,16 @@ export interface LaneAStore {
   pendingSends: ReadonlyMap<AppSessionId, readonly PendingSend[]>;
   usage: ReadonlyMap<AppSessionId, LaneAUsage>; // the latest `usage` a watch of this page heard (its snapshot's, then each turn's)
   jobs: ReadonlyMap<AppSessionId, readonly Job[]>; // the latest jobs a watch of this page heard (its snapshot's, then each `subagents`)
+  told: ReadonlyMap<AppSessionId, ReadonlyMap<string, RequestSettlement>>; // M6: settlements an answer of this page was told, by request
+}
+
+// How a request of a bridged session was settled (DX4 `settled`'s words, `winner` 'web' | 'terminal' | 'other'), or that
+// it is the terminal's to answer (`terminalOnly`: a background request past its window). P5 O9 M6.
+export interface RequestSettlement {
+  winner: string | null;
+  outcome: string | null;
+  by: string | null;
+  terminalOnly?: true;
 }
 
 // The bridge's `usage` (DX5, `desk-hub/protocol`'s `Usage`): the context's fill, absent until a response reported it.
@@ -39,7 +52,7 @@ export interface LaneAUsage {
   cost: { usd: number } | null;
 }
 
-const empty = (): LaneAStore => ({ states: new Map(), catalogs: new Map(), pendingSends: new Map(), usage: new Map(), jobs: new Map() });
+const empty = (): LaneAStore => ({ states: new Map(), catalogs: new Map(), pendingSends: new Map(), usage: new Map(), jobs: new Map(), told: new Map() });
 
 export const useLaneA = create<LaneAStore>()(empty);
 
@@ -107,13 +120,15 @@ export function applyLaneAState(appSessionId: AppSessionId, state: LaneAState | 
   useLaneA.setState((s) => {
     const states = new Map(s.states);
     const catalogs = state === null ? new Map(s.catalogs) : s.catalogs;
+    const told = state === null && s.told.has(appSessionId) ? new Map(s.told) : s.told;
     if (state === null) {
       states.delete(appSessionId);
       (catalogs as Map<AppSessionId, LaneACatalog>).delete(appSessionId);
+      (told as Map<AppSessionId, ReadonlyMap<string, RequestSettlement>>).delete(appSessionId);
     } else states.set(appSessionId, state);
     const held = s.pendingSends.get(appSessionId);
     const followed = held ? follow(held, state) : undefined;
-    return { states, catalogs, pendingSends: held && followed !== held ? withPending(s.pendingSends, appSessionId, followed!) : s.pendingSends };
+    return { states, catalogs, told, pendingSends: held && followed !== held ? withPending(s.pendingSends, appSessionId, followed!) : s.pendingSends };
   });
   if (state !== null) readCatalog(appSessionId, state);
 }
@@ -158,6 +173,11 @@ export function laneAJobsWatchEnded(appSessionId: AppSessionId): void {
   });
 }
 export const useLaneAJobs = (appSessionId: AppSessionId): readonly Job[] | null => useLaneA((s) => s.jobs.get(appSessionId) ?? null);
+
+// P5 O9 M6: what an answer was told of its request's settlement (`not_pending`), kept while the session is in lane A.
+export function noteLaneASettlement(appSessionId: AppSessionId, request: string, settlement: RequestSettlement): void {
+  useLaneA.setState((s) => ({ told: new Map(s.told).set(appSessionId, new Map(s.told.get(appSessionId)).set(request, settlement)) }));
+}
 
 export function dismissPendingSend(appSessionId: AppSessionId, key: DeliveryKey): void {
   useLaneA.setState((s) => ({ pendingSends: withPending(s.pendingSends, appSessionId, (s.pendingSends.get(appSessionId) ?? []).filter((p) => !sameKey(p.key, key))) }));

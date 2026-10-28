@@ -14,6 +14,9 @@
 //   changed. The mode and the directories are closed: no bridge op sets them.
 // - The palette lists the bridge's catalog and opens only the widgets a lane A read or op backs (the model selector,
 //   compact, MCP, the side question).
+// - M6: a card's answer is closed with its reason where §D can't carry it, and every answer once the request is the
+//   terminal's alone (a background request past its window, or one the bridge refused as `terminalOnly`); a late
+//   answer keeps the settlement it was told (`noteLaneASettlement`), so the card says who won the race.
 import type { Catalog } from 'desk-hub/protocol';
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { AttentionItem } from '@shared/graph/attention';
@@ -33,7 +36,8 @@ import { watchLaneA } from '../../lane-a/watches';
 import { branchLabel, recordBranch } from '../../sessions/branch-label';
 import { canTakeOver } from '../../sessions/holder-words'; // not record-ops: its imports reach the terminal stack
 import type { SessionCatalog } from '../../stores/catalog';
-import { holdPendingSend, useLaneA } from '../../stores/lane-a';
+import { holdPendingSend, noteLaneASettlement, useLaneA } from '../../stores/lane-a';
+import { pastWindow, RACE } from '../../lane-a/race';
 import { MODE_OPTIONS } from '../../statusline/mode-menu';
 import type { Capability, ControlKey, SessionControls } from './types';
 
@@ -227,6 +231,8 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
     answerCapability: (item: AttentionItem, answer: RequestAnswer) => {
       if (live !== null) return closed(live);
       const raised = stateNow().pending.find((p) => p.request === item.request.requestId) ?? null;
+      const told = item.request.requestId === null ? undefined : useLaneA.getState().told.get(appSessionId)?.get(item.request.requestId);
+      if (told?.terminalOnly === true || (raised !== null && pastWindow(raised, Date.now()))) return closed(RACE.terminal); // M6: the terminal's alone
       return laneAAnswerCapability(raised, answer, state.controls);
     },
     async send(content, options) {
@@ -255,7 +261,14 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
       if (!result.ok) return { ok: false, error: result.error };
       const out = result.value;
       if (out.outcome === 'delivered') return { ok: true, value: { outcome: 'delivered' } };
-      if (out.outcome === 'not_pending') return { ok: true, value: { outcome: 'not_pending' } };
+      if (out.outcome === 'not_pending') {
+        // M6: who won, as the bridge named it, for the card (a background request past its window: the terminal's)
+        const settled = out.settled;
+        if (item.request.requestId !== null && (settled !== null || out.terminalOnly === true)) {
+          noteLaneASettlement(appSessionId, item.request.requestId, { winner: settled?.winner ?? null, outcome: settled?.outcome ?? null, by: settled?.by ?? null, ...(out.terminalOnly === true && { terminalOnly: true }) });
+        }
+        return { ok: true, value: { outcome: 'not_pending' } };
+      }
       return out.outcome === 'refused' ? failed(out.message, { refusal: out.code }) : failed(LANE_A_WORDS.unknownAnswer, { unknown: out.why });
     },
     bindings,

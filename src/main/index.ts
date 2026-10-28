@@ -26,6 +26,7 @@ import { bindLocalMachine } from './machine/local'; // P5 O6 M2
 import { startMachines } from './machines'; // P5 O6 M3: the connection manager, and the stand-in behind its gate
 import { createLaneADriver, registerLaneA } from './lane-a/driver'; // P5 O9 M2: terminal sessions' bridges
 import { sminosHome } from './lane-a/discovery'; // P5 O9 M2
+import { laneAAttention } from './lane-a/attention'; // P5 O9 M6
 import { createStepUp } from './device/step-up'; // P5 O7 M1: the development org session's signer; P5 O8 M1: the production session's
 import { createDevOrgSession } from './org/dev-session'; // P5 O7 M1
 import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2
@@ -439,6 +440,17 @@ function startMain(settings: SettingsService, launch: LaunchShape, { local, loca
     emit: (name, payload) => void emit(name, payload),
   });
   registerLaneA(laneA, registerMainHandler);
+  // P5 O9 M6: each bridged session's pending requests are attention items, and its digest reads its live phase from the
+  // bridge while the bridge is live (today's `foreign` otherwise)
+  const laneAItems = laneAAttention({ set: (appId, entries) => attention.setLaneAItems(appId, entries) });
+  const offLaneAView = laneA.onChange((appId, view) => {
+    laneAItems.update(appId, view);
+    indexSource.setBridged(appId, view?.state.bridge === 'live' ? { running: view.state.turn.running, pending: view.state.pending.length, tool: view.tool } : null);
+  });
+  shutdown.add('lane A attention', () => {
+    offLaneAView();
+    laneAItems.stop();
+  });
   if (index.unavailable === null) {
     for (const record of index.sessions.list({ includeArchived: true })) laneA.observe(record);
     const offLaneA = index.sessions.onChange((record, cause) => (cause === 'removed' ? laneA.forget(record.appId) : laneA.observe(record)));

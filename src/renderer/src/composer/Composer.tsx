@@ -41,6 +41,7 @@ import { heldWords, useSessionControls } from '../session/controls/controls-for'
 import { holderWords } from '../sessions/holder-words'; // P2-A
 import { DictationNotice } from './dictation/MicControl'; // E9
 import { PendingSends } from './PendingSends'; // P5 O9 M5
+import { useSettling } from '../lane-a/race'; // P5 O9 M6
 import { useDockedCards } from './docked/registry';
 import { swapOf } from './docked/swap';
 import { attachmentsOf, emptyDoc, isMultiline, type ComposerDoc } from './editor/doc';
@@ -211,7 +212,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const swap = useMemo(() => swapOf(items, requests), [items, requests]);
   useEffect(() => swap.unread.forEach((item) => void useAttention.getState().loadRequest(client, item)), [swap.unread, client]);
   const card = cards[0] ?? null;
-  const docked = card !== null || swap.item !== null;
+  const settling = useSettling(swap.item); // P5 O9 M6: a request its terminal answered first stays docked, settled, for a moment (Q3)
+  const docked = card !== null || settling !== null;
   const waiting = cards.length - (card ? 1 : 0) + (card && swap.item ? 1 : 0) + swap.waiting;
 
   // ---- focus: the one app-level ⌘L and the docked frame's return go through this -----------------------------------------
@@ -415,8 +417,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
             <>
               {card ? (
                 <div key={`card:${card.id}`}>{card.render()}</div>
-              ) : swap.item ? (
-                <RequestCard key={swap.item.id} item={swap.item} request={requests.get(swap.item.id) ?? null} placement="docked" paneIndex={paneIndex} />
+              ) : settling ? (
+                <RequestCard key={settling.id} item={settling} request={requests.get(settling.id) ?? null} placement="docked" paneIndex={paneIndex} />
               ) : null}
               {waiting > 0 && <p className="m-0 text-ui-sm text-fg-muted">{waiting === 1 ? '1 more waiting' : `${waiting} more waiting`}</p>}
             </>
