@@ -284,12 +284,26 @@ export class Remote {
       // A device answers the endpoint's ping (RL §4.5): a channel left silent for two of them is closed `timeout`, as
       // the run's would be while it waits on something long (a hub deploy's build).
       if ((m as Msg).t === 'ping') this.#pong((m as Msg).at as number);
+      const drop = this.#drops.find((d) => d.match(m as Msg));
+      if (drop !== undefined) return void drop.dropped.push(m as Msg);
       this.inbox.push(m as Msg);
     });
     this.closed = new Promise<string>((resolve) => channel.onClose((reason) => resolve((this.#reason = reason))));
   }
 
   #held: number[] | null = null;
+  readonly #drops: Array<{ match: (m: Msg) => boolean; dropped: Msg[] }> = [];
+
+  /**
+   * Keeps every message `match` holds for from the run, by its content, and records it in `dropped`; every other
+   * message passes, pings included. The relay sees only sealed frames, so a message is told apart here, on the device's
+   * end of the channel, past its seal: to the endpoint, which sent it, the message is lost all the same.
+   */
+  dropIncoming(match: (m: Msg) => boolean): { dropped: Msg[] } {
+    const drop = { match, dropped: [] as Msg[] };
+    this.#drops.push(drop);
+    return drop;
+  }
 
   #pong(at: number): void {
     if (this.#held !== null) this.#held.push(at);

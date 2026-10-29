@@ -553,3 +553,22 @@ describe('the sessions the run started', () => {
     expect(sessions).toEqual(['a', 'b', 'c']);
   });
 });
+
+describe('a lost acknowledgement', () => {
+  it('is the op’s own ack and done kept from the run, by their content: a ping before them still passes and is answered', async () => {
+    const { Remote } = await import('../../deploy/endpoint-remote.ts');
+    let deliver: (m: unknown) => void = () => {};
+    const sent: unknown[] = [];
+    const channel = { onMessage: (f: (m: unknown) => void) => void (deliver = f), onClose: () => {}, send: async (m: unknown) => void sent.push(m) };
+    const remote = new Remote({} as never, channel as never);
+    const lost = remote.dropIncoming((m) => m.opId === 'op-1' && (m.t === 'ack' || m.t === 'done' || m.t === 'result'));
+    deliver({ t: 'ping', at: 5 });
+    deliver({ t: 'ack', opId: 'op-1', state: 'accepted' });
+    deliver({ t: 'ack', opId: 'op-2', state: 'accepted' });
+    deliver({ t: 'done', opId: 'op-1', outcome: { state: 'done' } });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(remote.inbox).toEqual([{ t: 'ping', at: 5 }, { t: 'ack', opId: 'op-2', state: 'accepted' }]);
+    expect(sent).toEqual([{ t: 'pong', at: 5 }]);
+    expect(lost.dropped.map((m) => m.t)).toEqual(['ack', 'done']);
+  });
+});

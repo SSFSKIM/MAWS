@@ -588,31 +588,27 @@ export async function item3(scene: Scene, report: ItemReport): Promise<void> {
     }
   });
   await report.check('3', 'a lost acknowledgement resolves through query, answered only to the member who sent it', async () => {
-    let relay: ReturnType<typeof throughTamper>['relay'] | undefined;
-    const r = await open(scene, scene.owner, 'relayed', {
-      dial: async () => {
-        const spliced = throughTamper(await scene.relay.dial());
-        relay = spliced.relay;
-        return spliced.device;
-      },
-    });
+    const r = await open(scene, scene.owner, 'relayed');
     const text = marker(scene, 'lost-ack');
     const action = send(scene, r, text);
-    relay!.tamper('to-device', 'drop'); // the ack
-    relay!.tamper('to-device', 'drop'); // the done
+    // The op's own ack and outcome kept from the run by their content (a ping or any other frame passes), and the
+    // clause goes on only once the ack was seen and kept.
+    const lost = r.dropIncoming((m) => m.opId === action.opId && (m.t === 'ack' || m.t === 'done' || m.t === 'result'));
     await r.channel.send({ t: 'act', action });
+    await until(() => lost.dropped.some((m) => m.t === 'ack') || null, 'the ack of the act, kept from the run', 30_000, 200);
     await effects(scene, text, 6000);
     r.close();
     const q = await open(scene, scene.owner, 'direct');
     const mine = await q.query(action.opId, action.opCreated, 'sminos');
     q.close();
     if (mine.state !== 'done') throw new Error(`the sender's query answered ${JSON.stringify(mine)}`);
-    if (scene.other === null) return `the sender's query answered done; no second member to ask in this run`;
+    const kept = `the ${lost.dropped.map((m) => String(m.t)).join(' and ')} kept from the run`;
+    if (scene.other === null) return `${kept}; the sender's query answered done; no second member to ask in this run`;
     const t = await open(scene, scene.other, 'direct');
     const theirs = await t.query(action.opId, action.opCreated, 'sminos');
     t.close();
     if (theirs.state !== 'refused' || theirs.outcome !== undefined) throw new Error(`another member's query answered ${JSON.stringify(theirs)}`);
-    return `the sender's query answered done; another member's refused ${String(theirs.reason)}, revealing nothing`;
+    return `${kept}; the sender's query answered done; another member's refused ${String(theirs.reason)}, revealing nothing`;
   });
   await report.check('3', '`not-received` only once the id is tombstoned: the original, released late, is refused', async () => {
     const gate: { hold(on: boolean): void } = { hold: () => {} };
