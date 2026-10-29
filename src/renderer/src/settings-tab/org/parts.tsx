@@ -1,10 +1,9 @@
 // The Org page's shared pieces (P5 O8 M4a, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, *The split*): a
 // group's heading, M1's pairing-code field, fingerprint and refusal line (moved unchanged from OrgSection.tsx), a
 // device's line as People and You draw it, and a sign's outcome in one line. Tokens only, at the Settings rows' weight.
-import { useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { IpcError } from '@shared/ipc/schema';
 import type { OrgRefusal, OrgStatus, OrgView, SignResult } from '@shared/ipc/schema/org';
-import { PRIMARY, SECONDARY } from '../../sessions/ui';
 import { toast } from '../../stores/notices';
 import { ORG } from '../copy';
 import { Chip, INPUT, Setting, TEXT_ACTION } from '../parts';
@@ -122,48 +121,4 @@ export function UnplacedRefusal({ refusal }: { refusal: OrgRefusal | null }) {
 export function refusalText({ code, detail }: OrgRefusal): string {
   if (code === 'not-member') return ORG.refusals['not-member'](detail);
   return detail ? `${ORG.refusals[code]} · ${detail}` : ORG.refusals[code];
-}
-
-/**
- * A sheet's form whose default action can be absent: SheetForm's footer (Cancel, then the default button), with no
- * default button while `submitLabel` is null, as a change the checks refused has nothing to confirm. Enter submits only
- * while `canSubmit`.
- */
-export function ActionForm({
-  submitLabel,
-  canSubmit,
-  onSubmit,
-  cancelLabel,
-  onCancel,
-  extra,
-  children,
-}: {
-  submitLabel: string | null;
-  canSubmit: boolean;
-  onSubmit(): void;
-  cancelLabel: string;
-  onCancel(): void;
-  extra?: ReactNode;
-  children: ReactNode;
-}) {
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    if (submitLabel !== null && canSubmit) onSubmit();
-  };
-  return (
-    <form onSubmit={submit} className="flex flex-col gap-3">
-      {children}
-      <div className="flex items-center justify-end gap-2">
-        {extra}
-        <button type="button" onClick={onCancel} className={SECONDARY}>
-          {cancelLabel}
-        </button>
-        {submitLabel !== null && (
-          <button type="submit" disabled={!canSubmit} className={PRIMARY}>
-            {submitLabel}
-          </button>
-        )}
-      </div>
-    </form>
-  );
 }

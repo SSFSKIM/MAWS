@@ -3,15 +3,16 @@
 // then reads `org.preview`, which composes it on the held head and runs the checks, and shows its lines one by one with
 // the checks' warnings. Sign sends `org.change` with the change as previewed (normalized: `member.add`'s new id) and the
 // digest naming what was shown, so main signs nothing else (`stale`); Touch ID follows in main. A change the checks
-// refuse is named here, with no Sign, and never reaches Touch ID.
+// refuse is named here, with no Sign, and never reaches Touch ID. Once this Mac can't sign (`may`: signed out, or no
+// longer a root), Review and Sign are withdrawn and the sheet says why; a sign already in flight still shows its answer.
 import { useEffect, useState } from 'react';
 import type { OrgChange, PreviewResult, SignResult } from '@shared/ipc/schema/org';
 import { ipc } from '../../ipc/client';
-import { Sheet } from '../../sessions/Sheet';
-import { QUIET } from '../../sessions/ui';
+import { Sheet, SheetForm } from '../../sessions/Sheet';
+import { PRIMARY, QUIET } from '../../sessions/ui';
 import { ORG } from '../copy';
 import { INPUT, Segment } from '../parts';
-import { ActionForm, failed, OutcomeLine, signOutcome, type Outcome } from './parts';
+import { failed, OutcomeLine, signOutcome, type Outcome } from './parts';
 
 type Role = 'admin' | 'member';
 type Stage =
@@ -24,7 +25,7 @@ type Stage =
 // The fields a change takes before it is composed: Add person's email and role, Change email's new email.
 const takesFields = (change: OrgChange): boolean => change.kind === 'member.add' || change.kind === 'member.email';
 
-export function ChangeSheet({ title, change: asked, onClose, onSigned }: { title: string; change: OrgChange; onClose(): void; onSigned(version: number): void }) {
+export function ChangeSheet({ title, change: asked, may, onClose, onSigned }: { title: string; change: OrgChange; may: boolean; onClose(): void; onSigned(version: number): void }) {
   const [change, setChange] = useState<OrgChange>(asked);
   const [stage, setStage] = useState<Stage>(takesFields(asked) ? { at: 'fields' } : { at: 'composing' });
   const composing = stage.at === 'composing';
@@ -76,14 +77,14 @@ export function ChangeSheet({ title, change: asked, onClose, onSigned }: { title
   };
   return (
     <Sheet title={title} width="w-[min(560px,90vw)]" onClose={onClose}>
-      <ActionForm
-        submitLabel={fields ? ORG.review : signable ? ORG.changeConfirm : null}
+      <SheetForm
+        submitLabel={!may ? undefined : fields ? ORG.review : signable ? ORG.changeConfirm : undefined}
+        submitClass={PRIMARY}
         canSubmit={fields ? trimmed(change) !== null : stage.at === 'shown'}
         onSubmit={submit}
         cancelLabel={ORG.cancel}
-        onCancel={onClose}
         extra={
-          takesFields(asked) && !fields && stage.at !== 'signing' ? (
+          may && takesFields(asked) && !fields && stage.at !== 'signing' ? (
             <button type="button" onClick={() => setStage({ at: 'fields' })} className={`mr-auto ${QUIET}`}>
               {ORG.edit}
             </button>
@@ -100,7 +101,8 @@ export function ChangeSheet({ title, change: asked, onClose, onSigned }: { title
           <Refused preview={preview} />
         )}
         {stage.at === 'ended' && <OutcomeLine outcome={stage.outcome} />}
-      </ActionForm>
+        {!may && <p className="m-0 text-ui-sm text-warning">{ORG.readOnly}</p>}
+      </SheetForm>
     </Sheet>
   );
 }

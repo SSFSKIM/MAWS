@@ -46,8 +46,8 @@ export function PeopleGroup({ view, pairing }: { view: OrgView; pairing: OrgPair
         )}
         <OutcomeLine outcome={outcome} />
       </div>
-      {asked !== null && <ChangeSheet title={asked.title} change={asked.change} onClose={() => setAsked(null)} onSigned={(version) => setOutcome({ text: ORG.signed(version), refused: false })} />}
-      {pairOn !== null && <PairSheet member={pairOn.member} pairing={pairing} follow={pairOn.follow} onClose={() => setPairOn(null)} />}
+      {asked !== null && <ChangeSheet title={asked.title} change={asked.change} may={may} onClose={() => setAsked(null)} onSigned={(version) => setOutcome({ text: ORG.signed(version), refused: false })} />}
+      {pairOn !== null && <PairSheet member={pairOn.member} pairing={pairing} follow={pairOn.follow} may={may} onClose={() => setPairOn(null)} />}
     </>
   );
 }

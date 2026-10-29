@@ -9,14 +9,20 @@
 // ended, or whose device changed, before it (`stale`); the person's own cancel at Touch ID says nothing and leaves
 // Approve. Closing the sheet while the pairing runs cancels it, since its code can't be shown again. Reopened on a
 // running pairing (`follow`), the sheet takes it up without the code.
+//
+// An approval's answer shows below whatever the pairing's status says, since main publishes the pairing's end (an expiry,
+// a cancel) before it answers. Beside Approve, and while an approval is pending, the sheet says what a cancel no longer
+// withdraws once the signed state is kept, and that Discard is the way back. Once this Mac can't sign (`may`), Make a
+// code, Approve and Start over are withdrawn and the sheet says why; an approval already in flight still shows its answer.
 import { useState } from 'react';
 import { formatClock } from '@shared/app/date-format';
 import type { OrgPairingStatus, PairStartResult, SignResult } from '@shared/ipc/schema/org';
 import { ipc } from '../../ipc/client';
-import { Sheet } from '../../sessions/Sheet';
+import { Sheet, SheetForm } from '../../sessions/Sheet';
+import { PRIMARY } from '../../sessions/ui';
 import { ORG } from '../copy';
 import { Segment, TEXT_ACTION } from '../parts';
-import { ActionForm, failed, OutcomeLine, type Member, type Outcome } from './parts';
+import { failed, OutcomeLine, type Member, type Outcome } from './parts';
 
 type DeviceClass = 'native-mac' | 'web-cards';
 type Refused = Extract<PairStartResult, { ok: false }>;
@@ -28,7 +34,7 @@ function approveOutcome(result: SignResult): Outcome {
   return { text: [ORG.notApproved, ORG.signReasons[result.reason], result.detail].filter((part) => part !== undefined && part !== '').join(' · '), refused: true };
 }
 
-export function PairSheet({ member, pairing, follow, onClose }: { member: Member; pairing: OrgPairingStatus; follow: number | null; onClose(): void }) {
+export function PairSheet({ member, pairing, follow, may, onClose }: { member: Member; pairing: OrgPairingStatus; follow: number | null; may: boolean; onClose(): void }) {
   const [kind, setKind] = useState<DeviceClass>('native-mac');
   // The pairing this sheet follows is the first of this member's with a generation above `since`; null before a start.
   const [since, setSince] = useState<number | null>(follow === null ? null : follow - 1);
@@ -100,18 +106,20 @@ export function PairSheet({ member, pairing, follow, onClose }: { member: Member
 
   const choosing = since === null && approved === null;
   const problem = ours?.problem ?? null; // why the followed pairing ended
+  // Without the right to sign (signed out, or no longer a root), nothing here starts or approves: only Cancel pairing,
+  // Close and Done stay, and an approval already in flight still shows its answer.
   const form = choosing
-    ? { submit: ORG.makeCode, can: !starting, act: start, cancel: ORG.cancel }
+    ? { submit: may ? ORG.makeCode : undefined, can: !starting, act: start, cancel: ORG.cancel }
     : approved !== null
       ? { submit: ORG.done, can: true, act: onClose, cancel: ORG.close }
       : problem !== null || gone
-        ? { submit: ORG.startOver, can: true, act: startOver, cancel: ORG.close }
-        : { submit: ORG.approve, can: ours?.entry != null && !approving, act: approve, cancel: ORG.cancelPairing };
+        ? { submit: may ? ORG.startOver : undefined, can: !approving, act: startOver, cancel: ORG.close }
+        : { submit: may ? ORG.approve : undefined, can: ours?.entry != null && !approving, act: approve, cancel: ORG.cancelPairing };
   const expires = code?.expires ?? ours?.expires ?? null;
 
   return (
     <Sheet title={ORG.pairTitle(member.email, member.you)} width="w-[min(520px,90vw)]" onClose={close}>
-      <ActionForm submitLabel={form.submit} canSubmit={form.can} onSubmit={form.act} cancelLabel={form.cancel} onCancel={close}>
+      <SheetForm submitLabel={form.submit} submitClass={PRIMARY} canSubmit={form.can} onSubmit={form.act} cancelLabel={form.cancel}>
         <div className="flex flex-col gap-2 text-ui-sm leading-normal">
           {choosing ? (
             <>
@@ -149,7 +157,6 @@ export function PairSheet({ member, pairing, follow, onClose }: { member: Member
               <span className="font-mono text-prose font-semibold tracking-wide text-fg select-all">{ours.entry.fingerprint}</span>
               <p className="m-0 text-fg-muted">{ORG.pairEntry(ours.entry.id.slice(0, 8), ORG.classes[ours.entry.class], ours.entry.keyStorage)}</p>
               <p className="m-0 text-fg">{ORG.pairCompare}</p>
-              <OutcomeLine outcome={outcome} />
             </>
           ) : (
             <>
@@ -171,8 +178,13 @@ export function PairSheet({ member, pairing, follow, onClose }: { member: Member
               <p className="m-0 text-fg-muted">{ORG.pairWaiting}</p>
             </>
           )}
+          {/* What a cancel can't withdraw once signed: beside Approve, and while an approval is pending however the pairing stands */}
+          {approved === null && (approving || (ours?.entry != null && problem === null)) && <p className="m-0 text-fg-muted">{ORG.pairDurable}</p>}
+          {/* An approval's answer, whatever main has published of the pairing's end meanwhile (an expiry, a cancel) */}
+          <OutcomeLine outcome={outcome} />
+          {!may && approved === null && <p className="m-0 text-warning">{ORG.readOnly}</p>}
         </div>
-      </ActionForm>
+      </SheetForm>
     </Sheet>
   );
 }

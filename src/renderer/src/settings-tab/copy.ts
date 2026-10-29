@@ -566,6 +566,8 @@ export const ORG = {
   pairEntry: (device: string, cls: string, storage: string) => `Device ${device} · ${cls} · ${storage} keys`,
   pairCompare: 'Compare it with the new device’s screen. Approve only if the two match.',
   approve: 'Approve…',
+  // Beside the approval (M4a's "Once the slot is written the proposal is durable"): what a cancel no longer withdraws.
+  pairDurable: 'Once Touch ID is given and the signed state is kept, cancelling no longer withdraws it: it settles like any pending state, and Discard (Org › Pending) is the way back.',
   approved: (version: number) => `Paired. Signed version ${version}.`,
   pairProblems: {
     'two-entries': 'Two devices answered this code. Start over.',

@@ -232,6 +232,7 @@ function SignerLines({ signer, status }: { signer: Signer; status: Registered })
         <ChangeSheet
           title={ORG.changeTitles['device.remove'](status.member.email)}
           change={{ kind: 'device.remove', member: status.member.id, device: removing }}
+          may={signer.maySign}
           onClose={() => setRemoving(null)}
           onSigned={(version) => setOutcome({ text: ORG.signed(version), refused: false })}
         />

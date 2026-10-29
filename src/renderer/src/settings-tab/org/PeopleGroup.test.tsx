@@ -1,10 +1,12 @@
 // P5 O8 M4a: the Org page's People group (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M4a's "At its end",
 // "The rule the page states" and "Read-only, and refusals"): each member with email, role and devices, the roots marked;
 // while this Mac may sign, the changes it offers, never one that refuses for yourself; read-only otherwise, with the
-// roots' emails; and the later-device rule in place of Pair a device.
-import { screen, within } from '@testing-library/react';
+// roots' emails; and the later-device rule in place of Pair a device. A sheet open when this Mac loses the right to sign
+// withdraws what would sign, and an operation already in flight keeps its answer in view.
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
-import { ANA_MAC, BEN_WEB, DEVICE, MY_OTHER_MAC, ROOT, VIEW, emit, found, group, renderSection, resetHarness, row, signing, viewWith } from './test-support';
+import type { OrgChange, OrgPairingStatus, OrgStatus, PairStartResult, PreviewResult, SignResult } from '@shared/ipc/schema/org';
+import { ANA_MAC, BEN, BEN_WEB, DEVICE, ME, MY_OTHER_MAC, ROOT, VIEW, emit, found, group, renderSection, resetHarness, row, sent, signing, viewWith } from './test-support';
 
 vi.hoisted(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -83,5 +85,89 @@ describe('Settings › Org: People (M4a)', () => {
     renderSection(signing(ROOT), { 'org.view': () => anaRoot });
     expect(await within(await found('Ana')).findByText('They pair their next device from their own Org page.')).toBeTruthy();
     expect(within(row('Ana')).queryByRole('button', { name: 'Pair a device…' })).toBeNull();
+  });
+});
+
+describe('Settings › Org: People when this Mac stops being able to sign (M4a)', () => {
+  const ROLE: OrgChange = { kind: 'member.role', member: BEN, role: 'admin' };
+  const previewed = (): PreviewResult => ({ ok: true, change: ROLE, lines: ['Make ben@example.com an admin'], warnings: [], digest: 'digest-role' });
+  const PAIR_CODE = 'smns-pair-v1.eyJodWIiOiJodHRwczovL2h1YiJ9-made-for-the-new-device';
+  const started: PairStartResult = { ok: true, code: PAIR_CODE, expires: '2026-10-28T12:10:00.000Z' };
+  const ENTRY = { id: 'NewMacQ9xYc0dE000001', class: 'native-mac' as const, keyStorage: 'software', fingerprint: 'n3wdv-77777', digest: 'candidateDigest0001' };
+  const pairing = (patch: Partial<NonNullable<OrgPairingStatus>> = {}): OrgPairingStatus => ({ generation: 1, member: ME, class: 'native-mac', expires: '2026-10-28T12:10:00.000Z', entry: null, problem: null, ...patch });
+  // Each way this Mac loses the right to sign while a sheet is open: signed out, or a head that leaves it no root.
+  const losses: [string, OrgStatus][] = [
+    ['signed out', signing(ROOT, { session: 'signed-out' })],
+    ['no longer a root', signing({ root: false, maySign: false })],
+  ];
+
+  for (const [how, lost] of losses) {
+    it(`an open change sheet withdraws Sign once this Mac is ${how}, and says why`, async () => {
+      renderSection(signing(ROOT), { 'org.preview': previewed });
+      await group('people');
+      fireEvent.click(await within(row('Ben')).findByRole('button', { name: 'Make admin…' }));
+      const sheet = await screen.findByRole('dialog', { name: 'Make ben@example.com an admin?' });
+      await within(sheet).findByRole('button', { name: 'Sign' });
+      emit(lost);
+      await vi.waitFor(() => expect(within(sheet).queryByRole('button', { name: 'Sign' })).toBeNull());
+      expect(within(sheet).getByText('Only a root signs org changes.')).toBeTruthy();
+      expect(within(sheet).getByText('Make ben@example.com an admin')).toBeTruthy(); // what was shown stays readable
+      fireEvent.submit(sheet.querySelector('form')!); // Enter signs nothing either
+      expect(sent('org.change')).toEqual([]);
+    });
+
+    it(`an open pairing sheet withdraws Make a code and Approve once this Mac is ${how}; Cancel pairing stays`, async () => {
+      renderSection(signing(ROOT), { 'org.pair.start': () => started });
+      await group('people');
+      fireEvent.click(await within(row('Owner')).findByRole('button', { name: 'Pair a device…' }));
+      let sheet = await screen.findByRole('dialog', { name: 'Pair a device of yours' });
+      emit({ ...lost });
+      await vi.waitFor(() => expect(within(sheet).queryByRole('button', { name: 'Make a code' })).toBeNull());
+      expect(within(sheet).getByText('Only a root signs org changes.')).toBeTruthy();
+
+      // a pairing under way whose device answered: no Approve, but the way to end it
+      resetHarness();
+      renderSection(signing(ROOT), { 'org.pair.start': () => started });
+      await group('people');
+      fireEvent.click(await within(row('Owner')).findByRole('button', { name: 'Pair a device…' }));
+      sheet = await screen.findByRole('dialog', { name: 'Pair a device of yours' });
+      fireEvent.click(within(sheet).getByRole('button', { name: 'Make a code' }));
+      emit(signing(ROOT, { pairing: pairing({ entry: ENTRY }) }));
+      await within(sheet).findByRole('button', { name: 'Approve…' });
+      emit({ ...lost, pairing: pairing({ entry: ENTRY }) } as OrgStatus);
+      await vi.waitFor(() => expect(within(sheet).queryByRole('button', { name: 'Approve…' })).toBeNull());
+      expect(within(sheet).getByText('Only a root signs org changes.')).toBeTruthy();
+      fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel pairing' }));
+      await vi.waitFor(() => expect(sent('org.pair.cancel')).toEqual([undefined]));
+      expect(sent('org.pair.approve')).toEqual([]);
+    });
+  }
+
+  it('a sign or an approval in flight when this Mac stops being able to sign keeps its answer in view', async () => {
+    let signed: (result: SignResult) => void = () => {};
+    renderSection(signing(ROOT), { 'org.preview': previewed, 'org.change': () => new Promise<SignResult>((resolve) => (signed = resolve)) });
+    await group('people');
+    fireEvent.click(await within(row('Ben')).findByRole('button', { name: 'Make admin…' }));
+    let sheet = await screen.findByRole('dialog', { name: 'Make ben@example.com an admin?' });
+    fireEvent.click(await within(sheet).findByRole('button', { name: 'Sign' }));
+    await vi.waitFor(() => expect(sent('org.change')).toHaveLength(1));
+    emit(signing(ROOT, { session: 'signed-out' }));
+    await vi.waitFor(() => expect(within(sheet).getByText('Only a root signs org changes.')).toBeTruthy());
+    await act(async () => signed({ ok: false, reason: 'not-root', detail: 'signed out while Touch ID was open' }));
+    expect(await within(sheet).findByText('Not signed · This Mac isn’t a root of the org. · signed out while Touch ID was open')).toBeTruthy();
+
+    resetHarness();
+    let approved: (result: SignResult) => void = () => {};
+    renderSection(signing(ROOT), { 'org.pair.start': () => started, 'org.pair.approve': () => new Promise<SignResult>((resolve) => (approved = resolve)) });
+    await group('people');
+    fireEvent.click(await within(row('Owner')).findByRole('button', { name: 'Pair a device…' }));
+    sheet = await screen.findByRole('dialog', { name: 'Pair a device of yours' });
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Make a code' }));
+    emit(signing(ROOT, { pairing: pairing({ entry: ENTRY }) }));
+    fireEvent.click(await within(sheet).findByRole('button', { name: 'Approve…' }));
+    await vi.waitFor(() => expect(sent('org.pair.approve')).toHaveLength(1));
+    emit(signing({ root: false, maySign: false }, { pairing: null }));
+    await act(async () => approved({ ok: true, version: 13 }));
+    expect(await within(sheet).findByText('Paired. Signed version 13.')).toBeTruthy();
   });
 });

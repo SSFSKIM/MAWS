@@ -2,7 +2,7 @@
 // and *Pairing*): the code shown once, here only, with Copy; then the frozen candidate's fingerprint to compare; then
 // the approval naming `{generation, digest}`. An approval's end keeps apart a pairing that ended while Touch ID was open
 // (`cancelled`, with why) from one that ended before it (`stale`); a person's own Touch ID cancel says nothing.
-import { fireEvent, screen, within } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import type { OrgPairingStatus, PairStartResult, SignResult } from '@shared/ipc/schema/org';
 import { CAT, ME, ROOT, emit, group, renderSection, resetHarness, row, sent, signing } from './test-support';
@@ -27,6 +27,11 @@ const started: PairStartResult = { ok: true, code: PAIR_CODE, expires: EXPIRES }
 // main's words for an edit whose pairing ended (signer.ts): during Touch ID they come with `cancelled`, before it with `stale`
 const ENDED_DURING = 'the change ended (a pairing cancelled or expired): nothing was signed';
 const ENDED_BEFORE = 'the pairing ended (cancelled, expired or refused): nothing was signed';
+// the sheet's words for each: kept apart
+const DURING = 'The pairing ended while Touch ID was open. Nothing was signed.';
+const BEFORE = 'The pairing ended, or its device changed, before Touch ID. Nothing was signed.';
+// what a cancel can no longer withdraw (the spec's "Once the slot is written the proposal is durable")
+const DURABLE = 'Once Touch ID is given and the signed state is kept, cancelling no longer withdraws it: it settles like any pending state, and Discard (Org › Pending) is the way back.';
 
 async function openPair(member: string) {
   await group('people');
@@ -63,6 +68,7 @@ describe('Settings › Org: the pairing sheet (M4a)', () => {
     expect(within(sheet).getByText('n3wdv-77777').className).toContain('font-mono');
     expect(within(sheet).getByText('Compare it with the new device’s screen. Approve only if the two match.')).toBeTruthy();
     expect(within(sheet).getByText(`Device ${ENTRY.id.slice(0, 8)} · Mac · software keys`)).toBeTruthy();
+    expect(within(sheet).getByText(DURABLE)).toBeTruthy(); // beside the approval: what a cancel can't withdraw once signed
     expect(document.body.innerHTML).not.toContain(PAIR_CODE);
     fireEvent.click(within(sheet).getByRole('button', { name: 'Approve…' }));
     await vi.waitFor(() => expect(sent('org.pair.approve')).toEqual([{ generation: 1, digest: ENTRY.digest }]));
@@ -85,9 +91,10 @@ describe('Settings › Org: the pairing sheet (M4a)', () => {
     await vi.waitFor(() => expect(sent('org.pair.start')).toEqual([{ member: CAT, class: 'web-cards' }]));
   });
 
-  it('an approval whose pairing ended during Touch ID reads apart from one that ended before it; a Touch ID cancel says nothing', async () => {
-    let answer: SignResult = { ok: false, reason: 'cancelled' };
-    renderSection(signing(ROOT), { 'org.pair.start': () => started, 'org.pair.approve': () => answer });
+  it('an approval whose pairing ended during Touch ID reads apart from one that ended before it, after main has ended the pairing; a Touch ID cancel says nothing', async () => {
+    // Each approval is held open, as Touch ID holds it; main publishes the pairing's end before it answers (pairing.ts).
+    let settle: (result: SignResult) => void = () => {};
+    renderSection(signing(ROOT), { 'org.pair.start': () => started, 'org.pair.approve': () => new Promise<SignResult>((resolve) => (settle = resolve)) });
     const sheet = await openPair('Owner');
     fireEvent.click(within(sheet).getByRole('button', { name: 'Make a code' }));
     emit(signing(ROOT, { pairing: pairing({ generation: 2, entry: ENTRY }) }));
@@ -96,22 +103,44 @@ describe('Settings › Org: the pairing sheet (M4a)', () => {
     // the person's own cancel at Touch ID: no line, and Approve stays for another try
     fireEvent.click(approve);
     await vi.waitFor(() => expect(sent('org.pair.approve')).toEqual([{ generation: 2, digest: ENTRY.digest }]));
+    await act(async () => settle({ ok: false, reason: 'cancelled' }));
     await vi.waitFor(() => expect(approve.disabled).toBe(false));
-    expect(within(sheet).queryByRole('alert')).toBeNull();
+    expect(within(sheet).queryByText(DURING)).toBeNull();
+    expect(within(sheet).queryByText(new RegExp(BEFORE))).toBeNull();
 
-    // ended while Touch ID was open
-    answer = { ok: false, reason: 'cancelled', detail: ENDED_DURING };
+    // the code expires while Touch ID is open: main ends the pairing, then answers `cancelled` with why
     fireEvent.click(approve);
-    const during = (await within(sheet).findByRole('alert')).textContent;
-    expect(during).toBe('The pairing ended while Touch ID was open. Nothing was signed.');
+    await vi.waitFor(() => expect(sent('org.pair.approve')).toHaveLength(2));
+    emit(signing(ROOT, { pairing: pairing({ generation: 2, entry: ENTRY, problem: 'expired' }) }));
+    expect(within(sheet).getByText('The code expired. Start over.')).toBeTruthy();
+    expect(within(sheet).getByText(DURABLE)).toBeTruthy(); // said while the approval is pending, the pairing ended or not
+    await act(async () => settle({ ok: false, reason: 'cancelled', detail: ENDED_DURING }));
+    expect(await within(sheet).findByText(DURING)).toBeTruthy();
+    expect(within(sheet).getByText('The code expired. Start over.')).toBeTruthy();
+    expect(within(sheet).queryByText(new RegExp(BEFORE))).toBeNull();
 
-    // ended before Touch ID
-    answer = { ok: false, reason: 'stale', detail: ENDED_BEFORE };
-    emit(signing(ROOT, { pairing: pairing({ generation: 2, entry: ENTRY }) }));
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Approve…' }));
+    // a new pairing whose code expires before Touch ID: main ends it, then answers `stale`
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Start over' }));
+    fireEvent.click(await within(sheet).findByRole('button', { name: 'Make a code' }));
+    emit(signing(ROOT, { pairing: pairing({ generation: 3, entry: ENTRY }) }));
+    fireEvent.click(await within(sheet).findByRole('button', { name: 'Approve…' }));
     await vi.waitFor(() => expect(sent('org.pair.approve')).toHaveLength(3));
-    await vi.waitFor(() => expect(within(sheet).getByRole('alert').textContent).toBe(`The pairing ended, or its device changed, before Touch ID. Nothing was signed. · ${ENDED_BEFORE}`));
-    expect(within(sheet).getByRole('alert').textContent).not.toBe(during);
+    emit(signing(ROOT, { pairing: pairing({ generation: 3, entry: ENTRY, problem: 'expired' }) }));
+    await act(async () => settle({ ok: false, reason: 'stale', detail: ENDED_BEFORE }));
+    expect(await within(sheet).findByText(`${BEFORE} · ${ENDED_BEFORE}`)).toBeTruthy();
+    expect(within(sheet).queryByText(DURING)).toBeNull();
+
+    // a pairing cancelled elsewhere during Touch ID: main clears it, then answers `cancelled` with why
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Start over' }));
+    fireEvent.click(await within(sheet).findByRole('button', { name: 'Make a code' }));
+    emit(signing(ROOT, { pairing: pairing({ generation: 4, entry: ENTRY }) }));
+    fireEvent.click(await within(sheet).findByRole('button', { name: 'Approve…' }));
+    await vi.waitFor(() => expect(sent('org.pair.approve')).toHaveLength(4));
+    emit(signing(ROOT, { pairing: null }));
+    expect(within(sheet).getByText('This pairing is no longer running.')).toBeTruthy();
+    await act(async () => settle({ ok: false, reason: 'cancelled', detail: ENDED_DURING }));
+    expect(await within(sheet).findByText(DURING)).toBeTruthy();
+    expect(within(sheet).queryByText(new RegExp(BEFORE))).toBeNull();
   });
 
   it('a pairing that ends shows why, and Start over makes a new code', async () => {
