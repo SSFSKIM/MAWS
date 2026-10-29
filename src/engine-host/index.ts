@@ -107,7 +107,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
   const designs = registerDesigns({ documents, chain: designSystems.chain, refresh: library.refresh }); // P3-E (E1's M2): the design's adapter (its legacy migration among its hooks) and its mirror writer, kept fresh under its governing system
   const googleFaces = registerGoogleFaces({ documents }); // P4-B2 D19: a deck's or a design's named Google Fonts face fetched once into its assets (OFL only), under the host's egress rule
   let connectors: { close(): void; closeDirect(): Promise<void> } | null = null; // P3-H H3b: below, over the process table
-  const idle = idleCollector({ log: (line) => console.log(`[supervisor] ${line}`) }); // P5 Decision Log 124's lever: a collection at each entry into Supervision's quiet
+  const idle = idleCollector({ log: (line) => console.log(`[supervisor] ${line}`), quiet: () => supervision?.quiet() ?? false }); // P5 Decision Log 124's lever: a collection at each entry into Supervision's quiet, asked again as it collects
   // C3 start
   ipc = registerEngineIpc(on, emit, {
     afterShutdown: () => {

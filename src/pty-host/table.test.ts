@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EventName, EventPayload, PtyId } from '@shared/ipc/schema';
+import { GROWTH_BYTES, idleCollector } from '@shared/host/idle-collect';
 import { PROFILE_VARIABLE, writeScratchShellHome } from '../../test/support/shell-home';
 import { terminalEnvironment } from './env';
 import { runProbe } from './foreground';
@@ -432,6 +433,27 @@ describe('pty host coalesces reads into fewer events', () => {
     await table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'read line'] }));
     await table.shutdown();
     expect(told).toEqual(['live 1', 'shutdown', 'live 0']);
+  });
+
+  // P5 Decision Log 124: the collection asks the table's quiet again as it runs. One row per source it reads that can turn
+  // busy after an entry, pending as a queued collection runs: a source added with no row is one the collection cannot see.
+  const pending: [string, (table: PtyTable) => Promise<unknown>][] = [
+    ['a live pty', (table) => table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'read line'] }))],
+    ['a shutdown begun', (table) => table.shutdown()],
+  ];
+
+  it.each(pending)('%s, pending as the collection runs, holds it off', async (_, pend) => {
+    const deferred: (() => void)[] = [];
+    const collect = vi.fn();
+    let grown = 0;
+    const collector = idleCollector({ log: () => {}, collect, heap: () => ({ used: (grown += 2) * GROWTH_BYTES, physical: grown * GROWTH_BYTES }), defer: (run) => void deferred.push(run), quiet: () => table.quiet() });
+    const table = createPtyTable({ emit: () => true, environment: Promise.resolve(terminalEnvironment(BASE_ENV, { appVersion: '0' })) });
+    tables.push(table);
+    collector.set(table.quiet()); // its start's entry, queued
+    await pend(table);
+    deferred.splice(0).forEach((run) => run());
+    expect(table.quiet()).toBe(false);
+    expect(collect).not.toHaveBeenCalled();
   });
 
   it('answers attach with every byte it has read: nextOffset covers what is still waiting to be flushed', async () => {

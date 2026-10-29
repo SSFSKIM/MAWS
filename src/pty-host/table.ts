@@ -85,6 +85,7 @@ export interface PtyTable {
   foreground(input: CommandInput<'pty.foreground'>): Promise<CommandOutput<'pty.foreground'>>;
   shutdown(): Promise<void>; // P5 O2 M4: every live pty killed, each through its ladder; resolves once all have settled
   setEnvironment(next: Promise<Record<string, string>>): void; // P5 O2 M4: the spawns after it resolves start with it
+  quiet(): boolean; // no live pty and no shutdown begun, as the table stands now (P5 Decision Log 124's quiet)
   // tests: the flow state, the ring's oldest offset, and node-pty's reads and bytes read (flushed or pending)
   inspect(ptyId: string): { flow: Flow; ringStart: number; reads: number; read: number };
 }
@@ -296,6 +297,10 @@ export function createPtyTable({ emit, environment: initial, onLive, onShutdown 
       const live = [...entries.values()].filter((entry) => entry.info.alive);
       const ended = await Promise.allSettled(live.map((entry) => end(entry.info.ptyId, entry, 'SIGHUP')));
       for (const [i, result] of ended.entries()) if (result.status === 'rejected') console.error(`[pty-host] ${live[i]!.info.ptyId} did not end at shutdown`, result.reason);
+    },
+
+    quiet() {
+      return !closing && [...entries.values()].every((entry) => !entry.info.alive);
     },
 
     setEnvironment(next) {

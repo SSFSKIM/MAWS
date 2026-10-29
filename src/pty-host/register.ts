@@ -9,8 +9,9 @@
 //
 // Quiet (P5 Decision Log 124's idle collection, @shared/host/idle-collect.ts): no live pty, the one fact of its own the
 // pty host has (its client, `mawsd` or main, stays connected through an app's absence). So it collects once after its
-// start and each time its last terminal exits; terminals left running with no app are a quiet it cannot see. Its
-// shutdown's kills are not an exit into quiet: the collector stops as the shutdown begins.
+// start and each time its last terminal exits; terminals left running with no app are a quiet it cannot see. The table
+// answers it again at the moment of collecting. Its shutdown's kills are not an exit into quiet: the collector stops as
+// the shutdown begins.
 import { idleCollector } from '@shared/host/idle-collect';
 import { hostPing, type HostRegister } from '@shared/host/runtime';
 import { captureShellEnvironment, invalidateShellEnvironment } from '@shared/host/shell-env';
@@ -32,11 +33,11 @@ export function ptyHostRegister({ hostVersion, capture = captureShellEnvironment
   let table: PtyTable | null = null;
   const environment = () => baseEnvironment(capture).then((base) => terminalEnvironment(base, { appVersion: hostVersion, launcher }));
   const register: HostRegister = (on, emit) => {
-    const idle = idleCollector({ log: (line) => console.warn(`[pty-host] ${line}`) });
+    const idle = idleCollector({ log: (line) => console.warn(`[pty-host] ${line}`), quiet: () => ptys.quiet() });
     const start = environment();
-    const ptys = createPtyTable({ emit, environment: start, onLive: (live) => idle.set(live === 0), onShutdown: () => idle.stop() });
+    const ptys = createPtyTable({ emit, environment: start, onLive: () => idle.set(ptys.quiet()), onShutdown: () => idle.stop() });
     // the start's entry, once its login-shell capture is behind it (no pty can live before: a spawn waits on it)
-    void start.catch(() => {}).then(() => idle.set(ptys.list().ptys.every((pty) => !pty.alive)));
+    void start.catch(() => {}).then(() => idle.set(ptys.quiet()));
     table = ptys;
     on('pty.ping', async () => hostPing(hostVersion));
     on('pty.spawn', (input) => ptys.spawn(input));

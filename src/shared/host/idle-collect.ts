@@ -8,6 +8,12 @@
 // GROWTH_BYTES of what the last collection left collects nothing, so a client that comes and goes costs nothing after
 // the first. Garbage neither size shows (a session released while the process stays idle, whose objects die without
 // the heap growing) is the caller's to name: `dropped` collects past the guard.
+//
+// A collection is synchronous (12 to 28 ms), so it must never land on work. The entry's telling can come late: a source
+// can begin work before it tells (a send marks its use before its queue changes, and tells that only once its save
+// settles). So the moment of collecting asks the process's own predicate again, over its live state, and a process it
+// finds busy is not idle: the collection waits for the next entry, a dropped holding still owed. A late signal can only
+// delay a collection, never land one on work.
 import { getHeapStatistics, setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 
@@ -49,6 +55,9 @@ export interface HeapSize {
 
 export interface IdleCollectorOptions {
   log(line: string): void;
+  // The process's quiet as its live state reads now, asked at the moment of collecting: the same facts its caller tells
+  // through `set`, read from their sources (not from what was last told)
+  quiet(): boolean;
   // test seams
   collect?: Collect; // lastResortCollect
   heap?(): HeapSize; // getHeapStatistics()
@@ -57,7 +66,10 @@ export interface IdleCollectorOptions {
 }
 
 export interface IdleCollector {
-  /** The process's idle as its facts stand now. An entry (from busy, or from never told) collects once. */
+  /**
+   * The process's idle as its facts stand now, told at each reading of them (not only at a change). An entry (from busy,
+   * from never told, or from a collection that found it busy) collects once.
+   */
   set(idle: boolean): void;
   /** A holding was dropped while idle (a session released, a process ended): its garbage is collected, past the guard. */
   dropped(): void;
@@ -84,6 +96,10 @@ export function idleCollector(options: IdleCollectorOptions): IdleCollector {
   const run = () => {
     deferred = false;
     if (stopped || idle !== true) return; // exiting, or busy again before the loop turned
+    if (!options.quiet()) {
+      idle = false; // busy by its live state, told or not yet: the next reading that finds it quiet is an entry
+      return;
+    }
     const before = heap();
     if (!forced && !grown(before)) return;
     const started = now();

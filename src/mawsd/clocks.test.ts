@@ -1,6 +1,7 @@
 // `mawsd`'s clocks (P5 O2 M5, "The clocks"), on vitest's fake timers: the engine host's park clock, a private
 // daemon's own idle exit, and its quiet (P5 Decision Log 124's idle collection).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { GROWTH_BYTES, idleCollector } from '@shared/host/idle-collect';
 import { DaemonClocks, DEFAULT_IDLE_EXIT_MS } from './clocks';
 
 const MIN = 60_000;
@@ -160,9 +161,10 @@ describe('a private daemon’s idle exit', () => {
 });
 
 describe('the daemon’s quiet', () => {
-  const told = () => actions.quiet.mock.calls.map(([quiet]) => quiet);
+  // its changes as told (it is told at every evaluation)
+  const told = () => actions.quiet.mock.calls.map(([quiet]) => quiet).filter((quiet, i, all) => i === 0 || quiet !== all[i - 1]);
 
-  it('is told from the start’s end on, and then only when it changes', () => {
+  it('is told from the start’s end on, at each evaluation, and changes only with its own facts', () => {
     const c = clocks();
     c.clients(0);
     c.hosts({ engine: true, pty: true });
@@ -188,11 +190,44 @@ describe('the daemon’s quiet', () => {
     expect(told()).toEqual([true, false, true, false, true]);
   });
 
+  it('holds while an app is between a relay’s socket and the count: a hello admitted, a departure drained', () => {
+    const c = clocks();
+    c.served();
+    c.relaysBetween(true);
+    c.relaysBetween(false);
+    expect(told()).toEqual([true, false, true]);
+    expect(c.quiet()).toBe(true);
+  });
+
   it('is told nothing once stopped', () => {
     const c = clocks();
     c.served();
     c.stop();
     c.clients(1);
     expect(told()).toEqual([true]);
+    expect(c.quiet()).toBe(false);
+  });
+
+  // P5 Decision Log 124: the collection asks the clocks' quiet again as it runs. One row per source it reads that can turn
+  // busy after an entry, pending as a queued collection runs: a source added with no row is one the collection cannot see.
+  const pending: [string, (c: DaemonClocks) => void][] = [
+    ['a client on a socket', (c) => c.clients(1)],
+    ['an app between a relay’s socket and the count', (c) => c.relaysBetween(true)],
+    ['interest in a session', (c) => c.interest(false)],
+    ['a hold out', (c) => c.holds(1)],
+  ];
+
+  it.each(pending)('%s, pending as the collection runs, holds it off', (_, pend) => {
+    const deferred: (() => void)[] = [];
+    const collect = vi.fn();
+    let grown = 0;
+    const collector = idleCollector({ log: () => {}, collect, heap: () => ({ used: (grown += 2) * GROWTH_BYTES, physical: grown * GROWTH_BYTES }), defer: (run) => void deferred.push(run), quiet: () => c.quiet() });
+    const c = new DaemonClocks('unit', { ...actions, quiet: (quiet) => collector.set(quiet) });
+    made.push(c);
+    c.served();
+    pend(c);
+    deferred.splice(0).forEach((run) => run());
+    expect(c.quiet()).toBe(false);
+    expect(collect).not.toHaveBeenCalled();
   });
 });

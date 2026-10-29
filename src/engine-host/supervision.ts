@@ -14,12 +14,14 @@
 //   exit-when-idle interest is ignored, so an old supervisor still serving empties unless the owner kept a session.
 // - `host.stopAll`: engine.shutdown's body, answered, then the exit (a host that ran it can never launch again).
 // - Quiet (P5 Decision Log 124's idle collection, @shared/host/idle-collect.ts): once the host serves and its startup
-//   gate has settled, no client holds interest in any session, every live row is idle by E10's rule (budget.ts
-//   `isIdleRow`, no stateful server counted: ready, no turn, nothing working, waiting or queued) and the plugin runner
-//   holds nothing. Each change is told, so the engine host collects at every entry: a kept session's turn ending after
-//   the app left is one. A live row that ends with the host quiet (an idle release, an engine's exit) is told as a
-//   dropped holding, whose transcript is garbage the collection's guard cannot see. From a stop-all or an exit on it is
-//   never quiet again.
+//   gate has settled, no client holds interest in any session, no launch is preparing its row, every live row is idle by
+//   E10's rule (budget.ts `isIdleRow`, no stateful server counted: ready, no turn, nothing working, waiting or queued)
+//   and the plugin runner holds nothing. It is told at every refresh, so the engine host collects at every entry: a
+//   kept session's turn ending after the app left is one. The collector asks `quiet()` again at the moment of
+//   collecting, over the rows' live status, so work a row has begun and not yet told (a send whose queue tells only once
+//   its save settles) holds it off. A live row that ends with the host quiet (an idle release, an engine's exit) is told
+//   as a dropped holding, whose transcript is garbage the collection's guard cannot see. From a stop-all or an exit on it
+//   is never quiet again.
 import type { HostClientHooks, HostOn } from '@shared/host/runtime';
 import { HostCommandError } from '@shared/host/runtime';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -47,7 +49,7 @@ export type SupervisorIdentity = Pick<SupervisorStatus, 'pid' | 'startedAt' | 'b
 export interface SupervisionDeps {
   mode: 'utility' | 'detached';
   identity: SupervisorIdentity;
-  table: Pick<ProcessTable, 'onChange' | 'onRowsChanged' | 'setIdleRelease' | 'setInterest' | 'interested' | 'onInterestChanged'> & { list(): readonly Pick<EngineSession, 'lifecycle' | 'status'>[] };
+  table: Pick<ProcessTable, 'onChange' | 'onRowsChanged' | 'setIdleRelease' | 'setInterest' | 'interested' | 'launching' | 'onHoldChanged'> & { list(): readonly Pick<EngineSession, 'lifecycle' | 'status'>[] };
   role: MachineRole; // P5 O2 M2: read once at the engine host's start (role.ts)
   plugins: Pick<PluginsRunner, 'busy' | 'onIdle' | 'onBusy'>;
   shutdown(graceMs: number): Promise<{ stopped: number; forced: number }>; // engine.shutdown's body
@@ -76,7 +78,6 @@ export class Supervision {
   private orphansKilled = 0; // the engines of a dead predecessor the start-up sweep stopped (Task 2.5)
   private serving: boolean; // a utility host serves from its register, a detached one from `started`
   private settled: boolean; // the startup gate resolved or rejected
-  private quietNow: boolean | null = null; // as last told
   private live = 0; // the live rows as last counted
 
   constructor(private readonly deps: SupervisionDeps) {
@@ -85,7 +86,7 @@ export class Supervision {
     this.serving = deps.mode === 'utility';
     this.settled = deps.startup === undefined;
     deps.table.onChange(() => this.refresh());
-    if (deps.collector) deps.table.onInterestChanged(() => this.refresh());
+    if (deps.collector) deps.table.onHoldChanged(() => this.refresh());
     deps.table.onRowsChanged(() => this.refresh());
     deps.plugins.onIdle(() => this.refresh());
     deps.plugins.onBusy(() => this.refresh());
@@ -171,7 +172,8 @@ export class Supervision {
   }
 
   // Every change that could move a clock or the status: a row's status, the row set, the runner going busy or idle, a
-  // client, a configuration, the startup gate settling. Cheap: it reads the table's rows and compares.
+  // client, a configuration, the startup gate settling, the table's holds (interest, a launch preparing). Cheap: it reads
+  // the table's rows and compares.
   private refresh(): void {
     const live = this.deps.table.list().some((row) => row.lifecycle !== 'exited');
     this.tellQuiet();
@@ -190,20 +192,23 @@ export class Supervision {
     this.publish(false);
   }
 
+  // The host's quiet (the header's) as its live state reads now: told at each refresh, and asked again by the collector at
+  // the moment of collecting.
+  quiet(): boolean {
+    return this.serving && this.settled && this.leaving === null && !this.stopping && !this.deps.plugins.busy()
+      && !this.deps.table.interested() && !this.deps.table.launching()
+      && this.deps.table.list().every((row) => row.lifecycle === 'exited' || isIdleRow(row.status(), NO_STATEFUL));
+  }
+
   private tellQuiet(): void {
     const collector = this.deps.collector;
     if (!collector) return;
-    const rows = this.deps.table.list();
-    const live = rows.filter((row) => row.lifecycle !== 'exited').length;
+    const live = this.deps.table.list().filter((row) => row.lifecycle !== 'exited').length;
     const ended = live < this.live;
     this.live = live;
     if (!this.serving || !this.settled) return;
-    const quiet = this.leaving === null && !this.stopping && !this.deps.plugins.busy() && !this.deps.table.interested()
-      && rows.every((row) => row.lifecycle === 'exited' || isIdleRow(row.status(), NO_STATEFUL));
-    if (quiet !== this.quietNow) {
-      this.quietNow = quiet;
-      collector.set(quiet);
-    }
+    const quiet = this.quiet();
+    collector.set(quiet);
     if (quiet && ended) collector.dropped();
   }
 

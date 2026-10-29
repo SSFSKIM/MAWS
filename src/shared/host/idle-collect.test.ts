@@ -1,7 +1,7 @@
 // The idle collection (P5 Decision Log 124's lever): an entry into idle collects once, after its caller's turn; a busy
-// return before then collects nothing; a later entry collects again only if the heap grew, in use or in pages; a
-// dropped holding collects while it stays idle; a stopped collector collects nothing again; and the real collection's
-// gc stays private to its module.
+// return before then collects nothing, told or found by the process's quiet asked again as it collects; a later entry
+// collects again only if the heap grew, in use or in pages; a dropped holding collects while it stays idle; a stopped
+// collector collects nothing again; and the real collection's gc stays private to its module.
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
 import { GROWTH_BYTES, idleCollector, lastResortCollect, type HeapSize } from './idle-collect';
@@ -11,10 +11,11 @@ const MIB = GROWTH_BYTES;
 function rig(heap: HeapSize = { used: 20 * MIB, physical: 40 * MIB }) {
   const queued: (() => void)[] = [];
   const lines: string[] = [];
+  const live = { quiet: true }; // the process's live state, which its caller may not have told yet
   const collect = vi.fn(() => void Object.assign(heap, { used: 5 * MIB, physical: 10 * MIB }));
-  const collector = idleCollector({ log: (line) => lines.push(line), collect, heap: () => ({ ...heap }), defer: (run) => queued.push(run), now: () => 0 });
+  const collector = idleCollector({ log: (line) => lines.push(line), collect, heap: () => ({ ...heap }), defer: (run) => queued.push(run), now: () => 0, quiet: () => live.quiet });
   const turn = () => queued.splice(0).forEach((run) => run());
-  return { heap, collector, collect, lines, turn, queued };
+  return { heap, collector, collect, lines, turn, queued, live };
 }
 
 describe('the idle collector', () => {
@@ -38,6 +39,32 @@ describe('the idle collector', () => {
     collector.set(false);
     turn();
     expect(collect).not.toHaveBeenCalled();
+  });
+
+  it('asks the process again as it collects: work begun and not yet told holds it off until a reading finds it quiet', () => {
+    const { collector, collect, turn, live } = rig();
+    collector.set(true);
+    live.quiet = false; // a send's queue is busy; its status is told once its save settles
+    turn();
+    expect(collect).not.toHaveBeenCalled();
+    live.quiet = true;
+    collector.set(true); // its caller's next reading: an entry, though the last thing told was quiet too
+    turn();
+    expect(collect).toHaveBeenCalledOnce();
+  });
+
+  it('keeps a dropped holding owed through a collection that finds the process busy', () => {
+    const { collector, collect, turn, live } = rig();
+    collector.set(true);
+    turn();
+    collector.dropped();
+    live.quiet = false;
+    turn();
+    expect(collect).toHaveBeenCalledOnce();
+    live.quiet = true;
+    collector.set(true);
+    turn(); // the heap reads as the last collection left it: only the owed holding collects
+    expect(collect).toHaveBeenCalledTimes(2);
   });
 
   it('skips a later entry that finds the heap as the last collection left it: a client that came and went', () => {
@@ -128,7 +155,7 @@ describe('the idle collector', () => {
     const queued: (() => void)[] = [];
     const lines: string[] = [];
     const collect = vi.fn().mockImplementationOnce(() => { throw new Error('no extension'); });
-    const collector = idleCollector({ log: (line) => lines.push(line), collect, heap: () => ({ used: 0, physical: 0 }), defer: (run) => queued.push(run) });
+    const collector = idleCollector({ log: (line) => lines.push(line), collect, heap: () => ({ used: 0, physical: 0 }), defer: (run) => queued.push(run), quiet: () => true });
     collector.set(true);
     queued.splice(0).forEach((run) => run());
     collector.set(false);

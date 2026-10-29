@@ -210,7 +210,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   });
 
   // --- the clocks -----------------------------------------------------------------------------------------------------
-  const idle = idleCollector({ log, collect: options.collect }); // P5 Decision Log 124's lever: a collection at each quiet entry
+  const idle = idleCollector({ log, collect: options.collect, quiet: () => clocks.quiet() }); // P5 Decision Log 124's lever: a collection at each quiet entry, asked again as it collects
   const clocks = new DaemonClocks(kind, {
     armEnginePark: () => {
       log('no app and no interest for the idle time: asking the engine host to exit when idle');
@@ -337,6 +337,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     },
     drain: { start: (drained) => recycleEngine(drained), boundMs: options.departureBoundMs ?? DEPARTURE_BOUND_MS },
     holdMs: options.helloHoldMs,
+    between: () => clientsChanged(), // P5 Decision Log 124: the quiet's
   });
 
   function interceptEngine(request: RelayRequest): Promise<HostResponse> | null {
@@ -405,6 +406,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       void settleCredit();
     },
     holdMs: options.helloHoldMs,
+    between: () => clientsChanged(), // P5 Decision Log 124: the quiet's
   });
 
   // --- what the upstreams send ---------------------------------------------------------------------------------------
@@ -583,7 +585,10 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   let engineClients: SocketClients | null = null;
   let ptyClients: SocketClients | null = null;
   let machineClients: SocketClients | null = null;
-  const clientsChanged = () => clocks.clients(Number(engineRelay.attachedApp()) + Number(ptyRelay.attachedApp()) + (machineClients?.count() ?? 0));
+  const clientsChanged = () => {
+    clocks.relaysBetween(engineRelay.between() || ptyRelay.between());
+    clocks.clients(Number(engineRelay.attachedApp()) + Number(ptyRelay.attachedApp()) + (machineClients?.count() ?? 0));
+  };
   const counts = (host: 'engine-host' | 'pty-host') => () => {
     const welcome = hosts.welcome(host);
     return { liveSessions: welcome?.liveSessions ?? 0, rows: welcome?.rows ?? 0 };

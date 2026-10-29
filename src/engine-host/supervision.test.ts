@@ -8,8 +8,14 @@ import { validateCommandOutput, validateEventPayload } from '@shared/ipc/validat
 import { endableClientRef, type ClientRef } from '@shared/ipc/client'; // P5 O2 M2
 import type { MachineRole } from './role'; // P5 O2 M2
 import type { EngineSessionStatus } from '@shared/engine/status';
+import type { AppSessionId } from '@shared/graph/ids';
+import { GROWTH_BYTES, idleCollector } from '@shared/host/idle-collect';
+import { READ_LINES } from '@shared/plugins/cli';
 import type { BinaryCheck } from './binary-info';
+import { scriptedSession } from './conformance/session-harness';
 import { PluginsRunner } from './plugins/runner';
+import { ProcessTable } from './process-table';
+import { MemorySessionStateStore } from './store/memory-session-state-store';
 import { DEFAULT_IDLE_EXIT_MS, RELEASE_WHILE_CONNECTED, SERVER_RELEASE_MS, Supervision, type SupervisorExit, type SupervisorIdentity } from './supervision';
 
 const T0 = new Date('2026-10-06T10:00:00.000Z');
@@ -382,7 +388,8 @@ describe('the supervisor’s quiet', () => {
       emit: () => {},
       changed: () => {},
     });
-    const told: (boolean | 'dropped')[] = [];
+    const told: (boolean | 'dropped')[] = []; // each change of the quiet told (it is told at every refresh), and each dropped holding
+    let last: boolean | null = null;
     const supervision = new Supervision({
       mode, identity: IDENTITY, role: 'laptop',
       table: {
@@ -392,13 +399,20 @@ describe('the supervisor’s quiet', () => {
         setIdleRelease: () => {},
         setInterest: () => {},
         interested: () => interested,
-        onInterestChanged: (listener: () => void) => (listeners.interest.add(listener), () => listeners.interest.delete(listener)),
+        launching: () => false,
+        onHoldChanged: (listener: () => void) => (listeners.interest.add(listener), () => listeners.interest.delete(listener)),
       } as never,
       plugins,
       shutdown: () => new Promise(() => {}), // a stop-all's rows still stopping
       emit: () => true,
       log: () => {},
-      collector: { set: (quiet) => void told.push(quiet), dropped: () => void told.push('dropped') },
+      collector: {
+        set: (quiet) => {
+          if (quiet !== last) told.push(quiet);
+          last = quiet;
+        },
+        dropped: () => void told.push('dropped'),
+      },
       startup,
     });
     const handlers = new Map<string, (input: unknown, ctx: { client: ClientRef }) => Promise<unknown>>();
@@ -528,5 +542,156 @@ describe('the supervisor’s quiet', () => {
     expect(h.told).toEqual([true, false]);
     h.change(0, resting({ process: 'exited' }));
     expect(h.told).toEqual([true, false]);
+  });
+});
+
+// P5 Decision Log 124: the collection asks Supervision's quiet again as it runs, over the sources' live state, so a
+// source that has begun work and not yet told it (or tells it late) holds the collection off. One row per source the
+// quiet reads that can turn busy after an entry (the serving and the startup gate only ever turn it quiet, above): a
+// source added to the quiet with no row here is a signal the collection cannot see.
+describe('the engine host’s collection, asked again as it runs', () => {
+  const MIB = GROWTH_BYTES;
+  type Row = { lifecycle: EngineSessionStatus['process']; now: EngineSessionStatus; status(): EngineSessionStatus };
+  const resting = (over: Partial<EngineSessionStatus> = {}) => ({ process: 'ready', engineState: 'idle', turn: null, busy: false, backgroundTasks: [], pendingRequests: 0, pendingPlan: null, queue: { length: 0, paused: false }, heldPeerMessages: [], mcpServers: [], ...over }) as unknown as EngineSessionStatus;
+  const row = (status: EngineSessionStatus): Row => {
+    const made: Row = { lifecycle: status.process, now: status, status: () => made.now };
+    return made;
+  };
+
+  // A real collector over Supervision's quiet; each heap reading grown, so only the quiet decides
+  function collecting(over: { table?: object; plugins?: ConstructorParameters<typeof Supervision>[0]['plugins'] } = {}) {
+    const rows: Row[] = [];
+    const listeners = new Set<() => void>();
+    const add = (listener: () => void) => (listeners.add(listener), () => listeners.delete(listener));
+    const state = { interested: false, launching: false, pluginsBusy: false };
+    const deferred: (() => void)[] = [];
+    const collect = vi.fn();
+    let grown = 0;
+    const collector = idleCollector({ log: () => {}, collect, heap: () => ({ used: (grown += 2) * MIB, physical: grown * MIB }), defer: (run) => void deferred.push(run), quiet: () => supervision.quiet() });
+    const supervision = new Supervision({
+      mode: 'utility', identity: IDENTITY, role: 'laptop',
+      table: (over.table ?? { list: () => rows, onChange: add, onRowsChanged: add, setIdleRelease: () => {}, setInterest: () => {}, interested: () => state.interested, launching: () => state.launching, onHoldChanged: add }) as never,
+      plugins: over.plugins ?? { busy: () => state.pluginsBusy, onIdle: () => () => {}, onBusy: () => () => {} },
+      shutdown: () => new Promise(() => {}),
+      emit: () => true,
+      log: () => {},
+      collector,
+    });
+    const handlers = new Map<string, (input: unknown, ctx: { client: ClientRef }) => Promise<unknown>>();
+    supervision.register((name, handler) => void handlers.set(name, handler as (input: unknown, ctx: { client: ClientRef }) => Promise<unknown>), { onConnect: () => {} });
+    const told = () => listeners.forEach((listener) => listener()); // a source tells its change
+    // an entry: the host busy and quiet again, told, with its collection queued behind this turn
+    const enter = () => {
+      state.interested = true;
+      told();
+      state.interested = false;
+      told();
+      expect(deferred).toHaveLength(1);
+    };
+    const turn = () => deferred.splice(0).forEach((run) => run());
+    return { rows, state, supervision, collect, told, enter, turn, handlers };
+  }
+
+  const pending: [string, (h: ReturnType<typeof collecting>) => void][] = [
+    ['a row’s turn', (h) => void (h.rows[0]!.now = resting({ turn: { id: 'app:L1:1:0' } as never }))],
+    ['a row’s work in flight (a send whose queue tells once its save settles)', (h) => void (h.rows[0]!.now = resting({ busy: true }))],
+    ['a row’s engine working', (h) => void (h.rows[0]!.now = resting({ engineState: 'running' }))],
+    ['a row’s engine waiting on the owner', (h) => void (h.rows[0]!.now = resting({ engineState: 'requires_action' }))],
+    ['a row’s pending request', (h) => void (h.rows[0]!.now = resting({ pendingRequests: 1 }))],
+    ['a row’s pending plan', (h) => void (h.rows[0]!.now = resting({ pendingPlan: {} as never }))],
+    ['a row’s queued message', (h) => void (h.rows[0]!.now = resting({ queue: { length: 1, paused: false } }))],
+    ['a row’s background task', (h) => void (h.rows[0]!.now = resting({ backgroundTasks: [{ taskId: 't' as never, taskType: 'local_agent', description: 'd', ambient: false }] }))],
+    ['a row’s cron', (h) => void (h.rows[0]!.now = resting({ work: { unknown: null, crons: [{}] } } as never))],
+    ['a row’s work the host cannot read', (h) => void (h.rows[0]!.now = resting({ work: { unknown: 'unreadable', crons: [] } } as never))],
+    ['a row’s held peer message', (h) => void (h.rows[0]!.now = resting({ heldPeerMessages: [{}] } as never))],
+    ['a row stopping', (h) => Object.assign(h.rows[0]!, { lifecycle: 'exiting', now: resting({ process: 'exiting' }) })],
+    ['a new row starting', (h) => void h.rows.push(row(resting({ process: 'starting' })))],
+    ['interest in a session', (h) => void (h.state.interested = true)],
+    ['a launch preparing its row', (h) => void (h.state.launching = true)],
+    ['the plugin runner holding work', (h) => void (h.state.pluginsBusy = true)],
+    ['a stop-all', (h) => void h.handlers.get('host.stopAll')!({ graceMs: 100 }, { client: endableClientRef('1') })],
+  ];
+
+  it.each(pending)('%s, pending as the collection runs, holds it off', (_, pend) => {
+    const h = collecting();
+    h.rows.push(row(resting()));
+    h.told();
+    h.turn();
+    expect(h.collect).toHaveBeenCalledOnce(); // its start's entry
+    h.enter();
+    pend(h); // told to no one yet
+    h.turn();
+    expect(h.supervision.quiet()).toBe(false);
+    expect(h.collect).toHaveBeenCalledOnce();
+  });
+
+  it('collects at the next reading that finds it quiet once the source has settled, told late or not at all', () => {
+    const h = collecting();
+    h.rows.push(row(resting()));
+    h.told();
+    h.turn();
+    h.enter();
+    h.rows[0]!.now = resting({ busy: true });
+    h.turn();
+    h.rows[0]!.now = resting(); // its work ended, and nothing told it
+    h.told(); // any later refresh
+    h.turn();
+    expect(h.collect).toHaveBeenCalledTimes(2);
+  });
+
+  // The reviewer's reproduction (round 3, finding 1): the real table and session, the queue's save held. The send marks
+  // its use, which tells a status still at rest, then makes the queue busy, which it tells only once the save settles.
+  it('holds off over a real session whose send’s queue save is still pending', async () => {
+    const table = new ProcessTable({ ps: async () => '' });
+    const store = new MemorySessionStateStore();
+    const save = store.saveQueue.bind(store);
+    const held: (() => void)[] = [];
+    let hold = false;
+    store.saveQueue = async (id, queue) => {
+      if (hold) await new Promise<void>((resolve) => void held.push(resolve));
+      return save(id, queue);
+    };
+    const s = scriptedSession({ spec: { appSessionId: 'app-q' as AppSessionId }, session: { store } });
+    table.reserve('app-q' as AppSessionId, () => s.session);
+    await s.session.start();
+    const h = collecting({ table, plugins: { busy: () => false, onIdle: () => () => {}, onBusy: () => () => {} } });
+    h.turn();
+    expect(h.collect).toHaveBeenCalledOnce(); // its start's entry
+    const holder = endableClientRef('main');
+    table.setInterest(holder, ['app-q' as AppSessionId]);
+    table.setInterest(holder, []); // the tab closed: an entry, its collection queued
+    hold = true;
+    const sent = s.session.send('hi');
+    await vi.waitFor(() => expect(held).toHaveLength(1)); // its linked reads prepared, its save pending
+    expect(s.session.status().busy).toBe(true);
+    h.turn();
+    expect(h.collect).toHaveBeenCalledOnce();
+    held[0]!();
+    await sent;
+  });
+
+  // The reviewer's reproduction (round 3, finding 2): the real runner, its binary check held. A read has no operation;
+  // it holds the runner from its entry, so its preparation is work.
+  it('holds off while a plugin read prepares, its binary check still pending', async () => {
+    let answer!: (check: BinaryCheck) => void;
+    const plugins = new PluginsRunner({
+      binary: () => new Promise<BinaryCheck>((resolve) => (answer = resolve)),
+      captureEnv: async () => ({}),
+      reloadTargets: () => [],
+      emit: () => {},
+      changed: () => {},
+    });
+    const h = collecting({ plugins });
+    h.turn();
+    h.enter();
+    const read = plugins.read(READ_LINES.installed, '/');
+    expect(plugins.busy()).toBe(true);
+    h.turn();
+    expect(h.collect).toHaveBeenCalledOnce();
+    answer({ path: '/bin/claude', testedVersion: '2.1.290', version: null, ok: false, error: 'no engine binary', declaresSystemPromptSnapshot: false });
+    await expect(read).rejects.toThrow('no engine binary');
+    expect(plugins.busy()).toBe(false);
+    h.turn(); // the read's end told the runner idle: an entry
+    expect(h.collect).toHaveBeenCalledTimes(2);
   });
 });
