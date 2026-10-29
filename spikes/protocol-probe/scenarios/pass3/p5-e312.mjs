@@ -21,7 +21,7 @@ import {allowAll} from './e7-common.mjs';
 import {execFileSync} from 'node:child_process';
 import {chmodSync} from 'node:fs';
 
-const PROVENANCE={child:'P5 engine verification',document:'spikes/protocol-probe/findings-p5-e312-engine.txt',spike:'normal-use frames on the engine the owner runs',engineVersion:ENGINE_VERSION};
+const PROVENANCE={child:'P5-E312',pin:'643eadf136ac70e93290d8b14ce58e8055330ddc',document:'docs/doperpowers/plans/2026-10-27-p5-org.md',findings:'spikes/protocol-probe/findings-p5-e312-engine.txt',spike:'normal-use frames on the engine the owner runs',engineVersion:ENGINE_VERSION};
 const ARMS=(process.env.E312_ARM||'title,vcs,auto,fallback,memory,devintent').split(',');
 const sys=(f,subtype)=>f.type==='system'&&f.subtype===subtype;
 const frames=(p,subtype,after=0)=>p.frames.filter(r=>r.seq>after&&sys(r.frame,subtype));
