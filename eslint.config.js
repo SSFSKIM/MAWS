@@ -280,8 +280,9 @@ module.exports = defineConfig(
     rules: { 'no-restricted-imports': ['error', { patterns: YJS_PATTERNS }] },
   },
   {
-    // P5 O8 M1: the org session's suites, against the same hub and endpoint harness
-    files: ['test/machines/**/*.ts', 'test/org/**/*.ts'],
+    // P5 O8 M1: the org session's suites, against the same hub and endpoint harness; P5 O9 M9: remote lane A's suite,
+    // through the same link against the same harness
+    files: ['test/machines/**/*.ts', 'test/org/**/*.ts', 'test/lane-a/**/*.ts'],
     rules: { 'no-restricted-imports': 'off' },
   },
   // P5 O10 end
