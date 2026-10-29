@@ -12,7 +12,8 @@
 //   legacy status          the DX1 org key: held, retired (bytes kept), purged or none (O14 M5a: the org state retires it)
 //   legacy purge           deletes the retired key's bytes for good, the stale copies' too (O14's final brief)
 //   attest-history [--former NAME]… [--project ID] [--check] [--json]
-//                          signs the machine's phase-1 history, or checks what the hub keeps of it (history.ts, O14 M4)
+//                          signs the machine's phase-1 history, or checks what the hub keeps of it (history.ts, O14 M4);
+//                          one run at a time, its start and end in mawsd's log
 //
 // `-` reads the file's content from the request's `secret`, as `mawsd`'s client sends stdin. Exit codes are O2's: 0
 // done, 1 failed, 2 not available here, 3 not running, 4 enrolled with the hub but not yet listed in the org state.
@@ -271,13 +272,26 @@ function legacy(endpoint: Endpoint, args: readonly string[]): Out {
 }
 
 /**
+ * The `attest-history` run in progress on each endpoint, and since when. A run reads every inventory writer's events
+ * from the hub page by page, minutes on a machine with hundreds of writers, and goes on to its end when its caller stops
+ * waiting; so one runs at a time, attesting or checking alike: a second is refused rather than started beside it (a
+ * check beside an attest would also judge records the attest is still posting).
+ */
+const historyRuns = new WeakMap<Endpoint, { run: string; since: string }>();
+
+/**
  * `attest-history`: the machine's DX1 writers under its current name and each `--former` one, attested (exit 0 when
  * every one is attested or was already, 1 when any is skipped or refused), or with `--check` judged against what the hub
  * keeps (exit 0 only when every one is `verified`). Attesting needs the legacy key in use, to check each event's code:
  * at a head that retired it (O14 M5a's tombstone, its bytes kept) nothing is attested; the check needs no key. Both need the machine listed in the org state, whose key signs.
+ * One run at a time (`historyRuns`); each holds a private mawsd up until it ends, and logs its start and its outcome.
  */
 async function attestHistoryCommand(endpoint: Endpoint, args: readonly string[]): Promise<Out> {
   const { values } = parse(args, { former: { type: 'string', multiple: true }, project: { type: 'string' }, check: { type: 'boolean' }, json: { type: 'boolean' } });
+  const running = historyRuns.get(endpoint);
+  if (running !== undefined) {
+    return { code: EXIT.failed, out: `${running.run} has been in progress since ${running.since}: no second run starts beside it; its outcome is in mawsd's log (\`mawsd logs\`) when it ends` };
+  }
   const { state, org, services } = endpoint.parts!;
   const enrollment = state.enrolled ? state.enrollment : null;
   if (enrollment === null) return { code: EXIT.failed, out: 'not enrolled: there is no machine key to sign with' };
@@ -302,16 +316,31 @@ async function attestHistoryCommand(endpoint: Endpoint, args: readonly string[])
     certificates: org.certificates(),
     verifiesCode: (project: string, event: object) => legacy.verifies(project, event),
   };
-  if (values.check) {
-    const checked = await checkHistory(ctx, names, values.project);
-    const code = checked.every((c) => c.outcome === 'verified') ? EXIT.done : EXIT.failed;
-    if (values.json) return { code, out: JSON.stringify({ names, writers: checked }) };
-    return { code, out: [...checked.map(checkedLine), summary(checked, names)].join('\n') };
+  // Nothing above awaits, so no second run can pass the check above before this one is recorded.
+  const run = values.check ? 'attest-history --check' : 'attest-history';
+  historyRuns.set(endpoint, { run, since: new Date(endpoint.deps.now()).toISOString() });
+  const release = services.hold(run);
+  services.log(`endpoint: ${run} started under ${names.join(', ')}`);
+  try {
+    let answer: { code: number; writers: Array<Attested | Checked>; lines: string[] };
+    if (values.check) {
+      const checked = await checkHistory(ctx, names, values.project);
+      answer = { code: checked.every((c) => c.outcome === 'verified') ? EXIT.done : EXIT.failed, writers: checked, lines: checked.map(checkedLine) };
+    } else {
+      const attested = await attestHistory(ctx, names, values.project);
+      answer = { code: attested.every((a) => a.outcome === 'attested' || a.outcome === 'already') ? EXIT.done : EXIT.failed, writers: attested, lines: attested.map(attestedLine) };
+    }
+    const said = summary(answer.writers, names);
+    services.log(`endpoint: ${run} ended, exit ${answer.code}: ${said}`);
+    if (values.json) return { code: answer.code, out: JSON.stringify({ names, writers: answer.writers }) };
+    return { code: answer.code, out: [...answer.lines, said].join('\n') };
+  } catch (error) {
+    services.log(`endpoint: ${run} failed: ${(error as Error).message}`);
+    throw error;
+  } finally {
+    release();
+    historyRuns.delete(endpoint);
   }
-  const attested = await attestHistory(ctx, names, values.project);
-  const code = attested.every((a) => a.outcome === 'attested' || a.outcome === 'already') ? EXIT.done : EXIT.failed;
-  if (values.json) return { code, out: JSON.stringify({ names, writers: attested }) };
-  return { code, out: [...attested.map(attestedLine), summary(attested, names)].join('\n') };
 }
 
 function attestedLine(a: Attested): string {
