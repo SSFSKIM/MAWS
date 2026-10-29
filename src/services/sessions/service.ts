@@ -109,6 +109,7 @@ export class SessionService {
   // recovery), so a release waits for it before the index closes. A wait for the host is not counted: nothing is written
   // until it ends, and a released root's waits are dropped with its host adapter.
   readonly work = new Work();
+  private disposed = false; // P5 O3-D M2: the root stopped; the startup and a deferred recovery end at their next boundary
   private readonly lastAttempt = new Map<AppSessionId, NonNullable<AcquisitionMemory['last']>>();
   private readonly now: () => string;
   private readonly log: (message: string) => void;
@@ -136,14 +137,22 @@ export class SessionService {
     return this.readyPromise;
   }
 
-  // Stops listening and halts every watch in flight, leaving their setups where they are (the tests' app restart).
+  // Stops listening and halts every watch in flight, leaving their setups where they are (the tests' app restart; P5
+  // O3-D M2: the root's stop, after which a startup still waiting resumes into nothing, since the index may be closed and
+  // spine.lock another process's).
   dispose(): void {
+    this.disposed = true;
     this.offReady?.();
+    this.offReady = null;
     for (const watch of [...(this.setup?.watches ?? [])]) watch.halt();
   }
 
+  // P5 O3-D M2: cancellable at each async boundary (a disposed service resumes into nothing), and each phase that can
+  // write counted in `work`; the waits for the environment and for the host are not (nothing is written across them,
+  // and a host that never streams would hold a release forever).
   private async boot(): Promise<void> {
     const env = await this.deps.env;
+    if (this.disposed) return;
     this.setup = {
       sessions: this.deps.index.sessions,
       sideThreads: this.deps.index.sideThreads ?? null, // E3
@@ -167,9 +176,13 @@ export class SessionService {
       stopWaitMs: this.deps.timing?.stopWaitMs ?? STOP_WAIT_MS,
       watches: new Set(),
     };
-    await this.deps.intents.load();
+    await this.work.track(this.deps.intents.load());
+    if (this.disposed) return;
     await this.deps.host.ready?.();
-    for (const manifest of await this.manifests.list()) {
+    if (this.disposed) return;
+    const manifests = await this.work.track(this.manifests.list());
+    if (this.disposed) return;
+    for (const manifest of manifests) {
       this.log(`a deletion of ${manifest.appSessionId} was interrupted (${manifest.trashed.length} of ${manifest.paths.length} moved); session.delete finishes it`);
     }
     this.offReady = this.deps.host.onReady?.(() => {
@@ -181,7 +194,7 @@ export class SessionService {
 
   // Runs the deferred recovery again (the host streamed), unless none is owed or one is already running.
   private rerunDeferred(): void {
-    if (this.unrecovered === null || this.recovering !== null) return;
+    if (this.disposed || this.unrecovered === null || this.recovering !== null) return;
     this.recovering = this.work.track(this.recover()) // P5 O3-D M2
       .catch((error: unknown) => this.log(`the deferred recovery failed: ${error instanceof Error ? error.message : String(error)}`))
       .finally(() => (this.recovering = null));
@@ -205,6 +218,7 @@ export class SessionService {
       try {
         live = await liveRows(this.deps.host.dispatch);
       } catch (error) {
+        if (this.disposed) return; // P5 O3-D M2
         if (this.streamed) continue; // the host streamed while the read was in flight: read again
         if (this.unrecovered === null) {
           const intents = this.deps.intents.list();
@@ -217,6 +231,7 @@ export class SessionService {
         return;
       }
     }
+    if (this.disposed) return; // P5 O3-D M2: the root stopped while the table was read
     const scope = this.unrecovered; // null: the boot's own run, before any command could act
     const idle = (id: string) => !this.starting.has(id) && (scope === null || !this.locks.has(id));
     // decided once, before the steps' own writes change an intent; each step re-reads it

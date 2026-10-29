@@ -115,8 +115,7 @@ describe('the spine and the checkouts composed under plain Node', () => {
   };
 
   // Both roots as main composes them, each on its bus (one bus for both unless a test tells them apart)
-  const compose = (data: SpineData, host: FakeSpineHost, bus: FakeBus, { checkouts = true, checkoutsBus = bus } = {}) => {
-    const engineEnv = Promise.resolve({ HOME: join(dir.path, 'home'), CLAUDE_CONFIG_DIR: join(dir.path, 'claude') });
+  const compose = (data: SpineData, host: FakeSpineHost, bus: FakeBus, { checkouts = true, checkoutsBus = bus, engineEnv = Promise.resolve({ HOME: join(dir.path, 'home'), CLAUDE_CONFIG_DIR: join(dir.path, 'claude') }) } = {}) => {
     const spine = startSpine({
       profile,
       machine: MACHINE,
@@ -211,6 +210,30 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(await start).toMatchObject({ ok: true, value: { status: 'refused', reason: 'unknown_session' } });
     await settling;
     expect(spine.busy()).toBe(false);
+  });
+
+  // P5 O3-D M2 review (Interfaces §A, D27): a yield settles the root and gives spine.lock up while the session service's
+  // startup still waits at an async boundary (here the login-shell capture); the startup must not resume into the
+  // recovery, a subscription or a write once the root stopped and another process may hold the lock
+  it('a root stopped while the session service’s startup waits resumes into no recovery and no subscription after the handover', async () => {
+    const data = await openSpineData(profile, { build: BUILD });
+    const host = new FakeSpineHost();
+    await host.ready(); // the host streams: nothing but the environment holds the startup
+    let capture!: (env: Record<string, string>) => void;
+    const engineEnv = new Promise<Record<string, string>>((resolve) => (capture = resolve));
+    const composed = compose(data, host, fakeBus(), { checkouts: false, engineEnv });
+    await composed.spine.settled();
+    expect(composed.spine.busy()).toBe(false);
+    stopBoth(composed);
+    data.lock.release(); // the yield's handover
+    const candidate = await takeSpineLock(profile, { build: 'the next writer', waitMs: 10, log: () => {} });
+    expect(candidate.refused).toBeNull();
+    const asked = host.calls.length;
+    capture({ HOME: join(dir.path, 'home'), CLAUDE_CONFIG_DIR: join(dir.path, 'claude') });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(host.calls.slice(asked).map((call) => call.name)).toEqual([]); // no recovery's engine.sessions, nothing at all
+    expect(host.held()).toBe(0); // no late subscription
+    candidate.release();
   });
 
   // P5 O9 (O3 Decision Log 13): lane A drives, from the spine, a terminal session the index held at start, and its
