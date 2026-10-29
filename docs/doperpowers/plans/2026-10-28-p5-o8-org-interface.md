@@ -53,7 +53,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-29) Task 1, reviewed clean and approved by the desk track (336af704b): the move: the pairing judges and their `PendingEntry` type into `org-protocol`, `admin.ts` importing them (its own commit, the desk track's review).
   - [x] (2026-10-29) Task 2, reviewed clean and approved by the desk track (5935f62a5; review fix 592211929; boundary comment 37ce2077d): `successorProblems` and `stateProblems` in `org-protocol`, and `admin.ts`'s `amend` running it (the desk track's review).
   - [x] (2026-10-29) Task 3, reviewed clean (643d126de, fix 6d23a8055): the signing paths: `edits.ts`, `Edit.endorse` and `Edit.live`, `StateSigner.sign`'s endorsement and guard, the signer's check before the slot, and `checks.ts` running `successorProblems`.
-  - [ ] Task 4: the session's surface: `org.view`, `org.preview`, `org.change`, `org.pair.*`, `pairing.ts`, `hub-client.ts`'s `pendingOf`, `refused.attempt`, the schema and main's wiring.
+  - [x] (2026-10-29) Task 4, reviewed clean (19730e6ae; class 1a green through it, run 40819796641): the session's surface: `org.view`, `org.preview`, `org.change`, `org.pair.*`, `pairing.ts`, `hub-client.ts`'s `pendingOf`, `refused.attempt`, the schema and main's wiring.
   - [ ] Task 5: `close()`'s fence and join (`HeldOrg.close()`, the parts' operations in flight), and the two test workarounds removed.
   - [ ] Task 6: the renderer: `settings-tab/org/`, the four groups, the change and pair sheets, `copy.ts`.
   - [ ] Task 7: `test/org/org-page.local.test.ts`, registered in `TIMING_NODE_TESTS`.
