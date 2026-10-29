@@ -25,6 +25,9 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 export interface HeldReplay {
   barrier(): boolean;
   replaying(): boolean;
+  // While replaying: the held events after the one being delivered, in arrival order (the hold's own order, which the
+  // fold reads to tell a superseded launch's status from a relaunch's)
+  later(): readonly { name: string; payload: unknown }[];
   onDrained(listener: () => void): () => void;
 }
 
@@ -58,10 +61,13 @@ export interface Sessions {
 // `ready` line: every row's status and launch folded before the host streams. The batches that follow pass the fold
 // filter, so the burst's tail and live events fold once, in order, after what the resync folded.
 // P5 O3-D M2: at a load's barrier (HeldReplay, above) each session's current launch is the one its listing or its latest
-// status named, updated by a held status as the drain applies it, unless that status is of a launch older than the
-// current one (held before the listing named its successor): applied, it would make the ended launch foldable again
-// and reset the filter to it, and the return to the current launch would re-admit its paged prefix. A held batch's events of that launch fold through the
-// filter, which drops what the resync paged; those of another launch (a relaunch during the load) reach the raw
+// status named, updated by a held status as the drain applies it, unless that status is superseded: of another launch
+// than the current one while a status of the current launch follows it in the hold. The engine host runs one launch of a
+// session at a time and emits a launch's statuses after its predecessor's, so the hold's order says which is older; the
+// launches' wall-clock times say nothing the contract promises. Applied, a superseded status would make the ended
+// launch foldable again and reset the filter to it, and the return to the current launch would re-admit its paged
+// prefix; a relaunch's status, which no status of the current launch follows, applies. A held batch's events of that
+// launch fold through the filter, which drops what the resync paged; those of another launch (a relaunch during the load) reach the raw
 // listeners alone, so the filter, which keeps one position per session, is never reset to an ended launch. An exited
 // status the barrier met (coalesced while cold, or listed) applies after the drain, unless a held status of the session
 // applied during it, and the session's held batches fold meanwhile as its launch's lifecycle (`asLive`), as the engine
@@ -77,13 +83,16 @@ export function hostEventSource(
       const replay = hosts.replay ?? null;
       const current = new Map<AppSessionId, string>(); // the launch a session's held events fold for
       const deferred = new Map<AppSessionId, EngineSessionStatus>(); // exited statuses waiting for the drain
-      const launched = new Map<AppSessionId, number>(); // when the current launch started: an older launch's held status is superseded
-      const follow = (status: EngineSessionStatus) => {
-        current.set(status.appSessionId, status.launchId);
-        launched.set(status.appSessionId, Date.parse(status.launchedAt));
+      const follow = (status: EngineSessionStatus) => void current.set(status.appSessionId, status.launchId);
+      const superseded = (status: EngineSessionStatus): boolean => {
+        const launch = current.get(status.appSessionId);
+        if (launch === undefined || launch === status.launchId) return false;
+        return replay!.later().some(({ name, payload }) => {
+          if (name !== 'session.status') return false;
+          const later = (payload as { status: EngineSessionStatus }).status;
+          return later.appSessionId === status.appSessionId && later.launchId === launch;
+        });
       };
-      const superseded = (status: EngineSessionStatus): boolean =>
-        current.has(status.appSessionId) && current.get(status.appSessionId) !== status.launchId && Date.parse(status.launchedAt) < launched.get(status.appSessionId)!;
       const atBarrier = (status: EngineSessionStatus): boolean => {
         follow(status);
         if (status.process !== 'exited') return false;
@@ -94,7 +103,6 @@ export function hostEventSource(
         for (const status of deferred.values()) writer.applyEngineStatus(status);
         deferred.clear();
         current.clear();
-        launched.clear();
       };
       const foldHeld = (appSessionId: AppSessionId, events: SessionEvent[]) => {
         const launch = current.get(appSessionId);

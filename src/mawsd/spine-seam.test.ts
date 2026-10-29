@@ -83,6 +83,7 @@ class FakeLink {
 // follow `session.status`. Its work is a test's to hold (`busy`).
 class FakeRoot implements SpineRoot {
   readonly seen: string[] = [];
+  readonly later: number[] = []; // at each held batch: how many held events follow it (HeldReplay.later)
   readonly stop = vi.fn();
   private readonly statuses = new Map<string, EngineSessionStatus>();
   private readonly engine = new Set<SpineViewEvents['engine']>();
@@ -92,7 +93,10 @@ class FakeRoot implements SpineRoot {
 
   constructor(readonly hosts: SpineHosts, readonly deps: SpineDeps) {
     const phase = () => (hosts.replay?.replaying() ? 'held' : hosts.replay?.barrier() ? 'coalesced' : 'live');
-    hosts.onEvent('session.eventBatch', ({ appSessionId, events }) => this.seen.push(`${phase()} batch ${appSessionId} ${events.map((e) => e.seq).join(',')}`));
+    hosts.onEvent('session.eventBatch', ({ appSessionId, events }) => {
+      if (phase() === 'held') this.later.push(hosts.replay!.later().length);
+      this.seen.push(`${phase()} batch ${appSessionId} ${events.map((e) => e.seq).join(',')}`);
+    });
     hosts.onEvent('session.status', ({ status }) => {
       this.seen.push(`${phase()} status ${status.appSessionId} ${status.process}`);
       this.statuses.set(status.appSessionId, status);
@@ -285,6 +289,7 @@ describe('the hold and the barrier', () => {
       'held status s1 exiting',
       'live batch s1 3',
     ]);
+    expect(root.later).toEqual([2, 1]); // the hold's own order, offered to the fold at each held event
     expect(logs).toContainEqual(expect.stringMatching(/^spine: the hold drained: 3 events \(\d+ bytes\)$/));
   });
 

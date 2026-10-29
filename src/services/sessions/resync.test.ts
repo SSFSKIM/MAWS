@@ -8,7 +8,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { CommandResult, HostState, SessionDigest } from '@shared/ipc/schema';
 import type { EventsSnapshot } from '@shared/ipc/schema/session';
-import { record, status } from '../../../test/support/builders';
+import { record, status, T0 } from '../../../test/support/builders';
 import { ev } from '../../../test/support/events';
 import type { HostDispatch, HostResync } from '@shared/host/host-supervisor';
 import { hostEventSource } from '.';
@@ -48,9 +48,13 @@ function harness(ids: string[], { held = false }: { held?: boolean } = {}) {
   const rows = new Map<string, { status: EngineSessionStatus; events: SessionEvent[] }>();
   const calls: { name: string; input: unknown }[] = [];
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
-  const fire = (name: string, payload: unknown) => listeners.get(name)?.forEach((listener) => listener(payload));
-  // P5 O3-D M2: mawsd's adapter replaying what it held while the spine loaded (Interfaces §A, step 4)
-  const replay = { barrier: false, replaying: false, drained: new Set<() => void>() };
+  // P5 O3-D M2: mawsd's adapter replaying what it held while the spine loaded (Interfaces §A, step 4): what `drain`'s
+  // callback sends is the hold, recorded whole and then delivered in order, each event seeing those after it (`later`)
+  const replay = { barrier: false, replaying: false, drained: new Set<() => void>(), recording: null as { name: string; payload: unknown }[] | null, hold: [] as { name: string; payload: unknown }[], at: -1 };
+  const fire = (name: string, payload: unknown) => {
+    if (replay.recording) return void replay.recording.push({ name, payload });
+    listeners.get(name)?.forEach((listener) => listener(payload));
+  };
   const stateListeners = new Set<(state: HostState) => void>();
   const logs: string[] = [];
   let resync: HostResync | null = null;
@@ -85,6 +89,7 @@ function harness(ids: string[], { held = false }: { held?: boolean } = {}) {
       replay: {
         barrier: () => replay.barrier,
         replaying: () => replay.replaying,
+        later: () => replay.hold.slice(replay.at + 1),
         onDrained: (listener: () => void) => (replay.drained.add(listener), () => void replay.drained.delete(listener)),
       },
     }),
@@ -137,10 +142,19 @@ function harness(ids: string[], { held = false }: { held?: boolean } = {}) {
       replay.barrier = true;
     },
     drain(held: () => void) {
-      replay.replaying = true;
+      replay.recording = [];
       try {
         held();
       } finally {
+        replay.hold = replay.recording;
+        replay.recording = null;
+      }
+      replay.replaying = true;
+      try {
+        for (replay.at = 0; replay.at < replay.hold.length; replay.at += 1) fire(replay.hold[replay.at]!.name, replay.hold[replay.at]!.payload);
+      } finally {
+        replay.hold = [];
+        replay.at = -1;
         replay.replaying = false;
         replay.barrier = false;
       }
@@ -504,6 +518,46 @@ describe('the load’s barrier in mawsd (P5 O3-D M2)', () => {
     expect(h.model.engineStatus(X as AppSessionId)?.launchId).toBe('LB');
     h.deliver(X, pairs(X, 'LB', 1_201, 1_201));
     expect(h.digest(X)?.childAgents.done).toBe(1_201);
+  });
+
+  // the fence is the hold's own order, not the launches' wall-clock times, which the status contract does not order
+  for (const [what, launchedAt] of [['the same', T0], ['a later', '2026-09-28T11:00:00.000Z']] as const) {
+    it(`the old launch’s held status is superseded with ${what} launch time as the resynced launch’s`, async () => {
+      const X = 'x1';
+      const h = harness([X], { held: true });
+      const raw = h.raw();
+      h.begin();
+      h.host(X, live(X, 'LB'), pairs(X, 'LB', 1, 1_200));
+      await h.connect();
+      const tailA = pairs(X, 'LA', 50, 60);
+      h.drain(() => {
+        h.status({ ...live(X, 'LA'), launchedAt });
+        h.deliver(X, tailA);
+        h.status(live(X, 'LB'));
+        h.deliver(X, pairs(X, 'LB', 1, 1_200));
+      });
+      expect(h.digest(X)?.childAgents).toEqual({ active: 0, done: 1_200 });
+      expect(raw.filter((event) => event.id.includes(':LA:'))).toEqual(tailA);
+      expect(h.model.engineStatus(X as AppSessionId)?.launchId).toBe('LB');
+    });
+  }
+
+  it('a relaunch to a third launch held after the listing applies, and its held events fold', async () => {
+    const X = 'x1';
+    const h = harness([X], { held: true });
+    h.begin();
+    h.host(X, live(X, 'LB'), pairs(X, 'LB', 1, 10)); // the listing names B
+    await h.connect();
+    expect(h.digest(X)?.childAgents.done).toBe(10);
+    h.drain(() => {
+      h.deliver(X, pairs(X, 'LB', 11, 12)); // B's last events
+      h.status({ ...live(X, 'LC'), launchedAt: '2026-09-28T09:00:00.000Z' }); // C, even with an earlier clock
+      h.deliver(X, pairs(X, 'LC', 1, 3));
+    });
+    expect(h.model.engineStatus(X as AppSessionId)?.launchId).toBe('LC');
+    expect(h.digest(X)?.childAgents.done).toBe(15); // B's 12, then C's 3 folded (raw-only, they would read 12)
+    h.deliver(X, pairs(X, 'LC', 4, 4)); // live
+    expect(h.digest(X)?.childAgents.done).toBe(16);
   });
 
   it('a session that exits during the load with a crash in its held final batch reads failed, its turn’s end kept', async () => {

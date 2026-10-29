@@ -48,6 +48,7 @@ export class SpineEvents {
   private readonly coalesced = new Map<string, Held>();
   private held: Held[] = [];
   private heldBytes = 0;
+  private delivering = -1; // the drain's index into `held`
   private readonly listeners = new Map<string, Set<Listener>>();
   private readonly offs: (() => void)[];
   dropped = 0; // held events discarded since the seam started (daemon.status.spine.heldDropped)
@@ -89,6 +90,11 @@ export class SpineEvents {
     }
   }
 
+  // While draining: what was held after the event being delivered (HeldReplay.later)
+  later(): readonly Held[] {
+    return this.delivering < 0 ? [] : this.held.slice(this.delivering + 1);
+  }
+
   listen(name: string, listener: Listener): () => void {
     if (!this.listeners.has(name)) this.listeners.set(name, new Set());
     this.listeners.get(name)!.add(listener);
@@ -115,9 +121,13 @@ export class SpineEvents {
   // then live delivery. Answers what it drained.
   drain(): { events: number; bytes: number } {
     const drained = { events: 0, bytes: this.heldBytes };
-    for (let i = 0; i < this.held.length; i += 1) {
-      drained.events += 1;
-      this.deliver(this.held[i].name, this.held[i].payload);
+    try {
+      for (this.delivering = 0; this.delivering < this.held.length; this.delivering += 1) {
+        drained.events += 1;
+        this.deliver(this.held[this.delivering].name, this.held[this.delivering].payload);
+      }
+    } finally {
+      this.delivering = -1;
     }
     this.held = [];
     this.heldBytes = 0;
@@ -201,6 +211,7 @@ export class SpineHostsAdapter implements SpineHosts {
   readonly replay = {
     barrier: () => this.atBarrier,
     replaying: () => this.replayingHold,
+    later: () => this.options.events.later(),
     onDrained: (listener: () => void) => (this.drainedListeners.add(listener), () => void this.drainedListeners.delete(listener)),
   };
 
