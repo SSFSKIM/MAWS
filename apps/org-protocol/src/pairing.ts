@@ -18,7 +18,7 @@ import { canonicalize } from './canonical.ts';
 import { isPublicKey, utf8, type B64 } from './keys.ts';
 import { isMemberId, type MemberId } from './names.ts';
 import { isDevice } from './shapes.ts';
-import type { Device } from './types.ts';
+import type { Device, DeviceClass, KeyStorage, Passkey } from './types.ts';
 
 export const PAIRING_CODE_PREFIX = 'smns-pair-v1.';
 export const PAIRING_MAC_DOMAIN = 'smns-pair-mac-v1';
@@ -29,6 +29,11 @@ export const PAIRING_SECRET_BYTES = 16;
 export type PairingCode = { hub: string; org: string; member: MemberId; roots: B64[]; recoveryPub: B64; k: B64 };
 /** What the MAC binds: the org, the member, and the device entry as the successor will list it, before its endorsement. */
 export type PairingFields = { org: string; member: MemberId; device: Omit<Device, 'endorsement'> };
+/**
+ * A pending device entry as the approving side judges it: the device's fields, flat, and its MAC. The hub's pending list
+ * (its `PendingDevice`, which adds the member and the entry's times) is one; nothing here trusts the hub's grammar.
+ */
+export type PendingEntry = { deviceId: string; class: DeviceClass; keyStorage: KeyStorage; channelPub: string; stepUpPub?: string; passkey?: Passkey; mac: string };
 
 const CODE_FIELDS = ['hub', 'org', 'member', 'roots', 'recoveryPub', 'k'];
 const LOOPBACK = ['127.0.0.1', 'localhost', '[::1]'];
@@ -152,3 +157,36 @@ export async function pairingFingerprint(org: string, member: MemberId, entry: D
   }
   return `${text.slice(0, 5)}-${text.slice(5)}`;
 }
+
+/** A device entry as the pending list carries it, rebuilt as the state would list it (no endorsement yet). */
+export function entryDevice(entry: PendingEntry): Omit<Device, 'endorsement'> {
+  const device: Record<string, unknown> = { id: entry.deviceId, class: entry.class, keyStorage: entry.keyStorage, channelPub: entry.channelPub };
+  if (entry.stepUpPub !== undefined) device.stepUpPub = entry.stepUpPub;
+  if (entry.passkey !== undefined) device.passkey = entry.passkey;
+  return device as Omit<Device, 'endorsement'>;
+}
+
+/**
+ * Whether a pending entry answers this pairing: the device a state could list, of the class asked for, its MAC under
+ * `k` over the org, the member and the whole entry, and not a device the head already lists. Otherwise why not.
+ */
+export async function judgeEntry(
+  entry: PendingEntry,
+  pairing: { org: string; member: string; k: Uint8Array; class: Device['class']; listed: Set<string> },
+): Promise<{ ok: true; device: Omit<Device, 'endorsement'> } | { ok: false; why: string }> {
+  const device = entryDevice(entry);
+  if (device.class === 'web-cards' && device.stepUpPub !== undefined) return { ok: false, why: 'a web-cards entry with a step-up key, which the class never holds (RL 5.10)' };
+  if (!isDevice(device)) return { ok: false, why: 'not a device entry the org state could list' };
+  if (!isPairedDeviceId(device.id)) return { ok: false, why: 'its id is outside the device id grammar (base64url)' };
+  if (device.passkey !== undefined && !isRpId(device.passkey.rpId)) return { ok: false, why: "its passkey's rpId is not a host name" };
+  if (device.class !== pairing.class) return { ok: false, why: `of class ${device.class}, not ${pairing.class}` };
+  if (device.class === 'web-cards' && device.passkey === undefined) return { ok: false, why: 'a web-cards entry with no passkey' };
+  if (!(await verifyPairingMac(pairing.k, { org: pairing.org, member: pairing.member, device }, entry.mac))) return { ok: false, why: "its MAC is not under this code's secret" };
+  if (pairing.listed.has(device.id)) return { ok: false, why: 'its id is a device the head already lists' };
+  return { ok: true, device };
+}
+
+/** A device id as a pairing takes it: base64url's alphabet, as the phone's 16 random bytes and this command's ids are. */
+export const isPairedDeviceId = (id: string) => /^[A-Za-z0-9_-]{1,128}$/.test(id);
+/** A relying party id as a pairing takes it: a lower-case host name (dot-separated labels) or a dotted IPv4 address. */
+export const isRpId = (rpId: string) => rpId.length <= 253 && /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/.test(rpId);

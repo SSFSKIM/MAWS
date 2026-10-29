@@ -4,7 +4,7 @@
 // arrives (at once in a main-scope subscription for a subagent's block, whose row that subscription never carries) or
 // dropped at its step's end. It records what a consumer must never see: a gap in `n`, a row twice, a chunk at or below
 // the watermark or out of order.
-import type { SessionMessage, Streaming } from '../../src/protocol/session';
+import type { SessionMessage, StepEnd, Streaming } from '../../src/protocol/session';
 
 type Block = { text: string; settledBy: string | null };
 const msgKey = (m: { turnId: string; agentId: string | null; step: number }) => `${m.turnId}/${m.agentId ?? ''}/${m.step}`;
@@ -17,6 +17,8 @@ export class Dx4Reader {
   /** Every block's text as this reader assembled it (snapshot text, then its chunks), kept after it settles. */
   readonly assembled = new Map<string, string>();
   readonly faults: string[] = [];
+  /** Every step-end's body, as it came. */
+  readonly stepEnds: StepEnd[] = [];
   ended: { reason: string; n: number } | null = null;
   kinds: string[] = [];
   private next = 0;
@@ -68,6 +70,7 @@ export class Dx4Reader {
         return;
       }
       case 'step-end':
+        this.stepEnds.push(message.body);
         // A block of the step without a block-row never gets one: dropped. A paired block waits for its row.
         for (const [id, block] of this.partial) if (id.startsWith(`${msgKey(message.body)}#`) && block.settledBy === null) this.partial.delete(id);
         return;
