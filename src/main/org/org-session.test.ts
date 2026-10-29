@@ -2018,9 +2018,13 @@ describe('M3: rekey', () => {
     const feed = fakeFeed();
     session.attach(feed.hooks);
     await followHub(session, feed);
+    // The crash's files are written behind the session's back, so the session is closed and its anchor for the head it
+    // just adopted is on disk first: the adoption moves the head in memory before that write, which `close()` doesn't
+    // wait for, and a late one would carry the registration without the intent.
+    for (const s of opened) await s.close();
+    await until(async () => (await readRegistration()).anchor.version === hub.head.state.version, 'the anchor written');
     const reg = await readRegistration();
     await realFiles().write(REGISTRATION_FILE, { ...reg, rekey: { device: nextEntry.id } });
-    for (const s of opened) await s.close();
     return { old: entry, next: nextEntry };
   }
 
