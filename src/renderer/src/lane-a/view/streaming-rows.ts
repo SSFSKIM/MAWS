@@ -30,18 +30,23 @@ export function latestTurn(rows: readonly Row[]): TurnId | null {
   return rows.findLast((row) => row.turnId !== null)?.turnId ?? null;
 }
 
-/** `turn`: the turn the blocks belong to (the report's bridge); absent, they belong to none. */
-export function streamingRows(blocks: readonly StreamBlock[], since: (block: StreamBlock) => string, options: { turn?: TurnId | null } = {}): Row[] {
+/**
+ * `turn`: the turn the blocks belong to (the report's bridge); absent, they belong to none. `kept` (P5 O9): the blocks
+ * of a step that ended before the engine wrote them (an interrupt cut it), drawn as lane B keeps a stopped reply's
+ * partial text: settled, an answer with words and a message as far as it came; thinking, which streams no words, none.
+ */
+export function streamingRows(blocks: readonly StreamBlock[], since: (block: StreamBlock) => string, options: { turn?: TurnId | null; kept?: boolean } = {}): Row[] {
   const turnId = options.turn ?? null;
+  const live = options.kept !== true;
   const rows: Row[] = [];
   for (const block of blocks) {
     if (block.kind === 'text') {
-      rows.push({ id: rowId(block), turnId, at: since(block), kind: 'assistant_text', messageUuid: null, blockIndex: block.index, markdown: block.text, live: true, phase: 'answer', model: null });
+      if (live || block.text.trim() !== '') rows.push({ id: rowId(block), turnId, at: since(block), kind: 'assistant_text', messageUuid: null, blockIndex: block.index, markdown: block.text, live, phase: 'answer', model: null });
     } else if (block.kind === 'thinking') {
-      rows.push({ id: rowId(block), turnId, at: since(block), kind: 'thinking', messageUuid: null, text: '', live: true, durationMs: null });
+      if (live) rows.push({ id: rowId(block), turnId, at: since(block), kind: 'thinking', messageUuid: null, text: '', live: true, durationMs: null });
     } else if (isMessageTool(block.toolName) && block.toolUseId !== null) {
       const text = streamingMessageText(block.text);
-      if (text !== null) rows.push({ id: rowId(block), turnId, at: since(block), kind: 'to_human', toolUseId: block.toolUseId as ToolUseId, text, pending: true });
+      if (text !== null) rows.push({ id: rowId(block), turnId, at: since(block), kind: 'to_human', toolUseId: block.toolUseId as ToolUseId, text, pending: live });
     }
   }
   return rows;

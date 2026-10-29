@@ -12,6 +12,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { TEST_MACHINE, at } from '../../../../../test/support/machine';
 import { laneAState } from '../../lane-a/test-support/lane-a-state'; // P5 O9
+import { resetLaneAWatches } from '../../lane-a/watches'; // P5 O9
 import { applyLaneAState, resetLaneAStore } from '../../stores/lane-a'; // P5 O9
 import { resetQueueStore } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
@@ -374,7 +375,11 @@ describe('TranscriptSlot', () => {
   // draws closed while the port says nothing runs, in the words its own rows give (a stop's marker: "You stopped").
   describe('a session driven through its bridge', () => {
     const id = at('app-slot-bridged' as AppSessionId);
-    afterEach(() => resetLaneAStore());
+    afterEach(() => {
+      resetLaneAWatches();
+      resetLaneAStore();
+    });
+    let plane: ((payload: unknown, machine?: string) => void) | null = null;
     function mount(events: SessionEvent[]) {
       const records = useSessions.getState().records;
       act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project', worktree: null, holder: { kind: 'terminal', pid: 4242 } } as unknown as SessionRecord]]) }));
@@ -392,9 +397,18 @@ describe('TranscriptSlot', () => {
                   : { ok: true, value: null },
         ),
       );
-      window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
+      plane = null;
+      const on = vi.fn((name: string, listener: (payload: unknown, machine?: string) => void) => {
+        if (name === 'laneA.plane') plane = listener;
+        return () => {};
+      });
+      window.maws = { localMachine: TEST_MACHINE, invoke, on } as unknown as PreloadBridge;
       render(<TranscriptSlot appSessionId={id} />);
     }
+    // the pane's watch hears DX4 messages, as main's driver reshapes the bridge's stream
+    const step = { turnId: 'turn-bridge-1', agentId: null, step: 0 };
+    const hear = (...messages: { kind: string; body: unknown }[]) =>
+      act(() => plane!({ appSessionId: bareOf(id), watch: 'w-1', messages: messages.map((m, n) => ({ project: '', machine: 'm', session: 'eng-1', sub: 'w-1', n, ...m })) }));
     const divider = () => document.querySelector('[data-kind="divider"]')?.textContent ?? null;
     const running = (on: boolean) => act(() => applyLaneAState(id, laneAState(id, { turn: { running: on, unknown: false } })));
 
@@ -411,6 +425,27 @@ describe('TranscriptSlot', () => {
       await settle();
       expect(divider()).toMatch(/^You stopped after/);
       expect(document.body.textContent).not.toMatch(/Working/);
+    });
+
+    // The M8 sitting's second defect: Stop dropped the partly streamed reply. The engine writes no row for what an
+    // interrupt cut, so the text stays as lane B keeps a stopped reply's: settled, in its turn, never streaming.
+    it('keeps the partly streamed reply an interrupt cut, settled in its turn', async () => {
+      const b = builder();
+      b.turn('u1', 'count slowly to 300, one line each');
+      running(true);
+      mount(b.events);
+      await settle();
+      hear({ kind: 'snapshot', body: { streaming: [], usage: null } }, { kind: 'chunk', body: { ...step, chunkIndex: 0, chunk: { kind: 'text', index: 0, text: '1\n\n2\n\n3' } } });
+      await settle();
+      expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toContain('3');
+      hear({ kind: 'step-end', body: step }); // the interrupt: the step ends with nothing named
+      running(false);
+      await settle();
+      const kept = document.querySelectorAll('[data-kind="assistant_text"]');
+      expect(kept).toHaveLength(1);
+      expect(kept[0].textContent).toContain('3');
+      expect(kept[0].getAttribute('data-turn-id')).toBe(document.querySelector('[data-kind="user"]')?.getAttribute('data-turn-id'));
+      expect(document.body.textContent).not.toMatch(/Working/); // at rest, the turn closed
     });
 
     it('never reads a slash command’s turn, which no row ends, as working while no turn runs', async () => {

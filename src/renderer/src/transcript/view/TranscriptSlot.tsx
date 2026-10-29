@@ -14,7 +14,7 @@
 // P2-C (2026-10-09): a session's slot follows its owner channel (`stores/owner-channel.ts`) and tells the transcript
 // whether the lane is on, which the report view and the report module read.
 // P5 O9 M5: a terminal session driven through its bridge streams its reply into the tail (`lane-a/stream/overlay.ts`),
-// and is at rest while its controls port says no main turn runs.
+// keeps what an interrupt cut of it in its turn, and is at rest while its controls port says no main turn runs.
 // L197: the slot gives the transcript the session's agents from its task graph (agent-lookup.ts), so a message to an
 // agent no loaded turn launched names it.
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
@@ -82,7 +82,7 @@ export function TranscriptSlot({ appSessionId, agentId, className, startAt, pres
   );
   // P5 O9 M5: a terminal session driven through its bridge draws its reply as it is written, after the rows on disk
   const streaming = useLaneAStreaming(agentId === undefined ? appSessionId : null, storeKey);
-  const tail = useMemo(() => [...streaming, ...held.filter((_, i) => !answered[i]).map(heldRow)], [streaming, held, answered]);
+  const tail = useMemo(() => [...streaming.tail, ...held.filter((_, i) => !answered[i]).map(heldRow)], [streaming.tail, held, answered]);
   const withdrawn = useMemo(() => new Set<string>(queue.withdrawn), [queue.withdrawn]);
   const effort = useShownEffort(appSessionId);
   const ownerLane = useOwnerChannel(agentId === undefined ? appSessionId : null)?.lane.on ?? false; // P2-C: a session's, never a child's
@@ -102,6 +102,7 @@ export function TranscriptSlot({ appSessionId, agentId, className, startAt, pres
       presentation={presentation}
       ownerLane={agentId === undefined ? ownerLane : undefined}
       atRest={atRest}
+      placed={streaming.kept}
     />
   );
 }

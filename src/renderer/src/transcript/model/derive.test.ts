@@ -1,7 +1,7 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { afterEach, describe, expect, it } from 'vitest';
-import { heldRow, restingRows, rowsOf, turnDerivations, turnRows, turnSummary, withAllExpanded, withQueueTail } from './derive';
+import { heldRow, restingRows, rowsOf, turnDerivations, turnRows, turnSummary, withAllExpanded, withPlacedRows, withQueueTail } from './derive';
 import { cellId, rowId, turnId } from './keys';
 import { applyEvents, createState, withAgents, type AgentLookup } from './reduce';
 import type { Row, SubagentRef } from './rows';
@@ -508,6 +508,26 @@ describe('the queue tail', () => {
     expect(shown.filter((row) => row.kind === 'user').map((row) => row.id)).toEqual(['user:u1', 'held:q-1']);
     expect(withQueueTail(rows, new Set(['u1']), [])).toEqual(rows); // a prompt that ran is never hidden
     expect(withQueueTail(rows, new Set(), [])).toBe(rows);
+  });
+
+  // P5 O9 (the M8 sitting): rows a mount keeps outside the store (a terminal session's reply cut by an interrupt) sit
+  // after the last row of their turn, in their order, so a later turn's rows never come before them; a row whose turn
+  // is not drawn goes last.
+  it('places kept rows after the last row of their turn', () => {
+    const b = builder();
+    b.turn('u1', 'count slowly');
+    b.text('m1', 0, 'Counting.');
+    b.end(['u1']);
+    b.turn('u2', 'and again');
+    b.end(['u2']);
+    const list = rows(b.events);
+    const first = turnId.ofMessage(uuid('u1'));
+    const kept = (id: string, turn: string | null) => ({ id, turnId: turn, at: '2026-09-28T10:00:01.000Z', kind: 'assistant_text', messageUuid: null, blockIndex: 0, markdown: id, live: false, phase: 'answer', model: null }) as Row;
+    const placed = withPlacedRows(list, [kept('k1', first), kept('k2', first), kept('k3', 'turn:gone'), kept('k4', null)]);
+    const lastOfFirst = list.findLastIndex((row) => row.turnId === first);
+    expect(lastOfFirst).toBeLessThan(list.length - 1); // the later turn's rows come after it
+    expect(placed.map((row) => row.id)).toEqual([...list.slice(0, lastOfFirst + 1).map((row) => row.id), 'k1', 'k2', ...list.slice(lastOfFirst + 1).map((row) => row.id), 'k3', 'k4']);
+    expect(withPlacedRows(list, [])).toBe(list);
   });
 });
 

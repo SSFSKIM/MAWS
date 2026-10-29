@@ -3,7 +3,7 @@
 // fake-bridge.ts) on the launch's scratch sminos home, and no `claude` running. Each control's body as the fake receives
 // it; sends in order, a refusal keeping its draft, a held send's strip; a side question answered from its op's end; the
 // gaps greyed with their reasons; no bridge as before; the reply streaming, then its row; a pane opened mid-reply, and
-// that turn aborted with no `step end`. M6 (acceptance 3 and 5): the requests the bridge raises, as attention items and
+// that turn aborted with no `step end`, its text kept settled. M6 (acceptance 3 and 5): the requests the bridge raises, as attention items and
 // docked cards answered through the port, each decision's body as the fake receives it, and the race with the terminal.
 import { randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
@@ -447,7 +447,8 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 
-  test('a pane opened mid-reply shows what already streamed; the turn aborting with no step end leaves no streaming text', async () => {
+  // The M8 sitting: an interrupt's partial reply stays, settled (no longer streaming), as lane B keeps a stopped reply's.
+  test('a pane opened mid-reply shows what already streamed; the turn aborting with no step end leaves its text settled, none streaming', async () => {
     const c = await begin();
     const { page } = c;
     const { bridge } = await drive(c, { open: false });
@@ -459,8 +460,9 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(main(page).getByText('Half a story', { exact: true })).toBeVisible({ timeout: 10_000 });
     bridge.emit({ type: 'chunk', ...step, chunkIndex: 1, chunk: { kind: 'text', index: 0, text: ' and more' } });
     await expect(main(page).getByText('Half a story and more', { exact: true })).toBeVisible({ timeout: 10_000 });
-    bridge.emit({ type: 'turn', phase: 'complete', turnId: 'turn-m' }); // aborted: no step end, no block-row
-    await expect(main(page).getByText('Half a story and more', { exact: true })).toHaveCount(0, { timeout: 10_000 });
+    bridge.emit({ type: 'turn', phase: 'complete', turnId: 'turn-m', reason: 'aborted' }); // no step end, no block-row
+    await expect(main(page).locator('.transcript-prose-live')).toHaveCount(0, { timeout: 10_000 });
+    await expect(main(page).getByText('Half a story and more', { exact: true })).toBeVisible();
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 
