@@ -133,6 +133,17 @@ describe('an Agent call whose session’s process exits', () => {
     expect(expanded(state)).toEqual(['stopped', 'started']);
   });
 
+  it('a drill-in child with a nested agent working at the parent’s exit: the row folds and reads stopped, no exit row of the child’s', () => {
+    const b = started();
+    b.end(['u1']); // the child's own turn ended, its nested agent working on
+    let child = applyEvents(createState(null, 'agent-child' as never), b.events);
+    expect(shown(child)).toEqual(['working']);
+    child = applyEvents(child, exit(b.at + 1_000, 'crash')); // the parent's process, delivered into the child's slice
+    expect(shown(child)).toEqual([]);
+    expect(expanded(child)).toEqual(['stopped']);
+    expect(rowsOf(child).some((row) => row.kind === 'error')).toBe(false);
+  });
+
   it('an exit before the call (an earlier process’s) ends none of its agents', () => {
     const earlier = exit(Date.parse('2026-09-28T09:00:00.000Z'), 'stop');
     const b = started();

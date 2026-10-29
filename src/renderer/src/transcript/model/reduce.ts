@@ -747,11 +747,23 @@ function apply(batch: Batch, event: SessionEvent): void {
     }
     case 'session.reconnect':
     case 'process.exited': {
+      // P5 O9: the process's exit ends the agents every agents row names, each turn's own up to now, a turn a rewind hid
+      // among them (its branch draws when revealed), a child's nested agents too; the rows derive again
+      const endAgents = () => {
+        if (event.kind !== 'process.exited') return;
+        for (const id of [...state.order, ...(state.hidden?.turns ?? [])]) {
+          if (!state.turns.get(id)?.events.some(makesAgentsRow)) continue;
+          const turn = batch.touch(id);
+          turn.agentsEndedAt = turn.events.length;
+          turn.version += 1;
+        }
+      };
       // In a child transcript, the parent's process exiting ends the child with no finish to come: its open turn closes
       // as stopped, and the exit is the parent's row, not the child's.
       if (state.agentId !== null) {
         const turn = batch.current();
         if (turn) batch.closeUnended(turn, 'stopped', event.at, event.kind === 'process.exited' && event.reason === 'crash' ? 'crash' : null);
+        endAgents();
         return;
       }
       // A session's process exiting ends every turn the engine was running (no turn.ended will come for them); a
@@ -760,23 +772,13 @@ function apply(batch: Batch, event: SessionEvent): void {
       // not seen to go) is no evidence of a stop, so such a turn closes by the superseding start's rule.
       if (event.kind === 'process.exited') {
         if (state.pluginStatus.size > 0) state.pluginStatus = new Map(); // R1: the plugins' lines went with the process
-        // P5 O9: the agents a turn's agents rows name ended with the process, each turn's own up to now, a turn a rewind
-        // hid among them (its branch draws when revealed); the rows derive again
-        const endAgents = (id: TurnId) => {
-          if (!state.turns.get(id)?.events.some(makesAgentsRow)) return;
-          const turn = batch.touch(id);
-          turn.agentsEndedAt = turn.events.length;
-          turn.version += 1;
-        };
         for (const id of state.order) {
           const turn = state.turns.get(id)!;
-          if (turn.state === 'open' && turn.accepted) {
-            const { outcome, cause } = exitClosing(turn, event.reason);
-            batch.closeUnended(batch.touch(id), outcome, event.at, cause);
-          }
-          endAgents(id);
+          if (turn.state !== 'open' || !turn.accepted) continue;
+          const { outcome, cause } = exitClosing(turn, event.reason);
+          batch.closeUnended(batch.touch(id), outcome, event.at, cause);
         }
-        for (const id of state.hidden?.turns ?? []) endAgents(id);
+        endAgents();
       }
       return batch.loose(event);
     }
