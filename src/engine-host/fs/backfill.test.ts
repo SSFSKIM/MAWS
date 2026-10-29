@@ -319,7 +319,39 @@ describe('a /compact on disk', () => {
       [true, 'This session is being co'], [true, '<local-command-caveat>Ca'], [false, '<command-name>/compact</'], [false, '<local-command-stdout>Co'],
     ]);
     expect(only(events, 'turn.started').map((e) => e.userMessageUuid)).toEqual([messages[2].messageUuid]); // the command's turn only
+    expect(only(events, 'turn.ended').map((e) => e.userMessageUuids)).toEqual([[messages[2].messageUuid]]); // P5 O9: which ends at its record
     expect(records.slice(at, at + 5).map((record) => startsTurn(record))).toEqual([false, false, false, true, false]);
+  });
+});
+
+// P5 O9 (the M10 sitting): commands typed at the terminal, as 2.1.312 wrote them in the sitting's transcript (the
+// caveat, the command's record under it, its output), shapes kept and words shortened. A local command runs no model,
+// so its turn ends where it starts; a skill's command record, under no caveat, opens a turn the model then runs.
+describe('a command typed at the terminal', () => {
+  const caveat = (uuid: string, parent: string | null, n: number) =>
+    rec({ type: 'user', uuid, parentUuid: parent, timestamp: at(n), isMeta: true, message: { role: 'user', content: '<local-command-caveat>The command below was run directly in Claude Code, not sent to you as a request.</local-command-caveat>' } });
+  const command = (uuid: string, parent: string, n: number, name: string, args: string) =>
+    rec({ type: 'user', uuid, parentUuid: parent, timestamp: at(n), message: { role: 'user', content: `<command-name>/${name}</command-name>\n            <command-message>${name}</command-message>\n            <command-args>${args}</command-args>` } });
+  const output = (uuid: string, parent: string, n: number, text: string) =>
+    rec({ type: 'user', uuid, parentUuid: parent, timestamp: at(n), message: { role: 'user', content: `<local-command-stdout>${text}</local-command-stdout>` } });
+
+  it('opens and ends the command’s turn at its record, the output after it, for each of two in a row', () => {
+    const events = mapAll([
+      caveat('c1', 'prior', 1), command('m1', 'c1', 1, 'model', 'haiku'), output('o1', 'm1', 2, 'Set model to `Haiku 5.5` and saved as your default for new sessions'),
+      caveat('c2', 'o1', 3), command('e2', 'c2', 3, 'effort', 'low'), output('o2', 'e2', 4, 'Set effort level to low (saved as your default for new sessions): Quick'),
+    ]);
+    const turns = events.filter((e) => e.kind === 'turn.started' || e.kind === 'turn.ended').map((e) => [e.kind, e.kind === 'turn.started' ? e.userMessageUuid : e.userMessageUuids, e.id]);
+    expect(turns).toEqual([
+      ['turn.started', 'm1', 'm1'], ['turn.ended', ['m1'], 'm1#2'],
+      ['turn.started', 'e2', 'e2'], ['turn.ended', ['e2'], 'e2#2'],
+    ]);
+    expect(only(events, 'turn.ended').map((e) => [e.numTurns, e.result, e.resultText])).toEqual([[0, 'success', null], [0, 'success', null]]);
+    expect(kinds(events.filter((e) => e.id.startsWith('o1') || e.id.startsWith('o2')))).toEqual(['user.message', 'user.message']); // the outputs open nothing
+  });
+
+  it('a skill’s command record, under no caveat, opens a turn it leaves running', () => {
+    const events = mapAll([output('o0', 'prior', 1, 'done'), command('s1', 'o0', 2, 'doperpowers:brainstorming', 'a feature')]);
+    expect(kinds(events.filter((e) => e.kind === 'turn.started' || e.kind === 'turn.ended'))).toEqual(['turn.started']);
   });
 });
 

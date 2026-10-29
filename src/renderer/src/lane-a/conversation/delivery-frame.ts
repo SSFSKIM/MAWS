@@ -58,13 +58,20 @@ export const BRIDGE_PLUGINS = ['sminos', 'doperpowers'] as const;
 const isBridgePlugin = (name: unknown): boolean => (BRIDGE_PLUGINS as readonly unknown[]).includes(name);
 
 /**
- * A row the bridge appended (`$.session.append`), as the engine keeps it: a meta user row with the plugin's origin. A
- * companion the engine writes beside a turn (`turnCompanion`: a plugin skill's body, loaded for a command the plugin
- * ran, carries the plugin's origin too; local transcripts, 2.1.272–2.1.277) is the engine's, not an append.
+ * A row the bridge appended (`$.session.append`), as the engine keeps it: a meta user row with the plugin's origin,
+ * whose content is the plugin's text blocks and nothing else (2.1.287 to 2.1.312 build it so). The engine writes rows of
+ * its own under the plugin's origin too, which are no appends:
+ * - a companion beside a turn (`turnCompanion`: a plugin skill's body, loaded for a command the plugin ran; local
+ *   transcripts, 2.1.272–2.1.277);
+ * - what a command the plugin queued writes (`$.command.run`, `$.prompt.submit`): each of its user rows takes the queued
+ *   command's origin and its priority (`queuePriority`), its content as the command wrote it. The O9 M10 sitting's
+ *   `/rename` left one: the system reminder telling the model the session's new name, a meta string row of the bridge's
+ *   origin (2.1.312, `queuePriority: "later"`), which read as a steer and drew as the person's words.
  */
 export function isBridgeRow(row: JsonObject): boolean {
   const origin = object(row.origin);
-  return row.type === 'user' && row.isMeta === true && row.turnCompanion !== true && origin?.kind === 'plugin' && isBridgePlugin(origin.name);
+  if (row.type !== 'user' || row.isMeta !== true || row.turnCompanion === true || row.queuePriority !== undefined) return false;
+  return origin?.kind === 'plugin' && isBridgePlugin(origin.name) && Array.isArray(object(row.message)?.content);
 }
 
 /**

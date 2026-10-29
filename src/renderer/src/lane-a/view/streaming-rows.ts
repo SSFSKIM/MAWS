@@ -32,21 +32,25 @@ export function latestTurn(rows: readonly Row[]): TurnId | null {
 
 /**
  * `turn`: the turn the blocks belong to (the report's bridge); absent, they belong to none. `kept` (P5 O9): the blocks
- * of a step that ended before the engine wrote them (an interrupt cut it), drawn as lane B keeps a stopped reply's
- * partial text: settled, an answer with words and a message as far as it came; thinking, which streams no words, none.
+ * of a step that ended before the engine wrote them (an interrupt cut it), settled: the words of an answer and of a
+ * message as far as they came; thinking, which streams no words, none. The engine keeps an assistant block only once
+ * it completes, so the session holds none of these words and its next turn won't see them (the M10 sitting): each is
+ * marked cut off (`cut`), never the turn's answer, and a cut message was never sent, so it is no message row.
  */
 export function streamingRows(blocks: readonly StreamBlock[], since: (block: StreamBlock) => string, options: { turn?: TurnId | null; kept?: boolean } = {}): Row[] {
   const turnId = options.turn ?? null;
   const live = options.kept !== true;
+  const cut = (block: StreamBlock, markdown: string): Row => ({ id: rowId(block), turnId, at: since(block), kind: 'assistant_text', messageUuid: null, blockIndex: block.index, markdown, live: false, phase: 'commentary', model: null, cut: true });
   const rows: Row[] = [];
   for (const block of blocks) {
     if (block.kind === 'text') {
-      if (live || block.text.trim() !== '') rows.push({ id: rowId(block), turnId, at: since(block), kind: 'assistant_text', messageUuid: null, blockIndex: block.index, markdown: block.text, live, phase: 'answer', model: null });
+      if (live) rows.push({ id: rowId(block), turnId, at: since(block), kind: 'assistant_text', messageUuid: null, blockIndex: block.index, markdown: block.text, live, phase: 'answer', model: null });
+      else if (block.text.trim() !== '') rows.push(cut(block, block.text));
     } else if (block.kind === 'thinking') {
       if (live) rows.push({ id: rowId(block), turnId, at: since(block), kind: 'thinking', messageUuid: null, text: '', live: true, durationMs: null });
     } else if (isMessageTool(block.toolName) && block.toolUseId !== null) {
       const text = streamingMessageText(block.text);
-      if (text !== null) rows.push({ id: rowId(block), turnId, at: since(block), kind: 'to_human', toolUseId: block.toolUseId as ToolUseId, text, pending: live });
+      if (text !== null) rows.push(live ? { id: rowId(block), turnId, at: since(block), kind: 'to_human', toolUseId: block.toolUseId as ToolUseId, text, pending: true } : cut(block, text));
     }
   }
   return rows;

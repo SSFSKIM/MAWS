@@ -76,8 +76,8 @@ function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presen
   const controls = useSessionControls(appSessionId);
   const filesGap = controls !== null && controls.turn() !== null ? controls.capability('rewind-files') : null;
   // P5 O9 (the M8 sitting): such a session runs exactly while its port says a main turn is open, the one source custody
-  // reads. Its disk rows leave turns open that nothing there ends (a slash command's echo, a turn the bridge
-  // interrupted), so while the port says none runs those draw closed, as the desk draws a session its host calls idle.
+  // reads. Its disk rows leave turns open that nothing there ends (a turn the bridge interrupted), so while the port
+  // says none runs those draw closed, as the desk draws a session its host calls idle.
   const atRest = agentId === undefined && controls?.turn()?.running === false;
   const filesReason = filesGap !== null && !filesGap.available ? filesGap.reason : null;
   const rewind = useMemo(() => (agentId === undefined ? { ...ipcRewind(appSessionId), unavailable: filesReason } : undefined), [appSessionId, agentId, filesReason]);

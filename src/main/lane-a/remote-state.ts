@@ -6,21 +6,32 @@
 // - `bridge` is `starting` until the first snapshot; then `none` when the presence names no process ("the session is not
 //   running"), no bridge or no launch ("no bridge": an act would be refused `unavailable` with no launch to fence it), or
 //   capabilities without `controls` (a sminos older than MW1); else `live`. The link's own state is the machine row's.
-// - `turn.running` comes from the plane alone, never from disk turns (custody, item 2): the engine record's status says
-//   anything but `idle`, or a main-loop model request is open (opened by a snapshot's `streaming` or a chunk, closed by
-//   its `step-end`; sminos's plane closes every open step at its turn's end).
+// - `turn.running` comes from the plane, never from disk turns (custody, item 2): a main-loop model request is open
+//   (opened by a snapshot's `streaming` or a chunk, closed by its `step-end`; sminos's plane closes every open step at
+//   its turn's end), or the engine record says the loop is not at rest and the main transcript has not ended its turn.
+//   The record alone runs more than a main turn (2.1.312, the O9 M10 sitting): `shell` is an idle loop beside a
+//   background shell, `busy` covers background agents still working, `waiting` a panel a command typed at the terminal
+//   opened. So the latest main row that marks a turn says whether one runs: its end (`turn_duration`, an interrupt's
+//   marker), or a row of a turn running (a prompt that opens one, a response, a tool's result). A command typed at the
+//   terminal and the rows around a turn (attachments, notices, a command's records) mark nothing. With no such row
+//   seen, the record says alone.
 // - `model` and `effort` are, each on its own, what the main loop's latest step-end naming it said (sminos 1.27.12; a
 //   present `effort: null` names the default), else the model `read status` gave and no effort; `override` is `read status`'s, since the plane carries none (item 4).
-// - `mode` is the one `read status` reported (sminos 1.27.14; the plane carries none), from a bridge that reports one,
-//   while the presence names the launch it was read under: a new process starts with none.
+// - `mode` is the later, by its `at`, of the one `read status` reported (sminos 1.27.14), from a bridge that reports one
+//   while the presence names the launch it was read under (a new process starts with none), and the one the presence
+//   carries (sminos 1.27.16, the bridge's mode as it changes, so an idle session's Shift+Tab shows with no read; its
+//   `at` on the read's clock). On the same `at`, the read's, which names the event it came in.
 // - `pending` is what the plane says now: a snapshot clears it and the endpoint restates the session's pending requests
 //   as `raised` right after it. `settled` keeps the last 100, across snapshots.
 import type { LaneAAct, LaneACatalog, LaneADelivery, LaneALink, LaneAMode, LaneARaised, LaneASettled, LaneAState, PlaneMessage } from '@shared/ipc/schema/lane-a';
 import type { AppSessionId } from '@shared/graph/ids';
 import { controlsMissingReason } from '@shared/lane-a/bridge';
-import { reportsMode } from '@shared/lane-a/mode';
+import { laterMode, presenceModeOf, reportsMode } from '@shared/lane-a/mode';
 import { stepEndFields } from '@shared/lane-a/step-end';
 import type { StepEnd } from 'desk-hub/protocol';
+import { localCommandKind, singleText, startsTurn } from '../../engine-host/fs/backfill';
+import { INTERRUPT_MARKER } from '../../engine-host/normalizer-support';
+import type { TranscriptRecord } from '@shared/wire/transcript';
 
 /** What the bridge's `read status` says that the plane doesn't: the session's model, its per-request override, and the
  * mode the session last reported (null: none, or a field the bridge doesn't send); `launch`, the presence's when it was
@@ -37,12 +48,34 @@ const record = (value: unknown): Fields | null => (value !== null && typeof valu
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((x): x is string => typeof x === 'string') : []);
 const stepKey = (body: Fields) => JSON.stringify([body.turnId, body.step]);
 const isMain = (body: Fields) => (body.agentId ?? null) === null;
+/** The engine record's statuses of a main loop at rest: `shell` is one beside a background shell (2.1.312). */
+const IDLE_LOOP: ReadonlySet<string> = new Set(['idle', 'shell']);
+
+/**
+ * What a main transcript row says of the main turn (the module's header): its end, a turn running, or nothing. A command's
+ * record opens a turn here as a prompt does; the fold leaves out one under the engine's caveat, a command typed at the
+ * terminal, which runs no model (a skill's record has no caveat, and its turn runs).
+ */
+export function turnMark(row: Fields): 'ended' | 'running' | null {
+  const parsed = row as TranscriptRecord;
+  if (row.type === 'system') return row.subtype === 'turn_duration' ? 'ended' : null;
+  if (row.type === 'assistant') return record(row.message)?.model === '<synthetic>' ? null : 'running';
+  if (row.type !== 'user') return null;
+  const text = singleText(parsed);
+  if (text !== null && INTERRUPT_MARKER.test(text.trim()) && record(row.origin)?.kind !== 'human') return 'ended';
+  const content = record(row.message)?.content;
+  if (Array.isArray(content) && content.some((block) => record(block)?.type === 'tool_result')) return 'running';
+  if (record(row.origin)?.kind === 'peer') return 'running'; // a message from another session or an agent: the engine answers it
+  return startsTurn(parsed) ? 'running' : null;
+}
 
 export class RemoteFold {
   #presence: Fields | null = null;
   #snapshot = false;
   #catalog: LaneACatalog | null = null;
   #open = new Set<string>(); // the main loop's open model requests, by (turnId, step)
+  #ended: boolean | null = null; // whether the latest main row that marks a turn is its end; null: none seen
+  #caveat: unknown = null; // the uuid of the engine's `<local-command-caveat>` when it is the latest row
   #ranModel: string | null = null; // what the main loop's latest step-end that named it said
   #ranEffort: string | null = null;
   #pending = new Map<string, LaneARaised>();
@@ -61,6 +94,10 @@ export class RemoteFold {
         const catalog = record(body.catalog);
         if (catalog !== null && typeof catalog.fingerprint === 'string') this.#catalog = catalog as unknown as LaneACatalog;
         this.#open = new Set((Array.isArray(body.streaming) ? body.streaming : []).map(record).filter((s): s is Fields => s !== null && isMain(s)).map(stepKey));
+        // the snapshot's rows, newest first, read in the transcript's order: the latest that marks a turn says
+        this.#ended = null;
+        this.#caveat = null;
+        for (const row of (Array.isArray(body.rows) ? body.rows : []).toReversed()) this.#mark(record(row));
         this.#pending = new Map();
         return;
       }
@@ -80,6 +117,8 @@ export class RemoteFold {
       case 'catalog':
         if (typeof body.fingerprint === 'string') this.#catalog = body as unknown as LaneACatalog;
         return;
+      case 'row':
+        return this.#mark(record(body.row));
       case 'chunk':
         if (isMain(body)) this.#open.add(stepKey(body));
         return;
@@ -96,6 +135,17 @@ export class RemoteFold {
       default:
         return;
     }
+  }
+
+  /** One main row, in the transcript's order: what it says of the main turn (`turnMark`), a terminal command's record aside. */
+  #mark(row: Fields | null): void {
+    if (row === null) return;
+    const caveat = this.#caveat;
+    const kind = localCommandKind(row as TranscriptRecord);
+    this.#caveat = kind === 'caveat' ? row.uuid : null;
+    if (kind === 'echo' && caveat !== null && caveat !== undefined && row.parentUuid === caveat) return;
+    const mark = turnMark(row);
+    if (mark !== null) this.#ended = mark === 'ended';
   }
 
   hasSnapshot(): boolean {
@@ -135,11 +185,11 @@ export class RemoteFold {
       ops: strings(capabilities?.ops),
       reads: strings(capabilities?.reads),
       controls: (controls ?? {}) as LaneAState['controls'],
-      turn: { running: (typeof status_ === 'string' && status_ !== 'idle') || this.#open.size > 0, unknown: false },
+      turn: { running: this.#open.size > 0 || (typeof status_ === 'string' && !IDLE_LOOP.has(status_) && this.#ended !== true), unknown: false },
       model: this.#ranModel ?? status?.model ?? null,
       effort: this.#ranEffort,
       override: status?.override ?? null,
-      mode: reportsMode(sminos) && status !== null && status.launch === this.launch() ? status.mode : null,
+      mode: laterMode(reportsMode(sminos) && status !== null && status.launch === this.launch() ? status.mode : null, presenceModeOf(presence)),
       catalog: this.#catalog === null ? null : { fingerprint: this.#catalog.fingerprint },
       pending: [...this.#pending.values()],
       settled: [...this.#settled.values()],

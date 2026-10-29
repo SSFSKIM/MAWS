@@ -22,6 +22,15 @@ const recorded = {
     { path: '.github', start_line: 12, end_line: 12, annotation_level: 'failure', title: '', message: 'Process completed with exit code 130.', raw_details: '' },
   ],
 };
+// MAWS run 40961677238, job 123755932819: AWS reclaimed the EC2 spot runner. GitHub's annotation
+// also permits a tree-starved box; the retry must not call this a proven spot interruption.
+const lostRunnerAnnotation = {
+  path: '.github', blob_href: 'https://github.com/SSFSKIM/MAWS/blob/61d9ddb6bdc597b5c2c249da87f0afbf2199dfa6/.github',
+  start_line: 1, start_column: null, end_line: 1, end_column: null, annotation_level: 'failure', title: '',
+  message: 'The self-hosted runner lost communication with the server. Verify the machine is running and has a healthy network connection. Anything in your workflow that terminates the runner process, starves it for CPU/Memory, or blocks its network access can cause this error.',
+  raw_details: '',
+};
+const lostEc2 = (name) => preempted(name, 'ci-kit-ec2-test', [lostRunnerAnnotation]);
 // A MAWS pool job ended the same way: the recorded job's conclusion, runner shape and annotations under a gate's name.
 const preempted = (name, runner = 'ci-kit-gce-hs99r2glck', annotations = recorded.annotations) => ({ name, conclusion: recorded.job.conclusion, runner_name: runner, annotations });
 // MAWS's own pool jobs, preempted mid-step (simulated, run 39112141861: unit 117630377116 in its vitest step, static
@@ -159,7 +168,60 @@ test('a preempted job is rerun alone, once, and the final attempt reports it gre
   assert.equal(result.printed, 'ci-gate: unit preempted in attempt 1\nci-gate: rerunning unit alone as attempt 2\n');
   assert.equal(result.attempt, '2 success');
   assert.deepEqual(result.jobs, ['success\tplan', 'success\tprobes', 'success\tstatic', 'success\tunit']);
-  assert.equal(result.summary, 'ci-gate: preempted by GCE (1): unit; green on its rerun: unit');
+  assert.equal(result.summary, 'ci-gate: pool runner interruptions (1): unit; green on its rerun: unit');
+});
+
+test('an EC2 job that lost communication is rerun alone and reports the final outcome without claiming its cause', () => {
+  const result = settle({ jobs: classOneA(lostEc2('unit')), reruns: { unit: [green('unit', 'ci-kit-ec2-replacement')] } });
+  assert.deepEqual(result.reruns, ['unit']);
+  assert.match(result.printed, /unit lost its runner .*EC2 spot interruption or a box the tree starved.*attempt 1/);
+  assert.equal(result.attempt, '2 success');
+  assert.deepEqual(result.jobs, ['success\tplan', 'success\tprobes', 'success\tstatic', 'success\tunit']);
+  assert.equal(result.summary, 'ci-gate: pool runner interruptions (1): unit; green on its rerun: unit');
+});
+
+test('an EC2 job lost again stays red after exactly one rerun', () => {
+  const result = settle({ jobs: classOneA(lostEc2('unit')), reruns: { unit: [lostEc2('unit')] } });
+  assert.deepEqual(result.reruns, ['unit']);
+  assert.match(result.printed, /unit lost its runner .*EC2 spot interruption or a box the tree starved.*again in attempt 2; it stays red/);
+  assert.equal(result.attempt, '2 failure');
+  assert.ok(result.jobs.includes('failure\tunit'));
+  assert.equal(result.summary, 'ci-gate: pool runner interruptions (1): unit; interrupted twice, red: unit');
+});
+
+test('EC2 failures without the lost-communication annotation are not retried, including GCE cancellation text', () => {
+  for (const job of [red('unit', 'ci-kit-ec2-test'), preempted('unit', 'ci-kit-ec2-test'), preempted('unit', 'ci-kit-ec2-test', [])]) {
+    const result = settle({ jobs: classOneA(job) });
+    assert.deepEqual(result.reruns, []);
+    assert.equal(result.attempt, '1 failure');
+    assert.equal(result.printed, '');
+    assert.equal(result.summary, '');
+  }
+});
+
+test('lost communication outside the EC2 pool, on a non-failed job, or in a cancelled run is not retried', () => {
+  const cases = [
+    ...['ci-kit-gce-test', 'ci-kit-mac-mini', 'GitHub Actions 1000005582'].map((runner) => ({ jobs: classOneA(preempted('unit', runner, [lostRunnerAnnotation])) })),
+    { jobs: classOneA({ ...lostEc2('unit'), conclusion: 'cancelled' }) },
+    { jobs: classOneA({ ...lostEc2('unit'), conclusion: 'success' }) },
+    { jobs: classOneA(lostEc2('unit')), cancelled: true },
+  ];
+  for (const scenario of cases) {
+    const result = settle(scenario);
+    assert.deepEqual(result.reruns, []);
+    assert.equal(result.printed, '');
+    assert.equal(result.summary, '');
+  }
+});
+
+test('GCE and EC2 interruptions share the same per-job bound across a mixed-pool run', () => {
+  const result = settle({
+    jobs: [plan, preempted('static'), lostEc2('unit')],
+    reruns: { static: [green('static')], unit: [preempted('unit')] },
+  });
+  assert.deepEqual(result.reruns, ['static', 'unit']);
+  assert.equal(result.attempt, '3 failure');
+  assert.equal(result.summary, 'ci-gate: pool runner interruptions (2): static unit; green on its rerun: static; interrupted twice, red: unit');
 });
 
 // On the pool unit runs as shards, `unit <k>/<n>` (gate-plan.mjs's UNIT_SHARDS): a name with a space in it.
@@ -172,7 +234,7 @@ test('a preempted unit shard is rerun alone by its whole name, and the final att
   assert.equal(result.printed, 'ci-gate: unit 2/4 preempted in attempt 1\nci-gate: rerunning unit 2/4 alone as attempt 2\n');
   assert.equal(result.attempt, '2 success');
   assert.deepEqual(result.jobs, ['success\tplan', 'success\tprobes', 'success\tstatic', 'success\tunit 1/4', 'success\tunit 2/4', 'success\tunit 3/4', 'success\tunit 4/4']);
-  assert.equal(result.summary, 'ci-gate: preempted by GCE (1): unit 2/4; green on its rerun: unit 2/4');
+  assert.equal(result.summary, 'ci-gate: pool runner interruptions (1): unit 2/4; green on its rerun: unit 2/4');
 });
 
 // Three shards preempted at once, each kept apart by its whole name: one green on its rerun, one preempted again, one
@@ -190,7 +252,7 @@ test('preempted shards each keep their own name through the reruns, a second pre
       "ci-gate: unit 4/4's rerun was refused: fake gh: the scenario has no outcome for this rerun of unit 4/4; it stays red\n",
   );
   assert.equal(result.attempt, '3 failure');
-  assert.equal(result.summary, 'ci-gate: preempted by GCE (3): unit 1/4 unit 3/4 unit 4/4; green on its rerun: unit 1/4; preempted twice, red: unit 3/4; not rerun, red: unit 4/4');
+  assert.equal(result.summary, 'ci-gate: pool runner interruptions (3): unit 1/4 unit 3/4 unit 4/4; green on its rerun: unit 1/4; interrupted twice, red: unit 3/4; not rerun, red: unit 4/4');
 });
 
 test('a job preempted again on its rerun stays red, and the summary says it was preempted twice', () => {
@@ -198,7 +260,7 @@ test('a job preempted again on its rerun stays red, and the summary says it was 
   assert.deepEqual(result.reruns, ['unit']);
   assert.equal(result.printed, 'ci-gate: unit preempted in attempt 1\nci-gate: rerunning unit alone as attempt 2\nci-gate: unit preempted again in attempt 2; it stays red\n');
   assert.equal(result.attempt, '2 failure');
-  assert.equal(result.summary, 'ci-gate: preempted by GCE (1): unit; preempted twice, red: unit');
+  assert.equal(result.summary, 'ci-gate: pool runner interruptions (1): unit; interrupted twice, red: unit');
 });
 
 test('a timeout is not a preemption, though it reads "The operation was canceled." too', () => {
@@ -244,7 +306,7 @@ const settledTwoPreempted = (result) => {
   );
   assert.equal(result.attempt, '3 failure');
   assert.deepEqual(result.jobs, ['success\te2e:desk-web', 'success\tplan', 'success\tprobes', 'failure\tstatic', 'failure\tunit']);
-  assert.equal(result.summary, 'ci-gate: preempted by GCE (2): e2e:desk-web unit; green on its rerun: e2e:desk-web; red on its rerun: unit');
+  assert.equal(result.summary, 'ci-gate: pool runner interruptions (2): e2e:desk-web unit; green on its rerun: e2e:desk-web; red on its rerun: unit');
 };
 
 test('two preempted jobs are rerun one after the other, a red beside them is not rerun, and each reads by its final attempt', () => {
@@ -292,7 +354,7 @@ esac
     const ref = / as (ci\/\S+)/.exec(gate.stdout)?.[1];
     assert.equal(gate.status, 0, gate.stdout + gate.stderr);
     assert.deepEqual(lines.slice(-6), [
-      'ci-gate: preempted by GCE (1): unit; green on its rerun: unit',
+      'ci-gate: pool runner interruptions (1): unit; green on its rerun: unit',
       `ci-gate: run ${run} attempt 2`,
       `ci-gate: run ${run} success`,
       `ci-gate: removed ${ref}`,

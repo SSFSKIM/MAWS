@@ -5,6 +5,7 @@
 // a steer or a delivery the bridge appended and its mirror line, and the bridge's wake as the user or through the inbox.
 // A builder chains each row under the one before unless told its parent, as the engine writes a conversation.
 import type { JsonObject } from 'desk-hub/protocol';
+import { CUT_LINE, PARTWAY } from '@shared/lane-a/interrupt-cut';
 
 export const SESSION = 'sess-chain';
 
@@ -142,7 +143,63 @@ export class Chain {
   userWake(body: string, parent?: JsonObject | null): JsonObject {
     return this.row('user', { origin: { kind: 'plugin', name: this.plugin, asUser: true }, promptId: `w${this.n}`, message: { role: 'user', content: body } }, parent);
   }
+
+  /**
+   * The bridge's row of the reply an interrupt cut off (sminos 1.27.16, after the marker and the note), as the desk track
+   * sent its shape: its line, ending with the partway sentence when only a block's tail was kept, then the cut-off text.
+   */
+  cutReply(text: string, partway = false, parent?: JsonObject | null): JsonObject {
+    return this.appended(`${CUT_LINE} The person was shown what you had written of it, the text after this line, but it is not in the conversation as your reply.${partway ? PARTWAY : ''}\n${text}`, parent);
+  }
+
+  /** An `Agent` call the engine ran in the background, and the result it returns at once (2.1.312: `async_launched`). */
+  backgroundAgentCall(id: string, agentId: string, description: string): JsonObject {
+    const call = this.assistant([{ type: 'tool_use', id, name: 'Agent', input: { description, subagent_type: 'general-purpose', prompt: 'Work.' } }]);
+    const text = `Async agent launched successfully.\nagentId: ${agentId}`;
+    return this.row('user', { message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text }] }] }, sourceToolAssistantUUID: call.uuid, toolUseResult: { isAsync: true, status: 'async_launched', agentId, description } }, call);
+  }
+
+  /** The engine's notice that a background agent ended, which starts a turn of its own (2.1.312). */
+  agentEnded(agentId: string, toolUseId: string, status = 'completed'): JsonObject {
+    const content = `<task-notification>\n<task-id>${agentId}</task-id>\n<tool-use-id>${toolUseId}</tool-use-id>\n<status>${status}</status>\n<summary>Agent finished</summary>\n</task-notification>`;
+    return this.row('user', { origin: { kind: 'task-notification' }, promptId: `n${this.n}`, message: { role: 'user', content } });
+  }
+
+  /**
+   * A command typed at the terminal, as 2.1.312 writes one (the O9 M10 sitting's transcript): the engine's caveat (meta),
+   * the command's record under it, then its output. The command's record is returned.
+   */
+  terminalCommand(name: string, args: string, output: string): JsonObject {
+    const promptId = `t${this.n}`;
+    this.row('user', { isMeta: true, promptId, message: { role: 'user', content: '<local-command-caveat>The command below was run directly in Claude Code, not sent to you as a request, and its output goes straight to the user.</local-command-caveat>' } });
+    const command = this.row('user', { promptId, message: { role: 'user', content: commandRecord(name, args) } });
+    this.row('user', { promptId, message: { role: 'user', content: `<local-command-stdout>${output}</local-command-stdout>` } });
+    return command;
+  }
+
+  /**
+   * A command the plugin ran (`$.command.run`), as 2.1.312 writes one (the sitting's `/rename`): its record and its output
+   * as system rows, then, when the command gives the model context, that context as a meta user row, which takes the
+   * plugin's origin and the queue's priority from the command the plugin queued. That row is returned (else the output).
+   */
+  pluginCommand(name: string, args: string, output: string, context?: string): JsonObject {
+    this.row('system', { subtype: 'local_command', content: commandRecord(name, args), level: 'info', isMeta: false });
+    const out = this.row('system', { subtype: 'local_command', content: `<local-command-stdout>${output}</local-command-stdout>`, level: 'info', isMeta: false, commandRun: { command: name, args } });
+    if (context === undefined) return out;
+    return this.row('user', { isMeta: true, origin: { kind: 'plugin', name: this.plugin }, queuePriority: 'later', promptId: `r${this.n}`, message: { role: 'user', content: context } });
+  }
 }
+
+/** A background agent's meta file, as the plane's `subagents` carries it. */
+export const backgroundAgent = (agentId: string, toolUseId: string, description: string) => ({
+  agentId,
+  meta: { agentType: 'general-purpose', isBuiltIn: true, description, toolUseId, spawnDepth: 1, requestShape: 'background' },
+});
+
+const commandRecord = (name: string, args: string) => `<command-name>/${name}</command-name>\n            <command-message>${name}</command-message>\n            <command-args>${args}</command-args>`;
+
+/** The context the engine gives the model after a `/rename` (2.1.312). */
+export const renamed = (name: string) => `<system-reminder>\nThe user named this session "${name}". This may indicate the session's focus or intent.\n</system-reminder>`;
 
 export const frame = (msgId: string) => `[sminos message from human id=${msgId}]`;
 
