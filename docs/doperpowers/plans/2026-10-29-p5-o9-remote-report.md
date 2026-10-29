@@ -2,7 +2,7 @@
 
 Spec: `docs/doperpowers/plans/2026-10-28-p5-o9-lane-a.md` (parent `docs/doperpowers/plans/2026-10-27-p5-org.md`, child O9; P5 Decision Logs 131, 132 and 135).
 The O9 remote controller executed it for the architect, using subagent-driven execution: one executor for each half of M9, a task review at each frontier, fixes resumed on the same executor, then a reviewer-high landing review over the whole range.
-Branch: `p5-o9-remote`, cut from `origin/p5-o3-c` at e89b0437a (O3-C's landing head, which carries the D20 fold of lane A into `src/services/lane-a/`). It merged O3-C's later heads (b1f1aa4dc, then 4c3fcbe15) and master c6c523547 (#339), and was never rebased.
+PR: #348. Branch: `p5-o9-remote`, cut from `origin/p5-o3-c` at e89b0437a (O3-C's landing head, which carries the D20 fold of lane A into `src/services/lane-a/`). It merged O3-C's later heads (b1f1aa4dc, then 4c3fcbe15) and master c6c523547 (#339), and was never rebased.
 
 ## What was built
 
