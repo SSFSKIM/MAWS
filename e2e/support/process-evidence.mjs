@@ -1,7 +1,7 @@
 // Public CI evidence, not a profile backup. Keep only the two main-process streams and the engine host's log.
 // Raw errors can contain upstream responses or account data: credentialed/owner scenes opt out, not regex-redact.
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
 export function captureAllowed({ file, env, syntheticEngineBin, realEngine = false, ownerConfigHome = false }) {
@@ -16,6 +16,57 @@ export function captureAllowed({ file, env, syntheticEngineBin, realEngine = fal
   return true;
 }
 
+// Per stream: 256 KiB of startup plus a 256 KiB rolling tail. Only the head is written during the run; cleanup
+// flushes the tail and an exact dropped-byte marker. Neither retained memory nor disk grows with the run's output.
+const STREAM_PART_BYTES = 256 * 1024;
+const utilityLinesOf = (bytes) => bytes.toString('utf8').split('\n').filter((line) => line.startsWith('[engine-host] '));
+function boundedStream(file) {
+  const head = Buffer.alloc(STREAM_PART_BYTES);
+  const tail = Buffer.alloc(STREAM_PART_BYTES);
+  let headBytes = 0;
+  let tailBytes = 0;
+  let cursor = 0;
+  let total = 0;
+  writeFileSync(file, '');
+  return {
+    receive(chunk) {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      total += bytes.length;
+      const take = Math.min(head.length - headBytes, bytes.length);
+      if (take) {
+        bytes.copy(head, headBytes, 0, take);
+        headBytes += take;
+        appendFileSync(file, bytes.subarray(0, take));
+      }
+      const rest = bytes.subarray(take);
+      if (rest.length >= tail.length) {
+        tail.set(rest.subarray(-tail.length));
+        tailBytes = tail.length;
+        cursor = 0;
+      } else if (rest.length) {
+        const first = Math.min(rest.length, tail.length - cursor);
+        tail.set(rest.subarray(0, first), cursor);
+        tail.set(rest.subarray(first), 0);
+        cursor = (cursor + rest.length) % tail.length;
+        tailBytes = Math.min(tail.length, tailBytes + rest.length);
+      }
+    },
+    finish() {
+      const start = head.subarray(0, headBytes);
+      const end = tailBytes < tail.length ? tail.subarray(0, tailBytes) : Buffer.concat([tail.subarray(cursor), tail.subarray(0, cursor)]);
+      const dropped = total - headBytes - tailBytes;
+      const marker = dropped ? `\n[process-evidence: dropped ${dropped} bytes]\n` : '';
+      appendFileSync(file, Buffer.concat([Buffer.from(marker), end]));
+      // Extraction uses retained bytes, never rereads/splits a growing file (also for detached hosts). A truncation
+      // boundary may cut a line: leave its fragments in raw evidence but don't invent complete utility-host lines.
+      if (!dropped) return utilityLinesOf(Buffer.concat([start, end]));
+      const first = utilityLinesOf(start.subarray(0, start.lastIndexOf(10) + 1));
+      const last = end.indexOf(10) < 0 ? [] : utilityLinesOf(end.subarray(end.indexOf(10) + 1));
+      return first.length || last.length ? [...first, marker.trim(), ...last] : [];
+    },
+  };
+}
+
 export function processEvidence(outputDir, userData) {
   mkdirSync(outputDir, { recursive: true });
   const id = randomUUID(); // distinct even for relaunches over the same profile, and retries have their own outputDir
@@ -28,11 +79,10 @@ export function processEvidence(outputDir, userData) {
         const stream = child[name];
         if (!stream) continue;
         const file = join(outputDir, `main-process-${id}.${name}.log`);
-        writeFileSync(file, '');
-        streams.push(file);
-        const receive = (chunk) => appendFileSync(file, chunk);
-        stream.on('data', receive); // additive: quit specs and scene hooks keep their own listeners and bytes
-        listeners.push(() => stream.off('data', receive));
+        const capture = boundedStream(file);
+        streams.push(capture);
+        stream.on('data', capture.receive); // additive: quit specs and scene hooks keep their own listeners and bytes
+        listeners.push(() => stream.off('data', capture.receive));
       }
     },
     finish() {
@@ -40,8 +90,8 @@ export function processEvidence(outputDir, userData) {
       finished = true;
       for (const remove of listeners) remove();
       // Utility hosts (artifacts-perf) have no file: main/hosts/supervisor.ts forwards their lines with this prefix.
-      // Extract after the measurement, from complete bytes already captured. Streams retain their own line order.
-      const utilityLines = streams.flatMap((file) => readFileSync(file, 'utf8').split('\n').filter((line) => line.startsWith('[engine-host] ')));
+      // Extract after the measurement, within each stream's head/tail budget. Streams retain their own line order.
+      const utilityLines = streams.flatMap((stream) => stream.finish());
       if (utilityLines.length) writeFileSync(join(outputDir, `engine-host-${id}.utility.log`), `${utilityLines.join('\n')}\n`);
       // Called after the profile's processes stop, before its directory is removed. An early failed launch or a
       // utility-mode host may have no file. The rotated generation uses .log too so the narrow upload catches it.

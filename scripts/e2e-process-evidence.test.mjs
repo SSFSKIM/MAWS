@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
+import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import { URL } from 'node:url';
 import { captureAllowed, processEvidence, writeTimingEvidence } from '../e2e/support/process-evidence.mjs';
@@ -51,16 +53,93 @@ test('copies host generations before profile deletion, including a failed launch
   assert.deepEqual(files.map((name) => readFileSync(join(dir, 'output', name), 'utf8')).sort(), ['idle: collected in 13 ms\n', 'older host\n']);
 });
 
-test('utility hosts retain only their forwarded lines, even across stream chunks', async (t) => {
+test('utility hosts retain only their forwarded lines, even across stream chunks', (t) => {
   const dir = scratch(t);
   const evidence = processEvidence(join(dir, 'output'), join(dir, 'profile'));
-  const child = spawn(process.execPath, ['-e', "process.stdout.write('[engine-'); process.stdout.write('host] idle: collected in 8 ms\\n[pty-host] other\\nmain only\\n'); process.stderr.write('[engine-host] host warning\\n')"]);
+  const child = { stdout: new PassThrough(), stderr: new PassThrough() };
   evidence.capture(child);
-  await once(child, 'close');
+  child.stdout.write('[engine-');
+  child.stdout.write('host] idle: collected in 8 ms\n[pty-host] other\nmain only\n');
+  child.stderr.write('[engine-host] host warning\n');
   evidence.finish();
   const host = readdirSync(join(dir, 'output')).find((name) => name.endsWith('.utility.log'));
   assert.ok(host);
   assert.equal(readFileSync(join(dir, 'output', host), 'utf8'), '[engine-host] idle: collected in 8 ms\n[engine-host] host warning\n');
+});
+
+test('oversized streams retain bounded startup and shutdown bytes with exact dropped counts, without changing other listeners', (t) => {
+  const dir = scratch(t);
+  const output = join(dir, 'output');
+  const evidence = processEvidence(output, join(dir, 'profile'));
+  const child = { stdout: new PassThrough(), stderr: new PassThrough() };
+  evidence.capture(child);
+  const markers = [];
+  for (const name of ['stdout', 'stderr']) {
+    const payload = Buffer.from(`[engine-host] ${name} startup\n${'x'.repeat(2 * 1024 * 1024)}\n[engine-host] discarded middle\n${'y'.repeat(2 * 1024 * 1024)}\n[engine-host] ${name} shutdown\n`);
+    const seen = createHash('sha256');
+    child[name].on('data', (chunk) => seen.update(chunk));
+    if (name === 'stdout') child[name].write(payload); // one chunk larger than the whole capture budget
+    else for (let offset = 0; offset < payload.length; offset += 33727) child[name].write(payload.subarray(offset, offset + 33727));
+    assert.equal(seen.copy().digest('hex'), createHash('sha256').update(payload).digest('hex'));
+    const file = join(output, readdirSync(output).find((file) => file.endsWith(`.${name}.log`)));
+    assert.ok(statSync(file).size <= 1024 * 1024, `${name} must be bounded before finish, too`);
+    assert.ok(readFileSync(file, 'utf8').startsWith(`[engine-host] ${name} startup\n`));
+    markers.push({ name, file, payload });
+  }
+  evidence.finish();
+  evidence.finish();
+  let expectedUtility = '';
+  for (const { name, file, payload } of markers) {
+    const bytes = readFileSync(file);
+    assert.ok(bytes.length <= 1024 * 1024, `${name} must stay bounded after finish`);
+    const marker = /\n\[process-evidence: dropped (\d+) bytes\]\n/.exec(bytes.toString('utf8'));
+    assert.ok(marker, 'truncation must be explicit');
+    const head = bytes.subarray(0, marker.index);
+    const tail = bytes.subarray(marker.index + Buffer.byteLength(marker[0]));
+    assert.ok(head.length > 0 && tail.length > 0);
+    assert.ok(head.equals(payload.subarray(0, head.length)), 'startup bytes must be unchanged');
+    assert.ok(tail.equals(payload.subarray(-tail.length)), 'shutdown bytes must be unchanged');
+    assert.equal(Number(marker[1]), payload.length - head.length - tail.length);
+    expectedUtility += `[engine-host] ${name} startup\n${marker[0].trim()}\n[engine-host] ${name} shutdown\n`;
+    child[name].write('late bytes after finish\n');
+    assert.ok(readFileSync(file).equals(bytes));
+    assert.equal(child[name].listenerCount('data'), 1);
+  }
+  const utility = readdirSync(output).find((file) => file.endsWith('.utility.log'));
+  assert.equal(readFileSync(join(output, utility), 'utf8'), expectedUtility);
+});
+
+test('capture preserves all bytes through the head-to-tail boundary until the combined budget is exceeded', (t) => {
+  const dir = scratch(t);
+  for (const size of [0, 256 * 1024 - 1, 256 * 1024 + 1, 512 * 1024]) {
+    const output = join(dir, String(size));
+    const evidence = processEvidence(output, join(dir, 'profile'));
+    const child = { stdout: new PassThrough() };
+    evidence.capture(child);
+    const payload = Buffer.alloc(size, 'é');
+    child.stdout.write(payload.subarray(0, 31)); // split UTF-8 bytes, not decoded strings
+    child.stdout.write(payload.subarray(31));
+    evidence.finish();
+    assert.ok(readFileSync(join(output, readdirSync(output)[0])).equals(payload), `${size} bytes must not be truncated or decoded/re-encoded`);
+  }
+});
+
+test('finishing a noisy detached launch keeps host files and does not invent utility evidence from a long main-only line', (t) => {
+  const dir = scratch(t);
+  const profile = join(dir, 'profile');
+  const output = join(dir, 'output');
+  mkdirSync(join(profile, 'supervisor'), { recursive: true });
+  writeFileSync(join(profile, 'supervisor', 'host.log'), 'detached host diagnostic\n');
+  const evidence = processEvidence(output, profile);
+  const child = { stderr: new PassThrough() };
+  evidence.capture(child);
+  child.stderr.write(Buffer.alloc(4 * 1024 * 1024, 'x')); // no newline: extraction must not retain an unbounded partial line
+  child.stderr.write('\nshutdown\n');
+  evidence.finish();
+  const files = readdirSync(output);
+  assert.equal(files.length, 2);
+  assert.ok(files.every((file) => statSync(join(output, file)).size <= 1024 * 1024));
+  assert.equal(readFileSync(join(output, files.find((file) => file.startsWith('engine-host-'))), 'utf8'), 'detached host diagnostic\n');
 });
 
 test('a launch with no detached host writes no pretend host log', (t) => {
