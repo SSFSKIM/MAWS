@@ -10,13 +10,13 @@
 // which add the one request and take it away (a raise held already, or a settlement of a request not held, moves
 // nothing). A rise in a session's count is a new request waiting, `waiting` with the count; a fall is `settled` with
 // what remains, which pushes nothing. The hub is told each change once: what it was last told is kept, and a change
-// made while no connection was up is told at the next welcome. A count above 0 the hub was told is kept on disk (`notified.json`), so after a
-// restart the first pending set that leaves its session out still tells it `settled 0`; the hub keeps a count until it
-// is told otherwise. A session withdrawn while no connection is up owes its `settled 0`, kept there too and paid at the
-// next welcome, listed again or not (a count known then is told after it). The file is read when the notifier is made
-// and again at the module's start, before anything is fed. A `wrote` carries the last count told when sminos hasn't
-// restated one yet, and what it carries is what the hub was told. Any other session's first count after a restart is
-// told as it is (`settled 0` clears a badge left from before).
+// made while no connection was up is told at the next welcome. A count above 0 the hub was told is kept on disk
+// (`notified.json`), so after a restart the first pending set that leaves its session out still tells it `settled 0`;
+// the hub keeps a count until it is told otherwise. A session withdrawn while no connection is up owes its `settled 0`,
+// kept there too and paid at the next welcome, listed again or not (a count known then is told after it). The file is
+// read when the notifier is made and again at the module's start, before anything is fed. A `wrote` carries the last
+// count told when sminos hasn't restated one yet, and what it carries is what the hub was told. Any other session's
+// first count after a restart is told as it is (`settled 0` clears a badge left from before).
 //
 // Lane B's counts are the engine host's, not sminos's: sminos's sets hold only the requests its bridges raised (lane A).
 // A lane B session's count is its broker items that wait on an answer, followed for every session whether or not a
