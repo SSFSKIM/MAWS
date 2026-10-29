@@ -34,9 +34,9 @@ esac
 // ci-gate.sh on a one-commit tree with `args` after the tree. Returns its status and output, the gh calls, the refs the
 // origin holds and the pushed commit's message (empty when nothing was pushed). With `change`, the origin's master holds
 // a first commit of `base` (path → content) and the tested commit is `change(tree, git)` on top of it.
-function gate(args, { alerts = false, base = {}, change } = {}) {
+function gate(args, { alerts = false, base = {}, change, backlog } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'ci-gate-'));
-  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, MAWS_GATE_RUNNER: '', MAWS_GATE_IGNORE_ALERTS: alerts ? '' : '1' };
+  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, XDG_CACHE_HOME: join(dir, 'cache'), MAWS_GATE_RUNNER: '', MAWS_GATE_IGNORE_ALERTS: alerts ? '' : '1' };
   for (const role of ['AUTHOR', 'COMMITTER']) Object.assign(env, { [`GIT_${role}_NAME`]: 'ci-gate test', [`GIT_${role}_EMAIL`]: 'ci-gate@test.invalid' });
   const git = (...gitArgs) => execFileSync('git', gitArgs, { encoding: 'utf8', env }).trim();
   let transcript = '';
@@ -58,7 +58,14 @@ function gate(args, { alerts = false, base = {}, change } = {}) {
       git('-C', tree, 'add', '-A');
     }
     git('-C', tree, 'commit', '--quiet', '--allow-empty', '-m', 'tested tree');
-    writeFileSync(join(dir, 'gh'), fakeGh);
+    let gh = fakeGh;
+    if (backlog) {
+      gh = gh.replace("'variable list '*) ;;", "'variable list '*) echo direct ;;");
+      gh = gh.replace('case "$*" in', `case "$*" in
+  'api repos/SSFSKIM/MAWS/actions/runners?'*) ${backlog === 'failed' ? 'exit 1' : `echo '${JSON.stringify({ total_count: 1, runners: [{ name: 'ci-kit-mac-ec2', status: 'online', busy: false, labels: ['self-hosted', 'macOS', 'ARM64', 'ci-kit-mac-ec2'].map((name) => ({ name })) }] })}'`} ;;
+  'api repos/'*'/actions/runs?'*) echo '{"total_count":0,"workflow_runs":[]}' ;;`);
+    }
+    writeFileSync(join(dir, 'gh'), gh);
     writeFileSync(join(dir, 'sleep'), '#!/bin/sh\n'); // the 30 polls for the run, at once
     chmodSync(join(dir, 'gh'), 0o755);
     chmodSync(join(dir, 'sleep'), 0o755);
@@ -335,7 +342,7 @@ test('a --peer that names no commit is refused with exit 2 before the alert chec
 // will: a bump tree's class 1a gains a Mac job the mini's alert holds, its --affected iteration does not.
 test('the alert check sees the peer group a bump adds, and none for an --affected run, which goes ahead past an alert', () => {
   const own = (path) => readFileSync(join(root, path), 'utf8');
-  const planned = { ...bump, base: { ...bump.base, '.github/scripts/gate-plan.mjs': own('.github/scripts/gate-plan.mjs'), '.github/scripts/gate-affected.mjs': own('.github/scripts/gate-affected.mjs'), '.github/workflows/gate.yml': own('.github/workflows/gate.yml'), 'package.json': own('package.json') }, alerts: true };
+  const planned = { ...bump, base: { ...bump.base, '.github/scripts/gate-plan.mjs': own('.github/scripts/gate-plan.mjs'), '.github/scripts/gate-affected.mjs': own('.github/scripts/gate-affected.mjs'), '.github/scripts/gate-backlog.mjs': own('.github/scripts/gate-backlog.mjs'), '.github/workflows/gate.yml': own('.github/workflows/gate.yml'), 'package.json': own('package.json') }, alerts: true };
   const held = gate(['--gates', 'static,unit,probes', '--class1a', 'pool'], planned);
   assert.equal(held.status, 2, held.stdout + held.stderr);
   assert.match(held.stderr, /^ci-gate: not pushing: this run puts jobs on a Mac \(e2e:cross-build\) /m);
@@ -360,7 +367,7 @@ test('--hosted-route writes a validated override, with no trailer when omitted',
 
 test('a direct packaged/peer admission push is not held by the mini alert', () => {
   const own = (path) => readFileSync(join(root, path), 'utf8');
-  const base = Object.fromEntries(['.github/scripts/gate-plan.mjs', '.github/scripts/gate-affected.mjs', '.github/workflows/gate.yml', 'package.json'].map((path) => [path, own(path)]));
+  const base = Object.fromEntries(['.github/scripts/gate-plan.mjs', '.github/scripts/gate-affected.mjs', '.github/scripts/gate-backlog.mjs', '.github/workflows/gate.yml', 'package.json'].map((path) => [path, own(path)]));
   base['.github/workflows/gate.yml'] = base['.github/workflows/gate.yml'].replace("HOSTED_MAC_JOBS: ''", 'HOSTED_MAC_JOBS: packaged');
   const result = gate(['--gates', 'packaged,e2e:cross-build', '--runner', 'macos', '--lane', 'hosted', '--hosted-route', 'direct', '--peer', 'none'], { alerts: true, base, change: () => {} });
   assert.equal(result.status, 1, result.stdout + result.stderr);
@@ -370,10 +377,24 @@ test('a direct packaged/peer admission push is not held by the mini alert', () =
 
 test('the reserved final push ref keeps direct packaged on the Mac in the alert preflight', () => {
   const own = (path) => readFileSync(join(root, path), 'utf8');
-  const base = Object.fromEntries(['.github/scripts/gate-plan.mjs', '.github/scripts/gate-affected.mjs', '.github/workflows/gate.yml', 'package.json'].map((path) => [path, own(path)]));
+  const base = Object.fromEntries(['.github/scripts/gate-plan.mjs', '.github/scripts/gate-affected.mjs', '.github/scripts/gate-backlog.mjs', '.github/workflows/gate.yml', 'package.json'].map((path) => [path, own(path)]));
   base['.github/workflows/gate.yml'] = base['.github/workflows/gate.yml'].replace("HOSTED_MAC_JOBS: ''", 'HOSTED_MAC_JOBS: packaged');
   const result = gate(['--gates', 'packaged', '--runner', 'macos', '--hosted-route', 'direct', '--lane', 'hosted', '--peer', 'none', '--label', 'e1-final'], { alerts: true, base, change: () => {} });
   assert.equal(result.status, 2, result.stdout + result.stderr);
   assert.match(result.stderr, /this run puts jobs on a Mac \(packaged\)/);
   assert.deepEqual(result.refs, []);
+});
+
+
+test('direct calls put the cached backlog into the pushed commit, and failed counts still push without it', () => {
+  const good = gate(['--gates', 'e2e:document', '--peer', 'none'], { backlog: 'good' });
+  assert.equal(good.refs.length, 1, good.stdout + good.stderr);
+  const sample = JSON.parse(/^Mac-Backlog: (.+)$/m.exec(good.message)?.[1] || 'null');
+  assert.equal(sample?.ec2, 'idle');
+  assert.equal(sample.hostedQueued, 0);
+  assert.equal(good.calls.filter((call) => /actions\/runs\?status=/.test(call)).length, 10);
+  const failed = gate(['--gates', 'e2e:document', '--peer', 'none'], { backlog: 'failed' });
+  assert.equal(failed.refs.length, 1, failed.stdout + failed.stderr);
+  assert.doesNotMatch(failed.message, /^Mac-Backlog:/m);
+  assert.match(failed.stdout + failed.stderr, /backlog unavailable/);
 });
