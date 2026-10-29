@@ -101,9 +101,10 @@ export type StepResult = { rc: number; lines: string[] };
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-/** A step's script: its body's output (stdout and stderr) between the markers, and its status after them. */
+/** A step's script: its body's output (stdout and stderr) between the markers, and its status after them. The body
+ * runs in a subshell, so an `exit` in it (vm/teardown.sh's last line) ends the body and its status still follows. */
 function stepScript(body: string): string {
-  return `#!/bin/bash\nset -uo pipefail\necho "@@BEGIN"\n{\n${body}\n} 2>&1\nrc=$?\necho "@@END $rc"\n`;
+  return `#!/bin/bash\nset -uo pipefail\necho "@@BEGIN"\n(\n${body}\n) 2>&1\nrc=$?\necho "@@END $rc"\n`;
 }
 
 /**

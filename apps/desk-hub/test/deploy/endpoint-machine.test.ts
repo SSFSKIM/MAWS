@@ -202,6 +202,16 @@ describe('the run’s end, however it ends', () => {
   }, 20_000);
 });
 
+describe('a step whose script exits', () => {
+  it('still reports its status and lines: a body’s `exit` ends the body, not the step (vm/teardown.sh ends `exit $left`)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ep-bash-'));
+    const bin = join(dir, 'devcloud');
+    writeFileSync(bin, '#!/bin/sh\nexec bash -s\n', { mode: 0o755 }); // runs the step's script as the VM would
+    const run = new ScriptRunner({ devcloud: bin, vm: 'vm1' }, scratch());
+    expect(await run.step('teardown', 'echo gone; exit 3', { root: true })).toEqual({ rc: 3, lines: ['gone'] });
+  });
+});
+
 describe('composeScript', () => {
   it('carries files as base64 into a stage directory and runs the body after them, with its markers', () => {
     const script = composeScript('echo "$STAGE/a.txt"', { 'a.txt': Buffer.from('payload\n') }, { trace: 'setup' });
