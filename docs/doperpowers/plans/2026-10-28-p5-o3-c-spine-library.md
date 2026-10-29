@@ -30,7 +30,7 @@ Nothing a person sees changes in O3-C. What changes is the code's shape, so the 
 - [x] M3 — The library moves to `src/services/`, behind its boundary (2026-10-28 23:56Z, 6328850a2; review clean)
 - [x] M4 — Two roots and the services entry (2026-10-29 02:11Z, 9d0dd9548 with the review's fix c61750ea6; review clean)
 - [x] M5 — The spine's idle reading (`e2e:daemon-idle-spine`) (2026-10-29 11:25Z, c7707ca20; review clean; three valid runs on 4c3fcbe15, D38)
-- [ ] M6 — Landing: the acceptance run, O9's half, the bench and the review
+- [x] M6 — Landing: the acceptance run, O9's half, the bench and the review (2026-10-29 12:16Z, 8544c48fc; reviews clean; class 1a 40866274156, hosted 40866279797, `e2e:default` 40868072929, D38)
 
 ## Acceptance
 
@@ -628,7 +628,8 @@ Main's root imports only that entry. It holds the view, the machine half of the 
 6. **Behaviour is unchanged.**
    - Class 1a and `unit:darwin` on every milestone head.
    - All 36 `HOSTED_MAC_E2E` groups on the daemon shape (O3-B merged at 4c3fcbe15).
-   - `e2e:default` on the mini (b1f1aa4dc).
+   - `e2e:default` on the mini (b1f1aa4dc), and on the landing head's tree (40868072929).
+   - On the landing head 8544c48fc: class 1a (40866274156) and the 36 hosted groups (40866279797), both green with no flaky lines.
    - `e2e:local-latency-daemon`, within OX7's budget and better than master's last run.
 
    The PR body lists every run.
