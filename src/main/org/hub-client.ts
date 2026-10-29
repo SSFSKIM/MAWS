@@ -10,7 +10,7 @@
 // No text of an answer leaves here unchecked: what a refusal, a log or a status may carry (an `error` code, an email, an
 // instant) must match a short grammar, else it reads as `unrecognized` or the answer as `malformed`, so a hostile hub
 // can't reflect the bearer token into the renderer or the log.
-import { isCertificates, isCertRetirement, isMachineCert, isSigned, type Certificates, type RootTransition, type Signed, type SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
+import { isCertificates, isCertRetirement, isMachineCert, isMemberEmail, isSigned, type Certificates, type RootTransition, type Signed, type SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
 import { orgTiming, type OrgTiming } from './timing';
 
 export const BUILD_HEADER = 'x-desk-build';
@@ -54,8 +54,6 @@ export interface HubClient {
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 /** A Worker's error code (`not-a-member`, `too-many`): anything else is reported as `unrecognized`. */
 const ERROR_CODE = /^[a-z][a-z0-9-]{0,39}$/;
-/** An address as Access names it: one `@`, no space or control, within RFC 5321's lengths (a token is far longer). */
-const EMAIL = /^[^\s@\p{Cc}]{1,64}@[^\s@\p{Cc}]{1,253}$/u;
 /** An ISO 8601 instant in UTC, as the Worker writes one. */
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 
@@ -133,7 +131,8 @@ export function hubClient(input: {
       request(ME_PATH, { signal }, (body) => {
         if (!isObject(body) || !isObject(body.org) || !isObject(body.member)) return null;
         const { org, member } = body;
-        if (typeof org.id !== 'string' || typeof member.id !== 'string' || typeof member.email !== 'string' || !EMAIL.test(member.email)) return null;
+        // The email only as an address (`isMemberEmail`): a token is far longer than its lengths allow.
+        if (typeof org.id !== 'string' || typeof member.id !== 'string' || !isMemberEmail(member.email)) return null;
         return { org: { id: org.id }, member: { id: member.id, email: member.email, role: String(member.role) } };
       }),
     state: (signal) => request(ORG_STATE_PATH, { signal }, readView),

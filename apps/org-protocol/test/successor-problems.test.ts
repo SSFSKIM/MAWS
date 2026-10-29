@@ -4,7 +4,9 @@
 // whole-state rules `stateInvariants` judges, each by its own code. Proved over the package's vectors, whose verdicts
 // are the oracle, and by one case per code.
 import { describe, expect, it } from 'vitest';
-import { PROBLEMS_PER_CODE, stateHash, stateInvariants, stateProblems, successorProblems, verifySuccessor, verifyTransition, type ProblemCode } from '../src/org-state.ts';
+import { importSigningKey } from '../src/keys.ts';
+import { isMemberEmail } from '../src/names.ts';
+import { PROBLEMS_PER_CODE, signOrgState, stateHash, stateInvariants, stateProblems, successorProblems, verifySuccessor, verifyTransition, type ProblemCode } from '../src/org-state.ts';
 import { isOrgState } from '../src/shapes.ts';
 import type { OrgState, RootTransition, Signed, SignedOrgState } from '../src/types.ts';
 import { VECTOR_KEYS, VECTORS, type Case } from '../vectors/index.ts';
@@ -227,6 +229,40 @@ describe('endorsing', () => {
   it('needs no endorsement for a member\'s first device', async () => {
     const first = await next(v2(), (s) => s.members.push({ id: 'c'.repeat(32), email: 'c@example.com', role: 'member', devices: [{ ...b2, id: 'dev-c1' }] }));
     expect(await codes(v2(), first)).toEqual([]);
+  });
+});
+
+describe('email-grammar', () => {
+  // v2 lists A and B. An email is judged where a successor writes it, a member's new or changed, and nowhere it is read.
+  const v2 = () => signedFixture('v2').state;
+  const newcomer = (email: string) => (s: OrgState) => void s.members.push({ id: 'c'.repeat(32), email, role: 'member', devices: [] });
+
+  it("isMemberEmail takes an address in the app hub client's grammar, and nothing else", () => {
+    for (const email of ['a@b', 'Ana.Lopez+tag@Example.COM', 'ü@例え.jp', `${'x'.repeat(64)}@${'y'.repeat(253)}`]) expect(isMemberEmail(email), email).toBe(true);
+    const refused = ['', 'no-at', '@b', 'a@', 'a@b@c', ' a@b', 'a@b ', 'a b@c', 'a@b\nc', 'a\u0000@b', 'a\u0085@b', `${'x'.repeat(65)}@b`, `a@${'y'.repeat(254)}`, 7, null];
+    for (const email of refused) expect(isMemberEmail(email), JSON.stringify(email)).toBe(false);
+  });
+
+  it("names a new member's email outside it, and a changed one, naming the member and the email", async () => {
+    expect(await codes(v2(), await next(v2(), newcomer('c@example.com')))).toEqual([]);
+    const added = await successorProblems(v2(), await next(v2(), newcomer('c at example.com')));
+    expect(added).toEqual([{ code: 'email-grammar', detail: expect.stringContaining(`member ${'c'.repeat(32)}'s email "c at example.com"`) as string }]);
+    expect(await codes(v2(), await next(v2(), (s) => (s.members[1].email = `${s.members[1].email} `)))).toEqual(['email-grammar']);
+  });
+
+  it("never judges an unchanged member's: a head holding one is followed, and fixed, without it", async () => {
+    const legacy = structuredClone(v2());
+    legacy.members[1].email = 'b at example.com';
+    expect(await codes(legacy, await next(legacy, (s) => s.projects.push({ id: 'proj-later', name: 'later' })))).toEqual([]);
+    expect(await codes(legacy, await next(legacy, (s) => (s.members[1].email = 'b@example.com')))).toEqual([]);
+  });
+
+  it("stays the writer's rule: isOrgState and verifySuccessor take the same successor once signed", async () => {
+    const head = signedFixture('v2');
+    const state = await next(head.state, newcomer('c at example.com'));
+    expect(isOrgState(state)).toBe(true);
+    const signed = await signOrgState(state, [await importSigningKey(VECTOR_KEYS.a1StepUp.jwk)]);
+    expect(await verifySuccessor(head, signed, [])).toEqual({ ok: true });
   });
 });
 

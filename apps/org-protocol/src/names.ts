@@ -6,6 +6,17 @@
 export type MemberId = string;
 export const isMemberId = (id: string) => /^[0-9a-f]{32}$/.test(id);
 
+const MEMBER_EMAIL = /^[^\s@\p{Cc}]{1,64}@[^\s@\p{Cc}]{1,253}$/u;
+
+/**
+ * A member's email as an address, the way Access names one: one `@`, no space or control character, within RFC 5321's
+ * lengths. Strict where an email is written: `successorProblems` (`email-grammar`, for a member new or whose email
+ * changed) and the admin's genesis. A reader takes any text and compares it lower-cased (`isOrgState`, `verifySuccessor`,
+ * the hub), but for the app's hub client, which reads `/api/me`'s email only in this grammar so that a hostile hub can't
+ * reflect the bearer token as an email.
+ */
+export const isMemberEmail = (email: unknown): email is string => typeof email === 'string' && MEMBER_EMAIL.test(email);
+
 // Machine names. A machine writes `<name>/<session>` feeds into files named after them on every machine, so a name is a
 // file-name-safe word, unique in the org without regard to case (macOS's disk ignores case), and never a prefix the hub
 // gives another meaning: `hub/` (web writes) and `legacy/` (pre-.smns chats).

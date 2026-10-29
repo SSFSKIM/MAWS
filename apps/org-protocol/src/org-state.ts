@@ -34,7 +34,7 @@
 import { canonicalize } from './canonical.ts';
 import { base64urlEncode } from './base64url.ts';
 import { importPublicKey, keyId, signBody, signingInput, utf8, verifyInput, type B64, type Sig } from './keys.ts';
-import { machineNameKey, type MemberId } from './names.ts';
+import { isMemberEmail, machineNameKey, type MemberId } from './names.ts';
 import { canonicalizable, isOrgState, isRootTransition, isSigned, isSignedOrgState } from './shapes.ts';
 import { SIGNING_DOMAINS, type Device, type DeviceEndorsement, type OrgState, type RevokedKey, type RootTransition, type Signed, type SignedOrgState } from './types.ts';
 import { accept, refuse, type Verdict } from './verdict.ts';
@@ -98,6 +98,7 @@ export type ProblemCode =
   | 'machine-ref-changed'
   | 'keys-unaccounted'
   | 'endorsement-missing'
+  | 'email-grammar'
   // The whole state's (stateProblems)
   | 'member-id-taken'
   | 'email-taken'
@@ -518,7 +519,8 @@ export async function verifySuccessor(head: SignedOrgState, next: SignedOrgState
 /**
  * Every problem of `after` as an ordinary successor of `before`, named before anything is signed: each check
  * `verifySuccessor` makes but the signatures (the root's and the endorsements'), which it still judges once signed. An
- * empty list means `verifySuccessor` refuses the signed state for a signature alone, if at all.
+ * empty list means `verifySuccessor` refuses the signed state for a signature alone, if at all. One rule is the
+ * writer's alone, which `verifySuccessor` never makes: an email the successor writes is an address (`email-grammar`).
  *
  * Ordinary: no root transition authorizes it. A held transition changes non-signature rules (the successor takes the
  * transition's root set, and the transition's new root devices need no endorsement), so a recovery's successor is not
@@ -570,8 +572,20 @@ export async function successorProblems(
   if (!(await keysAccounted(before, after))) {
     add('keys-unaccounted', () => 'a key the head held, retired or revoked is not where a successor must put it, or a delegation changed beyond its expires');
   }
+  judgeEmails(before, after, add);
   await judgeEndorsements(before, after, opts.endorsing, add);
   return problems;
+}
+
+/**
+ * Each email the successor writes, a member's who is new or whose email changed, outside `isMemberEmail`'s grammar. An
+ * unchanged member is never judged: the rule is the writer's, and a reader takes any text (`verifySuccessor`).
+ */
+function judgeEmails(before: OrgState, after: OrgState, report: Report): void {
+  for (const member of after.members) {
+    if (before.members.find((m) => m.id === member.id)?.email === member.email || isMemberEmail(member.email)) continue;
+    report('email-grammar', () => `member ${member.id}'s email ${JSON.stringify(member.email)} is not an address: one @, no space or control character, at most 64 characters before it and 253 after`);
+  }
 }
 
 /** Each device new to a member who had devices in `before` and carries no endorsement, nor one `endorsing` promises. */
