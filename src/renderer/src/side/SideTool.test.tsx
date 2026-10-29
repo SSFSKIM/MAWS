@@ -2,7 +2,7 @@
 // the panel rule (a thread opened while its parent is not shown is added without activation and a toast says where);
 // the chip strip of the session's threads, newest first; the thread view yielding to a main tab of the same thread
 // and publishing the child it draws for the unread rule.
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Anchor } from '@shared/anchor/anchor';
@@ -406,6 +406,20 @@ describe('the Side pane’s question view', () => {
     expect(screen.getByText('The engine substituted this answer')).toBeTruthy();
     expect(screen.getByText('Answering…')).toBeTruthy();
     expect(screen.getByRole('alert').textContent).toContain('Side question cancelled');
+  });
+
+  // P5 O9: a terminal session's question whose acknowledgement was unknown stays pending with its doubt, Retry offered
+  it('draws a pending question with a doubt as answering still, the doubt said beside a Retry', async () => {
+    withThreads(thread(ONE, '2026-10-06T01:00:00.000Z'));
+    listing([exchange({ id: 'op-5', question: 'Still?', state: 'pending', response: null, answeredAt: null, error: 'It may have been asked: its answer shows here if it was' })]);
+    act(() => setSideView(A, { kind: 'btw' }));
+    mount();
+    await screen.findByText('Still?');
+    expect(screen.getByText('Answering…')).toBeTruthy();
+    const doubt = document.querySelector<HTMLElement>('[data-side-uncertain]')!;
+    expect(doubt.textContent).toContain('It may have been asked: its answer shows here if it was');
+    expect(within(doubt).getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   // P2-A (2026-10-09; the execution document §5.6): Ask and Retry on an exited session start it (side), then ask

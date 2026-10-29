@@ -18,7 +18,7 @@ import type { CommandName, EventName } from '@shared/ipc/schema';
 // Each event is placed by one rule: a namespace (`session.*`) or one name. link-surface.test.ts holds the two sides to a
 // partition of the registry's events, so a new event lands on the side its author chose.
 const LINK_RULES = {
-  namespaces: ['session', 'fs'],
+  namespaces: ['session', 'fs', 'laneA'], // P5 O9 M2: laneA.changed and laneA.plane name a session
   names: ['attention.changed', 'engine.hostState', 'pty.hostState', 'pty.data', 'pty.exit', 'git.changed', 'files.changed', 'scm.remote.output', 'ownerChannel.changed'],
 };
 const CLIENT_RULES = {

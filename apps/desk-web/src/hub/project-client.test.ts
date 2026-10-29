@@ -6,7 +6,7 @@ import { BROWSER_SET_LIMIT, newNonce, seal, importOrgKey, type HumanDraft, type 
 import { DOUBLE_MEMBER, HubDouble } from '../../test/double/hub-double';
 import { VECTOR_KEY, VECTOR_PROJECT as PROJECT } from '../../test/vectors';
 import { ProjectClient, type ConnectionStatus, type RpcStateFrame } from './project-client';
-import type { SubscriptionListener } from '../shell/session-plane';
+import type { SubscriptionListener } from '../../../../src/renderer/src/lane-a/session-plane';
 import { catalogs, catalogKey } from '../state/catalog';
 import type { Catalog } from 'desk-hub/protocol';
 import { latency } from '../latency/latency';

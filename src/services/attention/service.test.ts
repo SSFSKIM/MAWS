@@ -595,3 +595,40 @@ describe('the owner channel projects its items as a third list (P2-C)', () => {
   });
 });
 // P2-C end
+
+// P5 O9 M6: a local terminal session's requests, a fourth list from main's lane A driver (src/main/lane-a/attention.ts)
+describe('lane A items', () => {
+  const laneA = (request: string): { item: AttentionItem; request: SessionEvent } => ({
+    item: AttentionItemSchema.parse({
+      id: `lane-a:${SID}:${request}`, appSessionId: APP, sessionId: SID, kind: 'permission', request: { requestId: request, toolUseId: request, taskId: null, agentId: null },
+      summary: 'Bash: ls', createdAt: AT, state: 'pending', stateChangedAt: AT, expiresAt: null,
+    }),
+    request: { id: `lane-a:${request}`, sessionId: SID, at: AT, seq: null, agentId: null, parentToolUseId: null, kind: 'permission.requested', requestId: request, toolUseId: request, toolName: 'Bash', displayName: null, input: { command: 'ls' }, description: null, decisionReasonType: null, suggestions: [], blockedPath: null } as unknown as SessionEvent,
+  });
+
+  it('merges them last, answers attention.request from their own views without asking the host, and leaves them past a host restart', async () => {
+    const { service, fire, last, handlers, dispatch, hostState } = setup();
+    await service.ready;
+    const permission = item({ kind: 'permission', state: 'pending' });
+    fire('session.brokerItems', { appSessionId: APP, items: [permission] });
+    const a = laneA('toolu_a');
+    service.setLaneAItems(APP, [a]);
+    expect(last()).toEqual([permission, a.item]);
+    expect(await handlers.get('attention.request')!({ appSessionId: APP, requestId: 'toolu_a' })).toEqual({ event: a.request });
+    expect(dispatch).not.toHaveBeenCalled();
+    hostState('crashed'); // the engine host holds none of them
+    expect(last()).toEqual([a.item]);
+    service.setLaneAItems(APP, []);
+    expect(last()).toEqual([]);
+    expect(await handlers.get('attention.request')!({ appSessionId: APP, requestId: 'toolu_a' })).toEqual({ event: null });
+    service.stop();
+  });
+
+  it('skips them at load: the bridge re-raises what is still pending', async () => {
+    const a = laneA('toolu_a');
+    const { service, last } = setup({ store: new FakeStore([a.item]) });
+    await service.ready;
+    expect(last()).toEqual([]);
+    service.stop();
+  });
+});

@@ -14,6 +14,7 @@ import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { useQueueStore } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
+import { sessionControls } from '../session/controls/controls-for'; // P5 O9 M4
 import { isBusy } from './submit/submit-state';
 
 // The session of the focused pane's active tab (in the strip's set, W12), if that tab is a session's.
@@ -25,10 +26,17 @@ export function focusedSession(): AppSessionId | null {
 export function stopFocused(client: MawsBridge = ipc): void {
   const appSessionId = focusedSession();
   if (appSessionId === null) return;
-  const status = useSessions.getState().engine.get(appSessionId) ?? null;
-  const entries = useQueueStore.getState().bySession.get(appSessionId)?.entries ?? [];
-  if (status?.process !== 'ready' || !isBusy(status, entries)) return;
-  void client.invoke('session.interrupt', { appSessionId, cancelEngineQueued: false, holdEngineQueued: true }).then((result) => {
+  const controls = sessionControls(appSessionId, client);
+  // P5 O9 M5: a session another process runs (lane A) is busy as its holder reports its turn
+  const elsewhere = controls?.turn() ?? null;
+  if (elsewhere !== null) {
+    if (!elsewhere.running) return;
+  } else {
+    const status = useSessions.getState().engine.get(appSessionId) ?? null;
+    const entries = useQueueStore.getState().bySession.get(appSessionId)?.entries ?? [];
+    if (status?.process !== 'ready' || !isBusy(status, entries)) return;
+  }
+  void controls?.interrupt({ cancelEngineQueued: false, holdEngineQueued: true }).then((result) => {
     if (!result.ok) console.warn('[composer] session.interrupt failed', result.error);
   });
 }

@@ -160,7 +160,7 @@ function TurnSummary({ row, durationMs }: { row: DividerRowData; durationMs: num
   const working = useTranscriptStore((state) => [...(state.entries[storeKey]?.state.turns.values() ?? [])].some((turn) => turn.state === 'open'));
   const busy = checking || restoreState === 'undoing';
   const preview = async () => {
-    if (!rewind || busy || working) return;
+    if (!rewind || rewind.unavailable || busy || working) return;
     setChecking(true); setError(null);
     try {
       const answer = await rewind.canUndo(row.turnId!);
@@ -202,7 +202,7 @@ function TurnSummary({ row, durationMs }: { row: DividerRowData; durationMs: num
         <Popover.Content className="transcript-popover" side="bottom" align="start" sideOffset={6}>
           <SummaryText row={row} durationMs={durationMs} />
           {(row.files?.length ?? 0) > 0 && <button type="button" className="transcript-button" onClick={() => { actions.reviewChanges(row.turnId!); setMenuOpen(false); }}>Review changes</button>}
-          {rewind && (row.files?.length ?? 0) > 0 && <button type="button" className="transcript-button" disabled={working || busy || restoreState === 'undone'} onClick={() => void preview()}>
+          {rewind && (row.files?.length ?? 0) > 0 && <button type="button" className="transcript-button" disabled={working || busy || restoreState === 'undone' || !!rewind.unavailable} title={rewind.unavailable ?? undefined} onClick={() => void preview()}>
             {restoreState === 'undone' ? 'Files restored' : checking ? 'Checking files…' : 'Restore files to before this turn'}
           </button>}
           {error && <p role="alert">{error}</p>}

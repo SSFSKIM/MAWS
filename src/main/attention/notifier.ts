@@ -2,9 +2,14 @@
 // has focus. Restored requests/turns are silent; live requests retract on resolution. The banners, the dock's badge,
 // its bounce and the window's focus go through the client port (OX4), with no client: no page asked for them. P5 O3-C
 // (reader R1): the spine is read through its view alone, an attention change carrying the ids it must not announce.
+// P5 O9 M6 (the owner's Q5): a request a terminal or background-job session's bridge raised (the lane A list's item) is
+// asked in that terminal too, which the owner may be reading, so it is told in-app only: no OS notification and no
+// bounce; it counts in the badge. The session's other notices (a turn, an owner-channel mark, a held message) are any
+// session's.
 import type { AttentionItem } from '@shared/graph/attention';
 import { isNoClient, type ClientPort, type NotificationHandle, type NotifyEvent, type NotifyRequest } from '@shared/client/port';
 import type { AttentionKind } from '@shared/graph/enums';
+import { isLaneAItem } from '../lane-a/attention'; // P5 O9 M6
 import type { AppSessionId, AttentionId } from '@shared/graph/ids';
 import type { SpineView } from '@shared/spine/view';
 import type { EventPayload, NotificationKinds, Settings, SessionDigest } from '@shared/ipc/schema';
@@ -53,6 +58,7 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
   const post = (notice: Notice, allowOnce = false, checked = false) => {
     if (deps.isViewing(notice.appSessionId)) return;
     if (deps.isFocused()) { notified(notice, 'in-app'); return; }
+    if (notice.attentionId !== null && isLaneAItem(notice.attentionId)) return; // P5 O9 M6: in-app only
     if (fallback !== null) { fallBack(notice); return; }
     const item = notice.attentionId === null ? undefined : view.attention(notice.appSessionId).find((i) => i.id === notice.attentionId && i.state === 'pending');
     if (notice.attentionId !== null && !item) return;

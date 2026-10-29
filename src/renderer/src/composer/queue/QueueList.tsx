@@ -15,6 +15,8 @@ import type { QueueEntry, QueuePauseReason, SendContent } from '@shared/engine/s
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../../ipc/client';
+import { useSessionControls } from '../../session/controls/controls-for'; // P5 O9 M4
+import type { SessionControls } from '../../session/controls/types';
 import { toast } from '../../stores/notices';
 import type { SessionQueue } from '../../stores/queue';
 import { SENDS_AT_NEXT_STEP, SENDS_AT_TURN_END, SENDS_NOW, SEND_NOW_DETAIL, steerPriority } from '../submit/submit-state';
@@ -50,12 +52,14 @@ export interface QueueListProps {
   client?: MawsBridge;
 }
 
-function useQueueActions(appSessionId: AppSessionId, client: MawsBridge) {
+// P5 O9 M4: every action goes through the session's controls port (lane B: the host queue's commands, unchanged).
+function useQueueActions(controls: SessionControls | null) {
   const [busy, setBusy] = useState<string | null>(null); // the queue id an action is in flight for
-  const run = async (queueId: string | null, action: () => Promise<{ ok: boolean; error?: { message: string } }>) => {
+  const run = async (queueId: string | null, action: () => Promise<{ ok: boolean; error?: { message: string } }> | undefined) => {
     setBusy(queueId ?? '');
     try {
       const result = await action();
+      if (result === undefined) return false; // no queue behind this session's port: nothing to act on
       if (!result.ok) toast({ level: 'warning', text: result.error?.message ?? 'The queue did not answer', actions: [], dismissible: true });
       return result.ok;
     } finally {
@@ -64,13 +68,13 @@ function useQueueActions(appSessionId: AppSessionId, client: MawsBridge) {
   };
   return {
     busy,
-    promote: (queueId: string, action: 'queue' | 'interrupt_and_send') => run(queueId, () => client.invoke('session.queue.promote', { appSessionId, queueId, priority: steerPriority(action) })),
+    promote: (queueId: string, action: 'queue' | 'interrupt_and_send') => run(queueId, () => controls?.queue()?.promote({ queueId, priority: steerPriority(action) })),
     // W1: a pending steer's two actions
-    sendNow: (messageUuid: string) => run(messageUuid, () => client.invoke('session.interrupt', { appSessionId, cancelEngineQueued: false })),
-    hold: (messageUuid: string) => run(messageUuid, () => client.invoke('session.queue.hold', { appSessionId, messageUuid: messageUuid as MessageUuid })),
-    remove: (queueId: string) => run(queueId, () => client.invoke('session.queue.remove', { appSessionId, queueId })),
-    edit: (queueId: string, content: SendContent) => run(queueId, () => client.invoke('session.queue.edit', { appSessionId, queueId, content })),
-    resume: () => run(null, () => client.invoke('session.queue.setPaused', { appSessionId, paused: false })),
+    sendNow: (messageUuid: string) => run(messageUuid, () => controls?.interrupt({ cancelEngineQueued: false })),
+    hold: (messageUuid: string) => run(messageUuid, () => controls?.queue()?.hold({ messageUuid: messageUuid as MessageUuid })),
+    remove: (queueId: string) => run(queueId, () => controls?.queue()?.remove({ queueId })),
+    edit: (queueId: string, content: SendContent) => run(queueId, () => controls?.queue()?.edit({ queueId, content })),
+    resume: () => run(null, () => controls?.queue()?.setPaused({ paused: false })),
   };
 }
 
@@ -110,7 +114,7 @@ function SubmittingRow({ entry }: { entry: QueueEntry }) {
 }
 
 export function QueueList({ appSessionId, queue, busy, sessionId, cwd, client = ipc }: QueueListProps) {
-  const actions = useQueueActions(appSessionId, client);
+  const actions = useQueueActions(useSessionControls(appSessionId, { client }));
   const [editing, setEditing] = useState<string | null>(null);
   const lasting = useLastingSubmissions(queue.entries);
   // what is shown decides whether the list is: queued entries (the uncertain head among them) and lasting submissions

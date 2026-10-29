@@ -14,6 +14,10 @@
 // P2-C (2026-10-09; the P2-C document, Design §5): a third list per session, the owner channel's `async_input` and
 // `essential_unread` items (`setOwnerItems`), a projection of its marks table: never restored from this store (the owner
 // channel re-projects at start), retired by no turn, and silent when the owner channel says so (`restoredIds`).
+// P5 O9 M6: a fourth list, a local terminal session's requests from main's lane A driver (`setLaneAItems`,
+// src/main/lane-a/attention.ts), each with the request view `attention.request` answers for it; a live projection like
+// the owner channel's, never restored (the bridge re-raises what is still pending), and untouched by the engine host,
+// which holds none of them.
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, AttentionId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
@@ -92,6 +96,8 @@ export interface AttentionService {
   // `restoredIds` before the change is emitted, so the notifier announces none of them. Taken as given: the producer
   // supplies a live, archive-aware projection (empty while the session is archived, its items again once unarchived).
   setOwnerItems(appSessionId: AppSessionId, items: AttentionItem[], silent: readonly AttentionId[]): void;
+  // P5 O9 M6: the session's lane A items whole (replacing the last), each with its request view.
+  setLaneAItems(appSessionId: AppSessionId, entries: readonly { item: AttentionItem; request: SessionEvent }[]): void;
   settled(): Promise<void>; // every change so far has reached the store
   stop(): void;
 }
@@ -100,6 +106,7 @@ interface SessionState {
   broker: AttentionItem[];
   derived: Map<string, AttentionItem>;
   owner: AttentionItem[]; // P2-C: the owner channel's projection
+  laneA: { item: AttentionItem; request: SessionEvent }[]; // P5 O9 M6
   signature: string;
   // retired live since this run started, per kind: the moment (ms) before which a persisted item of the kind stays retired
   retiredBefore: Map<AttentionItem['kind'], number>;
@@ -117,10 +124,10 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
 
   const stateOf = (id: AppSessionId): SessionState => {
     let state = sessions.get(id);
-    if (!state) sessions.set(id, (state = { broker: [], derived: new Map(), owner: [], signature: '[]', retiredBefore: new Map() }));
+    if (!state) sessions.set(id, (state = { broker: [], derived: new Map(), owner: [], laneA: [], signature: '[]', retiredBefore: new Map() }));
     return state;
   };
-  const merged = (state: SessionState): AttentionItem[] => [...state.broker, ...state.derived.values(), ...state.owner];
+  const merged = (state: SessionState): AttentionItem[] => [...state.broker, ...state.derived.values(), ...state.owner, ...state.laneA.map((e) => e.item)];
 
   // Persistence (M5 review): the sessions whose stored list is behind the in-memory one, written in order; a failed
   // write stays owed, is retried with the next change and after PERSIST_RETRY_MS, and makes settled() reject until a
@@ -287,6 +294,8 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
     changed(appSessionId as AppSessionId, state);
   });
   deps.register('attention.request', async ({ appSessionId, requestId }) => {
+    const laneA = sessions.get(appSessionId as AppSessionId)?.laneA.find((e) => e.item.request.requestId === (requestId as RequestId)); // P5 O9 M6
+    if (laneA) return { event: laneA.request };
     const brokered = sessions.get(appSessionId as AppSessionId)?.broker.some((item) => item.request.requestId === (requestId as RequestId));
     if (!brokered) return { event: null };
     const answer = await deps.dispatch('engine-host', 'session.pendingRequest', { appSessionId, requestId });
@@ -361,11 +370,19 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
   };
   // P2-C end
 
+  // P5 O9 M6: a live projection, as the owner channel's
+  const setLaneAItems = (id: AppSessionId, entries: readonly { item: AttentionItem; request: SessionEvent }[]) => {
+    const state = stateOf(id);
+    state.laneA = [...entries];
+    changed(id, state);
+  };
+
   return {
     ready,
     restoredIds,
     list,
     setOwnerItems, // P2-C
+    setLaneAItems, // P5 O9 M6
     settled: async () => {
       await attempt;
       if (!loadedOk) throw loadError;

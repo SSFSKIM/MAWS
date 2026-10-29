@@ -20,7 +20,7 @@ import { Markdown } from '../../../../../src/renderer/src/transcript/view/markdo
 import { MessageIcon } from '../../../../../src/renderer/src/transcript/view/rows/icons';
 import { chatBlocks, dayOf, type ChatBlock, type HumanItem, type QuietLine, type RunItem } from '../../conversation/chat';
 import { broadcastLabel, byWhom, crossProject, type StreamItem } from '../../conversation/stream';
-import { settledText, DELIVERY_TEXT } from '../../conversation/words';
+import { settledText, DELIVERY_TEXT } from '../../../../../src/renderer/src/lane-a/conversation/words';
 import { deliveryKey, type OutboxItem, type RequestRecord } from '../../project/conversation';
 import { useProjectName } from '../../state/grid';
 import { questionsOf, RequestCard } from '../requests/RequestCard';

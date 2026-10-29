@@ -8,6 +8,8 @@ import { useEffect, useEffectEvent, useId, useRef, useState } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import { useKeyChord } from '../../../keymap/useKeyChord';
+import { useSessionControls } from '../../../session/controls/controls-for'; // P5 O9 M5
+import type { SessionControls } from '../../../session/controls/types'; // P5 O9 M5
 import { RELAY_LONG_WAIT_MS } from '../../../relay-wait';
 import { RELAY_COPY } from '../copy';
 import { formatElapsed } from '../model/elapsed';
@@ -71,7 +73,78 @@ interface Props {
   onSent(): void; // clears the draft if it is still this agent's (the owner may have moved on while the steer was out)
 }
 
-export function RelayComposer({ appSessionId, agentId, node, status, sessionTitle, visible, draft, onDraft, onSent }: Props) {
+export function RelayComposer(props: Props) {
+  const controls = useSessionControls(props.appSessionId); // P5 O9 M5: a session driven through its bridge tells the agent itself
+  return controls && controls.turn() !== null ? <TellComposer {...props} controls={controls} /> : <EngineRelayComposer {...props} />;
+}
+
+// P5 O9 M5 start: the bridge's `tell` reaches the agent itself, so no parent relays it: the box is open while the agent
+// has not ended and the session's `tell` control is, and the line says what the bridge answered.
+function TellComposer({ agentId, node, draft, onDraft, onSent, controls }: Props & { controls: SessionControls }) {
+  const [sending, setSending] = useState(false);
+  const [line, setLine] = useState<{ text: string; failed: boolean } | null>(null);
+  const title = node ? rowTitle(node) : agentId;
+  const tell = controls.capability('tell');
+  const { disabled: words } = RELAY_COPY;
+  const reason = node && isEnded(node.status) ? (node.status === 'stopped' ? words.stopped : node.status === 'exited' ? words.exited : words.finished) : tell.available ? null : tell.reason;
+  const canSend = reason === null && !sending && draft.trim() !== '';
+  const send = async () => {
+    if (!canSend) return;
+    setSending(true);
+    const result = await controls.tell(agentId, draft.trim());
+    setSending(false);
+    if (result.state === 'refused') return setLine({ text: RELAY_COPY.driven.failed(result.message), failed: true }); // the draft stays
+    setLine({ text: result.state === 'done' ? RELAY_COPY.driven.told(title) : RELAY_COPY.driven.unknown, failed: false });
+    onSent();
+  };
+  const root = useRef<HTMLDivElement>(null);
+  useKeyChord('composer.send', () => void send(), { within: root });
+  const id = useId();
+  return (
+    <div ref={root} data-key-sink="composer" className="shrink-0 border-t border-border">
+      {line !== null && (
+        <p data-part="relay-line" role="status" className={`px-4 pt-2.5 text-ui-sm ${line.failed ? 'text-danger' : 'text-fg-muted'}`}>
+          {line.text}
+        </p>
+      )}
+      <div className="m-3 flex flex-col gap-1.5 rounded-md border border-border-strong p-2.5">
+        <label htmlFor={id} className="text-ui-sm text-fg-muted">
+          {RELAY_COPY.driven.label(title)}
+        </label>
+        <textarea
+          id={id}
+          rows={2}
+          value={draft}
+          disabled={reason !== null}
+          placeholder={reason ?? RELAY_COPY.placeholder(title)}
+          onChange={(e) => {
+            onDraft(e.target.value);
+            setLine(null);
+          }}
+          className="block w-full resize-none bg-transparent text-ui text-fg outline-accent placeholder:text-fg-muted focus-visible:outline-2 disabled:cursor-not-allowed"
+        />
+        {reason !== null && draft !== '' && (
+          <p data-part="relay-reason" className="text-ui-sm text-fg-muted">
+            {reason}
+          </p>
+        )}
+        <div className="flex justify-end">
+          <button
+            type="button"
+            disabled={!canSend}
+            onClick={() => void send()}
+            className="rounded-sm border border-border-strong bg-bg-active px-2.5 py-0.5 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-bg-active"
+          >
+            {RELAY_COPY.send}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+// P5 O9 M5 end
+
+function EngineRelayComposer({ appSessionId, agentId, node, status, sessionTitle, visible, draft, onDraft, onSent }: Props) {
   const key = relayKey(appSessionId, agentId);
   const relay = useRelays((s) => s.relays.get(key));
   const [sending, setSending] = useState(false); // the steer is out and unanswered

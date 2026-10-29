@@ -17,7 +17,7 @@ import { sessionName } from '../../log/projection';
 import type { DepthSlotProps } from '../../shell/slots';
 import { SessionLabel } from '../../shell/SessionLabel';
 import type { DeskSession } from '../../shell/sessions';
-import { jobsTabLabel } from '../jobs/jobs-copy';
+import { jobsTabLabel } from '../../../../../src/renderer/src/lane-a/jobs/jobs-copy';
 import { useSessionOwner, type SessionOwner } from '../owner/session-owner';
 import { DESK_ACTIONS } from './actions';
 import { createDiffView, DiffPane } from './DiffPane';

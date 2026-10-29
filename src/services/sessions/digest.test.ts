@@ -6,7 +6,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import { parseJournalRow } from '@shared/wire/journal'; // P4-R7
 import { parseTranscriptRecord } from '@shared/wire/transcript';
 import { createBackfillContext, recordToEvents } from '../../engine-host/fs/backfill';
-import { applyStatusToDigest, costLedger, costOf, emptyDigest, foldDigest, foldEvents, restoreCost, type MessageCalls } from './digest';
+import { applyStatusToDigest, bridgedDigest, costLedger, costOf, emptyDigest, foldDigest, foldEvents, restoreCost, type MessageCalls } from './digest';
 import { status } from '../../../test/support/builders'; // C12
 import { ev } from '../../../test/support/events';
 import { FIXTURE_DIR, framesOf, loadJournal } from '../../../test/support/fixtures';
@@ -429,3 +429,18 @@ describe('a budget exit reads idle with the released mark', () => {
   });
 });
 // C12 end
+
+// P5 O9 M6: a session a terminal holds whose bridge MAWS drives reads its live phase from the bridge
+describe('a bridged foreign session’s phase', () => {
+  it('is waiting while a request is pending, working while its main turn runs, else idle', () => {
+    expect(bridgedDigest({ running: false, pending: 0, tool: null })).toEqual({ phase: 'idle', activity: null, pendingRequests: 0 });
+    expect(bridgedDigest({ running: true, pending: 0, tool: null })).toEqual({ phase: 'working', activity: 'Thinking', pendingRequests: 0 });
+    expect(bridgedDigest({ running: true, pending: 2, tool: { tool: 'Bash', input: { command: 'rm -rf build' }, running: true } })).toEqual({ phase: 'waiting', activity: 'Running rm -rf build', pendingRequests: 2 });
+    expect(bridgedDigest({ running: false, pending: 1, tool: null })).toEqual({ phase: 'waiting', activity: null, pendingRequests: 1 }); // an async question outlives its turn
+  });
+
+  it('reads its activity from the running tool as the fold does, Working once its result came', () => {
+    expect(bridgedDigest({ running: true, pending: 0, tool: { tool: 'Read', input: { file_path: '/a/b.ts' }, running: true } }).activity).toBe('Reading b.ts');
+    expect(bridgedDigest({ running: true, pending: 0, tool: { tool: 'Read', input: { file_path: '/a/b.ts' }, running: false } }).activity).toBe('Working');
+  });
+});

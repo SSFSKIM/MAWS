@@ -28,6 +28,7 @@ import type { Holder, TranscriptSummary } from '@shared/wire/store';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
 import type { ReadModelWriter as ShellReadModelWriter, SessionSource } from '../sessions/read-model';
 import { toSessionRecordPatch } from '@shared/engine/status';
+import { bridgedDigest, type BridgedPhase } from '../sessions/digest'; // P5 O9 M6
 import { previewLine } from '@shared/owner/preview';
 import type { Index } from './index';
 import { locatesWithoutGit, warmLinkedWorktrees } from './projects';
@@ -86,6 +87,7 @@ export class IndexSessionSource implements SessionSource {
   private scanned = false;
   private generation = 0;
   private readonly scanListeners = new Set<() => void>();
+  private readonly bridged = new Map<AppSessionId, BridgedPhase>(); // P5 O9 M6: what the bridges MAWS drives say
 
   constructor(
     private readonly index: Index,
@@ -473,17 +475,30 @@ export class IndexSessionSource implements SessionSource {
     this.schedule();
   }
 
+  // P5 O9 M6: a foreign session's live phase from its sminos bridge while MAWS drives it (main's lane A driver); null
+  // when it has no live bridge, which leaves today's `foreign` seed.
+  setBridged(appId: AppSessionId, phase: BridgedPhase | null): void {
+    if (phase === null) {
+      if (!this.bridged.delete(appId)) return;
+    } else this.bridged.set(appId, phase);
+    const record = this.index.unavailable === null ? this.index.sessions.get(appId) : null;
+    if (record) this.digest(record);
+  }
+
   // Sessions nobody runs in MAWS get a digest from what their transcript's tail says, so the sidebar can describe them;
-  // a session MAWS runs (`self`) is C5's live fold.
+  // a session MAWS runs (`self`) is C5's live fold. P5 O9 M6: one a terminal holds whose bridge MAWS drives reads its
+  // phase, activity and pending requests from the bridge.
   // C12: the seed leaves the memory budget's released mark out; main's read model keeps it against a seed with phase
   // `exited` and drops it against a `foreign` one (a terminal or background job took the session after its release).
   private digest(record: SessionRecord): void {
     if (!this.writer || record.holder.kind === 'self') return;
     const summary = this.index.sessions.summaryOf(record.appId);
     const text = summary?.lastAssistantText ?? null;
+    const foreign = record.holder.kind === 'terminal' || record.holder.kind === 'background_job';
+    const bridged = foreign ? this.bridged.get(record.appId) : undefined;
     this.writer.setDigest({
       appSessionId: record.appId,
-      phase: record.holder.kind === 'terminal' || record.holder.kind === 'background_job' ? 'foreign' : 'exited',
+      phase: foreign ? 'foreign' : 'exited',
       activity: null,
       lastAssistantLine: text === null ? null : previewLine(text, LAST_LINE_CHARS), // E11 F2b: a summary cached raw reads clean too
       turnStartedAt: null,
@@ -492,6 +507,7 @@ export class IndexSessionSource implements SessionSource {
       cost: null,
       childAgents: { active: 0, done: 0 },
       pendingRequests: 0,
+      ...(bridged && bridgedDigest(bridged)), // P5 O9 M6
     });
   }
 

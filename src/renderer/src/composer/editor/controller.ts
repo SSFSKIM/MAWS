@@ -208,11 +208,17 @@ export class EditorController {
   // A registered widget opened where it belongs (W3): the selector's names in the model chip's menu, every other one as
   // the app's floating dialog, never in the box; false when none is registered.
   private openWidget(name: string, args: string): boolean {
-    const widget = slashWidget(name);
+    const widget = this.widgetFor(name);
     if (!widget) return false;
     if (widget.placement === 'modelChip') requestChipWidget(this.inputs.appSessionId, name, args);
     else openWidgetDialog(this.inputs.appSessionId, name, args);
     return true;
+  }
+
+  // The widget registered for a name that this session opens (P5 O9 M5: a lane A session opens only those a lane A read or
+  // op backs, its port's `slash` says which; any other typed `/<name>` goes on as text, to the session's own route).
+  private widgetFor(name: string) {
+    return this.inputs.widgets.has(name) ? slashWidget(name) : null;
   }
 
   // ---- Tiptap's callbacks ---------------------------------------------------------------------------------------
@@ -323,7 +329,7 @@ export class EditorController {
     // `/btw` draft reaches `session.send` or `session.steer`.
     const btw = /^\/btw(?:\s|$)/.test(s.display.trim());
     if (btw) {
-      const refusal = !slashWidget('btw') ? BTW_UNAVAILABLE : typeof s.content !== 'string' ? BTW_TEXT_ONLY : null;
+      const refusal = !this.widgetFor('btw') ? BTW_UNAVAILABLE : typeof s.content !== 'string' ? BTW_TEXT_ONLY : null;
       if (refusal !== null) {
         warn(refusal);
         return;
@@ -341,7 +347,7 @@ export class EditorController {
       s.mode === 'send' && typeof s.content === 'string' && Object.keys(s.pastedContents).length === 0 && !isMultiline(editor.getJSON());
     const command = plain ? s.display.trim() : btw ? plainTextOf(editor.getJSON()).trim() : null; // E3: a non-plain `/btw`
     const typed = command !== null ? /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(command) : null;
-    const widget = typed ? slashWidget(typed[1]) : null;
+    const widget = typed ? this.widgetFor(typed[1]) : null;
     if (typed && widget) {
       this.writer.cancel();
       this.drafts.save(null);
