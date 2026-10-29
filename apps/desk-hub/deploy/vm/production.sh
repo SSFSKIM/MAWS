@@ -31,7 +31,6 @@ TX=o10-m11-prod
 say() { printf '%s\n' "$*"; }
 fail() { say "production.sh: $*"; exit 1; }
 word() { [[ $1 =~ ^[A-Za-z0-9._:/=@+-]+$ ]] || fail "a word, not '$1'"; }
-uid=$(id -u $OWNER) || fail "no user $OWNER"
 within() { local s=$1 i; shift; for ((i = 0; i < s * 2; i++)); do "$@" && return 0; sleep 0.5; done; return 1; }
 
 # Every verb but check and down registers its pid in $VERBS while it runs: the run's end kills a step's local ssh,
@@ -61,10 +60,6 @@ stop_verbs() {
 pid() { pgrep -u $OWNER -f "$CUR/.*mawsd.js run" | head -1; }
 logfile() { case $1 in mawsd) say $DIR/mawsd.log ;; sminos) say $SH/daemon.log ;; *) fail "a log: mawsd or sminos" ;; esac; }
 
-OWNER_ENV=("HOME=$OH" "USER=$OWNER" "LOGNAME=$OWNER" "PATH=$CUR/runtime/bin:/usr/bin:/bin" "LANG=C.UTF-8" "XDG_RUNTIME_DIR=/run/user/$uid")
-SESSION_ENV=("${OWNER_ENV[@]}" "PATH=$O/bin:$CUR/runtime/bin:/usr/bin:/bin" "SHELL=/bin/bash" "TERM=xterm-256color" "SMINOS_HOME=$SH"
-  "CLAUDE_CONFIG_DIR=$X/claude" "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1" "ANTHROPIC_BASE_URL=$STUB_URL" "ANTHROPIC_AUTH_TOKEN=o10-m11-stub-no-credential"
-  "DISABLE_AUTOUPDATER=1" "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1" "DISABLE_TELEMETRY=1" "DISABLE_ERROR_REPORTING=1")
 as_owner() { runuser -u $OWNER -- env -i "${OWNER_ENV[@]}" "$@"; }
 mawsd_cli() { as_owner $CUR/runtime/bin/node $CUR/out/main/mawsd.js "$@"; }
 anchor() { local p; p=$(cat $R/anchor.pid 2>/dev/null) && [[ -d /proc/$p ]] && [[ $(readlink /proc/"$p"/ns/mnt) != "$(readlink /proc/1/ns/mnt)" ]] && say "$p"; }
@@ -89,32 +84,66 @@ cut_tuples() {
   say $n
 }
 
-# ---- the owner's claude processes, by executable and terminal only ----------------------------------------------------
+# ---- what the run calls its own --------------------------------------------------------------------------------------
+# A process is the run's only inside the run's private mount namespace: nothing but this script's verbs enters it, so
+# every process there descends from them. The selection is pure, over tables read from /proc (the suite,
+# test/deploy/production-scene.test.ts, sources this script and feeds them); of the owner's other processes only their
+# executable and their namespace are read, never their arguments or environment.
 
-# `pid tty` of every process of the owner's that runs a claude binary (the installed versions, or the run's copy).
-claude_procs() {
-  local p tty comm exe
-  while read -r p tty comm; do
+# Why the session engine described on stdin (`KEY=value` lines: CLAUDE_CONFIG_DIR, ANTHROPIC_BASE_URL, cwd, ns) is not
+# the run's lane A session, one line a reason; none, status 0, when it is ($1: the run's namespace).
+session_problems() {
+  local ours=$1 line cfg='' base='' cwd='' ns='' bad=0
+  while IFS= read -r line; do
+    case $line in CLAUDE_CONFIG_DIR=*) cfg=${line#*=} ;; ANTHROPIC_BASE_URL=*) base=${line#*=} ;; cwd=*) cwd=${line#*=} ;; ns=*) ns=${line#*=} ;; esac
+  done
+  [[ $cfg == "$X/claude" ]] || { say "CLAUDE_CONFIG_DIR is ${cfg:-unset}, not $X/claude"; bad=1; }
+  [[ $base == "$STUB_URL" ]] || { say "ANTHROPIC_BASE_URL is ${base:-unset}, not $STUB_URL"; bad=1; }
+  [[ $cwd == "$W" ]] || { say "its directory is ${cwd:-unknown}, not $W"; bad=1; }
+  [[ $ns == "$ours" ]] || { say "it runs outside the run’s namespace (${ns:-unknown})"; bad=1; }
+  return $bad
+}
+# The pids of the `pid ns` lines on stdin outside namespace $1: claude processes the run cannot call its own.
+foreign() { local ours=$1 p ns; while read -r p ns; do [[ -n $p && $ns != "$ours" ]] && say "$p"; done; return 0; }
+# The seat's session as `sminos spawn` printed it (`seat spawned: <group>/<alias>  [<short> / <session>] …`).
+seat_session() { local id; id=$(sed -n 's|^seat [a-z-]*: .*\[[0-9a-z]* / \([0-9a-f-]\{36\}\)\].*|\1|p' | tail -1); [[ -n $id ]] && say "$id"; }
+# The claude processes a spawn brought (`pid ns [KEY=value…]` lines on stdin), each `ours` (in namespace $1, with the
+# scratch config and the stub), `kill` (in it, with another environment) or `foreign` (outside it: not the run's to
+# kill); status 0 only when there is at least one and every one is `ours`.
+seat_verdict() {
+  local ours=$1 p ns rest n=0 ok=1
+  while read -r p ns rest; do
+    [[ -n $p ]] || continue
+    n=$((n + 1))
+    if [[ $ns != "$ours" ]]; then
+      say "foreign $p"; ok=0
+    elif [[ " $rest " == *" CLAUDE_CONFIG_DIR=$X/claude "* && " $rest " == *" ANTHROPIC_BASE_URL=$STUB_URL "* ]]; then
+      say "ours $p"
+    else
+      say "kill $p"; ok=0
+    fi
+  done
+  ((n > 0 && ok == 1))
+}
+
+ns_of() { readlink /proc/"$1"/ns/mnt 2>/dev/null; }
+ours_ns() { local a; a=$(anchor) && ns_of "$a"; }
+# `pid ns` of every process of the owner's that runs a claude binary (the installed versions, or the run's copy).
+claude_table() {
+  local p comm exe
+  while read -r p comm; do
     exe=$(readlink /proc/"$p"/exe 2>/dev/null) || continue
-    case $exe in "$OH"/.local/share/claude/versions/* | "$CLAUDE") say "$p $tty" ;; *) [[ $comm == claude ]] && say "$p $tty" ;; esac
-  done < <(ps -u $OWNER -o pid=,tty=,comm=)
+    case $exe in "$OH"/.local/share/claude/versions/* | "$CLAUDE") ;; *) [[ $comm == claude ]] || continue ;; esac
+    say "$p $(ns_of "$p")"
+  done < <(ps -u $OWNER -o pid=,comm=)
 }
-# The run's own session: its tmux server and every process beneath it.
-own_tree() {
-  local server; server=$(pgrep -u $OWNER -xf "tmux -L $TX .*" | head -1); [[ -n $server ]] || return 0
-  ps -u $OWNER -o pid=,ppid= | awk -v root="$server" '{ parent[$1] = $2 } END { for (p in parent) { q = p; while (q in parent && q != root) q = parent[q]; if (q == root) print p } }'
-}
-# The owner's claude supervisors and background seats the run did not start (a claude without a terminal).
-foreign_background() {
-  local tree p tty
-  tree=" $(own_tree | tr '\n' ' ') "
-  while read -r p tty; do [[ -n $p && $tty == '?' && $tree != *" $p "* ]] && say "$p"; done < <(claude_procs)
-}
+# The two variables the ruling lets the run read of a claude process of its own.
+two_vars() { tr '\0' '\n' </proc/"$1"/environ 2>/dev/null | grep -E '^(CLAUDE_CONFIG_DIR|ANTHROPIC_BASE_URL)=' | sort; }
+# Kills the pids given that are still in the run's namespace (a pid read earlier may since be another process's).
+kill_ours() { local ours p; ours=$(ours_ns) || return 0; for p in "$@"; do [[ $(ns_of "$p") == "$ours" ]] && kill -KILL "$p" 2>/dev/null; done; return 0; }
 
 # ---- lane A -----------------------------------------------------------------------------------------------------------
 
-sockets() { ls "$SH"/bridge/*.sock 2>/dev/null | sort; }
-new_socket() { comm -13 $R/socks.before <(sockets) | head -1 | grep .; }
 gone() { ! test -S "$1"; }
 
 lane_a_up() {
@@ -139,9 +168,8 @@ lane_a_up() {
   as_session bash -c "cd $W && git add .smns && git -c user.name=o10-m11 -c user.email=o10-m11@scene.invalid commit -qm scene"
   as_session python3 -c 'import json,sys; w=sys.argv[2]; json.dump({"hasCompletedOnboarding": True, "projects": {w: {"hasTrustDialogAccepted": True}}}, open(sys.argv[1], "w"))' $X/claude/.claude.json $W
   as_session python3 -c 'import json,sys; json.dump({"permissions": {"allow": ["Bash(echo:*)"]}}, open(sys.argv[1], "w"))' $X/claude/settings.json
-  sockets >$R/socks.before
-  start_session ""
-  sid=$(cat $R/session) || fail "no session"
+  sid=$(cat /proc/sys/kernel/random/uuid) && say "$sid" >$R/session || fail "no session id"
+  start_session "$sid" new
   launch=$(bridge_launch "$sid") || fail "the bridge answered no launch"
   alias=$(as_session bash -c "cd $W && $SMINOS list --here --json" | python3 -c '
 import json, sys
@@ -159,18 +187,27 @@ print(next(walk(json.load(sys.stdin)), ""))' "$sid") || alias=
   python3 -c 'import json,sys; print(json.dumps({"session": sys.argv[1], "launch": sys.argv[2], "org": sys.argv[3], "alias": sys.argv[4], "checkout": sys.argv[5]}))' "$sid" "$launch" "$org" "$alias" "$W"
 }
 
-# The session in its tmux pane (its own server, -L $TX), in the namespace; `--resume <sid>` when given. A new session's
-# id is the bridge socket that appears beside those of the owner's own sessions.
+# The session in its tmux pane (its own server, -L $TX), in the namespace: a new one under the session id the run
+# chose (`--session-id`), so no session of the owner's can be taken for it; `--resume <sid>` to start it again. Its
+# bridge waited for, then its engine checked to be the run's (session_problems) before anything uses it.
 start_session() {
-  local resume=$1 flags=(--plugin-dir "$PLUGIN" --model sonnet -n o10-m11-lane-a) sock
-  [[ -n $resume ]] && flags+=(--resume "$resume")
+  local sid=$1 how=$2 flags=(--plugin-dir "$PLUGIN" --model sonnet -n o10-m11-lane-a)
+  [[ $sid =~ ^[0-9a-f-]{36}$ ]] || fail "a session id"
+  if [[ $how == resume ]]; then flags+=(--resume "$sid"); else flags+=(--session-id "$sid"); fi
   as_session tmux -L $TX new-session -d -s lane-a -x 200 -y 50 -c $W "$CLAUDE ${flags[*]}" || fail "tmux"
-  if [[ -n $resume ]]; then
-    within 120 test -S "$SH/bridge/$resume.sock" || { pane; fail "no bridge for $resume within 120 s"; }
-    return 0
-  fi
-  within 120 new_socket >/dev/null || { pane; fail "no new bridge within 120 s"; }
-  sock=$(new_socket); basename "$sock" .sock >$R/session
+  within 120 test -S "$SH/bridge/$sid.sock" || { pane; fail "no bridge for $sid within 120 s"; }
+  check_engine "$sid"
+}
+# The pane's claude: in the run's namespace, with the scratch config, the stub and the checkout; else lane A fails.
+check_engine() {
+  local pane engine ours problems
+  ours=$(ours_ns) || fail "no lane A namespace"
+  pane=$(as_session tmux -L $TX list-panes -t lane-a -F '#{pane_pid}' 2>/dev/null | head -1)
+  [[ -n $pane ]] || fail "no lane A pane"
+  engine=$(claude_table | awk '{print $1}' | grep -xF -f <(tree "$pane") | head -1)
+  [[ -n $engine ]] || fail "no claude under the lane A pane"
+  problems=$({ two_vars "$engine"; say "cwd=$(readlink /proc/"$engine"/cwd)"; say "ns=$(ns_of "$engine")"; } | session_problems "$ours") ||
+    fail "the session on $1's bridge is not the run's: ${problems//$'\n'/; }"
 }
 pane() { say "the pane, last lines:"; as_session tmux -L $TX capture-pane -p -t lane-a 2>/dev/null | grep -v '^\s*$' | tail -15; }
 
@@ -185,7 +222,7 @@ lane_a_stop() {
 
 lane_a_resume() {
   local sid; sid=$(cat $R/session) || fail "no session to resume"
-  start_session "$sid"
+  start_session "$sid" resume
   python3 -c 'import json,sys; print(json.dumps({"launch": sys.argv[1]}))' "$(bridge_launch "$sid")"
 }
 
@@ -217,50 +254,61 @@ if len(sys.argv) >= 3:
 }
 
 # A local `sminos spawn` from the session's checkout, inside the owner's ruling's guard. A background seat inherits
-# the claude supervisor's environment, not its spawner's, so before the spawn no supervisor or background claude of the
-# owner's may run but the run's own; after it, every claude process the spawn brought must point at the scratch config
-# and the stub, read from /proc/<pid>/environ and shown for those two variables alone. Exit 10: the first check failed
-# and nothing was spawned; 11: the second failed and the seat was killed at once.
-SPAWN_BEFORE=
-spawned() { claude_procs | while read -r p _; do [[ $SPAWN_BEFORE == *" $p "* ]] || say "$p"; done; }
+# the claude supervisor's environment, not its spawner's, so before the spawn no claude of the owner's may run outside
+# the run's namespace (one with a terminal could be a supervisor all the same: unproven is declined); after it, the
+# seat is the session `sminos spawn` names, and every claude process the spawn brought must be in the run's namespace
+# with the scratch config and the stub, read from /proc/<pid>/environ and shown for those two variables alone. Exit 10:
+# the first check failed and nothing was spawned; 11: the second failed, the run's own of them killed at once and the
+# seat retired (one outside the namespace is not the run's to kill).
 local_spawn() {
-  local alias=$1 foreign new p env ok=1 rc
+  local alias=$1 ours others before out rc sid p ns verdict seats=() bad=0
   word "$alias"
-  foreign=$(foreign_background | tr '\n' ' ')
-  if [[ -n ${foreign// /} ]]; then say "not spawned: a claude of the owner's runs in the background already (pid ${foreign% })"; exit 10; fi
-  say "before the spawn: no claude supervisor or background claude of $OWNER's but the run's own"
-  SPAWN_BEFORE=" $(claude_procs | awk '{print $1}' | tr '\n' ' ') "
-  as_session bash -c "cd $W && exec $SMINOS spawn $alias 'o10-m11: a local spawn; answer ok' --cwd $W"; rc=$?
-  within 30 spawned >/dev/null && sleep 2   # the supervisor, then its seat
-  new=$(spawned | tr '\n' ' ')
-  say "${new% }" >$R/seat.pids
-  [[ -n ${new// /} ]] || { say "no seat's claude appeared"; ok=0; }
-  for p in $new; do
-    env=$(tr '\0' '\n' </proc/"$p"/environ 2>/dev/null | grep -E '^(CLAUDE_CONFIG_DIR|ANTHROPIC_BASE_URL)=' | sort | tr '\n' ' ')
-    say "seat pid $p: ${env% }"
-    [[ $env == *"ANTHROPIC_BASE_URL=$STUB_URL "* && $env == *"CLAUDE_CONFIG_DIR=$X/claude "* ]] || ok=0
-  done
-  if ((ok == 0)); then
-    for p in $new; do kill -KILL "$p" 2>/dev/null; done
-    say "the seat was killed at once: its environment is not the scratch config's and the stub's"
+  ours=$(ours_ns) || fail "no lane A namespace"
+  others=$(claude_table | foreign "$ours" | tr '\n' ' ')
+  if [[ -n ${others// /} ]]; then say "not spawned: claude of $OWNER's outside the run's namespace, not proven no supervisor (pid ${others% })"; exit 10; fi
+  say "before the spawn: no claude of $OWNER's but the run's own"
+  before=" $(claude_table | awk '{print $1}' | tr '\n' ' ') "
+  out=$(as_session bash -c "cd $W && exec $SMINOS spawn $alias 'o10-m11: a local spawn; answer ok' --cwd $W" 2>&1); rc=$?
+  say "$out" | tail -3
+  sid=$(say "$out" | seat_session) && say "$sid" >$R/seat.session
+  brought() { claude_table | while read -r p ns; do [[ $before == *" $p "* ]] || say "$p $ns"; done; }
+  any_brought() { [[ -n $(brought) ]]; }
+  within 30 any_brought && sleep 2 # the supervisor, then its seat
+  local table rest what
+  table=$(brought | while read -r p ns; do if [[ $ns == "$ours" ]]; then say "$p $ns $(two_vars "$p" | tr '\n' ' ')"; else say "$p $ns"; fi; done)
+  # A spawn that failed and brought nothing is the clause's failure, not the guard's.
+  [[ -z $table && $rc -ne 0 ]] && exit $rc
+  verdict=$(say "$table" | seat_verdict "$ours") || bad=1
+  while read -r p ns rest; do [[ -n $p && $ns == "$ours" ]] && say "seat pid $p: ${rest% }"; done <<<"$table"
+  while read -r what p; do [[ $what == ours || $what == kill ]] && seats+=("$p"); done <<<"$verdict"
+  say "${seats[*]}" >$R/seat.pids
+  [[ -n ${sid:-} ]] || { say "sminos spawn named no seat session"; bad=1; }
+  if ((bad)); then
+    kill_ours "${seats[@]}"
+    as_session bash -c "cd $W && exec $SMINOS retire $alias" >/dev/null 2>&1
+    say "the seat was stopped at once: ${verdict//$'\n'/, }${verdict:+; }its processes are not all the run's with the scratch config and the stub"
     exit 11
   fi
   exit $rc
 }
 
+# The run's seat retired, and its processes, those still in the run's namespace, ended.
 retire() {
   word "$1"
   as_session bash -c "cd $W && exec $SMINOS retire $1"; local rc=$?
-  for p in $(cat $R/seat.pids 2>/dev/null); do kill -TERM "$p" 2>/dev/null; done
+  # shellcheck disable=SC2046
+  kill_ours $(cat $R/seat.pids 2>/dev/null)
   return $rc
 }
 
-# Everything of the run's lane A ended and its scratch directory removed: the tmux server and the session under it, a
-# seat the run spawned, the stub, the namespace's anchor. The owner's mawsd and sminos are not the run's to end.
+# Everything of the run's lane A ended and its scratch directory removed: a seat the run spawned (its processes in
+# the run's namespace), the tmux server and the session under it, the stub, the namespace's anchor. The owner's mawsd
+# and sminos are not the run's to end.
 lane_a_down() {
   local left=0 p
+  # shellcheck disable=SC2046
+  kill_ours $(cat $R/seat.pids 2>/dev/null)
   runuser -u $OWNER -- tmux -L $TX kill-server 2>/dev/null
-  for p in $(cat $R/seat.pids 2>/dev/null); do kill -KILL "$p" 2>/dev/null; done
   pkill -u $OWNER -f "$O/stub-model.mjs --port $STUB_PORT" 2>/dev/null
   p=$(cat $R/anchor.pid 2>/dev/null) && kill "$p" 2>/dev/null
   within 10 bash -c "! pgrep -u $OWNER -f 'tmux -L $TX' >/dev/null && ! pgrep -u $OWNER -f '$O/stub-model.mjs' >/dev/null"
@@ -271,6 +319,14 @@ lane_a_down() {
   ((left == 0)) && say "down: the run's lane A session, its seat and its stub ended, $X removed (the owner's mawsd and sminos run on)"
   return $left
 }
+
+# Sourced (the suite), the script stops here: nothing above has run anything.
+[[ ${BASH_SOURCE[0]} == "$0" ]] || return 0
+uid=$(id -u $OWNER) || fail "no user $OWNER"
+OWNER_ENV=("HOME=$OH" "USER=$OWNER" "LOGNAME=$OWNER" "PATH=$CUR/runtime/bin:/usr/bin:/bin" "LANG=C.UTF-8" "XDG_RUNTIME_DIR=/run/user/$uid")
+SESSION_ENV=("${OWNER_ENV[@]}" "PATH=$O/bin:$CUR/runtime/bin:/usr/bin:/bin" "SHELL=/bin/bash" "TERM=xterm-256color" "SMINOS_HOME=$SH"
+  "CLAUDE_CONFIG_DIR=$X/claude" "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1" "ANTHROPIC_BASE_URL=$STUB_URL" "ANTHROPIC_AUTH_TOKEN=o10-m11-stub-no-credential"
+  "DISABLE_AUTOUPDATER=1" "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1" "DISABLE_TELEMETRY=1" "DISABLE_ERROR_REPORTING=1")
 
 verb=${1:-}; (($#)) && shift
 case $verb in check | down | "") ;; *) register "$verb" || fail "cannot register the verb $verb" ;; esac

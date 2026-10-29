@@ -25,7 +25,8 @@ import { checkTestHub, PRODUCTION_HOST, readDeployConfig } from './config';
 import { readSecrets } from './deploy';
 import { Person } from './hub';
 import { composeScript, ScriptRunner, stopMachineWork, VmMachine, type EndpointMachine } from './endpoint-machine';
-import { HubWrites, runItems, ITEMS, type Scene } from './endpoint-items';
+import { ProjectSocket } from 'org-protocol/test-support';
+import { HubWrites, runItems, runOwnEvents, sessionResidue, ITEMS, type LoggedEvent, type Scene } from './endpoint-items';
 import { DirectPacer, RelayDialer, type RunDevice } from './endpoint-remote';
 import { ItemReport, Secrets } from './endpoint-verdicts';
 import { loadAdminDevice, OrgAdmin, successor, type AdminDevice, type OrgScope } from './org-admin';
@@ -33,6 +34,13 @@ import { Cleanup, interruptible, isTestTarget, STEP_MS, type InterruptOptions } 
 
 export const DEFAULT_VM = 'dc-acceptance-7f80';
 export const DEFAULT_DIRECT_URL = 'ws://100.116.205.27:47831';
+/** Production's direct listener: the VM's own mawsd, on its own port. */
+export const PRODUCTION_DIRECT_URL = 'ws://100.116.205.27:47830';
+
+/** The direct listener the run dials: the one the command names, else the mode's own. */
+export function directUrlFor(mode: 'production' | 'staging', given: string | undefined): string {
+  return given ?? (mode === 'production' ? PRODUCTION_DIRECT_URL : DEFAULT_DIRECT_URL);
+}
 const DEVCLOUD = '/Users/new/.claude/plugins/cache/doperpowers/devcloud/0.15.1/bin/devcloud';
 /** A cleanup step's bound: the scene's `down` on the VM waits out its processes, longer than a hub request's. */
 const CLEANUP_STEP_MS = 4 * STEP_MS;
@@ -83,7 +91,15 @@ export type RunOptions = {
    * Production's run device: its id, named before anything is sent, and its pairing (endpoint-production.ts), made in
    * the run so the owner's removal is the cleanup's on every exit; and the owner's steps by hand.
    */
-  production: { id: string; pair(): Promise<RunDevice>; ownerStep(what: string, done: () => Promise<boolean>): Promise<void> } | null;
+  production: {
+    id: string;
+    pair(): Promise<RunDevice>;
+    ownerStep(what: string, done: () => Promise<boolean>): Promise<void>;
+    /** The machine the owner authorized: the run's lane A project and its hub writes are its. */
+    machine: { name: string; ref: string };
+    /** Throws unless the machine's `mawsd keys --json` is the authorized machine's, listed. */
+    checkMachine(keys: Record<string, unknown>): void;
+  } | null;
   hubDeploy?: (() => Promise<void>) | null;
   tag?: string;
 };
@@ -108,7 +124,9 @@ export async function buildScene(o: RunOptions & { tag: string }, made: Made, lo
     chain = await readChain(person);
     owner = { member: admin.member, id: o.admin.device.id, clientClass: 'native-mac', channel: o.admin.device.channel, stepUp: o.admin.device.stepUp };
   } else if (o.production !== null) {
-    // The obligation first: the owner removes the device, and the read-back looks for it, however the run ends.
+    // The machine first, before the owner is asked for anything: the one authorized, by its name and its ref.
+    o.production.checkMachine(await machine.keys());
+    // Then the obligation: the owner removes the device, and the read-back looks for it, however the run ends.
     const { id } = o.production;
     made.devices.push(id);
     cleanup.add(`the owner removes ${id}`, async () => {
@@ -119,6 +137,15 @@ export async function buildScene(o: RunOptions & { tag: string }, made: Made, lo
     chain = await readChain(person);
   } else throw new Error('a run needs an admin device or production’s paired one');
 
+  // The machine's own events the run's sessions write (lane A's, the spawn's lifecycle), kept as residue apart from
+  // the run's marked ones; read once the scene is ended (the cleanup runs its steps last-added first).
+  let sessionLog: { project: string; from: number } | null = null;
+  cleanup.add('record the machine’s own events the run’s sessions wrote', async () => {
+    if (sessionLog === null) return;
+    const { project, from } = sessionLog;
+    made.kept.push(await readSessionResidue(person, project, from, machineName).catch((error: unknown) => `${sessionResidue(project, from, [])} (unread: ${error instanceof Error ? error.message : String(error)})`));
+  });
+  let machineName = '';
   cleanup.add(`end the scene on ${machine.label}`, async () => {
     const left = await machine.down();
     if (left.length) throw new Error(left.join('; '));
@@ -179,11 +206,11 @@ export async function buildScene(o: RunOptions & { tag: string }, made: Made, lo
     await refresh();
     log(`${name}: enrolled and listed, ref ${ref}`);
   } else {
-    const keys = await machine.keys();
-    if (keys.enrollment !== 'org-listed' || typeof keys.name !== 'string' || typeof keys.ref !== 'string') throw new Error(`${machine.label} is not org-listed: ${JSON.stringify(keys)}`);
-    ({ name, ref } = keys as { name: string; ref: string });
-    log(`${name}: org-listed, ref ${ref}`);
+    // Production's, checked against the pin before the pairing.
+    ({ name, ref } = o.production!.machine);
+    log(`${name}: org-listed, ref ${ref} (the authorized machine)`);
   }
+  machineName = name;
   const status = await until(
     async () => {
       const s = await machine.status();
@@ -204,6 +231,8 @@ export async function buildScene(o: RunOptions & { tag: string }, made: Made, lo
   const project = { id: machineProjectId(org, name), name };
   const hubWrites = o.target === 'production' ? HubWrites.production(project.id) : HubWrites.staging(project.id);
   cleanup.add('record what the run keeps on the hub', async () => void made.kept.push(...hubWrites.kept()));
+  sessionLog = { project: project.id, from: await projectLogOffset(person, project.id, o.target === 'production') };
+  log(`lane A’s project log stands at offset ${sessionLog.from} before lane A starts`);
   const laneA = await machine.laneA.up(project);
   log(`lane A: session ${laneA.session} (${laneA.alias}) in the machine’s project ${project.id}, launch ${laneA.launch}`);
 
@@ -231,7 +260,38 @@ export async function buildScene(o: RunOptions & { tag: string }, made: Made, lo
     tag,
     made,
     hubWrites,
+    logFrom: sessionLog.from,
   };
+}
+
+/**
+ * Where `project`'s log stands now, the offset the hub is caught up to. A project the hub does not know yet (a staging
+ * machine's, before its sminos says hello) has nothing in it: 0, unless `known` (production's machine has a history).
+ */
+async function projectLogOffset(person: Person, project: string, known: boolean): Promise<number> {
+  let socket: ProjectSocket;
+  try {
+    socket = await ProjectSocket.open(person.hub, person.headers, project, 15_000);
+  } catch (error) {
+    if (known) throw error;
+    return 0;
+  }
+  try {
+    return await socket.catchUp(0);
+  } finally {
+    socket.close();
+  }
+}
+
+/** The residue line for the machine's own events in `project` after `from`. */
+async function readSessionResidue(person: Person, project: string, from: number, machine: string): Promise<string> {
+  const socket = await ProjectSocket.open(person.hub, person.headers, project, 15_000);
+  try {
+    await socket.catchUp(from);
+    return sessionResidue(project, from, runOwnEvents(socket.log as LoggedEvent[], from, machine));
+  } finally {
+    socket.close();
+  }
 }
 
 /** What is still there after the cleanup: the head's members, machines and devices of the run's, the hub's machine. */
@@ -342,7 +402,7 @@ export const OPTIONS = {
   items: { type: 'string', default: ITEMS.join(',') },
   vm: { type: 'string', default: DEFAULT_VM },
   devcloud: { type: 'string', default: DEVCLOUD },
-  'direct-url': { type: 'string', default: DEFAULT_DIRECT_URL },
+  'direct-url': { type: 'string' },
   scratch: { type: 'string' },
   scan: { type: 'string' },
   'hub-deploy': { type: 'string' },
@@ -439,12 +499,12 @@ export async function main(argv: string[]): Promise<number> {
 
   if (chosen.mode === 'production') {
     const { productionRun } = await import('./endpoint-production');
-    return productionRun({ person, items, cleanup, secrets, ssh, scratch, directUrl: values['direct-url'] as string, log, ready: (values['code-ready'] as string | undefined) ?? join(scratch, 'code-ready'), interruption });
+    return productionRun({ person, items, cleanup, secrets, ssh, scratch, directUrl: directUrlFor('production', values['direct-url'] as string | undefined), log, ready: (values['code-ready'] as string | undefined) ?? join(scratch, 'code-ready'), interruption });
   }
 
   if (!isTestTarget(config!)) return 2;
   const device = await loadAdminDevice(values['device-keys'] as string);
-  const machine = new VmMachine(ssh, scratch, { directUrl: values['direct-url'] as string, log: (line) => log(`  vm: ${line}`), ...interruption });
+  const machine = new VmMachine(ssh, scratch, { directUrl: directUrlFor('staging', values['direct-url'] as string | undefined), log: (line) => log(`  vm: ${line}`), ...interruption });
   const deployScript = values['hub-deploy'] as string | undefined;
   const hubDeploy = deployScript === undefined ? null : () => run('zsh', [deployScript, 'deploy'], log, DEPLOY_MS);
   return runEndpointAcceptance({

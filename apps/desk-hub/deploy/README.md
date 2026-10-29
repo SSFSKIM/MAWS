@@ -280,13 +280,19 @@ One `PASS <item>`, `FAIL <item>` or `NOT SHOWN <item>: <why>` per item, the suit
 under it; then `LEFT …` for anything still there. `staging-run.sh endpoint` runs it (production compared before and
 after), `staging-run.sh endpoint-vm setup <base> | teardown` sets the scene up or removes it. Production (item 7) is a
 mode of its own, refused unless asked for by `--production --confirm-production <production's host>` with production's
-config (`endpoint-production.ts`), and driven by `vm/production.sh` against the VM's own `mawsd` and sminos. It runs
-only the clauses its allowlist names (`PRODUCTION_CLAUSES` in `endpoint-items.ts`): VM-local work, reads, and at most
-five events marked `o10 m11 acceptance` posted in the machine's own project (`HubWrites`, which refuses a sixth or any
-other project itself); never a hub deploy or an org-state change, which it reports `NOT SHOWN`. Its lane A session runs
-as the owner's user, since that sminos does, against the stub model under `env -i`, with a scratch `CLAUDE_CONFIG_DIR`
-holding the sminos plugin alone and `/etc/claude-code` hidden; `down` ends it and removes the scratch directory. The
-events, the machine's project and its history stay, printed as `KEPT …` lines.
+config (`endpoint-production.ts`), and driven by `vm/production.sh` against the VM's own `mawsd` and sminos. Its
+machine is pinned (`PRODUCTION_MACHINE`: the VM `dc-acceptance-7f80`, its name and its ref), checked before the owner
+is asked for anything, and dialled directly on 47830 unless `--direct-url` names another address. It runs only the
+clauses its allowlist names (`PRODUCTION_CLAUSES` in `endpoint-items.ts`): VM-local work, reads, and at most five
+events marked `o10 m11 acceptance` posted in the machine's own project (`HubWrites`, which refuses a sixth or any other
+project itself); never a hub deploy, an org-state change, or a spawn the daemon is asked to refuse (a broken refusal
+would launch a seat), which it reports `NOT SHOWN`. Its lane A session runs as the owner's user, since that sminos
+does, against the stub model under `env -i`, with a scratch `CLAUDE_CONFIG_DIR` holding the sminos plugin alone and
+`/etc/claude-code` hidden by a private mount namespace; the run names the session (`--session-id`) and checks its
+engine is that one before using it, and calls a process its own only inside that namespace (item 4's local spawn is
+declined while any other claude of the owner's runs). `down` ends it and removes the scratch directory. The marked
+events, the events the run's sessions wrote (counted by writer, from the offset the log stood at before lane A), the
+machine's project and its history stay, printed as `KEPT …` lines.
 
 ## `admin`: the owner's hand on the org state (P5 O13 M2)
 

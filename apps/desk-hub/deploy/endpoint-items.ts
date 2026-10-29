@@ -63,6 +63,24 @@ export class HubWrites {
   }
 }
 
+/** An event of a project's log as the hub serves it: its offset and the event (its writer and seq). */
+export type LoggedEvent = { offset: number; event: { writer: string; seq: number } & Record<string, unknown> };
+
+/** The machine's own events this run's sessions wrote: its writers' (`<machine>/…`), after `since`, the offset the
+ * project's log stood at before lane A started; the history before it (a cut-over machine's included) is never the
+ * run's. */
+export function runOwnEvents<E extends LoggedEvent>(log: readonly E[], since: number, machine: string): E[] {
+  return log.filter((e) => e.offset > since && e.event.writer.startsWith(`${machine}/`));
+}
+
+/** The residue line for the machine's own events the run's sessions wrote, by writer, apart from `HubWrites`' budget. */
+export function sessionResidue(project: string, since: number, events: readonly LoggedEvent[]): string {
+  const by = new Map<string, number[]>();
+  for (const { offset, event } of events) by.set(event.writer, [...(by.get(event.writer) ?? []), offset]);
+  const writers = [...by].map(([writer, offsets]) => `${writer} ${offsets.length} (${offsets.length === 1 ? `offset ${offsets[0]}` : `offsets ${Math.min(...offsets)}–${Math.max(...offsets)}`})`);
+  return `the machine’s own events in the project ${project} after offset ${since}, written by the run’s sessions (lane A, the spawn): ${writers.length ? writers.join(', ') : 'none'}`;
+}
+
 /** The lane A session the run watches, as its sminos reported it. */
 export type LaneA = { session: string; launch: string; alias: string; project: string; checkout: string };
 
@@ -102,6 +120,8 @@ export type Scene = {
   made: { devices: string[] };
   /** The run's writes to the hub's stored data, each admitted by it (production's allowance enforced there). */
   hubWrites: HubWrites;
+  /** The offset the lane A project's log stood at before lane A started: the run's own events come after it. */
+  logFrom: number;
 };
 
 const NO_CERTS: Certificates = { certs: [], retirements: [] };
@@ -742,17 +762,29 @@ export async function item5(scene: Scene, report: ItemReport): Promise<void> {
     return 'the owner device’s signed human event reached the transcript once';
   });
   await report.check('5', 'the machine’s own events go up signed', async () => {
+    // Only this run's: the machine's writers' events after the offset the log stood at before lane A started, which
+    // its sessions write (their lifecycle); never the history before it, a cut-over machine's DX2 years included.
     const socket = await ProjectSocket.open(scene.hub, scene.person.headers, scene.laneA.project, 15_000);
     try {
-      await socket.catchUp(0);
-      const own = socket.log.filter((e) => e.event.writer.startsWith(`${scene.name}/`));
-      if (own.length === 0) return { skip: 'the machine wrote no event of its own to the project in this run' };
+      let own: LoggedEvent[] = [];
+      const deadline = Date.now() + 60_000;
+      for (;;) {
+        socket.log.length = 0; // each read the whole stretch again, once
+        await socket.catchUp(scene.logFrom);
+        own = runOwnEvents(socket.log as LoggedEvent[], scene.logFrom, scene.name);
+        if (own.length > 0 || Date.now() > deadline) break;
+        await sleep(3000);
+      }
+      if (own.length === 0) {
+        if (probe === null) return { skip: 'no real sminos in this scene: nothing writes the machine’s own events' };
+        throw new Error(`no event of the machine’s after offset ${scene.logFrom} within 60 s, though lane A’s session runs`);
+      }
       const head = scene.chain().at(-1)!.state;
       for (const { event } of own) {
         const verdict = await verifyEvent({ org: scene.org, project: scene.laneA.project }, head, event as unknown as LogEventV2, NO_CERTS, new Date());
         if (!verdict.ok) throw new Error(`${event.writer}:${event.seq} does not verify: ${verdict.code}`);
       }
-      return `all ${own.length} of the machine's events in the project verify under its key`;
+      return `the ${own.length} event(s) the run’s sessions wrote after offset ${scene.logFrom} verify under the machine’s key`;
     } finally {
       socket.close();
     }
@@ -1035,9 +1067,7 @@ export const PRODUCTION_CLAUSES: Record<string, 'vm' | 'read' | 'hub-write'> = O
   ['9 handshakes past the per-source limit answered `busy`', 'vm'],
   ['8 a `view` read on a session the member holds nothing on', 'vm'],
   ['8 a `converse`, an `approve` and a `manage` act refused below their grades', 'vm'],
-  ['8 a spawn by a member without the machine’s `spawn` right', 'vm'],
   ['8 the machine’s content-free reads, for any member', 'vm'],
-  ['8 an owner’s spawn needs step-up', 'vm'],
   ['8 what production’s offer table doesn’t offer is refused `not-offered`, the owner’s too', 'vm'],
   ['3 an action frame the relay replays closes the channel, and the action runs once', 'vm'],
   ['3 an action resent under a used nonce is refused `replayed`', 'vm'],
@@ -1049,8 +1079,6 @@ export const PRODUCTION_CLAUSES: Record<string, 'vm' | 'read' | 'hub-write'> = O
   ['3 an action frame altered in the relay closes the channel, and nothing runs', 'vm'],
   ['3 the run’s own device, removed by the owner, is refused at once', 'vm'],
   ['4 `--read-only on` refuses every action, while reads and subscriptions go on', 'vm'],
-  ['4 a spawn whose permission mode is above the ceiling is refused `ceiling`', 'vm'],
-  ['4 a spawn into a directory that is no known checkout is refused `unknown-checkout`', 'vm'],
   // Ruled: only when vm/production.sh shows no claude supervisor or background seat of the owner's before it, and the
   // seat's environment the scratch config's and the stub's after it (else the seat is killed and the clause skipped).
   ['4 a local `sminos spawn` from the machine runs, untouched by the endpoint', 'vm'],
@@ -1066,8 +1094,16 @@ export const PRODUCTION_CLAUSES: Record<string, 'vm' | 'read' | 'hub-write'> = O
   ...both('2 lane A over the <carrier> carrier: every event once, by the endpoint’s cursor, sminos’s numbering and the transcript').map((c) => [c, 'vm']),
 ]);
 
+/** A spawn the real daemon is asked to refuse: were its refusal broken, it would launch a seat with the daemon's own
+ * environment, so production never asks it. */
+const SPAWN_PROBE = 'never in production: a broken refusal would launch a seat with the production daemon’s environment; staging runs it, and test/endpoint/grades.test.ts proves the refusal';
+
 /** Clauses production never runs, and why. */
 const NEVER_IN_PRODUCTION: Record<string, string> = {
+  '4 a spawn whose permission mode is above the ceiling is refused `ceiling`': SPAWN_PROBE,
+  '4 a spawn into a directory that is no known checkout is refused `unknown-checkout`': SPAWN_PROBE,
+  '8 an owner’s spawn needs step-up': SPAWN_PROBE,
+  '8 a spawn by a member without the machine’s `spawn` right': SPAWN_PROBE,
   '2 a hub deploy, then the forced cut: the relayed channel resumes by replay': 'never in production: no hub deploy',
   '9 a revoked device refused, and one a new state removes closed `removed`, over both carriers': 'never in production: the run amends no org state there',
   '3 a device a new org state removes is refused at once': 'never in production: the run amends no org state there',

@@ -350,3 +350,75 @@ describe('item 2’s deploy watcher', () => {
     }
   });
 });
+
+describe('production’s spawn probes', () => {
+  it('runs no spawn the real daemon could launch if its refusal broke: staging and the suite show those refusals', async () => {
+    const { productionAdmit } = await import('../../deploy/endpoint-items.ts');
+    const admit = productionAdmit(true);
+    for (const [item, check] of [
+      ['4', 'a spawn whose permission mode is above the ceiling is refused `ceiling`'],
+      ['4', 'a spawn into a directory that is no known checkout is refused `unknown-checkout`'],
+      ['8', 'an owner’s spawn needs step-up'],
+      ['8', 'a spawn by a member without the machine’s `spawn` right'],
+    ]) expect(admit(item, check), check).toMatch(/^never in production: .*launch a seat.*staging.*test\/endpoint\/grades\.test\.ts/);
+    // The guarded local spawn still runs.
+    expect(admit('4', 'a local `sminos spawn` from the machine runs, untouched by the endpoint')).toBeNull();
+  });
+});
+
+describe('production’s machine', () => {
+  const pinned = { enrollment: 'org-listed', name: 'dc-acceptance-7f80', ref: '7872ff6c6ff6a58065ae0a68160b5dcb_AyQ4IqKLwVJ95-o2oc4zTA' };
+
+  it('is the one the owner authorized, by its VM, its name and its ref, or the run refuses it', async () => {
+    const { checkProductionMachine, PRODUCTION_MACHINE } = await import('../../deploy/endpoint-production.ts');
+    expect(PRODUCTION_MACHINE).toEqual({ vm: 'dc-acceptance-7f80', name: 'dc-acceptance-7f80', ref: pinned.ref });
+    expect(() => checkProductionMachine('dc-acceptance-7f80', pinned)).not.toThrow();
+    expect(() => checkProductionMachine('dc-other', pinned)).toThrow(/dc-acceptance-7f80/);
+    expect(() => checkProductionMachine('dc-acceptance-7f80', { ...pinned, name: 'macbook' })).toThrow(/macbook/);
+    expect(() => checkProductionMachine('dc-acceptance-7f80', { ...pinned, ref: 'other_ref' })).toThrow(/other_ref/);
+    expect(() => checkProductionMachine('dc-acceptance-7f80', { ...pinned, enrollment: 'hub-confirmed' })).toThrow(/org-listed/);
+  });
+
+  it('is refused before anything is asked of the VM or the owner when the VM is another', async () => {
+    const { productionRun } = await import('../../deploy/endpoint-production.ts');
+    const { Cleanup } = await import('../../deploy/proof.ts');
+    const said: string[] = [];
+    const person = { hub: 'https://desk-hub.opencognita-platform.workers.dev' } as unknown as Person;
+    await expect(
+      productionRun({ person, items: ['9'], cleanup: new Cleanup(), secrets: new Secrets(null), ssh: { devcloud: '/nonexistent', vm: 'dc-other' }, scratch: mkdtempSync(join(tmpdir(), 'ep-pin-')), directUrl: 'ws://100.116.205.27:47830', log: (l) => said.push(l), ready: '/nonexistent' }),
+    ).rejects.toThrow(/dc-acceptance-7f80/);
+    expect(said).toEqual([]);
+  });
+
+  it('is dialled directly at production’s own port unless the command names another address', async () => {
+    const { directUrlFor } = await import('../../deploy/endpoint-acceptance.ts');
+    expect(directUrlFor('production', undefined)).toBe('ws://100.116.205.27:47830');
+    expect(directUrlFor('staging', undefined)).toBe('ws://100.116.205.27:47831');
+    expect(directUrlFor('production', 'ws://100.64.0.9:47830')).toBe('ws://100.64.0.9:47830');
+  });
+});
+
+describe('the machine’s own events, this run’s', () => {
+  const log = [
+    { offset: 4, event: { writer: 'dc-acceptance-7f80/old', seq: 9 } },
+    { offset: 11, event: { writer: 'hub/member-1', seq: 3 } },
+    { offset: 12, event: { writer: 'dc-acceptance-7f80/s1', seq: 1 } },
+    { offset: 13, event: { writer: 'dc-acceptance-7f80/s1', seq: 2 } },
+    { offset: 15, event: { writer: 'dc-acceptance-7f80/s2', seq: 1 } },
+    { offset: 16, event: { writer: 'dc-acceptance-7f80-twin/s1', seq: 1 } },
+  ];
+
+  it('are the machine’s writers’ events after the log stood where it did before lane A started, nothing earlier', async () => {
+    const { runOwnEvents } = await import('../../deploy/endpoint-items.ts');
+    expect(runOwnEvents(log, 10, 'dc-acceptance-7f80').map((e) => e.offset)).toEqual([12, 13, 15]);
+    expect(runOwnEvents(log, 15, 'dc-acceptance-7f80')).toEqual([]);
+  });
+
+  it('are kept as residue by writer, apart from the run’s marked events', async () => {
+    const { runOwnEvents, sessionResidue } = await import('../../deploy/endpoint-items.ts');
+    expect(sessionResidue('proj-m', 10, runOwnEvents(log, 10, 'dc-acceptance-7f80'))).toBe(
+      'the machine’s own events in the project proj-m after offset 10, written by the run’s sessions (lane A, the spawn): dc-acceptance-7f80/s1 2 (offsets 12–13), dc-acceptance-7f80/s2 1 (offset 15)',
+    );
+    expect(sessionResidue('proj-m', 10, [])).toBe('the machine’s own events in the project proj-m after offset 10, written by the run’s sessions (lane A, the spawn): none');
+  });
+});

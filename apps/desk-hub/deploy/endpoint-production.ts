@@ -7,7 +7,8 @@
 // watches its channel close `removed` (item 3) and the revocation reach the machine's sminos (item 5).
 //
 // endpoint-acceptance.ts reaches this only with `--production --confirm-production <production's host>` and a
-// production config; nothing here runs otherwise. Its machine driver is vm/production.sh, which part 1 never ran.
+// production config; nothing here runs otherwise. Its machine driver is vm/production.sh; the machine is pinned
+// (PRODUCTION_MACHINE) and checked before the owner is asked for anything.
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, rmSync } from 'node:fs';
@@ -23,6 +24,19 @@ import type { Cleanup } from './proof';
 
 /** Where vm/production.sh would be installed on the VM (part 2's setup; never installed in part 1). */
 export const PRODUCTION_SCENE = '/opt/o10-m11/production.sh';
+/** The production machine the owner authorized for this run (2026-10-28), and no other: the devcloud acceptance VM's
+ * cut-over mawsd, by its VM, its name and its ref. */
+export const PRODUCTION_MACHINE = { vm: 'dc-acceptance-7f80', name: 'dc-acceptance-7f80', ref: '7872ff6c6ff6a58065ae0a68160b5dcb_AyQ4IqKLwVJ95-o2oc4zTA' } as const;
+
+/** Throws unless `vm` is the authorized one and, given its `mawsd keys --json`, its machine is the pinned one, listed. */
+export function checkProductionMachine(vm: string, keys?: Record<string, unknown>): void {
+  if (vm !== PRODUCTION_MACHINE.vm) throw new Error(`the production run is authorized on ${PRODUCTION_MACHINE.vm} alone, not ${vm}`);
+  if (keys === undefined) return;
+  if (keys.enrollment !== 'org-listed') throw new Error(`${vm}'s mawsd is not org-listed (${String(keys.enrollment)})`);
+  if (keys.name !== PRODUCTION_MACHINE.name) throw new Error(`${vm}'s mawsd is the machine ${String(keys.name)}, not the authorized ${PRODUCTION_MACHINE.name}`);
+  if (keys.ref !== PRODUCTION_MACHINE.ref) throw new Error(`${vm}'s mawsd has the ref ${String(keys.ref)}, not the authorized ${PRODUCTION_MACHINE.ref}`);
+}
+
 /** How long the owner has for a step by hand. */
 const OWNER_MS = 15 * 60_000;
 
@@ -113,6 +127,7 @@ export async function waitForFile(file: string, ms: number, check: () => void = 
  */
 export async function productionRun(o: ProductionOptions): Promise<number> {
   if (new URL(o.person.hub).hostname !== PRODUCTION_HOST) throw new Error(`the production run is production's alone, not ${o.person.hub}'s`);
+  checkProductionMachine(o.ssh.vm);
   const tag = randomBytes(3).toString('hex');
   const id = `o10-p-${tag}`;
   const readyMs = o.readyMs ?? OWNER_MS;
@@ -134,5 +149,5 @@ export async function productionRun(o: ProductionOptions): Promise<number> {
       await sleep(3000);
     }
   };
-  return runEndpointAcceptance({ target: 'production', person: o.person, machine, items: o.items, cleanup: o.cleanup, secrets: o.secrets, print: o.log, admin: null, production: { id, pair, ownerStep }, tag });
+  return runEndpointAcceptance({ target: 'production', person: o.person, machine, items: o.items, cleanup: o.cleanup, secrets: o.secrets, print: o.log, admin: null, production: { id, pair, ownerStep, machine: PRODUCTION_MACHINE, checkMachine: (keys) => checkProductionMachine(o.ssh.vm, keys) }, tag });
 }
