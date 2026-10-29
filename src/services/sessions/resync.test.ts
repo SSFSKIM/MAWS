@@ -483,6 +483,29 @@ describe('the load’s barrier in mawsd (P5 O3-D M2)', () => {
     expect(h.digest(X)?.childAgents.done).toBe(1_201);
   });
 
+  it('a relaunch during the load whose hold carries the old launch’s status before its tail: the resynced launch stays protected, its 2,400 events fold once', async () => {
+    const X = 'x1';
+    const h = harness([X], { held: true });
+    const raw = h.raw();
+    const launchA = { ...live(X, 'LA'), launchedAt: '2026-09-28T09:00:00.000Z' }; // launched before B
+    h.begin();
+    h.host(X, live(X, 'LB'), pairs(X, 'LB', 1, 1_200)); // the listing names B, whose journal the resync pages
+    await h.connect();
+    const tailA = pairs(X, 'LA', 50, 60);
+    const heldB = pairs(X, 'LB', 1, 1_200); // overlapping the journal, past the fold's id window
+    h.drain(() => {
+      h.status(launchA); // held before the relaunch: superseded by the listing's B
+      h.deliver(X, tailA);
+      h.status(live(X, 'LB'));
+      h.deliver(X, heldB);
+    });
+    expect(h.digest(X)?.childAgents).toEqual({ active: 0, done: 1_200 }); // B once; nothing of A; the filter never reset to A
+    expect(raw.filter((event) => event.id.includes(':LA:'))).toEqual(tailA); // A's tail reaches the raw listeners
+    expect(h.model.engineStatus(X as AppSessionId)?.launchId).toBe('LB');
+    h.deliver(X, pairs(X, 'LB', 1_201, 1_201));
+    expect(h.digest(X)?.childAgents.done).toBe(1_201);
+  });
+
   it('a session that exits during the load with a crash in its held final batch reads failed, its turn’s end kept', async () => {
     const A = 'a1';
     const h = harness([A], { held: true });
