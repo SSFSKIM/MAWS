@@ -185,6 +185,37 @@ describe('a remote lane A session’s state', () => {
     expect(state(fold, { ...status, launch: 'L2' }).mode).toMatchObject({ mode: 'plan' });
   });
 
+  // sminos 1.27.16: the presence carries the bridge's mode as `{mode, at}`, `at` on the same clock as `read status`'s
+  describe('the mode on the presence (sminos 1.27.16)', () => {
+    const caps = { ...capabilities, sminos: '1.27.16' };
+    const status = (mode: { mode: 'plan' | 'acceptEdits' | 'default'; at: number } | null) => ({ model: 'claude-opus-4-5', override: null, mode: mode && { ...mode, from: 'permission_mode_changed' }, launch: 'L1' });
+
+    it('shows an idle session’s switch from its presence, with no status read', () => {
+      const fold = new RemoteFold(S);
+      fold.message(snapshot({ presence: presence({ capabilities: caps }) }));
+      expect(state(fold).mode).toBeNull();
+      fold.message(env('presence', presence({ capabilities: caps, mode: { mode: 'acceptEdits', at: 2_000 } }), null, null)); // Shift+Tab at the terminal
+      expect(state(fold).mode).toEqual({ mode: 'acceptEdits', at: 2_000, from: 'presence' });
+      expect(state(fold, status({ mode: 'default', at: 1_000 })).mode).toEqual({ mode: 'acceptEdits', at: 2_000, from: 'presence' }); // an older read
+    });
+
+    it('never takes an older presence over a newer status read; on the same `at`, the read', () => {
+      const fold = new RemoteFold(S);
+      fold.message(snapshot({ presence: presence({ capabilities: caps, mode: { mode: 'plan', at: 1_000 } }) }));
+      expect(state(fold, status({ mode: 'acceptEdits', at: 3_000 })).mode).toEqual({ mode: 'acceptEdits', at: 3_000, from: 'permission_mode_changed' });
+      expect(state(fold, status({ mode: 'default', at: 1_000 })).mode).toEqual({ mode: 'default', at: 1_000, from: 'permission_mode_changed' });
+    });
+
+    it('a presence with no mode (sminos before 1.27.16), or no word of the engine’s, changes nothing', () => {
+      const fold = new RemoteFold(S);
+      fold.message(snapshot({ presence: presence({ capabilities: { ...capabilities, sminos: '1.27.14' } }) }));
+      expect(state(fold).mode).toBeNull();
+      expect(state(fold, status({ mode: 'plan', at: 1_000 })).mode).toEqual({ mode: 'plan', at: 1_000, from: 'permission_mode_changed' });
+      fold.message(env('presence', presence({ capabilities: caps, mode: { mode: 'yolo', at: 5_000 } }), null, null));
+      expect(state(fold, status({ mode: 'plan', at: 1_000 })).mode).toEqual({ mode: 'plan', at: 1_000, from: 'permission_mode_changed' });
+    });
+  });
+
   it('carries the link and the acts in flight it is given, and leaves both out when given none', () => {
     const fold = new RemoteFold(S);
     fold.message(snapshot());
