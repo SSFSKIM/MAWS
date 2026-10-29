@@ -11,7 +11,10 @@
 // so the quit is made mid-turn). The turn ends with no app connected and the session holds at its next prompt. Then a
 // 120 s settle, and a 600 s window: every 30 s each measured process's physical footprint (proc_pid_rusage, P5 Decision
 // Log 48) and `ps -o rss=` (each summed per sample; the RSS is a diagnostic) and the 1-minute load, and `ps -o time=` at
-// the window's start and end. At the first sample top's MEM column reads the footprint a second, independent way. The
+// the window's start and end. At the first sample top's MEM column reads the footprint a second, independent way. Each
+// sample also records two diagnostics no verdict reads: the cores' cumulative CPU times (os.cpus()), which give each
+// interval's busy share, and the process outside the measured set that used the most CPU over the interval, from the
+// one process table the sample reads to tell that each measured process is still the one the window started with. The
 // measured processes are those of the profile whose argv0 is `maws-supervisor`; the replay has no `claude` child, and a
 // real one is the session's cost, not the daemon's.
 //
@@ -21,11 +24,14 @@
 // DAEMON_IDLE_BOUND. The settings' `idleExitMinutes: null` reaches `mawsd` as `host.configure`'s, so neither its park
 // clock nor its own idle exit arms.
 //
-// A run is valid when the load stays under 5 throughout the window, every measured process lives through it, the
-// kept session is still held at its end and the two footprint readers agree; an invalid run fails, saying why. It
-// prints one line naming each process's footprint and the app's Electron version against the runtime floor's, adds it
-// as an annotation, and writes the samples to test-results/daemon-idle.json. On the daemon shape the line states the
-// bound's verdict and a valid run outside the bound fails; the detached shape records only.
+// A run is valid when its load passes IDLE_RUN's rule, every measured process lives through it, the kept session is
+// still held at its end and the two footprint readers agree; an invalid run fails, saying why. The load rule voids
+// sustained load and passes a burst: a window is void when its 1-minute load reaches 5 and two adjacent 30 s intervals
+// both held 4.7 or more, each interval's own load rebuilt from the 1-minute series (its 30 s pair). It prints one line
+// naming each process's footprint, the app's Electron version against the runtime floor's and the load, the highest
+// 1-minute load with the 30 s pair beside it, adds it as an annotation, and writes the samples to
+// test-results/daemon-idle.json. On the daemon shape the line states the bound's verdict and a valid run outside the
+// bound fails; the detached shape records only.
 //
 // The second case is the runtime floor, the footprint of the bare runtime `mawsd` runs on, a diagnostic outside the
 // bound (P5 Decision Logs 54 and 57); it writes test-results/daemon-idle-floor.json. The third (P5 O2 M5, Decision Log
@@ -63,7 +69,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import { daemonPaths } from '@shared/daemon/files';
 import { machineSettingsDefaults } from '@shared/settings/defaults';
-import { abaDeltas, abaLine, boundMisses, cpuSeconds, DAEMON_IDLE_BOUND, ENROLLED_INCREMENT_BUDGET_KIB, enrolledLine, floorLine, IDLE_RUN, idleLine, invalidReasons, mawsdLine, measured, median, readerMismatches, readFootprints, readTopMem, SPINE_RELEASED_RUN, spineLine, type MeasuredProcess, type ShapeReading, type TopMem } from '../test/support/daemon-idle';
+import { abaDeltas, abaLine, boundMisses, busyShare, cpuSeconds, cpuTimes, DAEMON_IDLE_BOUND, ENROLLED_INCREMENT_BUDGET_KIB, enrolledLine, floorLine, IDLE_RUN, idleLine, invalidReasons, loadPair, mawsdLine, measured, median, readerMismatches, readFootprints, readProcessTable, readTopMem, SPINE_RELEASED_RUN, spineLine, topOutside, type CpuTimes, type MeasuredProcess, type ProcessRow, type ShapeReading, type TopMem, type TopProcess } from '../test/support/daemon-idle';
 import { writeSpineFixture } from '../test/support/spine-fixture';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
@@ -95,7 +101,9 @@ const ABA_RUN: IdleRun = process.env.MAWS_DAEMON_IDLE_TRIAL === '1' ? { ...IDLE_
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 interface JournalRow { seq: number; direction: string; frame: Record<string, unknown> }
-interface Sample { atS: number; load: number; footprintKiB: Record<number, number | null>; rssKiB: Record<number, number | null> }
+// A sample's readings, then its diagnostics: the cores' cumulative CPU times, the interval's busy share and the top
+// process outside the measured set over the interval (both null at the window's first sample, which has no interval).
+interface Sample { atS: number; load: number; footprintKiB: Record<number, number | null>; rssKiB: Record<number, number | null>; cpuTimesMs: CpuTimes; busyShare: number | null; topProcess: TopProcess | null }
 interface CrossCheck { atS: number; readings: { pid: number; argv0: string; footprintKiB: number; top: TopMem | null }[] }
 
 function firstPrompt(): string {
@@ -209,7 +217,7 @@ test('daemon idle: the physical footprint and CPU of what stays behind holding o
     const reasons = invalidReasons({ loads: measurement.samples.map((s) => s.load), measured: measurement.names, lost: measurement.lost, sessionEnded, mismatches: measurement.mismatches });
     const { footprintKiB, rssKiB, cpuS, load } = measurement;
     const bound = DAEMON ? DAEMON_IDLE_BOUND : null;
-    const line = footprintKiB === null || rssKiB === null || cpuS === null ? null : idleLine({ footprintKiB, rssKiB, samples: measurement.whole, cpuS, processes: measurement.perProcess, bound, electron, load });
+    const line = footprintKiB === null || rssKiB === null || cpuS === null ? null : idleLine({ footprintKiB, rssKiB, samples: measurement.whole, cpuS, processes: measurement.perProcess, bound, electron, load, loadPair: measurement.loadPair });
     const misses = bound === null || footprintKiB === null || cpuS === null ? [] : boundMisses({ footprintKiB, cpuS }, bound);
     report('daemon-idle.json', line, reasons, { shape: SHAPE, electron, bound, misses, ...measurement.record, sessionEnded });
     expect(misses, `the daemon shape's processes together are within DAEMON_IDLE_BOUND (${line})`).toEqual([]);
@@ -242,7 +250,7 @@ test('daemon idle runtime floor: the physical footprint and CPU of the bare Elec
 
     const reasons = invalidReasons({ loads: measurement.samples.map((s) => s.load), measured: measurement.names, lost: measurement.lost, sessionEnded: false, mismatches: measurement.mismatches });
     const { footprintKiB, rssKiB, cpuS, load } = measurement;
-    const line = footprintKiB === null || rssKiB === null || cpuS === null ? null : floorLine({ footprintKiB, rssKiB, samples: measurement.whole, cpuS, electron, load });
+    const line = footprintKiB === null || rssKiB === null || cpuS === null ? null : floorLine({ footprintKiB, rssKiB, samples: measurement.whole, cpuS, electron, load, loadPair: measurement.loadPair });
     report('daemon-idle-floor.json', line, reasons, { shape: 'runtime floor', electron, ...measurement.record });
   } finally {
     floor?.kill('SIGKILL');
@@ -278,7 +286,7 @@ test('daemon idle mawsd alone: the physical footprint and CPU of mawsd idle with
 
     const reasons = invalidReasons({ loads: measurement.samples.map((s) => s.load), measured: measurement.names, lost: measurement.lost, sessionEnded: false, mismatches: measurement.mismatches });
     const { footprintKiB, rssKiB, cpuS, load } = measurement;
-    const line = footprintKiB === null || rssKiB === null || cpuS === null ? null : mawsdLine({ footprintKiB, rssKiB, samples: measurement.whole, cpuS, load });
+    const line = footprintKiB === null || rssKiB === null || cpuS === null ? null : mawsdLine({ footprintKiB, rssKiB, samples: measurement.whole, cpuS, load, loadPair: measurement.loadPair });
     report('daemon-idle-mawsd.json', line, reasons, { shape: 'mawsd alone', ...measurement.record });
   } finally {
     mawsd?.kill('SIGTERM');
@@ -466,7 +474,9 @@ function electronBinary(): string {
 
 // The window over the measured processes: their start times, then a sample every 30 s on a fixed schedule, each
 // process's footprint (proc_pid_rusage) and `ps -o rss=` summed per sample and the 1-minute load, top's cross-check at
-// the first sample, and `ps -o time=` at the start and the end.
+// the first sample, and `ps -o time=` at the start and the end; the window's 30 s pair from its loads. Each sample's one
+// process table (`ps -axo`) tells which measured processes are still the ones it started with and, with the cores' CPU
+// times read beside the load, gives the sample's diagnostics.
 async function measureWindow(procs: readonly MeasuredProcess[], run: IdleRun = IDLE_RUN) {
   const started = new Map(procs.map((p) => [p.pid, ps(p.pid, 'lstart')]));
   const cpuAtStart = new Map(procs.map((p) => [p.pid, cpuSeconds(ps(p.pid, 'time'))]));
@@ -474,11 +484,16 @@ async function measureWindow(procs: readonly MeasuredProcess[], run: IdleRun = I
   const samples: Sample[] = [];
   const lost: { pid: number; argv0: string; atS: number }[] = [];
   let crossCheck: CrossCheck | null = null;
+  let lastTable: Map<number, ProcessRow> | null = null; // the previous sample's, for the interval's top process
+  let lastTimes: CpuTimes | null = null; // the previous sample's, for the interval's busy share
   const windowStart = Date.now();
   for (let k = 0; k < run.samples; k += 1) {
     await sleep(Math.max(0, windowStart + k * run.everyS * 1_000 - Date.now()));
     const atS = Math.round((Date.now() - windowStart) / 1_000);
-    const live = procs.filter((p) => ps(p.pid, 'lstart') === started.get(p.pid));
+    const table = readProcessTable();
+    const topProcess = topOutside(lastTable, table, procs.map((p) => p.pid));
+    lastTable = table;
+    const live = procs.filter((p) => table.get(p.pid)?.started === started.get(p.pid));
     const read = readFootprints(live.map((p) => p.pid));
     const footprintOf = (pid: number) => { const f = read.get(pid); return f === undefined || 'errno' in f ? null : f.footprintKiB; };
     if (k === 0 && live.length > 0) {
@@ -496,7 +511,9 @@ async function measureWindow(procs: readonly MeasuredProcess[], run: IdleRun = I
       if (!alive && !lost.some((l) => l.pid === p.pid)) lost.push({ pid: p.pid, argv0: p.argv0, atS });
       if (alive && k === run.samples - 1) cpuAtEnd.set(p.pid, cpuSeconds(ps(p.pid, 'time')));
     }
-    samples.push({ atS, load: loadavg()[0]!, footprintKiB, rssKiB });
+    const cpuTimesMs = cpuTimes();
+    samples.push({ atS, load: loadavg()[0]!, footprintKiB, rssKiB, cpuTimesMs, busyShare: lastTimes === null ? null : busyShare(lastTimes, cpuTimesMs), topProcess });
+    lastTimes = cpuTimesMs;
   }
 
   const names = [...new Set(procs.map((p) => p.argv0))];
@@ -509,10 +526,11 @@ async function measureWindow(procs: readonly MeasuredProcess[], run: IdleRun = I
   const perProcess = whole.length === 0 ? [] : procs.map((p) => ({ argv0: p.argv0, pid: p.pid, footprintKiB: median(whole.map((s) => s.footprintKiB[p.pid]!)), cpuS: cpuOf(p.pid) }));
   const cpuS = lost.length > 0 ? null : Math.round(procs.reduce((sum, p) => sum + cpuAtEnd.get(p.pid)! - cpuAtStart.get(p.pid)!, 0) * 100) / 100;
   const load = Math.max(...samples.map((s) => s.load));
+  const pair = loadPair(samples.map((s) => s.load));
   const processes = procs.map((p) => ({ ...p, started: started.get(p.pid), cpuStartS: cpuAtStart.get(p.pid), cpuEndS: cpuAtEnd.get(p.pid) ?? null }));
   return {
-    samples, lost, mismatches, names, whole: whole.length, footprintKiB, rssKiB, perProcess, cpuS, load,
-    record: { run, footprintKiB, rssKiB, perProcess, cpuS, load, processes, crossCheck, mismatches, lost, samples },
+    samples, lost, mismatches, names, whole: whole.length, footprintKiB, rssKiB, perProcess, cpuS, load, loadPair: pair,
+    record: { run, footprintKiB, rssKiB, perProcess, cpuS, load, loadPair: pair, processes, crossCheck, mismatches, lost, samples },
   };
 }
 
@@ -523,7 +541,7 @@ const windowReasons = (run: IdleWindow, sessionEnded: boolean) => invalidReasons
 
 // A window's reading as the lines take it; null when no sample read every process or one was lost.
 const shapeReading = (run: IdleWindow): ShapeReading | null =>
-  run.footprintKiB === null || run.cpuS === null ? null : { footprintKiB: run.footprintKiB, cpuS: run.cpuS, samples: run.whole, load: run.load, processes: run.perProcess.map((p) => ({ ...p, cpuS: p.cpuS! })) };
+  run.footprintKiB === null || run.cpuS === null ? null : { footprintKiB: run.footprintKiB, cpuS: run.cpuS, samples: run.whole, load: run.load, loadPair: run.loadPair, processes: run.perProcess.map((p) => ({ ...p, cpuS: p.cpuS! })) };
 
 // The run's JSON beside the report, then its line printed and annotated, then the validity asserted.
 function report(file: string, line: string | null, reasons: string[], record: Record<string, unknown>): void {

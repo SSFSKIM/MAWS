@@ -363,20 +363,126 @@ describe('notify', () => {
     return { notifier, sent, listed, ctx, file: () => file, up: (on: boolean) => void (up = on) };
   };
   const notify = (session: string, kind: string, pending: number) => ({ t: 'notify', session, project: 'p1', kind, pending });
+  /** A pending set's items, one request each: a session's numbered in order (`s1#1`, `s1#2`), the same in every set. */
+  const items = (...sessions: string[]) => sessions.map((session, i) => ({ session, request: `${session}#${sessions.slice(0, i).filter((s) => s === session).length + 1}` }));
+  /** A session-wide `raised` or `settled` of one request, as sminos sends it on RL10 between its complete sets. */
+  const request = (kind: 'raised' | 'settled', session: string | null, id: unknown, extra: { sub?: string | null; project?: string } = {}) => ({
+    kind,
+    session,
+    project: extra.project ?? 'p1',
+    sub: extra.sub ?? null,
+    body: kind === 'raised' ? { session, request: id, tool: 'Bash', input: { command: 'ls' } } : { request: id, winner: 'terminal', outcome: 'allow', by: 'terminal' },
+  });
+
+  it('moves a session’s count by each single `raised` and `settled`, once per request (the production defect: no card for a question raised after a project opened)', () => {
+    const { notifier, sent, file } = setup();
+    notifier.requestMessage(request('raised', 's1', 'r1'));
+    expect(file()).toEqual({ s1: { project: 'p1', pending: 1 } });
+    notifier.requestMessage(request('raised', 's1', 'r2'));
+    notifier.requestMessage(request('raised', 's1', 'r1'));
+    notifier.requestMessage(request('settled', 's1', 'r9'));
+    notifier.requestMessage(request('settled', 's2', 'r1'));
+    notifier.requestMessage(request('settled', 's1', 'r1'));
+    notifier.requestMessage(request('settled', 's1', 'r1'));
+    expect(file()).toEqual({ s1: { project: 'p1', pending: 1 } });
+    notifier.requestMessage(request('settled', 's1', 'r2'));
+    expect(sent).toEqual([notify('s1', 'waiting', 1), notify('s1', 'waiting', 2), notify('s1', 'settled', 1), notify('s1', 'settled', 0)]);
+    expect(file()).toEqual({});
+  });
+
+  it('takes only a sub-less, session-bearing `raised` or `settled` that names its request', () => {
+    const { notifier, sent } = setup();
+    notifier.requestMessage(request('raised', 's1', 'r1', { sub: 'sub-1' }));
+    notifier.requestMessage(request('raised', null, 'r1'));
+    notifier.requestMessage(request('raised', 's1', 7));
+    notifier.requestMessage({ kind: 'presence', session: 's1', project: 'p1', sub: null, body: { request: 'r1' } });
+    notifier.requestMessage({ kind: 'raised', session: 's1', project: 'p1', sub: null, body: null });
+    expect(sent).toEqual([]);
+  });
+
+  it('agrees with a complete set: one restating what single messages built tells nothing, and each moves what the other built', () => {
+    const { notifier, sent } = setup();
+    notifier.requestMessage(request('raised', 's1', 's1#1'));
+    notifier.requestMessage(request('raised', 's1', 's1#2'));
+    notifier.pendingSet('p1', items('s1', 's1'));
+    expect(sent).toEqual([notify('s1', 'waiting', 1), notify('s1', 'waiting', 2)]);
+    // The set's requests are the ones a single message settles, and a raise the set holds is no new one.
+    notifier.pendingSet('p1', items('s1'));
+    notifier.requestMessage(request('raised', 's1', 's1#1'));
+    notifier.requestMessage(request('settled', 's1', 's1#2'));
+    expect(sent.slice(2)).toEqual([notify('s1', 'settled', 1)]);
+    notifier.requestMessage(request('settled', 's1', 's1#1'));
+    // A session single messages raised in is settled by a set that leaves it out.
+    notifier.requestMessage(request('raised', 's2', 'r1'));
+    notifier.pendingSet('p1', []);
+    expect(sent.slice(3)).toEqual([notify('s1', 'settled', 0), notify('s2', 'waiting', 1), notify('s2', 'settled', 0)]);
+  });
+
+  it('tells at the welcome what single messages moved while no connection was up, and the set after it agrees', () => {
+    const { notifier, sent, up } = setup();
+    up(false);
+    notifier.requestMessage(request('raised', 's1', 's1#1'));
+    notifier.requestMessage(request('raised', 's1', 's1#2'));
+    notifier.requestMessage(request('raised', 's1', 's1#3'));
+    notifier.requestMessage(request('settled', 's1', 's1#3'));
+    up(true);
+    notifier.welcome();
+    notifier.pendingSet('p1', items('s1', 's1'));
+    expect(sent).toEqual([notify('s1', 'waiting', 2)]);
+  });
+
+  it('after a restart, a settlement the restarted endpoint never saw raised moves nothing, and the set after it settles what the hub was told', () => {
+    const { notifier, sent, ctx, file } = setup();
+    notifier.requestMessage(request('raised', 's1', 'r1'));
+    const restarted = new Notifier(ctx);
+    // sminos's restatement: the settlements the hub hasn't had, then the complete set.
+    restarted.requestMessage(request('settled', 's1', 'r1'));
+    expect(sent).toEqual([notify('s1', 'waiting', 1)]);
+    restarted.pendingSet('p1', []);
+    expect(sent.slice(1)).toEqual([notify('s1', 'settled', 0)]);
+    expect(file()).toEqual({});
+  });
+
+  it('forgets a session’s requests with the session: a later set or settlement settles nothing more, and a new raise counts from 0', () => {
+    const { notifier, sent, listed } = setup();
+    notifier.requestMessage(request('raised', 's1', 'r1'));
+    notifier.requestMessage(request('raised', 's2', 'r1'));
+    listed.delete('s1');
+    notifier.withdrawn('s1', 'p1');
+    notifier.forget('s1');
+    notifier.requestMessage(request('settled', 's1', 'r1'));
+    notifier.pendingSet('p1', items('s2'));
+    expect(sent).toEqual([notify('s1', 'waiting', 1), notify('s2', 'waiting', 1), notify('s1', 'settled', 0)]);
+    // A session id seen again (listed anew) counts only what is raised from then on.
+    listed.add('s1');
+    notifier.requestMessage(request('raised', 's1', 'r2'));
+    expect(sent.slice(3)).toEqual([notify('s1', 'waiting', 1)]);
+  });
+
+  it('keeps a withdrawn session’s requests: listed again, it is told the count they make', () => {
+    const { notifier, sent, listed } = setup();
+    notifier.requestMessage(request('raised', 's1', 'r1'));
+    listed.delete('s1');
+    notifier.withdrawn('s1', 'p1');
+    notifier.requestMessage(request('raised', 's1', 'r2'));
+    listed.add('s1');
+    notifier.listed('s1');
+    expect(sent).toEqual([notify('s1', 'waiting', 1), notify('s1', 'settled', 0), notify('s1', 'waiting', 2)]);
+  });
 
   it('tells a rise as `waiting` and a fall as `settled`, each change once, from each project’s whole pending set', () => {
     const { notifier, sent } = setup();
-    notifier.pendingSet('p1', [{ session: 's1' }]);
-    notifier.pendingSet('p1', [{ session: 's1' }]);
-    notifier.pendingSet('p1', [{ session: 's1' }, { session: 's1' }, { session: 's2' }]);
-    notifier.pendingSet('p1', [{ session: 's1' }]);
-    notifier.pendingSet('p1', []);
+    notifier.pendingSet('p1', items('s1'));
+    notifier.pendingSet('p1', items('s1'));
+    notifier.pendingSet('p1', items('s1', 's1', 's2'));
+    notifier.pendingSet('p1', items('s1'));
+    notifier.pendingSet('p1', items());
     expect(sent).toEqual([notify('s1', 'waiting', 1), notify('s1', 'waiting', 2), notify('s2', 'waiting', 1), notify('s1', 'settled', 1), notify('s2', 'settled', 0), notify('s1', 'settled', 0)]);
   });
 
   it('notifies nothing for a session that isn’t listed', () => {
     const { notifier, sent } = setup();
-    notifier.pendingSet('p1', [{ session: 'private' }]);
+    notifier.pendingSet('p1', items('private'));
     notifier.hostMessage({ kind: 'host', session: 'private', project: 'p1', sub: null, body: { event: { kind: 'message', writer: 'w', seq: 1 } } });
     expect(sent).toEqual([]);
   });
@@ -384,7 +490,7 @@ describe('notify', () => {
   it('tells a session’s count and its `wrote` once its listing is sent, and a welcome drops a `wrote` still unlisted', () => {
     const { notifier, sent, listed } = setup();
     const host = (session: string, seq: number) => ({ kind: 'host', session, project: 'p1', sub: null, body: { event: { kind: 'message', writer: 'mini/host', seq } } });
-    notifier.pendingSet('p1', [{ session: 's3' }]);
+    notifier.pendingSet('p1', items('s3'));
     notifier.hostMessage(host('s3', 1));
     notifier.hostMessage(host('private', 2));
     expect(sent).toEqual([]);
@@ -399,19 +505,19 @@ describe('notify', () => {
 
   it('after a restart, settles a count it told before it when the first pending set leaves the session out (review finding 4)', () => {
     const { notifier, sent, ctx, file } = setup();
-    notifier.pendingSet('p1', [{ session: 's1' }, { session: 's2' }]);
-    notifier.pendingSet('p1', [{ session: 's1' }]);
+    notifier.pendingSet('p1', items('s1', 's2'));
+    notifier.pendingSet('p1', items('s1'));
     expect(file()).toEqual({ s1: { project: 'p1', pending: 1 } });
     const restarted = new Notifier(ctx);
-    restarted.pendingSet('p2', []);
-    restarted.pendingSet('p1', []);
+    restarted.pendingSet('p2', items());
+    restarted.pendingSet('p1', items());
     expect(sent.slice(3)).toEqual([notify('s1', 'settled', 0)]);
     expect(file()).toEqual({});
   });
 
   it('owes a withdrawn session’s `settled 0` while no connection is up, across a restart, and pays it at the welcome though the session is unlisted (round 2 finding 1)', () => {
     const { notifier, sent, listed, ctx, file, up } = setup();
-    notifier.pendingSet('p1', [{ session: 's1' }, { session: 's2' }]);
+    notifier.pendingSet('p1', items('s1', 's2'));
     up(false);
     listed.delete('s1');
     listed.delete('s2');
@@ -428,7 +534,7 @@ describe('notify', () => {
 
     // Owed across a restart: kept on disk until it is sent.
     listed.add('s2');
-    notifier.pendingSet('p1', [{ session: 's2' }]);
+    notifier.pendingSet('p1', items('s2'));
     expect(sent.slice(4)).toEqual([notify('s2', 'waiting', 1)]);
     listed.delete('s2');
     up(false);
@@ -442,7 +548,7 @@ describe('notify', () => {
 
   it('keeps an owed `settled 0` through a `forget` that comes first after a restart (round 3 finding 1)', () => {
     const { notifier, sent, listed, ctx, file, up } = setup();
-    notifier.pendingSet('p1', [{ session: 's1' }]);
+    notifier.pendingSet('p1', items('s1'));
     up(false);
     listed.delete('s1');
     notifier.withdrawn('s1', 'p1');
@@ -456,7 +562,7 @@ describe('notify', () => {
 
   it('pays an owed `settled 0` at the welcome though the session is listed again, before any count is restated (round 3 finding 2)', () => {
     const { notifier, sent, listed, ctx, file, up } = setup();
-    notifier.pendingSet('p1', [{ session: 's1' }]);
+    notifier.pendingSet('p1', items('s1'));
     up(false);
     listed.delete('s1');
     notifier.withdrawn('s1', 'p1');
@@ -464,47 +570,47 @@ describe('notify', () => {
     listed.add('s1');
     up(true);
     restarted.welcome();
-    restarted.pendingSet('p1', []);
+    restarted.pendingSet('p1', items());
     expect(sent).toEqual([notify('s1', 'waiting', 1), notify('s1', 'settled', 0)]);
     expect(file()).toEqual({});
     // A count restated later is told after the zero, as usual.
-    restarted.pendingSet('p1', [{ session: 's1' }]);
+    restarted.pendingSet('p1', items('s1'));
     expect(sent.slice(2)).toEqual([notify('s1', 'waiting', 1)]);
   });
 
   it('carries the count it last told in a `wrote` after a restart, before sminos restates the set, and keeps what it told (round 2 finding 2)', () => {
     const { notifier, sent, ctx, file } = setup();
     const host = (seq: number) => ({ kind: 'host', session: 's1', project: 'p1', sub: null, body: { event: { kind: 'message', writer: 'mini/host', seq } } });
-    notifier.pendingSet('p1', [{ session: 's1' }]);
+    notifier.pendingSet('p1', items('s1'));
     const restarted = new Notifier(ctx);
     restarted.hostMessage(host(1));
-    restarted.pendingSet('p1', [{ session: 's1' }]);
+    restarted.pendingSet('p1', items('s1'));
     expect(sent).toEqual([notify('s1', 'waiting', 1), notify('s1', 'wrote', 1)]);
     // A `wrote` with a count the hub wasn't told is bookkept like any other notify: the set restating it tells nothing.
     restarted.pending('s1', 2);
     restarted.hostMessage(host(2));
-    restarted.pendingSet('p1', [{ session: 's1' }]);
+    restarted.pendingSet('p1', items('s1'));
     expect(sent.slice(2)).toEqual([notify('s1', 'waiting', 2), notify('s1', 'wrote', 2), notify('s1', 'settled', 1)]);
     expect(file()).toEqual({ s1: { project: 'p1', pending: 1 } });
   });
 
   it('settles a withdrawn session’s count at the hub, then tells it nothing more', () => {
     const { notifier, sent, listed } = setup();
-    notifier.pendingSet('p1', [{ session: 's1' }, { session: 's1' }]);
+    notifier.pendingSet('p1', items('s1', 's1'));
     // By the time it is withdrawn the session no longer qualifies (it left, or is private): its project comes from its listing.
     listed.delete('s1');
     notifier.withdrawn('s1', 'p1');
     notifier.withdrawn('s1', 'p1');
-    notifier.pendingSet('p1', [{ session: 's1' }]);
+    notifier.pendingSet('p1', items('s1'));
     expect(sent).toEqual([notify('s1', 'waiting', 2), notify('s1', 'settled', 0)]);
   });
 
   it('tells at the welcome what changed while no connection was up, as one change', () => {
     const { notifier, sent, up } = setup();
-    notifier.pendingSet('p1', [{ session: 's1' }]);
+    notifier.pendingSet('p1', items('s1'));
     up(false);
-    notifier.pendingSet('p1', [{ session: 's1' }, { session: 's1' }, { session: 's1' }]);
-    notifier.pendingSet('p1', [{ session: 's1' }, { session: 's1' }]);
+    notifier.pendingSet('p1', items('s1', 's1', 's1'));
+    notifier.pendingSet('p1', items('s1', 's1'));
     up(true);
     notifier.welcome();
     notifier.welcome();

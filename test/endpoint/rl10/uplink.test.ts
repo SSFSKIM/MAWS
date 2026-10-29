@@ -95,7 +95,7 @@ async function scene(limits: SendLimits) {
       writable: () => link.writable(),
     },
     listings: { report: async () => {}, gone: async () => {}, refresh: async () => {}, listedSessions: () => [] },
-    notifier: { pendingSet: () => {}, hostMessage: () => {}, forget: () => {} },
+    notifier: { pendingSet: () => {}, requestMessage: () => {}, hostMessage: () => {}, forget: () => {} },
     machineOwners: async () => [],
     dispatch: () => Promise.reject(new Error('none')),
     now: Date.now,

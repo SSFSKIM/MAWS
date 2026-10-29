@@ -253,6 +253,18 @@ const scenes = async (step: { scene: string } & Record<string, unknown>, binding
       expect(told.length).toBe(step.count);
       return;
     }
+    case 'notify': {
+      // The last notify the hub was told of the session is this one, and notified.json keeps a count above 0 alone.
+      const session = step.session as string;
+      await until(() => {
+        const last = toHub.findLast((f) => f.t === 'notify' && f.session === session);
+        return last !== undefined && last.kind === step.kind && last.pending === step.pending;
+      }, `a notify ${String(step.kind)} ${String(step.pending)} for ${session}`);
+      const path = join(services.machine.stateDir, 'notified.json');
+      const notified = fs.existsSync(path) ? (JSON.parse(fs.readFileSync(path, 'utf8')) as Record<string, { pending: number }>) : {};
+      expect(notified[session]?.pending).toBe((step.pending as number) > 0 ? step.pending : undefined);
+      return;
+    }
     case 'heard':
       await until(() => heard.some((m) => m.kind === step.kind), `a ${String(step.kind)} message`);
       return;
