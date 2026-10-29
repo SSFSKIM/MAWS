@@ -2,7 +2,7 @@
 // the MAC under the code's pairing secret; the enrolling member's device fetches them and checks the MAC, and the hub
 // shows the machine listed once a state lists that key, apart from its hub confirmation. An active machine re-enrolls
 // in place under a token that names it.
-import { base64urlEncode, generateSigningKey, keyId, verifyEnrollmentMac, type SignedOrgState, type SigningKey } from 'org-protocol';
+import { base64urlEncode, generateSigningKey, keyId, verifyEnrollmentMac, type OrgState, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { enrollV2, machineFetch, type V2Machine } from '../fake-machine/org';
 import { encodeEnrollmentCodeV2, type EnrollmentKey, type MachineView } from '../src/protocol/identity';
@@ -123,6 +123,73 @@ describe('a v2 machine', () => {
     expect((await hub.fetchAs(ADMIN, '/api/org/state', { body: listed })).status).toBe(201);
     head = listed;
     expect(await machineNamed('mini')).toMatchObject({ state: 'active', key: { listed: true } });
+  });
+});
+
+// One holder per key (RL5): a key that the state listing the machine would hold twice, or that no state makes current
+// again, is refused at its post rather than in the listing successor. On the head the case above left.
+describe('a key another holder has', () => {
+  async function accept(edit: (s: OrgState) => void): Promise<void> {
+    const signed = await signedBy(await next(head, edit), a1);
+    expect((await hub.fetchAs(ADMIN, '/api/org/state', { body: signed })).status).toBe(201);
+    head = signed;
+  }
+  /** A machine enrolled under `name` with a fresh key and ref, and listed with them. */
+  async function listed(name: string): Promise<V2Machine> {
+    const machine = await enrollV2((await code()).text, name);
+    await accept((s) => {
+      s.machines.push({ name, ref: machine.ref, pub: machine.key.pub, owners: [s.members[0].id] });
+      s.machineNames.push({ name, ref: machine.ref });
+    });
+    return machine;
+  }
+  /** Takes `machine` out of the state, its key retired or revoked. */
+  async function unlisted(machine: V2Machine, how: 'retired' | 'revoked'): Promise<void> {
+    const kid = await keyId(machine.key.pub);
+    await accept((s) => {
+      s.machines = s.machines.filter((m) => m.ref !== machine.ref);
+      if (how === 'retired') s.retired.push({ keyId: kid, pub: machine.key.pub, notAfter: new Date().toISOString(), holder: { machine: machine.ref } });
+      else s.revoked.push({ keyId: kid, holder: { machine: machine.ref } });
+    });
+  }
+  let fresh = 0;
+  /** A machine under a fresh name and ref (or `keep.ref`) posting `key`. */
+  const posting = async (key: SigningKey, keep: { name?: string; ref?: string; code?: string } = {}) =>
+    enrollV2((await code(keep.code)).text, keep.name ?? `kh-fresh-${++fresh}`, { key, ...(keep.ref === undefined ? {} : { ref: keep.ref }) });
+  const keyHeld = (holder: string) => new RegExp(`409 \\{"error":"key-held","message":"this key is ${holder}`);
+
+  it("is refused when the org state holds it: another machine's, a device's, the recovery key", async () => {
+    const other = await listed('kh-listed');
+    await expect(posting(other.key)).rejects.toThrow(keyHeld(`machine kh-listed's in the org state \\(ref ${other.ref}\\)`));
+    await expect(posting(a1.channel)).rejects.toThrow(keyHeld('the channel key of device a1 in the org state'));
+    await expect(posting(a1.stepUp!)).rejects.toThrow(keyHeld('the step-up key of device a1 in the org state'));
+    await expect(posting(recovery)).rejects.toThrow(keyHeld("the org state's recovery key"));
+  });
+
+  it('is refused when another enrollment posted it under another ref, though nothing lists it', async () => {
+    const posted = await enrollV2((await code()).text, 'kh-unlisted');
+    await expect(posting(posted.key)).rejects.toThrow(keyHeld("another enrollment's, posted under another ref"));
+  });
+
+  it('is refused when the org state retired or revoked it, under its own machine and ref too', async () => {
+    const retired = await listed('kh-retired');
+    await unlisted(retired, 'retired');
+    await expect(posting(retired.key)).rejects.toThrow(keyHeld('retired in the org state'));
+    await expect(posting(retired.key, { code: 'kh-retired', name: 'kh-retired', ref: retired.ref })).rejects.toThrow(keyHeld('retired in the org state'));
+    const revoked = await listed('kh-revoked');
+    await unlisted(revoked, 'revoked');
+    await expect(posting(revoked.key)).rejects.toThrow(keyHeld('revoked in the org state'));
+    await expect(posting(revoked.key, { code: 'kh-revoked', name: 'kh-revoked', ref: revoked.ref })).rejects.toThrow(keyHeld('revoked in the org state'));
+  });
+
+  it('is taken from the machine of its own ref: renamed in the state, it enrolls under the new name with its key and ref', async () => {
+    const machine = await listed('kh-old-name');
+    await accept((s) => {
+      s.machines.find((m) => m.ref === machine.ref)!.name = 'kh-new-name';
+      s.machineNames.push({ name: 'kh-new-name', ref: machine.ref });
+    });
+    await posting(machine.key, { name: 'kh-new-name', ref: machine.ref });
+    expect(await machineNamed('kh-new-name')).toMatchObject({ state: 'active', key: { ref: machine.ref, pub: machine.key.pub, listed: true } });
   });
 });
 

@@ -13,6 +13,7 @@
 import {
   canonicalize,
   contestedRefs,
+  heldKeys,
   isCertRetirement,
   isEndpointRecord,
   isListing,
@@ -105,15 +106,24 @@ export class OrgRecords {
 
   // ---- A v2 machine's key (RL §5.3) ----------------------------------------------------------------------------
 
-  /** Keeps the machine's `{pub, ref, mac}` for its enrollment: `201` kept, `200` the same again, `409 key-posted` another. */
-  keepMachineKey(machine: { name: string; enrollment: string }, body: unknown): Result<{ key: EnrollmentKey; kept: boolean }> {
+  /**
+   * Keeps the machine's `{pub, ref, mac}` for its enrollment: `201` kept, `200` the same again, `409 key-posted` another,
+   * `409 ref-taken` a ref that other names hold, `409 key-held` a key another holder has (`keyHolder`). `held` re-checks
+   * the poster's standing in the synchronous step that judges and keeps the key, after the await for its key id.
+   */
+  async keepMachineKey(machine: { name: string; enrollment: string }, body: unknown, held: Authority = always): Promise<Result<{ key: EnrollmentKey; kept: boolean }>> {
     const b = (typeof body === 'object' && body !== null && !Array.isArray(body) ? body : null) as Record<string, unknown> | null;
     if (!b || !Object.keys(b).every((k) => KEY_FIELDS.includes(k)) || !isPublicKey(b.pub) || !isMachineRef(b.ref) || !isBase64urlOf(b.mac, 32)) {
       return fail(400, 'bad-shape', 'the body is {pub: the machine key’s uncompressed P-256 point, ref: its MachineRef, mac: 32 bytes}, base64url');
     }
-    const held = this.machineKey(machine.enrollment);
-    if (held) {
-      if (held.pub === b.pub && held.ref === b.ref && held.mac === b.mac) return ok({ key: held, kept: false });
+    const pub = b.pub as string;
+    const kid = await keyId(pub);
+    // From here on synchronous, so what is judged is what is kept.
+    const standing = held();
+    if (!standing.ok) return standing;
+    const kept = this.machineKey(machine.enrollment);
+    if (kept) {
+      if (kept.pub === pub && kept.ref === b.ref && kept.mac === b.mac) return ok({ key: kept, kept: false });
       return fail(409, 'key-posted', 'this enrollment holds another key; enroll again with a new code to post another');
     }
     // A ref the state or a certificate gives other names is theirs: a key posted with it would claim their relay (O11 M6).
@@ -121,9 +131,40 @@ export class OrgRecords {
     if (names.length > 0 && !names.includes(machineNameKey(machine.name))) {
       return fail(409, 'ref-taken', `the ref ${b.ref} is another machine's in the org state or a certificate: mint a fresh ref`);
     }
-    const key: EnrollmentKey = { enrollment: machine.enrollment, machine: machine.name, pub: b.pub as string, ref: b.ref, mac: b.mac as string, posted: iso() };
+    const holder = this.keyHolder(pub, kid, b.ref);
+    if (holder !== null) return fail(409, 'key-held', `this key is ${holder}: mint a fresh key for this machine`);
+    const key: EnrollmentKey = { enrollment: machine.enrollment, machine: machine.name, pub, ref: b.ref, mac: b.mac as string, posted: iso() };
     this.sql.exec('INSERT INTO machine_keys (enrollment, machine, pub, ref, mac, posted) VALUES (?, ?, ?, ?, ?, ?)', key.enrollment, key.machine, key.pub, key.ref, key.mac, key.posted);
     return ok({ key, kept: true });
+  }
+
+  /**
+   * Who other than the machine of `ref` holds `pub` (key id `kid`), in words, or null. One holder per key (RL5), so the
+   * hub refuses at the post a key that would make the state hold one twice, rather than the listing successor later:
+   *   - the head holding it as current under any other holder (a machine of another ref, a device, a delegation, the
+   *     recovery key): listing it would be `key-held-twice`;
+   *   - the head holding it retired or revoked, whatever the ref: neither key is ever current again (a `retired` entry
+   *     stays or moves to `revoked`; `retired-key-held`, `revives-revoked`), since a retired key still speaks for its
+   *     ref's history up to its `notAfter`, and a revoked one speaks for nothing;
+   *   - another enrollment's posted key under another ref: the two machines could never both be listed.
+   * The machine of `ref` is no other holder: a rename keeps the key and the ref, and the machine enrolls again under its
+   * new name with both (O11 M6). A certificate's key is not counted: no verifier refuses a state entry sharing one.
+   */
+  private keyHolder(pub: string, kid: string, ref: string): string | null {
+    const state = this.chain.head()?.state;
+    if (state) {
+      if (state.root.recoveryPub === pub) return "the org state's recovery key";
+      for (const { pub: p, holder: h } of heldKeys(state)) {
+        if (p !== pub || ('machine' in h && h.machine === ref)) continue;
+        if ('machine' in h) return `machine ${state.machines.find((m) => m.ref === h.machine)?.name ?? h.machine}'s in the org state (ref ${h.machine})`;
+        if ('delegation' in h) return `delegation ${h.delegation}'s in the org state`;
+        return `the ${h.key} key of device ${h.device} in the org state`;
+      }
+      if (state.retired.some((r) => r.pub === pub)) return 'retired in the org state, and a retired key is never current again';
+      if (state.revoked.some((r) => r.keyId === kid)) return 'revoked in the org state';
+    }
+    const other = this.sql.exec('SELECT 1 FROM machine_keys WHERE pub = ? AND ref != ? LIMIT 1', pub, ref).toArray();
+    return other.length > 0 ? "another enrollment's, posted under another ref" : null;
   }
 
   machineKey(enrollment: string): EnrollmentKey | null {

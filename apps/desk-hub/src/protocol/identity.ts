@@ -504,8 +504,11 @@ export function decodeEnrollmentCodeV2(text: string): EnrollmentCodeV2 {
 /**
  * `POST /machine/key` (the machine, once redeemed): its public key, its ref (RL §2.3, minted at its first run) and the
  * MAC over `{name, machinePub: pub, ref, tokenId}` under the code's `k`, where `name` is the machine's enrolled name and
- * `tokenId` its enrollment's id (`Redeemed.enrollment`). One key per enrollment: posting the same again answers as
- * before, another is refused `409 key-posted`. `GET /api/enrollments/<id>/key` (the member who made the enrollment)
+ * `tokenId` its enrollment's id (`Redeemed.enrollment`). One key per enrollment: `201` kept, posting the same again
+ * answers `200`, another is refused `409 key-posted`. A ref that the org state or a certificate gives another name is
+ * refused `409 ref-taken`, and a key another holder has `409 key-held`: the org state holding it under another holder
+ * than this ref's machine, or retired or revoked, or another enrollment having posted it under another ref (one holder
+ * per key, RL5; a rename keeps the key and ref). `GET /api/enrollments/<id>/key` (the member who made the enrollment)
  * answers it, `404 no-key` until it is posted; the hub never checks the MAC, the member's device does, before it signs
  * the machine into the org state. The hub shows the machine `listed` once the head lists that ref with that key
  * (`MachineView.key`), apart from its hub confirmation (`state`), as RL §5.3 keeps them.

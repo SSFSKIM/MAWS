@@ -271,8 +271,11 @@ async function judgeRetired(state: OrgState, report: Report): Promise<void> {
 type Holder = RevokedKey['holder'];
 const same = (a: unknown, b: unknown) => canonicalize(a) === canonicalize(b);
 
-/** The keys a state holds as current, each with its holder: devices' channel and step-up keys, machines', delegations'. */
-function heldKeys(state: OrgState): Array<{ pub: B64; holder: Holder }> {
+/**
+ * The keys a state holds as current, each with its holder: devices' channel and step-up keys, machines', delegations'.
+ * The recovery key, `root.recoveryPub`, is held beside them.
+ */
+export function heldKeys(state: OrgState): Array<{ pub: B64; holder: Holder }> {
   return [
     ...state.members.flatMap((m) =>
       m.devices.flatMap((d) => [
