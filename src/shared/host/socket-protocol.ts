@@ -187,14 +187,15 @@ export const ATTACHMENT_CAPABILITY = 'host.attachment';
 export const MACHINE_SPINE_CAPABILITY = 'machine.spine';
 // What each peer lists of itself in its hello or welcome: only what it implements. The wire's capability list
 // (WIRE_CAPABILITIES, the manifest's) is the union of every name a peer of this major may list, and no peer reads it as
-// its own. At O3-D M1 every list is the one it was: the engine host's welcome and `mawsd`'s hello to it gain
-// `host.attachment` at M3, when the engine host serves it; main's hellos gain `machine.spine` at M5, when main stops
-// composing the spine on the daemon shape. `mawsd`'s relays welcome with the upstream's list and `daemon`'s added.
+// its own. At O3-D M1 every list was the one it was; from M3 the engine host's welcome and `mawsd`'s hello to it list
+// `host.attachment` (the engine host serves it; `mawsd` declares it only with its permanent-client option on, which
+// drops the name from this list otherwise, src/mawsd/daemon.ts); main's hellos gain `machine.spine` at M5, when main
+// stops composing the spine on the daemon shape. `mawsd`'s relays welcome with the upstream's list and `daemon`'s added.
 export const PEER_CAPABILITIES = {
-  engineHost: [PTY_FRAMES_CAPABILITY], // the engine host's welcome
+  engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY], // the engine host's welcome (P5 O3-D M3: it serves host.attachment)
   ptyHost: [PTY_FRAMES_CAPABILITY], // the pty host's welcome
   app: [PTY_FRAMES_CAPABILITY], // main's hellos, to `mawsd`'s sockets and to a direct engine host
-  daemonToEngineHost: [PTY_FRAMES_CAPABILITY], // `mawsd`'s hello to the engine host
+  daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY], // `mawsd`'s hello to the engine host (P5 O3-D M3: under its permanent-client option)
   daemonToPtyHost: [PTY_FRAMES_CAPABILITY], // `mawsd`'s hello to the pty host
   daemon: [PTY_FRAMES_CAPABILITY], // `mawsd`'s welcome on machine.sock (and the stand-in's, until O3-D M6), and what its relays add
   link: [PTY_FRAMES_CAPABILITY], // O6's link's hello to another profile's machine.sock

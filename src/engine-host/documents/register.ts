@@ -11,7 +11,7 @@
 // names is a `HostCommandError` whose `issues` is an `ArtifactRefusal` (schema/artifacts.ts); a store that failed to
 // open answers `unavailable`; a refusal waits for the batch its validation read the same way (`writeCommitted`).
 import { join } from 'node:path';
-import { HostCommandError, type HostClientHooks, type HostEmit, type HostOn } from '@shared/host/runtime';
+import { HostCommandError, type AppPresence, type HostClientHooks, type HostEmit, type HostOn } from '@shared/host/runtime';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { isDocKind, type Space } from '@shared/artifacts/entity';
@@ -68,8 +68,9 @@ function typed(error: unknown): unknown {
   return error;
 }
 
-// E3: `onClientGone` releases the holds main's connection took (its absence: a test's surface, holds released at close)
-export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostClientHooks, 'onDocPort'> & Partial<Pick<HostClientHooks, 'onClientGone'>>, { documents, env, datasetRefresh }: ArtifactsSurfaceDeps): { close(): void } {
+// E3: the app's going releases the holds main took (its absence: a test's surface, holds released at close); P5 O3-D M3:
+// the app's presence (@shared/host/runtime's AppPresence), since `mawsd`'s connection outlives every app
+export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostClientHooks, 'onDocPort'> & { presence?: Pick<AppPresence, 'onGone'> }, { documents, env, datasetRefresh }: ArtifactsSurfaceDeps): { close(): void } {
   const e2e = env.MAWS_E2E === '1';
   const loopDelay = e2e ? new LoopDelaySampler() : null; // P3-F L158: its own timer, started at the first read
 
@@ -262,9 +263,9 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
       return { revision, bytes: state };
     });
   });
-  // E3 start: main's holds over snapshot bytes (src/engine-host/dashboards/holds.ts), its connection's alone
+  // E3 start: main's holds over snapshot bytes (src/engine-host/dashboards/holds.ts), the attached app's alone
   const holds = new ConnectionHolds();
-  const stopGone = client.onClientGone?.(() => holds.releaseAll());
+  const stopGone = client.presence?.onGone(() => holds.releaseAll());
   serve('artifacts.captureDatasetState', async ({ artifactId, versionId }) => {
     const store = storeOf();
     if (versionId === undefined) await prepared(store, artifactId); // the live state is the kind's model, as `artifacts.state`'s

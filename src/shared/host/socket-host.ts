@@ -21,7 +21,7 @@ import { dirname, join } from 'node:path';
 import { format } from 'node:util';
 import { buildIdOf, isAlive, procStartOf, readLock, START_EXIT_HELD, takeLock, type LockNames } from '../../engine-host/supervisor-files';
 import { wireFingerprint } from '../ipc/wire-fingerprint';
-import { WIRE_MINOR } from '../ipc/wire';
+import { WIRE_MINOR, type WirePeer } from '../ipc/wire';
 import { clearSocketPath, makePrivateDirectory } from './private-listen';
 import { createHostRuntime, type HostRegister } from './runtime';
 import { SOCKET_PROTOCOL } from './socket-protocol';
@@ -64,7 +64,7 @@ export interface SocketHostOptions {
   shutdown(): Promise<unknown>; // exit order step (2)
   clean?(owner: LockOwner): void; // step (3), a clean exit's, before the files go
   exitWhenIdle(): void; // a client's `exit {when: 'idle'}`
-  onClient?(connected: boolean): void; // a client was welcomed, or the client left
+  onClient?(connected: boolean, peer?: WirePeer): void; // a client was welcomed (P5 O3-D M3: with what its hello said of it), or the client left
   listening?(host: SocketHost): void; // serving, synchronously after the listen and before anything can be asked
   log(line: string): void;
 }

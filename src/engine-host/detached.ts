@@ -14,7 +14,9 @@
 //
 // Task 2.5: after listen the orphan sweep reads the predecessor's ledger (live.json) and, when that supervisor is dead,
 // stops the engines it left; once the sweep has ended the engine host's table records this supervisor's own ledger
-// (`life.orphansSwept`). A welcomed client drops the cached login-shell capture, so the next launch captures again.
+// (`life.orphansSwept`). A welcomed client drops the cached login-shell capture, so the next launch captures again;
+// P5 O3-D M3: a client that declared `host.attachment` (`mawsd`, whose connection outlives every app) drops it at its
+// {attached: true} instead (attachment.ts), since its welcome is no owner coming back.
 //
 // P5 O2 M3 (RL §5.11): the directory and the socket's directory are created 0700 when missing and checked before the
 // lock, the token and the listen (@shared/host/private-path): a symlink, another owner or a mode wider than 0700 stops
@@ -28,7 +30,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { invalidateShellEnvironment } from '@shared/host/shell-env';
 import { runSocketHost, START_EXIT_ABORTED, startSocketHost, type HostProcess } from '@shared/host/socket-host'; // P5 O2 M4
-import { PEER_CAPABILITIES, SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import type { HostRegister } from '@shared/host/runtime';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { clearLive, signalOrphan, sweepOrphans, writeLive, type LiveRow } from './live-ledger';
@@ -90,13 +92,14 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
       modulePath: opts.modulePath,
       register,
       badToken: 'refuse', // E10's `refuse token` (P5 Decision Log 29)
-      capabilities: PEER_CAPABILITIES.engineHost, // P5 O3-D: `host.attachment` joins at M3, when the host serves it
+      capabilities: PEER_CAPABILITIES.engineHost, // P5 O3-D: with `host.attachment`, which it serves from M3
       counts: () => opts.counts(),
       shutdown: () => opts.shutdown(EXIT_GRACE_MS), // (2) every live row stopped (grace 3 s) and the plugin runner with it
       clean: (owner) => clearLive(dir, owner), // the orphan ledger, if this process still owns it
       exitWhenIdle: () => opts.life.exitWhenIdle(),
-      onClient: (connected) => {
-        if (connected) invalidateShellEnvironment(); // the owner is back: the next launch captures the shell again
+      onClient: (connected, peer) => {
+        // the owner is back: the next launch captures the shell again (a declaring client says so by host.attachment)
+        if (connected && !peer?.capabilities.includes(ATTACHMENT_CAPABILITY)) invalidateShellEnvironment();
         opts.life.clientChanged(connected);
       },
       // the predecessor's ledger is read here, synchronously, before anything can launch; its orphans are stopped in the

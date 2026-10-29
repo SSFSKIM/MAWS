@@ -22,7 +22,7 @@
 //   commit or rollback, the registry owns its end. A reply, withdrawal, deadline or main's going heard meanwhile is
 //   held: the commit then answers its durable record, a rollback the end first heard.
 import { randomUUID } from 'node:crypto';
-import type { HostClientHooks, HostEmit } from '@shared/host/runtime';
+import type { AppPresence, HostEmit } from '@shared/host/runtime';
 import type { Actor } from '@shared/artifacts/actor';
 import { CONNECTOR_OPERATION_DEADLINE_MS } from '@shared/artifacts/connectors';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -200,10 +200,11 @@ export class DatasetRefreshRequests {
   }
 }
 
-/** The host's registry as its entry wires it: announced on the host's event, asked only with an app connected, ended
- * when main's client goes. One per host, given to the artifacts surface, the connector leg and the engine IPC. */
-export function hostDatasetRefresh(emit: HostEmit, client: Pick<HostClientHooks, 'hasClient' | 'onClientGone'>): DatasetRefreshRequests {
-  const requests = new DatasetRefreshRequests({ announce: (requestId) => void emit('maws.artifact.datasetRefresh', { requestId }), hasClient: client.hasClient });
-  client.onClientGone(() => requests.clientGone());
+/** The host's registry as its entry wires it: announced on the host's event, asked only with an app attached, ended
+ * when the app goes (P5 O3-D M3: the app's presence, Interfaces §D; for a client that does not signal it, its connection,
+ * as E10 had it). One per host, given to the artifacts surface, the connector leg and the engine IPC. */
+export function hostDatasetRefresh(emit: HostEmit, presence: AppPresence): DatasetRefreshRequests {
+  const requests = new DatasetRefreshRequests({ announce: (requestId) => void emit('maws.artifact.datasetRefresh', { requestId }), hasClient: presence.attached });
+  presence.onGone(() => requests.clientGone());
   return requests;
 }

@@ -45,7 +45,7 @@ import { PrivatePathError } from '@shared/host/private-path';
 import { captureShellEnvironment } from '@shared/host/shell-env';
 import { writeToken } from '@shared/host/socket-host';
 import { CLOSE_GRACE_MS } from '@shared/host/socket-port';
-import { PEER_CAPABILITIES, SOCKET_PROTOCOL, type DocumentsOpen } from '@shared/host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL, type DocumentsOpen } from '@shared/host/socket-protocol';
 import { serveSocketClients, type SocketClients, type SupervisorIdentity } from '@shared/host/socket-server';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ClientRef } from '@shared/ipc/client';
@@ -189,7 +189,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const packaged = /\.asar[/\\]/.test(options.modules.self);
   const execPath = options.execPath ?? process.execPath;
   const identity: SupervisorIdentity = { protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, buildId, capabilities: PEER_CAPABILITIES.daemon, wire: wireFingerprint(), pid: process.pid, startedAt }; // P5 O3-D: its own list
-  const engineIdentity = appIdentity(options.modules.engineHost, env, 'detached', PEER_CAPABILITIES.daemonToEngineHost); // the e2e seams stand in, as for main
+  // P5 O3-D M3: `host.attachment` is declared only by a client that sends it, which mawsd's permanent client does
+  const engineHello = PEER_CAPABILITIES.daemonToEngineHost.filter((name) => name !== ATTACHMENT_CAPABILITY);
+  const engineIdentity = appIdentity(options.modules.engineHost, env, 'detached', engineHello); // the e2e seams stand in, as for main
   const endpoint = options.endpoint === undefined ? loadEndpointModule(buildId) : options.endpoint;
   // The machine's enrollment, the endpoint's in process (D16, D38): machine.identity's project and the spine's org projects
   const enrollment = () => machineEnrollment(() => endpoint?.enrollment() ?? null);

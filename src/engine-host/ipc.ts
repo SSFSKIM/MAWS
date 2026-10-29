@@ -175,7 +175,8 @@ export interface EngineIpcDeps {
   heldElsewhere?: (appSessionId: AppSessionId, since: string | null) => boolean;
   pluginsTimers?: Timers; // E8: the plugin runner's timers (its settle, its CLI ceiling); default the real ones
   onConnect?: (hook: () => void) => void; // E10: the runtime's connect hooks, where the connect burst registers
-  hasClient?: () => boolean; // E10: the runtime's, whether a client is connected and ready
+  hasClient?: () => boolean; // E10: the runtime's, whether a client is connected and ready (the stream's refused batch)
+  appAttached?: () => boolean; // P5 O3-D M3: the app's presence (the runtime's AppPresence), the bridges' gate; absent, always
   observedStore?: ObservedFactsStore; // P2-A (X17): default the file beside each state file under userData
   afterShutdown?: () => void; // P3-A: runs at the end of engine.shutdown's body (closes the artifact store)
   // P3-HD M2: started with the sessions' stop and awaited with it, so route D's owned MCP processes are gone (within their
@@ -285,7 +286,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     spawn: deps.spawn ?? ((plan) => spawnEngine(plan, { maxLineChars: MAX_LINE_CHARS })),
     appVersion: deps.appVersion ?? 'unknown',
     log,
-    hasClient: deps.hasClient, // E10: each session's bridges fail fast with no client
+    appAttached: deps.appAttached, // E10: each session's bridges fail fast with no app (P5 O3-D M3: its presence)
     observedFacts: observed, // P2-A
     artifacts: deps.artifacts, // P3-A (M6)
     datasetRefresh: deps.datasetRefresh, // E3

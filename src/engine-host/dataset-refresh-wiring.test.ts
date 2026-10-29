@@ -26,7 +26,7 @@ let handlers: Map<string, (input: unknown) => Promise<unknown>>;
 let emitted: { name: EventName; payload: unknown }[];
 let requests: DatasetRefreshRequests;
 let closers: { close(): void }[];
-let gone: (() => void)[]; // main's client going
+let gone: (() => void)[]; // the app going (P5 O3-D M3: its presence)
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'maws-refresh-wiring-'));
@@ -41,11 +41,11 @@ beforeEach(() => {
     return true;
   };
   gone = [];
-  const client = { onDocPort: () => {}, hasClient: () => true, onClientGone: (hook: () => void) => (gone.push(hook), () => {}) };
-  requests = hostDatasetRefresh(emit, client);
+  const client = { onDocPort: () => {}, presence: { attached: () => true, onGone: (hook: () => void) => (gone.push(hook), () => {}) } };
+  requests = hostDatasetRefresh(emit, client.presence);
   closers = [registerArtifacts(on, emit, client, { documents, env: {}, datasetRefresh: requests })];
   const ipc = registerEngineIpc(on, emit, { userData: dir, replayEnabled: false, artifacts: () => documents.store, datasetRefresh: requests });
-  closers.push(registerConnectors(on, emit, client as never, { sessions: ipc.table, store: documents.store, datasetRefresh: requests }));
+  closers.push(registerConnectors(on, emit, client.presence, { sessions: ipc.table, store: documents.store, datasetRefresh: requests }));
 });
 afterEach(() => {
   for (const closer of closers) closer.close();
@@ -95,7 +95,7 @@ describe('an agent’s dataset refresh through the host’s handlers', () => {
     expect(await call('artifacts.datasetRefreshRequest', { requestId })).toEqual({ request: null });
   });
 
-  it('ends a pending request when main’s client goes', async () => {
+  it('ends a pending request when the app goes', async () => {
     const asked = requests.ask({ artifactId: '00000000-0000-4000-8000-000000000003', datasetId: 'live', baseRevision: 0, appSessionId: 'app-1' as AppSessionId, opId: null, server: 'fixture', tool: 'rows', args: {} }, new AbortController().signal);
     for (const hook of gone) hook();
     expect(await asked).toEqual({ kind: 'noClient' });
