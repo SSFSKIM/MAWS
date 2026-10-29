@@ -115,7 +115,7 @@ describe('the spine and the checkouts composed under plain Node', () => {
   };
 
   // Both roots as main composes them, each on its bus (one bus for both unless a test tells them apart)
-  const compose = (data: SpineData, host: FakeSpineHost, bus: FakeBus, { checkouts = true, checkoutsBus = bus, engineEnv = Promise.resolve({ HOME: join(dir.path, 'home'), CLAUDE_CONFIG_DIR: join(dir.path, 'claude') }) } = {}) => {
+  const compose = (data: SpineData, host: FakeSpineHost, bus: FakeBus, { checkouts = true, checkoutsBus = bus, engineEnv = Promise.resolve<Record<string, string>>({ HOME: join(dir.path, 'home'), CLAUDE_CONFIG_DIR: join(dir.path, 'claude') }) } = {}) => {
     const spine = startSpine({
       profile,
       machine: MACHINE,
