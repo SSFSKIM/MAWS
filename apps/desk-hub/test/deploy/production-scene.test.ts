@@ -4,8 +4,11 @@
 // The script is sourced (its verbs dispatch only when it is run), and its selection functions are fed tables as the
 // VM's /proc would give them.
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { machineProjectId } from '../../src/protocol/identity';
 
 const script = join(import.meta.dirname, '../../deploy/vm/production.sh');
 const X = '/Users/new/.local/share/o10-m11-lane-a';
@@ -77,5 +80,60 @@ describe('after a local spawn', () => {
 
   it('fails when no new claude process appeared at all', () => {
     expect(call('seat_verdict', [OURS], '')).toEqual({ lines: [], status: 1 });
+  });
+});
+
+describe('the lane A session in the machine project', () => {
+  it('is in the project the run names only when that is this machine’s own, as sminos derives it', () => {
+    expect(call('machine_project', ['ssfskim', 'dc-acceptance-7f80'])).toEqual({ lines: [machineProjectId('ssfskim', 'dc-acceptance-7f80')], status: 0 });
+    expect(call('machine_project', ['ssfskim', 'DC-Acceptance-7F80']).lines).toEqual([machineProjectId('ssfskim', 'dc-acceptance-7f80')]);
+  });
+
+  it('is found in the listing by its own session id, never by a row that merely mentions it', () => {
+    const sid = '09208ca6-d9ca-4cda-a917-7fec865e43fa';
+    const rows = [
+      { alias: 'owners-seat', session: '11111111-2222-4333-8444-555555555555', seat: { current: sid }, former: [sid] },
+      { alias: 'o10-m11-lane-a', session: sid, local: true },
+    ];
+    expect(call('member_alias', [sid], JSON.stringify(rows))).toEqual({ lines: ['o10-m11-lane-a'], status: 0 });
+    expect(call('member_alias', [sid], JSON.stringify(rows.slice(0, 1)))).toEqual({ lines: [], status: 1 });
+    expect(call('member_alias', [sid], '')).toEqual({ lines: [], status: 1 });
+  });
+});
+
+// sminos reads the engine's session records from $HOME/.claude/sessions alone, whatever CLAUDE_CONFIG_DIR says, so a
+// lane A engine on the scratch config dir is seen only through a link there to its own record (attempt 2, 2026-10-29).
+describe('the engine records the owner’s sminos reads', () => {
+  function dirs(): { records: string; sessions: string; done: () => void } {
+    const root = mkdtempSync(join(tmpdir(), 'o10-records-'));
+    const records = join(root, 'records');
+    const sessions = join(root, 'sessions');
+    spawnSync('mkdir', ['-p', records, sessions]);
+    return { records, sessions, done: () => rmSync(root, { recursive: true, force: true }) };
+  }
+
+  it('links each of the run’s records not linked yet, keeps one linked already, and never takes a name the owner’s holds', () => {
+    const { records, sessions, done } = dirs();
+    try {
+      for (const pid of ['501', '502', '503']) writeFileSync(join(records, `${pid}.json`), '{}');
+      symlinkSync(join(records, '502.json'), join(sessions, '502.json'));
+      writeFileSync(join(sessions, '503.json'), '{}');
+      expect(call('record_plan', [records, sessions])).toEqual({ lines: ['link 501.json', 'linked 502.json', 'taken 503.json'], status: 0 });
+    } finally {
+      done();
+    }
+  });
+
+  it('names for removal only the links into the run’s scratch, never the owner’s own records or other links', () => {
+    const { sessions, done } = dirs();
+    try {
+      symlinkSync(`${X}/claude/sessions/601.json`, join(sessions, '601.json'));
+      symlinkSync('/Users/new/.claude/elsewhere.json', join(sessions, '602.json'));
+      symlinkSync(`${X}-other/claude/sessions/603.json`, join(sessions, '603.json'));
+      writeFileSync(join(sessions, '604.json'), '{}');
+      expect(call('own_links', [sessions])).toEqual({ lines: [join(sessions, '601.json')], status: 0 });
+    } finally {
+      done();
+    }
   });
 });

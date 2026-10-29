@@ -12,6 +12,13 @@
 # namespace whose /etc/claude-code is an empty tmpfs; `down` ends it and removes $X. Of the owner's processes this reads
 # only which are claude's (their executable and terminal, never their arguments) and, for a seat the run spawned, the
 # two environment variables local-spawn names.
+#
+# The session is a stray in the machine's own project (the only project production lets the run write): its checkout
+# is a git repository with no remote and no .smns, which sminos resolves to the machine project as it does any such
+# directory of the owner's. sminos reads the engine's session records from $HOME/.claude/sessions alone, whatever
+# CLAUDE_CONFIG_DIR says, so for the owner's sminos (its CLI, its hooks, its daemon) to see the run's engines at all,
+# each record the engines write in the scratch config dir is linked there under its own name, and `down` removes
+# those links: the run's one write into the owner's ~/.claude.
 set -uo pipefail
 OWNER=new
 OH=/Users/new
@@ -23,6 +30,8 @@ X=$OH/.local/share/o10-m11-lane-a     # the run's scratch: claude/ (the config d
 R=$X/run
 W=$X/work
 PLUGIN=$X/claude/plugins/sminos
+RECORDS=$X/claude/sessions            # the engine's session records, as the run's engines write them
+ENGINE_SESSIONS=$OH/.claude/sessions  # where sminos reads them
 STUB_PORT=47899
 STUB_URL=http://127.0.0.1:$STUB_PORT
 CLAUDE=$O/bin/claude
@@ -126,6 +135,34 @@ seat_verdict() {
   ((n > 0 && ok == 1))
 }
 
+# The machine project's id for org $1 and machine $2, as sminos derives it (machine_project_id: a UUID v5).
+machine_project() { python3 -c 'import sys, uuid; print(uuid.uuid5(uuid.NAMESPACE_URL, "smns-machine:%s:%s" % (sys.argv[1], sys.argv[2].lower())))' "$1" "$2"; }
+# The alias of session $1 in a `sminos list --json` on stdin: the row that is that session, never one that only names it.
+member_alias() {
+  python3 -c '
+import json, sys
+try:
+    rows = json.load(sys.stdin)
+except ValueError:
+    sys.exit(1)
+hit = next((r["alias"] for r in rows if isinstance(r, dict) and r.get("session") == sys.argv[1] and isinstance(r.get("alias"), str) and r["alias"]), None)
+sys.exit(1) if hit is None else print(hit)' "$1"
+}
+# For each record in directory $1 (the run's), what directory $2 (the owner's) holds of its name: `link` none yet,
+# `linked` the run's link to it, `taken` anything else (the owner's, never replaced).
+record_plan() {
+  local f name
+  for f in "$1"/*.json; do
+    [[ -f $f ]] || continue
+    name=${f##*/}
+    if [[ -L $2/$name && $(readlink "$2/$name") == "$f" ]]; then say "linked $name"
+    elif [[ -e $2/$name || -L $2/$name ]]; then say "taken $name"
+    else say "link $name"; fi
+  done
+}
+# The links in directory $1 into the run's scratch $X: the run's, and only those, for `down` to remove.
+own_links() { local f; for f in "$1"/*; do [[ -L $f && $(readlink "$f") == "$X/"* ]] && say "$f"; done; return 0; }
+
 ns_of() { readlink /proc/"$1"/ns/mnt 2>/dev/null; }
 ours_ns() { local a; a=$(anchor) && ns_of "$a"; }
 # `pid ns` of every process of the owner's that runs a claude binary (the installed versions, or the run's copy).
@@ -147,7 +184,7 @@ kill_ours() { local ours p; ours=$(ours_ns) || return 0; for p in "$@"; do [[ $(
 gone() { ! test -S "$1"; }
 
 lane_a_up() {
-  local project=$1 name=$2 org sid launch alias
+  local project=$1 name=$2 org machine sid launch alias
   [[ $project =~ ^[0-9a-f-]{36}$ ]] || fail "a project id"; word "$name"
   [[ -f $SH/daemon/identity.json ]] || fail "the VM's sminos is not cut over to its endpoint (no daemon/identity.json)"
   [[ -x $CLAUDE && -x $SMINOS && -f $O/sminos/.claude-plugin/plugin.json ]] || fail "no claude or sminos in $O: run setup.sh first"
@@ -162,28 +199,22 @@ lane_a_up() {
   [[ -z $(inns ls -A /etc/claude-code) ]] || fail "the namespace still shows /etc/claude-code's files"
   inns setsid -f runuser -u $OWNER -- env -i "${SESSION_ENV[@]}" $CUR/runtime/bin/node $O/stub-model.mjs --port $STUB_PORT </dev/null >>$R/stub.log 2>&1
   within 20 bash -c "exec 3<>/dev/tcp/127.0.0.1/$STUB_PORT" 2>/dev/null || fail "the stub model did not listen"
-  org=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["org"])' $SH/daemon/identity.json) || fail "identity.json names no org"
+  read -r org machine < <(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["org"], d["name"])' $SH/daemon/identity.json) || fail "identity.json names no org and machine"
+  [[ $name == "$machine" && $project == "$(machine_project "$org" "$machine")" ]] || fail "$project ($name) is not the machine project of $machine in $org"
+  # A git repository (sminos's hook records a session only in a .smns or .git directory on a cut-over machine), with no
+  # remote and no .smns: a stray, in the machine project.
   as_session git -c init.defaultBranch=main init -q $W || fail "git init"
-  as_session python3 -c 'import json,sys; json.dump({"project": sys.argv[2], "name": sys.argv[3], "hub": {"org": sys.argv[4]}}, open(sys.argv[1], "w"))' $W/.smns "$project" "$name" "$org"
-  as_session bash -c "cd $W && git add .smns && git -c user.name=o10-m11 -c user.email=o10-m11@scene.invalid commit -qm scene"
+  as_session bash -c "cd $W && git -c user.name=o10-m11 -c user.email=o10-m11@scene.invalid commit -q --allow-empty -m scene" || fail "git commit"
   as_session python3 -c 'import json,sys; w=sys.argv[2]; json.dump({"hasCompletedOnboarding": True, "projects": {w: {"hasTrustDialogAccepted": True}}}, open(sys.argv[1], "w"))' $X/claude/.claude.json $W
   as_session python3 -c 'import json,sys; json.dump({"permissions": {"allow": ["Bash(echo:*)"]}}, open(sys.argv[1], "w"))' $X/claude/settings.json
   sid=$(cat /proc/sys/kernel/random/uuid) && say "$sid" >$R/session || fail "no session id"
   start_session "$sid" new
   launch=$(bridge_launch "$sid") || fail "the bridge answered no launch"
-  alias=$(as_session bash -c "cd $W && $SMINOS list --here --json" | python3 -c '
-import json, sys
-def walk(x):
-    if isinstance(x, dict):
-        if sys.argv[1] in x.values() and isinstance(x.get("alias"), str):
-            yield x["alias"]
-        for v in x.values():
-            yield from walk(v)
-    elif isinstance(x, list):
-        for v in x:
-            yield from walk(v)
-print(next(walk(json.load(sys.stdin)), ""))' "$sid") || alias=
-  [[ -n $alias ]] || fail "sminos lists no alias for $sid"
+  # The machine project's listing, by the session's id: a reading verb joins a running session it sees (its engine's
+  # record linked), so the first listings after the start may still be without it.
+  alias_of() { as_session bash -c "cd $W && $SMINOS list --project $project --json" 2>/dev/null | member_alias "$sid"; }
+  for _ in $(seq 15); do alias=$(alias_of) && break; sleep 2; done
+  [[ -n ${alias:-} ]] || fail "sminos lists no alias for $sid in the machine project $project within 30 s"
   python3 -c 'import json,sys; print(json.dumps({"session": sys.argv[1], "launch": sys.argv[2], "org": sys.argv[3], "alias": sys.argv[4], "checkout": sys.argv[5]}))' "$sid" "$launch" "$org" "$alias" "$W"
 }
 
@@ -197,6 +228,19 @@ start_session() {
   as_session tmux -L $TX new-session -d -s lane-a -x 200 -y 50 -c $W "$CLAUDE ${flags[*]}" || fail "tmux"
   within 120 test -S "$SH/bridge/$sid.sock" || { pane; fail "no bridge for $sid within 120 s"; }
   check_engine "$sid"
+  link_records
+}
+# Every record of the run's engines linked where the owner's sminos reads them (record_plan); a name the owner's
+# records hold already fails the run rather than be replaced.
+link_records() {
+  local what name
+  as_owner install -d -m 700 $ENGINE_SESSIONS || fail "no $ENGINE_SESSIONS"
+  while read -r what name; do
+    case $what in
+      link) as_owner ln -s "$RECORDS/$name" "$ENGINE_SESSIONS/$name" || fail "could not link the engine record $name" ;;
+      taken) fail "the owner's $ENGINE_SESSIONS/$name is there already: the run's engine record of that name is not linked" ;;
+    esac
+  done < <(record_plan $RECORDS $ENGINE_SESSIONS)
 }
 # The pane's claude: in the run's namespace, with the scratch config, the stub and the checkout; else lane A fails.
 check_engine() {
@@ -290,6 +334,7 @@ local_spawn() {
     say "the seat was stopped at once: ${verdict//$'\n'/, }${verdict:+; }its processes are not all the run's with the scratch config and the stub"
     exit 11
   fi
+  link_records
   exit $rc
 }
 
@@ -313,11 +358,13 @@ lane_a_down() {
   pkill -u $OWNER -f "$O/stub-model.mjs --port $STUB_PORT" 2>/dev/null
   p=$(cat $R/anchor.pid 2>/dev/null) && kill "$p" 2>/dev/null
   within 10 bash -c "! pgrep -u $OWNER -f 'tmux -L $TX' >/dev/null && ! pgrep -u $OWNER -f '$O/stub-model.mjs' >/dev/null"
+  own_links $ENGINE_SESSIONS | while read -r p; do rm -f "$p"; done
+  [[ -n $(own_links $ENGINE_SESSIONS) ]] && { say "LEFT links in $ENGINE_SESSIONS to the run's engine records"; left=1; }
   rm -rf $X
   [[ -e $X ]] && { say "LEFT $X"; left=1; }
   pgrep -u $OWNER -f "$O/stub-model.mjs" >/dev/null && { say "LEFT the stub model"; left=1; }
   pgrep -u $OWNER -f "tmux -L $TX" >/dev/null && { say "LEFT the lane A session's tmux"; left=1; }
-  ((left == 0)) && say "down: the run's lane A session, its seat and its stub ended, $X removed (the owner's mawsd and sminos run on)"
+  ((left == 0)) && say "down: the run's lane A session, its seat and its stub ended, its engine records' links and $X removed (the owner's mawsd and sminos run on)"
   return $left
 }
 
