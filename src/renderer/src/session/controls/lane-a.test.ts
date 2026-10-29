@@ -243,9 +243,12 @@ describe('the chips', () => {
   });
 
   it('closes the mode and the directories with their reasons', async () => {
-    const { bindings } = port().controls;
-    expect(bindings().mode.disabled).toBe(LANE_A_WORDS.mode);
+    const { bindings, capability } = port().controls;
+    const controlsCapabilityMode = () => capability('mode');
+    // the O9 sitting: no bridge event or read reports the session's mode, so the chip names none (never a default)
+    expect(bindings().mode).toMatchObject({ value: null, unreported: true, disabled: LANE_A_WORDS.modeUnreported });
     expect(await bindings().mode.set('plan')).toEqual({ ok: false, error: LANE_A_WORDS.mode });
+    expect(controlsCapabilityMode()).toEqual({ available: false, reason: LANE_A_WORDS.mode }); // Q2's words where the gap is listed
     expect(bindings().directories.disabled).toBe(LANE_A_WORDS.directories);
     expect(bindings().location.path).toBe('/work/here');
   });

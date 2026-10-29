@@ -52,6 +52,9 @@ export const LANE_A_WORDS = {
   noBridge: 'This session has no bridge MAWS can drive',
   idle: 'Nothing is running in this session',
   mode: "A terminal session's mode is changed in the terminal",
+  // no bridge event or read reports the live mode (the O9 sitting): the chip and Session info name none
+  modeNotReported: 'Not reported by the terminal session',
+  modeUnreported: 'Not reported by the terminal session: its mode is changed in the terminal',
   rewind: 'Rewind is a terminal panel: use /rewind there',
   queue: 'The terminal keeps its own queue',
   elicitation: 'Answer this form in the terminal',
@@ -248,7 +251,7 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
           return result.state === 'done' ? { ok: true } : { ok: false, error: result.state === 'refused' ? result.message : LANE_A_WORDS.unknown };
         },
       },
-      mode: { value: null, options: MODE_OPTIONS.map((o) => o.mode), disabled: LANE_A_WORDS.mode, refusal: null, autoUnavailable: null, set: refusedWith(LANE_A_WORDS.mode) },
+      mode: { value: null, unreported: true, options: MODE_OPTIONS.map((o) => o.mode), disabled: LANE_A_WORDS.modeUnreported, refusal: null, autoUnavailable: null, set: refusedWith(LANE_A_WORDS.mode) },
       directories: { value: [...(record?.additionalDirectories ?? [])], options: [], disabled: LANE_A_WORDS.directories, set: refusedWith(LANE_A_WORDS.directories) },
     };
   };

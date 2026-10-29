@@ -153,7 +153,10 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(marker).toHaveAttribute('title', 'Running in Terminal · driven through sminos’s bridge');
     // acceptance 2: each gap in place with its reason, the bridge's words from the capability fixture
     const reasonOf = (key: string) => sentence(FULL_CAPABILITIES.controls![key]!.reason!);
-    await expect(main(page).getByRole('button', { name: /^Permission mode/ })).toHaveAttribute('title', "A terminal session's mode is changed in the terminal");
+    // the O9 sitting: no mode is reported, so the chip names none, only why
+    const mode = main(page).getByRole('button', { name: 'Permission mode not reported' });
+    await expect(mode).toHaveAttribute('title', 'Not reported by the terminal session: its mode is changed in the terminal');
+    await expect(mode).toHaveText(/^Mode/);
     await editor(page).click();
     await editor(page).pressSequentially('/doc');
     await expect(page.getByRole('option', { name: /doctor/ }), 'a command only the terminal runs, listed with why').toContainText(/runs only in the terminal/i);
