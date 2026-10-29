@@ -178,6 +178,7 @@ export class PluginsRunner {
   private readonly timers: Timers;
   private readonly operations = new Map<string, Operation>(); // queued or running
   private readonly groups = new Set<OwnedGroup>(); // every process group a read or a mutation still owns
+  private reads = 0; // reads from their entry to their end: their preparation (the probe, the directory, the environment) and their CLI
   private closed = false; // `stop` ran: nothing new runs
   private queue: Promise<void> = Promise.resolve();
   private readonly idleListeners = new Set<() => void>(); // E10
@@ -188,11 +189,18 @@ export class PluginsRunner {
     this.timers = deps.timers ?? realTimers;
   }
 
-  // A read: the CLI's whole output, whatever its exit code; rejects when the CLI could not run.
+  // A read: the CLI's whole output, whatever its exit code; rejects when the CLI could not run. Held from its entry, so
+  // its preparation, which may be a login-shell capture, counts as work.
   async read(args: readonly string[], cwd: string): Promise<CliRun> {
-    const ended = await this.exec(args, cwd, null, null);
-    if ('failed' in ended) throw new Error(ended.message);
-    return ended.run;
+    this.hold(() => (this.reads += 1));
+    try {
+      const ended = await this.exec(args, cwd, null, null);
+      if ('failed' in ended) throw new Error(ended.message);
+      return ended.run;
+    } finally {
+      this.reads -= 1;
+      this.settledOne();
+    }
   }
 
   // Queued behind the running mutation; the receipt answers before any of its events.
@@ -224,11 +232,11 @@ export class PluginsRunner {
     return [...this.operations.values()].flatMap((op) => (op.latest ? [op.latest] : []));
   }
 
-  // E10: whether the runner holds anything (a queued or running operation, a process group a read or a mutation still
-  // owns), which the supervisor's idle exit and exit-when-idle wait for; listeners hear each time it holds nothing again,
-  // and each time it holds something again (the supervisor's quiet, P5 Decision Log 124).
+  // E10: whether the runner holds anything (a queued or running operation, a read from its entry to its end, a process
+  // group a read or a mutation still owns), which the supervisor's idle exit and exit-when-idle wait for; listeners hear
+  // each time it holds nothing again, and each time it holds something again (the supervisor's quiet, P5 Decision Log 124).
   busy(): boolean {
-    return this.operations.size > 0 || this.groups.size > 0;
+    return this.operations.size > 0 || this.reads > 0 || this.groups.size > 0;
   }
 
   onIdle(listener: () => void): () => void {
@@ -241,7 +249,7 @@ export class PluginsRunner {
     return () => this.busyListeners.delete(listener);
   }
 
-  // `take` adds an operation or a group; listeners hear it when the runner held nothing before.
+  // `take` adds an operation, a read or a group; listeners hear it when the runner held nothing before.
   private hold(take: () => void): void {
     const was = this.busy();
     take();
@@ -394,7 +402,7 @@ export class PluginsRunner {
         this.groups.delete(group);
         if (op) op.group = null;
         resolve(ended);
-        this.settledOne(); // E10: a read's group was the last thing held
+        this.settledOne(); // E10
       };
       child.on('error', (error) => {
         if (child.pid === undefined) settle({ failed: 'spawn_failed', message: error.message }); // the spawn itself failed

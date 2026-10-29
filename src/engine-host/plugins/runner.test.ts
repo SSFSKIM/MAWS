@@ -394,7 +394,7 @@ describe('PluginsRunner mutations', () => {
     const read = runner.read(READ_LINES.installed, cwd);
     await until(() => calls().some((line) => line.startsWith('plugin list')), 'the read spawned');
     expect(runner.busy()).toBe(true);
-    expect(busies).toBe(2); // the read's group
+    expect(busies).toBe(2); // the read, from its entry
     writeFileSync(join(fake, 'read'), '');
     await read;
     expect(runner.busy()).toBe(false);
@@ -403,6 +403,32 @@ describe('PluginsRunner mutations', () => {
 });
 
 describe('PluginsRunner reads', () => {
+  // P5 Decision Log 124 (round 3, finding 2): a read has no operation, and its preparation (the binary probe, the
+  // directory's stat, the environment capture, which may be a login shell's) runs before its CLI spawns; the runner holds
+  // it from its entry to its end, failure included, so the supervisor's quiet hears it at once
+  it('is busy from a read’s entry, its binary check still pending, until the read fails or ends', async () => {
+    behave(`echo '[]'\n`);
+    let answer!: (check: BinaryCheck) => void;
+    const { runner } = make({ binary: () => new Promise<BinaryCheck>((resolve) => (answer = resolve)) });
+    let busies = 0;
+    let idles = 0;
+    runner.onBusy(() => (busies += 1));
+    runner.onIdle(() => (idles += 1));
+    const failing = runner.read(READ_LINES.installed, cwd);
+    expect(runner.busy()).toBe(true);
+    expect(busies).toBe(1);
+    answer({ ...ok(bin), ok: false, error: 'no engine binary' });
+    await expect(failing).rejects.toThrow('no engine binary');
+    expect(runner.busy()).toBe(false);
+    expect(idles).toBe(1);
+    const reading = runner.read(READ_LINES.installed, cwd);
+    expect(busies).toBe(2);
+    answer(ok(bin));
+    expect((await reading).stdout).toBe('[]\n');
+    expect(runner.busy()).toBe(false);
+    expect([busies, idles]).toEqual([2, 2]); // the spawned CLI's group within the read's hold
+  });
+
   it('runs a read freely, beside a running mutation, and answers its whole output', async () => {
     behave(`if [ "$2" = "install" ]; then sleep 30; else printf '[\\n  {"id": "p@m"}\\n]\\n'; fi\n`);
     const { runner } = make();
