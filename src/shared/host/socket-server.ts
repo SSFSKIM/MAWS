@@ -86,7 +86,7 @@ export type ServedRuntime = Pick<HostRuntime, 'serve' | 'detach' | 'docPort'>;
 
 export interface SocketServerOptions {
   runtime?: ServedRuntime; // the one client's; with `many`, none
-  many?: { runtimeFor(): ServedRuntime }; // P5 O2 M3: a runtime per welcomed client, none replaced
+  many?: { runtimeFor(client: { appPid: number; capabilities: readonly string[] }): ServedRuntime }; // P5 O2 M3: a runtime per welcomed client, none replaced; P5 O3-D M2: given the hello's appPid and capabilities
   badToken?: 'refuse' | 'close'; // P5 O2 M3: 'refuse' (E10's line) unless said otherwise
   onClientEnd?(): void; // P5 O2 M3: a welcomed client's FIN (above)
   identity(): SupervisorIdentity;
@@ -322,7 +322,7 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
       }
       socket.write(`${JSON.stringify(written)}\n`);
       const port = new SocketPort(socket, splitter.rest(), { lineCap, log, ptyFrames: peer.capabilities.includes(PTY_FRAMES_CAPABILITY) }); // P5 O2 M4
-      const runtime = many ? many.runtimeFor() : options.runtime!; // P5 O2 M3
+      const runtime = many ? many.runtimeFor({ appPid, capabilities: peer.capabilities }) : options.runtime!; // P5 O2 M3; P5 O3-D M2: the hello's facts
       const documents = new HostDocChannels(port, (message, end) => runtime.docPort(message, end), { highWater: options.docHighWater, log }); // P3-A M5
       const client: Client = { socket, port, runtime, documents, peer };
       clients.add(client);

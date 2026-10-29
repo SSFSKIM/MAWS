@@ -21,11 +21,18 @@
 // today (its resync, its connect burst and undelivered tail, its client-gone hooks, its per-connection interest and its
 // login-shell recapture). Between attachments `mawsd` holds a link that never says ready, for its own requests. The pty
 // relay is not recycled; while no app holds `pty-host.sock`, `mawsd` owns the pty host's output credit.
+//
+// P5 O3-D M2 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §A and §B): `machine.sock` is served by
+// the services front (front.ts), and the spine runs here too, composed by the seam (spine-seam.ts) from the services
+// chunk at its first trigger, never at start: refused by `spine.lock` while an app that composes its own holds it,
+// released after the quiet period (the daemon's own idle time, or MAWS_SPINE_QUIET_MS under a measured scene), and,
+// for a unit daemon, re-executed after a release (exit 75, its unit restarts it cold). The exit order stops its parts
+// once their work settled, before the client connections close.
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import { createServer, type Server } from 'node:net';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { homedir, hostname, tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { daemonPaths, DAEMON_FILES, DAEMON_LOCK_BREAKER, type DaemonPaths } from '@shared/daemon/files';
 import { createHostSupervisor, type HostSupervisor } from '@shared/host/host-supervisor';
 import { supervisorEnv, type DetachedTransportOptions } from '@shared/host/detached-transport';
@@ -34,7 +41,7 @@ import { appIdentity } from '@shared/host/identity';
 import { idleCollector, type Collect } from '@shared/host/idle-collect';
 import { makePrivateDirectory, clearSocketPath } from '@shared/host/private-listen';
 import { PrivatePathError } from '@shared/host/private-path';
-import { createHostRuntime } from '@shared/host/runtime';
+import { captureShellEnvironment } from '@shared/host/shell-env';
 import { writeToken } from '@shared/host/socket-host';
 import { CLOSE_GRACE_MS } from '@shared/host/socket-port';
 import { PEER_CAPABILITIES, SOCKET_PROTOCOL, type DocumentsOpen } from '@shared/host/socket-protocol';
@@ -47,15 +54,18 @@ import { MAX_IDLE_EXIT_MS } from '@shared/ipc/schema/host';
 import type { DaemonHost, DaemonStatus } from '@shared/ipc/schema/daemon';
 import { WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
+import { machineEnrollment, machineName, machineProject } from '@shared/machine/identity';
 import { readOrMintMachineRef } from '@shared/machine/identity-file';
 import type { MachineRef } from '@shared/machine/ref';
 import { readMachineRole, type MachineRole } from '../engine-host/role';
 import { buildIdOf, isAlive, procStartOf, readLock, START_EXIT_HELD, takeLock } from '../engine-host/supervisor-files';
 import { LOG_ROTATE_BYTES, openSupervisorLog } from '../engine-host/supervisor-log';
 import { ptyHostFiles } from '../pty-host/files';
-import { DaemonClocks } from './clocks';
+import { DaemonClocks, DEFAULT_IDLE_EXIT_MS } from './clocks';
 import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOINT_MODULE, type DaemonServices, type EndpointModule } from './endpoint-seam';
+import { createServicesFront, NO_CLIENT_PORT } from './front';
 import { DEPARTURE_BOUND_MS, Relay, type RelayRequest } from './relay';
+import { createLazySpine, loadServicesEntry, type SpineEntry, type SpineTiming } from './spine-seam';
 
 export const EXIT_RESTART = 75; // a requested restart: the units restart on it
 const STATUS_BOUND_MS = 5_000; // daemon.status waits this long for the engine host's own status
@@ -86,6 +96,10 @@ export interface DaemonOptions {
   helloHoldMs?: number;
   restartBackoffMs?: readonly number[];
   collect?: Collect; // the idle collection (@shared/host/idle-collect.ts's lastResortCollect)
+  // P5 O3-D M2: the spine seam's (spine-seam.ts): the chunk's load, whether a batch while cold loads the spine (off in the
+  // product until main stops composing its own spine, M5: an app quitting leaves its last batches to mawsd's link,
+  // and a spine loaded by them would hold spine.lock against the app's next launch), the timings and the lock's wait
+  spine?: { load?(): Promise<SpineEntry>; wakeOnEvents?: boolean; timing?: Partial<SpineTiming>; lockWaitMs?: number };
 }
 
 export interface RunningDaemon {
@@ -209,6 +223,49 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     },
   });
 
+  // --- the spine (P5 O3-D M2; spine-seam.ts): cold at start, loaded from the services chunk at the first trigger ---------
+  const spineQuietMs = positiveInteger(env.MAWS_SPINE_QUIET_MS); // the measured scene's quiet period (D6)
+  const spine = createLazySpine({
+    profileDir,
+    build: `${options.build.version}+${options.build.commit}`,
+    hosts,
+    intercept: (request) => interceptEngine(request),
+    load: options.spine?.load ?? loadServicesEntry,
+    deps: () => ({
+      profile: profileDir,
+      machine: ref,
+      bus: front.bus,
+      clientPort: NO_CLIENT_PORT, // §E's port over the front is M4's
+      interest: () => new Set(union()),
+      browserSocket: () => null, // the attached app's path from machine.client: M4's
+      trash: async (path) => {
+        throw new Error(`the trash is not reachable from mawsd yet: ${path} kept`); // D10's binding is M5's
+      },
+      engineEnv: captureShellEnvironment({ cache: false }), // one capture per load
+      env,
+      packaged,
+      appPath: join(dirname(options.modules.self), '..', '..'),
+      devRoot: process.cwd(),
+      home: homedir(),
+    }),
+    quietMs: () => spineQuietMs ?? clocks.idleMs() ?? DEFAULT_IDLE_EXIT_MS,
+    reexecute: kind === 'unit',
+    wakeOnEvents: options.spine?.wakeOnEvents ?? false,
+    endLink: async () => {
+      const drained = hosts.stop(); // the terminal draining close: what the engine host wrote before it saw the end folds now
+      if (drained) await Promise.race([drained, sleep(CLOSE_GRACE_MS + 250)]);
+    },
+    restart: (reason) => void stop(reason, EXIT_RESTART),
+    exitForYield: () => void stop('yield', kind === 'unit' ? EXIT_RESTART : 0),
+    collected: () => idle.dropped(),
+    onState: (state) => {
+      if (state !== 'loading' && state !== 'loaded' && state !== 'releasing') front.unbind(); // the parts stopped: the next load registers afresh
+    },
+    log,
+    ...(options.spine?.timing && { timing: options.spine.timing }),
+    ...(options.spine?.lockWaitMs !== undefined && { lockWaitMs: options.spine.lockWaitMs }),
+  });
+
   // --- the clocks -----------------------------------------------------------------------------------------------------
   const idle = idleCollector({ log, collect: options.collect, quiet: () => clocks.quiet() }); // P5 Decision Log 124's lever: a collection at each quiet entry, asked again as it collects
   const clocks = new DaemonClocks(kind, {
@@ -227,7 +284,10 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       log('no client, both hosts parked and no hold for the idle time');
       void stop('idle', 0);
     },
-    quiet: (quiet) => idle.set(quiet),
+    quiet: (quiet) => {
+      idle.set(quiet);
+      spine.quiet(quiet); // the spine's release runs on the daemon's quiet, with no working session (spine-seam.ts)
+    },
   });
 
   // --- the interest union (OX5): the relay connection's set and the endpoint's remote viewers -------------------------
@@ -471,6 +531,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       idleExitAt: clocks.idleExitAt(),
       logPath: paths.log,
       endpoint: { present: endpoint !== null, detail: endpoint ? safely(() => endpoint.status(), log) : null },
+      spine: spine.status(),
     };
   }
   async function daemonCommand(name: string, input: unknown): Promise<unknown> {
@@ -490,6 +551,19 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         throw new Error(`mawsd serves no ${name}`);
     }
   }
+
+  // --- the services front (P5 O3-D M2; front.ts): machine.sock's commands and events --------------------------------
+  const front = createServicesFront({
+    spine,
+    hosts,
+    intercept: (request) => interceptEngine(request),
+    daemon: daemonCommand,
+    identity: () => {
+      const name = machineName(env, hostname());
+      return { ref, name, project: machineProject(ref, name, machineEnrollment()) };
+    },
+    log,
+  });
 
   // --- the endpoint seam -----------------------------------------------------------------------------------------------
   const holds = new Map<number, string>();
@@ -622,14 +696,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     ptyRelay.bind(ptyClients);
     const machineServer = createServer();
     machineClients = serveSocketClients(machineServer, {
-      many: {
-        runtimeFor: () =>
-          createHostRuntime((on) => {
-            on('daemon.status', async () => status());
-            on('daemon.restart', async () => void (await daemonCommand('daemon.restart', undefined)));
-            on('daemon.endpoint', async (input) => (await daemonCommand('daemon.endpoint', input)) as { code: number; out: string });
-          }),
-      },
+      many: { runtimeFor: (client) => front.runtimeFor(client) },
       badToken: 'close',
       identity: () => identity,
       counts: () => ({ liveSessions: 0, rows: 0 }),
@@ -671,7 +738,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       if (endpoint) {
         await Promise.race([endpoint.stop().catch((error: unknown) => log(`the endpoint's stop failed: ${error instanceof Error ? error.message : String(error)}`)), sleep(ENDPOINT_STOP_MS)]);
       }
+      await spine.stop(); // its parts stopped once its work settled (bounded: the exit ends what is left)
       for (const clients of [engineClients, ptyClients, machineClients]) clients?.closeClient();
+      front.close();
       const drained = hosts.stop(); // both hosts keep running: mawsd never stops a session
       if (drained) await Promise.race([drained, sleep(CLOSE_GRACE_MS + 250)]);
       if (code !== 1 && lockNamesMe()) {
@@ -782,6 +851,11 @@ function excludeFromBackups(dir: string, run: NonNullable<DaemonOptions['runComm
   } catch (error) {
     log(`could not exclude ${dir} from Time Machine: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+function positiveInteger(value: string | undefined): number | null {
+  const parsed = value === undefined ? NaN : Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function runCommand(command: string, args: string[]): { status: number | null; stdout: string } {

@@ -12,6 +12,8 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { readOrMintMachineRef } from '@shared/machine/identity-file';
 import { buildIdOf } from '../engine-host/supervisor-files';
 import type { FakeSupervisor } from '../../test/support/fake-supervisor';
+import { takeSpineLock } from '../services/settings/spine-lock';
+import type { SpineEntry } from './spine-seam';
 import { MawsdScene, RawApp, sleep, until, type StandIn } from '../../test/support/mawsd-scene';
 
 let scene: MawsdScene;
@@ -543,5 +545,62 @@ describe('document channels', () => {
     expect(engine.docs).toHaveLength(1);
     app.post({ t: 'documents.close', channel: 1 });
     await until(() => engine.docs[0]!.closed, 3_000, 'the app’s close upstream');
+  });
+});
+
+// P5 O3-D M2 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §A and §B): the seam and the front in the
+// daemon, over a stand-in of the services chunk (the real spine inside the seam is daemon-spine.test.ts's)
+describe('the spine (P5 O3-D M2)', () => {
+  // The services chunk as the seam loads it: the real lock, data and a root that registers one command
+  function standInChunk() {
+    const loads = vi.fn();
+    const stops = vi.fn();
+    const load = async (): Promise<SpineEntry> => {
+      loads();
+      return {
+        takeSpineLock,
+        openSpineData: async (_profile, { lock }) => ({ lock: lock!, refused: lock!.refused, machineSettings: null as never, paths: { client: '', machine: '' } }),
+        startSpine: (deps) => {
+          deps.bus.register('session.launchMode', () => ({ mode: 'index' }));
+          return { view: { engineStatuses: () => [], on: () => () => {} } as never, settled: async () => {}, busy: () => false, stop: stops };
+        },
+      };
+    };
+    return { load, loads, stops };
+  }
+
+  it('loads the services chunk only at the first spine command, answers it on machine.sock, and daemon.status carries the spine', async () => {
+    const chunk = standInChunk();
+    await scene.start({ spine: { load: chunk.load } });
+    const client = await scene.app('machine');
+    expect(await client.request('machine.identity')).toMatchObject({ ok: true, value: { ref: expect.any(String), project: expect.any(Object) } });
+    expect(await client.request('daemon.status')).toMatchObject({ ok: true, value: { spine: { state: 'cold', refused: null, loadedAt: null, heldDropped: 0 } } });
+    expect(chunk.loads).not.toHaveBeenCalled();
+    expect(await client.request('session.launchMode')).toMatchObject({ ok: true, value: { mode: 'index' } });
+    expect(chunk.loads).toHaveBeenCalledOnce();
+    expect(await client.request('daemon.status')).toMatchObject({ ok: true, value: { spine: { state: 'loaded', loadedAt: expect.any(String) } } });
+    expect(scene.logs).toContainEqual(expect.stringMatching(/^spine: loaded in \d+ ms$/));
+  });
+
+  it('a unit daemon releases after the quiet period and exits 75; a private one releases and stays', async () => {
+    for (const kind of ['unit', 'private'] as const) {
+      const chunk = standInChunk();
+      const daemon = await scene.start({ kind, spine: { load: chunk.load }, env: { MAWS_USER_DATA: scene.root, MAWS_SPINE_QUIET_MS: '50' } });
+      const client = await scene.app('machine');
+      expect(await client.request('session.launchMode')).toMatchObject({ ok: true });
+      client.destroy();
+      await until(() => scene.logs.includes('spine: released'), 5_000, 'the release');
+      expect(chunk.stops).toHaveBeenCalledOnce();
+      if (kind === 'unit') {
+        await until(() => scene.exits.includes(75), 5_000, 'the re-execution');
+        expect(scene.logs).toContainEqual('exited (spine released, code 75)');
+      } else {
+        await sleep(50);
+        expect(scene.exits).toEqual([75]); // the unit's, nothing more
+        expect((await daemon.status()).spine).toMatchObject({ state: 'cold' });
+        await daemon.stop('test');
+      }
+      scene.logs.length = 0;
+    }
   });
 });

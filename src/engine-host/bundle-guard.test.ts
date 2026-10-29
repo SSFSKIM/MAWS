@@ -114,6 +114,18 @@ describe.skipIf(graph === null)('the built mawsd’s run path', () => {
       expect([...graph!].some(([, text]) => text.includes(marker)), `${what} beside it`).toBe(true);
     }
   });
+
+  // P5 O3-D M2 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, M2's Proves): the spine is composed from the
+  // services chunk, loaded at its first trigger (spine-seam.ts), so the library's code is on no file the run path holds
+  // and is in the deferred graph. The markers are definitions: the seam itself names `startSpine` as the entry's member.
+  it('keep the services library off the run path, in the chunk the spine seam loads', () => {
+    const markers = { startSpine: /\bfunction startSpine\(/, IndexSessionSource: /\bclass IndexSessionSource\b/ };
+    const run = runPathOf(MAWSD);
+    for (const [what, marker] of Object.entries(markers)) {
+      expect([...run].filter(([, text]) => marker.test(text)).map(([file]) => file), what).toEqual([]);
+      expect([...graph!].some(([, text]) => marker.test(text)), `${what} beside it`).toBe(true);
+    }
+  });
 });
 
 describe.skipIf(graph === null)('the built mawsd and its chunks', () => {

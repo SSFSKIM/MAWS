@@ -34,7 +34,7 @@ interface StartOptions {
   onDocPort?: DocPortHandler;
   docHighWater?: number;
   badToken?: 'refuse' | 'close';
-  many?: { runtimeFor(): HostRuntime };
+  many?: { runtimeFor(client: { appPid: number; capabilities: readonly string[] }): HostRuntime };
   halfOpen?: boolean;
   admitHello?: SocketServerOptions['admitHello']; // P5 O2 M5
   admit?: (socket: Socket) => boolean; // P5 O6 M3
@@ -338,7 +338,9 @@ describe('the socket layer handshake (server side)', () => {
 
   it('many clients: each is welcomed and served by its own runtime at once, none replaced', async () => {
     const runtimes: HostRuntime[] = [];
-    const runtimeFor = () => {
+    const facts: { appPid: number; capabilities: readonly string[] }[] = [];
+    const runtimeFor = (client: { appPid: number; capabilities: readonly string[] }) => {
+      facts.push(client); // P5 O3-D M2: the welcomed hello's facts
       const pid = runtimes.length + 1; // which runtime answered
       const made = createHostRuntime((on) => on('engine.ping', async () => ({ pid, uptimeMs: 1, hostVersion: 'test' })));
       runtimes.push(made);
@@ -349,8 +351,9 @@ describe('the socket layer handshake (server side)', () => {
     first.send(hello());
     expect(await first.next()).toMatchObject({ t: 'welcome' });
     const second = await host.connect();
-    second.send(hello({ appPid: 8 }));
+    second.send(hello({ appPid: 8, capabilities: ['machine.spine'] }));
     expect(await second.next()).toMatchObject({ t: 'welcome' });
+    expect(facts).toEqual([{ appPid: 7, capabilities: [] }, { appPid: 8, capabilities: ['machine.spine'] }]);
     first.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined });
     second.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined });
     const answer = (id: string) => (line: unknown) => (line as { t: string; id?: string }).t === 'res' && (line as { id: string }).id === id;

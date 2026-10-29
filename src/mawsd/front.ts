@@ -19,6 +19,7 @@ import { thrownError, type DocPortEnd, type HostPort } from '@shared/host/runtim
 import type { HostSupervisor } from '@shared/host/host-supervisor';
 import { remoteClients, type RemoteClients } from '@shared/host/client-refs';
 import type { ServedRuntime } from '@shared/host/socket-server';
+import { NO_CLIENT, type ClientPort } from '@shared/client/port';
 import type { HandlerContext } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import { HostClientGoneSchema, HostReadySchema, HostRequestSchema, type HostDoc, type HostResponse } from '@shared/ipc/host-protocol';
@@ -40,6 +41,18 @@ export const LATER_COMMANDS: ReadonlySet<string> = new Set([
   'clientPort.answer', 'library.fileLinkedPaths', 'machine.client', 'machine.op', 'machine.opQuery',
   'machineSettings.get', 'machineSettings.set', 'session.follow', 'session.visible',
 ]);
+
+// The client port before §E's (M4): no client performs an effect.
+export const NO_CLIENT_PORT: ClientPort = {
+  pick: async () => NO_CLIENT,
+  save: async () => NO_CLIENT,
+  confirm: async () => NO_CLIENT,
+  reveal: async () => NO_CLIENT,
+  openExternal: async () => NO_CLIENT,
+  notify: () => NO_CLIENT,
+  badge: () => NO_CLIENT,
+  focus: () => NO_CLIENT,
+};
 
 export interface ClientFacts {
   appPid: number;

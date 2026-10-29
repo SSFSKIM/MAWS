@@ -29,6 +29,10 @@ export interface SpineEntry {
   startSpine(deps: SpineDeps): SpineRoot;
 }
 
+// The deferred load of the services chunk (`out/main/services.js`'s code, emitted beside mawsd.js): nothing of the
+// library is on mawsd's run path until the first trigger (the bundle guard's case).
+export const loadServicesEntry = (): Promise<SpineEntry> => import('../services/entry');
+
 export interface SpineTiming {
   refusalRetryMs: number; // a refused load is tried again at the first trigger after this
   yieldCheckMs: number; // the yielded-to pid's liveness, by pid and start time
