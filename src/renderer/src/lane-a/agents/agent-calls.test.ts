@@ -9,8 +9,9 @@ import type { Row } from '../../transcript/model/rows';
 import { backgroundAgent, Chain, SESSION } from '../test-support/chain-rows';
 import { freshSource, subagentLookupOf } from '../plane-transcript';
 import { rowsOf } from '../../transcript/model/derive';
-import { applyEvents, createState, type TranscriptState } from '../../transcript/model/reduce';
-import { builder, task, tool } from '../../transcript/model/test-events';
+import { applyEvents, createState, withUi, type TranscriptState } from '../../transcript/model/reduce';
+import { rowId } from '../../transcript/model/keys';
+import { builder, task, tool, uuid } from '../../transcript/model/test-events';
 
 async function drawn(rows: JsonObject[], metas: SubagentMeta[]): Promise<Row[]> {
   const store = createTranscriptStore();
@@ -89,6 +90,20 @@ describe('an Agent call whose session’s process exits', () => {
     state = applyEvents(state, exit(b.at + 1_000, 'stop'));
     expect(shown(state)).toEqual([]);
     expect(expanded(state)).toEqual(['stopped']);
+  });
+
+  it('in a branch a rewind hid, shown revealed: the process then exiting folds its row too', () => {
+    const b = started();
+    b.end(['u1']);
+    b.turn('u2', 'Go on.');
+    b.end(['u2']);
+    const rewind = b.emit('boundary.rewind', { targetMessageUuid: uuid('u1'), precedingAssistantUuid: null, prefillText: 'Spawn an agent.' });
+    b.turn('u3', 'Something else.');
+    b.end(['u3']);
+    const hidden = applyEvents(createState(null, null), b.events);
+    const revealed = withUi(hidden, { ...hidden.ui, revealedBoundaries: new Set([rowId.boundary(rewind.id)]), global: hidden.ui.global + 1, version: hidden.ui.version + 1 }); // as the store's toggleBoundary
+    expect(shown(revealed)).toEqual(['working']); // the hidden turn's rows, derived and kept
+    expect(shown(applyEvents(revealed, exit(b.at + 1_000, 'crash')))).toEqual([]);
   });
 
   it('an exit before the call (an earlier process’s) ends none of its agents', () => {

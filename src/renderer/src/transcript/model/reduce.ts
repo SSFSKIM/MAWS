@@ -763,6 +763,8 @@ function apply(batch: Batch, event: SessionEvent): void {
             batch.closeUnended(batch.touch(id), outcome, event.at, cause);
           } else if (turn.events.some(isAgentCall)) batch.touch(id).version += 1; // P5 O9: its agents ended with the process (derive.ts, exitedSince)
         }
+        // P5 O9: a turn a rewind hid draws when its branch is revealed (rowsOf), so its Agent rows derive again too
+        for (const id of state.hidden?.turns ?? []) if (state.turns.get(id)?.events.some(isAgentCall)) batch.touch(id).version += 1;
       }
       return batch.loose(event);
     }
