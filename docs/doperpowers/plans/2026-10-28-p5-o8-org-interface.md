@@ -670,7 +670,8 @@ M3's own edits are the no-change successor and that revocation. The delegation a
   - `signer.ts`: `Edit.endorse`;
   - `src/main/device/step-up.ts`: `StateSigner.sign` endorses;
   - `hub-client.ts`: `pendingOf`;
-  - `org-session.ts`: the commands, `refused.attempt`, `close()`;
+  - `org-session.ts`: the commands, `refused.attempt`, `close()` and its fence;
+  - `held.ts`: `adoptServed`'s closed guard; the signer's, weekly's and deliveries' `close()` return their operation in flight;
   - `src/main/index.ts`: wiring;
   - their tests.
 - **Shared:** `src/shared/ipc/schema/org.ts` (`OrgView`, `OrgChange`, `org.view`, `org.preview`, `org.change`, `org.pair.*`, `OrgRefusal.attempt`, `OrgStatus`'s `pairing`), `routes.json`, `grades/org.ts`.
@@ -679,7 +680,7 @@ M3's own edits are the no-change successor and that revocation. The delegation a
   - `copy.ts`'s `ORG`;
   - `SettingsView.tsx`'s import;
   - the tests, split by group.
-- **Tests:** `test/org/org-page.local.test.ts` (new), `org-session.test.ts` (the workarounds removed).
+- **Tests:** `test/org/org-page.local.test.ts` (new, added to `vitest.config.ts`'s `TIMING_NODE_TESTS`, whose explicit list is the only way into the `node-timing` project), `org-session.test.ts` (the workarounds removed).
 
 **Interfaces.** It produces §M. It consumes:
 - M3's signer, checks and status (§K);
@@ -687,18 +688,20 @@ M3's own edits are the no-change successor and that revocation. The delegation a
 - H1 (`GET /api/devices/pending?member=`);
 - `org-protocol`'s `encodePairingCode`, `verifyPairingMac`, `pairingFingerprint`, `endorseDevice`, `keyId` and `verifySuccessor`;
 - `memberName` (M5);
-- the roster's machine states (`Machines.remote`) for "up".
+- the renderer's `useMachines` store for whether a machine is up.
 
 **Decisions.**
 
 *The move* (Constraints: `apps/org-protocol` and `apps/desk-hub` are the desk track's; the architect's ruling, 2026-10-29).
 - **What moves.** The pure pairing judges go from `admin.ts` to `apps/org-protocol/src/pairing.ts`, byte for byte, as their own commit at the head of the branch: `judgeEntry`, `entryDevice`, `isPairedDeviceId`, `isRpId` and the constants they read. `admin.ts` imports them, with no behaviour change, and the desk track reviews that commit.
-  - `org-protocol`'s sources use `.ts` import specifiers and nothing `--experimental-strip-types` refuses, because `deploy/bin.ts` runs the admin verbs that way from the deploy checkout. The moved code keeps that form.
+  - `deploy/bin.ts` bundles `admin.ts` and its imports with esbuild before running the generated module, so a bundled admin run can't show whether the package loads on its own. `org-protocol`'s sources use `.ts` import specifiers and nothing Node's type stripping refuses. The moved code keeps that form, and the move's steps import the exported judges straight from `apps/org-protocol/src/index.ts` under `node --experimental-strip-types`.
+  - The judges' input type moves with them as a package-owned structural type (`PendingEntry`), since today's `PendingDevice` is the hub's (`apps/desk-hub/src/protocol/identity.ts`). The hub's type stays where it is and satisfies it.
   - Rejected: app-side copies with a parity test, which are a shim where the code can simply move.
 - **What moves later.** The pure parts of `admin-machines.ts` and `encodeEnrollmentCodeV2` are M4b's. `prefixProblem` is M4c's. Each moves when its milestone needs it.
 
 *The pre-sign function.*
-- `successorProblems(before: OrgState, after: OrgState, opts: { endorsing?: { kid: string; devices: string[] } }): Promise<Problem[]>` runs every check `verifySuccessor` makes except the signatures, and names each problem.
+- `successorProblems(before: OrgState, after: OrgState, opts: { endorsing?: { kid: string; devices: string[] } }): Promise<Problem[]>` is for an **ordinary successor**, one with no authorizing root transition. That is every successor the app and the CLI compose. For it, the function runs every check `verifySuccessor` makes except the signatures, and names each problem.
+  - It does not judge a successor a recovery authorizes. A held transition changes non-signature rules: the successor must take the transition's root set, and the transition's new root devices are exempt from endorsement (`org-state.ts:350-375`). The recovery vector in `vectors/scenario.ts:345-370` replaces a member's devices unendorsed and is accepted that way.
   - The link: version, `prev`, org.
   - `revives-revoked`.
   - The whole-state rules (`stateProblems`):
@@ -709,7 +712,7 @@ M3's own edits are the no-change successor and that revocation. The delegation a
   - `recovery-changed`, `legacy-retired`, `machine-names`, `keys-unaccounted`.
   - `endorsement-missing`: a later device of a member who had devices, without an endorsement. A device id in `opts.endorsing.devices` counts as endorsed by `opts.endorsing.kid`, when that kid is one of the member's step-up keys in `before`, since the signer endorses it inside the same Touch ID.
   - `stateInvariants(state)` becomes `(await stateProblems(state)).length === 0`.
-  - `verifySuccessor` is unchanged in every verdict it returns. `org-protocol`'s existing suites and vectors pass unchanged, which is the proof.
+  - `verifySuccessor` is unchanged in every verdict it returns, and in the order it reaches them. `org-protocol`'s existing suites and vectors pass unchanged, which is the proof.
   - Rejected: app-only rows in `checks.ts`, which leave the CLI to meet the same problems only after signing.
 - `checks.ts`'s `checkSuccessor` runs `successorProblems` first, each problem a `refuse` finding with its code, then M3's own rows (the delegation rules and the superseded offer). The delegation rules duplicated between `checks.ts` and `admin.ts`'s `prefixProblem` stay until M4c moves `prefixProblem`.
 - `admin.ts`'s `amend` runs `successorProblems` on the composed successor before `signOrgState`. A problem refuses in `amend`'s words, "nothing was signed", naming the code. Every admin verb's successor is valid today, so this changes only how a broken one is refused.
@@ -717,7 +720,7 @@ M3's own edits are the no-change successor and that revocation. The delegation a
 *The view* (`org.view`). It reads `OrgView | null` from the held head, null unless `registered` with a head:
 - `version` and `issued`;
 - `members`: id, email, `name` (`memberNames`), role, `you`, and devices. Each device carries id, class, `keyStorage`, `root` (its step-up kid is in `root.keys`), `thisMac` and `fingerprint` (`pairingFingerprint`, for compare-by-eye);
-- `machines`: name, ref, owners, and `up` from the roster;
+- `machines`: name, ref and owners, the signed facts only. Whether a machine is up comes from the renderer's `useMachines` store, which `machines.changed` keeps current. A link can drop with no new head, so the view would go stale if it carried that bit;
 - `roots`: kid with member and device, as `rootLines` reads them, or `unlisted`;
 - `recoveryKid`: `keyId(root.recoveryPub)`;
 - `maySign` (M3's).
@@ -763,18 +766,26 @@ The renderer reads it again at each `org.changed`, which the session already fir
 Each composer throws `StaleEdit` when its target is gone from the draft, so a head that moved under the sheet reads `stale`. Lines name members by email and devices by their first 8 characters with class, as `show` does.
 
 *Pairing* (`pairing.ts`).
-- **`org.pair.start {member}`.** Only while `maySign`, and only for yourself or a member with no devices; otherwise `refused` with the rule above.
-  - The app makes a 16-byte `k` and `encodePairingCode({hub, org, member, roots: root.keys, recoveryPub, k})`, and answers `{ok: true, code, expires}`. The TTL is `PAIR_TTL_MS`, 600 s, `pair`'s maximum.
+- **`org.pair.start {member, class}`.** Only while `maySign`, and only for yourself or a member with no devices; otherwise `refused` with the rule above.
+  - `class` is `native-mac` (a Mac running MAWS, the default) or `web-cards` (a browser holding a passkey), chosen in the PairSheet. `judgeEntry` refuses an entry of another class, as `pair --class` does.
+  - The app makes 16 random bytes `k`, then calls `encodePairingCode({hub, org, member, roots: root.keys, recoveryPub, k: base64urlEncode(k)})` (the code carries `k` as base64url, `pairing.ts:29-31`; `admin.ts:745-753`). It answers `{ok: true, code, expires}`. The TTL is `PAIR_TTL_MS`, 600 s, `pair`'s maximum.
   - The code is in that answer alone: the status never carries it or `k`, and the suites' secret check covers it. `k` lives in main's memory only, so a relaunch ends the pairing.
-- **The polling.** Every `PAIR_POLL_MS` (2 s) it polls `GET /api/devices/pending?member=<id>`; for yourself, the plain read. Each entry is judged with `judgeEntry(k, org, member, entry, head)`.
+- **The polling.** Every `PAIR_POLL_MS` (2 s) it polls `GET /api/devices/pending?member=<id>`; for yourself, the plain read. Each entry is judged with today's signature, `judgeEntry(entry, {org, member, k, class, listed})` (`admin.ts:304-321`), with `listed` taken from the held head's device ids.
   - `503 hub-updating` and no answer keep polling (P5 Decision Log 121).
   - `403 not-admin` and `404 no-member` end the pairing as `refused` with that code.
   - Two matching entries end it: "two devices answered this code: start over".
-- **The status.** `pairing: {member, expires, entry: {id, class, keyStorage, fingerprint} | null, problem: 'two-entries' | 'expired' | null} | null`. The renderer's PairSheet shows the entry's fingerprint, to compare with the device's own screen.
-- **`org.pair.approve {entry}`.** It reads the pending list again and requires the same canonical entry, refusing `stale` otherwise ("the entry changed after it was shown", `pair`'s rule). Then it signs `device.approve`:
-  - the device appended to the member;
-  - for yourself, `Edit.endorse` names it, and the state signer endorses it with this Mac's step-up key inside the same Touch ID, before signing the state.
-- **`org.pair.cancel`** ends it.
+- **The candidate is frozen once found.** The first matching entry becomes the pairing's candidate: its canonical device and that device's digest. The hub keeps a pending entry under its member and device id and replaces it on a repost (`org-chain.ts:243-260`, `INSERT OR REPLACE`), so a later poll can show the same id with other keys. If it does (another canonical device under the candidate's id, or a second match), the pairing ends as `entry-changed` or `two-entries`, and the person starts over. Main never swaps the candidate for a newer one.
+- **The status.** `pairing: {generation, member, class, expires, entry: {id, class, keyStorage, fingerprint, digest} | null, problem: 'two-entries' | 'entry-changed' | 'expired' | 'not-admin' | 'no-member' | null} | null`.
+  - `generation` counts pairings in this run.
+  - `digest` is the candidate's canonical device digest.
+  - The renderer's PairSheet shows the fingerprint, to compare with the device's own screen.
+- **`org.pair.approve {generation, digest}`.** The approval names the candidate the person compared, as `pair` keeps the exact device it showed (`admin.ts:790-801`).
+  - It refuses `stale` when the pairing's generation or the candidate's digest isn't the one named.
+  - It then reads the pending list again and requires that same canonical device ("the entry changed after it was shown", `pair`'s rule).
+  - It signs `device.approve` with the frozen candidate, never with what the read returned.
+  - The edit's `apply` checks, synchronously, that the pairing is still this generation and not cancelled or expired. Otherwise it throws `StaleEdit`, so a cancel or an expiry during Touch ID signs nothing.
+  - The edit appends the device to the member. For yourself, `Edit.endorse` names it, and the state signer endorses it with this Mac's step-up key inside the same Touch ID, before signing the state.
+- **`org.pair.cancel`** ends it, advancing nothing a signing in flight relies on: that signing's `apply` sees the pairing ended and reads `stale`.
 
 One pairing at a time, and none while a rekey runs, since both are the session's attempts.
 
@@ -792,9 +803,17 @@ One pairing at a time, and none while a rekey runs, since both are the session's
 - The renderer shows a refusal under the control whose attempt it names, which retires `OrgSection`'s `source` state and its after-reload heuristic (`rekeyRefused`; P5 Decision Log 126's residue).
 - Pairing refusals are the pairing's own (`pairing.problem`, or the start's answer), not the session's.
 
-*Close.* `close()` stops the parts, as today, then awaits the commit queue's tail. A write already queued (an anchor, a settle's file, the rekey's intent) is on disk when `close()` resolves.
+*Close.* A late write comes from a producer, not only from the queue. A signer step awaiting a hub read can adopt after the queue has drained: `signer.ts:277-291` keeps its held view across `await hub.chain()`, its `close()` only sets flags (`:616-620`), adoption writes `chain.json` and queues an anchor (`held.ts:368-373`), and `writeAnchor` doesn't refuse a closed session (`org-session.ts:640-646`). So `close()` runs in four steps:
+  1. It fences: `closed` is set, and every producer checks it after each await, before it adopts or queues a write. The signer's adoption checks its lifecycle epoch there, as its posts already do. `writeAnchor` and the session's other queued writers refuse to enqueue once closed. The held view's `adoptServed` takes a guard the session passes, which is false once closed.
+  2. It stops the parts, as today.
+  3. It awaits the producers in flight: the signer's current operation, the sync and the deliveries' run, which each part's `close()` now returns. It awaits them from outside the commit queue, never inside it.
+  4. It awaits the commit queue's tail.
+
+  When `close()` resolves, nothing more is written under `org/`.
 - The test workarounds go: 8d18883f4's `rm` retry, and 8e21b6354's wait for the anchor in `crashedRekey`.
-- A test holds a queued anchor write open, and asserts that `close()` resolves only after it lands.
+- Two tests:
+  - one holds a queued anchor write open and asserts `close()` resolves only after it lands;
+  - one holds the signer's hub read open, calls `close()`, releases the read, and asserts that no file under `org/` changes after `close()` resolved.
 - This closes the tracker row P5 Decision Log 129 opened.
 
 *The split.*
@@ -820,7 +839,7 @@ One pairing at a time, and none while a rekey runs, since both are the session's
   - `org-protocol`'s `pairing.test.ts` gains the moved judges' cases: those admin's suites pin through `pair`, now on the functions themselves.
 - **`apps/org-protocol/test/successor-problems.test.ts` (new):**
   - `successorProblems` names each problem, with one case per code.
-  - It accepts what `verifySuccessor` accepts over the package's vectors, signatures aside.
+  - Over the package's vectors whose successor `verifySuccessor` accepts with no transition, `successorProblems` finds nothing. Over those it refuses for a non-signature reason, it names a problem. The recovery vectors are outside its contract, and a case says so.
   - `endorsing` counts a named device as endorsed only under one of the member's own keys.
   - `stateInvariants` agrees with `stateProblems` on every vector.
 - **`edits.test.ts`:**
@@ -834,6 +853,10 @@ One pairing at a time, and none while a rekey runs, since both are the session's
   - two entries refuse;
   - `503` keeps polling, while `403` and `404` end;
   - approve re-reads, and refuses a changed entry;
+  - a same-id entry reposted with other keys, between display and approval, ends the pairing as `entry-changed`;
+  - approval naming an old generation or digest reads `stale`;
+  - a cancel during Touch ID signs nothing;
+  - a wrong class is "not this pairing's";
   - the code and `k` are never in a status;
   - expiry ends it.
 - **`step-up.test.ts`:** one confirmation endorses and signs, the endorsement verifying under the device's step-up key; a cancel endorses nothing.
@@ -843,9 +866,11 @@ One pairing at a time, and none while a rekey runs, since both are the session's
   - `org.preview` and `org.change` bind the digest (`stale`);
   - `refused.attempt` names each attempt;
   - `close()` resolves after a held anchor write;
+  - a signer hub read released after `close()` writes nothing;
   - the two workarounds are gone and the cases still pass 20 runs in a row.
 - **The renderer** (`settings-tab/org/*.test.tsx`):
   - each group draws its rows;
+  - a machine's up state follows `machines.changed` while the org version stays the same;
   - read-only without `maySign`;
   - each change's sheet shows its lines and warnings, and Confirm sends the previewed digest;
   - a refused preview shows its findings and no Confirm;
@@ -1086,8 +1111,10 @@ The move commit is the branch's first. Run its checks before any other M4a work:
     pnpm --filter desk-hub exec vitest run test/deploy/admin.test.ts test/deploy/admin-verbs.test.ts
     pnpm --filter desk-hub exec vitest run test/deploy/production-scripts.test.ts
     pnpm --filter org-protocol exec vitest run test/pairing.test.ts
-    # admin resolves the moved code as the deploy checkout runs it (node --experimental-strip-types): read-only verbs
-    # against the local hub, in a scratch org (the deploy README's local recipe)
+    # the package boundary on its own: the judges imported straight from org-protocol under Node's type stripping
+    node --experimental-strip-types --input-type=module -e "const m = await import('./apps/org-protocol/src/index.ts'); console.log(['judgeEntry','entryDevice','isPairedDeviceId','isRpId'].map((n) => typeof m[n]).join(' '))"
+    # admin as the deploy checkout runs it (bin.ts bundles it): read-only verbs against the local hub, in a scratch org
+    # (the deploy README's local recipe)
     pnpm --filter desk-hub local --state ~/.local/share/o8-m4a-move/hub          # a second terminal; Ctrl-C at the end
     pnpm --filter desk-hub deployment admin init --keys ~/.local/share/o8-m4a-move/keys.json --hub http://127.0.0.1:8747 --user owner@example.com
     pnpm --filter desk-hub deployment admin genesis --keys ~/.local/share/o8-m4a-move/keys.json --hub http://127.0.0.1:8747 --user owner@example.com --recovery ~/.local/share/o8-m4a-move/recovery.json --yes
@@ -1095,7 +1122,7 @@ The move commit is the branch's first. Run its checks before any other M4a work:
     pnpm --filter desk-hub deployment admin devices --keys ~/.local/share/o8-m4a-move/keys.json --hub http://127.0.0.1:8747 --user owner@example.com
     rm -r ~/.local/share/o8-m4a-move
 
-Expected: the suites pass, and `show` and `devices` print as they did before the move.
+Expected: the import line prints `function function function function`; the suites pass; `show` and `devices` print as they did before the move.
 
 The same checks follow the pre-sign commit. That commit also runs `org-protocol`'s whole suite once, through the gate, not locally.
 
@@ -1112,7 +1139,7 @@ Then the milestone:
     npx vitest run --project node src/main/org/signer.test.ts
     npx vitest run --project node src/main/org/org-session.test.ts
     npx vitest run --project node src/main/device/step-up.test.ts
-    npx vitest run --project node-timing test/org/org-page.local.test.ts
+    npx vitest run --project node-timing test/org/org-page.local.test.ts    # registered in TIMING_NODE_TESTS first
     npx vitest run --project renderer src/renderer/src/settings-tab/org/<each group's test file>
     npx eslint src/main/org src/main/device src/main/index.ts src/shared/ipc/schema/org.ts src/renderer/src/settings-tab apps/org-protocol/src apps/desk-hub/deploy/admin.ts test/org
     W/scripts/ci-gate.sh W --gates static,unit,probes --class1a pool --peer none
@@ -1488,7 +1515,8 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
     // apps/org-protocol/src/org-state.ts (desk-track reviewed)
     export type Problem = { code: string; detail?: string };
     export function stateProblems(state: OrgState): Promise<Problem[]>;          // stateInvariants(s) === (problems.length === 0)
-    export function successorProblems(before: OrgState, after: OrgState, opts?: { endorsing?: { kid: string; devices: string[] } }): Promise<Problem[]>;
+    export function successorProblems(before: OrgState, after: OrgState, opts?: { endorsing?: { kid: string; devices: string[] } }): Promise<Problem[]>;   // ordinary successors only
+    export type PendingEntry = { /* the judges' structural input, package-owned */ };
     // apps/org-protocol/src/pairing.ts: judgeEntry, entryDevice, isPairedDeviceId, isRpId (moved from deploy/admin.ts)
 
     // src/shared/ipc/schema/org.ts
@@ -1496,7 +1524,7 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
       version: number; issued: string; maySign: boolean; recoveryKid: string;
       members: { id: string; email: string; name: string; role: 'admin' | 'member'; you: boolean;
                  devices: { id: string; class: 'native-mac' | 'web-cards'; keyStorage: string; root: boolean; thisMac: boolean; fingerprint: string }[] }[];
-      machines: { name: string; ref: string; owners: string[] | 'org'; up: boolean }[];
+      machines: { name: string; ref: string; owners: string[] | 'org' }[];          // up or not: the renderer's useMachines
       roots: ({ kid: string; member: string; device: string } | { kid: string; unlisted: true })[];
     };
     export type OrgChange =
@@ -1507,9 +1535,10 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
     // org.view: void -> OrgView | null
     // org.preview {change}: {ok: true, change, lines, warnings, digest} | {ok: false, reason, findings}
     // org.change {change, digest}: SignResult (stale on another digest)
-    // org.pair.start {member}: {ok: true, code, expires} | {ok: false, reason}   (the code only here)
-    // org.pair.approve {entry: string}: SignResult;  org.pair.cancel: void
-    // OrgStatus registered gains pairing: {member, expires, entry: {id, class, keyStorage, fingerprint} | null, problem: 'two-entries' | 'expired' | 'not-admin' | 'no-member' | null} | null
+    // org.pair.start {member, class: 'native-mac' | 'web-cards'}: {ok: true, code, expires} | {ok: false, reason}   (the code only here)
+    // org.pair.approve {generation, digest}: SignResult;  org.pair.cancel: void
+    // OrgStatus registered gains pairing: {generation, member, class, expires, entry: {id, class, keyStorage, fingerprint, digest} | null,
+    //   problem: 'two-entries' | 'entry-changed' | 'expired' | 'not-admin' | 'no-member' | null} | null
     // OrgRefusal gains attempt: 'register' | 'reanchor' | 'signIn' | 'rekey'
 
     // src/main/org/signer.ts
@@ -1974,6 +2003,16 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   Date/Author: 2026-10-29, O8's executor, on the architect's ruling.
 
 - Decision: `close()` awaits the commit queue's tail. This is folded into M4a, which touches `org-session.ts` anyway. The two test workarounds go (8d18883f4, 8e21b6354), which closes P5 Decision Log 129's tracker row.
+  Date/Author: 2026-10-29, O8's executor.
+
+- Decision: The re-plan's buildability round is folded in (doperpowers:adversarial-reviewer on f8f51e500: 1 P1, 5 P2, 1 P3, each checked against the cited code and adopted). Its verdict keeps members in M4a: the protocol supports device-less members, first-device pairing, email admission, demotion and key-accounted removal, so no M4d.
+  1. (P1) Pairing approval is bound to the candidate the person compared. The candidate is frozen when found. A same-id entry reposted with other keys ends the pairing. `org.pair.approve` names `{generation, digest}`, and the edit signs the frozen device, checking at `apply` that the pairing is still live.
+  2. `successorProblems` is scoped to ordinary successors. A held transition changes non-signature rules, and the recovery vector is accepted unendorsed that way. `verifySuccessor` keeps its verdicts and their order.
+  3. `close()` fences its producers and joins them before draining the queue, since a signer step awaiting a hub read can adopt after the tail has drained. A test holds that read open across `close()`.
+  4. Pairing uses today's API: `judgeEntry(entry, {org, member, k, class, listed})`, `k` base64url in the code, a class chosen in the sheet (`native-mac` by default), and `listed` from the held head. The judges' input type moves as a package-owned `PendingEntry`.
+  5. Whether a machine is up comes from the renderer's `useMachines`, not the view, since a link drops with no new head.
+  6. `org-page.local.test.ts` is registered in `TIMING_NODE_TESTS`.
+  7. (P3) `deploy/bin.ts` bundles admin, so the move's steps also import the judges straight from the package under Node's type stripping.
   Date/Author: 2026-10-29, O8's executor.
 
 ## Outcomes & Retrospective
