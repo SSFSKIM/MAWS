@@ -55,8 +55,8 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-29) Task 3, reviewed clean (643d126de, fix 6d23a8055): the signing paths: `edits.ts`, `Edit.endorse` and `Edit.live`, `StateSigner.sign`'s endorsement and guard, the signer's check before the slot, and `checks.ts` running `successorProblems`.
   - [x] (2026-10-29) Task 4, reviewed clean (19730e6ae; class 1a green through it, run 40819796641): the session's surface: `org.view`, `org.preview`, `org.change`, `org.pair.*`, `pairing.ts`, `hub-client.ts`'s `pendingOf`, `refused.attempt`, the schema and main's wiring.
   - [x] (2026-10-29) Task 5, reviewed clean (9b9f8945d, fix 653e60c0b; class 1a green at the fix, run 40824276945): `close()`'s fence and join (`HeldOrg.close()`, the parts' operations in flight), and the two test workarounds removed.
-  - [ ] Task 6: the renderer: `settings-tab/org/`, the four groups, the change and pair sheets, `copy.ts`.
-  - [ ] Task 7: `test/org/org-page.local.test.ts`, registered in `TIMING_NODE_TESTS`.
+  - [x] (2026-10-29) Task 6, reviewed clean (1971d3be9, fix 7437e1e2e): the renderer: `settings-tab/org/`, the four groups, the change and pair sheets, `copy.ts`.
+  - [x] (2026-10-29) Task 7, reviewed clean (7033fb853): `test/org/org-page.local.test.ts`, registered in `TIMING_NODE_TESTS`; 6/6, six runs in a row.
   - [ ] Task 8: the Org page's look made checkable through the gate: one `e2e:settings` case over a seeded org, its four groups screenshotted and attached, run hosted with `--evidence` for the architect's look.
 - [ ] M4b — Machines and their rights — *advisory; needs M4a*
 - [ ] M4c — Delegations — *advisory; needs M4a*
@@ -2130,6 +2130,29 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
 - Decision: M4a gains Task 8, the Org page's look checked through the gate. Task 6 was proved in happy-dom only, and this MacBook may not launch the app, so the look would otherwise wait for an owner's sitting. One case in the e2e group that opens Settings seeds an org with real-world variety: a member whose name and email wrap, a member with several devices, a pending pairing, and a refusal with no attempt. It screenshots each of the four groups and attaches the PNGs (`testInfo.attach`), and asserts only structure: no horizontal overflow, and every row's actions visible. The group runs on the hosted lane with `--evidence`, so the attachments upload when green, and the architect reads the screenshots. The PR names the owner's taste look as a later sitting only if the architect finds nothing wrong.
   Rationale: a renderer whose wrapping nobody has seen is not done; the gate can carry the evidence without an owner present.
   Date/Author: 2026-10-29, the architect (O8's executor recording).
+
+- Decision: M4a Task 6, the Org page's renderer (1971d3be9, review fix 7437e1e2e), settles these points.
+  1. The groups are `<h4>` headings in `data-org-group` divs, not regions: a group named "Org" would collide with the Settings section's region and with the "Org" row.
+  2. Org state shows in every registered state (M1 showed it only when signed in). The held chain's problem stays with its Re-anchor field in You; Org's Problem row shows every other problem. The signer lines show only when signed in, as before.
+  3. A refusal shows under the control its attempt names. One naming no attempt, or naming a control the page no longer offers (a `rekey` refusal with no new-keys field), goes in a "Refused" row of its own, at the end of You or after the code field in `none`, so none is dropped. A command's own synchronous `{ok: false}` is tagged with the attempt the page sent.
+  4. The old-device row (M3's) offers Remove… through the change sheet (`device.remove`), only while `maySign`, in place of the `remove-device` command line.
+  5. People offers nothing the composers refuse for yourself. Make a root is offered on an admin's non-root `native-mac` device; whether it has a step-up key is the preview's to refuse (`not-signing-device`), since the view does not carry it.
+  6. A later device of a member who signs reads "They pair their next device from their own Org page."; the non-signing case reads the spec's sentence. Neither offers the action.
+  7. A change that succeeds closes its sheet and shows "Signed version N." at the foot of People. Any other failure stays in the sheet with Sign withdrawn. The person's own Touch ID cancel shows nothing.
+  8. Closing the pairing sheet while a pairing runs (Cancel pairing, Escape, the overlay) cancels it, since its code cannot be shown again. A pairing running with no sheet reads "Pairing a device until HH:MM" on its member's row with Show…, which reopens the sheet without the code. The code lives only in the sheet's state and is dropped once the entry appears or the pairing ends.
+  9. An approval's answer shows in every stage of the sheet, because main publishes a pairing's end before approve answers: `cancelled` with a detail reads "ended while Touch ID was open", `stale` reads "ended, or its device changed, before Touch ID" with main's detail, and the person's own cancel shows nothing.
+  10. When this Mac loses the right to sign, an open change or pairing sheet withdraws its signing actions and says why rather than closing; an operation in flight keeps its answer.
+  11. The pairing sheet says, beside Approve and while an approval is pending, that once the signed state is kept a cancel no longer withdraws it and Discard is the way back (`ORG.pairDurable`, muted text).
+  12. Machines read Up, Connecting…, Offline, or "Not connected" when the roster does not name the machine. Owners read you as "you", an id the head no longer lists as "a former member", and `'org'` as "Owned by the org". The spec's "(here in M4b)" reads "Enrolling from this page comes later.", the UI carrying no milestone ids.
+  13. `SheetForm`'s `submitLabel` is optional: without it there is no default button and Enter submits nothing. The Org sheets use it, so a refused preview has no Confirm.
+  Date/Author: 2026-10-29, O8's executor.
+
+- Decision: M4a Task 7, `test/org/org-page.local.test.ts` (7033fb853), settles these points.
+  1. Step 5 removes B's device before B, so B's app reads `removed` from a verified head while the hub still admits it; removing B first would end B's feed with a `4403`, which reads `denied`.
+  2. `member.email` is proved by `edits.test.ts`, not here: B's app holds a fixed stand-in identity, so changing B's email would end its hub access mid-scenario.
+  3. The pairing secret is checked by booleans only, so a failure cannot print a code.
+  4. A's `PAIR_POLL_MS` is 100 in this suite (2 s in production).
+  Date/Author: 2026-10-29, O8's executor.
 
 ## Outcomes & Retrospective
 
