@@ -9,17 +9,26 @@
 # "The operation was canceled." and "Process completed with exit code 130." (ci-kit's simulated preemption,
 # SSFSKIM/ci-kit-sandbox run 38927837115). A preempted job is one that concluded so on a `ci-kit-gce-*` runner, in a
 # run not itself cancelled, with no timeout annotation: a job past its timeout-minutes reads "The operation was
-# canceled." too, beside "… has exceeded the maximum execution time …", and is red. Prints them, "id<TAB>name" lines,
-# from the jobs of the run's latest attempt, "id<TAB>conclusion<TAB>runner<TAB>name" lines; settle_run asks only of a
-# run not cancelled. A job whose annotations cannot be read is not one. Only a job that ran in the attempt carries
-# annotations: GitHub copies the jobs a rerun leaves alone into the new attempt under new ids and without them.
+# canceled." too, beside "… has exceeded the maximum execution time …", and is red. An EC2 spot interruption instead
+# leaves a `failure` on a `ci-kit-ec2-*` runner annotated "The self-hosted runner lost communication with the server."
+# followed by GitHub's troubleshooting advice (MAWS run 40961677238, job 123755932819). A tree-starved box can produce
+# the same annotation: retry it under the same bound, without claiming its cause. Prints "id<TAB>name<TAB>reason"
+# lines from the latest attempt's "id<TAB>conclusion<TAB>runner<TAB>name" lines; settle_run asks only of a run not
+# cancelled. A job whose annotations cannot be read is not one. Only a job that ran in the attempt carries annotations:
+# GitHub copies the jobs a rerun leaves alone into the new attempt under new ids and without them.
 preempted_jobs() { # <the jobs>
-  local id conclusion runner name notes
+  local id conclusion runner name notes reason
   while IFS=$'\t' read -r id conclusion runner name; do
-    [[ $conclusion == failure && $runner == ci-kit-gce-* ]] || continue
+    [[ $conclusion == failure && ( $runner == ci-kit-gce-* || $runner == ci-kit-ec2-* ) ]] || continue
     notes=$'\n'$(gh api --paginate "repos/$REPO/check-runs/$id/annotations?per_page=100" --jq '.[].message' </dev/null)$'\n' || continue
-    [[ $notes == *$'\nThe operation was canceled.\n'* && $notes != *'exceeded the maximum execution time'* ]] || continue
-    printf '%s\t%s\n' "$id" "$name"
+    if [[ $runner == ci-kit-gce-* ]]; then
+      [[ $notes == *$'\nThe operation was canceled.\n'* && $notes != *'exceeded the maximum execution time'* ]] || continue
+      reason=preempted
+    else
+      [[ $notes == *$'\nThe self-hosted runner lost communication with the server.'* ]] || continue
+      reason='lost its runner (EC2 spot interruption or a box the tree starved)'
+    fi
+    printf '%s\t%s\t%s\n' "$id" "$name" "$reason"
   done <<<"$1"
 }
 
@@ -39,7 +48,7 @@ listed() { # <list> <name>
 # await_run's do.
 # Its lists of names hold one whole name a line: a job's name can have spaces in it (unit's shards, `unit <k>/<n>`).
 settle_run() {
-  local rows found id name pending='' retried='' twice='' refused='' next rerun_err started observed run_status unread=0
+  local rows found id name reason pending='' retried='' twice='' refused='' next rerun_err started observed run_status unread=0
   while :; do
     await_run
     # The attempt, its status and its conclusion from one observation of the run, then that attempt's jobs.
@@ -66,13 +75,13 @@ settle_run() {
     # In a cancelled run nothing is a preemption, and nothing found before is rerun.
     [[ $conclusion != cancelled ]] || break
     found=$(preempted_jobs "$rows")
-    while IFS=$'\t' read -r id name; do
+    while IFS=$'\t' read -r id name reason; do
       [[ -n $name ]] || continue
       if listed "$retried" "$name"; then
-        listed "$twice" "$name" || { twice+=$name$'\n'; echo "ci-gate: $name preempted again in attempt $run_attempt; it stays red"; }
+        listed "$twice" "$name" || { twice+=$name$'\n'; echo "ci-gate: $name $reason again in attempt $run_attempt; it stays red"; }
       elif ! listed "$pending$refused" "$name"; then
         pending+=$name$'\n'
-        echo "ci-gate: $name preempted in attempt $run_attempt"
+        echo "ci-gate: $name $reason in attempt $run_attempt"
       fi
     done <<<"$found"
     next=${pending%%$'\n'*}
@@ -122,7 +131,7 @@ settle_run() {
     $1 == "success" { g = g " " $2; next }
     { d = d " " $2 ($1 == "failure" ? "" : " (" $1 ")") }
     END {
-      printf "ci-gate: preempted by GCE (%d):%s%s%s%s%s\n", nall, all, (g ? "; green on its rerun:" g : ""), (d ? "; red on its rerun:" d : ""),
-        (t ? "; preempted twice, red:" t : ""), (r ? "; not rerun, red:" r : "")
+      printf "ci-gate: pool runner interruptions (%d):%s%s%s%s%s\n", nall, all, (g ? "; green on its rerun:" g : ""), (d ? "; red on its rerun:" d : ""),
+        (t ? "; interrupted twice, red:" t : ""), (r ? "; not rerun, red:" r : "")
     }')
 }

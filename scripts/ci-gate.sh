@@ -12,10 +12,13 @@
 # .github/workflows/gate.yml on it, prints each job's conclusion, downloads the failed e2e jobs' reports to
 # /tmp/maws-review/gates/ci-<short>-<run-id>-<invocation>/reports/ (including hosted reports from SSFSKIM/maws-app),
 # keeps the whole transcript beside it in transcript.log, deletes the
-# ref (unless --keep) and exits with the run's status (0 green, 1 anything else). A job GCE preempted on ci-kit's pool
-# is rerun alone, once per job per run, and the script reports the run's final attempt: the line before the run's status,
-# `ci-gate: run <id> <conclusion>`, is `ci-gate: run <id> attempt <n>`, and a line before those names each preempted job
-# and how its rerun ended, one preempted again staying red (Decision Log 70). When the mini refused jobs (ci-kit's
+# ref (unless --keep) and exits with the run's status (0 green, 1 anything else). On ci-kit's pool, a failed GCE job
+# annotated "The operation was canceled." without a timeout, or a failed EC2 job annotated "The self-hosted runner
+# lost communication with the server.", is rerun alone, once per job per run. The EC2 annotation can mean a spot
+# interruption or a box the tree starved, not a proven preemption. The script reports the run's final attempt: the line
+# before the run's status, `ci-gate: run <id> <conclusion>`, is `ci-gate: run <id> attempt <n>`, and a line before those
+# names each interrupted job and how its rerun ended, one interrupted again staying red (Decision Log 70).
+# When the mini refused jobs (ci-kit's
 # job-started check: a dialog or the wrong app in front; its measured-job guard: a MEASURED_E2E group's desktop not
 # settled within 15 minutes), the last line before the run's status names the refused, the green and the red, and the
 # --gates that relaunches the refused and the red on the same tree (Decision Log 58(c), 59(1)), with --default-beside
