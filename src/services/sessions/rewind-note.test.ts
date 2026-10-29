@@ -152,6 +152,30 @@ describe('the rewind repair: a last-act note, re-sent at resume', () => {
     expect(h.host.calledWith('session.rewind')).toEqual([]);
   });
 
+  it('an act begun before the rewind, answered after it, leaves the rewind’s note', async () => {
+    const id = await liveSession();
+    const seam = h.host as unknown as { answer: Answer };
+    const answer = seam.answer.bind(h.host);
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let sent: () => void = () => {};
+    const sending = new Promise<void>((resolve) => (sent = resolve));
+    vi.spyOn(seam, 'answer').mockImplementation(async (name, input) => {
+      if (name !== 'session.send') return answer(name, input);
+      sent();
+      await held; // the host's answer is on its way back while the rewind goes out
+      return answer(name, input);
+    });
+    const earlier = invoke('session.send', { appSessionId: id, content: 'before the rewind' });
+    await sending;
+    expect(await rewind(id)).toMatchObject({ ok: true });
+    release();
+    expect(await earlier).toMatchObject({ ok: true });
+    expect(noteOf(id)).toMatchObject({ state: 'confirmed' });
+    expect(await invoke('session.send', { appSessionId: id, content: 'after the rewind' })).toMatchObject({ ok: true });
+    expect(noteOf(id)).toBeNull(); // an act begun after it still clears it
+  });
+
   it('a refused act keeps the note', async () => {
     const id = await liveSession();
     expect(await rewind(id)).toMatchObject({ ok: true });

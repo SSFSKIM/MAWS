@@ -67,6 +67,9 @@ export class RewindNotes {
   private readonly notes = new Map<AppSessionId, RewindNote>();
   private loading: Promise<void> | null = null;
   private readonly tails = new Map<AppSessionId, Promise<unknown>>();
+  // Each session's rewinds begun so far: an act clears only a note no rewind begun after the act wrote (its answer may
+  // come back after a later rewind's).
+  private readonly rewinds = new Map<AppSessionId, number>();
   private closed = false;
 
   constructor(
@@ -84,6 +87,7 @@ export class RewindNotes {
   // `session.rewind`, through the note. A note that cannot be written refuses the rewind unsent.
   async rewind(input: CommandInput<'session.rewind'>): Promise<CommandOutput<'session.rewind'>> {
     const appSessionId = input.appSessionId as AppSessionId;
+    this.rewinds.set(appSessionId, (this.rewinds.get(appSessionId) ?? 0) + 1);
     const live = await reservationOf(this.deps.dispatch, appSessionId).catch(() => null);
     const note: RewindNote = {
       appSessionId,
@@ -105,11 +109,14 @@ export class RewindNotes {
     return outcome;
   }
 
-  // A conversation act, forwarded; once the host accepted it the note has served.
+  // A conversation act, forwarded; once the host accepted it the note it followed has served (a rewind begun after the
+  // act keeps its own).
   async act<N extends ConversationAct>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> {
+    const appSessionId = input.appSessionId as AppSessionId;
+    const rewinds = this.rewinds.get(appSessionId) ?? 0;
     const result = await this.deps.dispatch('engine-host', name, input);
     if (!result.ok) throw new HostCommandError(result.error);
-    await this.clear(input.appSessionId as AppSessionId);
+    await this.quietly(appSessionId, (note) => (note === null || (this.rewinds.get(appSessionId) ?? 0) !== rewinds ? undefined : null));
     return result.value as CommandOutput<N>;
   }
 
