@@ -34,6 +34,11 @@ import { DEFAULT_LABEL, UnitError, type CommandRunner, type UnitProgram } from '
 
 export const EXIT = { done: 0, failed: 1, unavailable: 2, notRunning: 3, notListed: 4 } as const;
 const WAIT_DEFAULT_S = 300; // a bare `--wait`'s seconds, and `provision`'s wait when it is given none (the module's)
+// `endpoint attest-history`'s deadline (P5 O14 M4): the module reads every inventory writer's events from the hub page by
+// page, minutes on a machine with hundreds of writers, each read bounded by the hub client's own 30 s. The run goes on
+// to its end in mawsd whether or not this command still waits for it (one at a time; its outcome in mawsd's log), so this
+// bound only decides how long the caller sees the outcome itself, and ends the wait on a daemon that never answers.
+const ATTEST_HISTORY_TIMEOUT_MS = 60 * 60_000;
 const FOLLOW_INTERVAL_MS = 500;
 
 export const USAGE = `usage: mawsd <command> [--profile <dir>] [--label <label>]
@@ -398,7 +403,8 @@ async function endpoint(context: Context, args: readonly string[]): Promise<numb
   if (command === undefined) throw new Usage('mawsd endpoint needs a command');
   if (Object.hasOwn(SECRET_COMMANDS, command)) return withSecret(context, command as SecretCommand, rest);
   if (command === 'keys') return keys(context, rest);
-  return withDaemon(context, async (link) => answered(context.deps, await link.request('daemon.endpoint', { command, args: [...rest] })));
+  const timeoutMs = command === 'attest-history' ? ATTEST_HISTORY_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
+  return withDaemon(context, async (link) => answered(context.deps, await link.request('daemon.endpoint', { command, args: [...rest] }, timeoutMs)));
 }
 
 // The commands that read a secret. A code's (`code`): the flags it passes to the module and how long the module waits
