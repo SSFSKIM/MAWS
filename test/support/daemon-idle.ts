@@ -21,7 +21,7 @@ import { execFileSync } from 'node:child_process';
 import { cpus } from 'node:os';
 import { basename } from 'node:path';
 
-// The window, and its load rule (the architect's Rule B at 4.7, 2026-10-28). A window is void on load when its 1-minute
+// The window, and its load rule (the architect's Rule B at 4.7). A window is void on load when its 1-minute
 // load reaches maxLoad at a sample and its 30 s pair reaches pairLoad: the highest load two adjacent 30 s intervals both
 // held, each interval's own average rebuilt from the 1-minute series (loadPair). What voids a window is sustained load.
 // A burst, one short system-wide wakeup the 1-minute average smears over about 90 s so that two or three samples read 5
