@@ -1614,6 +1614,47 @@ describe('owners and the People toggle', () => {
     expect(entries(within(recordCard).getByRole('list', { name: 'Owners' }))).toEqual(['Benben@example.com']);
   });
 
+  // The toggle shows only where it can act: with others to show, or while it is on (so it can be turned off). A row with
+  // neither is as it was before M5, so a person with no org sees no dead control and the row's hover geometry is unchanged.
+  const peopleAction = (name: string) => within(row(name)).queryByRole('button', { name: /people’s sessions in/ });
+  const peopleItem = async (name: string) => {
+    fireEvent.contextMenu(row(name));
+    const item = within(await screen.findByRole('menu')).queryByRole('menuitemcheckbox', { name: /Show people’s sessions/ });
+    await userEvent.keyboard('{Escape}');
+    return item;
+  };
+
+  it('offers no People toggle on a row with no others and the toggle off, project and machine rows alike', async () => {
+    fill([listedOn('b1', { title: 'Mine' }), listedOn('b2', { title: 'Mine elsewhere', orgKey: null })]);
+    expandAll();
+    render(<Sidebar />);
+    expect(projectRows()).toEqual(['MAWS', 'Studio']);
+    expect(peopleAction('MAWS')).toBeNull();
+    expect(within(row('MAWS').querySelector<HTMLElement>('[data-project-line]')!).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Resume a session in MAWS', 'Remove MAWS from sidebar', 'New chat in MAWS']);
+    expect(await peopleItem('MAWS')).toBeNull();
+    expect(await peopleItem('Studio')).toBeNull();
+  });
+
+  it('offers it with others to show, and while on with every other drawn, pressed and checked; off again, the count shows and the action stays', async () => {
+    fill([theirs('b1', { title: 'Theirs here' }), theirs('b2', { title: 'Theirs elsewhere', orgKey: null })]);
+    expandAll();
+    render(<Sidebar />);
+    expect(peopleAction('MAWS')?.getAttribute('aria-pressed')).toBe('false');
+    expect((await peopleItem('MAWS'))?.getAttribute('aria-checked')).toBe('false');
+    expect((await peopleItem('Studio'))?.getAttribute('aria-checked')).toBe('false');
+
+    people(ORG);
+    expect(within(row('MAWS')).queryByLabelText('1 other')).toBeNull(); // every other drawn
+    expect(peopleAction('MAWS')?.getAttribute('aria-label')).toBe('Hide people’s sessions in MAWS');
+    expect(peopleAction('MAWS')?.getAttribute('aria-pressed')).toBe('true');
+    expect((await peopleItem('MAWS'))?.getAttribute('aria-checked')).toBe('true');
+
+    // turned off (as the store sets it: the click and its write are the persistence test's, which owns the store's one read)
+    people();
+    expect(within(row('MAWS')).getByLabelText('1 other').textContent).toBe('+1 other');
+    expect(peopleAction('MAWS')?.getAttribute('aria-label')).toBe('Show people’s sessions in MAWS');
+  });
+
   it('names no owners in the hover card of your own session', async () => {
     fill([listedOn('b1', { title: 'Mine', lane: 'A' })]);
     expandAll();

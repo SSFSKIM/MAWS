@@ -13,7 +13,9 @@
 // projects) is the same row without hover actions or a card, with a context menu for its archived sessions. A row whose
 // machines are all offline greys (T2). P5 O8 M2: other machines' listed sessions sit among its sessions (`ListedRow.tsx`).
 // P5 O8 M5 (Q3): its People toggle (the first hover action, and its menu's checked item; a machine's row has the menu
-// alone) draws other people's sessions among them; while it is off, "+N others", faint, counts those it leaves out.
+// alone) draws other people's sessions among them; while it is off, "+N others", faint, counts those it leaves out. The
+// toggle is offered only where it can act, with others to show or while it is on (`data-people` tells the menu), so a
+// row with neither (every row of a person with no org) is as it was before M5.
 import { useState } from 'react';
 import type { ProjectId } from '@shared/graph/ids';
 import { machineOf } from '@shared/machine/address';
@@ -45,6 +47,7 @@ export interface ProjectRowProps {
 
 export function ProjectRow({ entry, open, sessions, more, matchCount, onToggle, onShowMore }: ProjectRowProps) {
   const { key, project, name, rollup } = entry;
+  const people = usePeople((s) => (s.on.has(key) || entry.others > 0 ? s.on.has(key) : null)); // null: no toggle offered
   const offline = useMachines((s) => {
     const machines = entry.machine !== null ? [entry.machine] : entry.org.checkouts.map((c) => c.machine);
     return machines.length > 0 && machines.every((m) => selectOffline(s, m));
@@ -87,7 +90,7 @@ export function ProjectRow({ entry, open, sessions, more, matchCount, onToggle, 
           )}
         </span>
       )}
-      {project ? <ProjectActions projectId={project.id} rowKey={key} name={name} /> : <span aria-hidden className="size-[22px] shrink-0" />}
+      {project ? <ProjectActions projectId={project.id} rowKey={key} name={name} people={people} /> : <span aria-hidden className="size-[22px] shrink-0" />}
     </div>
   );
 
@@ -103,6 +106,7 @@ export function ProjectRow({ entry, open, sessions, more, matchCount, onToggle, 
       data-kind="project"
       data-offline={offline || undefined}
       data-menu={project ? `project:${project.id}` : `machine:${entry.machine}`}
+      data-people={people !== null || undefined}
       onFocus={(event) => {
         if (event.target !== event.currentTarget) return;
         tree.onFocusItem(nodeId);
@@ -140,18 +144,17 @@ const othersText = (count: number) => `+${count} ${count === 1 ? 'other' : 'othe
 const peopleActionLabel = (on: boolean) => (on ? 'Hide people’s sessions' : 'Show people’s sessions');
 
 // The row's hover actions, out of the tab order (the row is the tree's stop; its context menu carries the same actions
-// for the keyboard): the people icon toggles the row's other people's sessions, pressed while they show (P5 O8 M5, the
-// menu's "Show people's sessions"; first, so the three before it keep their places), the search icon opens the Resume…
-// picker on the project (I7, "Resume a session…"), the minus removes the project from the sidebar after a confirm (I5;
-// the menu's "Remove from sidebar…"), and "+" opens an unstarted session tab in the project ("New chat in X", the New
-// chat landing's open copy item).
-function ProjectActions({ projectId, rowKey, name }: { projectId: ProjectId; rowKey: ProjectKey; name: string }) {
+// for the keyboard): where the row offers its People toggle (`people` not null), the people icon toggles the row's other
+// people's sessions, pressed while they show (P5 O8 M5, the menu's "Show people's sessions"; first, so the three after
+// it keep their places), the search icon opens the Resume… picker on the project (I7, "Resume a session…"), the minus
+// removes the project from the sidebar after a confirm (I5; the menu's "Remove from sidebar…"), and "+" opens an
+// unstarted session tab in the project ("New chat in X", the New chat landing's open copy item).
+function ProjectActions({ projectId, rowKey, name, people }: { projectId: ProjectId; rowKey: ProjectKey; name: string; people: boolean | null }) {
   const canCreate = useSessionCreatorRegistered() && machineOf(projectId) === ipc.localMachine;
   const canRemove = useProjectActionEnabled('removeProject');
-  const people = usePeople((s) => s.on.has(rowKey));
   return (
     <span className="hidden shrink-0 items-center group-hover/line:flex group-focus-visible/project:flex">
-      <button
+      {people !== null && <button
         type="button"
         tabIndex={-1}
         aria-label={`${peopleActionLabel(people)} in ${name}`}
@@ -164,7 +167,7 @@ function ProjectActions({ projectId, rowKey, name }: { projectId: ProjectId; row
         className={`${ACTION} aria-pressed:bg-bg-active aria-pressed:text-fg`}
       >
         <PeopleIcon className="size-[13px]" />
-      </button>
+      </button>}
       <button
         type="button"
         tabIndex={-1}

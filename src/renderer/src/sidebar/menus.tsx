@@ -2,7 +2,8 @@
 // items follow the row under the pointer (or the focused row, for the keyboard's context-menu key). Actions another
 // child answers render disabled until its handler registers. A foreign-live session offers only the opens (D-12); I2:
 // Open replaces the focused pane's session, Open in new tab keeps it. P5 O8 M5: a project's and a machine's row both
-// carry the row's People toggle, checked while it draws other people's sessions.
+// carry the row's People toggle where the row offers it (its `data-people`: others to show, or the toggle on), checked
+// while it draws other people's sessions.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import type { ReactNode } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
@@ -21,15 +22,18 @@ import { PROJECT_ACTION_IDS, PROJECT_ACTIONS, runProjectAction, useProjectAction
 import { openResumeChooser } from '../resume/host'; // P2-D
 import { KEEP_RUNNING } from './copy'; // P5 O2 M2
 
-export type MenuTarget = { kind: 'machine'; machine: MachineRef } | { kind: 'session'; appSessionId: AppSessionId } | { kind: 'project'; projectId: ProjectId };
+// P5 O8 M5: a project's or machine's `people` says whether its row offers the People toggle.
+export type MenuTarget = { kind: 'machine'; machine: MachineRef; people: boolean } | { kind: 'session'; appSessionId: AppSessionId } | { kind: 'project'; projectId: ProjectId; people: boolean };
 
 // The target a `data-menu` attribute names: `session:<appSessionId>`, `project:<projectId>` (an org project's row, by the
 // checkout its actions act on) or `machine:<ref>` (a machine's own row, P5 O6 M5).
 export function menuTargetOf(element: Element | null): MenuTarget | null {
-  const value = element?.closest('[data-menu]')?.getAttribute('data-menu') ?? null;
-  if (value?.startsWith('machine:')) return { kind: 'machine', machine: value.slice('machine:'.length) as MachineRef };
+  const row = element?.closest('[data-menu]') ?? null;
+  const value = row?.getAttribute('data-menu') ?? null;
+  const people = row?.hasAttribute('data-people') ?? false;
+  if (value?.startsWith('machine:')) return { kind: 'machine', machine: value.slice('machine:'.length) as MachineRef, people };
   if (value?.startsWith('session:')) return { kind: 'session', appSessionId: value.slice('session:'.length) as AppSessionId };
-  if (value?.startsWith('project:')) return { kind: 'project', projectId: value.slice('project:'.length) as ProjectId };
+  if (value?.startsWith('project:')) return { kind: 'project', projectId: value.slice('project:'.length) as ProjectId, people };
   return null;
 }
 
@@ -54,11 +58,11 @@ export function SidebarMenuContent({ target }: { target: MenuTarget | null }) {
             <Item enabled onSelect={() => openDialog({ kind: 'archived', projectId: null, machine: target.machine })}>
               Archived sessions…
             </Item>
-            <PeopleItem rowKey={machineKey(target.machine)} />
+            {target.people && <PeopleItem rowKey={machineKey(target.machine)} />}
           </>
         )}
         {target?.kind === 'session' && <SessionItems appSessionId={target.appSessionId} />}
-        {target?.kind === 'project' && <ProjectItems projectId={target.projectId} />}
+        {target?.kind === 'project' && <ProjectItems projectId={target.projectId} people={target.people} />}
       </ContextMenu.Content>
     </ContextMenu.Portal>
   );
@@ -104,7 +108,7 @@ function SessionItem({ id, record, dropdown }: { id: SessionActionId; record: Se
 const projectRowOf = (projectId: ProjectId): HTMLElement | null =>
   [...document.querySelectorAll<HTMLElement>('[role="treeitem"][data-menu]')].find((el) => el.dataset.menu === `project:${projectId}`) ?? null;
 
-function ProjectItems({ projectId }: { projectId: ProjectId }) {
+function ProjectItems({ projectId, people }: { projectId: ProjectId; people: boolean }) {
   const canCreate = useSessionCreatorRegistered() && machineOf(projectId) === ipc.localMachine; // a New chat on another machine is O7's picker
   const records = useSessions((s) => s.records);
   const projects = useSessions((s) => s.projects);
@@ -123,7 +127,7 @@ function ProjectItems({ projectId }: { projectId: ProjectId }) {
       <Item enabled={unread.length > 0} onSelect={() => void markAllRead(unread)}>
         Mark all read
       </Item>
-      {project !== undefined && <PeopleItem rowKey={orgKeyOf(project)} />}
+      {people && project !== undefined && <PeopleItem rowKey={orgKeyOf(project)} />}
       <ContextMenu.Separator className="my-1 h-px bg-border" />
       {PROJECT_ACTION_IDS.map((id) => (
         <ProjectItem key={id} id={id} projectId={projectId} />
