@@ -95,6 +95,38 @@ test('copies host generations before profile deletion, including a failed launch
   assert.deepEqual(files.map((name) => readFileSync(join(dir, 'output', name), 'utf8')).sort(), ['idle: collected in 13 ms\n', 'older host\n']);
 });
 
+// P5 O3-D M2: a scene that runs mawsd itself (e2e:daemon-idle-mawsd-spine) publishes mawsd's own log beside the engine
+// host's, both generations, redacted and bounded the same way, and under the same inherited-log rule, each file on its own
+test('publishes a mawsd directory’s log generations beside the host’s, redacted, and refuses only an inherited one', (t) => {
+  const dir = scratch(t);
+  const profile = join(dir, 'profile');
+  const daemon = join(profile, 'mawsd');
+  mkdirSync(join(profile, 'supervisor'), { recursive: true });
+  mkdirSync(daemon, { recursive: true });
+  const evidence = processEvidence(join(dir, 'output'), profile, () => true, { ...process.env, MAWS_TEST_SECRET_TOKEN: 'sk-ant-api03-mawsdlogsecret0000000000' }, { daemon });
+  writeFileSync(join(profile, 'supervisor', 'host.log'), 'idle: collected in 13 ms\n');
+  writeFileSync(join(daemon, 'mawsd.log'), 'spine: released\nexited (spine released, code 75)\n');
+  writeFileSync(join(daemon, 'mawsd.log.1'), 'mawsd 0.0.0 starting with sk-ant-api03-mawsdlogsecret0000000000\n');
+  writeFileSync(join(daemon, 'mawsd.lock'), 'not evidence');
+  evidence.finish();
+  rmSync(profile, { recursive: true });
+  const files = readdirSync(join(dir, 'output')).sort();
+  assert.equal(files.length, 3);
+  assert.ok(files.every((name) => /^engine-host-.*\.log$/.test(name)), 'every file is one the measured upload takes');
+  const read = (suffix) => readFileSync(join(dir, 'output', files.find((name) => name.endsWith(suffix))), 'utf8');
+  assert.equal(read('.mawsd.log'), 'spine: released\nexited (spine released, code 75)\n');
+  assert.ok(!read('.mawsd.previous.log').includes('mawsdlogsecret'), 'redacted');
+  assert.equal(files.filter((name) => /-[0-9a-f-]{36}\.log$/.test(name)).length, 1); // the host's own
+
+  const reused = join(dir, 'reused');
+  mkdirSync(join(reused, 'mawsd'), { recursive: true });
+  writeFileSync(join(reused, 'mawsd', 'mawsd.log'), 'an earlier run\n');
+  const again = processEvidence(join(dir, 'again'), reused, () => true, process.env, { daemon: join(reused, 'mawsd') });
+  again.finish();
+  const marked = readdirSync(join(dir, 'again'));
+  assert.deepEqual(marked.map((name) => name.replace(/^engine-host-[0-9a-f-]{36}/, '<id>')), ['<id>.mawsd-excluded.log']);
+});
+
 test('a reused profile never publishes either inherited host generation, even after rotation, while new main streams remain eligible', (t) => {
   const dir = scratch(t);
   for (const previous of ['host.log', 'host.log.1']) {

@@ -8,7 +8,8 @@ export function captureAllowed(options: {
   realEngine?: boolean;
   ownerConfigHome?: boolean;
 }): boolean;
-export function processEvidence(outputDir: string, userData: string, canKeep?: () => boolean, env?: Record<string, string | undefined>): {
+// `daemon` (P5 O3-D M2): a mawsd directory whose own log is published beside the engine host's
+export function processEvidence(outputDir: string, userData: string, canKeep?: () => boolean, env?: Record<string, string | undefined>, options?: { daemon?: string | null }): {
   capture(child: ChildProcess): void;
   finish(): void;
 };

@@ -77,6 +77,7 @@ import { abaDeltas, abaLine, mawsdSpineLine, boundMisses, busyShare, cpuSeconds,
 import { writeSpineFixture } from '../test/support/spine-fixture';
 import { reachMachine } from '../src/mawsd/machine-client';
 import { invoke, launchReady, value } from './support/c7-replay';
+import { processEvidence } from './support/process-evidence.mjs';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { startLocalOrg, type LocalOrg, type Ran } from './support/local-org';
 import { isAlive, killScratchProcesses, processesNaming, ps } from './support/processes';
@@ -525,6 +526,12 @@ test('daemon idle mawsd with the spine: loaded, released, re-executed', async ()
     return procs;
   };
   const windows: Record<SpineWindow, IdleWindow | null> = { loaded: null, released: null, reexecuted: null };
+  // The engine host's log (its `idle: collected` lines) and mawsd's own (its `spine:` lines, its idle collection, the
+  // exit 75), published redacted beside the JSON on pass or failure, once every process of the scratch has stopped. One
+  // capture covers both daemons: each file is appended by both, and the engine host is one process through both (the
+  // unit adopts it), so a second capture would find its log inherited and exclude it. The scene runs no engine (the
+  // replay transport and no session, over a scratch HOME), so no account state can reach either log.
+  const evidence = processEvidence(test.info().outputDir, profile, () => true, env, { daemon: join(profile, 'mawsd') });
   let leftover: unknown = null;
   try {
     const counts = await writeSpineFixture({ profile, folders: join(root, 'projects') });
@@ -566,6 +573,11 @@ test('daemon idle mawsd with the spine: loaded, released, re-executed', async ()
     for (const daemon of daemons) daemon.kill('SIGTERM');
     const pids = daemons.flatMap((d) => (d.pid === undefined ? [] : [d.pid]));
     await killScratchProcesses(root, pids).catch((error: unknown) => (leftover = error));
+    try {
+      evidence.finish();
+    } catch (error) {
+      leftover ??= error;
+    }
     const sockets = daemonPaths(profile, env.TMPDIR).socketDir;
     if (!sockets.startsWith(root)) rmSync(sockets, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });

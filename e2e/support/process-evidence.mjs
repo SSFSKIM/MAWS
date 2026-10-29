@@ -1,4 +1,5 @@
-// Public CI evidence, not a profile backup. Keep only the two main-process streams and the engine host's log.
+// Public CI evidence, not a profile backup. Keep only the two main-process streams, the engine host's log and, for a scene
+// that runs mawsd itself, mawsd's own.
 // Credentialed/owner scenes opt out. Every promoted diagnostic is also redacted: provenance can change during a run.
 import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
@@ -148,7 +149,9 @@ function boundedStream(file) {
   };
 }
 
-export function processEvidence(outputDir, userData, canKeep = () => true, env = process.env) {
+// `daemon` (P5 O3-D M2): a mawsd directory whose own log (`mawsd.log`, and `mawsd.log.1`) is published beside the host's,
+// for a scene that runs mawsd itself rather than through a launch; the same redaction, bounds and inherited-log rule.
+export function processEvidence(outputDir, userData, canKeep = () => true, env = process.env, { daemon = null } = {}) {
   const redact = createRedactor({ ...process.env, ...env });
   const publicBytes = (bytes) => {
     const text = bytes.toString('utf8');
@@ -159,6 +162,17 @@ export function processEvidence(outputDir, userData, canKeep = () => true, env =
   const id = randomUUID(); // distinct even for relaunches over the same profile, and retries have their own outputDir
   const stage = join(userData, `.process-evidence-${id}`); // never uploaded if the worker dies before the final check
   const inheritedHostLogs = ['host.log', 'host.log.1'].some((name) => existsSync(join(userData, 'supervisor', name)));
+  const inheritedDaemonLogs = daemon !== null && ['mawsd.log', 'mawsd.log.1'].some((name) => existsSync(join(daemon, name)));
+  // Each generation under a name the measured upload's `engine-host-*.log` glob takes; a missing file is no evidence.
+  const publishGenerations = (dir, base, label) => {
+    for (const [source, suffix] of [[base, ''], [`${base}.1`, '.previous']]) {
+      try {
+        writeFileSync(join(outputDir, `engine-host-${id}${label}${suffix}.log`), publicBytes(boundedFileBytes(join(dir, source))));
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+    }
+  };
   const listeners = [];
   const streams = [];
   let finished = false;
@@ -195,6 +209,10 @@ export function processEvidence(outputDir, userData, canKeep = () => true, env =
           utilityLines.push(...retained.utilityLines);
         }
         if (utilityLines.length) writeFileSync(join(outputDir, `engine-host-${id}.utility.log`), redact(`${utilityLines.join('\n')}\n`));
+        if (daemon !== null) {
+          if (inheritedDaemonLogs) writeFileSync(join(outputDir, `engine-host-${id}.mawsd-excluded.log`), 'mawsd log evidence excluded: its directory already contained logs.\n');
+          else publishGenerations(daemon, 'mawsd.log', '.mawsd');
+        }
         // A reused profile can hold diagnostics from an earlier excluded launch. If either generation predates
         // this capture, refuse both even after rotation; new main streams above are still independently eligible.
         if (inheritedHostLogs) {
@@ -203,13 +221,7 @@ export function processEvidence(outputDir, userData, canKeep = () => true, env =
         }
         // Called after the profile's processes stop, before its directory is removed. An early failed launch or a
         // utility-mode host may have no file. The rotated generation uses .log too so the narrow upload catches it.
-        for (const [source, suffix] of [['host.log', ''], ['host.log.1', '.previous']]) {
-          try {
-            writeFileSync(join(outputDir, `engine-host-${id}${suffix}.log`), publicBytes(boundedFileBytes(join(userData, 'supervisor', source))));
-          } catch (error) {
-            if (error.code !== 'ENOENT') throw error;
-          }
-        }
+        publishGenerations(join(userData, 'supervisor'), 'host.log', '');
       } finally {
         rmSync(stage, { recursive: true, force: true });
       }
