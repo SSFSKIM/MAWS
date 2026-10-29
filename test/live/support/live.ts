@@ -20,39 +20,15 @@ import { ENGINE_BIN, ENGINE_VERSION } from '../../support/engine-pin'; // FX4: t
 import { withoutClaudeVariables } from '../../support/claude-env';
 import { checkRelay } from '../../../src/engine-host/relay-health';
 import { MAX_LINE_CHARS, spawnEngine, type EngineTransport } from '../../../src/engine-host/transport';
+import { redactJournal } from './public-evidence.mjs';
 
 // The engine's cap is cumulative for the conversation (a resumed session's restored cost counts toward it; C11 M6).
 export const LIVE_MAX_BUDGET_USD = 0.5;
 export const LIVE_APP_VERSION = '0.0.0-live';
 
-// The redactor (the probe's `redact` widened for RFC 2606 names; spikes/protocol-probe/harness.mjs keeps the probe's
-// narrower pattern), applied when a live run's journal is exported as a pass-3 fixture (M6), never by the
-// production writer (the journal is a faithful record; Interfaces, Journal): values of environment keys that look
-// secret (8+ characters, longest first so a value containing another is replaced whole), then `sk-ant-…` keys, then
-// e-mail addresses other than placeholders (`localhost`, and the reserved test TLDs `.test`, `.example`, `.invalid` of
-// RFC 2606, which name no one: E4c's recording types `ada@example.test` into a form, and its replay needs the value).
-export function createRedactor(env: Record<string, string>): (text: string) => string {
-  const secrets = Object.entries(env)
-    .filter(([key, value]) => /TOKEN|KEY|SECRET|PASSWORD/i.test(key) && value.length >= 8)
-    .map(([, value]) => value)
-    .sort((a, b) => b.length - a.length);
-  return (text) => {
-    let out = text;
-    for (const secret of secrets) out = out.split(secret).join('[REDACTED]');
-    return out
-      .replace(/sk-ant-[A-Za-z0-9_-]+/g, 'sk-ant-[REDACTED]')
-      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z.]{2,}/g, (m) => (/@(localhost|[A-Za-z0-9.-]+\.(test|example|invalid))$/.test(m) ? m : 'owner@redacted.invalid'));
-  };
-}
-
-// Redacts a journal file's text line by line; `env` defaults to the process environment (the exporter's shell).
-export function redactJournal(text: string, env: Record<string, string> = stringEnv(process.env)): string {
-  const redact = createRedactor(env);
-  return text
-    .split('\n')
-    .map((line) => redact(line))
-    .join('\n');
-}
+// Shared with sitting notes, which public CI uploads even when no journal is exported. The production journal
+// stays faithful; only its exported copy is redacted (known environment secrets, bearer/provider keys and emails).
+export { createRedactor, redactJournal } from './public-evidence.mjs';
 
 // Every engine session writes a transcript, even when its controls only read. Live runs therefore require an
 // explicit scratch CLAUDE_CONFIG_DIR. The C12 real-store exception is an index-only app case, not a live engine case.
@@ -318,7 +294,7 @@ export async function withRawProcess(ctx: LiveContext, spec: LaunchSpec, fn: (p:
     return new Promise<ControlResponse>((resolve, reject) => {
       const timer = setTimeout(() => {
         pending.delete(request_id);
-        reject(new Error(`${subtype} unanswered after ${timeoutMs} ms; stderr: ${stderr.join(' | ')}`));
+        reject(new Error(`${subtype} unanswered after ${timeoutMs} ms; stderr: ${redactJournal(stderr.join(' | '), plan.env)}`));
       }, timeoutMs);
       pending.set(request_id, (response) => {
         clearTimeout(timer);

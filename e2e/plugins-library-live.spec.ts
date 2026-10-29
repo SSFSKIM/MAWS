@@ -26,6 +26,7 @@ import { expect, test, type ElectronApplication, type Locator, type Page } from 
 import type { AppSessionId } from '@shared/graph/ids';
 import { installCountWords } from '../src/renderer/src/customize/discover/present';
 import { ENGINE_BIN, ENGINE_VERSION } from '../test/support/engine-pin';
+import { redactJournal } from '../test/live/support/public-evidence.mjs';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws } from './support/launch';
 import { cappedEngine, capWords } from './support/live-budget';
@@ -64,7 +65,7 @@ function cli(args: string[], cwd: string): { ok: boolean; out: string } {
     return { ok: true, out };
   } catch (error) {
     const e = error as { stdout?: string; stderr?: string; message: string };
-    return { ok: false, out: `${e.stdout ?? ''}${e.stderr ?? ''}`.trim() || e.message };
+    return { ok: false, out: redactJournal(`${e.stdout ?? ''}${e.stderr ?? ''}`.trim() || e.message) };
   }
 }
 
