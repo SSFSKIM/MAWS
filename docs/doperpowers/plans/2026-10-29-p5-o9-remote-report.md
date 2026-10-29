@@ -24,7 +24,7 @@ The decisions are folded into the spec's Decision Log, in the entries dated 2026
   - 40854320233 on bb31c1978 (renderer half);
   - 40858548379 on ae8bad82d (landing fixes).
   All green. One earlier red (40835225666) was the tracked `src/mawsd/cli-prompt.test.ts` ^C flake. Two others were typecheck slips in new tests, fixed.
-- Hosted Mac: 40845576884 on 89d2db14d, 40850880929 on 7fc743ca1, and e2e:lane-a 40854302887 on bb31c1978, all green. The landing set runs once on the tree merged with O3-C's next head, as the architect planned: LANDING_HOSTED.
+- Hosted Mac: 40845576884 on 89d2db14d, 40850880929 on 7fc743ca1, and e2e:lane-a 40854302887 on bb31c1978, all green. The landing set ran once, as the architect planned, on 20202ddd0. That is M9 merged with O3-C's post-series head 8544c48fc, which carries master 5b7f51092. Run 40866323525 was green: class 1a pool (static, probes, unit 4/4), and unlaned e2e:lane-a 11, c7 35, c7-utility 35, widgets 29, agents 23, transcript 37, side 12, desk-web 198 and desk-web-hub 39 passed, with 0 flaky. The run's tree e4a8bd0f1 equals 20202ddd0's.
 
 ## Preconditions for M10 (checked read-only, 2026-10-29)
 
