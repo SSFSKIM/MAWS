@@ -39,6 +39,9 @@
     "apps/desk-hub/deploy/deploy.ts",
     "apps/desk-hub/deploy/run-lock.ts",
     "apps/desk-hub/deploy/terminal.ts",
+    // P5 O10 M11: test/endpoint/acceptance-local.test.ts runs the endpoint acceptance run itself against a local mawsd
+    "apps/desk-hub/deploy/endpoint-*.ts",
+    "apps/org-protocol/test-support/*.ts",
     "apps/desk-hub/fake-machine/json-file.ts",
     "apps/desk-hub/fake-machine/link.ts",
     "apps/desk-hub/fake-machine/org.ts",
