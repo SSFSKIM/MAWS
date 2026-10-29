@@ -92,6 +92,28 @@ describe('a row the bridge appended while no turn ran', () => {
     expect(entry.working).toBe(false);
   });
 
+  // P5 O9 (the sitting's fix wave): the shape a MAWS send takes after the bridge's own interrupt, which MAWS's lane B
+  // history reads alike through its backfill (`transcript/model/derive.test.ts`, "a sminos delivery while no turn runs").
+  it('MAWS’s words after the bridge’s interrupt (no frame, sminos) open the inbox wake’s turn; the stopped turn reads stopped', async () => {
+    const c = new Chain('c4a1d000', 'sminos');
+    c.prompt('count slowly to 300, one line each');
+    c.assistant([{ type: 'thinking', thinking: 'Counting.', signature: 'sig' }]);
+    c.appended('[Request interrupted by user]');
+    c.appended('The interrupt came from outside the terminal.');
+    const words = c.appended('and count them');
+    c.mirror('delivered', 'and count them');
+    c.inboxWake(wakeAfterStop([]));
+    c.answer('1, 2, 3.');
+    c.end();
+    const { rows, turns, entry } = await drawn(c.rows);
+    const bubble = user(rows, 'and count them')!;
+    expect(bubble).toMatchObject({ steer: false, dropped: false, messageUuid: words.uuid, turnId: turnOf(rows, '1, 2, 3.') });
+    expect(bubble.pending).toBeUndefined();
+    expect(turns.map((turn) => turn.state)).toEqual(['closed', 'closed']);
+    expect(rows.flatMap((row) => (row.kind === 'divider' ? [row.state] : []))).toEqual(['stopped']);
+    expect(entry.working).toBe(false);
+  });
+
   it('an Esc before the model answered (after-esc): the delivery lands in the wake’s turn once the abandoned prompt is off the chain', async () => {
     const c = new Chain();
     c.prompt('Write a poem about rivers.');

@@ -109,7 +109,7 @@ it('exports every slide, including hidden ones, as distinct numbered PNGs in dec
 // fix wave 1: the window's staging script is sent as text; each of its forms parses
 describe('the staging script for a picture', () => {
   it('parses for every mode, with any id', () => {
-    for (const mode of ['slide', 'background', 'self', 'tree', 'drawn'] as const) expect(() => new Function(`return ${STAGE('c"1', mode === 'slide' ? null : `e'2`, mode)}`), mode).not.toThrow();
+    for (const mode of ['slide', 'background', 'self', 'tree', 'drawn'] as const) expect(() => new Function(`return ${STAGE('c"1', mode === 'slide' ? null : `e'2`, mode, [255, 7, 255])}`), mode).not.toThrow();
   });
 });
 
@@ -163,22 +163,119 @@ describe('the deck window', () => {
     await expect(used).rejects.toThrow();
   });
 
-  // P4 (the skewed-element row's re-review): a `drawn` picture is taken where the slide draws the element, its region (in
-  // slide px) moved by where the slide sits in its frame (a section the dialect lets translate)
-  it('captures a drawn job at its region moved by the slide’s offset in the frame', async () => {
-    const captured: unknown[] = [];
+  type Region = { x: number; y: number; width: number; height: number };
+  interface Drawn {
+    slide: string;
+    /** The window's last row (y 1080) as `toBitmap` reads it, BGRA. */
+    row: number[];
+  }
+  /** A copy of `region` of what the compositor drew: its picture names the slide shown and the region it was cut from. */
+  const copyOf = (drawn: Drawn, region: Region): Pick<Electron.NativeImage, 'crop' | 'toBitmap' | 'toPNG' | 'getSize' | 'resize'> => ({
+    crop: (r) => copyOf(drawn, { x: region.x + r.x, y: region.y + r.y, width: r.width, height: r.height }) as Electron.NativeImage,
+    toBitmap: () => Buffer.from(region.y >= 1080 ? drawn.row : [0, 0, 0, 255]),
+    toPNG: () => Buffer.from(JSON.stringify({ slide: drawn.slide, ...region })),
+    getSize: () => ({ width: region.width, height: region.height }),
+    resize: () => copyOf(drawn, region) as Electron.NativeImage,
+  });
+  /**
+   * A capture window whose compositor draws a staging `lag` ms after the page's script answered (null: before it
+   * answers; Infinity: never), as Chromium's may: a copy is of the frame drawn last, and each draw is a `paint`. The page
+   * as loaded shows its first slide on top and draws nothing of its own in the last row.
+   */
+  function compositorWindow(id: number, lag: number | null, answer = { x: 0, y: 0, w: 1920, h: 1080 }) {
+    let drawn: Drawn = { slide: 'cover', row: [0, 0, 0, 0] };
+    const copies: Region[] = [];
     const contents = Object.assign(new EventEmitter(), {
-      id: 4343,
-      executeJavaScript: async () => ({ x: 300, y: 0, w: 1920, h: 1080 }),
-      capturePage: async (rect: unknown) => {
-        captured.push(rect);
-        return { toPNG: () => Buffer.from('png') };
+      id,
+      executeJavaScript: async (script: string) => {
+        const slide = /const slide = "([^"]*)"/.exec(script)![1]!;
+        const mark = /mark = "rgb\((\d+), (\d+), (\d+)\)"/.exec(script)?.slice(1).map(Number);
+        const next: Drawn = { slide, row: mark ? [mark[2]!, mark[1]!, mark[0]!, 255] : [0, 0, 0, 0] };
+        const draw = () => {
+          drawn = next;
+          contents.emit('paint');
+        };
+        if (lag === null) draw();
+        else if (lag !== Infinity) setTimeout(draw, lag);
+        return answer;
+      },
+      capturePage: async (region: Region) => {
+        copies.push(region);
+        return copyOf(drawn, region);
       },
     });
     const win = { webContents: contents, setBackgroundColor: () => {}, isDestroyed: () => false, destroy: () => {} };
+    return { win, copies };
+  }
+  const pictureOf = (png: Buffer) => JSON.parse(png.toString()) as { slide: string } & Region;
+  const slideJob = (slideId: string) => ({ slideId, elementId: null, mode: 'slide' as const, box: { x: 0, y: 0, w: 1920, h: 1080 } });
+
+  // P4 (the skewed-element row's re-review): a `drawn` picture is taken where the slide draws the element, its region (in
+  // slide px) moved by where the slide sits in its frame (a section the dialect lets translate)
+  it('captures a drawn job at its region moved by the slide’s offset in the frame', async () => {
+    const { win } = compositorWindow(4343, null, { x: 300, y: 0, w: 1920, h: 1080 });
     vi.mocked(openCaptureWindow).mockReturnValueOnce(win as never);
-    await withDeckWindow({}, new AbortController().signal, (deck) => deck.capture({ slideId: 's1', elementId: 'lean', mode: 'drawn', box: { x: 171.13, y: 200, w: 257.74, h: 100 } }));
-    expect(captured).toEqual([{ x: 471, y: 200, width: 258, height: 100 }]);
+    const png = await withDeckWindow({}, new AbortController().signal, (deck) => deck.capture({ slideId: 's1', elementId: 'lean', mode: 'drawn', box: { x: 171.13, y: 200, w: 257.74, h: 100 } }));
+    expect(pictureOf(png)).toEqual({ slide: 's1', x: 471, y: 200, width: 258, height: 100 });
+  });
+
+  // The P4 presentations-export flake (two of three PNGs alike): the page's two animation frames after a staging do not
+  // wait for the compositor, whose copy may still be of the frame before it, the slide staged last
+  it('takes each picture from a frame drawn after its staging, not the one the compositor still holds', async () => {
+    const { win, copies } = compositorWindow(4444, 20);
+    vi.mocked(openCaptureWindow).mockReturnValueOnce(win as never);
+    const pictures = await withDeckWindow({}, new AbortController().signal, async (deck) => {
+      const taken: string[] = [];
+      for (const slide of ['cover', 'body', 'gone']) taken.push(pictureOf(await deck.capture(slideJob(slide))).slide);
+      return taken;
+    });
+    expect(pictures).toEqual(['cover', 'body', 'gone']);
+    expect(copies.length).toBeGreaterThan(3); // each first copy was of the frame before
+  });
+
+  // Chromium's compositor now and then refuses a copy (capturePage rejects with UnknownVizError; the hosted Macs,
+  // e2e/design-export.spec.ts): the copy is asked for again, within a bound, and then fails naming the slide
+  it('asks again for a copy the compositor refused, and keeps the one it gives', async () => {
+    const { win, copies } = compositorWindow(4646, null);
+    const copy = win.webContents.capturePage;
+    let asked = 0;
+    win.webContents.capturePage = (region: Region) => (++asked === 1 ? Promise.reject(new Error('UnknownVizError')) : copy(region));
+    vi.mocked(openCaptureWindow).mockReturnValueOnce(win as never);
+    const png = await withDeckWindow({}, new AbortController().signal, (deck) => deck.capture(slideJob('body')));
+    expect(pictureOf(png)).toEqual({ slide: 'body', x: 0, y: 0, width: 1920, height: 1080 });
+    expect([asked, copies.length]).toEqual([2, 1]);
+  });
+
+  it('fails, naming the slide, when the compositor keeps refusing the copy; another failure of the copy is not asked again', async () => {
+    const refusing = compositorWindow(4747, null);
+    let asked = 0;
+    refusing.win.webContents.capturePage = () => (++asked, Promise.reject(new Error('UnknownVizError')));
+    vi.mocked(openCaptureWindow).mockReturnValueOnce(refusing.win as never);
+    await expect(withDeckWindow({}, new AbortController().signal, (deck) => deck.capture(slideJob('body')))).rejects.toThrow('the export window refused a copy of slide body 5 times (UnknownVizError)');
+    expect(asked).toBe(5);
+
+    const failing = compositorWindow(4848, null);
+    let failed = 0;
+    failing.win.webContents.capturePage = () => (++failed, Promise.reject(new Error('Object has been destroyed')));
+    vi.mocked(openCaptureWindow).mockReturnValueOnce(failing.win as never);
+    await expect(withDeckWindow({}, new AbortController().signal, (deck) => deck.capture(slideJob('body')))).rejects.toThrow('Object has been destroyed');
+    expect(failed).toBe(1);
+  });
+
+  it('fails, naming the slide, rather than take a picture of a frame from before its staging', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true }); // the page's directory is made for real meanwhile
+    try {
+      const { win, copies } = compositorWindow(4545, Infinity);
+      vi.mocked(openCaptureWindow).mockReturnValueOnce(win as never);
+      const taken = withDeckWindow({}, new AbortController().signal, (deck) => deck.capture(slideJob('body')));
+      const failed = expect(taken).rejects.toThrow('the export window did not draw slide body within 10 s');
+      await vi.waitFor(() => expect(copies).not.toHaveLength(0));
+      await vi.advanceTimersByTimeAsync(11_000);
+      await failed;
+      expect(copies.length).toBeGreaterThan(10); // a copy after each paint the window owed, or each half second
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
