@@ -1,5 +1,5 @@
 import type { SessionEvent } from '@shared/graph/events';
-import type { AgentId, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
+import type { AgentId, MessageUuid, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { parseTranscriptRecord } from '@shared/wire/transcript';
 import { createBackfillContext, recordToEvents } from '../../../../engine-host/fs/backfill'; // P5 O9: a delivery read from disk
 import { afterEach, describe, expect, it } from 'vitest';
@@ -554,6 +554,135 @@ describe('a sminos delivery into a running turn, from disk', () => {
       ['and count them', true, turnId.ofMessage(uuid('p1'))],
     ]);
     expect(drawn.some((row) => JSON.stringify(row).includes('sminos: delivered'))).toBe(false);
+  });
+});
+
+// P5 O9 (the fix wave, B): words the bridge delivers while no turn runs (after a stop the engine refuses a plugin's
+// prompt, so they go in as a row and an inbox wake follows; or the row lands as its turn ends, and the bridge's wake
+// prompt follows) belong to the turn that answers them, the wake's, as desk-web draws them (`appended-turn.ts`): its
+// prompt, never a steer of the turn already over, never a prompt left waiting for a turn that ran.
+describe('a sminos delivery while no turn runs, from disk', () => {
+  type User = Extract<Row, { kind: 'user' }>;
+  type DiskRecord = { [field: string]: unknown; uuid: string };
+  // The records in the shapes the engine keeps them (the sitting's transcript; `lane-a/test-support/chain-rows.ts`).
+  class Disk {
+    readonly records: DiskRecord[] = [];
+    private add(fields: { [field: string]: unknown }): DiskRecord {
+      const n = this.records.length;
+      const record = { uuid: `r${n}`, timestamp: `2026-10-29T03:12:${String(n).padStart(2, '0')}.000Z`, cwd: '/d', ...fields };
+      this.records.push(record);
+      return record;
+    }
+    prompt(text: string): DiskRecord {
+      return this.add({ type: 'user', origin: { kind: 'human' }, message: { role: 'user', content: text } });
+    }
+    assistant(content: unknown[]): DiskRecord {
+      return this.add({ type: 'assistant', message: { id: `msg_${this.records.length}`, model: 'x', content } });
+    }
+    answer(text: string): DiskRecord {
+      return this.assistant([{ type: 'text', text }]);
+    }
+    end(): void {
+      this.add({ type: 'system', subtype: 'stop_hook_summary', hookCount: 0, hookInfos: [], hookErrors: [], preventedContinuation: false, stopReason: '', hasOutput: false, level: 'suggestion' });
+      this.add({ type: 'system', subtype: 'turn_duration', durationMs: 1600, isMeta: false });
+    }
+    marker(): DiskRecord {
+      return this.add({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } });
+    }
+    /** A row the bridge appended, kept meta under the plugin's origin, and the line the bridge writes for it. */
+    appended(text: string): DiskRecord {
+      return this.add({ type: 'user', isMeta: true, origin: { kind: 'plugin', name: 'sminos' }, message: { role: 'user', content: [{ type: 'text', text }] } });
+    }
+    line(content: string): DiskRecord {
+      return this.add({ type: 'system', subtype: 'informational', content, isMeta: false, level: 'notice' });
+    }
+    /** The bridge's wake through the inbox, kept as a peer's message; or as the user. */
+    inboxWake(body: string): DiskRecord {
+      const content = `Another Claude session sent a message:\n<cross-session-message from-name="sminos bridge">\n${body}\n</cross-session-message>\n\nThis came from another Claude session.`;
+      return this.add({ type: 'user', isMeta: true, origin: { kind: 'peer', from: 'unknown', name: 'sminos bridge', body }, message: { role: 'user', content } });
+    }
+    userWake(body: string): DiskRecord {
+      return this.add({ type: 'user', origin: { kind: 'plugin', name: 'sminos', asUser: true }, message: { role: 'user', content: body } });
+    }
+  }
+  const read = (records: DiskRecord[]) => {
+    const ctx = createBackfillContext({ sessionId: 'S' as SessionId, agent: null });
+    const events = records.flatMap((record) => recordToEvents(parseTranscriptRecord(record), ctx));
+    const state = reduce(events);
+    return { state, drawn: rowsOf(withAllExpanded(state)) };
+  };
+  const users = (drawn: Row[]) => drawn.filter((row): row is User => row.kind === 'user');
+  const turnOf = (drawn: Row[], text: string) => drawn.find((row) => row.kind === 'assistant_text' && row.markdown === text)?.turnId;
+  const settled = ({ state, drawn }: ReturnType<typeof read>) => {
+    expect([...state.turns.values()].map((turn) => turn.state)).not.toContain('open');
+    expect(drawn.some((row) => row.kind === 'divider' && row.state === 'working')).toBe(false);
+    expect(drawn.some((row) => JSON.stringify(row).includes('sminos: delivered'))).toBe(false);
+  };
+  const WAKE_STOPPED = '[sminos bridge]\nA message for you was added to the conversation after your turn was stopped. It is the user message before this message: read it and act on it now.';
+  const WAKE_ANSWER = '[sminos bridge]\nA message for you was added to the conversation while you were finishing your answer, too late for that answer to take it in. It is the user message just before your last answer: read it and act on it now.';
+
+  it.each([
+    ['the bridge’s interrupt', (c: Disk) => {
+      c.appended('[Request interrupted by user]');
+      c.appended('The interrupt came from outside the terminal.');
+      c.line('sminos: interrupt: [Request interrupted by user] The interrupt came from outside the terminal.');
+    }],
+    ['an Esc', (c: Disk) => void c.marker()],
+  ])('after %s, the words open the inbox wake’s turn, and every turn ends', (_, stop) => {
+    const c = new Disk();
+    const prompt = c.prompt('count slowly to 300, one line each');
+    c.assistant([{ type: 'thinking', thinking: 'Counting.', signature: 'sig' }]);
+    stop(c);
+    const row = c.appended('and count them');
+    c.line('sminos: delivered: and count them');
+    c.inboxWake(WAKE_STOPPED);
+    c.answer('1, 2, 3.');
+    c.end();
+    const out = read(c.records);
+    expect(users(out.drawn).map((user) => [user.text, user.steer, user.pending, user.turnId])).toEqual([
+      ['count slowly to 300, one line each', false, undefined, turnId.ofMessage(prompt.uuid as MessageUuid)],
+      ['and count them', false, undefined, turnOf(out.drawn, '1, 2, 3.')],
+    ]);
+    expect(users(out.drawn)[1].messageUuid).toBe(row.uuid);
+    expect([...out.state.turns.values()].map((turn) => [turn.accepted, turn.closedBy])).toEqual([[true, 'stopped'], [true, null]]);
+    settled(out);
+  });
+
+  it('landing as its turn ended, the words open the turn the wake prompt starts, and every turn ends', () => {
+    const c = new Disk();
+    c.prompt('List the files.');
+    c.answer('Two files.');
+    c.end();
+    const row = c.appended('and count them');
+    c.line('sminos: delivered: and count them');
+    c.userWake(WAKE_ANSWER);
+    c.answer('Two, counted.');
+    c.end();
+    const out = read(c.records);
+    expect(users(out.drawn).map((user) => [user.text, user.steer, user.pending, user.turnId])).toEqual([
+      ['List the files.', false, undefined, turnOf(out.drawn, 'Two files.')],
+      ['and count them', false, undefined, turnOf(out.drawn, 'Two, counted.')],
+    ]);
+    expect(users(out.drawn)[1].messageUuid).toBe(row.uuid);
+    expect([...out.state.turns.values()].map((turn) => [turn.accepted, turn.closedBy])).toEqual([[true, null], [true, null]]);
+    settled(out);
+  });
+
+  it('a prompt typed before any wake takes the waiting words into its turn, as sent during it', () => {
+    const c = new Disk();
+    c.prompt('List the files.');
+    c.answer('Two files.');
+    c.end();
+    c.appended('and count them');
+    c.line('sminos: delivered: and count them');
+    c.prompt('Now the tests.');
+    c.answer('Tests pass.');
+    c.end();
+    const out = read(c.records);
+    const words = users(out.drawn).find((user) => user.text === 'and count them')!;
+    expect(words).toMatchObject({ steer: true, turnId: turnOf(out.drawn, 'Tests pass.') });
+    expect(words.pending).toBeUndefined();
+    settled(out);
   });
 });
 

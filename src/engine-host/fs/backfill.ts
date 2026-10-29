@@ -48,6 +48,10 @@ export interface BackfillContext {
   // P5 O9: the rows a sminos bridge appended lately, by their words on one line, waiting for the transcript line that
   // says which of them were the owner's words delivered into a running turn (sminosDelivery, below)
   readonly bridgeRows: Map<string, { uuid: MessageUuid; content: string }>;
+  // P5 O9 (the fix wave): whether a turn runs, from its `turn.started` to its `turn.ended` or an interrupt marker, and
+  // the owner's words the bridge delivered while none did, waiting for the turn that answers them (withWaitingWords)
+  running: boolean;
+  readonly waitingWords: { uuid: MessageUuid; content: string }[];
 }
 
 export function createBackfillContext(init: {
@@ -70,6 +74,8 @@ export function createBackfillContext(init: {
     inToolLoop: false,
     lastAssistantWasApiError: false,
     bridgeRows: new Map(),
+    running: false,
+    waitingWords: [],
   };
 }
 
@@ -125,7 +131,7 @@ export function recordToEvents(record: TranscriptRecord, ctx: BackfillContext): 
     default:
       events.push({ ...base(), kind: 'frame.unknown', frameType: `transcript:${record.type}`, subtype: null });
   }
-  return events;
+  return withWaitingWords(record, events, ctx, base);
 }
 
 type Base = () => EventBase;
@@ -598,9 +604,60 @@ function sminosDelivery(record: TranscriptRecord, ctx: BackfillContext, base: Ba
   const row = ctx.bridgeRows.get(key);
   if (row === undefined) return false;
   ctx.bridgeRows.delete(key);
+  if (!ctx.running) {
+    ctx.waitingWords.push(row);
+    return true;
+  }
   events.push({ ...base(), kind: 'user.message', messageUuid: row.uuid, content: row.content, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
   events.push({ ...base(), kind: 'command.lifecycle', commandUuid: row.uuid, state: 'started' });
   return true;
+}
+
+// P5 O9 (the fix wave): words the bridge delivers while no turn runs go in as such a row too: after a stop, since the
+// engine then refuses a plugin's prompt (the bridge wakes the session through its inbox, which the engine keeps as a
+// peer message); or the row lands as the turn it was given into ends (the bridge's wake is then its prompt as the user).
+// No turn runs to take them as sent during it, so they wait for the turn that answers them, as desk-web's view has them
+// (`renderer/src/lane-a/source/appended-turn.ts`): the bridge's wake opens a turn of the words', the first its prompt
+// (the wake's own text the model's context, no bubble) and any others sent during it; any other turn that starts first
+// takes them all as sent during it. A turn the interrupt left open on this mapping (the marker opens and ends nothing
+// here) is not one that runs: the next turn's start closes it, stopped.
+const BRIDGE_WAKE_LINE = '[sminos bridge]'; // doperpowers `sminos/hooks/mods/bridge.tsx`, `WAKE_LINE`
+
+function withWaitingWords(record: TranscriptRecord, events: SessionEvent[], ctx: BackfillContext, base: Base): SessionEvent[] {
+  const start = events.findIndex((event) => event.kind === 'turn.started');
+  let out = events;
+  if (start >= 0 && ctx.waitingWords.length > 0) {
+    const [first, ...rest] = ctx.waitingWords.splice(0);
+    const said = (row: { uuid: MessageUuid; content: string }): SessionEvent => ({ ...base(), kind: 'user.message', messageUuid: row.uuid, content: row.content, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    const sentDuring = (rows: { uuid: MessageUuid; content: string }[]) => rows.flatMap((row): SessionEvent[] => [said(row), { ...base(), kind: 'command.lifecycle', commandUuid: row.uuid, state: 'started' }]);
+    if (isBridgeWake(record)) {
+      ctx.lastTurnUserUuid = first.uuid;
+      const opened = { ...events[start], userMessageUuid: first.uuid, origin: null } as SessionEvent;
+      const wake = events.slice(start + 1).map((event) => (event.kind === 'user.message' && event.messageUuid === record.uuid ? { ...event, isSynthetic: true } : event));
+      out = [...events.slice(0, start), opened, said(first), ...sentDuring(rest), ...wake];
+    } else out = [...events, ...sentDuring([first, ...rest])];
+  }
+  for (const event of out) {
+    if (event.kind === 'turn.started') ctx.running = true;
+    else if (event.kind === 'turn.ended' || (event.kind === 'user.message' && event.origin === 'interrupt-marker')) ctx.running = false;
+  }
+  return out;
+}
+
+// The bridge's wake, by its first line: its prompt as the user, or its inbox message, kept as a peer's (the line opens
+// the envelope's body). Desk-web reads it alike (`renderer/src/lane-a/conversation/delivery-frame.ts`, `isBridgeWake`).
+function isBridgeWake(record: TranscriptRecord): boolean {
+  if (record.type !== 'user') return false;
+  const origin = record.origin as { kind?: unknown; asUser?: unknown } | undefined;
+  const content = messageContent(record);
+  const text = typeof content === 'string' ? content : Array.isArray(content) ? messageText(content.filter(isContentBlock)) : '';
+  let body: string | null = null;
+  if (origin?.kind === 'plugin' && origin.asUser === true) body = text;
+  else if (origin?.kind === 'peer') {
+    const envelope = parsePeerMessage(text);
+    body = envelope?.kind === 'cross-session' && envelope.frame === null ? envelope.body : null;
+  }
+  return body !== null && body.split('\n', 1)[0] === BRIDGE_WAKE_LINE;
 }
 
 // A prompt a UserPromptSubmit hook blocked leaves no user record, only a system `informational` record:
