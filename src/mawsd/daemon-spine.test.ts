@@ -68,10 +68,11 @@ function compose(): void {
   });
   front = createServicesFront({
     spine,
-    hosts: { forward: async () => ({ t: 'res', id: 'x', ok: false, error: { code: 'host_unavailable', message: 'none' } }), onRaw: () => () => {} },
+    hosts: { forward: async () => ({ t: 'res', id: 'x', ok: false, error: { code: 'host_unavailable', message: 'none' } }), onRaw: () => () => {}, onStreaming: () => () => {}, parked: () => true },
     intercept: () => null,
     daemon: async () => undefined,
     identity: () => ({ ref: MACHINE, name: 'test', project: { key: `machine:${MACHINE}`, name: 'test', smnsId: null } }),
+    isApp: () => false,
     log: () => {},
   });
 }

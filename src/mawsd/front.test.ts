@@ -49,10 +49,13 @@ function front(over: Partial<FrontOptions> = {}) {
     hosts: {
       forward: async (owner, request) => (forwarded.push({ owner, ...request }), { t: 'res', id: 'x', ok: true, value: { forwarded: request.name } } as HostResponse),
       onRaw: (_owner, listener) => (raw.add(listener), () => void raw.delete(listener)),
+      onStreaming: () => () => {},
+      parked: () => false,
     },
     intercept: () => null,
     daemon: async (name) => (name === 'daemon.status' ? { asked: name } : undefined),
     identity: () => IDENTITY,
+    isApp: () => false,
     log: (line) => void logs.push(line),
     ...over,
   });

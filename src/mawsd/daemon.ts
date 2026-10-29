@@ -39,6 +39,12 @@
 // the option off, the recycle per attachment above stays, chosen again at each welcome. The endpoint seam's
 // `onAttachment` says whether events are available: true from a permanent link's streaming on, whatever app comes and
 // goes; an app's attachment otherwise.
+//
+// P5 O3-D M4 (Interfaces §B, §C, §E): each machine.sock client follows its sessions' streams with its own cursors on the
+// front (front-streams.ts), every stream catching up at each streaming of the engine-host link (D41); the spine's
+// client port asks the client whose request minted the asking ref, or the app attached on engine-host.sock for none
+// (client-port.ts); the endpoint's `dispatch('machine', …)` is the front's table and its `onEvent` carries the spine's
+// events with owner `machine`.
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import { createServer, type Server } from 'node:net';
@@ -74,7 +80,7 @@ import { LOG_ROTATE_BYTES, openSupervisorLog } from '../engine-host/supervisor-l
 import { ptyHostFiles } from '../pty-host/files';
 import { DaemonClocks, DEFAULT_IDLE_EXIT_MS } from './clocks';
 import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOINT_MODULE, type DaemonServices, type EndpointModule } from './endpoint-seam';
-import { createServicesFront, NO_CLIENT_PORT } from './front';
+import { createServicesFront } from './front';
 import { DEPARTURE_BOUND_MS, Relay, type RelayRequest } from './relay';
 import { createLazySpine, loadServicesEntry, type SpineEntry, type SpineTiming } from './spine-seam';
 
@@ -258,9 +264,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       profile: profileDir,
       machine: ref,
       bus: front.bus,
-      clientPort: NO_CLIENT_PORT, // §E's port over the front is M4's
+      clientPort: front.port, // §E: the asking client's connection, or the attached app's
       interest: () => new Set(union()),
-      browserSocket: () => null, // the attached app's path from machine.client: M4's
+      browserSocket: () => front.browserSocket(), // the attached app's, from its machine.client
       trash: async (path) => {
         throw new Error(`the trash is not reachable from mawsd yet: ${path} kept`); // D10's binding is M5's
       },
@@ -334,7 +340,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   };
 
   // --- listeners the seam offers ---------------------------------------------------------------------------------------
-  const eventListeners = new Set<(owner: 'engine-host' | 'pty-host', message: { name: string; payload: unknown }) => void>();
+  const eventListeners = new Set<(owner: 'engine-host' | 'pty-host' | 'machine', message: { name: string; payload: unknown }) => void>();
   const attachmentListeners = new Set<(attached: boolean) => void>();
   let available = false; // what a listener that comes later is told at once (an endpoint loaded at its first command)
   const frameListeners = new Set<FrameListener>();
@@ -616,7 +622,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     }
   }
 
-  // --- the services front (P5 O3-D M2; front.ts): machine.sock's commands and events --------------------------------
+  // --- the services front (P5 O3-D M2, M4; front.ts): machine.sock's commands, events, streams and client port --------
+  let engineAppPid: number | null = null; // the app welcomed on engine-host.sock: the port's requests with no client go to its machine.sock connection
   const front = createServicesFront({
     spine,
     hosts,
@@ -626,8 +633,10 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       const name = machineName(env, hostname());
       return { ref, name, project: machineProject(ref, name, enrollment()) };
     },
+    isApp: (appPid) => engineAppPid !== null && engineRelay.attachedApp() && appPid === engineAppPid,
     log,
   });
+  front.events((name, payload) => each(eventListeners, 'machine', { name, payload })); // the endpoint's owner `machine`
 
   // --- the endpoint seam -----------------------------------------------------------------------------------------------
   const holds = new Map<number, string>();
@@ -637,13 +646,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     machine: { ref, profileDir, stateDir: paths.endpoint, kind },
     async dispatch(host, name, input, client?: ClientRef) {
       const refused = (why: string): HostResponse => ({ t: 'res', id: 'endpoint', ok: false, error: ipcError('internal', why) });
-      if (host === 'machine') {
-        try {
-          return { t: 'res', id: 'endpoint', ok: true, value: await daemonCommand(name, input) };
-        } catch (error) {
-          return refused(error instanceof Error ? error.message : String(error));
-        }
-      }
+      // P5 O3-D M4: the front's table, as a machine.sock client's request (the spine loaded for a spine command), the
+      // endpoint's ref for its device the asking client (the client port answers it noClient until O7 M5)
+      if (host === 'machine') return { t: 'res', id: 'endpoint', ...(await front.dispatch(name, input, client)) } as HostResponse;
       if (host === 'pty-host' && (name === 'pty.ack' || name === 'pty.checkpoint')) return refused(`${name} through the endpoint: the credit is the app's or the daemon's`);
       if (host === 'engine-host' && name === 'host.interest') return refused('a remote viewer’s interest arrives through interest.report');
       if (host === 'engine-host' && name === 'host.stopAll') return stopAll({ input, ...(client && { client: client.id }) });
@@ -740,6 +745,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       badToken: 'close',
       admitHello: () => engineRelay.admit(),
       onClientEnd: () => engineRelay.ended(),
+      onClient: (connected, _peer, appPid) => void (engineAppPid = connected ? (appPid ?? null) : null),
       identity: () => identity,
       counts: counts('engine-host'),
       token: () => token,

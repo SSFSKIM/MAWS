@@ -154,6 +154,8 @@ class Stream implements StreamHandle {
   lost = false;
   /** `paused` went and no `resumed` since. */
   paused = false;
+  /** Its first opening failed: whatever launch it opens later is new to its reader, from the launch's first event. */
+  unanswered = false;
   /** Bumped by each (re)open: a flow that finds it moved stops. */
   gen = 0;
   hydration = 0;
@@ -262,8 +264,9 @@ export class SessionStreams {
     const launch = String(status.launchId);
     const relaunched = stream.epoch !== null && stream.epoch !== launch;
     const catchUp = (how === 'resume' || how === 'relink') && !relaunched;
-    // A launch begun while the stream ran goes on from its first event, whatever `from` says.
-    const from: StreamFrom = how === 'relaunch' || relaunched ? 'start' : stream.from;
+    // A launch begun while the stream ran, or first seen after its opening failed, goes on from its first event,
+    // whatever `from` says.
+    const from: StreamFrom = how === 'relaunch' || relaunched || stream.unanswered ? 'start' : stream.from;
     stream.epoch = launch;
     stream.engine = engineOf(status);
     if (stream.view === 'cards') return this.#openCards(stream, gen, catchUp);
@@ -444,6 +447,7 @@ export class SessionStreams {
     stream.latest.clear();
     stream.reading = false;
     stream.catching = true;
+    if (!stream.answered) stream.unanswered = true;
     stream.sink.end('unavailable');
   }
 

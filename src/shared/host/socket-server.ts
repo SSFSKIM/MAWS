@@ -93,7 +93,7 @@ export interface SocketServerOptions {
   counts(): { liveSessions: number; rows: number };
   token(): string;
   onExit(when: 'now' | 'idle', from?: { refused: boolean }): void; // an `exit` line on a connection whose token checked out (P5 O2 M5: `from` says which kind)
-  onClient?(connected: boolean, peer?: WirePeer): void; // a client was welcomed (P5 O3-D M3: with what its hello said of it), or a client left (not called for a replaced one)
+  onClient?(connected: boolean, peer?: WirePeer, appPid?: number): void; // a client was welcomed (P5 O3-D M3: with what its hello said of it; M4: and its appPid), or a client left (not called for a replaced one)
   admitHello?(peer: WirePeer): Promise<Admission>; // P5 O2 M5: a relay's reflected handshake (above)
   log(line: string): void;
   helloTimeoutMs?: number;
@@ -341,7 +341,7 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
       });
       runtime.serve(envelopeOnly(port, client), { capabilities: peer.capabilities }); // P5 O3-D M3: the app's presence reads them
       log(`client connected: appPid ${appPid} build ${peer.build} wire ${peer.major}.${peer.minor} capabilities [${peer.capabilities.join(', ')}]`);
-      options.onClient?.(true, peer);
+      options.onClient?.(true, peer, appPid);
     }
   }
 
