@@ -64,7 +64,8 @@ describe('a remote lane A session’s state', () => {
     const ended = () => row({ type: 'system', subtype: 'turn_duration', durationMs: 1000 });
     const marker = () => row({ type: 'user', isMeta: true, origin: { kind: 'plugin', name: 'sminos' }, message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } });
     const caveat = () => row({ type: 'user', isMeta: true, message: { role: 'user', content: '<local-command-caveat>The command below was run directly in Claude Code.</local-command-caveat>' } });
-    const echo = () => row({ type: 'user', message: { role: 'user', content: '<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>haiku</command-args>' } });
+    const echo = (parentUuid: string | null) => row({ type: 'user', parentUuid, message: { role: 'user', content: '<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>haiku</command-args>' } });
+    const skill = () => row({ type: 'user', message: { role: 'user', content: '<command-message>doperpowers:brainstorming</command-message>\n<command-name>/doperpowers:brainstorming</command-name>\n<command-args>a feature</command-args>' } });
     const output = () => row({ type: 'user', message: { role: 'user', content: '<local-command-stdout>Set model to `Haiku 5.5`</local-command-stdout>' } });
     const status = (fold: RemoteFold, s: string) => fold.message(env('presence', presence({ record: { status: s } }), null, null));
     const live = (fold: RemoteFold, r: Record<string, unknown>) => fold.message(env('row', { row: r }));
@@ -79,7 +80,8 @@ describe('a remote lane A session’s state', () => {
       const fold = new RemoteFold(S);
       fold.message(snapshot({ rows: [ended(), call(), prompt('Spawn two agents.')], presence: presence({ record: { status: 'busy' } }) }));
       expect(state(fold).turn.running).toBe(false); // the agents it started work in the background
-      for (const r of [caveat(), echo(), output()]) live(fold, r); // a command typed at the terminal runs no turn
+      const typed = caveat();
+      for (const r of [typed, echo(typed.uuid), output()]) live(fold, r); // a command typed at the terminal runs no turn
       status(fold, 'waiting'); // its panel, up in the terminal
       expect(state(fold).turn.running).toBe(false);
       live(fold, prompt('Go on.'));
@@ -90,6 +92,18 @@ describe('a remote lane A session’s state', () => {
       expect(state(fold).turn.running).toBe(true);
       live(fold, marker()); // the bridge's interrupt
       expect(state(fold).turn.running).toBe(false);
+    });
+
+    it('a skill invoked at the terminal runs its turn from its record, before any chunk: it has no caveat', () => {
+      const fold = new RemoteFold(S);
+      fold.message(snapshot({ rows: [ended(), call(), prompt('Earlier.')], presence: presence({ record: { status: 'busy' } }) }));
+      expect(state(fold).turn.running).toBe(false);
+      live(fold, skill());
+      expect(state(fold).turn.running).toBe(true);
+      const typed = caveat(); // the same read in a snapshot, newest first: a command under its caveat marks nothing
+      const later = new RemoteFold(S);
+      later.message(snapshot({ rows: [output(), echo(typed.uuid), typed, ended()], presence: presence({ record: { status: 'waiting' } }) }));
+      expect(state(later).turn.running).toBe(false);
     });
 
     it('a main turn between its steps, a permission prompt up, runs; with no turn row seen, the record says', () => {

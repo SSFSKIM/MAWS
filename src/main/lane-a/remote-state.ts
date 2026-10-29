@@ -49,7 +49,11 @@ const isMain = (body: Fields) => (body.agentId ?? null) === null;
 /** The engine record's statuses of a main loop at rest: `shell` is one beside a background shell (2.1.312). */
 const IDLE_LOOP: ReadonlySet<string> = new Set(['idle', 'shell']);
 
-/** What a main transcript row says of the main turn (the module's header): its end, a turn running, or nothing. */
+/**
+ * What a main transcript row says of the main turn (the module's header): its end, a turn running, or nothing. A command's
+ * record opens a turn here as a prompt does; the fold leaves out one under the engine's caveat, a command typed at the
+ * terminal, which runs no model (a skill's record has no caveat, and its turn runs).
+ */
 export function turnMark(row: Fields): 'ended' | 'running' | null {
   const parsed = row as TranscriptRecord;
   if (row.type === 'system') return row.subtype === 'turn_duration' ? 'ended' : null;
@@ -60,7 +64,7 @@ export function turnMark(row: Fields): 'ended' | 'running' | null {
   const content = record(row.message)?.content;
   if (Array.isArray(content) && content.some((block) => record(block)?.type === 'tool_result')) return 'running';
   if (record(row.origin)?.kind === 'peer') return 'running'; // a message from another session or an agent: the engine answers it
-  return startsTurn(parsed) && localCommandKind(parsed) === null ? 'running' : null;
+  return startsTurn(parsed) ? 'running' : null;
 }
 
 export class RemoteFold {
@@ -69,6 +73,7 @@ export class RemoteFold {
   #catalog: LaneACatalog | null = null;
   #open = new Set<string>(); // the main loop's open model requests, by (turnId, step)
   #ended: boolean | null = null; // whether the latest main row that marks a turn is its end; null: none seen
+  #caveat: unknown = null; // the uuid of the engine's `<local-command-caveat>` when it is the latest row
   #ranModel: string | null = null; // what the main loop's latest step-end that named it said
   #ranEffort: string | null = null;
   #pending = new Map<string, LaneARaised>();
@@ -87,9 +92,10 @@ export class RemoteFold {
         const catalog = record(body.catalog);
         if (catalog !== null && typeof catalog.fingerprint === 'string') this.#catalog = catalog as unknown as LaneACatalog;
         this.#open = new Set((Array.isArray(body.streaming) ? body.streaming : []).map(record).filter((s): s is Fields => s !== null && isMain(s)).map(stepKey));
-        // the snapshot's rows, newest first: the first that marks a turn says
-        const marked = (Array.isArray(body.rows) ? body.rows : []).map(record).map((row) => (row === null ? null : turnMark(row))).find((mark) => mark !== null) ?? null;
-        this.#ended = marked === null ? null : marked === 'ended';
+        // the snapshot's rows, newest first, read in the transcript's order: the latest that marks a turn says
+        this.#ended = null;
+        this.#caveat = null;
+        for (const row of (Array.isArray(body.rows) ? body.rows : []).toReversed()) this.#mark(record(row));
         this.#pending = new Map();
         return;
       }
@@ -109,12 +115,8 @@ export class RemoteFold {
       case 'catalog':
         if (typeof body.fingerprint === 'string') this.#catalog = body as unknown as LaneACatalog;
         return;
-      case 'row': {
-        const row = record(body.row);
-        const mark = row === null ? null : turnMark(row);
-        if (mark !== null) this.#ended = mark === 'ended';
-        return;
-      }
+      case 'row':
+        return this.#mark(record(body.row));
       case 'chunk':
         if (isMain(body)) this.#open.add(stepKey(body));
         return;
@@ -131,6 +133,17 @@ export class RemoteFold {
       default:
         return;
     }
+  }
+
+  /** One main row, in the transcript's order: what it says of the main turn (`turnMark`), a terminal command's record aside. */
+  #mark(row: Fields | null): void {
+    if (row === null) return;
+    const caveat = this.#caveat;
+    const kind = localCommandKind(row as TranscriptRecord);
+    this.#caveat = kind === 'caveat' ? row.uuid : null;
+    if (kind === 'echo' && caveat !== null && caveat !== undefined && row.parentUuid === caveat) return;
+    const mark = turnMark(row);
+    if (mark !== null) this.#ended = mark === 'ended';
   }
 
   hasSnapshot(): boolean {
