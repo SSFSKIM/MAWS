@@ -5,8 +5,8 @@
 import { base64urlEncode, generateSigningKey, keyId, verifyEnrollmentMac, type OrgState, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { enrollV2, machineFetch, type V2Machine } from '../fake-machine/org';
-import { encodeEnrollmentCodeV2, type EnrollmentKey, type MachineView } from '../src/protocol/identity';
-import { enrollmentToken, MachineClient, refusal, waitFor } from './support/clients';
+import { delegationFor, encodeEnrollmentCodeV2, type EnrollmentKey, type MachineView } from '../src/protocol/identity';
+import { enrollmentToken, MachineClient, provisioningKey, refusal, waitFor } from './support/clients';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from './support/local';
 import { genesis, newDevice, next, signedBy, type TestDevice } from './support/org';
 
@@ -158,11 +158,15 @@ describe('a key another holder has', () => {
     enrollV2((await code(keep.code)).text, keep.name ?? `kh-fresh-${++fresh}`, { key, ...(keep.ref === undefined ? {} : { ref: keep.ref }) });
   const keyHeld = (holder: string) => new RegExp(`409 \\{"error":"key-held","message":"this key is ${holder}`);
 
-  it("is refused when the org state holds it: another machine's, a device's, the recovery key", async () => {
+  it("is refused when the org state holds it: another machine's, a device's, a delegation's, the recovery key", async () => {
     const other = await listed('kh-listed');
     await expect(posting(other.key)).rejects.toThrow(keyHeld(`machine kh-listed's in the org state \\(ref ${other.ref}\\)`));
     await expect(posting(a1.channel)).rejects.toThrow(keyHeld('the channel key of device a1 in the org state'));
     await expect(posting(a1.stepUp!)).rejects.toThrow(keyHeld('the step-up key of device a1 in the org state'));
+    const issued = await provisioningKey(hub, ADMIN, { label: 'held', prefix: 'kh-vm-', max_uses: null, offline_revoke_s: null });
+    const delegation = await generateSigningKey();
+    await accept((s) => s.delegations.push(delegationFor(issued.key, delegation.pub, 'org')));
+    await expect(posting(delegation)).rejects.toThrow(keyHeld(`delegation ${issued.id}'s in the org state`));
     await expect(posting(recovery)).rejects.toThrow(keyHeld("the org state's recovery key"));
   });
 
