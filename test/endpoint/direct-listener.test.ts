@@ -65,9 +65,12 @@ afterEach(async () => {
   }
 });
 
-/** Listens on 127.0.0.1 in the address's place: the fake table's tailnet addresses aren't this machine's. */
-function loopback(requested: string[], ports: Map<string, number>, servers: Map<string, Server>, failing: Set<string>): NonNullable<DirectListenerOptions['listen']> {
-  return (server: Server, address: string) =>
+/**
+ * Listens on 127.0.0.1 in the address's place: the fake table's tailnet addresses aren't this machine's. It answers the
+ * loopback port it got, or with `configured` the port it was asked for, as a real bind on a fixed port does each time.
+ */
+function loopback(requested: string[], ports: Map<string, number>, servers: Map<string, Server>, failing: Set<string>, configured = false): NonNullable<DirectListenerOptions['listen']> {
+  return (server: Server, address: string, asked: number) =>
     new Promise<number>((resolve, reject) => {
       requested.push(address);
       if (failing.delete(address)) return reject(Object.assign(new Error(`listen EADDRNOTAVAIL ${address}`), { code: 'EADDRNOTAVAIL' }));
@@ -76,12 +79,12 @@ function loopback(requested: string[], ports: Map<string, number>, servers: Map<
       server.listen(0, '127.0.0.1', () => {
         const port = (server.address() as AddressInfo).port;
         ports.set(address, port);
-        resolve(port);
+        resolve(configured ? asked : port);
       });
     });
 }
 
-async function fixture(options: { table?: InterfaceTable; limits?: DirectListenerOptions['limits']; failing?: string[]; sendLimits?: SendLimits } = {}): Promise<Fixture> {
+async function fixture(options: { table?: InterfaceTable; limits?: DirectListenerOptions['limits']; failing?: string[]; sendLimits?: SendLimits; configuredPort?: boolean } = {}): Promise<Fixture> {
   const requested: string[] = [];
   const ports = new Map<string, number>();
   const servers = new Map<string, Server>();
@@ -106,7 +109,7 @@ async function fixture(options: { table?: InterfaceTable; limits?: DirectListene
       reads.count++;
       return table.current;
     },
-    listen: loopback(requested, ports, servers, new Set(options.failing)),
+    listen: loopback(requested, ports, servers, new Set(options.failing), options.configuredPort),
     connection: (io) => void carriers.push({ io, channel: channels.accept('direct', io, { deadlineMs: 10_000 }) }),
     addresses: (urls) => void reports.push(urls),
     log: (line) => void log.push(line),
@@ -236,6 +239,16 @@ describe('binding', () => {
       expect(f.servers.get(address)!.listening).toBe(false);
       expect(await reachesLetGo(f, address)).toBe(false);
     }
+  });
+
+  it('advertises the same addresses again when started after stop(), though they are the ones it had', async () => {
+    const f = await fixture({ configuredPort: true });
+    const urls = ['ws://100.101.102.103:47830', 'ws://[fd7a:115c:a1e0::abcd]:47830'];
+    expect(f.reports).toEqual([urls]);
+    await f.listener.stop();
+    await f.listener.start();
+    expect(f.listener.bound).toBe(true);
+    expect(f.reports).toEqual([urls, urls]);
   });
 });
 

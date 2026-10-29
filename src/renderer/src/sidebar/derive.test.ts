@@ -14,6 +14,7 @@ import { loadScenario } from '../../../../test/support/scenario';
 import { holderLine, needsYou, waitingItem, type NeedsYouRow } from '../attention/derive';
 import { listedGlyph } from '../attention/glyph';
 import type { ListedSession } from '../stores/sessions';
+import type { RowKey } from '../stores/org-projects';
 import { orderProjects } from '../overview/derive';
 import { pageScenario } from '../test-support/shell-stores';
 import {
@@ -262,6 +263,79 @@ describe('listed rows in the project list', () => {
     for (const state of ['done', 'stopped', 'retired']) expect(read(state)).toEqual(['✓', 'faint', 'Done', false]);
     for (const state of ['idle', 'unknown-word', '']) expect(read(state)).toEqual(['○', 'faint', 'Idle', false]);
     expect(listedTitle({ title: '  ' })).toBe('New chat');
+  });
+});
+
+// P5 O8 M5 (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, "The People toggle"): ownership first (an address
+// is others' when a listing at it isn't the member's), then the presentation: drawn under its row while that row's
+// People toggle is on, else counted in its `others`; never in the rollups, which say what needs you.
+describe('other people’s sessions and the People toggle', () => {
+  const ORG = 'repo:maws' as OrgKey;
+  const OTHER_ROW = machineKey(OTHER_MACHINE);
+  const here = projectOn(TEST_MACHINE, 'maws', 0, { name: 'MAWS', org: repo('maws', 'MAWS') });
+  const listedOn = (session: string, over: Partial<RemoteRow> = {}): ListedSession => ({ ...remoteRow(OTHER_MACHINE, session, { orgKey: ORG, ...over }), appId: there(session) as AppSessionId });
+  const theirs = (session: string, over: Partial<RemoteRow> = {}) => listedOn(session, { mine: false, owners: ['ana'], ...over });
+  const listedMap = (...list: ListedSession[]) => new Map(list.map((l) => [l.appId, l]));
+  const recs = (...list: SessionRecord[]) => new Map(list.map((r) => [r.appId, r]));
+  const local = sessionOn(TEST_MACHINE, 's1', { projectId: here.id, updatedAt: '2026-10-28T09:00:00Z' });
+  const list = (listed: Map<AppSessionId, ListedSession>, people: ReadonlySet<RowKey> = new Set(), over: Partial<ProjectListInput> = {}) =>
+    projectList(input({ records: recs(local), digests: new Map(), projects: mapOf([here]), rows: [], listed, people, ...over }));
+  const shape = (entries: ReturnType<typeof list>) => entries.map((e) => [e.key, e.sessions.map((r) => r.appId), e.listed.map((l) => l.appId), e.others]);
+  const waitingRow = (appSessionId: AppSessionId) => ({ appSessionId, oldest: item(appSessionId, 'permission', '2026-10-28T09:00:00Z'), count: 1, tier: 1 }) as NeedsYouRow;
+
+  it('counts others’ rows while the toggle is off and draws them under People while it is on, their activity only once drawn', () => {
+    const listed = listedMap(listedOn('b1'), theirs('b2', { issued: '2026-10-28T11:00:00Z' }), theirs('b3'));
+    const off = list(listed);
+    expect(shape(off)).toEqual([[ORG, [addr('s1')], [there('b1')], 2]]);
+    expect(off[0].lastActivity).toBe(Date.parse('2026-10-28T09:00:00Z'));
+    // a project holding others' rows alone, toggled off, ranks by when it was added, as one with no session does
+    const notes = projectOn(TEST_MACHINE, 'notes', 1, { name: 'notes', org: repo('notes'), createdAt: '2026-10-28T10:00:00Z' });
+    const ranked = list(listedMap(theirs('n1', { orgKey: 'repo:notes' as OrgKey })), new Set(), { projects: mapOf([here, notes]) });
+    expect(ranked.map((e) => [e.key, e.lastActivity, e.others])).toEqual([['repo:notes', null, 1], [ORG, Date.parse('2026-10-28T09:00:00Z'), 0]]);
+    const on = list(listed, new Set([ORG]));
+    expect(shape(on)).toEqual([[ORG, [addr('s1')], [there('b1'), there('b2'), there('b3')], 0]]);
+    expect(on[0].lastActivity).toBe(Date.parse('2026-10-28T11:00:00Z'));
+  });
+
+  it('hides a record at an others’ listed address while off and counts it; draws it while on; never in the rollups', () => {
+    const recorded = sessionOn(OTHER_MACHINE, 'c1', { projectId: null });
+    const over = { records: recs(local, recorded), rows: [waitingRow(recorded.appId)], digests: new Map([[recorded.appId, digest(recorded.appId, { phase: 'working' })]]) };
+    const listed = listedMap(theirs('c1', { orgKey: null }));
+    const off = list(listed, new Set(), over);
+    expect(shape(off)).toEqual([[ORG, [addr('s1')], [], 0], [OTHER_ROW, [], [], 1]]);
+    const on = list(listed, new Set([OTHER_ROW]), over);
+    expect(shape(on)).toEqual([[ORG, [addr('s1')], [], 0], [OTHER_ROW, [there('c1')], [], 0]]);
+    expect(on[1].rollup).toEqual({ waiting: 0, working: 0 });
+  });
+
+  it('draws a record at your listed address as today', () => {
+    const recorded = sessionOn(OTHER_MACHINE, 'b1', { projectId: null });
+    const entries = list(listedMap(listedOn('b1', { owners: ['member-1', 'ana'] })), new Set(), { records: recs(local, recorded) });
+    expect(shape(entries)).toEqual([[ORG, [addr('s1')], [], 0], [OTHER_ROW, [there('b1')], [], 0]]);
+  });
+
+  it('counts yours only in the rollups: others’ waiting and busy rows add nothing', () => {
+    const listed = listedMap(listedOn('b1', { state: 'waiting' }), theirs('b2', { state: 'waiting' }), theirs('b3', { state: 'busy' }));
+    expect(list(listed, new Set([ORG]))[0].rollup).toEqual({ waiting: 1, working: 0 });
+    expect(list(listed)[0].rollup).toEqual({ waiting: 1, working: 0 });
+  });
+
+  it('a search matches drawn rows only, so others’ rows match while the toggle is on', () => {
+    const listed = listedMap(theirs('b1', { title: 'Ana’s refactor' }));
+    expect(filterProjectList(list(listed), 'refactor', byId).map((e) => e.key)).toEqual([]);
+    expect(filterProjectList(list(listed, new Set([ORG])), 'refactor', byId).map((e) => e.key)).toEqual([ORG]);
+  });
+
+  it('keeps a machine’s row with only others’ sessions, with its others, so its toggle stays reachable', () => {
+    const entries = list(listedMap(theirs('b1', { orgKey: null }), theirs('b2', { orgKey: null })));
+    expect(shape(entries)).toEqual([[ORG, [addr('s1')], [], 0], [OTHER_ROW, [], [], 2]]);
+    expect(entries[1].name).toBe('Studio');
+  });
+
+  it('keys the toggle per row, machine rows included', () => {
+    const listed = listedMap(theirs('b1'), theirs('b2', { orgKey: null }));
+    expect(shape(list(listed, new Set([OTHER_ROW])))).toEqual([[ORG, [addr('s1')], [], 1], [OTHER_ROW, [], [there('b2')], 0]]);
+    expect(shape(list(listed, new Set([ORG])))).toEqual([[ORG, [addr('s1')], [there('b1')], 0], [OTHER_ROW, [], [], 1]]);
   });
 });
 

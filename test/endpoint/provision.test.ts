@@ -4,6 +4,7 @@
 // directory with nothing held in memory; `retire` and its reconciliation of a lost answer; `unenroll` on an attended and
 // on a delegated endpoint; and the crash-recovery scene carried through to `retire`, after which no private key is left.
 import * as fs from 'node:fs';
+import type { Server } from 'node:http';
 import { join } from 'node:path';
 import { base64urlEncode, encodeProvisioningCodeV2, generateSigningKey, keyId, NO_CERTIFICATES, verifyEvent, type LogEventV2, type ProvisioningCodeV2 } from 'org-protocol';
 import { delegationFor, type MachineView, type ProvisioningKeyIssued, type ProvisioningKeys } from 'desk-hub/protocol';
@@ -65,8 +66,20 @@ async function code(d: Delegation, options: { legacy?: boolean; privateJwk?: Jso
 /** Every request the endpoint sent, as `METHOD path`; `fault` may answer or throw in the hub's place. */
 type Traffic = { seen: string[]; fault?: (request: string, forward: () => Promise<Response>) => Promise<Response | undefined> | undefined };
 
-/** A started endpoint on a scratch profile (or the one given, as a fresh process sees it), its requests recorded. */
-async function endpointOn(options: { ref?: string; profileDir?: string; traffic?: Traffic } = {}) {
+/** The tailnet address `direct` endpoints bind, each time listened on at 127.0.0.1 in its place. */
+const TAILNET = '100.101.102.103';
+/** Listens on loopback and answers the port asked for, as a bind on the fixed direct port does each time. */
+const loopback = (server: Server, _address: string, port: number) =>
+  new Promise<number>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => resolve(port));
+  });
+
+/**
+ * A started endpoint on a scratch profile (or the one given, as a fresh process sees it), its requests recorded; with
+ * `direct`, binding the direct listener on a fake tailnet address.
+ */
+async function endpointOn(options: { ref?: string; profileDir?: string; traffic?: Traffic; direct?: boolean } = {}) {
   const traffic = options.traffic ?? { seen: [] };
   const services = fakeServices({ ...(options.ref === undefined ? {} : { ref: options.ref as ReturnType<typeof mintRef> }), ...(options.profileDir === undefined ? {} : { profileDir: options.profileDir }) });
   const endpoint = createEndpoint({
@@ -77,6 +90,12 @@ async function endpointOn(options: { ref?: string; profileDir?: string; traffic?
       return (await traffic.fault?.(request, forward)) ?? forward();
     },
     sleep: (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 50))),
+    ...(options.direct
+      ? {
+          env: { MAWS_ENDPOINT_DIRECT: '1' },
+          direct: { interfaces: () => ({ utun4: [{ address: TAILNET, family: 'IPv4' as const, internal: false, netmask: '255.255.255.255', mac: '00:00:00:00:00:00', cidr: null }] }), listen: loopback },
+        }
+      : {}),
   });
   await endpoint.start(services);
   const entry = { endpoint, services };
@@ -492,16 +511,20 @@ describe('unenroll', () => {
     expect(json((await reenrolling).out)).toMatchObject({ enrollment: 'org-listed', name: 'undone', ref: services.machine.ref });
   });
 
-  it('on a delegated endpoint: RL10 unserved, both keys destroyed, the hub side left for its drop; provisions again under the same ref once dropped', async () => {
-    const { endpoint, services } = await endpointOn({ ref: mintRef(box.id) });
+  it('on a delegated endpoint: RL10 unserved, both keys destroyed, the hub side left for its drop; provisions again under the same ref once dropped, its listener bound again', async () => {
+    const { endpoint, services } = await endpointOn({ ref: mintRef(box.id), direct: true });
     const dir = services.machine.stateDir;
     expect((await provision(endpoint, await code(box, { legacy: true }), 'box-undone')).code).toBe(0);
     await expect.poll(() => fs.existsSync(join(dir, 'rl10.json'))).toBe(true);
+    const urls = [`ws://${TAILNET}:47830`];
+    await expect.poll(() => endpoint.status().listener.bound).toBe(true);
+    await expect.poll(() => endpoint.endpointRecords.addresses).toEqual(urls);
     const cert = (read(dir, 'enrollment.json') as { cert: { body: { pub: string } } }).cert.body;
     const undone = await endpoint.cli('unenroll', ['--json']);
     expect(undone.code, undone.out).toBe(0);
     expect((json(undone.out).destroyed as string[]).length).toBe(2);
     expect(fs.existsSync(join(dir, 'rl10.json'))).toBe(false);
+    expect(endpoint.status().listener).toEqual({ bound: false });
     expect(privateKeyFiles(dir)).toEqual([]);
     const aside = join(dir, String(json(undone.out).aside));
     expect(fs.existsSync(join(aside, 'legacy.json'))).toBe(true);
@@ -520,6 +543,9 @@ describe('unenroll', () => {
     const again = await provision(endpoint, await code(box), 'box-undone');
     expect(again.code, again.out).toBe(0);
     expect(again.view).toMatchObject({ enrollment: 'org-listed', ref: services.machine.ref });
+    // The listener rebinds the same addresses: the status reads it bound, and the endpoint record names them still.
+    await expect.poll(() => endpoint.status().listener.bound).toBe(true);
+    expect(endpoint.endpointRecords.addresses).toEqual(urls);
   });
 });
 

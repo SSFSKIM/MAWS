@@ -515,6 +515,16 @@ describe('ipc schema validates both directions', () => {
   });
   // C8a end
 
+  // P5 O8 M5: the People toggle's layout key (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §L)
+  it('takes sidebar.people as a layout key, outside the panel namespace, and holds its value to its shape', () => {
+    const value = { version: 1, on: ['remote:github.com/o/r', 'machine:studio'] };
+    expect(validateCommandInput('layout.get', { key: 'sidebar.people' }).ok).toBe(true);
+    expect(validateCommandInput('layout.set', { key: 'sidebar.people', value })).toEqual({ ok: true, value: { key: 'sidebar.people', value } });
+    expect(layout.SidebarPeopleSchema.safeParse(value).success).toBe(true);
+    expect(layout.SidebarPeopleSchema.safeParse({ version: 2, on: [] }).success).toBe(false);
+    expect(layout.SidebarPeopleSchema.safeParse({ version: 1, on: [1] }).success).toBe(false);
+  });
+
   // C7 start: C7's additions (C7 execution document, Interfaces "X2 additions" and the Decision Log's execution-start entry)
   describe('C7 entries', () => {
     it("carries the queue's pause reason on session.queue and session.queue.list as a closed, nullable, optional set", () => {

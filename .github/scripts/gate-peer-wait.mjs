@@ -10,7 +10,7 @@ import { JOB_STATUSES, githubApi, jobsOf } from './gate-peer-api.mjs';
 function verdictOf(holder, jobs, group) {
   if (!JOB_STATUSES.has(holder.status) || (holder.status === 'completed' && typeof holder.conclusion !== 'string')) throw new Error('invalid holder run');
   const plan = jobs.find((job) => job.name === 'plan');
-  const peer = jobs.find((job) => job.name === `e2e:${group}`);
+  const peer = jobs.find((job) => job.name.replace(/ \(EC2 overflow\)$/, '') === `e2e:${group}`);
   if (plan?.status === 'completed' && plan.conclusion !== 'success') return `holder plan ${plan.conclusion}`;
   if (peer?.status === 'completed') return peer.conclusion;
   if (holder.status === 'completed') return `holder ${holder.conclusion} without a completed e2e:${group}`;

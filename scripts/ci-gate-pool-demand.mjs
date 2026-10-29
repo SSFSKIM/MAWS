@@ -51,7 +51,7 @@ export function targetOutputs(gitDir, sha, message = process.env.HEAD_MESSAGE ??
       import { readFileSync } from 'node:fs';
       const { planner, env, scripts } = JSON.parse(readFileSync(0, 'utf8'));
       const { planOf } = await import(planner);
-      process.stdout.write(JSON.stringify(planOf(env, scripts).outputs));
+      process.stdout.write(JSON.stringify(planOf(env, scripts, Date.now()).outputs));
     `], {
       cwd: dir,
       env: { PATH: process.env.PATH },

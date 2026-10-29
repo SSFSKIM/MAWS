@@ -17,6 +17,7 @@ import { allTabs } from '../stores/layout-model';
 import { createMachinesStore, selectOffline } from '../stores/machines';
 import { createSessionsStore } from '../stores/sessions';
 import { connectShell } from './events';
+import { ownersLabel } from '../sidebar/owners'; // P5 O8 M5
 
 // P5 O6 M2: `fake` stands for main (its answers, events and the saved layout hold bare ids); the shell connects through
 // the page's client over it, so the stores hold addresses (`A`, `at(id)`), and a saved layout from before O6 reads lifted.
@@ -618,6 +619,8 @@ describe('the org rows', () => {
     rows: (over.sessions ?? ['b1']).map((id) => remoteRow(OTHER_MACHINE, id, { title: `Studio ${id}` })),
     complete: over.complete ?? true,
     pending: over.pending ?? [],
+    members: [{ id: 'member-1', email: 'sam@example.com', name: 'Sam' }],
+    member: 'member-1',
   });
   const SNAPSHOT_READS = ['session.list', 'session.projects.list', 'session.digests', 'attention.list', 'engine.sessions'] as const;
 
@@ -630,6 +633,21 @@ describe('the org rows', () => {
     expect([...stores.sessions.getState().listedMachines]).toEqual([OTHER_MACHINE]);
     fake.event('org.rows.changed', rowsOf({ sessions: ['b3'] }));
     expect([...stores.sessions.getState().listed.keys()]).toEqual([onB('b3')]);
+  });
+
+  // P5 O8 M5 (Interfaces §L): the owners' names and "you" come with the rows, so a change of member relabels every row
+  it('applies members and member with the rows, a change of signed-in member relabelling every row from the new payload', async () => {
+    const { fake, stores } = setup();
+    const ana = { id: 'ana', email: 'ana.lopez@example.com', name: 'Ana' };
+    const sam = { id: 'member-1', email: 'sam@example.com', name: 'Sam' };
+    const coOwned = ['b1', 'b2'].map((id) => remoteRow(OTHER_MACHINE, id, { owners: ['member-1', 'ana'] }));
+    await fake.reply('org.rows', { ...rowsOf(), rows: coOwned, members: [sam, ana], member: 'member-1' });
+    const labels = () => [...stores.sessions.getState().listed.values()].map((l) => ownersLabel(l.owners, stores.sessions.getState().member, stores.sessions.getState().members));
+    expect(stores.sessions.getState().members.get('ana')).toEqual(ana);
+    expect(labels()).toEqual(['you, Ana', 'you, Ana']);
+    fake.event('org.rows.changed', { ...rowsOf(), rows: coOwned.map((r) => ({ ...r, mine: true })), members: [sam, ana], member: 'ana' });
+    expect(stores.sessions.getState().member).toBe('ana');
+    expect(labels()).toEqual(['you, Sam', 'you, Sam']);
   });
 
   it('applies no org.rows answer older than an org.rows.changed', async () => {
