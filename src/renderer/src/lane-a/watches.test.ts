@@ -90,6 +90,23 @@ describe('watchLaneA', () => {
     expect(fake.invoked('laneA.watch')).toHaveLength(2);
   });
 
+  // P5 O9 M9 (fix wave 2): a remote link's transport resume passes on as itself, never a reset: nothing was lost and no
+  // snapshot follows. Its pause stays the link's own (the controls read its reason from the state).
+  it('passes a resume on as a resume, keeps the replay log through it, and drops the pause', async () => {
+    const fake = fakeClient({ 'laneA.watch': { watch: 'w-1' } });
+    applyLaneAState(A, laneAState(A));
+    const heard: PlaneEvent[] = [];
+    watchLaneA(A, (e) => heard.push(e), { client: fake.client });
+    await settle();
+    fake.event('laneA.plane', { appSessionId: A, watch: 'w-1', messages: [snapshot] });
+    fake.event('laneA.plane', { appSessionId: A, watch: 'w-1', paused: 'offline' });
+    fake.event('laneA.plane', { appSessionId: A, watch: 'w-1', resumed: true });
+    expect(heard).toEqual([{ kind: 'messages', messages: [snapshot] }, { kind: 'resumed' }]);
+    const late: PlaneEvent[] = [];
+    watchLaneA(A, (e) => late.push(e), { replay: true, client: fake.client });
+    expect(late).toEqual([{ kind: 'messages', messages: [snapshot] }]);
+  });
+
   it('keeps each op’s messages by id', async () => {
     const fake = fakeClient({ 'laneA.watch': { watch: 'w-1' } });
     applyLaneAState(A, laneAState(A));

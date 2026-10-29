@@ -22,7 +22,6 @@
     // imports a new one fails `pnpm typecheck` until it is added here.
     "src/engine-host/**/*",
     "src/main/artifacts/page-connectors.ts",
-    "src/main/files/read-tail.ts",
     "src/main/usage/claude-usage-reader.ts",
     "src/main/usage/request-ledger.ts",
     "test/support/agents-events.ts",

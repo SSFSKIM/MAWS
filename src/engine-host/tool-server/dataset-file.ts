@@ -46,7 +46,7 @@ export async function datasetFileUnder(cwd: string, path: string): Promise<Valid
 }
 
 // macOS 11 and later: the kernel refuses a symlink anywhere on the path it walks, not only in its last component (as
-// src/main/files/service.ts:109-116 opens a session's files). Node's fs.constants does not carry it, so it is passed
+// src/services/files/service.ts:109-116 opens a session's files). Node's fs.constants does not carry it, so it is passed
 // numerically; it replaces O_NOFOLLOW, since macOS answers EINVAL for the two together, and refuses a last-component
 // link with ELOOP as well. Linux ignores the bit, so there the open guards the last component alone and a directory
 // above the file turned into a link after the containment check is a documented gap of the Linux unit lane (MAWS ships

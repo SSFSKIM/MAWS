@@ -103,7 +103,11 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     const p2 = ['p2-no-prompt-resume-1', 'p2-no-prompt-resume-setup', 'p2-to-human-converge-s10-new', 'p2-to-human-converge-s10-resume', 'p2-to-human-converge-s10-then', 'p2-to-human-converge-s11-fork', 'p2-to-human-converge-s11-new', 'p2-to-human-converge-s12-new', 'p2-to-human-converge-s12-resume', 'p2-to-human-converge-s13-new', 'p2-to-human-fork', 'p2-to-human-new', 'p2-to-human-off', 'p2-to-human-resume', 'p2-to-human-shapes-s14-compact', 'p2-to-human-shapes-s14-new', 'p2-to-human-shapes-s15-new', 'p2-to-human-shapes-s16-new', 'p2-to-human-snapoff-s6-new', 'p2-to-human-snapoff-s6-resume', 'p2-to-human-snapoff-s6-then', 'p2-to-human-snapoff-s7-new', 'p2-to-human-snapoff-s7-resume', 'p2-to-human-snapoff-s8-new', 'p2-to-human-snapoff-s8-resume', 'p2-to-human-snapoff-s9-fork', 'p2-to-human-snapoff-s9-new', 'p2-to-human-snapshot-s1-new', 'p2-to-human-snapshot-s1-resume', 'p2-to-human-snapshot-s2-new', 'p2-to-human-snapshot-s2-resume', 'p2-to-human-snapshot-s3-new', 'p2-to-human-snapshot-s3-resume', 'p2-to-human-snapshot-s4-new', 'p2-to-human-snapshot-s4-resume', 'p2-to-human-snapshot-s5-fork', 'p2-to-human-snapshot-s5-new', 'p2-to-human-steer-cancel-disk' /* M4 */, 'p2-to-human-style'];
     // P2 end
     const p2c3 = ['p2-c3-subagent-ask']; // P2-C3 (Decision Log 35): two subagents' mcp__maws__ask on 2.1.299, each framed under its parent before its call
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e1, ...e3, ...e7, ...e2, ...e4c, ...p2, ...p2c3].sort());
+    // P5 E312 (findings-p5-e312-engine.txt): the normal-use frames of 2.1.312 MAWS had no mapping for, through MAWS's
+    // launch line (a rename three ways and the named session's resume, a commit, a push and `gh pr create`, a fallback
+    // model, an iOS project's dev intent)
+    const e312 = ['p5-e312-devintent', 'p5-e312-fallback', 'p5-e312-title', 'p5-e312-title-resume', 'p5-e312-vcs'];
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e1, ...e3, ...e7, ...e2, ...e4c, ...p2, ...p2c3, ...e312 /* P5 E312 */].sort());
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -629,6 +633,7 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
       'ui_log', 'ui_status', 'ui_toast', 'ui_invalidate', // R0: pass3/mods-* on 2.1.287, the remote-surface pushes (R1 maps them to plugin.*)
       'ui_panes', 'ui_scroll', 'ui_focus', // R2: pass3/mods-surface-*, the attached surface's pushes
       'control_request_progress', // E0a: pass3/p1-side-question-session, the side question's `started` progress (E3: journaled, no event)
+      'session_title_changed', 'vcs_state_changed', 'code_change_published', 'model_fallback', 'dev_intent', // P5 E312: pass3/p5-e312-* on 2.1.312
     ].sort());
   });
 
@@ -1154,3 +1159,27 @@ describe('the P2-C report fixture replays into the X1 graph', () => {
   });
 });
 // P2-C end
+
+// P5 E312 (spikes/protocol-probe/findings-p5-e312-engine.txt): what 2.1.312 sent in normal use that MAWS had no mapping
+// for, as the frames arrived on MAWS's launch line, each mapped knowingly.
+describe('normaliser: the normal-use frames of 2.1.312 (P5 E312)', () => {
+  const inFrames = (name: string, subtype: string) =>
+    loadJournal('pass3', name).filter((r) => r.direction === 'in' && (r.frame as { type?: string; subtype?: string }).type === 'system' && (r.frame as { subtype?: string }).subtype === subtype).map((r) => r.frame as Record<string, unknown>);
+
+  it('a rename sends the name, a resume of the named session sends it at startup, and neither makes an event', async () => {
+    expect(inFrames('p5-e312-title', 'session_title_changed').map((f) => f.title)).toEqual(['E312 probe name', 'E312 slash name']);
+    expect(inFrames('p5-e312-title-resume', 'session_title_changed').map((f) => f.title)).toEqual(['E312 slash name']);
+    for (const name of ['p5-e312-title', 'p5-e312-title-resume']) expect(ofKind((await run('pass3', name)).events, 'frame.unknown')).toEqual([]);
+  });
+
+  it('a commit and a push send vcs_state_changed, `gh pr create` code_change_published, and an iOS project dev_intent', () => {
+    expect(inFrames('p5-e312-vcs', 'vcs_state_changed').map((f) => [f.kind, f.branch])).toEqual([['commit', 'master'], ['push', 'master']]);
+    expect(inFrames('p5-e312-vcs', 'code_change_published')).toMatchObject([{ provider: 'github', url: 'https://github.com/e312-probe/e312-repo/pull/7', identifier: '7', action: 'created' }]);
+    expect(inFrames('p5-e312-devintent', 'dev_intent')).toMatchObject([{ kind: 'ios_app', trigger: 'project_scan' }]);
+  });
+
+  it('a fallback model is the engine’s warning notice', async () => {
+    const notices = ofKind((await run('pass3', 'p5-e312-fallback')).events, 'notice.posted');
+    expect(notices).toMatchObject([{ level: 'warning', text: 'Switched to Haiku 5.5 because claude-e312-no-such-model is not available', key: null }]);
+  });
+});

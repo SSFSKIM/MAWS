@@ -18,6 +18,7 @@ import { endProfileProcesses, killProfileProcessesNow, processesNaming, shellsUn
 import { realEngine, type RealEngine } from './real-engine'; // P4-AGG M1
 import { assertEngineKeychainEnv, assertNoKeychainPrompt, killTree, loginShellEnvironment, watchKeychainPrompt } from './keychain-guard'; // fixB
 import { launchEnvironment } from './scratch-env';
+import { captureAllowed, processEvidence } from './process-evidence.mjs';
 import { cornerOrigin, windowCorner } from './window-origin';
 
 export const REPO_ROOT = resolve(__dirname, '../..');
@@ -54,6 +55,9 @@ export interface MawsLaunch {
 // C9 reuse it, through the `mawsEnv` option below, instead of editing this file).
 export interface MawsLaunchOptions {
   env?: Record<string, string>;
+  // Raw CI evidence for this test-owned synthetic engine only (never a wrapper forwarding to an installed engine).
+  // The default replay stub is known automatically; an override is private unless its author identifies it here.
+  syntheticEngineBin?: string;
 }
 // C3 end
 
@@ -95,6 +99,10 @@ export interface ShellLaunchOptions extends MawsLaunchOptions {
   // node_modules), whose app runs in this one's place: its out/main/index.js under its own Electron, from its root, as
   // this checkout's runs from here. Its supervisor is then that build's, spawned from its own bundle.
   root?: string;
+  // P5 O8 M4a Task 8: AppKit user defaults for this launch alone, through the argument domain (`-<key> <value>` after the
+  // app's entry, where Chromium takes neither for the app's path), e.g. `{ AppleShowScrollBars: 'Always' }` for classic
+  // scrollbars whatever the desktop's setting. Nothing is written to any defaults domain.
+  appKitDefaults?: Record<string, string>;
 }
 // C5 end
 
@@ -152,7 +160,8 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   // FX4: replay launch gates need a version, not an installed engine. Live specs explicitly pass ENGINE_BIN;
   // an environment override or the Engine setting can still name another binary. The scratch owns this stub.
   const keptStub = opts.keepConfigHome && existsSync(join(userData, 'replay-engine')) ? join(userData, 'replay-engine') : null; // E10
-  env.MAWS_E2E_ENGINE_BIN ??= opts.env?.MAWS_E2E_ENGINE_BIN ?? keptStub ?? writeReplayEngine(userData);
+  let replayEngine: string | undefined;
+  env.MAWS_E2E_ENGINE_BIN ??= opts.env?.MAWS_E2E_ENGINE_BIN ?? (replayEngine = keptStub ?? writeReplayEngine(userData));
   // C4 start: an empty engine store (C4 reads the config home the engine would), so the run never reads the owner's
   // ~/.claude; a test's `env` may still name another.
   mkdirSync(env.CLAUDE_CONFIG_DIR!, { recursive: opts.keepConfigHome === true }); // E10: kept, it may exist
@@ -175,6 +184,9 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   const keychainScene = Boolean(opts.realEngine) && process.platform === 'darwin';
   let keychainWatch: { stop(): Error | null } | null = null;
 
+  const info = base.info();
+  const canKeepEvidence = () => captureAllowed({ file: info.file, env, userData, syntheticEngineBin: opts.syntheticEngineBin ?? replayEngine, realEngine: Boolean(opts.realEngine), ownerConfigHome: opts.ownerConfigHome });
+  let evidence: ReturnType<typeof processEvidence> | null = null;
   let app: ElectronApplication | null = null;
   let child: ReturnType<ElectronApplication['process']> | null = null;
   let closed = false;
@@ -200,8 +212,12 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
       uncleaned.delete(entry);
       const left = await untilExited(shells, SHELL_EXIT_MS);
       if (left.length > 0) console.error(`[e2e] shells still running ${SHELL_EXIT_MS} ms after the app closed: ${left.map((p) => p.pid).join(', ')}`);
-      if (ownsUserData) rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); // C5: a given profile is the caller's
-      rmSync(sminosHome, { recursive: true, force: true }); // P5 O9 M5
+      try {
+        evidence?.finish(); // preserve the stopped host's log even on failure, before the scratch profile disappears
+      } finally {
+        if (ownsUserData) rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); // C5: a given profile is the caller's
+        rmSync(sminosHome, { recursive: true, force: true }); // P5 O9 M5
+      }
     }
     if (prompted) throw prompted;
     if (leftover) throw leftover;
@@ -214,14 +230,19 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
       if (opts.realEngine?.home === 'runner') assertEngineKeychainEnv(loginShellEnvironment(env), env.CLAUDE_CONFIG_DIR!, 'the login shell the engine host captures');
     }
     opts.prepare?.({ userData, shellHome: shellHome.dir, claudeConfigDir: env.CLAUDE_CONFIG_DIR }); // E6: inside, so a throw still cleans up
+    // A prepared/reused profile may configure a real engine ahead of the environment's replay stub. Check after
+    // preparation, and again at finish so a later unknown override cannot leave raw logs in public test-results.
+    evidence = canKeepEvidence() ? processEvidence(info.outputPath(), userData, canKeepEvidence, env) : null;
     const launchedAt = Date.now();
     const appArgs = opts.lang ? [`--lang=${opts.lang}`] : E2E_APP_ARGS; // P4-W2L
+    const defaults = Object.entries(opts.appKitDefaults ?? {}).flatMap(([key, value]) => [`-${key}`, value]); // P5 O8 M4a Task 8
     app = executable
-      ? await _electron.launch({ executablePath: executable, args: appArgs, env, cwd: REPO_ROOT })
-      : await _electron.launch({ ...(electron !== undefined && { executablePath: electron }), args: [...loader, ...(opts.requireFirst ? ['-r', opts.requireFirst] : []), ...appArgs, main], env, cwd: root });
+      ? await _electron.launch({ executablePath: executable, args: [...appArgs, ...defaults], env, cwd: REPO_ROOT })
+      : await _electron.launch({ ...(electron !== undefined && { executablePath: electron }), args: [...loader, ...(opts.requireFirst ? ['-r', opts.requireFirst] : []), ...appArgs, main, ...defaults], env, cwd: root });
     // Playwright's process() reads its live application channel, which may already be disposed before 'close' arrives.
     // Keep the actual ChildProcess while available, including for cleanup's failed-close fallback.
     child = app.process();
+    evidence?.capture(child);
     if (keychainScene) keychainWatch = watchKeychainPrompt(() => child?.pid !== undefined && killTree(child.pid)); // the app, its hosts, their engines and their `security` children
     launchedHook?.(app); // E4b
     app.on('close', () => (closed = true));

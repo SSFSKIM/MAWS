@@ -6,8 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
-import { record } from '../../../../test/support/builders';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { record, remoteRow } from '../../../../test/support/builders';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { addressOf } from '@shared/machine/address';
+import { LANE_A_WORDS } from '../session/controls/lane-a';
+import { resetLaneAStore } from '../stores/lane-a';
 import { registerCloseGuard, registerAction, runAction } from '../keymap/actions-runtime';
 import type { PanelHostProps } from '../panel/host-slot';
 import { useLayout } from '../stores/layout';
@@ -343,6 +346,36 @@ describe('toolbar', () => {
     expect(within(chromeTabs()).getByRole('tab', { name: held.title.text })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'More surfaces' }));
     expect((await screen.findByRole('menuitem', { name: 'Session actions' })).getAttribute('aria-disabled')).toBe('true');
+  });
+});
+
+// P5 O9 M9 (fix wave 1): another machine's terminal session (a listed lane A row, no record here) offers Take over in its
+// menu, disabled in place with the reason its port gives, and is titled by its row, not "New chat".
+describe('another machine’s terminal session in the toolbar', () => {
+  const REMOTE = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
+  beforeEach(() => {
+    useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', availability: 'foreign_held', title: 'Ship the relay' }), appId: REMOTE }]]) });
+  });
+  afterEach(() => resetLaneAStore());
+
+  it('its session actions hold Take over in MAWS, disabled with the remote reason', async () => {
+    const user = userEvent.setup();
+    offs.push(registerShellActions(fakeBridge()));
+    renderShell();
+    act(() => useLayout.setState({ main: withActive(sessionTab(REMOTE)) }));
+    await user.click(screen.getByRole('button', { name: 'More surfaces' }));
+    const actions = await screen.findByRole('menuitem', { name: 'Session actions' });
+    expect(actions.getAttribute('aria-disabled')).toBeNull();
+    act(() => actions.focus());
+    await user.keyboard('{ArrowRight}');
+    const takeOver = await screen.findByRole('menuitem', { name: 'Take over in MAWS' });
+    expect(takeOver.getAttribute('aria-disabled')).toBe('true');
+    expect(takeOver.getAttribute('title')).toBe(LANE_A_WORDS.remoteTakeOver);
+  });
+
+  it('is titled by its listed row', () => {
+    expect(toolbarTitle(sessionTab(REMOTE), new Map(), null, null, useSessions.getState().listed)).toEqual({ title: 'Ship the relay', branch: null });
+    expect(toolbarTitle(sessionTab(A), new Map(), null, null, useSessions.getState().listed).title).toBe('New chat'); // no record, no row
   });
 });
 

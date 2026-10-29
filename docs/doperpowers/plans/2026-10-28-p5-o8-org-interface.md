@@ -50,13 +50,17 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-28) The desk track reviewed the `deploy/` hunk and shaped the wrapper fix. The final gate, run 40771309800, had two browser reds (`browser-cua.spec.ts:483`, `browser-chrome.spec.ts:681`), none of #314's; its rerun, 40783162110, was green.
   - [ ] The owner's sitting: `root add` on staging, then production (the steps are in the report, `2026-10-28-p5-o8-report.md`).
 - [ ] M4a — The Org page: its shape, people and devices — **executable** (re-planned 2026-10-29; needs M3 and H1, both landed)
-  - [ ] Task 1: the move: the pairing judges and their `PendingEntry` type into `org-protocol`, `admin.ts` importing them (its own commit, the desk track's review).
-  - [ ] Task 2: `successorProblems` and `stateProblems` in `org-protocol`, and `admin.ts`'s `amend` running it (the desk track's review).
-  - [ ] Task 3: the signing paths: `edits.ts`, `Edit.endorse` and `Edit.live`, `StateSigner.sign`'s endorsement and guard, the signer's check before the slot, and `checks.ts` running `successorProblems`.
-  - [ ] Task 4: the session's surface: `org.view`, `org.preview`, `org.change`, `org.pair.*`, `pairing.ts`, `hub-client.ts`'s `pendingOf`, `refused.attempt`, the schema and main's wiring.
-  - [ ] Task 5: `close()`'s fence and join (`HeldOrg.close()`, the parts' operations in flight), and the two test workarounds removed.
-  - [ ] Task 6: the renderer: `settings-tab/org/`, the four groups, the change and pair sheets, `copy.ts`.
-  - [ ] Task 7: `test/org/org-page.local.test.ts`, registered in `TIMING_NODE_TESTS`.
+  - [x] (2026-10-29) Task 1, reviewed clean and approved by the desk track (336af704b): the move: the pairing judges and their `PendingEntry` type into `org-protocol`, `admin.ts` importing them (its own commit, the desk track's review).
+  - [x] (2026-10-29) Task 2, reviewed clean and approved by the desk track (5935f62a5; review fix 592211929; boundary comment 37ce2077d): `successorProblems` and `stateProblems` in `org-protocol`, and `admin.ts`'s `amend` running it (the desk track's review).
+  - [x] (2026-10-29) Task 3, reviewed clean (643d126de, fix 6d23a8055): the signing paths: `edits.ts`, `Edit.endorse` and `Edit.live`, `StateSigner.sign`'s endorsement and guard, the signer's check before the slot, and `checks.ts` running `successorProblems`.
+  - [x] (2026-10-29) Task 4, reviewed clean (19730e6ae; class 1a green through it, run 40819796641): the session's surface: `org.view`, `org.preview`, `org.change`, `org.pair.*`, `pairing.ts`, `hub-client.ts`'s `pendingOf`, `refused.attempt`, the schema and main's wiring.
+  - [x] (2026-10-29) Task 5, reviewed clean (9b9f8945d, fix 653e60c0b; class 1a green at the fix, run 40824276945): `close()`'s fence and join (`HeldOrg.close()`, the parts' operations in flight), and the two test workarounds removed.
+  - [x] (2026-10-29) Task 6, reviewed clean (1971d3be9, fix 7437e1e2e): the renderer: `settings-tab/org/`, the four groups, the change and pair sheets, `copy.ts`.
+  - [x] (2026-10-29) Task 7, reviewed clean (7033fb853): `test/org/org-page.local.test.ts`, registered in `TIMING_NODE_TESTS`; 6/6, six runs in a row.
+  - [x] (2026-10-29) Task 8, reviewed clean (37ea7abab, 9764fc1d7; fix wave 300f1a6b5..fac48e11f; test race ab8d2ede6): the Org page's look made checkable through the gate: `e2e/org-page.spec.ts` in `e2e:settings` over a seeded org, its four groups and the pairing sheet attached, under forced classic scrollbars. Its first run (40828325127) caught a real overflow, fixed in the layout; green on the EC2 Mac at d8d7417a8 (40830513848) and 44175e50a (40831591829).
+  - [x] (2026-10-29) reviewer-high on the whole branch (87af670c2..8cd862d6b) found nothing material, in one round; Task 8's later fix wave was re-reviewed clean at its frontier.
+  - [x] (2026-10-29) The final set at 2efc9642c, after merging master afac87f23: the hosted call (class 1a and every class-1 group but default and the two secret groups, run 40832852899) and packaged (40832852847), both green; the architect reviewed the Org page's screenshots and found nothing blocking (taste points to #342). Master 1fe1a74d9 (#338) merged after it at 063460ccf: class 1a and desk-web (40843054561), settings, desk-web-hub and machines (40846738615), all green.
+  - [x] (2026-10-29) Master bd6b4b097 (O3-B, #336) merged at 4ca8ec271: class 1a, settings, machines, desk-web and desk-web-hub green on the daemon shape (40851684636). In the architect's slot on the same tree: `e2e:default` (40867534219, EC2 Mac, `--lane no-hosted`), `e2e:connectors-oauth` (40867548462, the mini's VM guest) and `e2e:discover` (40867803535, the mini), all green with no flaky line.
 - [ ] M4b — Machines and their rights — *advisory; needs M4a*
 - [ ] M4c — Delegations — *advisory; needs M4a*
 - [x] M5 — Owners on rows and the People toggle — landed (PR #323, master 0db3870a0, P5 Decision Log 129)
@@ -719,6 +723,7 @@ M3's own edits are the no-change successor and that revocation. The delegation a
     - the key, name and prefix rules, each by its own code.
   - `recovery-changed`, `legacy-retired`, `machine-names`, `keys-unaccounted`.
   - `endorsement-missing`: a later device of a member who had devices, without an endorsement. A device id in `opts.endorsing.devices` counts as endorsed by `opts.endorsing.kid`, when that kid is one of the member's step-up keys in `before`, since the signer endorses it inside the same Touch ID.
+  - `email-grammar`: a member new in `after`, or whose email changed, whose email is not `isMemberEmail`'s address (`names.ts`). A writer's rule alone, which `verifySuccessor` never makes; the desk track's key-held PR (#338) added it, and `edits.ts` refuses the same grammar up front as `bad-email` through `isMemberEmail`.
   - `stateInvariants(state)` becomes `(await stateProblems(state)).length === 0`.
   - `verifySuccessor` is unchanged in every verdict it returns, and in the order it reaches them. `org-protocol`'s existing suites and vectors pass unchanged, which is the proof.
   - Rejected: app-only rows in `checks.ts`, which leave the CLI to meet the same problems only after signing.
@@ -1648,6 +1653,8 @@ Each is built as its recommendation when its milestone is re-planned, unless the
 - Observation (M5): `App.test.tsx` runs in the `renderer-timing` vitest project, not `renderer` (`vitest.config.ts:57`).
 - Observation (M4a Task 2, 2026-10-29): before `successorProblems`, a machine posting a key another machine already held (the hub doesn't check) made `enroll` sign a successor the package refuses. The admin kept it pending, the hub answered `409 malformed`, and every later verb failed until `abandon-pending`. It is now refused before anything is signed.
   Evidence: the admin test's RED run in Task 2 (`m4a-task-2-report.md`).
+- Observation (M4a Task 5, 2026-10-29): the first version of the signer's close test was itself flaky. Its "before" listing was taken while the prior adoption's anchor write was in flight (a `.tmp` entry, 4 against 3). The listing is now taken after `close()` resolves, which is what the spec asserts; the fence is shown by the head staying put in memory and in `chain.json`.
+  Evidence: `m4a-task-5-report.md`, Discoveries; `org-session.test.ts` 20 runs in a row clean with both workarounds removed.
 
 ## Decision Log
 
@@ -2064,7 +2071,105 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   4. An endorsement by a key outside the member's own (`unknown-signer`) stays `verifySuccessor`'s signature check.
   5. The admin check sits in `signPending`, so it covers `propose` as well as `amend`.
   6. Until M4c, `checkSuccessor` shows `prefix-overlaps` beside its own directional prefix code for one collision.
+  7. (Review fix, 592211929.) The task review found that full diagnostics ran inside `verifySuccessor` before authentication. 120 duplicate delegations built 7,140 `prefix-overlaps` diagnostics.
+     - `stateInvariants` now uses `stateProblems(s, {first: true})`, which returns at the first problem and builds no detail.
+     - Full mode keeps at most `PROBLEMS_PER_CODE` (8) problems per code, and builds each detail lazily, never past the cap. `onDetail` counts the details built, for the test.
+     - The pairwise comparison stays quadratic, as the desk track allowed.
+     - `key-held-twice`'s detail names the holders without the key id.
+     - Past the cap each call site still makes its closure, so full mode is for a caller's own successors, never for posted input. The desk track's note is recorded at the functions (37ce2077d).
   Date/Author: 2026-10-29, O8's executor.
+
+- Decision: M4a Task 3, the signing paths (643d126de), settles these points.
+  1. A composer refuses with `RefusedEdit` and a `ChangeCode` (`self`, `this-mac`, `no-change`, `bad-email`, `not-signing-device`), which the signer reads as `refused` before Touch ID. `no-change` and `bad-email` go beyond the spec; `bad-email` uses the hub's email pattern, exported from `hub-client.ts`.
+  2. Rules the state decides are the package's, not repeated in the composers: `owners-unknown`, `email-taken`, `empty-roots`, `root-not-admin`, `endorsement-missing`.
+  3. Shown equals signed. `composeChange` builds its lines from the state the sheet was shown on. `apply` builds them again on the signer's draft, and throws `StaleEdit` when they differ or the target is gone. Only a normalized change composes, so `member.add`'s id comes from `normalizeChange` alone.
+  4. `OrgChange` is a plain TypeScript type in `edits.ts`, as §M gives it. Task 4 moves it into the shared schema, and the finding codes there are strings.
+  5. `checkSuccessor` drops an M3 row whose code the package already named, and any finding repeated word for word. M3's own `revives-revoked` and `empty-roots` rows are gone. The directional prefix codes still show beside `prefix-overlaps` until M4c.
+  6. `live()` is also checked just before Touch ID, so a pairing that already ended shows no prompt. That makes four checks.
+  7. Asked to endorse a device the state doesn't list, the device module throws. The signer catches that case first and refuses `invalid`.
+  8. M3's `invalid` test now uses a device endorsed by an unknown key (`unknown-signer`), since a changed recovery key is refused before Touch ID.
+  9. (Review fix, 6d23a8055.) A pairing that ended while `signing.json`'s first write was being prepared still wrote and posted its slot. The store awaited the registration's `signing` mark after the callback's liveness check.
+     - On a first write, `update` now marks the registration, then runs its callback again on a fresh copy, and writes that second result with no await between. Every check an update makes runs just before the write.
+     - Update callbacks are therefore pure and synchronous functions of the file. The signer's, deliveries' and weekly's all are.
+     - Once marked, the registration stays marked and `signing.json` is written as it stands, so the store stays fail-closed.
+  Date/Author: 2026-10-29, O8's executor.
+
+- Decision: M4a Task 4, the session's surface (19730e6ae), settles these points.
+  1. `OrgRefusal.attempt` is optional. Every refusal a session attempt ends carries it. The startup `keys` refusal and the synchronous `{ok: false}` answers name none, and the renderer gives an attempt-less refusal its own place.
+  2. `registered.pairing` is required and nullable, like `signer`.
+  3. A preview refusal is `{ok: false, reason: refused | stale | not-root | unmarked | signing | invalid, detail?, findings}`. Preview refuses up front when this Mac can't sign. `org.change` maps a refusal into `SignResult`.
+  4. A pairing start is refused as one of:
+     - `not-root`;
+     - `later-device` (the page's sentence);
+     - `no-member`;
+     - `busy` (any session attempt runs: sign-in, re-anchor, rekey; a rekey is likewise refused while a pairing runs);
+     - `hub` (no live credential to poll with).
+  5. A pairing is done (`null`) when an approve succeeds, or when the held head lists the candidate. An approve that fails leaves it live for a retry. An ended pairing keeps its `problem` until it is cancelled or a new one starts.
+  6. An entry with the candidate's id and another device ends the pairing as `entry-changed`, whatever its MAC. The candidate vanishing while polling is ignored, since the hub drops a pending entry once its state is accepted. At approve, a missing candidate ends it as `entry-changed`.
+  7. Expiry runs on one unref'd timer per pairing, and `live()` reads the clock exactly. A pairing whose context reads null (closed or signed out) stops itself, and sign-out cancels it.
+  8. `org.change` normalizes its input, so a `member.add` without its previewed id reads `stale`.
+  9. `org.view` answers whenever a verified head is held, signed out (`maySign` false) or removed included.
+  10. `pendingOf` returns the protocol's `PendingEntry[]`, dropping misshapen items and the hub's own fields.
+  11. `names/org.ts` lists the six new commands. `index.ts` and `grades/org.ts` needed nothing.
+  12. A pairing that ends during Touch ID reads `cancelled`. One that ends before Touch ID reads `stale`.
+  13. Task 5: `close()` cancels a running pairing in its "stop the parts" step.
+  Date/Author: 2026-10-29, O8's executor.
+
+- Decision: M4a Task 5, `close()`'s fence and join (9b9f8945d), settles these points.
+  1. The commit queue itself refuses a new turn once the session is closed (a rejected promise), so every queued writer is covered without a check of its own; turns already queued still run. Its callers already handle the rejection, and the parts check `closed` before their updates, so a normal quit logs no refusal.
+  2. An adoption whose `chain.json` write lands before close but whose anchor write comes after it has that anchor refused. This is the crash case the load rule already settles (the anchor moved up to the head at the next load), and a session test pins both halves.
+  3. The guard is `StartInput.open`, a property of the held view, optional with absent meaning always open. Being the view's, it also covers a link's direct `advance` and the signer's own `adoptServed`; the session's four call sites pass it.
+  4. The signer's lifecycle epoch fences adoption after a sign-out too, as step 1 says ("checks its lifecycle epoch there, as its posts already do"). One behaviour changes: a 201 post whose follow-up read lands after a sign-out answers `not-root` and the slot stays pending until the next sign-in settles it.
+  5. The join order is the parts, the sync and the load first, then `held.close()`, then the commit queue's tail. The load can hold a new view until it ends, so `held` is read only after it; nothing in the commit queue waits on a producer or on the adoption queue, so the order cannot deadlock.
+  6. Interface §K's `close(): void` becomes `close(): Promise<void>` for `OrgSigner`, `Weekly` and `Deliveries`.
+  7. Main's quit awaits the session's `close()`, bounded by the shutdown steps' grace, so a Touch ID sheet open at quit cannot hold the exit indefinitely.
+  8. The pairing's cancel at close has no test of its own: a pairing whose context reads null already stops itself (Task 4, item 7).
+  9. A signer test that closed inside its Touch ID wait now starts the close there and awaits it after the sign, since awaiting it inside would wait on itself.
+  10. `close()` does not join the two writers under `device/`, `checkRetired`'s key destruction and a fenced rekey's `discardNext`: the rule covers `org/`. They did not trip the teardown's `rm` in 20 runs; if one does, join `retiredWork` and `keyWork` in step 3.
+  11. (Review fix, 653e60c0b.) A signer operation that meets `close()` reads as stopped, never as a storage failure through the IPC router. The lifecycle is checked right before each enqueue that follows an await: the slot's write after Touch ID and the exposure write before the post answer `not-root`; a discard answers `{ok: false}`. Genuine storage errors still read `signing`.
+  12. (Review fix.) The queued reset checks the signer's closed flag, not its sign-in lifecycle: a reset is the owner's repair of a damaged file, which a sign-out does not cancel and a close does.
+  13. (Review fix.) The discard uses the slot's stored `hash`, which the store recomputes on every read, instead of awaiting a fresh `stateHash`, so no await sits between its last check and its write.
+  Date/Author: 2026-10-29, O8's executor.
+
+- Decision: M4a gains Task 8, the Org page's look checked through the gate. Task 6 was proved in happy-dom only, and this MacBook may not launch the app, so the look would otherwise wait for an owner's sitting. One case in the e2e group that opens Settings seeds an org with real-world variety: a member whose name and email wrap, a member with several devices, a pending pairing, and a refusal with no attempt. It screenshots each of the four groups and attaches the PNGs (`testInfo.attach`), and asserts only structure: no horizontal overflow, and every row's actions visible. The group runs on the hosted lane with `--evidence`, so the attachments upload when green, and the architect reads the screenshots. The PR names the owner's taste look as a later sitting only if the architect finds nothing wrong.
+  Rationale: a renderer whose wrapping nobody has seen is not done; the gate can carry the evidence without an owner present.
+  Date/Author: 2026-10-29, the architect (O8's executor recording).
+
+- Decision: M4a Task 6, the Org page's renderer (1971d3be9, review fix 7437e1e2e), settles these points.
+  1. The groups are `<h4>` headings in `data-org-group` divs, not regions: a group named "Org" would collide with the Settings section's region and with the "Org" row.
+  2. Org state shows in every registered state (M1 showed it only when signed in). The held chain's problem stays with its Re-anchor field in You; Org's Problem row shows every other problem. The signer lines show only when signed in, as before.
+  3. A refusal shows under the control its attempt names. One naming no attempt, or naming a control the page no longer offers (a `rekey` refusal with no new-keys field), goes in a "Refused" row of its own, at the end of You or after the code field in `none`, so none is dropped. A command's own synchronous `{ok: false}` is tagged with the attempt the page sent.
+  4. The old-device row (M3's) offers Remove… through the change sheet (`device.remove`), only while `maySign`, in place of the `remove-device` command line.
+  5. People offers nothing the composers refuse for yourself. Make a root is offered on an admin's non-root `native-mac` device; whether it has a step-up key is the preview's to refuse (`not-signing-device`), since the view does not carry it.
+  6. A later device of a member who signs reads "They pair their next device from their own Org page."; the non-signing case reads the spec's sentence. Neither offers the action.
+  7. A change that succeeds closes its sheet and shows "Signed version N." at the foot of People. Any other failure stays in the sheet with Sign withdrawn. The person's own Touch ID cancel shows nothing.
+  8. Closing the pairing sheet while a pairing runs (Cancel pairing, Escape, the overlay) cancels it, since its code cannot be shown again. A pairing running with no sheet reads "Pairing a device until HH:MM" on its member's row with Show…, which reopens the sheet without the code. The code lives only in the sheet's state and is dropped once the entry appears or the pairing ends.
+  9. An approval's answer shows in every stage of the sheet, because main publishes a pairing's end before approve answers: `cancelled` with a detail reads "ended while Touch ID was open", `stale` reads "ended, or its device changed, before Touch ID" with main's detail, and the person's own cancel shows nothing.
+  10. When this Mac loses the right to sign, an open change or pairing sheet withdraws its signing actions and says why rather than closing; an operation in flight keeps its answer.
+  11. The pairing sheet says, beside Approve and while an approval is pending, that once the signed state is kept a cancel no longer withdraws it and Discard is the way back (`ORG.pairDurable`, muted text).
+  12. Machines read Up, Connecting…, Offline, or "Not connected" when the roster does not name the machine. Owners read you as "you", an id the head no longer lists as "a former member", and `'org'` as "Owned by the org". The spec's "(here in M4b)" reads "Enrolling from this page comes later.", the UI carrying no milestone ids.
+  13. `SheetForm`'s `submitLabel` is optional: without it there is no default button and Enter submits nothing. The Org sheets use it, so a refused preview has no Confirm.
+  Date/Author: 2026-10-29, O8's executor.
+
+- Decision: M4a Task 7, `test/org/org-page.local.test.ts` (7033fb853), settles these points.
+  1. Step 5 removes B's device before B, so B's app reads `removed` from a verified head while the hub still admits it; removing B first would end B's feed with a `4403`, which reads `denied`.
+  2. `member.email` is proved by `edits.test.ts`, not here: B's app holds a fixed stand-in identity, so changing B's email would end its hub access mid-scenario.
+  3. The pairing secret is checked by booleans only, so a failure cannot print a code.
+  4. A's `PAIR_POLL_MS` is 100 in this suite (2 s in production).
+  Date/Author: 2026-10-29, O8's executor.
+
+- Decision: M4a Task 8, the Org page's look through the gate (37ea7abab..fac48e11f), settles these points.
+  1. The page is seeded through a harness-build-only seam, not the real session: the only refusal naming no attempt is `keys`, set at load when the key file is gone, which leaves no signer, so a running pairing cannot coexist with it in a real session. `src/main/org/page-fixture.ts` answers `org.status` and `org.view` from a file the strict schemas must accept, through `interceptCommand`, under `MAWS_E2E=1`, unpackaged, with an absolute `MAWS_E2E_ORG_PAGE`; every other `org.*` act gets a no-effect answer, `org.rows` stays main's.
+  2. No production build carries it: `index.ts` calls it only under `__MAWS_HARNESS_BUILD__`, defined from the condition that builds `harness.html`, and a unit case checks the plain main's bundle holds none of it. The spec skips on a build without the harness.
+  3. (Review fix.) Installing the fixture stops the production session's `org.changed` forwarding (`registerOrgHandlers`' own return), so load's closing `changed(true)` cannot replace the seed after Settings mounts.
+  4. The case runs under classic scrollbars whatever the desktop's: `launchMaws` passes `-AppleShowScrollBars Always` through AppKit's argument domain for that process alone, and the case waits until the settings body's scrollbar takes width.
+  5. Its structural checks: nothing in the section, any row, cell or text block is wider than its box; every action, scrolled into view, lies on all four edges inside its row, every clipping ancestor and the window; two deliberately clipped probes prove the check names them; no seeded machine's ref shows in the section's text.
+  6. (The gate's finding.) A word wider than its column breaks inside its cell: `Setting`'s label and value cells take `min-width: 0` and `overflow-wrap: anywhere` (text that fits wraps as before), a text action never shrinks, and the refusal line, the People footer and a sheet's body break the same way. The first run had a widened member name 182px wide in the 168px label column, on the EC2 Mac and on a hosted Mac alike.
+  7. (The architect.) The Org group names machines as the Machines group does: the org state's name for a ref, else its link's name or This Mac, the ref only when nothing names it (Deliveries, too-large, Discarded). The superseded offer's lines stay main's words (`describeHolder`, under the offer's digest); they already lead with the name.
+  Date/Author: 2026-10-29, O8's executor.
+
+- Decision: the desk track's key-held PR (#338, master 1fe1a74d9, P5 Decision Log 134) landed before M4a, carrying M4a's Tasks 1 and 2 unchanged, so M4a takes its three follow-ons at the merge. `edits.ts` refuses `bad-email` through `org-protocol`'s `isMemberEmail` in place of hub-client's `EMAIL`, which the merge drops (hub-client reads `/api/me` through `isMemberEmail` too). `email-grammar` joins the pre-sign codes (*The pre-sign function*). The admin suite's "twin posts m1's key" case is #338's: the hub now refuses that twin with `409 key-held`, so the case posts a key another signer lists, which only the pre-sign check catches; its assertion is unchanged.
+  Date/Author: 2026-10-29, O8's executor, at the architect's word.
 
 ## Outcomes & Retrospective
 
@@ -2087,6 +2192,36 @@ Evidence:
 - the gates the PR body lists.
 
 Still owed: the owner's sitting, `root add` on staging and then on production.
+
+**M4a (2026-10-29, PR from `p5-o8-m4a`).** Settings › Org is the Org page, in Q1's four groups:
+- **You:** this Mac, the hub sign-in, new keys, and your other devices.
+- **People:** each member with their devices, the roots marked.
+- **Machines:** each machine, read-only, with its owners and whether it is up.
+- **Org:** the state, the roots, the recovery key, and M3's signer lines.
+
+A root Mac signs the page's changes from it:
+- add or remove a person, change a role or an email;
+- pair a device: the app makes the code, polls H1, and endorses its own member's later device inside the same Touch ID;
+- remove a device, make a root.
+
+Each change is shown line by line, judged by `org-protocol`'s `successorProblems` before Touch ID, and bound to the digest of what was shown. `Edit.live` guards it at apply, before Touch ID, after the confirmation, and before the slot's write. A refusal shows under the control that sent it, or in a row of its own when it names none. `close()` fences every writer under `org/` and joins it, and the two test workarounds are gone. The desk-hub admin's `amend` runs the same pre-sign check, and the pairing judges moved into `org-protocol`.
+
+Evidence:
+- the unit suites:
+  - `successor-problems` 62, `pairing` (package) 19, `edits` 21, `checks` 38, `step-up` 25, `signer` 46, `pairing` 16, `org-session` 113 (20 runs in a row, the workarounds removed), `held` 24, `page-fixture` 5;
+  - the Org page's renderer suites: `OrgSection` 12, `YouGroup` 11, `PeopleGroup` 9, `MachinesGroup` 3, `OrgGroup` 18, `ChangeSheet` 11, `PairSheet` 6;
+- `test/org/org-page.local.test.ts` 6, on desk-hub's Worker in Miniflare: a second member added, paired through H1, promoted, made a root, demoted, an own device paired endorsed, the device and the member removed, and every accepted state verified from genesis;
+- `e2e/org-page.spec.ts` in `e2e:settings`, the page's look over a seeded org under forced classic scrollbars, its screenshots attached;
+- the gates the PR body lists.
+
+Retrospective (M4a). Built as eight tasks under subagent-driven execution, each reviewed at its frontier, then reviewer-high on the whole branch, which found nothing material.
+- **The task reviews.** They found real defects in five of the eight tasks (2, 3, 5, 6 and 8).
+  - Three had M3's shape, a fact checked before an await and acted on after it: the liveness window during the first write's registration mark (Task 3); a closed commit queue reached after an await (Task 5); a pairing's end, published before approve answered, hiding the answer (Task 6).
+  - Two were a capability a surface kept after losing it: an open sheet still offering Sign (Task 6), and a fixture's seeded status overwritten by the real publisher (Task 8).
+  - One was cost: quadratic diagnostics built for unauthenticated input (Task 2).
+- **Task 8 paid for itself on its first run.** It was added mid-milestone to make the page's look checkable through the gate. That run caught a member name overrunning its label column on both the EC2 and hosted Macs, which happy-dom could never have shown. The architect read the same screenshots and found a second defect, a raw machine ref where a person reads.
+
+A future child that ships a renderer surface should seed it with realistic extremes (long names, many devices, every refusal shape) and photograph it through the gate before the branch review, not after. Structural assertions (overflow, whole actions) catch what unit tests can't, and the screenshots catch what assertions don't name.
 
 **M5 (2026-10-28, PR from `p5-o8-m5`).** A row of a session you don't own alone shows its owners as first names after the title ("you, Ana", "Ana, Ben +3"), and its hover card lists them with their emails. Names are derived from the head's emails in main. A People toggle, remembered per row under `sidebar.people`, draws other people's sessions in place; while it is off the row reads "+N others". It shows only where it can act. Rollups, ranking and search see only what is drawn and yours.
 

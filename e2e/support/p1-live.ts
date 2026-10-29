@@ -6,7 +6,7 @@
 // the engine's init plugin list. Free of Playwright, so test/support/p1-live.test.ts runs it under vitest.
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, mkdirSync, realpathSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { inflateSync } from 'node:zlib';
@@ -225,16 +225,9 @@ export function resumeNoOutput(journals: Readonly<Record<string, readonly Journa
 // The directory the sittings' logs are written to (`live-<sitting>.txt`), for the sitting to copy into evidence.
 export const liveOutDir = (env: Env = process.env): string => resolve(env.MAWS_P1_LIVE_OUT ?? '/tmp/maws-e11-p1-live');
 
-// One sitting's log: each line appended to `<dir>/live-<sitting>.txt` as it happens (a failing case still leaves its
-// record) and echoed to the runner's output. Nothing is written before the first line (a skipped run leaves no file).
-export function sittingLog(dir: string, sitting: string): (line: string) => void {
-  const file = join(dir, `live-${sitting}.txt`);
-  return (line) => {
-    mkdirSync(dir, { recursive: true });
-    appendFileSync(file, `${line}\n`);
-    console.log(`   [${sitting}] ${line}`);
-  };
-}
+// Notes and their console echo cross the same public-output redactor as exported journals. A skipped sitting still
+// writes nothing; the live specs keep their existing `<dir>/live-<sitting>.txt` names.
+export { sittingLog } from '../../test/live/support/public-evidence.mjs';
 
 // The scratch root every case of one run shares (Design §5's `/private/tmp/maws-e11-<sitting>-<stamp>`): Playwright
 // starts a fresh worker after a failed case, so the stamp is the runner's pid (the worker's parent), unless
@@ -247,6 +240,12 @@ export function installedEngine(home: string = homedir()): { bin: string; versio
   const version = /\d+\.\d+\.\d+/.exec(execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 30_000 }))?.[0] ?? '';
   return { bin, version };
 }
+
+// A foreground Bash job that runs `seconds` and then prints `marker`, for a case that needs a turn held open by a running
+// command. The engine's Bash tool refuses a command whose first part is `sleep N` with N ≥ 25 unless it runs in the
+// background (on for every session since 2.1.310; spikes/protocol-probe/findings-p5-e312-engine.txt), so the job is a
+// process of its own; `node` is on the login shell's PATH the engine's environment is captured from.
+export const foregroundJob = (seconds: number, marker: string): string => `node -e 'setTimeout(() => console.log("${marker}"), ${seconds * 1000})'`;
 
 // ---- the owner file (A-15) ----------------------------------------------------------------------------------------------
 

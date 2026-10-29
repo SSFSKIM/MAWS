@@ -11,6 +11,7 @@
     "electron.vite.config.ts",
     "vitest.config.ts",
     "src/main/**/*",
+    "src/services/**/*", // P5 O3-C: the machine services library (the spine and the checkouts)
     "src/preload/**/*",
     "src/engine-host/**/*",
     "src/pty-host/**/*",
@@ -45,6 +46,13 @@
     "apps/desk-hub/fake-machine/json-file.ts",
     "apps/desk-hub/fake-machine/link.ts",
     "apps/desk-hub/fake-machine/org.ts",
+    // P5 O9 M9: test/lane-a/fake-plane.ts plays a session's steps through the fake machine's DX4 producer (SessionDepth)
+    "apps/desk-hub/fake-machine/session.ts",
+    "apps/desk-hub/fake-machine/jobs.ts",
+    "apps/desk-hub/fake-machine/output.ts",
+    "apps/desk-hub/fake-machine/recording.ts",
+    "apps/desk-hub/fake-machine/routes.ts",
+    "apps/desk-hub/fake-machine/dx4/*.json",
     // M3: the RL1 suite runs desk-hub's own suites' hub (its Worker bundled, in Miniflare, behind the stand-in) and reads
     // its pushes as a device would
     "apps/desk-hub/test/support/bundle.ts",
@@ -86,6 +94,7 @@
     // E11 end
     // P2-F: test/support/live-budget.test.ts runs the live specs' engine cap
     "e2e/support/live-budget.ts",
+    "e2e/support/process-evidence.d.mts", // the live heavy guard's timing-only artifact
     // P2-F F-E: test/support/live-turns.test.ts runs the live specs' wait for a submitted turn
     "e2e/support/live-turns.ts",
     // P3-C M9: test/support/text-run.test.ts runs the LibreOffice compare's text matcher

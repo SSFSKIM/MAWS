@@ -1,5 +1,5 @@
 // Main's `voice.*` handlers and the backend choice (E9 execution document, Design §3). The backend is chosen once, at
-// startup, gated as the other end-to-end seams are (`src/main/client/e2e-pick.ts`, `src/main/sessions/e2e-trash.ts`):
+// startup, gated as the other end-to-end seams are (`src/main/client/e2e-pick.ts`, `src/services/sessions/e2e-trash.ts`):
 // under `MAWS_E2E=1` with `MAWS_E2E_VOICE` set, the scripted backend; under `MAWS_E2E=1` without it, the real helper in
 // probe-only mode (its reads never prompt, and `start` is refused), so the packaged run proves the bundled helper
 // launches without ever opening the microphone; otherwise the real helper. Outside the harness `MAWS_E2E_VOICE` means

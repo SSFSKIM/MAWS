@@ -1,17 +1,17 @@
 import type { AttentionItem } from '@shared/graph/attention';
-import type { AppSessionId, AttentionId } from '@shared/graph/ids';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AcquireOutcome } from '@shared/sessions/setup';
+import type { SpineView } from '@shared/spine/view';
 import { isReadOnlyRequest } from '@shared/attention/read-only-tools';
 import type { HostDispatch } from '../ipc/router';
 
+// P5 O3-C (reader R2): a reply acquires the session, and Allow once reads the request still pending, through the spine's view
 export function notificationActions(deps: {
   dispatch: HostDispatch;
-  acquire(id: AppSessionId, reason: 'send'): Promise<AcquireOutcome>;
-  pending(id: AppSessionId, attentionId: AttentionId): AttentionItem | undefined;
+  view: Pick<SpineView, 'acquire' | 'attention'>;
 }) {
   const canAllow = async (item: AttentionItem): Promise<boolean> => {
-    const current = deps.pending(item.appSessionId, item.id);
+    const current = deps.view.attention(item.appSessionId).find((pending) => pending.id === item.id);
     if (current?.kind !== 'permission' || current.state !== 'pending' || current.request.requestId === null) return false;
     const result = await deps.dispatch('engine-host', 'session.pendingRequest', { appSessionId: item.appSessionId, requestId: current.request.requestId });
     return result.ok && isReadOnlyRequest((result.value as { event: SessionEvent | null }).event);
@@ -26,7 +26,7 @@ export function notificationActions(deps: {
     },
     async reply(id: AppSessionId, text: string): Promise<void> {
       if (!text.trim()) return;
-      const ready = await deps.acquire(id, 'send');
+      const ready = await deps.view.acquire(id, 'send');
       if (ready.status !== 'ready') throw new Error('Open the session before sending this reply.');
       // Same command as the hover card: the engine host owns the queue. Never steer.
       const sent = await deps.dispatch('engine-host', 'session.send', { appSessionId: id, content: text });

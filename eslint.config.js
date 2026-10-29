@@ -30,19 +30,36 @@ const PORTABLE_DYNAMIC_SYNTAX = { selector: `ImportExpression[source.value=/${PO
 // P3-A end
 // P5 O1 M3 start (docs/doperpowers/plans/2026-10-27-p5-o1-seams.md, M3): the machine-bound services, the ones P5 moves
 // to mawsd (survey §2 items 1-7 and 12), import no Electron (value, type or dynamic) and not main's open-external (an
-// Electron effect): every client-only effect goes through the injected client port (OX4). Three files are allowed, each
-// with its reason below (P5 O3-A: settings' client half left for src/main/client/settings.ts). The imports that reach
-// Electron through main's router, events and windows are O3's to cut.
+// Electron effect): every client-only effect goes through the injected client port (OX4). P5 O3-C moved the spine and
+// the checkouts into src/services/, under rule A below; what stays machine-bound under src/main/ is O4's and O5's (the
+// library's files, connectors, delivery, the catalog, usage, the gateway), one file allowed with its reason.
 const CLIENT_PORT = "A machine-bound service (P5 OX4) imports no Electron and not main's open-external: reach the person's screen through the injected ClientPort (src/shared/client/port.ts).";
-const MACHINE_BOUND = ['src/main/{index,sessions,side,history,attention,owner,git,scm,files,library,connectors,delivery,catalog,settings,usage,gateway,machine,lane-a}/**/*.{ts,tsx}']; // P5 O6 M1: machine; P5 O9 M2: lane-a
+const MACHINE_BOUND = ['src/main/{library,connectors,delivery,catalog,usage,gateway}/**/*.{ts,tsx}']; // P5 O6 M1: machine
+const MACHINE_BOUND_TESTS = ['src/main/{library,connectors,delivery,catalog,usage,gateway}/**/*.test.{ts,tsx}'];
 const MACHINE_BOUND_ALLOWED = [
-  'src/main/attention/index.ts', // the client half: it reads page viewing and window focus
   'src/main/connectors/oauth-root.ts', // safeStorage, O4's to replace (U7)
-  'src/main/settings/capture-chords.ts', // the menu's chord capture
 ];
 // `.` stands for the slash, as above
 const CLIENT_PORT_DYNAMIC = { selector: 'ImportExpression[source.value=/^(?:electron|.*.open-external)$/]', message: CLIENT_PORT };
 // P5 O1 M3 end
+// P5 O3-C start (docs/doperpowers/plans/2026-10-28-p5-o3-c-spine-library.md, Interfaces §E): the library, src/services/
+// (the spine O3-D moves into mawsd and the checkouts O3-E moves), is composed by its roots from injected dependencies.
+// Rule A: it imports nothing from main, mawsd, the renderer or the preload, nor Electron. Rule B: nothing under
+// src/main/ but its root imports from it; staying code reads the spine through the view. Tests are exempt from rule B
+// (a suite may drive both halves); src/main/index.ts, the root, imports the services entry alone (M4).
+const SERVICES_BOUNDARY = {
+  regex: '^(\\.\\./)+(main|mawsd|renderer|preload)(/|$)',
+  message: 'The services library (src/services/, P5 O3-C rule A) imports nothing from main, mawsd, the renderer or the preload: it takes its commands, intercepts and events through the injected ServicesBus (@shared/spine/bus), and staying code reads it through SpineView (@shared/spine/view).',
+};
+const READ_THROUGH_VIEW = {
+  regex: '^(\\.\\./)+services(/|$)',
+  message: "Staying code reads the spine only through SpineView (@shared/spine/view; P5 O3-C rule B): nothing under src/main/ but main's root imports from src/services/.",
+};
+const ROOT_THROUGH_ENTRY = {
+  regex: '^\\.\\./services/(?!entry$)',
+  message: "Main's root reaches the services library only through its entry, ../services/entry (P5 O3-C rule B): the roots' view, the checkouts' file reads and the stop functions are all it holds of the library.",
+};
+// P5 O3-C end
 // P5 O10 start (docs/doperpowers/plans/2026-10-27-p5-o10-endpoint.md, Constraints, "The module"): the endpoint module is
 // its own directory with one entry. Its machine key, grant ledger, policy and state code are reached by nothing outside
 // it but through src/endpoint/index.ts; its own suites (test/endpoint/) are the module's and reach inside. It imports no
@@ -157,6 +174,17 @@ module.exports = defineConfig(
     ignores: ['src/artifacts/**'],
     rules: { 'no-restricted-imports': ['error', { patterns: [...YJS_PATTERNS, ...ENDPOINT_PATTERNS] }] }, // P5 O10: ENDPOINT_PATTERNS
   },
+  // P5 O3-C: rule B over the client, its root and suites aside; the machine-bound block below restates it.
+  {
+    files: ['src/main/**/*.{ts,tsx}'],
+    ignores: ['src/main/**/*.test.{ts,tsx}', 'src/main/index.ts'],
+    rules: { 'no-restricted-imports': ['error', { patterns: [...YJS_PATTERNS, ...ENDPOINT_PATTERNS, READ_THROUGH_VIEW] }] },
+  },
+  // P5 O3-C (M4): rule B over main's root, narrowed to the services entry
+  {
+    files: ['src/main/index.ts'],
+    rules: { 'no-restricted-imports': ['error', { patterns: [...YJS_PATTERNS, ...ENDPOINT_PATTERNS, ROOT_THROUGH_ENTRY] }] },
+  },
   {
     files: ['src/artifacts/**/*.{ts,tsx}'],
     ignores: ['src/artifacts/yjs/**'],
@@ -188,12 +216,28 @@ module.exports = defineConfig(
   },
   // P3-A end
   // P5 O1 M3: the no-Electron rule over the machine-bound services (above). This is those files' one block of each rule,
-  // so it restates src/'s Yjs rules.
+  // so it restates src/'s Yjs rules, and rule B (P5 O3-C) but for their suites.
   {
     files: MACHINE_BOUND,
-    ignores: MACHINE_BOUND_ALLOWED,
+    ignores: [...MACHINE_BOUND_ALLOWED, ...MACHINE_BOUND_TESTS],
     rules: {
-      'no-restricted-imports': ['error', { paths: [{ name: 'electron', message: CLIENT_PORT }], patterns: [{ group: ['**/open-external'], message: CLIENT_PORT }, ...YJS_PATTERNS, ...ENDPOINT_PATTERNS] }], // P5 O10: ENDPOINT_PATTERNS
+      'no-restricted-imports': ['error', { paths: [{ name: 'electron', message: CLIENT_PORT }], patterns: [{ group: ['**/open-external'], message: CLIENT_PORT }, ...YJS_PATTERNS, ...ENDPOINT_PATTERNS, READ_THROUGH_VIEW] }], // P5 O10: ENDPOINT_PATTERNS
+      'no-restricted-syntax': ['error', CLIENT_PORT_DYNAMIC, YJS_DYNAMIC],
+    },
+  },
+  {
+    files: MACHINE_BOUND_TESTS,
+    rules: {
+      'no-restricted-imports': ['error', { paths: [{ name: 'electron', message: CLIENT_PORT }], patterns: [{ group: ['**/open-external'], message: CLIENT_PORT }, ...YJS_PATTERNS, ...ENDPOINT_PATTERNS] }],
+      'no-restricted-syntax': ['error', CLIENT_PORT_DYNAMIC, YJS_DYNAMIC],
+    },
+  },
+  // P5 O3-C: rule A (above) over the library, with O1's no-Electron rule and no exception; its files' one block of each
+  // rule, so it restates src/'s Yjs and endpoint rules.
+  {
+    files: ['src/services/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': ['error', { paths: [{ name: 'electron', message: CLIENT_PORT }], patterns: [{ group: ['**/open-external'], message: CLIENT_PORT }, ...YJS_PATTERNS, ...ENDPOINT_PATTERNS, SERVICES_BOUNDARY] }],
       'no-restricted-syntax': ['error', CLIENT_PORT_DYNAMIC, YJS_DYNAMIC],
     },
   },
@@ -236,8 +280,9 @@ module.exports = defineConfig(
     rules: { 'no-restricted-imports': ['error', { patterns: YJS_PATTERNS }] },
   },
   {
-    // P5 O8 M1: the org session's suites, against the same hub and endpoint harness
-    files: ['test/machines/**/*.ts', 'test/org/**/*.ts'],
+    // P5 O8 M1: the org session's suites, against the same hub and endpoint harness; P5 O9 M9: remote lane A's suite,
+    // through the same link against the same harness
+    files: ['test/machines/**/*.ts', 'test/org/**/*.ts', 'test/lane-a/**/*.ts'],
     rules: { 'no-restricted-imports': 'off' },
   },
   // P5 O10 end

@@ -555,6 +555,30 @@ describe('normaliser: meta rows, system subtypes and the unknown', () => {
   });
   // C12 end
 
+  // P5 E312 (spikes/protocol-probe/findings-p5-e312-engine.txt): the frames a launch receives in normal use on 2.1.312.
+  // A frame maps to nothing when an existing path already shows its fact promptly, and to that path when it would show
+  // late or not at all; none is left unknown.
+  it('P5 E312: the normal-use frames of 2.1.312 map knowingly, none unknown', () => {
+    const sys = (subtype: string, extra: Record<string, unknown>) => inRow({ type: 'system', subtype, session_id: 'sess-1', uuid: `s-${subtype}`, ...extra });
+    const events = feed(make(), [
+      sys('session_title_changed', { title: 'E312 probe name' }), // C4's title rule reads the custom-title record the rename wrote
+      sys('vcs_state_changed', { kind: 'commit', branch: 'main', cwd: '/repo' }), // C4's git watcher sees the head and refs move
+      sys('vcs_state_changed', { kind: 'push', cwd: '/repo' }),
+      sys('permission_check_status', { tool_use_id: 'toolu_1', status: 'checking' }), // no surface shows a pending check
+      sys('permission_check_status', { tool_use_id: 'toolu_1', status: 'done' }),
+      sys('per_turn_effort_changed', { per_turn_effort_active: false }), // carries no effort
+      sys('memory_recall', { mode: 'select', memories: [{ path: '/m/favorite-color.md', scope: 'personal' }] }), // no surface shows a recall
+      sys('dev_intent', { kind: 'ios_app', trigger: 'project_scan' }), // no surface offers device tooling
+      // the status tracker keeps it as the session's `published`, on which the PR row re-asks gh (session-status.ts)
+      sys('code_change_published', { provider: 'github', url: 'https://github.com/o/r/pull/7', repo: 'o/r', identifier: '7', action: 'created', branch: 'feat' }),
+      sys('model_fallback', { trigger: 'model_not_found', original_model: 'claude-x', fallback_model: 'claude-haiku-5-5', content: 'Switched to Haiku: claude-x was not found' }),
+      sys('model_consent_fallback', { choice: 'cancelled', original_model: 'claude-fable-5', fallback_model: 'claude-opus-5-5', content: 'Switched to Opus for this session' }),
+    ]);
+    expect(kinds(events)).toEqual(['notice.posted', 'notice.posted']);
+    expect(events[0]).toMatchObject({ level: 'warning', text: 'Switched to Haiku: claude-x was not found', key: null });
+    expect(events[1]).toMatchObject({ level: 'warning', text: 'Switched to Opus for this session', key: null });
+  });
+
   it('maps every named system subtype and the other top-level frames', () => {
     const sys = (subtype: string, extra: Record<string, unknown>) => inRow({ type: 'system', subtype, session_id: 'sess-1', uuid: `s-${subtype}`, ...extra });
     const events = feed(make(), [

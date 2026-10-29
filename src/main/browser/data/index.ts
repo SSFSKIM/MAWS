@@ -4,7 +4,7 @@
 // machine's data before it moves to `mawsd`.
 //
 // The transfer is staged, and the index's `user_version` is the handoff. Whichever process migrates the index to 14 first
-// copies its three tables into this file's staging tables (src/main/index/browser-staging.ts). This side reads the
+// copies its three tables into this file's staging tables (src/services/index/browser-staging.ts). This side reads the
 // index's version on a read-only connection (a reader beside the spine's writer, never a second writer) at its start and
 // at each `reattach`, and touches its tables only once it reads 14 or above: then it brings its own schema current and
 // promotes staging into its live tables (live rows win, ids and values kept), dropping staging, in one transaction.

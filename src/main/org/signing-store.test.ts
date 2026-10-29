@@ -74,6 +74,34 @@ async function signed(version: number): Promise<SignedOrgState> {
 const asked = (at: string) => (file: SigningFile) => ((file.lastAsked = at), { next: file, value: undefined });
 
 describe('the signing store', () => {
+  it("decides a first write again after the registration's mark, and writes the file the mark promises whatever it decides", async () => {
+    const p = await profile();
+    const store = await p.open();
+    // The update's own check (a pairing still live, say) turns false while the mark is written.
+    let live = true;
+    const order: string[] = [];
+    const reg = p.registration;
+    Object.defineProperty(reg, 'signing', {
+      configurable: true,
+      get: () => undefined,
+      set: (v: true) => {
+        live = false;
+        Object.defineProperty(reg, 'signing', { value: v, writable: true, configurable: true, enumerable: true });
+      },
+    });
+    const value = await store.update((file) => {
+      order.push(live ? 'live' : 'ended');
+      if (!live) return { next: file, value: 'ended' };
+      file.lastAsked = '2026-10-29T12:00:00.000Z';
+      return { next: file, value: 'written' };
+    });
+    expect(order).toEqual(['live', 'ended']);
+    expect(value).toBe('ended');
+    expect(p.order).toEqual(['registration.json', SIGNING_FILE]);
+    expect(p.disk()).toEqual(emptySigningFile());
+    expect((await p.open()).get()).toEqual(emptySigningFile());
+  });
+
   it('reads a profile that never wrote one as a fresh file, and writes the registration flag before its first write', async () => {
     const p = await profile();
     const store = await p.open();

@@ -30,6 +30,13 @@
 // generation until the intent is on disk and irreversible from then; the load replays an intent a crash cut off before
 // the missing-keys check. The old device's retired key file is destroyed once the held head lists neither of its keys.
 //
+// M4a (the Org page; M4a's Decisions, Interfaces §M) reads and acts through the same parts: `view` reads the held head
+// (view.ts); `preview` composes a change on a fresh draft of it (edits.ts) and runs the checks, naming what it shows by a
+// digest of `{change, lines, warnings}`; `change` signs only under that digest, composed again on the head the signer
+// drafts from, as `revokeSuperseded` does. The pairing (pairing.ts) is this Mac as the approving device, through the
+// signer, never beside another attempt. A refusal on the status names the attempt it ended (`refused.attempt`).
+// `close` fences every writer under `org/` and joins it (`shut`), so nothing is written there once it resolves.
+//
 // Electron-free: the browser opener, the step-up signer, the state signer, focus, notifications and the RL2 links are
 // injected from main.
 import { lstat } from 'node:fs/promises';
@@ -55,7 +62,7 @@ import {
   type Signed,
   type SignedOrgState,
 } from '../../../apps/org-protocol/src/index.ts';
-import type { DiscardResult, OrgAttempt, OrgRefusal, OrgSignerStatus, OrgStatus, SignResult } from '@shared/ipc/schema/org';
+import type { DiscardResult, OrgAttempt, OrgChange, OrgRefusal, OrgSignerStatus, OrgStatus, OrgView, PairStartResult, PreviewResult, SignResult } from '@shared/ipc/schema/org';
 import type { MachineRef } from '@shared/machine/ref';
 import {
   createNextDeviceKeys,
@@ -83,15 +90,18 @@ import {
   type OrgFiles,
   type RegistrationFile,
 } from './files';
-import { checkSuccessor, describeHolder, supersededRevocations, type SupersededOffer } from './checks';
+import { checkSuccessor, describeHolder, supersededRevocations, type Finding, type SupersededOffer } from './checks';
 import { createDeliveries, type Deliveries, type DeliveryLink } from './deliveries';
+import { composeChange, normalizeChange, type ChangeEdit, type EditSelf } from './edits';
 import { rereadFrom, startHeldOrg, type HeldOrg } from './held';
 import { hubClient, type HubClient, type HubResult, type Me, type Served } from './hub-client';
+import { createPairing } from './pairing';
 import type { RegistryFeedHooks } from './registry-feed';
 import type { OrgSession, SignedIn } from './session';
-import { createOrgSigner, StaleEdit, successorDraft, supersededEdit, type OrgSigner, type SignOutcome } from './signer';
+import { createOrgSigner, RefusedEdit, StaleEdit, successorDraft, supersededEdit, type OrgSigner, type SignOutcome } from './signer';
 import { createSigningStore, type SigningStore } from './signing-store';
 import { orgTiming, type OrgTiming } from './timing';
+import { orgView } from './view';
 import { startWeekly, type Weekly } from './weekly';
 
 export interface OrgSessionService extends OrgSession {
@@ -123,6 +133,16 @@ export interface OrgSessionService extends OrgSession {
   discardPending(confirmed: true, hash: string): Promise<DiscardResult>;
   /** M3: a fresh signing.json, on the owner's confirmation, in `problem: 'signing'` only. */
   resetSigning(confirmed: true): Promise<void>;
+  /** M4a: the Org page's reading of the held head; null unless a registration holds a verified head. */
+  view(): Promise<OrgView | null>;
+  /** M4a: what `change` would sign on a fresh draft of the held head, with the checks' warnings and the digest naming them. */
+  preview(change: OrgChange): Promise<PreviewResult>;
+  /** M4a: `change` signed, composed again on the head the signer drafts from, only while its digest is the one shown. */
+  change(change: OrgChange, digest: string): Promise<SignResult>;
+  /** M4a: a pairing this Mac approves (pairing.ts); the code is in this answer alone. */
+  pairStart(input: { member: string; class: 'native-mac' | 'web-cards' }): PairStartResult;
+  pairApprove(input: { generation: number; digest: string }): Promise<SignResult>;
+  pairCancel(): void;
 }
 
 /** M3: what the signer needs of main, injected so this module stays Electron-free. Without it nothing is signed. */
@@ -301,6 +321,8 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   let syncAgain = false;
   let lastStatus = '';
   let commits: Promise<unknown> = Promise.resolve();
+  /** `close`'s one run: a second call answers the first's. */
+  let closing: Promise<void> | null = null;
   // ---- M3 ----
   let facts: KeyFacts | null = null;
   let stateSigner: StateSigner | null = null;
@@ -319,12 +341,17 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   /**
    * Runs `body` after every commit queued before it. Nothing run here may wait on a held view's adoption queue, whose
    * anchor writes wait here: a view made inside is given an `anchorSaver` that keeps its anchor until the view is held.
+   * Once closed nothing more is queued (`close`'s fence): the commit is refused, and what was queued before still runs.
    */
   function commit<T>(body: () => Promise<T>): Promise<T> {
+    if (closed) return Promise.reject(new Error('the org session is closed'));
     const turn = commits.then(body);
     commits = turn.catch(() => {});
     return turn;
   }
+
+  /** Every held view's guard (held.ts's `open`): no adoption writes once the session is closed. */
+  const open = (): boolean => !closed;
 
   /** A read the feed or a timer starts: a failure (a chain.json write, say) is logged, and the held state stays as it was. */
   function background(what: string, task: () => Promise<void>): void {
@@ -386,6 +413,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       problem: problem ?? (composed?.store.get() === 'damaged' ? 'signing' : null),
       ...(refused === undefined ? {} : { refused }),
       signer: signerStatus(),
+      pairing: pairing.status(),
     };
   }
 
@@ -557,14 +585,14 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     const hub = client(reg.hub, cred);
     const version = view.head().state.version;
     let read = await hub.chain(version);
-    if (credential !== cred || held !== view) return;
+    if (closed || credential !== cred || held !== view) return;
     if (!read.ok) return hubFailed(read);
     // A recovery from below the held head needs the states from its `fromVersion` on, which `?since=<head>` leaves out;
     // and a served head below the held one is judged with the whole chain, which tells a rewind from a rollback.
     const from = rereadFrom(view, read.value);
     if (from !== null) {
       read = await hub.chain(from);
-      if (credential !== cred || held !== view) return;
+      if (closed || credential !== cred || held !== view) return;
       if (!read.ok) return hubFailed(read);
     }
     await adopt(view, read.value);
@@ -576,7 +604,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     const view = held;
     if (closed || reg === null || cred === null || !hubLive() || view === null || !view.ready()) return;
     const read = await client(reg.hub, cred).state();
-    if (credential !== cred || held !== view) return;
+    if (closed || credential !== cred || held !== view) return;
     if (!read.ok) return hubFailed(read);
     const served = read.value;
     // Another head, or another state at the held head's version (a recovery's first state, or a fork): read as the feed's
@@ -589,8 +617,9 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   }
 
   async function adopt(view: HeldOrg, served: Served): Promise<void> {
+    if (closed) return;
     const result = await view.adoptServed(served);
-    if (held !== view) return;
+    if (closed || held !== view) return;
     const before = problem;
     if (result.refused === 'rollback' || result.refused === 'fork') problem = result.refused;
     else if (result.adopted > 0 && (problem === 'rollback' || problem === 'fork')) problem = null;
@@ -676,6 +705,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     const cred = credential;
     if (closed || reg === null || cred === null || !hubLive() || problem !== 'held-chain') return;
     const read = await client(reg.hub, cred).chain(0);
+    if (closed) return;
     if (!read.ok) return hubFailed(read);
     const served = read.value;
     await commit(async () => {
@@ -686,9 +716,12 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
         anchor: reg.anchor,
         saveAnchor: saver.save,
         first: { chain: served.chain, transitions: served.transitions, certificates: served.certificates ?? { certs: [], retirements: [] } },
+        open,
         log,
       });
       if (!started.ok) return log(`the hub's chain does not hold the anchored state (${started.reason}); closed until a re-anchor`);
+      // Closed while chain.json was written: it holds the anchored state on its own line, so the next load takes it.
+      if (closed) return;
       const anchor = saver.kept()!;
       try {
         await files.write(REGISTRATION_FILE, { ...registration, anchor });
@@ -734,6 +767,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       chain: (since, signal) => watched(inner.chain(since, signal)),
       postPending: (entry, signal) => watched(inner.postPending(entry, signal)),
       postState: (signed, signal) => watched(inner.postState(signed, signal)),
+      pendingOf: (member, signal) => watched(inner.pendingOf(member, signal)),
     };
   }
 
@@ -798,8 +832,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     const superseded = draft.revoked.filter((r) => !before.has(r.keyId)).length;
     const warnings = found.lines.length === 0 ? [] : (await checkSuccessor(head.state, draft, view.superseded(), new Date(at))).filter((x) => x.level === 'warn').map((x) => x.detail);
     const withheld = found.withheld.map((w) => `${describeHolder(head.state, w.holder)} (${w.keyId})`);
-    const words = canonicalize({ lines: found.lines, warnings, withheld });
-    const digest = base64urlEncode(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(words))));
+    const digest = await digestOf(canonicalize({ lines: found.lines, warnings, withheld }));
     return { shown: { superseded, lines: [...found.lines], warnings, withheld, digest }, offer: found };
   }
 
@@ -891,6 +924,110 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     changed();
   }
 
+  // ---- M4a: the Org page's surface ----
+
+  const selfOf = (reg: RegistrationFile): EditSelf => ({ member: reg.member.id, device: reg.device });
+
+  /** The Org page's view of the held head: read again by the renderer at each `org.changed`. */
+  async function view(): Promise<OrgView | null> {
+    const reg = registration;
+    const v = heldView();
+    if (closed || reg === null || v === null) return null;
+    return orgView(v.head().state, selfOf(reg), composed !== null && maySign(composed.signer));
+  }
+
+  type Refused = Extract<PreviewResult, { ok: false }>;
+  /** Why no change is composed at all: this Mac isn't signed in to a held head, isn't a root, or can't sign. */
+  function changeStanding(): Refused | null {
+    const c = composed;
+    if (c === null || registration === null || heldView() === null || !answering()) return { ok: false, reason: 'not-root', detail: 'this Mac is not signed in to the org', findings: [] };
+    if (!c.signer.isRoot()) return { ok: false, reason: 'not-root', detail: 'Only a root signs org changes', findings: [] };
+    if (keys?.excludedFromBackupAtCreation !== true) return { ok: false, reason: 'unmarked', findings: [] };
+    if (c.store.get() === 'damaged') return { ok: false, reason: 'signing', findings: [] };
+    return null;
+  }
+
+  /**
+   * `change` composed on a fresh draft of `head` and checked as the signer checks it before Touch ID: its lines, the
+   * checks' warnings, and the digest of `{change, lines, warnings}`, which a confirmation names. A composer's own refusal
+   * or a refuse finding reads `refused`; a target the head doesn't hold, `stale`.
+   */
+  async function shownChange(head: SignedOrgState, change: OrgChange, superseded: readonly SignedOrgState[]): Promise<{ ok: true; edit: ChangeEdit; warnings: string[]; digest: string } | Refused> {
+    const reg = registration;
+    if (reg === null) return { ok: false, reason: 'not-root', detail: 'this Mac is not signed in to the org', findings: [] };
+    const at = now();
+    let edit: ChangeEdit;
+    let draft: OrgState;
+    try {
+      edit = await composeChange(head.state, change, selfOf(reg));
+      draft = await successorDraft(head, at);
+      await edit.apply(draft);
+    } catch (error) {
+      if (error instanceof RefusedEdit) return { ok: false, reason: 'refused', findings: error.findings };
+      if (error instanceof StaleEdit) return { ok: false, reason: 'stale', detail: error.message, findings: [] };
+      return { ok: false, reason: 'invalid', detail: (error as Error).message, findings: [] };
+    }
+    const findings = await checkSuccessor(head.state, draft, superseded, new Date(at));
+    if (findings.some((f) => f.level === 'refuse')) return { ok: false, reason: 'refused', findings };
+    const warnings = findings.filter((f) => f.level === 'warn').map((f) => f.detail);
+    return { ok: true, edit, warnings, digest: await digestOf(canonicalize({ change, lines: edit.lines, warnings })) };
+  }
+
+  async function preview(raw: OrgChange): Promise<PreviewResult> {
+    const standing = changeStanding();
+    if (standing !== null) return standing;
+    const change = normalizeChange(raw);
+    const v = heldView()!;
+    const shown = await shownChange(v.head(), change, v.superseded());
+    if (!shown.ok) return shown;
+    return { ok: true, change, lines: [...shown.edit.lines], warnings: shown.warnings, digest: shown.digest };
+  }
+
+  /** A preview's refusal as a sign's: `refused` with its findings' words in `detail`. */
+  const asSign = (refusal: Refused): SignResult =>
+    refusal.reason === 'refused'
+      ? { ok: false, reason: 'refused', detail: refusal.findings.filter((f) => f.level === 'refuse').map((f) => f.detail).join('; ') }
+      : { ok: false, reason: refusal.reason, ...(refusal.detail === undefined ? {} : { detail: refusal.detail }) };
+
+  async function change(raw: OrgChange, digest: string): Promise<SignResult> {
+    const standing = changeStanding();
+    if (standing !== null) return asSign(standing);
+    const c = composed!;
+    // Normalizing keeps a previewed change as it was; one sent without the id its preview gave reads `stale` below.
+    const change = normalizeChange(raw);
+    const stale = 'the change, or the org state it changes, is not the one shown: nothing was signed';
+    const v = heldView()!;
+    const shown = await shownChange(v.head(), change, v.superseded());
+    if (!shown.ok) return asSign(shown);
+    if (shown.digest !== digest) return { ok: false, reason: 'stale', detail: stale };
+    // Composed again on the head the signer drafts from (the hub's, after its read), and signed only if it still says
+    // what was shown, as `revokeSuperseded` does: `stale` before Touch ID.
+    const apply = async (draft: OrgState): Promise<void> => {
+      const at = heldView();
+      const fresh = at === null ? null : await shownChange(at.head(), change, at.superseded());
+      if (fresh !== null && !fresh.ok && fresh.reason === 'refused') throw new RefusedEdit(fresh.findings as Finding[]);
+      if (fresh === null || !fresh.ok || fresh.digest !== digest) throw new StaleEdit(stale);
+      await fresh.edit.apply(draft);
+    };
+    return signResult(await c.signer.sign({ summary: shown.edit.summary, lines: shown.edit.lines, apply }));
+  }
+
+  /** M4a's pairing: this Mac as the approving device, one at a time, never beside another of the session's attempts. */
+  const pairing = createPairing({
+    context: () => {
+      const reg = registration;
+      const v = heldView();
+      if (closed || reg === null || v === null || !answering()) return null;
+      return { hub: reg.hub, self: selfOf(reg), head: v.head(), maySign: composed !== null && maySign(composed.signer), client: signerHub() };
+    },
+    busy: () => attempt !== null || signingOut,
+    sign: async (edit) => (composed === null ? notSigning : signResult(await composed.signer.sign(edit))),
+    changed: () => changed(),
+    timing: deps.timing,
+    now: deps.now,
+    log,
+  });
+
   // ---- startup ----
 
   async function load(): Promise<void> {
@@ -950,7 +1087,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       }
     }
     const saver = anchorSaver();
-    const started = await startHeldOrg({ files, anchor: reg.anchor, saveAnchor: saver.save, log });
+    const started = await startHeldOrg({ files, anchor: reg.anchor, saveAnchor: saver.save, open, log });
     if (started.ok) {
       saver.hold(started.held);
       // A crash between chain.json and the anchor left the anchor below the held head: it is moved up.
@@ -996,8 +1133,11 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     return admission.kind === 'standin' ? standinLogin(admission.user) : transfer;
   }
 
-  /** Runs `body` as the one attempt: fenced, cancellable, its refusal reported on the status. */
-  function run(what: string, body: (signal: AbortSignal, fence: () => void) => Promise<void>, onEnd: () => void): void {
+  /**
+   * Runs `body` as the one attempt: fenced, cancellable, its refusal reported on the status under the attempt's name
+   * (`refused.attempt`, so the Org page shows it under the control that sent it).
+   */
+  function run(what: string, kind: NonNullable<OrgRefusal['attempt']>, body: (signal: AbortSignal, fence: () => void) => Promise<void>, onEnd: () => void): void {
     const controller = new AbortController();
     attempt = controller;
     attemptNo = ++attempts;
@@ -1018,11 +1158,11 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
           ended('fenced');
           return;
         }
-        if (error instanceof Refusal) refused = error.refusal;
-        else if (error instanceof AccessLoginError) refused = error.reason === 'cancelled' ? undefined : { code: 'access', detail: error.reason };
+        if (error instanceof Refusal) refused = { ...error.refusal, attempt: kind };
+        else if (error instanceof AccessLoginError) refused = error.reason === 'cancelled' ? undefined : { code: 'access', detail: error.reason, attempt: kind };
         else if (controller.signal.aborted) refused = undefined;
         else {
-          refused = { code: 'hub', detail: (error as Error).message };
+          refused = { code: 'hub', detail: (error as Error).message, attempt: kind };
           log(`an attempt failed: ${(error as Error).message}`);
         }
         if (refused !== undefined) log(`refused ${refused.code}${refused.detail === undefined ? '' : ` (${refused.detail})`}`);
@@ -1082,6 +1222,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     changed();
     run(
       `register (org ${code.org})`,
+      'register',
       (signal, fence) => registerWith(code, signal, fence),
       () => (registering = null),
     );
@@ -1149,7 +1290,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       const dir = await files.ensure();
       if (!dir.ok) refuse('directory', dir.detail);
       const saver = anchorSaver();
-      const started = await startHeldOrg({ files, anchor: null, pins, first: { chain, transitions, certificates }, saveAnchor: saver.save, log });
+      const started = await startHeldOrg({ files, anchor: null, pins, first: { chain, transitions, certificates }, saveAnchor: saver.save, open, log });
       if (!started.ok) refuse('chain', started.reason);
       fence();
       await files.write(ACCESS_FILE, toAccessFile(code.hub, cred));
@@ -1202,6 +1343,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     changed();
     run(
       `sign in (org ${reg.org})`,
+      'signIn',
       async (signal, fence) => {
         const cred = await login(reg.hub, { signal });
         fence();
@@ -1241,6 +1383,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     changed();
     run(
       `re-anchor (org ${reg.org})`,
+      'reanchor',
       async (signal, fence) => {
         const cred = hubLive() ? credential! : await loginFor(code.hub)!(code.hub, { signal });
         fence();
@@ -1259,7 +1402,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
             throw new Fenced();
           }
           const saver = anchorSaver();
-          const started = await startHeldOrg({ files, anchor: null, pins, first, saveAnchor: saver.save, log });
+          const started = await startHeldOrg({ files, anchor: null, pins, first, saveAnchor: saver.save, open, log });
           if (!started.ok) refuse('chain', started.reason);
           fence();
           if (cred !== credential) {
@@ -1290,6 +1433,8 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
    */
   function rekey(text: string): OrgAttempt {
     if (closed || !ready || attempt !== null || signingOut) return { ok: false, reason: { code: 'busy' } };
+    // M4a: a pairing this Mac runs is the session's attempt too, and the two never run side by side.
+    if (pairing.running()) return { ok: false, reason: { code: 'busy', detail: 'a pairing is under way: cancel it first' } };
     const reg = registration;
     if (reg === null || reg.signedOut) return { ok: false, reason: { code: 'busy', detail: 'sign in to the org first' } };
     // A promotion that failed after its intent was written is the next start's to finish: new keys now would replace its own.
@@ -1307,6 +1452,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     changed();
     run(
       `rekey (org ${reg.org})`,
+      'rekey',
       (signal, fence) => rekeyWith(code, reg, old, signal, fence),
       () => (rekeying = null),
     );
@@ -1447,7 +1593,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   }
 
   function signOut(): Promise<void> {
-    if (registration === null) return Promise.resolve();
+    if (closed || registration === null) return Promise.resolve();
     // The fence moves now, so every attempt's commit queued before the marker writes nothing more; memory too, so the
     // status reads signed out at once and an anchor written before the marker's turn carries it.
     if (attempt !== null) endAttempt('ended by sign-out');
@@ -1455,6 +1601,8 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     // M3: a sign, settle or discard in flight goes no further (no Touch ID, no slot, no post); a slot already written
     // stays and settles at the next sign-in.
     composed?.signer.fence();
+    // M4a: a pairing ends with the sign-in; an approval already in the signer was fenced above.
+    pairing.cancel();
     attempt?.abort();
     attempt = null;
     registering = null;
@@ -1491,6 +1639,37 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     if (retired !== null) background('checking the retired keys', checkRetired);
   });
 
+  /**
+   * `close`, in M4a's four steps (*Close*): when it resolves nothing more is written under `org/`. Each writer there is
+   * one of the owners joined here: the commit queue, the held view's adoption queue, the session's load, and the
+   * producers that feed the two queues (the signer's operation, the sync, the deliveries' run, the weekly asking). A new
+   * writer joins one of them.
+   */
+  async function shut(): Promise<void> {
+    // 1. The fence: an attempt writes nothing more, no producer adopts or queues a write after its next await, the
+    //    commit queue takes no new turn, and every held view refuses adoptions (`open`).
+    if (attempt !== null) endAttempt('ended by quit');
+    generation++;
+    attempt?.abort();
+    closed = true;
+    // 2. The parts stop, each answering its operation in flight; a running pairing is cancelled.
+    pairing.cancel();
+    const c = composed;
+    c?.offs.forEach((off) => off());
+    const parts = c === null ? [] : [c.weekly.close(), c.deliveries.close(), c.signer.close()];
+    if (tokenTimer !== null) clearTimeout(tokenTimer);
+    if (certsTimer !== null) clearInterval(certsTimer);
+    if (recoverTimer !== null) clearInterval(recoverTimer);
+    unheld?.();
+    // 3. The producers in flight, joined from outside the commit queue (which never waits on them): the parts, the
+    //    sync and the load; then the held view's adoption queue, a write under way and a link's direct advance
+    //    included, once the load can no longer hold another view.
+    await Promise.all([...parts, syncing?.catch(() => {}), loaded]);
+    await held?.close();
+    // 4. The commit queue's tail.
+    await commits;
+  }
+
   const loaded = load()
     .catch((error: unknown) => log(`the org files did not load: ${(error as Error).message}`))
     .then(async () => {
@@ -1524,24 +1703,13 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     rekey,
     discardPending,
     resetSigning,
-    async close() {
-      if (closed) return;
-      if (attempt !== null) endAttempt('ended by quit');
-      generation++;
-      attempt?.abort();
-      closed = true;
-      if (composed !== null) {
-        composed.offs.forEach((off) => off());
-        composed.weekly.close();
-        composed.deliveries.close();
-        composed.signer.close();
-      }
-      if (tokenTimer !== null) clearTimeout(tokenTimer);
-      if (certsTimer !== null) clearInterval(certsTimer);
-      if (recoverTimer !== null) clearInterval(recoverTimer);
-      unheld?.();
-      await syncing?.catch(() => {});
-    },
+    view,
+    preview,
+    change,
+    pairStart: (input) => pairing.start(input),
+    pairApprove: (input) => pairing.approve(input),
+    pairCancel: () => pairing.cancel(),
+    close: () => (closing ??= shut()),
   };
 }
 
@@ -1558,6 +1726,11 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
     };
     signal.addEventListener('abort', aborted, { once: true });
   });
+}
+
+/** The words a person confirmed, named: base64url SHA-256 of their canonical form. */
+async function digestOf(words: string): Promise<string> {
+  return base64urlEncode(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(words))));
 }
 
 /** The token's email, for a refusal's detail (decoded, not verified). */

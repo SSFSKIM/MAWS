@@ -17,7 +17,7 @@ import { zipFiles } from '../design-systems/zip';
 import { createAssetDownload } from '../dashboard/download';
 import { startDelivery, type GwsDriver } from '../delivery';
 import { gwsLogin } from '../delivery/gws';
-import { createFilesService } from '../files/service';
+import { createFilesService } from '../../services/files/service';
 import { pickFiles } from '../files/pick';
 import { saveTextFile } from '../files/save-text';
 import { createLibraryFiles, type LibraryFilesDeps } from '../library/files';
@@ -25,7 +25,7 @@ import { revealPath } from '../settings/reveal';
 import { openOwnerBrowser } from '../connectors/oauth-root';
 import { listenLoopback } from '../connectors/oauth-callback';
 import { createSignIn } from '../connectors/sign-in';
-import { SessionReadModel, type ReadModelWriter } from '../sessions/read-model';
+import { fakeSpineView } from '../../../test/support/fake-spine-view';
 import { startNotifier } from '../attention/notifier';
 
 const CLIENT: ClientRef = { id: 'page:1.1' as ClientId, onGone: () => () => {} };
@@ -217,22 +217,18 @@ describe('the notifier', () => {
   const SESSION = 'app-1' as AppSessionId;
   function notifier(over: Partial<ClientPort> = {}) {
     Object.assign(port, over);
-    const model = new SessionReadModel('index');
-    let writer!: ReadModelWriter;
-    model.register({ start: (w) => ((writer = w), () => {}) });
-    writer.observeProject(project('maws', 0, { name: 'MAWS' }));
-    writer.observeRecord(record(SESSION, { projectId: 'maws' as never }));
+    const view = fakeSpineView({ projects: [project('maws', 0, { name: 'MAWS' })], records: [record(SESSION, { projectId: 'maws' as never })] }); // P5 O3-C: the spine's view
     const emit = vi.fn(() => true);
     const navigate = vi.fn();
     const settings: Settings = SETTINGS_DEFAULTS_V21;
-    const stop = startNotifier(model, { port, isFocused: () => false, isViewing: () => false, navigate, failure: vi.fn(), settings: () => settings, emit });
-    return { writer, emit, navigate, stop };
+    const stop = startNotifier(view, { port, isFocused: () => false, isViewing: () => false, navigate, failure: vi.fn(), settings: () => settings, emit });
+    return { view, emit, navigate, stop };
   }
 
   it('notify falls back to the dock bounce, whose own noClient is ignored; the badge’s is ignored', () => {
     const n = notifier();
     try {
-      n.writer.observeAttention(SESSION, [item(SESSION, 'permission', '2026-10-27T10:00:00Z')]);
+      n.view.setAttention(SESSION, [item(SESSION, 'permission', '2026-10-27T10:00:00Z')]);
       expect(port.notify).toHaveBeenCalledOnce();
       expect(port.focus).toHaveBeenCalledExactlyOnceWith(null, 'request');
       expect(n.emit).toHaveBeenCalledExactlyOnceWith('attention.notified', expect.objectContaining({ appSessionId: SESSION, delivery: 'fallback' }));
@@ -246,7 +242,7 @@ describe('the notifier', () => {
     let fire: (event: NotifyEvent) => void = () => {};
     const n = notifier({ notify: vi.fn((_client, _request, onEvent) => ((fire = onEvent), { close: () => {} })) });
     try {
-      n.writer.observeAttention(SESSION, [item(SESSION, 'permission', '2026-10-27T10:00:00Z')]);
+      n.view.setAttention(SESSION, [item(SESSION, 'permission', '2026-10-27T10:00:00Z')]);
       fire({ kind: 'clicked' });
       expect(port.focus).toHaveBeenCalledExactlyOnceWith(null, 'bring');
       expect(n.navigate).toHaveBeenCalledOnce();

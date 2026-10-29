@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import { createEngineRoute, CONNECTOR_OPERATION_DEADLINE_MS, DATASET_RETRY_MS, type EngineRoute } from './engine-route';
+import { fakeSpineView } from '../../../test/support/fake-spine-view';
 
 type Sent = { name: string; input: Record<string, unknown> };
 let sent: Sent[];
@@ -56,8 +57,7 @@ beforeEach(() => {
           throw new Error(`unexpected ${name}`);
       }
     }) as never,
-    sessions: { get: () => null },
-    projects: { list: () => [] },
+    view: fakeSpineView(),
     realpath: (path) => path,
     streaming: () => true,
     log: () => {},

@@ -99,6 +99,8 @@ const KNOWN_SILENT_TYPES = new Set([
   'file-history-snapshot', 'file-history-delta', 'cost-state', 'summary', 'tag', 'history-suppression', 'ended-by-model',
   'continued-in', 'attribution-snapshot', 'fork-context-ref', 'observer-ref', 'worktree-state', 'pr-link', 'agent-setting',
   'agent-name', 'bridge-session', // a teammate's display name (SPEC 35 AgentNameRecord); remote-control bridge bookkeeping
+  'api-request-shape', 'api-request-blob', 'api-request', // P5 E312: the request-replay records 2.1.312 writes per model request
+  'tools-used', // P5 E312: the tool registry's names, stamped once per file and registry generation
 ]);
 
 interface Produced {

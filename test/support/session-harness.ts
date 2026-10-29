@@ -12,17 +12,17 @@ import type { EventName, EventPayload } from '../../src/shared/ipc/schema';
 import type { SetupIntent } from '../../src/shared/sessions/intent';
 import type { SetupEvent } from '../../src/shared/sessions/setup';
 import { slugOf } from '../../src/engine-host/fs/paths';
-import { createGitRunner } from '../../src/main/git/runner';
-import { WorktreeService } from '../../src/main/git/worktrees';
-import { Index } from '../../src/main/index/index';
-import { IndexSessionSource } from '../../src/main/index/source';
-import { BootstrapNotes, FileIntentStore } from '../../src/main/sessions/intents';
-import { SessionService } from '../../src/main/sessions/service';
-import type { SessionServiceDeps } from '../../src/main/sessions/context'; // C12
-import type { AcquisitionMemory } from '../../src/main/sessions/availability'; // P2-A
-import type { C10Settings } from '../../src/main/sessions/launch-mapping';
-import type { ReplaySeam } from '../../src/main/sessions/replay-seam';
-import type { SessionReadModel } from '../../src/main/sessions/read-model'; // P2-A M3
+import { createGitRunner } from '../../src/services/git/runner';
+import { WorktreeService } from '../../src/services/git/worktrees';
+import { Index } from '../../src/services/index/index';
+import { IndexSessionSource } from '../../src/services/index/source';
+import { BootstrapNotes, FileIntentStore } from '../../src/services/sessions/intents';
+import { SessionService } from '../../src/services/sessions/service';
+import type { SessionServiceDeps } from '../../src/services/sessions/context'; // C12
+import type { AcquisitionMemory } from '../../src/services/sessions/availability'; // P2-A
+import type { C10Settings } from '../../src/services/sessions/launch-mapping';
+import type { ReplaySeam } from '../../src/services/sessions/replay-seam';
+import type { SessionReadModel } from '../../src/services/sessions/read-model'; // P2-A M3
 import { FakeEngineHost, type RestartOptions } from './session-host';
 import { TrustStoreFixture } from './trust-store';
 

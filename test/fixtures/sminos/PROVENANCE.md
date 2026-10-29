@@ -1,7 +1,7 @@
 # sminos's identity vectors, vendored
 
 P5 O6 M5 (`docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md`, "The derivation"): MAWS derives an org
-project's sminos id by sminos's rule, and `src/main/index/org-project.test.ts` holds it to sminos's own vectors. They are
+project's sminos id by sminos's rule, and `src/services/index/org-project.test.ts` and `src/shared/machine/project-ids.test.ts` hold it to sminos's own vectors. They are
 copied here, byte for byte, because the gate's runners have no sminos plugin cache to read them from. Never edit them:
 copy them again from a later sminos and update this file.
 

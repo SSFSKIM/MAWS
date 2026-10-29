@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, matchesGlob } from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
 import { URL, fileURLToPath } from 'node:url';
@@ -190,7 +190,7 @@ test('the Live: yes trailer, or the live input on a dispatch, turns live on for 
   const on = plan({ ...live, HEAD_MESSAGE: livePush('e2e:library-live,e2e:presentations-live') });
   assert.equal(on.outputs.live, 'true');
   assert.deepEqual(JSON.parse(on.outputs.e2e).map((entry) => entry.group), ['library-live', 'presentations-live']);
-  assert.match(on.summary, /Live: yes \(MAWS_LIVE, MAWS_LIBRARY_LIVE, MAWS_LIVE_DOCUMENT at 1\)\./);
+  assert.match(on.summary, /Live: yes \(every live group's run flag at 1\)\./);
 
   const off = plan({ ...live, HEAD_MESSAGE: livePush('static,e2e:default', '') });
   assert.equal(off.outputs.live, 'false');
@@ -255,7 +255,7 @@ test("every LIVE_E2E group's spec skips on a flag the e2e job sets under live", 
   // The e2e job's env, which e2e-vm aliases: each flag once in either job.
   const exportedBy = (job) => [...jobBody(workflow, job).matchAll(/^ {6}(MAWS_\w+): \$\{\{ needs\.plan\.outputs\.live == 'true' && '1' \|\| '' \}\}$/gm)].map((match) => match[1]).sort();
   const exported = exportedBy('e2e');
-  assert.deepEqual(exported, ['MAWS_LIBRARY_LIVE', 'MAWS_LIVE', 'MAWS_LIVE_DOCUMENT']);
+  assert.deepEqual(exported, ['MAWS_C8B_LIVE', 'MAWS_E1_LIVE', 'MAWS_E8_LIVE', 'MAWS_LIBRARY_LIVE', 'MAWS_LIVE', 'MAWS_LIVE_DOCUMENT', 'MAWS_P1_LIVE', 'MAWS_P2A_LIVE']);
   assert.deepEqual(exportedBy('e2e-vm'), exported);
   const guards = /^ {2}LIVE_GUARD_E2E: (.*)$/m.exec(workflow)[1].split(/\s+/).filter(Boolean);
   assert.deepEqual(guards.filter((group) => !groups.includes(group)), [], 'every LIVE_GUARD_E2E group is a LIVE_E2E group');
@@ -290,9 +290,7 @@ test('a MEASURED_E2E group is marked measured in its matrix entry, and gate.yml 
   assert.match(job, /\n {4}steps:\n(?: {6}#.*\n)* {6}- if: matrix\.measured && runner\.os == 'macOS'\n {8}uses: SSFSKIM\/ci-kit\/mac\/settle@v1\n {6}- id: checkout\n {8}uses: actions\/checkout@v7\n/);
   // The second guard: after the build of the entry's variant, on this disk's cache as the command's own build finds it,
   // and just before the command; it claims nothing, the first guard's claim holding the guest off until the job ends.
-  assert.match(job, /\n {6}- if: matrix\.prebuild && runner\.os == 'macOS'\n {8}env:\n {10}PREBUILD: \$\{\{ matrix\.prebuild \}\}\n {8}run: \|\n {10}export MAWS_E2E_BUILD_CACHE=\$HOME\/Library\/Caches\/maws-e2e-build\/\$RUNNER_NAME MAWS_E2E_BUILD_KEY=\$GITHUB_SHA\n {10}\.github\/scripts\/gate-run\.sh '[^']*' scripts\/e2e-build\.sh "\$PREBUILD"\n {6}- if: matrix\.prebuild && runner\.os == 'macOS'\n {8}uses: SSFSKIM\/ci-kit\/mac\/settle@v1\n {8}with:\n {10}vm: any\n {6}- env:\n {10}SCRIPT: \$\{\{ matrix\.script \}\}\n/);
-  // A job refused before its checkout uploads nothing: the Mac's persistent workspace still holds the last job's reports.
-  assert.match(job, /\n {6}- if: \(failure\(\) \|\| needs\.plan\.outputs\.evidence == 'true'\) && steps\.checkout\.outcome == 'success'\n {8}uses: actions\/upload-artifact@v7\n/);
+  assert.match(job, /\n {6}- if: matrix\.prebuild && runner\.os == 'macOS'\n {8}env:\n {10}PREBUILD: \$\{\{ matrix\.prebuild \}\}\n {8}run: \|\n {10}export MAWS_E2E_BUILD_CACHE=\$HOME\/Library\/Caches\/maws-e2e-build\/\$RUNNER_NAME MAWS_E2E_BUILD_KEY=\$GITHUB_SHA\n {10}\.github\/scripts\/gate-run\.sh '[^']*' scripts\/e2e-build\.sh "\$PREBUILD"\n {6}- if: matrix\.prebuild && runner\.os == 'macOS'\n {8}uses: SSFSKIM\/ci-kit\/mac\/settle@v1\n {8}with:\n {10}vm: any\n {6}- id: e2e\n {8}env:\n {10}SCRIPT: \$\{\{ matrix\.script \}\}\n/);
 });
 
 // E2E_MINUTES: a group's own minutes replace its class's, the wait of its runner's start still added on top; a group not
@@ -380,9 +378,13 @@ test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; e
   // The measured groups, which only a run naming them takes; class 1a on the Mac carries the wait too.
   const measured = plan({ ...own, HEAD_MESSAGE: `ci-gate: test\n\nGates: ${own.MEASURED_E2E.split(/\s+/).filter((group) => !own.LIVE_E2E.includes(group)).map((group) => `e2e:${group}`).join(',')}\nRunner: macos\nClass1a: macos` }).outputs;
   // daemon-idle-aba's three windows take its own 90 minutes (E2E_MINUTES), the home Mac's wait on top.
-  assert.equal(own.E2E_MINUTES, 'daemon-idle-aba=90');
+  assert.equal(own.E2E_MINUTES, 'daemon-idle-aba=90 p1-live=45');
   for (const [group, where] of Object.entries(placement(measured))) assert.deepEqual(where, [homeMac, group === 'daemon-idle-aba' ? 100 : UNBUILT_MEASURED.has(group) ? 55 : 70], group);
   assert.deepEqual(JSON.parse(measured.timeouts), { static: 40, unit: 40, probes: 40, unit_darwin: 40 });
+  // A live run of every live group: all on the home Mac; p1-live, every sitting in one invocation, its own 45 minutes.
+  const live = plan({ ...own, HEAD_MESSAGE: `ci-gate: test\n\nGates: ${own.LIVE_E2E.split(/\s+/).map((group) => `e2e:${group}`).join(',')}\nRunner: macos\nLive: yes` }).outputs;
+  assert.equal(live.live, 'true');
+  for (const [group, where] of Object.entries(placement(live))) assert.deepEqual(where, [homeMac, group === 'p1-live' ? 55 : UNBUILT_MEASURED.has(group) ? 55 : 40], group);
 });
 
 test('only measured, MAC_HOME_E2E and live e2e jobs ask for the home Mac; other placements keep their labels', () => {
@@ -1003,11 +1005,8 @@ const LIVENESS_BOUNDS = {
   'e2e/dashboard-live-data.spec.ts': {
     "expect(Date.parse(scheduled.at) - Date.parse(last.at), 'the scheduled call within the schedule (and a margin)').toBeLessThanOrEqual(35_000);": 'the product\'s own 30 s schedule; and no gate job runs it (MAWS_DASHBOARD_LIVE_DATA, outside every list)',
   },
-  'e2e/agent-tools-live.spec.ts': {
-    "for (const l of latency) expect(l.rowShownAfterMs, `row of ${l.agentId} shown within a second of its start`).toBeLessThan(1_000);": 'no gate job runs it: no group\'s script names it, and the bare set skips it without its live flags',
-  },
   'e2e/p1-live-keep-quit.spec.ts': {
-    "expect(relaunchMs, 'relaunched within 10 s').toBeLessThan(RELAUNCH_WITHIN_MS);": 'no gate job runs it: MAWS_P1_LIVE over a packaged build, which no group sets',
+    "expect(relaunchMs, 'relaunched within 10 s').toBeLessThan(RELAUNCH_WITHIN_MS);": 'the test\'s own steps from the first app\'s exit to its relaunch (an A-15 read and the launch\'s setup, no wait), against 10 s inside the 45 s sleep the relaunch must land in (keep-quit-live, on the home Mac)',
   },
 };
 const TIME_WORD = /Date\.now\(\)|Date\.parse\(|performance\.now\(\)|\b\w*(?:Ms|MS|_MS)\b|\bms\b|\btimings?\b|\btimes\b|\belapsed\w*|\blatency\b|\bduration\b|\b[a-z]\w*At\b/;
@@ -1734,7 +1733,7 @@ test('a direct entry whose script builds out/ carries that variant as cached, wh
   ];
   const places = steps.map((step) => host.indexOf(step));
   assert.ok(places.every((place, i) => place > 0 && (i === 0 || place > places[i - 1])), JSON.stringify(places));
-  assert.ok(places[2] < host.indexOf('\n      - env:\n          SCRIPT: ${{ matrix.script }}\n'));
+  assert.ok(places[2] < host.indexOf('\n      - id: e2e\n        env:\n          SCRIPT: ${{ matrix.script }}\n'));
   assert.match(host, /\n {10}CACHED: \$\{\{ matrix\.cached \}\}\n {10}MAWS_E2E_PEER_ROOT:/);
 });
 
@@ -1908,6 +1907,44 @@ test('overflow never moves home, measured, live, unlisted, hosted-lane, no-hoste
     { EVENT: 'workflow_dispatch', INPUT_RUNNER: 'macos', INPUT_GATES: 'e2e:document' },
     { HEAD_MESSAGE: `Runner: macos\nGates: e2e:design-live\nLive: yes\nMac-Backlog: ${overflowSample()}`, LIVE_E2E: 'design-live' },
   ]) assert.ok(JSON.parse(overflowPlan(overflowSample(), extra).outputs.e2e).every((e) => !e.overflow));
+});
+
+test('e2e uploads green flaky reports and every measured JSON set, but never a prior checkout’s evidence', () => {
+  const workflow = readWorkflow();
+  for (const job of ['e2e', 'e2e-vm']) {
+    const body = jobBody(workflow, job);
+    const uploads = body.split(/\n(?= {6}- )/).filter((chunk) => chunk.includes('uses: actions/upload-artifact@'));
+    const report = uploads.find((chunk) => /name: e2e-/.test(chunk));
+    const measured = uploads.find((chunk) => /name: measured-e2e-/.test(chunk));
+    assert.ok(report, `${job} has a full report upload`);
+    assert.ok(measured, `${job} has a measured samples and host-log upload`);
+    const run = body.split(/\n(?= {6}- )/).find((chunk) => chunk.includes('pnpm "$SCRIPT"'));
+    const id = /- id: (\S+)/.exec(run)?.[1];
+    assert.ok(id, 'the actual test command has a step id for its flaky output');
+    const condition = (chunk) => /(?:- )?if: (.+)/.exec(chunk)[1];
+    const enabled = (chunk, checkout, failure, evidence, flaky, measured) => Boolean(Function('steps', 'needs', 'matrix', 'failure', 'always', `return (${condition(chunk)})`)(
+      { checkout: { outcome: checkout }, [id]: { outputs: { flaky } } },
+      { plan: { outputs: { evidence } } }, { measured }, () => failure, () => true,
+    ));
+    for (const checkout of ['success', 'failure', 'skipped']) {
+      for (const failure of [false, true]) for (const evidence of ['false', 'true']) {
+        for (const flaky of ['', 'true']) for (const isMeasured of [false, true]) {
+          assert.equal(enabled(report, checkout, failure, evidence, flaky, isMeasured), checkout === 'success' && (failure || evidence === 'true' || flaky === 'true'));
+          assert.equal(enabled(measured, checkout, failure, evidence, flaky, isMeasured), checkout === 'success' && isMeasured);
+        }
+      }
+    }
+    // Status functions opt these out of Actions' implicit success() guard: cancelled measured runs keep partial samples.
+    assert.match(condition(report), /failure\(\)/);
+    assert.match(condition(measured), /always\(\)/);
+    assert.match(report, /name: e2e-\$\{\{ matrix.slug \}\}/);
+    assert.match(measured, /name: measured-e2e-\$\{\{ matrix.slug \}\}/);
+    const paths = /path: \|\n((?: {12}[^\n]+\n)+)/.exec(measured)?.[1].trim().split(/\s+/) ?? [/path: (.+)/.exec(measured)[1]];
+    const uploaded = (file) => paths.some((pattern) => matchesGlob(file, pattern));
+    for (const file of ['test-results/daemon-idle.json', 'test-results/artifacts-perf.jsonl', 'test-results/attempt/engine-host-abc.utility.log', 'test-results/attempt/engine-host-abc.log', 'test-results/attempt/engine-host-abc.previous.log', 'test-results/tool-time-heavy-live/timings.json']) assert.equal(uploaded(file), true, file);
+    for (const file of ['test-results/attempt/main-process-abc.stderr.log', 'test-results/attempt/screenshot.png', 'test-results/attempt/profile/host.log', 'playwright-report/index.html']) assert.equal(uploaded(file), false, file);
+    for (const upload of [report, measured]) assert.match(upload, /retention-days: 7\n/);
+  }
 });
 
 test('the workflow runs the same retry and flaky notice on hosted and overflow, and names overflow placement', () => {

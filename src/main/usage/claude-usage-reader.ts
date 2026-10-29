@@ -14,7 +14,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AccountUsage, UsageActivity, UsageCodex, UsageGateway, UsageSnapshot, UsageWindow } from '@shared/usage/types';
 import { routedAccountName } from '@shared/artifacts/export-author';
-import { jsonLines, readTail } from '../files/read-tail';
+import { jsonLines, readTail } from '@shared/fs/read-tail';
 import { RequestLedger } from './request-ledger';
 
 export const HISTORY_TAIL_BYTES = 64 * 1024;

@@ -9,6 +9,7 @@
 // the bridge's DX5 events, so they carry no `mac` (only sminos's daemon seals one).
 import * as z from 'zod';
 import { RequestAnswerSchema } from '../../engine/answers';
+import { PermissionModeSchema } from '../../graph/enums';
 import { AppSessionIdSchema } from '../../graph/ids';
 import type { CommandSpec } from './common';
 
@@ -56,6 +57,38 @@ export const LaneADeliverySchema = z.strictObject({
 });
 export type LaneADelivery = z.infer<typeof LaneADeliverySchema>;
 
+// P5 O9 M9: a remote session's link to its machine, as O7's `RemoteLink` and the endpoint's `caps` say it (absent for a
+// local session). `reason`, when set, disables every control with it: the link is down or connecting, the machine refused
+// this device, no `caps` came yet, or the device's class acts on cards only. `rights` are the member's machine rights
+// (`caps.machine.grades`); a session's own rank is the endpoint's to decide (its `grade` refusal).
+export const LaneALinkSchema = z.strictObject({
+  state: z.enum(['connecting', 'up', 'down']),
+  refusal: z.string().nullable(),
+  carrier: z.enum(['direct', 'relay']).nullable(),
+  member: z.string().nullable(),
+  clientClass: z.string().nullable(),
+  rights: z.array(z.string()),
+  reason: z.string().nullable(),
+});
+export type LaneALink = z.infer<typeof LaneALinkSchema>;
+
+// P5 O9 M9: a remote control's act in flight, from its creation to its outcome (`laneA.send`'s are its `deliveries`):
+// `id` its opId, `control` its RPC (`interrupt`, `answer`, `decide`, `model`, `command`, `btw`, `compact`, `stop-agent`,
+// `tell`), `target` what it names when it names one (an answer's or decision's request, a command's name, an agent).
+export const LaneAActSchema = z.strictObject({
+  id: z.string(),
+  control: z.string(),
+  target: z.string().optional(),
+  progress: z.enum(['waiting', 'sent', 'accepted', 'unknown']),
+  at: z.string(), // when it was made (ISO-8601)
+});
+export type LaneAAct = z.infer<typeof LaneAActSchema>;
+
+// The main loop's permission mode as the session last reported it to its bridge (sminos 1.27.14; @shared/lane-a/mode):
+// the engine's word, when the bridge read the report (epoch ms, the session's machine's clock) and the event it came in.
+export const LaneAModeSchema = z.strictObject({ mode: PermissionModeSchema, at: z.number(), from: z.string() });
+export type LaneAMode = z.infer<typeof LaneAModeSchema>;
+
 export const LaneAStateSchema = z.strictObject({
   appSessionId: AppSessionIdSchema,
   engineSessionId: z.string(), // bare: the engine's session id is never lifted (OX2)
@@ -72,10 +105,15 @@ export const LaneAStateSchema = z.strictObject({
   model: z.string().nullable(),
   effort: z.string().nullable(),
   override: z.strictObject({ model: z.string().nullable(), effort: z.string().nullable() }).nullable(), // the bridge's per-request override
+  // The mode the session last reported: the local heartbeat's, a remote status read's. Null until it reports one, and
+  // from a bridge older than sminos 1.27.14.
+  mode: LaneAModeSchema.nullable(),
   catalog: z.strictObject({ fingerprint: z.string() }).nullable(), // the body by laneA.catalog
   pending: z.array(LaneARaisedSchema),
   settled: z.array(LaneASettledSchema), // the last 100
   deliveries: z.array(LaneADeliverySchema), // this app's sends; settled ones kept 60 s
+  link: LaneALinkSchema.optional(), // M9: a remote session's only
+  acts: z.array(LaneAActSchema).optional(), // M9: a remote session's only
 });
 export type LaneAState = z.infer<typeof LaneAStateSchema>;
 

@@ -33,7 +33,7 @@ function git(cwd: string, args: string[]): { stdout: string; status: number | nu
   const result = spawnSync('/usr/bin/git', args, { cwd, env: isolatedGitEnv(), encoding: 'utf8' });
   return { stdout: result.stdout, status: result.status };
 }
-// `GitService.untrackedDiff`'s argv (src/main/git/service.ts), run from the top level.
+// `GitService.untrackedDiff`'s argv (src/services/git/service.ts), run from the top level.
 const untrackedDiff = (cwd: string, path: string) =>
   git(cwd, ['-c', 'diff.autoRefreshIndex=false', 'diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-index', '--src-prefix=a/', '--dst-prefix=b/', '-U3', '--', '/dev/null', path]);
 // `GitService.diff`'s `worktree` scope.

@@ -135,7 +135,7 @@ export function pluginRowsOf(stdout: string): PluginListRow[] {
 }
 
 // Whether a realpath lies under a root: equal to it, or inside it at a segment boundary (`/repo2` is not under `/repo`;
-// the rule of `src/main/files/allowlist.ts`).
+// the rule of `src/services/files/allowlist.ts`).
 export function under(root: string, real: string): boolean {
   return real === root || real.startsWith(root.endsWith(sep) ? root : root + sep);
 }

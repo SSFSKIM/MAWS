@@ -547,3 +547,66 @@ describe('a damaged chain.json', () => {
     expect(anchor!.version).toBe(3);
   });
 });
+
+describe('closing (M4a)', () => {
+  /** chain.json's next write held until `release`; `underWay` resolves once it is. */
+  function holdChainWrite() {
+    const write = files.write;
+    let release!: () => void;
+    let held!: () => void;
+    const underWay = new Promise<void>((resolve) => (held = resolve));
+    files.write = async (name, value) => {
+      files.write = write;
+      held();
+      await new Promise<void>((resolve) => (release = resolve));
+      return write(name, value);
+    };
+    return { underWay, release: () => release() };
+  }
+  const closedResult = { adopted: 0, rewound: false, certificatesChanged: false, refused: 'closed' };
+  const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  it('close() resolves at its queue\'s tail, a chain.json write under way included; an adoption queued behind it, or asked after, adopts nothing', async () => {
+    const held = await registered([s1]);
+    const s2 = await successor(s1, [a1]);
+    const s3 = await successor(s2, [a1]);
+    const gate = holdChainWrite();
+    const first = held.adoptServed(served([s1, s2]));
+    await gate.underWay;
+    const queued = held.adoptServed(served([s1, s2, s3]));
+    let closed = false;
+    const closing = held.close().then(() => void (closed = true));
+    await pause(20);
+    expect(closed).toBe(false);
+    gate.release();
+    await closing;
+    expect(onDisk().chain).toEqual([s1, s2]);
+    expect(anchor).toEqual(await anchorOf(s1, s2));
+    expect(await first).toEqual({ adopted: 1, rewound: false, certificatesChanged: false });
+    expect(await queued).toEqual(closedResult);
+    // A link's direct advance, after close, writes nothing.
+    await held.advance([s3], []);
+    expect(await held.adoptServed(served([s1, s2, s3]))).toEqual(closedResult);
+    expect(onDisk().chain).toEqual([s1, s2]);
+    expect(held.head()).toEqual(s2);
+  });
+
+  it('adopts nothing once its owner\'s guard reads closed, an adoption queued before the guard turned included', async () => {
+    let open = true;
+    const started = await startHeldOrg({ files, anchor: null, saveAnchor, pins: await pinsOf(a1), first: { chain: [s1], transitions: [], certificates: NO_CERTIFICATES }, log, open: () => open });
+    if (!started.ok) throw new Error(started.reason);
+    const held = started.held;
+    const s2 = await successor(s1, [a1]);
+    const s3 = await successor(s2, [a1]);
+    const gate = holdChainWrite();
+    const first = held.adoptServed(served([s1, s2]));
+    await gate.underWay;
+    const queued = held.adoptServed(served([s1, s2, s3]));
+    open = false;
+    gate.release();
+    expect(await first).toEqual({ adopted: 1, rewound: false, certificatesChanged: false });
+    expect(await queued).toEqual(closedResult);
+    expect(await held.adoptServed(served([s1, s2, s3]))).toEqual(closedResult);
+    expect(onDisk().chain).toEqual([s1, s2]);
+  });
+});

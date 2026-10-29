@@ -80,6 +80,20 @@ describe('SessionStatusTracker.pluginsObservedAt', () => {
 });
 // P2-A end
 
+// P5 E312 (additive X6): the last change the session published for review (`system/code_change_published`, a `gh pr`
+// verb or a push to a PR's branch), the cue on which the PR row re-asks gh; absent until one, and a subagent's counts too
+// (the checkout is the session's).
+describe('SessionStatusTracker.published', () => {
+  it('keeps the latest published change with its time, absent before the first', () => {
+    const tracker = new SessionStatusTracker(spec, () => {});
+    expect(tracker.snapshot().published).toBeUndefined();
+    tracker.observe({ type: 'system', subtype: 'code_change_published', provider: 'github', url: 'https://github.com/o/r/pull/7', repo: 'o/r', identifier: '7', action: 'created' }, '2026-10-29T06:40:00.000Z');
+    expect(tracker.snapshot().published).toEqual({ url: 'https://github.com/o/r/pull/7', action: 'created', at: '2026-10-29T06:40:00.000Z' });
+    tracker.observe({ type: 'system', subtype: 'code_change_published', parent_tool_use_id: 'toolu_1', provider: 'gerrit', url: 'https://x.googlesource.com/c/r/+/9', repo: 'r', identifier: '9' }, '2026-10-29T06:41:00.000Z');
+    expect(tracker.snapshot().published).toEqual({ url: 'https://x.googlesource.com/c/r/+/9', action: null, at: '2026-10-29T06:41:00.000Z' });
+  });
+});
+
 // P5 O2 M2 (P5 Decision Log 49): the cron record goes out at each Stop and cron tool when it differs from the one last
 // written; a write that failed is not counted as written, so the same record is sent again
 describe('SessionStatusTracker: the cron record', () => {

@@ -6,6 +6,7 @@ import { fakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address';
 import { laneACatalog, laneAState } from '../lane-a/test-support/lane-a-state';
+import { useSessions } from './sessions';
 import { applyLaneAList, applyLaneAState, connectLaneA, holdPendingSend, dismissPendingSend, noteLaneASettlement, resetLaneAStore, useLaneA } from './lane-a';
 
 const A = at('app-a') as AppSessionId;
@@ -26,6 +27,28 @@ describe('connectLaneA', () => {
     expect(useLaneA.getState().states.has(B)).toBe(true);
     fake.event('laneA.changed', { appSessionId: B, state: null });
     expect(useLaneA.getState().states.has(B)).toBe(false);
+    off();
+  });
+
+  // P5 O9 M9: another machine's lane A states are main's remote adapter's, for the sessions some page watches there; each
+  // listed machine's are listed by that machine, into its own partition, and a change that raced its list applied after.
+  it('lists each listed machine’s states into its partition, as the roster gains it, and empties a machine it loses', async () => {
+    useSessions.setState({ listedMachines: new Set() });
+    const fake = fakeClient({ 'laneA.catalog': laneACatalog() });
+    const off = connectLaneA(fake.client);
+    await fake.reply('laneA.list', { states: [laneAState(A)] });
+    const R = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
+    const S = addressOf(OTHER_MACHINE, 'eng-s' as AppSessionId);
+    useSessions.setState({ listedMachines: new Set([OTHER_MACHINE]) });
+    expect(fake.machines('laneA.list')).toEqual([undefined, OTHER_MACHINE]); // the local list as before, then the listed machine's
+    fake.event('laneA.changed', { appSessionId: S, state: laneAState(S, { turn: { running: true, unknown: false } }) }, OTHER_MACHINE);
+    await fake.reply('laneA.list', { states: [laneAState(R), laneAState(S)] });
+    expect(useLaneA.getState().states.get(R)?.appSessionId).toBe(R);
+    expect(useLaneA.getState().states.get(S)?.turn.running).toBe(true); // the change that raced the list wins
+    expect(useLaneA.getState().states.has(A)).toBe(true); // the local partition untouched
+    useSessions.setState({ listedMachines: new Set() });
+    expect(useLaneA.getState().states.has(R)).toBe(false);
+    expect(useLaneA.getState().states.has(A)).toBe(true);
     off();
   });
 

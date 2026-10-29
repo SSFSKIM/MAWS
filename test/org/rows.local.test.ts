@@ -8,7 +8,7 @@ import { rmSync } from 'node:fs';
 import { keyId } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createEndpoint, type Endpoint } from '../../src/endpoint';
-import { repoProjectId } from '../../src/main/index/org-project';
+import { repoProjectId } from '../../src/shared/machine/project-ids';
 import { orgFiles } from '../../src/main/org/files';
 import type { OrgSessionService } from '../../src/main/org/org-session';
 import { createRegistryFeed, type RegistryFeed } from '../../src/main/org/registry-feed';

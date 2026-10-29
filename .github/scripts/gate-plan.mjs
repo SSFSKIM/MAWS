@@ -17,10 +17,11 @@
 // set narrows `default` to the specs the whole set's `default` ran (Decision Log 66). Passed through unchecked: a name
 // the derivation cannot use makes `default` the bare set, never smaller (e2e-default-specs.mjs).
 // `live`: the `live` input or a `Live: yes` trailer (ci-gate.sh --live), a paid run asked for on purpose. The e2e job
-// then runs with MAWS_LIVE, MAWS_LIBRARY_LIVE and MAWS_LIVE_DOCUMENT at `1`, the flags the LIVE_E2E groups' specs skip
-// without, and each spec caps its own spend. The plan refuses it unless every gate asked for is a LIVE_E2E group:
-// `default`'s bare `pnpm e2e` collects every live spec and would run them all under those flags, and that no other
-// group's spec reads them is only today's convention, MAWS_LIVE being the name a new live case most likely gates on.
+// then runs with every run flag the LIVE_E2E groups' specs skip without at `1` (gate.yml's e2e env: MAWS_LIVE,
+// MAWS_LIBRARY_LIVE and MAWS_LIVE_DOCUMENT, and the core specs' own), and each spec caps its own spend. The plan
+// refuses it unless every gate asked for is a LIVE_E2E group: `default`'s bare `pnpm e2e` collects every live spec and
+// would run them all under those flags, and that no other group's spec reads them is only today's convention, MAWS_LIVE
+// being the name a new live case most likely gates on.
 // It refuses a LIVE_E2E group in a run that is not live too: design-live and dashboard-live set MAWS_LIVE in their own
 // scripts and would spend, the others would build and skip (Decision Log 75). Every live run also takes the
 // LIVE_GUARD_E2E groups (P4-A2, X34: the tool-time guard's heavy-case fixture), whichever live groups it names.
@@ -420,7 +421,7 @@ export function planOf(env, scripts, now) {
   // The peer, when a trailer names one, and the groups its minor brought in.
   const peerLine = peer === '' ? '' : `Peer: ${peer.slice(0, 8)}${peerWire ? `, wire ${peerWire.text}` : ''}${treeWire ? `; this tree's ${treeWire.text}` : ''}${minorApart ? ', a minor apart' : ''}${heldBy && peerAdditions.length > 0 ? `; ${peerAdditions.map((group) => `e2e:${group}`).join(', ')} ${peerAdditions.length === 1 ? 'is' : 'are'} checked in run ${heldBy[1]} (${heldBy[2]}), so not here` : peerJoined.length > 0 ? `, so ${peerJoined.map((group) => `e2e:${group}`).join(', ')} joined` : minorApart && !testsCode ? ', but the peer groups join only a run with unit or an e2e group' : ''}.`;
   const peerWaitLine = peerWait.length > 0 ? 'The peer verdict is awaited on hosted Linux; this run fails if its holder does not pass the check.' : '';
-  let summary = `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. Class 1a: ${class1a}. E2e lane: ${lane}${pooledNote}.${evidence ? ' Evidence: yes.' : ''}${live ? ' Live: yes (MAWS_LIVE, MAWS_LIBRARY_LIVE, MAWS_LIVE_DOCUMENT at 1).' : ''}${beside}${macNote}${peerLine && ` ${peerLine}`}\n`;
+  let summary = `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. Class 1a: ${class1a}. E2e lane: ${lane}${pooledNote}.${evidence ? ' Evidence: yes.' : ''}${live ? ' Live: yes (every live group\'s run flag at 1).' : ''}${beside}${macNote}${peerLine && ` ${peerLine}`}\n`;
   let stdout = `${[...gates].join('\n')}\nclass 1a: ${class1a}\nlane: ${lane}${pooledNote}\n${live ? 'live: yes\n' : ''}${defaultBeside.length > 0 ? `default beside: ${defaultBeside.join(' ')}\n` : ''}${macNote ? `${macNote.trim()}\n` : ''}${peerLine && `${peerLine}\n`}`;
   if (peerWaitLine) {
     summary += `\n${peerWaitLine}\n`;

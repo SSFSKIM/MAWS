@@ -4,13 +4,13 @@
 // resolved theme. The renderer only mirrors what it is told onto `<html data-theme>`.
 // P5 O3-A (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §3; contract O3X3): this is the client half, moved out of
 // the machine-bound `src/main/settings/`. It composes the renderer's one `Settings` (its version the client file's) from
-// its own file (./settings-store.ts) and the machine half's service (src/main/settings/machine.ts), routes each field of
+// its own file (./settings-store.ts) and the machine half's service (src/services/settings/machine.ts), routes each field of
 // a patch to its owner, and publishes on a change to either. The renderer's `settings.*` keeps its shape.
 import { nativeTheme } from 'electron';
 import type { SettingsState, ThemeSetting } from '@shared/ipc/schema';
 import { emit } from '../ipc/events';
 import { registerMainHandler } from '../ipc/router';
-import type { MachineSettingsService } from '../settings/machine';
+import type { MachineSettingsService } from '@shared/spine/machine-settings';
 import { applyWindowBackground } from '../window';
 import { composeSettings, resolveTheme } from './settings-store';
 

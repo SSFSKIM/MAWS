@@ -7,8 +7,9 @@ import { TEST_MACHINE } from './machine';
 export interface FakeClient {
   client: MawsBridge;
   calls: string[];
-  // Answers the oldest unanswered invocation of `name` and lets the promise chain settle.
-  reply(name: CommandName, value: unknown): Promise<void>;
+  // Answers the oldest unanswered invocation of `name`, or the `nth` of those still unanswered (from 0, so a later one can
+  // be answered first), and lets the promise chain settle.
+  reply(name: CommandName, value: unknown, nth?: number): Promise<void>;
   fail(name: CommandName, message?: string): Promise<void>;
   // P5 O6 M4: a listener hears the machine the event came from, `TEST_MACHINE` unless the test names another.
   event(name: EventName, payload: unknown, machine?: MachineRef): void;
@@ -51,9 +52,9 @@ export function fakeClient(given: Partial<Record<CommandName, unknown>> = {}): F
       return () => listeners.get(name)!.delete(listener);
     },
   } as unknown as MawsBridge;
-  const answer = async (name: CommandName, result: CommandResult<CommandName>) => {
+  const answer = async (name: CommandName, result: CommandResult<CommandName>, nth = 0) => {
     const queue = waiting.get(name) ?? [];
-    const resolve = queue.shift();
+    const [resolve] = queue.splice(nth, 1);
     if (!resolve) throw new Error(`fake client: no pending ${name}`);
     resolve(result);
     await settle();
@@ -61,7 +62,7 @@ export function fakeClient(given: Partial<Record<CommandName, unknown>> = {}): F
   return {
     client,
     calls,
-    reply: (name, value) => answer(name, { ok: true, value } as CommandResult<CommandName>),
+    reply: (name, value, nth) => answer(name, { ok: true, value } as CommandResult<CommandName>, nth),
     fail: (name, message = 'failed') => answer(name, { ok: false, error: { code: 'internal', message } }),
     event: (name, payload, machine = TEST_MACHINE) => listeners.get(name)?.forEach((listener) => listener(payload, { machine })),
     pending: (name) => waiting.get(name)?.length ?? 0,

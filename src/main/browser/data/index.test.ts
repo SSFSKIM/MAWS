@@ -12,9 +12,9 @@ import { BROWSER_COLUMNS, BROWSER_TABLES, stagingTable, type BrowserTable } from
 import type { AppSessionId } from '@shared/graph/ids';
 import { browserDataFile } from '../../../../test/support/browser-data';
 import { tempDir } from '../../../../test/support/index-fixture';
-import { openDb } from '../../index/db';
-import { Index } from '../../index/index';
-import { MIGRATIONS, REPAIRS, type Migration } from '../../index/migrations';
+import { openDb } from '../../../services/index/db';
+import { Index } from '../../../services/index/index';
+import { MIGRATIONS, REPAIRS, type Migration } from '../../../services/index/migrations';
 import { BrowserData } from './index';
 
 const S1 = 'a1a1a1a1-0000-4000-8000-000000000001' as AppSessionId;

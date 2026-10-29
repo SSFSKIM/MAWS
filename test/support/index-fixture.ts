@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { SessionId } from '@shared/graph/ids';
 import type { TranscriptSummary } from '@shared/wire/store';
-import { MIGRATIONS } from '../../src/main/index/migrations';
+import { MIGRATIONS } from '../../src/services/index/migrations';
 
 // A fresh directory under the system temp dir, realpathed (macOS: /var → /private/var) so it compares equal to what the
 // index stores, with a remover for afterEach.

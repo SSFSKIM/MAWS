@@ -9,7 +9,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import { branchName } from '@shared/sessions/branch';
 
 export const DETACHED = 'detached';
-// C4's message for a folder outside any repository (src/main/git/runner.ts, NotARepositoryError)
+// C4's message for a folder outside any repository (src/services/git/runner.ts, NotARepositoryError)
 export const NOT_A_REPOSITORY = 'not a git repository';
 
 // What git answered for a directory: a checkout and its branch (null when HEAD is detached), or no repository.

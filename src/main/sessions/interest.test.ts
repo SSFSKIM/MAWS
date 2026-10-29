@@ -4,7 +4,8 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { NO_PROJECT } from '@shared/ipc/schema/layout';
 import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
-import { INTEREST_COALESCE_MS, interestSet, startInterest, type InterestDeps } from './interest';
+import { fakeSpineView } from '../../../test/support/fake-spine-view';
+import { appInterest, INTEREST_COALESCE_MS, interestSet, startInterest, type InterestDeps } from './interest';
 
 const id = (n: number) => `00000000-0000-4000-8000-00000000000${n}` as AppSessionId;
 const tab = (kind: 'session' | 'agent' | 'diff', appSessionId: AppSessionId) => ({ id: `${kind}:${appSessionId}`, kind, appSessionId, pinned: false, ...(kind === 'agent' && { agentId: 'a1' }), ...(kind === 'diff' && { ref: 'HEAD' }) });
@@ -23,6 +24,49 @@ describe('the interest set', () => {
   it('keeps the local machine’s tabs, by their bare ids, and leaves another machine’s out', () => {
     const value = tabsV3(tab('session', addressOf(LOCAL, id(1))), tab('agent', addressOf(OTHER, id(2))));
     expect(interestSet(value, [], LOCAL)).toEqual([id(1)]);
+  });
+});
+
+// P5 O3-C (D11): one set for the report and the sweep, from `main.tabs` and the view's visible set, read again only
+// after either changes. A session on screen counts before the renderer's layout hydrates (l1-sessions-13 review).
+describe('the app’s interest', () => {
+  const layoutOf = (value: unknown) => {
+    const listeners = new Set<(key: string) => void>();
+    const layout = { value, reads: 0, get: () => (layout.reads++, layout.value), onChange: (l: (key: string) => void) => (listeners.add(l), () => void listeners.delete(l)) };
+    return { layout, write: (key: string, next: unknown) => { if (key === 'main.tabs') layout.value = next; listeners.forEach((l) => l(key)); }, listeners };
+  };
+
+  it('is the interest set of `main.tabs` and the sessions on screen, memoized until either changes', () => {
+    const { layout, write } = layoutOf(tabs(tab('session', id(1))));
+    const view = fakeSpineView({ visible: [id(5)] });
+    const interest = appInterest(layout, view, LOCAL);
+    expect([...interest.set()]).toEqual([id(1), id(5)]);
+    expect(interest.set()).toBe(interest.set());
+    const reads = layout.reads;
+    write('panel.pinned', true); // another key: the same set
+    expect(interest.set()).toBe(interest.set());
+    expect(layout.reads).toBe(reads);
+    write('main.tabs', tabs(tab('agent', id(2))));
+    expect([...interest.set()]).toEqual([id(2), id(5)]);
+    view.setVisible(id(5), false);
+    view.setVisible(id(3), true);
+    expect([...interest.set()]).toEqual([id(2), id(3)]);
+  });
+
+  it('tells its listeners of a `main.tabs` write or a visibility change, and stops', () => {
+    const { layout, write, listeners } = layoutOf(null);
+    const view = fakeSpineView();
+    const interest = appInterest(layout, view, LOCAL);
+    const heard = vi.fn();
+    const off = interest.onChange(heard);
+    write('panel.pinned', true);
+    write('main.tabs', tabs());
+    view.setVisible(id(1), true);
+    expect(heard).toHaveBeenCalledTimes(2);
+    expect(interest.set().has(id(1))).toBe(true);
+    off();
+    interest.stop();
+    expect([listeners.size, view.listeners()]).toEqual([0, 0]);
   });
 });
 

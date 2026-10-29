@@ -1,0 +1,80 @@
+import { describe, expect, it } from 'vitest';
+import type { AppSessionId } from '@shared/graph/ids';
+import { humanTurn, record, status } from '../../../test/support/builders';
+import { ev } from '../../../test/support/events';
+import { item } from '../../../test/support/builders';
+import { fakeBus } from '../../../test/support/fake-bus';
+import { emittedAppEventsSource, emittedAttentionSource, hostEventSource } from '.';
+import { SessionReadModel } from './read-model';
+
+describe('read model snapshot matches events', () => {
+  it('folds the engine host’s batches and statuses in index mode', () => {
+    const listeners = new Map<string, (payload: unknown) => void>();
+    const hosts = {
+      onEvent: (name: string, listener: (payload: unknown) => void) => {
+        listeners.set(name, listener);
+        return () => listeners.delete(name);
+      },
+      onState: () => () => {}, // C12
+      setResync: () => {}, // E10
+    };
+    const model = new SessionReadModel('index');
+    model.register({ start: (writer) => (writer.observeRecord(record('a1')), () => {}) });
+    const stop = model.register(hostEventSource(hosts as never));
+    listeners.get('session.status')!({ appSessionId: 'a1', status: status('a1', { engineState: 'running', turn: humanTurn }) });
+    listeners.get('session.eventBatch')!({ appSessionId: 'a1', events: [ev('turn.started', {}), ev('tool.use', { toolName: 'Grep' })] });
+    expect(model.midTurnCount()).toBe(1);
+    expect(model.digests()).toMatchObject([{ appSessionId: 'a1' as AppSessionId, phase: 'working', activity: 'Searching' }]);
+    stop();
+    expect(listeners.size).toBe(0);
+  });
+
+  it('folds a C4 replay run in full once the host reports its progress, with no engine status', () => {
+    const listeners = new Map<string, (payload: unknown) => void>();
+    const hosts = { onEvent: (name: string, listener: (payload: unknown) => void) => (listeners.set(name, listener), () => listeners.delete(name)), onState: () => () => {} /* C12 */, setResync: () => {} /* E10 */ };
+    const model = new SessionReadModel('index');
+    model.register({ start: (writer) => (writer.observeRecord(record('r1')), () => {}) });
+    model.register(hostEventSource(hosts as never));
+    listeners.get('session.eventBatch')!({ appSessionId: 'r1', events: [ev('turn.started', { seq: null })] });
+    expect(model.digests()[0]?.phase ?? 'idle').toBe('idle'); // history: no live process yet
+    listeners.get('session.replay.progress')!({ appSessionId: 'r1', state: 'running', index: 0, total: 3, at: null, speed: 1, message: null });
+    listeners.get('session.eventBatch')!({ appSessionId: 'r1', events: [ev('turn.started', { seq: null }), ev('tool.use', { seq: null, toolName: 'Grep' })] });
+    expect(model.digests()).toMatchObject([{ appSessionId: 'r1' as AppSessionId, phase: 'working', activity: 'Searching' }]);
+  });
+
+  it('sees attention.changed as emitted on the bus, in either launch mode', () => {
+    for (const mode of ['index', 'scenario'] as const) {
+      const { emit, onEmitted } = fakeBus();
+      const model = new SessionReadModel(mode);
+      const stop = mode === 'index' ? model.register(emittedAttentionSource(onEmitted)) : model.registerScenario(emittedAttentionSource(onEmitted));
+      const items = [item('a1', 'permission', '2026-09-28T10:00:00Z')];
+      expect(emit('attention.changed', { appSessionId: 'a1' as AppSessionId, items })).toBe(true);
+      expect(model.attention('a1' as AppSessionId)).toEqual(items);
+      stop();
+      emit('attention.changed', { appSessionId: 'a1' as AppSessionId, items: [] });
+      expect(model.attention('a1' as AppSessionId)).toEqual(items);
+    }
+  });
+
+  // Debt wave 5 (C10 · C6): an event main synthesises for a session (`seq: null`, its id under the app session id, as
+  // C10's route notice) is emitted once and nowhere journalled, so main keeps it for a page that loads after it.
+  it('keeps the events main synthesises for a session, as emitted, until the session is removed', () => {
+    const A = 'a1' as AppSessionId;
+    const { emit, onEmitted } = fakeBus();
+    const model = new SessionReadModel('index');
+    let remove = () => {};
+    model.register({ start: (writer) => (writer.observeRecord(record('a1')), (remove = () => writer.observeRemoved(A)), () => {}) });
+    const stop = model.register(emittedAppEventsSource(onEmitted));
+    const notice = ev('notice.posted', { id: 'a1:c10:relay-fallback:1', seq: null, level: 'warning', key: 'relay:direct_fallback', text: 'Direct.' });
+    const live = ev('turn.started', { id: 'a1:7', seq: 7 }); // C3's live row: journalled by the host
+    const disk = ev('turn.started', { id: 'uuid-1', seq: null }); // C4's disk form: read from the transcript
+    expect(emit('session.eventBatch', { appSessionId: A, events: [live, disk, notice] })).toBe(true);
+    emit('session.eventBatch', { appSessionId: A, events: [notice] }); // a repeat keeps one
+    emit('session.eventBatch', { appSessionId: 'b2' as AppSessionId, events: [{ ...notice, id: 'b2:x' as never }] }); // no record: dropped
+    expect(model.appEvents(A)).toEqual([notice]);
+    expect(model.appEvents('b2' as AppSessionId)).toEqual([]);
+    remove();
+    expect(model.appEvents(A)).toEqual([]);
+    stop();
+  });
+});

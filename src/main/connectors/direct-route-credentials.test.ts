@@ -9,6 +9,11 @@ import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validat
 import { ConnectorBroker } from './broker';
 import { createDirectRoute, DIRECT_OPERATION_DEADLINE_MS, type DirectCredentialPreparation, type DirectRoute, type DirectRouteDeps } from './direct-route';
 import type { ConnectorGrantAuthority, ConnectorRouteTarget } from './route';
+import { project, record } from '../../../test/support/builders';
+import { fakeSpineView } from '../../../test/support/fake-spine-view';
+
+// P5 O3-C (reader R8): the spine's view, holding the artifact's creator and its project
+const ownView = () => fakeSpineView({ records: [record('app-own', { projectId: 'proj' as never, directory: '/repo' })], projects: [project('proj', 0, { directory: '/repo' })] });
 
 const ART = '11111111-1111-4111-8111-111111111111';
 const SOURCE_ID = '22222222-2222-4222-8222-222222222222';
@@ -66,7 +71,7 @@ class Preparer implements DirectCredentialPreparation {
 let preparer: Preparer;
 
 function makeRoute(credentials: DirectCredentialPreparation | null): DirectRoute {
-  return createDirectRoute({ call, sessions: { get: () => ({ projectId: 'proj', directory: '/repo' }) }, projects: { list: () => [{ id: 'proj', directory: '/repo' }] }, realpath: (path) => path, streaming: () => streams, log: () => {}, ...(credentials && { credentials }) });
+  return createDirectRoute({ call, view: ownView(), realpath: (path) => path, streaming: () => streams, log: () => {}, ...(credentials && { credentials }) });
 }
 
 beforeEach(() => {

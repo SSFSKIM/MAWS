@@ -1,5 +1,5 @@
 // P4-R7z (the P4 spec's Decision Log 92): a scratch config home where the to-human plugin registers its message tool, as
-// the style resolver reads it (src/main/owner/resolve-style.ts, `messageTool`): doperpowers installed with its
+// the style resolver reads it (src/services/owner/resolve-style.ts, `messageTool`): doperpowers installed with its
 // `to-human` output style declaring `declared`, the `to-human` plugin installed beside it, both enabled at user scope,
 // and `doperpowers:to-human` selected. `toHuman: false` leaves the to-human plugin out (installed but disabled).
 // Settings already in the home are kept, these keys merged over them.

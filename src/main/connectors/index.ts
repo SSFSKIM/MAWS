@@ -63,7 +63,7 @@ export const WINDOW_RECHECK_MS = 1_000;
 export interface ConnectorsDeps {
   hosts: Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onState' | 'onStreaming' | 'streaming'>;
   register: typeof registerMainHandler;
-  index: { sessions: EngineRouteDeps['sessions']; projects: EngineRouteDeps['projects'] };
+  view: EngineRouteDeps['view']; // the spine's view (P5 O3-C reader R8): routes E and D read the creator's directory through it
   realpath?: (path: string) => string | null;
   // P3-H H4: the window that shows a client's page, as the veto reads it, or null when none does
   windowShown: (client: ClientRef) => ClientWindowShown | null;
@@ -88,7 +88,7 @@ const canonical = (path: string): string | null => {
 };
 
 // P4-B5: `delivery`, the owner's delivery through route D (./owner-delivery.ts), where route D exists; null otherwise.
-export function startConnectors({ hosts, register, index, realpath = canonical, windowShown, port, log = (line) => console.warn(`[connectors] ${line}`), direct: createDirect, oauth: createOAuth }: ConnectorsDeps): { stop(): void; delivery: OwnerDelivery | null } {
+export function startConnectors({ hosts, register, view, realpath = canonical, windowShown, port, log = (line) => console.warn(`[connectors] ${line}`), direct: createDirect, oauth: createOAuth }: ConnectorsDeps): { stop(): void; delivery: OwnerDelivery | null } {
   const call = <N extends CommandName>(name: N, input: CommandInput<N>) => hosts.dispatch('engine-host', name, input) as Promise<CommandResult<N>>;
   const host = async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> => {
     const result = await call(name, input);
@@ -101,12 +101,12 @@ export function startConnectors({ hosts, register, index, realpath = canonical, 
     revoke: async (artifactId, tool) => (await host('connectors.revoke', { artifactId, server: tool.server, tool: tool.tool })).revoked,
     check: (artifactId, ref) => host('connectors.check', { artifactId, call: ref }),
   };
-  const engine = createEngineRoute({ call, sessions: index.sessions, projects: index.projects, realpath, streaming: () => hosts.streaming('engine-host'), log });
+  const engine = createEngineRoute({ call, view, realpath, streaming: () => hosts.streaming('engine-host'), log });
   // P3-HD: route D joins after E (P3-H's brief: E first), when the root supplies it; its host leg is the direct operation family
   // P3-HD M3c2: MAWS's own OAuth, only beside route D; a host close is confirmed only by the host's acknowledgment
   const closeHost = async (target: { connectionId: string; credentialEpoch?: number }) => (await call('connectors.directClose', target).catch(() => null))?.ok === true;
   const oauth = createDirect && createOAuth ? createOAuth({ closeHost, log, port }) : null;
-  const direct = createDirect?.({ call, sessions: index.sessions, projects: index.projects, realpath, streaming: () => hosts.streaming('engine-host'), log, ...(oauth && { credentials: oauth }) });
+  const direct = createDirect?.({ call, view, realpath, streaming: () => hosts.streaming('engine-host'), log, ...(oauth && { credentials: oauth }) });
   const routes: ConnectorRoute[] = direct ? [engine, direct] : [engine];
   const broker = new ConnectorBroker({ routes, grants, log, recheckWindow: (owner) => followed.get(owner)?.read(), sessionRoute: (appSessionId, artifactId, tool, signal) => engine.resolveSession(appSessionId, artifactId, tool, signal) /* E3 */ });
 

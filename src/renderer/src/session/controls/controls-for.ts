@@ -2,7 +2,8 @@
 // state, never by a component. A session MAWS holds, or nobody holds (`contestedBy` included: MAWS holds it), gets lane
 // B. A session a terminal or a background job holds gets lane A while its bridge is live (M5); with no bridge, or one
 // that answers but can't be driven, it gets none: it is read-only, with the holder notice and "Take over here", as
-// before.
+// before. P5 O9 M9: another machine's terminal session (a listed row of lane A, which has no record) gets lane A's port
+// over main's remote adapter, its state the page's watch's (starting until the first), its gaps the remote ones.
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { SendContent } from '@shared/engine/session-state-store';
 import type { AttentionItem } from '@shared/graph/attention';
@@ -14,6 +15,7 @@ import type { LaneAState } from '@shared/ipc/schema/lane-a';
 import type { HumanPromptOptions, HumanPromptResult } from '../../composer/submit/send-human-prompt';
 import { ipc } from '../../ipc/client';
 import { holderWords } from '../../sessions/holder-words';
+import { isRemoteLaneA, remoteMachineName, startingRemoteState, useRemoteLaneA } from '../../lane-a/remote-session';
 import { laneAStateOf, useLaneACatalog, useLaneAState } from '../../stores/lane-a';
 import { useSessions } from '../../stores/sessions';
 import { laneAControls } from './lane-a';
@@ -24,6 +26,8 @@ const heldElsewhere = (record: SessionRecord | null): boolean => record?.holder.
 
 // `record` null: an id the renderer holds no record for (a status-only session); lane B reaches it by its status.
 export function controlsFor(record: SessionRecord | null, laneA: LaneAState | null, inputs: LaneBInputs): SessionControls | null {
+  const { appSessionId, client } = inputs;
+  if (record === null && isRemoteLaneA(appSessionId)) return laneAControls(laneA ?? startingRemoteState(appSessionId), null, { appSessionId, client, remote: { machine: remoteMachineName(appSessionId) } });
   if (heldElsewhere(record)) return laneA?.bridge === 'live' ? laneAControls(laneA, record, inputs) : null;
   return laneBControls(record, inputs);
 }
@@ -31,7 +35,8 @@ export function controlsFor(record: SessionRecord | null, laneA: LaneAState | nu
 // Whether the session is driven through its terminal's bridge now (lane A): its ops' outcomes arrive as the watch's
 // `op` messages, not as the host's.
 export const drivenByBridge = (appSessionId: AppSessionId): boolean =>
-  heldElsewhere(useSessions.getState().records.get(appSessionId) ?? null) && laneAStateOf(appSessionId)?.bridge === 'live';
+  (heldElsewhere(useSessions.getState().records.get(appSessionId) ?? null) && laneAStateOf(appSessionId)?.bridge === 'live') ||
+  (!useSessions.getState().records.has(appSessionId) && isRemoteLaneA(appSessionId));
 
 // The session's port as the stores have it now, for a caller outside a component (a store, a card's continuation).
 export function sessionControls(appSessionId: AppSessionId, client: MawsBridge = ipc): SessionControls | null {
@@ -44,6 +49,7 @@ export function useSessionControls(appSessionId: AppSessionId, options: { client
   const record = useSessions((s) => s.records.get(appSessionId) ?? null);
   const laneA = useLaneAState(appSessionId);
   useLaneACatalog(appSessionId); // read through the port; subscribed here so its arrival renders again
+  useRemoteLaneA(appSessionId); // M9: a listed row of another machine's lane A takes the port; subscribed so its listing renders again
   return controlsFor(record, laneA, { appSessionId, client: options.client ?? ipc, ...(options.frame && { frame: options.frame }) });
 }
 

@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
-import { emptyDigest, foldDigest } from '../main/sessions/digest';
+import { emptyDigest, foldDigest } from '../services/sessions/digest';
 import { replayedSession } from './conformance/session-harness';
 
 type Held = { type: string; request?: { subtype?: string }; message?: { content: string } };
