@@ -54,7 +54,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-29) Task 2, reviewed clean and approved by the desk track (5935f62a5; review fix 592211929; boundary comment 37ce2077d): `successorProblems` and `stateProblems` in `org-protocol`, and `admin.ts`'s `amend` running it (the desk track's review).
   - [x] (2026-10-29) Task 3, reviewed clean (643d126de, fix 6d23a8055): the signing paths: `edits.ts`, `Edit.endorse` and `Edit.live`, `StateSigner.sign`'s endorsement and guard, the signer's check before the slot, and `checks.ts` running `successorProblems`.
   - [x] (2026-10-29) Task 4, reviewed clean (19730e6ae; class 1a green through it, run 40819796641): the session's surface: `org.view`, `org.preview`, `org.change`, `org.pair.*`, `pairing.ts`, `hub-client.ts`'s `pendingOf`, `refused.attempt`, the schema and main's wiring.
-  - [ ] Task 5: `close()`'s fence and join (`HeldOrg.close()`, the parts' operations in flight), and the two test workarounds removed.
+  - [x] (2026-10-29) Task 5, reviewed clean (9b9f8945d, fix 653e60c0b; class 1a green at the fix, run 40824276945): `close()`'s fence and join (`HeldOrg.close()`, the parts' operations in flight), and the two test workarounds removed.
   - [ ] Task 6: the renderer: `settings-tab/org/`, the four groups, the change and pair sheets, `copy.ts`.
   - [ ] Task 7: `test/org/org-page.local.test.ts`, registered in `TIMING_NODE_TESTS`.
 - [ ] M4b — Machines and their rights — *advisory; needs M4a*
@@ -2121,6 +2121,9 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   8. The pairing's cancel at close has no test of its own: a pairing whose context reads null already stops itself (Task 4, item 7).
   9. A signer test that closed inside its Touch ID wait now starts the close there and awaits it after the sign, since awaiting it inside would wait on itself.
   10. `close()` does not join the two writers under `device/`, `checkRetired`'s key destruction and a fenced rekey's `discardNext`: the rule covers `org/`. They did not trip the teardown's `rm` in 20 runs; if one does, join `retiredWork` and `keyWork` in step 3.
+  11. (Review fix, 653e60c0b.) A signer operation that meets `close()` reads as stopped, never as a storage failure through the IPC router. The lifecycle is checked right before each enqueue that follows an await: the slot's write after Touch ID and the exposure write before the post answer `not-root`; a discard answers `{ok: false}`. Genuine storage errors still read `signing`.
+  12. (Review fix.) The queued reset checks the signer's closed flag, not its sign-in lifecycle: a reset is the owner's repair of a damaged file, which a sign-out does not cancel and a close does.
+  13. (Review fix.) The discard uses the slot's stored `hash`, which the store recomputes on every read, instead of awaiting a fresh `stateHash`, so no await sits between its last check and its write.
   Date/Author: 2026-10-29, O8's executor.
 
 ## Outcomes & Retrospective
