@@ -33,6 +33,7 @@ export function startingRemoteState(appSessionId: AppSessionId): LaneAState {
     model: null,
     effort: null,
     override: null,
+    mode: null,
     catalog: null,
     pending: [],
     settled: [],

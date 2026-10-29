@@ -14,7 +14,7 @@ const T = Date.parse('2026-10-28T10:00:00.000Z');
 
 const state = (pending: LaneARaised[], bridge: LaneAState['bridge'] = 'live'): LaneAState => ({
   appSessionId: APP, engineSessionId: ENGINE, bridge, reason: null, launch: 'launch-1', sminos: '1.25.0', ops: [], reads: [], controls: {},
-  turn: { running: true, unknown: false }, model: null, effort: null, override: null, catalog: null, pending, settled: [], deliveries: [],
+  turn: { running: true, unknown: false }, model: null, effort: null, override: null, mode: null, catalog: null, pending, settled: [], deliveries: [],
 });
 const view = (pending: LaneARaised[], fresh = true, bridge: LaneAState['bridge'] = 'live'): LaneAView => ({ state: state(pending, bridge), fresh, tool: null });
 const raised = (request: string, more: Partial<LaneARaised> = {}): LaneARaised => ({ request, session: ENGINE, tool: 'Bash', input: { command: 'rm -rf build' }, t: T, ...more });

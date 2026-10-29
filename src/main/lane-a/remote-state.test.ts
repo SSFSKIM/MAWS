@@ -55,7 +55,7 @@ describe('a remote lane A session’s state', () => {
   it('takes model and effort from a main-loop step-end that carries them, else the model `read status` gave and no effort', () => {
     const fold = new RemoteFold(S);
     fold.message(snapshot());
-    const status = { model: 'claude-opus-4-5', override: { model: null, effort: 'high' } };
+    const status = { model: 'claude-opus-4-5', override: { model: null, effort: 'high' }, mode: null };
     expect(state(fold, status)).toMatchObject({ model: 'claude-opus-4-5', effort: null, override: { model: null, effort: 'high' } });
     fold.message(env('step-end', { turnId: 't1', agentId: null, step: 1 }));
     expect(state(fold, status)).toMatchObject({ model: 'claude-opus-4-5', effort: null });
@@ -69,7 +69,7 @@ describe('a remote lane A session’s state', () => {
   it('folds a step-end’s model and effort each on its own: an effort-only step-end keeps the status read’s model', () => {
     const fold = new RemoteFold(S);
     fold.message(snapshot());
-    const status = { model: 'claude-opus-4-5', override: null };
+    const status = { model: 'claude-opus-4-5', override: null, mode: null };
     fold.message(env('step-end', { turnId: 't1', agentId: null, step: 1, effort: 'low' }));
     expect(state(fold, status)).toMatchObject({ model: 'claude-opus-4-5', effort: 'low' });
     fold.message(env('step-end', { turnId: 't1', agentId: null, step: 2, model: 'claude-haiku-4-5' }));
@@ -81,13 +81,31 @@ describe('a remote lane A session’s state', () => {
   it('reads a present `effort: null` as the default effort observed, and an absent effort as unknown', () => {
     const fold = new RemoteFold(S);
     fold.message(snapshot());
-    const status = { model: 'claude-opus-4-5', override: null };
+    const status = { model: 'claude-opus-4-5', override: null, mode: null };
     fold.message(env('step-end', { turnId: 't1', agentId: null, step: 1, model: 'claude-opus-4-5', effort: 'low' }));
     expect(state(fold, status)).toMatchObject({ effort: 'low' });
     fold.message(env('step-end', { turnId: 't1', agentId: null, step: 2, model: 'claude-opus-4-5' })); // a watch joined mid-step: no effort known
     expect(state(fold, status)).toMatchObject({ effort: 'low' });
     fold.message(env('step-end', { turnId: 't2', agentId: null, step: 1, model: 'claude-opus-4-5', effort: null })); // the request named none
     expect(state(fold, status)).toMatchObject({ effort: null });
+  });
+
+  // sminos 1.27.14: `read status` carries the mode the session last reported; the plane carries none
+  it('takes the mode `read status` reported, none before a status read or while it reports none', () => {
+    const fold = new RemoteFold(S);
+    fold.message(snapshot({ presence: presence({ capabilities: { ...capabilities, sminos: '1.27.14' } }) }));
+    const mode = { mode: 'bypassPermissions' as const, at: 1_761_700_000_000, from: 'UserPromptSubmit' };
+    expect(state(fold).mode).toBeNull();
+    expect(state(fold, { model: 'claude-opus-4-5', override: null, mode: null }).mode).toBeNull();
+    expect(state(fold, { model: 'claude-opus-4-5', override: null, mode }).mode).toEqual(mode);
+  });
+
+  it('shows no mode from a bridge older than sminos 1.27.14, whatever its status read carries', () => {
+    const fold = new RemoteFold(S);
+    fold.message(snapshot()); // sminos 1.27.12
+    expect(state(fold, { model: 'claude-opus-4-5', override: null, mode: { mode: 'plan', at: 1, from: 'UserPromptSubmit' } }).mode).toBeNull();
+    fold.message(env('presence', presence({ capabilities: { ...capabilities, sminos: '1.27.14' } }), null, null)); // updated, then reloaded
+    expect(state(fold, { model: 'claude-opus-4-5', override: null, mode: { mode: 'plan', at: 1, from: 'UserPromptSubmit' } }).mode).toMatchObject({ mode: 'plan' });
   });
 
   it('carries the link and the acts in flight it is given, and leaves both out when given none', () => {

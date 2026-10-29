@@ -41,6 +41,7 @@ export class FakePlane {
   readonly runs: Rpc[] = [];
   readonly frames: Frame[] = [];
   readonly presence = new Map<string, Record<string, unknown>>();
+  readonly statuses = new Map<string, Record<string, unknown>>(); // a session's `read status` result, STATUS_READ unless set
   readonly catalog = { fingerprint: 'cat-1', commands: [{ name: 'rename', route: { class: 'run' } }], models: { options: [{ value: 'opus' }, { value: 'haiku' }] } };
   readonly #ledger = new Map<string, Entry>();
   readonly #tombstoned = new Set<string>();
@@ -179,7 +180,7 @@ export class FakePlane {
       case 'output':
         return this.#on(sub, 'output', { taskId: f.taskId, result: 'unknown-task' });
       case 'read':
-        return this.#on(sub, 'read', f.what === 'status' ? { id: f.id, what: f.what, result: STATUS_READ } : { id: f.id, what: f.what, result: { servers: [{ name: 'github', status: 'connected' }] } });
+        return this.#on(sub, 'read', f.what === 'status' ? { id: f.id, what: f.what, result: this.statuses.get(this.#upstream.get(sub)?.session ?? '') ?? STATUS_READ } : { id: f.id, what: f.what, result: { servers: [{ name: 'github', status: 'connected' }] } });
       case 'query': {
         const held = this.#ledger.get(String(f.opId));
         if (held === undefined) return this.s.send({ t: 'queried', opId: f.opId, state: 'not-received' });

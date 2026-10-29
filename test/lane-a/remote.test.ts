@@ -24,7 +24,7 @@ import { createRemoteLink, type RelaySocket, type RemoteLink } from '../../src/m
 import { heldOrgSession, watchedView, type SignedIn } from '../../src/main/org/session';
 import { endorsed, iso, successor } from '../endpoint/org-fixtures';
 import { laneAMember, makeOrg, openRemote, ORG, sleep, sminos, startEndpoint, stopAll, until, type Fixture, type Org } from '../endpoint/sub-harness';
-import { FakePlane, STATUS_READ } from './fake-plane';
+import { CAPABILITIES, FakePlane, STATUS_READ } from './fake-plane';
 
 let org: Org;
 const started: Fixture[] = [];
@@ -552,6 +552,19 @@ describe('remote lane A over a real link', { timeout: 30_000 }, () => {
     await until(() => stateNow(l)?.effort === null, 'the default effort observed');
     expect(messagesOf(l, watch).filter((m) => m.kind === 'step-end').at(-1)!.body).toEqual({ turnId: 't4', agentId: null, step: 1, t: 1730000000002, model: 'claude-opus-4-5', effort: null });
     late.end();
+  });
+
+  // sminos 1.27.14: the plane carries no mode; the bridge's `read status` carries the one the session last reported
+  it('takes the mode the session reported from its status read, from a bridge of sminos 1.27.14 on', async () => {
+    const l = await lab();
+    const report = { permissionMode: 'plan', permissionModeAt: 1_761_700_000_000, permissionModeFrom: 'permission_mode_changed' };
+    l.plane.presence.set('la-1', { ...l.plane.presenceOf('la-1'), capabilities: { ...CAPABILITIES, sminos: '1.27.14' } });
+    l.plane.statuses.set('la-1', { ...STATUS_READ, ...report });
+    l.plane.statuses.set('la-b', { ...STATUS_READ, ...report }); // la-b's bridge is sminos 1.27.12
+    await watched(l);
+    expect(stateNow(l)?.mode).toEqual({ mode: 'plan', at: 1_761_700_000_000, from: 'permission_mode_changed' });
+    await watched(l, 'la-b');
+    expect(stateNow(l, 'la-b')?.mode).toBeNull();
   });
 
   it('ends a watch at laneA.unwatch and at its page’s end; the last one’s end clears the session’s state', async () => {

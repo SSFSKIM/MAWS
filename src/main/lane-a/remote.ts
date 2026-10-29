@@ -16,11 +16,12 @@
 //   close ends the watch (`{ended}`). The page's end (`clientGone`) ends its watches.
 // - The state. A remote session's `LaneAState` exists while a page watches it, from its oldest watch's subscription
 //   (./remote-state.ts), and `laneA.changed` follows it; the last watch's end sends `state: null`. `laneA.list` for the
-//   machine answers the states of the sessions watched there. The override is hydrated by `read status` at each watch,
-//   after each model change's outcome, and at a main-loop step-end at most once per 10 s. The state carries the link
-//   (`link`: its state, this device's member, class and machine rights from `caps`, and the reason no control acts, if
-//   so), refreshed at each `caps` and link state change; while that reason stands every act is refused with it here.
-//   It also carries each control's act in flight (`acts`) with the link's progress, until its outcome.
+//   machine answers the states of the sessions watched there. The override and the mode the session reported (sminos
+//   1.27.14) are hydrated by `read status` at each watch, after each model change's outcome, and at a main-loop step-end
+//   at most once per 10 s. The state carries the link (`link`: its state, this device's member, class and machine rights
+//   from `caps`, and the reason no control acts, if so), refreshed at each `caps` and link state change; while that
+//   reason stands every act is refused with it here. It also carries each control's act in flight (`acts`) with the
+//   link's progress, until its outcome.
 // - Reads name the watch's subscription (`input.sub`). `rows`, `diff` and `output` answer `{requested: true}` and arrive
 //   as plane messages of their kind; one of each kind is outstanding per watch, a second waiting for the first's answer,
 //   the watch's reset or 10 s. Every other read carries an id minted here and is answered by that id's `read` message
@@ -45,6 +46,7 @@ import type { CommandName, CommandResult, EventName, EventPayload } from '@share
 import type { ControlResult, DeliveryKey, LaneAAct, LaneAAnswerOutput, LaneADelivery, LaneASendOutput, LaneAState, PlaneMessage } from '@shared/ipc/schema/lane-a';
 import { validateCommandOutput } from '@shared/ipc/validate';
 import { answerIntent, suggestionSha256 } from '@shared/lane-a/answers';
+import { modeOf } from '@shared/lane-a/mode';
 import type { MachineRef } from '@shared/machine/ref';
 import type { MainContext, RemoteDispatch } from '../ipc/router';
 import type { ActOutcome, ActRequest, RemoteLink, Subscription } from '../machines/remote/link';
@@ -442,7 +444,7 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
     return answer;
   }
 
-  /** The override and the model the plane doesn't carry, from the bridge's `read status`. */
+  /** The override, the model and the mode the plane doesn't carry, from the bridge's `read status`. */
   async function hydrate(s: Session): Promise<void> {
     const w = primary(s);
     if (w === null) return;
@@ -452,7 +454,7 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
     const result = record(answer.result);
     const o = record(result?.override);
     const override = o === null ? null : { model: typeof o.model === 'string' ? o.model : null, effort: typeof o.effort === 'string' ? o.effort : null };
-    s.status = { model: typeof result?.model === 'string' ? result.model : null, override: override === null || (override.model === null && override.effort === null) ? null : override };
+    s.status = { model: typeof result?.model === 'string' ? result.model : null, override: override === null || (override.model === null && override.effort === null) ? null : override, mode: modeOf(result) };
     if (s.watches.size > 0) changed(s);
   }
 

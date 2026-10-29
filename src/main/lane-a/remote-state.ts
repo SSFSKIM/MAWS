@@ -11,16 +11,19 @@
 //   its `step-end`; sminos's plane closes every open step at its turn's end).
 // - `model` and `effort` are, each on its own, what the main loop's latest step-end naming it said (sminos 1.27.12; a
 //   present `effort: null` names the default), else the model `read status` gave and no effort; `override` is `read status`'s, since the plane carries none (item 4).
+// - `mode` is the one `read status` reported (sminos 1.27.14; the plane carries none), from a bridge that reports one.
 // - `pending` is what the plane says now: a snapshot clears it and the endpoint restates the session's pending requests
 //   as `raised` right after it. `settled` keeps the last 100, across snapshots.
-import type { LaneAAct, LaneACatalog, LaneADelivery, LaneALink, LaneARaised, LaneASettled, LaneAState, PlaneMessage } from '@shared/ipc/schema/lane-a';
+import type { LaneAAct, LaneACatalog, LaneADelivery, LaneALink, LaneAMode, LaneARaised, LaneASettled, LaneAState, PlaneMessage } from '@shared/ipc/schema/lane-a';
 import type { AppSessionId } from '@shared/graph/ids';
 import { controlsMissingReason } from '@shared/lane-a/bridge';
+import { reportsMode } from '@shared/lane-a/mode';
 import { stepEndFields } from '@shared/lane-a/step-end';
 import type { StepEnd } from 'desk-hub/protocol';
 
-/** What the bridge's `read status` says that the plane doesn't: the session's model and its per-request override. */
-export type StatusRead = { model: string | null; override: LaneAState['override'] };
+/** What the bridge's `read status` says that the plane doesn't: the session's model, its per-request override, and the
+ * mode the session last reported (null: none, or a field the bridge doesn't send). */
+export type StatusRead = { model: string | null; override: LaneAState['override']; mode: LaneAMode | null };
 
 type Fields = Record<string, unknown>;
 const SETTLED_KEPT = 100;
@@ -120,12 +123,13 @@ export class RemoteFold {
     const controls = record(capabilities?.controls);
     const engineRecord = record(presence?.record);
     const status_ = engineRecord?.status;
+    const sminos = typeof capabilities?.sminos === 'string' ? capabilities.sminos : null;
     return {
       appSessionId: appSessionId as AppSessionId,
       engineSessionId: this.session,
       ...this.#bridge(),
       launch: this.launch(),
-      sminos: typeof capabilities?.sminos === 'string' ? capabilities.sminos : null,
+      sminos,
       ops: strings(capabilities?.ops),
       reads: strings(capabilities?.reads),
       controls: (controls ?? {}) as LaneAState['controls'],
@@ -133,6 +137,7 @@ export class RemoteFold {
       model: this.#ranModel ?? status?.model ?? null,
       effort: this.#ranEffort,
       override: status?.override ?? null,
+      mode: reportsMode(sminos) ? (status?.mode ?? null) : null,
       catalog: this.#catalog === null ? null : { fingerprint: this.#catalog.fingerprint },
       pending: [...this.#pending.values()],
       settled: [...this.#settled.values()],
