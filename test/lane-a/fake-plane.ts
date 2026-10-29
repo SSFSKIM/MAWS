@@ -61,7 +61,7 @@ export class FakePlane {
   }
 
   presenceOf(session: string): Record<string, unknown> {
-    return this.presence.get(session) ?? { record: { status: 'idle' }, bridge: true, capabilities: CAPABILITIES, launch: session === 'la-b' ? 'LB' : 'L1' };
+    return this.presence.get(session) ?? { record: { status: 'idle' }, bridge: true, capabilities: CAPABILITIES, launch: ({ 'la-b': 'LB', 'la-v': 'LV' } as Record<string, string>)[session] ?? 'L1' };
   }
 
   /** The upstream subscriptions open on `session`: their epochs. */

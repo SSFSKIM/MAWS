@@ -70,10 +70,15 @@ type Lab = {
   route(name: string, input: unknown): Promise<CommandResult<CommandName>>;
 };
 
-/** The endpoint with sminos on RL10 (la-1, the owner's; la-b, B's, shared with A at `approve`), and main's link up to it. */
+/** The endpoint with sminos on RL10 (la-1, the owner's; la-b, B's, shared with A at `approve`; la-v, B's, shared with A at
+ * `view`), and main's link up to it. */
 async function lab(options: { relay?: boolean; upGraceMs?: number } = {}): Promise<Lab> {
   const f = await startEndpoint(org, started, { limits: OPEN });
-  const s = await sminos(f, [laneAMember(), laneAMember({ session: 'la-b', alias: 'bob', title: 'bob', launch: 'LB', owners: [org.B], shares: [{ member: org.A, grade: 'approve' }] })]);
+  const s = await sminos(f, [
+    laneAMember(),
+    laneAMember({ session: 'la-b', alias: 'bob', title: 'bob', launch: 'LB', owners: [org.B], shares: [{ member: org.A, grade: 'approve' }] }),
+    laneAMember({ session: 'la-v', alias: 'shown', title: 'shown', launch: 'LV', owners: [org.B], shares: [{ member: org.A, grade: 'view' }] }),
+  ]);
   const plane = new FakePlane(s);
   cleanups.push(() => plane.close());
   const profile = mkdtempSync(join(tmpdir(), 'maws-o9-remote-'));
@@ -378,6 +383,22 @@ describe('remote lane A over a real link', { timeout: 30_000 }, () => {
     l.plane.release('stop-agent');
     expect(await stopping).toEqual({ state: 'done', result: {} });
     expect(stateNow(l)!.acts).toEqual([]);
+  });
+
+  // The architect's ask (M9's renderer half, "Grade refusal"): a member who only views a session is refused `grade` by the
+  // endpoint, and nothing of it stays pending.
+  it('refuses a control and a send on a session its member only views, worded from `grade`; neither stays pending', async () => {
+    const l = await lab();
+    await watched(l, 'la-v');
+    expect(stateNow(l, 'la-v')).toMatchObject({ bridge: 'live', launch: 'LV' });
+    const words = { state: 'refused', code: 'grade', message: 'you can’t do that on this session' };
+    expect(await l.cmd('laneA.interrupt', { appSessionId: 'la-v' })).toEqual(words);
+    expect(await l.cmd('laneA.command', { appSessionId: 'la-v', name: 'rename', args: 'x' })).toEqual(words);
+    expect(stateNow(l, 'la-v')!.acts).toEqual([]);
+    const sent = (await l.cmd('laneA.send', { appSessionId: 'la-v', text: 'hello' })) as { key: { writer: string; seq: number }; state: string; code?: string; reason?: string };
+    expect(sent).toMatchObject({ state: 'refused', code: 'grade', reason: 'you can’t do that on this session' });
+    expect(stateNow(l, 'la-v')!.deliveries).toEqual([expect.objectContaining({ key: sent.key, state: 'refused', reason: 'you can’t do that on this session' })]);
+    expect(l.plane.rpcs.filter((r) => r.args.session === 'la-v')).toEqual([]); // the endpoint refused each before sminos
   });
 
   it('carries the link in the state: up with this device’s member and class; down, every control refused with its reason and no act made', async () => {
