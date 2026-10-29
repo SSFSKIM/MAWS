@@ -16,6 +16,9 @@ import { FakeSpineHost } from '../../test/support/fake-spine-host';
 import { FIXTURE_DIR } from '../../test/support/fixtures';
 import { tempDir } from '../../test/support/index-fixture';
 import { startCheckouts, type CheckoutsRoot } from './checkouts-root';
+import { GitService } from './git/service';
+import { Index } from './index/index';
+import { ScmService } from './scm/service';
 import { openSpineData, startSpine, type SpineData, type SpineRoot } from './spine-root';
 
 const JOURNAL = join(FIXTURE_DIR, 'permission-roundtrip.jsonl');
@@ -74,7 +77,7 @@ const CHECKOUTS_COMMANDS = [
 describe('the spine and the checkouts composed under plain Node', () => {
   let dir: ReturnType<typeof tempDir>;
   let profile: string;
-  let held: { data: SpineData; spine: SpineRoot; checkouts: CheckoutsRoot | null }[];
+  let held: { data: SpineData; spine: SpineRoot; checkouts: CheckoutsRoot | null; stopped?: boolean }[];
 
   beforeEach(() => {
     dir = tempDir('maws-spine-root-');
@@ -84,14 +87,21 @@ describe('the spine and the checkouts composed under plain Node', () => {
     held = [];
   });
   afterEach(() => {
-    for (const { spine, checkouts, data } of held.reverse()) {
-      checkouts?.stop();
-      spine.stop();
-      data.lock.release();
+    for (const composed of held.reverse()) {
+      stopBoth(composed);
+      composed.data.lock.release();
     }
     vi.restoreAllMocks();
     dir.dispose();
   });
+
+  // Both roots' stops in production's order (main's shutdown steps: 'spine', then 'checkouts'), once
+  const stopBoth = (composed: (typeof held)[number]) => {
+    if (composed.stopped) return;
+    composed.stopped = true;
+    composed.spine.stop();
+    composed.checkouts?.stop();
+  };
 
   // Both roots as main composes them, each on its bus (one bus for both unless a test tells them apart)
   const compose = (data: SpineData, host: FakeSpineHost, bus: FakeBus, { checkouts = true, checkoutsBus = bus } = {}) => {
@@ -142,7 +152,7 @@ describe('the spine and the checkouts composed under plain Node', () => {
     const digests = await bus.invoke('session.digests', undefined);
     if (!digests.ok) throw new Error(digests.error.message);
     const digest = digests.value.digests.find((candidate) => candidate.appSessionId === appSessionId);
-    expect(digest?.lastAssistantLine).toBeTruthy();
+    expect(digest?.lastAssistantLine).toBe('DONE'); // the journal's last assistant text (seq 275), its last turn's reply
     const attention = await bus.invoke('attention.list', undefined);
     if (!attention.ok) throw new Error(attention.error.message);
     expect(attention.value).toContainEqual(expect.objectContaining({ appSessionId, kind: 'permission', state: 'pending' }));
@@ -177,7 +187,7 @@ describe('the spine and the checkouts composed under plain Node', () => {
     const host = new FakeSpineHost();
     const spineBus = fakeBus();
     const checkoutsBus = fakeBus();
-    const { spine, checkouts } = compose(await openSpineData(profile, { build: BUILD }), host, spineBus, { checkoutsBus });
+    const composed = compose(await openSpineData(profile, { build: BUILD }), host, spineBus, { checkoutsBus });
     await host.ready();
     expect(spineBus.registered().sort()).toEqual(SPINE_COMMANDS);
     expect(spineBus.intercepted()).toEqual(SPINE_INTERCEPTS);
@@ -187,11 +197,35 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(checkoutsBus.tapped()).toEqual([]); // the checkouts follow the spine through its view
     expect(host.held()).toBeGreaterThan(0);
 
-    checkouts!.stop();
-    spine.stop();
+    stopBoth(composed);
     expect(host.held()).toBe(0);
     expect(spineBus.intercepted()).toEqual([]);
     expect(spineBus.tapped()).toEqual([]);
+  });
+
+  // D21: one stop per root, which still stops every later part when one throws, as main's shutdown steps did per part
+  it('stops every part of each root, in order, whatever an earlier part threw', async () => {
+    const host = new FakeSpineHost();
+    const composed = compose(await openSpineData(profile, { build: BUILD }), host, fakeBus());
+    await host.ready();
+    const failures = captureConsole('error', /^\[shutdown\] (spine|checkouts): /);
+    const close = Index.prototype.close;
+    vi.spyOn(Index.prototype, 'close').mockImplementationOnce(function (this: Index) {
+      close.call(this);
+      throw new Error('the index would not close');
+    });
+    const dispose = GitService.prototype.dispose;
+    vi.spyOn(GitService.prototype, 'dispose').mockImplementationOnce(function (this: GitService) {
+      dispose.call(this);
+      throw new Error('a watch would not close');
+    });
+    const scmStopped = vi.spyOn(ScmService.prototype, 'dispose');
+    stopBoth(composed);
+    expect(failures.lines()).toEqual(['[shutdown] spine: index failed; going on', '[shutdown] checkouts: git failed; going on']);
+    // the spine's parts after the index (the owner channel, the sweep, yield, side threads, the relays, the library)
+    // released what they held on the host, and the checkouts' after git (files, scm) stopped
+    expect(host.held()).toBe(0);
+    expect(scmStopped).toHaveBeenCalledOnce();
   });
 
   it('a refused run composes with the view unavailable and registers none of the parts it does not start', async () => {

@@ -58,6 +58,7 @@ import { readRestoredCost } from './sessions/restored-cost';
 import { SessionService } from './sessions/service';
 import { engineHostSettled, registerSessionServiceHandlers } from './sessions/service-register';
 import { createSpineView } from './sessions/spine-view';
+import { stopParts, type Part } from './stop-parts';
 import { startYield } from './sessions/yield';
 
 export interface SpineData {
@@ -110,7 +111,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   const { profile, data, hosts, bus, engineEnv } = deps;
   const machineSettings = data.machineSettings;
   const spineRuns = data.refused === null;
-  const stops: (() => void)[] = []; // in today's shutdown order (D21)
+  const parts: Part[] = []; // in today's shutdown order (D21), each stopped whatever an earlier one threw
 
   // C4: the index (<profile>/index.sqlite) answers the record side of session.*, and its session source folds the
   // engine host's store events into it once the host is ready; the read model starts the source (refused unstarted in
@@ -133,10 +134,8 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   // Replay (C4 M5): run in the engine host; the fixtures table lists the checkout's probe journals (none packaged)
   const replays = spineRuns ? registerReplayHandlers(index, hosts, bus) : null;
   if (index.unavailable === null) seedReplayFixtures(index.fixtures, appRoot(deps.appPath));
-  stops.push(() => {
-    replays?.dispose();
-    attention?.stop();
-  });
+  if (replays) parts.push(['replays', () => replays.dispose()]);
+  if (attention) parts.push(['attention', () => attention.stop()]);
 
   // C5: the read side (launch mode, read model, the stub source in launch mode scenario). A relative scenario path is
   // the development app root's.
@@ -174,12 +173,9 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     restoredIds: attention?.restoredIds ?? new Set(),
     acquire: (id, reason) => (sessionService ? sessionService.acquire(id, reason) : Promise.reject(new Error(`MAWS cannot reach its sessions this run: ${data.refused}`))),
   });
-  stops.push(() => {
-    sessions.stop();
-    spineView.stop();
-  });
+  parts.push(['sessions', () => sessions.stop()], ['view', () => spineView.stop()]);
   // registered after the read model's stop, so the index source has stopped before the index it reads closes
-  stops.push(() => index.close());
+  parts.push(['index', () => index.close()]);
 
   // C7: the prompt history (MAWS's own file; the terminal's read only) and the resume chooser's preview, under the
   // engine's environment (its config directory, where it writes a session's transcript). D24: they answer the machine's
@@ -230,7 +226,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       attention: attention!, dispatch: hosts.dispatch, onHostState: (listener) => hosts.onState('engine-host', listener), onStreaming: (listener) => hosts.onStreaming('engine-host', listener),
       streaming: () => hosts.streaming('engine-host'), emit: (name, payload) => void bus.emit(name, payload), onSettings: (listener) => machineSettings.onChange(() => listener()),
     });
-    stops.push(ownerChannel.stop);
+    parts.push(['owner channel', ownerChannel.stop]);
     // The session service (M3): intents, start, fork, archive, delete, rename and the trust check, reading the global
     // config and the store with the environment the engine receives. Its start resets every stale `self` holder at once
     // (D-16), then forgets stale bootstrap ids and reconciles interrupted handoffs once the engine host answers.
@@ -275,15 +271,15 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       },
     });
     bus.register('session.archiveOlder', ({ days, projectId }) => inactiveArchive.run(days, projectId as ProjectId | null));
-    stops.push(scheduleInactiveArchive(inactiveArchive, () => machineSettings.state().sessions.archiveInactiveDays, (changed) => machineSettings.onChange(() => changed()), (scanned) => indexSource.onScanned(scanned)));
+    parts.push(['inactive archive', scheduleInactiveArchive(inactiveArchive, () => machineSettings.state().sessions.archiveInactiveDays, (changed) => machineSettings.onChange(() => changed()), (scanned) => indexSource.onScanned(scanned))]);
     service.start().catch((error: unknown) => console.error('[sessions] the session service failed to start:', error));
   }
   registerObservedFacts(hosts.dispatch, bus); // P2-A (X17): the engine host's observed facts, beside session.digests
   // W7: a live MAWS process yields when a terminal or job that resumed its session starts writing into it; E3: each
   // live turn end of a side thread summarises it in its parent's transcript. Neither in a run refused the spine.
   if (spineRuns) {
-    stops.push(startYield({ dispatch: hosts.dispatch, onEvent: (name, listener) => hosts.onEvent(name, listener), sessions: index.sessions, emit: bus.emit }));
-    stops.push(startSideThreads({ onEvent: (name, listener) => hosts.onEvent(name, listener), emit: bus.emit, sessions: index.sessions, sideThreads: index.sideThreads }));
+    parts.push(['yield', startYield({ dispatch: hosts.dispatch, onEvent: (name, listener) => hosts.onEvent(name, listener), sessions: index.sessions, emit: bus.emit })]);
+    parts.push(['side threads', startSideThreads({ onEvent: (name, listener) => hosts.onEvent(name, listener), emit: bus.emit, sessions: index.sessions, sideThreads: index.sideThreads })]);
   }
 
   // C11, C12, E10: the machine settings' relays to the engine host (engine.configure and the budget's policy, the idle
@@ -303,36 +299,34 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       totalMemBytes: totalmem(),
     });
     engineConfigure = configure;
-    stops.push(configure.stop);
-    stops.push(startHostConfigure({
+    parts.push(['engine configure', configure.stop]);
+    parts.push(['host configure', startHostConfigure({
       settings: () => machineSettings.state(),
       onSettingsChanged: onMachineSettings,
       hostState: () => hosts.snapshot('engine-host'),
       onHostState: (listener) => hosts.onState('engine-host', listener),
       dispatch: (input) => hosts.dispatch('engine-host', 'host.configure', input) as Promise<CommandResult<'host.configure'>>,
       env: deps.env,
-    }));
+    })]);
   }
   // C12: the Settings tab's read of the configuration the spine holds for it (P5 O3-A: rejects when refused); W3
   bus.register('settings.engineApplied', () => (engineConfigure ? engineConfigure.applied() : Promise.reject(new Error(`the engine settings are not applied this run: ${data.refused}`))));
   bus.register('settings.userEngineDefaults', userDefaults);
   // D23: the design-system defaults, the machine's settings relayed to the engine host's store
-  if (spineRuns) stops.push(startArtifactDefaults({
+  if (spineRuns) parts.push(['design-system defaults', startArtifactDefaults({
     settings: () => machineSettings.state(),
     onSettingsChanged: onMachineSettings,
     hostState: () => hosts.snapshot('engine-host'),
     onHostState: (listener) => hosts.onState('engine-host', listener),
     dispatch: (input) => hosts.dispatch('engine-host', 'artifacts.setDefaults', input) as Promise<CommandResult<'artifacts.setDefaults'>>,
-  }));
+  })]);
   // P3-L M1 (D22): the library's derived index kept right against the engine host's store, and library.list, .get,
   // .spaces and library.changed answered from it. It stops in the same pass as the index's close, so no sync step runs
   // between them, and after it applies nothing.
-  stops.push(startLibrary({ index, hosts, register: bus.register, emit: bus.emit, e2e: deps.env.MAWS_E2E === '1' }).stop);
+  parts.push(['library', startLibrary({ index, hosts, register: bus.register, emit: bus.emit, e2e: deps.env.MAWS_E2E === '1' }).stop]);
 
   return {
     view: spineView.view,
-    stop: () => {
-      for (const stop of stops) stop();
-    },
+    stop: () => stopParts('spine', parts),
   };
 }

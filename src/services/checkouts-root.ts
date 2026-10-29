@@ -17,6 +17,7 @@ import { createGitRunner } from './git/runner';
 import { GitService } from './git/service';
 import { registerScmHandlers } from './scm/register';
 import { ScmService } from './scm/service';
+import { stopParts } from './stop-parts';
 
 export interface CheckoutsDeps {
   view: SpineView;
@@ -66,11 +67,13 @@ export function startCheckouts({ view, bus, clientPort, engineEnv, env }: Checko
   registerScmHandlers(scm, bus);
   return {
     files,
-    stop: () => {
-      git.dispose();
-      unfollowRoots();
-      files.dispose();
-      scm.dispose();
-    },
+    // each part stopped whatever an earlier one threw (D21)
+    stop: () =>
+      stopParts('checkouts', [
+        ['git', () => git.dispose()],
+        ['git.lsFiles roots', unfollowRoots],
+        ['files', () => files.dispose()],
+        ['scm', () => scm.dispose()],
+      ]),
   };
 }
