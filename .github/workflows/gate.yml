@@ -811,7 +811,8 @@ jobs:
         uses: SSFSKIM/ci-kit/mac/settle@v1
         with:
           vm: any
-      - env:
+      - id: e2e
+        env:
           SCRIPT: ${{ matrix.script }}
           MAWS_E2E_RETRY: ${{ github.job == 'e2e' && matrix.retry && runner.os == 'macOS' && '1' || '' }}
           MAWS_E2E_FLAKY_FILE: ${{ runner.temp }}/maws-e2e-flaky.txt
@@ -854,8 +855,9 @@ jobs:
         run: .github/scripts/launchd-sweep.sh
       # Only after this job's own checkout: on the Mac the workspace persists between jobs and only the checkout's clean
       # clears the last job's reports, so a job that failed before it (a refused measured group) would upload another's.
+      # A flaky pass keeps the same evidence as a red job, including the failed attempt's attachments.
       # desk-web's suites (desk-web, desk-web-hub) run under apps/desk-web and write their output there.
-      - if: (failure() || needs.plan.outputs.evidence == 'true') && steps.checkout.outcome == 'success'
+      - if: (failure() || needs.plan.outputs.evidence == 'true' || steps.e2e.outputs.flaky == 'true') && steps.checkout.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: e2e-${{ matrix.slug }}
@@ -863,6 +865,15 @@ jobs:
             playwright-report/
             test-results/
             apps/desk-web/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+      # Measured samples remain re-readable even on green or cancellation, without the HTML report and screenshots.
+      # A separate name lets a red measured job keep both artifacts without a collision.
+      - if: always() && matrix.measured && steps.checkout.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: measured-e2e-${{ matrix.slug }}
+          path: test-results/**/*.json
           retention-days: 7
           if-no-files-found: ignore
 
