@@ -33,11 +33,14 @@ export type Spawn = Omit<BridgeAgent, 'agentId' | 'running'>;
 /** One step of a session's timeline. `agentId` is null for the main loop. */
 export type Step = { at: number } & (
   | { k: 'turn-start'; turnId: string; agentId: string | null }
-  | { k: 'turn-end'; turnId: string; agentId: string | null; reason: string }
-  | { k: 'step-start'; turnId: string; agentId: string | null; step: number; model?: string }
+  /** `t`: the bridge's stamp of the turn's end, which a step it cuts off ends at. */
+  | { k: 'turn-end'; turnId: string; agentId: string | null; reason: string; t?: number }
+  /** The request's model and effort, as the bridge's step start carried them (effort null: the request named none). */
+  | { k: 'step-start'; turnId: string; agentId: string | null; step: number; model?: string; effort?: string | null }
   | { k: 'chunk'; turnId: string; agentId: string | null; step: number; chunkIndex: number; chunk: JsonObject }
   | { k: 'block-row'; body: BlockRow }
-  | { k: 'step-end'; body: StepEnd }
+  /** `body.t` the bridge's stamp of the end; the model and effort are the producer's, from the step's start. */
+  | { k: 'step-end'; body: Pick<StepEnd, 'turnId' | 'agentId' | 'step' | 't'> }
   /** The row is on disk: subscribers of its transcript receive it. */
   | { k: 'row'; agentId: string | null; row: Row }
   /** A subagent started: its `meta.json` joins the session's tree, and the bridge holds it running when it saw the
@@ -156,6 +159,9 @@ function clockOf(events: JsonObject[]): number | null {
   return offsets[Math.floor(offsets.length / 2)];
 }
 
+/** A bridge event's stamp `t` (epoch ms), when it carries one. */
+const stampOf = (e: JsonObject) => (typeof e.t === 'number' && Number.isFinite(e.t) ? { t: e.t } : {});
+
 const isoOf = (epochMs: unknown) => (typeof epochMs === 'number' ? new Date(epochMs).toISOString() : undefined);
 
 /** Steps for the requests and usage in a bridge stream; shared by both ways of getting chunks. */
@@ -210,13 +216,14 @@ function fromBridge(events: JsonObject[], rows: { main: Row[]; agents: Record<st
       const known = byUuid.get(String(e.uuid));
       if (known) release(known.agentId, String(e.uuid), at);
     } else if (e.type === 'step' && e.phase === 'start') {
-      steps.push({ at, k: 'step-start', turnId: String(e.turnId), agentId, step: Number(e.step), ...(typeof e.model === 'string' && { model: e.model }) });
+      const effort = e.effort === null || typeof e.effort === 'string' ? { effort: e.effort } : {};
+      steps.push({ at, k: 'step-start', turnId: String(e.turnId), agentId, step: Number(e.step), ...(typeof e.model === 'string' && { model: e.model }), ...effort });
     } else if (e.type === 'step' && e.phase === 'end') {
-      steps.push({ at, k: 'step-end', body: { turnId: String(e.turnId), agentId, step: Number(e.step) } });
+      steps.push({ at, k: 'step-end', body: { turnId: String(e.turnId), agentId, step: Number(e.step), ...stampOf(e) } });
     } else if (e.type === 'turn' && e.phase === 'start') {
       steps.push({ at, k: 'turn-start', turnId: String(e.turnId), agentId });
     } else if (e.type === 'turn' && e.phase === 'complete') {
-      steps.push({ at, k: 'turn-end', turnId: String(e.turnId), agentId, reason: String(e.reason) });
+      steps.push({ at, k: 'turn-end', turnId: String(e.turnId), agentId, reason: String(e.reason), ...stampOf(e) });
     } else if (e.type === 'agent' && e.phase === 'spawn') {
       steps.push({ at, k: 'agent', agentId: String(e.agentId), spawn: spawnOf(e) });
     } else if (e.type === 'agent' && e.phase === 'stop') {

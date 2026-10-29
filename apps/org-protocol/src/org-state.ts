@@ -34,8 +34,8 @@
 import { canonicalize } from './canonical.ts';
 import { base64urlEncode } from './base64url.ts';
 import { importPublicKey, keyId, signBody, signingInput, utf8, verifyInput, type B64, type Sig } from './keys.ts';
-import { machineNameKey, type MemberId } from './names.ts';
-import { isRootTransition, isSigned, isSignedOrgState } from './shapes.ts';
+import { isMemberEmail, machineNameKey, type MemberId } from './names.ts';
+import { canonicalizable, isOrgState, isRootTransition, isSigned, isSignedOrgState } from './shapes.ts';
 import { SIGNING_DOMAINS, type Device, type DeviceEndorsement, type OrgState, type RevokedKey, type RootTransition, type Signed, type SignedOrgState } from './types.ts';
 import { accept, refuse, type Verdict } from './verdict.ts';
 
@@ -80,43 +80,179 @@ async function rootKeys(state: OrgState): Promise<Map<string, B64>> {
   return out;
 }
 
-/** What needs the whole state: unique ids and names, owners that are members, a root set of admin step-up keys. */
-async function stateInvariants(state: OrgState): Promise<boolean> {
-  const memberIds = state.members.map((m) => m.id);
-  const emails = state.members.map((m) => m.email.toLowerCase());
-  const deviceIds = state.members.flatMap((m) => m.devices.map((d) => d.id));
-  const members = new Set(memberIds);
-  const ownersKnown = (owners: MemberId[] | 'org') => owners === 'org' || owners.every((id) => members.has(id));
-  const distinct = (items: string[]) => new Set(items).size === items.length;
-  if (!distinct(memberIds) || !distinct(emails) || !distinct(deviceIds)) return false;
-  if (!distinct(state.machines.map((m) => machineNameKey(m.name))) || !distinct(state.machines.map((m) => m.ref))) return false;
-  if (!distinct(state.delegations.map((d) => d.id)) || !distinct(state.projects.map((p) => p.id))) return false;
-  if (!state.machines.every((m) => ownersKnown(m.owners)) || !state.delegations.every((d) => ownersKnown(d.owners))) return false;
-  if (state.root.keys.length === 0 || !distinct(state.root.keys)) return false;
+/**
+ * A problem a state, or a successor, has: its code, and the id, name or key it concerns. The codes name the rules of the
+ * header, one each, so a writer can say before signing what the verifier would refuse after.
+ */
+export type ProblemCode =
+  // The successor's own (successorProblems)
+  | 'shape'
+  | 'other-org'
+  | 'version-not-next'
+  | 'prev-not-head'
+  | 'revives-revoked'
+  | 'issued-backwards'
+  | 'recovery-changed'
+  | 'legacy-retired'
+  | 'machine-names'
+  | 'machine-ref-changed'
+  | 'keys-unaccounted'
+  | 'endorsement-missing'
+  | 'email-grammar'
+  // The whole state's (stateProblems)
+  | 'member-id-taken'
+  | 'email-taken'
+  | 'device-id-taken'
+  | 'machine-name-taken'
+  | 'machine-ref-taken'
+  | 'delegation-id-used'
+  | 'project-id-taken'
+  | 'owners-unknown'
+  | 'empty-roots'
+  | 'root-key-twice'
+  | 'root-not-admin'
+  | 'key-held-twice'
+  | 'key-off-curve'
+  | 'prefix-overlaps'
+  | 'prefix-names-machine'
+  | 'ref-shapes-delegation'
+  | 'retired-under-revoked-delegation'
+  | 'retired-twice'
+  | 'retired-key-held'
+  | 'retired-kid-mismatch'
+  | 'revoked-twice'
+  | 'retired-and-revoked';
+export type Problem = { code: ProblemCode; detail?: string };
+
+/** The items that occur more than once, each named once. */
+function repeated(items: string[]): string[] {
+  const seen = new Set<string>();
+  const twice = new Set<string>();
+  for (const item of items) (seen.has(item) ? twice : seen).add(item);
+  return [...twice];
+}
+
+/** In the full diagnostics, the most problems kept per code; past it a rule still runs, but builds no detail. */
+export const PROBLEMS_PER_CODE = 8;
+
+/** Thrown by a fail-fast report to end the judgment at its first problem. */
+const FOUND = Symbol('found');
+
+/** Where a rule reports a problem: its code, and its detail as a thunk, built only for a problem that is kept. */
+type Report = (code: ProblemCode, detail: () => string) => void;
+
+/**
+ * What needs the whole state, each rule by its code: unique ids and names, owners that are members, a root set of admin
+ * step-up keys, one holder per key, the name namespaces, and `retired` and `revoked` apart. `stateInvariants` is its
+ * reading: a state holds them when it has no problem.
+ *
+ * Its cost is bounded, since `verifySuccessor` judges the state before any signature. With `first` it returns at the
+ * first problem and builds no detail; otherwise it keeps at most `PROBLEMS_PER_CODE` problems per code and builds no
+ * detail past that. `onDetail` is called once per detail built, for a caller counting what diagnostics cost.
+ *
+ * The full mode is for a caller's own proposed state (the admin's and the app's), not for unauthenticated input: past
+ * the cap each call site still makes its detail closure, so a crafted state costs a closure per pair. A caller that
+ * ever needs the full mode on posted input guards its call sites with a cheap count check first.
+ */
+export async function stateProblems(state: OrgState, opts: { first?: boolean; onDetail?: (code: ProblemCode) => void } = {}): Promise<Problem[]> {
+  const problems: Problem[] = [];
+  const kept = new Map<ProblemCode, number>();
+  const report: Report = (code, detail) => {
+    if (opts.first) {
+      problems.push({ code });
+      throw FOUND;
+    }
+    const count = kept.get(code) ?? 0;
+    if (count >= PROBLEMS_PER_CODE) return;
+    kept.set(code, count + 1);
+    opts.onDetail?.(code);
+    problems.push({ code, detail: detail() });
+  };
+  try {
+    await judgeState(state, report);
+  } catch (error) {
+    if (error !== FOUND) throw error;
+  }
+  return problems;
+}
+
+async function judgeState(state: OrgState, report: Report): Promise<void> {
+  const named = (code: ProblemCode, items: string[], what: (item: string) => string) => {
+    for (const item of repeated(items)) report(code, () => what(item));
+  };
+  named('member-id-taken', state.members.map((m) => m.id), (id) => `member ${id} is listed twice`);
+  named('email-taken', state.members.map((m) => m.email.toLowerCase()), (email) => `two members have the email ${email}`);
+  named('device-id-taken', state.members.flatMap((m) => m.devices.map((d) => d.id)), (id) => `device ${id} is listed twice`);
+  named('machine-name-taken', state.machines.map((m) => machineNameKey(m.name)), (name) => `two machines are named ${name}`);
+  named('machine-ref-taken', state.machines.map((m) => m.ref), (ref) => `two machines have the ref ${ref}`);
+  named('project-id-taken', state.projects.map((p) => p.id), (id) => `project ${id} is listed twice`);
+  const members = new Set(state.members.map((m) => m.id));
+  const unknown = (owners: MemberId[] | 'org') => owners !== 'org' && owners.some((id) => !members.has(id));
+  const unknownIds = (owners: MemberId[]) => owners.filter((id) => !members.has(id)).join(', ');
+  for (const m of state.machines) if (unknown(m.owners)) report('owners-unknown', () => `machine ${m.name} is owned by ${unknownIds(m.owners as MemberId[])}, no member`);
+  for (const d of state.delegations) if (unknown(d.owners)) report('owners-unknown', () => `delegation ${d.id} is owned by ${unknownIds(d.owners as MemberId[])}, no member`);
+  if (state.root.keys.length === 0) report('empty-roots', () => 'the root set is empty: nobody could sign a successor');
+  named('root-key-twice', state.root.keys, (kid) => `root key ${kid} is named twice`);
   // One holder per key: no key is two devices', a device's two, a machine's and a delegation's, or the recovery key too.
-  if (!distinct([...heldKeys(state).map((k) => k.pub), state.root.recoveryPub])) return false;
+  const holders = [...heldKeys(state), { pub: state.root.recoveryPub, holder: 'recovery' as const }];
+  for (const pub of repeated(holders.map((k) => k.pub))) {
+    report('key-held-twice', () => `one key is held by ${holders.filter((k) => k.pub === pub).map((k) => describeHolder(k.holder)).join(' and ')}`);
+  }
   // Name namespaces: a certificate's name, under its delegation's prefix, never meets an enrolled name or another
   // delegation's. A revoked delegation's prefix and id stay reserved (RL DL 26), so nothing reopens its history: no
   // later delegation takes them, and no entry takes the `<id>_` ref shape of a delegation the state knows.
   const gone = state.revoked.flatMap((r) => ('delegation' in r.holder ? [r.holder] : []));
-  const prefixes = [...state.delegations.map((d) => d.prefix), ...gone.map((d) => d.prefix)].map(machineNameKey);
-  if (prefixes.some((p, i) => prefixes.some((q, j) => i !== j && q.startsWith(p)))) return false;
-  if ([...state.machineNames, ...state.machines].some((n) => prefixes.some((p) => machineNameKey(n.name).startsWith(p)))) return false;
+  const prefixes = [...state.delegations.map((d) => d.prefix), ...gone.map((d) => d.prefix)];
+  const keys = prefixes.map(machineNameKey);
+  for (const [i, p] of keys.entries()) {
+    for (const [j, q] of keys.entries()) {
+      // An equal pair is reported once.
+      if (i !== j && q.startsWith(p) && (q !== p || i < j)) report('prefix-overlaps', () => `the delegation prefix ${prefixes[j]} starts with the prefix ${prefixes[i]}`);
+    }
+  }
+  for (const n of [...state.machineNames, ...state.machines]) {
+    for (const [i, p] of keys.entries()) if (machineNameKey(n.name).startsWith(p)) report('prefix-names-machine', () => `the machine name ${n.name} is under the delegation prefix ${prefixes[i]}`);
+  }
   const ids = [...state.delegations.map((d) => d.id), ...gone.map((d) => d.delegation)];
-  if (!distinct(ids) || [...state.machineNames, ...state.machines].some((m) => ids.some((id) => m.ref.startsWith(`${id}_`)))) return false;
+  named('delegation-id-used', ids, (id) => `delegation id ${id} is used twice, live or revoked`);
+  for (const m of [...state.machineNames, ...state.machines]) {
+    for (const id of ids) if (m.ref.startsWith(`${id}_`)) report('ref-shapes-delegation', () => `the ref ${m.ref} of ${m.name} has delegation ${id}'s shape`);
+  }
   // A revoked delegation's certificates are revoked with it, history included: none keeps a `retired` entry.
-  const goneIds = gone.map((d) => d.delegation);
-  if (state.retired.some((r) => 'machine' in r.holder && goneIds.some((id) => (r.holder as { machine: string }).machine.startsWith(`${id}_`)))) return false;
-  if (!(await retiredApart(state))) return false;
+  for (const r of state.retired) {
+    if (!('machine' in r.holder)) continue;
+    const ref = r.holder.machine;
+    for (const d of gone) if (ref.startsWith(`${d.delegation}_`)) report('retired-under-revoked-delegation', () => `${r.keyId} of ${ref} is retired, though its delegation ${d.delegation} is revoked`);
+  }
+  await judgeRetired(state, report);
   const revoked = state.revoked.map((r) => r.keyId);
-  if (!distinct(revoked) || state.retired.some((r) => revoked.includes(r.keyId))) return false;
+  named('revoked-twice', revoked, (kid) => `${kid} is revoked twice`);
+  const revokedSet = new Set(revoked);
+  for (const r of state.retired) if (revokedSet.has(r.keyId)) report('retired-and-revoked', () => `${r.keyId} is both retired and revoked`);
+  // A root kid names an admin device's step-up key in this state.
   const root = await rootKeys(state);
+  for (const kid of new Set(state.root.keys)) if (!root.has(kid)) report('root-not-admin', () => `root key ${kid} is no admin device's step-up key`);
   // Real points, not only encodings: a root set or a recovery key off the curve could never sign again.
-  return root.size === state.root.keys.length && (await allOnCurve([...root.values(), state.root.recoveryPub]));
+  for (const [kid, pub] of [...root, ['recovery', state.root.recoveryPub] as const]) {
+    if ((await importPublicKey(pub)) === null) report('key-off-curve', () => `${kid === 'recovery' ? 'the recovery key' : `root key ${kid}`} is not a point on the curve`);
+  }
+}
+
+/** A holder in words, for a problem's detail. */
+function describeHolder(holder: Holder | 'recovery'): string {
+  if (holder === 'recovery') return 'the recovery key';
+  if ('delegation' in holder) return `delegation ${holder.delegation}`;
+  if ('machine' in holder) return `machine ${holder.machine}`;
+  return `device ${holder.device}'s ${holder.key} key`;
+}
+
+/** What needs the whole state (see `stateProblems`): it holds when no rule there names a problem. Stops at the first. */
+export async function stateInvariants(state: OrgState): Promise<boolean> {
+  return (await stateProblems(state, { first: true })).length === 0;
 }
 
 /** Retired keys: each named by its own kid, once, and none of them still a key the state holds. */
-async function retiredApart(state: OrgState): Promise<boolean> {
+async function judgeRetired(state: OrgState, report: Report): Promise<void> {
   const held = new Set<B64>([
     state.root.recoveryPub,
     ...state.members.flatMap((m) => m.devices.flatMap((d) => [d.channelPub, ...(d.stepUpPub === undefined ? [] : [d.stepUpPub])])),
@@ -125,17 +261,21 @@ async function retiredApart(state: OrgState): Promise<boolean> {
   ]);
   const kids = new Set<string>();
   for (const r of state.retired) {
-    if (kids.has(r.keyId) || held.has(r.pub) || (await keyId(r.pub)) !== r.keyId) return false;
+    if (kids.has(r.keyId)) report('retired-twice', () => `${r.keyId} is retired twice`);
+    if (held.has(r.pub)) report('retired-key-held', () => `${r.keyId} is retired, yet the state still holds it`);
+    if ((await keyId(r.pub)) !== r.keyId) report('retired-kid-mismatch', () => `${r.keyId} is not the key id of the key it retires`);
     kids.add(r.keyId);
   }
-  return true;
 }
 
 type Holder = RevokedKey['holder'];
 const same = (a: unknown, b: unknown) => canonicalize(a) === canonicalize(b);
 
-/** The keys a state holds as current, each with its holder: devices' channel and step-up keys, machines', delegations'. */
-function heldKeys(state: OrgState): Array<{ pub: B64; holder: Holder }> {
+/**
+ * The keys a state holds as current, each with its holder: devices' channel and step-up keys, machines', delegations'.
+ * The recovery key, `root.recoveryPub`, is held beside them.
+ */
+export function heldKeys(state: OrgState): Array<{ pub: B64; holder: Holder }> {
   return [
     ...state.members.flatMap((m) =>
       m.devices.flatMap((d) => [
@@ -377,6 +517,94 @@ export async function verifySuccessor(head: SignedOrgState, next: SignedOrgState
     failure = verdict;
   }
   return failure;
+}
+
+/**
+ * Every problem of `after` as an ordinary successor of `before`, named before anything is signed: each check
+ * `verifySuccessor` makes but the signatures (the root's and the endorsements'), which it still judges once signed. An
+ * empty list means `verifySuccessor` refuses the signed state for a signature alone, if at all. One rule is the
+ * writer's alone, which `verifySuccessor` never makes: an email the successor writes is an address (`email-grammar`).
+ *
+ * Ordinary: no root transition authorizes it. A held transition changes non-signature rules (the successor takes the
+ * transition's root set, and the transition's new root devices need no endorsement), so a recovery's successor is not
+ * this function's to judge.
+ *
+ * `endorsing` names devices the signer endorses inside the same confirmation that signs the state: each counts as
+ * endorsed by `kid` when `kid` is one of its member's step-up keys in `before`.
+ *
+ * As `stateProblems`' full diagnostics: at most `PROBLEMS_PER_CODE` problems per code, no detail built past that, and
+ * `onDetail` called once per detail built. Like `stateProblems`' full mode, it is for a caller's own proposed successor,
+ * never for unauthenticated input.
+ */
+export async function successorProblems(
+  before: OrgState,
+  after: OrgState,
+  opts: { endorsing?: { kid: string; devices: string[] }; onDetail?: (code: ProblemCode) => void } = {},
+): Promise<Problem[]> {
+  const report = (code: ProblemCode, detail: () => string): Problem => {
+    opts.onDetail?.(code);
+    return { code, detail: detail() };
+  };
+  if (!isOrgState(after) || !canonicalizable(after)) return [report('shape', () => 'the successor is not a well-formed org state: an unknown or missing field, or a value of the wrong type or encoding')];
+  const problems: Problem[] = [];
+  const kept = new Map<ProblemCode, number>();
+  const add: Report = (code, detail) => {
+    const count = kept.get(code) ?? 0;
+    if (count >= PROBLEMS_PER_CODE) return;
+    kept.set(code, count + 1);
+    problems.push(report(code, detail));
+  };
+  if (after.org !== before.org) add('other-org', () => `the successor is of org ${after.org}, the head of ${before.org}`);
+  if (after.version !== before.version + 1) add('version-not-next', () => `version ${after.version} does not follow the head's ${before.version}`);
+  if (after.prev !== (await stateHash(before))) add('prev-not-head', () => "its prev is not the head's hash");
+  const revoked = new Set([...before.revoked, ...after.revoked].map((r) => r.keyId));
+  for (const { pub, holder } of heldKeys(after)) {
+    const kid = await keyId(pub);
+    if (revoked.has(kid)) add('revives-revoked', () => `${kid} is revoked, yet current as ${describeHolder(holder)}`);
+  }
+  problems.push(...(await stateProblems(after, { onDetail: opts.onDetail })));
+  if (after.issued < before.issued) add('issued-backwards', () => `issued ${after.issued}, before the head's ${before.issued}`);
+  if (after.root.recoveryPub !== before.root.recoveryPub) add('recovery-changed', () => 'the recovery key never changes after genesis');
+  if (!legacyRetiredKept(before, after)) add('legacy-retired', () => "legacyRetired is added only at the state's own version, then kept as it stands or dropped");
+  const names = machineNamesKept(before, after);
+  if (!names.ok) add('machine-names', () => (names.code === 'name-retired' ? 'a machine name given another ref, or a pair dropped from machineNames' : "machineNames does not hold exactly the head's pairs and every machine's own"));
+  for (const m of after.machines) {
+    const was = before.machines.find((h) => h.pub === m.pub && h.ref !== m.ref);
+    if (was !== undefined) add('machine-ref-changed', () => `machine ${m.name} keeps ${was.name}'s key under another ref`);
+  }
+  if (!(await keysAccounted(before, after))) {
+    add('keys-unaccounted', () => 'a key the head held, retired or revoked is not where a successor must put it, or a delegation changed beyond its expires');
+  }
+  judgeEmails(before, after, add);
+  await judgeEndorsements(before, after, opts.endorsing, add);
+  return problems;
+}
+
+/**
+ * Each email the successor writes, a member's who is new or whose email changed, outside `isMemberEmail`'s grammar. An
+ * unchanged member is never judged: the rule is the writer's, and a reader takes any text (`verifySuccessor`).
+ */
+function judgeEmails(before: OrgState, after: OrgState, report: Report): void {
+  for (const member of after.members) {
+    if (before.members.find((m) => m.id === member.id)?.email === member.email || isMemberEmail(member.email)) continue;
+    report('email-grammar', () => `member ${member.id}'s email ${JSON.stringify(member.email)} is not an address: one @, no space or control character, at most 64 characters before it and 253 after`);
+  }
+}
+
+/** Each device new to a member who had devices in `before` and carries no endorsement, nor one `endorsing` promises. */
+async function judgeEndorsements(before: OrgState, after: OrgState, endorsing: { kid: string; devices: string[] } | undefined, report: Report): Promise<void> {
+  for (const member of after.members) {
+    const was = before.members.find((m) => m.id === member.id);
+    if (was === undefined || was.devices.length === 0) continue;
+    const own = new Set<string>();
+    for (const d of was.devices) if (d.stepUpPub !== undefined) own.add(await keyId(d.stepUpPub));
+    const promised = (id: string) => endorsing !== undefined && own.has(endorsing.kid) && endorsing.devices.includes(id);
+    for (const device of member.devices) {
+      if (was.devices.some((d) => d.id === device.id && canonicalize(d) === canonicalize(device))) continue;
+      if (device.endorsement !== undefined || promised(device.id)) continue; // its signature is verifySuccessor's
+      report('endorsement-missing', () => `device ${device.id} is new to ${member.email}, who has devices, and no device of theirs endorses it`);
+    }
+  }
 }
 
 /** Every device new to a member who had devices in `before` carries a valid endorsement (see the header). */
