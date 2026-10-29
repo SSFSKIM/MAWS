@@ -13,6 +13,7 @@
 import {
   canonicalize,
   contestedRefs,
+  heldKeys,
   isCertRetirement,
   isEndpointRecord,
   isListing,
@@ -105,15 +106,24 @@ export class OrgRecords {
 
   // ---- A v2 machine's key (RL §5.3) ----------------------------------------------------------------------------
 
-  /** Keeps the machine's `{pub, ref, mac}` for its enrollment: `201` kept, `200` the same again, `409 key-posted` another. */
-  keepMachineKey(machine: { name: string; enrollment: string }, body: unknown): Result<{ key: EnrollmentKey; kept: boolean }> {
+  /**
+   * Keeps the machine's `{pub, ref, mac}` for its enrollment: `201` kept, `200` the same again, `409 key-posted` another,
+   * `409 ref-taken` a ref that other names hold, `409 key-held` a key another holder has (`keyHolder`). `held` re-checks
+   * the poster's standing in the synchronous step that judges and keeps the key, after the await for its key id.
+   */
+  async keepMachineKey(machine: { name: string; enrollment: string }, body: unknown, held: Authority = always): Promise<Result<{ key: EnrollmentKey; kept: boolean }>> {
     const b = (typeof body === 'object' && body !== null && !Array.isArray(body) ? body : null) as Record<string, unknown> | null;
     if (!b || !Object.keys(b).every((k) => KEY_FIELDS.includes(k)) || !isPublicKey(b.pub) || !isMachineRef(b.ref) || !isBase64urlOf(b.mac, 32)) {
       return fail(400, 'bad-shape', 'the body is {pub: the machine key’s uncompressed P-256 point, ref: its MachineRef, mac: 32 bytes}, base64url');
     }
-    const held = this.machineKey(machine.enrollment);
-    if (held) {
-      if (held.pub === b.pub && held.ref === b.ref && held.mac === b.mac) return ok({ key: held, kept: false });
+    const pub = b.pub as string;
+    const kid = await keyId(pub);
+    // From here on synchronous, so what is judged is what is kept.
+    const standing = held();
+    if (!standing.ok) return standing;
+    const kept = this.machineKey(machine.enrollment);
+    if (kept) {
+      if (kept.pub === pub && kept.ref === b.ref && kept.mac === b.mac) return ok({ key: kept, kept: false });
       return fail(409, 'key-posted', 'this enrollment holds another key; enroll again with a new code to post another');
     }
     // A ref the state or a certificate gives other names is theirs: a key posted with it would claim their relay (O11 M6).
@@ -121,9 +131,46 @@ export class OrgRecords {
     if (names.length > 0 && !names.includes(machineNameKey(machine.name))) {
       return fail(409, 'ref-taken', `the ref ${b.ref} is another machine's in the org state or a certificate: mint a fresh ref`);
     }
-    const key: EnrollmentKey = { enrollment: machine.enrollment, machine: machine.name, pub: b.pub as string, ref: b.ref, mac: b.mac as string, posted: iso() };
+    const holder = this.keyHolder(pub, kid, b.ref);
+    if (holder !== null) return fail(409, 'key-held', `this key is ${holder}: mint a fresh key for this machine`);
+    const key: EnrollmentKey = { enrollment: machine.enrollment, machine: machine.name, pub, ref: b.ref, mac: b.mac as string, posted: iso() };
     this.sql.exec('INSERT INTO machine_keys (enrollment, machine, pub, ref, mac, posted) VALUES (?, ?, ?, ?, ?, ?)', key.enrollment, key.machine, key.pub, key.ref, key.mac, key.posted);
     return ok({ key, kept: true });
+  }
+
+  /**
+   * Who other than the machine of `ref` holds `pub` (key id `kid`), in words, or null. A key speaks for one ref, whatever
+   * route it came by (one holder per key, RL5, kept across the hub's records as well as the state), so the hub refuses a
+   * key posted with a machine's key (`keepMachineKey`) or certified (`storeCert`) that another holder has, whichever came
+   * first, rather than leave a listing successor or a verifier to meet the two:
+   *   - the head holding it as current under any other holder (a machine of another ref, a device, a delegation, the
+   *     recovery key): listing it would be `key-held-twice`;
+   *   - the head holding it retired or revoked, whatever the ref: neither key is ever current again (a `retired` entry
+   *     stays or moves to `revoked`; `retired-key-held`, `revives-revoked`), since a retired key still speaks for its
+   *     ref's history up to its `notAfter`, and a revoked one speaks for nothing (`verifyMachineCert` refuses such a
+   *     certificate first, `expired` or `revoked`);
+   *   - another enrollment's posted key, or a kept certificate's, under another ref: the one private key would speak for
+   *     two refs, whose owners may differ (`machineSigners`, `machineOwners`).
+   * The machine of `ref` is no other holder: a rename keeps the key and the ref, and the machine enrolls again under its
+   * new name with both (O11 M6). Synchronous, for the caller's commit: a key post moves neither the head nor the
+   * certificates, so only the commit sees one made during a certificate's awaits.
+   */
+  private keyHolder(pub: string, kid: string, ref: string): string | null {
+    const state = this.chain.head()?.state;
+    if (state) {
+      if (state.root.recoveryPub === pub) return "the org state's recovery key";
+      for (const { pub: p, holder: h } of heldKeys(state)) {
+        if (p !== pub || ('machine' in h && h.machine === ref)) continue;
+        if ('machine' in h) return `machine ${state.machines.find((m) => m.ref === h.machine)?.name ?? h.machine}'s in the org state (ref ${h.machine})`;
+        if ('delegation' in h) return `delegation ${h.delegation}'s in the org state`;
+        return `the ${h.key} key of device ${h.device} in the org state`;
+      }
+      if (state.retired.some((r) => r.pub === pub)) return 'retired in the org state, and a retired key is never current again';
+      if (state.revoked.some((r) => r.keyId === kid)) return 'revoked in the org state';
+    }
+    if (this.sql.exec('SELECT 1 FROM machine_keys WHERE pub = ? AND ref != ? LIMIT 1', pub, ref).toArray().length > 0) return "another enrollment's, posted under another ref";
+    const certified = this.sql.exec<{ ref: string }>('SELECT ref FROM machine_certs WHERE key_id = ? AND ref != ? LIMIT 1', kid, ref).toArray()[0];
+    return certified ? `a kept certificate's, under the ref ${certified.ref}` : null;
   }
 
   machineKey(enrollment: string): EnrollmentKey | null {
@@ -144,7 +191,8 @@ export class OrgRecords {
    * A delegated machine's certificate, for its own name under the delegation it enrolled through, at the use its
    * redemption counted: kept only on a clean `verifyMachineCert`, and never when it would contest a live certificate
    * (`409 contested`, naming each and the remedies). `201` kept, `200` the same again, `409 conflict` another for a
-   * key a kept one certifies. `held` re-checks the poster's standing in the commit's synchronous step.
+   * key a kept one certifies, `409 key-held` a key another holder has under another ref (`keyHolder`, in the commit).
+   * `held` re-checks the poster's standing in the commit's synchronous step.
    */
   async storeCert(poster: Poster, body: unknown, held: Authority = always): Promise<Result<{ stored: boolean }>> {
     if (!isSigned(body, isMachineCert)) return fail(400, 'malformed', 'the body is a delegation-signed MachineCert, {body, sig}');
@@ -177,6 +225,8 @@ export class OrgRecords {
         );
       }
       return ok(() => {
+        const holder = this.keyHolder(cert.pub, kid, cert.machine);
+        if (holder !== null) return fail(409, 'key-held', `the certificate's key is ${holder}: certify a fresh key`);
         this.sql.exec('INSERT INTO machine_certs (key_id, ref, name_key, body, stored) VALUES (?, ?, ?, ?, ?)', kid, cert.machine, machineNameKey(cert.name), canonicalize(body), iso());
         this.raiseCertsVersion();
         return ok({ stored: true });

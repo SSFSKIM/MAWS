@@ -3,9 +3,12 @@
 // and the pty host, and main reaches both (and `mawsd`'s own `daemon` namespace) over its three relay sockets;
 // `detached`: the supervisor, a process that outlives the app, reached over a Unix socket, with the pty host a utility
 // process (the embedded shape); `utility`: both are Electron utility processes forked by main, as before E10.
-// MAWS_HOST_MODE wins; the e2e harness (MAWS_E2E=1) and the component harness (MAWS_HARNESS=1) take `utility`, so every
-// existing suite runs unchanged; otherwise the setting `supervisor.shape` decides (daemon: `daemon`, embedded: `detached`).
-// Whether the daemon shape can run this launch (the default profile's unit) is daemon.ts's to say.
+// MAWS_HOST_MODE wins; otherwise the setting `supervisor.shape` decides (daemon: `daemon`, embedded: `detached`), under
+// the e2e harness (MAWS_E2E=1) and the component harness (MAWS_HARNESS=1) as for the owner: P5 O3-B
+// (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md, O3-B) makes the shape the owner runs the shape the suites test, a
+// test launch's scratch profile getting a private `mawsd`. A suite pins MAWS_HOST_MODE only where the mode is what it
+// tests (the embedded shape's sentinels among them). Whether the daemon shape can run this launch (the default profile's
+// unit) is daemon.ts's to say.
 import type { SupervisorShape } from '@shared/ipc/schema/settings';
 
 export type HostMode = 'utility' | 'detached' | 'daemon';
@@ -15,7 +18,6 @@ export function hostModeFromEnv(env: NodeJS.ProcessEnv, shape: SupervisorShape):
   const asked = env.MAWS_HOST_MODE;
   if (asked && MODES.includes(asked)) return asked as HostMode;
   if (asked) console.warn(`[hosts] MAWS_HOST_MODE=${asked} is none of ${MODES.join(', ')}; using the default`);
-  if (env.MAWS_E2E === '1' || env.MAWS_HARNESS === '1') return 'utility';
   return shape === 'daemon' ? 'daemon' : 'detached';
 }
 

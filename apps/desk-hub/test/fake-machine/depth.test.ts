@@ -213,6 +213,62 @@ describe('a subscription to the replay', () => {
   });
 });
 
+describe('a step-end’s time, model and effort', () => {
+  const keyOf = (s: { turnId: string; agentId: string | null; step: number }) => `${s.turnId}/${s.agentId}/${s.step}`;
+
+  it('carry the bridge’s stamp of the end, a cut-off step its turn’s, and what the step’s start said, over the committed recording', async () => {
+    const t = depthOf(recording);
+    const main = await t.reader('main', null);
+    t.play();
+    const starts = new Map<string, Extract<Step, { k: 'step-start' }>>();
+    const ends = new Map<string, number | undefined>();
+    const turnEnds = new Map<string, number | undefined>();
+    for (const s of recording.steps) {
+      if (s.k === 'step-start') starts.set(keyOf(s), s);
+      if (s.k === 'step-end') ends.set(keyOf(s.body), s.body.t);
+      if (s.k === 'turn-end') turnEnds.set(`${s.turnId}/${s.agentId}`, s.t);
+    }
+    expect(main.stepEnds.length).toBeGreaterThan(0);
+    for (const end of main.stepEnds) {
+      const start = starts.get(keyOf(end));
+      expect(start, keyOf(end)).toBeDefined();
+      const at = ends.has(keyOf(end)) ? ends.get(keyOf(end)) : turnEnds.get(`${end.turnId}/${end.agentId}`);
+      expect(typeof at, keyOf(end)).toBe('number');
+      expect(end).toStrictEqual({ turnId: end.turnId, agentId: end.agentId, step: end.step, t: at, model: start!.model, effort: start!.effort });
+    }
+  });
+
+  it('say only what the subscription knows: one that came mid-step has its model and no effort; one known only by its chunks neither; an unstamped end no time', async () => {
+    const turnId = 't-known';
+    const known: Recording = {
+      ...recording,
+      rows: { main: [], agents: {} },
+      steps: [
+        { at: 0, k: 'turn-start', turnId, agentId: null },
+        { at: 1, k: 'step-start', turnId, agentId: null, step: 0, model: 'claude-opus-5-5', effort: 'high' },
+        { at: 2, k: 'chunk', turnId, agentId: null, step: 0, chunkIndex: 0, chunk: { kind: 'text', index: 0, text: 'Hel' } },
+        { at: 3, k: 'step-end', body: { turnId, agentId: null, step: 0 } },
+        { at: 4, k: 'step-start', turnId, agentId: null, step: 1, model: 'claude-opus-5-5', effort: null },
+        { at: 5, k: 'chunk', turnId, agentId: null, step: 1, chunkIndex: 0, chunk: { kind: 'text', index: 0, text: 'cut' } },
+        { at: 6, k: 'turn-end', turnId, agentId: null, reason: 'aborted', t: 1760000001200 },
+        { at: 7, k: 'chunk', turnId: 't-unseen', agentId: null, step: 0, chunkIndex: 0, chunk: { kind: 'text', index: 0, text: 'x' } },
+        { at: 8, k: 'step-end', body: { turnId: 't-unseen', agentId: null, step: 0, t: 1760000001500 } },
+      ],
+    };
+    const t = depthOf(known);
+    const before = await t.reader('before', null);
+    t.stepTo(3); // step 0 streams
+    const during = await t.reader('during', null);
+    t.play();
+    const cut = { turnId, agentId: null, step: 1, t: 1760000001200, model: 'claude-opus-5-5', effort: null };
+    const unseen = { turnId: 't-unseen', agentId: null, step: 0, t: 1760000001500 };
+    expect(before.stepEnds).toStrictEqual([{ turnId, agentId: null, step: 0, model: 'claude-opus-5-5', effort: 'high' }, cut, unseen]);
+    expect(during.stepEnds).toStrictEqual([{ turnId, agentId: null, step: 0, model: 'claude-opus-5-5' }, cut, unseen]);
+    expect(before.faults).toEqual([]);
+    expect(during.faults).toEqual([]);
+  });
+});
+
 describe('the reader the suites check the stream with', () => {
   it('keeps a paired block drawn past its step’s end until the row its block-row named arrives', () => {
     const r = new Dx4Reader(null);

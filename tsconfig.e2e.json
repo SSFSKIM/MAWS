@@ -63,6 +63,7 @@
     "src/engine-host/launch.ts",
     "src/engine-host/relay-health.ts",
     "src/engine-host/supervisor-files.ts", // P5 O2 M3: src/shared/host's detached transport and identity read the supervisor's files
+    "src/pty-host/files.ts", // P5 O3-B: a launch's cleanup removes the pty host's socket fallback with the profile's processes
     "src/engine-host/transport.ts",
     "src/main/git/runner.ts",
     "src/main/index/migrations.ts",

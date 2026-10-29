@@ -9,6 +9,10 @@ import { generateSigningKey, keyId, utf8 } from '../src/keys.ts';
 import {
   decodePairingCode,
   encodePairingCode,
+  entryDevice,
+  isPairedDeviceId,
+  isRpId,
+  judgeEntry,
   PAIRING_CODE_PREFIX,
   pairingFingerprint,
   pairingMac,
@@ -16,6 +20,7 @@ import {
   verifyPairingMac,
   type PairingCode,
   type PairingFields,
+  type PendingEntry,
 } from '../src/pairing.ts';
 import type { Device } from '../src/types.ts';
 
@@ -182,5 +187,69 @@ describe("the entry's fingerprint", () => {
     expect(await pairingFingerprint(ORG, MEMBER, { ...phone, passkey: { ...phone.passkey!, rpId: 'evil.example' } })).not.toBe(print);
     expect(await pairingFingerprint(ORG, MEMBER, { ...mac, stepUpPub: phone.passkey!.publicKey })).not.toBe(await pairingFingerprint(ORG, MEMBER, mac));
     expect(await pairingFingerprint('org-other', MEMBER, phone)).not.toBe(print);
+  });
+});
+
+describe("the approving side's judges", () => {
+  /** The entry the device posts for `device`: its fields, flat, and its MAC under `k`. */
+  const entryOf = async (device: Omit<Device, 'endorsement'>, k = K): Promise<PendingEntry> => {
+    const { id, ...rest } = device;
+    return { deviceId: id, ...rest, mac: await pairingMac(k, { org: ORG, member: MEMBER, device }) };
+  };
+  const pairing = (cls: Device['class'], listed: string[] = []) => ({ org: ORG, member: MEMBER, k: K, class: cls, listed: new Set(listed) });
+
+  it('rebuilds the device a state would list from an entry, with no field the entry lacks', async () => {
+    const { phone, mac } = await fixtures();
+    // The hub's own fields (`member`, `created`, `expires`) ride along on its list; they are not the device's.
+    const served = { ...(await entryOf(mac)), member: MEMBER, created: '2026-10-28T00:00:00Z', expires: '2026-10-28T00:10:00Z' };
+    expect(entryDevice(served)).toEqual(mac);
+    const device = entryDevice(await entryOf(phone));
+    expect(device).toEqual(phone);
+    expect(Object.keys(device)).not.toContain('stepUpPub');
+  });
+
+  it('takes an entry of the class asked for, its MAC under the code\'s secret, as the device the successor lists', async () => {
+    const { phone, mac } = await fixtures();
+    expect(await judgeEntry(await entryOf(mac), pairing('native-mac'))).toEqual({ ok: true, device: mac });
+    expect(await judgeEntry(await entryOf(phone), pairing('web-cards', ['mac-2']))).toEqual({ ok: true, device: phone });
+  });
+
+  it('refuses an entry whose MAC is under another secret', async () => {
+    const { mac } = await fixtures();
+    const entry = await entryOf(mac, Uint8Array.from(K, (b) => b ^ 1));
+    expect(await judgeEntry(entry, pairing('native-mac'))).toEqual({ ok: false, why: "its MAC is not under this code's secret" });
+  });
+
+  it('refuses an entry of another class than the pairing asked for', async () => {
+    const { phone, mac } = await fixtures();
+    expect(await judgeEntry(await entryOf(mac), pairing('web-cards'))).toEqual({ ok: false, why: 'of class native-mac, not web-cards' });
+    expect(await judgeEntry(await entryOf(phone), pairing('native-mac'))).toEqual({ ok: false, why: 'of class web-cards, not native-mac' });
+  });
+
+  it('refuses an entry whose id the head already lists', async () => {
+    const { mac } = await fixtures();
+    expect(await judgeEntry(await entryOf(mac), pairing('native-mac', ['mac-2']))).toEqual({ ok: false, why: 'its id is a device the head already lists' });
+  });
+
+  it('refuses an id outside base64url and a relying party that is not a host name, each MAC valid', async () => {
+    const { phone, mac } = await fixtures();
+    for (const id of ['mac 2', 'mac.2', '\x1b[2Kmac', 'a'.repeat(129)]) {
+      expect(await judgeEntry(await entryOf({ ...mac, id }), pairing('native-mac')), id).toEqual({ ok: false, why: 'its id is outside the device id grammar (base64url)' });
+    }
+    for (const rpId of ['Evil.example', 'evil..example', 'a b', 'evil\x1b[31m.example']) {
+      const device = { ...phone, passkey: { ...phone.passkey!, rpId } };
+      expect(await judgeEntry(await entryOf(device), pairing('web-cards')), rpId).toEqual({ ok: false, why: "its passkey's rpId is not a host name" });
+    }
+    expect([isPairedDeviceId('mac-2'), isPairedDeviceId('A_z-09'), isPairedDeviceId(''), isPairedDeviceId('a/b'), isPairedDeviceId('a'.repeat(128))]).toEqual([true, true, false, false, true]);
+    expect([isRpId('127.0.0.1'), isRpId('hub.example'), isRpId(`${'a'.repeat(63)}.example`), isRpId(`${'a'.repeat(64)}.example`), isRpId('-hub.example')]).toEqual([true, true, true, false, false]);
+  });
+
+  it('refuses what no state could list: a web-cards entry with a step-up key or with no passkey, and a malformed key', async () => {
+    const { phone, other } = await fixtures();
+    const stepUp = { ...(await entryOf(phone)), stepUpPub: other.pub };
+    expect(await judgeEntry(stepUp, pairing('web-cards'))).toEqual({ ok: false, why: 'a web-cards entry with a step-up key, which the class never holds (RL 5.10)' });
+    const noPasskey: Omit<Device, 'endorsement'> = { id: phone.id, class: 'web-cards', keyStorage: 'webcrypto', channelPub: phone.channelPub };
+    expect(await judgeEntry(await entryOf(noPasskey), pairing('web-cards'))).toEqual({ ok: false, why: 'a web-cards entry with no passkey' });
+    expect(await judgeEntry({ ...(await entryOf(phone)), channelPub: 'not-a-key' }, pairing('web-cards'))).toEqual({ ok: false, why: 'not a device entry the org state could list' });
   });
 });

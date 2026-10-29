@@ -6,6 +6,8 @@
 //   - a quit asks with both parts named, and `cancel` keeps the app;
 //   - `when_idle` shows the banner and quits once the replayed tasks settle (the fixture's next turn, then the engine's
 //     own follow-up turn after `background_tasks_changed []`) and the terminal's command ends (^C);
+//   - P5 O3-B: on the daemon shape, whose pty host outlives the app (P5 O2), `when_idle` waits for the tasks alone, the
+//     banner counting only them, and the terminal's command is still running after the app has quit;
 //   - a quit with nothing busy asks nothing and exits within the probe bound.
 // Run by `pnpm e2e:c12` (MAWS_C12_E2E=1), part of `pnpm verify`.
 import { randomUUID } from 'node:crypto';
@@ -16,6 +18,7 @@ import { expect, test, type ElectronApplication, type Page } from '@playwright/t
 import type { AppSessionId } from '@shared/graph/ids';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { isAlive } from './support/processes';
 
 test.skip(process.env.MAWS_C12_E2E !== '1', 'the quit e2e runs under pnpm e2e:c12 (MAWS_C12_E2E=1)');
 
@@ -68,7 +71,7 @@ function seedRecord(config: string, repo: string): string {
 const statusOf = async (page: Page, id: string) => value(await invoke(page, 'session.status', { appSessionId: id as AppSessionId }));
 
 // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured
-test('quit names a replayed session’s background work and a busy terminal; cancel keeps the app; quit when idle waits for both', async ({}, testInfo) => {
+test('quit names a replayed session’s background work and a busy terminal; cancel keeps the app; quit when idle waits for both, or for the session alone where the terminal outlives the app', async ({}, testInfo) => {
   test.setTimeout(120_000);
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-c12-quit-')));
   const repo = join(root, 'repo');
@@ -98,6 +101,9 @@ test('quit names a replayed session’s background work and a busy terminal; can
     // A cold pty can report spawn-helper or the startup wrapper as busy before the shell reaches its prompt.
     // Wait for our command, not that transient busy reading, before comparing the renderer and quit probes.
     await expect.poll(async () => value(await invoke(page, 'pty.foreground', { ptyId }))).toEqual({ process: 'sleep', busy: true });
+    // P5 O3-B: the shape this launch runs; on the daemon's the terminal belongs to the pty host under `mawsd`
+    const daemon = value(await invoke(page, 'host.status', undefined)).transport === 'daemon';
+    const terminal = value(await invoke(page, 'pty.list', undefined)).ptys.find((p) => p.ptyId === ptyId)!.pid;
 
     // a quit asks with both parts named; cancel keeps the app
     await quit(app);
@@ -109,18 +115,24 @@ test('quit names a replayed session’s background work and a busy terminal; can
     const banner = page.locator('[data-banner-host]').getByRole('status').filter({ hasText: 'MAWS will quit when' });
     await expect(banner).toHaveCount(0);
 
-    // quit when idle: the banner, then the quit once both finish
+    // quit when idle: the banner, then the quit once both finish (on the daemon shape, once the session's work does)
     await answerWith(app, 'when_idle');
     const gone = exited(app);
     await quit(app);
     await expect.poll(lines).toContain('quit-guard: 1 background work, 1 busy terminal, auto-answered when_idle');
-    await expect(banner).toHaveText(/MAWS will quit when 2 things finish/);
+    await expect(banner).toHaveText(daemon ? /MAWS will quit when 1 thing finishes/ : /MAWS will quit when 2 things finish/);
     await expect(banner.getByRole('button', { name: 'Quit now' })).toBeVisible();
     await expect(banner.getByRole('button', { name: 'Cancel' })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath('quit-when-idle.png') });
 
     // the replayed tasks settle: the fixture's next turn, then the engine's own turn after background_tasks_changed []
     value(await invoke(page, 'session.send', { appSessionId: id as AppSessionId, content: 'continue' }));
+    if (daemon) {
+      // the tasks settle and the app quits, its terminal's command still running under the pty host
+      await exitWithin(gone, 40_000, lines);
+      expect(isAlive(terminal), 'the terminal outlives the app').toBe(true);
+      return;
+    }
     await expect.poll(async () => {
       const s = await statusOf(page, id);
       return s.turn === null && s.backgroundTasks.length === 0 && s.engineState !== 'running';
