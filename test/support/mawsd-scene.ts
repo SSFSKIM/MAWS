@@ -13,7 +13,7 @@ import { vi, type Mock } from 'vitest';
 import * as z from 'zod';
 import { daemonHostFiles, daemonPaths, type DaemonPaths, type DaemonSocket } from '@shared/daemon/files';
 import { createHostSupervisor, type HostSupervisor, type HostSupervisorOptions } from '@shared/host/host-supervisor';
-import type { DocPortEnd, HostEmit, HostRuntime } from '@shared/host/runtime';
+import type { DocPortEnd, HostEmit, HostOn, HostRuntime } from '@shared/host/runtime';
 import { createHostRuntime } from '@shared/host/runtime';
 import { SocketPort } from '@shared/host/socket-port';
 import { PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY, SOCKET_PROTOCOL, splitLines } from '@shared/host/socket-protocol';
@@ -21,6 +21,7 @@ import type { HostDoc } from '@shared/ipc/host-protocol';
 import type { WireRegistry } from '@shared/ipc/registry';
 import { WIRE_MINOR } from '@shared/ipc/wire';
 import { startDaemon, type DaemonOptions, type RunningDaemon } from '../../src/mawsd/daemon';
+import { registerAttachment } from '../../src/engine-host/attachment';
 import { procStartOf } from '../../src/engine-host/supervisor-files';
 import { ptyHostSocketPath } from '../../src/pty-host/files';
 import { fakeProfile, FakeProcesses, FakeSupervisor, type FakeProfile, type FakeSupervisorOptions } from './fake-supervisor';
@@ -60,6 +61,9 @@ export interface StandInOptions extends Partial<Omit<FakeSupervisorOptions, 'run
 // ready client for the next client's connect burst, as SessionStream's undelivered tail does.
 export class StandIn {
   readonly calls: { name: string; input: unknown }[] = [];
+  // P5 O3-D M3: the engine host's presence as attachment.ts keeps it: its gone hooks run, its shell recaptures counted
+  appGone = 0;
+  shellRecaptured = 0;
   readonly pending: unknown[] = [];
   readonly docs: { message: HostDoc; end: DocPortEnd; frames: Uint8Array[]; closed: boolean }[] = [];
   supervisor!: FakeSupervisor;
@@ -79,12 +83,21 @@ export class StandIn {
     return createHostRuntime<WireRegistry>(
       (on, emit, client) => {
         this.hostEmit = emit;
-        for (const name of names)
+        for (const name of names.filter((n) => n !== 'host.attachment'))
           on(name, async (input) => {
             this.calls.push({ name, input });
             return (this.answers[name]?.(input) ?? null) as never;
           });
         if (this.kind !== 'engine-host') return;
+        // P5 O3-D M3: host.attachment served as the engine host serves it (recorded, and an `answers` hook run first)
+        const recorded = ((name: string, handler: (input: unknown, ctx: never) => Promise<unknown>) =>
+          on(name as never, async (input, ctx) => {
+            this.calls.push({ name, input });
+            this.answers[name]?.(input);
+            return handler(input, ctx as never) as never;
+          })) as unknown as HostOn;
+        registerAttachment(recorded, client, () => void this.shellRecaptured++);
+        client.presence.onGone(() => void this.appGone++);
         client.onConnect(() => {
           for (const payload of this.pending.splice(0)) this.send(payload);
         });

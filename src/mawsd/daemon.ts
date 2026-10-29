@@ -361,6 +361,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   // The app's attachment, told to a permanent link's host. Never to a parked one, which has no connection (whose end
   // already counted as {attached: false}) and must not be woken for it; one restarting hears it once it is up.
   let departure: Promise<void> = Promise.resolve(); // the latest {attached: false}'s answer: the departure's drain
+  let appOnEngine = false; // an app is attached on engine-host.sock (a second attach without a departure replaces it)
   const tellAttachment = (attached: boolean): Promise<void> => {
     if (hosts.parked('engine-host')) return Promise.resolve();
     return hosts.forward('engine-host', { name: 'host.attachment', input: { attached } }).then((answer) => {
@@ -423,8 +424,12 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     attached: () => {
       clocks.engineAttached(true); // disarms a park first
       setInterest('app', []);
-      if (permanentLink) void tellAttachment(true); // before anything of the app's is forwarded
+      // before anything of the app's is forwarded; an app it replaced departs first (the relay calls no departed() for
+      // it), so its route E, direct operations and holds end and the new one is the owner back, on the same connection
+      if (permanentLink && appOnEngine) void tellAttachment(false);
+      if (permanentLink) void tellAttachment(true);
       else availability(true);
+      appOnEngine = true;
       clientsChanged();
       if (!permanentLink) recycleEngine(); // a fresh link for this attachment
     },
@@ -437,6 +442,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       void sendInterest();
       if (permanentLink) departure = tellAttachment(false);
       else availability(false);
+      appOnEngine = false;
       clientsChanged();
     },
     // the upstream's draining close (O2), or a permanent link's {attached: false}, whose answer follows every event the

@@ -94,6 +94,29 @@ describe('the permanent client, on, to an engine host that lists host.attachment
     await until(() => seam.events.length === 3);
   });
 
+  // M3's task review: a second app replacing a still-attached one is the first one's departure; the old app's route E,
+  // direct operations, status cache and holds end, and the new one is the owner back, on the same connection
+  it('a replaced app departs before its replacement attaches: {attached: false} then true, ahead of the replacement’s requests, no recycle', async () => {
+    await scene.start({ permanentClient: true });
+    const first = await scene.app();
+    first.ready();
+    await first.request('engine.ping');
+    await until(() => attachments().length === 1);
+    const engine = scene.lastEngine();
+    expect([engine.appGone, engine.shellRecaptured]).toEqual([0, 1]);
+    const links = engine.supervisor.connections.length;
+    const before = engine.calls.length;
+    const second = await scene.app(); // first is still attached: the socket layer replaces it
+    expect(second.welcomed()).toBe(true);
+    await second.request('engine.ping');
+    await until(() => first.closed, 3_000, 'the replaced app closed');
+    expect(engine.calls.slice(before).map(({ name, input }) => (name === 'host.attachment' ? `attached ${(input as { attached: boolean }).attached}` : name))).toEqual(['attached false', 'attached true', 'engine.ping']);
+    expect(engine.appGone).toBe(1); // the replaced app's resources ended
+    expect(engine.shellRecaptured).toBe(2); // the owner back
+    expect(engine.supervisor.connections.length).toBe(links);
+    expect(scene.spawn).toHaveBeenCalledOnce();
+  });
+
   it('the departure drains through {attached: false}: what the host wrote before it saw that reaches the departing app', async () => {
     scene.engineSpawn = {
       answers: {
@@ -211,5 +234,17 @@ describe('O2’s recycle per attachment stays', () => {
     expect(engine.send({ n: 1 })).toBe(false);
     expect(engine.named('host.attachment')).toEqual([]);
     expect(seam.availability).toEqual([true, false]);
+  });
+  it('with the option off, a replaced app is O2’s: a recycle for the replacement, no signal', async () => {
+    await scene.start();
+    const first = await scene.app();
+    first.ready();
+    await first.request('engine.ping');
+    const engine = scene.lastEngine();
+    const links = engine.supervisor.connections.length;
+    const second = await scene.app();
+    await second.request('engine.ping');
+    await until(() => engine.supervisor.connections.length > links, 3_000, 'the recycle at the replacement');
+    expect(engine.named('host.attachment')).toEqual([]);
   });
 });
