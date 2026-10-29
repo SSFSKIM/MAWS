@@ -49,7 +49,7 @@ export function readClipboard(command = 'pbpaste'): Promise<string> {
  * fingerprint printed for the owner to compare with the one `pair` shows, and the device returned once the head lists
  * it. The code and `k` go to `secrets` before anything else.
  */
-export async function pairRunDevice(person: Person, code: string, secrets: Secrets, log: (line: string) => void, { id, approveMs = OWNER_MS }: { id: string; approveMs?: number }): Promise<RunDevice> {
+export async function pairRunDevice(person: Person, code: string, secrets: Secrets, log: (line: string) => void, { id, approveMs = OWNER_MS, check = () => {} }: { id: string; approveMs?: number; check?: () => void }): Promise<RunDevice> {
   secrets.add(code);
   const pairing = decodePairingCode(code);
   if (pairing === null) throw new Error('the clipboard holds no pairing code');
@@ -62,15 +62,16 @@ export async function pairRunDevice(person: Person, code: string, secrets: Secre
   const request: PendingDeviceRequest = { deviceId: entry.id, class: entry.class, keyStorage: entry.keyStorage, channelPub: entry.channelPub, stepUpPub: entry.stepUpPub, mac: await pairingMac(base64urlDecode(pairing.k), { org: pairing.org, member: pairing.member, device: entry }) };
   await person.json(PENDING_DEVICES_PATH, { body: request }, 201);
   log(`OWNER: approve ${device.id} in \`production-run.sh admin pair\`; its fingerprint is ${await pairingFingerprint(pairing.org, pairing.member, entry)}`);
-  await waitForHead(person, (state) => state.members.some((m) => m.id === device.member && m.devices.some((d) => d.id === device.id && d.channelPub === entry.channelPub)), `${device.id} in the head`, approveMs);
+  await waitForHead(person, (state) => state.members.some((m) => m.id === device.member && m.devices.some((d) => d.id === device.id && d.channelPub === entry.channelPub)), `${device.id} in the head`, approveMs, check);
   log(`${device.id}: listed in the head`);
   return device;
 }
 
 /** Waits until the head the hub serves holds for `holds`. */
-export async function waitForHead(person: Person, holds: (state: SignedOrgState['state']) => boolean, what: string, ms: number): Promise<void> {
+export async function waitForHead(person: Person, holds: (state: SignedOrgState['state']) => boolean, what: string, ms: number, check: () => void = () => {}): Promise<void> {
   const deadline = Date.now() + ms;
   for (;;) {
+    check();
     const { head } = await person.json<{ head: SignedOrgState | null }>(ORG_STATE_PATH);
     if (head !== null && holds(head.state)) return;
     if (Date.now() > deadline) throw new Error(`no ${what} within ${ms / 1000} s`);
@@ -91,40 +92,47 @@ export type ProductionOptions = {
   ready: string;
   readCode?: () => Promise<string>;
   readyMs?: number;
+  /** The run's interruption, for the machine's steps (ScriptRunner's `gate` and `signal`). */
+  interruption?: { gate: () => void; signal: AbortSignal };
 };
 
-/** Waits until `file` exists, within `ms`. */
-export async function waitForFile(file: string, ms: number): Promise<void> {
+/** Waits until `file` exists, within `ms`; `check` (the run's interruption) is asked each second. */
+export async function waitForFile(file: string, ms: number, check: () => void = () => {}): Promise<void> {
   const deadline = Date.now() + ms;
   while (!existsSync(file)) {
+    check();
     if (Date.now() > deadline) throw new Error(`${file} did not appear within ${ms / 60_000} min`);
     await sleep(1000);
   }
 }
 
-/** The production run: refused unless the hub is production's own; the device paired, the items, the owner's removal. */
+/**
+ * The production run: refused unless the hub is production's own. The device's id is printed first and its pairing
+ * made inside the run, so the owner's removal of it is the cleanup's and the read-back's however the run ends; then the
+ * items production allows (endpoint-items.ts's `PRODUCTION_CLAUSES`), and the owner's removal.
+ */
 export async function productionRun(o: ProductionOptions): Promise<number> {
   if (new URL(o.person.hub).hostname !== PRODUCTION_HOST) throw new Error(`the production run is production's alone, not ${o.person.hub}'s`);
   const tag = randomBytes(3).toString('hex');
   const id = `o10-p-${tag}`;
-  rmSync(o.ready, { force: true });
-  o.log(`OWNER: the run's device will be ${id}. Run \`production-run.sh admin pair --class native-mac\`; once its code is on the clipboard, touch ${o.ready} (the run waits ${(o.readyMs ?? OWNER_MS) / 60_000} min, then reads the clipboard and never prints it)`);
-  await waitForFile(o.ready, o.readyMs ?? OWNER_MS);
-  rmSync(o.ready, { force: true });
-  const device = await pairRunDevice(o.person, await (o.readCode ?? readClipboard)(), o.secrets, o.log, { id });
-  // The device stays in the head until the owner removes it: the cleanup says so and checks it.
-  o.cleanup.add(`the owner removes ${device.id}`, async () => {
-    const { head } = await o.person.json<{ head: SignedOrgState | null }>(ORG_STATE_PATH);
-    if (head?.state.members.some((m) => m.devices.some((d) => d.id === device.id))) throw new Error(`${device.id} is still in the head: \`production-run.sh admin remove-device ${device.id}\``);
-  });
-  const machine = new VmMachine(o.ssh, o.scratch, { directUrl: o.directUrl, log: (line) => o.log(`  vm: ${line}`), script: PRODUCTION_SCENE, label: `the production mawsd on ${o.ssh.vm}` });
+  const readyMs = o.readyMs ?? OWNER_MS;
+  const check = () => o.cleanup.check();
+  const pair = async () => {
+    rmSync(o.ready, { force: true });
+    o.log(`OWNER: the run's device will be ${id}. Run \`production-run.sh admin pair --class native-mac\`; once its code is on the clipboard, touch ${o.ready} (the run waits ${readyMs / 60_000} min, then reads the clipboard and never prints it)`);
+    await waitForFile(o.ready, readyMs, check);
+    rmSync(o.ready, { force: true });
+    return pairRunDevice(o.person, await (o.readCode ?? readClipboard)(), o.secrets, o.log, { id, check });
+  };
+  const machine = new VmMachine(o.ssh, o.scratch, { directUrl: o.directUrl, log: (line) => o.log(`  vm: ${line}`), script: PRODUCTION_SCENE, label: `the production mawsd on ${o.ssh.vm}`, ...o.interruption });
   const ownerStep = async (what: string, done: () => Promise<boolean>) => {
     o.log(`OWNER: ${what}`);
     const deadline = Date.now() + OWNER_MS;
     while (!(await done())) {
+      check();
       if (Date.now() > deadline) throw new Error(`the owner's step was not taken within ${OWNER_MS / 60_000} min: ${what}`);
       await sleep(3000);
     }
   };
-  return runEndpointAcceptance({ target: 'production', person: o.person, machine, items: o.items, cleanup: o.cleanup, secrets: o.secrets, print: o.log, admin: null, production: { device, ownerStep }, tag });
+  return runEndpointAcceptance({ target: 'production', person: o.person, machine, items: o.items, cleanup: o.cleanup, secrets: o.secrets, print: o.log, admin: null, production: { id, pair, ownerStep }, tag });
 }

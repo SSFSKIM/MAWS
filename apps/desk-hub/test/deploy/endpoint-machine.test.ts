@@ -3,11 +3,12 @@
 // with no `--` and no command words; a file that held a secret is gone before the step ends and its secret reaches no
 // argument, log or result; the step's own lines are read between its markers, past the VM's login banner; and every
 // wait is bounded.
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { composeScript, ScriptRunner, VmMachine, type Ssh } from '../../deploy/endpoint-machine.ts';
+import { Cleanup } from '../../deploy/proof.ts';
 
 /** A stand-in for devcloud: records its argv, the mode of the file on its stdin and the script, answers `reply`. */
 function standin(reply: (script: string) => string, { exit = 0, delayS = 0 } = {}): { bin: string; dir: string; calls: () => Array<{ argv: string[]; mode: string; script: string; scriptGone: boolean }> } {
@@ -98,6 +99,62 @@ describe('a step on the VM', () => {
     const run = new ScriptRunner({ devcloud: fake.bin, vm: 'vm1' }, scratch());
     await expect(run.step('slow', 'true', { ms: 500 })).rejects.toThrow(/the step slow on vm1 took longer than 0.5 s/);
   });
+});
+
+/** A devcloud that never answers: it starts a child (as devcloud's python starts `ssh`) and waits on it; both pids kept. */
+function hung(): { bin: string; pids: () => number[] } {
+  const dir = mkdtempSync(join(tmpdir(), 'ep-hung-'));
+  const bin = join(dir, 'devcloud');
+  writeFileSync(bin, `#!/bin/sh\ncat > /dev/null\nsleep 60 &\necho $! > '${dir}/child.pid'\necho $$ > '${dir}/parent.pid'\nwait\n`, { mode: 0o755 });
+  const read = (f: string) => (existsSync(join(dir, f)) ? Number(readFileSync(join(dir, f), 'utf8')) : NaN);
+  return { bin, pids: () => [read('parent.pid'), read('child.pid')] };
+}
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+const until = async (check: () => boolean, ms: number) => {
+  const deadline = Date.now() + ms;
+  while (!check() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+  return check();
+};
+
+describe('a step that does not end', () => {
+  it('is killed past its bound with every process devcloud started (its ssh), and settles on its own deadline', async () => {
+    const fake = hung();
+    const run = new ScriptRunner({ devcloud: fake.bin, vm: 'vm1' }, scratch());
+    const started = Date.now();
+    await expect(run.step('stuck', 'true', { ms: 800 })).rejects.toThrow(/took longer than 0.8 s/);
+    expect(Date.now() - started).toBeLessThan(8000);
+    const [parent, child] = fake.pids();
+    expect(Number.isInteger(parent) && Number.isInteger(child)).toBe(true);
+    expect(await until(() => !alive(parent) && !alive(child), 3000)).toBe(true);
+  }, 15_000);
+
+  it('is cancelled by the run’s interruption, and the run starts no step after it but the cleanup’s', async () => {
+    const fake = hung();
+    const cleanup = new Cleanup();
+    const run = new ScriptRunner({ devcloud: fake.bin, vm: 'vm1' }, scratch(), () => {}, { gate: () => cleanup.check(), signal: cleanup.signal });
+    const stuck = run.step('up', 'true', { ms: 60_000 });
+    await until(() => Number.isInteger(fake.pids()[1]), 5000);
+    cleanup.interrupt('interrupted by SIGINT');
+    await expect(stuck).rejects.toThrow(/cancelled: interrupted by SIGINT/);
+    const [parent, child] = fake.pids();
+    expect(await until(() => !alive(parent) && !alive(child), 3000)).toBe(true);
+    await run.settle();
+    await expect(run.step('enroll', 'true')).rejects.toThrow(/interrupted by SIGINT/);
+    // The cleanup's own steps still run.
+    const answering = standin(() => '@@BEGIN\ndown\n@@END 0\n');
+    const down = new ScriptRunner({ devcloud: answering.bin, vm: 'vm1' }, scratch(), () => {}, { gate: () => cleanup.check(), signal: cleanup.signal });
+    let said: string[] = [];
+    cleanup.add('down', async () => void (said = (await down.step('down', 'true')).lines));
+    expect(await cleanup.run()).toEqual([]);
+    expect(said).toEqual(['down']);
+  }, 20_000);
 });
 
 describe('composeScript', () => {

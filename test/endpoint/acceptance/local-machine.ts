@@ -228,7 +228,7 @@ export class LocalLaneA implements LaneAScene {
     const result = (outcome: unknown) => s.send({ t: 'rpc-result', project: this.project, opId, nonce: rpc.nonce, outcome });
     const known = this.#ops.get(opId);
     if (known !== undefined) return result(known.outcome);
-    if (this.#tombstoned.has(opId)) return result({ state: 'refused', reason: 'tombstoned' });
+    if (this.#tombstoned.has(opId)) return result({ state: 'failed', error: { code: 'tombstoned', message: `${opId} was answered not-received and given up: it never runs` } });
     const args = rpc.args as { session: string; text?: string };
     let outcome: unknown = { state: 'done', result: {} };
     if (rpc.rpc === 'send' && typeof args.text === 'string') {
@@ -396,6 +396,9 @@ export class LocalMachine implements EndpointMachine {
     }
     return [...bound];
   }
+
+  /** Nothing to wait for: the suite's own commands are bounded, and none is cancelled. */
+  async settle(): Promise<void> {}
 
   async down(): Promise<string[]> {
     this.#stopping = true;

@@ -90,6 +90,14 @@ describe('acceptance 2, lane A: a subscription followed across its resumes', () 
     expect(laneAProblems([a, holed], ['r1', 'r2', 'r3', 'r4', 'r5'])).toEqual(['the latest epoch, E2, lacks 1 row the session wrote after its oldest (first: r3)']);
   });
 
+  it('counts a row a snapshot carries twice, a restart’s snapshot too', () => {
+    const doubled = first('E1', ['r2', 'r1', 'r2'], ['r3']);
+    expect(laneAProblems([doubled], ['r1', 'r2', 'r3'])).toEqual(['after first: the snapshot of epoch E1 carries the row r2 twice']);
+    const a = first('E1', [], ['r1', 'r2']);
+    const restart: Segment = { ...first('E2', ['r2', 'r1', 'r1'], []), after: 'mawsd restart', cursor: resumeCursor(a) };
+    expect(laneAProblems([a, restart], ['r1', 'r2'])).toEqual(['after mawsd restart: the snapshot of epoch E2 carries the row r1 twice']);
+  });
+
   it('ignores session-wide messages in sminos’s numbering, while the endpoint numbers them', () => {
     const a = first('E1', [], ['r1']);
     a.events.push({ epoch: 'E1', seq: 2, message: { kind: 'presence', sub: null, n: null, body: {} } });

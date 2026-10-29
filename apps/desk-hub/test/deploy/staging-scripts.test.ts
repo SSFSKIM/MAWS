@@ -566,7 +566,9 @@ describe('the endpoint step', () => {
     expect(readFileSync(join(dir, 'stdin'), 'utf8')).toBe(`DESK_ACCESS_TOKEN=${token}\n`);
     expect(run.stdout).toContain('PASS 9');
     expect(run.stdout).not.toContain('a line naming a secret');
-    expect(run.stdout).toContain('production untouched: X-Desk-Build: hub@0123abcd web@master.0123abcd');
+    // Production's build header is all it compares: it says so, and claims no more.
+    expect(run.stdout).toContain('production build unchanged: X-Desk-Build: hub@0123abcd web@master.0123abcd');
+    expect(run.stdout).not.toContain('production untouched');
     expect(run.stdout).toContain('files holding the Access token or a secret the run handled: 0');
     expect(existsSync(join(state, 'endpoint.scan'))).toBe(false);
     expect(run.stdout + run.stderr).not.toContain(token);

@@ -20,6 +20,7 @@
 #                                session was given hold it (a user's prompt, or words a hook delivered; not the
 #                                model's own, nor the queue's bookkeeping): how many times a send or words arrived
 #   sminos-status | sminos-revoked   `sminos daemon status` (and whether hub.json exists); daemon/revoked.json
+#   imported <token>             how many events in sminos's project logs hold the token (words it imported)
 #   local-spawn <alias> | retire <alias>   a local `sminos spawn` from the project's checkout; its retirement
 #   down                         everything of the scene ended and removed; `LEFT …` for what could not be
 # Nothing here names the owner, the owner's profile, sminos or daemon, or the VM's own mawsd (port 47830): the scene is
@@ -92,13 +93,29 @@ restart() {
   say "serving again: mawsd pid $(mawsd_pid)"
 }
 
+# The established sockets to :443 of process $1, each cut by its own four-tuple (src and dst), never by port alone: the
+# VM's other processes (the owner's mawsd, sminos, the gateway) hold sockets to :443 too. Prints how many it cut;
+# fails when one of them is still there.
+cut_tuples() {
+  local pid=$1 n=0 here there
+  local -a tuples=()
+  mapfile -t tuples < <(ss -tnpH state established '( dport = :443 )' | grep -F "pid=$pid," | awk '{print $3, $4}')
+  for t in "${tuples[@]}"; do
+    read -r here there <<<"$t"
+    [[ -n $here && -n $there ]] || continue
+    ss -K -tnH state established "( src $here and dst $there )" >/dev/null || fail "ss -K failed on $here -> $there"
+    [[ -z $(ss -tnH state established "( src $here and dst $there )") ]] || fail "the socket $here -> $there is still there"
+    n=$((n + 1))
+  done
+  say $n
+}
+
 cut_hub() {
-  local pid ports n=0 p
+  local pid n
   pid=$(mawsd_pid); [[ -n $pid ]] || fail "no scratch mawsd running"
-  ports=$(ss -tnpH state established '( dport = :443 )' | grep -F "pid=$pid," | awk '{print $3}' | sed 's/.*://' | sort -u)
-  for p in $ports; do ss -K -tnH state established "( sport = :$p )" >/dev/null && n=$((n + 1)); done
+  n=$(cut_tuples "$pid") || { say "$n"; exit 1; }
   ((n > 0)) || fail "mawsd pid $pid holds no socket to :443"
-  say "cut $n socket(s) of mawsd pid $pid to :443"
+  say "cut $n socket(s) of mawsd pid $pid to :443, each by its own tuple"
 }
 
 lane_a_up() {
@@ -219,9 +236,10 @@ case $verb in
   lane-a-resume) lane_a_resume ;;
   transcript) transcript "${1:-}" "${2:-}" ;;
   sminos-status) as $SMINOS daemon status; [[ -e $S/daemon/hub.json ]] && say "hub.json: present" || say "hub.json: absent" ;;
+  imported) [[ ${1:-} =~ ^[a-z0-9-]{4,64}$ ]] || fail "a marker token"; { find $S -path '*/log/*.jsonl' -type f -exec cat {} + 2>/dev/null | grep -cF -- "$1"; true; } ;;
   sminos-revoked) if [[ -f $S/daemon/revoked.json ]]; then python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))))' $S/daemon/revoked.json; else say none; fi ;;
   local-spawn) word "${1:-}"; inns runuser -u $U -- env -i "${SCENE_ENV[@]}" bash -c "cd $W && exec $SMINOS spawn $1 'o10-m11: a local spawn; answer ok' --cwd $W" ;;
   retire) word "${1:-}"; as bash -c "cd $W && exec $SMINOS retire $1" ;;
   down) down ;;
-  *) fail "scene.sh check | up | enroll <name> | mawsd <args…> | restart | cut-hub | listening | log-size <log> | log-since <log> <bytes> | lane-a-up <project> <name> | lane-a-stop | lane-a-resume | transcript <session> [token] | sminos-status | sminos-revoked | local-spawn <alias> | retire <alias> | down" ;;
+  *) fail "scene.sh check | up | enroll <name> | mawsd <args…> | restart | cut-hub | listening | log-size <log> | log-since <log> <bytes> | lane-a-up <project> <name> | lane-a-stop | lane-a-resume | transcript <session> [token] | sminos-status | sminos-revoked | imported <token> | local-spawn <alias> | retire <alias> | down" ;;
 esac

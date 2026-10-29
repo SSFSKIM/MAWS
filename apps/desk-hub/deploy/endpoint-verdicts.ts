@@ -89,7 +89,10 @@ export function laneAProblems(segments: Segment[], produced: string[]): string[]
         if (segment.snapshot.epoch !== subbed.epoch || segment.snapshot.seq !== subbed.seq) problems.push(`${where}: the snapshot at (${segment.snapshot.epoch}, ${segment.snapshot.seq}), the answer at (${subbed.epoch}, ${subbed.seq})`);
         if (segment.snapshot.message.kind !== 'snapshot' || segment.snapshot.message.n !== 0) problems.push(`${where}: the snapshot is no sminos snapshot at n 0`);
       }
-      state = { seq: subbed.seq + 1, n: 1, rows: new Set(segment.snapshot ? snapshotRows(segment.snapshot.message) : []) };
+      const snapped = segment.snapshot ? snapshotRows(segment.snapshot.message) : [];
+      const twice = snapped.filter((uuid, at) => snapped.indexOf(uuid) !== at);
+      for (const uuid of new Set(twice)) problems.push(`${where}: the snapshot of epoch ${subbed.epoch} carries the row ${uuid} twice`);
+      state = { seq: subbed.seq + 1, n: 1, rows: new Set(snapped) };
       epochs.set(subbed.epoch, state);
     }
     if (state === undefined) continue;
@@ -151,9 +154,17 @@ export class ItemReport {
     for (const item of items) this.#checks.set(item, []);
   }
 
+  /** Whether a check may run here: null, or why not (production's allowlist; endpoint-items.ts's `productionAdmit`). */
+  admit: ((item: string, check: string) => string | null) | null = null;
+
   /** Runs one check: its detail when it passes, `{skip}` when it cannot run in this scene, its error when it fails. */
   async check(item: string, check: string, run: () => Promise<string | { skip: string }>): Promise<boolean> {
     this.signal?.throwIfAborted();
+    const refused = this.admit?.(item, check) ?? null;
+    if (refused !== null) {
+      this.add(item, 'skip', check, refused);
+      return true;
+    }
     try {
       const detail = await run();
       if (typeof detail === 'string') this.add(item, 'pass', check, detail);

@@ -8,7 +8,7 @@
 // What the run cannot show on a machine with no app (lane B's live half, O3), what is another child's (O12's phase 2,
 // O14's cutover for item 7), and what only the suites can show (a kill between an fsync and its answer) are named under
 // the item, never counted as shown.
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { canonicalize, endorseDevice, generateSigningKey, keyId, OP_HORIZON_S, signEvent, verifyEvent, verifyListing, type Action, type ByteDuplex, type Certificates, type KeyHolder, type Listing, type LogEventV2, type OrgState, type RevokedKey, type Signed, type SignedOrgState } from 'org-protocol';
 import { ProjectSocket, type DeviceHuman } from 'org-protocol/test-support';
 import type { Person } from './hub';
@@ -19,6 +19,49 @@ import type { Cleanup } from './proof';
 
 export const ITEMS = ['2', '3', '4', '5', '8', '9'] as const;
 export type Item = (typeof ITEMS)[number];
+
+/** The words every event the run posts to a project log carries, so the owner can tell its residue from anything else. */
+export const EVENT_MARK = 'o10 m11 acceptance';
+
+/**
+ * The run's writes to the hub's stored data (a device's signed `human` in a project's log), each admitted before it is
+ * posted: in the run's project alone, marked `EVENT_MARK`, and in production at most `limit` (the owner's allowance), an
+ * event refused or lost counting as well, since it may have been stored. What was posted is kept as the run's residue:
+ * a project's log is never pruned.
+ */
+export class HubWrites {
+  readonly #events: string[] = [];
+  #admitted = 0;
+  private constructor(
+    readonly project: string,
+    readonly limit: number | null,
+  ) {}
+
+  static production(project: string, limit = 5): HubWrites {
+    return new HubWrites(project, limit);
+  }
+
+  static staging(project: string): HubWrites {
+    return new HubWrites(project, null);
+  }
+
+  /** Throws unless an event of `text` may go to `project`; counts it when it may. */
+  admit(project: string, text: string): void {
+    if (project !== this.project) throw new Error(`the run writes events only in the machine’s project ${this.project}, not ${project}`);
+    if (!text.startsWith(`${EVENT_MARK} `)) throw new Error(`an event the run writes is marked \`${EVENT_MARK}\``);
+    if (this.limit !== null && this.#admitted >= this.limit) throw new Error(`the run writes at most ${this.limit} events to this hub`);
+    this.#admitted++;
+  }
+
+  /** The hub's answer to one the run posted. */
+  posted(project: string, answer: { t?: string; writer?: unknown; seq?: unknown }): void {
+    if (project === this.project && answer.t === 'human-ack') this.#events.push(`${String(answer.writer)}:${String(answer.seq)}`);
+  }
+
+  kept(): string[] {
+    return [`the project ${this.project} on the hub, and in it the run’s events ${this.#events.length ? this.#events.join(', ') : '(none acknowledged)'}`];
+  }
+}
 
 /** The lane A session the run watches, as its sminos reported it. */
 export type LaneA = { session: string; launch: string; alias: string; project: string; checkout: string };
@@ -38,9 +81,9 @@ export type Scene = {
   owner: RunDevice;
   /** Signs the head's successor as the admin, posts it and adds it to the chain; null where the run holds no admin key
    * (production: the owner signs there, by hand). */
-  amend: ((what: string, edit: (s: OrgState) => void | Promise<void>) => Promise<SignedOrgState>) | null;
+  amend: ((what: string, edit: (s: OrgState) => void | boolean) => Promise<SignedOrgState | null>) | null;
   /** The successor signed but not posted (for a delivery over a channel), and its posting after. */
-  sign: ((edit: (s: OrgState) => void | Promise<void>) => Promise<SignedOrgState>) | null;
+  sign: ((edit: (s: OrgState) => void) => Promise<SignedOrgState>) | null;
   post: ((state: SignedOrgState) => Promise<void>) | null;
   /** A second member who holds nothing on the machine, and their device; null in production. */
   other: RunDevice | null;
@@ -55,6 +98,10 @@ export type Scene = {
   log(line: string): void;
   /** The run's tag, in every name and marker it makes. */
   tag: string;
+  /** What the run made that the read-back after its cleanup looks for: every device id it added. */
+  made: { devices: string[] };
+  /** The run's writes to the hub's stored data, each admitted by it (production's allowance enforced there). */
+  hubWrites: HubWrites;
 };
 
 const NO_CERTS: Certificates = { certs: [], retirements: [] };
@@ -126,7 +173,9 @@ const entry = (d: RunDevice) => ({ id: d.id, class: d.clientClass, keyStorage: '
 async function addDevice(scene: Scene, member: string, prefix: string, endorse: (d: ReturnType<typeof entry>) => Promise<Record<string, unknown>>): Promise<RunDevice> {
   if (scene.amend === null) throw new Error('no admin key in this run');
   const device = await freshDevice(member, `o10-${prefix}-${scene.tag}`);
-  scene.cleanup.add(`revoke ${device.id}`, async () => void (await removeDevice(scene, device, 'revoked').catch(() => undefined)));
+  scene.made.devices.push(device.id);
+  // Against the head as the hub serves it then (amend reads it afresh); a failure is the cleanup's to report.
+  scene.cleanup.add(`revoke ${device.id}`, async () => void (await removeDevice(scene, device, 'revoked')));
   const signed = { ...entry(device), ...(await endorse(entry(device))) };
   await scene.amend(`${device.id} added`, (s) => void s.members.find((m) => m.id === member)!.devices.push(signed as never));
   return device;
@@ -135,11 +184,11 @@ async function addDevice(scene: Scene, member: string, prefix: string, endorse: 
 /** The successor that takes `device` out: revoked (its keys never verify again), or retired as an honest departure. */
 async function removeDevice(scene: Scene, device: RunDevice, how: 'revoked' | 'retired'): Promise<SignedOrgState | null> {
   if (scene.amend === null) throw new Error('no admin key in this run');
-  const head = scene.chain().at(-1)!.state;
-  if (!head.members.some((m) => m.devices.some((d) => d.id === device.id))) return null;
   const keys = await heldKeys(device);
+  // Nothing posted when the head the hub serves no longer lists it (amend's edit runs on that head).
   return scene.amend(`${device.id} ${how}`, (s) => {
-    const m = s.members.find((x) => x.id === device.member)!;
+    const m = s.members.find((x) => x.id === device.member);
+    if (m === undefined || !m.devices.some((d) => d.id === device.id)) return false;
     m.devices = m.devices.filter((d) => d.id !== device.id);
     if (how === 'revoked') s.revoked.push(...revokedEntries(keys));
     else s.retired.push(...keys.map((k) => ({ ...k, notAfter: s.issued })));
@@ -157,6 +206,8 @@ const send = (scene: Scene, remote: Remote, text: string, fields: Partial<Action
 
 /** A text no other of the run's holds, ending in its token, for counting a send's or words' arrival in the transcript. */
 const marker = (scene: Scene, what: string) => `o10-m11 ${what} ${scene.tag}-${randomBytes(5).toString('hex')}`;
+/** A person's words for the session: `marker`'s, under the run's event mark. */
+const words = (scene: Scene, what: string) => `${EVENT_MARK} ${what} ${scene.tag}-${randomBytes(5).toString('hex')}`;
 const tokenOf = (text: string) => text.slice(text.lastIndexOf(' ') + 1);
 
 /** How many times `text` reached the session, now. */
@@ -383,6 +434,17 @@ function replaying(inner: ByteDuplex): { device: ByteDuplex; replayLast(): void 
   };
 }
 
+/**
+ * Whether the late original was answered as a tombstoned op: sminos refuses it `tombstoned` before its ledger
+ * (sminos_rpc.py, `refuse_loose`), as DX6's failed outcome, which the endpoint passes on as `{state: 'failed', error:
+ * {code: 'tombstoned'}}`; `{state: 'refused', reason: 'tombstoned'}` is the same refusal in RL4's words.
+ */
+export function isTombstoned(answer: { t: unknown; outcome?: unknown }): boolean {
+  if (answer.t !== 'done') return false;
+  const o = answer.outcome as { state?: unknown; reason?: unknown; error?: { code?: unknown } } | undefined;
+  return (o?.state === 'failed' && o.error?.code === 'tombstoned') || (o?.state === 'refused' && o.reason === 'tombstoned');
+}
+
 export async function item3(scene: Scene, report: ItemReport): Promise<void> {
   await report.check('3', 'an action frame the relay replays closes the channel, and the action runs once', async () => {
     // The relay lets the original through and sends its bytes again once it was acknowledged: a frame repeated at
@@ -399,10 +461,10 @@ export async function item3(scene: Scene, report: ItemReport): Promise<void> {
     await r.done(action.opId);
     relay!.replayLast();
     const reason = await Promise.race([r.closed, sleep(20_000).then(() => 'still open')]);
-    if (reason === 'still open') throw new Error('the channel stayed open after a replayed frame');
+    if (reason !== 'sequence') throw new Error(reason === 'still open' ? 'the channel stayed open after a replayed frame' : `the channel closed ${reason}, not sequence`);
     const count = await effects(scene, text);
     if (count !== 1) throw new Error(`the action ran ${count} times`);
-    return `closed ${reason}; the transcript shows the send once`;
+    return 'closed `sequence`; the transcript shows the send once';
   });
   await report.check('3', 'an action resent under a used nonce is refused `replayed`', async () => {
     const r = await open(scene, scene.owner, 'direct');
@@ -503,7 +565,8 @@ export async function item3(scene: Scene, report: ItemReport): Promise<void> {
     r.close();
     const count = await effects(scene, text, 3000);
     if (count !== 0) throw new Error(`the late original ran ${count} times`);
-    return `the query answered not-received; the original, let go after it, was answered ${answer.t === 'done' ? JSON.stringify(answer.outcome) : `refused ${String(answer.reason)}`} and never ran`;
+    if (!isTombstoned(answer)) throw new Error(`the late original was answered ${JSON.stringify(answer.t === 'done' ? answer.outcome : answer)}, not its tombstone's refusal`);
+    return `the query answered not-received; the original, let go after it, was answered ${JSON.stringify(answer.outcome)} and never ran`;
   });
   await report.check('3', 'an `opCreated` older than OP_HORIZON is refused `expired`, and so is its query', async () => {
     const r = await open(scene, scene.owner, 'direct');
@@ -627,6 +690,9 @@ export async function item4(scene: Scene, report: ItemReport): Promise<void> {
     const mark = await scene.machine.logMark();
     scene.cleanup.add(`retire ${alias}`, () => probe.retire(alias));
     const spawned = await probe.localSpawn(alias);
+    // Production's guard (vm/production.sh): 10, a claude supervisor or background seat of the owner's ran already, so
+    // nothing was spawned; 11, the seat's environment was not the scratch config's and the stub's, so it was killed.
+    if (spawned.rc === 10 || spawned.rc === 11) return { skip: `not shown on production: ${spawned.lines.at(-1) ?? `exit ${spawned.rc}`}` };
     if (spawned.rc !== 0) throw new Error(`sminos spawn exited ${spawned.rc}: ${spawned.lines.slice(-3).join(' / ')}`);
     const touched = (await scene.machine.logSince(mark)).filter((l) => l.includes(alias) || /endpoint: .*(rpc|spawn)/i.test(l));
     if (touched.length) throw new Error(`the endpoint's log mentions it: ${touched[0]}`);
@@ -669,37 +735,31 @@ export async function item5(scene: Scene, report: ItemReport): Promise<void> {
   });
   await report.check('5', 'a device’s words arrive verified and are delivered into the session', async () => {
     if (probe === null) return { skip: 'no real sminos in this scene: words reach the session through it' };
-    const text = marker(scene, 'words');
+    const text = words(scene, 'words');
     await say(scene, scene.owner, text);
     const count = await until(async () => (await arrivals(scene, text)) || null, 'the words in the transcript', 90_000, 3000);
     if (count !== 1) throw new Error(`delivered ${count} times`);
     return 'the owner device’s signed human event reached the transcript once';
   });
-  await report.check('5', 'the machine’s own events go up signed, and a forced resend changes nothing at the hub', async () => {
+  await report.check('5', 'the machine’s own events go up signed', async () => {
     const socket = await ProjectSocket.open(scene.hub, scene.person.headers, scene.laneA.project, 15_000);
     try {
       await socket.catchUp(0);
       const own = socket.log.filter((e) => e.event.writer.startsWith(`${scene.name}/`));
       if (own.length === 0) return { skip: 'the machine wrote no event of its own to the project in this run' };
       const head = scene.chain().at(-1)!.state;
-      for (const { event } of own.slice(-5)) {
+      for (const { event } of own) {
         const verdict = await verifyEvent({ org: scene.org, project: scene.laneA.project }, head, event as unknown as LogEventV2, NO_CERTS, new Date());
         if (!verdict.ok) throw new Error(`${event.writer}:${event.seq} does not verify: ${verdict.code}`);
       }
-      const before = new Map(own.map((e) => [`${e.event.writer}:${e.event.seq}`, canonicalize(e.event)]));
-      await scene.machine.cutHubSocket();
-      await until(async () => (await scene.machine.status()).hub.connected, 'the hub link back', 90_000, 2000);
-      await sleep(5000);
-      const again = await ProjectSocket.open(scene.hub, scene.person.headers, scene.laneA.project, 15_000);
-      await again.catchUp(0);
-      again.close();
-      const changed = again.log.filter((e) => before.has(`${e.event.writer}:${e.event.seq}`) && before.get(`${e.event.writer}:${e.event.seq}`) !== canonicalize(e.event));
-      if (changed.length) throw new Error(`${changed.length} stored events changed after the resend`);
-      return `${own.length} own events verify under the machine's key; after a cut and the resend the hub holds each byte-identical`;
+      return `all ${own.length} of the machine's events in the project verify under its key`;
     } finally {
       socket.close();
     }
   });
+  // The hub asks a resend only for a gap it sees, which nothing here can make it see: a live run can't force one, and a
+  // check that compared the stored events after a cut would show no resend at all.
+  report.add('5', 'skip', 'a forced resend is byte-identical', 'not forceable live (the hub asks `resend` only on a gap it sees); test/endpoint/rl10/conversation.json resends from the signature ledger and compares the bytes');
   if (probe !== null && scene.amend !== null) {
     await report.check('5', 'a new state’s revocations reach sminos, and an owed delivery from the removed device is not delivered as words', async () => {
       const lost = await addDevice(scene, scene.owner.member, 'o4', (d) => endorseBy(scene, scene.owner, d));
@@ -707,11 +767,12 @@ export async function item5(scene: Scene, report: ItemReport): Promise<void> {
       await probe.stopSession();
       let resumed = false;
       scene.cleanup.add('resume the lane A session', async () => void (resumed ? undefined : await probe.resumeSession()));
-      const revokedText = marker(scene, 'revoked');
-      const keptText = marker(scene, 'kept');
+      const revokedText = words(scene, 'revoked');
+      const keptText = words(scene, 'kept');
       await say(scene, lost, revokedText);
       await say(scene, scene.owner, keptText);
-      await sleep(10_000); // sminos imports both, and owes their delivery to a session with no engine
+      // sminos imports both and owes their delivery to a session with no engine: revoked only once both are in its log.
+      await until(async () => ((await probe.imported(tokenOf(revokedText))) > 0 && (await probe.imported(tokenOf(keptText))) > 0) || null, 'both words in sminos’s project log', 90_000, 3000);
       await removeDevice(scene, lost, 'revoked');
       const kid = await keyId(lost.channel.pub);
       const held = await until(async () => {
@@ -727,7 +788,7 @@ export async function item5(scene: Scene, report: ItemReport): Promise<void> {
       if (refused !== 0) throw new Error('the removed device’s words were delivered');
       return `sminos holds the revocation (version ${held.version ?? '?'}); after the session came back the other device's words were delivered and the removed one's never`;
     });
-  } else report.add('5', probe === null ? 'skip' : 'skip', 'revocations reach sminos', probe === null ? 'no real sminos in this scene' : 'no admin key in this run (production: the owner’s remove-device step shows it)');
+  } else report.add('5', 'skip', 'revocations reach sminos', probe === null ? 'no real sminos in this scene' : 'no admin key in this run (production: the owner’s remove-device step shows it)');
   report.bySuites('5', 'test/endpoint/rl10/conversation.json pins RL10 frame by frame (a byte-identical resend from the signature ledger, a forged event refused, `query` and the tombstone); lane A actions by opId are item 3’s, through sminos’s ledger');
   report.outstanding('5', 'the sminos half is O12 phase 2’s RL10 client; this item is joint with it');
 }
@@ -737,8 +798,10 @@ async function say(scene: Scene, who: RunDevice, text: string): Promise<void> {
   const socket = await ProjectSocket.open(scene.hub, scene.person.headers, scene.laneA.project, 15_000);
   try {
     const draft: Omit<DeviceHuman, 'sig'> = { kind: 'human', from: 'human', member: who.member, to: [{ session: scene.laneA.session, alias: scene.laneA.alias }], text, created: new Date().toISOString(), nonce: randomBytes(16).toString('base64url') };
+    scene.hubWrites.admit(scene.laneA.project, text);
     const event = await signEvent({ org: scene.org, project: scene.laneA.project }, draft, who.channel.privateKey, who.channel.pub);
     const answer = await socket.say(event);
+    scene.hubWrites.posted(scene.laneA.project, answer as { t?: string });
     if ((answer as { t?: string }).t !== 'human-ack') throw new Error(`the hub refused the words: ${JSON.stringify(answer).slice(0, 200)}`);
   } finally {
     socket.close();
@@ -873,13 +936,21 @@ export async function item2(scene: Scene, report: ItemReport): Promise<void> {
       }
       return said;
     })();
-    await scene.hubDeploy!();
-    deploying = false;
-    const during = await watching;
+    let during: string[];
+    try {
+      await scene.hubDeploy!();
+    } finally {
+      // The watcher stops at its next turn (2 s at most, or the resume it is in), and is joined before anything else.
+      deploying = false;
+      during = await watching;
+    }
+    // A long deploy outlasts the stretch it started with: a new one, so the forced cut falls among rows being written.
+    await ticks(30);
+    await flowing(relayed, 'after the deploy, before the forced cut');
     const cut = await scene.machine.cutHubSocket();
     const reason = await relayed.closed(60_000);
     const resumed = await relayed.subscribe('the hub deploy and its forced cut', 'replay');
-    await flowing(relayed, 'after the deploy');
+    await flowing(relayed, 'after the forced cut');
     return `${during.length ? `${during.join('; ')}; ` : 'the deploy cut nothing; '}${cut}; closed ${reason}, resumed (${resumed})`;
   });
 
@@ -922,6 +993,80 @@ export async function item2(scene: Scene, report: ItemReport): Promise<void> {
   report.outstanding('2', 'lane B’s live half needs an app-less event source on a machine with no app, O3’s (P5 DL 29); until then M8’s suites prove it (test/endpoint/subscriptions-b.test.ts)');
 }
 
+// ---- production ------------------------------------------------------------------------------------------------------
+
+const both = (check: string) => ['relayed', 'direct'].map((carrier) => check.replace('<carrier>', carrier));
+
+/**
+ * What production runs (acceptance 7), by name: each clause VM-local on the production machine (channels and
+ * subscriptions from the paired device, the stub lane A session and actions to it, `mawsd restart` of its unit, a cut of
+ * mawsd's own RL1 socket, its policy toggled and restored), or a read of the hub. `hub-write` clauses post to the
+ * production hub's stored data, which the owner allowed within `HubWrites.production`'s bounds (five marked events in
+ * the machine's own project, kept as residue); `productionAdmit(false)` holds them back. Any clause not named here is
+ * skipped, so a clause added later runs in production only once someone lists it.
+ */
+export const PRODUCTION_CLAUSES: Record<string, 'vm' | 'read' | 'hub-write'> = Object.fromEntries([
+  ...both('9 the handshake and caps over the <carrier> carrier').map((c) => [c, 'vm']),
+  ...both('9 an unknown device refused over the <carrier> carrier').map((c) => [c, 'vm']),
+  ...both('9 a device claiming another class refused over the <carrier> carrier').map((c) => [c, 'vm']),
+  ...both('9 an altered frame closes the channel over the <carrier> carrier').map((c) => [c, 'vm']),
+  ['9 the direct listener binds only the tailnet’s addresses', 'vm'],
+  ['9 a call before the handshake verifies closes the connection', 'vm'],
+  ['9 handshakes past the per-source limit answered `busy`', 'vm'],
+  ['8 a `view` read on a session the member holds nothing on', 'vm'],
+  ['8 a `converse`, an `approve` and a `manage` act refused below their grades', 'vm'],
+  ['8 a spawn by a member without the machine’s `spawn` right', 'vm'],
+  ['8 the machine’s content-free reads, for any member', 'vm'],
+  ['8 an owner’s spawn needs step-up', 'vm'],
+  ['8 what production’s offer table doesn’t offer is refused `not-offered`, the owner’s too', 'vm'],
+  ['3 an action frame the relay replays closes the channel, and the action runs once', 'vm'],
+  ['3 an action resent under a used nonce is refused `replayed`', 'vm'],
+  ['3 an action more than 60 s old by the machine’s clock is refused `stale`', 'vm'],
+  ['3 a reseal under the same opId returns the stored result and runs nothing', 'vm'],
+  ['3 a lost acknowledgement resolves through query, answered only to the member who sent it', 'vm'],
+  ['3 `not-received` only once the id is tombstoned: the original, released late, is refused', 'vm'],
+  ['3 an `opCreated` older than OP_HORIZON is refused `expired`, and so is its query', 'vm'],
+  ['3 an action frame altered in the relay closes the channel, and nothing runs', 'vm'],
+  ['3 the run’s own device, removed by the owner, is refused at once', 'vm'],
+  ['4 `--read-only on` refuses every action, while reads and subscriptions go on', 'vm'],
+  ['4 a spawn whose permission mode is above the ceiling is refused `ceiling`', 'vm'],
+  ['4 a spawn into a directory that is no known checkout is refused `unknown-checkout`', 'vm'],
+  // Ruled: only when vm/production.sh shows no claude supervisor or background seat of the owner's before it, and the
+  // seat's environment the scratch config's and the stub's after it (else the seat is killed and the clause skipped).
+  ['4 a local `sminos spawn` from the machine runs, untouched by the endpoint', 'vm'],
+  ['5 sminos runs no DX2 uplink, and holds no hub credential', 'read'],
+  ['5 the hub sees the machine through its endpoint alone', 'read'],
+  ['5 the session’s listing goes up signed by the machine', 'read'],
+  ['5 the machine’s own events go up signed', 'read'],
+  ['5 a device’s words arrive verified and are delivered into the session', 'hub-write'],
+  ['5 the owner’s removal reaches the machine’s sminos', 'read'],
+  ['2 both carriers subscribed to the lane A session, rows flowing', 'vm'],
+  ['2 the endpoint’s RL1 socket cut by force: the relayed channel resumes by replay, the direct one never drops', 'vm'],
+  ['2 `mawsd restart`: both channels close `restart` and resume by snapshot under a new epoch', 'vm'],
+  ...both('2 lane A over the <carrier> carrier: every event once, by the endpoint’s cursor, sminos’s numbering and the transcript').map((c) => [c, 'vm']),
+]);
+
+/** Clauses production never runs, and why. */
+const NEVER_IN_PRODUCTION: Record<string, string> = {
+  '2 a hub deploy, then the forced cut: the relayed channel resumes by replay': 'never in production: no hub deploy',
+  '9 a revoked device refused, and one a new state removes closed `removed`, over both carriers': 'never in production: the run amends no org state there',
+  '3 a device a new org state removes is refused at once': 'never in production: the run amends no org state there',
+  '3 a device removed by a state delivered over an admin’s channel is refused at once': 'never in production: the run amends no org state there',
+  '5 a new state’s revocations reach sminos, and an owed delivery from the removed device is not delivered as words': 'never in production: the run amends no org state there (the owner’s removal shows the revocation)',
+};
+
+/** Production's gate for `ItemReport.admit`: its allowlist, its hub writes behind `hubWrites`. */
+export function productionAdmit(hubWrites: boolean): (item: string, check: string) => string | null {
+  return (item, check) => {
+    const key = `${item} ${check}`;
+    if (NEVER_IN_PRODUCTION[key] !== undefined) return NEVER_IN_PRODUCTION[key];
+    const kind = PRODUCTION_CLAUSES[key];
+    if (kind === undefined) return 'not on production’s allowlist';
+    if (kind === 'hub-write' && !hubWrites) return 'writes the production hub’s stored data, which this run is not allowed';
+    return null;
+  };
+}
+
 /** The items in the run's order: the ones that change the machine's links last, the removal of the run's own device
  * (production's owner step) after everything. */
 export async function runItems(scene: Scene, report: ItemReport, items: readonly string[]): Promise<void> {
@@ -933,6 +1078,7 @@ export async function runItems(scene: Scene, report: ItemReport, items: readonly
     ['5', item5],
     ['2', item2],
   ];
+  if (scene.target === 'production') report.admit = productionAdmit(true);
   for (const [item, run] of order) {
     if (!items.includes(item)) continue;
     scene.log(`-- item ${item}`);
@@ -950,15 +1096,25 @@ export async function runItems(scene: Scene, report: ItemReport, items: readonly
  * Production's last step: the owner removes the run's own device by hand while its channel is open. Its channel closes
  * `removed` at once and a new one is refused (item 3), and the removal's revocation reaches the machine's sminos (item 5).
  */
+/**
+ * How a channel ended around a removal the run waits for: its close, watched from before the wait began; `still open`
+ * only when no close came within `ms` after the removal was seen (the deadline starts there, not at the wait's start).
+ */
+export function closeAfterRemoval(closed: Promise<string>, removal: Promise<unknown>, ms: number): Promise<string> {
+  return Promise.race([closed, removal.then(() => sleep(ms)).then(() => 'still open')]);
+}
+
 async function ownersRemoval(scene: Scene, report: ItemReport, items: readonly string[]): Promise<void> {
   const device = scene.owner;
   const r = await open(scene, device, 'relayed');
-  const closing = Promise.race([r.closed, sleep(60_000).then(() => 'still open')]);
   const removed = async () => {
     const { head } = await scene.person.json<{ head: SignedOrgState | null }>('/api/org/state');
     return head !== null && !head.state.members.some((m) => m.devices.some((d) => d.id === device.id));
   };
-  await scene.ownerStep!(`run \`production-run.sh admin remove-device ${device.id}\` now; the run watches its channel`, removed);
+  const stepping = scene.ownerStep!(`run \`production-run.sh admin remove-device ${device.id}\` now; the run watches its channel`, removed);
+  const closing = closeAfterRemoval(r.closed, stepping, 30_000);
+  closing.catch(() => {}); // the owner's step failing is reported by `stepping` itself
+  await stepping;
   const kid = await keyId(device.channel.pub);
   if (items.includes('3')) {
     await report.check('3', 'the run’s own device, removed by the owner, is refused at once', async () => {
@@ -980,4 +1136,3 @@ async function ownersRemoval(scene: Scene, report: ItemReport, items: readonly s
   }
 }
 
-export { randomUUID };

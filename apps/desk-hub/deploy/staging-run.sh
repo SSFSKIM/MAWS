@@ -263,7 +263,7 @@ case $step in
     # `endpoint-vm setup`) enrolled and listed by the admin device, the items run over the relay and the tailnet, its hub
     # deploy item this script's own `deploy` step; then everything it made undone by the run itself. The token reaches
     # the command on its stdin alone; what else it handled (the enrollment code and its secrets) is listed in $SCAN for
-    # the search after it; production's X-Desk-Build compared before and after.
+    # the search after it; production's X-Desk-Build compared before and after (its build alone).
     [[ -f $H/keys.json ]] || { print -r -- "no admin device keys at $H/keys.json (DESK_STAGING_DEVICE): stop. Nothing was changed."; exit 2; }
     LOG=$O/endpoint-$(stamp).log; : > $LOG
     SCAN=$O/endpoint.scan; : > $SCAN
@@ -275,7 +275,9 @@ case $step in
     finish() {
       (( finished )) && return; finished=1
       after=$(header $PROD) || after="unread"
-      if [[ $after == "$before" ]]; then say "production untouched: $after"; else say "production build CHANGED or unread: $after"; fi
+      # Production's build header is what this compares, and all it can vouch for: the run's own guards keep it off
+      # production (endpoint-acceptance refuses it by name).
+      if [[ $after == "$before" ]]; then say "production build unchanged: $after"; else say "production build CHANGED or unread: $after"; fi
       leaked=$(secret_scan <(print -r -- "$T"; cat $SCAN) $LOG)
       unset T
       rm -f $SCAN

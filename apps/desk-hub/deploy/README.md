@@ -280,7 +280,13 @@ One `PASS <item>`, `FAIL <item>` or `NOT SHOWN <item>: <why>` per item, the suit
 under it; then `LEFT …` for anything still there. `staging-run.sh endpoint` runs it (production compared before and
 after), `staging-run.sh endpoint-vm setup <base> | teardown` sets the scene up or removes it. Production (item 7) is a
 mode of its own, refused unless asked for by `--production --confirm-production <production's host>` with production's
-config (`endpoint-production.ts`); `vm/production.sh` is its driver, a draft not yet installed.
+config (`endpoint-production.ts`), and driven by `vm/production.sh` against the VM's own `mawsd` and sminos. It runs
+only the clauses its allowlist names (`PRODUCTION_CLAUSES` in `endpoint-items.ts`): VM-local work, reads, and at most
+five events marked `o10 m11 acceptance` posted in the machine's own project (`HubWrites`, which refuses a sixth or any
+other project itself); never a hub deploy or an org-state change, which it reports `NOT SHOWN`. Its lane A session runs
+as the owner's user, since that sminos does, against the stub model under `env -i`, with a scratch `CLAUDE_CONFIG_DIR`
+holding the sminos plugin alone and `/etc/claude-code` hidden; `down` ends it and removes the scratch directory. The
+events, the machine's project and its history stay, printed as `KEPT …` lines.
 
 ## `admin`: the owner's hand on the org state (P5 O13 M2)
 

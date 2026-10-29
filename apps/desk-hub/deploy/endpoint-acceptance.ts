@@ -17,15 +17,15 @@
 import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { generateSigningKey, keyId, signOrgState, type OrgState, type RevokedKey, type SignedOrgState } from 'org-protocol';
-import { ORG_STATE_PATH, type OrgStateView } from '../src/protocol/identity';
+import { machineProjectId, ORG_STATE_PATH, type OrgStateView } from '../src/protocol/identity';
 import { checkTestHub, PRODUCTION_HOST, readDeployConfig } from './config';
 import { readSecrets } from './deploy';
 import { Person } from './hub';
 import { composeScript, ScriptRunner, VmMachine, type EndpointMachine } from './endpoint-machine';
-import { runItems, ITEMS, type Scene } from './endpoint-items';
+import { HubWrites, runItems, ITEMS, type Scene } from './endpoint-items';
 import { DirectPacer, RelayDialer, type RunDevice } from './endpoint-remote';
 import { ItemReport, Secrets } from './endpoint-verdicts';
 import { loadAdminDevice, OrgAdmin, successor, type AdminDevice, type OrgScope } from './org-admin';
@@ -62,8 +62,11 @@ export async function readChain(person: Person, after = 0): Promise<SignedOrgSta
   }
 }
 
-/** What the run made, for the read-back after its cleanup. */
-type Made = { machines: string[]; members: string[]; devicePrefix: string };
+/**
+ * What the run made: what the read-back after its cleanup looks for (machines, members, every device id it added), and
+ * what it keeps by design (`kept`: the project it wrote events in, and those events; a project's log is never pruned).
+ */
+export type Made = { machines: string[]; members: string[]; devices: string[]; kept: string[] };
 
 /** What a run is given: its hub, the machine, and either the admin who writes the org's state or production's device. */
 export type RunOptions = {
@@ -76,8 +79,11 @@ export type RunOptions = {
   print?: (line: string) => void;
   /** The staging (or local) admin: the org's scope and the admin device whose step-up key signs its successors. */
   admin: { scope: OrgScope; device: AdminDevice } | null;
-  /** Production's run device, paired for the run (endpoint-production.ts), and the owner's steps by hand. */
-  production: { device: RunDevice; ownerStep(what: string, done: () => Promise<boolean>): Promise<void> } | null;
+  /**
+   * Production's run device: its id, named before anything is sent, and its pairing (endpoint-production.ts), made in
+   * the run so the owner's removal is the cleanup's on every exit; and the owner's steps by hand.
+   */
+  production: { id: string; pair(): Promise<RunDevice>; ownerStep(what: string, done: () => Promise<boolean>): Promise<void> } | null;
   hubDeploy?: (() => Promise<void>) | null;
   tag?: string;
 };
@@ -87,9 +93,8 @@ export type RunOptions = {
  * the machine's scene up, the second member, the machine enrolled and listed, its endpoint serving, the relay, and the
  * lane A session.
  */
-export async function buildScene(o: RunOptions, made: Made, log: (line: string) => void): Promise<Scene> {
-  const { person, machine, cleanup } = o;
-  const tag = made.devicePrefix.replace(/^o10-.*?-/, '');
+export async function buildScene(o: RunOptions & { tag: string }, made: Made, log: (line: string) => void): Promise<Scene> {
+  const { person, machine, cleanup, tag } = o;
   let chain = await readChain(person);
   const refresh = async () => {
     chain.push(...(await readChain(person, chain.at(-1)!.state.version)));
@@ -102,8 +107,17 @@ export async function buildScene(o: RunOptions, made: Made, log: (line: string) 
     admin = await OrgAdmin.open(person, o.admin.scope, o.admin.device, log);
     chain = await readChain(person);
     owner = { member: admin.member, id: o.admin.device.id, clientClass: 'native-mac', channel: o.admin.device.channel, stepUp: o.admin.device.stepUp };
-  } else if (o.production !== null) owner = o.production.device;
-  else throw new Error('a run needs an admin device or production’s paired one');
+  } else if (o.production !== null) {
+    // The obligation first: the owner removes the device, and the read-back looks for it, however the run ends.
+    const { id } = o.production;
+    made.devices.push(id);
+    cleanup.add(`the owner removes ${id}`, async () => {
+      const { head } = await person.json<{ head: SignedOrgState | null }>(ORG_STATE_PATH);
+      if (head?.state.members.some((m) => m.devices.some((d) => d.id === id))) throw new Error(`${id} is still in the head: \`production-run.sh admin remove-device ${id}\``);
+    });
+    owner = await o.production.pair();
+    chain = await readChain(person);
+  } else throw new Error('a run needs an admin device or production’s paired one');
 
   cleanup.add(`end the scene on ${machine.label}`, async () => {
     const left = await machine.down();
@@ -115,9 +129,8 @@ export async function buildScene(o: RunOptions, made: Made, log: (line: string) 
   const amend =
     admin === null
       ? null
-      : async (what: string, edit: (s: OrgState) => void) => {
+      : async (what: string, edit: (s: OrgState) => void | boolean) => {
           const signed = await admin.amend(what, edit);
-          if (signed === null) throw new Error(`${what}: nothing to change`);
           await refresh();
           return signed;
         };
@@ -135,9 +148,10 @@ export async function buildScene(o: RunOptions, made: Made, log: (line: string) 
   if (amend !== null) {
     const id = randomBytes(16).toString('hex');
     const email = `o10-m11-${tag}@staging.invalid`;
-    other = { member: id, id: `${made.devicePrefix}-b1`, clientClass: 'native-mac', channel: await generateSigningKey(), stepUp: await generateSigningKey() };
+    other = { member: id, id: `o10-s-${tag}-b1`, clientClass: 'native-mac', channel: await generateSigningKey(), stepUp: await generateSigningKey() };
     const b1 = other;
     made.members.push(id);
+    made.devices.push(b1.id);
     cleanup.add(`remove the member ${email}`, async () => {
       const keys: RevokedKey[] = await Promise.all(
         [
@@ -184,14 +198,19 @@ export async function buildScene(o: RunOptions, made: Made, log: (line: string) 
   const relay = new RelayDialer(person.hub, ref, () => person.headers);
   cleanup.add('close the relay’s Machine socket', async () => relay.close());
 
-  const project = { id: randomUUID(), name };
+  // Lane A in the machine's own project (one the hub keeps for the machine), never one of the run's making; the events
+  // the run writes there are admitted by `hubWrites` and kept as its residue.
+  const org = chain[0].state.org;
+  const project = { id: machineProjectId(org, name), name };
+  const hubWrites = o.target === 'production' ? HubWrites.production(project.id) : HubWrites.staging(project.id);
+  cleanup.add('record what the run keeps on the hub', async () => void made.kept.push(...hubWrites.kept()));
   const laneA = await machine.laneA.up(project);
-  log(`lane A: session ${laneA.session} (${laneA.alias}) in project ${project.id}, launch ${laneA.launch}`);
+  log(`lane A: session ${laneA.session} (${laneA.alias}) in the machine’s project ${project.id}, launch ${laneA.launch}`);
 
   return {
     target: o.target,
     hub: person.hub,
-    org: chain[0].state.org,
+    org,
     person,
     machine,
     name,
@@ -210,6 +229,8 @@ export async function buildScene(o: RunOptions, made: Made, log: (line: string) 
     cleanup,
     log,
     tag,
+    made,
+    hubWrites,
   };
 }
 
@@ -221,7 +242,7 @@ export async function afterEndpointCleanup(person: Person, made: Made, signal?: 
     const s = head.state;
     problems.push(...s.members.filter((m) => made.members.includes(m.id)).map((m) => `the state still lists the member ${m.email}`));
     problems.push(...s.machines.filter((m) => made.machines.includes(m.name)).map((m) => `the state still lists ${m.name}`));
-    problems.push(...s.members.flatMap((m) => m.devices.filter((d) => d.id.startsWith(made.devicePrefix)).map((d) => `the state still lists the device ${d.id}`)));
+    problems.push(...s.members.flatMap((m) => m.devices.filter((d) => made.devices.includes(d.id)).map((d) => `the state still lists the device ${d.id}`)));
   }
   const { machines } = await person.json<{ machines: Array<{ name: string }> }>('/api/machines', { signal });
   problems.push(...machines.filter((m) => made.machines.includes(m.name)).map((m) => `the hub still holds the machine ${m.name}`));
@@ -235,7 +256,7 @@ export async function afterEndpointCleanup(person: Person, made: Made, signal?: 
 export function runEndpointAcceptance(o: RunOptions, interrupt: InterruptOptions = {}): Promise<number> {
   const print = o.secrets.guard(o.print ?? console.log);
   const tag = o.tag ?? randomBytes(3).toString('hex');
-  const made: Made = { machines: [], members: [], devicePrefix: `o10-${o.target === 'production' ? 'p' : 's'}-${tag}` };
+  const made: Made = { machines: [], members: [], devices: [], kept: [] };
   if (o.target !== 'production') checkTestHub(o.person.hub, 'run the endpoint acceptance against it');
   return interruptible(
     o.cleanup,
@@ -247,10 +268,14 @@ export function runEndpointAcceptance(o: RunOptions, interrupt: InterruptOptions
       return report.summary() ? 0 : 1;
     },
     async (status) => {
+      // What the machine was doing when the run was interrupted settles (cancelled, each within its kill's deadline)
+      // before anything is undone, so a slow step can't land after the teardown.
+      await o.machine.settle();
       const failed = await o.cleanup.run();
       const left = await afterEndpointCleanup(o.person, made, AbortSignal.timeout(STEP_MS)).catch((error: unknown) => [`the check after cleanup failed: ${error instanceof Error ? error.message : String(error)}`]);
       for (const line of [...failed.map((f) => `cleanup: ${f}`), ...left]) print(`LEFT ${line}`);
       if (failed.length === 0 && left.length === 0) print(`cleanup: the head lists none of the run’s members, devices or machines, the hub holds none of its machines, and the scene on ${o.machine.label} is ended`);
+      for (const line of made.kept) print(`KEPT ${line}`);
       const code = failed.length || left.length ? 1 : status;
       print(`endpoint acceptance: ${code === 0 ? 'PASS' : 'FAIL'}`);
       return code;
@@ -261,11 +286,26 @@ export function runEndpointAcceptance(o: RunOptions, interrupt: InterruptOptions
 
 // ---- the command -----------------------------------------------------------------------------------------------------
 
+/** How long one request to the hub may take, its body included. */
+const REQUEST_MS = 30_000;
+
+/** The lines setup.sh is given before its body: the bundle's base and the branch's commit, each a full object id. */
+export function setupHead(base: string, commit: string): string {
+  for (const [what, id] of [
+    ['base', base],
+    ['commit', commit],
+  ]) {
+    if (!/^[0-9a-f]{40}$/.test(id)) throw new Error(`the ${what} is not a full commit id: ${JSON.stringify(id).slice(0, 60)}`);
+  }
+  return `BASE='${base}'\nCOMMIT='${commit}'\n`;
+}
+
 /** The files vm/setup.sh's stage holds: the scene, the stub model and its API, and the branch's bundle. */
 export function setupPayload(app: string, repo: string, bundle: string): Record<string, Buffer> {
   const vm = join(app, 'deploy', 'vm');
   return {
     'scene.sh': readFileSync(join(vm, 'scene.sh')),
+    'production.sh': readFileSync(join(vm, 'production.sh')),
     'stub-model.mjs': readFileSync(join(vm, 'stub-model.mjs')),
     'stub-api.mjs': readFileSync(join(repo, 'spikes', 'protocol-probe', 'stub-api.mjs')),
     'maws.bundle': readFileSync(bundle),
@@ -367,17 +407,18 @@ export async function main(argv: string[]): Promise<number> {
     let script: string;
     if (chosen.mode === 'vm-setup') {
       const repo = (values.repo as string | undefined) ?? resolve(app, '..', '..');
-      const base = values.base as string | undefined;
-      if (!base) {
+      if (typeof values.base !== 'string' || values.base === '') {
         console.error('--base <commit>: a commit the VM’s MAWS checkout holds, which the branch’s bundle is cut from');
         return 2;
       }
+      // Both go into a root script on the VM: each resolved here to a full object id and checked to be one.
+      const base = await gitOut(repo, ['rev-parse', '--verify', '--end-of-options', `${values.base}^{commit}`]);
+      const commit = await gitOut(repo, ['rev-parse', '--verify', 'HEAD^{commit}']);
       const bundle = join(scratch, `maws-${process.pid}.bundle`);
-      const commit = await gitOut(repo, ['rev-parse', 'HEAD']);
       await run('git', ['-C', repo, 'bundle', 'create', bundle, `${base}..HEAD`], print, 120_000);
       const files = setupPayload(app, repo, bundle);
       rmSync(bundle, { force: true });
-      script = composeScript(`BASE=${base}\nCOMMIT=${commit}\n${readFileSync(join(app, 'deploy', 'vm', 'setup.sh'), 'utf8')}`, files, { trace: 'setup' });
+      script = composeScript(`${setupHead(base, commit)}${readFileSync(join(app, 'deploy', 'vm', 'setup.sh'), 'utf8')}`, files, { trace: 'setup' });
     } else script = readFileSync(join(app, 'deploy', 'vm', 'teardown.sh'), 'utf8');
     const result = await runner.step(chosen.mode, script, { root: true, ms: 30 * 60_000, composed: chosen.mode === 'vm-setup' });
     for (const line of result.lines) print(line);
@@ -392,17 +433,18 @@ export async function main(argv: string[]): Promise<number> {
   }
   secrets.add(read.DESK_ACCESS_TOKEN);
   const cleanup = new Cleanup(CLEANUP_STEP_MS);
-  const person = new Person(`https://${config!.host}`, read.DESK_ACCESS_TOKEN, () => cleanup.check());
+  const person = new Person(`https://${config!.host}`, read.DESK_ACCESS_TOKEN, () => cleanup.check(), { requestMs: REQUEST_MS, signal: cleanup.signal });
+  const interruption = { gate: () => cleanup.check(), signal: cleanup.signal };
   const log = secrets.guard(print);
 
   if (chosen.mode === 'production') {
     const { productionRun } = await import('./endpoint-production');
-    return productionRun({ person, items, cleanup, secrets, ssh, scratch, directUrl: values['direct-url'] as string, log, ready: (values['code-ready'] as string | undefined) ?? join(scratch, 'code-ready') });
+    return productionRun({ person, items, cleanup, secrets, ssh, scratch, directUrl: values['direct-url'] as string, log, ready: (values['code-ready'] as string | undefined) ?? join(scratch, 'code-ready'), interruption });
   }
 
   if (!isTestTarget(config!)) return 2;
   const device = await loadAdminDevice(values['device-keys'] as string);
-  const machine = new VmMachine(ssh, scratch, { directUrl: values['direct-url'] as string, log: (line) => log(`  vm: ${line}`) });
+  const machine = new VmMachine(ssh, scratch, { directUrl: values['direct-url'] as string, log: (line) => log(`  vm: ${line}`), ...interruption });
   const deployScript = values['hub-deploy'] as string | undefined;
   const hubDeploy = deployScript === undefined ? null : () => run('zsh', [deployScript, 'deploy'], log, DEPLOY_MS);
   return runEndpointAcceptance({

@@ -169,3 +169,153 @@ describe('the lane A session’s stub model', () => {
     expect(turn).toEqual({ blocks: [{ type: 'text', text: 'o10-m11 stub: noted (28 characters)' }], stop: 'end_turn' });
   });
 });
+
+describe('the run’s requests to the hub', () => {
+  /** A hub that takes every request and never answers it. */
+  async function silent(): Promise<{ url: string; close(): void }> {
+    const { createServer } = await import('node:http');
+    const held: Array<{ destroy(): void }> = [];
+    const server = createServer((req) => void held.push(req.socket));
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+    return { url: `http://127.0.0.1:${(server.address() as { port: number }).port}`, close: () => (held.forEach((s) => s.destroy()), server.close()) };
+  }
+
+  it('gives each request a deadline', async () => {
+    const hub = await silent();
+    const { Person } = await import('../../deploy/hub.ts');
+    const person = new Person(hub.url, 'token', () => {}, { requestMs: 500 });
+    const started = Date.now();
+    await expect(person.json('/api/me')).rejects.toThrow(/GET \/api\/me: no answer within 0.5 s/);
+    expect(Date.now() - started).toBeLessThan(3000);
+    hub.close();
+  });
+
+  it('ends a request in flight when the run is interrupted, but not the cleanup’s after it', async () => {
+    const hub = await silent();
+    const { Person } = await import('../../deploy/hub.ts');
+    const cleanup = new Cleanup();
+    const person = new Person(hub.url, 'token', () => cleanup.check(), { requestMs: 60_000, signal: cleanup.signal });
+    const asking = person.json('/api/me');
+    setTimeout(() => cleanup.interrupt('interrupted by SIGTERM'), 200);
+    await expect(asking).rejects.toThrow(/interrupted by SIGTERM/);
+    // The cleanup's request is bounded by its deadline alone.
+    const bounded = new Person(hub.url, 'token', () => cleanup.check(), { requestMs: 400, signal: cleanup.signal });
+    let said = '';
+    cleanup.add('read back', async () => {
+      await bounded.json('/api/me').catch((error: Error) => void (said = error.message));
+    });
+    await cleanup.run();
+    expect(said).toMatch(/no answer within 0.4 s/);
+    hub.close();
+  });
+});
+
+describe('the owner’s removal of the run’s device', () => {
+  const after = (ms: number, value?: string) => new Promise<string>((done) => setTimeout(() => done(value as string), ms));
+
+  it('watches the channel through the owner’s whole wait, its deadline starting only once the removal is seen', async () => {
+    const { closeAfterRemoval } = await import('../../deploy/endpoint-items.ts');
+    // The owner took longer than the deadline: the close that follows the removal still counts.
+    expect(await closeAfterRemoval(after(600, 'removed'), after(500), 300)).toBe('removed');
+    // A close the channel saw before the removal was read is kept too.
+    expect(await closeAfterRemoval(after(100, 'removed'), after(400), 50)).toBe('removed');
+    // No close within the deadline after the removal: still open.
+    expect(await closeAfterRemoval(new Promise<string>(() => {}), after(100), 200)).toBe('still open');
+  });
+});
+
+describe('the late original’s answer', () => {
+  it('is the tombstone’s refusal, in sminos’s words or RL4’s', async () => {
+    const { isTombstoned } = await import('../../deploy/endpoint-items.ts');
+    expect(isTombstoned({ t: 'done', outcome: { state: 'failed', error: { code: 'tombstoned' } } })).toBe(true);
+    expect(isTombstoned({ t: 'done', outcome: { state: 'refused', reason: 'tombstoned' } })).toBe(true);
+    expect(isTombstoned({ t: 'done', outcome: { state: 'done', result: {} } })).toBe(false);
+    expect(isTombstoned({ t: 'done', outcome: { state: 'failed', error: { code: 'internal' } } })).toBe(false);
+    expect(isTombstoned({ t: 'ack', outcome: undefined })).toBe(false);
+  });
+});
+
+describe('production’s allowlist', () => {
+  it('runs only the clauses it lists, a hub write only when allowed, and never a hub deploy or an org-state change', async () => {
+    const { productionAdmit } = await import('../../deploy/endpoint-items.ts');
+    const { ItemReport } = await import('../../deploy/endpoint-verdicts.ts');
+    const lines: string[] = [];
+    const report = new ItemReport(['2', '3', '5', '9'], (line) => lines.push(line));
+    report.admit = productionAdmit(false);
+    const ran: string[] = [];
+    const run = (name: string) => async () => (ran.push(name), 'ran');
+    await report.check('9', 'the handshake and caps over the direct carrier', run('caps'));
+    await report.check('9', 'a revoked device refused, and one a new state removes closed `removed`, over both carriers', run('revoked'));
+    await report.check('2', 'a hub deploy, then the forced cut: the relayed channel resumes by replay', run('deploy'));
+    await report.check('5', 'a device’s words arrive verified and are delivered into the session', run('words'));
+    await report.check('3', 'a clause nobody listed', run('unlisted'));
+    expect(ran).toEqual(['caps']);
+    expect(lines).toEqual([
+      'ok   9 the handshake and caps over the direct carrier: ran',
+      'skip 9 a revoked device refused, and one a new state removes closed `removed`, over both carriers: never in production: the run amends no org state there',
+      'skip 2 a hub deploy, then the forced cut: the relayed channel resumes by replay: never in production: no hub deploy',
+      'skip 5 a device’s words arrive verified and are delivered into the session: writes the production hub’s stored data, which this run is not allowed',
+      'skip 3 a clause nobody listed: not on production’s allowlist',
+    ]);
+    report.admit = productionAdmit(true);
+    await report.check('5', 'a device’s words arrive verified and are delivered into the session', run('words'));
+    expect(ran).toEqual(['caps', 'words']);
+  });
+
+  it('names only clauses the items have', async () => {
+    const { PRODUCTION_CLAUSES } = await import('../../deploy/endpoint-items.ts');
+    const source = (await import('node:fs')).readFileSync(join(import.meta.dirname, '../../deploy/endpoint-items.ts'), 'utf8');
+    const names = new Set<string>();
+    for (const m of source.matchAll(/report\.check\('(\d)', (`[^`]*`|'[^']*')/g)) {
+      const raw = m[2].slice(1, -1);
+      for (const carrier of raw.includes('${') ? ['relayed', 'direct'] : ['']) names.add(`${m[1]} ${raw.replace(/\$\{(track\.)?carrier\}/g, carrier)}`);
+    }
+    for (const clause of Object.keys(PRODUCTION_CLAUSES)) expect(names, clause).toContain(clause);
+  });
+});
+
+describe('the run’s writes to the hub’s stored data', () => {
+  it('in production: five marked events at most, in the machine’s own project alone, each kept as residue', async () => {
+    const { HubWrites } = await import('../../deploy/endpoint-items.ts');
+    const writes = HubWrites.production('proj-machine');
+    const ack = (seq: number) => ({ t: 'human-ack', writer: 'hub/mem', seq, offset: seq, nonce: `n${seq}` });
+    expect(() => writes.admit('proj-other', 'o10 m11 acceptance words t-1')).toThrow(/only in the machine’s project proj-machine/);
+    expect(() => writes.admit('proj-machine', 'hello there')).toThrow(/marked `o10 m11 acceptance`/);
+    for (let i = 1; i <= 5; i++) {
+      writes.admit('proj-machine', `o10 m11 acceptance words t-${i}`);
+      writes.posted('proj-machine', ack(i));
+    }
+    expect(() => writes.admit('proj-machine', 'o10 m11 acceptance words t-6')).toThrow(/at most 5 events/);
+    expect(writes.kept()).toEqual(['the project proj-machine on the hub, and in it the run’s events hub/mem:1, hub/mem:2, hub/mem:3, hub/mem:4, hub/mem:5']);
+  });
+
+  it('counts an event the hub refused against the limit too, since it may still have been stored', async () => {
+    const { HubWrites } = await import('../../deploy/endpoint-items.ts');
+    const writes = HubWrites.production('p', 2);
+    writes.admit('p', 'o10 m11 acceptance a x-1');
+    writes.admit('p', 'o10 m11 acceptance b x-2');
+    expect(() => writes.admit('p', 'o10 m11 acceptance c x-3')).toThrow(/at most 2 events/);
+  });
+
+  it('on staging: any project, no limit, the project still kept', async () => {
+    const { HubWrites } = await import('../../deploy/endpoint-items.ts');
+    const writes = HubWrites.staging('proj-s');
+    for (let i = 0; i < 8; i++) writes.admit('proj-s', `o10 m11 acceptance w x-${i}`);
+    expect(writes.kept()).toEqual(['the project proj-s on the hub, and in it the run’s events (none acknowledged)']);
+  });
+});
+
+describe('the read-back after the cleanup', () => {
+  it('looks for every device the run added by its id, whatever its prefix, in the head the hub serves then', async () => {
+    const { afterEndpointCleanup } = await import('../../deploy/endpoint-acceptance.ts');
+    const person = {
+      async json(path: string) {
+        if (path === '/api/org/state') return { head: { state: { members: [{ id: OWNER, email: 'o@x', devices: [{ id: 'a1' }, { id: 'o10-o2-abc123' }] }], machines: [] } } };
+        if (path === '/api/machines') return { machines: [] };
+        throw new Error(path);
+      },
+    } as unknown as Person;
+    const left = await afterEndpointCleanup(person, { machines: [], members: [], devices: ['o10-s-abc123-b1', 'o10-o2-abc123'], kept: [] });
+    expect(left).toEqual(['the state still lists the device o10-o2-abc123']);
+  });
+});

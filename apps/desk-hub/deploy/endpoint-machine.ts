@@ -31,6 +31,8 @@ export interface SminosProbe {
   status(): Promise<{ lines: string[]; hubJson: boolean }>;
   /** `daemon/revoked.json` (RL10's revocations as sminos keeps them), or null when it has none. */
   revoked(): Promise<{ version?: number; devices?: string[]; members?: string[]; keys?: string[] } | null>;
+  /** How many events in sminos's project logs hold `token` (a person's words it imported). */
+  imported(token: string): Promise<number>;
   /** daemon.log's size now, and its lines after a size. */
   logMark(): Promise<number>;
   logSince(mark: number): Promise<string[]>;
@@ -85,6 +87,8 @@ export interface EndpointMachine {
   laneA: LaneAScene;
   /** Everything of the scene stopped and removed; what could not be. */
   down(): Promise<string[]>;
+  /** Waits until nothing the run asked of the machine is still running (after an interruption cancelled it). */
+  settle(): Promise<void>;
 }
 
 // ---- the steps -------------------------------------------------------------------------------------------------------
@@ -120,14 +124,42 @@ export function composeScript(body: string, files: Record<string, Buffer>, { tra
  */
 export class ScriptRunner {
   #n = 0;
+  readonly #inflight = new Set<Promise<unknown>>();
   constructor(
     readonly ssh: Ssh,
     private readonly dir: string,
     private readonly log: (line: string) => void = () => {},
+    /**
+     * The run's interruption: `gate` refuses a new step once the run is interrupted (outside its cleanup; proof.ts's
+     * `Cleanup.check`), and `signal` cancels the steps running when it aborts.
+     */
+    private readonly options: { gate?: () => void; signal?: AbortSignal } = {},
   ) {}
 
-  /** The step's lines and status; throws when it never reached its end marker or ran past `ms`. */
-  async step(name: string, body: string, { root = false, secret, ms = 120_000, composed = false }: { root?: boolean; secret?: string; ms?: number; composed?: boolean } = {}): Promise<StepResult> {
+  /** Waits until no step is running (each is bounded, and a cancelled one settles within its kill's deadline). */
+  async settle(ms = 15_000): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([Promise.allSettled([...this.#inflight]), new Promise((done) => (timer = setTimeout(done, ms)))]);
+    clearTimeout(timer);
+  }
+
+  /** The step's lines and status; throws when it never reached its end marker, ran past `ms`, or was cancelled. */
+  step(name: string, body: string, options: { root?: boolean; secret?: string; ms?: number; composed?: boolean } = {}): Promise<StepResult> {
+    try {
+      this.options.gate?.();
+    } catch (error) {
+      return Promise.reject(error as Error);
+    }
+    const running = this.#step(name, body, options);
+    this.#inflight.add(running);
+    void running.then(
+      () => this.#inflight.delete(running),
+      () => this.#inflight.delete(running),
+    );
+    return running;
+  }
+
+  async #step(name: string, body: string, { root = false, secret, ms = 120_000, composed = false }: { root?: boolean; secret?: string; ms?: number; composed?: boolean }): Promise<StepResult> {
     const file = join(this.dir, `${name.replace(/[^a-z0-9-]/gi, '-')}-${process.pid}-${++this.#n}.sh`);
     writeFileSync(file, composed ? body : stepScript(body), { mode: 0o600, flag: 'wx' });
     let fd: number;
@@ -138,27 +170,47 @@ export class ScriptRunner {
     }
     const args = ['vm', 'ssh', this.ssh.vm, ...(root ? ['--root'] : [])];
     const started = Date.now();
+    // A step that started before the run was interrupted is cancelled by it; one the cleanup starts (the signal aborted
+    // already) runs to its own bound.
+    const signal = this.options.signal?.aborted === false ? this.options.signal : undefined;
     const { code, out } = await new Promise<{ code: number | null; out: string }>((resolve, reject) => {
-      const child = spawn(this.ssh.devcloud, args, { stdio: [fd, 'pipe', 'pipe'] });
+      // Its own process group, so a kill reaches what devcloud started (its `ssh`), not devcloud alone.
+      const child = spawn(this.ssh.devcloud, args, { stdio: [fd, 'pipe', 'pipe'], detached: true });
       closeSync(fd);
       let out = '';
       child.stdout!.setEncoding('utf8').on('data', (chunk: string) => (out += chunk));
       child.stderr!.resume(); // devcloud's own words: not the step's
-      let late = false;
-      const timer = setTimeout(() => {
-        late = true;
-        child.kill('SIGTERM');
-        setTimeout(() => child.kill('SIGKILL'), 5000).unref();
-      }, ms);
-      child.once('error', (error) => {
-        clearTimeout(timer);
-        reject(error);
-      });
-      child.once('close', (exit) => {
-        clearTimeout(timer);
-        if (late) reject(new Error(`the step ${name} on ${this.ssh.vm} took longer than ${ms / 1000} s`));
-        else resolve({ code: exit, out });
-      });
+      let settled = false;
+      const timers: Array<ReturnType<typeof setTimeout>> = [];
+      const finish = (outcome: { code: number | null } | Error) => {
+        if (settled) return;
+        settled = true;
+        for (const t of timers) clearTimeout(t);
+        signal?.removeEventListener('abort', onAbort);
+        if (outcome instanceof Error) reject(outcome);
+        else resolve({ code: outcome.code, out });
+      };
+      const group = (sig: NodeJS.Signals) => {
+        try {
+          process.kill(-child.pid!, sig);
+        } catch {
+          // the group is gone
+        }
+      };
+      /** Ends the step: the group sent TERM, then KILL, and the step settled on a deadline of its own, its close or not. */
+      let ended: Error | null = null;
+      const end = (why: Error) => {
+        if (ended !== null) return;
+        ended = why;
+        group('SIGTERM');
+        timers.push(setTimeout(() => group('SIGKILL'), 2000));
+        timers.push(setTimeout(() => finish(why), 4000));
+      };
+      const onAbort = () => end(new Error(`the step ${name} on ${this.ssh.vm} was cancelled: ${(signal!.reason as Error | undefined)?.message ?? 'the run was interrupted'}`));
+      signal?.addEventListener('abort', onAbort, { once: true });
+      timers.push(setTimeout(() => end(new Error(`the step ${name} on ${this.ssh.vm} took longer than ${ms / 1000} s`)), ms));
+      child.once('error', (error) => finish(error));
+      child.once('close', (exit) => finish(ended ?? { code: exit }));
     });
     const lines = out.split('\n');
     const begin = lines.indexOf('@@BEGIN');
@@ -208,8 +260,9 @@ export class VmMachine implements EndpointMachine {
   readonly #script: string;
 
   /** `options.script` is the scene's script on the VM: the scratch scene's (SCENE) unless named. */
-  constructor(ssh: Ssh, scratchDir: string, options: { directUrl: string; log?: (line: string) => void; script?: string; label?: string }) {
-    this.runner = new ScriptRunner(ssh, scratchDir, options.log);
+  /** `gate` and `signal` are the run's interruption (ScriptRunner's). */
+  constructor(ssh: Ssh, scratchDir: string, options: { directUrl: string; log?: (line: string) => void; script?: string; label?: string; gate?: () => void; signal?: AbortSignal }) {
+    this.runner = new ScriptRunner(ssh, scratchDir, options.log, { gate: options.gate, signal: options.signal });
     this.directUrl = options.directUrl;
     this.#script = options.script ?? SCENE;
     this.label = options.label ?? `the scratch mawsd on ${ssh.vm}`;
@@ -271,6 +324,10 @@ export class VmMachine implements EndpointMachine {
     return (await this.scene('listening')).lines.filter((line) => line.trim() !== '');
   }
 
+  settle(): Promise<void> {
+    return this.runner.settle();
+  }
+
   async down(): Promise<string[]> {
     const result = await this.scene('down', [], { ms: 180_000, allow: [0, 1] });
     return result.rc === 0 ? [] : result.lines.filter((line) => line.startsWith('LEFT '));
@@ -289,13 +346,17 @@ class VmLaneA implements LaneAScene {
         const r = await vm.scene('sminos-revoked');
         return r.lines.includes('none') ? null : (jsonLine('sminos-revoked', r) as Awaited<ReturnType<SminosProbe['revoked']>>);
       },
+      imported: async (token) => {
+        if (!/^[a-z0-9-]{4,64}$/.test(token)) throw new Error('imported: a marker token ([a-z0-9-])');
+        return Number((await vm.scene('imported', [token])).lines.at(-1));
+      },
       logMark: async () => Number((await vm.scene('log-size', ['sminos'])).lines.at(-1)),
       logSince: async (mark) => (await vm.scene('log-since', ['sminos', String(Math.max(0, Math.floor(mark)))], { ms: 60_000 })).lines,
       stopSession: async () => void (await vm.scene('lane-a-stop', [], { ms: 60_000 })),
       resumeSession: async () => ({ launch: String(jsonLine('lane-a-resume', await vm.scene('lane-a-resume', [], { ms: 120_000 })).launch) }),
       localSpawn: async (alias) => {
         if (!NAME.test(alias)) throw new Error(`an alias ([a-z0-9-]), not ${JSON.stringify(alias)}`);
-        return vm.scene('local-spawn', [alias], { ms: 180_000, allow: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] });
+        return vm.scene('local-spawn', [alias], { ms: 180_000, allow: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] });
       },
       retire: async (alias) => {
         if (!NAME.test(alias)) throw new Error(`an alias ([a-z0-9-]), not ${JSON.stringify(alias)}`);
