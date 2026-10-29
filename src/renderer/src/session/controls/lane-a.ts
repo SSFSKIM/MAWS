@@ -22,6 +22,11 @@
 // - M6: a card's answer is closed with its reason where §D can't carry it, and every answer once the request is the
 //   terminal's alone (a background request past its window, or one the bridge refused as `terminalOnly`); a late
 //   answer keeps the settlement it was told (`noteLaneASettlement`), so the card says who won the race.
+// - M9: a session on another machine (`remote`) takes the same port over main's remote adapter. Its gaps are closed in
+//   place (the owner's Q2): a subagent's own rows, stopping a background shell, "Take over in MAWS", reopening it, and
+//   attachments. While its link can't act from this device (`state.link.reason`), every control is closed with that
+//   reason; while a control's act is on its way (`state.acts`), that control is closed with the act's progress, and opens
+//   again at its outcome, a refusal showing where the control answers.
 import type { Catalog } from 'desk-hub/protocol';
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { AttentionItem } from '@shared/graph/attention';
@@ -29,7 +34,7 @@ import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { CommandName, CommandResult, IpcError, MawsBridge } from '@shared/ipc/schema';
 import { ipcError } from '@shared/ipc/errors';
-import type { ControlResult, LaneARaised, LaneAState } from '@shared/ipc/schema/lane-a';
+import type { ControlResult, LaneAAct, LaneARaised, LaneAState } from '@shared/ipc/schema/lane-a';
 import { aliasOf, chipLabel } from '@shared/sessions/model-label';
 import type { HookResult, ModelInfo } from '../../composer/setup-intent';
 import type { FrameBindings } from '../../composer/frame/bindings';
@@ -73,10 +78,40 @@ export const LANE_A_WORDS = {
   unknownAsk: 'It may have been asked: its answer shows here if it was',
   unknownAnswer: 'The answer may have been taken: the card settles if it was',
   unknown: 'It may have run: the transcript shows it if it did',
+  // M9: a session on another machine (Q2's words where it gives them)
+  remoteSubagentRows: 'A subagent’s own transcript on another machine isn’t shown yet',
+  remoteStopTask: 'A background shell on another machine is stopped there',
+  remoteTakeOver: 'A session on another machine is taken over on that machine',
+  remoteReopen: 'Reopening a session on another machine isn’t offered yet',
+  remoteMedia: 'Attachments to a session on another machine wait for uploads across machines',
+  // a control's act on its way to the session's machine (`state.acts`), by its progress
+  progress: (progress: LaneAAct['progress'], machine: string): string =>
+    ({ waiting: `Waiting to reach ${machine}`, sent: `Sent to ${machine}`, accepted: `${machine} has it`, unknown: `May not have reached ${machine}: waiting for its answer` })[progress],
 };
 
-// What the machine is called in a route's reason (`<machine>`): a local session's is this Mac.
+// What the machine is called in a route's reason (`<machine>`): a local session's is this Mac, a remote one's its name.
 const HERE = 'this Mac';
+// M9: the gaps of a session on another machine, closed whatever its bridge says (Interfaces §C's "remote never").
+const REMOTE_GAPS: Partial<Record<ControlKey, string>> = {
+  'subagent-rows': LANE_A_WORDS.remoteSubagentRows,
+  'stop-task': LANE_A_WORDS.remoteStopTask,
+  'take-over': LANE_A_WORDS.remoteTakeOver,
+  reopen: LANE_A_WORDS.remoteReopen,
+  media: LANE_A_WORDS.remoteMedia,
+};
+// M9: the act a control makes (`LaneAAct.control`, its RPC): MCP's verbs go as `/mcp` commands.
+const ACT_OF: Partial<Record<ControlKey, { control: string; target?: string }>> = {
+  interrupt: { control: 'interrupt' },
+  model: { control: 'model' },
+  command: { control: 'command' },
+  btw: { control: 'btw' },
+  compact: { control: 'compact' },
+  'stop-agent': { control: 'stop-agent' },
+  tell: { control: 'tell' },
+  'mcp.enable': { control: 'command', target: 'mcp' },
+  'mcp.disable': { control: 'command', target: 'mcp' },
+  'mcp.reconnect': { control: 'command', target: 'mcp' },
+};
 type BridgeEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'; // the bridge's efforts (`model` op)
 // The widgets a lane A read or op backs in O9 (M5): the model selector's three names, compact, MCP and the side question.
 const BACKED_WIDGETS = new Set(['model', 'effort', 'fast', 'compact', 'mcp', 'btw']);
@@ -168,10 +203,19 @@ export function laneAAnswerCapability(raised: LaneARaised | null, answer: Reques
 export interface LaneAInputs {
   appSessionId: AppSessionId;
   client: MawsBridge;
+  remote?: { machine: string }; // M9: the session runs on another machine, by its name
 }
 
-export function laneAControls(state: LaneAState, record: SessionRecord | null, { appSessionId, client }: LaneAInputs): SessionControls {
-  const live = state.bridge === 'live' ? null : (state.reason ?? LANE_A_WORDS.noBridge);
+export function laneAControls(state: LaneAState, record: SessionRecord | null, { appSessionId, client, remote }: LaneAInputs): SessionControls {
+  const here = remote?.machine ?? HERE;
+  // M9: this device can't act on the session now (its link down or refused, no grades yet), said by main
+  const linkReason = state.link?.reason ?? null;
+  const live = linkReason !== null ? sentence(linkReason) : state.bridge === 'live' ? null : sentence(state.reason ?? LANE_A_WORDS.noBridge);
+  // M9: a control's act still on its way, as its progress says it; null when none is
+  const inFlight = (control: string, target?: string): Capability | null => {
+    const act = state.acts?.find((a) => a.control === control && (target === undefined || a.target === target));
+    return act === undefined ? null : closed(LANE_A_WORDS.progress(act.progress, here));
+  };
   const catalogNow = (): Catalog | null => (useLaneA.getState().catalogs.get(appSessionId) as Catalog | undefined) ?? null;
   const stateNow = (): LaneAState => useLaneA.getState().states.get(appSessionId) ?? state;
   // The session's watch held across an op's call, so its `op` messages are kept even when an early end beats whoever
@@ -184,10 +228,15 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
   function capability(key: ControlKey): Capability {
     const own = OWN_WORDS[key];
     if (own !== undefined) return closed(own);
+    const gap = remote === undefined ? undefined : REMOTE_GAPS[key];
+    if (gap !== undefined) return closed(gap);
     if (key === 'subagent-rows') return AVAILABLE;
     if (key === 'take-over') return record && (record.holder.kind === 'terminal' || record.holder.kind === 'background_job') && canTakeOver(record.holder) ? AVAILABLE : closed(LANE_A_WORDS.takeOver);
     if (live !== null) return closed(live);
     if (key === 'answer') return AVAILABLE;
+    const act = ACT_OF[key];
+    const pending = act === undefined ? null : inFlight(act.control, act.target);
+    if (pending !== null) return pending;
     const op = OP_OF[key];
     if (op !== undefined) {
       if (!state.ops.includes(op)) return closed(`Not in this session’s sminos${state.sminos ? ` (${state.sminos})` : ''}`);
@@ -200,7 +249,7 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
     if (key === 'mcp.enable' || key === 'mcp.disable' || key === 'mcp.reconnect') {
       const catalog = catalogNow();
       if (catalog === null) return closed(LANE_A_WORDS.catalog);
-      const route = commandRoute(catalog, 'mcp', `${key.slice('mcp.'.length)} server`, HERE);
+      const route = commandRoute(catalog, 'mcp', `${key.slice('mcp.'.length)} server`, here);
       if (route.kind !== 'command') return closed(sentence(route.kind === 'unavailable' ? route.reason : LANE_A_WORDS.widget));
     }
     return AVAILABLE;
@@ -211,7 +260,7 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
     const typed = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text.trim());
     if (!typed) return { disposition: 'refused', started: false, reason: LANE_A_WORDS.widget };
     const [, name, args = ''] = typed;
-    const route = commandRoute(catalogNow(), name, args, HERE);
+    const route = commandRoute(catalogNow(), name, args, here);
     if (route.kind === 'unavailable') return { disposition: 'refused', started: false, reason: route.reason };
     if (route.kind === 'widget') return { disposition: 'refused', started: false, reason: `Use the ${route.name} control` };
     const release = holdWatch();
@@ -260,6 +309,9 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
     capability,
     answerCapability: (item: AttentionItem, answer: RequestAnswer) => {
       if (live !== null) return closed(live);
+      const requestId = item.request.requestId ?? undefined;
+      const pending = requestId === undefined ? null : (inFlight('answer', requestId) ?? inFlight('decide', requestId)); // M9: its answer on its way
+      if (pending !== null) return pending;
       const raised = stateNow().pending.find((p) => p.request === item.request.requestId) ?? null;
       const told = item.request.requestId === null ? undefined : useLaneA.getState().told.get(appSessionId)?.get(item.request.requestId);
       if (told?.terminalOnly === true || (raised !== null && pastWindow(raised, Date.now()))) return closed(RACE.terminal); // M6: the terminal's alone
@@ -347,7 +399,7 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
       const widgets = new Set([...registered].filter((name) => BACKED_WIDGETS.has(name)));
       const unavailable: Record<string, string> = {};
       // why each command of the catalog can't run from here, by the lifted desk-web rules (`catalog.ts`)
-      for (const item of catalog === null ? [] : slashItems(catalog, HERE, null)) {
+      for (const item of catalog === null ? [] : slashItems(catalog, here, null)) {
         if (item.action.kind === 'unavailable' && !BACKED_WIDGETS.has(item.name)) unavailable[item.name] = item.action.hint;
       }
       for (const { name } of WIDGET_COMMANDS) {

@@ -2,9 +2,11 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'; // C7: vi
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
-import { record } from '../../../../test/support/builders';
+import { addressOf } from '@shared/machine/address';
+import { item, record, remoteRow, T0 } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { useAttention } from '../stores/attention';
 import { registerSlot, resetSlots } from '../app/slots';
 import { useSessions } from '../stores/sessions';
 import { useUsage } from '../stores/usage';
@@ -114,5 +116,21 @@ describe('session pane', () => {
     act(() => void useSessions.getState().applyChanged({ record: record(NEW), cause: 'live', revision: 7 } as never, TEST_MACHINE));
     expect(screen.getByText('Transcript unavailable')).toBeTruthy();
     expect(screen.queryByRole('group', { name: 'Session status' })).toBeNull();
+  });
+
+  // P5 O9 M9: another machine's terminal session is a listed lane A row with no record; it reads as started, its
+  // composer the lane A port's (never the holder notice), and its pending request docked.
+  it('shows another machine’s listed lane A session as started, with its composer and its docked request', () => {
+    const REMOTE = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
+    useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', availability: 'foreign_held' }), appId: REMOTE }]]) });
+    registerSlot('transcript', ({ appSessionId }) => <p>transcript {appSessionId}</p>);
+    registerSlot('newSession', () => <h2>setup</h2>);
+    registerSlot('requestCard', ({ item, placement }) => <p>request {`${item.kind} ${placement}`}</p>);
+    useAttention.setState({ bySession: new Map([[REMOTE, [item(REMOTE, 'permission', T0)]]]) });
+    render(<SessionPane appSessionId={REMOTE} paneIndex={0} />);
+    expect(screen.getByText(`transcript ${REMOTE}`)).toBeTruthy();
+    expect(screen.getByText('Composer unavailable')).toBeTruthy();
+    expect(screen.getByText('request permission docked')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'setup' })).toBeNull();
   });
 });

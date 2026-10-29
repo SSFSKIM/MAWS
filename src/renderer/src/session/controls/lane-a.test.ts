@@ -321,3 +321,98 @@ describe('answers', () => {
     expect(useLaneA.getState().told.get(APP)?.get('req-1')).toEqual({ winner: 'terminal', outcome: 'allow', by: 'terminal' });
   });
 });
+
+// P5 O9 M9: a terminal session on another machine, driven over main's remote adapter (`state.link` and `state.acts` are
+// a remote state's only).
+const LINK = { state: 'up', refusal: null, carrier: 'direct', member: 'm-a', clientClass: 'native-mac', rights: [], reason: null } as const;
+const asking = (requestId: string) => item(APP, 'permission', T0, { request: { requestId: requestId as RequestId, toolUseId: null, taskId: null, agentId: null } });
+const ALLOW: RequestAnswer = { kind: 'permission', decision: 'allow', scope: 'once' };
+const AT = '2026-10-29T08:00:00.000Z';
+
+function remotePort(over: Partial<LaneAState> = {}, given: Parameters<typeof fakeClient>[0] = {}) {
+  const state = laneAState(APP, { link: LINK, acts: [], ...over });
+  applyLaneAState(APP, state);
+  useLaneA.setState((s) => ({ catalogs: new Map(s.catalogs).set(APP, laneACatalog()) }));
+  const fake = fakeClient({ 'laneA.catalog': laneACatalog(), ...given });
+  return { fake, controls: laneAControls(state, null, { appSessionId: APP, client: fake.client, remote: { machine: 'mini' } }) };
+}
+
+describe('a session on another machine', () => {
+  it('closes the remote gaps in place with their reasons, whatever the bridge offers', () => {
+    const { controls } = remotePort();
+    expect(controls.capability('subagent-rows')).toEqual({ available: false, reason: LANE_A_WORDS.remoteSubagentRows });
+    expect(controls.capability('stop-task')).toEqual({ available: false, reason: LANE_A_WORDS.remoteStopTask });
+    expect(controls.capability('take-over')).toEqual({ available: false, reason: LANE_A_WORDS.remoteTakeOver });
+    expect(controls.capability('reopen')).toEqual({ available: false, reason: LANE_A_WORDS.reopen }); // live there: Q2's own words come first
+    expect(controls.capability('media')).toEqual({ available: false, reason: LANE_A_WORDS.remoteMedia });
+    for (const key of ['send', 'command', 'model', 'btw', 'compact', 'stop-agent', 'tell', 'mcp.enable', 'answer'] as const) expect(controls.capability(key), key).toEqual({ available: true });
+    expect(controls.capability('mode')).toEqual({ available: false, reason: LANE_A_WORDS.mode });
+  });
+
+  it('names the machine in a route’s reason, where a local session’s says this Mac', () => {
+    const named = laneACatalog({ commands: [{ name: 'doctor', description: 'Diagnose', source: 'builtin', route: { class: 'local', enabled: false, reason: 'runs only in the terminal on <machine>', measured: 'M' } }] });
+    const reasonOf = (controls: ReturnType<typeof port>['controls']) => {
+      useLaneA.setState((s) => ({ catalogs: new Map(s.catalogs).set(APP, named) }));
+      return controls.slash(EMPTY_CATALOG, new Set()).catalog.unavailable.doctor;
+    };
+    expect(reasonOf(remotePort().controls)).toBe('runs only in the terminal on mini');
+    expect(reasonOf(port().controls)).toBe('runs only in the terminal on this Mac');
+  });
+
+  it('reads its turn from the state main folds from the plane', () => {
+    expect(remotePort().controls.turn()).toEqual({ running: false });
+    expect(remotePort({ turn: { running: true, unknown: false } }).controls.turn()).toEqual({ running: true });
+  });
+
+  it('closes every control, answers included, with the link’s reason while this device can’t act', () => {
+    const { controls } = remotePort({ link: { ...LINK, state: 'down', carrier: null, reason: 'mini isn’t reachable' } });
+    for (const key of ['send', 'interrupt', 'command', 'model', 'btw', 'compact', 'answer'] as const) expect(controls.capability(key), key).toEqual({ available: false, reason: 'Mini isn’t reachable' });
+    expect(controls.answerCapability(asking('toolu_1'), ALLOW)).toEqual({ available: false, reason: 'Mini isn’t reachable' });
+    expect(controls.capability('subagent-rows')).toEqual({ available: false, reason: LANE_A_WORDS.remoteSubagentRows }); // a gap keeps its own words
+  });
+
+  it('shows a control’s act on its way by its progress, and opens the control again at its outcome', () => {
+    const acts: LaneAState['acts'] = [
+      { id: 'op-1', control: 'interrupt', progress: 'accepted', at: AT },
+      { id: 'op-2', control: 'command', target: 'mcp', progress: 'sent', at: AT },
+      { id: 'op-3', control: 'decide', target: 'toolu_1', progress: 'waiting', at: AT },
+    ];
+    const pending = remotePort({ turn: { running: true, unknown: false }, acts }).controls;
+    expect(pending.capability('interrupt')).toEqual({ available: false, reason: 'mini has it' });
+    expect(pending.capability('mcp.enable')).toEqual({ available: false, reason: 'Sent to mini' });
+    expect(pending.capability('send')).toEqual({ available: true }); // another control is not held by it
+    expect(pending.answerCapability(asking('toolu_1'), ALLOW)).toEqual({ available: false, reason: 'Waiting to reach mini' });
+    expect(pending.answerCapability(asking('toolu_2'), ALLOW)).toEqual({ available: true });
+    const done = remotePort({ turn: { running: true, unknown: false }, acts: [] }).controls;
+    expect(done.capability('interrupt')).toEqual({ available: true });
+    expect(done.capability('mcp.enable')).toEqual({ available: true });
+  });
+});
+
+// The architect's ask (M9's renderer half, "Grade refusal"): a member who only views a session is refused `grade` by the
+// session's machine. The act leaves `acts` at its outcome, so the control is usable again, the refusal's words are what
+// its caller shows, and a send keeps its text with them.
+describe('a grade refusal on another machine', () => {
+  const WORDS = 'you can’t do that on this session';
+  const running = { turn: { running: true, unknown: false } };
+
+  it('a control: shown pending while its act is out, then usable again, the refusal’s words in its answer', async () => {
+    expect(remotePort({ ...running, acts: [{ id: 'op-1', control: 'interrupt', progress: 'accepted', at: AT }] }).controls.capability('interrupt')).toEqual({ available: false, reason: 'mini has it' });
+    const after = remotePort(running, { 'laneA.interrupt': { state: 'refused', code: 'grade', message: WORDS } });
+    expect(await after.controls.interrupt({ holdEngineQueued: true })).toEqual({ ok: false, error: expect.objectContaining({ message: WORDS, issues: { refusal: 'grade' } }) });
+    expect(after.controls.capability('interrupt')).toEqual({ available: true });
+    const command = remotePort(running, { 'laneA.command': { state: 'refused', code: 'grade', message: WORDS } });
+    expect(await command.controls.command('rename', 'x')).toEqual({ state: 'refused', code: 'grade', message: WORDS });
+    expect(command.controls.capability('command')).toEqual({ available: true });
+  });
+
+  it('a send: refused with the words and its text kept by the composer; one whose fate came later kept by the strip with them', async () => {
+    const { controls } = remotePort({}, { 'laneA.send': { key: { writer: 'remote/m', seq: 1 }, state: 'refused', reason: WORDS, code: 'grade' } });
+    expect(await controls.send('hello', { origin: 'composer' })).toEqual({ disposition: 'refused', started: false, reason: WORDS });
+    const key = { writer: 'remote/m', seq: 2 };
+    const slow = remotePort({}, { 'laneA.send': { key, state: 'submitted' } });
+    expect(await slow.controls.send('slow words', { origin: 'composer' })).toEqual({ disposition: 'unconfirmed', started: false });
+    applyLaneAState(APP, laneAState(APP, { link: LINK, acts: [], deliveries: [{ key, at: AT, state: 'refused', reason: WORDS }] }));
+    expect(useLaneA.getState().pendingSends.get(APP)).toEqual([{ key, text: 'slow words', state: 'refused', reason: WORDS }]);
+  });
+});

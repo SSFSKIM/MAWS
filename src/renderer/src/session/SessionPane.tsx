@@ -9,7 +9,8 @@
 // (C10's heading and setup) with the composer frame centred beneath it and nothing else; it swaps to the ordinary pane
 // when the record arrives. In both placements the composer sits in the column the transcript's rows use
 // (`.thread-column`, W2: §5.4 as amended 2026-10-01, Codex's shared class), so the frame is exactly the transcript's
-// width.
+// width. P5 O9 M9: another machine's terminal session (a listed lane A row) has no record and reads as started: its
+// transcript from its machine's plane, its composer driven through the lane A port, its requests docked as cards.
 import { useEffect, useRef, type ReactNode } from 'react';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -23,6 +24,7 @@ import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
 import { useSettling } from '../lane-a/race'; // P5 O9 M6
 import { useSessions } from '../stores/sessions';
+import { useRemoteLaneA } from '../lane-a/remote-session'; // P5 O9 M9
 import { HolderNotice } from './HolderNotice';
 import { useSessionControls } from './controls/controls-for'; // P5 O9 M4
 import { SessionTabNotes } from '../sessions/SessionDialogs'; // C10
@@ -37,9 +39,10 @@ export function ComposerColumn({ children }: { children: ReactNode }) {
 
 export function SessionPane({ appSessionId, paneIndex, compact = false }: { appSessionId: AppSessionId; paneIndex: PaneIndex; compact?: boolean }) {
   const record = useSessions((s) => s.records.get(appSessionId));
+  const remote = useRemoteLaneA(appSessionId); // P5 O9 M9
   const envelope = useRef<HTMLDivElement>(null);
   return <div ref={envelope} className="h-full min-h-0 min-w-0"><SurfaceViewportProvider element={envelope}>
-    {record ? <StartedPane record={record} paneIndex={paneIndex} compact={compact} /> : <UnstartedPane appSessionId={appSessionId} paneIndex={paneIndex} compact={compact} />}
+    {record || remote ? <StartedPane appSessionId={appSessionId} record={record ?? null} paneIndex={paneIndex} compact={compact} /> : <UnstartedPane appSessionId={appSessionId} paneIndex={paneIndex} compact={compact} />}
   </SurfaceViewportProvider></div>;
 }
 
@@ -58,12 +61,11 @@ function UnstartedPane({ appSessionId, paneIndex, compact }: { appSessionId: App
   );
 }
 
-function StartedPane({ record, paneIndex, compact }: { record: SessionRecord; paneIndex: PaneIndex; compact: boolean }) {
-  const id = record.appId;
+function StartedPane({ appSessionId: id, record, paneIndex, compact }: { appSessionId: AppSessionId; record: SessionRecord | null; paneIndex: PaneIndex; compact: boolean }) {
   const Transcript = useSlot('transcript');
   const Composer = useSlot('composer');
   const pending = useAttention((s) => selectPendingOf(s, id));
-  const { holder } = record;
+  const holder = record?.holder ?? null;
   const readOnly = useSessionControls(id) === null; // P5 O9 M4: no port drives the session
   const bridgeReason = useLaneAState(id)?.reason ?? null; // P5 O9 M5: a bridge that answered but can't be driven
   // A docked request is the session's oldest actionable item (the one its Needs-you row shows); held peer messages
@@ -85,7 +87,7 @@ function StartedPane({ record, paneIndex, compact }: { record: SessionRecord; pa
           {/* C10 start: an interrupted delete's Finish deleting or Keep, and the card a resume waits on */}
           <SessionTabNotes appSessionId={id} />
           {/* C10 end */}
-          {readOnly && (holder.kind === 'terminal' || holder.kind === 'background_job') ? (
+          {readOnly && holder !== null && (holder.kind === 'terminal' || holder.kind === 'background_job') ? (
             // C10: the notice carries the session's id for its actions
             <HolderNotice appSessionId={id} holder={holder} reason={bridgeReason} />
           ) : (

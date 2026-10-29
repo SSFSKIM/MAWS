@@ -16,12 +16,17 @@
 //
 // The session-wide `op` and `compact` messages are kept by their op's id (the last 100 ops per session), so a caller that
 // learns an id from a control's answer after its op already ended still finds the op's messages.
+//
+// P5 O9 M9: another machine's terminal session (`remote-session.ts`) has a state only while a watch of it is open (main's
+// remote adapter folds it from the watch's subscription), so it is watchable whatever its state says, and its plane is
+// the transcript's too (`remote-source.ts`), whose older rows, diff and outputs are asked of the watch (`readLaneA`).
 import type { SessionMessage } from 'desk-hub/protocol';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { CommandResult, EventPayload, MawsBridge } from '@shared/ipc/schema';
+import type { CommandInput, CommandResult, EventPayload, MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import type { Job } from 'desk-hub/protocol';
 import { laneAJobsWatchEnded, noteLaneAJobs, noteLaneAUsage, useLaneA, type LaneAUsage } from '../stores/lane-a';
+import { isRemoteLaneA } from './remote-session';
 
 export type PlaneEvent = { kind: 'messages'; messages: SessionMessage[] } | { kind: 'reset' } | { kind: 'ended'; reason: string };
 
@@ -51,7 +56,7 @@ const ops = new Map<AppSessionId, Map<string, SessionMessage[]>>();
 
 const watchable = (appSessionId: AppSessionId): boolean => {
   const bridge = useLaneA.getState().states.get(appSessionId)?.bridge;
-  return bridge === 'live' || bridge === 'starting';
+  return bridge === 'live' || bridge === 'starting' || isRemoteLaneA(appSessionId);
 };
 
 const tell = (entry: Entry, event: PlaneEvent) => {
@@ -171,15 +176,16 @@ export function watchLaneA(appSessionId: AppSessionId, listener: (event: PlaneEv
   };
 }
 
-// A read of the session's bridge (`laneA.read`), which names a watch of this page: the page's, held across the read.
-export async function readLaneA(appSessionId: AppSessionId, kind: 'usage' | 'config' | 'settings' | 'mcp' | 'status', client: MawsBridge = ipc): Promise<ReadOutput> {
+// A read of the session's bridge (`laneA.read`), which names a watch of this page: the page's, held across the read. M9:
+// a remote session's `rows`, `diff` and `output` answer `{requested: true}`, their answers arriving on the watch.
+export async function readLaneA(appSessionId: AppSessionId, kind: CommandInput<'laneA.read'>['kind'], client: MawsBridge = ipc, args?: Record<string, unknown>): Promise<ReadOutput> {
   const off = watchLaneA(appSessionId, () => {}, { client });
   try {
     const entry = entries.get(appSessionId);
     if (entry?.opening) await entry.opening;
     const watch = entries.get(appSessionId)?.watch ?? null;
     if (watch === null) return { ok: false, code: 'no-bridge', message: 'The session’s bridge is not live' };
-    const result = await client.invoke('laneA.read', { appSessionId, watch, kind });
+    const result = await client.invoke('laneA.read', { appSessionId, watch, kind, ...(args !== undefined && { args }) });
     return result.ok ? result.value : { ok: false, code: 'failed', message: result.error.message };
   } finally {
     off();

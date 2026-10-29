@@ -17,8 +17,12 @@
 // keeps what an interrupt cut of it in its turn, and is at rest while its controls port says no main turn runs.
 // L197: the slot gives the transcript the session's agents from its task graph (agent-lookup.ts), so a message to an
 // agent no loaded turn launched names it.
+// P5 O9 M9: another machine's terminal session (a listed lane A row) draws from its machine's plane through the page's
+// watch (`lane-a/remote-source.ts`), older rows paged in at the top as the reader reaches it; it streams and rests by its
+// controls port as a local one does. A subagent's own transcript there is a gap, said in its place.
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
-import { useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { useStore } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 import { useShownEffort } from '../../composer/effective-effort';
 import { useOwnerChannel } from '../../stores/owner-channel'; // P2-C
@@ -31,9 +35,15 @@ import { ipcRewind, ipcSource } from '../source/ipc';
 import { useAgentLookup } from './agent-lookup'; // L197
 import type { TranscriptActions } from './context';
 import { useLaneAStreaming } from '../../lane-a/stream/use-overlay'; // P5 O9 M5
+import { useRemoteLaneA } from '../../lane-a/remote-session'; // P5 O9 M9
+import { useRemoteTranscript } from '../../lane-a/remote-source'; // P5 O9 M9
+import { drawnRows } from '../../lane-a/view/drawn-rows'; // P5 O9 M9
+import { useKeepPlaceThroughOlderRows } from '../../lane-a/view/keep-place'; // P5 O9 M9
+import { useOlderPages } from '../../lane-a/view/older-pages'; // P5 O9 M9
+import { LANE_A_WORDS } from '../../session/controls/lane-a'; // P5 O9 M9
 import { useSessionControls } from '../../session/controls/controls-for'; // P5 O9 M5
 import { useRegisteredActions, useRegisteredRequestRenderer } from './registry';
-import { storeKeyOf, Transcript } from './Transcript';
+import { storeKeyOf, Transcript, type TranscriptListHandle } from './Transcript';
 
 export interface TranscriptSlotProps {
   appSessionId: AppSessionId;
@@ -44,7 +54,62 @@ export interface TranscriptSlotProps {
   actions?: Partial<TranscriptActions>; // P2-E1: merged over the registered actions, for this mount only
 }
 
-export function TranscriptSlot({ appSessionId, agentId, className, startAt, presentation, actions: overrides }: TranscriptSlotProps) {
+export function TranscriptSlot(props: TranscriptSlotProps) {
+  const remote = useRemoteLaneA(props.appSessionId); // P5 O9 M9
+  if (!remote) return <LocalTranscriptSlot {...props} />;
+  if (props.agentId !== undefined) {
+    return <p className={`m-0 px-4 py-3 text-ui-sm text-fg-muted ${props.className ?? ''}`} role="status" data-testid="remote-subagent-gap">{LANE_A_WORDS.remoteSubagentRows}</p>;
+  }
+  return <RemoteTranscriptSlot {...props} />;
+}
+
+const NO_ROWS: readonly Row[] = [];
+
+// P5 O9 M9: another machine's terminal session, from its machine's plane.
+function RemoteTranscriptSlot({ appSessionId, className, startAt, presentation, actions: overrides }: TranscriptSlotProps) {
+  const registered = useRegisteredActions();
+  const actions = useMemo(() => (overrides ? { ...registered, ...overrides } : registered), [registered, overrides]);
+  const renderRequest = useRegisteredRequestRenderer();
+  const transcript = useRemoteTranscript(appSessionId)!;
+  const state = useStore(transcript.state);
+  const storeKey = transcript.key;
+  useAgentLookup(storeKey, appSessionId);
+  const controls = useSessionControls(appSessionId);
+  const atRest = controls?.turn()?.running === false;
+  const filesGap = controls?.capability('rewind-files') ?? null;
+  const filesReason = filesGap !== null && !filesGap.available ? filesGap.reason : null;
+  const rewind = useMemo(() => ({ ...ipcRewind(appSessionId), unavailable: filesReason }), [appSessionId, filesReason]);
+  const streaming = useLaneAStreaming(appSessionId, storeKey);
+  // Older rows when the reader reaches the top, while what is drawn does not fill the pane, and after a page that drew
+  // nothing new; the reader's place kept through each (the desk's own rules, lifted with the plane transcript).
+  const list = useRef<TranscriptListHandle>(null);
+  const rows = useTranscriptStore((s) => s.entries[storeKey]?.rows ?? NO_ROWS);
+  const tail = useRef(streaming.tail);
+  useLayoutEffect(() => {
+    tail.current = streaming.tail;
+  }, [streaming.tail]);
+  const indexOf = useCallback((id: string) => drawnRows(storeKey, tail.current, atRest).findIndex((row) => row.id === id), [storeKey, atRest]);
+  useKeepPlaceThroughOlderRows(list, rows, state.loadingOlder, indexOf);
+  useOlderPages(transcript, list, state, atRest);
+  return (
+    <Transcript
+      source={state.source}
+      variant="session"
+      actions={actions}
+      rewind={rewind}
+      renderRequest={renderRequest}
+      className={className}
+      handle={list}
+      tail={streaming.tail}
+      startAt={startAt}
+      presentation={presentation}
+      atRest={atRest}
+      placed={streaming.kept}
+    />
+  );
+}
+
+function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presentation, actions: overrides }: TranscriptSlotProps) {
   const registered = useRegisteredActions();
   const actions = useMemo(() => (overrides ? { ...registered, ...overrides } : registered), [registered, overrides]);
   const renderRequest = useRegisteredRequestRenderer(); // C7's card; the placeholder until it registers
