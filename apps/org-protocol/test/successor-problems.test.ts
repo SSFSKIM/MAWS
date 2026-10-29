@@ -4,7 +4,7 @@
 // whole-state rules `stateInvariants` judges, each by its own code. Proved over the package's vectors, whose verdicts
 // are the oracle, and by one case per code.
 import { describe, expect, it } from 'vitest';
-import { stateHash, stateInvariants, stateProblems, successorProblems, verifyTransition, type ProblemCode } from '../src/org-state.ts';
+import { PROBLEMS_PER_CODE, stateHash, stateInvariants, stateProblems, successorProblems, verifySuccessor, verifyTransition, type ProblemCode } from '../src/org-state.ts';
 import { isOrgState } from '../src/shapes.ts';
 import type { OrgState, RootTransition, Signed, SignedOrgState } from '../src/types.ts';
 import { VECTOR_KEYS, VECTORS, type Case } from '../vectors/index.ts';
@@ -227,6 +227,51 @@ describe('endorsing', () => {
   it('needs no endorsement for a member\'s first device', async () => {
     const first = await next(v2(), (s) => s.members.push({ id: 'c'.repeat(32), email: 'c@example.com', role: 'member', devices: [{ ...b2, id: 'dev-c1' }] }));
     expect(await codes(v2(), first)).toEqual([]);
+  });
+});
+
+describe('an adversarial state, before any signature is checked', () => {
+  // verifySuccessor judges the whole state before the root signature, so what it costs to judge one is open to anyone
+  // who can hand a verifier an envelope: the hub, an endpoint and the app alike. Many copies of one delegation make
+  // every pairwise rule fire for every pair.
+  const N = 120;
+  const flooded = async () => {
+    const v2 = signedFixture('v2');
+    const state = await next(v2.state, (s) => (s.delegations = Array.from({ length: N }, () => structuredClone(s.delegations[0]))));
+    // A stale signature (v3's): the verdict must come from the state, as before, and cheaply.
+    return { head: v2, signed: { state, sigs: signedFixture('v3').sigs } as SignedOrgState };
+  };
+
+  it('is refused malformed, as before', async () => {
+    const { head, signed } = await flooded();
+    expect(isOrgState(signed.state)).toBe(true);
+    expect(await verifySuccessor(head, signed, [])).toEqual({ ok: false, code: 'malformed' });
+  });
+
+  it('stops at its first problem, building no detail, when only the verdict is asked for', async () => {
+    const { signed } = await flooded();
+    let details = 0;
+    expect(await stateProblems(signed.state, { first: true, onDetail: () => details++ })).toHaveLength(1);
+    expect(details).toBe(0);
+    expect(await stateInvariants(signed.state)).toBe(false);
+  });
+
+  it('keeps at most PROBLEMS_PER_CODE problems per code in the full diagnostics, and builds no detail past that', async () => {
+    const { head, signed } = await flooded();
+    const judges = [
+      (onDetail: () => void) => stateProblems(signed.state, { onDetail }),
+      (onDetail: () => void) => successorProblems(head.state, signed.state, { onDetail }),
+    ];
+    for (const judge of judges) {
+      let details = 0;
+      const found = await judge(() => details++);
+      const perCode = new Map<string, number>();
+      for (const p of found) perCode.set(p.code, (perCode.get(p.code) ?? 0) + 1);
+      for (const [code, count] of perCode) expect(count, code).toBeLessThanOrEqual(PROBLEMS_PER_CODE);
+      // The pairwise rule fired for every pair (N·(N−1)/2 of them) yet reported only up to its cap.
+      expect(perCode.get('prefix-overlaps')).toBe(PROBLEMS_PER_CODE);
+      expect(details).toBe(found.length);
+    }
   });
 });
 
