@@ -10,15 +10,17 @@
 //
 // Loaded when it is needed (O10 M10, the architect's lever (a) on acceptance 14): the module, `ws` and org-protocol are
 // a chunk of their own, which an unenrolled daemon never loads. At start step 7 it is loaded and started when an
-// enrollment is on disk (src/endpoint/presence.ts, a few `lstat`s); otherwise at the first `daemon.endpoint` command,
-// `enroll` included, and started then with the same services before the command runs. Until then `status()` is the
+// enrollment is on disk (src/endpoint/presence.ts, a few `lstat`s); otherwise at the first `daemon.endpoint` command
+// that needs it, `enroll` included, and started then with the same services before the command runs. A read-only one
+// (`status`, `keys`, `policy`) over a state directory that holds nothing needs none: presence.ts answers it as the
+// module would, so a check costs an unenrolled daemon nothing until its restart. Until then `status()` is the
 // unenrolled module's, and the stop order is unchanged (a load in flight is awaited, and what it loaded stopped).
 import type { AppSessionId } from '@shared/graph/ids';
 import type { DocumentsOpen } from '@shared/host/socket-protocol';
 import type { ClientRef } from '@shared/ipc/client';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import type { MachineRef } from '@shared/machine/ref';
-import { enrollmentOnDisk, UNENROLLED_STATUS } from '../endpoint/presence';
+import { enrollmentOnDisk, unloadedAnswer, UNENROLLED_STATUS } from '../endpoint/presence';
 
 export const ENDPOINT_STOP_MS = 2_500;
 // `daemon.endpoint`'s answer while there is no module (a daemon a test starts with none), `{code: 2, out:
@@ -97,6 +99,12 @@ export class LazyEndpoint implements EndpointModule {
   async cli(command: string, args: readonly string[], secret?: string): Promise<{ code: number; out: string }> {
     if (this.#services === null) return { code: 3, out: 'the endpoint has not started' };
     if (this.#stopped) return { code: 3, out: 'the endpoint has stopped' };
+    // Unloaded and not loading, a read-only command may be answered without the module; once a load is under way, the
+    // module answers.
+    if (this.#module === null && this.#loading === null) {
+      const answer = unloadedAnswer(this.#services.machine, command, args);
+      if (answer !== null) return answer;
+    }
     let module: EndpointModule | null;
     try {
       module = await this.#ensure(false);

@@ -235,16 +235,20 @@ describe.skipIf(!existsSync(MAWSD))('the built mawsd with its endpoint', () => {
     const env = { ...base, MAWS_ENDPOINT_DIRECT: '1', MAWS_ENDPOINT_PORT: String(port) };
     const first = await runDaemon(profile, env);
 
-    // Unenrolled, the daemon has not loaded the endpoint (lever (a)): daemon.status says unenrolled from the seam, and
-    // the module's chunk comes with the first endpoint command.
+    // Unenrolled, the daemon has not loaded the endpoint (lever (a)): daemon.status says unenrolled from the seam, and so
+    // do the read-only commands, which leave it unloaded; the module's chunk comes with the first command that needs it.
     const daemonStatus = await cli(env, ['status', '--json']);
     expect(JSON.parse(daemonStatus.stdout)).toMatchObject({ endpoint: { present: true, detail: { enrollment: 'none', hub: { connected: false }, listener: { bound: false } } } });
     expect(log(profile)).not.toContain('loading the endpoint');
     expect(await endpointStatus(env)).toMatchObject({ enrollment: 'none', hub: { connected: false }, listener: { bound: false }, rl10: { connected: false } });
-    expect(log(profile)).toContain('loading the endpoint for its first command');
+    const unlisted = await cli(env, ['keys', '--json']);
+    expect(unlisted.status, unlisted.stderr).toBe(0);
+    expect(JSON.parse(unlisted.stdout)).toEqual({ enrollment: 'none', ref: (JSON.parse(daemonStatus.stdout) as { machine: string }).machine, delegated: false });
+    expect(log(profile)).not.toContain('loading the endpoint');
     expect(existsSync(join(profile, 'mawsd', 'endpoint', 'rl10.json'))).toBe(false);
 
     const { ref } = await enroll(profile, env, 'm10-mini');
+    expect(log(profile)).toContain('loading the endpoint for its first command');
     const keys = await cli(env, ['keys', '--json']);
     expect(keys.status, keys.stderr).toBe(0);
     const shown = JSON.parse(keys.stdout) as Record<string, unknown>;

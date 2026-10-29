@@ -47,7 +47,8 @@ const CLIENT_PORT_DYNAMIC = { selector: 'ImportExpression[source.value=/^(?:elec
 // its own directory with one entry. Its machine key, grant ledger, policy and state code are reached by nothing outside
 // it but through src/endpoint/index.ts; its own suites (test/endpoint/) are the module's and reach inside. It imports no
 // Electron, O1's rule with no exception (its block below). M10: src/endpoint/presence.ts is its second entry, what mawsd
-// reads before it loads the module (whether an enrollment is on disk, the unenrolled status), importing nothing of it.
+// reads before it loads the module (whether an enrollment is on disk, the unenrolled status, a read-only command's
+// unenrolled answer), importing of it only the pure renderers the module answers with (answers.ts, status.ts).
 const ENDPOINT = 'The endpoint module (src/endpoint/) is reached only through its entries, src/endpoint/index.ts and presence.ts (P5 O10): its key, policy and state code stay inside it.';
 const ENDPOINT_PATTERNS = [{ regex: '(?:^|/)endpoint/(?!(?:index|presence)(?:\\.ts)?$)', message: ENDPOINT }];
 // P5 O10 end

@@ -47,7 +47,8 @@ export const BACKSTOP_MS = 30 * DAY_MS;
 /** The most pages one sync reads (a page is about 1 MiB and holds at least one state). */
 const MAX_PAGES = 1000;
 
-type Options = { log: (line: string) => void; now?: () => number };
+/** `maxPages`: a suite's lower cap on the pages one read takes (MAX_PAGES otherwise). */
+type Options = { log: (line: string) => void; now?: () => number; maxPages?: number };
 
 export class EndpointOrg implements OrgView {
   #queue: Promise<unknown> = Promise.resolve();
@@ -56,11 +57,13 @@ export class EndpointOrg implements OrgView {
   readonly #state: EndpointState;
   readonly #log: (line: string) => void;
   readonly #now: () => number;
+  readonly #maxPages: number;
 
   constructor(state: EndpointState, options: Options) {
     this.#state = state;
     this.#log = options.log;
     this.#now = options.now ?? Date.now;
+    this.#maxPages = Math.max(1, options.maxPages ?? MAX_PAGES);
   }
 
   /** A head is held: the first sync has been adopted. */
@@ -95,25 +98,91 @@ export class EndpointOrg implements OrgView {
   /**
    * Reads the hub's state from the head on (from version 0 at the first sync), a page at a time, and adopts it. Its
    * `head` tells a rollback apart; its certificates are kept beside the state as served (each use verifies them).
+   *
+   * A sync reads at most `maxPages` pages, and every state it reads goes into one pool that `#adopt` judges whole. When
+   * the first page after the head serves a recovery from below the head that passes `verifyRewind` against it (only one
+   * the recovery key signed, and none already accepted), half of what is left is the recovery's (`#recover`) and the
+   * rest the read after the head's, each getting what the other leaves: neither can starve the other. What was read
+   * when the pages run out is adopted, and the next sync goes on from there.
    */
   async sync(fetchView: (since: number) => Promise<OrgStateView>): Promise<AdoptResult> {
-    let cursor = this.ready ? this.head().state.version : 0;
-    const chain: SignedOrgState[] = [];
-    let view: OrgStateView;
-    for (let page = 0; ; page++) {
-      view = await fetchView(cursor);
-      const got = list(view.chain).filter(isSignedOrgState);
-      chain.push(...got);
-      if (view.more !== true || got.length === 0) break;
-      if (page + 1 >= MAX_PAGES) {
-        this.#log(`endpoint: the org state's chain ran past ${MAX_PAGES} pages; the rest waits for the next sync`);
-        break;
-      }
-      cursor = got[got.length - 1].state.version;
+    const budget: Budget = { left: this.#maxPages };
+    const pool = new Pool();
+    const first = await this.#read(fetchView, budget, pool, this.ready ? this.head().state.version : 0, Infinity, 1);
+    let view = first.view as OrgStateView;
+    const bases = await this.#bases(list(view.transitions) as Signed<RootTransition>[]);
+    if (bases.length > 0) {
+      const share: Budget = { left: Math.ceil(budget.left / 2) };
+      budget.left -= share.left;
+      await this.#recover(fetchView, share, pool, bases, list(view.transitions) as Signed<RootTransition>[]);
+      budget.left += share.left;
+    }
+    if (!first.ended) {
+      const rest = await this.#read(fetchView, budget, pool, first.last);
+      view = rest.view ?? view;
+      if (!rest.ended) this.#log(`endpoint: the org state's chain ran past ${this.#maxPages} pages; the rest waits for the next sync`);
     }
     const served = isSignedOrgState(view.head) ? view.head : null;
     const certificates = isCertificates(view.certificates) ? view.certificates : null;
-    return this.#serial(() => this.#adopt(chain, list(view.transitions) as Signed<RootTransition>[], served, certificates));
+    return this.#serial(() => this.#adopt(pool.states, list(view.transitions) as Signed<RootTransition>[], served, certificates));
+  }
+
+  /**
+   * The hub's chain after `since` into `pool`, a page at a time, while `budget` has pages left: at most `pages` pages,
+   * up to the page that reaches version `until`. The last page's view (null when none was read), the version to read on
+   * from, and whether the hub had nothing after it.
+   */
+  async #read(fetchView: (since: number) => Promise<OrgStateView>, budget: Budget, pool: Pool, since: number, until = Infinity, pages = Infinity): Promise<{ view: OrgStateView | null; last: number; ended: boolean }> {
+    let cursor = since;
+    let view: OrgStateView | null = null;
+    for (let page = 0; page < pages && budget.left > 0; page++) {
+      view = await fetchView(cursor);
+      budget.left--;
+      const got = list(view.chain).filter(isSignedOrgState);
+      await pool.add(got);
+      if (view.more !== true || got.length === 0) return { view, last: cursor, ended: true };
+      cursor = got[got.length - 1].state.version;
+      if (cursor >= until) break;
+    }
+    return { view, last: cursor, ended: false };
+  }
+
+  /** The `fromVersion`s, newest first, of the transitions in `transitions` that pass `verifyRewind` against the head. */
+  async #bases(transitions: Signed<RootTransition>[]): Promise<number[]> {
+    const org = this.#state.org;
+    const head = org?.head ?? null;
+    if (org === null || head === null) return [];
+    const bases = new Set<number>();
+    for (const t of transitions) {
+      if (typeof t?.body?.fromVersion !== 'number' || t.body.fromVersion >= head.state.version || bases.has(t.body.fromVersion)) continue;
+      if ((await verifyRewind(head, t, org.pinned.recoveryPub, org.acceptedTransitions)).ok) bases.add(t.body.fromVersion);
+    }
+    return [...bases].sort((x, y) => y - x);
+  }
+
+  /**
+   * Reads into `pool`, within `share`, what a recovery from below the head needs (the app's rule, src/main/org/held.ts's
+   * `rereadFrom`, with the endpoint's window): the first state under it at `fromVersion + 1`, which a read after the
+   * head leaves out whenever that state is at or below the head's version (a sibling of the head: the hub never had the
+   * head, an admin having delivered it straight to the machines), with the base at `fromVersion` when the window no
+   * longer holds it. Each base, newest first, gets two pages at most; once `#rewind` finds a rewind in the pool, its line
+   * is read on up to the head's version (the read after the head has the rest), and nothing more is probed. It picks
+   * only what is read: `#adopt` verifies the rewind again, against the head it adopts onto.
+   */
+  async #recover(fetchView: (since: number) => Promise<OrgStateView>, share: Budget, pool: Pool, bases: number[], transitions: Signed<RootTransition>[]): Promise<void> {
+    const org = this.#state.org as OrgFile;
+    const head = org.head as SignedOrgState;
+    for (const from of bases) {
+      if (share.left <= 0) return;
+      const window = this.#window();
+      const since = window.states.some((s) => s.state.version === from) ? from : Math.max(0, from - 1);
+      await this.#read(fetchView, share, pool, since, from + 1, 2);
+      const rewind = await this.#rewind(org, window, pool.states, transitions, () => {});
+      if (rewind === null) continue;
+      const end = await runEnd(rewind.first, pool.states);
+      if (end < head.state.version) await this.#read(fetchView, share, pool, end, head.state.version);
+      return;
+    }
   }
 
   /**
@@ -222,7 +291,7 @@ export class EndpointOrg implements OrgView {
    * it verified then. A transition binds no base, so a base known only by the first state's `prev` could be anyone's,
    * and a base under another recovery key would let its own root sign that first state.
    */
-  async #rewind(org: OrgFile, window: Window, states: SignedOrgState[], transitions: Signed<RootTransition>[]): Promise<{ t: Signed<RootTransition>; base: SignedOrgState; first: SignedOrgState } | null> {
+  async #rewind(org: OrgFile, window: Window, states: SignedOrgState[], transitions: Signed<RootTransition>[], log = this.#log): Promise<{ t: Signed<RootTransition>; base: SignedOrgState; first: SignedOrgState } | null> {
     const head = org.head as SignedOrgState;
     const candidates = transitions.filter((t) => typeof t?.body?.fromVersion === 'number' && t.body.fromVersion < head.state.version);
     candidates.sort((x, y) => (x.body.issued < y.body.issued ? 1 : -1));
@@ -236,7 +305,7 @@ export class EndpointOrg implements OrgView {
         if (s.state.version === from && (await stateHash(s.state)) === adopted) bases.push(s);
       }
       if (bases.length === 0) {
-        this.#log(`endpoint: a recovery transition from version ${from} reaches before the chain the endpoint keeps, and the delivery doesn't carry the state it adopted at version ${from}`);
+        log(`endpoint: a recovery transition from version ${from} reaches before the chain the endpoint keeps, and the delivery doesn't carry the state it adopted at version ${from}`);
         continue;
       }
       for (const base of bases) {
@@ -294,8 +363,35 @@ export class EndpointOrg implements OrgView {
 }
 
 type Window = { states: SignedOrgState[]; transitions: Signed<RootTransition>[] };
+type Budget = { left: number };
 
 const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+
+/** The states one sync read, each once by version and hash, in the order read. */
+class Pool {
+  readonly states: SignedOrgState[] = [];
+  readonly #seen = new Set<string>();
+
+  async add(states: SignedOrgState[]): Promise<void> {
+    for (const s of states) {
+      const key = `${s.state.version} ${await stateHash(s.state)}`;
+      if (this.#seen.has(key)) continue;
+      this.#seen.add(key);
+      this.states.push(s);
+    }
+  }
+}
+
+/** The version the run from `first` reaches in `states`, each state the one after the last by version and `prev`. */
+async function runEnd(first: SignedOrgState, states: SignedOrgState[]): Promise<number> {
+  let at = first;
+  for (;;) {
+    const hash = await stateHash(at.state);
+    const next = states.find((s) => s.state.version === at.state.version + 1 && s.state.prev === hash);
+    if (next === undefined) return at.state.version;
+    at = next;
+  }
+}
 
 const hashesOf = (states: SignedOrgState[]): Promise<string[]> => Promise.all(states.map((s) => stateHash(s.state)));
 

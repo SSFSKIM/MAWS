@@ -382,6 +382,7 @@ export const ORG = {
     rollback: 'The hub served an older org state than this Mac holds. It was refused.',
     fork: 'The hub served an org state that conflicts with the one this Mac holds. It was refused.',
     directory: 'MAWS’s org folder isn’t private to you, so it wasn’t used.',
+    signing: 'This Mac’s record of the org states it signed is missing or damaged, so it signs nothing until you reset it. A state it sent before the damage could still surface as a fork.',
   },
   reanchor: 'Re-anchor',
   reanchorNote: 'Re-anchoring replaces the org state this Mac trusted with the one the code’s device vouches for.',
@@ -402,5 +403,84 @@ export const ORG = {
     busy: 'Another sign-in is running.',
     directory: 'MAWS’s org folder isn’t private to you, so nothing could be saved there.',
   },
+  // M3: this Mac as the org's signer
+  signer: 'Signer',
+  signs: 'This Mac signs the org state.',
+  weekly: (days: number) => `Org state is ${days} days old`,
+  resign: 'Re-sign now',
+  makeRoot: 'Make this Mac a root: run',
+  // The id after `--`: a base64url key id may start with '-', which the admin's option parser would read as an option.
+  rootCommand: (device: string) => `deployment admin root add -- ${device}`,
+  rootNote: (fingerprint: string) => `Its confirmation names this Mac’s fingerprint, ${fingerprint}. Compare the two before you confirm.`,
+  unmarked: 'This Mac’s keys weren’t kept out of Time Machine backups when they were made, so it signs nothing. Make new keys with a pairing code.',
+  signed: (version: number) => `Signed version ${version}.`,
+  notSigned: 'Not signed',
+  signReasons: {
+    'not-root': 'This Mac isn’t a root of the org.',
+    unmarked: 'This Mac’s keys can’t sign: make new keys first.',
+    signing: 'The record of signed states is damaged.',
+    cancelled: 'Touch ID was cancelled.',
+    pending: 'A state this Mac signed is still pending.',
+    invalid: 'The signed state didn’t verify.',
+    hub: 'The hub didn’t take it.',
+    busy: 'Another signing is running.',
+    refused: 'The checks refused it.',
+    stale: 'What would be signed changed since it was shown.',
+  },
+  pending: 'Pending',
+  pendingWaits: (version: number) => `Version ${version} is signed and waits for the hub.`,
+  pendingRefused: (version: number, why: string) => `The hub refused version ${version} · ${why}`,
+  pendingFork: (version: number) => `Version ${version} conflicts with another version ${version} at the hub: a fork.`,
+  discard: 'Discard…',
+  discardTitle: (version: number) => `Discard version ${version}?`,
+  discardConfirm: 'Discard',
+  // abandon-pending's distinctions (apps/desk-hub/deploy/admin.ts): never sent, or exposed with the fork warning
+  discardUnsent: (version: number) => `Version ${version} was never sent: nothing was posted, so nothing can show it as a fork.`,
+  discardAtHub: (version: number, fork: boolean) => (fork ? `The hub holds another version ${version}: a fork.` : `Version ${version} isn’t at the hub.`),
+  discardWarning: (version: number) =>
+    `A later sign may make another successor of version ${version - 1}, which a hub or machine that kept these bytes could show as a fork: discard it only once you know why the hub refused it.`,
+  discarded: (version: number, unsent: boolean, hubVersion: number, forkAt: number | undefined) =>
+    unsent
+      ? `Discarded version ${version}. It was never sent.`
+      : forkAt !== undefined
+        ? `Discarded version ${version}. The hub holds another version ${forkAt} (a fork); its head is version ${hubVersion}.`
+        : `Discarded version ${version}. The hub’s head is version ${hubVersion}.`,
+  notDiscarded: 'Not discarded',
+  discardReasons: {
+    held: (version: number) => `The hub holds version ${version} now: it settled.`,
+    hub: () => 'Couldn’t read the hub.',
+    none: () => 'Nothing is pending.',
+    signing: () => 'The record of signed states is damaged.',
+    stale: () => 'The pending state changed since you confirmed: nothing was discarded.',
+  },
+  reset: 'Reset…',
+  resetTitle: 'Reset the signing record?',
+  resetBody: 'MAWS starts an empty record and can sign again. A state this Mac sent before the damage could still surface as a fork if the hub or a machine kept it.',
+  resetConfirm: 'Reset',
+  revocations: 'Revocations',
+  offer: (keys: number) => `A recovery dropped the revocation of ${keys === 1 ? '1 key' : `${keys} keys`}.`,
+  revoke: 'Revoke again…',
+  // The sheet Revoke again opens: Touch ID shows one line, so everything the signature carries is read here first.
+  revokeTitle: 'Sign these revocations?',
+  revokeIntro: 'One new org state carries all of this, signed with Touch ID:',
+  revokeWarning: (text: string) => `Warning: ${text}`,
+  revokeConfirm: 'Sign',
+  withheld: (name: string) => `Not offered: ${name}. Revoking it would remove this Mac’s own keys or the org’s last root, so settle it another way.`,
+  deliveries: 'Deliveries',
+  owing: (version: number, waiting: string | null, tooLarge: string | null) =>
+    [`Version ${version}`, waiting === null ? null : `waiting for ${waiting} to acknowledge`, tooLarge === null ? null : `too large to send to ${tooLarge}, which catches up from the hub`]
+      .filter((part) => part !== null)
+      .join(' · '),
+  discardedRow: 'Discarded',
+  abandoned: (version: number, holders: string) => `Version ${version} · ${holders} may still hold it`,
+  theHub: 'the hub',
+  oldDevice: 'Old device',
+  oldDeviceLine: 'Listed until a root removes it: run',
+  removeCommand: (device: string) => `deployment admin remove-device -- ${device}`,
+  newKeys: 'New keys',
+  makeNewKeys: 'Make new keys',
+  rekeySteps: { browser: 'Finish signing in in the browser.', checking: 'Checking the org…', approval: 'Waiting for approval.', promoting: 'Switching to the new keys…' },
+  rekeyNote: 'Get a code from a device already in the org (today deployment admin pair --class native-mac). This Mac stays signed in on its old keys until the new ones are approved.',
+  rejoinNote: 'To rejoin, make new keys with a pairing code from a device already in the org (today deployment admin pair --class native-mac).',
 } as const;
 // P5 O8 M1 end

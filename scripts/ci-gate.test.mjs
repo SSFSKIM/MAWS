@@ -21,6 +21,9 @@ const fakeGh = String.raw`#!/usr/bin/env bash
 printf '%s\n' "$*" >> "$(dirname "$0")/gh-calls"
 case "$*" in
   *" run list "*) ;;
+  'variable get GATE_RUNNER '*) echo pool ;;
+  'variable get GATE_E2E_RUNNER '*) echo macos ;;
+  'variable list '*) ;;
   *"repos/SSFSKIM/MAWS/actions/variables"*) echo '["GATE_RUNNER","pool"]'; echo '["GATE_E2E_RUNNER","macos"]' ;;
   *"repos/SSFSKIM/ci-kit-sandbox/issues"*) echo '{"number":18,"title":"ci-kit alert: mini: UserNotificationCenter since 2026-10-19T21:08Z"}' ;;
   *"repos/SSFSKIM/MAWS/actions/runners"*) echo '{"name":"ci-kit-mac-mini","status":"online","labels":["self-hosted","macOS","ARM64","ci-kit-mac","ci-kit-mac-solo","ci-kit-mac-home"]}' ;;
@@ -36,7 +39,7 @@ function gate(args, { alerts = false, base = {}, change } = {}) {
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, MAWS_GATE_RUNNER: '', MAWS_GATE_IGNORE_ALERTS: alerts ? '' : '1' };
   for (const role of ['AUTHOR', 'COMMITTER']) Object.assign(env, { [`GIT_${role}_NAME`]: 'ci-gate test', [`GIT_${role}_EMAIL`]: 'ci-gate@test.invalid' });
   const git = (...gitArgs) => execFileSync('git', gitArgs, { encoding: 'utf8', env }).trim();
-  let short = '';
+  let transcript = '';
   try {
     const origin = join(dir, 'origin.git');
     const tree = join(dir, 'tree');
@@ -55,12 +58,12 @@ function gate(args, { alerts = false, base = {}, change } = {}) {
       git('-C', tree, 'add', '-A');
     }
     git('-C', tree, 'commit', '--quiet', '--allow-empty', '-m', 'tested tree');
-    short = git('-C', tree, 'rev-parse', '--short=8', 'HEAD');
     writeFileSync(join(dir, 'gh'), fakeGh);
     writeFileSync(join(dir, 'sleep'), '#!/bin/sh\n'); // the 30 polls for the run, at once
     chmodSync(join(dir, 'gh'), 0o755);
     chmodSync(join(dir, 'sleep'), 0o755);
     const run = spawnSync('bash', [join(root, 'scripts/ci-gate.sh'), tree, ...args, '--keep'], { encoding: 'utf8', env, maxBuffer: 8 << 20 });
+    transcript = /^ci-gate: transcript in (.+)$/m.exec(run.stdout)?.[1] ?? '';
     const refs = git('--git-dir', origin, 'for-each-ref', '--format=%(refname)').split('\n').filter((ref) => ref && ref !== 'refs/heads/master');
     const calls = join(dir, 'gh-calls');
     return {
@@ -73,7 +76,7 @@ function gate(args, { alerts = false, base = {}, change } = {}) {
     };
   } finally {
     rmSync(dir, { recursive: true, force: true });
-    if (short) rmSync(`/tmp/maws-review/gates/ci-${short}.log`, { force: true });
+    if (transcript) rmSync(dirname(transcript), { recursive: true, force: true });
   }
 }
 
@@ -178,7 +181,7 @@ test('a call that names no gates is refused with exit 2 and the two forms, befor
     const result = gate(args, { alerts: true });
     assert.equal(result.status, 2, args.join(' '));
     assert.equal(result.stderr, 'ci-gate: name the gates: --gates static,unit,probes for class 1a only, --gates all for the whole set\n');
-    assert.equal(result.stdout, '');
+    assert.equal(result.stdout, 'ci-gate: transcript: none (stopped before a run)\nci-gate: reports: none (stopped before a run)\n');
     assert.deepEqual(result.calls, []);
     assert.deepEqual(result.refs, []);
   }
@@ -203,14 +206,14 @@ test('a live call that names no gates is refused with the live form, since a liv
 test('--gates all pushes the whole set as the plan reads it: no Gates: trailer, the other flags as given', () => {
   const result = gate(['--gates', 'all', '--class1a', 'pool', '--runner', 'macos', '--evidence']);
   assert.equal(result.status, 1, result.stdout + result.stderr); // the fake gh finds no run
-  assert.match(result.stdout, /^ci-gate: [0-9a-f]{40} as ci\/gates-[0-9a-f]{8} \(Gates: all\) \(Runner: macos\) \(Class1a: pool\) \(Evidence: yes\)$/m);
+  assert.match(result.stdout, /^ci-gate: [0-9a-f]{40} as ci\/auto-gates-[A-Za-z0-9._-]+-[0-9a-f]{8} \(Gates: all\) \(Runner: macos\) \(Class1a: pool\) \(Evidence: yes\)$/m);
   assert.deepEqual(trailers(result.message), ['Runner: macos', 'Class1a: pool', 'Evidence: yes']);
 });
 
 test('--gates all reaches the alert check as the whole set, unit:darwin and the class-1 e2e groups on the Mac', () => {
   const result = gate(['--gates', 'all', '--class1a', 'pool', '--runner', 'macos'], { alerts: true });
   assert.equal(result.status, 2);
-  assert.match(result.stderr, /^ci-gate: not pushing: this run puts jobs on a Mac \(unit:darwin, the class-1 e2e groups\) /);
+  assert.match(result.stderr, /^ci-gate: not pushing: this run puts jobs on a Mac \(unit:darwin, the class-1 e2e groups\) /m);
   assert.deepEqual(result.refs, []);
 });
 
@@ -229,7 +232,7 @@ test('a list of gates goes through as given, live groups with --live too', () =>
 // ci-kit's hosted-Mac spec: `hosted` sends every eligible e2e group to GitHub's hosted Macs, `no-hosted` none.
 test('--lane vm, vm-trial, hosted or no-hosted goes through as a Lane: trailer; any other value is refused before anything is pushed', () => {
   const vm = gate(['--gates', 'e2e:document-app', '--runner', 'macos', '--lane', 'vm']);
-  assert.match(vm.stdout, /^ci-gate: [0-9a-f]{40} as ci\/gates-[0-9a-f]{8} \(Gates: e2e:document-app\) \(Runner: macos\) \(Lane: vm\)$/m);
+  assert.match(vm.stdout, /^ci-gate: [0-9a-f]{40} as ci\/auto-gates-[A-Za-z0-9._-]+-[0-9a-f]{8} \(Gates: e2e:document-app\) \(Runner: macos\) \(Lane: vm\)$/m);
   assert.deepEqual(trailers(vm.message), ['Gates: e2e:document-app', 'Runner: macos', 'Lane: vm']);
   for (const lane of ['vm-trial', 'hosted', 'no-hosted']) assert.deepEqual(trailers(gate(['--gates', 'e2e:document-app', '--lane', lane]).message), ['Gates: e2e:document-app', `Lane: ${lane}`], lane);
   for (const value of ['host', 'VM', 'vm,vm-trial', 'Hosted', 'nohosted']) {
@@ -335,7 +338,7 @@ test('the alert check sees the peer group a bump adds, and none for an --affecte
   const planned = { ...bump, base: { ...bump.base, '.github/scripts/gate-plan.mjs': own('.github/scripts/gate-plan.mjs'), '.github/scripts/gate-affected.mjs': own('.github/scripts/gate-affected.mjs'), '.github/workflows/gate.yml': own('.github/workflows/gate.yml'), 'package.json': own('package.json') }, alerts: true };
   const held = gate(['--gates', 'static,unit,probes', '--class1a', 'pool'], planned);
   assert.equal(held.status, 2, held.stdout + held.stderr);
-  assert.match(held.stderr, /^ci-gate: not pushing: this run puts jobs on a Mac \(e2e:cross-build\) /);
+  assert.match(held.stderr, /^ci-gate: not pushing: this run puts jobs on a Mac \(e2e:cross-build\) /m);
   assert.deepEqual(held.refs, []);
   const iteration = gate(['--gates', 'unit', '--class1a', 'pool', '--affected'], planned);
   assert.equal(iteration.status, 1, iteration.stdout + iteration.stderr); // pushed; the fake gh finds no run
