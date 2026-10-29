@@ -12,7 +12,6 @@ import type { EventPayload } from '@shared/graph/events';
 import type {
   SystemApiRetryFrame,
   SystemBackgroundTasksChangedFrame,
-  SystemCodeChangePublishedFrame, // P5 E312
   SystemCommandsChangedFrame,
   SystemCompactBoundaryFrame,
   SystemFrame,
@@ -221,11 +220,8 @@ export function mapSystemFrame(frame: SystemFrame, tasks: TaskRegistry): SystemM
       return one({ kind: 'notice.posted', level: 'warning', text: (frame as SystemModelFallbackFrame).content, key: null });
     case 'model_consent_fallback': // session-scoped: every later turn's system/init reports the model it runs (the status's resolved model)
       return one({ kind: 'notice.posted', level: 'warning', text: (frame as SystemModelConsentFallbackFrame).content, key: null });
-    case 'code_change_published': { // P5 E312: the cue the PR row re-asks gh on (renderer ipc/events.ts)
-      const f = frame as SystemCodeChangePublishedFrame;
-      return one({ kind: 'code.published', provider: f.provider, url: f.url, repo: f.repo, identifier: f.identifier, action: f.action ?? null, branch: f.branch ?? null });
-    }
     // P5 E312, journaled with no event because an existing path already shows the fact, promptly, or none shows it:
+    case 'code_change_published': // the status's `published` (session-status.ts), on which the PR row re-asks gh at once
     case 'session_title_changed': // the same rename appends a `custom-title` record, which C4's title rule reads (the fs watcher's re-summary)
     case 'vcs_state_changed': // C4's git watcher sees the commit, push, merge or rebase move the head and refs
     case 'permission_check_status': // no surface shows a pending auto-mode check

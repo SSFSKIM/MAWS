@@ -569,16 +569,14 @@ describe('normaliser: meta rows, system subtypes and the unknown', () => {
       sys('per_turn_effort_changed', { per_turn_effort_active: false }), // carries no effort
       sys('memory_recall', { mode: 'select', memories: [{ path: '/m/favorite-color.md', scope: 'personal' }] }), // no surface shows a recall
       sys('dev_intent', { kind: 'ios_app', trigger: 'project_scan' }), // no surface offers device tooling
+      // the status tracker keeps it as the session's `published`, on which the PR row re-asks gh (session-status.ts)
       sys('code_change_published', { provider: 'github', url: 'https://github.com/o/r/pull/7', repo: 'o/r', identifier: '7', action: 'created', branch: 'feat' }),
-      sys('code_change_published', { provider: 'gerrit', url: 'https://x.googlesource.com/c/r/+/9', repo: 'r', identifier: '9' }),
       sys('model_fallback', { trigger: 'model_not_found', original_model: 'claude-x', fallback_model: 'claude-haiku-5-5', content: 'Switched to Haiku: claude-x was not found' }),
       sys('model_consent_fallback', { choice: 'cancelled', original_model: 'claude-fable-5', fallback_model: 'claude-opus-5-5', content: 'Switched to Opus for this session' }),
     ]);
-    expect(kinds(events)).toEqual(['code.published', 'code.published', 'notice.posted', 'notice.posted']);
-    expect(events[0]).toMatchObject({ provider: 'github', url: 'https://github.com/o/r/pull/7', repo: 'o/r', identifier: '7', action: 'created', branch: 'feat' });
-    expect(events[1]).toMatchObject({ provider: 'gerrit', identifier: '9', action: null, branch: null });
-    expect(events[2]).toMatchObject({ level: 'warning', text: 'Switched to Haiku: claude-x was not found', key: null });
-    expect(events[3]).toMatchObject({ level: 'warning', text: 'Switched to Opus for this session', key: null });
+    expect(kinds(events)).toEqual(['notice.posted', 'notice.posted']);
+    expect(events[0]).toMatchObject({ level: 'warning', text: 'Switched to Haiku: claude-x was not found', key: null });
+    expect(events[1]).toMatchObject({ level: 'warning', text: 'Switched to Opus for this session', key: null });
   });
 
   it('maps every named system subtype and the other top-level frames', () => {

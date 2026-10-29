@@ -23,7 +23,7 @@ type Gateway = Omit<EngineSessionStatus['gateway'], 'mode'>;
 export type TrackedStatus = Pick<
   EngineSessionStatus,
   'engineState' | 'activity' | 'permissionMode' | 'prePlanMode' | 'fastMode' | 'plugins' | 'pluginErrors' | 'pluginWarnings' | 'backgroundTasks' | 'mcpServers' | 'heldPeerMessages' | 'memory'
-  | 'pluginsObservedAt' /* P2-A */
+  | 'pluginsObservedAt' /* P2-A */ | 'published' /* P5 E312 */
 > & { gateway: Gateway; resolvedModel: string | null; engineVersion: string | null; work: NonNullable<EngineSessionStatus['work']> /* P5 O2 M2 */ };
 
 const FAST_MODE_STATES = ['off', 'cooldown', 'on'] as const;
@@ -67,6 +67,7 @@ export class SessionStatusTracker {
   mcpServers: EngineSessionStatus['mcpServers'] = [];
   backgroundTasks: EngineSessionStatus['backgroundTasks'] = [];
   heldPeerMessages: EngineSessionStatus['heldPeerMessages'] = [];
+  published: EngineSessionStatus['published'] = undefined; // P5 E312: the last code_change_published
   memory: EngineSessionStatus['memory'] = { rssKiB: null, treeRssKiB: null, sampledAt: null };
   peakTreeRssKiB: number | null = null;
   private catalogState: Catalog = { commands: [], agents: [], skills: [], terminalSlashCommands: [], revision: 0 };
@@ -108,6 +109,7 @@ export class SessionStatusTracker {
       fastMode: { ...this.fastMode }, pluginsObservedAt: this.pluginsObservedAt /* P2-A */, plugins: this.plugins.map((p) => ({ ...p })), pluginErrors: this.pluginErrors.map((e) => ({ ...e })), pluginWarnings: this.pluginWarnings.map((w) => ({ ...w })),
       backgroundTasks: this.backgroundTasks.map((t) => ({ ...t })), mcpServers: this.mcpServers.map((s) => ({ ...s })), heldPeerMessages: this.heldPeerMessages.map((m) => ({ ...m })), memory: { ...this.memory },
       work: this.work.snapshot(), // P5 O2 M2
+      ...(this.published && { published: { ...this.published } }), // P5 E312
     };
   }
 
@@ -255,6 +257,9 @@ export class SessionStatusTracker {
         return;
       case 'peer_message_hold':
         this.peerMessageHold(frame, at);
+        return;
+      case 'code_change_published': // P5 E312: a subagent's too, since the checkout is the session's
+        if (typeof frame.url === 'string') this.published = { url: frame.url, action: str(frame.action), at };
         return;
     }
   }

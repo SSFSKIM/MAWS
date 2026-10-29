@@ -405,7 +405,7 @@ export function connectPanelEvents(client: MawsBridge = ipc): () => void {
     }),
     client.on('session.setup', () => invalidateScmQueries(() => true, [SCM_STATUS_QUERIES])),
     client.on('fs.workflowChanged', ({ appSessionId }) => void queryClient.invalidateQueries({ queryKey: ['maws', 'fs.workflows', { appSessionId }] })),
-    client.on('session.eventBatch', ({ appSessionId, events }) => refreshPublishedPrState(appSessionId, events, client)), // P5 E312
+    client.on('session.status', ({ appSessionId, status }) => refreshPublishedPrState(appSessionId, status.published, client)), // P5 E312
   ];
   return () => offs.forEach((off) => off());
 }

@@ -613,6 +613,7 @@ export class EngineSession {
       trust: { attested: this.spec.trust !== null, recorded: this.trustRecorded }, // C10
       work: tracked.work, kept: this.kept, // P5 O2 M2
       ...(this.surface.attached && { uiSurface: { clientId: this.surface.clientId } }), // R2
+      ...(tracked.published && { published: tracked.published }), // P5 E312
     };
     // C12: what an exit would lose, by the budget policy's rules (an exited process holds nothing)
     if (status.process !== 'exited') status.keepAlive = hardReasons(status, this.opts.statefulMcpServers?.() ?? NO_SERVERS);
