@@ -9,8 +9,8 @@
 // between sets each question goes up alone as a session-wide `raised`, each answer as a `settled` naming its request,
 // which add the one request and take it away (a raise held already, or a settlement of a request not held, moves
 // nothing). A rise in a session's count is a new request waiting, `waiting` with the count; a fall is `settled` with
-// what remains, which pushes nothing. The hub is told each change once: what it was last told is kept, and a change made while no connection
-// was up is told at the next welcome. A count above 0 the hub was told is kept on disk (`notified.json`), so after a
+// what remains, which pushes nothing. The hub is told each change once: what it was last told is kept, and a change
+// made while no connection was up is told at the next welcome. A count above 0 the hub was told is kept on disk (`notified.json`), so after a
 // restart the first pending set that leaves its session out still tells it `settled 0`; the hub keeps a count until it
 // is told otherwise. A session withdrawn while no connection is up owes its `settled 0`, kept there too and paid at the
 // next welcome, listed again or not (a count known then is told after it). The file is read when the notifier is made
