@@ -6,19 +6,14 @@
 // its `settled`, and all of a session's leave when its state stream ends without a fresh snapshot within 5 s, when its
 // bridge stops being live, or when it leaves lane A. Each item carries the request view `attention.request` answers for
 // it, built from the raised record (tool, input, questions, suggestions) in the shape of the engine's own request event,
-// so the card, the hover preview and the docked swap read it as they read a broker item's.
-import { LANE_A_ITEM_PREFIX } from '@shared/attention/lane-a-item';
-import type { AttentionItem } from '@shared/graph/attention';
-import type { Question, SessionEvent } from '@shared/graph/events';
-import type { AgentId, AppSessionId, AttentionId, EventId, RequestId, SessionId, ToolUseId } from '@shared/graph/ids';
+// so the card, the hover preview and the docked swap read it as they read a broker item's (src/shared/lane-a/attention-entry.ts,
+// which the remote pane shares).
+import type { AppSessionId } from '@shared/graph/ids';
 import type { LaneARaised } from '@shared/ipc/schema/lane-a';
-import { requestKind } from './decisions';
+import { laneAEntryOf as entryOf, type LaneAEntry } from '@shared/lane-a/attention-entry';
 import type { LaneAView } from './driver';
 
-export interface LaneAEntry {
-  item: AttentionItem;
-  request: SessionEvent;
-}
+export type { LaneAEntry };
 
 export interface LaneAAttentionDeps {
   set(appId: AppSessionId, entries: LaneAEntry[]): void; // the session's whole list, on each change
@@ -32,60 +27,6 @@ interface Session {
   seen: Map<string, string>; // a request the bridge stamped no time to: when it was first seen
   told: string; // the entries last told, as JSON
   grace: ReturnType<typeof setTimeout> | null;
-}
-
-const record = (value: unknown): Record<string, unknown> => (value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {});
-const str = (value: unknown): string | null => (typeof value === 'string' ? value : null);
-
-// The engine's question shape (`QuestionSchema`), as the engine host reads a `can_use_tool` request's.
-const questionsOf = (input: Record<string, unknown>): Question[] =>
-  (Array.isArray(input.questions) ? input.questions : []).map((raw) => {
-    const q = record(raw);
-    return {
-      question: String(q.question ?? ''),
-      header: String(q.header ?? ''),
-      options: (Array.isArray(q.options) ? q.options : []).map((o) => ({ label: String(record(o).label ?? ''), description: str(record(o).description), preview: str(record(o).preview) })),
-      multiSelect: q.multiSelect === true,
-    };
-  });
-
-// The one line Needs you shows, in the broker's words (`engine-host/broker.ts` `shapeOf`).
-function summaryOf(raised: LaneARaised, kind: AttentionItem['kind']): string {
-  if (kind === 'question') return questionsOf(raised.input)[0]?.question || 'Question';
-  if (kind === 'plan') return 'Plan ready for review';
-  const detail = str(raised.input.command) ?? str(raised.input.description) ?? '';
-  return detail.length > 0 ? `${raised.tool}: ${detail.slice(0, 80)}` : raised.tool;
-}
-
-function entryOf(appId: AppSessionId, raised: LaneARaised, createdAt: string): LaneAEntry {
-  const kind = requestKind(raised);
-  const requestId = raised.request as RequestId;
-  const toolUseId = (raised.toolUseId ?? raised.request) as ToolUseId;
-  const agentId = (raised.agentId ?? null) as AgentId | null;
-  const id = `${LANE_A_ITEM_PREFIX}${raised.session}:${raised.request}`; // a prompt its terminal shows too
-  const item: AttentionItem = {
-    id: id as AttentionId,
-    appSessionId: appId,
-    sessionId: raised.session as SessionId,
-    kind,
-    request: { requestId, toolUseId, taskId: null, agentId },
-    summary: summaryOf(raised, kind),
-    createdAt,
-    state: 'pending',
-    stateChangedAt: createdAt,
-    expiresAt: raised.deadline ?? null,
-  };
-  const base = { id: id as EventId, sessionId: raised.session as SessionId, at: createdAt, seq: null, agentId, parentToolUseId: null };
-  const request: SessionEvent =
-    kind === 'question'
-      ? { ...base, kind: 'question.requested', requestId, toolUseId, questions: questionsOf(raised.input) }
-      : kind === 'plan'
-        ? { ...base, kind: 'plan.requested', requestId, toolUseId, plan: str(raised.input.plan) ?? '', input: raised.input }
-        : {
-            ...base, kind: 'permission.requested', requestId, toolUseId, toolName: raised.tool, displayName: null, input: raised.input,
-            description: null, decisionReasonType: null, suggestions: raised.suggestions ?? [], blockedPath: null,
-          };
-  return { item, request };
 }
 
 export function laneAAttention(deps: LaneAAttentionDeps): { update(appId: AppSessionId, view: LaneAView | null): void; stop(): void } {
