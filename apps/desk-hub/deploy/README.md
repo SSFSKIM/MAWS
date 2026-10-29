@@ -11,7 +11,7 @@ naming its account, Worker, host, owner and org:
 
 Everything here goes through one command, run from the MAWS worktree root:
 
-    pnpm --filter desk-hub deployment <deploy|probe|fake-check|redeploy-check|measure|frame-cost|counts|access-sync|relay-measure|acceptance|admin> [--config deploy/<file>.json] [options]
+    pnpm --filter desk-hub deployment <deploy|probe|fake-check|redeploy-check|measure|frame-cost|counts|access-sync|relay-measure|acceptance|endpoint-acceptance|admin> [--config deploy/<file>.json] [options]
 
 Each command acts on the deployment `--config` names, `config.json` when it
 names none (the path resolves from `apps/desk-hub`, where pnpm runs the
@@ -266,6 +266,35 @@ signal stops the run, gives a request in flight 5 s to land, runs the cleanup (e
     printf 'DESK_ACCESS_TOKEN=%s\n' "$(cloudflared access token -app=$HUB)" \
       | pnpm --filter desk-hub deployment acceptance --config deploy/staging.json --device-keys <file> [--push-url <https> --push-port <port>]
 
+## `endpoint-acceptance`: MAWS's endpoint on a real machine (P5 O10 M11)
+
+O10's acceptance items 2-5, 8 and 9 against a real `mawsd` (`endpoint-acceptance.ts`, its items in
+`endpoint-items.ts`, its verdicts in `endpoint-verdicts.ts`). The machine is a scratch scene on the devcloud acceptance
+VM (`vm/`): the user `o10acc`, a `mawsd` built from the branch on a scratch profile with the direct listener on 47831,
+a sminos cut over to it and one terminal `claude` session under that sminos whose model is a stub (`vm/stub-model.mjs`),
+all in a private mount namespace that hides the VM's managed settings; every step on the VM is a 0600 script handed to
+`devcloud vm ssh <vm> --root` on its stdin and unlinked at once (`endpoint-machine.ts`). The run enrolls the scratch
+`mawsd` by a code the staging admin mints and lists it, adds a second member, drives each item over the relay and over
+the tailnet (`TamperRelay` and the run's own relays in the path for item 3), and undoes all of it, the policy included.
+One `PASS <item>`, `FAIL <item>` or `NOT SHOWN <item>: <why>` per item, the suites' and other children's clauses named
+under it; then `LEFT …` for anything still there. `staging-run.sh endpoint` runs it (production compared before and
+after), `staging-run.sh endpoint-vm setup <base> | teardown` sets the scene up or removes it. Production (item 7) is a
+mode of its own, refused unless asked for by `--production --confirm-production <production's host>` with production's
+config (`endpoint-production.ts`), and driven by `vm/production.sh` against the VM's own `mawsd` and sminos. Its
+machine is pinned (`PRODUCTION_MACHINE`: the VM `dc-acceptance-7f80`, its name and its ref), checked before the owner
+is asked for anything, and dialled directly on 47830 unless `--direct-url` names another address. It runs items 2–5
+(its default; `--items` naming 8 or 9 is refused, their probes being staging's), and of them only the clauses its
+allowlist names (`PRODUCTION_CLAUSES` in `endpoint-items.ts`): VM-local work, reads, and at most five
+events marked `o10 m11 acceptance` posted in the machine's own project (`HubWrites`, which refuses a sixth or any other
+project itself); never a hub deploy, an org-state change, or a spawn the daemon is asked to refuse (a broken refusal
+would launch a seat), which it reports `NOT SHOWN`. Its lane A session runs as the owner's user, since that sminos
+does, against the stub model under `env -i`, with a scratch `CLAUDE_CONFIG_DIR` holding the sminos plugin alone and
+`/etc/claude-code` hidden by a private mount namespace; the run names the session (`--session-id`) and checks its
+engine is that one before using it, and calls a process its own only inside that namespace (item 4's local spawn is
+declined while any other claude of the owner's runs). `down` ends it and removes the scratch directory. The marked
+events, the events the run's sessions wrote (counted by writer, from the offset the log stood at before lane A), the
+machine's project and its history stay, printed as `KEPT …` lines.
+
 ## `admin`: the owner's hand on the org state (P5 O13 M2)
 
 Until O8's Org page, the owner roots a deployment's org, pairs a device into it, revokes one and keeps the head
@@ -497,6 +526,9 @@ production's Worker or host, or a preview alias of it (`<alias>-desk-hub.…`), 
     then the quick-tunnel API asked directly with a 60 s wait (cloudflared's own request gives up after 15 s, and the
     API has taken 22-33 s to answer), with cloudflared run on the credentials it answered. That credentials file is
     written 0600 into the state directory and removed when the tunnel stops; its secret is never printed.
+  - `endpoint [args…]`, `endpoint-vm setup <base> | teardown`: `endpoint-acceptance` under `staging-ssfskim` with the
+    admin device's keys, its hub-deploy item this script's own `deploy`, the secrets it handled searched for in its log
+    after; the VM scene set up from a bundle cut at <base> (a commit the VM's MAWS checkout holds), or removed.
   - `access-sync`: the people policy read back at the org state's head, with the machine credentials access-sync uses.
   - `admin <args…>`: `deployment admin` against `staging-ssfskim` with the admin device's `keys.json` (its anchor,
     `keys.json.org.json`, beside it once `admin adopt` ran). `adopt`, `devices` and `refresh` run unattended; `pair` and
