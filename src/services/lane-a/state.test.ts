@@ -37,6 +37,7 @@ describe('the session fold', () => {
     expect(fold.view()).toEqual({
       turn: { running: true, unknown: false }, model: 'claude-opus-4-5', effort: null, override: { model: 'haiku', effort: null }, catalog: { fingerprint: 'fp' },
       pending: [{ request: 'r1', session: 's', tool: 'Bash', input: {} }], settled: [{ request: 'r0', session: 's', winner: 'terminal', outcome: 'allow', by: 'terminal' }],
+      mode: null,
     });
     expect(fold.catalogBody()).toMatchObject({ fingerprint: 'fp' });
   });
@@ -93,6 +94,27 @@ describe('the session fold', () => {
     // a new session (`/clear`) starts on its own model, its effort unknown until its first request
     fold.event({ type: 'session', phase: 'start', model: 'claude-sonnet-5-5' });
     expect(fold.view()).toMatchObject({ model: 'claude-sonnet-5-5', effort: null });
+  });
+
+  // sminos 1.27.14: the heartbeat's `state` carries the main loop's mode as the session last reported it, all three
+  // fields absent until it has; the snapshot carries none, so a fresh stream's keeps the last one heard until the next
+  // heartbeat says it again.
+  it('follows the mode the heartbeat reports, with when the bridge read it and from what, and none while it reports none', () => {
+    const fold = new SessionFold('s');
+    fold.snapshot({ ...snapshot, turns: [] });
+    expect(fold.view().mode).toBeNull();
+    const beat = (fields: Record<string, unknown> = {}) => fold.event({ type: 'heartbeat', state: { mainTurn: null, isStreaming: false, tools: [], ...fields } });
+    expect(beat()).toBe(false); // nothing reported, nothing changed
+    expect(beat({ permissionMode: 'plan', permissionModeAt: 1000, permissionModeFrom: 'permission_mode_changed' })).toBe(true);
+    expect(fold.view().mode).toEqual({ mode: 'plan', at: 1000, from: 'permission_mode_changed' });
+    expect(fold.view().turn).toEqual({ running: false, unknown: false });
+    expect(beat({ permissionMode: 'plan', permissionModeAt: 1000, permissionModeFrom: 'permission_mode_changed' })).toBe(false); // the same report
+    expect(beat({ permissionMode: 'plan', permissionModeAt: 9000, permissionModeFrom: 'UserPromptSubmit' })).toBe(true); // reported again, later
+    expect(fold.view().mode).toEqual({ mode: 'plan', at: 9000, from: 'UserPromptSubmit' });
+    fold.snapshot({ ...snapshot, turns: [] }); // a fresh stream: its snapshot says no mode
+    expect(fold.view().mode).toEqual({ mode: 'plan', at: 9000, from: 'UserPromptSubmit' });
+    expect(beat()).toBe(true); // the session's bridge holds none now (a new process starts with none)
+    expect(fold.view().mode).toBeNull();
   });
 
   // P5 O9 M6: the digest's activity reads the main loop's latest tool call of its running turn

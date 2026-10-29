@@ -1,8 +1,9 @@
 // A bridged session's state (P5 O9 M2, docs/doperpowers/plans/2026-10-28-p5-o9-lane-a.md, "State" and Interfaces §A):
 // what its bridge can do, from `GET /status`, and what the session is doing, folded from its state stream (the snapshot,
 // then the events). Only `live` drives controls.
-import type { LaneACatalog, LaneARaised, LaneASettled, LaneAState } from '@shared/ipc/schema/lane-a';
+import type { LaneACatalog, LaneAMode, LaneARaised, LaneASettled, LaneAState } from '@shared/ipc/schema/lane-a';
 import { controlsMissingReason } from '@shared/lane-a/bridge';
+import { modeOf, sameMode } from '@shared/lane-a/mode';
 import { raisedOf, settledOf } from './reshape';
 
 type Event = Record<string, unknown>;
@@ -28,7 +29,7 @@ export function classify(status: Record<string, unknown>): BridgeState {
   return { bridge: 'live', reason: null };
 }
 
-export type FoldView = Pick<LaneAState, 'turn' | 'model' | 'effort' | 'override' | 'catalog' | 'pending' | 'settled'>;
+export type FoldView = Pick<LaneAState, 'turn' | 'model' | 'effort' | 'override' | 'mode' | 'catalog' | 'pending' | 'settled'>;
 // The main loop's latest tool call of its running turn (P5 O9 M6: the digest's activity): `running` until its result.
 export type MainTool = { tool: string; input: unknown; running: boolean };
 
@@ -41,6 +42,9 @@ export class SessionFold {
   // snapshot, whose `sessionInfo` the bridge read when it loaded.
   private ran: { model: string; effort: string | null } | null = null;
   private override: LaneAState['override'] = null;
+  // The mode the session last reported, as the latest heartbeat says it (sminos 1.27.14): kept across a fresh stream's
+  // snapshot, which carries none, until the next heartbeat (5 s) says it again or says none.
+  private mode: LaneAMode | null = null;
   private catalog: LaneACatalog | null = null;
   private pending = new Map<string, LaneARaised>();
   private settled = new Map<string, LaneASettled>();
@@ -88,9 +92,14 @@ export class SessionFold {
       if (!state) return false;
       const running = typeof state.mainTurn === 'string';
       const unknown = state.isTurnUnknown === true;
-      if (running === this.mainTurns.size > 0 && unknown === this.unknown) return false;
-      this.mainTurns = running ? new Set([String(state.mainTurn)]) : new Set();
-      this.unknown = unknown;
+      const mode = modeOf(state);
+      const turn = running !== this.mainTurns.size > 0 || unknown !== this.unknown;
+      if (!turn && sameMode(mode, this.mode)) return false;
+      if (turn) {
+        this.mainTurns = running ? new Set([String(state.mainTurn)]) : new Set();
+        this.unknown = unknown;
+      }
+      this.mode = mode;
       return true;
     }
     if (type === 'raised' && typeof e.request === 'string') {
@@ -130,6 +139,7 @@ export class SessionFold {
       model: this.ran?.model ?? this.model,
       effort: this.ran?.effort ?? null,
       override: this.override,
+      mode: this.mode,
       catalog: this.catalog === null ? null : { fingerprint: this.catalog.fingerprint },
       pending: [...this.pending.values()],
       settled: [...this.settled.values()],

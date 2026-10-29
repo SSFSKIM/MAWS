@@ -35,6 +35,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { ClientRef } from '@shared/ipc/client';
 import type { CommandName, EventPayload } from '@shared/ipc/schema';
 import type { ControlResult, LaneAAnswerOutput, LaneACatalog, LaneASendOutput, LaneAState } from '@shared/ipc/schema/lane-a';
+import { reportsMode } from '@shared/lane-a/mode';
 import type { ServiceHandler } from '@shared/spine/bus';
 import { createGitRunner, type GitRun } from '../git/runner';
 import { BridgeUnreachable, call, subscribe, type BridgeAnswer, type EventStream } from './bridge-client';
@@ -483,17 +484,20 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     if (s.bridge === null || s.status === null) return null;
     const capabilities = record(s.status.capabilities);
     const controls = record(capabilities?.controls) ?? {};
+    const sminos = typeof capabilities?.sminos === 'string' ? capabilities.sminos : null;
+    const view = s.fold.view();
     return {
       appSessionId: s.appId,
       engineSessionId: s.engine,
       bridge: s.bridge.bridge,
       reason: s.bridge.reason,
       launch: typeof s.status.launch === 'string' ? s.status.launch : null,
-      sminos: typeof capabilities?.sminos === 'string' ? capabilities.sminos : null,
+      sminos,
       ops: strings(capabilities?.ops),
       reads: strings(capabilities?.reads),
       controls: controls as LaneAState['controls'],
-      ...s.fold.view(),
+      ...view,
+      mode: reportsMode(sminos) ? view.mode : null, // its heartbeat's, from a bridge that reports one
       deliveries: s.lane.entries(),
     };
   }

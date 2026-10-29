@@ -6,7 +6,7 @@ import { connectUsage } from '../stores/usage';
 
 export { windowsFor, useSessionWindows, type SessionWindows, type Windows } from '../stores/usage';
 export { ModeMenu } from './ModeMenu';
-export { liveModeBinding, nextMode, autoUnavailableReason, MODE_OPTIONS, MODE_REFUSAL_WORDS, NOT_RUNNING, type ModeBinding, type ModeOption } from './mode-menu';
+export { liveModeBinding, nextMode, autoUnavailableReason, modeReported, MODE_OPTIONS, MODE_REFUSAL_WORDS, NOT_RUNNING, type ModeBinding, type ModeOption } from './mode-menu';
 
 // Mounted once from App.tsx: keeps the usage store live.
 export function connectStatusLine(): () => void {

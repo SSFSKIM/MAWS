@@ -43,6 +43,7 @@ export function laneAState(appSessionId: AppSessionId, over: Partial<LaneAState>
     model: 'claude-opus-4-5',
     effort: null,
     override: null,
+    mode: null,
     catalog: { fingerprint: 'fp-1' },
     pending: [],
     settled: [],

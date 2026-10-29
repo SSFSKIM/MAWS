@@ -252,6 +252,17 @@ describe('the chips', () => {
     expect(bindings().directories.disabled).toBe(LANE_A_WORDS.directories);
     expect(bindings().location.path).toBe('/work/here');
   });
+
+  // sminos 1.27.14: the bridge reports the mode (main's state holds it only from such a bridge); MAWS shows it and when
+  // it was reported, and still sets none
+  it('names the mode the session reported, with when, its choice still closed', async () => {
+    const { bindings, capability } = port({ mode: { mode: 'acceptEdits', at: 1_761_700_000_000, from: 'permission_mode_changed' } }).controls;
+    const mode = bindings().mode;
+    expect(mode).toMatchObject({ value: 'acceptEdits', reportedAt: 1_761_700_000_000, disabled: LANE_A_WORDS.mode });
+    expect(mode.unreported).toBeFalsy();
+    expect(await mode.set('plan')).toEqual({ ok: false, error: LANE_A_WORDS.mode });
+    expect(capability('mode')).toEqual({ available: false, reason: LANE_A_WORDS.mode });
+  });
 });
 
 describe('the palette', () => {

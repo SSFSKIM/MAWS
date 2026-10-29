@@ -1,18 +1,40 @@
 // The toolbar's permission mode (C7 execution document, "Composer frame" Mode): the engine's effective mode, a warning
 // glyph with the refusal in words when one is set, and M5's `ModeMenu` in a popover (W2: at the toolbar's left, so it
 // opens from its start). W3: never a printed "default" for a mode nothing knows yet; MAWS's own default is auto. P5 O9:
-// where nothing reports the mode (`unreported`, a terminal session), the chip names no mode, only "Mode", with why.
+// where nothing reports the mode (`unreported`, a terminal session), the chip names no mode, only "Mode", with why;
+// where the session reported it (`reportedAt`, sminos 1.27.14), its title says how long ago.
 // ⇧Tab's cycle is the Composer's (`composer.cycleMode`, delivered inside the editor).
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
 import { Popover } from 'radix-ui';
-import { ModeMenu, MODE_REFUSAL_WORDS, type ModeBinding } from '../../statusline';
+import { useEffect, useState } from 'react';
+import { ModeMenu, modeReported, MODE_REFUSAL_WORDS, type ModeBinding } from '../../statusline';
+import { POPOVER_TICK_MS } from '../../statusline/use-now';
 import { CHIP, POPOVER } from './chip-style';
 import { useOpenWhileShown } from './draft-shown';
 
+// The clock a reported mode's age reads against: read again as a report arrives, and every 30 s while one is shown.
+function useReportClock(at: number | undefined): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (at === undefined) return;
+    const tick = () => setNow(Date.now());
+    const first = setTimeout(tick, 0);
+    const timer = setInterval(tick, POPOVER_TICK_MS);
+    return () => {
+      clearTimeout(first);
+      clearInterval(timer);
+    };
+  }, [at]);
+  return now;
+}
+
 export function ModeChip({ binding, onOpen }: { binding: ModeBinding; onOpen?(): void }) {
   const [open, setOpen] = useOpenWhileShown();
+  const now = useReportClock(binding.reportedAt);
   const refusal = binding.refusal ? MODE_REFUSAL_WORDS[binding.refusal] : null;
   const mode = binding.unreported ? null : PERMISSION_MODE_LABELS[binding.value ?? 'auto'];
+  const reported = binding.reportedAt === undefined ? null : modeReported(binding.reportedAt, now);
+  const why = [reported, binding.disabled].filter((part) => part !== null).join(' · ');
   return (
     <Popover.Root
       open={open}
@@ -21,7 +43,7 @@ export function ModeChip({ binding, onOpen }: { binding: ModeBinding; onOpen?():
         setOpen(next);
       }}
     >
-      <Popover.Trigger aria-label={mode === null ? 'Permission mode not reported' : `Permission mode ${mode}${refusal ? ` · ${refusal}` : ''}`} title={refusal ?? binding.disabled ?? 'Permission mode'} className={`${CHIP} shrink-0`}>
+      <Popover.Trigger aria-label={mode === null ? 'Permission mode not reported' : `Permission mode ${mode}${refusal ? ` · ${refusal}` : ''}`} title={refusal ?? (why || 'Permission mode')} className={`${CHIP} shrink-0`}>
         {refusal && (
           <span aria-hidden className="text-warning">
             ⚠
