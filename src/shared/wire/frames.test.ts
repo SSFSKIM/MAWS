@@ -277,7 +277,7 @@ describe('wire frames type the normal-use frames of 2.1.312', () => {
     ['session_title_changed', 'title'], ['vcs_state_changed', 'cwd'], ['code_change_published', 'url'], ['permission_check_status', 'tool_use_id'],
     ['model_fallback', 'content'], ['model_consent_fallback', 'fallback_model'], ['dev_intent', 'kind'],
   ])('rejects %s without %s', ([subtype, key]) => {
-    const { [key!]: _dropped, ...rest } = frames[subtype!]!;
+    const rest = Object.fromEntries(Object.entries(frames[subtype!]!).filter(([name]) => name !== key));
     expect(() => parseStdoutFrame({ ...envelope, subtype, ...rest })).toThrow(z.ZodError);
   });
 
