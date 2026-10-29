@@ -109,6 +109,8 @@ export class ProcessTable {
   // E10 start: the idle-row release (P5 O2 M2: its rule in idle-release.ts) and the row set's listeners
   private readonly idle: IdleRelease;
   private readonly rowsListeners = new Set<() => void>();
+  private readonly holdListeners = new Set<() => void>(); // P5 Decision Log 124
+  private launches = 0; // P5 Decision Log 124: launches from their entry until they have reserved their row or refused
   private readonly procStartOf: (pid: number) => string | null;
   private liveLedger: ((rows: LiveRow[]) => void) | null = null; // the orphan ledger's writer, once recording
   private readonly ledgerKeys = new WeakMap<EngineSession, string>(); // each row's part of the ledger: exited, pid
@@ -127,7 +129,7 @@ export class ProcessTable {
     this.budgetSignature = signatureOf(this.budget);
     this.exitedRowsMax = opts.exitedRowsMax ?? EXITED_ROWS_MAX;
     // C12 end
-    this.idle = new IdleRelease({ current: (session) => this.currentStatus(session), stateful: () => this.stateful, log: (line) => this.log(line) }); // P5 O2 M2
+    this.idle = new IdleRelease({ current: (session) => this.currentStatus(session), stateful: () => this.stateful, log: (line) => this.log(line), interestChanged: () => this.holdChanged() }); // P5 O2 M2
   }
 
   private readonly log: (message: string) => void;
@@ -230,6 +232,44 @@ export class ProcessTable {
   // P5 O2 M2: `host.interest`, a client connection's full set of the sessions it holds interest in
   setInterest(holder: ClientRef, sessions: readonly AppSessionId[]): void {
     this.idle.setInterest(holder, sessions);
+  }
+
+  // P5 Decision Log 124 (the supervisor's quiet): what holds the host beside its rows' status. Whether any client holds
+  // interest in any session; whether a launch is preparing (the launcher's binary probe, relay check and environment
+  // capture run before its row exists); and each change of either: a holder's set, its end included, and a launch's
+  // entry and its end.
+  interested(): boolean {
+    return this.idle.interested();
+  }
+
+  launching(): boolean {
+    return this.launches > 0;
+  }
+
+  async preparing<T>(launch: () => Promise<T>): Promise<T> {
+    this.launches += 1;
+    this.holdChanged();
+    try {
+      return await launch();
+    } finally {
+      this.launches -= 1;
+      this.holdChanged();
+    }
+  }
+
+  onHoldChanged(listener: () => void): () => void {
+    this.holdListeners.add(listener);
+    return () => this.holdListeners.delete(listener);
+  }
+
+  private holdChanged(): void {
+    for (const listener of this.holdListeners) {
+      try {
+        listener();
+      } catch (error) {
+        this.log(`hold listener failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   }
 
   private currentStatus(session: EngineSession): EngineSessionStatus | null {
