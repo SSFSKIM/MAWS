@@ -16,7 +16,7 @@ import { useSettingsValue } from './parts';
 import { VoiceSection } from './VoiceSection'; // E9
 import { BrowserSection } from './BrowserSection'; // E4a
 import { ArtifactsSection } from './ArtifactsSection'; // P3-D
-import { OrgSection } from './OrgSection'; // P5 O8 M1
+import { OrgSection } from './org/OrgSection'; // P5 O8 M1; M4a: the Org page, split by group
 import { openCustomize } from '../customize/open';
 
 export type SettingsSection = NonNullable<Extract<TabRef, { kind: 'settings' }>['section']>;
