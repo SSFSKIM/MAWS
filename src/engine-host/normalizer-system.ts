@@ -12,12 +12,15 @@ import type { EventPayload } from '@shared/graph/events';
 import type {
   SystemApiRetryFrame,
   SystemBackgroundTasksChangedFrame,
+  SystemCodeChangePublishedFrame, // P5 E312
   SystemCommandsChangedFrame,
   SystemCompactBoundaryFrame,
   SystemFrame,
   SystemHookResponseFrame,
   SystemHookStartedFrame,
   SystemInformationalFrame,
+  SystemModelConsentFallbackFrame, // P5 E312
+  SystemModelFallbackFrame, // P5 E312
   SystemModelRefusalFallbackFrame,
   SystemModelRefusalNoFallbackFrame,
   SystemNotificationFrame,
@@ -213,6 +216,23 @@ export function mapSystemFrame(frame: SystemFrame, tasks: TaskRegistry): SystemM
       const f = frame as SystemUiFocusFrame;
       return one({ kind: 'plugin.focus', component: f.component, instanceId: f.instance_id, plugin: f.plugin, key: f.key });
     }
+    // P5 E312 (findings-p5-e312-engine.txt): a model swap is the engine's notice, as an informational line is
+    case 'model_fallback': // turn-scoped: the next turn tries the requested model again
+      return one({ kind: 'notice.posted', level: 'warning', text: (frame as SystemModelFallbackFrame).content, key: null });
+    case 'model_consent_fallback': // session-scoped: every later turn's system/init reports the model it runs (the status's resolved model)
+      return one({ kind: 'notice.posted', level: 'warning', text: (frame as SystemModelConsentFallbackFrame).content, key: null });
+    case 'code_change_published': { // P5 E312: the cue the PR row re-asks gh on (renderer ipc/events.ts)
+      const f = frame as SystemCodeChangePublishedFrame;
+      return one({ kind: 'code.published', provider: f.provider, url: f.url, repo: f.repo, identifier: f.identifier, action: f.action ?? null, branch: f.branch ?? null });
+    }
+    // P5 E312, journaled with no event because an existing path already shows the fact, promptly, or none shows it:
+    case 'session_title_changed': // the same rename appends a `custom-title` record, which C4's title rule reads (the fs watcher's re-summary)
+    case 'vcs_state_changed': // C4's git watcher sees the commit, push, merge or rebase move the head and refs
+    case 'permission_check_status': // no surface shows a pending auto-mode check
+    case 'per_turn_effort_changed': // carries no effort, only that per-turn effort went off
+    case 'memory_recall': // no surface shows a recall
+    case 'dev_intent': // no surface offers device tooling
+      return none;
     // Journaled, no event, no consumer in P0 (the process table reads status and peer holds from the frames themselves).
     case 'status':
     case 'thinking_tokens':

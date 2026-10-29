@@ -127,6 +127,8 @@ export const EVENT_KINDS = [
   // P2-C start (2026-10-09): a prompt's transition through the host's queue, from the queue's `meta queue` row
   'queue.transition',
   // P2-C end
+  // P5 E312 (2026-10-29): a change the session published for review (the engine's system/code_change_published)
+  'code.published',
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
@@ -339,6 +341,10 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
   // the row names, each null where its action names none; `reason` is a drop's lifecycle state, null on every other row.
   event('queue.transition', { action: z.enum(QUEUE_TRANSITION_ACTIONS), queueId: z.string().nullable(), messageUuid: MessageUuidSchema.nullable(), reason: z.enum(QUEUE_DROP_REASONS).nullable() }),
   // P2-C end
+  // P5 E312: the session's command published a change for review (`gh pr create`, `merge`, `close`, …; the engine's
+  // `system/code_change_published`): the URL as the command printed it, unverified. Read only as a cue that the session's
+  // pull request state moved; the state itself is gh's answer (`scm.pr.state`).
+  event('code.published', { provider: z.string(), url: z.string(), repo: z.string(), identifier: z.string(), action: nullableString(), branch: nullableString() }),
 ]);
 
 export type SessionEvent = z.infer<typeof SessionEventSchema>;

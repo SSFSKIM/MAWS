@@ -8,7 +8,9 @@
 // and `scm.status` when a session's setup records trust: one app-level listener (`connectPanelEvents`, ipc/events.ts)
 // does it through `invalidateScmQueries`, so neither surface subscribes to an event of its own (E11 W-D).
 import { useEffect, useRef } from 'react';
+import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { MawsBridge } from '@shared/ipc/schema';
 import type { ScmStatus } from '@shared/ipc/schema/scm';
 import { queryClient, useCommand } from '../../ipc/query';
 
@@ -33,6 +35,23 @@ export function invalidateScmQueries(which: (appSessionId: AppSessionId) => bool
       },
     });
   }
+}
+
+// P5 E312: the session published a change for review (X1 `code.published`, the engine's code_change_published: a PR
+// created, merged, closed, …), which moves no ref the watcher sees. A PR state a surface holds is asked of gh again at
+// once, past main's kept answer, as the row's Refresh asks; otherwise the poll shows it up to two minutes late. A publish
+// older than the poll (a replayed journal) is one the poll has read already; one ask per session at a time.
+const republishing = new Set<AppSessionId>();
+export function refreshPublishedPrState(appSessionId: AppSessionId, events: readonly SessionEvent[], client: MawsBridge): void {
+  const now = Date.now();
+  if (!events.some((e) => e.kind === 'code.published' && now - Date.parse(e.at) < PR_STATE_POLL.refetchInterval)) return;
+  const key = prStateKey(appSessionId);
+  if (queryClient.getQueryState(key) === undefined || republishing.has(appSessionId)) return;
+  republishing.add(appSessionId);
+  void client
+    .invoke('scm.pr.state', { appSessionId, refresh: true })
+    .then((result) => (result.ok ? void queryClient.setQueryData(key, result.value) : queryClient.invalidateQueries({ queryKey: key })))
+    .finally(() => republishing.delete(appSessionId));
 }
 
 // The checkout's `scm.status`. Read again when its repository's head or refs move (`git remote add`, a remote's URL or an

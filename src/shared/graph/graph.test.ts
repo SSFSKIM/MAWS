@@ -81,11 +81,12 @@ describe('graph schemas accept and reject', () => {
 
     it('lists every event kind once and the union covers each', () => {
       expect(new Set(EVENT_KINDS).size).toBe(EVENT_KINDS.length);
-      expect(EVENT_KINDS).toHaveLength(70); // R1: the five plugin.* kinds; R2: the surface's four; E1: the five maws.* kinds; E3: the two side.thread.* kinds; E7: peer.message; E2: maws.delivery.artifact; E4c: maws.browser.action; P2-C: queue.transition; l2-transcript-01: tool.summary
-      expect(EVENT_KINDS.at(-4)).toBe('peer.message'); // E7: appended after E1's block (X1 is append-only)
-      expect(EVENT_KINDS.at(-3)).toBe('maws.delivery.artifact'); // E2: appended after E7's (landing order)
-      expect(EVENT_KINDS.at(-2)).toBe('maws.browser.action'); // E4c: after E2's, in ledger order
-      expect(EVENT_KINDS.at(-1)).toBe('queue.transition'); // P2-C (2026-10-09): after E4c's
+      expect(EVENT_KINDS).toHaveLength(71); // R1: the five plugin.* kinds; R2: the surface's four; E1: the five maws.* kinds; E3: the two side.thread.* kinds; E7: peer.message; E2: maws.delivery.artifact; E4c: maws.browser.action; P2-C: queue.transition; l2-transcript-01: tool.summary; P5 E312: code.published
+      expect(EVENT_KINDS.at(-5)).toBe('peer.message'); // E7: appended after E1's block (X1 is append-only)
+      expect(EVENT_KINDS.at(-4)).toBe('maws.delivery.artifact'); // E2: appended after E7's (landing order)
+      expect(EVENT_KINDS.at(-3)).toBe('maws.browser.action'); // E4c: after E2's, in ledger order
+      expect(EVENT_KINDS.at(-2)).toBe('queue.transition'); // P2-C (2026-10-09): after E4c's
+      expect(EVENT_KINDS.at(-1)).toBe('code.published'); // P5 E312 (2026-10-29): after P2-C's
       const covered = SessionEventSchema.options.map((option) => option.shape.kind.value).sort();
       expect(covered).toEqual([...EVENT_KINDS].sort());
     });
@@ -207,6 +208,7 @@ describe('graph schemas accept and reject', () => {
         // P2-C start (2026-10-09): a drop row of the host queue's prompt record
         'queue.transition': { action: 'drop', queueId: 'q-1', messageUuid: 'u-1', reason: 'cancelled' },
         // P2-C end
+        'code.published': { provider: 'github', url: 'https://github.com/o/r/pull/7', repo: 'o/r', identifier: '7', action: 'created', branch: null }, // P5 E312
       };
       expect(Object.keys(samples).sort()).toEqual([...EVENT_KINDS].sort());
       for (const [kind, payload] of Object.entries(samples)) {

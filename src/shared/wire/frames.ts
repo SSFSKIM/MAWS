@@ -267,6 +267,53 @@ export type SystemUiScrollFrame = z.infer<typeof SystemUiScrollFrameSchema>;
 export const SystemUiFocusFrameSchema = systemFrame('ui_focus', { client_id: z.string().optional(), component: z.string(), instance_id: z.string(), plugin: z.string(), key: z.string() });
 export type SystemUiFocusFrame = z.infer<typeof SystemUiFocusFrameSchema>;
 
+// P5 E312 (spikes/protocol-probe/findings-p5-e312-engine.txt): what a MAWS launch receives in normal use on the engine the
+// owner runs (2.1.312) and had no schema for, typed from the engine's schema registry (each `@internal`, outside the
+// published SDK union) and the probe's recordings (fixtures/pass3/p5-e312-*). Sets the engine documents as open (a vcs
+// kind, a forge, a change's action) stay strings.
+// The session's custom name (`/rename`, `rename_session`, a hook's sessionTitle; never the AI title), at startup when the
+// session has one and after each change; the same name may repeat.
+export const SystemSessionTitleChangedFrameSchema = systemFrame('session_title_changed', { title: z.string() });
+export type SystemSessionTitleChangedFrame = z.infer<typeof SystemSessionTitleChangedFrameSchema>;
+
+// A foreground Bash or PowerShell command moved repository state (commit, push, merge, rebase): a hint to look again.
+export const SystemVcsStateChangedFrameSchema = systemFrame('vcs_state_changed', { kind: z.string(), cwd: z.string(), branch: z.string().optional() });
+export type SystemVcsStateChangedFrame = z.infer<typeof SystemVcsStateChangedFrameSchema>;
+
+// A change from this session went out for review: a pull or merge request the session created, edited, merged, closed,
+// pushed to or checked out (`gh pr …`), with its URL as the command printed it (unverified).
+export const SystemCodeChangePublishedFrameSchema = systemFrame('code_change_published', {
+  provider: z.string(), url: z.string(), repo: z.string(), identifier: z.string(), action: z.string().optional(), branch: z.string().optional(),
+});
+export type SystemCodeChangePublishedFrame = z.infer<typeof SystemCodeChangePublishedFrameSchema>;
+
+// A tool call has waited on its auto-mode permission check about four seconds (`checking`), and the wait is over (`done`).
+export const SystemPermissionCheckStatusFrameSchema = systemFrame('permission_check_status', { tool_use_id: z.string(), agent_id: z.string().optional(), status: z.enum(['checking', 'done']) });
+export type SystemPermissionCheckStatusFrame = z.infer<typeof SystemPermissionCheckStatusFrameSchema>;
+
+// The conversation stopped sending effort per turn after the server refused it; carries no effort, only `false`.
+export const SystemPerTurnEffortChangedFrameSchema = systemFrame('per_turn_effort_changed', { per_turn_effort_active: z.boolean() });
+export type SystemPerTurnEffortChangedFrame = z.infer<typeof SystemPerTurnEffortChangedFrameSchema>;
+
+// Auto memory surfaced memories to the model for this turn.
+export const SystemMemoryRecallFrameSchema = systemFrame('memory_recall', { mode: z.string(), memories: z.array(z.looseObject({ path: z.string(), scope: z.string().optional(), content: z.string().optional() })) });
+export type SystemMemoryRecallFrame = z.infer<typeof SystemMemoryRecallFrameSchema>;
+
+// The turn moved to the configured fallback model because the primary failed (turn-scoped: the next turn tries the primary).
+export const SystemModelFallbackFrameSchema = systemFrame('model_fallback', { trigger: z.string(), original_model: z.string(), fallback_model: z.string(), content: z.string() });
+export type SystemModelFallbackFrame = z.infer<typeof SystemModelFallbackFrameSchema>;
+
+// A pre-send consent gate moved the session off the requested model (session-scoped; the Fable 5 usage-credit gate).
+export const SystemModelConsentFallbackFrameSchema = systemFrame('model_consent_fallback', {
+  choice: z.string(), original_model: z.string(), original_model_name: z.string().optional(), fallback_model: z.string(), persisted_as_default: z.boolean().optional(), content: z.string(),
+});
+export type SystemModelConsentFallbackFrame = z.infer<typeof SystemModelConsentFallbackFrameSchema>;
+
+// The kind of development the conversation or the repository shows (`ios_app` from an Xcode project for iOS, …), once
+// per kind; the scan a headless session starts sends it before any turn.
+export const SystemDevIntentFrameSchema = systemFrame('dev_intent', { kind: z.string(), trigger: z.string().optional() });
+export type SystemDevIntentFrame = z.infer<typeof SystemDevIntentFrameSchema>;
+
 // The validator for every `system` frame: one entry per typed subtype; a subtype absent here parses as UnknownSystemFrame.
 export const SYSTEM_SUBTYPE_SCHEMAS: Readonly<Record<string, z.ZodType>> = Object.freeze({
   init: SystemInitFrameSchema,
@@ -298,6 +345,15 @@ export const SYSTEM_SUBTYPE_SCHEMAS: Readonly<Record<string, z.ZodType>> = Objec
   ui_panes: SystemUiPanesFrameSchema, // R2
   ui_scroll: SystemUiScrollFrameSchema, // R2
   ui_focus: SystemUiFocusFrameSchema, // R2
+  session_title_changed: SystemSessionTitleChangedFrameSchema, // P5 E312
+  vcs_state_changed: SystemVcsStateChangedFrameSchema, // P5 E312
+  code_change_published: SystemCodeChangePublishedFrameSchema, // P5 E312
+  permission_check_status: SystemPermissionCheckStatusFrameSchema, // P5 E312
+  per_turn_effort_changed: SystemPerTurnEffortChangedFrameSchema, // P5 E312
+  memory_recall: SystemMemoryRecallFrameSchema, // P5 E312
+  model_fallback: SystemModelFallbackFrameSchema, // P5 E312
+  model_consent_fallback: SystemModelConsentFallbackFrameSchema, // P5 E312
+  dev_intent: SystemDevIntentFrameSchema, // P5 E312
 });
 
 export type SystemFrame =
@@ -309,6 +365,8 @@ export type SystemFrame =
   | SystemPeerMessageHoldFrame | SystemElicitationCompleteFrame
   | SystemUiToastFrame | SystemUiStatusFrame | SystemUiLogFrame | SystemUiInvalidateFrame // R1
   | SystemUiPanesFrame | SystemUiScrollFrame | SystemUiFocusFrame // R2
+  | SystemSessionTitleChangedFrame | SystemVcsStateChangedFrame | SystemCodeChangePublishedFrame | SystemPermissionCheckStatusFrame // P5 E312
+  | SystemPerTurnEffortChangedFrame | SystemMemoryRecallFrame | SystemModelFallbackFrame | SystemModelConsentFallbackFrame | SystemDevIntentFrame // P5 E312
   | UnknownSystemFrame;
 
 // Table lookup that ignores inherited keys, so a frame typed `constructor` or `toString` is unknown, not a prototype method.

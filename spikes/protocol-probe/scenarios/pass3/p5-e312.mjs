@@ -12,6 +12,8 @@
 //   fallback    `--model` naming no model with `--fallback-model haiku`: `model_fallback` (trigger model_not_found).
 //   memory      auto memory on, one memory file whose topic the prompt asks about: `memory_recall` when the selector
 //               surfaces it (behind the engine's own gates).
+//   devintent   the session's repository holds an Xcode project for iOS at its root: `dev_intent` (ios_app,
+//               project_scan) from the scan a headless session starts.
 // Run where an engine run cannot reach the owner's Keychain (P5 Decision Log 29), with a relay answering on 127.0.0.1:8641:
 //   PROBE_ENGINE=~/.local/share/claude/versions/2.1.312 [E312_ARM=title,vcs,…] node run-pass3.mjs p5-e312
 import {launch,scratchRun,removeRun,initPayload,success,check,endAsStop,delay,transcriptPath,ENGINE_VERSION,join,writeFileSync,mkdirSync,records,slug} from './p1-common.mjs';
@@ -20,7 +22,7 @@ import {execFileSync} from 'node:child_process';
 import {chmodSync} from 'node:fs';
 
 const PROVENANCE={child:'P5 engine verification',document:'spikes/protocol-probe/findings-p5-e312-engine.txt',spike:'normal-use frames on the engine the owner runs',engineVersion:ENGINE_VERSION};
-const ARMS=(process.env.E312_ARM||'title,vcs,auto,fallback,memory').split(',');
+const ARMS=(process.env.E312_ARM||'title,vcs,auto,fallback,memory,devintent').split(',');
 const sys=(f,subtype)=>f.type==='system'&&f.subtype===subtype;
 const frames=(p,subtype,after=0)=>p.frames.filter(r=>r.seq>after&&sys(r.frame,subtype));
 const waitSys=(p,subtype,after,timeout=15000)=>p.wait(f=>sys(f,subtype),{after,timeout}).catch(()=>null);
@@ -144,5 +146,22 @@ async function memoryArm(){
  }finally{removeRun(run);}
 }
 
-const ARM_RUNS={title:titleArm,vcs:vcsArm,auto:autoArm,fallback:fallbackArm,memory:memoryArm};
+async function devIntentArm(){
+ const run=scratchRun('e312-devintent');
+ try{
+  const project=join(run.cwd,'Probe.xcodeproj');mkdirSync(project);
+  writeFileSync(join(project,'project.pbxproj'),'// !$*UTF8*$!\n{\n\tobjects = {\n\t\tE312 /* Debug */ = {\n\t\t\tisa = XCBuildConfiguration;\n\t\t\tbuildSettings = {\n\t\t\t\tIPHONEOS_DEPLOYMENT_TARGET = 17.0;\n\t\t\t\tSDKROOT = iphoneos;\n\t\t\t\tTARGETED_DEVICE_FAMILY = "1,2";\n\t\t\t};\n\t\t\tname = Debug;\n\t\t};\n\t};\n}\n');
+  execFileSync('git',['add','Probe.xcodeproj'],{cwd:run.cwd});
+  execFileSync('git',['-c','user.name=Probe','-c','user.email=probe@localhost','commit','-qm','xcode project'],{cwd:run.cwd});
+  await launch('p5-e312-devintent',run,{provenance:PROVENANCE},async p=>{
+   success(await p.init(initPayload(run.cwd)),'initialize');
+   await waitSys(p,'dev_intent',0,10000);
+   await turn(p,'Reply with exactly OK');
+   p.note({event:'e312_devintent',frames:brief(p,['dev_intent'])});
+   await endAsStop(p);
+  });
+ }finally{removeRun(run);}
+}
+
+const ARM_RUNS={title:titleArm,vcs:vcsArm,auto:autoArm,fallback:fallbackArm,memory:memoryArm,devintent:devIntentArm};
 export default async()=>{for(const arm of ARMS){try{await ARM_RUNS[arm]();}catch(e){console.error('p5-e312',arm,e.message);}}};

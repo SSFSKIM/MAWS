@@ -240,11 +240,49 @@ describe('wire frames reject malformed input', () => {
       'tool_progress', 'tool_use_summary', 'user',
     ]);
     expect(Object.keys(SYSTEM_SUBTYPE_SCHEMAS).sort()).toEqual([
-      'api_retry', 'background_tasks_changed', 'commands_changed', 'compact_boundary', 'elicitation_complete',
-      'hook_progress', 'hook_response', 'hook_started', 'informational', 'init', 'model_refusal_fallback',
-      'model_refusal_no_fallback', 'notification', 'peer_message_hold', 'permission_denied', 'session_state_changed',
+      'api_retry', 'background_tasks_changed', 'code_change_published' /* P5 E312 */, 'commands_changed', 'compact_boundary', 'dev_intent' /* P5 E312 */, 'elicitation_complete',
+      'hook_progress', 'hook_response', 'hook_started', 'informational', 'init', 'memory_recall' /* P5 E312 */,
+      'model_consent_fallback' /* P5 E312 */, 'model_fallback' /* P5 E312 */, 'model_refusal_fallback',
+      'model_refusal_no_fallback', 'notification', 'peer_message_hold', 'per_turn_effort_changed' /* P5 E312 */,
+      'permission_check_status' /* P5 E312 */, 'permission_denied', 'session_state_changed', 'session_title_changed' /* P5 E312 */,
       'status', 'task_notification', 'task_progress', 'task_started', 'task_updated', 'thinking_tokens',
       'ui_focus' /* R2 */, 'ui_invalidate', 'ui_log', 'ui_panes' /* R2 */, 'ui_scroll' /* R2 */, 'ui_status', 'ui_toast', // R1
+      'vcs_state_changed' /* P5 E312 */,
     ]);
+  });
+});
+
+// P5 E312 (findings-p5-e312-engine.txt): the system frames a MAWS launch receives in normal use on 2.1.312 that had no
+// schema, typed from the engine's own schema registry with the lower-bound rule (what the mapping reads is required).
+describe('wire frames type the normal-use frames of 2.1.312', () => {
+  const envelope = { type: 'system', uuid: 'u-1', session_id: 's-1' };
+  const frames: Record<string, Record<string, unknown>> = {
+    session_title_changed: { title: 'Login button bug' },
+    vcs_state_changed: { kind: 'push', branch: 'main', cwd: '/repo' },
+    code_change_published: { provider: 'github', url: 'https://github.com/o/r/pull/7', repo: 'o/r', identifier: '7', action: 'created', branch: 'feat' },
+    permission_check_status: { tool_use_id: 'toolu_1', status: 'checking' },
+    per_turn_effort_changed: { per_turn_effort_active: false },
+    memory_recall: { mode: 'select', memories: [{ path: '/m/favorite-color.md', scope: 'personal' }] },
+    model_fallback: { trigger: 'model_not_found', original_model: 'claude-x', fallback_model: 'claude-haiku-5-5', content: 'Switched to Haiku' },
+    model_consent_fallback: { choice: 'cancelled', original_model: 'claude-fable-5', fallback_model: 'claude-opus-5-5', persisted_as_default: false, content: 'Switched to Opus' },
+    dev_intent: { kind: 'ios_app', trigger: 'project_scan' },
+  };
+
+  it.for(Object.entries(frames))('parses %s whole, unknown keys kept', ([subtype, fields]) => {
+    const frame = { ...envelope, subtype, ...fields, later_key: 1 };
+    expect(parseStdoutFrame(frame)).toEqual(frame);
+  });
+
+  it.for([
+    ['session_title_changed', 'title'], ['vcs_state_changed', 'cwd'], ['code_change_published', 'url'], ['permission_check_status', 'tool_use_id'],
+    ['model_fallback', 'content'], ['model_consent_fallback', 'fallback_model'], ['dev_intent', 'kind'],
+  ])('rejects %s without %s', ([subtype, key]) => {
+    const { [key!]: _dropped, ...rest } = frames[subtype!]!;
+    expect(() => parseStdoutFrame({ ...envelope, subtype, ...rest })).toThrow(z.ZodError);
+  });
+
+  it('keeps the open sets open: a vcs kind and a forge the engine adds later still parse', () => {
+    expect(() => parseStdoutFrame({ ...envelope, subtype: 'vcs_state_changed', kind: 'cherry_pick', cwd: '/repo' })).not.toThrow();
+    expect(() => parseStdoutFrame({ ...envelope, subtype: 'code_change_published', ...frames.code_change_published, provider: 'gerrit', action: 'started' })).not.toThrow();
   });
 });

@@ -30,7 +30,7 @@ import { checkoutKey } from './machine';
 import { useGit } from '../stores/git';
 import { queryClient } from './query';
 import type { ScmStatus } from '@shared/ipc/schema/scm';
-import { invalidateScmQueries, SCM_STATUS_QUERIES, scmStatusKey } from '../tools/scm/queries';
+import { invalidateScmQueries, refreshPublishedPrState /* P5 E312 */, SCM_STATUS_QUERIES, scmStatusKey } from '../tools/scm/queries';
 // C8a end
 // C8c start
 import { useFiles } from '../tools/code/files/store';
@@ -395,7 +395,7 @@ export function connectShell(
 // invalidating that session's cached `fs.workflows` (a disk-only session's Background work). E11 W-D: the one listener
 // for the scm queries the summary's push row and the Source control tool share (tools/scm/queries.ts): a head or refs
 // move re-reads both for every session whose checkout is in that repository, and a session's setup (trust recorded in
-// main) re-reads every session's `scm.status`.
+// main) re-reads every session's `scm.status`. P5 E312: a session's published change re-asks gh for its PR state.
 export function connectPanelEvents(client: MawsBridge = ipc): () => void {
   const offs = [
     client.on('git.changed', (event, { machine }) => {
@@ -405,6 +405,7 @@ export function connectPanelEvents(client: MawsBridge = ipc): () => void {
     }),
     client.on('session.setup', () => invalidateScmQueries(() => true, [SCM_STATUS_QUERIES])),
     client.on('fs.workflowChanged', ({ appSessionId }) => void queryClient.invalidateQueries({ queryKey: ['maws', 'fs.workflows', { appSessionId }] })),
+    client.on('session.eventBatch', ({ appSessionId, events }) => refreshPublishedPrState(appSessionId, events, client)), // P5 E312
   ];
   return () => offs.forEach((off) => off());
 }
