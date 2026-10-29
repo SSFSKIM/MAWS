@@ -57,7 +57,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-29) Task 5, reviewed clean (9b9f8945d, fix 653e60c0b; class 1a green at the fix, run 40824276945): `close()`'s fence and join (`HeldOrg.close()`, the parts' operations in flight), and the two test workarounds removed.
   - [x] (2026-10-29) Task 6, reviewed clean (1971d3be9, fix 7437e1e2e): the renderer: `settings-tab/org/`, the four groups, the change and pair sheets, `copy.ts`.
   - [x] (2026-10-29) Task 7, reviewed clean (7033fb853): `test/org/org-page.local.test.ts`, registered in `TIMING_NODE_TESTS`; 6/6, six runs in a row.
-  - [ ] Task 8: the Org page's look made checkable through the gate: one `e2e:settings` case over a seeded org, its four groups screenshotted and attached, run hosted with `--evidence` for the architect's look.
+  - [x] (2026-10-29) Task 8, reviewed clean (37ea7abab, 9764fc1d7; fix wave 300f1a6b5..fac48e11f; test race ab8d2ede6): the Org page's look made checkable through the gate: `e2e/org-page.spec.ts` in `e2e:settings` over a seeded org, its four groups and the pairing sheet attached, under forced classic scrollbars. Its first run (40828325127) caught a real overflow, fixed in the layout; green on the EC2 Mac at d8d7417a8 (40830513848) and 44175e50a (40831591829).
 - [ ] M4b — Machines and their rights — *advisory; needs M4a*
 - [ ] M4c — Delegations — *advisory; needs M4a*
 - [x] M5 — Owners on rows and the People toggle — landed (PR #323, master 0db3870a0, P5 Decision Log 129)
@@ -2152,6 +2152,16 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   2. `member.email` is proved by `edits.test.ts`, not here: B's app holds a fixed stand-in identity, so changing B's email would end its hub access mid-scenario.
   3. The pairing secret is checked by booleans only, so a failure cannot print a code.
   4. A's `PAIR_POLL_MS` is 100 in this suite (2 s in production).
+  Date/Author: 2026-10-29, O8's executor.
+
+- Decision: M4a Task 8, the Org page's look through the gate (37ea7abab..fac48e11f), settles these points.
+  1. The page is seeded through a harness-build-only seam, not the real session: the only refusal naming no attempt is `keys`, set at load when the key file is gone, which leaves no signer, so a running pairing cannot coexist with it in a real session. `src/main/org/page-fixture.ts` answers `org.status` and `org.view` from a file the strict schemas must accept, through `interceptCommand`, under `MAWS_E2E=1`, unpackaged, with an absolute `MAWS_E2E_ORG_PAGE`; every other `org.*` act gets a no-effect answer, `org.rows` stays main's.
+  2. No production build carries it: `index.ts` calls it only under `__MAWS_HARNESS_BUILD__`, defined from the condition that builds `harness.html`, and a unit case checks the plain main's bundle holds none of it. The spec skips on a build without the harness.
+  3. (Review fix.) Installing the fixture stops the production session's `org.changed` forwarding (`registerOrgHandlers`' own return), so load's closing `changed(true)` cannot replace the seed after Settings mounts.
+  4. The case runs under classic scrollbars whatever the desktop's: `launchMaws` passes `-AppleShowScrollBars Always` through AppKit's argument domain for that process alone, and the case waits until the settings body's scrollbar takes width.
+  5. Its structural checks: nothing in the section, any row, cell or text block is wider than its box; every action, scrolled into view, lies on all four edges inside its row, every clipping ancestor and the window; two deliberately clipped probes prove the check names them; no seeded machine's ref shows in the section's text.
+  6. (The gate's finding.) A word wider than its column breaks inside its cell: `Setting`'s label and value cells take `min-width: 0` and `overflow-wrap: anywhere` (text that fits wraps as before), a text action never shrinks, and the refusal line, the People footer and a sheet's body break the same way. The first run had a widened member name 182px wide in the 168px label column, on the EC2 Mac and on a hosted Mac alike.
+  7. (The architect.) The Org group names machines as the Machines group does: the org state's name for a ref, else its link's name or This Mac, the ref only when nothing names it (Deliveries, too-large, Discarded). The superseded offer's lines stay main's words (`describeHolder`, under the offer's digest); they already lead with the name.
   Date/Author: 2026-10-29, O8's executor.
 
 ## Outcomes & Retrospective
