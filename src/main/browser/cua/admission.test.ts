@@ -142,6 +142,24 @@ describe('a peer judged at accept, before anything is read', () => {
     expect(atWrite[0]).toBe(1); // the hello's write
   });
 
+  it('a refused peer is counted before its socket closes: a reading taken as the peer can first see the close finds the refusal', async () => {
+    const addon = fakeAddon();
+    const h = harness({ peer: { addon } });
+    h.backend.engineProcess(A, ENGINE);
+    addon.peerPid = STRANGER;
+    const atDestroy: number[] = [];
+    onAccepted.hook = (socket) => {
+      const destroy = socket.destroy.bind(socket);
+      socket.destroy = ((error?: Error) => {
+        atDestroy.push(h.backend.inspect().sessions.A!.refused);
+        return destroy(error);
+      }) as Socket['destroy'];
+    };
+    const client = rawClient(h.backend.socketPathFor(A)!);
+    await until(client.closed);
+    expect(atDestroy[0]).toBe(1);
+  });
+
   it('a root user\'s peer is refused uid_mismatch', async () => {
     const addon = fakeAddon();
     addon.peer = () => ({ pid: CHILD, uid: 0 });
