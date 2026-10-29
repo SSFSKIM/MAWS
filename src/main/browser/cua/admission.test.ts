@@ -199,6 +199,26 @@ describe('a peer judged at accept, before anything is read', () => {
   });
 });
 
+describe('a connection\'s close', () => {
+  it('is one line naming the session, how long the connection lasted and the cause: the host\'s end, the session removed', async () => {
+    const addon = fakeAddon();
+    const h = harness({ peer: { addon } });
+    h.backend.engineProcess(A, ENGINE);
+    const one = await connectFakeHost(h.backend.socketPathFor(A)!);
+    const two = await connectFakeHost(h.backend.socketPathFor(A)!);
+    tracked.hosts.push(one, two);
+    await one.close();
+    await until(() => h.logs.length === 1);
+    h.backend.closeSession(A);
+    await two.closed;
+    await until(() => h.logs.length === 2);
+    expect(h.logs.map((line) => line.replace(/after \d+ ms/, 'after N ms'))).toEqual([
+      "a cua host's connection on A's socket closed after N ms: the host ended it",
+      "a cua host's connection on A's socket closed after N ms: its session was removed",
+    ]);
+  });
+});
+
 describe('the wait for the session\'s engine', () => {
   it('a root arriving within the wait accepts, and the hello follows', async () => {
     const addon = fakeAddon();

@@ -173,14 +173,14 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
     return listening;
   };
 
-  const close = (listening: Listening) => {
+  const close = (listening: Listening, why: string) => {
     listening.server.close();
     for (const [socket, { timer }] of listening.pending) {
       clearTimeout(timer);
       socket.destroy();
     }
     listening.pending.clear();
-    for (const connection of listening.connections) connection.disconnect();
+    for (const connection of listening.connections) connection.disconnect(why);
     rmSync(listening.path, { force: true });
   };
 
@@ -240,7 +240,7 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
       const listening = sessions.get(appSessionId);
       if (!listening) return;
       sessions.delete(appSessionId);
-      close(listening);
+      close(listening, 'its session was removed');
     },
     holds: (tabId) => claims.leasedTo(tabId) !== undefined,
     onChange: (listener) => claims.onChange(listener),
@@ -266,7 +266,7 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
       for (const stop of stops.splice(0)) stop();
       feed?.dispose();
       held.dispose();
-      for (const listening of sessions.values()) close(listening);
+      for (const listening of sessions.values()) close(listening, 'MAWS stopped its server');
       sessions.clear();
       engineRoots.clear();
     },
