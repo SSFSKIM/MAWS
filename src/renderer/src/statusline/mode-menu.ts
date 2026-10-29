@@ -70,6 +70,9 @@ export interface ModeBinding {
   refusal: AutoModeRefusalCode | null; // why the requested mode was refused, shown in words
   autoUnavailable: string | null; // why auto is disabled in the list
   starts?: boolean; // P2-A: a choice starts the session first (no ready process); the menu says "Starting…" meanwhile
+  // P5 O9 (the sitting): nothing reports this session's mode (a terminal session driven through its bridge), so the chip
+  // names none; `value` null is then no mode, never MAWS's default
+  unreported?: boolean;
 }
 
 export const NOT_RUNNING = 'The session is not running';

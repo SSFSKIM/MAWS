@@ -41,6 +41,7 @@ export function laneAState(appSessionId: AppSessionId, over: Partial<LaneAState>
     controls: LIVE_CONTROLS,
     turn: { running: false, unknown: false },
     model: 'claude-opus-4-5',
+    effort: null,
     override: null,
     catalog: { fingerprint: 'fp-1' },
     pending: [],

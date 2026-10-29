@@ -31,6 +31,7 @@ import { createHostSupervisor, type HostSupervisor } from '@shared/host/host-sup
 import { supervisorEnv, type DetachedTransportOptions } from '@shared/host/detached-transport';
 import type { RelayPort } from '@shared/host/doc-relay';
 import { appIdentity } from '@shared/host/identity';
+import { idleCollector, type Collect } from '@shared/host/idle-collect';
 import { makePrivateDirectory, clearSocketPath } from '@shared/host/private-listen';
 import { PrivatePathError } from '@shared/host/private-path';
 import { createHostRuntime } from '@shared/host/runtime';
@@ -84,6 +85,7 @@ export interface DaemonOptions {
   departureBoundMs?: number;
   helloHoldMs?: number;
   restartBackoffMs?: readonly number[];
+  collect?: Collect; // the idle collection (@shared/host/idle-collect.ts's lastResortCollect)
 }
 
 export interface RunningDaemon {
@@ -208,6 +210,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   });
 
   // --- the clocks -----------------------------------------------------------------------------------------------------
+  const idle = idleCollector({ log, collect: options.collect, quiet: () => clocks.quiet() }); // P5 Decision Log 124's lever: a collection at each quiet entry, asked again as it collects
   const clocks = new DaemonClocks(kind, {
     armEnginePark: () => {
       log('no app and no interest for the idle time: asking the engine host to exit when idle');
@@ -224,6 +227,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       log('no client, both hosts parked and no hold for the idle time');
       void stop('idle', 0);
     },
+    quiet: (quiet) => idle.set(quiet),
   });
 
   // --- the interest union (OX5): the relay connection's set and the endpoint's remote viewers -------------------------
@@ -333,6 +337,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     },
     drain: { start: (drained) => recycleEngine(drained), boundMs: options.departureBoundMs ?? DEPARTURE_BOUND_MS },
     holdMs: options.helloHoldMs,
+    between: () => clientsChanged(), // P5 Decision Log 124: the quiet's
   });
 
   function interceptEngine(request: RelayRequest): Promise<HostResponse> | null {
@@ -401,6 +406,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       void settleCredit();
     },
     holdMs: options.helloHoldMs,
+    between: () => clientsChanged(), // P5 Decision Log 124: the quiet's
   });
 
   // --- what the upstreams send ---------------------------------------------------------------------------------------
@@ -579,7 +585,10 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   let engineClients: SocketClients | null = null;
   let ptyClients: SocketClients | null = null;
   let machineClients: SocketClients | null = null;
-  const clientsChanged = () => clocks.clients(Number(engineRelay.attachedApp()) + Number(ptyRelay.attachedApp()) + (machineClients?.count() ?? 0));
+  const clientsChanged = () => {
+    clocks.relaysBetween(engineRelay.between() || ptyRelay.between());
+    clocks.clients(Number(engineRelay.attachedApp()) + Number(ptyRelay.attachedApp()) + (machineClients?.count() ?? 0));
+  };
   const counts = (host: 'engine-host' | 'pty-host') => () => {
     const welcome = hosts.welcome(host);
     return { liveSessions: welcome?.liveSessions ?? 0, rows: welcome?.rows ?? 0 };
@@ -658,6 +667,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       log(`exiting (${reason})`);
       for (const server of servers) server.close(); // no new client
       clocks.stop();
+      idle.stop(); // nothing collects through the bounded exit, an entry the last evaluation queued included
       if (endpoint) {
         await Promise.race([endpoint.stop().catch((error: unknown) => log(`the endpoint's stop failed: ${error instanceof Error ? error.message : String(error)}`)), sleep(ENDPOINT_STOP_MS)]);
       }
@@ -686,6 +696,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   }
   const [engineAdopted, ptyAdopted] = await Promise.all([hosts.adopt('engine-host'), hosts.adopt('pty-host')]);
   log(`serving; engine host ${engineAdopted ? 'adopted' : 'parked'}, pty host ${ptyAdopted ? 'adopted' : 'parked'}`);
+  clocks.served(); // its quiet is told from here: no client yet is its first entry, with the start's garbage behind it
 
   return { paths, ref, hosts, services, status, stop };
 }

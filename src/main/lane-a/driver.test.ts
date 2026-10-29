@@ -273,7 +273,7 @@ describe('watches', () => {
     // that turn aborts with no step end: the second watch closes the step its snapshot named
     b.emit({ type: 'turn', phase: 'complete', turnId: 't1', agentId: null, reason: 'aborted' });
     await expect.poll(() => messagesOf(h.planes, second).map((m) => m.kind)).toEqual(['snapshot', 'step-end']);
-    expect(messagesOf(h.planes, second)[1]!.body).toEqual({ turnId: 't1', agentId: null, step: 1 });
+    expect(messagesOf(h.planes, second)[1]!.body).toEqual({ turnId: 't1', agentId: null, step: 1, t: expect.any(Number) }); // the bridge's time of the turn's end
     expect(messagesOf(h.planes, first).map((m) => m.kind)).toEqual(['snapshot', 'chunk', 'step-end']);
   });
 

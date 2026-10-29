@@ -35,7 +35,7 @@ describe('the session fold', () => {
     const fold = new SessionFold('s');
     fold.snapshot(snapshot);
     expect(fold.view()).toEqual({
-      turn: { running: true, unknown: false }, model: 'claude-opus-4-5', override: { model: 'haiku', effort: null }, catalog: { fingerprint: 'fp' },
+      turn: { running: true, unknown: false }, model: 'claude-opus-4-5', effort: null, override: { model: 'haiku', effort: null }, catalog: { fingerprint: 'fp' },
       pending: [{ request: 'r1', session: 's', tool: 'Bash', input: {} }], settled: [{ request: 'r0', session: 's', winner: 'terminal', outcome: 'allow', by: 'terminal' }],
     });
     expect(fold.catalogBody()).toMatchObject({ fingerprint: 'fp' });
@@ -73,6 +73,26 @@ describe('the session fold', () => {
     fold.event({ type: 'catalog', fingerprint: 'fp2', commands: [], models: {} });
     expect(fold.view().catalog).toEqual({ fingerprint: 'fp2' });
     expect(fold.event({ type: 'chunk' })).toBe(false);
+  });
+
+  // The O9 sitting (item 4): `/model haiku` and `/effort low` typed in the terminal reach no event of their own; the
+  // session's next main-loop request says them (`step start`, as the sitting's bridge stream recorded it).
+  it('follows the model and effort the main loop’s latest request ran on, over the one the session started with', () => {
+    const fold = new SessionFold('s');
+    fold.snapshot({ ...snapshot, override: null });
+    expect(fold.view()).toMatchObject({ model: 'claude-opus-4-5', effort: null });
+    expect(fold.event({ type: 'step', phase: 'start', turnId: 't1', agentId: null, step: 0, model: 'claude-opus-4-5', effort: 'xhigh', messageCount: 3 })).toBe(true);
+    expect(fold.view()).toMatchObject({ model: 'claude-opus-4-5', effort: 'xhigh' });
+    expect(fold.event({ type: 'step', phase: 'start', turnId: 't1', agentId: null, step: 1, model: 'claude-opus-4-5', effort: 'xhigh', messageCount: 5 })).toBe(false); // nothing new
+    expect(fold.event({ type: 'step', phase: 'start', turnId: 't2', agentId: 'a1', step: 0, model: 'claude-haiku-4-5', effort: null, messageCount: 1 })).toBe(false); // a subagent's own
+    expect(fold.event({ type: 'step', phase: 'start', turnId: 't3', agentId: null, step: 0, model: 'claude-haiku-5-5', effort: 'low', messageCount: 9 })).toBe(true);
+    expect(fold.view()).toMatchObject({ model: 'claude-haiku-5-5', effort: 'low' });
+    // a fresh stream's snapshot names the model the bridge read when it loaded: what a request ran on since is newer
+    fold.snapshot({ ...snapshot, override: null });
+    expect(fold.view()).toMatchObject({ model: 'claude-haiku-5-5', effort: 'low' });
+    // a new session (`/clear`) starts on its own model, its effort unknown until its first request
+    fold.event({ type: 'session', phase: 'start', model: 'claude-sonnet-5-5' });
+    expect(fold.view()).toMatchObject({ model: 'claude-sonnet-5-5', effort: null });
   });
 
   // P5 O9 M6: the digest's activity reads the main loop's latest tool call of its running turn
