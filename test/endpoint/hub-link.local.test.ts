@@ -318,7 +318,7 @@ describe('the machine’s records', () => {
     };
 
     let from = hub.pushes.length;
-    listed.endpoint.notifier.pendingSet(project, [{ session }, { session: secret }]);
+    listed.endpoint.notifier.pendingSet(project, [{ session, request: 'req-1' }, { session: secret, request: 'req-2' }]);
     await until(() => hub.pushes.length > from, 'the push');
     await sleep(300);
     expect(await pushedTo(from)).toEqual([{ to: 'A', notice: { project, machine: listed.ref, session, kind: 'waiting' } }]);
