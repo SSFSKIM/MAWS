@@ -9,7 +9,8 @@
 // the session's machine, and for an offline machine says so and when it was last seen (the roster's `since`). Opening it answers nothing:
 // approval is an explicit click inside the card, and the slot offers it only for read-only tools. The project row's
 // card is `ProjectHoverCard.tsx`. P5 O8 M2: a listed row's card (`ListedHoverCard`) says what its listing does: the title,
-// the machine, the state and when it was issued; no owners (M5) and no actions.
+// the machine, the state and when it was issued, and no actions. P5 O8 M5 (Q2): a session you don't own alone, listed or a
+// record at a listed address, has its card list every owner with its email.
 import { HoverCard as Radix } from 'radix-ui';
 import { useCallback, useContext, useEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
@@ -29,6 +30,7 @@ import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { selectEndedWithErrorOf, selectPendingOf, useAttention } from '../stores/attention';
 import { useSessions } from '../stores/sessions';
 import { listedTitle, rowBranch, sessionAge } from './derive';
+import { ownerEntries, ownersLabel } from './owners'; // P5 O8 M5
 import { displayTitle } from '../sessions/title';
 import { SidebarInteractionContext } from './interaction';
 import { SIDE_COPY } from '../side/copy'; // E3
@@ -184,6 +186,7 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
       <p data-testid="hover-machine" className={`m-0 truncate ${machine.offline ? 'text-fg-faint' : 'text-fg-muted'}`}>
         {machine.offline ? [machine.name, 'offline', lastSeen(machine.since, now)].filter(Boolean).join(' · ') : machine.name}
       </p>
+      <Owners appId={appSessionId} />
       {place && (
         <p data-testid="hover-place" title={place.title ?? undefined} className="m-0 truncate text-fg-muted">
           {place.text}
@@ -241,7 +244,26 @@ function ListedBody({ appId }: { appId: AppSessionId }) {
       <p data-testid="hover-machine" className={`m-0 truncate ${machine.offline ? 'text-fg-faint' : 'text-fg-muted'}`}>
         {machine.offline ? [machine.name, 'offline', lastSeen(machine.since, now)].filter(Boolean).join(' · ') : machine.name}
       </p>
+      <Owners appId={appId} />
     </div>
+  );
+}
+
+// P5 O8 M5: the owners the listing at this address names, you first, each with its email; nothing when it is you alone.
+function Owners({ appId }: { appId: AppSessionId }) {
+  const owners = useSessions((s) => s.listed.get(appId)?.owners);
+  const member = useSessions((s) => s.member);
+  const members = useSessions((s) => s.members);
+  if (owners === undefined || ownersLabel(owners, member, members) === null) return null;
+  return (
+    <ul aria-label="Owners" className="m-0 flex list-none flex-col gap-0.5 p-0">
+      {ownerEntries(owners, member, members).map((owner) => (
+        <li key={owner.id} className="flex min-w-0 items-baseline gap-1.5">
+          <span className="shrink-0">{owner.name}</span>
+          {owner.email !== null && <span className="min-w-0 truncate text-fg-muted">{owner.email}</span>}
+        </li>
+      ))}
+    </ul>
   );
 }
 

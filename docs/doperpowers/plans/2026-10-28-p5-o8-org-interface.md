@@ -36,7 +36,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-28) The final gate on bcb8959b7: run 40691164424, 41 of 42 jobs green; the one red is packaged's known `layout-transfer.spec.ts:541` (O2's skip). The landing gate runs on the merge with the master O2 leaves (the architect).
   - [x] (2026-10-28) The landing gate on the merge with O2's master (fd1d65c44): runs 40716613510 and 40716660100 green, no flaky lines.
   - [ ] The live check at the first cut-over machine.
-- [ ] M3 — The app as the org's signer: a co-root, the weekly successor, the signing checks — **executable** (re-planned 2026-10-28; needs M1 and O7 M1, both landed); the owner's sitting (`root add` on staging, then production) owed after M1's
+- [x] M3 — The app as the org's signer: a co-root, the weekly successor, the signing checks — landed (PR #314, master 716a2675d, P5 Decision Log 126); the owner's sitting (`root add` on staging, then production) owed — (re-planned 2026-10-28; needed M1 and O7 M1)
   - [x] (2026-10-28) Task 1: `root add` in `deploy/admin.ts`, its `production-run.sh` line, and its proofs in `admin.test.ts`.
   - [x] (2026-10-28) Task 2: `checks.ts` (`checkSuccessor`, `supersededRevocations`) and its proofs, the zero-roots ones included.
   - [x] (2026-10-28) Task 3: the device module, `createStateSigner` and the next keys (create, promote, destroy).
@@ -47,9 +47,14 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-28) Task 7, reviewed clean (1e38ae640): `test/org/signer.local.test.ts`, with the shared harness `test/org/local-org.ts`.
   - [x] (2026-10-28) Task 8, reviewed clean (740f0c46f): the app follows a recovery whose first state is a sibling at its head's version (Task 7's Discovery 2).
   - [x] (2026-10-28) reviewer-high on the whole branch converged in three rounds. Round 1, on 559ddfc0c, found 3 P1 and 2 P2, fixed at c4a1d6801..ba781f87f. Round 2 reproduced one earlier interleaving of the first P1, fixed at b92b07573. Round 3 found nothing material.
-  - [ ] The desk track's review of the `deploy/` hunk, and the final gate (the full hosted set).
+  - [x] (2026-10-28) The desk track reviewed the `deploy/` hunk and shaped the wrapper fix. The final gate, run 40771309800, had two browser reds (`browser-cua.spec.ts:483`, `browser-chrome.spec.ts:681`), none of #314's; its rerun, 40783162110, was green.
+  - [ ] The owner's sitting: `root add` on staging, then production (the steps are in the report, `2026-10-28-p5-o8-report.md`).
 - [ ] M4 — The Org page — *advisory; Q1 answered; needs M3 and O11's H1*
 - [ ] M5 — Owners on rows and the People toggle — **executable** (re-planned 2026-10-28; needs M2, landed)
+  - [x] (2026-10-28) Built on `p5-o8-m5` at b78445447, one task: `memberName`, `OrgRows.members` and `member`, the `sidebar.people` key and `stores/people.ts`, `ownersLabel` and `RowTitle`, `projectList`'s ownership-first filing, the People hover action and menu item, owners in the hover cards. The focused suites pass locally, each file alone.
+  - [x] (2026-10-28) Class 1a at the merge with master (df6c2826a, run 40786128124) found one typecheck error in `derive.test.ts`, fixed at 50a1ab992. reviewer-medium found one P2, the early toggle's replay (Decision Log, M5's build, item 11), fixed at 854178726.
+  - [x] (2026-10-28) The first final gate (run 40786951312 on 53f147ef1) found one M5 regression. The People action sat on every row and took a line-center click at the sidebar's 200px floor (`e2e/shell.spec.ts:50`). Fixed at 54aab1ada: the toggle shows only where it can act. The same run's unit red was a test-side race, fixed with two others in tests: `OrgSection`'s clock, the teardown's `rm`, and the rekey crash setup.
+  - [x] (2026-10-28) The final gate on 7e58d6984: run 40794571273, 48 jobs green and 3 skipped, `e2e:default` and `e2e:discover` among the green. One flaky line, `browser-cua.spec.ts:483` (M3's known one), was green on retry.
 - [ ] M5b — Add owner — *later; needs O10's `record.owners` offer row and O12's sminos executor*
 - [ ] M6 — Visibility, shares and per-member reader state — *advisory; taste (Q4); needs O3*
 - [ ] M7 — The project channel — *advisory; taste (Q5); needs O7 M2 and M6, O3, O12's to-human store; its people's words wait for O14's last machine*
@@ -1238,6 +1243,10 @@ Each is built as its recommendation when its milestone is re-planned, unless the
   - the staging and production wrappers, which appended their own `--config`/`--keys` after `"$@"` and now put them first.
   Evidence: class 1a run 40768996939 at b92b07573: `remove-device: … Unknown option '-y'` in `signer.local.test.ts`'s rekey case, which had passed at 559ddfc0c with another random id. Fixed at 031c476da and in the wrapper commit after it.
 
+- Observation (M5, 2026-10-28): `stores/summary.ts`'s `load()` has no production caller, so `summary.sections` is written but never read back; collapsed summary sections reset at each launch. M5's People store is loaded from `App.tsx` instead.
+  Evidence: `grep -rn "getState().load()" src/renderer/src`, outside tests, finds no summary caller.
+- Observation (M5): `App.test.tsx` runs in the `renderer-timing` vitest project, not `renderer` (`vitest.config.ts:57`).
+
 ## Decision Log
 
 - Decision: Verification. This document gets one `doperpowers:adversarial-reviewer` buildability round on its execution section, focused on the first milestone (M1 and M2), repeated until a round yields nothing worth changing. M1's and M2's PRs each get doperpowers:reviewer-high. M3–M8 each get their own buildability round when re-planned, and the review rung their re-plan names.
@@ -1563,6 +1572,27 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   Rejected: printing the bare id and adding `--` only for a `-`-led id, which fails through the wrappers for one id in 64 until they change.
   Date/Author: 2026-10-28, O8's executor.
 
+- Decision: M5's build (b78445447) settles these points the milestone left open.
+  1. The label shows two entries in all, "you" among them: "you, Ana +1" for you, Ana and Ben. The cap bounds the row's width, so "you" counts.
+  2. `ownersLabel`'s `me` is `string | null`: signed out, nobody reads "you". Empty owners give `null`.
+  3. Names widen one level further than §L: two members whose local parts also collide (`ana@a`, `ana@b`) read their whole emails.
+  4. `memberName` takes Unicode letters (`élodie` reads "Élodie"), upper-cases the first and lower-cases the rest (`GINA` reads "Gina"), falls back to the whole local part when it has no letters, and compares collisions case-insensitively.
+  5. `OrgRows.members` is ordered by the sorted rows' first naming of each id, which keeps main's JSON dedup stable.
+  6. Others' hidden rows add no activity: a project holding only hidden rows ranks by `createdAt`. What you can't see doesn't reorder your list. Drawn others' rows count.
+  7. Others' archived records are not counted in "+N others", as archived records are never drawn. "+1 other" is singular, and it shows whether the project is open or closed.
+  8. The People hover action is the first of the four buttons, so Resume, Remove and "+" keep their places at the right edge. The menu's item carries a trailing check, as the menu has no indicator gutter.
+  9. The hover card lists owners only where the row's label shows (not on a session you own alone); "you" carries your email, a former member none.
+  10. `usePeople.load()` runs once from `App.tsx`'s mount, not the Sidebar, which keeps IPC out of every Sidebar test.
+  11. A toggle made before the stored set is read records the state the person saw it reach. When the read lands, each touched key is set to that state and every other stored key is kept, and nothing is written before. Rejected: `summary.ts`'s "toggle wins", which would replace the whole stored set with one early toggle; and replaying early toggles as flips (the first build), which reviewer-medium showed turns a stored-on project off after a "Show" clicked during the read, and saves that (fixed at 854178726).
+  Debt, not built: `sidebar.people` keys are neither moved when an address key becomes an org key (`layout-model.ts`'s `rekeySets` does so for `expandedProjects`) nor pruned; the toggle reads off until set again. Others' records still reach Needs you and "Mark all read"; attention across machines is O7 M6's and O3's.
+  Date/Author: 2026-10-28, O8's executor.
+
+- Decision: The People toggle shows only where it can act: its hover action and its menu item appear on a project or machine row when the row has others' sessions (`others` above zero) or while it is on, so it can be turned off. Elsewhere the row and its menu are as before M5.
+  Rationale: the first build put it on every project row, local-only projects of a person with no org included, so most people met a control that does nothing on every row. It also moved the hover geometry: the final gate's e2e:default (run 40786951312, `e2e/shell.spec.ts:50`, Item 6) clicked the line's center at the sidebar's 200px floor and landed on "Hide people's sessions".
+  Rejected: showing it on every org-keyed row. That still offers a toggle with nothing behind it.
+  At the 200px floor the actions don't cover the name. The line is a flex row: the name is `flex-1 min-w-0`, the actions a `shrink-0` sibling, not an overlay. Computed from the classes, not measured (happy-dom does no layout): with four actions the name keeps about 56px, x 29–85, and the line's center (about 92) falls on the first action. A click on the name collapses the row; only a click at the center misses, which the e2e helper `closeProject` makes (`e2e/support/sidebar.ts:60`). Residue: that helper could click the name.
+  Date/Author: 2026-10-28, O8's executor.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
@@ -1584,6 +1614,14 @@ Evidence:
 - the gates the PR body lists.
 
 Still owed: the owner's sitting, `root add` on staging and then on production.
+
+**M5 (2026-10-28, PR from `p5-o8-m5`).** A row of a session you don't own alone shows its owners as first names after the title ("you, Ana", "Ana, Ben +3"), and its hover card lists them with their emails. Names are derived from the head's emails in main. A People toggle, remembered per row under `sidebar.people`, draws other people's sessions in place; while it is off the row reads "+N others". It shows only where it can act. Rollups, ranking and search see only what is drawn and yours.
+
+Evidence:
+- the unit suites: `member-name` 6, `rows` 23, `owners` 6, `people` 7, `derive` 45, `Sidebar` 100, `HoverCard` 40, `events` 43;
+- the final gate, run 40794571273.
+
+Retrospective (M5). Only the whole hosted set caught the build's one real regression: a new hover button took the click an e2e helper aimed at the line's center at the 200px floor. Its unit tests couldn't see it, since happy-dom has no layout. The underlying fault was a design one, a control shown where it can't act, and fixing that also fixed the geometry. The task review's one finding was the shape M3's retrospective named: an early toggle replayed over state it hadn't seen. A future child adding a control to a dense row should show it only where it acts, and run the e2e groups that click that row.
 
 Retrospective (M3). Built as eight tasks under subagent-driven execution, each reviewed at its frontier, then reviewer-high on the whole branch.
 - What the reviews found: ten task reviews found real defects in five of the eight tasks, and the whole-branch review found five more across tasks.
