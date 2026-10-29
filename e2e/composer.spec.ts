@@ -127,6 +127,9 @@ async function clearEditor(page: Page) {
 
 // A paste as the system delivers it: a ClipboardEvent carrying text or files.
 async function paste(page: Page, item: { text: string } | { file: { name: string; type: string; base64: string } }) {
+  // P5 O3-B (a flaky pass of e2e:c7, run 40847569515): the editor is not editable while a send is pending, which outlasts
+  // the session's event a case waits for, so the paste waits for it to be editable again
+  await page.locator('[contenteditable="true"]').waitFor();
   await page.evaluate((it) => {
     const target = document.querySelector('[contenteditable="true"]') as HTMLElement;
     const data = new DataTransfer();
