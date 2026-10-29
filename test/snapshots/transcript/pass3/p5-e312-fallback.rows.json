@@ -1,0 +1,104 @@
+[
+  {
+    "at": "2026-10-29T06:55:22.413Z",
+    "id": "time:turn:41d3826b-1560-4c8a-b38d-6401d3362221",
+    "kind": "time",
+    "label": "Oct 29, 2026 6:55 AM",
+    "turnId": "turn:41d3826b-1560-4c8a-b38d-6401d3362221"
+  },
+  {
+    "at": "2026-10-29T06:55:22.413Z",
+    "attachments": [],
+    "dropped": false,
+    "editable": true,
+    "id": "user:41d3826b-1560-4c8a-b38d-6401d3362221",
+    "kind": "user",
+    "lines": 1,
+    "messageUuid": "41d3826b-1560-4c8a-b38d-6401d3362221",
+    "placeholders": [],
+    "steer": false,
+    "text": "Reply with exactly OK",
+    "turnId": "turn:41d3826b-1560-4c8a-b38d-6401d3362221"
+  },
+  {
+    "at": "2026-10-29T06:55:22.413Z",
+    "autoDenied": 0,
+    "denied": 0,
+    "endedAt": "2026-10-29T06:55:25.288Z",
+    "expanded": true,
+    "files": [],
+    "firstDeniedCell": null,
+    "id": "divider:turn:41d3826b-1560-4c8a-b38d-6401d3362221",
+    "kind": "divider",
+    "origin": "human",
+    "startedAt": "2026-10-29T06:55:22.468Z",
+    "state": "completed",
+    "summary": {
+      "autoDenied": 0,
+      "byCategory": {
+        "commands": 0,
+        "exploration": 0,
+        "files": 0,
+        "mcp": 0,
+        "other": 0,
+        "skills": 0,
+        "web": 0
+      },
+      "childAgents": 0,
+      "costUsd": 0.000820725,
+      "denials": [],
+      "durationMs": 2807,
+      "model": "claude-haiku-5-5",
+      "safeguard": {
+        "flagged": 0,
+        "notEvaluated": 0,
+        "reviewed": 0
+      },
+      "terminalReason": "completed",
+      "toolCalls": 0,
+      "usage": {
+        "cacheCreationInputTokens": 5565,
+        "cacheReadInputTokens": 12290,
+        "inputTokens": 2,
+        "outputTokens": 4,
+        "thinkingTokens": 0
+      }
+    },
+    "toolCalls": 0,
+    "turnId": "turn:41d3826b-1560-4c8a-b38d-6401d3362221"
+  },
+  {
+    "at": "2026-10-29T06:55:23.475Z",
+    "attempt": null,
+    "id": "error:replay:journal:13:0",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "notice",
+    "severity": "notice",
+    "text": "Switched to Haiku 5.5 because claude-e312-no-such-model is not available",
+    "turnId": "turn:41d3826b-1560-4c8a-b38d-6401d3362221"
+  },
+  {
+    "at": "2026-10-29T06:55:25.243Z",
+    "blockIndex": 0,
+    "id": "text:msg_011CgW6D2SwbCpYkDg7o6oQK:0",
+    "kind": "assistant_text",
+    "live": false,
+    "markdown": "OK",
+    "messageUuid": "5dedaad1-c77d-4cc5-9c85-034d132c4afb",
+    "model": "claude-haiku-5-5",
+    "phase": "answer",
+    "turnId": "turn:41d3826b-1560-4c8a-b38d-6401d3362221"
+  },
+  {
+    "at": "2026-10-29T06:55:25.481Z",
+    "attempt": null,
+    "id": "error:replay:journal:28:0",
+    "kind": "error",
+    "lostAttentionCount": 0,
+    "scope": "exit",
+    "severity": "notice",
+    "text": "Session process exited (unknown)",
+    "turnId": null
+  }
+]

@@ -147,3 +147,23 @@ On disk, which the wire notice never reads: those request-replay records and the
 transcript records the chain follower had no name for, so every 2.1.312 transcript MAWS followed produced a
 `frame.unknown` event (`transcript:api-request`, …) per model request: no notice and no row, but noise in the graph. They
 join the follower's known bookkeeping (src/engine-host/fs/chain-follower.ts KNOWN_SILENT_TYPES).
+
+Live re-runs on the mini (docs/doperpowers/evidence/p5-e312/live-mini.txt): PENDING.
+
+Residue (rows; the architect writes the tracker at landing):
+  1. to-human-live (P2-F's R3) cannot run: its arms assert the to-human contract 7 and supplement 2, which P4-R7z withdrew
+     (P4 Decision Log 92), so the spec skips itself even under MAWS_C_LIVE=1 and has no live group. It needs a rewrite
+     for the plugin's tool and supplement 3, or retirement.
+  2. E11 S4's browser cases were retired with the browser tools (A-54); nothing of S4 re-ran.
+  3. `permission_check_status`, `memory_recall` and `dev_intent` map to none because no MAWS surface shows a pending
+     auto-mode check, a recall or device tooling. Claude Desktop shows the first ("checking") and acts on the third; each
+     is a UX decision, not a wire gap.
+  4. `model_consent_fallback` is a warning notice; the session-scoped model swap reaches the model chip only with the next
+     turn's system/init. Moving the chip at once belongs with the chip's acknowledged-value path (lane A's is O9's).
+  5. The PR row's publish refresh misses a publish heard while no PR-state query exists when no later status follows
+     (an exited session); the row the architect holds for the tracker names it.
+  6. Probe upkeep: end-session-archive and context-full make their scratch homes under /private/tmp and run only on
+     macOS; p1-side-question's disk check counts 2.1.312's `api-request*` records (`querySource: "sdk"`) as side-question
+     records and fails though no question's text is on disk; its check should exclude the request-replay records.
+  7. The engine's own SPEC 45 says print mode drops `dev_intent`; 2.1.312 sends it from the project scan every headless
+     session starts (`ea` bypasses filter 1). Cite the probe, not the SPEC, for it.
