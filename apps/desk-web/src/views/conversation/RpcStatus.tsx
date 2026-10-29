@@ -3,8 +3,8 @@
 // Retry that sends the same sealed RPC again, nonce and all, which the machine answers from its ledger if it ran — or
 // refused in the browser because the project socket was down, nothing sent.
 import { useStore } from 'zustand';
-import { failureOf, resultOf } from '../../conversation/outcome';
-import { failureText, resultText } from '../../conversation/words';
+import { failureOf, resultOf } from '../../../../../src/renderer/src/lane-a/conversation/outcome';
+import { failureText, resultText } from '../../../../../src/renderer/src/lane-a/conversation/words';
 import { useDesk } from './desk-context';
 
 export function RpcStatus({ nonce, className = '' }: { nonce: string | null; className?: string }) {

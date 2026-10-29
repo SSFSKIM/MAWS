@@ -853,6 +853,16 @@ function delegationOver(state: OrgState, name: string): string | null {
   return prefixes.find((p) => key.startsWith(machineNameKey(p))) ?? null;
 }
 
+/**
+ * One line per root of the state: its step-up key id and the device listed in the head that holds the key. A verified
+ * head lists a device for every root; `no listed device` is for a head that somehow does not.
+ */
+export async function rootLines(state: OrgState): Promise<string[]> {
+  const holders = new Map<string, string>();
+  for (const m of state.members) for (const d of m.devices) if (d.stepUpPub !== undefined) holders.set(await keyId(d.stepUpPub), `${printable(m.email)} device ${printable(d.id)}`);
+  return state.root.keys.map((kid) => `root ${printable(kid)} (${holders.get(kid) ?? 'no listed device'})`);
+}
+
 async function show(ctx: Context): Promise<number> {
   const { head, keys, person, certificates } = await anchored(ctx, false, { unsent: 'note' });
   const state = head.state;
@@ -860,6 +870,7 @@ async function show(ctx: Context): Promise<number> {
     ctx.io.out(`member ${m.id} ${printable(m.email)} ${m.role}`);
     for (const d of m.devices) ctx.io.out(`  device ${describeEntry(d)}${d.id === keys.id ? ' (this admin device)' : ''}`);
   }
+  for (const line of await rootLines(state)) ctx.io.out(line);
   const rows = await machineRows(state, await certificateViews(state, certificates), await hubRows(person));
   if (rows.length === 0) ctx.io.out('machines: none');
   else {

@@ -3,6 +3,8 @@
 // first scope is selected and Enter allows it; digits 1–3 pick a scope (the card's key handler). `button_only`
 // (`default_to_no`): nothing is selected and Enter only says to use the Allow button. `none`
 // (`requires_user_interaction`): no Allow, no scope, no Enter; the request is denied here or answered in a terminal.
+// P5 O9 M6: each scope, Deny and Deny and stop is drawn disabled in place with its reason where the session's port can't
+// carry it (a terminal session's bridge: deny-and-interrupt, a scope its request doesn't suggest), and no key answers it.
 import { DropdownMenu, RadioGroup } from 'radix-ui';
 import { useEffect, useState } from 'react';
 import { useSessions } from '../../stores/sessions';
@@ -11,12 +13,12 @@ import { CardButton, CardTextarea, Controls, Muted } from '../controls';
 import { ToolPreview } from '../preview/ToolPreview';
 import { quickApproval } from '../quick-approval';
 import { scopeOptions, type Scope, type ScopeOption } from '../scope';
-import type { VariantProps } from './types';
+import { carried, gated, type VariantProps } from './types';
 
 const ALLOWED: Record<Scope, string> = { once: 'Allowed once', session: 'Allowed for this session', local_settings: 'Always allowed in this project' };
 const HINT_MS = 2_000;
 
-export function PermissionBody({ item, request, busy, submit, bindKeys }: VariantProps<'permission.requested'>) {
+export function PermissionBody({ item, request, busy, submit, bindKeys, capability = carried }: VariantProps<'permission.requested'>) {
   const project = useSessions((s) => {
     const record = s.records.get(item.appSessionId);
     return record?.projectId ? (s.projects.get(record.projectId) ?? null) : null;
@@ -28,13 +30,18 @@ export function PermissionBody({ item, request, busy, submit, bindKeys }: Varian
   const [message, setMessage] = useState('');
   const [hint, setHint] = useState(false);
 
-  const allow = (chosen: Scope) => submit(toAnswer({ kind: 'permission', decision: 'allow', scope: chosen }), ALLOWED[chosen]);
-  const deny = (decision: 'deny' | 'deny_and_stop', text = '') => submit(toAnswer({ kind: 'permission', decision, message: text }), decision === 'deny' ? 'Denied' : 'Denied and stopped');
+  const allowing = (chosen: Scope) => toAnswer({ kind: 'permission', decision: 'allow', scope: chosen });
+  const denying = (decision: 'deny' | 'deny_and_stop', text = '') => toAnswer({ kind: 'permission', decision, message: text });
+  const allow = (chosen: Scope) => capability(allowing(chosen)).available && submit(allowing(chosen), ALLOWED[chosen]);
+  const deny = (decision: 'deny' | 'deny_and_stop', text = '') => capability(denying(decision, text)).available && submit(denying(decision, text), decision === 'deny' ? 'Denied' : 'Denied and stopped');
+  const denyGate = gated(capability(denying('deny', message)));
+  const stopGate = gated(capability(denying('deny_and_stop', message)));
+  const allowGate = gated(scope === null ? { available: true } : capability(allowing(scope)));
 
   useEffect(() => {
     bindKeys({
-      accept: policy === 'none' ? null : () => (policy === 'full' && scope ? allow(scope) : setHint(true)),
-      decline: () => deny('deny'),
+      accept: policy === 'none' || allowGate.disabled ? null : () => (policy === 'full' && scope ? allow(scope) : setHint(true)),
+      decline: denyGate.disabled ? null : () => deny('deny'),
       digit: policy === 'full' ? (n) => options[n - 1] && setScope(options[n - 1].scope) : null, // picks, never answers
     });
   });
@@ -65,6 +72,7 @@ export function PermissionBody({ item, request, busy, submit, bindKeys }: Varian
               key={option.scope}
               value={option.scope}
               aria-label={option.label}
+              {...gated(capability(allowing(option.scope)))}
               className="flex items-start gap-2 rounded-sm border border-border px-2.5 py-1.5 text-left outline-accent hover:bg-bg-hover focus-visible:outline-2 data-[state=checked]:border-border-strong data-[state=checked]:bg-bg-active"
             >
               <span aria-hidden className="w-3 shrink-0 text-fg-muted tabular-nums">
@@ -94,12 +102,12 @@ export function PermissionBody({ item, request, busy, submit, bindKeys }: Varian
       )}
       <Controls>
         {!reasoning && (
-          <CardButton disabled={busy} onClick={() => setReasoning(true)} className="mr-auto border-transparent text-fg-muted">
+          <CardButton disabled={busy || denyGate.disabled} title={denyGate.title} onClick={() => setReasoning(true)} className="mr-auto border-transparent text-fg-muted">
             Deny… with a reason
           </CardButton>
         )}
         <span className="flex">
-          <CardButton disabled={busy} onClick={() => deny('deny', message)} className="rounded-r-none">
+          <CardButton disabled={busy || denyGate.disabled} title={denyGate.title} onClick={() => deny('deny', message)} className="rounded-r-none">
             Deny
           </CardButton>
           <DropdownMenu.Root>
@@ -110,7 +118,12 @@ export function PermissionBody({ item, request, busy, submit, bindKeys }: Varian
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
               <DropdownMenu.Content align="end" sideOffset={4} className="z-50 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
-                <DropdownMenu.Item onSelect={() => deny('deny_and_stop', message)} className="cursor-default rounded-sm px-2.5 py-1 outline-none data-[highlighted]:bg-bg-hover">
+                <DropdownMenu.Item
+                  disabled={stopGate.disabled}
+                  title={stopGate.title}
+                  onSelect={() => deny('deny_and_stop', message)}
+                  className="cursor-default rounded-sm px-2.5 py-1 outline-none data-[disabled]:text-fg-faint data-[highlighted]:bg-bg-hover"
+                >
                   Deny and stop the turn
                 </DropdownMenu.Item>
               </DropdownMenu.Content>
@@ -118,7 +131,7 @@ export function PermissionBody({ item, request, busy, submit, bindKeys }: Varian
           </DropdownMenu.Root>
         </span>
         {policy !== 'none' && (
-          <CardButton tone="primary" disabled={busy || scope === null} onClick={() => scope && allow(scope)}>
+          <CardButton tone="primary" disabled={busy || scope === null || allowGate.disabled} title={allowGate.title} onClick={() => scope && allow(scope)}>
             Allow
           </CardButton>
         )}

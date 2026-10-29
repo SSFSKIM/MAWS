@@ -416,6 +416,25 @@ export async function frameAt(page: Page, url: string) {
   return found!;
 }
 
+// A pick's pointer in an artifact frame while picking: moved to (x, y), then again a pixel back and forth until the
+// frame's pick overlay is up, as the owner sees the highlight before they click, so the click that follows picks.
+// Chromium routes input into a frame of another process only once the window's compositor has placed it, so in the
+// first moments after a frame loads (or moves to a main tab) a move or a click can still go to the app's document,
+// where it reaches the iframe element and nothing in the frame (run 39353273976: 16 of 63 first moves); and the pick-on
+// message is a task in the frame a move can overtake (L64). An overlay a real move placed is both settled.
+export async function pointInFrame(page: Page, frame: { locator(selector: string): Locator }, x: number, y: number): Promise<void> {
+  let nudge = 0;
+  await expect
+    .poll(
+      async () => {
+        await page.mouse.move(x + (nudge++ % 2), y);
+        return frame.locator('[data-maws-pick-overlay]').count();
+      },
+      { message: `the pick overlay under the pointer at ${x}, ${y}` },
+    )
+    .toBe(1);
+}
+
 // ---- evidence -------------------------------------------------------------------------------------------------------
 
 export const SHOTS = process.env.MAWS_E2_SHOTS === '1' ? join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e2') : null;

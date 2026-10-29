@@ -5,6 +5,8 @@
 // acquired first (`session.acquire`, joining a start in flight) and then sent; `started` says this call launched the
 // engine or joined its launch, beside the host's own answer. A trust or relay card holds a composer message (`held`,
 // the text staying in the composer's draft until the host accepts it); no other origin's text is handed to a card.
+// P5 O9 M4: this seam is lane B's `send` behind the session's controls port (`session/controls/`); callers go through
+// the port, never here.
 import type { PastedContent } from '@shared/composer/history-entry';
 import type { SendContent } from '@shared/engine/session-state-store';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
@@ -32,9 +34,14 @@ export interface HumanPromptOptions {
   // this call makes carries main's guard, which refuses while a first message is retained there and leaves it in place;
   // absent, an acquisition keeps today's semantics (a retained resume message goes first).
   requireEmptyMessage?: true;
+  // P5 O9 M7: the attachments' names as the person gave them, in the order of `content`'s image and document blocks; lane
+  // A names its upload's files by them (a block carries no name), lane B reads nothing of it
+  attachmentNames?: readonly string[];
 }
 export interface HumanPromptResult {
-  disposition: 'sent' | 'steered' | 'queued' | 'held' | 'refused';
+  // P5 O9 M5: 'unconfirmed', lane A's alone: the bridge took the words and had not said whether they entered when it
+  // answered; the port keeps them in the composer's pending-send strip by their key until their fate arrives
+  disposition: 'sent' | 'steered' | 'queued' | 'held' | 'refused' | 'unconfirmed';
   started: boolean; // P2-A: this call acquired the engine first (launched it, or joined a launch in flight)
   messageUuid?: MessageUuid; // sent, steered
   queueId?: string; // queued (the host's queue, paused or non-empty)

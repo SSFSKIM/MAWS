@@ -644,6 +644,31 @@ describe('the rows', () => {
     expect(rows.b).toMatchObject({ mine: false, lane: 'B', availability: null });
   });
 
+  // M5 (Interfaces §L): the owners' names come from the held head, beside the member "you" is judged against
+  it('name every owner a row lists from the held head, an unlisted id as a former member, and carry the signed-in member', async () => {
+    const w = await World.make();
+    const gone = hex();
+    const h = await start(w);
+    await push(h, await w.list(w.m1, 'a', 1, { owners: [w.B, w.A] }), await w.list(w.m2, 'b', 1, { owners: [w.B, gone] }));
+    expect(h.rows.rows()).toMatchObject({
+      member: w.A,
+      members: [
+        { id: w.B, email: 'b@example.com', name: 'B' },
+        { id: w.A, email: 'owner@example.com', name: 'Owner' },
+        { id: gone, email: null, name: 'former member' },
+      ],
+    });
+    // a head that renames a member renames it in the rows; one whose names collide widens both
+    await w.adopt((s) => {
+      s.members.find((m) => m.id === w.B)!.email = 'owner.b@example.com';
+    });
+    await h.settle();
+    expect(h.rows.rows().members.map((m) => [m.email, m.name])).toEqual([['owner.b@example.com', 'owner.b'], ['owner@example.com', 'owner'], [null, 'former member']]);
+    w.session.set(null);
+    await h.settle();
+    expect(h.rows.rows()).toMatchObject({ members: [], member: null });
+  });
+
   it('join the local org projects by smnsId and by repoProjectId with the signed-in org, and nothing else', async () => {
     const w = await World.make();
     const remote = 'github.com/owner/repo';

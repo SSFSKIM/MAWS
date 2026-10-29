@@ -76,7 +76,7 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       case 'machines.list': // P5 O6 M4: the roster the shell reads at connect: this machine only
         return { machines: [{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-10-27T10:00:00.000Z', generation: 0 }] };
       case 'org.rows': // P5 O8 M2: the org's rows at connect: no other machine, nothing listed
-        return { machines: [], rows: [], complete: true, pending: [] };
+        return { machines: [], rows: [], complete: true, pending: [], members: [], member: null }; // M5: and no owners
       case 'session.list':
         return { sessions: [], revision: 1 };
       case 'session.projects.list':
@@ -139,6 +139,9 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       case 'browser.import.list':
         return { profiles: [], fileBroken: false, running: null };
       // E4b end
+      // P5 O9 M5: the lane A store's first list at connect (no terminal session driven through its bridge)
+      case 'laneA.list':
+        return { states: [] };
       case 'pty.spawn':
         return { ptyId: 'p1', pid: 3333 };
       case 'pty.write':

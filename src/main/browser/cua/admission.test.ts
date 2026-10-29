@@ -9,14 +9,19 @@ import { A, harness, takeDown, testPeer, tracked } from './server.fake';
 // Acceptance 3): every accepted socket is held unread until its peer is judged, waits a bounded while for the session's
 // engine to become known, and is destroyed unread when refused. The peer's identity comes from a double of the addon
 // (one fixed peer pid per case, a process table of three), over real sockets; the server-side sockets are seen through
-// `node:net`'s createServer, wrapped to keep each accepted socket.
+// `node:net`'s createServer, wrapped to keep each accepted socket (and, for a case that asks, to see it before the
+// server does).
 
 const accepted = vi.hoisted(() => [] as import('node:net').Socket[]);
+const onAccepted = vi.hoisted(() => ({ hook: null as ((socket: import('node:net').Socket) => void) | null }));
 vi.mock('node:net', async (importOriginal) => {
   const net = await importOriginal<typeof import('node:net')>();
   const createServer = ((...args: Parameters<typeof net.createServer>) => {
     const server = net.createServer(...args);
-    server.on('connection', (socket) => void accepted.push(socket));
+    server.prependListener('connection', (socket) => {
+      accepted.push(socket);
+      onAccepted.hook?.(socket);
+    });
     return server;
   }) as typeof net.createServer;
   return { ...net, createServer, default: { ...net, createServer } };
@@ -25,6 +30,7 @@ vi.mock('node:net', async (importOriginal) => {
 afterEach(async () => {
   await takeDown();
   accepted.length = 0;
+  onAccepted.hook = null;
 });
 
 const ENGINE = 5000; // the session's engine
@@ -116,6 +122,44 @@ describe('a peer judged at accept, before anything is read', () => {
     early.socket.destroy();
   });
 
+  // The e2e reads the server through Playwright's evaluate, which Node's inspector runs at the next interrupt, between
+  // any two calls of main's synchronous code; so the moment a write reaches the host is a moment the server can be read.
+  it('the hello goes out only once the connection is counted: a reading taken as the host can first hear it finds the host', async () => {
+    const addon = fakeAddon();
+    const h = harness({ peer: { addon } });
+    h.backend.engineProcess(A, ENGINE);
+    const atWrite: number[] = [];
+    onAccepted.hook = (socket) => {
+      const write = socket.write.bind(socket) as Socket['write'];
+      socket.write = ((...args: Parameters<Socket['write']>) => {
+        atWrite.push(h.backend.inspect().sessions.A!.connections);
+        return write(...args);
+      }) as Socket['write'];
+    };
+    const host = await connectFakeHost(h.backend.socketPathFor(A)!);
+    tracked.hosts.push(host);
+    expect(host.hello).toMatchObject({ extensionInstanceId: 'maws:A' });
+    expect(atWrite[0]).toBe(1); // the hello's write
+  });
+
+  it('a refused peer is counted before its socket closes: a reading taken as the peer can first see the close finds the refusal', async () => {
+    const addon = fakeAddon();
+    const h = harness({ peer: { addon } });
+    h.backend.engineProcess(A, ENGINE);
+    addon.peerPid = STRANGER;
+    const atDestroy: number[] = [];
+    onAccepted.hook = (socket) => {
+      const destroy = socket.destroy.bind(socket);
+      socket.destroy = ((error?: Error) => {
+        atDestroy.push(h.backend.inspect().sessions.A!.refused);
+        return destroy(error);
+      }) as Socket['destroy'];
+    };
+    const client = rawClient(h.backend.socketPathFor(A)!);
+    await until(client.closed);
+    expect(atDestroy[0]).toBe(1);
+  });
+
   it('a root user\'s peer is refused uid_mismatch', async () => {
     const addon = fakeAddon();
     addon.peer = () => ({ pid: CHILD, uid: 0 });
@@ -152,6 +196,26 @@ describe('a peer judged at accept, before anything is read', () => {
     const host = await h.host(A);
     expect(host.hello).toMatchObject({ extensionInstanceId: 'maws:A' });
     expect(h.backend.inspect().sessions.A).toMatchObject({ connections: 1, refused: 0 });
+  });
+});
+
+describe('a connection\'s close', () => {
+  it('is one line naming the session, how long the connection lasted and the cause: the host\'s end, the session removed', async () => {
+    const addon = fakeAddon();
+    const h = harness({ peer: { addon } });
+    h.backend.engineProcess(A, ENGINE);
+    const one = await connectFakeHost(h.backend.socketPathFor(A)!);
+    const two = await connectFakeHost(h.backend.socketPathFor(A)!);
+    tracked.hosts.push(one, two);
+    await one.close();
+    await until(() => h.logs.length === 1);
+    h.backend.closeSession(A);
+    await two.closed;
+    await until(() => h.logs.length === 2);
+    expect(h.logs.map((line) => line.replace(/after \d+ ms/, 'after N ms'))).toEqual([
+      "a cua host's connection on A's socket closed after N ms: the host ended it",
+      "a cua host's connection on A's socket closed after N ms: its session was removed",
+    ]);
   });
 });
 

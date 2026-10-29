@@ -19,7 +19,7 @@ const headOf = (head) => {
 };
 
 function heldState(jobs, groups) {
-  const peerJobs = groups.map((group) => jobs.find((job) => job.name === `e2e:${group}`));
+  const peerJobs = groups.map((group) => jobs.find((job) => job.name.replace(/ \(EC2 overflow\)$/, '') === `e2e:${group}`));
   // A visible failed/skipped peer job is definitive, even if the plan has not reported completion yet.
   const stateOf = (job) => active.has(job.status) ? job.status : job.status === 'completed' && job.conclusion === 'success' ? 'succeeded' : '';
   if (peerJobs.some((job) => job && !stateOf(job))) return '';

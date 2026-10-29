@@ -30,7 +30,7 @@ import {
 import { catalogs, catalogKey } from '../state/catalog';
 import type { Catalog } from 'desk-hub/protocol';
 import { latency } from '../latency/latency';
-import { ReadError, type SessionPlane, type SessionTarget, type Subscription, type SubscriptionListener, type SubscriptionMessage } from '../shell/session-plane';
+import { ReadError, type SessionPlane, type SessionTarget, type Subscription, type SubscriptionListener, type SubscriptionMessage } from '../../../../src/renderer/src/lane-a/session-plane';
 import { backoff, HubSocket, type ConnectionStatus } from './socket';
 
 /** How often a visible tab says so again: a third of the 90 s the hub counts a socket as visible after the last. */

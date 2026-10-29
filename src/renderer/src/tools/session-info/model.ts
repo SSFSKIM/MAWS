@@ -24,6 +24,8 @@ import { num } from '../../widgets/parts';
 import { INFO, LANE } from './copy';
 import { contestLine, holderLine } from '../../attention/derive'; // W7
 import type { Lane } from './lane';
+import { CONTROL_KEYS, type Capability, type ControlKey } from '../../session/controls/types'; // P5 O9 M5
+import { LANE_A_WORDS } from '../../session/controls/lane-a'; // P5 O9 M5
 // C12 start
 import type { BudgetState } from '@shared/ipc/schema/engine';
 import { BUDGET } from '../../budget/copy';
@@ -54,6 +56,7 @@ export interface SessionInfoInput {
   // P2-A (X17): present while no process is live: the facts the engine host kept for the session (null when it kept
   // none), which the model, effort, mode, output style, plugin count and context rows show labelled with when
   observed?: { facts: ObservedFactsAnswer | null; loading: boolean };
+  driven?: { capability(key: ControlKey): Capability } | null; // P5 O9 M5: the port of a session driven through its terminal's bridge
   reads: {
     status: GetStatusResponse | null;
     rules: ListPermissionRulesResponse | null;
@@ -89,12 +92,25 @@ export function browserTabsRow({ loaded, memoryKiB }: SessionInfoInput['browserT
 }
 
 // W7: who holds the session, read through the same derivation as the glyph and the tab (§5.7).
-export function heldByRow(record: SessionRecord): InfoRow {
+// P5 O9 M5: `bridged`, MAWS drives the foreign holder through its bridge, which the note says in place of read-only.
+export function heldByRow(record: SessionRecord, { bridged = false }: { bridged?: boolean } = {}): InfoRow {
   const contest = contestLine(record);
   if (contest !== null) return { label: INFO.heldBy, value: INFO.contested(contest), note: INFO.contestedNote };
   const foreign = holderLine(record);
-  if (foreign !== null) return { label: INFO.heldBy, value: foreign, note: INFO.readOnly };
+  if (foreign !== null) return { label: INFO.heldBy, value: foreign, note: bridged ? INFO.bridged : INFO.readOnly };
   return { label: INFO.heldBy, value: record.holder.kind === 'self' ? INFO.heldByMaws : INFO.heldByNone };
+}
+
+// P5 O9 M5 (the owner's Q2): every control a session driven through its bridge can't reach here, with its reason, in
+// the port's order (CONTROL_KEYS); null when it reaches them all. An idle turn is no gap: `interrupt` closed for that
+// alone is left out.
+export function drivenSection(capability: (key: ControlKey) => Capability): InfoSection | null {
+  const rows = CONTROL_KEYS.flatMap((key) => {
+    const given = capability(key);
+    if (given.available || (key === 'interrupt' && given.reason === LANE_A_WORDS.idle)) return [];
+    return [{ label: INFO.control[key], value: given.reason }];
+  });
+  return rows.length === 0 ? null : { title: INFO.unavailableTitle, rows };
 }
 
 // P2-A start (2026-10-09; X17): a row from one observed fact, labelled with when; "Not observed yet" for an unknown one
@@ -106,7 +122,7 @@ function observedRow<T>(label: string, observed: NonNullable<SessionInfoInput['o
 }
 // P2-A end
 
-function engineSection({ record, status, digest, budget, browserTabs, observed, now }: SessionInfoInput): InfoSection { // C12: digest, budget; E4a: browserTabs; P2-A: observed, now
+function engineSection({ record, status, digest, budget, browserTabs, observed, now, driven }: SessionInfoInput): InfoSection { // C12: digest, budget; E4a: browserTabs; P2-A: observed, now
   const version = status?.engineVersion ?? record.engineVersion;
   const tree = status?.memory.treeRssKiB ?? null;
   return {
@@ -118,7 +134,7 @@ function engineSection({ record, status, digest, budget, browserTabs, observed, 
       ...(observed ? [observedRow(INFO.plugins, observed, (f) => f.plugins, (p) => INFO.pluginsLoaded(p.plugins.length), now)] : []), // P2-A
       { label: INFO.binary, value: status ? homeAbbreviated(status.bin) : NONE },
       { label: INFO.sessionId, value: record.engineSessionId ?? NONE },
-      heldByRow(record), // W7
+      heldByRow(record, { bridged: driven != null }), // W7; P5 O9 M5
       { label: INFO.processTree, value: tree === null ? NONE : INFO.tree(mb(tree), status?.memory.rssKiB == null ? null : mb(status.memory.rssKiB)) },
       ...budgetRows(budget, digest), // C12
       browserTabsRow(browserTabs), // E4a
@@ -260,5 +276,6 @@ function hooksSection({ status, reads }: SessionInfoInput): InfoSection {
 }
 
 export function sessionInfoSections(input: SessionInfoInput): InfoSection[] {
-  return [engineSection(input), modelSection(input), gatewaySection(input), permissionsSection(input), usageSection(input), hooksSection(input)];
+  const unavailable = input.driven ? drivenSection((key) => input.driven!.capability(key)) : null; // P5 O9 M5
+  return [engineSection(input), ...(unavailable ? [unavailable] : []), modelSection(input), gatewaySection(input), permissionsSection(input), usageSection(input), hooksSection(input)];
 }

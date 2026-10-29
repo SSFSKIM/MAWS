@@ -8,11 +8,11 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
-import { FakePlane } from '../../../test/double/fake-plane';
-import { readRecording, scriptOf } from '../../../test/double/session-stream';
+import { FakePlane } from '../../../../../src/renderer/src/lane-a/test-support/fake-plane';
+import { readRecording, scriptOf } from '../../../../../src/renderer/src/lane-a/test-support/session-stream';
 import type { DeskSession } from '../../shell/sessions';
-import { DeskTranscript } from '../source/desk-transcript';
-import { QUIET_MS } from '../source/keeper';
+import { deskTranscript } from '../source/desk-source';
+import { QUIET_MS } from '../../../../../src/renderer/src/lane-a/keeper';
 import { transcriptStatus, useDeskTranscript } from './TranscriptPane';
 
 const script = scriptOf(readRecording().session, null);
@@ -44,7 +44,7 @@ afterEach(() => {
 
 function mount(agentId: string | null = null) {
   const plane = new FakePlane('proj');
-  const controller = new DeskTranscript({ plane, project: 'proj', target: { machine: 'mini', session: 'sess-1', agentId }, store: useTranscriptStore });
+  const controller = deskTranscript({ plane, project: 'proj', target: { machine: 'mini', session: 'sess-1', agentId }, store: useTranscriptStore });
   const hook = renderHook(({ s }) => useDeskTranscript(controller, s), { initialProps: { s: session(true) } });
   const end = (reason: 'error' | 'machine-offline') => act(() => plane.current.listener.end({ reason }));
   const wait = (ms: number) => act(() => void vi.advanceTimersByTime(ms));

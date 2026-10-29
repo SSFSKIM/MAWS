@@ -356,7 +356,7 @@ deletes (`enroll`, `delegation create`, `delegation publish`, `delegation drop`,
 `keys retire`, `keys purge`, `abandon-pending`) opens `/dev/tty` before any request. The token is `DESK_ACCESS_TOKEN` from the environment when it is
 set there (the runners' `--pipe`), else on stdin.
 
-- `show` prints the age line, the members and their devices, the machines as a table (`NAME STATE REF KEY ONLINE
+- `show` prints the age line, the members and their devices, the roots (each with the device that holds it), the machines as a table (`NAME STATE REF KEY ONLINE
   SEEN`: a head entry `listed`; a served certificate `certified`, `retired <notAfter>`, `revoked` or `refused <code>`,
   as `org-protocol`'s checks judge it against the verified head; a hub row neither covers `unlisted` when it posted a
   v2 key the head does not list, `phase-1` otherwise; `ONLINE` and `SEEN` are the row's DX2 presence when

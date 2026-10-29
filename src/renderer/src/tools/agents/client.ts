@@ -1,7 +1,8 @@
 // The agent-work client (C8b execution document, Interfaces *The agent-work client*): the one object through which the
 // agent tools and their stores reach X2. Its disk half (the engine store's sidecars, workflow runs, task lists and
-// spills with their change events), its command half (the relay's steer, Stop) and its wire half (`session.events` and
-// `session.eventBatch`, the only wire inputs of the task-graph store and the relay store). The product uses the
+// spills with their change events), its command half (the relay's steer, Stop: P5 O9 M4, through the session's controls
+// port) and its wire half (`session.events` and `session.eventBatch`, the only wire inputs of the task-graph store and
+// the relay store). The product uses the
 // validated bridge; the `#panel` harness and the tests install a fake with `setAgentWorkClient`. C6's `ipcSource` is
 // not behind this seam: the drill-in mounts it as it is (K2). E7: its files half reads and watches a session's project
 // files through X2 `files.*` (the durable cron file, Design §7), never writing one.
@@ -14,6 +15,7 @@ import type { FilesChanged, FilesReadInput, FilesReadOutput } from '@shared/ipc/
 import type { PersistedTask } from '@shared/wire/store';
 import { ipc } from '../../ipc/client';
 import type { MachineRef } from '@shared/machine/ref';
+import { stopSessionTask } from '../../session/controls/controls-for'; // P5 O9 M4
 
 export interface AgentWorkClient {
   subagents(appSessionId: AppSessionId): Promise<SubagentEntry[]>;
@@ -54,7 +56,10 @@ export function createAgentWorkClient(bridge: MawsBridge): AgentWorkClient {
     agentEvents: async (appSessionId, agentId) => valueOf(await bridge.invoke('fs.agentEvents', { appSessionId, agentId })).events,
     unfollowAgent: async (appSessionId, agentId) => valueOf(await bridge.invoke('fs.unfollow', { appSessionId, agentId })),
     steer: async (appSessionId, content, priority) => valueOf(await bridge.invoke('session.steer', { appSessionId, content, priority })),
-    stopTask: async (appSessionId, taskId) => valueOf(await bridge.invoke('session.stopTask', { appSessionId, taskId })),
+    stopTask: async (appSessionId, taskId) => {
+      const stopped = await stopSessionTask(appSessionId, taskId, bridge);
+      if (stopped.state === 'refused') throw new Error(stopped.message);
+    },
     onEventBatch: (listener) => bridge.on('session.eventBatch', listener),
     onSubagentsChanged: (listener) => bridge.on('fs.subagentsChanged', listener),
     onWorkflowChanged: (listener) => bridge.on('fs.workflowChanged', listener),

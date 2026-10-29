@@ -2,15 +2,17 @@
 // the Needs-you group, the branch, an unread dot), the activity line, the last answer on its own line, the pending
 // request through the X4 slot (`placement: 'card'`), and the footer (context, cost since seen, running agents). A
 // click opens the session, a ⌘-click opens it in the split. A foreign-live card shows its holder and holds no control
-// but itself (D-12).
+// but itself (D-12); P5 O9 M6: unless MAWS drives it through its bridge (it has a controls port), when its request is
+// answered from the card as any session's.
 import { useEffect, type KeyboardEvent, type MouseEvent } from 'react';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useSlot } from '../app/slots';
 import { GlyphMark } from '../attention/GlyphMark';
-import { holderLine, waitingItem } from '../attention/derive';
+import { waitingItem } from '../attention/derive';
 import { glyphFor } from '../attention/glyph';
 import { ipc } from '../ipc/client';
+import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M6
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { selectEndedWithErrorOf, selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
@@ -40,11 +42,11 @@ export function SessionCard({ appSessionId, paneIndex, showProject, stop, onFocu
   const project = useSessions((s) => (record?.projectId ? (s.projects.get(record.projectId)?.name ?? null) : null));
   const pending = useAttention((s) => selectPendingOf(s, appSessionId));
   const ended = useAttention((s) => selectEndedWithErrorOf(s, appSessionId)); // E11 F2b
+  const controlled = useSessionControls(appSessionId) !== null; // P5 O9 M6: none for a session held elsewhere with no live bridge
   if (!record) return null;
 
-  const foreign = holderLine(record) !== null;
   const waiting = waitingItem(pending);
-  const request = !foreign && waiting?.tier === 1 ? waiting.oldest : null;
+  const request = controlled && waiting?.tier === 1 ? waiting.oldest : null;
   const title = displayTitle(record);
   const branch = branchLabel(recordBranch(record)); // W9 (H2)
   const footer = cardFooter(digest);

@@ -10,6 +10,7 @@ import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AgentId, AppSessionId, TaskId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
 import type { PanelToolContext } from '../../../panel/tool';
+import { useSessionControls } from '../../../session/controls/controls-for'; // P5 O9
 import { selectPendingOf, useAttention } from '../../../stores/attention';
 import { SubagentGlyph, useTranscriptStore } from '../../../transcript';
 import { SUBAGENTS_COPY } from '../copy';
@@ -40,7 +41,10 @@ export function AgentList({ appSessionId, handle, expanded, shown, expandedFolds
   const pending = useAttention((s) => selectPendingOf(s, appSessionId));
   // An agent with an open request of its own (the child's permission, answered in its drill-in).
   const waiting = useMemo(() => new Set<string>(pending.flatMap((item) => [item.request.agentId, item.request.taskId].filter((id): id is NonNullable<typeof id> => id !== null))), [pending]);
-  const live = ctx.status !== null;
+  // P5 O9: a session a terminal drives through its bridge is not live here, whatever engine status MAWS kept from an
+  // earlier run of it
+  const controls = useSessionControls(appSessionId);
+  const live = (controls === null || controls.turn() === null) && ctx.status !== null;
   // The roster: the newest listing's Teammates, from the transcript's activity (both paths, every launch).
   const activity = useTranscriptStore((s) => s.activity(appSessionId));
   const roster = useMemo(() => teammatesOf(activity), [activity]);

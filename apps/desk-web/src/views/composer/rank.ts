@@ -1,5 +1,5 @@
 // Each application's origin order and recents; ranking itself is shared and browser-safe.
 import { createSlashRanker } from '@shared/composer/slash-rank';
-import { ORIGIN_ORDER } from '../../conversation/catalog';
+import { ORIGIN_ORDER } from '../../../../../src/renderer/src/lane-a/conversation/catalog';
 
 export const { rankItems, rememberChosen, resetChosen } = createSlashRanker(ORIGIN_ORDER);

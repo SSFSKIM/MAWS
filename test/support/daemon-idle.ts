@@ -40,13 +40,24 @@ export interface DaemonIdleRuntimeFloor extends IdleRecord {
 // 3.3, 3.0 and 2.7. It gave the bound 96721 KiB and 1.11 s.
 export const DAEMON_IDLE_BASELINE_M1: DaemonIdleBaseline = { commit: 'd14e92991', runs: ['40490756731', '40492851056', '40495339208'], footprintKiB: 64481, cpuS: 0.11 };
 
+// History, no longer the bound's: O2's landing record, from three valid e2e:daemon-idle-baseline runs on the mini: 65729
+// KiB at 7ff8f582 (40650181035, load 4.2, CPU 0.10 s), 70881 KiB (40669418019, load 3.4, 0.11 s) and 67409 KiB
+// (40673974571, load 4.6, 0.14 s), the latter two at d6037a48a; three more were invalid on the load rule: 40647561480
+// (11.0), 40652728419 (14.8) and 40657230165 (25.8). It gave the bound 101113 KiB and 1.11 s, which master itself read
+// above on 2026-10-28 (103203 KiB) while the mini held 9.76 GB wired from a tart leak.
+export const DAEMON_IDLE_BASELINE_O2: DaemonIdleBaseline = { commit: 'd6037a48a', runs: ['40650181035', '40669418019', '40673974571'], footprintKiB: 67409, cpuS: 0.11 };
+
 // The bound's baseline: today's detached supervisor on the landing tree itself. The architect's ruling at O2's landing
 // (superseding P5 Decision Log 57's fixed number): the bound is 1.5 times today's supervisor measured on the same tree,
-// re-measured with e2e:daemon-idle-baseline whenever a landing misses it. Three valid runs on the mini: 65729 KiB at
-// 7ff8f582 (40650181035, load 4.2, CPU 0.10 s), 70881 KiB (40669418019, load 3.4, 0.11 s) and 67409 KiB (40673974571,
-// load 4.6, 0.14 s), the latter two at d6037a48a; three more were invalid on the load rule: 40647561480 (11.0),
-// 40652728419 (14.8) and 40657230165 (25.8).
-export const DAEMON_IDLE_BASELINE: DaemonIdleBaseline = { commit: 'd6037a48a', runs: ['40650181035', '40669418019', '40673974571'], footprintKiB: 67409, cpuS: 0.11 };
+// re-measured with e2e:daemon-idle-baseline whenever a landing misses it. Re-derived after P5 O10 M10 (P5 Decision Log
+// 107) on the mini rebooted at 2026-10-28 21:27Z (1.83 GB wired, 82% free), Activity Monitor open on its desktop at
+// about 5% CPU in every window, all at d0802b29d: 66737 KiB (40791210494, load 2.4, CPU 0.12 s), 66097 KiB
+// (40795119204, load 3.7, 0.11 s), and the A-B-A 40778748076 as the mean of its two detached windows, 66073 KiB (65537
+// at load 4.5 and 66609 at 3.7, 0.12 s each), the reading its own daemon window is paired with. Void on load: 40789442114
+// (66001 KiB, 9.5) and 40793346639 (66273 KiB, 5.4, at 178eb02d8, whose supervisor bundle differs from d0802b29d's only
+// by O8 M3's org ipc schema, 48 lines of module-level zod objects), each from Apple Intelligence's post-reboot
+// app-content indexing (corespotlightd, spotlightknowledged; Spotlight's file indexing is off on the mini).
+export const DAEMON_IDLE_BASELINE: DaemonIdleBaseline = { commit: 'd0802b29d', runs: ['40778748076', '40791210494', '40795119204'], footprintKiB: 66097, cpuS: 0.12 };
 
 // A diagnostic (P5 Decision Log 57), recorded from three valid e2e:daemon-idle-floor runs on the mini at 36704c984:
 // footprints 12689, 13153 and 13185 KiB (1.04x), CPU 0.00 s each, load 2.9, 4.3 and 3.3; a fourth run (40502284016,
@@ -73,9 +84,9 @@ export function idleBound(baseline: DaemonIdleBaseline, windowS: number = IDLE_R
   };
 }
 
-// 101113 KiB and 1.11 s. The daemon shape at the landing, judged in the same quiet window on d6037a48a: 40671838782 at
-// 97683 KiB (load 3.4) and 40676048769 at 99219 KiB (load 3.8) within it; 40678158535 at 96675 KiB was invalid on load
-// (7.6). Two of the two valid runs are within.
+// 99145 KiB and 1.12 s. The daemon shape in the same series: the A-B-A's daemon window, 95907 KiB (mawsd 29409, engine
+// host 66497; load 4.7), x1.452 its own detached mean, within it. At O2's landing it was 101113 KiB, the daemon shape on
+// d6037a48a reading 97683 KiB (40671838782, load 3.4) and 99219 KiB (40676048769, load 3.8).
 export const DAEMON_IDLE_BOUND: DaemonIdleBound = idleBound(DAEMON_IDLE_BASELINE);
 
 // What is wrong with a recorded baseline or runtime floor, each one line; empty when it is well formed, and for none
@@ -310,4 +321,56 @@ export function enrolledLine(run: { unenrolled: ShapeReading; enrolled: ShapeRea
   const budget = `${footprint <= ENROLLED_INCREMENT_BUDGET_KIB ? 'within' : 'over'} the ${ENROLLED_INCREMENT_BUDGET_KIB} KiB budget (P5 Decision Log 114)`;
   const validity = run.reasons.length === 0 ? 'valid' : `invalid: ${run.reasons.join('; ')}`;
   return `[daemon-idle] enrolled endpoint footprint ${signed(footprint)} KiB (enrolled ${Math.round(enrolled.footprintKiB)} KiB, unenrolled ${Math.round(unenrolled.footprintKiB)} KiB; medians of ${enrolled.samples} and ${unenrolled.samples}) · cpu ${signed(cpu, 2)} s over ${IDLE_RUN.windowS} s (enrolled ${enrolled.cpuS.toFixed(2)} s, unenrolled ${unenrolled.cpuS.toFixed(2)} s) · processes ${processes} · ${budget} · ${validity} · load ${enrolled.load.toFixed(1)} enrolled, ${unenrolled.load.toFixed(1)} unenrolled`;
+}
+
+// The A-B-A reading, for the bound's re-derivation (after P5 O10 M10): the first case's scene three times back to back
+// in one job, each window on a fresh launch: today's detached supervisor (A), the daemon shape (B), the supervisor again
+// (A'). The engine host reads 65 to 73 MiB run to run with no code change while mawsd holds at 31.2 to 31.8, so a fixed
+// bound on B flaps. When A and A' agree with each other but not with other jobs, the spread is the machine's state and
+// pairing B with them cancels it; when they differ as much as runs do, it is each launch's, and pairing does not help.
+// Recorded only: no bound is asserted.
+export interface AbaDeltas {
+  aMean: { footprintKiB: number; cpuS: number }; // the mean of A and A', in whole KiB and centiseconds
+  footprintKiB: number; // B less the A mean, in whole KiB as the line prints them
+  cpuS: number;
+  ratio: number; // B's footprint over the A mean, to three places
+  spread: { footprintKiB: number; cpuS: number }; // A less A'
+  processes: { argv0: string; footprintKiB: number; cpuS: number }[]; // each of B's processes both A windows measured, less its A mean
+  alone: string[]; // the argv0 of B's processes neither A window measured (mawsd, and the pty host if it ran)
+}
+
+const centis = (value: number) => Math.round(value * 100) / 100;
+
+export function abaDeltas(a: ShapeReading, b: ShapeReading, a2: ShapeReading): AbaDeltas {
+  const aMean = { footprintKiB: Math.round((a.footprintKiB + a2.footprintKiB) / 2), cpuS: centis((a.cpuS + a2.cpuS) / 2) };
+  const own = (run: ShapeReading, argv0: string) => run.processes.find((p) => p.argv0 === argv0);
+  const processes = b.processes.flatMap((p) => {
+    const [first, second] = [own(a, p.argv0), own(a2, p.argv0)];
+    return first === undefined || second === undefined ? [] : [{ argv0: p.argv0, footprintKiB: Math.round(p.footprintKiB) - Math.round((first.footprintKiB + second.footprintKiB) / 2), cpuS: centis(p.cpuS - (first.cpuS + second.cpuS) / 2) }];
+  });
+  return {
+    aMean,
+    footprintKiB: Math.round(b.footprintKiB) - aMean.footprintKiB,
+    cpuS: centis(b.cpuS - aMean.cpuS),
+    ratio: Math.round((Math.round(b.footprintKiB) / aMean.footprintKiB) * 1_000) / 1_000,
+    spread: { footprintKiB: Math.round(a.footprintKiB) - Math.round(a2.footprintKiB), cpuS: centis(a.cpuS - a2.cpuS) },
+    processes,
+    alone: b.processes.filter((p) => !processes.some((q) => q.argv0 === p.argv0)).map((p) => p.argv0),
+  };
+}
+
+// The job log's line: the deltas first (B against the A mean, with the ratio a paired bound would read, and A against
+// A'), each of B's processes against its A mean, then each window's footprint, CPU and per-process medians with its
+// load, the sample counts and the validity, every window's (`reasons`). `windowS` is the window the run read.
+export function abaLine(run: { a: ShapeReading; b: ShapeReading; a2: ShapeReading; reasons: readonly string[]; windowS: number }): string {
+  const { a, b, a2 } = run;
+  const d = abaDeltas(a, b, a2);
+  const window = (name: string, shape: string, r: ShapeReading) =>
+    `${name} ${shape} ${Math.round(r.footprintKiB)} KiB ${r.cpuS.toFixed(2)} s (${r.processes.map((p) => `${p.argv0} ${Math.round(p.footprintKiB)} KiB ${p.cpuS.toFixed(2)} s`).join(', ')}; load ${r.load.toFixed(1)})`;
+  const processes = b.processes.map((p) => {
+    const delta = d.processes.find((q) => q.argv0 === p.argv0);
+    return delta === undefined ? `${p.argv0} in B alone` : `${p.argv0} ${signed(delta.footprintKiB)} KiB ${signed(delta.cpuS, 2)} s`;
+  }).join(', ');
+  const validity = run.reasons.length === 0 ? 'valid' : `invalid: ${run.reasons.join('; ')}`;
+  return `[daemon-idle] A-B-A footprint B ${signed(d.footprintKiB)} KiB against the A mean ${d.aMean.footprintKiB} KiB (x${d.ratio.toFixed(3)}), A ${signed(d.spread.footprintKiB)} KiB against A' · cpu B ${signed(d.cpuS, 2)} s against the A mean ${d.aMean.cpuS.toFixed(2)} s, A ${signed(d.spread.cpuS, 2)} s against A' · B's processes against the A mean: ${processes} · ${window('A', 'detached', a)} · ${window('B', 'daemon', b)} · ${window("A'", 'detached', a2)} · medians of ${a.samples}, ${b.samples} and ${a2.samples} over ${run.windowS} s each · ${validity}`;
 }

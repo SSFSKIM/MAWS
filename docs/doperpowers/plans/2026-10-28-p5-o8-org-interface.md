@@ -1,6 +1,6 @@
 # P5 O8 — The org interface (2026-10-28)
 
-> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O8**, §"O8: The org interface". Parent pin: blob `e74a3c5d58e682790627cf0fc54abe23e161930e` at master `1bf619c83` (P5's Decision Logs 1–116; first drafted at `5b46682f1`, re-pinned for Decision Logs 95 to 97, and again on 2026-10-28 for M3's and M5's re-plan: Decision Log 101 refuses O3's D2, so lane B's owner changes route to sminos's member record; 105 and 113 land M1 and M2; 111 answers Q1 to Q7; 116 passes M1's staging sitting and finds the double sign-in, fixed in its own PR; the others, 114 and 115 among them, change nothing here).
+> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O8**, §"O8: The org interface". Parent pin: blob `d07bfc4ea2466d7d5ca7ca3164aed4d93021311a` at master `6fb933626` (P5's Decision Logs 1–129; re-pinned on 2026-10-29 for M4's re-plan: 121 lands H1, 126 leaves M4 the refused attempt and the section's split, 129 lands M5 and names M4 next; earlier pin blob `e74a3c5d58e682790627cf0fc54abe23e161930e` at master `1bf619c83`, Decision Logs 1–116; first drafted at `5b46682f1`, re-pinned for Decision Logs 95 to 97, and again on 2026-10-28 for M3's and M5's re-plan: Decision Log 101 refuses O3's D2, so lane B's owner changes route to sminos's member record; 105 and 113 land M1 and M2; 111 answers Q1 to Q7; 116 passes M1's staging sitting and finds the double sign-in, fixed in its own PR; the others, 114 and 115 among them, change nothing here).
 >
 > **What binds.** O8's section in P5 is this document's design, and P5's approval covers it. Binding with it:
 > - P5 §7 (people: owners, visibility, machine owners and grants, agents talk as today, credentials) and §8 (the sidebar's per-project toggle, the project channel, the Org page, attention across machines); parent acceptance 3 (its remote rows: Decision Log 93), 11 and 12.
@@ -9,7 +9,7 @@
 >
 > **Built on.** O7's document `docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md` (blob `6f67459b`, PR #276), whose M1 is being built in parallel: its Interfaces §B (`OrgSession`, `SignedIn`, `HubAccess`, `signedOut()`), which M1 here implements for production, and §A (`Machines.remote`, `Machines.onRemote`), whose roster M2 reads. O9's document `…-p5-o9-lane-a.md` (blob `5aaaae49`, PR #277; its M1 landed, P5 Decision Log 97): its Interfaces §G, R1 to R6, which M2's rows answer. O6, landed (`…-p5-o6-machine-dimension.md`, blob `f5a91406`): addresses, OX3's org keys and `smnsId`, the sidebar's settled forms T1 to T5. O10 M1–M9, landed (`…-p5-o10-endpoint.md`, blob `315bc8cf`): `src/main/device/` (keys, step-up, the backup mark), the endpoint's listings (`src/endpoint/listings.ts`) and `endpoint.listings`. O11, landed (`…-p5-o11-hub-v2.md`, blob `4c4ac1ff`): the Registry's chain, pairing exchange, listings and app socket. O13, landed (`…-p5-o13-web-cards.md`, blob `04e88ca6`): `deployment admin` (`apps/desk-hub/deploy/admin.ts`), production's root until O8, and the pairing code, MAC and fingerprint in `org-protocol`. O14's Interfaces §D (`…-p5-o14-cutover.md`, blob `511deaba`) for M7.
 >
-> **What this file holds.** The execution only. P5 Decision Log 92's first milestone is specified to be built now, as two milestones: **M1, the app's org session** (sign-in, the device's registration, the held org state) and **M2, the remote rows**. **M3, the app as the org's signer**, and **M5, owners on rows and the People toggle**, were re-planned to that depth on 2026-10-28 on the owner's answers (P5 Decision Log 111), with "Add owner" split out as M5b. M4 and M6–M8 are **advisory**: what each needs, adds and proves, not how. Much of them turns on the owner's taste, asked under "Open questions for the owner"; M1 and M2 pre-empt none of those answers. Residue decisions are made where they bind, each with the alternative that lost, and listed in the Decision Log for P5's writer.
+> **What this file holds.** The execution only. P5 Decision Log 92's first milestone is specified to be built now, as two milestones: **M1, the app's org session** (sign-in, the device's registration, the held org state) and **M2, the remote rows**. **M3, the app as the org's signer**, and **M5, owners on rows and the People toggle**, were re-planned to that depth on 2026-10-28 on the owner's answers (P5 Decision Log 111), with "Add owner" split out as M5b. M4 was re-planned on 2026-10-29 and split three ways: **M4a, the Org page's shape, people and devices**, is executable; M4b (machines and their rights) and M4c (delegations) stay advisory, with the facts their re-plans need. M4b, M4c and M6–M8 are **advisory**: what each needs, adds and proves, not how. Much of them turns on the owner's taste, asked under "Open questions for the owner"; M1 and M2 pre-empt none of those answers. Residue decisions are made where they bind, each with the alternative that lost, and listed in the Decision Log for P5's writer.
 
 ## Purpose
 
@@ -36,7 +36,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-28) The final gate on bcb8959b7: run 40691164424, 41 of 42 jobs green; the one red is packaged's known `layout-transfer.spec.ts:541` (O2's skip). The landing gate runs on the merge with the master O2 leaves (the architect).
   - [x] (2026-10-28) The landing gate on the merge with O2's master (fd1d65c44): runs 40716613510 and 40716660100 green, no flaky lines.
   - [ ] The live check at the first cut-over machine.
-- [ ] M3 — The app as the org's signer: a co-root, the weekly successor, the signing checks — **executable** (re-planned 2026-10-28; needs M1 and O7 M1, both landed); the owner's sitting (`root add` on staging, then production) owed after M1's
+- [x] M3 — The app as the org's signer: a co-root, the weekly successor, the signing checks — landed (PR #314, master 716a2675d, P5 Decision Log 126); the owner's sitting (`root add` on staging, then production) owed — (re-planned 2026-10-28; needed M1 and O7 M1)
   - [x] (2026-10-28) Task 1: `root add` in `deploy/admin.ts`, its `production-run.sh` line, and its proofs in `admin.test.ts`.
   - [x] (2026-10-28) Task 2: `checks.ts` (`checkSuccessor`, `supersededRevocations`) and its proofs, the zero-roots ones included.
   - [x] (2026-10-28) Task 3: the device module, `createStateSigner` and the next keys (create, promote, destroy).
@@ -47,9 +47,16 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-28) Task 7, reviewed clean (1e38ae640): `test/org/signer.local.test.ts`, with the shared harness `test/org/local-org.ts`.
   - [x] (2026-10-28) Task 8, reviewed clean (740f0c46f): the app follows a recovery whose first state is a sibling at its head's version (Task 7's Discovery 2).
   - [x] (2026-10-28) reviewer-high on the whole branch converged in three rounds. Round 1, on 559ddfc0c, found 3 P1 and 2 P2, fixed at c4a1d6801..ba781f87f. Round 2 reproduced one earlier interleaving of the first P1, fixed at b92b07573. Round 3 found nothing material.
-  - [ ] The desk track's review of the `deploy/` hunk, and the final gate (the full hosted set).
-- [ ] M4 — The Org page — *advisory; Q1 answered; needs M3 and O11's H1*
-- [ ] M5 — Owners on rows and the People toggle — **executable** (re-planned 2026-10-28; needs M2, landed)
+  - [x] (2026-10-28) The desk track reviewed the `deploy/` hunk and shaped the wrapper fix. The final gate, run 40771309800, had two browser reds (`browser-cua.spec.ts:483`, `browser-chrome.spec.ts:681`), none of #314's; its rerun, 40783162110, was green.
+  - [ ] The owner's sitting: `root add` on staging, then production (the steps are in the report, `2026-10-28-p5-o8-report.md`).
+- [ ] M4a — The Org page: its shape, people and devices — **executable** (re-planned 2026-10-29; needs M3 and H1, both landed)
+- [ ] M4b — Machines and their rights — *advisory; needs M4a*
+- [ ] M4c — Delegations — *advisory; needs M4a*
+- [x] M5 — Owners on rows and the People toggle — landed (PR #323, master 0db3870a0, P5 Decision Log 129)
+  - [x] (2026-10-28) Built on `p5-o8-m5` at b78445447, one task: `memberName`, `OrgRows.members` and `member`, the `sidebar.people` key and `stores/people.ts`, `ownersLabel` and `RowTitle`, `projectList`'s ownership-first filing, the People hover action and menu item, owners in the hover cards. The focused suites pass locally, each file alone.
+  - [x] (2026-10-28) Class 1a at the merge with master (df6c2826a, run 40786128124) found one typecheck error in `derive.test.ts`, fixed at 50a1ab992. reviewer-medium found one P2, the early toggle's replay (Decision Log, M5's build, item 11), fixed at 854178726.
+  - [x] (2026-10-28) The first final gate (run 40786951312 on 53f147ef1) found one M5 regression. The People action sat on every row and took a line-center click at the sidebar's 200px floor (`e2e/shell.spec.ts:50`). Fixed at 54aab1ada: the toggle shows only where it can act. The same run's unit red was a test-side race, fixed with two others in tests: `OrgSection`'s clock, the teardown's `rm`, and the rekey crash setup.
+  - [x] (2026-10-28) The final gate on 7e58d6984: run 40794571273, 48 jobs green and 3 skipped, `e2e:default` and `e2e:discover` among the green. One flaky line, `browser-cua.spec.ts:483` (M3's known one), was green on retry.
 - [ ] M5b — Add owner — *later; needs O10's `record.owners` offer row and O12's sminos executor*
 - [ ] M6 — Visibility, shares and per-member reader state — *advisory; taste (Q4); needs O3*
 - [ ] M7 — The project channel — *advisory; taste (Q5); needs O7 M2 and M6, O3, O12's to-human store; its people's words wait for O14's last machine*
@@ -57,7 +64,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
 
 ## Acceptance
 
-Items 1 and 2 are the first milestone, landed. Items 3 and 5 are executable (re-planned 2026-10-28). Items 4 and 6 to 8 restate P5's O8 acceptance and are advisory until their milestones are re-planned.
+Items 1, 2, 3 and 5 have landed. Item 4a is executable (re-planned 2026-10-29). Items 4b, 4c and 6 to 8 restate P5's O8 acceptance and are advisory until their milestones are re-planned.
 
 1. **The org session (M1).**
    - A profile that never signs in creates no device keys, makes no network request, and has no `<userData>/org/`. `org.status` answers `{state: 'none'}`.
@@ -75,7 +82,16 @@ Items 1 and 2 are the first milestone, landed. Items 3 and 5 are executable (re-
    - A `gone` revision removes the row, a higher revision replaces it, and a lower one is ignored, after a reconnect or a relaunch too. The rows survive a relaunch with the hub down, from a cache verified again at load, and a machine's restored tabs stay until this run's hub snapshot has applied.
    - Proved by `src/main/org/rows.test.ts`, `test/org/rows.local.test.ts` (a real endpoint's listings through the Miniflare hub), `derive.test.ts` and `Sidebar.test.tsx` (remote rows under org projects with machine chips, beside local rows), and live at the first cut-over machine.
 3. **The app as the org's signer (M3).** The app's device, its key file carrying `excludedFromBackupAtCreation` (else registered again with new keys first), is a root beside the deployment admin, made one by the owner's `deployment admin root add` (the owner's sitting). It signs the weekly no-change successor, asking once with Touch ID at the first focus after the head turns 7 days old and never more than once a day (Q6), so the deployment admin's `refresh` stops. Every state it signs is kept in a durable pending slot before it is sent, and nothing else is signed while one is unsettled. Before signing anything it refuses a state that makes a revoked key current again, offers the superseded states' revocations after a root transition, warns before dropping a delegation, refuses a delegation prefix that equals, nests in or covers another or a name, and one whose prefix or id was used before (revoked ones included), and renews a delegation only while it is live (P5 Decision Logs 26, 30 and 31). Each removal it signs is also delivered to every machine and acknowledged (RL §5.2).
-4. **The Org page (M4).** Members and their devices, machines with enrollment codes, per-machine rights, delegations and the recovery key's id, each change shown before it is signed. A re-enrolled machine's grants are re-signed, each shown first. An admin enrolls a member's first device directly (P5 Decision Log 34).
+4. **The Org page (M4).**
+   - **4a (M4a).** Settings › Org is in Q1's four groups.
+     - From the app, a root adds and removes members, changes a role or an email, pairs a device (its own, endorsed in the same Touch ID, or another member's first device through H1), removes a device, and makes an admin's device a root.
+     - Each change is shown in a sheet before it is signed. A problem `successorProblems` names refuses before Touch ID.
+     - A later device of a member who doesn't sign is stated as not yet possible, rather than offered.
+     - A refusal shows under the control that sent it.
+     - Proved by the unit suites and `test/org/org-page.local.test.ts`, including a second member added, paired, promoted, demoted and removed on the local hub.
+   - **4b (M4b).** Machines with enrollment codes and per-machine rights. A re-enrolled machine's grants are re-signed, each shown first.
+   - **4c (M4c).** Delegations created, renewed and dropped under M3's checks.
+   - An admin enrolls a member's first device directly (P5 Decision Log 34).
 5. **Owners are visible and carried (M5; P5 acceptance 11).** Every row of a session you don't own alone shows its owners, as first names after the title, and its hover card lists them all (Q2). A per-project People toggle, off by default and remembered per project, adds other people's sessions, each with its owners and machine; while it is off the project row says "+N others" when there are any (Q3). Owners add owners (`record.owners {add: true, member}`, P5 Decision Log 50) in M5b, once O10 and O12 build its row and executor.
 6. **The people model (M6; P5 acceptance 12).** A second member, added by an org-state edit on staging, sees listings per each session's visibility and their own sessions in full. With sessions at the default `listed`, `converse` and `approve` are refused on sessions not shared with them. Reader state (unread, last seen, pinned) and drafts are kept per member, so nothing the second person reads, pins or types changes what the owner sees (P5 Decision Log 36).
 7. **The project channel (M7).** A project's to-human messages and cards across machines, agent-to-agent traffic folded, people's own messages, and migrated events drawn "attested at migration by `<machine>`" by O14's Interfaces §D. The app sends the owner's words v2-only (P5 Decision Log 75).
@@ -125,7 +141,7 @@ Items 1 and 2 are the first milestone, landed. Items 3 and 5 are executable (re-
 
 ### Plan of Work
 
-M1 runs now and lands by its own PR. M2 needs M1 and O7 M1 on master, and lands by its own PR. M3 needs M1 and O7 M1 (both landed) and lands by its own PR, reviewed at reviewer-high, since it signs the org state; its owner's sitting follows M1's. M4 needs M3 and O11's H1. M5 needs M2 (landed) and lands by its own PR after M3's, reviewed at reviewer-medium; M5b needs O10's offer row and O12's executor (Interfaces §I). M6 needs M5 and O3. M7 needs O7 M2 and M6 and O3, and its people's words wait for O14's last machine. M8 needs O14's B4 and every milestone before it. Each advisory milestone is re-planned, with its own buildability round, when its dependencies land and the owner has answered its questions.
+M1 runs now and lands by its own PR. M2 needs M1 and O7 M1 on master, and lands by its own PR. M3 needs M1 and O7 M1 (both landed) and lands by its own PR, reviewed at reviewer-high, since it signs the org state; its owner's sitting follows M1's. M4a needs M3 and O11's H1, both landed, and lands by its own PR, reviewed at reviewer-medium; the first two commits on its branch (the move and the pre-sign function) are the desk track's to review. M4b and M4c need M4a. M5 needs M2 (landed) and lands by its own PR after M3's, reviewed at reviewer-medium; M5b needs O10's offer row and O12's executor (Interfaces §I). M6 needs M5 and O3. M7 needs O7 M2 and M6 and O3, and its people's words wait for O14's last machine. M8 needs O14's B4 and every milestone before it. Each advisory milestone is re-planned, with its own buildability round, when its dependencies land and the owner has answered its questions.
 
 ### M1 — The app's org session
 
@@ -614,35 +630,330 @@ M3's own edits are the no-change successor and that revocation. The delegation a
   - one run of consecutive states filling `DELIVERY_MAX_BYTES` delivered over the real link and adopted, with an `endpoint.state` done. A single state over the bound is `too-large` in `deliveries.test.ts` and is never sent (the architect, 2026-10-28).
 - `OrgSection.test.tsx`: the root line, and no `root add` guidance for an unmarked device; the quiet line and Re-sign now; the superseded offer; owing machines; `pending-fork` with Discard behind its confirmation; `signing` with Reset behind its confirmation; the rekey offer with its code field.
 
-### M4 — The Org page *(advisory; taste: Q1, answered)*
+### M4a — The Org page: its shape, people and devices *(executable; re-planned 2026-10-29)*
 
-**What it adds.** Settings › Org grows into the Org page in Q1's four groups (You, People, Machines, Org), each change through a sheet that shows exactly what will be signed and asks Touch ID, through M3's signer and checks; desk-web's `apps/desk-web/src/views/{org,key,machines}` are the reference:
-- **People and devices.** Pair a device from the app, which shows the code, judges entries as `judgeEntry` does, compares the fingerprint and approves; remove a device; add or remove a member; change a role or an email. On production a member's Access admission is an Access change, so it is the owner's.
-- **Machines.** Enrollment codes for `mawsd enroll`: `k` by hand, the machine's MAC checked through `GET /api/enrollments/<id>/key`, and the machine signed in with its owners. Re-enrollment re-signs each grant, shown first.
-- **Rights.** Per-machine grants (`spawn`, `machine-admin`, `shell`).
-- **Delegations.** Created, renewed and dropped under M3's checks.
-- **The recovery key's id**, and a root transition's flow should one ever be needed; becoming a root and ending the deployment admin as guided flows (Q6).
-- **The org state's age and the machines owing a revocation** (M3's deliveries).
+**At its end.**
+- Settings › Org is the Org page, in Q1's four groups.
+  - **You:** this Mac (its device id and fingerprint), the hub sign-in with its renewal, Sign out, new keys, and your other devices.
+  - **People:** each member with email, role and devices, the roots marked.
+  - **Machines:** each listed machine with its owners and whether it is up. Read-only in M4a.
+  - **Org:** the state's version and age, the roots as `rootLines` reads them, the recovery key's id, the problem held, and M3's signer lines (weekly, pending slot, superseded offer, deliveries owing).
+- While this Mac may sign (M3's `maySign`), People offers these changes:
+  - Add person, Remove person, Change role and Change email;
+  - Pair a device (to yourself, or as another member's first device);
+  - Remove device (any member's but this Mac's);
+  - Make a root (an admin's `native-mac` device with a step-up key).
+- Each change opens one sheet that shows what will be signed, line by line, with the checks' warnings. Its consent is bound to a digest of what was shown, and Confirm asks Touch ID. A change the checks refuse is named in the sheet and never reaches Touch ID.
+- **Pairing from the app.** The app makes the pairing code and shows it once, with Copy. It polls H1 for the target member's pending entries and judges each with `judgeEntry`. It shows the matched entry's fingerprint to compare, and approves through the signer:
+  - **your own device:** endorsed by this Mac's step-up key, inside the same Touch ID;
+  - **another member's first device:** unendorsed, as the protocol allows (P5 Decision Log 34).
+- **The rule the page states, not an action that fails.** The protocol's `endorsed` (`org-state.ts:383-399`) needs a later device of a member who already has devices to be endorsed by one of that member's own step-up keys.
+  - A member who signs (a root) pairs their own later devices from their own app.
+  - A member who doesn't sign has no route yet: their later device waits for the countersign flow (RL §5.2; P5 Decision Log 34 deferred it).
+  - On such a member, People shows "Their next device is paired from one of their own devices, a flow not built yet" in place of Pair a device.
+- **Read-only, and refusals.** An app that isn't a root, or can't sign, sees the page read-only, with "Only a root signs org changes" and the roots' emails. A refused sign-in, re-anchor or rekey shows under the control that sent it, through `refused.attempt`.
+- `OrgSection.tsx` is split by group. `close()` awaits the commit queue's tail, and the two test workarounds go (Decisions, *Close*).
 
-It settles P5 Decision Log 34: an admin enrolls a member's first device directly. The member's new device posts its entry as itself, and the admin reads it through H1. A member adding a later device of their own with an admin's countersignature (RL §5.2) waits until a second member needs it. Rejected: building the countersign flow now, for an org of one.
+**Touches.**
+- **The move, first commit** (desk-track reviewed; *The move* below):
+  - `apps/org-protocol/src/pairing.ts`: `judgeEntry`, `entryDevice`, `isPairedDeviceId` and `isRpId` arrive from `apps/desk-hub/deploy/admin.ts`, unchanged, and are exported from `index.ts`;
+  - `admin.ts` imports them.
+- **The pre-sign function, second commit** (desk-track reviewed):
+  - `apps/org-protocol/src/org-state.ts` gains `successorProblems` and the named `stateProblems`, which `stateInvariants` becomes a reading of. `verifySuccessor`'s verdicts are unchanged.
+  - `apps/desk-hub/deploy/admin.ts`'s `amend` runs it before signing.
+  - `apps/org-protocol/test/successor-problems.test.ts` (new) proves it.
+- **Main:**
+  - `src/main/org/edits.ts` (new): the change composers;
+  - `src/main/org/pairing.ts` (new): the app's pairing;
+  - `src/main/org/view.ts` (new): `OrgView` from the held head;
+  - `checks.ts`: runs `successorProblems`;
+  - `signer.ts`: `Edit.endorse`;
+  - `src/main/device/step-up.ts`: `StateSigner.sign` endorses;
+  - `hub-client.ts`: `pendingOf`;
+  - `org-session.ts`: the commands, `refused.attempt`, `close()` and its fence;
+  - `held.ts`: `HeldOrg.close()` (the adoption queue fenced and its tail returned) and `adoptServed`'s closed guard;
+  - the signer's, weekly's and deliveries' `close()` return their operation in flight;
+  - `src/main/index.ts`: wiring;
+  - their tests.
+- **Shared:** `src/shared/ipc/schema/org.ts` (`OrgView`, `OrgChange`, `org.view`, `org.preview`, `org.change`, `org.pair.*`, `OrgRefusal.attempt`, `OrgStatus`'s `pairing`), `routes.json`, `grades/org.ts`.
+- **Renderer:**
+  - `src/renderer/src/settings-tab/org/` (new folder): `OrgSection.tsx` (the shell), `YouGroup.tsx`, `PeopleGroup.tsx`, `MachinesGroup.tsx`, `OrgGroup.tsx` (M3's signer lines, moved), `ChangeSheet.tsx`, `PairSheet.tsx`, `parts.tsx`;
+  - `copy.ts`'s `ORG`;
+  - `SettingsView.tsx`'s import;
+  - the tests, split by group.
+- **Tests:** `test/org/org-page.local.test.ts` (new, added to `vitest.config.ts`'s `TIMING_NODE_TESTS`, whose explicit list is the only way into the `node-timing` project), `org-session.test.ts` (the workarounds removed).
 
-**H1, the shape the desk track builds** (O11's hub; Interfaces §I). `GET /api/devices/pending?member=<member id>`:
-- no `member`, or the caller's own id: as today, the caller's entries;
-- another member's id: the Registry checks the caller with `current(you, 'admin')` (`403 not-admin` otherwise) and answers that member's entries, `404 no-member` for an id the current head doesn't list;
-- the answer is today's `PendingDevices`, `{pending: PendingDevice[]}`, each entry as stored (`member`, `created`, `expires` and the posted fields with its `mac`), the MAC unchecked: the admin's app judges it under the `k` of the code it showed, as `judgeEntry` does;
-- posting stays the member's own; nothing else changes.
+**Interfaces.** It produces §M. It consumes:
+- M3's signer, checks and status (§K);
+- M1's session, held view and hub client;
+- H1 (`GET /api/devices/pending?member=`);
+- `org-protocol`'s `encodePairingCode`, `verifyPairingMac`, `pairingFingerprint`, `endorseDevice`, `keyId` and `verifySuccessor`;
+- `memberName` (M5);
+- the renderer's `useMachines` store for whether a machine is up.
 
-**Needs.** M3; O11's H1 above.
+**Decisions.**
 
-**Proves.** Acceptance 4.
+*The move* (Constraints: `apps/org-protocol` and `apps/desk-hub` are the desk track's; the architect's ruling, 2026-10-29).
+- **What moves.** The pure pairing judges go from `admin.ts` to `apps/org-protocol/src/pairing.ts`, byte for byte, as their own commit at the head of the branch: `judgeEntry`, `entryDevice`, `isPairedDeviceId`, `isRpId` and the constants they read. `admin.ts` imports them, with no behaviour change, and the desk track reviews that commit.
+  - `deploy/bin.ts` bundles `admin.ts` and its imports with esbuild before running the generated module, so a bundled admin run can't show whether the package loads on its own. `org-protocol`'s sources use `.ts` import specifiers and nothing Node's type stripping refuses. The moved code keeps that form, and the move's steps import the exported judges straight from `apps/org-protocol/src/index.ts` under `node --experimental-strip-types`.
+  - The judges' input type moves with them as a package-owned structural type (`PendingEntry`), since today's `PendingDevice` is the hub's (`apps/desk-hub/src/protocol/identity.ts`). The hub's type stays where it is and satisfies it.
+  - Rejected: app-side copies with a parity test, which are a shim where the code can simply move.
+- **What moves later.** The pure parts of `admin-machines.ts` and `encodeEnrollmentCodeV2` are M4b's. `prefixProblem` is M4c's. Each moves when its milestone needs it.
 
-*H1 landed (2026-10-28, PR #306, master 409920137, P5 Decision Log 121).* `GET /api/devices/pending?member=<id>`. Its answers:
-- `403 not-admin` for anyone but an admin. The admin check comes first, so a 403 never says whether the id is a member.
-- `404 no-member` for an id the head doesn't list, a removed member's lingering entries included.
-- `503 hub-updating` from a Registry before H1. M4 reads it as "try again".
-- Otherwise `{pending}`, stored as is with the MAC unchecked; the approving device checks the MAC.
-- No id, or the caller's own id, is today's read.
-M4 adds `?member=` to `hub-client.ts`'s own `PENDING_DEVICES_PATH` copy.
+*The pre-sign function.*
+- `successorProblems(before: OrgState, after: OrgState, opts: { endorsing?: { kid: string; devices: string[] } }): Promise<Problem[]>` is for an **ordinary successor**, one with no authorizing root transition. That is every successor the app and the CLI compose. For it, the function runs every check `verifySuccessor` makes except the signatures, and names each problem.
+  - It does not judge a successor a recovery authorizes. A held transition changes non-signature rules: the successor must take the transition's root set, and the transition's new root devices are exempt from endorsement (`org-state.ts:350-375`). The recovery vector in `vectors/scenario.ts:345-370` replaces a member's devices unendorsed and is accepted that way.
+  - The link: version, `prev`, org.
+  - `revives-revoked`.
+  - The whole-state rules (`stateProblems`):
+    - `member-id-taken`, `email-taken`, `device-id-taken`;
+    - `owners-unknown`, naming the machine or delegation;
+    - `empty-roots`, `root-not-admin` (a root kid that is no admin device's step-up key);
+    - the key, name and prefix rules, each by its own code.
+  - `recovery-changed`, `legacy-retired`, `machine-names`, `keys-unaccounted`.
+  - `endorsement-missing`: a later device of a member who had devices, without an endorsement. A device id in `opts.endorsing.devices` counts as endorsed by `opts.endorsing.kid`, when that kid is one of the member's step-up keys in `before`, since the signer endorses it inside the same Touch ID.
+  - `stateInvariants(state)` becomes `(await stateProblems(state)).length === 0`.
+  - `verifySuccessor` is unchanged in every verdict it returns, and in the order it reaches them. `org-protocol`'s existing suites and vectors pass unchanged, which is the proof.
+  - Rejected: app-only rows in `checks.ts`, which leave the CLI to meet the same problems only after signing.
+- `checks.ts`'s `checkSuccessor` runs `successorProblems` first, each problem a `refuse` finding with its code, then M3's own rows (the delegation rules and the superseded offer). The delegation rules duplicated between `checks.ts` and `admin.ts`'s `prefixProblem` stay until M4c moves `prefixProblem`.
+- `admin.ts`'s `amend` runs `successorProblems` on the composed successor before `signOrgState`. A problem refuses in `amend`'s words, "nothing was signed", naming the code. Every admin verb's successor is valid today, so this changes only how a broken one is refused.
+
+*The view* (`org.view`). It reads `OrgView | null` from the held head, null unless `registered` with a head:
+- `version` and `issued`;
+- `members`: id, email, `name` (`memberNames`), role, `you`, and devices. Each device carries id, class, `keyStorage`, `root` (its step-up kid is in `root.keys`), `thisMac` and `fingerprint` (`pairingFingerprint`, for compare-by-eye);
+- `machines`: name, ref and owners, the signed facts only. Whether a machine is up comes from the renderer's `useMachines` store, which `machines.changed` keeps current. A link can drop with no new head, so the view would go stale if it carried that bit;
+- `roots`: kid with member and device, as `rootLines` reads them, or `unlisted`;
+- `recoveryKid`: `keyId(root.recoveryPub)`;
+- `maySign` (M3's).
+
+The renderer reads it again at each `org.changed`, which the session already fires at every adopted head. It is not a field of the status: the status is emitted on every attempt and timer, and the view changes only with the head.
+
+*Changes.* `OrgChange` is one of:
+- `member.add {email, role}`;
+- `member.remove {member}`;
+- `member.role {member, role}`;
+- `member.email {member, email}`;
+- `device.remove {member, device}`;
+- `root.add {member, device}`.
+
+`org.preview {change}` composes it on a fresh `successorDraft` of the held head (`edits.ts`) and runs `checkSuccessor`. It answers `{ok: true, change, lines, warnings, digest}`, where `change` is normalized: `member.add` gains its new random member id, so the id signed is the id shown. Otherwise it answers `{ok: false, reason, findings}`.
+
+`org.change {change, digest}` composes again inside the signer's `sign`, on the head it signs on. A different digest of `{change, lines, warnings}` reads `stale` and signs nothing, as `org.revokeSuperseded` does. The composers:
+- **`member.add`.** The email is trimmed and lower-cased, and the role is `member` unless chosen. The member has no devices; the first is paired next (Pair a device).
+  - The sheet adds: "They sign in through the hub's Access. On production their email must be admitted there too: an Access change, the owner's."
+  - The member id is 16 random bytes in hex, the 32 characters `isMemberId` takes. The hub rebuilds its members table from each accepted head (`org-chain.ts` `projectMembers`) and resolves a person by email against it, so the new member's `/api/me` names this id once the state is accepted.
+- **`member.remove`.**
+  - Each device's channel and step-up keys go to `revoked`, with their holders, and their step-up kids leave `root.keys`.
+  - Refused:
+    - for yourself;
+    - for the member holding this Mac's device;
+    - when they own a machine or a delegation (`owners-unknown`, naming each). Their machines change hands in M4b.
+- **`member.role`.**
+  - A demotion takes the member's step-up kids out of `root.keys`, a line saying so.
+  - Refused:
+    - for yourself ("another admin changes your role");
+    - when it would empty the roots (`empty-roots`).
+- **`member.email`.**
+  - The line says the hub admits the member by the new email from this state on, and that on production Access must admit it too.
+  - Refused: an email another member has (`email-taken`).
+- **`device.remove`.**
+  - Both of the device's keys go to `revoked`, and its kid leaves `root.keys`: `remove-device`'s edit, for any member.
+  - Refused:
+    - this Mac's own device (it leaves through New keys or M8);
+    - `empty-roots`.
+  - M3's old-device line becomes this action, in place of the `remove-device` command.
+- **`root.add`.** Appends the device's step-up kid to `root.keys`, for an admin's `native-mac` device with a step-up key that isn't a root: `root add`'s rule, for any admin.
+
+Each composer throws `StaleEdit` when its target is gone from the draft, so a head that moved under the sheet reads `stale`. Lines name members by email and devices by their first 8 characters with class, as `show` does.
+
+*Pairing* (`pairing.ts`).
+- **`org.pair.start {member, class}`.** Only while `maySign`, and only for yourself or a member with no devices; otherwise `refused` with the rule above.
+  - `class` is `native-mac` (a Mac running MAWS, the default) or `web-cards` (a browser holding a passkey), chosen in the PairSheet. `judgeEntry` refuses an entry of another class, as `pair --class` does.
+  - The app makes 16 random bytes `k`, then calls `encodePairingCode({hub, org, member, roots: root.keys, recoveryPub, k: base64urlEncode(k)})` (the code carries `k` as base64url, `pairing.ts:29-31`; `admin.ts:745-753`). It answers `{ok: true, code, expires}`. The TTL is `PAIR_TTL_MS`, 600 s, `pair`'s maximum.
+  - The code is in that answer alone: the status never carries it or `k`, and the suites' secret check covers it. `k` lives in main's memory only, so a relaunch ends the pairing.
+- **The polling.** Every `PAIR_POLL_MS` (2 s) it polls `GET /api/devices/pending?member=<id>`; for yourself, the plain read. Each entry is judged with today's signature, `judgeEntry(entry, {org, member, k, class, listed})` (`admin.ts:304-321`), with `listed` taken from the held head's device ids.
+  - `503 hub-updating` and no answer keep polling (P5 Decision Log 121).
+  - `403 not-admin` and `404 no-member` end the pairing as `refused` with that code.
+  - Two matching entries end it: "two devices answered this code: start over".
+- **The candidate is frozen once found.** The first matching entry becomes the pairing's candidate: its canonical device and that device's digest. The hub keeps a pending entry under its member and device id and replaces it on a repost (`org-chain.ts:243-260`, `INSERT OR REPLACE`), so a later poll can show the same id with other keys. If it does (another canonical device under the candidate's id, or a second match), the pairing ends as `entry-changed` or `two-entries`, and the person starts over. Main never swaps the candidate for a newer one.
+- **The status.** `pairing: {generation, member, class, expires, entry: {id, class, keyStorage, fingerprint, digest} | null, problem: 'two-entries' | 'entry-changed' | 'expired' | 'not-admin' | 'no-member' | null} | null`.
+  - `generation` counts pairings in this run.
+  - `digest` is the candidate's canonical device digest.
+  - The renderer's PairSheet shows the fingerprint, to compare with the device's own screen.
+- **`org.pair.approve {generation, digest}`.** The approval names the candidate the person compared, as `pair` keeps the exact device it showed (`admin.ts:790-801`).
+  - It refuses `stale` when the pairing's generation or the candidate's digest isn't the one named.
+  - It then reads the pending list again and requires that same canonical device ("the entry changed after it was shown", `pair`'s rule).
+  - It signs `device.approve` with the frozen candidate, never with what the read returned.
+  - The edit carries a liveness guard, `Edit.live()`: true while the pairing is this generation and neither cancelled nor expired. It is checked at three points:
+    - in `apply`, which throws `StaleEdit`, for the races before Touch ID;
+    - in the device module, right after the confirmation and before any endorsement or state signature, where it reads `cancelled` (`StateSigner.sign` takes the guard);
+    - in the signer, just before the pending slot's write, where it reads `stale`.
+  - So a cancel or an expiry while Touch ID is open endorses, signs, slots and posts nothing.
+  - Once the slot is written the proposal is durable, and cancelling the pairing no longer withdraws it. It settles as any pending proposal does, and M3's Discard is the way back, as the sheet says.
+  - The edit appends the device to the member. For yourself, `Edit.endorse` names it, and the state signer endorses it with this Mac's step-up key inside the same Touch ID, before signing the state.
+- **`org.pair.cancel`** ends it, advancing nothing a signing in flight relies on: that signing's `apply` sees the pairing ended and reads `stale`.
+
+One pairing at a time, and none while a rekey runs, since both are the session's attempts.
+
+*Endorsement inside one Touch ID.*
+- `Edit` gains `endorse?: {member: string; device: string}[]` and `live?(): boolean`.
+- `StateSigner.sign(state, prompt, {endorse?, live?})`, after the confirmation:
+  - returns `cancelled` if `live` says no;
+  - endorses each named device on the canonical copy it signs (`endorseDevice(org, member, device-without-endorsement, key)`);
+  - then signs the state.
+- The signer checks `live` again before the slot's write. `apply` already ran before Touch ID (`signer.ts:460-468`, Touch ID at `:485`), so it can't see a change made while the prompt is open.
+- The signer passes `opts.endorsing` to `checkSuccessor`, so the device reads endorsed before Touch ID. `verifySuccessor` after signing checks the real endorsement.
+- The key stays in the device module (P5 Decision Log 53).
+- Rejected: two Touch IDs, one to endorse and one to sign, for one change the person confirmed once.
+
+*The refused attempt.*
+- `OrgRefusal` gains `attempt: 'register' | 'reanchor' | 'signIn' | 'rekey'`, set where the session sets `refused` (`org-session.ts`) and carried with it for as long as it stands.
+- The renderer shows a refusal under the control whose attempt it names, which retires `OrgSection`'s `source` state and its after-reload heuristic (`rekeyRefused`; P5 Decision Log 126's residue).
+- Pairing refusals are the pairing's own (`pairing.problem`, or the start's answer), not the session's.
+
+*Close.* A late write comes from a producer, not only from the queue. A signer step awaiting a hub read can adopt after the queue has drained: `signer.ts:277-291` keeps its held view across `await hub.chain()`, its `close()` only sets flags (`:616-620`), adoption writes `chain.json` and queues an anchor (`held.ts:368-373`), and `writeAnchor` doesn't refuse a closed session (`org-session.ts:640-646`). So `close()` runs in four steps:
+  1. It fences: `closed` is set, and every producer checks it after each await, before it adopts or queues a write. The signer's adoption checks its lifecycle epoch there, as its posts already do. `writeAnchor` and the session's other queued writers refuse to enqueue once closed. The held view's `adoptServed` takes a guard the session passes, which is false once closed.
+  2. It stops the parts, as today.
+  3. It awaits the producers in flight, from outside the commit queue, never inside it:
+     - the signer's current operation, the sync and the deliveries' run, which each part's `close()` now returns;
+     - the held view's own adoption queue. `HeldOrg.close()` fences it: a queued adoption checks the guard when it runs, not only when it was submitted. It returns the queue's tail, including a `chain.json` write already under way. An adoption reaches that queue from outside the session too: a link's direct `view.advance(...)` (`remote/link.ts:442-445`), which isn't awaited, and which writes `chain.json` outside the commit queue (`held.ts:285-292`, `:368-373`);
+     - the session's load, if it is still running.
+  4. It awaits the commit queue's tail.
+
+  The rule: each writer under `org/` is one of these owners, and a new writer joins one of them.
+
+  When `close()` resolves, nothing more is written under `org/`.
+- The test workarounds go: 8d18883f4's `rm` retry, and 8e21b6354's wait for the anchor in `crashedRekey`.
+- Two tests:
+  - one holds a queued anchor write open and asserts `close()` resolves only after it lands;
+  - one holds the signer's hub read open, calls `close()`, releases the read, and asserts that no file under `org/` changes after `close()` resolved;
+  - one starts `view.advance` directly, as a link does, holds its `chain.json` write open, calls `close()`, and asserts `close()` waits for that write to settle.
+- This closes the tracker row P5 Decision Log 129 opened.
+
+*The split.*
+- `settings-tab/org/OrgSection.tsx` keeps the status read and the state switch: none, development, registering, registered.
+- Each group is its own file, and the sheets are their own.
+- The M1 and M3 pieces move unchanged into You and Org: Held, Problem, SignerLines, NewKeys, Fingerprint, HeadAge, CodeField and Refusal.
+- Their tests split with them. `OrgSection.test.tsx`'s cases keep their names in the group files, so a moved case reads as moved.
+- The copy stays in `copy.ts`'s `ORG`. Its "Today that is `deployment admin pair --class native-mac`" lines become "An admin pairs it from their Org page (Pair a device), or `deployment admin pair --class native-mac`".
+
+*Machines in M4a.* Read-only: name, owners by name, up or not. "Enroll a machine" reads "`deployment admin enroll <name>` (here in M4b)".
+
+**Does not touch.**
+- Machines' edits, grants and enrollment (M4b). Delegations (M4c).
+- The deployment admin's end (M8).
+- The countersign flow for a non-signing member's later device.
+- The step-up prompt's full text (O7's re-plan, P5 Decision Log 126).
+- `apps/org-protocol/src/` and `apps/desk-hub/deploy/` beyond the two reviewed commits.
+- `apps/desk-hub/src/`, `src/endpoint/`, `apps/desk-web/`.
+
+**Proves.** Acceptance 4a, each test named by the behaviour it pins.
+- **The move:**
+  - `admin.test.ts`, `admin-verbs.test.ts` and `production-scripts.test.ts` pass unchanged.
+  - `org-protocol`'s `pairing.test.ts` gains the moved judges' cases: those admin's suites pin through `pair`, now on the functions themselves.
+- **`apps/org-protocol/test/successor-problems.test.ts` (new):**
+  - `successorProblems` names each problem, with one case per code.
+  - Over the package's vectors whose successor `verifySuccessor` accepts with no transition, `successorProblems` finds nothing. Over those it refuses for a non-signature reason, it names a problem. The recovery vectors are outside its contract, and a case says so.
+  - `endorsing` counts a named device as endorsed only under one of the member's own keys.
+  - `stateInvariants` agrees with `stateProblems` on every vector.
+- **`edits.test.ts`:**
+  - each composer's successor passes `successorProblems` and the package's `verifySuccessor` once signed;
+  - each refusal row above refuses;
+  - a target gone from the draft reads `stale`;
+  - `member.add`'s id is the one previewed.
+- **`pairing.test.ts`:**
+  - the code decodes to the target member with this head's roots;
+  - an entry with a wrong MAC, class or id is "not this pairing's";
+  - two entries refuse;
+  - `503` keeps polling, while `403` and `404` end;
+  - approve re-reads, and refuses a changed entry;
+  - a same-id entry reposted with other keys, between display and approval, ends the pairing as `entry-changed`;
+  - approval naming an old generation or digest reads `stale`;
+  - a cancel or an expiry while the confirmation is held open, then answered yes, gives no endorsement, no state signature, no slot and no post;
+  - a wrong class is "not this pairing's";
+  - the code and `k` are never in a status;
+  - expiry ends it.
+- **`step-up.test.ts`:** one confirmation endorses and signs, the endorsement verifying under the device's step-up key; a cancel endorses nothing.
+- **`checks.test.ts`:** `successorProblems`' codes arrive as refusals before Touch ID.
+- **`org-session.test.ts`:**
+  - `org.view` follows the head;
+  - `org.preview` and `org.change` bind the digest (`stale`);
+  - `refused.attempt` names each attempt;
+  - `close()` resolves after a held anchor write;
+  - a signer hub read released after `close()` writes nothing;
+  - the two workarounds are gone and the cases still pass 20 runs in a row.
+- **The renderer** (`settings-tab/org/*.test.tsx`):
+  - each group draws its rows;
+  - a machine's up state follows `machines.changed` while the org version stays the same;
+  - read-only without `maySign`;
+  - each change's sheet shows its lines and warnings, and Confirm sends the previewed digest;
+  - a refused preview shows its findings and no Confirm;
+  - the PairSheet shows the code once, then the entry's fingerprint, and approves;
+  - the later-device rule is shown in place of the action;
+  - a refusal shows under the control its attempt names;
+  - M1's and M3's moved cases pass.
+- **`test/org/org-page.local.test.ts`** (desk-hub's Worker in Miniflare, through `local-org.ts`), with app A a root through `root add`:
+  1. A adds member B (`b@example.com`) and pairs B's first device. B's app, under the stand-in's identity for B, registers with A's code, and A approves through H1. B reads signed in.
+  2. A changes B's role to admin and makes B's device a root. B's app reads `root`.
+  3. A demotes B, and B's root leaves.
+  4. A pairs a second profile of its own member, endorsed, and the hub accepts it.
+  5. A removes B's device, then B. B's app reads removed.
+  6. Every state the hub accepted verifies from genesis.
+
+  This is P5 acceptance 12's "a second member added by an org-state edit", here on the local hub. Staging's is M6's sitting.
+
+### M4b — Machines and their rights *(advisory; facts for its re-plan, 2026-10-29)*
+
+**What it adds.** Machines in the Org page:
+- enroll with a code;
+- check the machine's key MAC;
+- list it with its owners, and change its owners;
+- drop it, retiring or revoking its key;
+- per-machine rights as grants;
+- a re-enrolled machine's grants re-signed, each shown first (P5's O8 acceptance).
+
+**Facts found at M4's re-plan** (read on master 6fb933626).
+- **Enrollment** (`admin.ts:898-967`).
+  1. `POST /api/enrollments {ttl_s ≤ 3600, machine?}` answers `{enrollment, token}`.
+  2. The code is `encodeEnrollmentCodeV2({hub, token, roots, recoveryPub, k (32 bytes), machine})`. It lives in `apps/desk-hub/src/protocol/identity.ts:475-497`, which is in the Worker's bundle. M4b moves it to `org-protocol`, and a `wrangler deploy --dry-run` build of desk-hub must stay clean (the desk track's condition).
+  3. The machine redeems the code (`POST /machine/enroll`) and posts `{pub, ref, mac}` with `enrollmentMac(k, {name, machinePub, ref, tokenId})`.
+  4. The admin polls `GET /api/enrollments/<id>/key` every 5 s, where 404 `no-key` means wait, then runs `verifyEnrollmentMac`.
+  5. The successor pushes `{name, ref, pub, owners}` and a `machineNames` pair. Re-enrollment retires the old key and replaces `pub`.
+- **Grants are not in `OrgState`.**
+  - They are separate `Signed<Grant>` records `{org, machine, machineKey, member, rights: ('spawn'|'machine-admin'|'shell')[], version, issued}`, under `SIGNING_DOMAINS.grant`. `signRecord` signs them with the step-up key of a machine owner's device, or an admin's when owners is `'org'` (`records.ts:79-90`).
+  - Only the hosting machine's ledger holds them (`src/endpoint/grants.ts`, highest version per member). Owners need none (`machineRights`).
+  - They are delivered by the `endpoint.grant {grant}` act (`src/main/machines/remote/acts.ts:29`; O10 M7's own-action path) or by `mawsd endpoint grant` out of band.
+  - No production grant signer exists: `signRecord(SIGNING_DOMAINS.grant, …)` appears only in `org-protocol/vectors/scenario.ts`.
+- **Re-enrollment re-signing grants exists nowhere.**
+  - `verifyGrant` refuses any `machineKey` but the current one (`not-listed`), so a re-enrolled machine's ledger refuses every old grant.
+  - The app keeps no record of the grants it issued. M4b needs an issued-grants record in `<userData>/org/` (each grant as signed, per machine and member), so it can list them, show each, sign it again for the new key at version + 1, and deliver it.
+- **New signing paths in the device module, behind Touch ID:** `signRecord` for grants, beside M4a's endorsement.
+- **`admin-machines.ts`** (`certificateViews`, `resolveMachine`, `machineRows`) is pure and moves to `org-protocol` when M4b needs it. `machine drop` is at `admin.ts:1120`.
+- **Changing a machine's owners** is a state edit (`machines[].owners`). M4a refuses removing a member who owns machines, and M4b is where those machines change hands.
+
+**Needs.** M4a.
+
+**Proves.** Acceptance 4b.
+
+### M4c — Delegations *(advisory; facts for its re-plan, 2026-10-29)*
+
+**What it adds.** Delegations created, renewed and dropped from the Org page, under M3's prefix and renewal checks (P5 Decision Logs 30, 31).
+
+**Facts found at M4's re-plan.**
+- **Create** (`admin.ts:1005`).
+  - It checks `prefixProblem` (`admin.ts:832`) and confirms "delegate `<prefix>` for `<ttl>` s?".
+  - It calls `POST /api/provisioning-keys`, and checks the answer with `mintDisagrees` (`:973`).
+  - It makes a key pair. The delegation is `{id, pub, prefix, expires, maxUses, offlineRevokeS, owners}`, signed into the pending slot unsent.
+  - The `smns-provision-v2` code, which carries the private key, is shown once.
+  - `delegation publish` (`:1078`) posts it.
+- **Drop** (`:1090`) revokes the delegation's key with `{delegation, prefix}` and moves its certificates' `retired` entries to `revoked`, then calls `DELETE /api/provisioning-keys/<id>`.
+- **Renew:** no verb exists. M3's checks already hold the rules (`renew-expired`, `renew-not-extension`).
+- **Duplicated rules:** the prefix rules live twice, in `admin.ts`'s `prefixProblem` and the app's `checks.ts`. M4c moves `prefixProblem` into `org-protocol`'s `successorProblems` and drops the app's copy.
+- **UI reference:** desk-web's `ProvisioningKeys.tsx` (lifetimes 7, 30, 90 and 365 days; the revoke confirmation) is a v1 view, used for its wording only.
+
+**Needs.** M4a.
+
+**Proves.** Acceptance 4c.
 
 ### M5 — Owners on rows and the People toggle
 
@@ -805,6 +1116,51 @@ Expected as for M1. The owner's sitting, after the PR's gates and M1's staging s
     W/apps/desk-hub/deploy/staging-run.sh admin root add <the device id the Org section shows>    # compare the fingerprint with the Org section's; confirm
 
 In the app's scratch profile, Settings › Org reads "This Mac signs the org state". "Re-sign now" asks Touch ID and the head's version goes up by one; `staging-run.sh admin show` reads the new version. Recorded in Outcomes: the version, the fingerprint match, and the admin's `show` naming two roots. The production rollout is the owner's alone once M3 is on master: `production-run.sh admin root add <id>` from the owner's own MAWS's Org section, then the owner stops running `refresh`.
+
+**M4a.**
+
+The move commit is the branch's first. Run its checks before any other M4a work:
+
+    # the moved judges: admin's suites and org-protocol's, unchanged in outcome
+    pnpm --filter desk-hub exec vitest run test/deploy/admin.test.ts test/deploy/admin-verbs.test.ts
+    pnpm --filter desk-hub exec vitest run test/deploy/production-scripts.test.ts
+    pnpm --filter org-protocol exec vitest run test/pairing.test.ts
+    # the package boundary on its own: the judges imported straight from org-protocol under Node's type stripping
+    node --experimental-strip-types --input-type=module -e "const m = await import('./apps/org-protocol/src/index.ts'); console.log(['judgeEntry','entryDevice','isPairedDeviceId','isRpId'].map((n) => typeof m[n]).join(' '))"
+    # admin as the deploy checkout runs it (bin.ts bundles it): read-only verbs against the local hub, in a scratch org
+    # (the deploy README's local recipe)
+    pnpm --filter desk-hub local --state ~/.local/share/o8-m4a-move/hub          # a second terminal; Ctrl-C at the end
+    pnpm --filter desk-hub deployment admin init --keys ~/.local/share/o8-m4a-move/keys.json --hub http://127.0.0.1:8747 --user owner@example.com
+    pnpm --filter desk-hub deployment admin genesis --keys ~/.local/share/o8-m4a-move/keys.json --hub http://127.0.0.1:8747 --user owner@example.com --recovery ~/.local/share/o8-m4a-move/recovery.json --yes
+    pnpm --filter desk-hub deployment admin show --keys ~/.local/share/o8-m4a-move/keys.json --hub http://127.0.0.1:8747 --user owner@example.com
+    pnpm --filter desk-hub deployment admin devices --keys ~/.local/share/o8-m4a-move/keys.json --hub http://127.0.0.1:8747 --user owner@example.com
+    rm -r ~/.local/share/o8-m4a-move
+
+Expected: the import line prints `function function function function`; the suites pass; `show` and `devices` print as they did before the move.
+
+The same checks follow the pre-sign commit. That commit also runs `org-protocol`'s whole suite once, through the gate, not locally.
+
+#261 (O14's m5b, held to B4 step 3) also touches `apps/desk-hub/deploy/`. Whichever of #261 and M4a lands second merges the other in, with no rebase.
+
+When M4b moves `encodeEnrollmentCodeV2`, `pnpm --filter desk-hub build` (a `wrangler deploy --dry-run`) must stay clean. That is the desk track's condition, and it goes into M4b's steps.
+
+Then the milestone:
+
+    pnpm --filter org-protocol exec vitest run test/successor-problems.test.ts
+    npx vitest run --project node src/main/org/edits.test.ts
+    npx vitest run --project node src/main/org/pairing.test.ts
+    npx vitest run --project node src/main/org/checks.test.ts
+    npx vitest run --project node src/main/org/signer.test.ts
+    npx vitest run --project node src/main/org/org-session.test.ts
+    npx vitest run --project node src/main/device/step-up.test.ts
+    npx vitest run --project node-timing test/org/org-page.local.test.ts    # registered in TIMING_NODE_TESTS first
+    npx vitest run --project renderer src/renderer/src/settings-tab/org/<each group's test file>
+    npx eslint src/main/org src/main/device src/main/index.ts src/shared/ipc/schema/org.ts src/renderer/src/settings-tab apps/org-protocol/src apps/desk-hub/deploy/admin.ts test/org
+    W/scripts/ci-gate.sh W --gates static,unit,probes --class1a pool --peer none
+    W/scripts/ci-gate.sh W --gates all --lane hosted --class1a pool --peer none        # class 1a, every hosted Electron group, e2e:default, unit:darwin
+    W/scripts/ci-gate.sh W --gates packaged --peer none                                  # `all` skips packaged
+
+Expected as for M1. The app packages (`apps/org-protocol`, `apps/desk-hub`) run their own vitest configs through `pnpm --filter`, one file at a time as here.
 
 **M5.**
 
@@ -1051,7 +1407,8 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
 - **Now (M2):** `RemoteRow`, `OrgRows`, `org.rows` and `org.rows.changed`; the listed partition, `rowOfListed` and `registerRemoteOpener` (§G); `listings.json`.
 - **M3 (executable):** §K: `createStateSigner`, the next keys, `checks.ts`, the signer and its pending slot, the weekly asking, deliveries, `postState`, `OrgStatus`'s `signer` and `problem: 'signing'`, `org.resign`, `org.revokeSuperseded`, `org.rekey`, `org.discardPending`, `org.resetSigning`, `signing.json` (failing closed) and `registration.json`'s `signing` and `rekey`; `deployment admin root add`. No `WIRE_MINOR`, settings version, `IpcError` code or e2e group.
 - **M5 (executable):** §L: `memberName`, `OrgMember`, `OrgRows.members`, the `sidebar.people` layout key, `ownersLabel`. No layout version, `WIRE_MINOR` or settings version.
-- **Later (advisory):** the Org page (M4); owner changes as acts through O10's row and O12's executor (M5b, M6); the project channel's sockets (M7).
+- **M4a (executable):** §M: `successorProblems` and `stateProblems` in `org-protocol`, the pairing judges moved there, `OrgView`, `OrgChange`, `org.view`, `org.preview`, `org.change`, `org.pair.start`, `org.pair.approve`, `org.pair.cancel`, `OrgStatus`'s `pairing`, `OrgRefusal.attempt`, `Edit.endorse` and `StateSigner.sign`'s `endorse`. No `WIRE_MINOR`, settings version or e2e group.
+- **Later (advisory):** machines and grants (M4b); delegations (M4c); owner changes as acts through O10's row and O12's executor (M5b, M6); the project channel's sockets (M7).
 
 **§K. The signer** (M3).
 
@@ -1167,6 +1524,46 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
     //   stores/people.ts: usePeople { on: ReadonlySet<RowKey>; toggle(key: RowKey): void; load(): Promise<void> }
     //   sidebar/derive.ts: projectList(…, people: ReadonlySet<RowKey>); ProjectEntry gains `others: number`
 
+**§M. The Org page** (M4a).
+
+    // apps/org-protocol/src/org-state.ts (desk-track reviewed)
+    export type Problem = { code: string; detail?: string };
+    export function stateProblems(state: OrgState): Promise<Problem[]>;          // stateInvariants(s) === (problems.length === 0)
+    export function successorProblems(before: OrgState, after: OrgState, opts?: { endorsing?: { kid: string; devices: string[] } }): Promise<Problem[]>;   // ordinary successors only
+    export type PendingEntry = { /* the judges' structural input, package-owned */ };
+    // apps/org-protocol/src/pairing.ts: judgeEntry, entryDevice, isPairedDeviceId, isRpId (moved from deploy/admin.ts)
+
+    // src/shared/ipc/schema/org.ts
+    export type OrgView = {
+      version: number; issued: string; maySign: boolean; recoveryKid: string;
+      members: { id: string; email: string; name: string; role: 'admin' | 'member'; you: boolean;
+                 devices: { id: string; class: 'native-mac' | 'web-cards'; keyStorage: string; root: boolean; thisMac: boolean; fingerprint: string }[] }[];
+      machines: { name: string; ref: string; owners: string[] | 'org' }[];          // up or not: the renderer's useMachines
+      roots: ({ kid: string; member: string; device: string } | { kid: string; unlisted: true })[];
+    };
+    export type OrgChange =
+      | { kind: 'member.add'; email: string; role: 'admin' | 'member'; id?: string }   // id set by the preview
+      | { kind: 'member.remove'; member: string } | { kind: 'member.role'; member: string; role: 'admin' | 'member' }
+      | { kind: 'member.email'; member: string; email: string }
+      | { kind: 'device.remove'; member: string; device: string } | { kind: 'root.add'; member: string; device: string };
+    // org.view: void -> OrgView | null
+    // org.preview {change}: {ok: true, change, lines, warnings, digest} | {ok: false, reason, findings}
+    // org.change {change, digest}: SignResult (stale on another digest)
+    // org.pair.start {member, class: 'native-mac' | 'web-cards'}: {ok: true, code, expires} | {ok: false, reason}   (the code only here)
+    // org.pair.approve {generation, digest}: SignResult;  org.pair.cancel: void
+    // OrgStatus registered gains pairing: {generation, member, class, expires, entry: {id, class, keyStorage, fingerprint, digest} | null,
+    //   problem: 'two-entries' | 'entry-changed' | 'expired' | 'not-admin' | 'no-member' | null} | null
+    // OrgRefusal gains attempt: 'register' | 'reanchor' | 'signIn' | 'rekey'
+
+    // src/main/org/signer.ts
+    export type Edit = { summary: string; lines: string[]; endorse?: { member: string; device: string }[]; apply(draft: OrgState): void | Promise<void> };
+    // src/main/device/step-up.ts
+    //   StateSigner.sign(state, prompt, {endorse?, live?}): one confirmation; cancelled if !live(); then endorseDevice for each named device, then signOrgState
+    // Edit gains live?(): boolean, checked at apply, after the confirmation, and before the slot's write
+    // src/main/org/held.ts: HeldOrg.close(): Promise<void>   (fences the adoption queue, resolves at its tail)
+
+    // src/main/org/timing.ts: PAIR_TTL_MS 600_000, PAIR_POLL_MS 2_000
+
 ## Open questions for the owner
 
 Each is built as its recommendation when its milestone is re-planned, unless the owner answers otherwise. M1 and M2 build only Q7's recommendation, and pre-empt the rest.
@@ -1237,6 +1634,10 @@ Each is built as its recommendation when its milestone is re-planned, unless the
   - the deploy README;
   - the staging and production wrappers, which appended their own `--config`/`--keys` after `"$@"` and now put them first.
   Evidence: class 1a run 40768996939 at b92b07573: `remove-device: … Unknown option '-y'` in `signer.local.test.ts`'s rekey case, which had passed at 559ddfc0c with another random id. Fixed at 031c476da and in the wrapper commit after it.
+
+- Observation (M5, 2026-10-28): `stores/summary.ts`'s `load()` has no production caller, so `summary.sections` is written but never read back; collapsed summary sections reset at each launch. M5's People store is loaded from `App.tsx` instead.
+  Evidence: `grep -rn "getState().load()" src/renderer/src`, outside tests, finds no summary caller.
+- Observation (M5): `App.test.tsx` runs in the `renderer-timing` vitest project, not `renderer` (`vitest.config.ts:57`).
 
 ## Decision Log
 
@@ -1563,6 +1964,78 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   Rejected: printing the bare id and adding `--` only for a `-`-led id, which fails through the wrappers for one id in 64 until they change.
   Date/Author: 2026-10-28, O8's executor.
 
+- Decision: M5's build (b78445447) settles these points the milestone left open.
+  1. The label shows two entries in all, "you" among them: "you, Ana +1" for you, Ana and Ben. The cap bounds the row's width, so "you" counts.
+  2. `ownersLabel`'s `me` is `string | null`: signed out, nobody reads "you". Empty owners give `null`.
+  3. Names widen one level further than §L: two members whose local parts also collide (`ana@a`, `ana@b`) read their whole emails.
+  4. `memberName` takes Unicode letters (`élodie` reads "Élodie"), upper-cases the first and lower-cases the rest (`GINA` reads "Gina"), falls back to the whole local part when it has no letters, and compares collisions case-insensitively.
+  5. `OrgRows.members` is ordered by the sorted rows' first naming of each id, which keeps main's JSON dedup stable.
+  6. Others' hidden rows add no activity: a project holding only hidden rows ranks by `createdAt`. What you can't see doesn't reorder your list. Drawn others' rows count.
+  7. Others' archived records are not counted in "+N others", as archived records are never drawn. "+1 other" is singular, and it shows whether the project is open or closed.
+  8. The People hover action is the first of the four buttons, so Resume, Remove and "+" keep their places at the right edge. The menu's item carries a trailing check, as the menu has no indicator gutter.
+  9. The hover card lists owners only where the row's label shows (not on a session you own alone); "you" carries your email, a former member none.
+  10. `usePeople.load()` runs once from `App.tsx`'s mount, not the Sidebar, which keeps IPC out of every Sidebar test.
+  11. A toggle made before the stored set is read records the state the person saw it reach. When the read lands, each touched key is set to that state and every other stored key is kept, and nothing is written before. Rejected: `summary.ts`'s "toggle wins", which would replace the whole stored set with one early toggle; and replaying early toggles as flips (the first build), which reviewer-medium showed turns a stored-on project off after a "Show" clicked during the read, and saves that (fixed at 854178726).
+  Debt, not built: `sidebar.people` keys are neither moved when an address key becomes an org key (`layout-model.ts`'s `rekeySets` does so for `expandedProjects`) nor pruned; the toggle reads off until set again. Others' records still reach Needs you and "Mark all read"; attention across machines is O7 M6's and O3's.
+  Date/Author: 2026-10-28, O8's executor.
+
+- Decision: The People toggle shows only where it can act: its hover action and its menu item appear on a project or machine row when the row has others' sessions (`others` above zero) or while it is on, so it can be turned off. Elsewhere the row and its menu are as before M5.
+  Rationale: the first build put it on every project row, local-only projects of a person with no org included, so most people met a control that does nothing on every row. It also moved the hover geometry: the final gate's e2e:default (run 40786951312, `e2e/shell.spec.ts:50`, Item 6) clicked the line's center at the sidebar's 200px floor and landed on "Hide people's sessions".
+  Rejected: showing it on every org-keyed row. That still offers a toggle with nothing behind it.
+  At the 200px floor the actions don't cover the name. The line is a flex row: the name is `flex-1 min-w-0`, the actions a `shrink-0` sibling, not an overlay. Computed from the classes, not measured (happy-dom does no layout): with four actions the name keeps about 56px, x 29–85, and the line's center (about 92) falls on the first action. A click on the name collapses the row; only a click at the center misses, which the e2e helper `closeProject` makes (`e2e/support/sidebar.ts:60`). Residue: that helper could click the name.
+  Date/Author: 2026-10-28, O8's executor.
+
+- Decision: M4 is re-planned on today's master and split three ways (2026-10-29, on the architect's rulings). The parent pin moves to P5's blob `d07bfc4e` at master `6fb933626`.
+  - M4a, the Org page's shape, people and devices, is executable.
+  - M4b (machines and their rights) and M4c (delegations) stay advisory, with the facts the re-plan found written into them.
+  Rationale: the re-plan's reading found most of M4 has no implementation to port.
+  - No admin verb adds or removes a member, changes a role or an email, renews a delegation, or touches a grant.
+  - Grants are not in `OrgState`. They are separate records the hosting machine's ledger holds, and nothing issues them in production. A re-enrolled machine refuses every old grant, and the app keeps no record of the grants it issued.
+  - The device module signs only whole states.
+  - desk-web's `views/{org,key,machines}`, the named reference, are the v1 desk, with no pairing, members, rights or delegations.
+  Each part is a milestone of its own.
+  Members stay in M4a: Q1's People group with "Add person" is the owner's answer, and an org of people is the product's point. The buildability round may still split them out as M4d.
+  Rejected:
+  - one M4 at this depth, which reviews poorly;
+  - app-side copies of the pairing judges and checks with parity tests, a shim where the code can move.
+  Date/Author: 2026-10-29, O8's executor.
+
+- Decision: The pre-sign checks for members, roles, the root set, endorsements and machine names live in `apps/org-protocol` as `successorProblems`, beside `verifySuccessor`.
+  - It is one pure function that names a proposed successor's problems before Touch ID.
+  - The CLI's `amend` and the app's `checkSuccessor` both run it. `verifySuccessor` stays the gate after signing.
+  - The pure pairing judges move there first, as a mechanical commit. Both commits are the desk track's to review.
+  The desk track's conditions:
+  - admin runs the moved code from the deploy checkout: read-only `show` and `devices` against the local hub, plus admin's suites;
+  - a `wrangler` dry-run build stays clean when M4b moves `encodeEnrollmentCodeV2`;
+  - #261 and M4a merge, never rebase, whichever lands second.
+  Date/Author: 2026-10-29, the architect's ruling, recorded by O8's executor.
+
+- Decision: The protocol's endorsement rule is a user-visible rule in M4a.
+  - An admin pairs another member's first device through H1, unendorsed.
+  - A later device needs an endorsement by one of that member's own step-up keys.
+  - A member who signs pairs their own later device from their app.
+  - A member who doesn't sign has no route until the countersign flow (RL §5.2, deferred by P5 Decision Log 34).
+  The page says so where the action would be, and offers nothing that fails.
+  Date/Author: 2026-10-29, O8's executor, on the architect's ruling.
+
+- Decision: `close()` awaits the commit queue's tail. This is folded into M4a, which touches `org-session.ts` anyway. The two test workarounds go (8d18883f4, 8e21b6354), which closes P5 Decision Log 129's tracker row.
+  Date/Author: 2026-10-29, O8's executor.
+
+- Decision: The re-plan's buildability round is folded in (doperpowers:adversarial-reviewer on f8f51e500: 1 P1, 5 P2, 1 P3, each checked against the cited code and adopted). Its verdict keeps members in M4a: the protocol supports device-less members, first-device pairing, email admission, demotion and key-accounted removal, so no M4d.
+  1. (P1) Pairing approval is bound to the candidate the person compared. The candidate is frozen when found. A same-id entry reposted with other keys ends the pairing. `org.pair.approve` names `{generation, digest}`, and the edit signs the frozen device, checking at `apply` that the pairing is still live.
+  2. `successorProblems` is scoped to ordinary successors. A held transition changes non-signature rules, and the recovery vector is accepted unendorsed that way. `verifySuccessor` keeps its verdicts and their order.
+  3. `close()` fences its producers and joins them before draining the queue, since a signer step awaiting a hub read can adopt after the tail has drained. A test holds that read open across `close()`.
+  4. Pairing uses today's API: `judgeEntry(entry, {org, member, k, class, listed})`, `k` base64url in the code, a class chosen in the sheet (`native-mac` by default), and `listed` from the held head. The judges' input type moves as a package-owned `PendingEntry`.
+  5. Whether a machine is up comes from the renderer's `useMachines`, not the view, since a link drops with no new head.
+  6. `org-page.local.test.ts` is registered in `TIMING_NODE_TESTS`.
+  7. (P3) `deploy/bin.ts` bundles admin, so the move's steps also import the judges straight from the package under Node's type stripping.
+  Date/Author: 2026-10-29, O8's executor.
+
+- Decision: The buildability round's second pass is folded in (on 02bd683e1: 1 P1, 1 P2; it confirmed the other six fixes closed and members kept in M4a).
+  1. (P1) The pairing's liveness check moves to the point it can act. `apply` runs before Touch ID, so `Edit.live()` is also checked in the device module after the confirmation (before endorsing or signing) and by the signer before the slot's write. A proposal already in the slot is durable, and cancelling the pairing no longer withdraws it.
+  2. `close()` also joins the held view's own adoption queue (`HeldOrg.close()`), which a link's direct `advance` feeds outside the session's producers, and the session's load. Each writer under `org/` belongs to one owner that `close()` joins.
+  Date/Author: 2026-10-29, O8's executor.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
@@ -1584,6 +2057,14 @@ Evidence:
 - the gates the PR body lists.
 
 Still owed: the owner's sitting, `root add` on staging and then on production.
+
+**M5 (2026-10-28, PR from `p5-o8-m5`).** A row of a session you don't own alone shows its owners as first names after the title ("you, Ana", "Ana, Ben +3"), and its hover card lists them with their emails. Names are derived from the head's emails in main. A People toggle, remembered per row under `sidebar.people`, draws other people's sessions in place; while it is off the row reads "+N others". It shows only where it can act. Rollups, ranking and search see only what is drawn and yours.
+
+Evidence:
+- the unit suites: `member-name` 6, `rows` 23, `owners` 6, `people` 7, `derive` 45, `Sidebar` 100, `HoverCard` 40, `events` 43;
+- the final gate, run 40794571273.
+
+Retrospective (M5). Only the whole hosted set caught the build's one real regression: a new hover button took the click an e2e helper aimed at the line's center at the 200px floor. Its unit tests couldn't see it, since happy-dom has no layout. The underlying fault was a design one, a control shown where it can't act, and fixing that also fixed the geometry. The task review's one finding was the shape M3's retrospective named: an early toggle replayed over state it hadn't seen. A future child adding a control to a dense row should show it only where it acts, and run the e2e groups that click that row.
 
 Retrospective (M3). Built as eight tasks under subagent-driven execution, each reviewed at its frontier, then reviewer-high on the whole branch.
 - What the reviews found: ten task reviews found real defects in five of the eight tasks, and the whole-branch review found five more across tasks.

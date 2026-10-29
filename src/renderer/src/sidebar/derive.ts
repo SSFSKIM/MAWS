@@ -60,6 +60,7 @@ export interface ProjectListInput {
   machineName(machine: MachineRef): string;
   alsoListed?: ReadonlySet<ProjectKey>; // keys listed for the moment though no checkout lists them (the project filter's)
   listed?: ReadonlyMap<AppSessionId, ListedSession>; // P5 O8 M2: other machines' listed sessions (the sessions store's)
+  people?: ReadonlySet<ProjectKey>; // P5 O8 M5: the rows whose People toggle is on (`stores/people.ts`)
 }
 
 export interface ProjectEntry {
@@ -70,8 +71,9 @@ export interface ProjectEntry {
   name: string;
   sessions: SessionRecord[]; // not archived, unsorted
   listed: ListedSession[]; // P5 O8 M2: the listed rows drawn under it, unsorted
-  rollup: { waiting: number; working: number };
-  lastActivity: number | null; // W11 (I6): the latest movement of any of its sessions, archived ones included; null without one
+  rollup: { waiting: number; working: number }; // P5 O8 M5: yours only
+  lastActivity: number | null; // W11 (I6): the latest movement of any of its drawn sessions, archived ones included; null without one
+  others: number; // P5 O8 M5: other people's sessions filed under it and not drawn (its People toggle is off)
 }
 
 // P5 O6 M5: every listed org project, then each machine's own project that holds a session (T3: named after the machine,
@@ -83,27 +85,48 @@ export interface ProjectEntry {
 // P5 O8 M2 ("Drawing", membership): another machine's listed session the member owns joins the row `rowOfListed` files it
 // under, unless a record holds its address (the yield rule: the record's row is drawn); its issue counts as activity, and
 // a listed row waiting or busy adds to the counts.
-export function projectList({ records, digests, projects, rows, local, machineName, alsoListed, listed: remoteSessions = new Map() }: ProjectListInput): ProjectEntry[] {
+//
+// P5 O8 M5 ("The People toggle"): ownership comes first. An address, a record's or a listing's, is others' when a listing
+// at it exists and isn't the member's, and yours otherwise (a record carries no owners). Filed as above, others' rows are
+// drawn only under a row whose People toggle is on (`people`), else counted in its `others`, so a record a lane opened of
+// someone else's session leaves the list with the toggle. Drawn, they count as activity but never in the rollups, which
+// say what needs you; a machine's row with others' sessions alone is kept, so its "+N others" and toggle stay reachable.
+export function projectList({ records, digests, projects, rows, local, machineName, alsoListed, listed: remoteSessions = new Map(), people = new Set() }: ProjectListInput): ProjectEntry[] {
   const index = orgIndex(projects.values(), local);
   const waiting = new Set(rows.map((row) => row.appSessionId));
-  const grouped = new Map<ProjectKey, { live: SessionRecord[]; listed: ListedSession[]; activity: number }>();
+  const grouped = new Map<ProjectKey, { live: SessionRecord[]; listed: ListedSession[]; activity: number; theirs: Set<AppSessionId>; others: number }>();
   const groupOf = (key: ProjectKey) => {
     let entry = grouped.get(key);
-    if (!entry) grouped.set(key, (entry = { live: [], listed: [], activity: Number.NEGATIVE_INFINITY }));
+    if (!entry) grouped.set(key, (entry = { live: [], listed: [], activity: Number.NEGATIVE_INFINITY, theirs: new Set(), others: 0 }));
     return entry;
   };
+  const isTheirs = (appId: AppSessionId) => remoteSessions.get(appId)?.mine === false;
   for (const record of records.values()) {
     const key = rowOfSession(index, projects, record, alsoListed);
     if (key === null) continue; // a hidden project's: nowhere
     const entry = groupOf(key);
+    if (isTheirs(record.appId)) {
+      if (!people.has(key)) {
+        if (!record.archived) entry.others++;
+        continue;
+      }
+      entry.theirs.add(record.appId);
+    }
     entry.activity = Math.max(entry.activity, lastActivity(record, digests.get(record.appId)));
     if (!record.archived) entry.live.push(record);
   }
   for (const session of remoteSessions.values()) {
-    if (!session.mine || records.has(session.appId)) continue;
+    if (records.has(session.appId)) continue; // the record's row is drawn (or counted) in its place
     const key = rowOfListed(index, session, alsoListed);
     if (key === null) continue; // an all-hidden project's: nowhere
     const entry = groupOf(key);
+    if (!session.mine) {
+      if (!people.has(key)) {
+        entry.others++;
+        continue;
+      }
+      entry.theirs.add(session.appId);
+    }
     entry.activity = Math.max(entry.activity, issuedAt(session));
     entry.listed.push(session);
   }
@@ -113,11 +136,17 @@ export function projectList({ records, digests, projects, rows, local, machineNa
     return primary ? [[key, primary] as const] : [];
   }));
   const labels = projectLabels([...primaries.values()].map((p) => ({ ...p, name: index.orgs.get(orgKeyOf(p))!.name })));
+  // a row's latest drawn movement; null with none (others' rows the toggle hides leave a group with no activity)
+  const entryActivity = (key: ProjectKey): number | null => {
+    const activity = grouped.get(key)?.activity;
+    return activity !== undefined && Number.isFinite(activity) ? activity : null;
+  };
   const entryOf = (org: OrgProject, project: ProjectRecord | null, machine: MachineRef | null, name: string): ProjectEntry => {
     const group = grouped.get(org.id);
     const sessions = group?.live ?? [];
     const remote = group?.listed ?? [];
-    const count = (state: string) => remote.filter((l) => l.state === state).length;
+    const yours = (id: AppSessionId) => !group?.theirs.has(id);
+    const count = (state: string) => remote.filter((l) => l.state === state && yours(l.appId)).length;
     return {
       key: org.id,
       org,
@@ -127,18 +156,19 @@ export function projectList({ records, digests, projects, rows, local, machineNa
       sessions,
       listed: remote,
       rollup: {
-        waiting: sessions.filter((r) => waiting.has(r.appId)).length + count('waiting'),
-        working: sessions.filter((r) => isWorking(digests.get(r.appId))).length + count('busy'),
+        waiting: sessions.filter((r) => yours(r.appId) && waiting.has(r.appId)).length + count('waiting'),
+        working: sessions.filter((r) => yours(r.appId) && isWorking(digests.get(r.appId))).length + count('busy'),
       },
-      lastActivity: group && Number.isFinite(group.activity) ? group.activity : null,
+      lastActivity: entryActivity(org.id),
+      others: group?.others ?? 0,
     };
   };
   const listed = [...primaries]
-    .map(([key, project]) => ({ entry: entryOf(index.orgs.get(key)!, project, null, labels.get(project.id)!), activity: grouped.get(key)?.activity ?? Date.parse(project.createdAt) }))
+    .map(([key, project]) => ({ entry: entryOf(index.orgs.get(key)!, project, null, labels.get(project.id)!), activity: entryActivity(key) ?? Date.parse(project.createdAt) }))
     .sort((a, b) => b.activity - a.activity || a.entry.project!.order - b.entry.project!.order || a.entry.name.localeCompare(b.entry.name))
     .map(({ entry }) => entry);
   const machines = [...new Set([...grouped.keys()].map(machineOfRow).filter((m) => m !== null))].sort(machineOrder(local, machineName));
-  const own = machines.map((machine) => entryOf(machineProject(machine, machineName(machine)), null, machine, machineName(machine))).filter((entry) => entry.sessions.length > 0 || entry.listed.length > 0);
+  const own = machines.map((machine) => entryOf(machineProject(machine, machineName(machine)), null, machine, machineName(machine))).filter((entry) => entry.sessions.length > 0 || entry.listed.length > 0 || entry.others > 0);
   return [...listed, ...own];
 }
 

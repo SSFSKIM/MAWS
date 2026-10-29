@@ -36,7 +36,7 @@ export default defineConfig({
   ...(process.env.MAWS_HARNESS === '1' || process.env.MAWS_PANEL_LIVE === '1' ? {} : { testMatch: /(?<!\/panel(-live)?)\.spec\.ts$/ }),
   // C8a end
   workers: 1,
-  // One retry for the hosted Macs' timing long tail; the gate grants it only to direct, non-measured/non-live/non-secret e2e.
+  // One retry for direct hosted-eligible e2e, including EC2 overflow; never measured/live/secret groups.
   retries: process.env.MAWS_E2E_RETRY === '1' ? 1 : 0,
   timeout: 60_000,
   // Gate-offload Decision Log 50: a child's acceptance script names its reserved final label and the variant its live

@@ -24,6 +24,7 @@ import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions, type ListedSession } from '../stores/sessions';
+import { usePeople } from '../stores/people'; // P5 O8 M5
 import { fileTabsByProject, fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import type { ProjectKey } from './derive';
 import { registerProjectAction } from './project-actions';
@@ -1508,5 +1509,192 @@ describe('listed rows from another machine', () => {
     act(() => useLayout.getState().openSession(here.appId));
     expect(row('Sidebar pass').getAttribute('aria-selected')).toBe('true');
     expect(row('Studio build').getAttribute('aria-selected')).not.toBe('true');
+  });
+});
+
+// P5 O8 M5 (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, "The label", "The People toggle"; Q2, Q3): a row
+// of a session you don't own alone names its owners, and each row's People toggle draws other people's sessions.
+describe('owners and the People toggle', () => {
+  const studio = (id: string) => addressOf(OTHER_MACHINE, id) as AppSessionId;
+  const ORG = 'repo:maws' as OrgKey;
+  const STUDIO_ROW = machineKey(OTHER_MACHINE);
+  const ME = 'member-1';
+  const members = [
+    { id: ME, email: 'sam@example.com', name: 'Sam' },
+    { id: 'ana', email: 'ana.lopez@example.com', name: 'Ana' },
+    { id: 'ben', email: 'ben@example.com', name: 'Ben' },
+  ];
+  const maws = project(at('maws'), 0, { name: 'MAWS', org: { key: ORG, name: 'MAWS', source: 'remote', smnsId: null } });
+  const here = record(at('here'), { projectId: maws.id, title: { text: 'Sidebar pass', source: 'user' }, updatedAt: '2026-10-28T09:00:00Z' });
+  const listedOn = (id: string, over: Partial<ListedSession> = {}): ListedSession => ({ ...remoteRow(OTHER_MACHINE, id, { orgKey: ORG, owners: [ME], issued: '2026-10-28T10:00:00Z' }), appId: studio(id), ...over });
+  const theirs = (id: string, over: Partial<ListedSession> = {}) => listedOn(id, { owners: ['ana', 'ben'], mine: false, ...over });
+  const fill = (listed: ListedSession[], sessions: SessionRecord[] = [here]) =>
+    useSessions.setState({
+      loaded: true,
+      projects: new Map([[maws.id, maws]]),
+      records: new Map(sessions.map((r) => [r.appId, r])),
+      listed: new Map(listed.map((l) => [l.appId, l])),
+      members: new Map(members.map((m) => [m.id, m])),
+      member: ME,
+    });
+  const drawn = (el: HTMLElement) => within(el).queryAllByRole('treeitem').filter((t) => t.dataset.kind === 'session' || t.dataset.kind === 'listed').map(label);
+  const owners = (title: string) => row(title).querySelector('[data-owners]')?.textContent ?? null;
+  const expandAll = () => act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG, STUDIO_ROW] as ProjectKey[] }));
+  const people = (...keys: string[]) => act(() => usePeople.setState({ on: new Set(keys as ProjectKey[]) }));
+  beforeEach(() => {
+    useAttention.setState({ loaded: true });
+    useMachines.getState().applyRoster([
+      { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-10-28T10:00:00Z', generation: 0 },
+      { ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: '2026-10-28T10:00:00Z', generation: 0 },
+    ]);
+  });
+  afterEach(() => {
+    useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
+    usePeople.setState({ on: new Set() });
+  });
+
+  it('labels a co-owned and a foreign row after the title and before the chip, a record at a listed address by its listing, and none of yours', () => {
+    const opened = record(studio('b4'), { projectId: null, title: { text: 'Opened', source: 'user' } });
+    const shared = record(studio('b5'), { projectId: null, title: { text: 'Shared record', source: 'user' } });
+    fill([listedOn('b1', { title: 'Mine alone' }), listedOn('b2', { title: 'Co-owned', owners: ['ana', ME] }), theirs('b3', { title: 'Theirs' }), theirs('b4', { owners: ['ana'] }), listedOn('b5', { orgKey: null, owners: [ME, 'ben'] })], [here, opened, shared]);
+    people(ORG, STUDIO_ROW);
+    expandAll();
+    render(<Sidebar />);
+    expect(owners('Mine alone')).toBeNull();
+    expect(owners('Sidebar pass')).toBeNull(); // a local record: no owners
+    expect(owners('Co-owned')).toBe('you, Ana');
+    expect(owners('Theirs')).toBe('Ana, Ben');
+    expect(owners('Opened')).toBe('Ana');
+    expect(owners('Shared record')).toBe('you, Ben');
+    const owned = row('Theirs').querySelector('[data-owners]')!;
+    expect(owned.className).toContain('text-fg-muted');
+    expect(row('Theirs').querySelector('[data-session-title]')!.compareDocumentPosition(owned) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(owned.compareDocumentPosition(row('Theirs').querySelector('[data-machine-chip]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('says "+N others", faint, while the toggle is off, hidden on hover as the rollups are, and keeps a machine’s row with others’ sessions alone', () => {
+    fill([listedOn('b1', { title: 'Mine' }), theirs('b2', { title: 'Theirs 1' }), theirs('b3', { title: 'Theirs 2' }), theirs('b4', { title: 'Theirs elsewhere', orgKey: null })]);
+    expandAll();
+    render(<Sidebar />);
+    expect(projectRows()).toEqual(['MAWS', 'Studio']);
+    const others = within(row('MAWS')).getByLabelText('2 others');
+    expect(others.textContent).toBe('+2 others');
+    expect(others.className).toContain('text-fg-faint');
+    expect(others.className).toContain('group-hover/line:hidden');
+    expect(within(row('Studio')).getByLabelText('1 other').textContent).toBe('+1 other');
+    expect(drawn(row('MAWS'))).toEqual(['Mine', 'Sidebar pass']);
+    expect(drawn(row('Studio'))).toEqual([]);
+    people(ORG);
+    expect(within(row('MAWS')).queryByLabelText('2 others')).toBeNull();
+  });
+
+  it('draws others’ rows in activity order with their owners and chips while the toggle is on', () => {
+    fill([theirs('b1', { title: 'Theirs late', issued: '2026-10-28T11:00:00Z' }), theirs('b2', { title: 'Theirs early', issued: '2026-10-28T08:00:00Z', owners: ['ben'] })]);
+    people(ORG);
+    expandAll();
+    render(<Sidebar />);
+    expect(drawn(row('MAWS'))).toEqual(['Theirs late', 'Sidebar pass', 'Theirs early']);
+    expect(owners('Theirs late')).toBe('Ana, Ben');
+    expect(owners('Theirs early')).toBe('Ben');
+    expect(row('Theirs late').querySelector('[data-machine-chip]')?.textContent).toBe('@Studio');
+  });
+
+  it('lists every owner with its email in the hover card of a listed row and of a record at a listed address', async () => {
+    const opened = record(studio('b4'), { projectId: null, title: { text: 'Opened', source: 'user' } });
+    fill([listedOn('b1', { title: 'Co-owned', owners: ['ana', ME, 'gone'], lane: 'A' }), theirs('b4', { owners: ['ben'] })], [here, opened]);
+    people(STUDIO_ROW);
+    expandAll();
+    render(<Sidebar />);
+    await userEvent.click(row('Co-owned'));
+    const card = await screen.findByRole('dialog', { name: 'Co-owned' });
+    const entries = (list: HTMLElement) => within(list).getAllByRole('listitem').map((li) => li.textContent);
+    expect(entries(within(card).getByRole('list', { name: 'Owners' }))).toEqual(['yousam@example.com', 'Anaana.lopez@example.com', 'former member']);
+    act(() => row('Opened').focus());
+    const recordCard = await screen.findByRole('dialog', { name: 'Opened' });
+    expect(entries(within(recordCard).getByRole('list', { name: 'Owners' }))).toEqual(['Benben@example.com']);
+  });
+
+  // The toggle shows only where it can act: with others to show, or while it is on (so it can be turned off). A row with
+  // neither is as it was before M5, so a person with no org sees no dead control and the row's hover geometry is unchanged.
+  const peopleAction = (name: string) => within(row(name)).queryByRole('button', { name: /people’s sessions in/ });
+  const peopleItem = async (name: string) => {
+    fireEvent.contextMenu(row(name));
+    const item = within(await screen.findByRole('menu')).queryByRole('menuitemcheckbox', { name: /Show people’s sessions/ });
+    await userEvent.keyboard('{Escape}');
+    return item;
+  };
+
+  it('offers no People toggle on a row with no others and the toggle off, project and machine rows alike', async () => {
+    fill([listedOn('b1', { title: 'Mine' }), listedOn('b2', { title: 'Mine elsewhere', orgKey: null })]);
+    expandAll();
+    render(<Sidebar />);
+    expect(projectRows()).toEqual(['MAWS', 'Studio']);
+    expect(peopleAction('MAWS')).toBeNull();
+    expect(within(row('MAWS').querySelector<HTMLElement>('[data-project-line]')!).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Resume a session in MAWS', 'Remove MAWS from sidebar', 'New chat in MAWS']);
+    expect(await peopleItem('MAWS')).toBeNull();
+    expect(await peopleItem('Studio')).toBeNull();
+  });
+
+  it('offers it with others to show, and while on with every other drawn, pressed and checked; off again, the count shows and the action stays', async () => {
+    fill([theirs('b1', { title: 'Theirs here' }), theirs('b2', { title: 'Theirs elsewhere', orgKey: null })]);
+    expandAll();
+    render(<Sidebar />);
+    expect(peopleAction('MAWS')?.getAttribute('aria-pressed')).toBe('false');
+    expect((await peopleItem('MAWS'))?.getAttribute('aria-checked')).toBe('false');
+    expect((await peopleItem('Studio'))?.getAttribute('aria-checked')).toBe('false');
+
+    people(ORG);
+    expect(within(row('MAWS')).queryByLabelText('1 other')).toBeNull(); // every other drawn
+    expect(peopleAction('MAWS')?.getAttribute('aria-label')).toBe('Hide people’s sessions in MAWS');
+    expect(peopleAction('MAWS')?.getAttribute('aria-pressed')).toBe('true');
+    expect((await peopleItem('MAWS'))?.getAttribute('aria-checked')).toBe('true');
+
+    // turned off (as the store sets it: the click and its write are the persistence test's, which owns the store's one read)
+    people();
+    expect(within(row('MAWS')).getByLabelText('1 other').textContent).toBe('+1 other');
+    expect(peopleAction('MAWS')?.getAttribute('aria-label')).toBe('Show people’s sessions in MAWS');
+  });
+
+  it('names no owners in the hover card of your own session', async () => {
+    fill([listedOn('b1', { title: 'Mine', lane: 'A' })]);
+    expandAll();
+    render(<Sidebar />);
+    await userEvent.click(row('Mine'));
+    const card = await screen.findByRole('dialog', { name: 'Mine' });
+    expect(within(card).queryByRole('list', { name: 'Owners' })).toBeNull();
+  });
+
+  it('toggles from the hover action and the menu, project and machine rows alike, persisting through layout.set and restored from layout.get', async () => {
+    const fake = fakeClient({ 'layout.get': ({ key }: { key: string }) => ({ value: key === 'sidebar.people' ? { version: 1, on: [STUDIO_ROW] } : null }), 'layout.set': undefined });
+    window.maws = fake.client as unknown as PreloadBridge;
+    await act(() => usePeople.getState().load());
+    fill([theirs('b1', { title: 'Theirs here' }), theirs('b2', { title: 'Theirs elsewhere', orgKey: null })]);
+    expandAll();
+    render(<Sidebar />);
+    expect(drawn(row('Studio'))).toEqual(['Theirs elsewhere']); // restored
+    expect(drawn(row('MAWS'))).toEqual(['Sidebar pass']);
+
+    const show = within(row('MAWS')).getByRole('button', { name: 'Show people’s sessions in MAWS' });
+    expect(show.getAttribute('aria-pressed')).toBe('false');
+    await userEvent.click(show);
+    expect(drawn(row('MAWS'))).toEqual(['Sidebar pass', 'Theirs here']); // the pointer is within: arrivals follow the held rows
+    expect(within(row('MAWS')).getByRole('button', { name: 'Hide people’s sessions in MAWS' }).getAttribute('aria-pressed')).toBe('true');
+    expect(expanded()).toContain(ORG); // the hover action toggles People, not the row
+    await vi.waitFor(() => expect(fake.invoked('layout.set')).toEqual([{ key: 'sidebar.people', value: { version: 1, on: [STUDIO_ROW, ORG] } }]));
+
+    fireEvent.contextMenu(row('MAWS'));
+    const menu = await screen.findByRole('menu');
+    const names = [...menu.querySelectorAll('[role^="menuitem"]')].map((m) => m.textContent);
+    expect(names.indexOf('Show people’s sessions✓')).toBe(names.indexOf('Mark all read') + 1);
+    expect(within(menu).getByRole('menuitemcheckbox', { name: /Show people’s sessions/ }).getAttribute('aria-checked')).toBe('true');
+    await userEvent.keyboard('{Escape}');
+
+    fireEvent.contextMenu(row('Studio'));
+    const item = within(await screen.findByRole('menu')).getByRole('menuitemcheckbox', { name: /Show people’s sessions/ });
+    expect(item.getAttribute('aria-checked')).toBe('true');
+    await userEvent.click(item);
+    expect(drawn(row('Studio'))).toEqual([]);
+    expect(within(row('Studio')).getByLabelText('1 other')).toBeTruthy();
+    await vi.waitFor(() => expect(fake.invoked('layout.set').at(-1)).toEqual({ key: 'sidebar.people', value: { version: 1, on: [ORG] } }));
   });
 });

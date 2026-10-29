@@ -174,3 +174,16 @@ test('resolved peer commits separate refs, while two names for one peer retain t
   assert.notEqual(first.ref, second.ref);
   assert.equal(first.ref, alias.ref);
 }));
+
+test('backlog changes neither the default ref hash nor the committed planner outputs used by that hash', () => fixture(({ tree, sha }) => {
+  const message = 'Gates: e2e:document\nRunner: macos\nHosted-Route: direct';
+  const sample = { v: 1, at: new Date().toISOString(), hostedQueued: 20, hostedRunning: 5, ec2: 'idle', ec2Queued: 0, partial: [] };
+  const messages = [message, `${message}\nMac-Backlog: ${JSON.stringify(sample)}`, `${message}\nMac-Backlog: ${JSON.stringify({ ...sample, hostedQueued: 0, hostedRunning: 0 })}`];
+  const env = { ...process.env, GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos', HOSTED_MAC_ROUTE: 'direct' };
+  // These samples really do change placement if allowed through to the planner.
+  const placements = messages.map((HEAD_MESSAGE) => planOf({ ...workflow, ...env, HEAD_MESSAGE }, scripts, Date.now()).outputs.e2e);
+  assert.notEqual(placements[0], placements[1]);
+  assert.equal(placements[0], placements[2]);
+  const labels = messages.map((HEAD_MESSAGE) => execFileSync(process.execPath, [join(root, 'scripts/ci-gate-identity.mjs'), '--git-dir', tree, '--sha', sha, '--branch', 'feature/work'], { encoding: 'utf8', env: { ...env, HEAD_MESSAGE }, stdio: ['ignore', 'pipe', 'pipe'] }).trim());
+  assert.equal(new Set(labels).size, 1, 'a relaunch supersedes the same work regardless of its sampled placement');
+}));
