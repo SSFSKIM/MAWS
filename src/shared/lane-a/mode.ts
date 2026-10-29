@@ -34,3 +34,23 @@ export function modeOf(fields: Record<string, unknown> | null): LaneAMode | null
 
 /** Whether two reports are the same one. */
 export const sameMode = (a: LaneAMode | null, b: LaneAMode | null): boolean => a === b || (a !== null && b !== null && a.mode === b.mode && a.at === b.at && a.from === b.from);
+
+/** What a presence-carried mode names as its source: the plane's presence, which carries no event. */
+export const PRESENCE = 'presence';
+
+/**
+ * The mode a DX4 presence carries (sminos 1.27.16: `mode: {mode, at}`, `at` the bridge's own `permissionModeAt`, the
+ * clock `read status` uses), as a report from the presence; null when it carries none (an older sminos), or a word that
+ * is none of the engine's modes.
+ */
+export function presenceModeOf(presence: Record<string, unknown> | null): LaneAMode | null {
+  const reading = presence?.mode;
+  if (reading === null || typeof reading !== 'object' || Array.isArray(reading)) return null;
+  const { mode, at } = reading as Record<string, unknown>;
+  if (!PERMISSION_MODES.includes(mode as PermissionMode) || typeof at !== 'number' || !Number.isFinite(at)) return null;
+  return { mode: mode as PermissionMode, at, from: PRESENCE };
+}
+
+/** The later of two reports by their `at`; on the same `at`, the first. */
+export const laterMode = (first: LaneAMode | null, second: LaneAMode | null): LaneAMode | null => (first === null ? second : second === null || second.at <= first.at ? first : second);
+

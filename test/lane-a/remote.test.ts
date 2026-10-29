@@ -591,6 +591,21 @@ describe('remote lane A over a real link', { timeout: 30_000 }, () => {
     expect(stateNow(l)?.mode).toBeNull();
   });
 
+  // sminos 1.27.16: the presence carries the bridge's mode, so an idle session's switch shows with no status read; an
+  // older presence never overrides a newer read
+  it('takes an idle session’s switch from its presence, the later of it and the status read', async () => {
+    const l = await lab();
+    const caps = { ...CAPABILITIES, sminos: '1.27.16' };
+    l.plane.presence.set('la-1', { ...l.plane.presenceOf('la-1'), capabilities: caps });
+    l.plane.statuses.set('la-1', { ...STATUS_READ, permissionMode: 'plan', permissionModeAt: 1_761_700_000_000, permissionModeFrom: 'permission_mode_changed' });
+    await watched(l);
+    expect(stateNow(l)?.mode).toEqual({ mode: 'plan', at: 1_761_700_000_000, from: 'permission_mode_changed' });
+    l.plane.wide('presence', { ...l.plane.presenceOf('la-1'), capabilities: caps, mode: { mode: 'plan', at: 1_761_600_000_000 } }); // older
+    l.plane.wide('presence', { ...l.plane.presenceOf('la-1'), capabilities: caps, mode: { mode: 'acceptEdits', at: 1_761_700_005_000 } }); // Shift+Tab
+    await until(() => stateNow(l)?.mode?.mode === 'acceptEdits', 'the switch from the presence');
+    expect(stateNow(l)?.mode).toEqual({ mode: 'acceptEdits', at: 1_761_700_005_000, from: 'presence' });
+  });
+
   it('ends a watch at laneA.unwatch and at its page’s end; the last one’s end clears the session’s state', async () => {
     const l = await lab();
     const first = await watched(l);
