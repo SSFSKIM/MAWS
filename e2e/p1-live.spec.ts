@@ -62,7 +62,9 @@
 // docs/doperpowers/evidence/p1-e11/ only under MAWS_E11_SHOTS=1.
 // It spends money; run on purpose only (the script builds, the flag runs):
 //   MAWS_P1_LIVE=1 pnpm e2e:p1-live
-// (`pnpm e2e:p1-live` alone builds and reports every case skipped.)
+// (`pnpm e2e:p1-live` alone builds and reports every case skipped.) The script, the gate's live group
+// (`ci-gate.sh --live`), names the run's cap (every sitting's own summed, so none starves another), the installed
+// engine and the logs' directory under test-results/.
 import { addressed } from './support/address';
 import { activeMainTab, openSurface, surface } from './support/shell';
 import { execFileSync, spawn } from 'node:child_process';

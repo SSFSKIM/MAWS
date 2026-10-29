@@ -11,9 +11,12 @@
 // exited session in P2-A's dormant state, starting nothing until its Load now (which then reads the skills with no
 // turn), the session stopped again; the loaded line's Refresh ("Starting…", then "Loaded now"); Open Discover's counts
 // and the other-projects card installing here (P4-AGG Decision Log 10); Manage marketplaces; `/skills`' groups with Use in chat, and `/sandbox`. Light
-// and dark shots of each library. The owner's ~/.claude.json check runs
-// around the whole run, outside this file (§6.3). Run on purpose only; it spends usage (one one-line Haiku turn):
+// and dark shots of each library. The owner's ~/.claude.json is only read: the A-15 reading before the run and after
+// the app closed (§6.3's check, once a wrapper's around the run, now here). Run on purpose only; it spends usage (one
+// one-line Haiku turn):
 //   MAWS_HARNESS=1 pnpm exec electron-vite build && unset MAWS_E2E; MAWS_E8_LIVE=1 [MAWS_LIVE_MAX_USD=0.15] pnpm exec playwright test e2e/plugins-library-live.spec.ts --reporter=line
+// In the gate it is the live group e2e:plugins-library-live (`ci-gate.sh --live`), its cap and the installed engine in
+// its script.
 // With MAWS_LIVE_MAX_USD set (at most 1), the engine is reached through support/live-budget.ts's forwarding script,
 // which adds `--max-budget-usd <that cap>` to every session process (P2-F's re-run cap); unset, the engine itself.
 import { execFileSync } from 'node:child_process';
@@ -28,10 +31,13 @@ import { launchMaws } from './support/launch';
 import { cappedEngine, capWords } from './support/live-budget';
 import { promptsEnded, sessionJournal, writtenPrompts } from './support/live-turns';
 import { pluginsLiveSkipReason, pluginsScratch, type PluginsScratch } from './support/plugins-live';
+import { a15Line, a15Reading, type A15Reading } from './support/p1-live';
+import { compareA15 } from '../test/support/owner-file';
 import { mainTab } from './support/shell';
 import { newChatIn } from './support/sidebar';
 
-const skip = pluginsLiveSkipReason();
+test.skip(process.env.MAWS_E8_LIVE !== '1', 'the P2-B acceptance runs only under MAWS_E8_LIVE=1');
+const skip = process.env.MAWS_E8_LIVE === '1' ? pluginsLiveSkipReason() : null;
 test.skip(skip !== null, skip ?? '');
 test.describe.configure({ timeout: 1_800_000 });
 
@@ -42,6 +48,7 @@ const o = (name: string) => `${name}@${OFFICIAL}`;
 const NETWORK_REFUSAL = /could not resolve host|unable to access|failed to connect|connection (refused|reset|timed out)|network is unreachable|operation timed out|timed out|getaddrinfo|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|SSL|TLS|offline/i;
 
 let scratch: PluginsScratch;
+let a15First: A15Reading; // the owner file before the run (A-15), read here since no wrapper around the gate's run reads it
 let other: string; // a second project, trusted in the scratch home, where supabase is installed
 let refusal: string | null = null; // the network's words when the marketplace could not be added
 // an official plugin not installed here, counted in the millions, and the count of a directory entry of its name (the
@@ -62,7 +69,9 @@ function cli(args: string[], cwd: string): { ok: boolean; out: string } {
 }
 
 test.beforeAll(() => {
+  a15First = a15Reading();
   scratch = pluginsScratch();
+  scratch.log(a15Line('before the run', a15First, a15First, [scratch.root]));
   other = join(scratch.root, 'other');
   mkdirSync(other);
   const home = join(scratch.config, '.claude.json');
@@ -184,6 +193,7 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
   // One launch over a fresh profile: the forwarding script's budget is the whole cap (support/live-budget.ts).
   const engine = await cappedEngine({ root: scratch.root, real: ENGINE_BIN });
   scratch.log(`engine cap: ${capWords(engine)}`);
+  console.log(`P2-B live: engine ${ENGINE_VERSION} (${ENGINE_BIN}), cap ${capWords(engine)}, log ${join(scratch.root, 'live-run.txt')}`);
   const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config } });
   const { page, app } = maws;
   const invokes = await trackInvokes(app);
@@ -484,6 +494,9 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
   } finally {
     await shot('final');
     await maws.cleanup();
+    const a15After = a15Reading();
+    scratch.log(a15Line('after the app closed', a15First, a15After, [scratch.root]));
+    expect.soft(compareA15(a15First.keys, a15After.keys, [scratch.root]).breach, 'A-15: no project of the run’s scratch in the owner file').toEqual([]);
   }
   expect(failures, failures.join('\n')).toEqual([]);
 });
