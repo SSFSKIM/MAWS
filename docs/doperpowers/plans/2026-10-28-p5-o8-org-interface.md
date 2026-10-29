@@ -671,7 +671,8 @@ M3's own edits are the no-change successor and that revocation. The delegation a
   - `src/main/device/step-up.ts`: `StateSigner.sign` endorses;
   - `hub-client.ts`: `pendingOf`;
   - `org-session.ts`: the commands, `refused.attempt`, `close()` and its fence;
-  - `held.ts`: `adoptServed`'s closed guard; the signer's, weekly's and deliveries' `close()` return their operation in flight;
+  - `held.ts`: `HeldOrg.close()` (the adoption queue fenced and its tail returned) and `adoptServed`'s closed guard;
+  - the signer's, weekly's and deliveries' `close()` return their operation in flight;
   - `src/main/index.ts`: wiring;
   - their tests.
 - **Shared:** `src/shared/ipc/schema/org.ts` (`OrgView`, `OrgChange`, `org.view`, `org.preview`, `org.change`, `org.pair.*`, `OrgRefusal.attempt`, `OrgStatus`'s `pairing`), `routes.json`, `grades/org.ts`.
@@ -783,17 +784,24 @@ Each composer throws `StaleEdit` when its target is gone from the draft, so a he
   - It refuses `stale` when the pairing's generation or the candidate's digest isn't the one named.
   - It then reads the pending list again and requires that same canonical device ("the entry changed after it was shown", `pair`'s rule).
   - It signs `device.approve` with the frozen candidate, never with what the read returned.
-  - The edit's `apply` checks, synchronously, that the pairing is still this generation and not cancelled or expired. Otherwise it throws `StaleEdit`, so a cancel or an expiry during Touch ID signs nothing.
+  - The edit carries a liveness guard, `Edit.live()`: true while the pairing is this generation and neither cancelled nor expired. It is checked at three points:
+    - in `apply`, which throws `StaleEdit`, for the races before Touch ID;
+    - in the device module, right after the confirmation and before any endorsement or state signature, where it reads `cancelled` (`StateSigner.sign` takes the guard);
+    - in the signer, just before the pending slot's write, where it reads `stale`.
+  - So a cancel or an expiry while Touch ID is open endorses, signs, slots and posts nothing.
+  - Once the slot is written the proposal is durable, and cancelling the pairing no longer withdraws it. It settles as any pending proposal does, and M3's Discard is the way back, as the sheet says.
   - The edit appends the device to the member. For yourself, `Edit.endorse` names it, and the state signer endorses it with this Mac's step-up key inside the same Touch ID, before signing the state.
 - **`org.pair.cancel`** ends it, advancing nothing a signing in flight relies on: that signing's `apply` sees the pairing ended and reads `stale`.
 
 One pairing at a time, and none while a rekey runs, since both are the session's attempts.
 
 *Endorsement inside one Touch ID.*
-- `Edit` gains `endorse?: {member: string; device: string}[]`.
-- `StateSigner.sign(state, prompt, endorse?)`, after the confirmation:
+- `Edit` gains `endorse?: {member: string; device: string}[]` and `live?(): boolean`.
+- `StateSigner.sign(state, prompt, {endorse?, live?})`, after the confirmation:
+  - returns `cancelled` if `live` says no;
   - endorses each named device on the canonical copy it signs (`endorseDevice(org, member, device-without-endorsement, key)`);
   - then signs the state.
+- The signer checks `live` again before the slot's write. `apply` already ran before Touch ID (`signer.ts:460-468`, Touch ID at `:485`), so it can't see a change made while the prompt is open.
 - The signer passes `opts.endorsing` to `checkSuccessor`, so the device reads endorsed before Touch ID. `verifySuccessor` after signing checks the real endorsement.
 - The key stays in the device module (P5 Decision Log 53).
 - Rejected: two Touch IDs, one to endorse and one to sign, for one change the person confirmed once.
@@ -806,14 +814,20 @@ One pairing at a time, and none while a rekey runs, since both are the session's
 *Close.* A late write comes from a producer, not only from the queue. A signer step awaiting a hub read can adopt after the queue has drained: `signer.ts:277-291` keeps its held view across `await hub.chain()`, its `close()` only sets flags (`:616-620`), adoption writes `chain.json` and queues an anchor (`held.ts:368-373`), and `writeAnchor` doesn't refuse a closed session (`org-session.ts:640-646`). So `close()` runs in four steps:
   1. It fences: `closed` is set, and every producer checks it after each await, before it adopts or queues a write. The signer's adoption checks its lifecycle epoch there, as its posts already do. `writeAnchor` and the session's other queued writers refuse to enqueue once closed. The held view's `adoptServed` takes a guard the session passes, which is false once closed.
   2. It stops the parts, as today.
-  3. It awaits the producers in flight: the signer's current operation, the sync and the deliveries' run, which each part's `close()` now returns. It awaits them from outside the commit queue, never inside it.
+  3. It awaits the producers in flight, from outside the commit queue, never inside it:
+     - the signer's current operation, the sync and the deliveries' run, which each part's `close()` now returns;
+     - the held view's own adoption queue. `HeldOrg.close()` fences it: a queued adoption checks the guard when it runs, not only when it was submitted. It returns the queue's tail, including a `chain.json` write already under way. An adoption reaches that queue from outside the session too: a link's direct `view.advance(...)` (`remote/link.ts:442-445`), which isn't awaited, and which writes `chain.json` outside the commit queue (`held.ts:285-292`, `:368-373`);
+     - the session's load, if it is still running.
   4. It awaits the commit queue's tail.
+
+  The rule: each writer under `org/` is one of these owners, and a new writer joins one of them.
 
   When `close()` resolves, nothing more is written under `org/`.
 - The test workarounds go: 8d18883f4's `rm` retry, and 8e21b6354's wait for the anchor in `crashedRekey`.
 - Two tests:
   - one holds a queued anchor write open and asserts `close()` resolves only after it lands;
-  - one holds the signer's hub read open, calls `close()`, releases the read, and asserts that no file under `org/` changes after `close()` resolved.
+  - one holds the signer's hub read open, calls `close()`, releases the read, and asserts that no file under `org/` changes after `close()` resolved;
+  - one starts `view.advance` directly, as a link does, holds its `chain.json` write open, calls `close()`, and asserts `close()` waits for that write to settle.
 - This closes the tracker row P5 Decision Log 129 opened.
 
 *The split.*
@@ -855,7 +869,7 @@ One pairing at a time, and none while a rekey runs, since both are the session's
   - approve re-reads, and refuses a changed entry;
   - a same-id entry reposted with other keys, between display and approval, ends the pairing as `entry-changed`;
   - approval naming an old generation or digest reads `stale`;
-  - a cancel during Touch ID signs nothing;
+  - a cancel or an expiry while the confirmation is held open, then answered yes, gives no endorsement, no state signature, no slot and no post;
   - a wrong class is "not this pairing's";
   - the code and `k` are never in a status;
   - expiry ends it.
@@ -1544,7 +1558,9 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
     // src/main/org/signer.ts
     export type Edit = { summary: string; lines: string[]; endorse?: { member: string; device: string }[]; apply(draft: OrgState): void | Promise<void> };
     // src/main/device/step-up.ts
-    //   StateSigner.sign(state, prompt, endorse?): one confirmation, then endorseDevice for each named device, then signOrgState
+    //   StateSigner.sign(state, prompt, {endorse?, live?}): one confirmation; cancelled if !live(); then endorseDevice for each named device, then signOrgState
+    // Edit gains live?(): boolean, checked at apply, after the confirmation, and before the slot's write
+    // src/main/org/held.ts: HeldOrg.close(): Promise<void>   (fences the adoption queue, resolves at its tail)
 
     // src/main/org/timing.ts: PAIR_TTL_MS 600_000, PAIR_POLL_MS 2_000
 
@@ -2013,6 +2029,11 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   5. Whether a machine is up comes from the renderer's `useMachines`, not the view, since a link drops with no new head.
   6. `org-page.local.test.ts` is registered in `TIMING_NODE_TESTS`.
   7. (P3) `deploy/bin.ts` bundles admin, so the move's steps also import the judges straight from the package under Node's type stripping.
+  Date/Author: 2026-10-29, O8's executor.
+
+- Decision: The buildability round's second pass is folded in (on 02bd683e1: 1 P1, 1 P2; it confirmed the other six fixes closed and members kept in M4a).
+  1. (P1) The pairing's liveness check moves to the point it can act. `apply` runs before Touch ID, so `Edit.live()` is also checked in the device module after the confirmation (before endorsing or signing) and by the signer before the slot's write. A proposal already in the slot is durable, and cancelling the pairing no longer withdraws it.
+  2. `close()` also joins the held view's own adoption queue (`HeldOrg.close()`), which a link's direct `advance` feeds outside the session's producers, and the session's load. Each writer under `org/` belongs to one owner that `close()` joins.
   Date/Author: 2026-10-29, O8's executor.
 
 ## Outcomes & Retrospective
