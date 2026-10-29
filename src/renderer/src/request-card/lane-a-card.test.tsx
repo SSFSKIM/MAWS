@@ -118,6 +118,28 @@ describe('a terminal session’s permission card', () => {
   });
 });
 
+// The O9 sitting (item 9): the hover card read "Approval needed" with no Allow or Deny, on a Bash and a Write. The hover
+// approves only a read-only tool's permission (charter §5.1), for every lane: a lane A Read is approved there through
+// the port, and a Bash or Write offers Open session alone, as lane B's does.
+describe('a terminal session’s request in the sidebar’s hover card', () => {
+  const hover = (event: Extract<SessionEvent, { kind: `${string}.requested` }>) => render(<RequestCard item={itemFor(event, APP)} request={event} placement="hover" paneIndex={null} />);
+
+  it('approves a read-only tool’s permission through the bridge', async () => {
+    live({ pending: [raised({ tool: 'Read', input: { file_path: '/w/notes.txt' } })] });
+    hover(permission({ requestId: REQ, toolName: 'Read', displayName: 'Read', input: { file_path: '/w/notes.txt' } }));
+    expect(screen.getByRole('button', { name: 'Deny' })).toBeTruthy();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Approve' }));
+    await waitFor(() => expect(answers()).toEqual([{ kind: 'permission', decision: 'allow', scope: 'once' }]));
+  });
+
+  it.each(['Bash', 'Write'])('offers %s only Open session, as for any session', (tool) => {
+    live({ pending: [raised({ tool })] });
+    hover(permission({ requestId: REQ, toolName: tool, displayName: tool }));
+    expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Open session' })).toBeTruthy();
+  });
+});
+
 describe('a terminal session’s plan and question cards', () => {
   it('closes a plan’s clear and implement with its reason, and implements', async () => {
     live({ pending: [raised({ tool: 'ExitPlanMode', input: { plan: '1. do it' } })] });

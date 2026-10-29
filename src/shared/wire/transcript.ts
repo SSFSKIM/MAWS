@@ -42,6 +42,17 @@ export function parseTranscriptRecord(line: unknown): TranscriptRecord {
   return TranscriptRecordSchema.parse(line);
 }
 
+// P5 O9 (the M8 sitting, engine 2.1.312): the words the engine writes for a message with no content, as a user record's
+// content (a plugin's start-up wrote two before the first prompt) and as a local command's output (`/reload-plugins`).
+// A record holding only them holds nothing: no prompt, no bubble, no title, no command output.
+export const NO_CONTENT = '(no content)';
+
+/** A record's content (a message's, or a system record's) that is the engine's word for none, alone. */
+export function isNoContent(content: unknown): boolean {
+  if (typeof content === 'string') return content === NO_CONTENT;
+  return Array.isArray(content) && content.length === 1 && (content[0] as { type?: unknown; text?: unknown } | null)?.type === 'text' && (content[0] as { text?: unknown }).text === NO_CONTENT;
+}
+
 export interface ChainResult {
   chain: TranscriptRecord[]; // root to leaf
   leaf: TranscriptRecord | null;

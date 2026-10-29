@@ -161,6 +161,26 @@ export function withQueueTail(rows: Row[], withdrawn: ReadonlySet<string>, tail:
   return tail.length === 0 ? kept : [...kept, ...tail];
 }
 
+// P5 O9: rows a mount keeps outside the store (a terminal session's reply its interrupt cut before the engine wrote it,
+// `lane-a/stream/overlay.ts`), each after the last row of its turn, in their order; one whose turn is not drawn, last.
+export function withPlacedRows(rows: Row[], placed: readonly Row[]): Row[] {
+  if (placed.length === 0) return rows;
+  const after = new Map<TurnId, Row[]>();
+  const loose: Row[] = [];
+  const last = new Map<TurnId, number>();
+  rows.forEach((row, i) => row.turnId !== null && last.set(row.turnId, i));
+  for (const row of placed) {
+    if (row.turnId === null || !last.has(row.turnId)) loose.push(row);
+    else after.set(row.turnId, [...(after.get(row.turnId) ?? []), row]);
+  }
+  const out: Row[] = [];
+  rows.forEach((row, i) => {
+    out.push(row);
+    if (row.turnId !== null && last.get(row.turnId) === i) out.push(...(after.get(row.turnId) ?? []));
+  });
+  return [...out, ...loose];
+}
+
 // The desk (DC9): the flat rows with each turn the engine was running drawn as an exit nobody saw closes it, at the
 // turn's last event (`closedByUnseenExit`: what MAWS's disk follower writes for a transcript nobody is writing whose last
 // turn never ended), the state untouched. For a host that knows the session runs no turn though no row ended one: the

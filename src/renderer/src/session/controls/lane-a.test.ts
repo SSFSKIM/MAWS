@@ -225,6 +225,16 @@ describe('the chips', () => {
     expect(port().controls.bindings().model.label).toBe('opus');
   });
 
+  // The O9 sitting (item 4): after `/model haiku` and `/effort low` in the terminal the chip still read Opus. It names
+  // what the session's latest request ran on; an override MAWS set names itself before the next request carries it.
+  it('names the model and effort the session runs on, an override MAWS set winning, each part on its own', () => {
+    expect(port({ model: 'claude-haiku-5-5', effort: 'low' }).controls.bindings().model.label).toBe('haiku low');
+    expect(port({ model: 'claude-haiku-5-5', effort: 'low', override: { model: 'sonnet', effort: null } }).controls.bindings().model.label).toBe('sonnet low');
+    expect(port({ model: 'claude-haiku-5-5', effort: 'low', override: { model: null, effort: 'high' } }).controls.bindings().model.label).toBe('haiku high');
+    // what MAWS set stays the selector's choice: the terminal's own is its Default
+    expect(port({ model: 'claude-haiku-5-5', effort: 'low' }).controls.bindings().model.value).toEqual({ model: null, effort: null });
+  });
+
   it('sends only what changed', async () => {
     const { fake, controls } = port({ override: { model: 'haiku', effort: null } }, { 'laneA.model': { state: 'done', result: {} } });
     expect(await controls.bindings().model.set({ model: 'haiku', effort: 'low' })).toEqual({ ok: true });
@@ -233,9 +243,12 @@ describe('the chips', () => {
   });
 
   it('closes the mode and the directories with their reasons', async () => {
-    const { bindings } = port().controls;
-    expect(bindings().mode.disabled).toBe(LANE_A_WORDS.mode);
+    const { bindings, capability } = port().controls;
+    const controlsCapabilityMode = () => capability('mode');
+    // the O9 sitting: no bridge event or read reports the session's mode, so the chip names none (never a default)
+    expect(bindings().mode).toMatchObject({ value: null, unreported: true, disabled: LANE_A_WORDS.modeUnreported });
     expect(await bindings().mode.set('plan')).toEqual({ ok: false, error: LANE_A_WORDS.mode });
+    expect(controlsCapabilityMode()).toEqual({ available: false, reason: LANE_A_WORDS.mode }); // Q2's words where the gap is listed
     expect(bindings().directories.disabled).toBe(LANE_A_WORDS.directories);
     expect(bindings().location.path).toBe('/work/here');
   });
