@@ -506,33 +506,67 @@ describe('production’s items', () => {
   });
 });
 
-describe('item 3’s replaying relay', () => {
-  it('replays the action frame it was armed for, not a pong sent after it', async () => {
-    const { replaying } = await import('../../deploy/endpoint-items.ts');
-    const sent: string[] = [];
-    const inner = { send: (b: Uint8Array) => void sent.push(Buffer.from(b).toString()), onBytes: () => {}, onClose: () => {}, close: () => {} };
-    const relay = replaying(inner as never);
-    relay.device.send(Buffer.from('hello'));
-    relay.arm();
-    relay.device.send(Buffer.from('act'));
-    relay.device.send(Buffer.from('pong'));
-    relay.replayLast();
-    expect(sent).toEqual(['hello', 'act', 'pong', 'act']);
+describe('item 3’s relays, bound to the action’s own sealed frame', () => {
+  /** A channel stand-in that writes each message's bytes to its carrier after a delay, one write at a time, as
+   * Channel.write seals and writes in its queue's order. */
+  function slowChannel(carrier: { send(b: Uint8Array): void }, sealMs = 20) {
+    let deliver: (m: unknown) => void = () => {};
+    let queue = Promise.resolve();
+    const channel = {
+      onMessage: (f: (m: unknown) => void) => void (deliver = f),
+      onClose: () => {},
+      send: (m: unknown) => {
+        const run = queue.then(async () => {
+          await new Promise((r) => setTimeout(r, sealMs));
+          carrier.send(Buffer.from(JSON.stringify(m)));
+        });
+        queue = run.catch(() => {});
+        return run;
+      },
+    };
+    return { channel, deliver: (m: unknown) => deliver(m) };
+  }
+  const text = (b: Uint8Array) => Buffer.from(b).toString();
+
+  it('replays the action’s frame, never a pong queued before it', async () => {
+    const { FrameRelay, Remote } = await import('../../deploy/endpoint-remote.ts');
+    const out: string[] = [];
+    const relay = new FrameRelay({ send: (b: Uint8Array) => void out.push(text(b)), onBytes: () => {}, onClose: () => {}, close: () => {} } as never);
+    const { channel, deliver } = slowChannel(relay.device);
+    const remote = new Remote({} as never, channel as never);
+    deliver({ t: 'ping', at: 1 }); // its pong queued in the channel's writes, not yet on the carrier
+    const act = await remote.sendCaptured({ t: 'act', action: { opId: 'op-1' } } as never, relay);
+    expect(text(act)).toBe('{"t":"act","action":{"opId":"op-1"}}');
+    relay.inject(act);
+    expect(out).toEqual(['{"t":"pong","at":1}', '{"t":"act","action":{"opId":"op-1"}}', '{"t":"act","action":{"opId":"op-1"}}']);
   });
 
-  it('is fed no pong while the run holds them: a ping between the act and the replay is answered after', async () => {
-    const { Remote } = await import('../../deploy/endpoint-remote.ts');
-    let deliver: (m: unknown) => void = () => {};
-    const sent: unknown[] = [];
-    const channel = { onMessage: (f: (m: unknown) => void) => void (deliver = f), onClose: () => {}, send: async (m: unknown) => void sent.push(m) };
+  it('alters the action’s frame by its bytes, a pong queued before it passed untouched', async () => {
+    const { FrameRelay, Remote } = await import('../../deploy/endpoint-remote.ts');
+    const out: Uint8Array[] = [];
+    const relay = new FrameRelay({ send: (b: Uint8Array) => void out.push(b), onBytes: () => {}, onClose: () => {}, close: () => {} } as never);
+    const { channel, deliver } = slowChannel(relay.device);
     const remote = new Remote({} as never, channel as never);
-    remote.holdPongs(true);
-    deliver({ t: 'ping', at: 1 });
-    await new Promise((r) => setTimeout(r, 0));
-    expect(sent).toEqual([]);
-    remote.holdPongs(false);
-    await new Promise((r) => setTimeout(r, 0));
-    expect(sent).toEqual([{ t: 'pong', at: 1 }]);
+    deliver({ t: 'ping', at: 2 });
+    relay.hold();
+    const act = await remote.sendCaptured({ t: 'act', action: { opId: 'op-2' } } as never, relay);
+    relay.release(act);
+    expect(out.map(text)[0]).toBe('{"t":"pong","at":2}');
+    expect(out).toHaveLength(2);
+    expect(text(out[1])).not.toBe(text(act));
+    expect(out[1].length).toBe(act.length);
+  });
+
+  it('keeps answering pings while a slow action waits for its done: nothing is held past the action’s own write', async () => {
+    const { FrameRelay, Remote } = await import('../../deploy/endpoint-remote.ts');
+    const out: string[] = [];
+    const relay = new FrameRelay({ send: (b: Uint8Array) => void out.push(text(b)), onBytes: () => {}, onClose: () => {}, close: () => {} } as never);
+    const { channel, deliver } = slowChannel(relay.device, 5);
+    const remote = new Remote({} as never, channel as never);
+    await remote.sendCaptured({ t: 'act', action: { opId: 'op-3' } } as never, relay);
+    for (const at of [10, 11, 12]) deliver({ t: 'ping', at });
+    await new Promise((r) => setTimeout(r, 60));
+    expect(out).toEqual(['{"t":"act","action":{"opId":"op-3"}}', '{"t":"pong","at":10}', '{"t":"pong","at":11}', '{"t":"pong","at":12}']);
   });
 });
 

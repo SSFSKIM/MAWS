@@ -179,6 +179,58 @@ export function throughTamper(inner: ByteDuplex): { device: ByteDuplex; relay: T
 }
 
 /**
+ * A relay of the run's own between a device's channel and its carrier: it records every frame the device writes
+ * (`written`, what `Remote.sendCaptured` reads), can hold them (`hold`) and release them in order with the one whose
+ * bytes are given altered by a flipped last byte, and can put a frame's bytes on the carrier again (`inject`). It acts
+ * on a frame by its bytes, never by its place among the device's writes.
+ */
+export class FrameRelay {
+  readonly written: Uint8Array[] = [];
+  readonly device: ByteDuplex;
+  #held: Uint8Array[] | null = null;
+
+  constructor(private readonly inner: ByteDuplex) {
+    this.device = {
+      send: (bytes) => {
+        const frame = Uint8Array.from(bytes);
+        this.written.push(frame);
+        if (this.#held !== null) this.#held.push(frame);
+        else inner.send(frame);
+      },
+      onBytes: (listener) => inner.onBytes(listener),
+      onClose: (listener) => inner.onClose?.(listener),
+      close: (reason) => inner.close(reason),
+    };
+  }
+
+  hold(): void {
+    this.#held ??= [];
+  }
+
+  /** The held frames on to the carrier, in order; the one equal to `alter`, if given, with its last byte flipped. */
+  release(alter?: Uint8Array): void {
+    const held = this.#held ?? [];
+    this.#held = null;
+    let altered = false;
+    for (const frame of held) {
+      if (alter !== undefined && !altered && sameBytes(frame, alter)) {
+        const copy = Uint8Array.from(frame);
+        copy[copy.length - 1] ^= 0x01;
+        altered = true;
+        this.inner.send(copy);
+      } else this.inner.send(frame);
+    }
+    if (alter !== undefined && !altered) throw new Error('the frame to alter was not among the held ones');
+  }
+
+  inject(frame: Uint8Array): void {
+    this.inner.send(frame);
+  }
+}
+
+const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((byte, i) => byte === b[i]);
+
+/**
  * The run's own direct dials kept under the listener's per-source limit (burst 3, then 5 a minute): a token bucket a
  * little slower than the listener's, so a dial of the run's is never `busy` unless a check spent the burst on purpose
  * (`drain`, after which the bucket waits a full refill).
@@ -291,7 +343,9 @@ export class Remote {
     this.closed = new Promise<string>((resolve) => channel.onClose((reason) => resolve((this.#reason = reason))));
   }
 
-  #held: number[] | null = null;
+  /** Pong writes not yet done, and pings to answer once the run's write in hand is on the carrier. */
+  readonly #pongs = new Set<Promise<void>>();
+  #quiet: number[] | null = null;
   readonly #drops: Array<{ match: (m: Msg) => boolean; dropped: Msg[] }> = [];
 
   /**
@@ -306,23 +360,33 @@ export class Remote {
   }
 
   #pong(at: number): void {
-    if (this.#held !== null) this.#held.push(at);
-    else void this.channel.send({ t: 'pong', at }).catch(() => {});
+    if (this.#quiet !== null) return void this.#quiet.push(at);
+    const sent = this.channel.send({ t: 'pong', at }).catch(() => {});
+    this.#pongs.add(sent);
+    void sent.then(() => this.#pongs.delete(sent));
   }
 
   /**
-   * Holds the pongs (`on`), and sends those held once released: while a relay of the run's takes or alters a frame by
-   * its place in the stream, the frame there is the one the run sent, never a pong. A few seconds held is well inside
-   * the endpoint's two unanswered pings.
+   * Sends `message` and answers the exact sealed frame its write put on `carrier` (a relay of the run's that records
+   * every frame the device writes): the run's pongs already queued are written first, none starts while the message is
+   * written, and they resume the moment it is on the carrier, so the frame is the message's own and the channel keeps
+   * answering pings however long the message's effect takes. A message that is not one frame alone is refused.
    */
-  holdPongs(on: boolean): void {
-    if (on) {
-      this.#held ??= [];
-      return;
+  async sendCaptured(message: ChannelMessage, carrier: { readonly written: readonly Uint8Array[] }): Promise<Uint8Array> {
+    this.#quiet ??= [];
+    let from: number;
+    try {
+      await Promise.all([...this.#pongs]);
+      from = carrier.written.length;
+      await this.channel.send(message);
+    } finally {
+      const held = this.#quiet ?? [];
+      this.#quiet = null;
+      for (const at of held) this.#pong(at);
     }
-    const held = this.#held ?? [];
-    this.#held = null;
-    for (const at of held) this.#pong(at);
+    const mine = carrier.written.slice(from, from + 2);
+    if (mine.length !== 1) throw new Error(`the ${message.t} went out as ${mine.length} frames, not one of its own`);
+    return mine[0];
   }
 
   /** How the channel closed, once it has. */

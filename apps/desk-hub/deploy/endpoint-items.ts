@@ -13,7 +13,7 @@ import { canonicalize, endorseDevice, generateSigningKey, keyId, OP_HORIZON_S, s
 import { ProjectSocket, type DeviceHuman } from 'org-protocol/test-support';
 import type { Person } from './hub';
 import type { EndpointMachine } from './endpoint-machine';
-import { DirectPacer, dialDirect, openRemote, Remote, testDevice, throughTamper, upgradeStatus, type RelayDialer, type RunDevice } from './endpoint-remote';
+import { DirectPacer, dialDirect, FrameRelay, openRemote, Remote, testDevice, throughTamper, upgradeStatus, type RelayDialer, type RunDevice } from './endpoint-remote';
 import { laneAProblems, resumeCursor, type ItemReport, type Segment } from './endpoint-verdicts';
 import type { Cleanup } from './proof';
 
@@ -471,34 +471,6 @@ function gated(inner: ByteDuplex): { device: ByteDuplex; hold(on: boolean): void
 }
 
 /**
- * A relay of the run's own that keeps the first frame the device sends once `arm`ed (the action's: the run holds its
- * pongs meanwhile, and a frame after it never takes its place), to send it again on the run's word.
- */
-export function replaying(inner: ByteDuplex): { device: ByteDuplex; arm(): void; replayLast(): void } {
-  let armed = false;
-  let last: Uint8Array | null = null;
-  return {
-    device: {
-      send: (b) => {
-        if (armed && last === null) last = Uint8Array.from(b);
-        inner.send(b);
-      },
-      onBytes: (l) => inner.onBytes(l),
-      onClose: (l) => inner.onClose?.(l),
-      close: (r) => inner.close(r),
-    },
-    arm() {
-      armed = true;
-      last = null;
-    },
-    replayLast() {
-      if (last === null) throw new Error('the relay holds no armed frame to replay');
-      inner.send(last);
-    },
-  };
-}
-
-/**
  * Whether the late original was answered as a tombstoned op: sminos refuses it `tombstoned` before its ledger
  * (sminos_rpc.py, `refuse_loose`), as DX6's failed outcome, which the endpoint passes on as `{state: 'failed', error:
  * {code: 'tombstoned'}}`; `{state: 'refused', reason: 'tombstoned'}` is the same refusal in RL4's words.
@@ -514,24 +486,19 @@ export async function item3(scene: Scene, report: ItemReport): Promise<void> {
     // The relay lets the original through and sends its bytes again once it was acknowledged: a frame repeated at
     // once is closed on before the original is handed on (the endpoint runs nothing for a channel that closed), which
     // shows only the close; a replay after the original ran shows both halves.
-    let relay: ReturnType<typeof replaying> | undefined;
+    let relay: FrameRelay | undefined;
     const r = await open(scene, scene.owner, 'relayed', {
-      dial: async () => (relay = replaying(await scene.relay.dial())).device,
+      dial: async () => (relay = new FrameRelay(await scene.relay.dial())).device,
     });
     const text = marker(scene, 'replayed');
     const action = send(scene, r, text);
-    // The run's pongs held while the frame is taken and replayed, so the frame replayed is the action's.
-    r.holdPongs(true);
-    let said: string;
-    try {
-      relay!.arm();
-      said = await r.act(action);
-      if (said !== 'accepted') throw new Error(`the original was answered ${said}`);
-      await r.done(action.opId);
-      relay!.replayLast();
-    } finally {
-      r.holdPongs(false);
-    }
+    // The replay is the action's own sealed frame, as the device wrote it (never a frame found by its place).
+    const from = r.inbox.length;
+    const frame = await r.sendCaptured({ t: 'act', action }, relay!);
+    const ack = await r.waitFor((m) => m.t === 'ack' && m.opId === action.opId, 'the ack of the original', from, 30_000);
+    if (ack.state !== 'accepted') throw new Error(`the original was answered ${String(ack.reason)}`);
+    await r.done(action.opId, from);
+    relay!.inject(frame);
     const reason = await Promise.race([r.closed, sleep(20_000).then(() => 'still open')]);
     if (reason !== 'sequence') throw new Error(reason === 'still open' ? 'the channel stayed open after a replayed frame' : `the channel closed ${reason}, not sequence`);
     const count = await effects(scene, text);
@@ -651,18 +618,19 @@ export async function item3(scene: Scene, report: ItemReport): Promise<void> {
     }
   });
   await report.check('3', 'an action frame altered in the relay closes the channel, and nothing runs', async () => {
-    let relay: ReturnType<typeof throughTamper>['relay'] | undefined;
+    let relay: FrameRelay | undefined;
     const r = await open(scene, scene.owner, 'relayed', {
-      dial: async () => {
-        const spliced = throughTamper(await scene.relay.dial());
-        relay = spliced.relay;
-        return spliced.device;
-      },
+      dial: async () => (relay = new FrameRelay(await scene.relay.dial())).device,
     });
     const text = marker(scene, 'altered');
-    r.holdPongs(true); // the next frame to the endpoint, the one altered, is the action's
-    relay!.tamper('to-endpoint', { flip: -1 });
-    await r.channel.send({ t: 'act', action: send(scene, r, text) });
+    // The device's frames held while the action is written, then let go with the action's own frame altered.
+    relay!.hold();
+    try {
+      relay!.release(await r.sendCaptured({ t: 'act', action: send(scene, r, text) }, relay!));
+    } catch (error) {
+      relay!.release();
+      throw error;
+    }
     const reason = await Promise.race([r.closed, sleep(20_000).then(() => 'still open')]);
     if (reason !== 'tag') throw new Error(`the channel ${reason === 'still open' ? 'stayed open' : `closed ${reason}`}`);
     if ((await effects(scene, text, 3000)) !== 0) throw new Error('the altered action ran');
