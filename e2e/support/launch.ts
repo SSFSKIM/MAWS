@@ -89,6 +89,10 @@ export interface ShellLaunchOptions extends MawsLaunchOptions {
   // node_modules), whose app runs in this one's place: its out/main/index.js under its own Electron, from its root, as
   // this checkout's runs from here. Its supervisor is then that build's, spawned from its own bundle.
   root?: string;
+  // P5 O8 M4a Task 8: AppKit user defaults for this launch alone, through the argument domain (`-<key> <value>` after the
+  // app's entry, where Chromium takes neither for the app's path), e.g. `{ AppleShowScrollBars: 'Always' }` for classic
+  // scrollbars whatever the desktop's setting. Nothing is written to any defaults domain.
+  appKitDefaults?: Record<string, string>;
 }
 // C5 end
 
@@ -189,9 +193,10 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     opts.prepare?.({ userData, shellHome: shellHome.dir, claudeConfigDir: env.CLAUDE_CONFIG_DIR }); // E6: inside, so a throw still cleans up
     const launchedAt = Date.now();
     const appArgs = opts.lang ? [`--lang=${opts.lang}`] : E2E_APP_ARGS; // P4-W2L
+    const defaults = Object.entries(opts.appKitDefaults ?? {}).flatMap(([key, value]) => [`-${key}`, value]); // P5 O8 M4a Task 8
     app = executable
-      ? await _electron.launch({ executablePath: executable, args: appArgs, env, cwd: REPO_ROOT })
-      : await _electron.launch({ ...(electron !== undefined && { executablePath: electron }), args: [...loader, ...(opts.requireFirst ? ['-r', opts.requireFirst] : []), ...appArgs, main], env, cwd: root });
+      ? await _electron.launch({ executablePath: executable, args: [...appArgs, ...defaults], env, cwd: REPO_ROOT })
+      : await _electron.launch({ ...(electron !== undefined && { executablePath: electron }), args: [...loader, ...(opts.requireFirst ? ['-r', opts.requireFirst] : []), ...appArgs, main, ...defaults], env, cwd: root });
     // Playwright's process() reads its live application channel, which may already be disposed before 'close' arrives.
     // Keep the actual ChildProcess while available, including for cleanup's failed-close fallback.
     child = app.process();

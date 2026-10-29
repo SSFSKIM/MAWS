@@ -16,7 +16,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test, type ElectronApplication, type Locator } from '@playwright/test';
+import { expect, test, type ElectronApplication } from '@playwright/test';
 import type { OrgStatus, OrgView } from '../src/shared/ipc/schema/org';
 import { readOrMintMachineRef } from '../src/shared/machine/identity-file';
 import { memberNames } from '../src/shared/org/member-name';
@@ -135,27 +135,51 @@ function seededOrg(local: string, userData: string, now: number): { status: Regi
   return { status, view, names };
 }
 
-// What is wider than its box in the section: the section, each row and its cells (a label past its column overlaps the
-// value without widening the row), each device line. Each offender as `<what> "<text>" scrollWidth > clientWidth`.
-async function overflowing(section: Locator): Promise<string[]> {
-  return section.evaluate((root) => {
-    const rows = Array.from(root.querySelectorAll('[role="group"]'));
-    const checked = [root, ...rows, ...rows.flatMap((row) => Array.from(row.children)), ...Array.from(root.querySelectorAll('[data-org-device]'))];
-    return checked
-      .filter((el) => el.scrollWidth > el.clientWidth)
-      .map((el) => `${el.getAttribute('role') ?? el.tagName.toLowerCase()} "${(el.textContent ?? '').slice(0, 60)}" ${el.scrollWidth} > ${el.clientWidth}`);
+// What is wider than its box under `root`: the root, each row and each of its cells (a label past its grid column
+// overlaps the value without widening the row, so the cells are looked at, not only the rows), and every block that text
+// lands in. A text item too wide for its cell shows as its cell's overflow. Each offender as `<what> "<text>" scrollWidth >
+// clientWidth`.
+function overflowing(root: Element): string[] {
+  return [root, ...Array.from(root.querySelectorAll('[role="group"], [role="group"] > *, div, p, h1, h2, h3, h4, h5, h6'))]
+    .filter((el) => el.scrollWidth > el.clientWidth)
+    .map((el) => `${el.getAttribute('role') ?? el.tagName.toLowerCase()} "${(el.textContent ?? '').slice(0, 60)}" ${el.scrollWidth} > ${el.clientWidth}`);
+}
+
+// Every action under `root` that is not drawn whole: each is scrolled into view first (the settings body scrolls, which
+// is no fault), then its four edges must lie inside its row (the Setting row, else `root`), inside every ancestor that
+// clips (an overflow other than visible), and inside the window. Each offender as `"<text>" <box> outside <what> <box>`.
+function actionsNotWhole(root: Element): string[] {
+  type Box = { left: number; top: number; right: number; bottom: number };
+  const inside = (a: Box, b: Box) => a.left >= b.left - 0.5 && a.top >= b.top - 0.5 && a.right <= b.right + 0.5 && a.bottom <= b.bottom + 0.5;
+  const shown = (b: Box) => `${Math.round(b.left)},${Math.round(b.top)}..${Math.round(b.right)},${Math.round(b.bottom)}`;
+  return Array.from(root.querySelectorAll('button')).flatMap((button) => {
+    button.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+    const box = button.getBoundingClientRect();
+    const name = `"${(button.textContent ?? '').trim()}" ${shown(box)}`;
+    if (box.width === 0 || box.height === 0 || getComputedStyle(button).visibility !== 'visible') return [`${name} not drawn`];
+    const bounds: Array<[string, Box]> = [
+      ['its row', (button.closest('[role="group"]') ?? root).getBoundingClientRect()],
+      ['the window', { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }],
+    ];
+    for (let el = button.parentElement; el !== null; el = el.parentElement) {
+      const style = getComputedStyle(el);
+      if (style.overflowX === 'visible' && style.overflowY === 'visible') continue;
+      const r = el.getBoundingClientRect();
+      const left = r.left + el.clientLeft;
+      const top = r.top + el.clientTop;
+      bounds.push([`clipping ${el.tagName.toLowerCase()}`, { left, top, right: left + el.clientWidth, bottom: top + el.clientHeight }]);
+    }
+    return bounds.filter(([, b]) => !inside(box, b)).map(([what, b]) => `${name} outside ${what} ${shown(b)}`);
   });
 }
 
-// Every action in the section drawn whole inside its row (the Setting row, or the section for a line of its own).
-async function clippedActions(section: Locator): Promise<string[]> {
-  return section.evaluate((root) =>
-    Array.from(root.querySelectorAll('button')).flatMap((button) => {
-      const box = button.getBoundingClientRect();
-      const row = (button.closest('[role="group"]') ?? root).getBoundingClientRect();
-      const whole = box.width > 0 && box.height > 0 && box.left >= row.left - 0.5 && box.right <= row.right + 0.5 && getComputedStyle(button).visibility === 'visible';
-      return whole ? [] : [`"${button.textContent}" at ${Math.round(box.left)}..${Math.round(box.right)} in ${Math.round(row.left)}..${Math.round(row.right)}`];
-    }),
+// Two actions clipped on purpose, one across and one down, appended to `root` (each marked `data-probe`, removed after):
+// the check above must name both, or it proves nothing about the page.
+function addClippedProbes(root: Element): void {
+  root.insertAdjacentHTML(
+    'beforeend',
+    '<div data-probe role="group" style="overflow:hidden;width:40px"><button type="button" style="width:120px">wide probe</button></div>' +
+      '<div data-probe role="group" style="overflow:hidden;height:8px"><button type="button" style="height:24px">tall probe</button></div>',
   );
 }
 
@@ -169,7 +193,9 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
     const { status, view, names } = seededOrg(local, userData, Date.now());
     const fixture = join(userData, 'org-page.json');
     writeFileSync(fixture, JSON.stringify({ status, view }));
-    const maws = await launchMaws({ userData, env: { [FIXTURE_ENV]: fixture } });
+    // Classic scrollbars, which take width from the view, as on any Mac with a mouse attached, whatever the desktop's own
+    // setting (the hosted lane selects overlay ones for every group).
+    const maws = await launchMaws({ userData, env: { [FIXTURE_ENV]: fixture }, appKitDefaults: { AppleShowScrollBars: 'Always' } });
     try {
       const { app, page } = maws;
       await expect(page.locator('html')).toHaveAttribute('data-theme', 'light'); // the app's default
@@ -177,6 +203,8 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
       const panel = page.locator('[data-region="main"]').getByRole('tabpanel');
       await panel.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: SECTIONS.org, exact: true }).click();
       const section = panel.getByRole('region', { name: SECTIONS.org });
+      const body = panel.locator('[data-settings-body]');
+      await expect.poll(() => body.evaluate((el) => (el as HTMLElement).offsetWidth - el.clientWidth), { message: "the settings body's scrollbar takes width (classic scrollbars)" }).toBeGreaterThan(0);
       const group = (id: (typeof GROUPS)[number]) => section.locator(`[data-org-group="${id}"]`);
 
       // Ready: every group under its heading, each member's row, the refusal's own row, this Mac's machine up, and the
@@ -193,18 +221,22 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
       await test.info().attach('org-page-window', { body: await page.screenshot(), contentType: 'image/png' });
       for (const id of GROUPS) await test.info().attach(`org-page-${id}`, { body: await group(id).screenshot(), contentType: 'image/png' });
 
-      expect(await overflowing(section), 'nothing in the Org section scrolls sideways').toEqual([]);
-      expect(await clippedActions(section), 'every action is drawn whole inside its row').toEqual([]);
-      const buttons = section.getByRole('button');
-      expect(await buttons.count(), 'the seeded page offers its actions').toBeGreaterThan(0);
-      for (const button of await buttons.all()) await expect(button).toBeVisible();
+      expect(await section.evaluate(overflowing), 'nothing in the Org section is wider than its box').toEqual([]);
+      expect(await section.getByRole('button').count(), 'the seeded page offers its actions').toBeGreaterThan(0);
+      expect(await section.evaluate(actionsNotWhole), 'every action is drawn whole inside its row').toEqual([]);
+      // ...and the check sees a clipped action when there is one
+      await section.evaluate(addClippedProbes);
+      const probed = await section.evaluate(actionsNotWhole);
+      await section.evaluate((root) => root.querySelectorAll('[data-probe]').forEach((probe) => probe.remove()));
+      expect(probed.some((line) => line.startsWith('"wide probe"')) && probed.some((line) => line.startsWith('"tall probe"')), `the check names both probes: ${probed.join('; ')}`).toBe(true);
 
       // The sheet taken up on the running pairing: the new device's fingerprint to compare, Approve and Cancel pairing.
       await show.click();
       const sheet = page.getByRole('dialog');
       await expect(sheet.getByText(status.pairing!.entry!.fingerprint, { exact: true })).toBeVisible();
-      for (const button of await sheet.getByRole('button').all()) await expect(button).toBeVisible();
       await test.info().attach('org-page-pair-sheet', { body: await sheet.screenshot(), contentType: 'image/png' });
+      expect(await sheet.evaluate(overflowing), 'nothing in the pairing sheet is wider than its box').toEqual([]);
+      expect(await sheet.evaluate(actionsNotWhole), "every action is drawn whole inside the pairing sheet").toEqual([]);
     } finally {
       await maws.cleanup();
     }
