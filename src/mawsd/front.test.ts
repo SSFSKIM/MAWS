@@ -1,6 +1,7 @@
 // The services front's core (P5 O3-D M2; docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §B): a
 // machine.sock client's runtime over a stand-in seam and hosts. The front over the real spine is daemon-spine.test.ts's.
 import { describe, expect, it, vi } from 'vitest';
+import { MACHINE_SPINE_CAPABILITY } from '@shared/host/socket-protocol';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import { REGISTRY } from '@shared/ipc/registry';
 import type { CommandName } from '@shared/ipc/schema';
@@ -55,9 +56,9 @@ function front(over: Partial<FrontOptions> = {}) {
     log: (line) => void logs.push(line),
     ...over,
   });
-  const client = () => {
+  const client = (capabilities: readonly string[] = []) => {
     const end = connection();
-    served.runtimeFor({ appPid: 1, capabilities: [] }).serve(end.port);
+    served.runtimeFor({ appPid: 1, capabilities }).serve(end.port);
     return end;
   };
   return { served, client, ensure, forwarded, logs, raw: (name: string, payload: unknown) => raw.forEach((l) => l({ name, payload })) };
@@ -137,16 +138,24 @@ describe('the services front', () => {
     expect(logs).toContainEqual('machine.sock: refused to emit session.queue: it is not in MACHINE_EVENTS');
   });
 
-  it('relays the engine host’s events raw to the taps, and to every ready client those that name no session', () => {
+  // Main's machine transport hears the engine host's events on its relay until M5: the front gives them only to a client
+  // that reads them here (machine.spine), so none reaches main twice; the taps hear every one
+  it('relays the engine host’s events raw to the taps, and those that name no session only to a ready machine.spine client', () => {
     const { served, client, raw } = front();
-    const c = client();
-    c.ready();
+    const [plain, spine] = [client(['host.attachment']), client([MACHINE_SPINE_CAPABILITY])];
+    plain.ready();
+    spine.ready();
     const tapped: string[] = [];
     served.bus.onEmitted('session.eventBatch', () => void tapped.push('batch'));
+    served.bus.onEmitted('plugins.changed' as never, () => void tapped.push('plugins'));
     raw('session.eventBatch', { appSessionId: 's1', events: [] });
     raw('plugins.changed', {});
-    expect(tapped).toEqual(['batch']);
-    expect(c.events()).toEqual(['plugins.changed']);
+    expect(tapped).toEqual(['batch', 'plugins']);
+    expect(plain.events()).toEqual([]);
+    expect(spine.events()).toEqual(['plugins.changed']);
+    served.bus.emit('session.status', { appSessionId: 's1', status: statusOf('s1') } as never); // the spine's own: every ready client
+    expect(plain.events()).toEqual(['session.status']);
+    expect(spine.events()).toEqual(['plugins.changed', 'session.status']);
   });
 
   it('invoke runs a registered command in process without waiting for a load; unbind drops the load’s registrations', async () => {

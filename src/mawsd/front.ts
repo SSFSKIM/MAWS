@@ -12,11 +12,15 @@
 //
 // `bus.emit` is gated by the registry's `machineEvents` and validated, then posted to every client that said ready and
 // handed to the taps. The engine host's events reach the taps raw, before the spine's listeners fold them (the
-// supervisor's `onRaw` runs before its `onEvent`), and every ready client hears those that name no session (the app-bound
-// requests and the feeds); a session's events are the streams' (M4). The bus's registrations are a load's: `unbind`
-// drops them when the spine's parts have stopped, so the next load registers afresh.
+// supervisor's `onRaw` runs before its `onEvent`); those that name no session (the app-bound requests and the feeds) go
+// only to a ready client whose hello listed `machine.spine`, the app that reads them here from M5 on, when the relay
+// stops giving them to it (§B, §L). Until then the app hears them on its engine-host relay, so a client without the
+// capability (main's machine transport among them) hears none here, or it would hear each twice. A session's events
+// are the streams' (M4), per follow, which is how a client without the capability gets its sessions' events. The bus's
+// registrations are a load's: `unbind` drops them when the spine's parts have stopped, so the next load registers afresh.
 import { thrownError, type DocPortEnd, type HostPort } from '@shared/host/runtime';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
+import { MACHINE_SPINE_CAPABILITY } from '@shared/host/socket-protocol';
 import { remoteClients, type RemoteClients } from '@shared/host/client-refs';
 import type { ServedRuntime } from '@shared/host/socket-server';
 import { NO_CLIENT, type ClientPort } from '@shared/client/port';
@@ -105,13 +109,13 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       }
     }
   };
-  const post = (name: string, payload: unknown) => {
-    for (const client of clients) client.event(name, payload);
+  const post = (name: string, payload: unknown, to: (client: FrontClient) => boolean = () => true) => {
+    for (const client of clients) if (to(client)) client.event(name, payload);
   };
 
   const offRaw = options.hosts.onRaw('engine-host', ({ name, payload }) => {
     tap(name, payload);
-    if (!namesSession(payload)) post(name, payload);
+    if (!namesSession(payload)) post(name, payload, readsHostEvents);
   });
 
   // A handler's answer, as a host runtime gives it: its output validated, a HostCommandError intact.
@@ -258,6 +262,9 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
     },
   };
 }
+
+// A client that reads the engine host's app-bound events on machine.sock rather than on its relay (the post-D app, M5).
+const readsHostEvents = (client: { facts: ClientFacts }) => client.facts.capabilities.includes(MACHINE_SPINE_CAPABILITY);
 
 // A payload a session's stream carries (M4): one that names a session.
 function namesSession(payload: unknown): boolean {
