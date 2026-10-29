@@ -124,19 +124,23 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
   };
   const hasLiveRoot = (appSessionId: AppSessionId) => addon !== null && rootsOf(appSessionId).some((root) => addon.process(root.pid)?.start === root.start);
 
-  // The verdict on an accepted socket, which nothing has read yet: refused, it is destroyed unread; accepted, it becomes
-  // a connection (whose hello goes at once) and only then is read.
+  // The verdict on an accepted socket, which nothing has read yet: refused, it is counted and then destroyed unread;
+  // accepted, it becomes a connection, counted before its hello goes, and only then is read. The order is what a reader
+  // of the server sees: the e2e seam's `inspect`, which Node's inspector runs at its next interrupt (between any two
+  // calls of this synchronous code), finds the peer counted as soon as the peer can hear the hello or the close.
   const decide = (appSessionId: AppSessionId, listening: Listening, socket: Socket, acceptedAt: number) => {
     listening.pending.delete(socket);
     if (socket.destroyed) return;
     const refusal = authorizePeer(socketFd(socket), rootsOf(appSessionId), { addon, now: acceptedAt, uid });
     if (refusal) {
-      socket.destroy();
       listening.refused += 1;
       log(refusalLine(appSessionId, refusal));
+      socket.destroy(); // last: the peer can see the close from here on
       return;
     }
-    listening.connections.add(new CuaConnection(ctx, appSessionId, socket, (closed) => listening.connections.delete(closed)));
+    const connection = new CuaConnection(ctx, appSessionId, socket, (closed) => listening.connections.delete(closed));
+    listening.connections.add(connection);
+    connection.greet();
     socket.resume();
   };
 
@@ -169,14 +173,14 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
     return listening;
   };
 
-  const close = (listening: Listening) => {
+  const close = (listening: Listening, why: string) => {
     listening.server.close();
     for (const [socket, { timer }] of listening.pending) {
       clearTimeout(timer);
       socket.destroy();
     }
     listening.pending.clear();
-    for (const connection of listening.connections) connection.disconnect();
+    for (const connection of listening.connections) connection.disconnect(why);
     rmSync(listening.path, { force: true });
   };
 
@@ -236,7 +240,7 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
       const listening = sessions.get(appSessionId);
       if (!listening) return;
       sessions.delete(appSessionId);
-      close(listening);
+      close(listening, 'its session was removed');
     },
     holds: (tabId) => claims.leasedTo(tabId) !== undefined,
     onChange: (listener) => claims.onChange(listener),
@@ -262,7 +266,7 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
       for (const stop of stops.splice(0)) stop();
       feed?.dispose();
       held.dispose();
-      for (const listening of sessions.values()) close(listening);
+      for (const listening of sessions.values()) close(listening, 'MAWS stopped its server');
       sessions.clear();
       engineRoots.clear();
     },

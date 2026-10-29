@@ -198,3 +198,9 @@ test('a refused admission run relaunches with its explicit hosted route', () => 
     assert.match(refusals(run(), [refusal('e2e:default')], { hosted_route }), new RegExp(`--hosted-route ${hosted_route} `));
   }
 });
+
+test('overflow placement stays visible but relaunch gates and default-beside use bare group names', () => {
+  const out = refusals(['failure\te2e:default', 'failure\te2e:tools (EC2 overflow)', 'success\te2e:side (EC2 overflow)'], [refusal('e2e:default'), red('e2e:tools (EC2 overflow)')]);
+  assert.match(out, /red \(1\): e2e:tools \(EC2 overflow\)/);
+  assert.match(out, / --gates e2e:default,e2e:tools --default-beside tools,side --label /);
+});

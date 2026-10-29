@@ -15,7 +15,7 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { EventPayload, ProjectRecord, SessionDigest } from '@shared/ipc/schema';
-import type { OrgRows, RemoteRow } from '@shared/ipc/schema/org';
+import type { OrgMember, OrgRows, RemoteRow } from '@shared/ipc/schema/org';
 import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import type { NeedsYouRow } from '../attention/derive';
@@ -58,6 +58,10 @@ export interface SessionsState {
   // roster the rows cover (those machines take no record snapshot). Replaced whole by each `org.rows` answer or event.
   listed: ReadonlyMap<AppSessionId, ListedSession>;
   listedMachines: ReadonlySet<MachineRef>;
+  // P5 O8 M5 (Interfaces §L): the owners the rows name, by member id, and the signed-in member they were computed for
+  // ("you"; null signed out), replaced with the rows so a row's owners are always read against their own payload.
+  members: ReadonlyMap<string, OrgMember>;
+  member: string | null;
   applyRows(rows: OrgRows): void;
   addUnstarted(appSessionId: AppSessionId, entry: UnstartedSession): void;
   dropUnstarted(appSessionId: AppSessionId): void;
@@ -175,13 +179,15 @@ export function createSessionsStore() {
       indexing: null,
       listed: new Map(),
       listedMachines: new Set(),
-      applyRows({ machines, rows }) {
+      members: new Map(),
+      member: null,
+      applyRows({ machines, rows, members, member }) {
         const listed = new Map<AppSessionId, ListedSession>();
         for (const row of rows) {
           const appId = addressOf(row.machine, row.session as AppSessionId);
           listed.set(appId, { ...row, appId });
         }
-        set({ listed, listedMachines: new Set(machines) });
+        set({ listed, listedMachines: new Set(machines), members: new Map(members.map((m) => [m.id, m])), member });
       },
       applyList({ sessions, revision }, machine) {
         const p = partition(machine);

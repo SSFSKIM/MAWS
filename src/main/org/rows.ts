@@ -21,6 +21,11 @@
 // frame brought it since the feed opened. Everything runs in one queue, behind the cache's read, so no record is judged
 // before the persisted marks are held.
 //
+// M5 ("Names"; Interfaces §L): beside the rows go `member`, the signed-in member they were computed for (so "you" is
+// judged against the same identity as `mine`), and `members`, every member id some row's owners name with its email
+// and name from the held head (an id the head doesn't list reads "former member"), so the renderer derives nothing from
+// state it doesn't hold.
+//
 // Electron-free: vitest's node project runs it, and O3 moves it with the index into `mawsd`.
 import { createHash } from 'node:crypto';
 import {
@@ -37,10 +42,11 @@ import {
   type Signed,
   type SignedOrgState,
 } from '../../../apps/org-protocol/src/index.ts';
-import type { OrgRows, RemoteRow } from '@shared/ipc/schema/org';
+import { FORMER_MEMBER, type OrgMember, type OrgRows, type RemoteRow } from '@shared/ipc/schema/org';
 import type { ProjectRecord } from '@shared/ipc/schema/session';
 import type { OrgKey } from '@shared/machine/org-key';
 import type { MachineRef } from '@shared/machine/ref';
+import { memberNames } from '@shared/org/member-name';
 import { repoProjectId } from '@shared/machine/project-ids';
 import type { OrgFiles } from './files';
 import type { RegistryFeed } from './registry-feed';
@@ -395,7 +401,7 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
   function rows(): OrgRows {
     const machines = [...deps.roster()];
     const current = signedIn();
-    if (current === null) return { machines, rows: [], complete: false, pending: [] };
+    if (current === null) return { machines, rows: [], complete: false, pending: [], members: [], member: null };
     const roster = new Set<string>(machines);
     const join = joinIds(current.identity.org);
     const member = current.identity.member;
@@ -421,7 +427,15 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
     out.sort((a, b) => (a.machine === b.machine ? (a.session < b.session ? -1 : a.session > b.session ? 1 : 0) : a.machine < b.machine ? -1 : 1));
     const waitingMachines = new Set([...waiting.values()].map((entry) => entry.record.body.machine));
     const complete = snapshotApplied && (announced === null || current.view.head().state.version >= announced);
-    return { machines, rows: out, complete, pending: machines.filter((m) => waitingMachines.has(m)) };
+    return { machines, rows: out, complete, pending: machines.filter((m) => waitingMachines.has(m)), members: ownersOf(current.view.head().state, out), member };
+  }
+
+  /** M5: every member some row's owners name, in the order the rows first name them, as the held head lists them. */
+  function ownersOf(state: OrgState, out: readonly RemoteRow[]): OrgMember[] {
+    const names = memberNames(state.members);
+    const emails = new Map(state.members.map((m) => [m.id, m.email]));
+    const ids = new Set(out.flatMap((row) => row.owners));
+    return [...ids].map((id) => ({ id, email: emails.get(id) ?? null, name: names.get(id) ?? FORMER_MEMBER }));
   }
 
   function schedule(): void {

@@ -30,7 +30,7 @@ refusals() { # <the jobs, "conclusion<TAB>name" lines> <the failed jobs' logs>
   # merge base of the moment.
   [[ -n ${relaunch_peer:-} ]] && relaunch+=" --peer $relaunch_peer"
   beside=$({
-    printf '%s\n' "$1" | awk -F'\t' '$1 != "skipped" && $2 ~ /^e2e:[A-Za-z0-9._:-]+$/ { print substr($2, 5) }'
+    printf '%s\n' "$1" | awk -F'\t' '{ sub(/ \(EC2 overflow\)$/, "", $2) } $1 != "skipped" && $2 ~ /^e2e:[A-Za-z0-9._:-]+$/ { print substr($2, 5) }'
     printf '%s\n' "$default_beside" | tr ', ' '\n'
   } | awk 'NF && $0 != "default" && !seen[$0]++' | paste -sd, -)
   # The refused through the environment, since awk's -v takes no newline.
@@ -38,6 +38,7 @@ refusals() { # <the jobs, "conclusion<TAB>name" lines> <the failed jobs' logs>
     # A red build skips the guest matrix before expansion, losing its group names. It is a prerequisite, not a gate:
     # relaunch the requested set, as for a refused plan, rather than omit the unnamed guest groups.
     function relaunched(job) {
+      sub(/ \(EC2 overflow\)$/, "", job)
       if (job ~ /^e2e-build \([^)]+\)$/) { build = 1; return }
       if (job ~ /^unit [0-9]+\/[0-9]+$/) job = "unit"
       if (!(job in named)) { named[job] = 1; gates = gates "," job }

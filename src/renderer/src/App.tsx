@@ -15,6 +15,7 @@ import { connectEditClaimants } from './keymap/edit-claimants'; // P4-B2 K6
 import { connectVisibility } from './session/visibility';
 import { persistLayout } from './stores/layout';
 import { useSettings } from './stores/settings';
+import { usePeople } from './stores/people'; // P5 O8 M5
 import { connectTranscript } from './transcript/shell'; // C6
 // C8a start
 import { registerSlot } from './app/slots';
@@ -185,6 +186,7 @@ export function App() {
     return connectPanelHost();
   }, []);
   useEffect(() => connectPanelEvents(), []); // the summary's git.changed and fs.workflowChanged
+  useEffect(() => void usePeople.getState().load(), []); // P5 O8 M5: the sidebar's People toggles, read once
   // Tool registration is the panel host's line (ruling O2). Never unregistered: a registration's disposer closes the
   // tool's tabs, which StrictMode's effect replay would do on every mount.
   useEffect(() => {
