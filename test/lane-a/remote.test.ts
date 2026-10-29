@@ -150,7 +150,7 @@ async function lab(options: { relay?: boolean } = {}): Promise<Lab> {
   cleanups.push(() => adapter.stop());
   const base: Array<{ name: string }> = [];
   const route = routeLaneA(
-    async (_machine, name) => (base.push({ name }), { ok: true, value: 'manager' }) as CommandResult<CommandName>,
+    async (_machine, name) => (base.push({ name }), { ok: true, value: 'manager' }) as unknown as CommandResult<CommandName>,
     (ref) => (ref === link.machine ? link : null),
     adapter,
   );
@@ -232,7 +232,7 @@ describe('remote lane A over a real link', { timeout: 30_000 }, () => {
   it('leaves every command but laneA.* to O7’s path, and laneA.* for a machine the link doesn’t answer', async () => {
     const l = await lab();
     expect(await l.route('session.status', { appSessionId: 'app-1' })).toEqual({ ok: true, value: 'manager' });
-    const route = routeLaneA(async (_m, name) => (l.base.push({ name }), { ok: true, value: 'manager' }) as CommandResult<CommandName>, () => null, l.adapter);
+    const route = routeLaneA(async (_m, name) => (l.base.push({ name }), { ok: true, value: 'manager' }) as unknown as CommandResult<CommandName>, () => null, l.adapter);
     expect(await route('another-machine-ref-01' as MachineRef, 'laneA.list', undefined, { client: l.client, target: l.machine })).toEqual({ ok: true, value: 'manager' });
     expect(l.base.map((b) => b.name)).toEqual(['session.status', 'laneA.list']);
   });

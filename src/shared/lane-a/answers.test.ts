@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { inputSha256 } from 'desk-hub/protocol';
 import type { RequestAnswer } from '@shared/engine/answers';
-import { answerIntent, requestKind, suggestionSha256 } from './answers';
+import { answerIntent, requestKind, suggestionSha256, type Controls } from './answers';
 
 const controls = {
   'decide.scope': { available: true },
@@ -15,7 +15,7 @@ const permission = { request: 'toolu_1', tool: 'Bash', input: { command: 'npm te
 const native = { request: 'toolu_q', tool: 'AskUserQuestion', input: { questions: [{ question: 'Which?' }] } };
 const asyncQ = { request: 'toolu_plugin_1', tool: 'mcp__sminos__AskUserQuestion', input: {}, async: true as const };
 const plan = { request: 'toolu_p', tool: 'ExitPlanMode', input: { plan: 'do it' } };
-const intent = (raised: Record<string, unknown>, answer: RequestAnswer, given = controls) => answerIntent({ raised, answer, controls: given });
+const intent = (raised: Record<string, unknown>, answer: RequestAnswer, given: Controls = controls) => answerIntent({ raised, answer, controls: given });
 
 describe('lane A answer intents', () => {
   it('reads a request kind by the bridge’s own rule', () => {

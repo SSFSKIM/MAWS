@@ -42,7 +42,8 @@ import { validateCommandOutput } from '@shared/ipc/validate';
 import { answerIntent, suggestionSha256 } from '@shared/lane-a/answers';
 import type { MachineRef } from '@shared/machine/ref';
 import type { MainContext, RemoteDispatch } from '../ipc/router';
-import type { ActOutcome, ActRequest, RemoteLink, Subscription } from '../machines/remote/link';
+import type { ActRequest, RemoteLink, Subscription } from '../machines/remote/link';
+import { controlOf, sendFate } from './remote-outcomes';
 import { NO_BRIDGE, RemoteFold, type StatusRead } from './remote-state';
 
 export type LaneACommand = Extract<CommandName, `laneA.${string}`>;
@@ -128,74 +129,6 @@ const keyOf = (key: DeliveryKey) => `${key.writer}#${key.seq}`;
 const NOT_OPEN = 'the session isn’t open here: open it to drive it';
 export const STOP_TASK_GAP = 'a background shell on another machine is stopped there: stopping one from here isn’t offered';
 export const MEDIA_GAP = 'attachments to a session on another machine wait for uploads across machines';
-
-/** A refusal's code in words: the endpoint's, the link's or sminos's. */
-export function refusalWords(code: string, machine: string, rpc?: string): string {
-  if (rpc === 'send' && code === 'unsupported') return `${machine}’s sminos predates sends from MAWS: update sminos there`;
-  switch (code) {
-    case 'offline':
-      return `${machine} wasn’t reachable within a minute; nothing ran`;
-    case 'step-up-cancelled':
-      return 'the confirmation was cancelled; nothing ran';
-    case 'step-up':
-      return 'it needed a confirmation that didn’t verify; nothing ran';
-    case 'context':
-      return 'the session restarted since it was shown; nothing ran';
-    case 'unavailable':
-      return `${machine} can’t reach this session’s bridge now; nothing ran`;
-    case 'grade':
-    case 'class':
-      return 'you can’t do that on this session';
-    case 'read-only':
-      return `${machine} is read-only: it runs nothing sent from outside it`;
-    case 'not-pending':
-      return 'the request is no longer pending';
-    case 'digest-mismatch':
-      return 'the request changed since it was shown; nothing was decided';
-    case 'refused-delivery':
-      return 'the session refused the message';
-    case 'duplicate':
-      return 'the bridge had already taken this message';
-    case 'not-sent':
-      return 'not sent: nothing ran, so it can be sent again';
-    case 'busy':
-      return `${machine} is busy; try again`;
-    case 'unsupported':
-      return 'this session can’t do that';
-    default:
-      return `refused by ${machine} (${code})`;
-  }
-}
-
-/** An act's outcome as the port's `ControlResult`. */
-export function controlOf(outcome: ActOutcome, machine: string, rpc?: string): ControlResult {
-  switch (outcome.state) {
-    case 'done':
-      return { state: 'done', result: outcome.result ?? null };
-    case 'failed': {
-      const code = typeof record(outcome.error)?.code === 'string' ? (record(outcome.error)!.code as string) : 'failed';
-      return refused(code, refusalWords(code, machine, rpc));
-    }
-    case 'refused':
-      return refused(outcome.reason, refusalWords(outcome.reason, machine, rpc));
-    case 'not-sent':
-      return refused('not-sent', refusalWords('not-sent', machine, rpc));
-    case 'unknown':
-      return { state: 'unknown', why: outcome.reason === 'expired' ? 'expired' : 'gone' };
-  }
-}
-
-/** A send's fate from its act's outcome (Interfaces §E): entered, refused, or unconfirmed when nothing says it entered. */
-export function sendFate(outcome: ActOutcome, machine: string): Pick<LaneADelivery, 'state' | 'uuid' | 'reason'> & { code?: string } {
-  if (outcome.state === 'done') {
-    const result = record(outcome.result);
-    if (result?.entered === true) return { state: 'entered', ...(typeof result.uuid === 'string' && { uuid: result.uuid }) };
-    return { state: 'unconfirmed', reason: 'it may not have arrived: the session took it but hasn’t said it entered' };
-  }
-  if (outcome.state === 'unknown') return { state: 'unconfirmed', reason: 'it may not have arrived: its outcome is unknown' };
-  const control = controlOf(outcome, machine, 'send') as Extract<ControlResult, { state: 'refused' }>;
-  return { state: 'refused', reason: control.message, code: control.code };
-}
 
 export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
   const timing: RemoteLaneATiming = { ...REMOTE_LANE_A_TIMING, ...deps.timing };
