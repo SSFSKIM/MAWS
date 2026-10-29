@@ -52,7 +52,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
 - [ ] M4a — The Org page: its shape, people and devices — **executable** (re-planned 2026-10-29; needs M3 and H1, both landed)
   - [x] (2026-10-29) Task 1, reviewed clean and approved by the desk track (336af704b): the move: the pairing judges and their `PendingEntry` type into `org-protocol`, `admin.ts` importing them (its own commit, the desk track's review).
   - [x] (2026-10-29) Task 2, reviewed clean and approved by the desk track (5935f62a5; review fix 592211929; boundary comment 37ce2077d): `successorProblems` and `stateProblems` in `org-protocol`, and `admin.ts`'s `amend` running it (the desk track's review).
-  - [ ] Task 3: the signing paths: `edits.ts`, `Edit.endorse` and `Edit.live`, `StateSigner.sign`'s endorsement and guard, the signer's check before the slot, and `checks.ts` running `successorProblems`.
+  - [x] (2026-10-29) Task 3, reviewed clean (643d126de, fix 6d23a8055): the signing paths: `edits.ts`, `Edit.endorse` and `Edit.live`, `StateSigner.sign`'s endorsement and guard, the signer's check before the slot, and `checks.ts` running `successorProblems`.
   - [ ] Task 4: the session's surface: `org.view`, `org.preview`, `org.change`, `org.pair.*`, `pairing.ts`, `hub-client.ts`'s `pendingOf`, `refused.attempt`, the schema and main's wiring.
   - [ ] Task 5: `close()`'s fence and join (`HeldOrg.close()`, the parts' operations in flight), and the two test workarounds removed.
   - [ ] Task 6: the renderer: `settings-tab/org/`, the four groups, the change and pair sheets, `copy.ts`.
@@ -2081,6 +2081,10 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   6. `live()` is also checked just before Touch ID, so a pairing that already ended shows no prompt. That makes four checks.
   7. Asked to endorse a device the state doesn't list, the device module throws. The signer catches that case first and refuses `invalid`.
   8. M3's `invalid` test now uses a device endorsed by an unknown key (`unknown-signer`), since a changed recovery key is refused before Touch ID.
+  9. (Review fix, 6d23a8055.) A pairing that ended while `signing.json`'s first write was being prepared still wrote and posted its slot. The store awaited the registration's `signing` mark after the callback's liveness check.
+     - On a first write, `update` now marks the registration, then runs its callback again on a fresh copy, and writes that second result with no await between. Every check an update makes runs just before the write.
+     - Update callbacks are therefore pure and synchronous functions of the file. The signer's, deliveries' and weekly's all are.
+     - Once marked, the registration stays marked and `signing.json` is written as it stands, so the store stays fail-closed.
   Date/Author: 2026-10-29, O8's executor.
 
 ## Outcomes & Retrospective
