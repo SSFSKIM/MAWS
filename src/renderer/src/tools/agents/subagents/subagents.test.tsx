@@ -35,6 +35,11 @@ import { REL } from '../../../test-support/relative-time';
 import { laneAState } from '../../../lane-a/test-support/lane-a-state'; // P5 O9
 import { applyLaneAState, resetLaneAStore } from '../../../stores/lane-a'; // P5 O9
 import { STOP_DOUBT_MS } from './shared'; // P5 O9
+import { addressOf } from '@shared/machine/address'; // P5 O9 M9
+import type { LaneAState } from '@shared/ipc/schema/lane-a'; // P5 O9 M9
+import { remoteRow } from '../../../../../../test/support/builders'; // P5 O9 M9
+import { OTHER_MACHINE } from '../../../../../../test/support/machine'; // P5 O9 M9
+import { LANE_A_WORDS } from '../../../session/controls/lane-a'; // P5 O9 M9
 
 const M3 = REL.agoNarrow(3, 'minute'); // 3m ago, 3분 전
 
@@ -605,6 +610,24 @@ describe('drill-in', () => {
       expect(invoked.find(([name]) => name === 'laneA.stopAgent')?.[1]).toEqual({ appSessionId: 'A', agentId: 'a1' }); // the bare id, as the client sends it
       expect(fake.inputs.stopTask).toEqual([]);
       expect(screen.getByRole('button', { name: 'stopping…' })).toBeTruthy();
+    });
+
+    // P5 O9 M9 (landing fix wave): another machine's terminal session withholds a subagent's own rows (its port's
+    // `subagent-rows` gap), so the drill-in reached from its tree says so with the reason in place of the transcript, and
+    // asks this machine's `session.events` nothing; Stop and Tell stay, through its port.
+    it('shows a remote session’s subagent rows as unavailable with the reason, building no child source, and keeps Stop and Tell', async () => {
+      const remote = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
+      const link: NonNullable<LaneAState['link']> = { state: 'up', refusal: null, carrier: 'direct', member: 'm', clientClass: 'native-mac', rights: [], reason: null };
+      useSessions.setState({ listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', availability: 'foreign_held' }), appId: remote }]]) });
+      applyLaneAState(remote, laneAState(remote, { engineSessionId: 'eng-r', link, acts: [], turn: { running: true, unknown: false } }));
+      ipcSourceSpy.mockClear();
+      render(<Mounted state={create({ agentId: 'a1' as AgentId }, remote)} appSessionId={remote} />);
+      expect(screen.getByTestId('subagent-rows-gap').textContent).toBe(LANE_A_WORDS.remoteSubagentRows);
+      expect(ipcSourceSpy).not.toHaveBeenCalled();
+      expect(invoked.filter(([name]) => name === 'session.events')).toEqual([]);
+      expect((screen.getByRole('button', { name: 'Stop agent' }) as HTMLButtonElement).disabled).toBe(false);
+      expect(screen.getByRole('textbox')).toBeTruthy(); // Tell, the relay composer
+      useSessions.setState({ listed: new Map() });
     });
 
     it('says a stop with an unknown outcome may not have stopped, and offers Stop again after the wait', async () => {

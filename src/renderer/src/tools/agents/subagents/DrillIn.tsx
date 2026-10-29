@@ -59,7 +59,11 @@ export function DrillIn({ appSessionId, agentId, handle, draft, ctx }: Props) {
   const driven = controls && controls.turn() !== null ? controls : null;
   const title = node ? rowTitle(node) : agentId;
 
-  const source = useMemo(() => childSourceFor(appSessionId, agentId), [appSessionId, agentId]);
+  // P5 O9 M9: a session whose port withholds a subagent's own rows (another machine's) shows why in their place, and no
+  // child source is built for it (this machine's reads know nothing of that session); Stop and Tell stay.
+  const rowsGap = controls?.capability('subagent-rows') ?? null;
+  const gap = rowsGap !== null && !rowsGap.available ? rowsGap.reason : null;
+  const source = useMemo(() => (gap === null ? childSourceFor(appSessionId, agentId) : null), [appSessionId, agentId, gap]);
   const registered = useRegisteredActions();
   const actions = useMemo(() => ({ ...registered, ...agentTranscriptActions }), [registered]);
   const renderRequest = useMemo(() => renderInlineRequest(appSessionId), [appSessionId]);
@@ -67,7 +71,7 @@ export function DrillIn({ appSessionId, agentId, handle, draft, ctx }: Props) {
   // The key's liveness, as C6's shell transcript tells it for C5's agent tab: an unset key ticks from the wall clock.
   const live = useSessions((s) => LIVE_PHASES.has(s.digests.get(appSessionId)?.phase as SessionPhase));
   useEffect(() => {
-    const key = source.key;
+    const key = source?.key;
     if (!key) return;
     useTranscriptStore.getState().setLive(key, live);
     return () => useTranscriptStore.getState().setLive(key, null);
@@ -103,7 +107,13 @@ export function DrillIn({ appSessionId, agentId, handle, draft, ctx }: Props) {
           {driven && !(node && isEnded(node.status)) && <StopAgent key={agentId} appSessionId={appSessionId} node={node} title={title} driven={{ controls: driven, agentId }} />}
         </div>
       </header>
-      <Transcript key={source.key ?? agentId} source={source} variant="child" actions={actions} renderRequest={renderRequest} className="min-h-0 flex-1" />
+      {source === null ? (
+        <p role="status" data-testid="subagent-rows-gap" className="m-0 min-h-0 flex-1 px-4 py-3 text-ui-sm text-fg-muted">
+          {gap}
+        </p>
+      ) : (
+        <Transcript key={source.key ?? agentId} source={source} variant="child" actions={actions} renderRequest={renderRequest} className="min-h-0 flex-1" />
+      )}
       <RelayComposer appSessionId={appSessionId} agentId={agentId} node={node} status={ctx.status} sessionTitle={sessionTitle} visible={ctx.visible} draft={draft} onDraft={handle.setDraft} onSent={() => handle.clearDraftFor(agentId)} />
     </div>
   );
