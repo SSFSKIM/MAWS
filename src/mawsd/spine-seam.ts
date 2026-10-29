@@ -277,7 +277,10 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
       log('spine: released');
       if (why !== 'stop') options.collected();
       if (reexecute) options.restart('spine released');
-      else if (why === 'yield' && !yieldTo) set('cold', 'the yield lifted');
+      else if (why === 'yield' && !yieldTo) {
+        events.cold(); // lifted while it released
+        set('cold', 'the yield lifted');
+      }
     })().finally(() => {
       releasing = null;
     });
@@ -322,6 +325,7 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
     clearInterval(yieldTo.check);
     log(`spine: the yield to pid ${yieldTo.pid} lifted`);
     yieldTo = null;
+    if (state === 'loading') events.beginHold(true); // the load goes on: its barrier drains what arrives from here
     if (state === 'yielded') {
       events.cold();
       set('cold', 'the yield lifted');

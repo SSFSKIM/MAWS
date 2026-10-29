@@ -95,9 +95,10 @@ export class SpineEvents {
     return () => void this.listeners.get(name)?.delete(listener);
   }
 
-  // From a trigger, a later connection's streaming, or a non-re-executing release's end: what arrives is held.
-  beginHold(): void {
-    if (this.mode !== 'off') this.mode = 'holding';
+  // From a trigger or a later connection's streaming: what arrives is held. Off stays off (a yield) unless `resume`
+  // says the yield lifted while the load went on.
+  beginHold(resume = false): void {
+    if (this.mode !== 'off' || resume) this.mode = 'holding';
   }
   holding(): boolean {
     return this.mode === 'holding';
@@ -138,8 +139,8 @@ export class SpineEvents {
     this.mode = next;
   }
 
-  // The parts stopped: the root's listeners go with them (an adapter's close removes its own); `next` is cold (the
-  // hold starts at the next batch, which is a trigger) or off.
+  // The parts stopped (an adapter's close removes the root's listeners): cold, where the next batch is a trigger and
+  // starts the next hold, or off (a yield), where nothing is kept.
   cold(): void {
     this.mode = 'cold';
   }

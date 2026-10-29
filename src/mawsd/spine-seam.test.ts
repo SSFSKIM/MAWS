@@ -15,7 +15,7 @@ import { ev } from '../../test/support/events';
 import { takeSpineLock, type SpineLock } from '../services/settings/spine-lock';
 import type { SpineDeps, SpineHosts, SpineRoot } from '../services/spine-root';
 import type { EngineLink } from './spine-hosts';
-import { createLazySpine, type LazySpine, type LazySpineOptions, type SpineEntry } from './spine-seam';
+import { createLazySpine, workingSession, type LazySpine, type LazySpineOptions, type SpineEntry } from './spine-seam';
 
 const BUILD = '0.0.0+spine-seam-test';
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -371,6 +371,17 @@ describe('the release', () => {
     expect(link.calls.map((call) => call.name)).not.toContain('session.stop');
   });
 
+  it('a session is working while it launches, holds a turn, host work or background tasks, or runs an engine-started turn; a request, a queue or a stateful MCP server keeps only its process', () => {
+    const of = (over: Parameters<typeof statusOf>[1], keepAlive: EngineSessionStatus['keepAlive'] = []) => workingSession({ ...statusOf('s1', over), keepAlive });
+    expect(of({ process: 'starting' })).toBe(true);
+    expect(of({ process: 'initializing' })).toBe(true);
+    for (const reason of ['turn', 'busy', 'background_tasks'] as const) expect(of({}, [reason]), reason).toBe(true);
+    expect(of({ engineState: 'requires_action' })).toBe(true);
+    for (const reason of ['pending_request', 'queued_messages', 'held_peer_message', 'stateful_mcp'] as const) expect(of({}, [reason]), reason).toBe(false);
+    expect(of({})).toBe(false); // ready, idle, nothing kept
+    expect(of({ process: 'exited' }, ['turn'])).toBe(false);
+  });
+
   it('a client or a hold (the daemon’s quiet) holds it', async () => {
     const spine = seam();
     await spine.ensure('command');
@@ -412,9 +423,14 @@ describe('the release', () => {
     const root = (await spine.ensure('command')) as FakeRoot;
     root.stop.mockImplementation(() => void root.seen.push('stopped'));
     spine.quiet(true);
+    await sleep(10);
+    const done = root.hold(); // work that began once the period ran: the release waits for it
+    await vi.waitFor(() => expect(spine.state()).toBe('releasing'));
+    link.batch('s1', 40); // while the release settles
+    done();
     await vi.waitFor(() => expect(restarts).toEqual(['spine released']));
     expect(ended).toBe(1);
-    expect(root.seen).toEqual(['live batch s1 41', 'live batch s1 42', 'stopped']);
+    expect(root.seen).toEqual(['live batch s1 40', 'live batch s1 41', 'live batch s1 42', 'stopped']);
   });
 
   it('stop at the daemon’s exit releases without re-executing', async () => {
@@ -464,6 +480,23 @@ describe('the yield', () => {
     expect(first.stop).not.toHaveBeenCalled(); // the exit ends the writer; nothing is handed over in process
     const candidate = await takeSpineLock(profile, { build: 'the old app', waitMs: 10, log: () => {} });
     expect(candidate.refused).not.toBeNull();
+  });
+
+  it('a yield lifted while the load goes on: the load completes and what arrives from then on folds', async () => {
+    link.stream();
+    const release = link.gate('engine.sessions');
+    const spine = seam({ processes });
+    const loaded = spine.ensure('command');
+    await vi.waitFor(() => expect(roots).toHaveLength(1));
+    spine.yield(777);
+    live.delete(777);
+    await vi.waitFor(() => expect(logs).toContain('spine: the yield to pid 777 lifted'));
+    link.batch('s1', 5); // held again: the load's barrier drains it
+    release();
+    const root = (await loaded) as FakeRoot;
+    link.batch('s1', 6);
+    expect(root.seen).toEqual(['resync', 'resync paged (ok)', 'held batch s1 5', 'live batch s1 6']);
+    expect(spine.state()).toBe('loaded');
   });
 
   it('a yield during a load discards its hold, counted, and a cold seam just refuses until the pid is gone', async () => {
