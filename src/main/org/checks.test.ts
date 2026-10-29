@@ -151,6 +151,60 @@ describe('checkSuccessor', () => {
     expect(await check(g, await successor(g, [a1]))).toEqual([]);
   });
 
+  // M4a: the package's pre-sign function runs first, so everything `verifySuccessor` would refuse for a reason other
+  // than a signature is a refusal here, by the package's own code, before Touch ID.
+  describe("successorProblems' codes, as refusals before Touch ID", () => {
+    const B = '0123456789abcdef0123456789abcdef';
+    const member = (email: string, role: 'admin' | 'member' = 'member') => ({ id: B, email, role, devices: [] as Device[] });
+
+    it('refuses each problem the package names, by its code, where the package refuses the signed state', async () => {
+      const d = await newDevice('d');
+      const other = await generateSigningKey();
+      const cases: Array<[string, (s: OrgState) => void | Promise<void>]> = [
+        ['endorsement-missing', (s) => void s.members[0].devices.push(d.device)],
+        ['email-taken', (s) => void s.members.push(member('OWNER@example.com'))],
+        ['root-not-admin', async (s) => {
+          s.members.push({ ...member('b@example.com'), devices: [d.device] });
+          s.root.keys.push(await keyId(d.stepUp.pub));
+        }],
+        ['recovery-changed', (s) => void (s.root.recoveryPub = other.pub)],
+        ['owners-unknown', async (s) => {
+          await enroll(s, 'mini');
+          s.machines[0].owners = [B];
+        }],
+      ];
+      for (const [code, edit] of cases) {
+        const next = await successor(g, [a1], edit);
+        const findings = await check(g, next);
+        expect(codes(findings), code).toEqual([`refuse:${code}`]);
+        expect(findings[0].detail, code).not.toBe('');
+        expect(await verdict(g, next), code).not.toBe('ok');
+      }
+    });
+
+    it('counts a device as endorsed when the signer endorses it inside the same Touch ID, under the member\'s own key alone', async () => {
+      const d = await newDevice('d');
+      const next = await successor(g, [a1], (s) => void s.members[0].devices.push(d.device));
+      const at = new Date();
+      expect(await checkSuccessor(g.state, next.state, [], at, { endorsing: { kid: await keyId(a1.stepUp.pub), devices: ['d'] } })).toEqual([]);
+      const stranger = await generateSigningKey();
+      const findings = await checkSuccessor(g.state, next.state, [], at, { endorsing: { kid: await keyId(stranger.pub), devices: ['d'] } });
+      expect(codes(findings)).toEqual(['refuse:endorsement-missing']);
+      // Signed with the real endorsement, the package agrees.
+      const endorsedNext = await successor(g, [a1], async (s) => void s.members[0].devices.push(await endorsed(d, a1)));
+      expect(await verdict(g, endorsedNext)).toBe('ok');
+    });
+
+    it('names a rule the app and the package both hold once, by the package', async () => {
+      // The machine's name sits in `machines` and in `machineNames`: one problem, not one per list and one per module.
+      const head = await successor(g, [a1], (s) => enroll(s, 'dc-prod-1').then(() => {}));
+      const { delegation } = await newDelegation('dc-');
+      const findings = await check(head, await successor(head, [a1], (s) => void s.delegations.push(delegation)));
+      expect(codes(findings)).toEqual(['refuse:prefix-names-machine']);
+      expect(findings[0].detail).toMatch(/dc-prod-1/);
+    });
+  });
+
   describe('revives-revoked', () => {
     it("refuses a revoked device's keys made current again, as the package does", async () => {
       const d = await newDevice('d');
@@ -197,21 +251,21 @@ describe('checkSuccessor', () => {
     it('refuses dc-prod- under a live dc- as nested, as the package does', async () => {
       const head = await headWith('dc-');
       const next = await adding(head, 'dc-prod-');
-      expect(codes(await check(head, next))).toEqual(['refuse:prefix-nested']);
+      expect(codes(await check(head, next))).toEqual(['refuse:prefix-overlaps', 'refuse:prefix-nested']);
       expect(await verdict(head, next)).toBe('malformed');
     });
 
     it('refuses dc- over a live dc-prod- as covering it, as the package does', async () => {
       const head = await headWith('dc-prod-');
       const next = await adding(head, 'dc-');
-      expect(codes(await check(head, next))).toEqual(['refuse:prefix-covers']);
+      expect(codes(await check(head, next))).toEqual(['refuse:prefix-overlaps', 'refuse:prefix-covers']);
       expect(await verdict(head, next)).toBe('malformed');
     });
 
     it('refuses an equal prefix, case-folded, as the package does', async () => {
       const head = await headWith('dc-');
       const next = await adding(head, 'DC-');
-      expect(codes(await check(head, next))).toEqual(['refuse:prefix-equal']);
+      expect(codes(await check(head, next))).toEqual(['refuse:prefix-overlaps', 'refuse:prefix-equal']);
       expect(await verdict(head, next)).toBe('malformed');
     });
 
@@ -221,7 +275,7 @@ describe('checkSuccessor', () => {
       const s3 = await successor(s2, [a1], (s) => dropDelegation(s, dc.delegation));
       for (const [prefix, code] of [['dc-', 'prefix-equal'], ['dc-x-', 'prefix-nested'], ['d', 'prefix-covers']] as const) {
         const next = await adding(s3, prefix);
-        expect(codes(await check(s3, next))).toEqual([`refuse:${code}`]);
+        expect(codes(await check(s3, next))).toEqual(['refuse:prefix-overlaps', `refuse:${code}`]);
         expect(await verdict(s3, next)).toBe('malformed');
       }
     });
@@ -234,7 +288,7 @@ describe('checkSuccessor', () => {
         await dropDelegation(s, dc.delegation);
         s.delegations.push(prod.delegation);
       });
-      expect(codes(await check(head, next))).toEqual(['refuse:prefix-nested', 'warn:drops-delegation']);
+      expect(codes(await check(head, next))).toEqual(['refuse:prefix-overlaps', 'refuse:prefix-nested', 'warn:drops-delegation']);
       expect(await verdict(head, next)).toBe('malformed');
     });
 
@@ -242,7 +296,7 @@ describe('checkSuccessor', () => {
       const x = await newDelegation('dc-');
       const y = await newDelegation('dc-prod-');
       const next = await successor(g, [a1], (s) => void s.delegations.push(x.delegation, y.delegation));
-      expect(codes(await check(g, next))).toEqual(['refuse:prefix-covers']);
+      expect(codes(await check(g, next))).toEqual(['refuse:prefix-overlaps', 'refuse:prefix-covers']);
       expect(await verdict(g, next)).toBe('malformed');
     });
 
@@ -303,7 +357,7 @@ describe('checkSuccessor', () => {
       const dc = await newDelegation('dc-', iso(t0 - 2 * DAY));
       const head = await successor(g, [a1], (s) => void s.delegations.push(dc.delegation), iso(t0 - 3 * DAY));
       const next = await successor(head, [a1], (s) => void (s.delegations[0].expires = iso(t0 + 30 * DAY)), iso(t0));
-      expect(codes(await check(head, next, [], new Date(t0)))).toEqual(['refuse:renew-expired']);
+      expect(codes(await check(head, next, [], new Date(t0)))).toEqual(['refuse:keys-unaccounted', 'refuse:renew-expired']);
       expect(await verdict(head, next)).toBe('malformed');
     });
 
@@ -311,7 +365,7 @@ describe('checkSuccessor', () => {
       const dc = await newDelegation('dc-', iso(t0 + 30 * DAY));
       const head = await successor(g, [a1], (s) => void s.delegations.push(dc.delegation), iso(t0 - DAY));
       const next = await successor(head, [a1], (s) => void (s.delegations[0].expires = iso(t0)), iso(t0));
-      expect(codes(await check(head, next, [], new Date(t0)))).toEqual(['refuse:renew-expired']);
+      expect(codes(await check(head, next, [], new Date(t0)))).toEqual(['refuse:keys-unaccounted', 'refuse:renew-expired']);
       expect(await verdict(head, next)).toBe('malformed');
     });
 

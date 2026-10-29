@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   canonicalize,
+  endorseDevice,
   generateSigningKey,
   keyId,
   NO_CERTIFICATES,
@@ -392,10 +393,13 @@ describe('the checks and the verdict', () => {
 
   it('refuses `invalid` when the signed state fails verifySuccessor, keeping and sending nothing', async () => {
     const h = await harness();
-    const other = await generateSigningKey();
-    // No check names a changed recovery key; the package refuses it (`malformed`) once it is signed.
-    const recovery: Edit = { summary: 'change the recovery key', lines: [], apply: (draft) => void (draft.root.recoveryPub = other.pub) };
-    expect(await h.signer.sign(recovery)).toEqual({ ok: false, reason: 'invalid', detail: 'malformed' });
+    // The checks run every rule but the signatures (M4a's `successorProblems`), so only a signature fails here: a new
+    // device of the owner endorsed by a key no device of theirs holds, which the package refuses once it is signed.
+    const fresh = await newDevice('dev-fresh');
+    const stranger = await generateSigningKey();
+    const endorsement = await endorseDevice(ORG, OWNER, fresh.device, stranger.privateKey, stranger.pub);
+    const forged: Edit = { summary: 'pair a device', lines: [], apply: (draft) => void draft.members[0].devices.push({ ...fresh.device, endorsement }) };
+    expect(await h.signer.sign(forged)).toEqual({ ok: false, reason: 'invalid', detail: 'unknown-signer' });
     expect(h.prompts).toHaveLength(1);
     expect(h.hub.posts).toEqual([]);
     expect(h.disk()).toBeNull();
@@ -451,6 +455,96 @@ describe('the checks and the verdict', () => {
     expect(await h.signer.sign(noChangeEdit())).toEqual({ ok: false, reason: 'cancelled' });
     expect(h.hub.posts).toEqual([]);
     expect(h.disk()).toBeNull();
+  });
+});
+
+// M4a ("Endorsement inside one Touch ID", and pairing's liveness guard): a device of this Mac's own member is endorsed
+// with its step-up key inside the same Touch ID that signs the state, and an edit whose `live()` turns false (a
+// pairing cancelled or expired) endorses, signs, slots and posts nothing, whenever it turns.
+describe('endorsement and liveness', () => {
+  /** The owner's new device, appended unendorsed; `endorse` names it, `live` guards it. */
+  async function pairOwn(options: { endorse?: boolean; live?: () => boolean } = {}): Promise<{ edit: Edit; fresh: TestDevice }> {
+    const fresh = await newDevice('dev-paired');
+    const edit: Edit = {
+      summary: 'pair device dev-paired to owner@example.com',
+      lines: ['Pair dev-paired (native-mac) to owner@example.com, endorsed by this Mac'],
+      ...(options.endorse === false ? {} : { endorse: [{ member: OWNER, device: fresh.device.id }] }),
+      ...(options.live === undefined ? {} : { live: options.live }),
+      apply: (draft) => void draft.members[0].devices.push(structuredClone(fresh.device)),
+    };
+    return { edit, fresh };
+  }
+
+  it("endorses this Mac's member's new device with its step-up key inside the one Touch ID, and the hub accepts it", async () => {
+    const h = await harness();
+    const { edit, fresh } = await pairOwn();
+    expect(await h.signer.sign(edit)).toEqual({ ok: true, version: 2 });
+    expect(h.prompts).toHaveLength(1);
+    const listed = h.hub.posts[0].state.members[0].devices.find((d) => d.id === fresh.device.id)!;
+    expect(listed.endorsement?.kid).toBe(await keyId((await org()).app.stepUp.pub));
+    expect(await verifySuccessor(h.genesis, h.hub.posts[0], [])).toEqual({ ok: true });
+    expect(h.held.head().state.members[0].devices.map((d) => d.id)).toContain(fresh.device.id);
+  });
+
+  it('refuses the same device unendorsed before Touch ID, since the checks see no endorsement promised', async () => {
+    const h = await harness();
+    const { edit } = await pairOwn({ endorse: false });
+    expect(await h.signer.sign(edit)).toMatchObject({ ok: false, reason: 'refused', findings: [{ level: 'refuse', code: 'endorsement-missing' }] });
+    expect(h.prompts).toEqual([]);
+    expect(h.disk()).toBeNull();
+  });
+
+  it('asks nothing for an edit no longer live before Touch ID: `stale`', async () => {
+    const h = await harness();
+    const { edit } = await pairOwn({ live: () => false });
+    expect(await h.signer.sign(edit)).toMatchObject({ ok: false, reason: 'stale' });
+    expect(h.prompts).toEqual([]);
+    expect(h.hub.posts).toEqual([]);
+    expect(h.disk()).toBeNull();
+  });
+
+  it('endorses, signs, slots and posts nothing when it ends while Touch ID is open and the person then says yes', async () => {
+    const h = await harness();
+    let live = true;
+    const { edit } = await pairOwn({ live: () => live });
+    h.during = () => void (live = false); // the pairing cancelled, or expired, while the prompt is up
+    const signs = vi.spyOn(crypto.subtle, 'sign');
+    try {
+      expect(await h.signer.sign(edit)).toMatchObject({ ok: false, reason: 'cancelled' });
+      expect(signs).not.toHaveBeenCalled();
+    } finally {
+      signs.mockRestore();
+    }
+    expect(h.prompts).toHaveLength(1);
+    expect(h.hub.posts).toEqual([]);
+    expect(h.disk()).toBeNull();
+    expect(h.signer.pending()).toBeNull();
+  });
+
+  it('keeps and posts nothing when it ends after Touch ID and before the slot is written: `stale`', async () => {
+    const h = await harness();
+    let live = true;
+    const { edit } = await pairOwn({ live: () => live });
+    // Between the signature and the slot's write the signer awaits the verdict and the delivery obligation.
+    h.deliveries = fakeDeliveries(() => void (live = false));
+    expect(await h.signer.sign(edit)).toMatchObject({ ok: false, reason: 'stale' });
+    expect(h.prompts).toHaveLength(1);
+    expect(h.hub.posts).toEqual([]);
+    expect(h.disk()).toBeNull();
+    expect(h.signer.pending()).toBeNull();
+  });
+
+  it('once the slot is written, the proposal is durable: a later end of the pairing withdraws nothing', async () => {
+    const h = await harness({ hub: false });
+    let live = true;
+    const { edit } = await pairOwn({ live: () => live });
+    expect(await h.signer.sign(edit)).toMatchObject({ ok: false, reason: 'hub' });
+    live = false;
+    expect(h.signer.pending()).toMatchObject({ version: 2, exposed: false });
+    h.online = true;
+    await h.signer.settle();
+    expect(h.held.head().state.version).toBe(2);
+    expect(h.disk()!.pending).toBeNull();
   });
 });
 

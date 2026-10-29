@@ -25,6 +25,10 @@
 //   planned on, checked again synchronously after its exposure write, with the hub client of that moment.
 // - The slot's state and its obligation settle apart: the slot at the hub's acceptance, the obligation (deliveries.ts,
 //   Task 5) when its machines acknowledge. A discard moves the obligation to `abandoned` in the same write.
+// - M4a: an edit may name devices this device endorses inside the same Touch ID (`Edit.endorse`; the checks count them
+//   endorsed, `verifySuccessor` checks the real endorsement after), and may carry a liveness guard (`Edit.live`, a
+//   pairing's) read before Touch ID, by the device module after the person's yes, and inside the slot's write, so a
+//   pairing that ends while Touch ID is open endorses, signs, slots and posts nothing.
 //
 // Network calls and adoptions run outside the signing store's updates (whose queue adoption's anchor write waits on).
 // Electron-free: the state signer is injected (step-up.ts's `createStateSigner`, imported here for its type only).
@@ -37,8 +41,15 @@ import type { HubClient, HubResult, Served } from './hub-client';
 import type { OrgSession } from './session';
 import { SigningDamaged, withExposure, type SigningStore } from './signing-store';
 
-/** A change to the org state, in the words the person confirms: `apply` edits the successor's draft. */
-export type Edit = { summary: string; lines: string[]; apply(draft: OrgState): void | Promise<void> };
+/**
+ * A change to the org state, in the words the person confirms: `apply` edits the successor's draft (M4a's composers are
+ * edits.ts). `endorse`: devices the draft lists that this device endorses with its step-up key inside the same Touch ID
+ * (a later device of this Mac's own member, paired from here); the checks count each as endorsed. `live`: whether the
+ * change still stands (a pairing neither cancelled nor expired), checked before Touch ID, by the device module after the
+ * person's yes, and just before the slot's write; once the slot holds the proposal it is durable, and `live` no longer
+ * withdraws it.
+ */
+export type Edit = { summary: string; lines: string[]; endorse?: ReadonlyArray<{ member: string; device: string }>; live?(): boolean; apply(draft: OrgState): void | Promise<void> };
 
 /**
  * `beforePrompt`: the caller's last word, awaited once everything before Touch ID has passed; Touch ID is asked
@@ -118,6 +129,19 @@ export type OrgSignerDeps = {
  * again on the head the signer drafts from). The sign ends `stale` before Touch ID.
  */
 export class StaleEdit extends Error {}
+
+/**
+ * An edit's refusal of what it was asked to do, whatever the head says (edits.ts's composers: changing yourself,
+ * removing this Mac's device, …). The sign ends `refused` with these findings before Touch ID, as the checks' refusals do.
+ */
+export class RefusedEdit extends Error {
+  constructor(readonly findings: Finding[]) {
+    super(findings.map((f) => f.detail).join('; '));
+  }
+}
+
+/** The edit no longer stands: what `live()` saying no reads as before Touch ID and before the slot's write. */
+const ENDED = 'the change ended (a pairing cancelled or expired): nothing was signed';
 
 /**
  * The successor of `head` an edit applies to, as `deploy/org-admin.ts`'s `successor()` composes it: a copy of its state,
@@ -462,10 +486,16 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
       await edit.apply(draft);
     } catch (error) {
       if (error instanceof StaleEdit) return { ok: false, reason: 'stale', detail: error.message };
+      if (error instanceof RefusedEdit) return { ok: false, reason: 'refused', findings: error.findings };
       return { ok: false, reason: 'invalid', detail: `the edit failed: ${(error as Error).message}` };
     }
+    // Each device to endorse is one the draft lists under that member: the device module endorses only what it signs.
+    const endorse = edit.endorse ?? [];
+    const unlisted = endorse.find(({ member, device }) => !draft.members.some((m) => m.id === member && m.devices.some((d) => d.id === device)));
+    if (unlisted !== undefined) return { ok: false, reason: 'invalid', detail: `the edit names device ${unlisted.device} to endorse, which the successor doesn't list under that member` };
 
-    const findings = await checkSuccessor(head.state, draft, view.superseded(), new Date(now()));
+    const endorsing = endorse.length === 0 ? undefined : { kid: signer.kid, devices: endorse.map((e) => e.device) };
+    const findings = await checkSuccessor(head.state, draft, view.superseded(), new Date(now()), endorsing === undefined ? {} : { endorsing });
     if (findings.some((f) => f.level === 'refuse')) return { ok: false, reason: 'refused', findings };
     const text = [
       `Org ${draft.org}: version ${head.state.version} → ${draft.version}`,
@@ -482,8 +512,10 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     if (options.beforePrompt !== undefined && !(await options.beforePrompt())) return { ok: false, reason: 'cancelled', detail: 'not asked' };
     // Synchronously from here to Touch ID.
     if (!live(asked)) return stopped('nothing was signed');
-    const answer = await signer.sign(draft, { summary, text });
-    if (!answer.ok) return { ok: false, reason: 'cancelled' };
+    if (edit.live !== undefined && !edit.live()) return { ok: false, reason: 'stale', detail: ENDED };
+    // The device module reads `live` again once the person said yes, before it endorses or signs anything.
+    const answer = await signer.sign(draft, { summary, text }, { endorse, ...(edit.live === undefined ? {} : { live: () => edit.live!() }) });
+    if (!answer.ok) return edit.live !== undefined && !edit.live() ? { ok: false, reason: 'cancelled', detail: ENDED } : { ok: false, reason: 'cancelled' };
     const signed = answer.signed;
 
     // Judged against the head as it is now: one adopted while the person was asked makes it `not-head`.
@@ -497,11 +529,14 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     }
     const obligation = await deliveries.obligation(signed, parent.state);
     const slot: Pending = { signed, parent: await stateHash(parent.state), hash: await stateHash(signed.state), exposed: { hub: false, machines: [] } };
-    let kept: 'kept' | 'pending' | 'moved' | 'stopped';
+    let kept: 'kept' | 'pending' | 'moved' | 'stopped' | 'ended';
     try {
       kept = await store.update((f) => {
         // A sign-out since the person was asked: what was signed is never kept, so nothing can post it later.
         if (!live(asked)) return { next: f, value: 'stopped' as const };
+        // The change ended since the person said yes (the verdict and the obligation were awaited): never kept. From
+        // this write on the proposal is durable, and ending the change no longer withdraws it.
+        if (edit.live !== undefined && !edit.live()) return { next: f, value: 'ended' as const };
         if (f.pending !== null) return { next: f, value: 'pending' as const };
         // An adoption between the verdict and this turn: the slot would name a parent that is no longer the head.
         if (deps.held() !== current || current.head() !== parent) return { next: f, value: 'moved' as const };
@@ -515,6 +550,7 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     if (kept === 'pending') return { ok: false, reason: 'pending' };
     if (kept === 'moved') return { ok: false, reason: 'invalid', detail: 'not-head' };
     if (kept === 'stopped') return stopped('what was signed was not kept or sent');
+    if (kept === 'ended') return { ok: false, reason: 'stale', detail: 'the change ended (a pairing cancelled or expired) after Touch ID: what was signed was not kept or sent' };
     log(`version ${signed.state.version} signed and kept pending${obligation === null ? '' : `, owed to ${obligation.owed.length} machine(s)`}`);
     refreshed();
 
