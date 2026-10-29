@@ -144,6 +144,24 @@ describe.skipIf(graph === null)('the built mawsd and its chunks', () => {
   });
 });
 
+// P5 O3-C start (docs/doperpowers/plans/2026-10-28-p5-o3-c-spine-library.md, Interfaces §E; D13, D26): the services
+// entry (`out/main/services.js`, main's third input) is what O3-D's `mawsd` will compose the spine from, so it is held to
+// mawsd's rule: a guarded entry (P5 Decision Log 114: a deferred load only of a chunk the same build emits beside it, by
+// a relative literal path), requiring only Node's builtins, zod and the MCP SDK, never electron.
+const SERVICES = join(OUT, 'services.js');
+const services = graphOf(SERVICES);
+
+describe.skipIf(services === null)('the built services entry and its chunks', () => {
+  it('are a guarded entry: Node builtins, zod and the MCP SDK at start, never electron, and deferred only chunks beside it', () => {
+    expect(guardedEntryProblems({ entry: SERVICES, root: resolve(OUT, '..'), externals: (name) => allowed(name), deferred: true })).toEqual([]);
+  });
+
+  it('require only Node builtins, zod and the MCP SDK, never electron', () => {
+    for (const [file, text] of services!) expect(externals(text).filter((name) => !allowed(name)), file).toEqual([]);
+  });
+});
+// P5 O3-C end
+
 describe.skipIf(chunk === null || pty === null)('the built hosts as guarded entries', () => {
   it('load nothing deferred, the engine host only builtins, zod and the MCP SDK, the pty host node-pty besides', () => {
     expect(guardedEntryProblems({ entry: hostFile(ENGINE_MARKER)!, root: resolve(OUT, '..'), externals: (name) => allowed(name), deferred: false })).toEqual([]);

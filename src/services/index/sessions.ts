@@ -290,7 +290,7 @@ export class SessionStore {
         this.bindingChanged(appId);
         if (projectId !== null) this.projects.sessionPresenceChanged();
         this.refoldFamilyOf(this.row(appId)); // E3
-        return { record: this.require(appId), created: true, advanced: false };
+        return { record: this.requireRecord(appId), created: true, advanced: false };
       }
 
       // A transcript back after its removal (a relocation: removed, then seen at its new path) lifts the archive the
@@ -310,7 +310,7 @@ export class SessionStore {
       const family = familyKey(existing); // E3: the family it was in, before the write
       if (this.write(existing, facts)) this.changed(appId, 'facts');
       this.refoldFamilyOf(existing, family); // E3
-      return { record: this.require(appId), created: false, advanced };
+      return { record: this.requireRecord(appId), created: false, advanced };
     });
   }
 
@@ -325,7 +325,7 @@ export class SessionStore {
       if (existing.archived === 0) values.removed_at = new Date().toISOString();
       if (existing.project_id !== null && existing.transcript_path !== null) this.projects.sessionPresenceChanged();
       if (this.write(existing, values)) this.changed(existing.app_id as AppSessionId, 'facts');
-      return this.require(existing.app_id as AppSessionId);
+      return this.requireRecord(existing.app_id as AppSessionId);
     });
   }
 
@@ -338,7 +338,7 @@ export class SessionStore {
       const appId = existing.app_id as AppSessionId;
       const next = (JSON.parse(existing.holder) as Holder).kind === 'self' ? contested(holder) : holder;
       if (this.write(existing, { holder: JSON.stringify(next) })) this.changed(appId, 'holder');
-      return this.require(appId);
+      return this.requireRecord(appId);
     });
   }
 
@@ -387,7 +387,7 @@ export class SessionStore {
         this.projects.sessionPresenceChanged();
       }
       this.changed(appId, 'live');
-      return { ok: true, record: this.require(appId) };
+      return { ok: true, record: this.requireRecord(appId) };
     });
   }
 
@@ -398,7 +398,7 @@ export class SessionStore {
     return this.db.transaction(() => {
       const existing = this.row(appId);
       this.bindRow(existing, sessionId, 'live');
-      return this.require(appId);
+      return this.requireRecord(appId);
     });
   }
 
@@ -411,7 +411,7 @@ export class SessionStore {
         this.changed(appId, 'update');
         this.bindingChanged(appId);
       }
-      return this.require(appId);
+      return this.requireRecord(appId);
     });
   }
 
@@ -441,7 +441,7 @@ export class SessionStore {
         values.pm_refusal = patch.permissionMode.refusal;
       }
       if (this.write(this.row(appId), values)) this.changed(appId, 'live');
-      return this.require(appId);
+      return this.requireRecord(appId);
     });
   }
 
@@ -478,7 +478,7 @@ export class SessionStore {
       }
       if (patch.branch !== undefined) values.branch = patch.branch;
       if (this.write(existing, values)) this.changed(appId, 'update');
-      return this.require(appId);
+      return this.requireRecord(appId);
     });
   }
 
@@ -497,7 +497,7 @@ export class SessionStore {
       });
       // No binding notice: the engine host binds a replay's ids itself when it launches the run (M5).
       this.changed(init.appId, 'replay');
-      return this.require(init.appId);
+      return this.requireRecord(init.appId);
     });
   }
 
@@ -561,7 +561,7 @@ export class SessionStore {
   private set(appId: AppSessionId, values: Record<string, Value>, cause: ChangeCause): SessionRecord {
     return this.db.transaction(() => {
       if (this.write(this.row(appId), values)) this.changed(appId, cause);
-      return this.require(appId);
+      return this.requireRecord(appId);
     });
   }
 
@@ -677,7 +677,8 @@ export class SessionStore {
     return row;
   }
 
-  private require(appId: AppSessionId): SessionRecord {
+  // not `require`: the services bundle guard reads every `require(` call as a module load (P5 O3-C M4)
+  private requireRecord(appId: AppSessionId): SessionRecord {
     return toRecord(this.row(appId));
   }
 

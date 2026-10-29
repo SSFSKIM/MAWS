@@ -78,8 +78,13 @@ export default defineConfig(({ command }) => {
       },
       // P5 O2 M5: `mawsd` (out/main/mawsd.js) is main's second input, so its `?modulePath` imports of the hosts emit the
       // files main's do and one build has one build id; src/engine-host/bundle-guard.test.ts holds its graph to Node's
-      // builtins and the hosts' externals (no `electron`)
-      build: { rollupOptions: { input: { index: resolve(__dirname, 'src/main/index.ts'), mawsd: resolve(__dirname, 'src/mawsd/index.ts') } } },
+      // builtins and the hosts' externals (no `electron`). P5 O3-C (D13): the services entry (out/main/services.js), the
+      // library's one door, is the third, held by the same guard to mawsd's rule; O3-D's mawsd composes the spine from it.
+      build: {
+        rollupOptions: {
+          input: { index: resolve(__dirname, 'src/main/index.ts'), mawsd: resolve(__dirname, 'src/mawsd/index.ts'), services: resolve(__dirname, 'src/services/entry.ts') },
+        },
+      },
     },
     preload: {
       resolve: { alias },

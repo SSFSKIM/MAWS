@@ -43,7 +43,8 @@ export class StubStore {
     return record;
   }
 
-  private require(appSessionId: AppSessionId): SessionRecord {
+  // not `require`: the services bundle guard reads every `require(` call as a module load (P5 O3-C M4)
+  private requireRecord(appSessionId: AppSessionId): SessionRecord {
     const record = this.records.get(appSessionId);
     if (!record) throw new Error(`unknown session ${appSessionId}`);
     return record;
@@ -64,7 +65,7 @@ export class StubStore {
   }
 
   update(appSessionId: AppSessionId, patch: SessionPatch): SessionRecord {
-    const current = this.require(appSessionId);
+    const current = this.requireRecord(appSessionId);
     const next: SessionRecord = { ...current, updatedAt: this.now() };
     if (patch.pinned !== undefined) next.pinned = patch.pinned;
     if (patch.archived !== undefined) next.archived = patch.archived;
@@ -85,7 +86,7 @@ export class StubStore {
   // The scenario's turn end stands for the index's `lastRecordAt` advance: unread unless visible, and a visible
   // session is marked seen in the same step so it never flickers unread.
   turnEnded(appSessionId: AppSessionId): void {
-    const record = this.require(appSessionId);
+    const record = this.requireRecord(appSessionId);
     if (this.visible.has(appSessionId)) this.markSeen(record);
     else if (!record.unread) this.changed({ ...record, unread: true }, 'live');
   }
