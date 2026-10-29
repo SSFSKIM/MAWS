@@ -5,11 +5,16 @@
 //
 // P5 O2 M5 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, "The build"): `mawsd` runs under the same rule, outliving
 // the binary that started it, and runs as plain Node where no Electron is installed: `out/main/mawsd.js` and every chunk
-// it requires load everything at start and require only Node's builtins and the externals the engine host allows; the
-// pty host's chunk, which `mawsd` spawns, adds `node-pty`.
+// it requires require only Node's builtins and the externals the engine host allows; the pty host's chunk, which `mawsd`
+// spawns, adds `node-pty`.
+//
+// P5 O10 M10 (the architect's ruling on acceptance 14): each is a guarded entry (test/support/guarded-entry.ts, the rule
+// O3's hosts reuse). `mawsd` loads its endpoint (the module, `ws`, org-protocol) only when it is needed, a deferred load
+// of a chunk the same build emits beside it; the hosts admit none.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { builtinModules } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
+import { guardedEntryProblems, runPathOf } from '../../test/support/guarded-entry';
 import { describe, expect, it } from 'vitest';
 // P5 O10 start
 import { randomBytes } from 'node:crypto';
@@ -73,6 +78,14 @@ function graphOf(entry: string): Map<string, string> | null {
   return graph;
 }
 
+const ENGINE_MARKER = MARKER;
+// The built file whose text holds `marker`, by path
+function hostFile(marker: string): string | null {
+  if (!existsSync(OUT)) return null;
+  for (const name of readdirSync(OUT).filter((file) => file.endsWith('.js'))) if (readFileSync(join(OUT, name), 'utf8').includes(marker)) return join(OUT, name);
+  return null;
+}
+
 function ptyHostChunk(): string | null {
   if (!existsSync(OUT)) return null;
   for (const name of readdirSync(OUT).filter((file) => file.endsWith('.js'))) {
@@ -90,9 +103,22 @@ const code = (text: string) => text.split('\n').filter((line) => !/^\s*(\*|\/\*|
 const graph = graphOf(MAWSD);
 const pty = ptyHostChunk();
 
+describe.skipIf(graph === null)('the built mawsd’s run path', () => {
+  // The architect's lever (a): an unenrolled mawsd doesn't pay for the endpoint, `ws` or org-protocol; each is in a
+  // chunk its run path never names, loaded at start only when an enrollment is on disk (endpoint-seam.ts).
+  it('keep the endpoint, ws and org-protocol off the run path, in chunks loaded when needed', () => {
+    const markers = { endpoint: 'endpoint: refusing its state', ws: 'Sec-WebSocket-Key', 'org-protocol': 'smns-rl2-v1' };
+    const run = runPathOf(MAWSD);
+    for (const [what, marker] of Object.entries(markers)) {
+      expect([...run].filter(([, text]) => text.includes(marker)).map(([file]) => file), what).toEqual([]);
+      expect([...graph!].some(([, text]) => text.includes(marker)), `${what} beside it`).toBe(true);
+    }
+  });
+});
+
 describe.skipIf(graph === null)('the built mawsd and its chunks', () => {
-  it('have no dynamic import()', () => {
-    for (const [file, text] of graph!) expect(code(text).filter((line) => /\bimport\s*\(/.test(line)), file).toEqual([]);
+  it('are a guarded entry: Node builtins and the engine host’s externals at start, never electron, and deferred only chunks beside it', () => {
+    expect(guardedEntryProblems({ entry: MAWSD, root: resolve(OUT, '..'), externals: (name) => allowed(name), deferred: true })).toEqual([]);
   });
 
   it('require only Node builtins and the engine host’s externals, never electron', () => {
@@ -115,6 +141,13 @@ describe.skipIf(graph === null)('the built mawsd and its chunks', () => {
     expect(mawsd).toHaveLength(2); // the engine host's and the pty host's
     for (const file of mawsd) expect(existsSync(file), file).toBe(true);
     expect(hostFiles(graphOf(join(OUT, 'index.js'))!)).toEqual(mawsd);
+  });
+});
+
+describe.skipIf(chunk === null || pty === null)('the built hosts as guarded entries', () => {
+  it('load nothing deferred, the engine host only builtins, zod and the MCP SDK, the pty host node-pty besides', () => {
+    expect(guardedEntryProblems({ entry: hostFile(ENGINE_MARKER)!, root: resolve(OUT, '..'), externals: (name) => allowed(name), deferred: false })).toEqual([]);
+    expect(guardedEntryProblems({ entry: hostFile(PTY_MARKER)!, root: resolve(OUT, '..'), externals: (name) => allowed(name, ['node-pty']), deferred: false })).toEqual([]);
   });
 });
 

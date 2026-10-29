@@ -271,3 +271,43 @@ export function mawsdLine(run: { footprintKiB: number; rssKiB: number; samples: 
   const fits = run.footprintKiB <= MAWSD_HEADROOM_KIB ? 'within' : 'over';
   return `[daemon-idle] mawsd footprint ${Math.round(run.footprintKiB)} KiB (median of ${run.samples}) · rss ${Math.round(run.rssKiB)} KiB · cpu ${run.cpuS.toFixed(2)} s over ${IDLE_RUN.windowS} s · ${fits} the ${MAWSD_HEADROOM_KIB} KiB the bound leaves it beside the engine host's ${DAEMON_IDLE_BASELINE.footprintKiB} KiB · load ${run.load.toFixed(1)}`;
 }
+
+// P5 O10 M10 (P5 Decision Log 114): an enrolled machine's endpoint has a budget of its own, 8 MiB of physical footprint
+// over the unenrolled daemon shape (its idle CPU share set at landing to 1.5 times the enrolled reading). The scene
+// measures both in one run (e2e/daemon-idle.spec.ts): its window unenrolled, then the same processes' window once the
+// scene's mawsd is enrolled and listed. The line states the budget's verdict and asserts nothing.
+export const ENROLLED_INCREMENT_BUDGET_KIB = 8 * 1024;
+
+export interface ProcessReading extends ProcessFootprint {
+  pid: number;
+  cpuS: number; // this process's CPU seconds over the window
+}
+
+export interface ShapeReading {
+  footprintKiB: number; // the measured processes summed per sample, the median
+  cpuS: number;
+  samples: number;
+  load: number; // the highest 1-minute load the window read
+  processes: readonly ProcessReading[];
+}
+
+const signed = (value: number, digits = 0) => `${value < 0 ? '-' : '+'}${Math.abs(value).toFixed(digits)}`;
+
+// The job log's line: the increment in footprint and CPU, each process's share of it (matched by pid across the two
+// windows), the budget's verdict, whether the run is valid (`reasons`, both windows' and the scene's) and both loads.
+export function enrolledLine(run: { unenrolled: ShapeReading; enrolled: ShapeReading; reasons: readonly string[] }): string {
+  const { unenrolled, enrolled } = run;
+  const footprint = Math.round(enrolled.footprintKiB) - Math.round(unenrolled.footprintKiB);
+  const cpu = Math.round((enrolled.cpuS - unenrolled.cpuS) * 100) / 100;
+  const before = new Map(unenrolled.processes.map((p) => [p.pid, p]));
+  const after = new Set(enrolled.processes.map((p) => p.pid));
+  const share = (p: ProcessReading) => {
+    const was = before.get(p.pid);
+    return was === undefined ? `${p.argv0} ${Math.round(p.footprintKiB)} KiB ${p.cpuS.toFixed(2)} s, in the enrolled window alone` : `${p.argv0} ${signed(Math.round(p.footprintKiB) - Math.round(was.footprintKiB))} KiB ${signed(Math.round((p.cpuS - was.cpuS) * 100) / 100, 2)} s`;
+  };
+  const gone = unenrolled.processes.filter((p) => !after.has(p.pid)).map((p) => `${p.argv0} ${Math.round(p.footprintKiB)} KiB ${p.cpuS.toFixed(2)} s, in the unenrolled window alone`);
+  const processes = [...enrolled.processes.map(share), ...gone].join(', ');
+  const budget = `${footprint <= ENROLLED_INCREMENT_BUDGET_KIB ? 'within' : 'over'} the ${ENROLLED_INCREMENT_BUDGET_KIB} KiB budget (P5 Decision Log 114)`;
+  const validity = run.reasons.length === 0 ? 'valid' : `invalid: ${run.reasons.join('; ')}`;
+  return `[daemon-idle] enrolled endpoint footprint ${signed(footprint)} KiB (enrolled ${Math.round(enrolled.footprintKiB)} KiB, unenrolled ${Math.round(unenrolled.footprintKiB)} KiB; medians of ${enrolled.samples} and ${unenrolled.samples}) · cpu ${signed(cpu, 2)} s over ${IDLE_RUN.windowS} s (enrolled ${enrolled.cpuS.toFixed(2)} s, unenrolled ${unenrolled.cpuS.toFixed(2)} s) · processes ${processes} · ${budget} · ${validity} · load ${enrolled.load.toFixed(1)} enrolled, ${unenrolled.load.toFixed(1)} unenrolled`;
+}

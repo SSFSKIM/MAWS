@@ -1,6 +1,6 @@
 // The hub's HTTP routes as the app uses them (P5 O8 M1, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md,
 // Orientation's "The hub, for an app"): `GET /api/me`, `GET /api/org/state` (from a version, every page), and
-// `POST /api/devices/pending`. None of its answers is trusted (RL §5.9): the session verifies every state against what it
+// `POST /api/devices/pending`, and M3's `POST /api/org/state` (a signed successor). None of its answers is trusted (RL §5.9): the session verifies every state against what it
 // holds, and this module only reads and classifies.
 //
 // Who answered matters. Every answer of the Worker carries `X-Desk-Build` (but a `101` or an event stream); a 401, 403 or
@@ -47,6 +47,8 @@ export interface HubClient {
   /** The chain after `since` (0: from genesis), every page, with the last page's head, transitions and certificates. */
   chain(since: number, signal?: AbortSignal): Promise<HubResult<Served>>;
   postPending(entry: PendingEntry, signal?: AbortSignal): Promise<HubResult<PendingAnswer>>;
+  /** M3: a signed successor of the hub's head. `201 {version}`; a 409's `error` is the verdict code (`not-head`, `rollback`, …). */
+  postState(signed: SignedOrgState, signal?: AbortSignal): Promise<HubResult<{ version: number }>>;
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -154,6 +156,10 @@ export function hubClient(input: {
     postPending: (entry, signal) =>
       request(PENDING_DEVICES_PATH, { method: 'POST', body: entry, signal }, (body) =>
         isObject(body) && isObject(body.pending) && typeof body.pending.expires === 'string' && INSTANT.test(body.pending.expires) ? { pending: { expires: body.pending.expires } } : null,
+      ),
+    postState: (signed, signal) =>
+      request(ORG_STATE_PATH, { method: 'POST', body: signed, signal }, (body) =>
+        isObject(body) && typeof body.version === 'number' && Number.isInteger(body.version) && body.version >= 1 ? { version: body.version } : null,
       ),
   };
 }

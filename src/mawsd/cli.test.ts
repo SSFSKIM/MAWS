@@ -11,7 +11,7 @@ import { fakePack, packProgram } from '../../test/support/fake-pack';
 import { FakeManagers } from '../../test/support/fake-units';
 import { MawsdScene, until } from '../../test/support/mawsd-scene';
 import { runCli, type CliDeps } from './cli';
-import { NO_ENDPOINT_MODULE, type EndpointModule } from './endpoint-seam';
+import { LazyEndpoint, NO_ENDPOINT_MODULE, type EndpointModule } from './endpoint-seam';
 
 let scene: MawsdScene;
 let managers: FakeManagers;
@@ -77,7 +77,7 @@ class FakeEndpoint implements EndpointModule {
 
 describe('mawsd status', () => {
   it('running: the daemon, its build, its machine ref, profile and role, its hosts, clients and endpoint', async () => {
-    const daemon = await scene.start({ role: 'laptop' }); // pinned: the machine's own role depends on its battery
+    const daemon = await scene.start({ role: 'laptop', endpoint: new FakeEndpoint() }); // pinned: the machine's own role depends on its battery
     const { code, out } = await cli(['status']);
     expect(code).toBe(0);
     const engine = scene.lastEngine();
@@ -89,7 +89,14 @@ describe('mawsd status', () => {
     expect(lines[4]).toMatch(new RegExp(`^engine host  ready · pid ${engine.pid} · build \\S+ · \\d+ live$`));
     expect(lines[5]).toBe('pty host     parked');
     expect(lines[6]).toBe('clients      none');
-    expect(lines[7]).toBe('endpoint     none (arrives with P5 O10)');
+    expect(lines[7]).toBe('endpoint     {"enrolled":false}');
+  });
+
+  it('running with no endpoint module (a daemon a test starts with none): the endpoint line is its null detail', async () => {
+    await scene.start();
+    const { code, out } = await cli(['status']);
+    expect(code).toBe(0);
+    expect(out.trimEnd().split('\n')[7]).toBe('endpoint     null');
   });
 
   it('running, --json: the daemon’s status with its machine ref as `machine`', async () => {
@@ -237,16 +244,11 @@ describe('mawsd enroll, keys and endpoint, with no endpoint module', () => {
     expect(`${out}${err}${scene.logs.join('\n')}`).not.toContain('CODE-SECRET-1');
   });
 
-  it('keys prints the machine ref and that there is no machine key, exit 0', async () => {
-    const daemon = await scene.start();
-    expect(await cli(['keys'])).toEqual({ code: 0, out: `machine ${daemon.ref}\nno machine key: not enrolled\n`, err: '' });
-    const json = await cli(['keys', '--json']);
-    expect(JSON.parse(json.out)).toEqual({ machine: daemon.ref, enrollment: 'none', key: null });
-  });
-
-  it('any other endpoint command exits 2 with the same line', async () => {
+  // Every daemon has the module since P5 O10 M10; one a test starts with none answers each command alike, `keys` too.
+  it('keys and any other endpoint command exit 2 with the same line', async () => {
     await scene.start();
-    expect(await cli(['endpoint', 'revoke', 'dev-1'])).toEqual({ code: 2, out: '', err: `${NO_ENDPOINT_MODULE}\n` });
+    expect(await cli(['keys', '--json'])).toEqual({ code: 2, out: '', err: `${NO_ENDPOINT_MODULE}\n` });
+    expect(await cli(['endpoint', 'status'])).toEqual({ code: 2, out: '', err: `${NO_ENDPOINT_MODULE}\n` });
   });
 
   it('with the daemon down, they exit 3', async () => {
@@ -339,12 +341,78 @@ describe('mawsd enroll, keys and endpoint, through an endpoint module', () => {
     await scene.start({ endpoint });
     endpoint.answer = { code: 0, out: 'machine x\nkey ed25519:abc (file)' };
     expect(await cli(['keys', '--json'])).toEqual({ code: 0, out: 'machine x\nkey ed25519:abc (file)\n', err: '' });
-    endpoint.answer = { code: 1, out: 'no such device' };
-    expect(await cli(['endpoint', 'revoke', 'dev-1'])).toEqual({ code: 1, out: '', err: 'no such device\n' });
+    endpoint.answer = { code: 1, out: 'refusing its state' };
+    expect(await cli(['endpoint', 'policy', '--read-only', 'on'])).toEqual({ code: 1, out: '', err: 'refusing its state\n' });
     expect(endpoint.calls).toEqual([
       ['keys', ['--json'], undefined],
-      ['revoke', ['dev-1'], undefined],
+      ['policy', ['--read-only', 'on'], undefined],
     ]);
+  });
+
+  // `endpoint revoke|grant <file|->` (P5 O10 M10): the daemon reads a file in its own working directory, not the
+  // caller's, and has no stdin of its own, so `-` is read here and sent as the request's `secret`, and a relative path is
+  // made the caller's.
+  it('endpoint revoke and grant send `-`’s stdin as `secret`', async () => {
+    const endpoint = new FakeEndpoint();
+    await scene.start({ endpoint });
+    const state = '{"state":{"version":7}}\n';
+    expect((await cli(['endpoint', 'revoke', '-'], { stdin: { isTTY: false, read: async () => state, prompt: async () => 'wrong' } })).code).toBe(0);
+    expect((await cli(['endpoint', 'grant', '-'], { stdin: { isTTY: true, read: async () => '{"body":{}}', prompt: async () => 'wrong' } })).code).toBe(0);
+    expect(endpoint.calls).toEqual([
+      ['revoke', ['-'], state],
+      ['grant', ['-'], '{"body":{}}'],
+    ]);
+  });
+
+  it('endpoint revoke and grant name a file by the caller’s path: a relative one made absolute against its working directory', async () => {
+    const endpoint = new FakeEndpoint();
+    await scene.start({ endpoint });
+    expect((await cli(['endpoint', 'revoke', 'states/next.json'], { cwd: '/home/u/work' })).code).toBe(0);
+    expect((await cli(['endpoint', 'grant', '/etc/maws/grant.json'], { cwd: '/home/u/work' })).code).toBe(0);
+    expect(endpoint.calls).toEqual([
+      ['revoke', ['/home/u/work/states/next.json'], undefined],
+      ['grant', ['/etc/maws/grant.json'], undefined],
+    ]);
+  });
+
+  it('endpoint revoke and grant refuse nothing on stdin, and more than one source, sending nothing', async () => {
+    const endpoint = new FakeEndpoint();
+    await scene.start({ endpoint });
+    const empty = await cli(['endpoint', 'grant', '-'], { stdin: { isTTY: false, read: async () => ' \n', prompt: async () => '' } });
+    expect(empty).toMatchObject({ code: 1, err: expect.stringContaining('no signed grant came on stdin') });
+    expect((await cli(['endpoint', 'revoke', 'a.json', 'b.json'])).code).toBe(1);
+    expect(endpoint.calls).toEqual([]);
+  });
+});
+
+// The architect's lever (a) on acceptance 14 (P5 Decision Log 114): on a machine with nothing in its endpoint's state
+// directory, a read-only check costs the daemon no module. Each answers as the module would answer it unenrolled
+// (test/endpoint/presence.test.ts holds the two byte for byte); a command that needs the module loads it.
+describe('mawsd keys and endpoint status, policy, unenrolled: answered without loading the module', () => {
+  it('as text and --json, the module never loaded; the first command that needs it loads it', async () => {
+    const loaded: FakeEndpoint[] = [];
+    const endpoint = new LazyEndpoint('cli-test', async () => ({ createEndpoint: () => (loaded.push(new FakeEndpoint()), loaded.at(-1)!) }));
+    const daemon = await scene.start({ endpoint });
+    const keys = { code: 0, out: `enrollment: none\nref: ${daemon.ref}\n`, err: '' };
+    expect(await cli(['keys'])).toEqual(keys);
+    expect(await cli(['endpoint', 'keys'])).toEqual(keys);
+    expect(await cli(['keys', '--json'])).toEqual({ code: 0, out: `{"enrollment":"none","ref":"${daemon.ref}","delegated":false}\n`, err: '' });
+    expect(await cli(['endpoint', 'status'])).toEqual({ code: 0, out: 'enrollment: none\nhub: not connected; channels: 0 relayed, 0 direct; sminos: not connected\n', err: '' });
+    expect(await cli(['endpoint', 'status', '--json'])).toEqual({
+      code: 0,
+      out: '{"enrollment":"none","hub":{"connected":false},"channels":{"relayed":0,"direct":0},"rl10":{"connected":false},"listener":{"bound":false},"legacyKey":false,"legacyRetired":false,"delegated":false}\n',
+      err: '',
+    });
+    expect(await cli(['endpoint', 'policy'])).toEqual({ code: 0, out: "read-only: no\nceiling: settings (from your settings' defaultMode)\n(the default: no policy is set)\n", err: '' });
+    expect(await cli(['endpoint', 'policy', '--json'])).toEqual({ code: 0, out: '{"read_only":false,"ceiling":"settings","source":"default"}\n', err: '' });
+    expect(loaded).toEqual([]);
+    expect(scene.logs.join('\n')).not.toContain('loading the endpoint');
+
+    expect(await cli(['endpoint', 'policy', '--read-only', 'on'])).toEqual({ code: 0, out: 'done\n', err: '' });
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].calls).toEqual([['policy', ['--read-only', 'on'], undefined]]);
+    expect(scene.logs.join('\n')).toContain('loading the endpoint for its first command');
+    expect(await cli(['keys'])).toEqual({ code: 0, out: 'done\n', err: '' }); // loaded: the module answers
   });
 });
 

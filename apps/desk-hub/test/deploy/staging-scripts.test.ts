@@ -108,7 +108,7 @@ describe('the admin step', () => {
     const run = spawnSync('zsh', [runner, 'admin', 'devices'], { encoding: 'utf8', env });
     expect(run.status, run.stdout + run.stderr).toBe(0);
     const args = readFileSync(join(dir, 'args'), 'utf8').trim().split('\n');
-    expect(args.slice(args.indexOf('deployment'))).toEqual(['deployment', 'admin', 'devices', '--keys', `${device}/keys.json`, '--config', 'deploy/staging.json']);
+    expect(args.slice(args.indexOf('deployment'))).toEqual(['deployment', 'admin', '--config', 'deploy/staging.json', '--keys', `${device}/keys.json`, 'devices']);
     expect(readFileSync(join(dir, 'stdin'), 'utf8')).toBe(`DESK_ACCESS_TOKEN=${token}\n`);
     expect(run.stdout).toContain('head version 3, issued 2 days ago');
     expect(run.stdout).not.toContain('secret');
@@ -117,6 +117,29 @@ describe('the admin step', () => {
     const log = readFileSync(join(dir, 'state', logs[0]), 'utf8');
     expect(log).toBe('head version 3, issued 2 days ago\ndevices listed\n');
     expect(run.stdout + run.stderr + log).not.toContain(token);
+  });
+
+  // The step's own options go after the command word and before the owner's arguments, so a device id after `--` (a
+  // base64url id starts with '-' about one time in 64) stays the last positional, and today's forms parse as before.
+  it.skipIf(!zsh)("hands the owner's arguments on last and whole: an id after `--`, and a verb with none", () => {
+    for (const args of [['root', 'add', '--', '-Dash-led_id'], ['remove-device', '--', '-Dash-led_id'], ['show']]) {
+      const { dir, device, env } = setup();
+      const run = spawnSync('zsh', [runner, 'admin', ...args], { encoding: 'utf8', env });
+      expect(run.status, run.stdout + run.stderr).toBe(0);
+      const given = readFileSync(join(dir, 'args'), 'utf8').trim().split('\n');
+      expect(given.slice(given.indexOf('deployment')), args.join(' ')).toEqual(['deployment', 'admin', '--config', 'deploy/staging.json', '--keys', `${device}/keys.json`, ...args]);
+    }
+  });
+
+  // Another verb through the same helper: the deployment after its command word, then the step's options and the
+  // owner's. A `--config` of the owner's reaches the command beside the step's, and the command refuses two (deployArgs:
+  // `name one deployment`), so neither wins.
+  it.skipIf(!zsh)('relay-measure reaches its command with the deployment after the command word', () => {
+    const { dir, device, env } = setup();
+    const run = spawnSync('zsh', [runner, 'relay-measure', '--rounds', '3'], { encoding: 'utf8', env });
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+    const given = readFileSync(join(dir, 'args'), 'utf8').trim().split('\n');
+    expect(given.slice(given.indexOf('deployment'))).toEqual(['deployment', 'relay-measure', '--config', 'deploy/staging.json', '--device-keys', `${device}/keys.json`, '--rounds', '3']);
   });
 
   it.skipIf(!zsh)('names the deployment and the keys itself: no option that would name others, no init, no keys, nothing run', () => {
@@ -148,7 +171,7 @@ describe('the admin step', () => {
     expect(readdirSync(dir)).not.toContain('args');
     const args = readFileSync(join(dir, 'node-args'), 'utf8').trim().split('\n');
     expect(args[0]).toMatch(/\/apps\/desk-hub$/);
-    expect(args.slice(args.indexOf('deploy/bin.ts'))).toEqual(['deploy/bin.ts', 'admin', ...create, '--keys', `${device}/keys.json`, '--config', 'deploy/staging.json']);
+    expect(args.slice(args.indexOf('deploy/bin.ts'))).toEqual(['deploy/bin.ts', 'admin', '--config', 'deploy/staging.json', '--keys', `${device}/keys.json`, ...create]);
     expect(run.stderr).toContain('head version 3, issued 2 days ago');
     expect(run.stderr).not.toContain('secret');
     const logs = readdirSync(join(dir, 'state')).filter((name) => name.startsWith('admin-delegation-pipe-'));

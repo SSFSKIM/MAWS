@@ -72,7 +72,7 @@ export interface DaemonOptions {
   // (default stderr) takes the refusal.
   openLog?(dir: string): (line: string) => void;
   refuse?(line: string): void;
-  endpoint?: EndpointModule | null; // loadEndpointModule() unless a test brings one
+  endpoint?: EndpointModule | null; // loadEndpointModule(<this build's id>) unless a test brings one (or none)
   // test seams
   detached?: Partial<Omit<DetachedTransportOptions, 'modulePath'>>; // spawn, processes, timing: both hosts' transports
   runCommand?(command: string, args: string[]): { status: number | null; stdout: string };
@@ -169,7 +169,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const execPath = options.execPath ?? process.execPath;
   const identity: SupervisorIdentity = { protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, buildId, capabilities: WIRE_CAPABILITIES, wire: wireFingerprint(), pid: process.pid, startedAt };
   const engineIdentity = appIdentity(options.modules.engineHost, env, 'detached'); // the e2e seams stand in, as for main
-  const endpoint = options.endpoint === undefined ? loadEndpointModule() : options.endpoint;
+  const endpoint = options.endpoint === undefined ? loadEndpointModule(buildId) : options.endpoint;
 
   // --- the upstreams --------------------------------------------------------------------------------------------------
   let stopping: Promise<void> | null = null;
@@ -248,6 +248,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   // --- listeners the seam offers ---------------------------------------------------------------------------------------
   const eventListeners = new Set<(owner: 'engine-host' | 'pty-host', message: { name: string; payload: unknown }) => void>();
   const attachmentListeners = new Set<(attached: boolean) => void>();
+  let appAttached = false; // what a listener that comes later is told at once (an endpoint loaded at its first command)
   const frameListeners = new Set<FrameListener>();
   const closedListeners = new Set<ClosedListener>();
   const upstreamListeners = new Set<(link: { connected: boolean; generation: number }) => void>();
@@ -316,6 +317,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     attached: () => {
       clocks.engineAttached(true); // disarms a park first
       setInterest('app', []);
+      appAttached = true;
       each(attachmentListeners, true);
       clientsChanged();
       recycleEngine(); // a fresh link for this attachment
@@ -325,6 +327,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       clocks.engineAttached(false);
       setInterest('app', null);
       void sendInterest();
+      appAttached = false;
       each(attachmentListeners, false);
       clientsChanged();
     },
@@ -514,7 +517,13 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       }
     },
     onEvent: (listener) => (eventListeners.add(listener), () => void eventListeners.delete(listener)),
-    onAttachment: (listener) => (attachmentListeners.add(listener), () => void attachmentListeners.delete(listener)),
+    // A listener hears the state as it stands when it comes (O10 M10: an endpoint loaded at its first command); at start
+    // step 7 no app is attached and no link is up, so the endpoint's start hears nothing at once.
+    onAttachment: (listener) => {
+      attachmentListeners.add(listener);
+      if (appAttached) listener(true);
+      return () => void attachmentListeners.delete(listener);
+    },
     onFrame: (listener) => (frameListeners.add(listener), () => void frameListeners.delete(listener)),
     documents: {
       open(message: DocumentsOpen) {
@@ -538,7 +547,11 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       },
       onClosed: (listener) => (closedListeners.add(listener), () => void closedListeners.delete(listener)),
     },
-    onUpstream: (listener) => (upstreamListeners.add(listener), () => void upstreamListeners.delete(listener)),
+    onUpstream: (listener) => {
+      upstreamListeners.add(listener);
+      if (upstreamConnected) listener({ connected: true, generation });
+      return () => void upstreamListeners.delete(listener);
+    },
     hold(reason) {
       const id = ++nextHold;
       holds.set(id, reason);

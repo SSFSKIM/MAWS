@@ -37,6 +37,17 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-28) The landing gate on the merge with O2's master (fd1d65c44): runs 40716613510 and 40716660100 green, no flaky lines.
   - [ ] The live check at the first cut-over machine.
 - [ ] M3 — The app as the org's signer: a co-root, the weekly successor, the signing checks — **executable** (re-planned 2026-10-28; needs M1 and O7 M1, both landed); the owner's sitting (`root add` on staging, then production) owed after M1's
+  - [x] (2026-10-28) Task 1: `root add` in `deploy/admin.ts`, its `production-run.sh` line, and its proofs in `admin.test.ts`.
+  - [x] (2026-10-28) Task 2: `checks.ts` (`checkSuccessor`, `supersededRevocations`) and its proofs, the zero-roots ones included.
+  - [x] (2026-10-28) Task 3: the device module, `createStateSigner` and the next keys (create, promote, destroy).
+  - [x] (2026-10-28) Task 4: `signing-store.ts`, `signer.ts`, `postState`, `signing.json`, §H's M3 rows.
+  - [x] (2026-10-28) Task 5, reviewed clean (5448d421b, fixes 34b043605 and 841d36673): `weekly.ts` and `deliveries.ts`.
+  - [x] (2026-10-28) Task 6a, reviewed clean (7fab342f5, fix 65e1310fa): the session's composition, the rekey transaction and its replay, the IPC schema and commands, main's wiring.
+  - [x] (2026-10-28) Task 6b, reviewed clean (fbed38051, fixes 37cdbf67d and 1d4bd558c): the Org section (its lines, buttons and confirmations) and `copy.ts`.
+  - [x] (2026-10-28) Task 7, reviewed clean (1e38ae640): `test/org/signer.local.test.ts`, with the shared harness `test/org/local-org.ts`.
+  - [x] (2026-10-28) Task 8, reviewed clean (740f0c46f): the app follows a recovery whose first state is a sibling at its head's version (Task 7's Discovery 2).
+  - [x] (2026-10-28) reviewer-high on the whole branch converged in three rounds. Round 1, on 559ddfc0c, found 3 P1 and 2 P2, fixed at c4a1d6801..ba781f87f. Round 2 reproduced one earlier interleaving of the first P1, fixed at b92b07573. Round 3 found nothing material.
+  - [ ] The desk track's review of the `deploy/` hunk, and the final gate (the full hosted set).
 - [ ] M4 — The Org page — *advisory; Q1 answered; needs M3 and O11's H1*
 - [ ] M5 — Owners on rows and the People toggle — **executable** (re-planned 2026-10-28; needs M2, landed)
 - [ ] M5b — Add owner — *later; needs O10's `record.owners` offer row and O12's sminos executor*
@@ -454,7 +465,7 @@ The Org page's final shape, where it lives and what more it shows are the owner'
   - the held chain holds the pending state → cleared;
   - the hub holds no successor of its parent → the same bytes are posted again;
   - another state holds its version → `pending-fork`.
-- **`org.discardPending`** clears a `pending-fork` slot only while the hub's chain doesn't hold it, and only after the owner confirms the Org section's line in `abandon-pending`'s words (`admin.ts:1155-1168`): a hub or machine that kept the proposal can still show it as a fork. The weekly successor that lost a race to the deployment admin therefore waits for that confirmation. It is rare once the owner stops `refresh`.
+- **`org.discardPending`** clears a pending slot (a `pending-fork`, or one the hub keeps refusing, such as `409 key-purged`: Decision Log, 2026-10-28, Task 4) only while the hub's chain doesn't hold it, and only after the owner confirms the Org section's line in `abandon-pending`'s words (`admin.ts:1155-1168`): a hub or machine that kept the proposal can still show it as a fork. The weekly successor that lost a race to the deployment admin therefore waits for that confirmation. It is rare once the owner stops `refresh`.
 - **Rejected:** clearing an exposed proposal on `409` because no machine acknowledged it, which the round showed unsafe. The hub has the bytes, and an applied delivery can lose its answer.
 
 *The checks before signing* (`checks.ts`; P5 Decision Logs 26, 30, 31). `checkSuccessor(head, next, superseded, now)` returns every finding, each `refuse` or `warn`:
@@ -466,6 +477,7 @@ The Org page's final shape, where it lives and what more it shows are the owner'
 | `delegation-id-used` | refuse | a new delegation's id is a live or revoked delegation's |
 | `renew-expired`, `renew-not-extension` | refuse | a delegation's `expires` changes and either the old or the new value is not later than `next.issued` (`keysAccounted`, `org-state.ts:202-206`), or the new value is not later than the old (P5 Decision Log 30: renewal extends) |
 | `drops-delegation` | warn | a delegation leaves `next.delegations`: shown in the prompt, its certificates' keys moving to `revoked` |
+| `empty-roots` | refuse | `next.root.keys` is empty (the package's `stateInvariants`, `org-state.ts:95`; named before Touch ID; the desk track's check, Decision Log 2026-10-28) |
 | `superseded-keys` | warn | `supersededRevocations(head, superseded)` offers revocations that `next.revoked` doesn't carry (shown so an unrelated edit after a recovery says what it leaves out) |
 
 A `refuse` finding ends the attempt with its code before Touch ID; `warn` findings are lines in the prompt.
@@ -501,7 +513,7 @@ M3's own edits are the no-change successor and that revocation. The delegation a
 - **To whom.** Each machine of the roster at signing, less a machine the state itself removes.
 - **The obligation is durable before anything is sent.** The signing store's `deliveries` gains `{hash, signed, owed: ref[]}` (`hash` the signed state's `stateHash`) in the same update as the pending slot. It keeps the signed bytes, so delivery never depends on the hub having accepted the state. Publication (the slot) and delivery (the obligation) settle apart: the slot clears at the hub's acceptance, and the obligation when its last machine acknowledges or leaves the roster. A crash between them loses neither.
 - **Only the app's own line is ever sent.** An obligation sends while its state is on the app's line: the held chain holds it, or it is the pending slot's state and the slot is not `pending-fork`. In `pending-fork` its sends are suspended. `org.discardPending` removes the obligation in the same update that clears the slot, so no abandoned byte is sent again. It moves to `abandoned: [{hash, version, hub, machines}]` (whether the hub and which machines may hold it, from the exposure record), which the status reports. If the held chain later adopts that state after all, the obligation is not revived: the machines get it through their own sync.
-- **The payload pages forward through the app's line** (`link.act({action: 'endpoint.state', args: {states, transitions}, stepUp: 'never'})`). The line is the held chain plus, while unaccepted, the pending state. `transitions` are all the held view's accepted transitions, a few at most. Each machine's cursor is kept per obligation as `known: {version, line}`. `line` is the count of accepted transitions the app held when the cursor was set, so a rewind the app adopts resets every cursor.
+- **The payload pages forward through the app's line** (`link.act({action: 'endpoint.state', args: {states, transitions}, stepUp: 'never'})`). The line is the held chain plus, while unaccepted, the pending state. `transitions` are all the held view's accepted transitions, a few at most. Each machine's cursor is kept per obligation as `known: {version, line}`. `line` is a digest of the accepted transitions the app held when the cursor was set, so a rewind the app adopts resets every cursor. A count would not do: a rewind past one forward root transition drops one transition and adds the recovery, which leaves the count unchanged (Decision Log, Task 5).
   1. **Recovery first.** When the app's line contains an accepted transition (`fromVersion` f) and this machine has no cursor on the current line, the first run starts at the state at f: the transition's base, which the whole held chain keeps. It runs forward through f + 1 and on. `EndpointOrg.#rewind` (`org-sync.ts:225-244`) needs the state at f + 1 and, when f has left its window, the authenticated base, and the run carries both. An endpoint still on the superseded branch, above the recovered head or at an equal version, rewinds by it. A `done` sets the cursor on this line.
      Recovery first is a probe, tried once per machine per line. Any other answer records `probed[ref] = line` and hands the machine to step 2, then step 3, on the same line. Two endpoints answer that way and neither is a failure:
      - One below the base (head < f − 1). No candidate transition applies (`fromVersion` ≥ its head), and the run holds no state at its head + 1, so it answers `not-newer`.
@@ -515,7 +527,7 @@ M3's own edits are the no-change successor and that revocation. The delegation a
   - A machine already ahead of the state is acknowledged once a run reaches its head's version.
   - A machine ahead of the app's own held head on the same line waits until the app adopts that far. One ahead on a superseded line is handled by recovery first.
   - Anything else stays owed, sent again at that machine's next link up and every `DELIVERY_RETRY_MS` (1 h).
-  - A machine that leaves the roster is no longer owed.
+  - A machine is no longer owed once it is out of the roster and the held head no longer names it. The roster is empty at start and at sign-out, so the roster alone would erase every obligation (Decision Log, Task 5).
 - The status lists the machines still owing an acknowledgement per version, and those that may hold an abandoned proposal. M4's page shows them.
 
 *New keys* (P5 Decision Log 71; M1's `removed` refusal said M3 builds it).
@@ -557,7 +569,7 @@ M3's own edits are the no-change successor and that revocation. The delegation a
   - through the one composed signing store: a weekly date write racing a pending write, and an acknowledgement racing a new pending state, nothing lost;
   - nothing signed while a state is pending.
 - `checks.test.ts`:
-  - Each row of the table, with states built by `org-protocol`'s helpers. Each refuse is also refused by the package where the package refuses: `dc-` against `dc-prod-`; a machine `dc-prod-1` under a new `dc-`; a renewal at or before `issued`; one shortening `expires`.
+  - Each row of the table, with states built by `org-protocol`'s helpers. Each refuse is also refused by the package where the package refuses: `dc-` against `dc-prod-`; a machine `dc-prod-1` under a new `dc-`; a renewal at or before `issued`. A shortening of `expires` that leaves the delegation live passes the package (`keysAccounted`, `org-state.ts:206`), so `renew-not-extension` is the app's own rule, and its test asserts the package's `ok` beside the app's refusal (Decision Log, 2026-10-28).
   - `supersededRevocations` after a rewind, each offer signed and checked with the real `verifySuccessor`:
     - an honest revocation of a device present before the base and current again after the recovery, with the device removed;
     - a device whose channel key the discarded branch revoked and whose step-up key it retired, the companion accounted;
@@ -566,6 +578,12 @@ M3's own edits are the no-change successor and that revocation. The delegation a
     - a delegation whose certificates the recovered branch retired, those keys moved to `revoked`;
     - a device added only on the discarded branch, not offered;
     - this device's own key, withheld.
+  - No path to zero roots (the desk track's check). M3's own surface removes no device and no root: its edits are the no-change successor and the superseded revocations, whose closure withholds anything that would empty `root.keys`. The package refuses an empty root set in `stateInvariants` (`org-state.ts:95`), which `verifySuccessor` runs on every successor (`:341`). A root kid must also name an admin's device's `stepUpPub` (`:115`). Tests, signed with the real package:
+    - a successor of a two-root head that removes the deployment admin's device and its kid, signed by the app's root: accepted, with the app the one root;
+    - a successor of that state that then removes the app's own device (the last root): refused `malformed` by `verifySuccessor` and refused by `checkSuccessor` as `empty-roots` before Touch ID;
+    - a successor that empties `root.keys` while keeping the devices: refused the same way.
+    `checkSuccessor` gains the `empty-roots` refuse row (a successor whose `root.keys` is empty), so the app names the refusal before Touch ID, as it names `revives-revoked`. M4's removal UI inherits it.
+  - A successor signed only by a key that the same successor adds to `root.keys` is refused `not-root-signed`, because `rootSigned` checks against the parent's root set (`org-state.ts:355`). The desk track's second check.
 - `weekly.test.ts`: due only when the device may sign, at 7 days, with nothing pending; the first focus asking once and `lastAsked` written first; a second focus the same day not asking; a cancel; the hourly notification only unfocused and once a day; "Re-sign now".
 - `deliveries.test.ts`, over a fake link backed by a real `EndpointOrg`:
   - which states are delivered, and that a removed machine is never sent to;
@@ -593,6 +611,7 @@ M3's own edits are the no-change successor and that revocation. The delegation a
   - `rekey`: new keys registered with a second `pair`, `remove-device` of the old id by the admin, the retired file destroyed.
   - a delivery to an endpoint more than 16 states behind, adopted through the genesis fallback and acknowledged;
   - a delivery while the local hub refuses the post, the endpoint adopting the pending state over the link.
+  - one run of consecutive states filling `DELIVERY_MAX_BYTES` delivered over the real link and adopted, with an `endpoint.state` done. A single state over the bound is `too-large` in `deliveries.test.ts` and is never sent (the architect, 2026-10-28).
 - `OrgSection.test.tsx`: the root line, and no `root add` guidance for an unmarked device; the quiet line and Re-sign now; the superseded offer; owing machines; `pending-fork` with Discard behind its confirmation; `signing` with Reset behind its confirmation; the rekey offer with its code field.
 
 ### M4 — The Org page *(advisory; taste: Q1, answered)*
@@ -616,6 +635,14 @@ It settles P5 Decision Log 34: an admin enrolls a member's first device directly
 **Needs.** M3; O11's H1 above.
 
 **Proves.** Acceptance 4.
+
+*H1 landed (2026-10-28, PR #306, master 409920137, P5 Decision Log 121).* `GET /api/devices/pending?member=<id>`. Its answers:
+- `403 not-admin` for anyone but an admin. The admin check comes first, so a 403 never says whether the id is a member.
+- `404 no-member` for an id the head doesn't list, a removed member's lingering entries included.
+- `503 hub-updating` from a Registry before H1. M4 reads it as "try again".
+- Otherwise `{pending}`, stored as is with the MAC unchecked; the approving device checks the MAC.
+- No id, or the caller's own id, is today's read.
+M4 adds `?member=` to `hub-client.ts`'s own `PENDING_DEVICES_PATH` copy.
 
 ### M5 — Owners on rows and the People toggle
 
@@ -995,7 +1022,6 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
 | `WEEKLY_DUE_DAYS` | 7 | Q6 |
 | `ASK_GAP_MS` | 86 400 000 | Q6's once a day |
 | `WEEKLY_CHECK_MS` | 3 600 000 | — |
-| `DELIVERY_SPAN` | 16 states | — |
 | `DELIVERY_RETRY_MS` | 3 600 000 | — |
 | `DELIVERY_MAX_BYTES` | 524 288 | an eighth of RL2's `MESSAGE_MAX_BYTES` (4 MiB, `channel.ts:50`) |
 
@@ -1119,7 +1145,7 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
     signing.json     { "version": 1,
                        "pending": { "signed": SignedOrgState, "parent": "<stateHash>", "exposed": { "hub": <boolean>, "machines": ["<ref>"] } } | null,
                        "deliveries": [ { "hash": "<stateHash>", "signed": SignedOrgState, "owed": ["<ref>", …],
-                                         "known": { "<ref>": { "version": <n>, "line": <accepted transitions held> } }, "probed": { "<ref>": <line> }, "tooLarge": ["<ref>"] } ],
+                                         "known": { "<ref>": { "version": <n>, "line": "<digest of the accepted transitions held>" } }, "probed": { "<ref>": <line> }, "tooLarge": ["<ref>"] } ],
                        "abandoned": [ { "hash": "<stateHash>", "version": <n>, "hub": <boolean>, "machines": ["<ref>"] } ],
                        "lastAsked": "<ISO>" | null, "lastNotified": "<ISO>" | null }      // fails closed once registration.json says signing: true
     registration.json  gains "signing": true (once signing.json is first written) and "rekey": { "device": "<new id>" } (during a rekey's promotion)
@@ -1205,6 +1231,12 @@ Each is built as its recommendation when its milestone is re-planned, unless the
   Evidence: held.ts `#commit` (the file, then memory, then `saveAnchor`, then the listeners); `test/org/sign-in.local.test.ts`'s refresh case first raced on it.
 - Observation: the Worker refuses a removed member's socket upgrade `403 not-a-member` with `X-Desk-Build` (its member resolution runs before every route), so a refused upgrade tells Access's end of a credential from the hub's refusal by that header.
   Evidence: `apps/desk-hub/src/worker.ts` `route`: `if (!principal) return json(403, { error: … 'not-a-member' … })`, then `fetch` names the build on every answer but a `101`.
+- Observation (M3, 2026-10-28): a device id is a base64url key id, so about one id in 64 starts with `-`. A CLI that parses options (`parseArgs`) then reads such an id as an option. Any CLI that takes a key id has this trap. The fix puts ids after `--` everywhere M3 passes or prints one:
+  - the O8 suites and their shared harness;
+  - the Org section's `root add -- <id>` and `remove-device -- <old id>`;
+  - the deploy README;
+  - the staging and production wrappers, which appended their own `--config`/`--keys` after `"$@"` and now put them first.
+  Evidence: class 1a run 40768996939 at b92b07573: `remove-device: … Unknown option '-y'` in `signer.local.test.ts`'s rekey case, which had passed at 559ddfc0c with another random id. Fixed at 031c476da and in the wrapper commit after it.
 
 ## Decision Log
 
@@ -1394,11 +1426,171 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   Rationale: `org-sync.ts:227` (a transition with `fromVersion` at or above the head is no candidate), `org-state.ts:311` (an accepted transition refused as `rollback`), `org-sync.ts:258-261` (`#refusal`: `not-newer` with no state at head + 1, `rollback` with states below the high-water mark). Without the exit, both machines would stay owed forever, retried hourly with the same run.
   Date/Author: 2026-10-28, O8's planner.
 
+- Decision: The desk track's two further checks for M3's PR (2026-10-28, via the architect) are written into M3's proofs, and `checks.ts` gains an `empty-roots` refuse row.
+  1. No path leaves the org with zero roots. M3's own surface removes nothing that holds a root. The package refuses an empty root set (`stateInvariants`, `org-state.ts:95`, run by `verifySuccessor` at `:341`), and `remove-device` filters a removed device's kid (`admin.ts:712`). The app still names the refusal before Touch ID, so M4's removal UI inherits it. The tests sign the sequence the desk track named with the real package.
+  2. A successor signed only by a root key it adds itself is refused (`rootSigned` against `rootKeys(before)`, `org-state.ts:355`). There is a test.
+  Rationale: the package already holds both rules. The app-side row costs one line, and it turns a late `invalid` after a fingerprint into a named refusal before one.
+  Date/Author: 2026-10-28, O8's executor.
+
+- Decision: M3 is built as seven tasks under subagent-driven-execution, each reviewed at its dependency frontier, then reviewer-high on the PR.
+  1. `root add` and its proofs.
+  2. `checks.ts`.
+  3. The device module: `createStateSigner`, the next keys.
+  4. The signing store, the signer and `postState`.
+  5. `weekly.ts` and `deliveries.ts`.
+  6. The session's composition, the rekey transaction, the IPC commands, main's wiring and the Org section.
+  7. `test/org/signer.local.test.ts`.
+  Rationale: the milestone spans about a dozen modules, and one context building all of them would carry every earlier task's noise into the later ones. The split follows §K's producers.
+  Date/Author: 2026-10-28, O8's executor.
+
+- Decision: Task 2 (`checks.ts`, ccd09f9d1) settles these points of the checks' contract, which later tasks read.
+  1. `CheckCode` gains `empty-roots`. §K's union predates that row.
+  2. `revives-revoked` reads both `head.revoked` and `next.revoked`, as the package does, and it covers revoked kids in `root.keys`.
+  3. A renewal is judged live at `max(next.issued, now)`.
+  4. `prefix-names-machine` also refuses a new machine name under an existing prefix. The package refuses it too, and M4's enroll would otherwise reach Touch ID first.
+  5. A delegation is new unless the head lists it with the same id, key and prefix.
+  6. The superseded offer is non-null whenever any candidate exists, withheld ones included. Its `lines` empty means nothing to sign: Task 6 hides the offer's button then and still shows the withheld names. `superseded-keys` also warns about withheld candidates.
+  7. M3's proof of "one shortening `expires`" was wrong about the package, which refuses only a shortening to or before `issued`. Renewal-extends is the app's own rule (P5 Decision Log 30). The proof line is reworded.
+  Rationale: the executor checked each point against `org-state.ts`.
+  Date/Author: 2026-10-28, O8's executor.
+
+- Decision: Task 3 (the device module, 5c866c647) settles the primitives Task 6's rekey transaction builds on.
+  1. `createStateSigner` is async, since `keyId` is.
+  2. Every refused confirmation reads `cancelled`.
+  3. `sign` signs a canonical copy taken before the prompt.
+  4. `DeviceKeysRefusal` gains `not-excluded`, covering a failed exclusion and one that answers `false`.
+  5. Added beyond §K: `discardNextDeviceKeys`, `deviceKeyIds(profile, 'current'|'next'|'retired')` and `findDeviceKeys(profile, device)`.
+  6. `promoteNextDeviceKeys` is idempotent: it completes whichever renames a crash left and syncs the directory. The replay is `findDeviceKeys`, then promote, then step 4.
+  7. A stale `keys.next.json` is replaced. So Task 6 keeps `createNextDeviceKeys` and step 1 under one fence, and a recorded rekey's next keys can't be replaced.
+  8. A second rekey's promotion overwrites a `keys.retired.json` that is still waiting, which destroys the first old device's keys before a root removes that device. Accepted: destroying a key early is the safe direction, and that old device stays listed, removable as before. The rejected alternative refused a second rekey while a retired file waits, which would block the `removed` case that needs it.
+  9. (Review fix, 7987431af.) Every read and change of a profile's key files runs in one in-process queue per profile, so two finishers of one promotion (or a load finishing it) can't retire the keys the other just installed. Reads are queued too, so `findDeviceKeys` can't answer `null` mid-promotion and make the replay drop a live rekey. Across processes, main's profile lock (`startWithProfileLock`, `index.ts:252`) keeps a second main off the profile. The queue serializes file steps, not the rekey transaction: Task 6's fence spans `createNextDeviceKeys` through step 1.
+  Rationale: §K's shapes, with what the transaction needs made explicit.
+  Date/Author: 2026-10-28, O8's executor.
+
+- Decision: Task 4 (the signing store and the signer, 96ef54f3b) settles these points.
+  1. `discardPending` clears any slot the hub's chain doesn't hold, not only a `pending-fork` one. This is `abandon-pending`'s own rule (`admin.ts:1155-1168`). Otherwise a slot the hub keeps refusing (`409 key-purged`, say) blocks every sign forever. The owner's confirmation and the `abandoned` record guard it as before. Refusals: `held`, `hub`, `none`, `signing`.
+  2. `registration.json`'s `signing: true` is written before `signing.json`'s first write, in the same queue turn, so the file fails closed from its first byte.
+  3. Whether the slot is a fork is derived from the held chain (`judgePending`), never stored. A re-judge, at `onChanged` too, clears a slot the held chain holds, with no network call.
+  4. A sign first reads and adopts the hub's chain, so it doesn't propose a fork on a stale head. After Touch ID, `verifySuccessor` runs against the current head, and the slot's update checks the head again: if it moved, nothing is kept.
+  5. A sign while signed out is refused `not-root`. A store error during a sign reads `signing`.
+  6. `createOrgSigner` takes `marked()`, since the backup mark rides on neither the state signer nor the held view. `OrgSigner` gains `onChanged` and `close`. The deliveries' `obligation` hook may be async.
+  7. (The architect's check of item 1, 2026-10-28.) The discard keeps `abandon-pending`'s distinctions (`admin.ts:1168-1196`).
+     - A slot never exposed (`exposed.hub` false and `exposed.machines` empty) reads as the CLI's never-sent case: "pending version n `<hash>` was never sent: nothing was posted", and the question says nothing can show it as a fork.
+     - An exposed slot (the hub, or any machine's act, since a delivery is exposure too) states where the hub stands, either not holding it or holding another state at version n (a fork). Its question carries the fork warning: "A later sign may make another successor of version n − 1, which a hub or machine that kept these bytes could show as a fork: discard it only once you know why the hub refused it."
+     - The signer's discard returns `{unsent, hubVersion, forkAt?}` for the Org section to word.
+     - The held floor after a discard is `max(slot's parent version, hub head)`, as `writeAnchor` sets it. In the app the held view never moves below the head it holds, which is at least the parent, and the discard adopts the hub's chain first. A test pins that no lower version is accepted after it. The floor holds on one line. A recovery the held view authenticates is the org's own rewind: it resets the held high-water mark to the recovered chain (`held.ts:335-360`), so a slot whose parent the recovery superseded is discarded at the recovered head, not held above it. Holding the floor at the superseded parent would refuse the recovery itself (the Task 4 re-review's finding, dismissed on that ground). Only a recovery transition the held view verified resets the floor (the architect, 2026-10-28). A hub answer merely lower than the floor, with no verified recovery behind it, is still refused (`rollback`).
+     - `abandon-pending`'s delegation-residue lines have no analogue: M3's signer adds no delegations. M4's delegation edits inherit them.
+  8. (Review fixes, 027ff0007.) The refresh before a sign follows a recovery: M1's `rereadFrom` moved to `held.ts`, shared with the session. A sign is refused `hub` when the hub was read but its head wasn't taken. A 201 is ok only once the held chain holds the signed state; a failed adoption reads `hub` ("… it stays pending"), and settle finishes it.
+  Task 6 inherits these:
+  - call `settle()` at start and at each feed open;
+  - `markRegistration` writes inside the current queue turn, without a nested `commit`, and updates the in-memory registration;
+  - the Org section offers Discard for a refused slot that isn't a fork;
+  - a post's `credentials` or `denied` answer goes to the session's hub-failure handling.
+  Date/Author: 2026-10-28, O8's executor.
+
+- Decision: Task 5 (`weekly.ts` and `deliveries.ts`, 5448d421b) settles these points of delivery. All of Task 4's seams fitted with no change to the signer.
+  1. A cursor's `line` is a 48-bit digest of the held accepted transitions, not their count, which stays level across a rewind past one forward root transition.
+  2. A machine is no longer owed once it is out of the roster and the held head no longer names it. The roster is empty at start and at sign-out.
+  3. An obligation whose state a recovery superseded is dropped. The superseded offer carries its revocations.
+  4. A run for a state already on the held chain stops at the held head, so it never carries another obligation's pending state.
+  5. Recovery first starts at the newest transition's `fromVersion`. Any judging answer records the probe.
+  6. A forward `not-newer` or `rollback` drops the cursor and resumes head-finding past the run.
+  7. `too-large` clears the cursor and keeps the machine owed, and a retry finds its head from caps.
+  9. (The architect's check, 2026-10-28.) The bound comes from the receiving side.
+     - A delivery reaches the endpoint as one RL2 message (`endpoint.state` in a call). RL2 messages are capped at `MESSAGE_MAX_BYTES` (4 MiB, `org-protocol` `channel.ts:50`). The endpoint's calls hold that cap less 1 KiB (`src/endpoint/calls.ts:101`). RL2 pages a message over RL1's 1 MiB frames (`RL1_MESSAGE_LIMIT`, `relay.ts:19`; `HANDSHAKE_PAGE_BYTES`).
+     - `DELIVERY_MAX_BYTES`, 512 KiB, is an eighth of that cap. That leaves margin for the call's envelope and the transitions it carries.
+     - Task 7 proves one run at the bound end to end over the real link. `deliveries.test.ts` proves that a single over-bound state reads `too-large` and is not retried in a loop.
+  10. (Review fixes, 34b043605.) The fixes cover three cases.
+     - A run records the held view and head it was planned on, and checks them again synchronously after the exposure write and just before `link.act`. A change means nothing is sent and the run is planned again.
+     - A recovery probe carries its base and the state after it. When that pair is over the bound, the probe reads `too-large`, is not sent and is not recorded as probed, and that pass falls through to head-finding. A machine that reached the recovered line by its own sync still settles.
+     - A machine leaves an obligation only on authenticated evidence: the state's own removal, or a certificate that `verifyMachineCert` accepts against the parent. A machine `next.machines` still holds is never dropped.
+  8. The planner's "last 16 held states" (the signer entry above) and `DELIVERY_SPAN` are superseded by the byte-bounded forward paging of the re-plan's rounds. The §H row is gone, and the constant leaves `timing.ts`.
+  Date/Author: 2026-10-28, O8's executor.
+
+- Decision: Task 6a (the session's composition, 7fab342f5) settles these points of the main side.
+  1. The session takes one optional `signing` dep: the state signer, focus, notify, the roster, `onRoster` and the link. Main passes the roster and the link as lazy closures, since the machines start after the session.
+  2. The weekly asking and `maySign` also need `current()`, so a signed-out root is never asked for Touch ID. The signer's parts stay up across a sign-out.
+  3. The `signer` status part carries more than §K names: `pending.exposed`, `pending.refused`, `offer.withheld`, `owing[].tooLarge`, `abandoned` and `rekeying`. A rekey keeps the status `registered`.
+  4. `SignResult` puts a refusal's findings in `detail`, and `DiscardResult` is Task 4's. `org.discardPending` and `org.resetSigning` take `{confirmed: true}`.
+  5. Rekey:
+     - it checks the new device against the held chain, not the fresh code's pins;
+     - its key-file work is serialized, and the commit checks `keys.next.json` holds the new id before step 1;
+     - a new rekey is refused while an unfinished intent is recorded;
+     - a failure after step 1 is left to the replay at the next start.
+  6. `revokeSuperseded` composes the offer again at signing and refuses `invalid` if it no longer matches what was shown.
+  7. The retired key file is destroyed once no listed device holds either old key.
+  8. (Review fixes, 65e1310fa.) Step 4 merges the promotion into the registration as it stands after its write, so a sign-out during that write stays signed out. A queued rekey checks `registration.rekey` again after waiting for the key-file work, and refuses `busy` while an intent waits for its replay.
+  Not built: rekey for a profile whose `keys.json` is gone or refused. M1's `keys` problem covers that profile, and its path is to sign out and register afresh. Residue.
+  Date/Author: 2026-10-28, O8's executor.
+
+- Decision: Task 6b (the Org section, fbed38051) settles these points of the signer's lines.
+  1. The discard's confirmation is worded from the status before the discard: never exposed, a fork, or exposed with the n − 1 fork warning. Its result line reports `{unsent, hubVersion, forkAt?}`.
+  2. Discard is offered for a fork or a refused non-fork slot. A slot that is only waiting reads as a muted line, with no Discard.
+  3. The buttons that sign need `maySign`. The offer and its withheld names show regardless.
+  4. Each signer action ends in one line on the Signer row, and a Touch ID cancel shows nothing.
+  5. Rekey refusals sit under the rekey field. Rekey and sign-in share `status.refused`, so the section tracks which control sent the attempt; a `refused.attempt` field would make that exact, and is residue for M4.
+  6. The weekly line sits on the Signer row. The `root add` line names the full device id, with the fingerprint in the row's note. A discarded proposal shows only when it was exposed.
+  7. OrgSection.tsx stays one file, about 440 lines. M4 splits it.
+  8. (Review fixes, 37cdbf67d and 1d4bd558c.) Discard's consent is bound to the proposal.
+     - The status's pending part carries the slot's `hash`. `org.discardPending` takes `{confirmed: true, hash}`, and the signer refuses `stale` when the hash doesn't name the current slot, before any hub read or write.
+     - The sheet closes when its slot settles or is replaced.
+     - The hash is the package's `stateHash`, computed in the slot's write and again at every load, so a stored value never outranks its state. Abandoned rows are keyed by hash.
+     - Rejected: a synchronous copy of `stateHash` for `pending()`, which would make a second definition of a protocol byte.
+  Date/Author: 2026-10-28, O8's executor.
+
+- Decision: Task 7's two adapted proofs and its Discovery 2 (the architect, 2026-10-28).
+  1. The genesis fallback can't be reached on a real link: a link is up only after `caps`, which always carries `stateVersion`. So the local suite proves deep delivery (versions 16 to 35, one run, acknowledged), and `deliveries.test.ts` keeps the literal genesis path.
+  2. "The hub refuses the post" is the fetch seam answering `503 busy`, a real `OrgChain.submit` answer. The real Worker can't refuse a valid successor without it becoming a fork.
+  3. Discovery 2, fixed in M1's session (740f0c46f):
+     - A feed `state` notice at the held head's version is followed through `rereadFrom`, as one above it is.
+     - The certificate poll syncs when the served head is at the same version with another hash, rather than judging it a `fork` alone.
+     - held.ts is unchanged, so only a verified recovery moves the head, and a sibling with no recovery behind it still reads `fork`.
+  4. A notice below the held head is not followed. A recovery below the app's head is followed by the certificate poll within 10 minutes, or when the hub's chain reaches the app's version. A recovery needs the owner's recovery key, so it is rare, and a post the app makes on the abandoned head in that window is refused by the hub, which M3's fork handling covers. Rejected: following such a notice only when the served chain carries a transition the held view hasn't accepted, since it costs a hub read on the common path and raises a false `rollback` when the hub is merely behind. Residue for M3's landing entry.
+  5. Discovery 1 is the desk track's residue (O10): an endpoint's own hub sync reads `?since=<head>`, so it can't take that same recovery. M3's recovery-first delivery covers it until then.
+  Date/Author: 2026-10-28, O8's executor.
+
+- Decision: The whole-branch review's fixes (reviewer-high round 1 on 559ddfc0c: 3 P1, 2 P2; fixed 559ddfc0c..ba781f87f).
+  1. The hub post checks the held line again synchronously after its exposure write, as deliveries do, and posts nothing off the line.
+  2. The signer carries its own lifecycle epoch, which sign-out and close advance. It is checked before Touch ID, before the slot's write and before each post, and a fenced sign reads `not-root`. The session's generation was not used: a cancelled rekey advances it too. A slot published before a sign-out stays, and settles at the next sign-in.
+  3. The closure is shown before Touch ID. The status carries the superseded offer's lines, warnings and withheld names with a digest of them. The Org section shows them in a sheet, and `org.revokeSuperseded {offer}` names the digest it confirmed. A mismatch reads `stale`, whether at the call or when the offer is composed again on the hub's head (formerly `invalid`). Touch ID's own line counts the warnings shown in Settings › Org, since macOS's prompt carries one reason string.
+  4. A hub refusal of any post, settlement's re-posts included, is kept and shown as `refused`, so Discard is offered. No answer, or no hub, only waits.
+  5. The weekly ask writes nothing at focus. A gate run just before Touch ID checks focus, writes `lastAsked`, checks focus again and takes the date back if focus was lost, so an ask that never reached Touch ID spends no day.
+  Residue for O7: RL4 step-up actions (`createStepUp`) show Touch ID only the action and the machine, and drop the prompt's text the same way.
+  Date/Author: 2026-10-28, O8's executor.
+
+- Decision: Device ids go after `--` wherever M3 passes or prints one (031c476da). The staging and production wrappers pass the owner's arguments last (1ec366d08): `deployment()` and `direct()` keep the command word first for `bin.ts`, then the wrapper's `--config`, then `"$@"`; the admin sites put `--keys` after `admin`.
+  Approved by the architect, with the desk track's shape and three pinned forms in `production-scripts.test.ts`: B1 step 2's `admin --pipe delegation create …` on the `direct()` path, `admin root add -- <a '-'-led id>` through both wrappers, and one non-admin verb through each wrapper with `--config` after the command word. `admin show` is also pinned, unchanged in form. A caller's own `--config` is refused, as before, since `--config` is not repeatable.
+  Rejected: printing the bare id and adding `--` only for a `-`-led id, which fails through the wrappers for one id in 64 until they change.
+  Date/Author: 2026-10-28, O8's executor.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
 
 **M2 (2026-10-28, PR from `p5-o8-m2`; the live check at the first cut-over machine pending).** Main keeps every hub-served session listing that verifies against the held head, judged per key against a persisted mark that a withdrawal keeps and only a signed head ends, cached in `listings.json` and verified again at load and at each head; `org.rows` gives the renderer the RL2 roster's rows, `complete` and `pending`; the sidebar draws the member's own listed sessions under their org projects, and a covered machine is loaded and settled only once its rows are known. Evidence: `rows.test.ts` 22, `test/org/rows.local.test.ts` 4 (desk-hub's Worker in Miniflare, a real endpoint's lane A and lane B listings), the renderer suites (events 42, derive 38, Sidebar 91, org-projects 6, remote-openers 2), and the final gate (run 40691164424). Still owed: the live check at the first cut-over machine.
+
+**M3 (2026-10-28, PR from `p5-o8-m3`; the owner's sitting pending).** The app becomes an org signer once the held head lists its step-up key as a root:
+- it signs typed successors behind Touch ID, through the checks before signing and the package's `verifySuccessor`, from a durable pending slot whose exposure is written before every send;
+- it signs the weekly successor at a focus;
+- it offers the revocations a recovery left lost, each closure shown before Touch ID;
+- it delivers every key-ending state to the roster's machines over O7's links, recovering first after a recovery and paging within RL2's bound;
+- it makes new keys through a transaction that recovers at every boundary.
+
+`deployment admin root add` makes a listed admin `native-mac` device a co-root.
+
+Evidence:
+- the unit suites: `checks` 35, `signer` 39, `signing-store` 8, `weekly` 13, `deliveries` 22, `org-session` 94, `keys` 40, `step-up` 20, `OrgSection` 31, `admin` 35;
+- `test/org/signer.local.test.ts` 8, on desk-hub's Worker in Miniflare with O13's real admin and an enrolled endpoint, including a run at the delivery bound over the real link;
+- the gates the PR body lists.
+
+Still owed: the owner's sitting, `root add` on staging and then on production.
+
+Retrospective (M3). Built as eight tasks under subagent-driven execution, each reviewed at its frontier, then reviewer-high on the whole branch.
+- What the reviews found: ten task reviews found real defects in five of the eight tasks, and the whole-branch review found five more across tasks.
+- The defects shared one shape: a fact checked before an await and acted on after it. That covers a run planned on a held line that moved, a registration snapshot that overwrote a sign-out, a queued attempt that missed an intent recorded meanwhile, a confirmation that outlived its proposal, and a post that captured a sibling as its parent.
+- Every task-scoped review that read each module alone missed the cross-module form. The whole-branch review caught it, and its race reproductions held the named await open.
+
+A future child that composes async modules over shared state should list each act's preconditions and re-check them synchronously at the act, with a test that holds each await open. It should also bind any person's consent (a sheet, a confirmation) to the identity of what was shown.
 
 Retrospective (M2). The mark rule and the coverage rule, which the planning rounds had sharpened, were exactly where the build's two real defects lay: an unverified certificate read beside a verified record, and a set emptied across an await while another reader treated it as coverage. Both are the same shape: a trust or coverage fact derived from something that was not itself the verified or settled thing. A future child deriving state from verified records should take every derived fact from the verified object itself, and keep in-flight work visible in whatever a reader treats as coverage.
 
