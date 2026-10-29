@@ -153,6 +153,27 @@ describe('a front client’s session streams', () => {
     expect(await follower.follow({ sessions: [{ appSessionId: 's1', cursor: null }], live: false })).toEqual({ streams: [{ appSessionId: 's1', mode: 'live', launchId: s.launchId }] });
   });
 
+  it('answers the first opening of a stream an event opened while a `live: true` follow was still listing the live sessions', async () => {
+    const host = new FakeEngineHost();
+    const s = host.add('s1');
+    host.row('s1', 1);
+    host.row('s1', 1);
+    host.row('s1', 1);
+    s.evicted = { seq: 2, idx: 0 };
+    s.journal = false;
+    let list: (apps: string[]) => void = () => {};
+    const streams = new FrontStreams({ read: async (name, input) => host.answer(name, input), liveSessions: () => new Promise((resolve) => (list = resolve)), log: () => {} });
+    cleanups.push(() => streams.stop());
+    let opened: () => void = () => {};
+    const parts = new Promise<void>((resolve) => (opened = resolve));
+    const follower = streams.follower((name) => void (name === 'session.status' && opened()));
+    const answer = follower.follow({ sessions: [], live: true });
+    streams.liveEvent('session.status', { appSessionId: 's1', status: host.status(s) }); // opens s1's stream from its launch's start
+    await parts; // and its opening is answered while the listing is still out
+    list(['s1']);
+    expect(await answer).toEqual({ streams: [{ appSessionId: 's1', mode: 'missing', launchId: s.launchId }] });
+  });
+
   it('carries a followed session’s other events, its archive’s `session.forgotten` among them', async () => {
     const { host, client } = lab();
     host.add('s1');

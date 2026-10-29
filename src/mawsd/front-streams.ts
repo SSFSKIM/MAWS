@@ -94,16 +94,16 @@ class ClientFollower implements Follower {
     const named = new Map(input.sessions.map((s) => [s.appSessionId as string, s.cursor]));
     this.#live = input.live;
     for (const [app, stream] of this.#streams) if (!named.has(app) && !(input.live && stream.auto)) this.#close(app);
-    // A stream this follow opens answers its first opening, whenever that lands (the listing below may outlast it); a
-    // stream it keeps answers how it goes on now.
-    const opened = new Map<string, Promise<Answer>>();
+    // A stream there before this follow answers how it goes on now; one opened during it, by the follow or by a live
+    // event while its listing was out, answers its first opening, whenever that lands.
+    const before = new Set(this.#streams.values());
     for (const [app, cursor] of named) {
       const kept = this.#streams.get(app);
       if (kept !== undefined) kept.auto = false;
-      else opened.set(app, this.#open(app, cursor === null ? null : { epoch: cursor.launchId, seq: cursor.seq, idx: cursor.idx }, false, 'now').opened);
+      else this.#open(app, cursor === null ? null : { epoch: cursor.launchId, seq: cursor.seq, idx: cursor.idx }, false, 'now');
     }
-    if (input.live) for (const stream of await this.#openLive('now')) opened.set(stream.app, stream.opened);
-    return { streams: await Promise.all([...this.#streams.values()].map((stream) => opened.get(stream.app) ?? stream.now())) };
+    if (input.live) await this.#openLive('now');
+    return { streams: await Promise.all([...this.#streams.values()].map((stream) => (before.has(stream) ? stream.now() : stream.opened))) };
   }
 
   carries(appSessionId: string): boolean {
@@ -128,24 +128,22 @@ class ClientFollower implements Follower {
     this.over();
   }
 
-  /** The live sessions this client does not follow yet, each opened now; the streams it opened. */
-  async #openLive(from: 'start' | 'now'): Promise<ClientStream[]> {
+  /** The live sessions this client does not follow yet, each opened now. */
+  async #openLive(from: 'start' | 'now'): Promise<void> {
     let live: string[];
     try {
       live = await this.options.liveSessions();
     } catch (error) {
-      this.options.log(`machine.sock: the live sessions could not be listed for a follow: ${error instanceof Error ? error.message : String(error)}`);
-      return [];
+      return this.options.log(`machine.sock: the live sessions could not be listed for a follow: ${error instanceof Error ? error.message : String(error)}`);
     }
-    if (!this.#live || this.#ended) return [];
-    return live.flatMap((app) => (this.#streams.has(app) ? [] : [this.#open(app, null, true, from)]));
+    if (!this.#live || this.#ended) return;
+    for (const app of live) if (!this.#streams.has(app)) this.#open(app, null, true, from);
   }
 
-  #open(app: string, cursor: StreamPosition | null, auto: boolean, from: 'start' | 'now'): ClientStream {
+  #open(app: string, cursor: StreamPosition | null, auto: boolean, from: 'start' | 'now'): void {
     const stream = new ClientStream(app, auto, this.post, this.options.log);
     this.#streams.set(app, stream);
     stream.handle = this.core.openStream({ app, cursor, view: 'full', from }, stream);
-    return stream;
   }
 
   #close(app: string): void {
