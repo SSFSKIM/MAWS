@@ -8,10 +8,11 @@ describe('hostModeFromEnv', () => {
     expect(hostModeFromEnv({}, 'embedded')).toBe('detached');
   });
 
-  it('keeps the utility process under the e2e harness and the component harness, whatever the shape (G5: no script changes)', () => {
-    for (const shape of ['daemon', 'embedded'] as const) {
-      expect(hostModeFromEnv({ MAWS_E2E: '1' }, shape)).toBe('utility');
-      expect(hostModeFromEnv({ MAWS_HARNESS: '1' }, shape)).toBe('utility');
+  // P5 O3-B: the suites run the shape the owner runs, the daemon's unless the setting says embedded
+  it('lets the shape decide under the e2e harness and the component harness, as for the owner', () => {
+    for (const harness of [{ MAWS_E2E: '1' }, { MAWS_HARNESS: '1' }, { MAWS_E2E: '1', MAWS_HARNESS: '1' }]) {
+      expect(hostModeFromEnv(harness, 'daemon')).toBe('daemon');
+      expect(hostModeFromEnv(harness, 'embedded')).toBe('detached');
     }
   });
 
@@ -32,12 +33,7 @@ describe('hostModeFromEnv', () => {
     expect(hostModeFromEnv({ MAWS_HOST_MODE: 'socket' }, 'daemon')).toBe('daemon');
     expect(warn).toHaveBeenCalledTimes(2);
     warn.mockRestore();
-    expect(hostModeFromEnv({ MAWS_HOST_MODE: '', MAWS_E2E: '1' }, 'daemon')).toBe('utility');
-  });
-
-  it('reads the flags as exactly "1"', () => {
-    expect(hostModeFromEnv({ MAWS_E2E: '0' }, 'embedded')).toBe('detached');
-    expect(hostModeFromEnv({ MAWS_HARNESS: 'true' }, 'daemon')).toBe('daemon');
+    expect(hostModeFromEnv({ MAWS_HOST_MODE: '', MAWS_E2E: '1' }, 'embedded')).toBe('detached');
   });
 });
 

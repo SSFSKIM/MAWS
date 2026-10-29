@@ -155,13 +155,15 @@ export class ConnectorScene {
     this.timeline.push({ at: new Date().toISOString(), event, ...(detail === undefined ? {} : { detail }) });
   }
 
-  // The app over the scene's profile; a relaunch keeps the engine store and the supervisor's files.
+  // The app over the scene's profile; a relaunch keeps the engine store and the supervisor's files. P5 O3-B: on the shape
+  // the owner runs, the daemon's by default, whose engine host outlives the app as the embedded shape's supervisor does;
+  // the scenes test connectors, not the shape, so they pin none.
   async launch(): Promise<Run> {
     const first = this.runs.length === 0;
     const maws = await launchMaws({
       userData: this.userData,
       keepConfigHome: !first,
-      env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: 'detached', MAWS_E2E_ENGINE_BIN: this.engine.bin, HOME: this.home, DISABLE_AUTOUPDATER: '1', ...(this.fixtureControl !== null && { MAWS_DASHBOARD_E2E: '1' }) /* E3 */, ...this.options.env?.(this) }, // P3-HD M4b: the scene's env
+      env: { MAWS_HARNESS: '0', MAWS_E2E_ENGINE_BIN: this.engine.bin, HOME: this.home, DISABLE_AUTOUPDATER: '1', ...(this.fixtureControl !== null && { MAWS_DASHBOARD_E2E: '1' }) /* E3 */, ...this.options.env?.(this) }, // P3-HD M4b: the scene's env
       prepare: ({ claudeConfigDir }) => {
         if (!first) return;
         const mcpServers = { [SERVER]: this.options.server?.(this) ?? fixtureServer(this.log, this.fixtureControl), ...this.options.servers?.(this) }; // P3-HD M4: the optional server entry; M4b: the others. E3: the default entry through fixtureServer
