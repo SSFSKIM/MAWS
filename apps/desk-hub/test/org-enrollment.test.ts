@@ -4,7 +4,7 @@
 // in place under a token that names it.
 import { base64urlEncode, generateSigningKey, keyId, verifyEnrollmentMac, type OrgState, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { enrollV2, machineFetch, type V2Machine } from '../fake-machine/org';
+import { certify, enrollDelegated, enrollV2, machineFetch, redeemDelegated, type DelegationKey, type V2Machine } from '../fake-machine/org';
 import { delegationFor, encodeEnrollmentCodeV2, type EnrollmentKey, type MachineView } from '../src/protocol/identity';
 import { enrollmentToken, MachineClient, provisioningKey, refusal, waitFor } from './support/clients';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from './support/local';
@@ -126,8 +126,10 @@ describe('a v2 machine', () => {
   });
 });
 
-// One holder per key (RL5): a key that the state listing the machine would hold twice, or that no state makes current
-// again, is refused at its post rather than in the listing successor. On the head the case above left.
+// One holder per key (RL5), across the hub's records too: a key speaks for one ref, whatever route it came by. A machine
+// key or a certificate whose key another holder has under another ref, or that no state makes current again, is
+// refused at its post, whichever came first, rather than in a listing successor or a verifier. On the head the case
+// above left.
 describe('a key another holder has', () => {
   async function accept(edit: (s: OrgState) => void): Promise<void> {
     const signed = await signedBy(await next(head, edit), a1);
@@ -157,6 +159,12 @@ describe('a key another holder has', () => {
   const posting = async (key: SigningKey, keep: { name?: string; ref?: string; code?: string } = {}) =>
     enrollV2((await code(keep.code)).text, keep.name ?? `kh-fresh-${++fresh}`, { key, ...(keep.ref === undefined ? {} : { ref: keep.ref }) });
   const keyHeld = (holder: string) => new RegExp(`409 \\{"error":"key-held","message":"this key is ${holder}`);
+  const certHeld = (holder: string) => new RegExp(`the certificate was refused: 409 \\{"error":"key-held","message":"the certificate's key is ${holder}`);
+  /** The org state's delegation for VMs named `kh-vm-…`, and its provisioning key's secret. */
+  let vms: { token: string; delegation: DelegationKey };
+  let vm = 0;
+  /** A VM under the delegation, certifying `key` (or a fresh one) under a fresh name and ref. */
+  const certifying = (keep: { key?: SigningKey } = {}) => enrollDelegated(hub.url, vms.token, `kh-vm-${++vm}`, vms.delegation, keep);
 
   it("is refused when the org state holds it: another machine's, a device's, a delegation's, the recovery key", async () => {
     const other = await listed('kh-listed');
@@ -164,10 +172,39 @@ describe('a key another holder has', () => {
     await expect(posting(a1.channel)).rejects.toThrow(keyHeld('the channel key of device a1 in the org state'));
     await expect(posting(a1.stepUp!)).rejects.toThrow(keyHeld('the step-up key of device a1 in the org state'));
     const issued = await provisioningKey(hub, ADMIN, { label: 'held', prefix: 'kh-vm-', max_uses: null, offline_revoke_s: null });
-    const delegation = await generateSigningKey();
-    await accept((s) => s.delegations.push(delegationFor(issued.key, delegation.pub, 'org')));
-    await expect(posting(delegation)).rejects.toThrow(keyHeld(`delegation ${issued.id}'s in the org state`));
+    vms = { token: issued.token, delegation: { id: issued.id, key: await generateSigningKey() } };
+    await accept((s) => s.delegations.push(delegationFor(issued.key, vms.delegation.key.pub, 'org')));
+    await expect(posting(vms.delegation.key)).rejects.toThrow(keyHeld(`delegation ${issued.id}'s in the org state`));
     await expect(posting(recovery)).rejects.toThrow(keyHeld("the org state's recovery key"));
+  });
+
+  it("is refused when a kept certificate holds it under another ref, and taken from the certificate's own machine", async () => {
+    const certified = await certifying();
+    await expect(posting(certified.key)).rejects.toThrow(keyHeld(`a kept certificate's, under the ref ${certified.ref}`));
+    const mac = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
+    expect((await machineFetch(hub.url, certified.credentials, '/machine/key', { pub: certified.key.pub, ref: certified.ref, mac })).status).toBe(201);
+  });
+
+  it('is certified for no other holder under another ref, whichever came first; for its own ref it is', async () => {
+    const other = await listed('kh-cert-listed');
+    await expect(certifying({ key: other.key })).rejects.toThrow(certHeld(`machine kh-cert-listed's in the org state \\(ref ${other.ref}\\)`));
+    const posted = await enrollV2((await code()).text, 'kh-cert-posted');
+    await expect(certifying({ key: posted.key })).rejects.toThrow(certHeld("another enrollment's, posted under another ref"));
+    await expect(certifying({ key: a1.channel })).rejects.toThrow(certHeld('the channel key of device a1 in the org state'));
+    await expect(certifying({ key: vms.delegation.key })).rejects.toThrow(certHeld(`delegation ${vms.delegation.id}'s in the org state`));
+    await expect(certifying({ key: recovery })).rejects.toThrow(certHeld("the org state's recovery key"));
+    // A retired or revoked key is the package's verdict first, whatever the ref.
+    const retired = await listed('kh-cert-retired');
+    await unlisted(retired, 'retired');
+    await expect(certifying({ key: retired.key })).rejects.toThrow(/409 \{"error":"expired"\}/);
+    const revoked = await listed('kh-cert-revoked');
+    await unlisted(revoked, 'revoked');
+    await expect(certifying({ key: revoked.key })).rejects.toThrow(/409 \{"error":"revoked"\}/);
+    // The VM's own key posted under its own ref, then certified there.
+    const own = await redeemDelegated(hub.url, vms.token, `kh-vm-${++vm}`, vms.delegation);
+    const mac = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
+    expect((await machineFetch(hub.url, own.credentials, '/machine/key', { pub: own.key.pub, ref: own.ref, mac })).status).toBe(201);
+    expect((await machineFetch(hub.url, own.credentials, '/machine/cert', await certify(own, vms.delegation))).status).toBe(201);
   });
 
   it('is refused when another enrollment posted it under another ref, though nothing lists it', async () => {
