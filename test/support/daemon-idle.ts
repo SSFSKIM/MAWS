@@ -18,9 +18,38 @@
 // of a footprint is the runtime's, and enters no bound. Each record is written by a recording commit touching only this
 // file (and, at O2's landing, its test, which since derives from the records).
 import { execFileSync } from 'node:child_process';
+import { cpus } from 'node:os';
+import { basename } from 'node:path';
 import type { SpineFixtureCounts } from './spine-fixture';
 
-export const IDLE_RUN = { settleS: 120, windowS: 600, everyS: 30, samples: 21, maxLoad: 5 } as const;
+// The window, and its load rule (the architect's Rule B at 4.7). A window is void on load when its 1-minute
+// load reaches maxLoad at a sample and its 30 s pair reaches pairLoad: the highest load two adjacent 30 s intervals both
+// held, each interval's own average rebuilt from the 1-minute series (loadPair). What voids a window is sustained load.
+// A burst, one short system-wide wakeup the 1-minute average smears over about 90 s so that two or three samples read 5
+// or more, raises one interval alone and leaves the window valid. The pair guards the peak rule and can only exempt: a
+// window under maxLoad throughout is valid whatever its pair. pairLoad sits in the middle of the thresholds, 4.2 to 5.2,
+// that score every re-scored window alike: the exempted bursts' pairs reach 4.15 at most, the sustained windows' read
+// 5.24 at least (the boundary windows are daemon-idle.test.ts's fixtures).
+export const IDLE_RUN = { settleS: 120, windowS: 600, everyS: 30, samples: 21, maxLoad: 5, pairLoad: 4.7 } as const;
+
+// The 1-minute load is an exponential average with a 60 s time constant, so across an interval of everyS it moves from
+// l(t-1) to e^(-everyS/60) l(t-1) + (1 - e^(-everyS/60)) u(t), u(t) the interval's own average load. Inverted, at the
+// window's nominal spacing: u(t) for each interval after the first sample.
+const SPACING_DECAY = Math.exp(-IDLE_RUN.everyS / 60);
+
+export function intervalLoads(loads: readonly number[]): number[] {
+  return loads.slice(1).map((load, t) => (load - SPACING_DECAY * loads[t]!) / (1 - SPACING_DECAY));
+}
+
+// The window's 30 s pair: the highest load two adjacent intervals both reached, max over t of min(u(t), u(t+1)).
+export function loadPair(loads: readonly number[]): number {
+  const u = intervalLoads(loads);
+  if (u.length < 2) throw new Error(`${loads.length} samples rebuild no two adjacent ${IDLE_RUN.everyS} s intervals`);
+  return Math.max(...u.slice(1).map((next, t) => Math.min(u[t]!, next)));
+}
+
+// A window's load as the lines print it: the highest 1-minute load, and the 30 s pair beside it.
+const loadText = (load: number, pair: number) => `${load.toFixed(1)} (${IDLE_RUN.everyS} s pair ${pair.toFixed(1)})`;
 
 interface IdleRecord {
   commit: string;
@@ -62,7 +91,8 @@ export const DAEMON_IDLE_BASELINE: DaemonIdleBaseline = { commit: 'd0802b29d', r
 
 // A diagnostic (P5 Decision Log 57), recorded from three valid e2e:daemon-idle-floor runs on the mini at 36704c984:
 // footprints 12689, 13153 and 13185 KiB (1.04x), CPU 0.00 s each, load 2.9, 4.3 and 3.3; a fourth run (40502284016,
-// 12657 KiB) was invalid on the load rule (7.7).
+// 12657 KiB) was invalid on the peak rule then (7.7). The 30 s pair reclassifies it as a burst by its shape, 2.5, 7.7,
+// 5.4, 3.7, 2.7 (30 s pair 2.8), so it is valid today; it was a diagnostic run, and the record stands as recorded.
 export const DAEMON_IDLE_RUNTIME_FLOOR: DaemonIdleRuntimeFloor = { commit: '36704c984', runs: ['40498387866', '40500435129', '40504203813'], footprintKiB: 13153, electron: '44.4.5' };
 
 export interface DaemonIdleBound {
@@ -220,6 +250,72 @@ export function measured(processes: readonly { pid: number; command: string }[],
     .filter((p) => names.includes(p.argv0));
 }
 
+// The window's diagnostics, recorded at every sample beside the readings and read by no verdict: what the machine was
+// doing while the load moved. The cores' cumulative times (os.cpus(), summed, in ms), from which each interval's busy
+// share follows, and the process outside the measured set that used the most CPU over the interval, from the one
+// process table the sample reads anyway (it also tells which measured processes are still alive).
+export interface CpuTimes {
+  user: number;
+  nice: number;
+  sys: number;
+  idle: number;
+  irq: number;
+}
+
+export function cpuTimes(cores: readonly { times: CpuTimes }[] = cpus()): CpuTimes {
+  const sum = (field: keyof CpuTimes) => cores.reduce((total, core) => total + core.times[field], 0);
+  return { user: sum('user'), nice: sum('nice'), sys: sum('sys'), idle: sum('idle'), irq: sum('irq') };
+}
+
+const totalMs = (t: CpuTimes) => t.user + t.nice + t.sys + t.idle + t.irq;
+
+// The interval's busy share across the cores, 1 - idle delta / total delta, to three places.
+export function busyShare(before: CpuTimes, after: CpuTimes): number {
+  return Math.round((1 - (after.idle - before.idle) / (totalMs(after) - totalMs(before))) * 1_000) / 1_000;
+}
+
+export interface ProcessRow {
+  pid: number;
+  started: string; // `ps -o lstart=`, as ps() reads it, so a reused pid is told apart
+  cpuS: number; // the CPU time it has used, in seconds
+  name: string; // its executable's name
+}
+
+// One `ps -axo pid=,lstart=,time=,comm=` (macOS, LC_ALL=C), by pid. A line of another form is not a process row.
+export function processTable(text: string): Map<number, ProcessRow> {
+  const rows = new Map<number, ProcessRow>();
+  for (const line of text.split('\n')) {
+    const match = /^\s*(\d+)\s+((?:\S+\s+){4}\S+)\s+(\d+(?::\d{2})+(?:\.\d{1,2})?)\s+(.*\S)\s*$/.exec(line);
+    if (match) rows.set(Number(match[1]), { pid: Number(match[1]), started: match[2]!, cpuS: cpuSeconds(match[3]!), name: basename(match[4]!) });
+  }
+  return rows;
+}
+
+export function readProcessTable(): Map<number, ProcessRow> {
+  return processTable(execFileSync('ps', ['-axo', 'pid=,lstart=,time=,comm='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } }));
+}
+
+export interface TopProcess {
+  pid: number;
+  name: string;
+  cpuS: number; // its CPU seconds over the interval
+}
+
+// The process outside `measuredPids` that used the most CPU between two tables, in centiseconds; a process the earlier
+// table does not hold as the same process (started since, or a pid reused) counts all its time. Null with no earlier
+// table, at the window's first sample. A process that ran and exited within the interval is in neither table.
+export function topOutside(before: ReadonlyMap<number, ProcessRow> | null, after: ReadonlyMap<number, ProcessRow>, measuredPids: readonly number[]): TopProcess | null {
+  if (before === null) return null;
+  let top: TopProcess | null = null;
+  for (const row of after.values()) {
+    if (measuredPids.includes(row.pid)) continue;
+    const was = before.get(row.pid);
+    const cpuS = Math.round((was?.started === row.started ? row.cpuS - was.cpuS : row.cpuS) * 100) / 100;
+    if (top === null || cpuS > top.cpuS) top = { pid: row.pid, name: row.name, cpuS };
+  }
+  return top;
+}
+
 export interface IdleRunCheck {
   loads: readonly number[]; // the 1-minute load at each sample
   measured: readonly string[]; // the argv0 of each process measured
@@ -233,7 +329,10 @@ export function invalidReasons(run: IdleRunCheck): string[] {
   const reasons: string[] = [];
   if (run.measured.length === 0) reasons.push('no process of the profile to measure');
   const peak = Math.max(...run.loads);
-  if (peak >= IDLE_RUN.maxLoad) reasons.push(`the 1-minute load reached ${peak.toFixed(1)} (a valid run stays under ${IDLE_RUN.maxLoad} throughout)`);
+  const pair = peak >= IDLE_RUN.maxLoad ? loadPair(run.loads) : null; // the pair only ever exempts a window the peak voids
+  if (pair !== null && pair >= IDLE_RUN.pairLoad) {
+    reasons.push(`the 1-minute load reached ${peak.toFixed(1)} and its ${IDLE_RUN.everyS} s pair ${pair.toFixed(1)} (a valid run stays under ${IDLE_RUN.maxLoad} throughout, or its ${IDLE_RUN.everyS} s pair under ${IDLE_RUN.pairLoad})`);
+  }
   for (const p of run.lost) reasons.push(`${p.argv0} pid ${p.pid} was gone at ${p.atS} s of the ${IDLE_RUN.windowS} s window`);
   if (run.sessionEnded) reasons.push('the kept session ended before the window did (the scene measures one held idle session)');
   reasons.push(...run.mismatches);
@@ -241,8 +340,8 @@ export function invalidReasons(run: IdleRunCheck): string[] {
 }
 
 // The runtime floor's line, with the Electron version the floor measured.
-export function floorLine(run: { footprintKiB: number; rssKiB: number; samples: number; cpuS: number; electron: string; load: number }): string {
-  return `[daemon-idle] runtime floor footprint ${Math.round(run.footprintKiB)} KiB (median of ${run.samples}) · rss ${Math.round(run.rssKiB)} KiB · cpu ${run.cpuS.toFixed(2)} s · electron ${run.electron} · load ${run.load.toFixed(1)}`;
+export function floorLine(run: { footprintKiB: number; rssKiB: number; samples: number; cpuS: number; electron: string; load: number; loadPair: number }): string {
+  return `[daemon-idle] runtime floor footprint ${Math.round(run.footprintKiB)} KiB (median of ${run.samples}) · rss ${Math.round(run.rssKiB)} KiB · cpu ${run.cpuS.toFixed(2)} s · electron ${run.electron} · load ${loadText(run.load, run.loadPair)}`;
 }
 
 // P5 O2 M9: where the daemon shape's processes together exceed the bound, each one line; empty when within it. The
@@ -260,18 +359,19 @@ export interface ProcessFootprint {
   footprintKiB: number; // the median of this process's own samples over the window
 }
 
-// The job log's line; `load` is the highest 1-minute load the window read. Each measured process is named with its own
+// The job log's line; `load` is the highest 1-minute load the window read, printed with the window's 30 s pair
+// (`loadPair`) beside it, so a window that peaked and still counted shows why. Each measured process is named with its own
 // footprint (a miss then names its hop; the per-process medians need not sum to the summed median). `bound` is the
 // daemon shape's (M9), whose verdict the line states; null for the supervisor's scene, which records only. The Electron
 // version is compared with the runtime floor's, a diagnostic: a floor recorded on another Electron says less.
-export function idleLine(run: { footprintKiB: number; rssKiB: number; samples: number; cpuS: number; processes: readonly ProcessFootprint[]; bound: DaemonIdleBound | null; electron: string; load: number }): string {
+export function idleLine(run: { footprintKiB: number; rssKiB: number; samples: number; cpuS: number; processes: readonly ProcessFootprint[]; bound: DaemonIdleBound | null; electron: string; load: number; loadPair: number }): string {
   const processes = run.processes.map((p) => `${p.argv0} ${Math.round(p.footprintKiB)} KiB`).join(', ');
   const limit = run.bound === null ? null : `the bound ${run.bound.footprintKiB} KiB and ${run.bound.cpuS.toFixed(2)} s`;
   const misses = run.bound === null ? [] : boundMisses(run, run.bound);
   const verdict = limit === null ? '' : misses.length === 0 ? ` · within ${limit}` : ` · over ${limit}: ${misses.join('; ')}`;
   const floor = DAEMON_IDLE_RUNTIME_FLOOR.electron;
   const electron = run.electron === floor ? `${run.electron}, the runtime floor's` : `${run.electron}, not the runtime floor's ${floor}`;
-  return `[daemon-idle] footprint ${Math.round(run.footprintKiB)} KiB (median of ${run.samples}) · rss ${Math.round(run.rssKiB)} KiB · cpu ${run.cpuS.toFixed(2)} s over ${IDLE_RUN.windowS} s · processes ${processes}${verdict} · electron ${electron} · load ${run.load.toFixed(1)}`;
+  return `[daemon-idle] footprint ${Math.round(run.footprintKiB)} KiB (median of ${run.samples}) · rss ${Math.round(run.rssKiB)} KiB · cpu ${run.cpuS.toFixed(2)} s over ${IDLE_RUN.windowS} s · processes ${processes}${verdict} · electron ${electron} · load ${loadText(run.load, run.loadPair)}`;
 }
 
 // P5 O2 M5 (P5 Decision Log 57's early check): `mawsd` alone, idle, with no hosts and no app. The line names its
@@ -279,9 +379,9 @@ export function idleLine(run: { footprintKiB: number; rssKiB: number; samples: n
 // baseline's footprint. A miss is no failure here; it reaches the architect as a P5 §10 finding.
 export const MAWSD_HEADROOM_KIB = DAEMON_IDLE_BOUND.footprintKiB - DAEMON_IDLE_BASELINE.footprintKiB;
 
-export function mawsdLine(run: { footprintKiB: number; rssKiB: number; samples: number; cpuS: number; load: number }): string {
+export function mawsdLine(run: { footprintKiB: number; rssKiB: number; samples: number; cpuS: number; load: number; loadPair: number }): string {
   const fits = run.footprintKiB <= MAWSD_HEADROOM_KIB ? 'within' : 'over';
-  return `[daemon-idle] mawsd footprint ${Math.round(run.footprintKiB)} KiB (median of ${run.samples}) · rss ${Math.round(run.rssKiB)} KiB · cpu ${run.cpuS.toFixed(2)} s over ${IDLE_RUN.windowS} s · ${fits} the ${MAWSD_HEADROOM_KIB} KiB the bound leaves it beside the engine host's ${DAEMON_IDLE_BASELINE.footprintKiB} KiB · load ${run.load.toFixed(1)}`;
+  return `[daemon-idle] mawsd footprint ${Math.round(run.footprintKiB)} KiB (median of ${run.samples}) · rss ${Math.round(run.rssKiB)} KiB · cpu ${run.cpuS.toFixed(2)} s over ${IDLE_RUN.windowS} s · ${fits} the ${MAWSD_HEADROOM_KIB} KiB the bound leaves it beside the engine host's ${DAEMON_IDLE_BASELINE.footprintKiB} KiB · load ${loadText(run.load, run.loadPair)}`;
 }
 
 // P5 O10 M10 (P5 Decision Log 114): an enrolled machine's endpoint has a budget of its own, 8 MiB of physical footprint
@@ -300,13 +400,15 @@ export interface ShapeReading {
   cpuS: number;
   samples: number;
   load: number; // the highest 1-minute load the window read
+  loadPair: number; // the window's 30 s pair (loadPair)
   processes: readonly ProcessReading[];
 }
 
 const signed = (value: number, digits = 0) => `${value < 0 ? '-' : '+'}${Math.abs(value).toFixed(digits)}`;
 
 // The job log's line: the increment in footprint and CPU, each process's share of it (matched by pid across the two
-// windows), the budget's verdict, whether the run is valid (`reasons`, both windows' and the scene's) and both loads.
+// windows), the budget's verdict, whether the run is valid (`reasons`, both windows' and the scene's) and both loads,
+// each with its 30 s pair.
 export function enrolledLine(run: { unenrolled: ShapeReading; enrolled: ShapeReading; reasons: readonly string[] }): string {
   const { unenrolled, enrolled } = run;
   const footprint = Math.round(enrolled.footprintKiB) - Math.round(unenrolled.footprintKiB);
@@ -321,7 +423,7 @@ export function enrolledLine(run: { unenrolled: ShapeReading; enrolled: ShapeRea
   const processes = [...enrolled.processes.map(share), ...gone].join(', ');
   const budget = `${footprint <= ENROLLED_INCREMENT_BUDGET_KIB ? 'within' : 'over'} the ${ENROLLED_INCREMENT_BUDGET_KIB} KiB budget (P5 Decision Log 114)`;
   const validity = run.reasons.length === 0 ? 'valid' : `invalid: ${run.reasons.join('; ')}`;
-  return `[daemon-idle] enrolled endpoint footprint ${signed(footprint)} KiB (enrolled ${Math.round(enrolled.footprintKiB)} KiB, unenrolled ${Math.round(unenrolled.footprintKiB)} KiB; medians of ${enrolled.samples} and ${unenrolled.samples}) · cpu ${signed(cpu, 2)} s over ${IDLE_RUN.windowS} s (enrolled ${enrolled.cpuS.toFixed(2)} s, unenrolled ${unenrolled.cpuS.toFixed(2)} s) · processes ${processes} · ${budget} · ${validity} · load ${enrolled.load.toFixed(1)} enrolled, ${unenrolled.load.toFixed(1)} unenrolled`;
+  return `[daemon-idle] enrolled endpoint footprint ${signed(footprint)} KiB (enrolled ${Math.round(enrolled.footprintKiB)} KiB, unenrolled ${Math.round(unenrolled.footprintKiB)} KiB; medians of ${enrolled.samples} and ${unenrolled.samples}) · cpu ${signed(cpu, 2)} s over ${IDLE_RUN.windowS} s (enrolled ${enrolled.cpuS.toFixed(2)} s, unenrolled ${unenrolled.cpuS.toFixed(2)} s) · processes ${processes} · ${budget} · ${validity} · load ${loadText(enrolled.load, enrolled.loadPair)} enrolled, ${loadText(unenrolled.load, unenrolled.loadPair)} unenrolled`;
 }
 
 // The A-B-A reading, for the bound's re-derivation (after P5 O10 M10): the first case's scene three times back to back
@@ -362,12 +464,12 @@ export function abaDeltas(a: ShapeReading, b: ShapeReading, a2: ShapeReading): A
 
 // The job log's line: the deltas first (B against the A mean, with the ratio a paired bound would read, and A against
 // A'), each of B's processes against its A mean, then each window's footprint, CPU and per-process medians with its
-// load, the sample counts and the validity, every window's (`reasons`). `windowS` is the window the run read.
+// load and 30 s pair, the sample counts and the validity, every window's (`reasons`). `windowS` is the run's window.
 export function abaLine(run: { a: ShapeReading; b: ShapeReading; a2: ShapeReading; reasons: readonly string[]; windowS: number }): string {
   const { a, b, a2 } = run;
   const d = abaDeltas(a, b, a2);
   const window = (name: string, shape: string, r: ShapeReading) =>
-    `${name} ${shape} ${Math.round(r.footprintKiB)} KiB ${r.cpuS.toFixed(2)} s (${r.processes.map((p) => `${p.argv0} ${Math.round(p.footprintKiB)} KiB ${p.cpuS.toFixed(2)} s`).join(', ')}; load ${r.load.toFixed(1)})`;
+    `${name} ${shape} ${Math.round(r.footprintKiB)} KiB ${r.cpuS.toFixed(2)} s (${r.processes.map((p) => `${p.argv0} ${Math.round(p.footprintKiB)} KiB ${p.cpuS.toFixed(2)} s`).join(', ')}; load ${r.load.toFixed(1)}, ${IDLE_RUN.everyS} s pair ${r.loadPair.toFixed(1)})`;
   const processes = b.processes.map((p) => {
     const delta = d.processes.find((q) => q.argv0 === p.argv0);
     return delta === undefined ? `${p.argv0} in B alone` : `${p.argv0} ${signed(delta.footprintKiB)} KiB ${signed(delta.cpuS, 2)} s`;
@@ -380,15 +482,15 @@ export function abaLine(run: { a: ShapeReading; b: ShapeReading; a2: ShapeReadin
 // services entry's idleReading under the Electron binary as Node over the profile-sized fixture, read in IDLE_RUN's
 // window while loaded, then, once its root has stopped and its data is released (two full collections when the runtime
 // exposes gc), after this settle in a window half as long. O3-D's starting point, recorded without a bound.
-export const SPINE_RELEASED_RUN = { settleS: 120, windowS: 300, everyS: 30, samples: 11, maxLoad: IDLE_RUN.maxLoad } as const;
+export const SPINE_RELEASED_RUN = { settleS: 120, windowS: 300, everyS: 30, samples: 11, maxLoad: IDLE_RUN.maxLoad, pairLoad: IDLE_RUN.pairLoad } as const;
 
 // The job log's line: the loaded and released medians and what the release gave back, each window's CPU, the fixture's
-// counts, whether a full collection ran, the validity (both windows' `reasons`) and both loads.
+// counts, whether a full collection ran, the validity (both windows' `reasons`) and both loads, each with its 30 s pair.
 export function spineLine(run: { loaded: ShapeReading; released: ShapeReading; counts: SpineFixtureCounts; gc: boolean; reasons: readonly string[] }): string {
   const { loaded, released, counts } = run;
   const drop = Math.round(released.footprintKiB) - Math.round(loaded.footprintKiB);
   const fixture = `${counts.sessions} sessions in ${counts.projects} projects, ${counts.attention} attention items (${counts.pending} pending), ${counts.library} library rows, ${counts.drafts} drafts, ${counts.history} prompt-history lines`;
   const gc = run.gc ? 'gc ran twice before the released window' : 'no gc (the runtime exposed none)';
   const validity = run.reasons.length === 0 ? 'valid' : `invalid: ${run.reasons.join('; ')}`;
-  return `[daemon-idle] spine loaded footprint ${Math.round(loaded.footprintKiB)} KiB (median of ${loaded.samples}) · released ${Math.round(released.footprintKiB)} KiB (median of ${released.samples}), ${signed(drop)} KiB · cpu ${loaded.cpuS.toFixed(2)} s over ${IDLE_RUN.windowS} s loaded, ${released.cpuS.toFixed(2)} s over ${SPINE_RELEASED_RUN.windowS} s released · fixture ${fixture} · ${gc} · ${validity} · load ${loaded.load.toFixed(1)} loaded, ${released.load.toFixed(1)} released`;
+  return `[daemon-idle] spine loaded footprint ${Math.round(loaded.footprintKiB)} KiB (median of ${loaded.samples}) · released ${Math.round(released.footprintKiB)} KiB (median of ${released.samples}), ${signed(drop)} KiB · cpu ${loaded.cpuS.toFixed(2)} s over ${IDLE_RUN.windowS} s loaded, ${released.cpuS.toFixed(2)} s over ${SPINE_RELEASED_RUN.windowS} s released · fixture ${fixture} · ${gc} · ${validity} · load ${loadText(loaded.load, loaded.loadPair)} loaded, ${loadText(released.load, released.loadPair)} released`;
 }
