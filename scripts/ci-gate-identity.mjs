@@ -7,7 +7,8 @@ import { targetOutputs } from './ci-gate-pool-demand.mjs';
 const { values } = parseArgs({ options: { 'git-dir': { type: 'string' }, sha: { type: 'string' }, branch: { type: 'string' } } });
 const list = (value) => [...new Set(value.split(/[\s,]+/).filter(Boolean))].sort().join(',');
 // Hash semantic trailers, never the nonce or advisory text. Normalize sets before asking the committed planner too.
-const trailers = (process.env.HEAD_MESSAGE ?? '').split('\n').filter((line) => line && !/^(Nonce|Pool-Demand|Unit-Coverage|E2E-Coverage):/.test(line)).map((line) =>
+// Queue samples change placement, not work identity: strip them before both hashing and planning for this label.
+const trailers = (process.env.HEAD_MESSAGE ?? '').split('\n').filter((line) => line && !/^(Nonce|Pool-Demand|Unit-Coverage|E2E-Coverage|Mac-Backlog):/.test(line)).map((line) =>
   line.replace(/^(Gates|DefaultBeside):\s*(.*)$/, (_, key, value) => `${key}: ${list(value)}`),
 ).sort();
 const message = trailers.join('\n');

@@ -28,6 +28,11 @@ export async function sampleBacklog({ api = apiOf, now = Date.now, maxCalls = 60
     for (let page = 1; ; page++) {
       const data = await read(`${path}${path.includes('?') ? '&' : '?'}per_page=100&page=${page}`);
       need(Array.isArray(data[key]) && Number.isSafeInteger(data.total_count) && data.total_count >= 0, `invalid ${key} response`);
+      // Every MAWS page must be complete: missing its EC2-compatible jobs would favor overflow incorrectly.
+      // Other repositories contribute only hosted counts, where a lower bound favors normal placement.
+      const expected = Math.min(100, Math.max(0, data.total_count - (page - 1) * 100));
+      if (path.startsWith('repos/SSFSKIM/MAWS/')) need(data[key].length === expected,
+        `incomplete ${key} response at ${path} page ${page}: expected ${expected}, got ${data[key].length}`);
       await visit(data[key]);
       if (page * 100 >= data.total_count) return;
       need(data[key].length === 100, `incomplete ${key} response`);

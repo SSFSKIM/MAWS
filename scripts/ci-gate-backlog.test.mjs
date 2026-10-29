@@ -16,7 +16,7 @@ function apiFixture({ jobs = {}, runs = {}, runnerOverride = {} } = {}) {
     if (path.includes('/runners?')) return { total_count: 1, runners: [{ ...runner, ...runnerOverride }] };
     const repo = path.split('/')[2];
     if (path.includes('/jobs?')) return { total_count: (jobs[repo] || []).length, jobs: jobs[repo] || [] };
-    return { total_count: (runs[repo] || []).length, workflow_runs: path.includes('status=in_progress') ? runs[repo] || [] : [] };
+    return { total_count: path.includes('status=in_progress') ? (runs[repo] || []).length : 0, workflow_runs: path.includes('status=in_progress') ? runs[repo] || [] : [] };
   } };
 }
 test('counts account-wide hosted jobs but only jobs the MAWS EC2 runner can take in its own queue', async () => {
@@ -118,4 +118,21 @@ test('the overall deadline stops reads even before the call cap', async () => {
     return api(path);
   } }), /timeout/);
   assert.equal(calls.length, 1);
+});
+
+test('every MAWS page, including a short final page, must match the count before overflow can be advised', async () => {
+  for (const endpoint of ['/runners?', '/runs?status=queued', '/runs?status=in_progress', '/jobs?']) {
+    const fixture = apiFixture({ runs: { MAWS: [{ id: 1 }] } });
+    await assert.rejects(sampleBacklog({ now: () => now, api: (path) => {
+      const data = fixture.api(path);
+      if (path.includes('/MAWS/') && path.includes(endpoint)) return { ...data, total_count: 4 };
+      return data;
+    } }), /incomplete/, endpoint);
+  }
+  // The second jobs page is the final one, but still owes the one remaining row.
+  await assert.rejects(sampleBacklog({ now: () => now, api: (path) => {
+    if (path.includes('/runners?')) return { total_count: 1, runners: [runner] };
+    if (path.includes('/jobs?')) return { total_count: 101, jobs: path.includes('page=2') ? [] : Array.from({ length: 100 }, (_, i) => job(i + 1, ['ci-kit-mac-solo'])) };
+    return { total_count: 1, workflow_runs: [{ id: 1 }] };
+  } }), /incomplete/);
 });
