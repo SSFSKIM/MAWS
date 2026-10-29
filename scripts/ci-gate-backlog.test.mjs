@@ -91,3 +91,31 @@ test('60-second atomic cache shares success and failures, expires, and does not 
     assert.deepEqual(await cachedBacklog({ cache, collect: async () => ({ ...sample, at: new Date(clock).toISOString() }), now: () => clock }), { ...sample, at: new Date(clock).toISOString() });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('a cap exhausted by the runner read cannot return an uncounted MAWS queue', async () => {
+  const { api, calls } = apiFixture();
+  await assert.rejects(sampleBacklog({ api, now: () => now, maxCalls: 1 }), /cap|incomplete/);
+  assert.equal(calls.length, 1);
+});
+test('pagination counts all compatible jobs and deduplicates a run seen across status transitions', async () => {
+  const calls = [];
+  const result = await sampleBacklog({ now: () => now, api: (path) => {
+    calls.push(path);
+    if (path.includes('/runners?')) return { total_count: 1, runners: [runner] };
+    if (!path.includes('/MAWS/')) return { total_count: 0, workflow_runs: [] };
+    if (path.includes('/jobs?')) return { total_count: 101, jobs: path.includes('page=2') ? [job(101, ['ci-kit-mac-solo'])] : Array.from({ length: 100 }, (_, i) => job(i + 1, ['SELF-HOSTED', 'MACOS', 'arm64'])) };
+    return { total_count: 1, workflow_runs: [{ id: 1 }] };
+  } });
+  assert.equal(result.ec2Queued, 101);
+  assert.equal(calls.filter((path) => path.includes('/jobs?')).length, 2);
+});
+test('the overall deadline stops reads even before the call cap', async () => {
+  let clock = now;
+  const { api, calls } = apiFixture();
+  await assert.rejects(sampleBacklog({ now: () => clock, budgetMs: 100, api: (path, timeout) => {
+    assert.ok(timeout <= 100);
+    clock += 101;
+    return api(path);
+  } }), /timeout/);
+  assert.equal(calls.length, 1);
+});

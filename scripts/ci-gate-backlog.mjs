@@ -41,7 +41,11 @@ export async function sampleBacklog({ api = apiOf, now = Date.now, maxCalls = 60
   const result = { v: 1, at: new Date(start).toISOString(), hostedQueued: 0, hostedRunning: 0, ec2: runner.status === 'offline' ? 'offline' : runner.busy ? 'busy' : 'idle', ec2Queued: 0, partial: [] };
   for (const repo of REPOS) {
     // Reserve no estimate of missing EC2 work: only the hosted-only repositories can truncate at the cap.
-    if (calls >= maxCalls) { result.partial.push(repo); continue; }
+    if (calls >= maxCalls) {
+      need(repo !== REPOS[0], 'backlog call cap reached before MAWS was counted');
+      result.partial.push(repo);
+      continue;
+    }
     const runs = new Set();
     try {
       for (const status of ['queued', 'in_progress']) {
