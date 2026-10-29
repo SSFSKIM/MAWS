@@ -124,18 +124,18 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
   };
   const hasLiveRoot = (appSessionId: AppSessionId) => addon !== null && rootsOf(appSessionId).some((root) => addon.process(root.pid)?.start === root.start);
 
-  // The verdict on an accepted socket, which nothing has read yet: refused, it is destroyed unread; accepted, it becomes
-  // a connection, counted before its hello goes, and only then is read. The order is what a reader of the server sees:
-  // the e2e seam's `inspect`, run by Node's inspector at the next interrupt (between any two calls of this synchronous
-  // code), finds the host counted as soon as the host can hear the hello.
+  // The verdict on an accepted socket, which nothing has read yet: refused, it is counted and then destroyed unread;
+  // accepted, it becomes a connection, counted before its hello goes, and only then is read. The order is what a reader
+  // of the server sees: the e2e seam's `inspect`, which Node's inspector runs at its next interrupt (between any two
+  // calls of this synchronous code), finds the peer counted as soon as the peer can hear the hello or the close.
   const decide = (appSessionId: AppSessionId, listening: Listening, socket: Socket, acceptedAt: number) => {
     listening.pending.delete(socket);
     if (socket.destroyed) return;
     const refusal = authorizePeer(socketFd(socket), rootsOf(appSessionId), { addon, now: acceptedAt, uid });
     if (refusal) {
-      socket.destroy();
       listening.refused += 1;
       log(refusalLine(appSessionId, refusal));
+      socket.destroy(); // last: the peer can see the close from here on
       return;
     }
     const connection = new CuaConnection(ctx, appSessionId, socket, (closed) => listening.connections.delete(closed));
