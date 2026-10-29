@@ -13,6 +13,8 @@ import { appendStripped, stripAnsi } from '@shared/wire/ansi';
 import { parseAskSteer } from '@shared/maws/ask'; // E1
 import type { AskAnswer } from '@shared/maws/tools'; // E1
 import { isInterruptionMarker, isLocalCommand } from './user-text';
+import { INTERRUPT_CUT } from '@shared/lane-a/interrupt-cut'; // P5 O9
+import { presentationOf } from './classify'; // P5 O9
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
 
@@ -62,6 +64,10 @@ export interface TurnState {
   // Additive (E1, residue 13): the answers an async ask's steer carried, by askId, on the turn that holds the ask's call
   // (the steer usually runs as a turn of its own). Replaced, never mutated, so an earlier snapshot keeps its own map.
   askSteers?: ReadonlyMap<string, AskAnswer[]>;
+  // Additive (P5 O9): how many of `events` the turn held when its session's process exited. The agents of an agents row
+  // made from the events before it ended with the process, though no finish of theirs came (derive.ts); ordered by
+  // arrival, never by time, since a synthesised exit and the engine's events carry different clocks.
+  agentsEndedAt?: number;
 }
 
 export interface TranscriptUi {
@@ -543,6 +549,13 @@ function apply(batch: Batch, event: SessionEvent): void {
         if (!pushRouted(null)) batch.loose(event); // a bash or local_command row; never a turn
         return;
       }
+      // P5 O9: the reply an interrupt cut off, as the sminos bridge records it after the marker closed its turn: that
+      // turn's, the latest, so derive draws it there marked cut off (a row: the turn's rows derive again)
+      if (event.origin === INTERRUPT_CUT) {
+        const cut = state.order.at(-1);
+        if (cut === undefined || !pushRouted(cut)) batch.loose(event);
+        return;
+      }
       if (isInterruptionMarker(event.origin, event.content) && !event.isSynthetic) {
         if (batch.foldMarkerBack(event)) return;
         const turn = batch.current();
@@ -734,11 +747,23 @@ function apply(batch: Batch, event: SessionEvent): void {
     }
     case 'session.reconnect':
     case 'process.exited': {
+      // P5 O9: the process's exit ends the agents every agents row names, each turn's own up to now, a turn a rewind hid
+      // among them (its branch draws when revealed), a child's nested agents too; the rows derive again
+      const endAgents = () => {
+        if (event.kind !== 'process.exited') return;
+        for (const id of [...state.order, ...(state.hidden?.turns ?? [])]) {
+          if (!state.turns.get(id)?.events.some(makesAgentsRow)) continue;
+          const turn = batch.touch(id);
+          turn.agentsEndedAt = turn.events.length;
+          turn.version += 1;
+        }
+      };
       // In a child transcript, the parent's process exiting ends the child with no finish to come: its open turn closes
       // as stopped, and the exit is the parent's row, not the child's.
       if (state.agentId !== null) {
         const turn = batch.current();
         if (turn) batch.closeUnended(turn, 'stopped', event.at, event.kind === 'process.exited' && event.reason === 'crash' ? 'crash' : null);
+        endAgents();
         return;
       }
       // A session's process exiting ends every turn the engine was running (no turn.ended will come for them); a
@@ -753,6 +778,7 @@ function apply(batch: Batch, event: SessionEvent): void {
           const { outcome, cause } = exitClosing(turn, event.reason);
           batch.closeUnended(batch.touch(id), outcome, event.at, cause);
         }
+        endAgents();
       }
       return batch.loose(event);
     }
@@ -844,6 +870,13 @@ function applySideThread(batch: Batch, event: Event<'side.thread.opened'> | Even
   batch.loose(event);
 }
 // E3 end
+
+// An event derive draws an agents row from (derive.ts): an Agent call, or an agent's start with no call of its own (a child
+// resumed through SendMessage names that call's tool use).
+const makesAgentsRow = (event: SessionEvent) =>
+  (event.kind === 'tool.use' && presentationOf(event.toolName) === 'subagent') ||
+  event.kind === 'subagent.started' ||
+  (event.kind === 'task.started' && (event.taskType === 'local_agent' || event.taskType === 'local_workflow'));
 
 // Interrupt evidence a turn retains: the engine's interrupt marker, or a call the human rejected.
 const wasInterrupted = (turn: TurnState) =>

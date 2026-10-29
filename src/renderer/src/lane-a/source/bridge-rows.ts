@@ -20,6 +20,9 @@
 //   terminal]`), then only those same Bash lines;
 // - the `/secret` mod's record, appended by doperpowers 7.138 and 7.139 before the mod moved to the cua plugin: `The
 //   person stored a secret under <KEY>. You never see its value. …`;
+// - the reply an interrupt cut off (sminos 1.27.16, after the marker and the note): its first line opening `The interrupt
+//   cut off the reply you were writing.`, then the cut-off text (`@shared/lane-a/interrupt-cut`), which MAWS's backfill
+//   draws marked cut off;
 // - a steer an older bridge appended: any other. Before 7.180.0 nothing in a steer's row said it was one, so a row with
 //   no steer line that is none of the rows above is still taken for one: the history holds such rows, and the Macs run
 //   an older bridge until they roll after the desk. A new kind of appended row would read as such a steer and draw as
@@ -35,10 +38,11 @@
 // (`appended-turn.ts`). The bridge's mirror of a steer or a delivery, a system notice for the terminal, is not drawn.
 import type { JsonObject } from 'desk-hub/protocol';
 import { INTERRUPT_MARKER } from '../../../../engine-host/normalizer-support';
+import { parseInterruptCut } from '@shared/lane-a/interrupt-cut';
 import { asQueuedPrompt, BRIDGE_PLUGINS, deliveryFrame, isBridgeRow } from '../conversation/delivery-frame';
 import { BRIDGE_TASK_LINE, bridgeRecordLines, isEngineMarker, singleText } from './interrupt';
 
-export type BridgeRowKind = 'delivery' | 'interrupt-marker' | 'interrupt-note' | 'stop-note' | 'interrupt-record' | 'secret-note' | 'steer';
+export type BridgeRowKind = 'delivery' | 'interrupt-marker' | 'interrupt-note' | 'stop-note' | 'interrupt-record' | 'secret-note' | 'cut-reply' | 'steer';
 
 /** The first line of the bridge's steer row (doperpowers `hooks/mods/bridge.tsx`, `STEER_LINE`), the owner's words after it. */
 export const STEER_LINE = '[sminos steer from human]';
@@ -70,6 +74,7 @@ export function bridgeRowKind(row: JsonObject): BridgeRowKind | null {
   if (text !== null && isInterruptNote(text)) return 'interrupt-note';
   if (text !== null && STOP_NOTE.test(text)) return 'stop-note';
   if (text !== null && SECRET_NOTE.test(text)) return 'secret-note';
+  if (text !== null && parseInterruptCut(text) !== null) return 'cut-reply';
   return 'steer';
 }
 

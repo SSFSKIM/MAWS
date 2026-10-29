@@ -19,7 +19,11 @@
 // before it, and it is known once the store holds a turn started after it (`placeCuts`). Until then the rows wait, last
 // and in no turn: they are never frozen under whatever turn was latest when the step-end was heard, which a replay
 // (a mount opened later, on a watch another holds) or a disk read still behind the stream would make the wrong one.
+// The M10 sitting: the cut is marked cut off (`streaming-rows.ts`), the session having kept none of it. From sminos
+// 1.27.16 the bridge records it in a row of its own, which a view rebuilt from the transcript draws alike; once the
+// store holds that row, the kept cut leaves (`placeCuts`), so a live view draws it once, as a rebuilt one does.
 import type { BlockRow, SessionBodies, StepEnd, Streaming } from 'desk-hub/protocol';
+import { INTERRUPT_CUT } from '@shared/lane-a/interrupt-cut';
 import type { Row, TurnId } from '../../transcript/model/rows';
 import type { TranscriptState } from '../../transcript/model/reduce';
 import { streamingRows } from '../view/streaming-rows';
@@ -44,12 +48,37 @@ export interface Keeping {
 
 const NO_KEEPING: Keeping = { keep: () => {} };
 
-/** The cuts' rows, each under the disk turn running at its time once the store shows which that is, else in none. */
+/**
+ * The cuts' rows, each under the disk turn running at its time once the store shows which that is, else in none. A cut
+ * the sminos bridge recorded (1.27.16) is drawn from that row, so it is dropped here once the store holds it.
+ */
 export function placeCuts(state: TranscriptState | undefined, cuts: readonly Cut[]): Row[] {
+  const recorded = recordedCut(state);
   return cuts.flatMap((cut) => {
+    if (recorded(cut.at)) return [];
     const turn = turnAt(state, cut.at);
     return turn === null ? cut.rows : cut.rows.map((row) => ({ ...row, turnId: turn }));
   });
+}
+
+/**
+ * Whether the store holds the sminos bridge's row of the reply cut at `at` (`@shared/lane-a/interrupt-cut`): one it
+ * wrote at or after the cut with no turn started in between, so in the turn the cut was in. The bridge writes it after
+ * the step the cut ended, on the clock of the step-end's `t`. No time: never.
+ */
+function recordedCut(state: TranscriptState | undefined): (at: number | null) => boolean {
+  if (state === undefined) return () => false;
+  const written: number[] = [];
+  const starts: number[] = [];
+  for (const id of state.order) {
+    const turn = state.turns.get(id);
+    if (turn === undefined) continue;
+    starts.push(Date.parse(turn.startedAt));
+    for (const event of turn.events) if (event.kind === 'user.message' && event.origin === INTERRUPT_CUT) written.push(Date.parse(event.at));
+  }
+  for (const event of state.loose) if (event.kind === 'user.message' && event.origin === INTERRUPT_CUT) written.push(Date.parse(event.at)); // its turn not loaded
+  if (written.length === 0) return () => false;
+  return (at) => at !== null && written.some((t) => t >= at && !starts.some((s) => s > at && s <= t));
 }
 
 function turnAt(state: TranscriptState | undefined, at: number | null): TurnId | null {
