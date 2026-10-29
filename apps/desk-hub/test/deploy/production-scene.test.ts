@@ -4,7 +4,7 @@
 // The script is sourced (its verbs dispatch only when it is run), and its selection functions are fed tables as the
 // VM's /proc would give them.
 import { spawnSync } from 'node:child_process';
-import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -121,80 +121,132 @@ describe('the lane A session in the machine project', () => {
 });
 
 
-// sminos reads the engine's session records from $HOME/.claude/sessions alone, whatever CLAUDE_CONFIG_DIR says, so a
-// lane A engine on the scratch config dir is seen only through a link there to its own record (attempt 2, 2026-10-29),
-// published under a name of the run's own (o10-m11-lane-a.<record>) that no engine of the owner's writes.
-const PREFIX = 'o10-m11-lane-a.';
-const AS_SELF = 'as_owner() { "$@"; }; '; // the owner's user is this test's own: nothing of the real owner's is touched
+// sminos 1.27.15 reads a session's engine records and transcript under the config dir its record hook kept at
+// $SMINOS_HOME/config-dirs/<session>.json, so the run makes no link into the owner's ~/.claude (attempts 2 to 4 did,
+// and with 1.27.15 a linked record would be read twice); it checks instead that both sminos sides are at that floor,
+// share the daemon's SMINOS_HOME, and that the session's config dir was recorded there.
+const SH = '/Users/new/.claude/sminos';
+const CLI = '/var/lib/devcloud/marketplaces/doperpowers/sminos/skills/sminos/scripts/sminos.py';
 
-describe('the engine records the owner’s sminos reads', () => {
-  function dirs(): { root: string; records: string; sessions: string; done: () => void } {
-    const root = mkdtempSync(join(tmpdir(), 'o10-records-'));
-    const records = join(root, 'records');
-    const sessions = join(root, 'sessions');
-    mkdirSync(records);
-    mkdirSync(sessions);
-    return { root, records, sessions, done: () => rmSync(root, { recursive: true, force: true }) };
-  }
+function scratch(): { root: string; done: () => void } {
+  const root = mkdtempSync(join(tmpdir(), 'o10-sminos-'));
+  return { root, done: () => rmSync(root, { recursive: true, force: true }) };
+}
 
-  it('plans a link under the run’s own name for each record, keeps its own link, and never takes a name already there', () => {
-    const { records, sessions, done } = dirs();
+describe('the owner’s ~/.claude', () => {
+  it('receives no link of the run’s: the record links and everything that made or removed them are gone', () => {
+    expect(call('for f in record_plan own_links link_records; do type -t $f; done; true', [])).toEqual({ lines: [], status: 0 });
+    // Of the owner's ~/.claude the script names sminos's home alone.
+    const named = [...readFileSync(script, 'utf8').matchAll(/\$OH\/\.claude\/[A-Za-z._-]*/g)].map((m) => m[0]);
+    expect(new Set(named)).toEqual(new Set(['$OH/.claude/sminos']));
+  });
+});
+
+describe('the lane A session’s environment', () => {
+  const env = () => call('printf "%s\\n" "${SESSION_ENV[@]}" | grep -E "^(SMINOS_HOME|CLAUDE_CONFIG_DIR)="', []).lines;
+
+  it('carries the owner daemon’s SMINOS_HOME and the scratch config dir, absolute', () => {
+    expect(env().sort()).toEqual([`CLAUDE_CONFIG_DIR=${X}/claude`, `SMINOS_HOME=${SH}`]);
+    expect(call('printf "%s\\n" "${SESSION_ENV[@]}" | session_env_problems', [])).toEqual({ lines: [], status: 0 });
+  });
+
+  it('is refused with another SMINOS_HOME, or a config dir that is not the scratch one’s absolute path', () => {
+    const good = [`SMINOS_HOME=${SH}`, `CLAUDE_CONFIG_DIR=${X}/claude`];
+    const swap = (line: string) => good.map((l) => (l.split('=')[0] === line.split('=')[0] ? line : l)).join('\n') + '\n';
+    expect(call('session_env_problems', [], swap('SMINOS_HOME=/Users/new/.config/sminos'))).toEqual({ lines: [`SMINOS_HOME is /Users/new/.config/sminos, not ${SH} (the owner’s daemon’s)`], status: 1 });
+    expect(call('session_env_problems', [], swap('CLAUDE_CONFIG_DIR=o10-m11-lane-a/claude'))).toEqual({ lines: [`CLAUDE_CONFIG_DIR is o10-m11-lane-a/claude, not ${X}/claude (absolute)`], status: 1 });
+    expect(call('session_env_problems', [], '').lines).toEqual([`SMINOS_HOME is unset, not ${SH} (the owner’s daemon’s)`, `CLAUDE_CONFIG_DIR is unset, not ${X}/claude (absolute)`]);
+  });
+});
+
+describe('the config dir sminos recorded for the session', () => {
+  it('is the scratch one, in the owner daemon’s SMINOS_HOME, or lane A is not up', () => {
+    const { root, done } = scratch();
     try {
-      for (const pid of ['501', '502', '503']) writeFileSync(join(records, `${pid}.json`), '{}');
-      writeFileSync(join(sessions, '501.json'), '{}'); // an owner's engine of the same pid: its own name, no clash
-      symlinkSync(join(records, '502.json'), join(sessions, `${PREFIX}502.json`));
-      mkdirSync(join(sessions, `${PREFIX}503.json`));
-      expect(call('record_plan', [records, sessions])).toEqual({ lines: ['link 501.json', 'linked 502.json', 'taken 503.json'], status: 0 });
+      const file = join(root, 'f.json');
+      writeFileSync(file, JSON.stringify({ configDir: `${X}/claude`, at: '2026-10-29T00:00:00.000Z' }));
+      expect(call('config_dir_verdict', [file])).toEqual({ lines: [], status: 0 });
+      writeFileSync(file, JSON.stringify({ configDir: '/Users/new/.claude', at: 'x' }));
+      expect(call('config_dir_verdict', [file])).toEqual({ lines: [`sminos recorded /Users/new/.claude as the config dir of the session, not ${X}/claude`], status: 1 });
+      writeFileSync(file, 'not json');
+      expect(call('config_dir_verdict', [file]).status).toBe(1);
+      expect(call('config_dir_verdict', [join(root, 'none.json')])).toEqual({ lines: [`sminos recorded no config dir for the session (no ${join(root, 'none.json')})`], status: 1 });
+    } finally {
+      done();
+    }
+  });
+});
+
+describe('sminos at 1.27.15 or later, on both sides', () => {
+  it('reads a version from sminos’s own plugin.json alone', () => {
+    const { root, done } = scratch();
+    try {
+      const at = (name: string, body: unknown) => (writeFileSync(join(root, name), JSON.stringify(body)), join(root, name));
+      expect(call('sminos_version', [at('a.json', { name: 'sminos', version: '1.27.15' })])).toEqual({ lines: ['1.27.15'], status: 0 });
+      expect(call('sminos_version', [at('b.json', { name: 'doperpowers', version: '7.300.0' })]).status).toBe(1);
+      expect(call('sminos_version', [at('c.json', { name: 'sminos', version: '1.27.15-rc1' })]).status).toBe(1);
+      expect(call('sminos_version', [join(root, 'none.json')]).status).toBe(1);
     } finally {
       done();
     }
   });
 
-  it('makes each link with its exact target and fails on a name taken, a directory never receiving a link inside it', () => {
-    const { records, sessions, done } = dirs();
+  it('finds the CLI a daemon runs from its command line, and nothing in another command line', () => {
+    const argv = (...a: string[]) => a.join('\0') + '\0';
+    expect(call('daemon_cli', [], argv('/usr/bin/python3', CLI, 'daemon', 'run'))).toEqual({ lines: [CLI], status: 0 });
+    expect(call('daemon_cli', [], argv('/usr/bin/python3', CLI, 'list', '--json')).status).toBe(1);
+    expect(call('daemon_cli', [], argv('/usr/bin/python3', 'sminos/skills/sminos/scripts/sminos.py', 'daemon', 'run')).status).toBe(1);
+    expect(call('daemon_cli', [], argv('/usr/bin/sleep', 'infinity'))).toEqual({ lines: ['not a direct `<python> <cli> daemon run`: /usr/bin/sleep infinity'], status: 1 });
+    expect(call('daemon_cli', [], '')).toEqual({ lines: ['not a direct `<python> <cli> daemon run`: an empty command line'], status: 1 });
+  });
+
+  it('takes only a direct `<python> <cli> daemon run`, as the unit runs it, and names any other command line it found', () => {
+    const argv = (...a: string[]) => a.join('\0') + '\0';
+    // The unit's ExecStart is `<python> <cli> daemon run` (references/sminos-daemon.service), and a restart in place
+    // execs the same argv; devcloud's scrubber runs it as a child, its argv unchanged.
+    expect(call('daemon_cli', [], argv('/usr/bin/python3.12', CLI, 'daemon', 'run'))).toEqual({ lines: [CLI], status: 0 });
+    for (const [found, line] of [
+      [['/usr/bin/python3', '/opt/wrapper.py', CLI, 'daemon', 'run'], `/usr/bin/python3 /opt/wrapper.py ${CLI} daemon run`],
+      [['/usr/bin/python3', '-c', 'import runpy', CLI, 'daemon', 'run'], `/usr/bin/python3 -c import runpy ${CLI} daemon run`],
+      [['/usr/bin/python3', '-m', 'sminos', CLI, 'daemon', 'run'], `/usr/bin/python3 -m sminos ${CLI} daemon run`],
+      [['/usr/bin/python3', '-I', CLI, 'daemon', 'run'], `/usr/bin/python3 -I ${CLI} daemon run`],
+      [['/usr/bin/python3', CLI, 'daemon', 'run', '--interval', '5'], `/usr/bin/python3 ${CLI} daemon run --interval 5`],
+      [['/opt/wrapper', CLI, 'daemon', 'run'], `/opt/wrapper ${CLI} daemon run`],
+      [['python3', CLI, 'daemon', 'run'], `python3 ${CLI} daemon run`],
+    ] as const) {
+      expect(call('daemon_cli', [], argv(...found)), line).toEqual({ lines: [`not a direct \`<python> <cli> daemon run\`: ${line}`], status: 1 });
+    }
+  });
+
+  it('takes the daemon for $SMINOS_HOME’s own only while the run lock’s pid holds that lock open and runs `daemon run`', () => {
+    const { root, done } = scratch();
     try {
-      writeFileSync(join(records, '701.json'), '{}');
-      expect(call(`${AS_SELF}link_records`, [records, sessions]).status).toBe(0);
-      expect(readlinkSync(join(sessions, `${PREFIX}701.json`))).toBe(join(records, '701.json'));
-      writeFileSync(join(records, '702.json'), '{}');
-      mkdirSync(join(sessions, `${PREFIX}702.json`));
-      const taken = call(`${AS_SELF}link_records`, [records, sessions]);
-      expect(taken.status).toBe(1);
-      expect(taken.lines.at(-1)).toContain(`${PREFIX}702.json is there already`);
-      expect(readdirSync(join(sessions, `${PREFIX}702.json`))).toEqual([]);
+      const lock = join(root, 'run.lock');
+      const proc = join(root, 'proc');
+      writeFileSync(lock, 'pid 4242 since 2026-10-29T00:00:00Z');
+      mkdirSync(join(proc, '4242', 'fd'), { recursive: true });
+      writeFileSync(join(proc, '4242', 'cmdline'), ['/usr/bin/python3', CLI, 'daemon', 'run', ''].join('\0'));
+      symlinkSync('/dev/null', join(proc, '4242', 'fd', '0'));
+      expect(call('daemon_of', [lock, proc])).toEqual({ lines: [`the daemon’s pid 4242 does not hold ${lock} open: it is not this SMINOS_HOME’s daemon`], status: 1 });
+      symlinkSync(lock, join(proc, '4242', 'fd', '3'));
+      expect(call('daemon_of', [lock, proc])).toEqual({ lines: [`4242 ${CLI}`], status: 0 });
+      writeFileSync(join(proc, '4242', 'cmdline'), ['/usr/bin/sleep', 'infinity', ''].join('\0'));
+      expect(call('daemon_of', [lock, proc])).toEqual({ lines: ['pid 4242 runs no sminos daemon: not a direct `<python> <cli> daemon run`: /usr/bin/sleep infinity'], status: 1 });
+      rmSync(join(proc, '4242'), { recursive: true });
+      expect(call('daemon_of', [lock, proc])).toEqual({ lines: ['pid 4242, which the run lock names, runs no more'], status: 1 });
+      writeFileSync(lock, '');
+      expect(call('daemon_of', [lock, proc])).toEqual({ lines: [`no daemon has run for ${root} (its run lock names no pid)`], status: 1 });
     } finally {
       done();
     }
   });
 
-  it('makes the owner’s sessions directory 0700 when it is absent, and leaves an existing one’s mode alone', () => {
-    const { root, records, done } = dirs();
-    try {
-      const absent = join(root, 'absent');
-      expect(call(`${AS_SELF}link_records`, [records, absent]).status).toBe(0);
-      expect(statSync(absent).mode & 0o777).toBe(0o700);
-      const open = join(root, 'open');
-      mkdirSync(open, { mode: 0o755 });
-      expect(call(`${AS_SELF}link_records`, [records, open]).status).toBe(0);
-      expect(statSync(open).mode & 0o777).toBe(0o755);
-    } finally {
-      done();
-    }
-  });
-
-  it('names for removal only links under the run’s name whose target is exactly its record, nothing by a path prefix', () => {
-    const { sessions, done } = dirs();
-    try {
-      symlinkSync(`${X}/claude/sessions/601.json`, join(sessions, `${PREFIX}601.json`));
-      symlinkSync(`${X}/claude/sessions/other.json`, join(sessions, `${PREFIX}602.json`));
-      symlinkSync(`${X}/claude/sessions/../sessions/603.json`, join(sessions, `${PREFIX}603.json`));
-      symlinkSync(`${X}/claude/sessions/604.json`, join(sessions, '604.json')); // not under the run's name
-      writeFileSync(join(sessions, `${PREFIX}605.json`), '{}');
-      writeFileSync(join(sessions, '606.json'), '{}');
-      expect(call('own_links', [sessions])).toEqual({ lines: [join(sessions, `${PREFIX}601.json`)], status: 0 });
-      expect(lstatSync(join(sessions, '606.json')).isFile()).toBe(true);
-    } finally {
-      done();
-    }
+  it('lets the run start only when the daemon and the stub’s copy are both at the floor, compared by number', () => {
+    for (const [daemon, stub] of [['1.27.15', '1.27.15'], ['1.27.100', '1.28.0'], ['2.0', '1.27.15']]) expect(call('sminos_floor', [daemon, stub]), `${daemon} ${stub}`).toEqual({ lines: [], status: 0 });
+    const need = 'lane A under a scratch CLAUDE_CONFIG_DIR needs both at 1.27.15 or later (the stub’s hooks record its config dir, the daemon’s plane reads its transcript there)';
+    expect(call('sminos_floor', ['1.27.14', '1.27.15'])).toEqual({ lines: [`refused: sminos below 1.27.15: the VM’s daemon runs 1.27.14, the stub’s copy is 1.27.15; ${need}`], status: 1 });
+    expect(call('sminos_floor', ['1.27.15', '1.27.9'])).toEqual({ lines: [`refused: sminos below 1.27.15: the VM’s daemon runs 1.27.15, the stub’s copy is 1.27.9; ${need}`], status: 1 });
+    expect(call('sminos_floor', ['', '1.27.15', 'no daemon has run for /x'])).toEqual({ lines: [`refused: sminos below 1.27.15: the VM’s daemon runs an unread version (no daemon has run for /x), the stub’s copy is 1.27.15; ${need}`], status: 1 });
+    expect(call('sminos_floor', ['1.27.15', '']).lines).toEqual([`refused: sminos below 1.27.15: the VM’s daemon runs 1.27.15, the stub’s copy is an unread version; ${need}`]);
   });
 });

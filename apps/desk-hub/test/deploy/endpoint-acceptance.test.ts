@@ -389,6 +389,48 @@ describe('production’s machine', () => {
     expect(said).toEqual([]);
   });
 
+  // A devcloud that answers production.sh's `sminos-floor` as the VM would (its line, its status) and fails any other
+  // step, so a run that went past the floor would show it here, before any pairing.
+  function devcloud(floor: { line: string; rc: number }): string {
+    const dir = mkdtempSync(join(tmpdir(), 'ep-floor-'));
+    const bin = join(dir, 'devcloud');
+    writeFileSync(bin, `#!/bin/bash\nscript=$(cat)\nif [[ $script == *"production.sh sminos-floor"* ]]; then printf '@@BEGIN\\n%s\\n@@END %d\\n' '${floor.line}' ${floor.rc}; else echo "a step past the floor: \${script##*production.sh }" >&2; exit 9; fi\n`, { mode: 0o755 });
+    return bin;
+  }
+  const run = async (bin: string) => {
+    const { productionRun } = await import('../../deploy/endpoint-production.ts');
+    const said: string[] = [];
+    let read = 0;
+    // A hub that answers nothing: the run's first read of production (its org state) fails, after the floor.
+    const person = { hub: 'https://desk-hub.opencognita-platform.workers.dev', json: async () => Promise.reject(new Error('no hub in this test')) } as unknown as Person;
+    const scratch = mkdtempSync(join(tmpdir(), 'ep-floor-run-'));
+    const outcome = productionRun({ person, items: ['2'], cleanup: new Cleanup(), secrets: new Secrets(null), ssh: { devcloud: bin, vm: 'dc-acceptance-7f80' }, scratch, directUrl: 'ws://100.116.205.27:47830', log: (l) => said.push(l), ready: join(scratch, 'ready'), readyMs: 1000, readCode: async () => (read++, 'x') }).then(
+      (code) => ({ code, error: null }),
+      (error: Error) => ({ code: null, error: error.message }),
+    );
+    return { ...(await outcome), said, read: () => read };
+  };
+
+  it('is refused before the owner is asked for anything when sminos on the VM is below the floor, naming both versions', async () => {
+    const line = 'refused: sminos below 1.27.15: the VM’s daemon runs 1.27.14, the stub’s copy is 1.27.15; lane A …';
+    const { code, error, said, read } = await run(devcloud({ line, rc: 1 }));
+    expect(code).toBeNull();
+    expect(error).toContain(line);
+    expect(said.filter((l) => l.startsWith('OWNER:'))).toEqual([]);
+    expect(read()).toBe(0);
+  });
+
+  it('checks the floor first, then goes on to the machine', async () => {
+    const line = 'sminos at 1.27.15 or later: the VM’s daemon runs 1.27.15 (pid 9, SMINOS_HOME /Users/new/.claude/sminos), the stub’s copy is 1.27.15';
+    const { code, said } = await run(devcloud({ line, rc: 0 }));
+    const floor = said.findIndex((l) => l.includes(line));
+    const started = said.findIndex((l) => l.startsWith('endpoint acceptance: production'));
+    expect(floor).toBeGreaterThanOrEqual(0);
+    expect(started).toBeGreaterThan(floor);
+    expect(code).toBe(1);
+    expect(said.filter((l) => l.startsWith('OWNER:'))).toEqual([]);
+  });
+
   it('is dialled directly at production’s own port unless the command names another address', async () => {
     const { directUrlFor } = await import('../../deploy/endpoint-acceptance.ts');
     expect(directUrlFor('production', undefined)).toBe('ws://100.116.205.27:47830');

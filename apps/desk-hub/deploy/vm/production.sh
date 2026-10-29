@@ -10,16 +10,17 @@
 # that sminos (SMINOS_HOME=$SH). It is a `claude` against the stub model on 127.0.0.1 (no credential, no spend), started
 # under `env -i` with a scratch CLAUDE_CONFIG_DIR ($X/claude) that holds the sminos plugin alone, inside a private mount
 # namespace whose /etc/claude-code is an empty tmpfs; `down` ends it and removes $X. Of the owner's processes this reads
-# only which are claude's (their executable and terminal, never their arguments) and, for a seat the run spawned, the
-# two environment variables local-spawn names.
+# only which are claude's (their executable and terminal, never their arguments), for a seat the run spawned the two
+# environment variables local-spawn names, and of the sminos daemon its command line (an interpreter, its CLI's path and
+# `daemon run`) and which files it holds open, never its environment or its unit (which may carry a gateway token).
 #
 # The session is a stray in the machine's own project (the only project production lets the run write): its checkout
 # is a git repository with no remote and no .smns, which sminos resolves to the machine project as it does any such
-# directory of the owner's. sminos reads the engine's session records from $HOME/.claude/sessions alone, whatever
-# CLAUDE_CONFIG_DIR says, so for the owner's sminos (its CLI, its hooks, its daemon) to see the run's engines at all,
-# each record the engines write in the scratch config dir is linked there under a name of the run's own
-# (o10-m11-lane-a.<record>, which no engine writes), and `down` removes those links: the run's one write into the
-# owner's ~/.claude.
+# directory of the owner's. The owner's sminos sees an engine on the scratch config dir through sminos 1.27.15's
+# record of that dir: the session's record hook, in its own environment, keeps it at $SH/config-dirs/<session>.json,
+# and every reader of the engine's records and transcript (the CLI, the daemon's plane) looks under it. So the run
+# writes nothing into the owner's ~/.claude but through sminos, and both sminos sides must be at that floor and share
+# $SH (sminos_floor, below).
 set -uo pipefail
 OWNER=new
 OH=/Users/new
@@ -31,9 +32,7 @@ X=$OH/.local/share/o10-m11-lane-a     # the run's scratch: claude/ (the config d
 R=$X/run
 W=$X/work
 PLUGIN=$X/claude/plugins/sminos
-RECORDS=$X/claude/sessions            # the engine's session records, as the run's engines write them
-ENGINE_SESSIONS=$OH/.claude/sessions  # where sminos reads them
-LINK_PREFIX=o10-m11-lane-a.           # the run's links there: $LINK_PREFIX<record>, never an engine's own <pid>.json
+SMINOS_FLOOR=1.27.15                  # the first sminos that reads a session's engine files under its own config dir
 STUB_PORT=47899
 STUB_URL=http://127.0.0.1:$STUB_PORT
 CLAUDE=$O/bin/claude
@@ -163,28 +162,105 @@ project_verdict() {
   [[ $source == "machine project:"* ]] || { say "its project comes from ${source:-nowhere}, not from no .smns or remote (the machine project)"; bad=1; }
   return $bad
 }
-# For each record in directory $1 (the run's), what directory $2 (the owner's) holds of the run's name for it,
-# $LINK_PREFIX<record>: `link` nothing yet, `linked` the run's link to exactly that record, `taken` anything else
-# (never replaced).
-record_plan() {
-  local f name at
-  for f in "$1"/*.json; do
-    [[ -f $f ]] || continue
-    name=${f##*/}; at=$2/$LINK_PREFIX$name
-    if [[ -L $at && $(readlink "$at") == "$f" ]]; then say "linked $name"
-    elif [[ -e $at || -L $at ]]; then say "taken $name"
-    else say "link $name"; fi
-  done
+# ---- sminos at the floor -----------------------------------------------------------------------------------------------
+# Lane A needs sminos $SMINOS_FLOOR or later on both sides: the stub's copy ($O/sminos, whose hooks the session loads,
+# plugins being per config dir) records the session's config dir, and the VM's daemon (whose plane streams item 2's rows
+# from the transcript) reads it; before it, sminos read both from $HOME/.claude alone (attempts 2 and 4). And they must
+# share one SMINOS_HOME, $SH: the record is written under the hook's, and read under the daemon's.
+
+# The version sminos's plugin.json $1 declares, a dotted number; status 1 when the file is not sminos's or says none.
+sminos_version() {
+  python3 -c '
+import json, re, sys
+try:
+    d = json.load(open(sys.argv[1], encoding="utf-8"))
+except (OSError, ValueError):
+    sys.exit(1)
+v = d.get("version") if isinstance(d, dict) and d.get("name") == "sminos" else None
+sys.exit(1) if not (isinstance(v, str) and re.fullmatch(r"[0-9]+(\.[0-9]+)*", v)) else print(v)' "$1"
 }
-# The run's links in directory $1, for `down` to remove: a name $LINK_PREFIX<record> whose target is exactly
-# $RECORDS/<record>, compared whole (never by a path prefix).
-own_links() {
-  local f name
-  for f in "$1"/"$LINK_PREFIX"*.json; do
-    name=${f##*/}; name=${name#"$LINK_PREFIX"}
-    [[ -L $f && $(readlink "$f") == "$RECORDS/$name" ]] && say "$f"
+# The CLI a sminos daemon runs, from its command line on stdin (NUL-separated, as /proc/<pid>/cmdline gives it): only
+# a direct `<python> <abs>/skills/sminos/scripts/sminos.py daemon run`, the unit's ExecStart exactly (`daemon install`
+# writes no interpreter flag, a restart in place execs the same argv, and devcloud's scrubber runs it as a child, its
+# argv unchanged), so the plugin.json beside that CLI is the code that runs. Anything else (a wrapper, `-c`, `-m`, a
+# flag, another argument) is one line naming what was found, status 1.
+daemon_cli() {
+  # shellcheck disable=SC2016 # Python's source: its backticks are the refusal's words
+  python3 -c '
+import os, re, sys
+argv = [a.decode("utf-8", "replace") for a in sys.stdin.buffer.read().split(b"\0") if a]
+ok = (len(argv) == 4 and argv[0].startswith("/") and re.fullmatch(r"python3?(\.[0-9]+)?", os.path.basename(argv[0]))
+      and argv[1].startswith("/") and argv[1].endswith("/skills/sminos/scripts/sminos.py") and argv[2:] == ["daemon", "run"])
+print(argv[1] if ok else "not a direct `<python> <cli> daemon run`: %s" % (" ".join(argv) or "an empty command line"))
+sys.exit(0 if ok else 1)'
+}
+# The daemon of the sminos home whose run lock is $1 (default $SH's), read from /proc ($2): `<pid> <cli>` for the pid
+# the lock names while that process holds the lock open (so its SMINOS_HOME is that home) and runs `daemon run`; else
+# one line why not, status 1. Its command line and its open files' paths alone are read; flock is never asked (a
+# shared lock held at the daemon's restart in place would refuse its new image the lock).
+daemon_of() {
+  local lock=${1:-$SH/daemon/run.lock} proc=${2:-/proc} p cli f held=0 real
+  p=$(sed -n 's/^pid \([0-9][0-9]*\) since .*/\1/p' "$lock" 2>/dev/null | head -1)
+  [[ -n $p ]] || { say "no daemon has run for ${lock%/*} (its run lock names no pid)"; return 1; }
+  [[ -r $proc/$p/cmdline ]] || { say "pid $p, which the run lock names, runs no more"; return 1; }
+  cli=$(daemon_cli <"$proc/$p/cmdline") || { say "pid $p runs no sminos daemon: $cli"; return 1; }
+  real=$(readlink -f "$lock" 2>/dev/null)
+  for f in "$proc/$p"/fd/*; do
+    case $(readlink "$f" 2>/dev/null) in "$lock" | "${real:-$lock}") held=1; break ;; esac
   done
-  return 0
+  ((held)) || { say "the daemon’s pid $p does not hold $lock open: it is not this SMINOS_HOME’s daemon"; return 1; }
+  say "$p $cli"
+}
+# Why sminos here is below the floor, as one line naming both versions ($1 the daemon's, $2 the stub's copy's, empty
+# when unread; $3 why the daemon's is): none, status 0, when both are at it or later, compared number by number.
+sminos_floor() {
+  local daemon=${1:-} stub=${2:-} why=${3:-}
+  python3 -c '
+import sys
+floor = tuple(int(x) for x in sys.argv[1].split("."))
+ok = lambda v: bool(v) and tuple(int(x) for x in v.split(".")) >= floor
+sys.exit(0 if ok(sys.argv[2]) and ok(sys.argv[3]) else 1)' "$SMINOS_FLOOR" "$daemon" "$stub" && return 0
+  say "refused: sminos below $SMINOS_FLOOR: the VM’s daemon runs ${daemon:-an unread version${why:+ ($why)}}, the stub’s copy is ${stub:-an unread version}; lane A under a scratch CLAUDE_CONFIG_DIR needs both at $SMINOS_FLOOR or later (the stub’s hooks record its config dir, the daemon’s plane reads its transcript there)"
+  return 1
+}
+# The floor on this VM: the running daemon of $SH, its version beside the CLI it runs (it restarts in place on its
+# scripts once they change, so that is the code it runs within a tick), and the stub's copy. One line either way.
+sminos_floor_here() {
+  local d daemon='' stub why='' p cli
+  stub=$(sminos_version $O/sminos/.claude-plugin/plugin.json) || stub=''
+  if d=$(daemon_of); then
+    read -r p cli <<<"$d"
+    daemon=$(sminos_version "${cli%/skills/sminos/scripts/sminos.py}/.claude-plugin/plugin.json") || why="no sminos plugin.json beside $cli"
+  else why=$d; fi
+  sminos_floor "$daemon" "$stub" "$why" || return 1
+  say "sminos at $SMINOS_FLOOR or later: the VM’s daemon runs $daemon (pid $p, SMINOS_HOME $SH, $cli), the stub’s copy is $stub ($O/sminos)"
+}
+# Why the session environment on stdin (`KEY=value` lines) would not be seen by the owner's daemon: its SMINOS_HOME
+# not $SH, or its CLAUDE_CONFIG_DIR not the scratch one's absolute path (sminos keeps only an absolute one); one line a
+# reason, none, status 0, when both hold.
+session_env_problems() {
+  local line home='' cfg='' bad=0
+  while IFS= read -r line; do
+    case $line in SMINOS_HOME=*) home=${line#*=} ;; CLAUDE_CONFIG_DIR=*) cfg=${line#*=} ;; esac
+  done
+  [[ $home == "$SH" ]] || { say "SMINOS_HOME is ${home:-unset}, not $SH (the owner’s daemon’s)"; bad=1; }
+  [[ $cfg == /* && $cfg == "$X/claude" ]] || { say "CLAUDE_CONFIG_DIR is ${cfg:-unset}, not $X/claude (absolute)"; bad=1; }
+  return $bad
+}
+# Why the config-dir record $1 (sminos's $SH/config-dirs/<session>.json) is not the scratch config dir: one line; none,
+# status 0, when it is.
+config_dir_verdict() {
+  [[ -f $1 ]] || { say "sminos recorded no config dir for the session (no $1)"; return 1; }
+  python3 -c '
+import json, sys
+try:
+    d = json.load(open(sys.argv[1], encoding="utf-8"))
+except (OSError, ValueError):
+    d = None
+cfg = d.get("configDir") if isinstance(d, dict) else None
+if cfg != sys.argv[2]:
+    print("sminos recorded %s as the config dir of the session, not %s" % (cfg if isinstance(cfg, str) else "nothing readable", sys.argv[2]))
+    sys.exit(1)' "$1" "$X/claude"
 }
 
 ns_of() { readlink /proc/"$1"/ns/mnt 2>/dev/null; }
@@ -212,6 +288,8 @@ lane_a_up() {
   [[ $project =~ ^[0-9a-f-]{36}$ ]] || fail "a project id"; word "$name"
   [[ -f $SH/daemon/identity.json ]] || fail "the VM's sminos is not cut over to its endpoint (no daemon/identity.json)"
   [[ -x $CLAUDE && -x $SMINOS && -f $O/sminos/.claude-plugin/plugin.json ]] || fail "no claude or sminos in $O: run setup.sh first"
+  problems=$(sminos_floor_here) || fail "$problems"
+  problems=$(printf '%s\n' "${SESSION_ENV[@]}" | session_env_problems) || fail "the session's environment: ${problems//$'\n'/; }"
   lane_a_down >/dev/null 2>&1
   [[ -z $(ss -ltnH "( sport = :$STUB_PORT )") ]] || fail "port $STUB_PORT is taken: the stub model cannot listen there"
   install -d -m 700 -o $OWNER -g $OWNER $X $R $W $X/claude $X/claude/plugins
@@ -238,7 +316,7 @@ lane_a_up() {
   start_session "$sid" new
   launch=$(bridge_launch "$sid") || fail "the bridge answered no launch"
   # The machine project's listing, by the session's id: a reading verb joins a running session it sees (its engine's
-  # record linked), so the first listings after the start may still be without it.
+  # record, under the config dir sminos recorded for it), so the first listings after the start may still be without it.
   alias_of() { as_session bash -c "cd $W && $SMINOS list --project $project --json" 2>/dev/null | member_alias "$sid"; }
   for _ in $(seq 15); do alias=$(alias_of) && break; sleep 2; done
   [[ -n ${alias:-} ]] || fail "sminos lists no alias for $sid in the machine project $project within 30 s"
@@ -247,7 +325,8 @@ lane_a_up() {
 
 # The session in its tmux pane (its own server, -L $TX), in the namespace: a new one under the session id the run
 # chose (`--session-id`), so no session of the owner's can be taken for it; `--resume <sid>` to start it again. Its
-# bridge waited for, then its engine checked to be the run's (session_problems) before anything uses it.
+# bridge waited for, its engine checked to be the run's (session_problems), and its config dir recorded by sminos
+# before anything uses it.
 start_session() {
   local sid=$1 how=$2 flags=(--plugin-dir "$PLUGIN" --model sonnet -n o10-m11-lane-a)
   [[ $sid =~ ^[0-9a-f-]{36}$ ]] || fail "a session id"
@@ -255,22 +334,10 @@ start_session() {
   as_session tmux -L $TX new-session -d -s lane-a -x 200 -y 50 -c $W "$CLAUDE ${flags[*]}" || fail "tmux"
   within 120 test -S "$SH/bridge/$sid.sock" || { pane; fail "no bridge for $sid within 120 s"; }
   check_engine "$sid"
-  link_records
-}
-# Every record of the run's engines (directory $1, $RECORDS by default) linked where the owner's sminos reads them
-# ($2, $ENGINE_SESSIONS) under the run's name for it (record_plan). The directory is made 0700 when it is absent, an
-# existing one's mode left as it is; a name there already fails the run rather than be replaced, and a link is made
-# only where nothing is (os.symlink: never forced, never nested inside a directory of that name).
-link_records() {
-  local records=${1:-$RECORDS} sessions=${2:-$ENGINE_SESSIONS} what name
-  [[ -d $sessions ]] || as_owner mkdir -m 700 "$sessions" || fail "no $sessions"
-  while read -r what name; do
-    case $what in
-      link) as_owner python3 -c 'import os, sys; os.symlink(sys.argv[1], sys.argv[2])' "$records/$name" "$sessions/$LINK_PREFIX$name" 2>/dev/null ||
-        fail "could not link the engine record $name: $sessions/$LINK_PREFIX$name is there already" ;;
-      taken) fail "$sessions/$LINK_PREFIX$name is there already: the run's engine record $name is not linked" ;;
-    esac
-  done < <(record_plan "$records" "$sessions")
+  # The record by which the owner's sminos reads this engine's records and transcript under $X/claude: the session's
+  # own record hook writes it at SessionStart, under the session's SMINOS_HOME (sminos 1.27.15's record_config_dir).
+  within 30 config_dir_verdict "$SH/config-dirs/$sid.json" >/dev/null ||
+    { pane; fail "$(config_dir_verdict "$SH/config-dirs/$sid.json") within 30 s: the session's hooks are not sminos $SMINOS_FLOOR's or later, or write under another SMINOS_HOME than $SH"; }
 }
 # The pane's claude: in the run's namespace, with the scratch config, the stub and the checkout; else lane A fails.
 check_engine() {
@@ -364,7 +431,6 @@ local_spawn() {
     say "the seat was stopped at once: ${verdict//$'\n'/, }${verdict:+; }its processes are not all the run's with the scratch config and the stub"
     exit 11
   fi
-  link_records
   exit $rc
 }
 
@@ -388,23 +454,24 @@ lane_a_down() {
   pkill -u $OWNER -f "$O/stub-model.mjs --port $STUB_PORT" 2>/dev/null
   p=$(cat $R/anchor.pid 2>/dev/null) && kill "$p" 2>/dev/null
   within 10 bash -c "! pgrep -u $OWNER -f 'tmux -L $TX' >/dev/null && ! pgrep -u $OWNER -f '$O/stub-model.mjs' >/dev/null"
-  own_links $ENGINE_SESSIONS | while read -r p; do rm -f "$p"; done
-  [[ -n $(own_links $ENGINE_SESSIONS) ]] && { say "LEFT links in $ENGINE_SESSIONS to the run's engine records"; left=1; }
   rm -rf $X
   [[ -e $X ]] && { say "LEFT $X"; left=1; }
   pgrep -u $OWNER -f "$O/stub-model.mjs" >/dev/null && { say "LEFT the stub model"; left=1; }
   pgrep -u $OWNER -f "tmux -L $TX" >/dev/null && { say "LEFT the lane A session's tmux"; left=1; }
-  ((left == 0)) && say "down: the run's lane A session, its seat and its stub ended, its engine records' links and $X removed (the owner's mawsd and sminos run on)"
+  ((left == 0)) && say "down: the run's lane A session, its seat and its stub ended, and $X removed (the owner's mawsd and sminos run on)"
   return $left
 }
 
-# Sourced (the suite), the script stops here: nothing above has run anything.
-[[ ${BASH_SOURCE[0]} == "$0" ]] || return 0
-uid=$(id -u $OWNER) || fail "no user $OWNER"
+# The environments, defined when sourced too (the suite reads SESSION_ENV); the owner's uid is checked only when run.
+uid=$(id -u $OWNER 2>/dev/null) || uid=''
 OWNER_ENV=("HOME=$OH" "USER=$OWNER" "LOGNAME=$OWNER" "PATH=$CUR/runtime/bin:/usr/bin:/bin" "LANG=C.UTF-8" "XDG_RUNTIME_DIR=/run/user/$uid")
 SESSION_ENV=("${OWNER_ENV[@]}" "PATH=$O/bin:$CUR/runtime/bin:/usr/bin:/bin" "SHELL=/bin/bash" "TERM=xterm-256color" "SMINOS_HOME=$SH"
   "CLAUDE_CONFIG_DIR=$X/claude" "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1" "ANTHROPIC_BASE_URL=$STUB_URL" "ANTHROPIC_AUTH_TOKEN=o10-m11-stub-no-credential"
   "DISABLE_AUTOUPDATER=1" "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1" "DISABLE_TELEMETRY=1" "DISABLE_ERROR_REPORTING=1")
+
+# Sourced (the suite), the script stops here: nothing above has changed anything.
+[[ ${BASH_SOURCE[0]} == "$0" ]] || return 0
+[[ -n $uid ]] || fail "no user $OWNER"
 
 verb=${1:-}; (($#)) && shift
 case $verb in check | down | "") ;; *) register "$verb" || fail "cannot register the verb $verb" ;; esac
@@ -413,18 +480,22 @@ case $verb in
   preflight)
     # Read only, before a run: the production mawsd and its machine (name and ref alone of its keys), its endpoint's
     # status, the owner's claude processes (pid and terminal; the run may start a lane A only while there are none
-    # outside its namespace, and before lane-a-up every one is), the stub model's start on a spare port.
+    # outside its namespace, and before lane-a-up every one is), sminos's floor, the stub model's start on a spare port.
     p=$(pid); say "mawsd: pid ${p:-none}"
     mawsd_cli keys --json | python3 -c 'import json,sys; k=json.loads(sys.stdin.read() or "{}"); print("machine:", k.get("enrollment"), k.get("name"), k.get("ref"))'
     mawsd_cli endpoint status --json
     n=0; while read -r cp _; do [[ -n $cp ]] || continue; n=$((n + 1)); say "claude of $OWNER's: pid $cp, tty $(ps -o tty= -p "$cp" | tr -d ' ')"; done < <(claude_table)
     say "claude processes of $OWNER's: $n"
+    sminos_floor_here
     [[ -z $(ss -ltnH "( sport = :$STUB_PORT )") ]] && say "port $STUB_PORT: free" || say "port $STUB_PORT: TAKEN"
     t=$(mktemp -d) && chmod 755 "$t"
     # As lane-a-up starts it: the owner's user, `env -i`, the run's node; on a spare port, and ended at once.
     setsid -f runuser -u $OWNER -- env -i "${OWNER_ENV[@]}" "$CUR/runtime/bin/node" "$O/stub-model.mjs" --port 47898 </dev/null >"$t/stub.log" 2>&1
     if within 15 bash -c "exec 3<>/dev/tcp/127.0.0.1/47898" 2>/dev/null; then say "stub model: started and listening (as $OWNER under env -i, port 47898)"; else say "stub model: did NOT listen: $(tail -2 "$t/stub.log")"; fi
     pkill -u $OWNER -f "$O/stub-model.mjs --port 47898"; rm -rf "$t" ;;
+  # Read only, before anything of the run's (the production run asks it before the owner's pairing): sminos at the floor
+  # on both sides and one SMINOS_HOME, in one line; exit 1 when not.
+  sminos-floor) sminos_floor_here ;;
   up) [[ -n $(pid) ]] || fail "the production mawsd is not running"; say "up: the production mawsd runs (pid $(pid)); nothing started" ;;
   enroll) fail "production enrolls nothing: its machine is cut over and listed already" ;;
   mawsd)
@@ -456,5 +527,5 @@ case $verb in
   retire) retire "${1:-}" ;;
   started) for f in session seat.session; do [[ -s $R/$f ]] && say "${f%.session} $(head -1 $R/$f)"; done; true ;;
   down) stop_verbs; v=$?; lane_a_down; d=$?; exit $((v | d)) ;;
-  *) fail "production.sh check | preflight | up | mawsd <keys|endpoint …> | restart | cut-hub | listening | log-size <log> | log-since <log> <bytes> | lane-a-up <project> <name> | lane-a-stop | lane-a-resume | transcript <session> [token] | sminos-status | sminos-revoked | imported <token> | local-spawn <alias> | retire <alias> | started | down" ;;
+  *) fail "production.sh check | preflight | sminos-floor | up | mawsd <keys|endpoint …> | restart | cut-hub | listening | log-size <log> | log-since <log> <bytes> | lane-a-up <project> <name> | lane-a-stop | lane-a-resume | transcript <session> [token] | sminos-status | sminos-revoked | imported <token> | local-spawn <alias> | retire <alias> | started | down" ;;
 esac
