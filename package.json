@@ -106,6 +106,7 @@
     "e2e:document-live": "scripts/e2e-build.sh plain && MAWS_HARNESS=0 playwright test e2e/document-live.spec.ts",
     "e2e:document-provisional-live": "scripts/e2e-build.sh plain && MAWS_HARNESS=0 playwright test e2e/document-provisional-live.spec.ts",
     "e2e:presentations-provisional-live": "scripts/e2e-build.sh plain && MAWS_HARNESS=0 playwright test e2e/presentations-provisional-live.spec.ts",
+    "e2e:ask-interrupt-live": "MAWS_P1_LIVE_OUT=test-results/live-s1 NODE_OPTIONS=\"$NODE_OPTIONS --disable-warning=ExperimentalWarning\" vitest run --project live --silent=false test/live/maws-ask-interrupt.live.test.ts",
     "e2e:tool-time-heavy-live": "MAWS_LIVE=1 NODE_OPTIONS=\"$NODE_OPTIONS --disable-warning=ExperimentalWarning\" vitest run --project live --silent=false test/live/tool-time-heavy.live.test.ts",
     "e2e:desk-web": "pnpm --filter desk-web e2e",
     "e2e:desk-web-hub": "pnpm --filter desk-web e2e:hub",

@@ -124,7 +124,9 @@ env:
   # the engine a fresh install of MAWS finds (the one the others resolve themselves), never the fixtures' retained pin.
   # Their own logs go under test-results/, which --evidence uploads. agents-live builds out/ with the renderer's
   # development surface (e2e/support/dev-surface.vite.config.mjs), keep-quit-live the unsigned packaged app (build:app).
-  LIVE_E2E: library-live document-live document-provisional-live presentations-live presentations-provisional-live design-systems-live design-live dashboard-live available-live plugins-library-live plugins-live p1-live keep-quit-live tools-live agents-live tool-time-heavy-live
+  # ask-interrupt-live is E11 S1, an interrupt during a blocking maws ask: a vitest file of the `live` project, skipped
+  # by its gate unless MAWS_LIVE is 1, its spend held to its own US$0.15 over three attempts, its log under test-results/.
+  LIVE_E2E: library-live document-live document-provisional-live presentations-live presentations-provisional-live design-systems-live design-live dashboard-live available-live plugins-library-live plugins-live p1-live keep-quit-live tools-live agents-live ask-interrupt-live tool-time-heavy-live
   LIVE_GUARD_E2E: tool-time-heavy-live
   # The timing-measured groups, whose bounds were calibrated on the mini at @2x with no viewer and no foreign load, so a
   # result read under another posture is void (Decision Log 75's posture go). On a Mac each job's first step is ci-kit's
