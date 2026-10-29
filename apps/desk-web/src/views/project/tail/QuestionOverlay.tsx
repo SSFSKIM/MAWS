@@ -16,7 +16,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { QUESTION } from '../../../../../../src/renderer/src/transcript/model/copy';
 import type { AskedQuestion } from '../../../conversation/asked';
-import { settledText } from '../../../conversation/words';
+import { settledText } from '../../../../../../src/renderer/src/lane-a/conversation/words';
 import type { RequestRecord } from '../../../project/conversation';
 
 /**

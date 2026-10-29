@@ -9,6 +9,7 @@ import { connectAttention } from './attention/navigation';
 import { registerShellActions } from './app/shell-actions';
 import { ipc } from './ipc/client';
 import { connectShell } from './ipc/events';
+import { connectLaneA } from './stores/lane-a'; // P5 O9 M5
 import { queryClient } from './ipc/query';
 import { connectActions, connectKeys } from './keymap/dispatcher';
 import { connectEditClaimants } from './keymap/edit-claimants'; // P4-B2 K6
@@ -163,6 +164,7 @@ export function App() {
 
   useEffect(() => useSettings.getState().connect(), []);
   useEffect(() => connectShell(), []); // C5: sessions, attention and layout, app-wide
+  useEffect(() => connectLaneA(), []); // P5 O9 M5: the terminal sessions MAWS drives through their sminos bridges
   useEffect(() => persistLayout(ipc), []); // C5: changed layout keys back to main
   useEffect(() => registerShellActions(), []); // C5: the frame's action handlers
   useEffect(() => connectAttention(), []); // C5: ⌘⇧J, notification clicks and the fallback toast

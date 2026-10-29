@@ -275,6 +275,21 @@ export function applyStatusToDigest(d: SessionDigest, status: EngineSessionStatu
   }
 }
 
+// P5 O9 M6: a session a terminal or a background job holds, driven through its sminos bridge, reads its live phase from
+// the bridge rather than today's `foreign` (main's lane A driver, src/main/lane-a/driver.ts `LaneAView`): waiting while a
+// request is pending (as `requires_action` reads for a MAWS session), working while its main turn runs, else idle; the
+// activity from the main loop's running tool, as the fold names one, `Working` once its result came, `Thinking` before
+// any. Its availability stays `foreign_held`: MAWS never starts a second writer on it.
+export interface BridgedPhase {
+  running: boolean; // the main loop's turn
+  pending: number; // its pending requests
+  tool: { tool: string; input: unknown; running: boolean } | null; // the main loop's latest tool call of the turn
+}
+export function bridgedDigest({ running, pending, tool }: BridgedPhase): Pick<SessionDigest, 'phase' | 'activity' | 'pendingRequests'> {
+  const activity = !running ? null : tool === null ? 'Thinking' : tool.running ? activityForTool(tool.tool, tool.input) : 'Working';
+  return { phase: pending > 0 ? 'waiting' : running ? 'working' : 'idle', activity, pendingRequests: pending };
+}
+
 // C12 start: the digest without the released mark (the field is optional, so it is left out rather than set undefined)
 export function withoutReleased(d: SessionDigest): SessionDigest {
   if (d.released === undefined) return d;

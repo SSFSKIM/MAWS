@@ -16,6 +16,7 @@ import { createSession, useSessionCreatorRegistered } from '../keymap/actions-ru
 import { openDialog } from '../sessions/dialogs';
 import { machineKey } from '@shared/machine/org-key';
 import { orgKeyOf, sessionsOfRow, type RowKey } from '../stores/org-projects';
+import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
 import { usePeople } from '../stores/people'; // P5 O8 M5
 import { useSessions } from '../stores/sessions';
 import { PROJECT_ACTION_IDS, PROJECT_ACTIONS, runProjectAction, useProjectActionEnabled, type ProjectActionId } from './project-actions';
@@ -70,12 +71,13 @@ export function SidebarMenuContent({ target }: { target: MenuTarget | null }) {
 
 function SessionItems({ appSessionId, dropdown = false }: { appSessionId: AppSessionId; dropdown?: boolean }) {
   const record = useSessions((s) => s.records.get(appSessionId));
+  const bridged = useLaneAState(appSessionId)?.bridge === 'live'; // P5 O9 M5
   const kept = useSessions((s) => s.engine.get(appSessionId)?.kept); // P5 O2 M2: undefined while no status reports it
   if (!record) return null;
   const foreign = record.holder.kind === 'terminal' || record.holder.kind === 'background_job'; // D-12: the opens only
   return (
     <>
-      {sessionActionsFor(record).map((id) => <SessionItem key={id} id={id} record={record} dropdown={dropdown} />)}
+      {sessionActionsFor(record, { bridged }).map((id) => <SessionItem key={id} id={id} record={record} dropdown={dropdown} />)}
       {kept !== undefined && !foreign && <KeepItem appSessionId={appSessionId} kept={kept} dropdown={dropdown} />}
     </>
   );

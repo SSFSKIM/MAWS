@@ -15,6 +15,10 @@ import { CHOOSE_PROJECT_FIRST } from '@shared/sessions/intent';
 
 export type SubmitState = 'send' | 'stop' | 'resume';
 
+// P5 O9 M5: the controls port's `Capability`, spelled here so this module stays free of the port's imports (it is in the
+// node project's program, through side/copy.ts)
+type DrivenCapability = { available: true } | { available: false; reason: string };
+
 export interface SubmitInput {
   status: EngineSessionStatus | null;
   intent: { starting: boolean; messageHeld: boolean; phase?: string | null; noProject?: boolean } | null; // non-null while the session is unstarted (C10's hook answers); phase: C10's running setup phase in words; noProject: a New chat with no project chosen yet
@@ -25,6 +29,9 @@ export interface SubmitInput {
   // a background job holds it, the holder in words
   availability: Availability | null;
   heldBy: string | null;
+  // P5 O9 M5: a session another process holds and the session's controls port drives (lane A): its turn as that process
+  // reports it, and whether Send and Stop may go now, each with its reason. Absent or null: C3's status decides.
+  driven?: { running: boolean; send: DrivenCapability; stop: DrivenCapability } | null;
 }
 
 export interface SubmitDecision {
@@ -48,6 +55,7 @@ export const STARTS = 'Starts this session';
 export const SENDS_WHEN_STARTED = 'Sends once the session has started';
 export const ARCHIVED = 'Archived · unarchive it to continue';
 // P2-A end
+export const MODES_IN_TERMINAL = 'A terminal session runs `!` and `#` in its terminal'; // P5 O9 M5
 
 export const isBusy = (status: EngineSessionStatus | null, entries: readonly QueueEntry[]): boolean =>
   (status?.turn ?? null) !== null || entries.some((e) => e.state === 'submitting' || e.state === 'released');
@@ -77,6 +85,16 @@ export function submitState(i: SubmitInput): SubmitDecision {
     if (intent.noProject) return decide('send', 'Send', false, CHOOSE_PROJECT_FIRST); // New chat: the project row's chip chooses one
     if (mode !== 'send') return decide('send', 'Send', false, NOT_YET);
     return decide('send', 'Send', !empty);
+  }
+  // P5 O9 M5: driven through its holder (lane A). Send goes in either turn state, never as a steer: the bridge reads words
+  // sent while a turn runs at the turn's next model request; with the box empty during a turn, Stop interrupts.
+  if (i.driven) {
+    const { running, send, stop } = i.driven;
+    if (mode !== 'send') return decide('send', mode === 'bash' ? 'Run' : 'Save to memory', false, MODES_IN_TERMINAL);
+    // Stop and Send each from its own capability: a bridge may interrupt without taking words, or the reverse
+    if (running && empty) return stop.available ? decide('stop', 'Stop', true) : decide('stop', 'Stop', false, stop.reason);
+    if (!send.available) return decide('send', 'Send', false, send.reason);
+    return decide('send', 'Send', !empty, null, running ? SENDS_AT_NEXT_STEP : null);
   }
   // P2-A start: with a record and no ready process the submission acquires the session first (the seam, and `!` and `#`
   // before their own dispatch), joining a start in flight; only an archived or a foreign-held session refuses

@@ -79,6 +79,7 @@ const NO_PEER_REPLIES: PeerReplies = { subscribe: () => () => {}, get: () => und
 export interface RewindInterface {
   canUndo(turnId: TurnId): Promise<{ ok: boolean; reason: string | null; files?: string[] | null }>; // dry run; disables the button with the reason as tooltip
   undo(turnId: TurnId): Promise<void>;
+  unavailable?: string | null; // P5 O9 M5: why this session can't roll files back here; the control stays, disabled, with it
 }
 
 const noop = () => {};

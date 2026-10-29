@@ -74,7 +74,10 @@ export function slashItems(catalog: SessionCatalog, widgets: ReadonlySet<string>
   const skills = new Set(catalog.skills);
   const terminalOnly = new Set(catalog.terminalOnly);
   const listed = new Set(catalog.commands.map((c) => c.name));
-  const dispatch = (name: string, headless: boolean, hint: string): SlashAction => (widgets.has(name) ? { kind: 'widget' } : headless ? { kind: 'text' } : { kind: 'unavailable', hint });
+  // P5 O9 M5: a command the session's port names as unavailable (lane A's bridge routes) is listed with its reason
+  const closed = catalog.unavailable ?? {};
+  const dispatch = (name: string, headless: boolean, hint: string): SlashAction =>
+    widgets.has(name) ? { kind: 'widget' } : closed[name] !== undefined ? { kind: 'unavailable', hint: closed[name] } : headless ? { kind: 'text' } : { kind: 'unavailable', hint };
   const engine = catalog.commands.map(
     (c): SlashItem => ({ name: c.name, title: `/${c.name}`, description: c.description, argumentHint: c.argumentHint, origin: originOf(c, skills), action: dispatch(c.name, !terminalOnly.has(c.name), TERMINAL_ONLY_HINT) }),
   );

@@ -28,6 +28,9 @@ import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P
 import { startMachineIdentity } from './machine/identity'; // P5 O6 M1
 import { bindLocalMachine } from './machine/local'; // P5 O6 M2
 import { startMachines } from './machines'; // P5 O6 M3: the connection manager, and the stand-in behind its gate
+import { createLaneADriver, registerLaneA } from './lane-a/driver'; // P5 O9 M2: terminal sessions' bridges
+import { sminosHome } from './lane-a/discovery'; // P5 O9 M2
+import { laneAAttention } from './lane-a/attention'; // P5 O9 M6
 import { createStateSigner, createStepUp } from './device/step-up'; // P5 O7 M1: the development org session's signer; P5 O8 M1: the production session's; M3: its state signer
 import { createDevOrgSession } from './org/dev-session'; // P5 O7 M1
 import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2
@@ -480,6 +483,46 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   // The engine's environment (its config directory, where it writes a session's transcript): C7's services below read it too.
   const home = app.getPath('home');
   const engineEnv = captureShellEnvironment();
+  // P5 O9 M2: the local lane A driver. Each session the index holds for a terminal or a `--bg` job is probed for its
+  // sminos bridge, under the sminos home from main's environment, else the login shell's (laneA.*).
+  // P5 O3-A: the driver is the spine's (it writes <userData>/lane-a/ and drives the sessions the index holds), so a run
+  // refused the spine starts none, and its laneA.* commands have no handler (the renderer starts empty). `attention` is
+  // non-null exactly when this run holds spine.lock.
+  if (attention !== null) {
+    const laneA = createLaneADriver({
+      machine: local,
+      home: engineEnv.then((shellEnv) => sminosHome(process.env, shellEnv)),
+      userData: app.getPath('userData'),
+      // M5: a watched session's jobs are derived from its transcript: the path the index knows, else where the engine writes it
+      transcript: async (appId, engineSessionId) => {
+        if (index.unavailable !== null) return null;
+        const record = index.sessions.get(appId);
+        if (record?.engineSessionId !== engineSessionId) return null; // another transcript now: the driver follows the record
+        return index.sessions.summaryOf(appId)?.transcriptPath || transcriptPathOf(await engineEnv, record.directory, record.engineSessionId);
+      },
+      emit: (name, payload) => void emit(name, payload),
+    });
+    registerLaneA(laneA, registerMainHandler);
+    // P5 O9 M6: each bridged session's pending requests are attention items, and its digest reads its live phase from the
+    // bridge while the bridge is live (today's `foreign` otherwise)
+    const laneAItems = laneAAttention({ set: (appId, entries) => attention.setLaneAItems(appId, entries) });
+    const offLaneAView = laneA.onChange((appId, view) => {
+      laneAItems.update(appId, view);
+      indexSource.setBridged(appId, view?.state.bridge === 'live' ? { running: view.state.turn.running, pending: view.state.pending.length, tool: view.tool } : null);
+    });
+    shutdown.add('lane A attention', () => {
+      offLaneAView();
+      laneAItems.stop();
+    });
+    if (index.unavailable === null) {
+      for (const record of index.sessions.list({ includeArchived: true })) laneA.observe(record);
+      const offLaneA = index.sessions.onChange((record, cause) => (cause === 'removed' ? laneA.forget(record.appId) : laneA.observe(record)));
+      shutdown.add('lane A', () => {
+        offLaneA();
+        laneA.stop();
+      });
+    } else shutdown.add('lane A', () => laneA.stop());
+  }
   // A relative scenario path is the repository's: the working directory of `pnpm dev`, `pnpm dev:stub` and the smoke's
   // launch alike (`app.getAppPath()` is `out/main` when the built app is launched by file, as the smoke does).
   const sessions = startSessions({

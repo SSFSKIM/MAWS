@@ -787,6 +787,33 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     expect(index.sessions.get(record.appId)?.holder).toEqual({ kind: 'self' });
   });
 
+  // P5 O9 M6: a terminal session whose bridge MAWS drives reads its live phase from the bridge, and today's foreign once
+  // the bridge is gone; a session MAWS holds is never seeded from it
+  it('seeds a bridged foreign session’s digest from its bridge, foreign again without it', async () => {
+    const fake = scriptedHost();
+    const recorded = recordingWriter();
+    const src = begin(fake.host, recorded.writer);
+    await settle();
+    const found = summary();
+    fake.fire('fs.holderChanged', { sessionId: found.sessionId, appSessionId: null, holder: { kind: 'terminal', pid: 99 }, registry: null, job: null });
+    fake.fire('fs.sessionChanged', { summary: found, appSessionId: null });
+    await applied();
+    const record = index.sessions.getByEngineId(found.sessionId)!;
+    const last = () => recorded.of('setDigest').filter((d) => d.appSessionId === record.appId).at(-1);
+    expect(last()).toMatchObject({ phase: 'foreign' });
+    src.setBridged(record.appId, { running: true, pending: 1, tool: { tool: 'Bash', input: { command: 'ls' }, running: true } });
+    expect(last()).toMatchObject({ phase: 'waiting', activity: 'Running ls', pendingRequests: 1 });
+    fake.fire('fs.sessionChanged', { summary: { ...found, size: found.size + 10 }, appSessionId: record.appId }); // a later record's re-seed keeps it
+    await applied();
+    expect(last()).toMatchObject({ phase: 'waiting', pendingRequests: 1 });
+    src.setBridged(record.appId, null);
+    expect(last()).toMatchObject({ phase: 'foreign', activity: null, pendingRequests: 0 });
+    index.sessions.applyEngineStatus(record.appId, { holder: { kind: 'self' } });
+    const count = recorded.of('setDigest').length;
+    src.setBridged(record.appId, { running: true, pending: 0, tool: null });
+    expect(recorded.of('setDigest')).toHaveLength(count);
+  });
+
   it('a transcript removed from disk archives its record and keeps it', async () => {
     const fake = scriptedHost();
     begin(fake.host);
