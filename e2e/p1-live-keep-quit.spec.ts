@@ -141,6 +141,7 @@ test('S5: a keep-quit mid-turn on the packaged build; the relaunch lists the ses
   const engines = new Set<number>();
   const sockets = new Set<string>();
   const launch = async (extra: Record<string, string> = {}): Promise<Run> => {
+    // the embedded shape's supervisor keeping a real turn across the quit is what this run records (E11's S5)
     const maws = await launchMaws({ userData, env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', MAWS_HOST_MODE: 'detached', CLAUDE_CONFIG_DIR: config, ...extra } });
     const child = maws.app.process(); // Playwright drops app.process() once the app closes; the cleanup still needs it
     let text = '';
@@ -339,10 +340,11 @@ test('S5: a keep-quit mid-turn on the packaged build; the relaunch lists the ses
     for (const run of runs) {
       if (run.child.exitCode === null && run.child.signalCode === null) run.child.kill('SIGKILL');
       await bounded(run.exited, 10_000, () => `app pid ${run.child.pid} did not exit after SIGKILL`).catch((error: unknown) => note(String(error)));
-      await run.maws.cleanup().catch(() => {}); // the app is gone; the profile is the scratch's
     }
-    let leftover: unknown = null;
+    // read before the launches' cleanup, which ends every process of the profile (P5 O3-B)
     const survivorsBefore = [...supervisors, ...engines].filter(isAlive);
+    for (const run of runs) await run.maws.cleanup().catch(() => {}); // the app is gone; the profile is the scratch's
+    let leftover: unknown = null;
     await killScratchProcesses(root, [...supervisors, ...engines]).catch((error: unknown) => (leftover = error));
     for (const socket of sockets) {
       const dir = tmpSocketDirOf(userData, socket);

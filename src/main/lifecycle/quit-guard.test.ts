@@ -1202,7 +1202,13 @@ describe('keeping sessions running at quit', () => {
     const model = modelWith(midTurn(1));
     const asked = guard(model, { pty: busy, ask, terminalsOutlive: () => true, pollMs: 10 });
     electron.app.attempt();
-    await vi.waitFor(() => expect(asked.deps.publish).toHaveBeenCalledWith(expect.objectContaining({ midTurn: 1, busyTerminals: 1 })));
+    await vi.waitFor(() => expect(asked.deps.publish).toHaveBeenCalled());
+    expect(ask).toHaveBeenLastCalledWith(expect.objectContaining({ midTurn: 1, busyTerminals: 1 }), FIRST, expect.anything()); // the report names it
+    // P5 O3-B (run 40723401776, c12-quit.spec.ts:128): the banner counts what the wait waits for, so not the terminal
+    expect(asked.deps.publish).toHaveBeenLastCalledWith({ ...NONE, midTurn: 1 });
+    expect(asked.control.waiting()).toEqual({ ...NONE, midTurn: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 30)); // a re-read publishes the same
+    expect(asked.deps.publish).toHaveBeenLastCalledWith({ ...NONE, midTurn: 1 });
     const keep = (ask.mock.calls.at(-1) as unknown[])[2] as { terminalsOutlive?: boolean };
     expect(keep.terminalsOutlive).toBe(true);
     model.apply(status('s0' as AppSessionId, { process: 'ready', engineState: 'idle', turn: null }));
@@ -1265,8 +1271,10 @@ describe('keeping sessions running at quit', () => {
     const cases = [
       { env: {}, shape: 'embedded', mode: 'detached', buttons: ['Quit and keep sessions running', 'Quit', 'Quit when idle', 'Cancel'] }, // `pnpm dev`, the packaged app
       { env: {}, shape: 'daemon', mode: 'daemon', buttons: ['Quit and keep sessions running', 'Quit', 'Quit when idle', 'Cancel'] }, // P5 O2 M7: the engine host behind mawsd's detached relay
-      { env: { MAWS_HARNESS: '1' }, shape: 'daemon', mode: 'utility', buttons: ['Quit', 'Quit when idle', 'Cancel'] }, // `pnpm dev:harness`
-      { env: { MAWS_E2E: '1' }, shape: 'embedded', mode: 'utility', buttons: ['Quit', 'Quit when idle', 'Cancel'] },
+      // P5 O3-B: the harnesses take the setting's shape, as the owner's app does
+      { env: { MAWS_HARNESS: '1' }, shape: 'daemon', mode: 'daemon', buttons: ['Quit and keep sessions running', 'Quit', 'Quit when idle', 'Cancel'] }, // `pnpm dev:harness`
+      { env: { MAWS_E2E: '1' }, shape: 'embedded', mode: 'detached', buttons: ['Quit and keep sessions running', 'Quit', 'Quit when idle', 'Cancel'] },
+      { env: { MAWS_E2E: '1', MAWS_HOST_MODE: 'utility' }, shape: 'daemon', mode: 'utility', buttons: ['Quit', 'Quit when idle', 'Cancel'] }, // `pnpm e2e:c7-utility`
     ] as const;
     for (const { env, shape, mode, buttons } of cases) {
       electron.app.reset();

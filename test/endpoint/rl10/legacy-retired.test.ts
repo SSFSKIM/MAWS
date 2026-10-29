@@ -143,7 +143,7 @@ describe('RL10 under the tombstone', () => {
       policy: new EndpointPolicy(() => state),
       hub: { openProject: () => () => {}, send: () => true },
       listings: { report: async () => {}, gone: async () => {}, refresh: async () => {}, listedSessions: () => [] },
-      notifier: { pendingSet: () => {}, hostMessage: () => {}, forget: () => {} },
+      notifier: { pendingSet: () => {}, requestMessage: () => {}, hostMessage: () => {}, forget: () => {} },
       machineOwners: async () => [],
       dispatch: () => Promise.reject(new Error('none')),
       now: Date.now,

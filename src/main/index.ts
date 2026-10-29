@@ -43,6 +43,7 @@ import { createRegistryFeed } from './org/registry-feed'; // P5 O8 M1
 import { registerOrgHandlers, registerRowsHandler } from './org/register'; // P5 O8 M1; M2: org.rows
 import { orgFiles } from './org/files'; // P5 O8 M1
 import { createRemoteRows } from './org/rows'; // P5 O8 M2
+import { installOrgPageFixture } from './org/page-fixture'; // P5 O8 M4a Task 8: a harness build's only
 // C3 end
 // C4 start (emit comes with C3's imports)
 import { startIndexAttention } from './index/attention-service';
@@ -388,7 +389,12 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   const session = devOrg ?? orgSession!;
   const orgFeed = createRegistryFeed({ session, log: (line) => console.log(line) });
   orgSession?.attach(orgFeed);
-  registerOrgHandlers({ register: registerMainHandler, emit: (name, status) => void emit(name, status), service: orgSession, development: devOrg });
+  const unpublishOrgStatus = registerOrgHandlers({ register: registerMainHandler, emit: (name, status) => void emit(name, status), service: orgSession, development: devOrg });
+  // P5 O8 M4a Task 8: the Org page's e2e look seeds org.* from a fixture (org/page-fixture.ts), which also stops the
+  // session's org.changed. The guard folds to false outside a harness build, which then carries none of it.
+  if (typeof __MAWS_HARNESS_BUILD__ !== 'undefined' && __MAWS_HARNESS_BUILD__) {
+    installOrgPageFixture({ env: process.env, packaged: app.isPackaged, intercept: interceptCommand, unpublish: unpublishOrgStatus });
+  }
   powerMonitor.on('resume', () => orgFeed.probe());
   powerMonitor.on('unlock-screen', () => orgFeed.probe());
   // P5 O6 M3: every other machine through the connection manager (one link per machine; MAWS_LOCAL_MACHINES names another
@@ -1109,11 +1115,11 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   machines.serve();
   shutdown.add('machines', () => machines.stop());
   // P5 O8 M1: the feed and the session stop (every org file is written whole and renamed); M2: the rows' last change is
-  // written to their cache first, so a relaunch keeps every mark
+  // written to their cache first, so a relaunch keeps every mark; M4a: the exit waits for the session's close, which
+  // resolves once nothing more is written under org/ (bounded by the steps' grace)
   shutdown.add('org', () => {
     orgFeed.close();
-    void orgSession?.close();
-    return remoteRows.close();
+    return Promise.all([orgSession?.close(), remoteRows.close()]).then(() => undefined);
   });
   // P5 O3-A: spine.lock is released at the process's exit alone (startSpineData), never at a will-quit step: the steps'
   // promises settle after the last step is called, and a writer still finishing (an intent's rename) must not run

@@ -14,7 +14,7 @@ import type { HostResponse } from '@shared/ipc/host-protocol';
 import { WIRE_MINOR } from '@shared/ipc/wire';
 
 export const HELLO_TIMEOUT_MS = 3_000;
-export const REQUEST_TIMEOUT_MS = 10_000; // a request's default deadline; `enroll --wait` takes its own
+export const REQUEST_TIMEOUT_MS = 10_000; // a request's default deadline; `enroll --wait` and `endpoint attest-history` take their own
 
 export interface MachineLink {
   welcome: ServerWelcome;

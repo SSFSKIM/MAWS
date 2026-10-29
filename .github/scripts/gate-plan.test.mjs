@@ -290,9 +290,7 @@ test('a MEASURED_E2E group is marked measured in its matrix entry, and gate.yml 
   assert.match(job, /\n {4}steps:\n(?: {6}#.*\n)* {6}- if: matrix\.measured && runner\.os == 'macOS'\n {8}uses: SSFSKIM\/ci-kit\/mac\/settle@v1\n {6}- id: checkout\n {8}uses: actions\/checkout@v7\n/);
   // The second guard: after the build of the entry's variant, on this disk's cache as the command's own build finds it,
   // and just before the command; it claims nothing, the first guard's claim holding the guest off until the job ends.
-  assert.match(job, /\n {6}- if: matrix\.prebuild && runner\.os == 'macOS'\n {8}env:\n {10}PREBUILD: \$\{\{ matrix\.prebuild \}\}\n {8}run: \|\n {10}export MAWS_E2E_BUILD_CACHE=\$HOME\/Library\/Caches\/maws-e2e-build\/\$RUNNER_NAME MAWS_E2E_BUILD_KEY=\$GITHUB_SHA\n {10}\.github\/scripts\/gate-run\.sh '[^']*' scripts\/e2e-build\.sh "\$PREBUILD"\n {6}- if: matrix\.prebuild && runner\.os == 'macOS'\n {8}uses: SSFSKIM\/ci-kit\/mac\/settle@v1\n {8}with:\n {10}vm: any\n {6}- env:\n {10}SCRIPT: \$\{\{ matrix\.script \}\}\n/);
-  // A job refused before its checkout uploads nothing: the Mac's persistent workspace still holds the last job's reports.
-  assert.match(job, /\n {6}- if: \(failure\(\) \|\| needs\.plan\.outputs\.evidence == 'true'\) && steps\.checkout\.outcome == 'success'\n {8}uses: actions\/upload-artifact@v7\n/);
+  assert.match(job, /\n {6}- if: matrix\.prebuild && runner\.os == 'macOS'\n {8}env:\n {10}PREBUILD: \$\{\{ matrix\.prebuild \}\}\n {8}run: \|\n {10}export MAWS_E2E_BUILD_CACHE=\$HOME\/Library\/Caches\/maws-e2e-build\/\$RUNNER_NAME MAWS_E2E_BUILD_KEY=\$GITHUB_SHA\n {10}\.github\/scripts\/gate-run\.sh '[^']*' scripts\/e2e-build\.sh "\$PREBUILD"\n {6}- if: matrix\.prebuild && runner\.os == 'macOS'\n {8}uses: SSFSKIM\/ci-kit\/mac\/settle@v1\n {8}with:\n {10}vm: any\n {6}- id: e2e\n {8}env:\n {10}SCRIPT: \$\{\{ matrix\.script \}\}\n/);
 });
 
 // E2E_MINUTES: a group's own minutes replace its class's, the wait of its runner's start still added on top; a group not
@@ -1735,7 +1733,7 @@ test('a direct entry whose script builds out/ carries that variant as cached, wh
   ];
   const places = steps.map((step) => host.indexOf(step));
   assert.ok(places.every((place, i) => place > 0 && (i === 0 || place > places[i - 1])), JSON.stringify(places));
-  assert.ok(places[2] < host.indexOf('\n      - env:\n          SCRIPT: ${{ matrix.script }}\n'));
+  assert.ok(places[2] < host.indexOf('\n      - id: e2e\n        env:\n          SCRIPT: ${{ matrix.script }}\n'));
   assert.match(host, /\n {10}CACHED: \$\{\{ matrix\.cached \}\}\n {10}MAWS_E2E_PEER_ROOT:/);
 });
 
@@ -1909,6 +1907,41 @@ test('overflow never moves home, measured, live, unlisted, hosted-lane, no-hoste
     { EVENT: 'workflow_dispatch', INPUT_RUNNER: 'macos', INPUT_GATES: 'e2e:document' },
     { HEAD_MESSAGE: `Runner: macos\nGates: e2e:design-live\nLive: yes\nMac-Backlog: ${overflowSample()}`, LIVE_E2E: 'design-live' },
   ]) assert.ok(JSON.parse(overflowPlan(overflowSample(), extra).outputs.e2e).every((e) => !e.overflow));
+});
+
+test('e2e uploads green flaky reports and every measured JSON set, but never a prior checkout’s evidence', () => {
+  const workflow = readWorkflow();
+  for (const job of ['e2e', 'e2e-vm']) {
+    const body = jobBody(workflow, job);
+    const uploads = body.split(/\n(?= {6}- )/).filter((chunk) => chunk.includes('uses: actions/upload-artifact@'));
+    const report = uploads.find((chunk) => /name: e2e-/.test(chunk));
+    const measured = uploads.find((chunk) => /name: measured-e2e-/.test(chunk));
+    assert.ok(report, `${job} has a full report upload`);
+    assert.ok(measured, `${job} has a JSON-only measured upload`);
+    const run = body.split(/\n(?= {6}- )/).find((chunk) => chunk.includes('pnpm "$SCRIPT"'));
+    const id = /- id: (\S+)/.exec(run)?.[1];
+    assert.ok(id, 'the actual test command has a step id for its flaky output');
+    const condition = (chunk) => /(?:- )?if: (.+)/.exec(chunk)[1];
+    const enabled = (chunk, checkout, failure, evidence, flaky, measured) => Boolean(Function('steps', 'needs', 'matrix', 'failure', 'always', `return (${condition(chunk)})`)(
+      { checkout: { outcome: checkout }, [id]: { outputs: { flaky } } },
+      { plan: { outputs: { evidence } } }, { measured }, () => failure, () => true,
+    ));
+    for (const checkout of ['success', 'failure', 'skipped']) {
+      for (const failure of [false, true]) for (const evidence of ['false', 'true']) {
+        for (const flaky of ['', 'true']) for (const isMeasured of [false, true]) {
+          assert.equal(enabled(report, checkout, failure, evidence, flaky, isMeasured), checkout === 'success' && (failure || evidence === 'true' || flaky === 'true'));
+          assert.equal(enabled(measured, checkout, failure, evidence, flaky, isMeasured), checkout === 'success' && isMeasured);
+        }
+      }
+    }
+    // Status functions opt these out of Actions' implicit success() guard: cancelled measured runs keep partial samples.
+    assert.match(condition(report), /failure\(\)/);
+    assert.match(condition(measured), /always\(\)/);
+    assert.match(report, /name: e2e-\$\{\{ matrix.slug \}\}/);
+    assert.match(measured, /name: measured-e2e-\$\{\{ matrix.slug \}\}/);
+    assert.match(measured, /path: test-results\/\*\*\/\*\.json\n/);
+    for (const upload of [report, measured]) assert.match(upload, /retention-days: 7\n/);
+  }
 });
 
 test('the workflow runs the same retry and flaky notice on hosted and overflow, and names overflow placement', () => {

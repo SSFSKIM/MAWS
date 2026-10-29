@@ -127,6 +127,9 @@ async function clearEditor(page: Page) {
 
 // A paste as the system delivers it: a ClipboardEvent carrying text or files.
 async function paste(page: Page, item: { text: string } | { file: { name: string; type: string; base64: string } }) {
+  // P5 O3-B (a flaky pass of e2e:c7, run 40847569515): the editor is not editable while a send is pending, which outlasts
+  // the session's event a case waits for, so the paste waits for it to be editable again
+  await page.locator('[contenteditable="true"]').waitFor();
   await page.evaluate((it) => {
     const target = document.querySelector('[contenteditable="true"]') as HTMLElement;
     const data = new DataTransfer();
@@ -328,7 +331,9 @@ test('bash mode runs through the engine', async ({ editor }) => {
   await page.keyboard.type(prompt);
   await page.keyboard.press('Enter'); // seq 16
   await expect.poll(() => sent(page, id)).toContain(prompt);
-  expect((await submissions(page)).map((s) => [s.mode, s.display, s.accepted])).toEqual([
+  // A submission is recorded once its invoke answers, which may land after the session's event the poll above saw
+  // (P5 O3-B: a flaky pass of e2e:c7-utility, run 40838515514), so it is read until both are in.
+  await expect.poll(async () => (await submissions(page)).map((s) => [s.mode, s.display, s.accepted])).toEqual([
     ['bash', '!printf MAWS_BASH_8823', true],
     ['send', prompt, true],
   ]);

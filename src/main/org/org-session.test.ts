@@ -31,8 +31,11 @@ import {
   stateHash,
   verifyPairingMac,
   type Certificates,
+  pairingMac,
+  decodePairingCode,
   type Device,
   type OrgState,
+  type PendingEntry as ProtocolPendingEntry,
   type RevokedKey,
   type RootTransition,
   type Signed,
@@ -136,6 +139,8 @@ class FakeHub {
   meAnswer?: (n: number) => Answer | undefined;
   stateAnswer?: (since: string | null) => Answer | undefined;
   pendingAnswer?: () => Answer | undefined;
+  /** M4a: other devices' pending entries per member, as H1's `GET /api/devices/pending[?member=]` serves them. */
+  waiting = new Map<string, ProtocolPendingEntry[]>();
   /** M3: the states posted to `POST /api/org/state`, and an override of the hub's answer. */
   posted: SignedOrgState[] = [];
   postAnswer?: (signed: SignedOrgState) => Answer | undefined;
@@ -189,7 +194,13 @@ class FakeHub {
       if (override !== undefined) return override;
       if (signed.state.version !== this.head.state.version + 1 || signed.state.prev !== (await stateHash(this.head.state))) return worker(409, { error: 'not-head' });
       this.chain.push(signed);
+      // An accepted state drops the pending entries of the devices it lists, as the Registry's does.
+      for (const m of signed.state.members) this.waiting.set(m.id, (this.waiting.get(m.id) ?? []).filter((e) => !m.devices.some((d) => d.id === e.deviceId)));
       return worker(201, { version: signed.state.version });
+    }
+    if (method === 'GET' && url.pathname === '/api/devices/pending') {
+      const of = url.searchParams.get('member') ?? this.member.id;
+      return worker(200, { pending: this.waiting.get(of) ?? [] });
     }
     if (method === 'POST' && url.pathname === '/api/devices/pending') {
       this.pending.push(JSON.parse(String(init?.body)) as PendingEntry);
@@ -302,9 +313,7 @@ afterEach(async () => {
   // Every status emitted is one org.changed carries: it parses as the schema says (M3: the signer part included).
   for (const text of emitted) OrgStatusSchema.parse(JSON.parse(text));
   await chmod(join(userData, 'org'), 0o700).catch(() => {});
-  // `close()` doesn't wait for a file write already under way (a settle, an obligation, the anchor), so a write can
-  // land in `org/` while it is being removed; `rm` retries ENOTEMPTY rather than failing the case that just passed.
-  await rm(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  await rm(userData, { recursive: true, force: true });
 });
 
 type Overrides = Partial<Omit<OrgSessionDeps, 'timing'>> & { timing?: Partial<typeof TIMING> & OrgSessionDeps['timing'] };
@@ -656,7 +665,10 @@ describe('registration refusals', () => {
     expect(made.session.register(code)).toEqual({ ok: true });
     await until(() => made.session.status().state === 'none', 'the attempt to end');
     expect(await dirExists(orgDir())).toBe(false);
-    return { ...made, refused: (made.session.status() as { refused?: unknown }).refused };
+    // M4a: the refusal names the attempt it ended, so the Org page shows it under the control that sent it.
+    const { attempt, ...refused } = (made.session.status() as { refused?: Record<string, unknown> }).refused ?? {};
+    expect(attempt).toBe('register');
+    return { ...made, refused };
   }
 
   it('bad-code: not a code, a loopback hub with no stand-in, or a packaged build; nothing is asked of anyone', async () => {
@@ -1425,7 +1437,7 @@ describe('the fresh token\'s grace', () => {
     await session.loaded;
     session.register((await pairing()).text);
     await until(() => session.status().state === 'none', 'the refusal');
-    expect(session.status()).toEqual({ state: 'none', refused: { code: 'access', detail: 'Access refused the sign-in (302)' } });
+    expect(session.status()).toEqual({ state: 'none', refused: { code: 'access', detail: 'Access refused the sign-in (302)', attempt: 'register' } });
     expect(hub.count('/api/me')).toBeGreaterThan(1);
   });
 
@@ -2018,11 +2030,8 @@ describe('M3: rekey', () => {
     const feed = fakeFeed();
     session.attach(feed.hooks);
     await followHub(session, feed);
-    // The crash's files are written behind the session's back, so the session is closed and its anchor for the head it
-    // just adopted is on disk first: the adoption moves the head in memory before that write, which `close()` doesn't
-    // wait for, and a late one would carry the registration without the intent.
+    // The crash's files are written behind the session's back, once it is closed: nothing is written after that.
     for (const s of opened) await s.close();
-    await until(async () => (await readRegistration()).anchor.version === hub.head.state.version, 'the anchor written');
     const reg = await readRegistration();
     await realFiles().write(REGISTRATION_FILE, { ...reg, rekey: { device: nextEntry.id } });
     return { old: entry, next: nextEntry };
@@ -2133,5 +2142,405 @@ describe('M3: rekey', () => {
     const again = await restart();
     expect(again.session.current()?.identity.device).toBe(newId);
     expect(await currentKeyId()).toBe(newId);
+  });
+});
+
+// ---- M4a: the session's surface for the Org page ----
+
+/** A member with no devices, added by the deployment admin's successor and followed through the feed. */
+async function addMember(session: OrgSessionService, feed: ReturnType<typeof fakeFeed>, email = 'bea@example.com'): Promise<string> {
+  const id = memberId();
+  hub.chain.push(await successor(hub.head, [a1], (s) => void s.members.push({ id, email, role: 'member', devices: [] })));
+  feed.state(hub.head.state.version);
+  await until(() => headVersion(session) === hub.head.state.version, 'the new member held');
+  return id;
+}
+
+/** The entry a device posts for the code: its id its channel key's, its MAC under the code's secret. */
+async function answering(code: string): Promise<{ device: Omit<Device, 'endorsement'>; entry: ProtocolPendingEntry }> {
+  const decoded = decodePairingCode(code)!;
+  const channel = await generateSigningKey();
+  const device: Omit<Device, 'endorsement'> = { id: await keyId(channel.pub), class: 'native-mac', keyStorage: 'software', channelPub: channel.pub, stepUpPub: (await generateSigningKey()).pub };
+  const mac = await pairingMac(base64urlDecode(decoded.k), { org: decoded.org, member: decoded.member, device });
+  return { device, entry: { deviceId: device.id, class: 'native-mac', keyStorage: 'software', channelPub: device.channelPub, stepUpPub: device.stepUpPub, mac } };
+}
+
+describe('M4a: refused.attempt', () => {
+  it('names each attempt a status\'s refusal ended: register (every registration refusal above), signIn, reanchor', async () => {
+    // signIn
+    const { session } = await signedIn();
+    await session.signOut();
+    hub.member = { id: memberId(), email: 'other@example.com' };
+    expect(session.signIn()).toEqual({ ok: true });
+    await until(() => registered(session).refused !== undefined, 'the sign-in refused');
+    expect(registered(session).refused).toEqual({ code: 'not-member', detail: 'other@example.com', attempt: 'signIn' });
+    hub.member = { id: A, email: OWNER };
+    expect(session.signIn()).toEqual({ ok: true });
+    await until(() => isSignedIn(session), 'signed in');
+    expect(registered(session).refused).toBeUndefined();
+
+    // reanchor: the held chain closed, the hub's chain not taken meanwhile, /api/me refusing the member
+    await writeFile(join(orgDir(), CHAIN_FILE), '{"version":1}\n');
+    hub.stateAnswer = () => worker(503, { error: 'busy' });
+    const again = await restart();
+    await until(() => registered(again.session).problem === 'held-chain', 'held-chain');
+    hub.meAnswer = () => worker(403, { error: 'not-a-member' });
+    expect(again.session.reanchor((await pairing()).text)).toEqual({ ok: true });
+    await until(() => registered(again.session).refused !== undefined, 'the re-anchor refused');
+    expect(registered(again.session).refused).toMatchObject({ code: 'not-member', attempt: 'reanchor' });
+  });
+
+  it('names rekey', async () => {
+    const { session } = await signedIn({}, unmarkedKeys);
+    hub.meAnswer = () => worker(403, { error: 'not-a-member' });
+    expect(session.rekey((await pairing()).text)).toEqual({ ok: true });
+    await until(() => registered(session).refused !== undefined, 'the rekey refused');
+    expect(registered(session).refused).toMatchObject({ code: 'not-member', attempt: 'rekey' });
+  });
+
+  it('a refusal made at load ended no attempt and names none', async () => {
+    await signedIn();
+    await rm(join(userData, 'device', 'keys.json'));
+    const { session } = await restart();
+    expect(registered(session).refused).toEqual({ code: 'keys', detail: expect.stringContaining('keys.json is gone') });
+  });
+});
+
+describe('M4a: org.view', () => {
+  it('is null for a profile that never signed in', async () => {
+    const { session } = make();
+    await session.loaded;
+    expect(await session.view()).toBeNull();
+  });
+
+  it('follows the head: members, this Mac and the roots, read again after each adopted head; maySign as the signer says', async () => {
+    const { session, feed, entry, keys } = await signingRoot();
+    const first = (await session.view())!;
+    expect(first).toMatchObject({ version: headVersion(session), maySign: true, recoveryKid: await keyId(recovery.pub), machines: [] });
+    expect(first.members).toEqual([
+      {
+        id: A,
+        email: OWNER,
+        name: 'Owner',
+        role: 'admin',
+        you: true,
+        devices: [
+          { id: 'a1', class: 'native-mac', keyStorage: 'software', root: true, thisMac: false, fingerprint: await pairingFingerprint(ORG, A, a1.device) },
+          { id: entry.id, class: 'native-mac', keyStorage: 'software', root: true, thisMac: true, fingerprint: await pairingFingerprint(ORG, A, entry) },
+        ],
+      },
+    ]);
+    expect(first.roots).toEqual([
+      { kid: await keyId(a1.stepUp.pub), member: A, device: 'a1' },
+      { kid: await keyId(keys.stepUp.pub), member: A, device: entry.id },
+    ]);
+
+    const bea = await addMember(session, feed);
+    const next = (await session.view())!;
+    expect(next.version).toBe(first.version + 1);
+    expect(next.members.map((m) => [m.id, m.you])).toEqual([
+      [A, true],
+      [bea, false],
+    ]);
+
+    await session.signOut();
+    expect((await session.view())!.maySign).toBe(false);
+  });
+});
+
+describe('M4a: org.preview and org.change', () => {
+  it('previews a change with its lines, warnings and digest; signs it only with that digest, and the id previewed is the id signed', async () => {
+    const { session } = await signingRoot();
+    const before = headVersion(session);
+    const preview = await session.preview({ kind: 'member.add', email: '  Bea@Example.com ', role: 'member' });
+    if (!preview.ok) throw new Error(JSON.stringify(preview));
+    expect(preview.change).toEqual({ kind: 'member.add', email: 'bea@example.com', role: 'member', id: expect.stringMatching(/^[0-9a-f]{32}$/) });
+    expect(preview.lines[0]).toBe('Add bea@example.com as a member, with no devices yet: their first device is paired next');
+    expect(preview.warnings).toEqual([]);
+    expect(preview.digest).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(signing.prompts).toEqual([]);
+
+    // Another digest, or the change without the id the preview gave it: `stale`, nothing asked or signed.
+    expect(await session.change(preview.change, 'A'.repeat(43))).toMatchObject({ ok: false, reason: 'stale' });
+    expect(await session.change({ kind: 'member.add', email: 'bea@example.com', role: 'member' }, preview.digest)).toMatchObject({ ok: false, reason: 'stale' });
+    expect(signing.prompts).toEqual([]);
+    expect(hub.posted).toEqual([]);
+
+    expect(await session.change(preview.change, preview.digest)).toEqual({ ok: true, version: before + 1 });
+    expect(signing.prompts.map((p) => p.summary)).toEqual(['add bea@example.com to the org']);
+    expect(hub.head.state.members.find((m) => m.email === 'bea@example.com')?.id).toBe((preview.change as { id: string }).id);
+  });
+
+  it('a head that moved under the sheet so the words differ reads `stale` before Touch ID', async () => {
+    const { session, feed } = await signingRoot();
+    const bea = await addMember(session, feed);
+    const preview = await session.preview({ kind: 'member.remove', member: bea });
+    if (!preview.ok) throw new Error(JSON.stringify(preview));
+    // Bea's first device is listed meanwhile: removing her now would also revoke it, which the sheet never said.
+    const phone = await newDevice('bea-1');
+    hub.chain.push(await successor(hub.head, [a1], (s) => void s.members.find((m) => m.id === bea)!.devices.push(phone.device)));
+    feed.state(hub.head.state.version);
+    await until(() => headVersion(session) === hub.head.state.version, 'the device held');
+    expect(await session.change(preview.change, preview.digest)).toMatchObject({ ok: false, reason: 'stale' });
+    expect(signing.prompts).toEqual([]);
+  });
+
+  it('a refused change names its findings and has no digest; not signing, it is refused before anything composes', async () => {
+    const { session } = await signingRoot();
+    expect(await session.preview({ kind: 'member.remove', member: A })).toMatchObject({ ok: false, reason: 'refused', findings: [{ level: 'refuse', code: 'self' }] });
+    expect(await session.preview({ kind: 'member.email', member: A, email: 'not an email' })).toMatchObject({ ok: false, reason: 'refused', findings: [{ code: 'bad-email' }] });
+    expect(await session.preview({ kind: 'member.remove', member: memberId() })).toMatchObject({ ok: false, reason: 'stale', findings: [] });
+
+    await session.signOut();
+    expect(await session.preview({ kind: 'member.add', email: 'cal@example.com', role: 'member' })).toMatchObject({ ok: false, reason: 'not-root', findings: [] });
+    expect(await session.change({ kind: 'member.add', email: 'cal@example.com', role: 'member', id: memberId() }, 'A'.repeat(43))).toMatchObject({ ok: false, reason: 'not-root' });
+    expect(signing.prompts).toEqual([]);
+  });
+});
+
+describe('M4a: org.pair.*', () => {
+  it('pairs another member\'s first device: the code in the start\'s answer alone, the entry\'s fingerprint in the status, approved through the signer', async () => {
+    const { session, feed } = await signingRoot();
+    const bea = await addMember(session, feed);
+    const started = session.pairStart({ member: bea, class: 'native-mac' });
+    if (!started.ok) throw new Error(JSON.stringify(started));
+    // The suites' secret check (afterEach) covers the code and its secret in every status emitted.
+    secrets.push(started.code, decodePairingCode(started.code)!.k);
+    expect(decodePairingCode(started.code)).toMatchObject({ hub: HUB, org: ORG, member: bea, roots: hub.head.state.root.keys });
+    expect(registered(session).pairing).toEqual({ generation: 1, member: bea, class: 'native-mac', expires: started.expires, entry: null, problem: null });
+
+    const { device, entry } = await answering(started.code);
+    hub.waiting.set(bea, [entry]);
+    await until(() => registered(session).pairing?.entry != null, 'the candidate');
+    expect(hub.calls.some((c) => c.method === 'GET' && c.path === `/api/devices/pending?member=${bea}`)).toBe(true);
+    const shown = registered(session).pairing!;
+    expect(shown.entry).toMatchObject({ id: device.id, fingerprint: await pairingFingerprint(ORG, bea, device) });
+
+    const before = headVersion(session);
+    expect(await session.pairApprove({ generation: shown.generation, digest: shown.entry!.digest })).toEqual({ ok: true, version: before + 1 });
+    expect(signing.prompts.map((p) => p.summary)).toEqual([`pair device ${device.id.slice(0, 8)} to bea@example.com`]);
+    expect(hub.head.state.members.find((m) => m.id === bea)!.devices).toEqual([device]);
+    expect(registered(session).pairing).toBeNull();
+  });
+
+  it('one pairing at a time, none beside a rekey; a sign-out ends it', async () => {
+    const { session, feed } = await signingRoot();
+    const bea = await addMember(session, feed);
+    const first = session.pairStart({ member: bea, class: 'native-mac' });
+    if (!first.ok) throw new Error(JSON.stringify(first));
+    secrets.push(first.code, decodePairingCode(first.code)!.k);
+    expect(session.pairStart({ member: A, class: 'native-mac' })).toMatchObject({ ok: false, reason: 'busy' });
+    expect(session.rekey((await pairing()).text)).toEqual({ ok: false, reason: { code: 'busy', detail: 'a pairing is under way: cancel it first' } });
+    session.pairCancel();
+    expect(registered(session).pairing).toBeNull();
+
+    const second = session.pairStart({ member: A, class: 'native-mac' });
+    if (!second.ok) throw new Error(JSON.stringify(second));
+    secrets.push(second.code, decodePairingCode(second.code)!.k);
+    expect(registered(session).pairing).toMatchObject({ generation: 2, member: A });
+    await session.signOut();
+    expect(registered(session).pairing).toBeNull();
+    expect(session.pairStart({ member: A, class: 'native-mac' })).toMatchObject({ ok: false, reason: 'not-root' });
+  });
+
+  it('is refused while a rekey waits for its approval', async () => {
+    const { session } = await signedIn({}, unmarkedKeys);
+    expect(session.rekey((await pairing()).text)).toEqual({ ok: true });
+    await until(() => signerOf(session).rekeying?.step === 'approval', 'the rekey waiting');
+    expect(session.pairStart({ member: A, class: 'native-mac' })).toEqual({ ok: false, reason: 'busy', detail: 'another org attempt is under way' });
+    session.cancel();
+  });
+
+  it('a later device of a member who isn\'t you is the page\'s stated rule, not a pairing', async () => {
+    const { session, feed } = await signingRoot();
+    const bea = await addMember(session, feed);
+    const phone = await newDevice('bea-1');
+    hub.chain.push(await successor(hub.head, [a1], (s) => void s.members.find((m) => m.id === bea)!.devices.push(phone.device)));
+    feed.state(hub.head.state.version);
+    await until(() => headVersion(session) === hub.head.state.version, 'her device held');
+    expect(session.pairStart({ member: bea, class: 'native-mac' })).toEqual({
+      ok: false,
+      reason: 'later-device',
+      detail: 'Their next device is paired from one of their own devices, a flow not built yet',
+    });
+    expect(registered(session).pairing).toBeNull();
+  });
+});
+
+/** Every file under org/ as it stands: its name, its inode and mtime (a rename-over shows), and its bytes. */
+async function orgSnapshot(): Promise<string[]> {
+  const names = (await readdir(orgDir())).sort();
+  return Promise.all(
+    names.map(async (name) => {
+      const path = join(orgDir(), name);
+      const s = await stat(path);
+      return `${name} ${s.ino} ${s.mtimeMs} ${await readFile(path, 'utf8')}`;
+    }),
+  );
+}
+
+/** The hub's fetch, whose next `GET /api/org/state` waits for `release`; `arm` resolves once that read is held. */
+function heldStateRead() {
+  let armed: (() => void) | null = null;
+  let release: () => void = () => {};
+  const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    if (armed !== null && new URL(String(input)).pathname === '/api/org/state' && (init?.method ?? 'GET') === 'GET') {
+      const held = armed;
+      armed = null;
+      await new Promise<void>((resolve) => {
+        release = resolve;
+        held();
+      });
+    }
+    return hub.fetch(input, init);
+  }) as typeof globalThis.fetch;
+  return { fetch, arm: () => new Promise<void>((resolve) => (armed = resolve)), release: () => release() };
+}
+
+describe('M4a: close()', () => {
+  it('resolves only after a queued anchor write lands', async () => {
+    const gate = gatedFiles();
+    const { session } = await signedIn({ files: gate.files });
+    const anchorHeld = gate.arm(REGISTRATION_FILE);
+    const s3 = await successor(hub.head, [a1]);
+    const adopted = session.current()!.view.advance([s3], []);
+    await anchorHeld;
+    let closed = false;
+    const closing = session.close().then(() => void (closed = true));
+    await pause(30);
+    expect(closed).toBe(false);
+    gate.release();
+    await closing;
+    expect((await readJson<RegistrationFile>(REGISTRATION_FILE)).anchor).toEqual({ genesis: await stateHash(s1.state), version: 3, head: await stateHash(s3.state) });
+    await adopted;
+  });
+
+  it('a signer hub read released after close() writes nothing: no file under org/ changes', async () => {
+    const read = heldStateRead();
+    const { session } = await signingRoot({ fetch: read.fetch });
+    const before = headVersion(session);
+    const reading = read.arm();
+    const resigned = session.resign();
+    await reading;
+    // The hub now serves a successor the signer would adopt (chain.json, then the anchor) if nothing fenced it.
+    hub.chain.push(await successor(hub.head, [a1]));
+    let closed = false;
+    const closing = session.close().then(() => void (closed = true));
+    await pause(30);
+    expect(closed).toBe(false); // close() joins the signer's operation in flight
+    read.release();
+    await closing;
+    const files = await orgSnapshot();
+    expect(await resigned).toMatchObject({ ok: false, reason: 'not-root' });
+    await pause(50);
+    expect(await orgSnapshot()).toEqual(files);
+    // Nothing read after close() was adopted: not in memory, not in chain.json.
+    expect(headVersion(session)).toBe(before);
+    expect((await readJson<{ chain: SignedOrgState[] }>(CHAIN_FILE)).chain).toHaveLength(before);
+    expect(signing.prompts).toEqual([]);
+  });
+
+  it('waits for a link\'s direct view.advance whose chain.json write is under way; the anchor it misses moves up at the next load', async () => {
+    const gate = gatedFiles();
+    const { session } = await signedIn({ files: gate.files });
+    const chainHeld = gate.arm(CHAIN_FILE);
+    const s3 = await successor(hub.head, [a1]);
+    // As a link does (remote/link.ts): not awaited.
+    void session.current()!.view.advance([s3], []);
+    await chainHeld;
+    let closed = false;
+    const closing = session.close().then(() => void (closed = true));
+    await pause(30);
+    expect(closed).toBe(false);
+    gate.release();
+    await closing;
+    expect((await readJson<{ chain: SignedOrgState[] }>(CHAIN_FILE)).chain.at(-1)).toEqual(s3);
+    // The session closed while chain.json was written: the anchor's write was refused, as a crash between the two.
+    expect((await readJson<RegistrationFile>(REGISTRATION_FILE)).anchor.version).toBe(2);
+    const files = await orgSnapshot();
+    await pause(50);
+    expect(await orgSnapshot()).toEqual(files);
+    const { session: again } = await restart();
+    expect(headVersion(again)).toBe(3);
+    expect((await readJson<RegistrationFile>(REGISTRATION_FILE)).anchor.version).toBe(3);
+  });
+
+  // Review fix: a command whose queued write meets the closed commit queue answers as stopped, never as a failure.
+  it('a reset asked for just before close() answers quietly and writes nothing', async () => {
+    const { session } = await signingRoot();
+    expect((await session.resign()).ok).toBe(true);
+    await rm(join(orgDir(), SIGNING_FILE));
+    const { session: again, logs } = await restart();
+    await until(() => registered(again).problem === 'signing', 'problem signing');
+    const resetting = again.resetSigning(true);
+    const closing = again.close();
+    await expect(resetting).resolves.toBeUndefined();
+    await closing;
+    expect(await exists(join(orgDir(), SIGNING_FILE))).toBe(false);
+    expect(logs.filter((l) => l.includes('closed'))).toEqual([]);
+  });
+
+  it('a close during Touch ID reads as a stopped sign, not a signing-storage failure; nothing is kept', async () => {
+    const { session, logs } = await signingRoot();
+    const signingFile = () => readFile(join(orgDir(), SIGNING_FILE), 'utf8').catch(() => null);
+    const kept = await signingFile();
+    let closing: Promise<void> | undefined;
+    signing.during = () => void (closing = session.close());
+    expect(await session.resign()).toMatchObject({ ok: false, reason: 'not-root' });
+    await closing;
+    expect(await signingFile()).toBe(kept);
+    expect(hub.posted).toEqual([]);
+    expect(logs.filter((l) => l.includes('closed'))).toEqual([]);
+  });
+
+  it('a close during a discard\'s hub read discards nothing and answers quietly', async () => {
+    const read = heldStateRead();
+    const { session, logs } = await signingRoot({ fetch: read.fetch });
+    hub.postAnswer = () => worker(409, { error: 'key-purged' });
+    expect(await session.resign()).toMatchObject({ ok: false, reason: 'hub' });
+    const slot = (await readJson<SigningFile>(SIGNING_FILE)).pending;
+    const reading = read.arm();
+    const discarding = session.discardPending(true, signerOf(session).pending!.hash);
+    await reading;
+    const closing = session.close();
+    read.release();
+    expect(await discarding).toEqual({ ok: false });
+    await closing;
+    expect((await readJson<SigningFile>(SIGNING_FILE)).pending).toEqual(slot);
+    expect(logs.filter((l) => l.includes('closed'))).toEqual([]);
+  });
+});
+
+describe('M4a: a sign-out after a post the hub took (Task 5, Decision 4)', () => {
+  it('reads not-root, adopts nothing late, keeps the slot\'s bytes, and the next sign-in settles it with no new confirmation', async () => {
+    const read = heldStateRead();
+    const { session, feed } = await signingRoot({ fetch: read.fetch });
+    const before = headVersion(session);
+    let reading: Promise<void> | undefined;
+    // The hub takes the post; the signer's read of the hub's chain after it is held.
+    hub.postAnswer = () => {
+      hub.postAnswer = undefined;
+      reading = read.arm();
+      return undefined;
+    };
+    const signed = session.resign();
+    await until(() => reading !== undefined, 'posted');
+    await reading;
+    const slot = await readFile(join(orgDir(), SIGNING_FILE), 'utf8');
+    const prompts = signing.prompts.length;
+    await session.signOut();
+    read.release();
+    expect(await signed).toMatchObject({ ok: false, reason: 'not-root' });
+    await pause(50);
+    expect(headVersion(session)).toBe(before);
+    expect((await readJson<{ chain: SignedOrgState[] }>(CHAIN_FILE)).chain).toHaveLength(before);
+    expect(await readFile(join(orgDir(), SIGNING_FILE), 'utf8')).toBe(slot);
+
+    expect(session.signIn()).toEqual({ ok: true });
+    await until(() => isSignedIn(session), 'signed in again');
+    feed.open();
+    await until(() => signerOf(session).pending === null && headVersion(session) === before + 1, 'settled at the sign-in');
+    expect(signing.prompts).toHaveLength(prompts);
+    expect(hub.posted).toHaveLength(1);
   });
 });

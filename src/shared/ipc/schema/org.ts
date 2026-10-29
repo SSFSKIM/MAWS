@@ -2,7 +2,8 @@
 // in the person's org: the sign-in from a pairing code, the device's registration, the held org state and the hub's
 // credential (src/main/org/org-session.ts). Owned by main and graded `client`: the local app answers it, no machine.
 // Main-to-renderer only, so outside the wire manifest. Nothing here carries a token, a key, a nonce or a pairing secret:
-// the code goes in with `org.register` and `org.reanchor` and is never echoed back.
+// the code goes in with `org.register` and `org.reanchor` and is never echoed back. The one exception is M4a's
+// `org.pair.start`, whose answer carries the code this Mac made for another device, once, to show; no status does.
 import * as z from 'zod';
 import { OrgKeySchema } from '../../machine/org-key';
 import { MachineRefSchema } from '../../machine/ref';
@@ -14,7 +15,13 @@ import type { CommandSpec } from './common';
  * Decision Log).
  */
 export const ORG_REFUSALS = ['bad-code', 'other-org', 'access', 'not-member', 'keys', 'chain', 'removed', 'expired', 'hub', 'busy', 'directory'] as const;
-export const OrgRefusalSchema = z.strictObject({ code: z.enum(ORG_REFUSALS), detail: z.string().optional() });
+/**
+ * M4a: the attempt a status's `refused` ended, so the Org page shows it under the control that sent it. A refusal the
+ * session makes at load (`keys`: the key file is gone or refused) ended no attempt and names none; an act's own answer
+ * (`{ok: false, reason}`) goes back to its caller and names none either.
+ */
+export const ORG_ATTEMPTS = ['register', 'reanchor', 'signIn', 'rekey'] as const;
+export const OrgRefusalSchema = z.strictObject({ code: z.enum(ORG_REFUSALS), detail: z.string().optional(), attempt: z.enum(ORG_ATTEMPTS).optional() });
 export type OrgRefusal = z.infer<typeof OrgRefusalSchema>;
 
 /** The Org section's warning tone from this age of the held head, and the backstop past which machines refuse acts. */
@@ -64,6 +71,28 @@ export const OrgSignerStatusSchema = z
   .nullable();
 export type OrgSignerStatus = z.infer<typeof OrgSignerStatusSchema>;
 
+const DeviceClassSchema = z.enum(['native-mac', 'web-cards']);
+const RoleSchema = z.enum(['admin', 'member']);
+
+/**
+ * M4a (Interfaces §M): a pairing this Mac runs as the approving device (src/main/org/pairing.ts). `generation` counts
+ * pairings in this run; `entry` is the frozen candidate, the first entry that answered the code, with its fingerprint to
+ * compare and the digest `org.pair.approve` names. Never the code or its secret: those are in `org.pair.start`'s answer
+ * alone. `problem`: why it ended (`two-entries`, `entry-changed`, `expired`, and the hub's `not-admin` and `no-member`).
+ */
+export const PAIRING_PROBLEMS = ['two-entries', 'entry-changed', 'expired', 'not-admin', 'no-member'] as const;
+export const OrgPairingStatusSchema = z
+  .strictObject({
+    generation: z.number().int().positive(),
+    member: z.string(),
+    class: DeviceClassSchema,
+    expires: z.string(),
+    entry: z.strictObject({ id: z.string(), class: DeviceClassSchema, keyStorage: z.string(), fingerprint: z.string(), digest: z.string() }).nullable(),
+    problem: z.enum(PAIRING_PROBLEMS).nullable(),
+  })
+  .nullable();
+export type OrgPairingStatus = z.infer<typeof OrgPairingStatusSchema>;
+
 const RegisteredSchema = z.strictObject({
   state: z.literal('registered'),
   org: z.string(),
@@ -78,6 +107,7 @@ const RegisteredSchema = z.strictObject({
   problem: z.enum(['held-chain', 'rollback', 'fork', 'directory', 'signing']).nullable(),
   refused: OrgRefusalSchema.optional(),
   signer: OrgSignerStatusSchema, // M3: null until a head is held
+  pairing: OrgPairingStatusSchema, // M4a: null while this Mac pairs no device
 });
 export const OrgStatusSchema = z.discriminatedUnion('state', [NoneSchema, DevelopmentSchema, RegisteringSchema, RegisteredSchema]);
 export type OrgStatus = z.infer<typeof OrgStatusSchema>;
@@ -114,6 +144,75 @@ export const DiscardResultSchema = z.union([
   z.strictObject({ ok: z.literal(false), reason: z.enum(['held', 'hub', 'none', 'signing', 'stale']).optional() }),
 ]);
 export type DiscardResult = z.infer<typeof DiscardResultSchema>;
+
+/**
+ * M4a (Interfaces §M): the Org page's reading of the held head (src/main/org/view.ts), null unless a registration holds a
+ * verified head. The signed facts only: whether a machine is up is the renderer's `useMachines`, since a link can drop
+ * with no new head. `roots` reads each root kid as `rootLines` does, the device holding it or `unlisted`.
+ */
+export const OrgViewSchema = z.strictObject({
+  version: z.number().int().positive(),
+  issued: z.string(),
+  maySign: z.boolean(),
+  recoveryKid: z.string(),
+  members: z.array(
+    z.strictObject({
+      id: z.string(),
+      email: z.string(),
+      name: z.string(),
+      role: RoleSchema,
+      you: z.boolean(),
+      devices: z.array(z.strictObject({ id: z.string(), class: DeviceClassSchema, keyStorage: z.string(), root: z.boolean(), thisMac: z.boolean(), fingerprint: z.string() })),
+    }),
+  ),
+  machines: z.array(z.strictObject({ name: z.string(), ref: z.string(), owners: z.union([z.array(z.string()), z.literal('org')]) })),
+  roots: z.array(z.union([z.strictObject({ kid: z.string(), member: z.string(), device: z.string() }), z.strictObject({ kid: z.string(), unlisted: z.literal(true) })])),
+});
+export type OrgView = z.infer<typeof OrgViewSchema>;
+
+const MemberIdSchema = z.string().min(1).max(64);
+const DeviceIdSchema = z.string().min(1).max(128);
+const EmailSchema = z.string().min(1).max(320);
+/**
+ * M4a: a change the Org page asks for (src/main/org/edits.ts composes each). `member.add`'s `id` is set by the preview,
+ * so the id signed is the id shown; a change sent without it reads `stale`.
+ */
+export const OrgChangeSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('member.add'), email: EmailSchema, role: RoleSchema, id: MemberIdSchema.optional() }),
+  z.strictObject({ kind: z.literal('member.remove'), member: MemberIdSchema }),
+  z.strictObject({ kind: z.literal('member.role'), member: MemberIdSchema, role: RoleSchema }),
+  z.strictObject({ kind: z.literal('member.email'), member: MemberIdSchema, email: EmailSchema }),
+  z.strictObject({ kind: z.literal('device.remove'), member: MemberIdSchema, device: DeviceIdSchema }),
+  z.strictObject({ kind: z.literal('root.add'), member: MemberIdSchema, device: DeviceIdSchema }),
+]);
+export type OrgChange = z.infer<typeof OrgChangeSchema>;
+
+/** A check's finding (src/main/org/checks.ts): `code` the package's, the checks' or a composer's, as a plain string. */
+export const OrgFindingSchema = z.strictObject({ level: z.enum(['refuse', 'warn']), code: z.string(), detail: z.string() });
+/**
+ * M4a: what a change would sign, before Touch ID: its lines and the checks' warnings, and `digest`, which names
+ * `{change, lines, warnings}` so `org.change` signs only what was shown. Refused: the checks' or the composer's own
+ * findings (`refused`), a target gone from the head (`stale`), or this Mac can't sign (`not-root`, `unmarked`,
+ * `signing`); `invalid` for anything else the composer threw.
+ */
+export const PreviewResultSchema = z.union([
+  z.strictObject({ ok: z.literal(true), change: OrgChangeSchema, lines: z.array(z.string()), warnings: z.array(z.string()), digest: z.string() }),
+  z.strictObject({ ok: z.literal(false), reason: z.enum(['refused', 'stale', 'not-root', 'unmarked', 'signing', 'invalid']), detail: z.string().optional(), findings: z.array(OrgFindingSchema) }),
+]);
+export type PreviewResult = z.infer<typeof PreviewResultSchema>;
+
+/**
+ * M4a: a pairing started. `code` is the pairing code, shown once: it is in this answer alone, never in a status. Refused:
+ * this Mac can't sign (`not-root`), a later device of a member who isn't you (`later-device`: their own device pairs it,
+ * a flow not built yet), a member the head doesn't list (`no-member`), a pairing or another attempt running (`busy`), or
+ * no hub to poll (`hub`).
+ */
+export const PAIR_REFUSALS = ['not-root', 'later-device', 'no-member', 'busy', 'hub'] as const;
+export const PairStartResultSchema = z.union([
+  z.strictObject({ ok: z.literal(true), code: z.string(), expires: z.string() }),
+  z.strictObject({ ok: z.literal(false), reason: z.enum(PAIR_REFUSALS), detail: z.string().optional() }),
+]);
+export type PairStartResult = z.infer<typeof PairStartResultSchema>;
 
 /**
  * M2 (Interfaces §G): another machine's session as its signed listing says it, verified against the held org state. Not a
@@ -165,6 +264,12 @@ export const commands = {
   'org.rekey': { input: CodeInputSchema, output: OrgAttemptSchema, owner: 'main' }, // M3: new keys with a fresh pairing code
   'org.discardPending': { input: DiscardInputSchema, output: DiscardResultSchema, owner: 'main' }, // M3
   'org.resetSigning': { input: ConfirmedInputSchema, output: z.void(), owner: 'main' }, // M3
+  'org.view': { input: z.void(), output: OrgViewSchema.nullable(), owner: 'main' }, // M4a: read again at each org.changed
+  'org.preview': { input: z.strictObject({ change: OrgChangeSchema }), output: PreviewResultSchema, owner: 'main' }, // M4a
+  'org.change': { input: z.strictObject({ change: OrgChangeSchema, digest: z.string().min(1).max(128) }), output: SignResultSchema, owner: 'main' }, // M4a: stale on another digest
+  'org.pair.start': { input: z.strictObject({ member: MemberIdSchema, class: DeviceClassSchema }), output: PairStartResultSchema, owner: 'main' }, // M4a
+  'org.pair.approve': { input: z.strictObject({ generation: z.number().int().positive(), digest: z.string().min(1).max(128) }), output: SignResultSchema, owner: 'main' }, // M4a
+  'org.pair.cancel': { input: z.void(), output: z.void(), owner: 'main' }, // M4a
 } as const satisfies Record<`org.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

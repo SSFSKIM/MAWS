@@ -1,12 +1,16 @@
 // The checks before signing and the superseded states' revocations (P5 O8 M3, docs/doperpowers/plans/2026-10-28-p5-o8-
 // org-interface.md, M3's "The checks before signing" and "The superseded states' revocations", Interfaces §K; P5
-// Decision Logs 26, 30 and 31). One pure module the signer runs on every edit before Touch ID, M4's included.
+// Decision Logs 26, 30 and 31; M4a's "The pre-sign function"). One pure module the signer runs on every edit before
+// Touch ID, M4a's included.
 //
-// `checkSuccessor` names, before a fingerprint is asked for, what the package's `verifySuccessor` would refuse after it
-// (a revoked key made current, a prefix or id a delegation already holds or held, a renewal of a delegation no longer
-// live, an empty root set), what P5 adds on top (a renewal must extend), and what the owner should see in the prompt (a
-// dropped delegation, revocations a recovery lost). The package stays the judge: these findings are early words, and
-// the signer still verifies the signed state.
+// `checkSuccessor` names, before a fingerprint is asked for, what the package's `verifySuccessor` would refuse after it,
+// what P5 adds on top (a renewal must extend), and what the owner should see in the prompt (a dropped delegation,
+// revocations a recovery lost). The package's own pre-sign function, `successorProblems`, runs first: every check
+// `verifySuccessor` makes but the signatures, each problem a refusal by the package's code (a revoked key made current,
+// an empty root set, a member, email or device id taken, a later device unendorsed, a key unaccounted for, …). Then this
+// module's own rows: the delegation rules, directional where the package's are not (until M4c moves `prefixProblem`
+// into the package), the renewal rules and the superseded offer's warning. The package stays the judge: these findings
+// are early words, and the signer still verifies the signed state.
 //
 // `supersededRevocations` offers, after a recovery, the revocations the discarded branch signed honestly and the
 // recovered line lacks, each with the whole closure the package needs (`keysAccounted`, `stateInvariants`) so the
@@ -17,18 +21,20 @@
 import {
   keyId,
   machineNameKey,
+  successorProblems,
   type Delegation,
   type Device,
   type KeyHolder,
   type MachineEntry,
   type Member,
   type OrgState,
+  type ProblemCode,
   type RevokedKey,
   type SignedOrgState,
 } from '../../../apps/org-protocol/src/index.ts';
 
+/** This module's own rows. The package's codes (`ProblemCode`) arrive beside them. */
 export type CheckCode =
-  | 'revives-revoked'
   | 'prefix-equal'
   | 'prefix-nested'
   | 'prefix-covers'
@@ -37,9 +43,15 @@ export type CheckCode =
   | 'renew-expired'
   | 'renew-not-extension'
   | 'drops-delegation'
-  | 'empty-roots'
   | 'superseded-keys';
-export type Finding = { level: 'refuse' | 'warn'; code: CheckCode; detail: string };
+/**
+ * What a change may not do whatever the state says (edits.ts's composers, M4a): change or remove yourself, remove this
+ * Mac's own device or its member, sign a change that changes nothing, take an email outside the grammar, make a root of
+ * a device that can't sign org states.
+ */
+export type ChangeCode = 'self' | 'this-mac' | 'no-change' | 'bad-email' | 'not-signing-device';
+export type FindingCode = CheckCode | ProblemCode | ChangeCode;
+export type Finding = { level: 'refuse' | 'warn'; code: FindingCode; detail: string };
 
 export type SupersededOffer = {
   /** The whole closure, applied to the successor. */
@@ -50,17 +62,31 @@ export type SupersededOffer = {
   withheld: RevokedKey[];
 } | null;
 
-const refuse = (code: CheckCode, detail: string): Finding => ({ level: 'refuse', code, detail });
-const warn = (code: CheckCode, detail: string): Finding => ({ level: 'warn', code, detail });
+/**
+ * `endorsing`: the devices the signer endorses inside the same Touch ID that signs the state, under its step-up key
+ * `kid` (the package counts each as endorsed when `kid` is one of its member's own step-up keys in `head`).
+ */
+export type CheckOptions = { endorsing?: { kid: string; devices: string[] } };
 
-/** Every finding on `next` as the successor of `head`, refusals and warnings alike, in the table's order. */
-export async function checkSuccessor(head: OrgState, next: OrgState, superseded: readonly SignedOrgState[], now: Date): Promise<Finding[]> {
-  return [
-    ...(await revivals(head, next)),
-    ...delegationFindings(head, next, now),
-    ...(next.root.keys.length === 0 ? [refuse('empty-roots', 'this state leaves the org with no root key: nobody could sign its successor')] : []),
-    ...(await supersededLeftOut(head, next, superseded)),
-  ];
+const refuse = (code: FindingCode, detail: string): Finding => ({ level: 'refuse', code, detail });
+const warn = (code: FindingCode, detail: string): Finding => ({ level: 'warn', code, detail });
+
+/**
+ * Every finding on `next` as the successor of `head`, refusals and warnings alike: the package's problems first, then
+ * this module's rows in the table's order. A row of this module whose code the package already named is left out (the
+ * same rule, held twice until M4c), and a finding repeated word for word is named once.
+ */
+export async function checkSuccessor(head: OrgState, next: OrgState, superseded: readonly SignedOrgState[], now: Date, options: CheckOptions = {}): Promise<Finding[]> {
+  const problems = await successorProblems(head, next, options.endorsing === undefined ? {} : { endorsing: options.endorsing });
+  const named = new Set<FindingCode>(problems.map((p) => p.code));
+  const own = [...delegationFindings(head, next, now), ...(await supersededLeftOut(head, next, superseded))].filter((f) => !named.has(f.code));
+  const seen = new Set<string>();
+  return [...problems.map((p) => refuse(p.code, p.detail ?? p.code)), ...own].filter((f) => {
+    const key = `${f.level}|${f.code}|${f.detail}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 // --- The keys a state holds -------------------------------------------------------------------------------------------
@@ -84,12 +110,6 @@ async function currentKeys(state: OrgState): Promise<Map<string, Current>> {
   return out;
 }
 
-function describeCurrent(c: Current): string {
-  if (c.kind === 'device') return `the ${c.key} key of ${c.member.email}'s device ${c.device.id}`;
-  if (c.kind === 'machine') return `machine ${c.entry.name}'s key`;
-  return `delegation ${c.delegation.id}'s key (prefix ${c.delegation.prefix})`;
-}
-
 /** A holder in words, its machine named where the state's `machineNames` gives the ref one. */
 export function describeHolder(state: OrgState, holder: RevokedKey['holder']): string {
   if ('delegation' in holder) return `delegation ${holder.delegation} (prefix ${holder.prefix})`;
@@ -99,27 +119,6 @@ export function describeHolder(state: OrgState, holder: RevokedKey['holder']): s
   }
   const email = state.members.find((m) => m.id === holder.member)?.email ?? `member ${holder.member}`;
   return `the ${holder.key} key of ${email}'s device ${holder.device}`;
-}
-
-// --- revives-revoked --------------------------------------------------------------------------------------------------
-
-/**
- * A key `head` or `next` revoked that `next` holds as current, or names in `root.keys`: the package refuses it as
- * `revoked` (`revivesRevoked` reads both states' `revoked`), and a revoked key must never speak again.
- */
-async function revivals(head: OrgState, next: OrgState): Promise<Finding[]> {
-  const revoked = new Set([...head.revoked, ...next.revoked].map((r) => r.keyId));
-  const findings: Finding[] = [];
-  const named = new Set<string>();
-  for (const [kid, c] of await currentKeys(next)) {
-    if (!revoked.has(kid)) continue;
-    named.add(kid);
-    findings.push(refuse('revives-revoked', `${describeCurrent(c)} (${kid}) was revoked, and a revoked key is never current again`));
-  }
-  for (const kid of next.root.keys) {
-    if (revoked.has(kid) && !named.has(kid)) findings.push(refuse('revives-revoked', `the root key ${kid} was revoked, and a revoked key is never a root again`));
-  }
-  return findings;
 }
 
 // --- Delegations ------------------------------------------------------------------------------------------------------

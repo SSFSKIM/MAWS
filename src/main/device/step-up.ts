@@ -18,6 +18,7 @@ import { systemPreferences, type SystemPreferences } from 'electron';
 import {
   base64urlEncode,
   canonicalize,
+  endorseDevice,
   isAction,
   keyId,
   NONCE_BYTES,
@@ -106,12 +107,25 @@ export function createStepUp(deps: { device: { org: string; device: string }; ke
   };
 }
 
+/**
+ * What a state signature may carry beside the state (P5-O8 M4a, "Endorsement inside one Touch ID"). `endorse`: devices
+ * this key endorses on the copy it signs, each one the state lists under that member (a later device of this key's own
+ * member, which the protocol's `endorsed` asks one of the member's step-up keys to endorse). `live`: whether what the
+ * person is asked about still stands (a pairing neither cancelled nor expired), read once after they answer yes and
+ * before anything is endorsed or signed.
+ */
+export type StateSignOptions = { endorse?: ReadonlyArray<{ member: string; device: string }>; live?(): boolean };
+
 /** Signs org states with the step-up key, each after the person confirmed the words the org signer composed for it. */
 export type StateSigner = {
   /** keyId(stepUp.pub): the id `root.keys` lists for this device. */
   kid: string;
-  /** Every refusal of the confirmation is `cancelled`: nothing was signed, whatever the reason. */
-  sign(state: OrgState, prompt: StepUpPrompt): Promise<{ ok: true; signed: SignedOrgState } | { ok: false; reason: 'cancelled' }>;
+  /**
+   * Every refusal of the confirmation is `cancelled`: nothing was signed, whatever the reason; so is a `live` that says
+   * no after the person said yes. One confirmation covers the endorsements and the state. Throws, before asking, when
+   * `endorse` names a device the state doesn't list under that member (the caller's error, never the person's).
+   */
+  sign(state: OrgState, prompt: StepUpPrompt, options?: StateSignOptions): Promise<{ ok: true; signed: SignedOrgState } | { ok: false; reason: 'cancelled' }>;
 };
 
 /** `confirm` defaults to `promptTouchIDConfirmation(systemPreferences)`, main's confirmation. Async only for the key id. */
@@ -119,10 +133,15 @@ export async function createStateSigner(deps: { key: SigningKey; confirm?: Confi
   const confirm = deps.confirm ?? promptTouchIDConfirmation(systemPreferences);
   return {
     kid: await keyId(deps.key.pub),
-    async sign(state, prompt) {
+    async sign(state, prompt, options = {}) {
       // A private copy in the canonical form the signature covers, taken before the person is asked: the caller keeps
       // its reference and may change it while the person decides. What was asked about is what is signed.
       const asked = JSON.parse(canonicalize(state)) as OrgState;
+      const endorsing = (options.endorse ?? []).map(({ member, device }) => {
+        const listed = asked.members.find((m) => m.id === member)?.devices.find((d) => d.id === device);
+        if (listed === undefined) throw new Error(`the state lists no device ${device} under member ${member} to endorse`);
+        return { member, device: listed };
+      });
       let answer: Confirmation;
       try {
         answer = await confirm(prompt);
@@ -130,6 +149,10 @@ export async function createStateSigner(deps: { key: SigningKey; confirm?: Confi
         answer = { ok: false, reason: 'failed' };
       }
       if (!answer.ok) return { ok: false, reason: 'cancelled' };
+      // What the person was asked about may have ended meanwhile (a pairing cancelled or expired): nothing is endorsed or signed.
+      if (options.live !== undefined && !options.live()) return { ok: false, reason: 'cancelled' };
+      // An endorsement covers the device without one (`endorseDevice` leaves it out), so one the caller left is replaced.
+      for (const { member, device } of endorsing) device.endorsement = await endorseDevice(asked.org, member, device, deps.key.privateKey, deps.key.pub);
       return { ok: true, signed: await signOrgState(asked, [deps.key]) };
     },
   };
