@@ -2,11 +2,11 @@
 // the MAC under the code's pairing secret; the enrolling member's device fetches them and checks the MAC, and the hub
 // shows the machine listed once a state lists that key, apart from its hub confirmation. An active machine re-enrolls
 // in place under a token that names it.
-import { base64urlEncode, generateSigningKey, keyId, verifyEnrollmentMac, type SignedOrgState, type SigningKey } from 'org-protocol';
+import { base64urlEncode, generateSigningKey, keyId, verifyEnrollmentMac, type OrgState, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { enrollV2, machineFetch, type V2Machine } from '../fake-machine/org';
-import { encodeEnrollmentCodeV2, type EnrollmentKey, type MachineView } from '../src/protocol/identity';
-import { enrollmentToken, MachineClient, refusal, waitFor } from './support/clients';
+import { certify, enrollDelegated, enrollV2, machineFetch, redeemDelegated, type DelegationKey, type V2Machine } from '../fake-machine/org';
+import { delegationFor, encodeEnrollmentCodeV2, type EnrollmentKey, type MachineView } from '../src/protocol/identity';
+import { enrollmentToken, MachineClient, provisioningKey, refusal, waitFor } from './support/clients';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from './support/local';
 import { genesis, newDevice, next, signedBy, type TestDevice } from './support/org';
 
@@ -123,6 +123,114 @@ describe('a v2 machine', () => {
     expect((await hub.fetchAs(ADMIN, '/api/org/state', { body: listed })).status).toBe(201);
     head = listed;
     expect(await machineNamed('mini')).toMatchObject({ state: 'active', key: { listed: true } });
+  });
+});
+
+// One holder per key (RL5), across the hub's records too: a key speaks for one ref, whatever route it came by. A machine
+// key or a certificate whose key another holder has under another ref, or that no state makes current again, is
+// refused at its post, whichever came first, rather than in a listing successor or a verifier. On the head the case
+// above left.
+describe('a key another holder has', () => {
+  async function accept(edit: (s: OrgState) => void): Promise<void> {
+    const signed = await signedBy(await next(head, edit), a1);
+    expect((await hub.fetchAs(ADMIN, '/api/org/state', { body: signed })).status).toBe(201);
+    head = signed;
+  }
+  /** A machine enrolled under `name` with a fresh key and ref, and listed with them. */
+  async function listed(name: string): Promise<V2Machine> {
+    const machine = await enrollV2((await code()).text, name);
+    await accept((s) => {
+      s.machines.push({ name, ref: machine.ref, pub: machine.key.pub, owners: [s.members[0].id] });
+      s.machineNames.push({ name, ref: machine.ref });
+    });
+    return machine;
+  }
+  /** Takes `machine` out of the state, its key retired or revoked. */
+  async function unlisted(machine: V2Machine, how: 'retired' | 'revoked'): Promise<void> {
+    const kid = await keyId(machine.key.pub);
+    await accept((s) => {
+      s.machines = s.machines.filter((m) => m.ref !== machine.ref);
+      if (how === 'retired') s.retired.push({ keyId: kid, pub: machine.key.pub, notAfter: new Date().toISOString(), holder: { machine: machine.ref } });
+      else s.revoked.push({ keyId: kid, holder: { machine: machine.ref } });
+    });
+  }
+  let fresh = 0;
+  /** A machine under a fresh name and ref (or `keep.ref`) posting `key`. */
+  const posting = async (key: SigningKey, keep: { name?: string; ref?: string; code?: string } = {}) =>
+    enrollV2((await code(keep.code)).text, keep.name ?? `kh-fresh-${++fresh}`, { key, ...(keep.ref === undefined ? {} : { ref: keep.ref }) });
+  const keyHeld = (holder: string) => new RegExp(`409 \\{"error":"key-held","message":"this key is ${holder}`);
+  const certHeld = (holder: string) => new RegExp(`the certificate was refused: 409 \\{"error":"key-held","message":"the certificate's key is ${holder}`);
+  /** The org state's delegation for VMs named `kh-vm-…`, and its provisioning key's secret. */
+  let vms: { token: string; delegation: DelegationKey };
+  let vm = 0;
+  /** A VM under the delegation, certifying `key` (or a fresh one) under a fresh name and ref. */
+  const certifying = (keep: { key?: SigningKey } = {}) => enrollDelegated(hub.url, vms.token, `kh-vm-${++vm}`, vms.delegation, keep);
+
+  it("is refused when the org state holds it: another machine's, a device's, a delegation's, the recovery key", async () => {
+    const other = await listed('kh-listed');
+    await expect(posting(other.key)).rejects.toThrow(keyHeld(`machine kh-listed's in the org state \\(ref ${other.ref}\\)`));
+    await expect(posting(a1.channel)).rejects.toThrow(keyHeld('the channel key of device a1 in the org state'));
+    await expect(posting(a1.stepUp!)).rejects.toThrow(keyHeld('the step-up key of device a1 in the org state'));
+    const issued = await provisioningKey(hub, ADMIN, { label: 'held', prefix: 'kh-vm-', max_uses: null, offline_revoke_s: null });
+    vms = { token: issued.token, delegation: { id: issued.id, key: await generateSigningKey() } };
+    await accept((s) => s.delegations.push(delegationFor(issued.key, vms.delegation.key.pub, 'org')));
+    await expect(posting(vms.delegation.key)).rejects.toThrow(keyHeld(`delegation ${issued.id}'s in the org state`));
+    await expect(posting(recovery)).rejects.toThrow(keyHeld("the org state's recovery key"));
+  });
+
+  it("is refused when a kept certificate holds it under another ref, and taken from the certificate's own machine", async () => {
+    const certified = await certifying();
+    await expect(posting(certified.key)).rejects.toThrow(keyHeld(`a kept certificate's, under the ref ${certified.ref}`));
+    const mac = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
+    expect((await machineFetch(hub.url, certified.credentials, '/machine/key', { pub: certified.key.pub, ref: certified.ref, mac })).status).toBe(201);
+  });
+
+  it('is certified for no other holder under another ref, whichever came first; for its own ref it is', async () => {
+    const other = await listed('kh-cert-listed');
+    await expect(certifying({ key: other.key })).rejects.toThrow(certHeld(`machine kh-cert-listed's in the org state \\(ref ${other.ref}\\)`));
+    const posted = await enrollV2((await code()).text, 'kh-cert-posted');
+    await expect(certifying({ key: posted.key })).rejects.toThrow(certHeld("another enrollment's, posted under another ref"));
+    await expect(certifying({ key: a1.channel })).rejects.toThrow(certHeld('the channel key of device a1 in the org state'));
+    await expect(certifying({ key: vms.delegation.key })).rejects.toThrow(certHeld(`delegation ${vms.delegation.id}'s in the org state`));
+    await expect(certifying({ key: recovery })).rejects.toThrow(certHeld("the org state's recovery key"));
+    // A retired or revoked key is the package's verdict first, whatever the ref.
+    const retired = await listed('kh-cert-retired');
+    await unlisted(retired, 'retired');
+    await expect(certifying({ key: retired.key })).rejects.toThrow(/409 \{"error":"expired"\}/);
+    const revoked = await listed('kh-cert-revoked');
+    await unlisted(revoked, 'revoked');
+    await expect(certifying({ key: revoked.key })).rejects.toThrow(/409 \{"error":"revoked"\}/);
+    // The VM's own key posted under its own ref, then certified there.
+    const own = await redeemDelegated(hub.url, vms.token, `kh-vm-${++vm}`, vms.delegation);
+    const mac = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
+    expect((await machineFetch(hub.url, own.credentials, '/machine/key', { pub: own.key.pub, ref: own.ref, mac })).status).toBe(201);
+    expect((await machineFetch(hub.url, own.credentials, '/machine/cert', await certify(own, vms.delegation))).status).toBe(201);
+  });
+
+  it('is refused when another enrollment posted it under another ref, though nothing lists it', async () => {
+    const posted = await enrollV2((await code()).text, 'kh-unlisted');
+    await expect(posting(posted.key)).rejects.toThrow(keyHeld("another enrollment's, posted under another ref"));
+  });
+
+  it('is refused when the org state retired or revoked it, under its own machine and ref too', async () => {
+    const retired = await listed('kh-retired');
+    await unlisted(retired, 'retired');
+    await expect(posting(retired.key)).rejects.toThrow(keyHeld('retired in the org state'));
+    await expect(posting(retired.key, { code: 'kh-retired', name: 'kh-retired', ref: retired.ref })).rejects.toThrow(keyHeld('retired in the org state'));
+    const revoked = await listed('kh-revoked');
+    await unlisted(revoked, 'revoked');
+    await expect(posting(revoked.key)).rejects.toThrow(keyHeld('revoked in the org state'));
+    await expect(posting(revoked.key, { code: 'kh-revoked', name: 'kh-revoked', ref: revoked.ref })).rejects.toThrow(keyHeld('revoked in the org state'));
+  });
+
+  it('is taken from the machine of its own ref: renamed in the state, it enrolls under the new name with its key and ref', async () => {
+    const machine = await listed('kh-old-name');
+    await accept((s) => {
+      s.machines.find((m) => m.ref === machine.ref)!.name = 'kh-new-name';
+      s.machineNames.push({ name: 'kh-new-name', ref: machine.ref });
+    });
+    await posting(machine.key, { name: 'kh-new-name', ref: machine.ref });
+    expect(await machineNamed('kh-new-name')).toMatchObject({ state: 'active', key: { ref: machine.ref, pub: machine.key.pub, listed: true } });
   });
 });
 

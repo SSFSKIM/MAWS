@@ -1,7 +1,9 @@
 import type { SessionEvent } from '@shared/graph/events';
-import type { AgentId, TaskId, ToolUseId } from '@shared/graph/ids';
+import type { AgentId, MessageUuid, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
+import { parseTranscriptRecord } from '@shared/wire/transcript';
+import { createBackfillContext, recordToEvents } from '../../../../engine-host/fs/backfill'; // P5 O9: a delivery read from disk
 import { afterEach, describe, expect, it } from 'vitest';
-import { heldRow, restingRows, rowsOf, turnDerivations, turnRows, turnSummary, withAllExpanded, withQueueTail } from './derive';
+import { heldRow, restingRows, rowsOf, turnDerivations, turnRows, turnSummary, withAllExpanded, withPlacedRows, withQueueTail } from './derive';
 import { cellId, rowId, turnId } from './keys';
 import { applyEvents, createState, withAgents, type AgentLookup } from './reduce';
 import type { Row, SubagentRef } from './rows';
@@ -508,6 +510,179 @@ describe('the queue tail', () => {
     expect(shown.filter((row) => row.kind === 'user').map((row) => row.id)).toEqual(['user:u1', 'held:q-1']);
     expect(withQueueTail(rows, new Set(['u1']), [])).toEqual(rows); // a prompt that ran is never hidden
     expect(withQueueTail(rows, new Set(), [])).toBe(rows);
+  });
+
+  // P5 O9 (the M8 sitting): rows a mount keeps outside the store (a terminal session's reply cut by an interrupt) sit
+  // after the last row of their turn, in their order, so a later turn's rows never come before them; a row whose turn
+  // is not drawn goes last.
+  it('places kept rows after the last row of their turn', () => {
+    const b = builder();
+    b.turn('u1', 'count slowly');
+    b.text('m1', 0, 'Counting.');
+    b.end(['u1']);
+    b.turn('u2', 'and again');
+    b.end(['u2']);
+    const list = rows(b.events);
+    const first = turnId.ofMessage(uuid('u1'));
+    const kept = (id: string, turn: string | null) => ({ id, turnId: turn, at: '2026-09-28T10:00:01.000Z', kind: 'assistant_text', messageUuid: null, blockIndex: 0, markdown: id, live: false, phase: 'answer', model: null }) as Row;
+    const placed = withPlacedRows(list, [kept('k1', first), kept('k2', first), kept('k3', 'turn:gone'), kept('k4', null)]);
+    const lastOfFirst = list.findLastIndex((row) => row.turnId === first);
+    expect(lastOfFirst).toBeLessThan(list.length - 1); // the later turn's rows come after it
+    expect(placed.map((row) => row.id)).toEqual([...list.slice(0, lastOfFirst + 1).map((row) => row.id), 'k1', 'k2', ...list.slice(lastOfFirst + 1).map((row) => row.id), 'k3', 'k4']);
+    expect(withPlacedRows(list, [])).toBe(list);
+  });
+});
+
+// P5 O9 (the M8 sitting): words a terminal session's sminos bridge delivered while a turn ran, read from disk as the
+// session's records hold them (a meta row of the plugin's origin, then the bridge's transcript line), draw as lane B
+// draws a mid-turn send: the owner's bubble in the running turn, at its place, and no "sminos: delivered" notice.
+describe('a sminos delivery into a running turn, from disk', () => {
+  it('draws the owner’s words as a steer in the turn they were delivered into', () => {
+    const ctx = createBackfillContext({ sessionId: 'S' as SessionId, agent: null });
+    const t = (n: number) => `2026-10-29T03:11:5${n}.000Z`;
+    const records = [
+      { type: 'user', uuid: 'p1', parentUuid: null, cwd: '/d', timestamp: t(0), origin: { kind: 'plugin', name: 'sminos', asUser: true }, message: { role: 'user', content: 'list the files here again' } },
+      { type: 'assistant', uuid: 'a1', parentUuid: 'p1', timestamp: t(1), message: { id: 'msg_1', model: 'x', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'ls' } }] } },
+      { type: 'user', uuid: 'd1', parentUuid: 'a1', isMeta: true, timestamp: t(2), origin: { kind: 'plugin', name: 'sminos' }, message: { role: 'user', content: [{ type: 'text', text: 'and count them' }] } },
+      { type: 'system', subtype: 'informational', uuid: 'n1', parentUuid: 'd1', isMeta: false, timestamp: t(3), content: 'sminos: delivered: and count them', level: 'notice' },
+      { type: 'user', uuid: 'r1', parentUuid: 'n1', timestamp: t(4), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'a\nb' }] } },
+    ].flatMap((record) => recordToEvents(parseTranscriptRecord(record), ctx));
+    const drawn = rows(records);
+    const users = drawn.filter((row): row is Extract<Row, { kind: 'user' }> => row.kind === 'user');
+    expect(users.map((row) => [row.text, row.steer, row.turnId])).toEqual([
+      ['list the files here again', false, turnId.ofMessage(uuid('p1'))],
+      ['and count them', true, turnId.ofMessage(uuid('p1'))],
+    ]);
+    expect(drawn.some((row) => JSON.stringify(row).includes('sminos: delivered'))).toBe(false);
+  });
+});
+
+// P5 O9 (the fix wave, B): words the bridge delivers while no turn runs (after a stop the engine refuses a plugin's
+// prompt, so they go in as a row and an inbox wake follows; or the row lands as its turn ends, and the bridge's wake
+// prompt follows) belong to the turn that answers them, the wake's, as desk-web draws them (`appended-turn.ts`): its
+// prompt, never a steer of the turn already over, never a prompt left waiting for a turn that ran.
+describe('a sminos delivery while no turn runs, from disk', () => {
+  type User = Extract<Row, { kind: 'user' }>;
+  type DiskRecord = { [field: string]: unknown; uuid: string };
+  // The records in the shapes the engine keeps them (the sitting's transcript; `lane-a/test-support/chain-rows.ts`).
+  class Disk {
+    readonly records: DiskRecord[] = [];
+    private add(fields: { [field: string]: unknown }): DiskRecord {
+      const n = this.records.length;
+      const record = { uuid: `r${n}`, timestamp: `2026-10-29T03:12:${String(n).padStart(2, '0')}.000Z`, cwd: '/d', ...fields };
+      this.records.push(record);
+      return record;
+    }
+    prompt(text: string): DiskRecord {
+      return this.add({ type: 'user', origin: { kind: 'human' }, message: { role: 'user', content: text } });
+    }
+    assistant(content: unknown[]): DiskRecord {
+      return this.add({ type: 'assistant', message: { id: `msg_${this.records.length}`, model: 'x', content } });
+    }
+    answer(text: string): DiskRecord {
+      return this.assistant([{ type: 'text', text }]);
+    }
+    end(): void {
+      this.add({ type: 'system', subtype: 'stop_hook_summary', hookCount: 0, hookInfos: [], hookErrors: [], preventedContinuation: false, stopReason: '', hasOutput: false, level: 'suggestion' });
+      this.add({ type: 'system', subtype: 'turn_duration', durationMs: 1600, isMeta: false });
+    }
+    marker(): DiskRecord {
+      return this.add({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } });
+    }
+    /** A row the bridge appended, kept meta under the plugin's origin, and the line the bridge writes for it. */
+    appended(text: string): DiskRecord {
+      return this.add({ type: 'user', isMeta: true, origin: { kind: 'plugin', name: 'sminos' }, message: { role: 'user', content: [{ type: 'text', text }] } });
+    }
+    line(content: string): DiskRecord {
+      return this.add({ type: 'system', subtype: 'informational', content, isMeta: false, level: 'notice' });
+    }
+    /** The bridge's wake through the inbox, kept as a peer's message; or as the user. */
+    inboxWake(body: string): DiskRecord {
+      const content = `Another Claude session sent a message:\n<cross-session-message from-name="sminos bridge">\n${body}\n</cross-session-message>\n\nThis came from another Claude session.`;
+      return this.add({ type: 'user', isMeta: true, origin: { kind: 'peer', from: 'unknown', name: 'sminos bridge', body }, message: { role: 'user', content } });
+    }
+    userWake(body: string): DiskRecord {
+      return this.add({ type: 'user', origin: { kind: 'plugin', name: 'sminos', asUser: true }, message: { role: 'user', content: body } });
+    }
+  }
+  const read = (records: DiskRecord[]) => {
+    const ctx = createBackfillContext({ sessionId: 'S' as SessionId, agent: null });
+    const events = records.flatMap((record) => recordToEvents(parseTranscriptRecord(record), ctx));
+    const state = reduce(events);
+    return { state, drawn: rowsOf(withAllExpanded(state)) };
+  };
+  const users = (drawn: Row[]) => drawn.filter((row): row is User => row.kind === 'user');
+  const turnOf = (drawn: Row[], text: string) => drawn.find((row) => row.kind === 'assistant_text' && row.markdown === text)?.turnId;
+  const settled = ({ state, drawn }: ReturnType<typeof read>) => {
+    expect([...state.turns.values()].map((turn) => turn.state)).not.toContain('open');
+    expect(drawn.some((row) => row.kind === 'divider' && row.state === 'working')).toBe(false);
+    expect(drawn.some((row) => JSON.stringify(row).includes('sminos: delivered'))).toBe(false);
+  };
+  const WAKE_STOPPED = '[sminos bridge]\nA message for you was added to the conversation after your turn was stopped. It is the user message before this message: read it and act on it now.';
+  const WAKE_ANSWER = '[sminos bridge]\nA message for you was added to the conversation while you were finishing your answer, too late for that answer to take it in. It is the user message just before your last answer: read it and act on it now.';
+
+  it.each([
+    ['the bridge’s interrupt', (c: Disk) => {
+      c.appended('[Request interrupted by user]');
+      c.appended('The interrupt came from outside the terminal.');
+      c.line('sminos: interrupt: [Request interrupted by user] The interrupt came from outside the terminal.');
+    }],
+    ['an Esc', (c: Disk) => void c.marker()],
+  ])('after %s, the words open the inbox wake’s turn, and every turn ends', (_, stop) => {
+    const c = new Disk();
+    const prompt = c.prompt('count slowly to 300, one line each');
+    c.assistant([{ type: 'thinking', thinking: 'Counting.', signature: 'sig' }]);
+    stop(c);
+    const row = c.appended('and count them');
+    c.line('sminos: delivered: and count them');
+    c.inboxWake(WAKE_STOPPED);
+    c.answer('1, 2, 3.');
+    c.end();
+    const out = read(c.records);
+    expect(users(out.drawn).map((user) => [user.text, user.steer, user.pending, user.turnId])).toEqual([
+      ['count slowly to 300, one line each', false, undefined, turnId.ofMessage(prompt.uuid as MessageUuid)],
+      ['and count them', false, undefined, turnOf(out.drawn, '1, 2, 3.')],
+    ]);
+    expect(users(out.drawn)[1].messageUuid).toBe(row.uuid);
+    expect([...out.state.turns.values()].map((turn) => [turn.accepted, turn.closedBy])).toEqual([[true, 'stopped'], [true, null]]);
+    settled(out);
+  });
+
+  it('landing as its turn ended, the words open the turn the wake prompt starts, and every turn ends', () => {
+    const c = new Disk();
+    c.prompt('List the files.');
+    c.answer('Two files.');
+    c.end();
+    const row = c.appended('and count them');
+    c.line('sminos: delivered: and count them');
+    c.userWake(WAKE_ANSWER);
+    c.answer('Two, counted.');
+    c.end();
+    const out = read(c.records);
+    expect(users(out.drawn).map((user) => [user.text, user.steer, user.pending, user.turnId])).toEqual([
+      ['List the files.', false, undefined, turnOf(out.drawn, 'Two files.')],
+      ['and count them', false, undefined, turnOf(out.drawn, 'Two, counted.')],
+    ]);
+    expect(users(out.drawn)[1].messageUuid).toBe(row.uuid);
+    expect([...out.state.turns.values()].map((turn) => [turn.accepted, turn.closedBy])).toEqual([[true, null], [true, null]]);
+    settled(out);
+  });
+
+  it('a prompt typed before any wake takes the waiting words into its turn, as sent during it', () => {
+    const c = new Disk();
+    c.prompt('List the files.');
+    c.answer('Two files.');
+    c.end();
+    c.appended('and count them');
+    c.line('sminos: delivered: and count them');
+    c.prompt('Now the tests.');
+    c.answer('Tests pass.');
+    c.end();
+    const out = read(c.records);
+    const words = users(out.drawn).find((user) => user.text === 'and count them')!;
+    expect(words).toMatchObject({ steer: true, turnId: turnOf(out.drawn, 'Tests pass.') });
+    expect(words.pending).toBeUndefined();
+    settled(out);
   });
 });
 

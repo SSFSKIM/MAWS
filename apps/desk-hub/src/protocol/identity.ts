@@ -504,8 +504,12 @@ export function decodeEnrollmentCodeV2(text: string): EnrollmentCodeV2 {
 /**
  * `POST /machine/key` (the machine, once redeemed): its public key, its ref (RL §2.3, minted at its first run) and the
  * MAC over `{name, machinePub: pub, ref, tokenId}` under the code's `k`, where `name` is the machine's enrolled name and
- * `tokenId` its enrollment's id (`Redeemed.enrollment`). One key per enrollment: posting the same again answers as
- * before, another is refused `409 key-posted`. `GET /api/enrollments/<id>/key` (the member who made the enrollment)
+ * `tokenId` its enrollment's id (`Redeemed.enrollment`). One key per enrollment: `201` kept, posting the same again
+ * answers `200`, another is refused `409 key-posted`. A ref that the org state or a certificate gives another name is
+ * refused `409 ref-taken`, and a key another holder has `409 key-held`: the org state holding it under another holder
+ * than this ref's machine, or retired or revoked, or another enrollment or a kept certificate holding it under another
+ * ref (a key speaks for one ref, whatever route it came by; a rename keeps the key and ref, and `POST /machine/cert`
+ * refuses the converse). `GET /api/enrollments/<id>/key` (the member who made the enrollment)
  * answers it, `404 no-key` until it is posted; the hub never checks the MAC, the member's device does, before it signs
  * the machine into the org state. The hub shows the machine `listed` once the head lists that ref with that key
  * (`MachineView.key`), apart from its hub confirmation (`state`), as RL §5.3 keeps them.
@@ -544,7 +548,10 @@ export function delegationFor(
  * delegation, at the use its redemption was counted as (`Redeemed.use`), and never one that would contest another
  * live certificate's ref or name: that refusal is `409 contested`, naming the conflicts and the remedies (a fresh name,
  * or the old certificate retired by its delegation's key or revoked in the org state). A certificate the hub holds is
- * answered as before; another for the same key is refused `409 conflict`. Certificates are served beside the state.
+ * answered as before; another for the same key is refused `409 conflict`. One whose key another holder has under another
+ * ref is refused `409 key-held`: a machine, device or delegation of the org state, its recovery key, or another
+ * enrollment's posted machine key (a key retired or revoked in the state is `verifyMachineCert`'s `409 expired` or
+ * `409 revoked`). Certificates are served beside the state.
  */
 export const MACHINE_CERT_PATH = '/machine/cert';
 /**

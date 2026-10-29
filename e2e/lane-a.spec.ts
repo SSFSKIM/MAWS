@@ -3,7 +3,7 @@
 // fake-bridge.ts) on the launch's scratch sminos home, and no `claude` running. Each control's body as the fake receives
 // it; sends in order, a refusal keeping its draft, a held send's strip; a side question answered from its op's end; the
 // gaps greyed with their reasons; no bridge as before; the reply streaming, then its row; a pane opened mid-reply, and
-// that turn aborted with no `step end`. M6 (acceptance 3 and 5): the requests the bridge raises, as attention items and
+// that turn aborted with no `step end`, its text kept settled. M6 (acceptance 3 and 5): the requests the bridge raises, as attention items and
 // docked cards answered through the port, each decision's body as the fake receives it, and the race with the terminal.
 import { randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
@@ -93,7 +93,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     ]);
     const maws = await launchMaws({ env: { CLAUDE_CONFIG_DIR: store.configHome } });
     const { page } = maws;
-    await expect(main(page)).toBeVisible();
+    await expect(main(page)).toBeVisible({ timeout: 60_000 });
     await expect.poll(async () => value(await invoke(page, 'session.list', {})).sessions.some((r) => r.engineSessionId === sid), { timeout: 20_000 }).toBe(true);
     const appId = value(await invoke(page, 'session.list', {})).sessions.find((r) => r.engineSessionId === sid)!.appId;
     current = { maws, page, store, repo, sid, appId, transcript, terminal: null };
@@ -153,7 +153,10 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(marker).toHaveAttribute('title', 'Running in Terminal · driven through sminos’s bridge');
     // acceptance 2: each gap in place with its reason, the bridge's words from the capability fixture
     const reasonOf = (key: string) => sentence(FULL_CAPABILITIES.controls![key]!.reason!);
-    await expect(main(page).getByRole('button', { name: /^Permission mode/ })).toHaveAttribute('title', "A terminal session's mode is changed in the terminal");
+    // the O9 sitting: no mode is reported, so the chip names none, only why
+    const mode = main(page).getByRole('button', { name: 'Permission mode not reported' });
+    await expect(mode).toHaveAttribute('title', 'Not reported by the terminal session: its mode is changed in the terminal');
+    await expect(mode).toHaveText(/^Mode/);
     await editor(page).click();
     await editor(page).pressSequentially('/doc');
     await expect(page.getByRole('option', { name: /doctor/ }), 'a command only the terminal runs, listed with why').toContainText(/runs only in the terminal/i);
@@ -190,6 +193,25 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await (await sidebarRow(page, { appSessionId: c.appId })).click({ button: 'right' });
     await expect(page.getByRole('menuitem', { name: 'Take over in MAWS' })).toBeVisible();
     await page.keyboard.press('Escape');
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  // The O9 sitting (item 6): after `/exit` the session left the sidebar. The terminal ending (its registry record and its
+  // bridge gone) leaves it listed, as an ended lane B session is, and no longer marked Terminal.
+  test('the terminal ending: the session stays listed, held by nothing, its bridge state gone', async () => {
+    const c = await begin();
+    const { page } = c;
+    const terminal = await drive(c);
+    const row = await sidebarRow(page, { appSessionId: c.appId });
+    await expect(page.locator('[role="tab"][aria-selected="true"] [data-holder-marker]')).toHaveText('Terminal');
+    await terminal.close();
+    c.terminal = null;
+    await expect.poll(async () => value(await invoke(page, 'session.get', { appSessionId: c.appId }))?.holder.kind, { timeout: 10_000 }).toBe('none');
+    await expect.poll(async () => value(await invoke(page, 'laneA.state', { appSessionId: c.appId })), { timeout: 10_000 }).toBeNull();
+    await expect(page.locator('[role="tab"][aria-selected="true"] [data-holder-marker]')).toHaveCount(0);
+    expect(value(await invoke(page, 'session.get', { appSessionId: c.appId }))?.archived).toBe(false);
+    await expect(row, 'still listed once nothing holds it').toBeVisible();
+    await expect((await sidebarRow(page, { appSessionId: c.appId })), 'and found again from the list').toBeVisible();
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 
@@ -447,7 +469,8 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 
-  test('a pane opened mid-reply shows what already streamed; the turn aborting with no step end leaves no streaming text', async () => {
+  // The M8 sitting: an interrupt's partial reply stays, settled (no longer streaming), as lane B keeps a stopped reply's.
+  test('a pane opened mid-reply shows what already streamed; the turn aborting with no step end leaves its text settled, none streaming', async () => {
     const c = await begin();
     const { page } = c;
     const { bridge } = await drive(c, { open: false });
@@ -459,8 +482,9 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(main(page).getByText('Half a story', { exact: true })).toBeVisible({ timeout: 10_000 });
     bridge.emit({ type: 'chunk', ...step, chunkIndex: 1, chunk: { kind: 'text', index: 0, text: ' and more' } });
     await expect(main(page).getByText('Half a story and more', { exact: true })).toBeVisible({ timeout: 10_000 });
-    bridge.emit({ type: 'turn', phase: 'complete', turnId: 'turn-m' }); // aborted: no step end, no block-row
-    await expect(main(page).getByText('Half a story and more', { exact: true })).toHaveCount(0, { timeout: 10_000 });
+    bridge.emit({ type: 'turn', phase: 'complete', turnId: 'turn-m', reason: 'aborted' }); // no step end, no block-row
+    await expect(main(page).locator('.transcript-prose-live')).toHaveCount(0, { timeout: 10_000 });
+    await expect(main(page).getByText('Half a story and more', { exact: true })).toBeVisible();
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 

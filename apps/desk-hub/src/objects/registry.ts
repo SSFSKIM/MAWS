@@ -1487,10 +1487,10 @@ export class Registry extends DurableObject<Env> {
   }
 
   /** A v2 machine's key, ref and pairing MAC, posted once redeemed (`OrgRecords.keepMachineKey`). */
-  keepMachineKey(machine: MachineRecord, body: unknown): Result<{ key: EnrollmentKey; kept: boolean }> {
+  async keepMachineKey(machine: MachineRecord, body: unknown): Promise<Result<{ key: EnrollmentKey; kept: boolean }>> {
     const held = this.enrolled(machine);
     if (!held.ok) return held;
-    return this.records.keepMachineKey(machine, body);
+    return this.records.keepMachineKey(machine, body, () => this.enrolled(machine));
   }
 
   /** The key a machine posted under an enrollment, for the member who made the enrollment. */

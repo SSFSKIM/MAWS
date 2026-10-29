@@ -50,6 +50,7 @@ export interface RelayOptions {
   departed(): void; // it left (its FIN or its close, whichever came first), once
   drain?: { start(drained: () => void): void; boundMs?: number }; // the upstream's draining close (the engine relay)
   holdMs?: number;
+  between?(): void; // `between()` may have changed
 }
 
 interface App {
@@ -64,6 +65,7 @@ export class Relay implements ServedRuntime {
   private current: App | null = null;
   private departing: App | null = null;
   private clients: SocketClients | null = null;
+  private admitting = 0; // hellos waiting on their admission
 
   constructor(private readonly options: RelayOptions) {}
 
@@ -76,6 +78,12 @@ export class Relay implements ServedRuntime {
     return this.current !== null;
   }
 
+  // An app between its socket and `attachedApp` (P5 Decision Log 124: mawsd's quiet): a hello waiting on its admission
+  // (a parked host woken for it), or a departed app whose side its drain has not ended yet.
+  between(): boolean {
+    return this.admitting > 0 || (this.departing !== null && !this.departing.gone);
+  }
+
   // The upstream link ended under an attached app (a crash, a quiet loss): its connection closes too, so main reads the
   // host's pid again, as it does when the supervisor's own socket closes.
   dropApp(why: string): void {
@@ -86,6 +94,17 @@ export class Relay implements ServedRuntime {
 
   // --- the socket layer's admission (socket-server.ts `admitHello`) ----------------------------------------------------
   async admit(): Promise<Admission> {
+    this.admitting += 1;
+    this.options.between?.();
+    try {
+      return await this.admission();
+    } finally {
+      this.admitting -= 1;
+      this.options.between?.();
+    }
+  }
+
+  private async admission(): Promise<Admission> {
     const { hosts, owner } = this.options;
     const answered = () => {
       const { state } = hosts.snapshot(owner);
@@ -210,6 +229,7 @@ export class Relay implements ServedRuntime {
     const drain = this.options.drain;
     if (!drain) return;
     this.departing = app;
+    this.options.between?.();
     let ended = false;
     // Ends the app's side once the upstream has closed or the bound passed, unless a new app took the socket meanwhile
     // (the socket layer already closed this one then).
@@ -220,6 +240,7 @@ export class Relay implements ServedRuntime {
       const closing = !app.gone;
       app.gone = true;
       if (closing && this.current === null) this.clients?.closeClient();
+      this.options.between?.();
     };
     const bound = setTimeout(endApp, drain.boundMs ?? DEPARTURE_BOUND_MS);
     drain.start(() => {

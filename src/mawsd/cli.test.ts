@@ -9,9 +9,10 @@ import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'v
 import { readOrMintMachineRef } from '@shared/machine/identity-file';
 import { fakePack, packProgram } from '../../test/support/fake-pack';
 import { FakeManagers } from '../../test/support/fake-units';
-import { MawsdScene, until } from '../../test/support/mawsd-scene';
+import { MawsdScene, sleep, until } from '../../test/support/mawsd-scene';
 import { runCli, type CliDeps } from './cli';
 import { LazyEndpoint, NO_ENDPOINT_MODULE, type EndpointModule } from './endpoint-seam';
+import { REQUEST_TIMEOUT_MS } from './machine-client';
 
 let scene: MawsdScene;
 let managers: FakeManagers;
@@ -64,6 +65,7 @@ async function cli(argv: string[], extra: Partial<CliDeps> = {}): Promise<Ran> {
 class FakeEndpoint implements EndpointModule {
   readonly calls: [string, readonly string[], string | undefined][] = [];
   answer = { code: 0, out: 'done' };
+  held: Promise<void> | null = null; // when set, every answer waits for it
   async start(): Promise<void> {}
   async stop(): Promise<void> {}
   status(): unknown {
@@ -71,6 +73,7 @@ class FakeEndpoint implements EndpointModule {
   }
   async cli(command: string, args: readonly string[], secret?: string): Promise<{ code: number; out: string }> {
     this.calls.push([command, args, secret]);
+    await this.held;
     return this.answer;
   }
 }
@@ -374,6 +377,27 @@ describe('mawsd enroll, keys and endpoint, through an endpoint module', () => {
       ['grant', ['/etc/maws/grant.json'], undefined],
     ]);
   });
+
+  // `endpoint attest-history` (P5 O14 M4) reads every inventory writer's events from the hub, minutes on a machine with
+  // hundreds of writers: its request waits past the 10 s every other endpoint command keeps. Both are held past that
+  // default at once, so one wait covers both.
+  it('endpoint attest-history waits for the module past the request’s 10 s default; another endpoint command still gives up at 10 s', async () => {
+    const endpoint = new FakeEndpoint();
+    let release = () => {};
+    endpoint.held = new Promise<void>((done) => (release = done));
+    endpoint.answer = { code: 0, out: 'verified p/w through 3\n1 verified under mini' };
+    await scene.start({ endpoint });
+    let attestEnded = false;
+    const attesting = cli(['endpoint', 'attest-history', '--check']).finally(() => (attestEnded = true));
+    const status = cli(['endpoint', 'status']);
+    await until(() => endpoint.calls.length === 2, 5_000, 'both commands to reach the module');
+    await sleep(REQUEST_TIMEOUT_MS + 1_500);
+    expect(await status).toEqual({ code: 1, out: '', err: `mawsd did not answer daemon.endpoint within ${REQUEST_TIMEOUT_MS / 1000} s\n` });
+    expect(attestEnded).toBe(false);
+    release();
+    expect(await attesting).toEqual({ code: 0, out: 'verified p/w through 3\n1 verified under mini\n', err: '' });
+    expect(endpoint.calls).toEqual(expect.arrayContaining([['attest-history', ['--check'], undefined], ['status', [], undefined]]));
+  }, 30_000);
 
   it('endpoint revoke and grant refuse nothing on stdin, and more than one source, sending nothing', async () => {
     const endpoint = new FakeEndpoint();

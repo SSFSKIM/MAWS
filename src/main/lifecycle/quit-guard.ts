@@ -338,7 +338,11 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
     })();
     return quitting;
   };
-  const startWaiting = (first: BusyReport) => {
+  // P5 O3-B: what a wait publishes and answers is what it waits for: on the daemon shape a busy terminal outlives the app,
+  // so the banner counts none (the question names none either)
+  const waited = (r: BusyReport): BusyReport => (outlive() ? { ...r, busyTerminals: 0, terminalsUnknown: false } : r);
+  const startWaiting = (asked: BusyReport) => {
+    const first = waited(asked);
     if (wait) {
       wait.report = first;
       deps.publish(first);
@@ -364,8 +368,8 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
           if (total(next, outlive()) === 0) {
             void quit();
           } else {
-            mine.report = next;
-            deps.publish(next);
+            mine.report = waited(next);
+            deps.publish(mine.report);
           }
         })
         .finally(() => {

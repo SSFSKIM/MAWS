@@ -45,18 +45,19 @@ import {
   encodeProvisioningCodeV2,
   endorseDevice,
   generateSigningKey,
-  isDevice,
   isMachineName,
+  isMemberEmail,
   isSignedOrgState,
+  judgeEntry,
   keyId,
   machineNameKey,
   NO_CERTIFICATES,
   pairingFingerprint,
   signOrgState,
   stateHash,
+  successorProblems,
   verifyEnrollmentMac,
   verifyGenesis,
-  verifyPairingMac,
   verifyPinnedChain,
   type Certificates,
   type Delegation,
@@ -116,6 +117,9 @@ import { certificateViews, machineRows, resolveMachine, table } from './admin-ma
 import { deviceEntry, purgeOrgKeys, restoreLegacyKey, retireLegacyKey, successor } from './org-admin';
 import { withRunLock } from './run-lock';
 import { openTerminal, type Terminal } from './terminal';
+
+// The pairing judges live in org-protocol (O8 M4a), where the app's pairing reads them too; re-exported for admin's suites.
+export { isPairedDeviceId, isRpId, judgeEntry } from 'org-protocol';
 
 export const SUBCOMMANDS = ['init', 'genesis', 'adopt', 'refresh', 'pair', 'devices', 'remove-device', 'root', 'show', 'enroll', 'delegation', 'machine', 'code', 'provisioning', 'keys', 'abandon-pending'] as const;
 /** The subcommands that name a verb of their own after them (`delegation create`). */
@@ -289,34 +293,6 @@ async function signerProblem(head: OrgState, member: string, keys: AdminKeys): P
   return null;
 }
 
-/** A device entry as the pending list carries it, rebuilt as the state would list it (no endorsement yet). */
-function entryDevice(entry: PendingDevice): Omit<Device, 'endorsement'> {
-  const device: Record<string, unknown> = { id: entry.deviceId, class: entry.class, keyStorage: entry.keyStorage, channelPub: entry.channelPub };
-  if (entry.stepUpPub !== undefined) device.stepUpPub = entry.stepUpPub;
-  if (entry.passkey !== undefined) device.passkey = entry.passkey;
-  return device as Omit<Device, 'endorsement'>;
-}
-
-/**
- * Whether a pending entry answers this pairing: the device a state could list, of the class asked for, its MAC under
- * `k` over the org, the member and the whole entry, and not a device the head already lists. Otherwise why not.
- */
-export async function judgeEntry(
-  entry: PendingDevice,
-  pairing: { org: string; member: string; k: Uint8Array; class: Device['class']; listed: Set<string> },
-): Promise<{ ok: true; device: Omit<Device, 'endorsement'> } | { ok: false; why: string }> {
-  const device = entryDevice(entry);
-  if (device.class === 'web-cards' && device.stepUpPub !== undefined) return { ok: false, why: 'a web-cards entry with a step-up key, which the class never holds (RL 5.10)' };
-  if (!isDevice(device)) return { ok: false, why: 'not a device entry the org state could list' };
-  if (!isPairedDeviceId(device.id)) return { ok: false, why: 'its id is outside the device id grammar (base64url)' };
-  if (device.passkey !== undefined && !isRpId(device.passkey.rpId)) return { ok: false, why: "its passkey's rpId is not a host name" };
-  if (device.class !== pairing.class) return { ok: false, why: `of class ${device.class}, not ${pairing.class}` };
-  if (device.class === 'web-cards' && device.passkey === undefined) return { ok: false, why: 'a web-cards entry with no passkey' };
-  if (!(await verifyPairingMac(pairing.k, { org: pairing.org, member: pairing.member, device }, entry.mac))) return { ok: false, why: "its MAC is not under this code's secret" };
-  if (pairing.listed.has(device.id)) return { ok: false, why: 'its id is a device the head already lists' };
-  return { ok: true, device };
-}
-
 /**
  * A hub-supplied string as it may be printed: every character outside printable ASCII, and the backslash, written as an
  * escape. What the hub serves (a device id, a relying party, a member's email, its refusal's text) could otherwise carry
@@ -327,11 +303,6 @@ export const printable = (text: string) => text.replace(/[^\x20-\x5b\x5d-\x7e]/g
 /** `text` with every control character (C0, DEL, C1, the Unicode line separators and bidirectional controls) escaped. */
 // eslint-disable-next-line no-control-regex -- matching the control characters is the point
 const noControls = (text: string) => text.replace(/[\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
-
-/** A device id as a pairing takes it: base64url's alphabet, as the phone's 16 random bytes and this command's ids are. */
-export const isPairedDeviceId = (id: string) => /^[A-Za-z0-9_-]{1,128}$/.test(id);
-/** A relying party id as a pairing takes it: a lower-case host name (dot-separated labels) or a dotted IPv4 address. */
-export const isRpId = (rpId: string) => rpId.length <= 253 && /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/.test(rpId);
 
 const describeEntry = (d: Omit<Device, 'endorsement'>) => printable(`${d.id} ${d.class} ${d.keyStorage} rpId ${d.passkey?.rpId ?? '-'}`);
 
@@ -480,6 +451,11 @@ async function anchored(ctx: Context, needsSigner: boolean, { unsent = 'refuse' 
   async function signPending(edit: (state: OrgState) => Promise<void> | void, unsent: boolean): Promise<SignedOrgState> {
     const next = await successor(head.state, () => {});
     await edit(next);
+    // What the package would refuse once signed, refused before: the slot never holds a successor no verifier takes.
+    const problems = await successorProblems(head.state, next);
+    if (problems.length > 0) {
+      refuse(`version ${next.version} would be refused: ${problems.map((p) => (p.detail === undefined ? p.code : `${p.code} (${printable(p.detail)})`)).join('; ')}: nothing was signed`);
+    }
     const signed = await signOrgState(next, [keys.stepUp]);
     save({ ...anchor, pending: signed, ...(unsent ? { unsent: true as const } : {}) });
     return signed;
@@ -609,6 +585,10 @@ async function genesis(ctx: Context): Promise<number> {
   }
 
   if (served.head !== null) refuse(`the hub holds a state (version ${served.head.state.version}): genesis roots an org with none`);
+  // The genesis writes the admin's email as `/api/me` names it, so it must be an address, as a successor's must.
+  if (!isMemberEmail(me.member.email)) {
+    refuse(`the hub names this member's email "${printable(me.member.email)}", which is not an address (one @, no space or control character, at most 64 characters before it and 253 after): nothing was written or signed`);
+  }
   if (!paper && existsSync(recovery)) refuse(`${recovery} exists: the recovery key is never written over a file; move it aside or name another path`);
   const key = await newRecoveryKey();
   if (paper) {

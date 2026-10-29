@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useRef, useSyncExternalStore, type ReactNode } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { QueueEntry } from '@shared/engine/session-state-store';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -359,6 +359,34 @@ describe("composer DOM under C5's dispatcher", () => {
     await waitFor(() => expect(composerOf(0).querySelector('[data-composer-draft]')!.hasAttribute('hidden')).toBe(false));
     expect(editorOf().editor.getText()).toBe('a draft kept aside');
     await waitFor(() => expect(editorOf().contains(document.activeElement)).toBe(true)); // focus is back in the editor
+  });
+
+  // The O9 sitting (item 8): the Mode menu, open when an approval docked, jumped to the window's top corner, its anchor
+  // hidden with the toolbar. Every toolbar menu closes as the card takes the draft's place, and stays closed after.
+  it('closes a toolbar menu open when a card docks, and leaves it closed when the card goes', async () => {
+    live(A);
+    const offEffort = registerSlashWidget('effort', { title: 'Effort', placement: 'modelChip', component: () => <p>effort view</p> });
+    onTestFinished(offEffort);
+    mount([{ index: 0, id: A }]);
+    const user = userEvent.setup();
+    const toolbar = within(composerOf(0)).getByRole('toolbar', { name: 'Composer tools' });
+    const dock = (version: number, items: AttentionItem[]) => act(() => useAttention.setState({ bySession: new Map([[A, items]]), requests: new Map(items.map((i) => [i.id, permission({ requestId: 'req-m' as never })])), version }));
+    const item = pageItem(itemFor(permission({ requestId: 'req-m' as never }), A_ID));
+    const menus = [
+      { open: () => user.click(within(toolbar).getByRole('button', { name: /^Permission mode/ })), shown: () => screen.queryByRole('menu', { name: 'Permission mode' }) },
+      { open: () => user.click(within(toolbar).getByRole('button', { name: 'Add files, photos or commands' })), shown: () => screen.queryByRole('menuitem', { name: 'Slash commands' }) },
+      { open: () => user.click(within(toolbar).getByRole('button', { name: /^Model / })), shown: () => screen.queryByText('effort view') },
+    ];
+    for (const [i, menu] of menus.entries()) {
+      await menu.open();
+      await waitFor(() => expect(menu.shown()).not.toBeNull());
+      dock(2 * i + 1, [item]);
+      await within(composerOf(0)).findByRole('group', { name: 'Approval needed' });
+      await waitFor(() => expect(menu.shown()).toBeNull());
+      dock(2 * i + 2, []);
+      await waitFor(() => expect(composerOf(0).querySelector('[data-composer-draft]')!.hasAttribute('hidden')).toBe(false));
+      expect(menu.shown()).toBeNull();
+    }
   });
 
   it('hands focus from a retiring docked request to the next one, whose Enter answers it (§5.7)', async () => {
