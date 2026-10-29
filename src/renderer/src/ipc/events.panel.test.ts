@@ -35,34 +35,86 @@ describe('panel events', () => {
     useGit.setState({ applyChanged: original });
   });
 
-  // P5 E312: the session published a change for review (the status's `published`, from the engine's
-  // code_change_published), which moves no ref the watcher sees: when its time moves, a PR state a surface holds is
-  // asked of gh again at once, past main's kept answer, as the row's Refresh asks. The same publish seen again, a session
-  // whose PR state nothing holds, a status without one and a publish older than the poll ask nothing.
+  // P5 E312: a session's status, with the change it last published (the status's `published`, from the engine's
+  // code_change_published) when given one; and a PR state main might answer, with the branch's PR in `state` when given.
+  const sessionStatus = (appSessionId: string, at?: string, action = 'created') => ({ appSessionId, status: at === undefined ? {} : { published: { url: 'https://github.com/o/r/pull/7', action, at } } });
+  const prState = (checkedAt: string, state?: 'OPEN' | 'MERGED') => ({
+    checkedAt,
+    branch: 'feat',
+    gh: { state: 'ready', path: '/gh', version: '2' },
+    pr: state === undefined ? null : { number: 7, url: 'https://github.com/o/r/pull/7', title: 'Feat', state, isDraft: false, reviewDecision: null, baseRefName: 'main', headRefName: 'feat', mergeStateStatus: state === 'OPEN' ? 'BLOCKED' : null, checks: { summary: state === 'OPEN' ? 'pending' : 'pass', items: [] } },
+    error: null,
+  });
+  const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+
+  // A published change moves no ref the watcher sees: when its time moves, a PR state a surface holds is asked of gh
+  // again at once, past main's kept answer, as the row's Refresh asks. The same publish seen again, a session whose PR
+  // state nothing holds, a status without one and a publish older than the poll ask nothing.
   it('re-asks gh for a held PR state when the session publishes a change', async () => {
     const fake = fakeClient();
     const disconnect = connectPanelEvents(fake.client);
     const A = 'A' as AppSessionId;
-    const answer = { checkedAt: 'later', branch: 'feat', gh: { state: 'ready', path: '/gh', version: '2', error: null }, pr: null, error: null };
-    queryClient.setQueryData(prStateKey(A), { ...answer, checkedAt: 'earlier' });
-    const status = (appSessionId: string, at?: string) => ({ appSessionId, status: at === undefined ? {} : { published: { url: 'https://github.com/o/r/pull/7', action: 'created', at } } });
+    const answer = prState('later');
+    queryClient.setQueryData(prStateKey(A), prState('earlier'));
     const now = new Date().toISOString();
     const stale = new Date(Date.now() - PR_STATE_POLL.refetchInterval - 1000).toISOString();
 
-    fake.event('session.status', status('B', now));
-    fake.event('session.status', status(A));
-    fake.event('session.status', status(A, stale));
+    fake.event('session.status', sessionStatus('B', now));
+    fake.event('session.status', sessionStatus(A));
+    fake.event('session.status', sessionStatus(A, stale));
     expect(fake.invoked('scm.pr.state')).toEqual([]);
 
-    fake.event('session.status', status(A, now));
-    fake.event('session.status', status(A, now));
+    fake.event('session.status', sessionStatus(A, now));
+    fake.event('session.status', sessionStatus(A, now));
     expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: A, refresh: true }]);
     await fake.reply('scm.pr.state', answer);
     expect(queryClient.getQueryData(prStateKey(A))).toEqual(answer);
 
     disconnect();
-    fake.event('session.status', status(A, new Date(Date.now() + 1000).toISOString()));
+    fake.event('session.status', sessionStatus(A, new Date(Date.now() + 1000).toISOString()));
     expect(fake.invoked('scm.pr.state')).toHaveLength(1);
+    queryClient.clear();
+  });
+
+  // Two publishes close together (a PR created, then merged) ask twice. The first lookup's answer, landing after the
+  // second's (gh slower while it read the checks), is superseded and leaves the newer answer standing.
+  it('keeps the later publish’s answer when the earlier lookup lands last', async () => {
+    const fake = fakeClient();
+    const disconnect = connectPanelEvents(fake.client);
+    const C = 'C' as AppSessionId;
+    queryClient.setQueryData(prStateKey(C), prState('before'));
+
+    fake.event('session.status', sessionStatus(C, ago(2000), 'created'));
+    fake.event('session.status', sessionStatus(C, ago(1000), 'merged'));
+    expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: C, refresh: true }, { appSessionId: C, refresh: true }]);
+    await fake.reply('scm.pr.state', prState('second', 'MERGED'), 1);
+    expect(queryClient.getQueryData(prStateKey(C))).toEqual(prState('second', 'MERGED'));
+    await fake.reply('scm.pr.state', prState('first', 'OPEN'));
+    expect(queryClient.getQueryData(prStateKey(C))).toEqual(prState('second', 'MERGED'));
+
+    disconnect();
+    queryClient.clear();
+  });
+
+  // A publish heard while no surface holds the session's PR state asks nothing and stays unconsumed: a row opened within
+  // the poll then reads main's kept answer from before it, so the next status carrying it asks gh past that answer.
+  it('asks for a publish heard before the PR state was held once a later status carries it', async () => {
+    const fake = fakeClient();
+    const disconnect = connectPanelEvents(fake.client);
+    const D = 'D' as AppSessionId;
+    const at = ago(1000);
+
+    fake.event('session.status', sessionStatus(D, at));
+    expect(fake.invoked('scm.pr.state')).toEqual([]);
+    queryClient.setQueryData(prStateKey(D), prState('kept'));
+    fake.event('session.status', sessionStatus(D, at));
+    expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: D, refresh: true }]);
+    await fake.reply('scm.pr.state', prState('fresh', 'OPEN'));
+    expect(queryClient.getQueryData(prStateKey(D))).toEqual(prState('fresh', 'OPEN'));
+    fake.event('session.status', sessionStatus(D, at));
+    expect(fake.invoked('scm.pr.state')).toHaveLength(1);
+
+    disconnect();
     queryClient.clear();
   });
 });
