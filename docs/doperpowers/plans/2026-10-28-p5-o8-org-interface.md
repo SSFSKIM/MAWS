@@ -50,6 +50,13 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-28) The desk track reviewed the `deploy/` hunk and shaped the wrapper fix. The final gate, run 40771309800, had two browser reds (`browser-cua.spec.ts:483`, `browser-chrome.spec.ts:681`), none of #314's; its rerun, 40783162110, was green.
   - [ ] The owner's sitting: `root add` on staging, then production (the steps are in the report, `2026-10-28-p5-o8-report.md`).
 - [ ] M4a — The Org page: its shape, people and devices — **executable** (re-planned 2026-10-29; needs M3 and H1, both landed)
+  - [ ] Task 1: the move: the pairing judges and their `PendingEntry` type into `org-protocol`, `admin.ts` importing them (its own commit, the desk track's review).
+  - [ ] Task 2: `successorProblems` and `stateProblems` in `org-protocol`, and `admin.ts`'s `amend` running it (the desk track's review).
+  - [ ] Task 3: the signing paths: `edits.ts`, `Edit.endorse` and `Edit.live`, `StateSigner.sign`'s endorsement and guard, the signer's check before the slot, and `checks.ts` running `successorProblems`.
+  - [ ] Task 4: the session's surface: `org.view`, `org.preview`, `org.change`, `org.pair.*`, `pairing.ts`, `hub-client.ts`'s `pendingOf`, `refused.attempt`, the schema and main's wiring.
+  - [ ] Task 5: `close()`'s fence and join (`HeldOrg.close()`, the parts' operations in flight), and the two test workarounds removed.
+  - [ ] Task 6: the renderer: `settings-tab/org/`, the four groups, the change and pair sheets, `copy.ts`.
+  - [ ] Task 7: `test/org/org-page.local.test.ts`, registered in `TIMING_NODE_TESTS`.
 - [ ] M4b — Machines and their rights — *advisory; needs M4a*
 - [ ] M4c — Delegations — *advisory; needs M4a*
 - [x] M5 — Owners on rows and the People toggle — landed (PR #323, master 0db3870a0, P5 Decision Log 129)
