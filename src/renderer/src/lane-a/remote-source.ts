@@ -22,7 +22,7 @@ import { ipc } from '../ipc/client';
 import { LANE_A_WORDS } from '../session/controls/lane-a';
 import { useTranscriptStore } from '../stores/transcript';
 import { PlaneTranscript } from './plane-transcript';
-import { ReadError, type SessionPlane, type Subscription, type SubscriptionMessage } from './session-plane';
+import { ReadError, type SessionPlane, type Subscription, type SubscriptionMessage, type UnansweredAsk } from './session-plane';
 import { readLaneA, watchLaneA } from './watches';
 
 const TRANSCRIPT_KINDS: ReadonlySet<string> = new Set(SUBSCRIPTION_KINDS.filter((kind) => kind !== 'end' && kind !== 'read'));
@@ -50,11 +50,15 @@ export function remotePlane(client: MawsBridge = ipc): SessionPlane {
         },
         { replay: true, client },
       );
-      const ask = (kind: 'rows' | 'diff' | 'output', args?: Record<string, unknown>) => void readLaneA(appSessionId, kind, client, args);
+      // The answer comes on the watch; a read main could not carry (the link down) brings none, so the listener hears why.
+      const ask = (unanswered: UnansweredAsk, args?: Record<string, unknown>) =>
+        void readLaneA(appSessionId, unanswered.kind, client, args).then((answer) => {
+          if (open && !answer.ok) listener.unanswered?.(unanswered, answer.message);
+        });
       return {
-        rows: (before, limit) => ask('rows', { before, limit }),
-        diff: () => ask('diff'),
-        output: (taskId, tail) => ask('output', { taskId, tail }),
+        rows: (before, limit) => ask({ kind: 'rows' }, { before, limit }),
+        diff: () => ask({ kind: 'diff' }),
+        output: (taskId, tail) => ask({ kind: 'output', taskId }, { taskId, tail }),
         async read(what, args) {
           const answer = await readLaneA(appSessionId, what as 'status', client, args);
           if (answer.ok) return answer.result as never;

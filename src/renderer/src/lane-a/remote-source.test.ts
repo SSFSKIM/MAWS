@@ -89,6 +89,33 @@ describe('a remote lane A session’s transcript', () => {
     close();
   });
 
+  // Fix wave 1: main answers a read it could not carry (the link down) with `ok: false`, and no page follows; a replay
+  // resume then sends no snapshot. The ask clears with its reason, and is asked again once the plane delivers again.
+  it('clears an older page the link could not carry, and asks it again once the plane delivers after a replay resume', async () => {
+    const c = new Chain('c4a1e300', 'sminos');
+    c.prompt('Older words.');
+    c.answer('Older answer.');
+    const older = c.rows.splice(0);
+    c.prompt('Newer words.');
+    let reads = 0;
+    const { fake, transcript, plane, close } = await opened({ 'laneA.read': () => (++reads === 1 ? { ok: false, code: 'failed', message: 'mini isn’t reachable' } : { ok: true, result: { requested: true } }) });
+    plane([snapshot(c.rows, true)]);
+    await wait(() => user('Newer words.') !== undefined);
+    const before = c.rows[0].uuid;
+    transcript.loadOlder();
+    await wait(() => transcript.state.getState().olderFailed !== null);
+    expect(transcript.state.getState()).toMatchObject({ phase: 'live', loadingOlder: false, olderFailed: 'mini isn’t reachable' });
+    c.answer('After the resume.'); // the replay resume: the watch's numbering goes on, with no reset and no snapshot
+    plane([envelope('row', { row: c.rows.at(-1), agentId: null })]);
+    await wait(() => reads === 2);
+    expect(transcript.state.getState()).toMatchObject({ loadingOlder: true, olderFailed: null });
+    expect(fake.invoked('laneA.read').map((input) => (input as { args: unknown }).args)).toEqual([{ before, limit: 100 }, { before, limit: 100 }]);
+    plane([envelope('rows', { rows: [...older].reverse(), before, more: false })]);
+    await wait(() => user('Older words.') !== undefined);
+    expect(transcript.state.getState()).toMatchObject({ loadingOlder: false, more: false, olderFailed: null });
+    close();
+  });
+
   it('keeps its rows through a reset, and merges the fresh snapshot after it', async () => {
     const c = new Chain('c4a1e200', 'sminos');
     c.prompt('Before the drop.');

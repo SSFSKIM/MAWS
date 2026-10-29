@@ -26,7 +26,15 @@ export interface SubscriptionListener {
   interrupted(): void;
   /** The hub ended the subscription, or the client cannot serve it; nothing follows. Subscribe again to resume. */
   end(body: SessionBodies['end']): void;
+  /**
+   * P5 O9 M9: an ask the plane could not carry to the machine (another machine's link down when it was asked), with
+   * why: no answer follows, and the subscription stands, so the consumer clears what waited and asks again once the
+   * plane delivers again. The hub's client never calls it (an ask it cannot carry waits for the fresh snapshot instead).
+   */
+  unanswered?(ask: UnansweredAsk, message: string): void;
 }
+
+export type UnansweredAsk = { kind: 'rows' } | { kind: 'diff' } | { kind: 'output'; taskId: string };
 
 export interface Subscription {
   /** Older rows before row `before`, newest first; they arrive as a `rows` message. */

@@ -85,6 +85,31 @@ describe('paging older rows in', () => {
     expect(plane.current.asked).toHaveLength(3);
   });
 
+  // P5 O9 M9 (fix wave 1): a page the plane could not carry (another machine's link down) is not asked again on the
+  // spot, which would spin while the link is down; the plane's next message asks it (`PlaneTranscript`), or the reader.
+  it('does not ask again on its own for a page the plane could not carry; the next delivery does', async () => {
+    expect(attachments).toHaveLength(9);
+    const { plane, script, answer } = open([prompt, ...attachments], 3, { scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    await act(async () => {
+      plane.snapshot(script, script.length, 3); // nothing drawn: the pane asks at once
+      await settle();
+    });
+    expect(plane.current.asked).toHaveLength(1);
+    await act(async () => {
+      plane.current.listener.unanswered!({ kind: 'rows' }, 'mini isn’t reachable');
+      await settle();
+      await settle();
+    });
+    expect(plane.current.asked).toHaveLength(1);
+    await act(async () => {
+      plane.current.send('presence', { record: { status: 'idle' }, bridge: true }); // the plane delivers again
+      await settle();
+    });
+    expect(plane.current.asked).toHaveLength(2);
+    await answer();
+    expect(plane.current.asked).toHaveLength(3); // paging goes on as before
+  });
+
   it('a page that draws nothing new while the reader is at the top asks for the next', async () => {
     const geometry = { scrollHeight: 1000, clientHeight: 300, scrollTop: 700 };
     const { plane, list, script, answer } = open([prompt, ...attachments, second], 3, geometry);
