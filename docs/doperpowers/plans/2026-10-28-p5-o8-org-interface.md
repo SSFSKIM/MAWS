@@ -58,6 +58,9 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-29) Task 6, reviewed clean (1971d3be9, fix 7437e1e2e): the renderer: `settings-tab/org/`, the four groups, the change and pair sheets, `copy.ts`.
   - [x] (2026-10-29) Task 7, reviewed clean (7033fb853): `test/org/org-page.local.test.ts`, registered in `TIMING_NODE_TESTS`; 6/6, six runs in a row.
   - [x] (2026-10-29) Task 8, reviewed clean (37ea7abab, 9764fc1d7; fix wave 300f1a6b5..fac48e11f; test race ab8d2ede6): the Org page's look made checkable through the gate: `e2e/org-page.spec.ts` in `e2e:settings` over a seeded org, its four groups and the pairing sheet attached, under forced classic scrollbars. Its first run (40828325127) caught a real overflow, fixed in the layout; green on the EC2 Mac at d8d7417a8 (40830513848) and 44175e50a (40831591829).
+  - [x] (2026-10-29) reviewer-high on the whole branch (87af670c2..8cd862d6b) found nothing material, in one round; Task 8's later fix wave was re-reviewed clean at its frontier.
+  - [x] (2026-10-29) The final set at 2efc9642c, after merging master afac87f23: the hosted call (class 1a and every class-1 group but default and the two secret groups, run 40832852899) and packaged (40832852847), both green; the architect reviewed the Org page's screenshots and found nothing blocking (taste points to #342). Master 1fe1a74d9 (#338) merged after it at 063460ccf: class 1a and desk-web (40843054561), settings, desk-web-hub and machines (40846738615), all green.
+  - [ ] `e2e:default`, `e2e:connectors-oauth` and `e2e:discover` on the mini, in the architect's slot.
 - [ ] M4b — Machines and their rights — *advisory; needs M4a*
 - [ ] M4c — Delegations — *advisory; needs M4a*
 - [x] M5 — Owners on rows and the People toggle — landed (PR #323, master 0db3870a0, P5 Decision Log 129)
