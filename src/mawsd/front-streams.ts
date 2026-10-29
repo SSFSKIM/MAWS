@@ -94,13 +94,16 @@ class ClientFollower implements Follower {
     const named = new Map(input.sessions.map((s) => [s.appSessionId as string, s.cursor]));
     this.#live = input.live;
     for (const [app, stream] of this.#streams) if (!named.has(app) && !(input.live && stream.auto)) this.#close(app);
+    // A stream this follow opens answers its first opening, whenever that lands (the listing below may outlast it); a
+    // stream it keeps answers how it goes on now.
+    const opened = new Map<string, Promise<Answer>>();
     for (const [app, cursor] of named) {
       const kept = this.#streams.get(app);
       if (kept !== undefined) kept.auto = false;
-      else this.#open(app, cursor === null ? null : { epoch: cursor.launchId, seq: cursor.seq, idx: cursor.idx }, false, 'now');
+      else opened.set(app, this.#open(app, cursor === null ? null : { epoch: cursor.launchId, seq: cursor.seq, idx: cursor.idx }, false, 'now').opened);
     }
-    if (input.live) await this.#openLive('now');
-    return { streams: await Promise.all([...this.#streams.values()].map((stream) => stream.answer())) };
+    if (input.live) for (const stream of await this.#openLive('now')) opened.set(stream.app, stream.opened);
+    return { streams: await Promise.all([...this.#streams.values()].map((stream) => opened.get(stream.app) ?? stream.now())) };
   }
 
   carries(appSessionId: string): boolean {
@@ -115,7 +118,7 @@ class ClientFollower implements Follower {
   }
 
   relinked(): void {
-    if (this.#live) void this.#openLive('start'); // launched while the link was down: new to this client
+    if (this.#live) void this.#openLive('start'); // launched while the link was down: new to this client, told by its events
   }
 
   end(): void {
@@ -125,21 +128,24 @@ class ClientFollower implements Follower {
     this.over();
   }
 
-  async #openLive(from: 'start' | 'now'): Promise<void> {
+  /** The live sessions this client does not follow yet, each opened now; the streams it opened. */
+  async #openLive(from: 'start' | 'now'): Promise<ClientStream[]> {
     let live: string[];
     try {
       live = await this.options.liveSessions();
     } catch (error) {
-      return this.options.log(`machine.sock: the live sessions could not be listed for a follow: ${error instanceof Error ? error.message : String(error)}`);
+      this.options.log(`machine.sock: the live sessions could not be listed for a follow: ${error instanceof Error ? error.message : String(error)}`);
+      return [];
     }
-    if (!this.#live || this.#ended) return;
-    for (const app of live) if (!this.#streams.has(app)) this.#open(app, null, true, from);
+    if (!this.#live || this.#ended) return [];
+    return live.flatMap((app) => (this.#streams.has(app) ? [] : [this.#open(app, null, true, from)]));
   }
 
-  #open(app: string, cursor: StreamPosition | null, auto: boolean, from: 'start' | 'now'): void {
+  #open(app: string, cursor: StreamPosition | null, auto: boolean, from: 'start' | 'now'): ClientStream {
     const stream = new ClientStream(app, auto, this.post, this.options.log);
     this.#streams.set(app, stream);
     stream.handle = this.core.openStream({ app, cursor, view: 'full', from }, stream);
+    return stream;
   }
 
   #close(app: string): void {
@@ -157,8 +163,10 @@ class ClientStream implements StreamSink {
   ended = false;
   readonly backlog = 0; // a socket's own buffer is the bound: a connection that refuses a line is gone
   #epoch: string | null = null;
-  #answered: Answer | null = null;
-  readonly #waiting: ((answer: Answer) => void)[] = [];
+  #answered = false;
+  #first: (answer: Answer) => void = () => {};
+  /** Its first opening's answer (the mode its follow is told). */
+  readonly opened = new Promise<Answer>((resolve) => (this.#first = resolve));
   #batch: SessionEvent[] = [];
   #flushing = false;
 
@@ -169,10 +177,9 @@ class ClientStream implements StreamSink {
     private readonly log: (line: string) => void,
   ) {}
 
-  /** The follow's answer for this stream: its first opening's mode, or, once answered, how it goes on now. */
-  answer(): Promise<Answer> {
-    if (this.#answered !== null) return Promise.resolve({ appSessionId: this.app, mode: 'live', launchId: this.#epoch } as Answer);
-    return new Promise((resolve) => this.#waiting.push(resolve));
+  /** A later follow's answer for this stream, which an earlier one opened: how it goes on now, once it opened. */
+  now(): Promise<Answer> {
+    return this.#answered ? Promise.resolve({ appSessionId: this.app, mode: 'live', launchId: this.#epoch } as Answer) : this.opened;
   }
 
   subbed(mode: StreamMode, at: StreamPosition): void {
@@ -211,9 +218,9 @@ class ClientStream implements StreamSink {
   }
 
   #answer(answer: Answer): void {
-    if (this.#answered !== null) return;
-    this.#answered = answer;
-    for (const resolve of this.#waiting.splice(0)) resolve(answer);
+    if (this.#answered) return;
+    this.#answered = true;
+    this.#first(answer);
   }
 
   #flush(): void {
