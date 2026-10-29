@@ -780,3 +780,50 @@ describe('peer messages from disk (E7)', () => {
   });
 });
 // E7 end
+
+// P5 O9 (the M8 sitting, recorded 2026-10-29 on sminos 1.27.10 and engine 2.1.312): words a terminal session's sminos
+// bridge delivered while a turn ran. The bridge appends them as the running turn's row, which the engine keeps alike
+// for every row a plugin appends (a meta user record of the plugin's origin), and mirrors them in a transcript line,
+// `sminos: delivered: <the words on one line>`, the one place the record says they are the owner's. Read together they
+// are what lane B's mid-turn send reads as (steeredPrompt): the owner's words folded into the running turn at that point,
+// under the row's own uuid (which the bridge's `delivered` names), and no notice.
+describe('a sminos delivery into a running turn', () => {
+  const sminos = { kind: 'plugin', name: 'sminos' };
+  const prompt = rec({ type: 'user', uuid: 'p1', parentUuid: null, cwd: '/d', timestamp: at(0), origin: { ...sminos, asUser: true }, message: { role: 'user', content: 'list the files here again' } });
+  const row = (uuid: string, text: string) => rec({ type: 'user', uuid, parentUuid: 'p1', isMeta: true, timestamp: at(1), origin: sminos, promptId: 'x', message: { role: 'user', content: [{ type: 'text', text }] } });
+  const line = (uuid: string, parentUuid: string, content: string) => rec({ type: 'system', subtype: 'informational', uuid, parentUuid, isMeta: false, timestamp: at(2), content, level: 'notice' });
+
+  it('reads the row and its transcript line as the owner’s words steered into the turn, with no notice', () => {
+    const events = mapAll([prompt, row('d1', 'and count them'), line('n1', 'd1', 'sminos: delivered: and count them')]);
+    expect(only(events, 'notice.posted')).toEqual([]);
+    const words = only(events, 'user.message').filter((e) => !e.isSynthetic);
+    expect(words.map((e) => [e.messageUuid, e.content, e.origin])).toEqual([
+      ['p1', 'list the files here again', null],
+      ['d1', 'and count them', 'human'],
+    ]);
+    expect(only(events, 'command.lifecycle').map((e) => [e.commandUuid, e.state])).toEqual([['d1', 'started']]);
+    expect(only(events, 'turn.started').map((e) => e.userMessageUuid)).toEqual(['p1']); // it starts no turn
+  });
+
+  it('matches words of several lines, which the line carries on one', () => {
+    const events = mapAll([prompt, row('d1', 'and count them\nthen stop'), line('n1', 'd1', 'sminos: delivered: and count them then stop')]);
+    expect(only(events, 'user.message').find((e) => e.messageUuid === 'd1' && !e.isSynthetic)?.content).toBe('and count them\nthen stop');
+    expect(only(events, 'notice.posted')).toEqual([]);
+  });
+
+  it('leaves the bridge’s other rows silent and its other lines notices, and a line whose row it never saw a notice', () => {
+    const events = mapAll([
+      prompt,
+      row('m1', '[Request interrupted by user]'),
+      row('m2', 'The interrupt came from outside the terminal.'),
+      line('n1', 'm2', 'sminos: interrupt: [Request interrupted by user] The interrupt came from outside the terminal.'),
+      line('n2', 'm2', 'sminos: delivered: words this transcript never held'),
+    ]);
+    expect(only(events, 'user.message').filter((e) => !e.isSynthetic && e.origin !== 'interrupt-marker').map((e) => e.messageUuid)).toEqual(['p1']);
+    expect(only(events, 'command.lifecycle')).toEqual([]);
+    expect(only(events, 'notice.posted').map((e) => e.text)).toEqual([
+      'sminos: interrupt: [Request interrupted by user] The interrupt came from outside the terminal.',
+      'sminos: delivered: words this transcript never held',
+    ]);
+  });
+});

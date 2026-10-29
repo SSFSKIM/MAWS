@@ -1,5 +1,7 @@
 import type { SessionEvent } from '@shared/graph/events';
-import type { AgentId, TaskId, ToolUseId } from '@shared/graph/ids';
+import type { AgentId, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
+import { parseTranscriptRecord } from '@shared/wire/transcript';
+import { createBackfillContext, recordToEvents } from '../../../../engine-host/fs/backfill'; // P5 O9: a delivery read from disk
 import { afterEach, describe, expect, it } from 'vitest';
 import { heldRow, restingRows, rowsOf, turnDerivations, turnRows, turnSummary, withAllExpanded, withPlacedRows, withQueueTail } from './derive';
 import { cellId, rowId, turnId } from './keys';
@@ -528,6 +530,30 @@ describe('the queue tail', () => {
     expect(lastOfFirst).toBeLessThan(list.length - 1); // the later turn's rows come after it
     expect(placed.map((row) => row.id)).toEqual([...list.slice(0, lastOfFirst + 1).map((row) => row.id), 'k1', 'k2', ...list.slice(lastOfFirst + 1).map((row) => row.id), 'k3', 'k4']);
     expect(withPlacedRows(list, [])).toBe(list);
+  });
+});
+
+// P5 O9 (the M8 sitting): words a terminal session's sminos bridge delivered while a turn ran, read from disk as the
+// session's records hold them (a meta row of the plugin's origin, then the bridge's transcript line), draw as lane B
+// draws a mid-turn send: the owner's bubble in the running turn, at its place, and no "sminos: delivered" notice.
+describe('a sminos delivery into a running turn, from disk', () => {
+  it('draws the owner’s words as a steer in the turn they were delivered into', () => {
+    const ctx = createBackfillContext({ sessionId: 'S' as SessionId, agent: null });
+    const t = (n: number) => `2026-10-29T03:11:5${n}.000Z`;
+    const records = [
+      { type: 'user', uuid: 'p1', parentUuid: null, cwd: '/d', timestamp: t(0), origin: { kind: 'plugin', name: 'sminos', asUser: true }, message: { role: 'user', content: 'list the files here again' } },
+      { type: 'assistant', uuid: 'a1', parentUuid: 'p1', timestamp: t(1), message: { id: 'msg_1', model: 'x', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'ls' } }] } },
+      { type: 'user', uuid: 'd1', parentUuid: 'a1', isMeta: true, timestamp: t(2), origin: { kind: 'plugin', name: 'sminos' }, message: { role: 'user', content: [{ type: 'text', text: 'and count them' }] } },
+      { type: 'system', subtype: 'informational', uuid: 'n1', parentUuid: 'd1', isMeta: false, timestamp: t(3), content: 'sminos: delivered: and count them', level: 'notice' },
+      { type: 'user', uuid: 'r1', parentUuid: 'n1', timestamp: t(4), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'a\nb' }] } },
+    ].flatMap((record) => recordToEvents(parseTranscriptRecord(record), ctx));
+    const drawn = rows(records);
+    const users = drawn.filter((row): row is Extract<Row, { kind: 'user' }> => row.kind === 'user');
+    expect(users.map((row) => [row.text, row.steer, row.turnId])).toEqual([
+      ['list the files here again', false, turnId.ofMessage(uuid('p1'))],
+      ['and count them', true, turnId.ofMessage(uuid('p1'))],
+    ]);
+    expect(drawn.some((row) => JSON.stringify(row).includes('sminos: delivered'))).toBe(false);
   });
 });
 

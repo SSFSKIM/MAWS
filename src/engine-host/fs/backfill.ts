@@ -45,6 +45,9 @@ export interface BackfillContext {
   // steer (blockedPrompt, below) from a blocked prompt of its own.
   inToolLoop: boolean;
   lastAssistantWasApiError: boolean;
+  // P5 O9: the rows a sminos bridge appended lately, by their words on one line, waiting for the transcript line that
+  // says which of them were the owner's words delivered into a running turn (sminosDelivery, below)
+  readonly bridgeRows: Map<string, { uuid: MessageUuid; content: string }>;
 }
 
 export function createBackfillContext(init: {
@@ -66,6 +69,7 @@ export function createBackfillContext(init: {
     lastTurnUserUuid: null,
     inToolLoop: false,
     lastAssistantWasApiError: false,
+    bridgeRows: new Map(),
   };
 }
 
@@ -101,6 +105,7 @@ export function recordToEvents(record: TranscriptRecord, ctx: BackfillContext): 
 
   switch (record.type) {
     case 'user':
+      noteBridgeRow(record, uuid, ctx);
       userEvents(record, uuid, ctx, base, events);
       break;
     case 'assistant':
@@ -477,6 +482,7 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
       events.push({ ...base(), kind: 'user.message', messageUuid: record.uuid as MessageUuid, content: typeof record.content === 'string' ? record.content : '', isReplay: false, isSynthetic: record.isMeta === true, origin: 'local-command', bash: null });
       return;
     case 'informational': {
+      if (sminosDelivery(record, ctx, base, events)) return;
       const blocked = blockedPrompt(record);
       if (blocked === null) {
         const text = typeof record.content === 'string' ? record.content.trim() : '';
@@ -557,6 +563,42 @@ const HOOK_FEEDBACK = /^(\w+) hook feedback:\n([\s\S]*)$/;
 function hookFeedback(content: string, uuid: MessageUuid, base: Base, events: SessionEvent[]): void {
   const match = HOOK_FEEDBACK.exec(content);
   if (match !== null) blockingHook(uuid, match[1], match[2], base, events);
+}
+
+// P5 O9 (the M8 sitting; doperpowers `sminos/hooks/mods/bridge.tsx`, `appendDelivery`): a terminal session's sminos bridge
+// gives words it delivers while a turn runs (the bridge's `deliver` from MAWS, sminos's send) to the running turn as a
+// row of its own, which the engine keeps as it keeps every row a plugin appends: a meta `user` record of the plugin's
+// origin whose content is the words, as text. The bridge's other rows (an interrupt's marker and note, a stop's note)
+// are kept alike, so the record alone does not say which are the owner's. The transcript line the bridge writes after a
+// delivery's row does: a `system/informational` record reading `sminos: delivered: <the words on one line>`. So each
+// such row is held by its words until a line names them; then the words are what lane B's mid-turn send reads as
+// (steeredPrompt): the owner's words folded into the running turn at that point, under the row's own uuid, which the
+// bridge's `delivered` names, and the line no notice. A line naming no row this context saw stays a notice.
+const SMINOS_DELIVERED = 'sminos: delivered: ';
+const BRIDGE_ROWS_HELD = 32;
+const oneLine = (text: string) => text.replaceAll('\n', ' ');
+
+function noteBridgeRow(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext): void {
+  const origin = record.origin as { kind?: unknown; name?: unknown } | undefined;
+  if (record.isMeta !== true || origin?.kind !== 'plugin' || origin.name !== 'sminos') return;
+  const content = messageContent(record);
+  const blocks = Array.isArray(content) ? content.filter(isContentBlock) : [];
+  const text = typeof content === 'string' ? content : blocks.length > 0 && blocks.every((b) => b.type === 'text' && typeof b.text === 'string') ? blocks.map((b) => b.text as string).join('') : null;
+  if (text === null || text.trim() === '') return;
+  ctx.bridgeRows.delete(oneLine(text));
+  ctx.bridgeRows.set(oneLine(text), { uuid, content: text });
+  while (ctx.bridgeRows.size > BRIDGE_ROWS_HELD) ctx.bridgeRows.delete(ctx.bridgeRows.keys().next().value as string);
+}
+
+function sminosDelivery(record: TranscriptRecord, ctx: BackfillContext, base: Base, events: SessionEvent[]): boolean {
+  if (typeof record.content !== 'string' || !record.content.startsWith(SMINOS_DELIVERED)) return false;
+  const key = record.content.slice(SMINOS_DELIVERED.length);
+  const row = ctx.bridgeRows.get(key);
+  if (row === undefined) return false;
+  ctx.bridgeRows.delete(key);
+  events.push({ ...base(), kind: 'user.message', messageUuid: row.uuid, content: row.content, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+  events.push({ ...base(), kind: 'command.lifecycle', commandUuid: row.uuid, state: 'started' });
+  return true;
 }
 
 // A prompt a UserPromptSubmit hook blocked leaves no user record, only a system `informational` record:
