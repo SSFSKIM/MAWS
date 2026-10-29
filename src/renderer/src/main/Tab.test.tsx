@@ -22,7 +22,7 @@ import { ARTIFACTS_TOOL_ID, artifactsTool, type ArtifactsHandle } from '../tools
 import { MainArea } from './MainArea';
 import { SHOW_IN_PANEL_COPY, Tab, useTabLabel } from './Tab';
 import type { SessionRecord } from '@shared/graph/session';
-import { record } from '../../../../test/support/builders';
+import { record, remoteRow } from '../../../../test/support/builders';
 import { laneAState } from '../lane-a/test-support/lane-a-state'; // P5 O9
 import { applyLaneAState, resetLaneAStore } from '../stores/lane-a'; // P5 O9
 import { useSessions } from '../stores/sessions';
@@ -168,6 +168,15 @@ describe('a session tab’s label without its record', () => {
     const onB = addressOf(OTHER_MACHINE, 'b-session' as AppSessionId);
     const { result } = renderHook(() => useTabLabel({ id: `session:${onB}`, kind: 'session', appSessionId: onB, pinned: false, title: 'B’s shared session' }));
     expect(result.current.title).toBe('B’s shared session');
+  });
+
+  // P5 O9 M9 (fix wave 1): another machine's terminal session opened from its listed row is titled by that row
+  it('is a listed row’s title, ahead of the one the tab last knew', () => {
+    const onB = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
+    useSessions.setState({ listed: new Map([[onB, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', title: 'Ship the relay' }), appId: onB }]]) });
+    const { result } = renderHook(() => useTabLabel({ id: `session:${onB}`, kind: 'session', appSessionId: onB, pinned: false, title: 'An older title' }));
+    expect(result.current.title).toBe('Ship the relay');
+    act(() => useSessions.setState({ listed: new Map() }));
   });
 });
 

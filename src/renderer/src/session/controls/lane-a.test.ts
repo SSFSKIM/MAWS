@@ -343,10 +343,17 @@ describe('a session on another machine', () => {
     expect(controls.capability('subagent-rows')).toEqual({ available: false, reason: LANE_A_WORDS.remoteSubagentRows });
     expect(controls.capability('stop-task')).toEqual({ available: false, reason: LANE_A_WORDS.remoteStopTask });
     expect(controls.capability('take-over')).toEqual({ available: false, reason: LANE_A_WORDS.remoteTakeOver });
-    expect(controls.capability('reopen')).toEqual({ available: false, reason: LANE_A_WORDS.reopen }); // live there: Q2's own words come first
+    expect(controls.capability('reopen')).toEqual({ available: false, reason: LANE_A_WORDS.remoteReopen }); // the remote gap before the local words
     expect(controls.capability('media')).toEqual({ available: false, reason: LANE_A_WORDS.remoteMedia });
     for (const key of ['send', 'command', 'model', 'btw', 'compact', 'stop-agent', 'tell', 'mcp.enable', 'answer'] as const) expect(controls.capability(key), key).toEqual({ available: true });
     expect(controls.capability('mode')).toEqual({ available: false, reason: LANE_A_WORDS.mode });
+  });
+
+  it('keeps a remote gap’s words once the machine’s process has ended, where a local session’s are its own', () => {
+    const { controls } = remotePort({ bridge: 'none', link: { ...LINK, reason: 'The session ended on mini' } });
+    expect(controls.capability('reopen')).toEqual({ available: false, reason: LANE_A_WORDS.remoteReopen });
+    expect(controls.capability('take-over')).toEqual({ available: false, reason: LANE_A_WORDS.remoteTakeOver });
+    expect(port().controls.capability('reopen')).toEqual({ available: false, reason: LANE_A_WORDS.reopen });
   });
 
   it('names the machine in a route’s reason, where a local session’s says this Mac', () => {

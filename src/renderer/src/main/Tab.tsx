@@ -63,12 +63,14 @@ function useProjectName(appSessionId: AppSessionId | null): string | null {
   });
 }
 
-// A session tab's label: the record's title, project and glyph; with no record, the title the tab last knew (P5 O6 M2: a
+// A session tab's label: the record's title, project and glyph; with no record, its listed row's title (P5 O9 M9: another
+// machine's terminal session, which has its row alone), the title the tab last knew (P5 O6 M2: a
 // session of a machine not loaded in this run), else an unstarted session's, titled through `registerUnstartedTitle`,
 // without a glyph. The project is named when the session's set is not the strip's (P5 O6 M5: sets are keyed by org
 // project, `sessionSetKey`).
 function useSessionLabel(appSessionId: AppSessionId, lastKnown?: string): TabLabel {
   const record = useSessions((s) => s.records.get(appSessionId));
+  const listedTitle = useSessions((s) => s.listed.get(appSessionId)?.title.trim() || null); // P5 O9 M9
   const digest = useSessions((s) => s.digests.get(appSessionId));
   const pending = useAttention((s) => selectPendingOf(s, appSessionId));
   const ended = useAttention((s) => selectEndedWithErrorOf(s, appSessionId)); // E11 F2b
@@ -76,7 +78,7 @@ function useSessionLabel(appSessionId: AppSessionId, lastKnown?: string): TabLab
   const unstarted = useUnstartedTitle(appSessionId);
   const current = useLayout((s) => s.main.current);
   const set = useSessions((s) => (s.records.has(appSessionId) ? sessionSetKey(s, ipc.localMachine, appSessionId, () => undefined) : undefined));
-  if (!record) return { title: lastKnown ?? unstarted.title, secondary: null, glyph: null, fileType: null };
+  if (!record) return { title: listedTitle ?? lastKnown ?? unstarted.title, secondary: null, glyph: null, fileType: null };
   return { title: displayTitle(record), secondary: set === current ? null : project, glyph: glyphFor(record, digest ?? null, pending, ended), fileType: null };
 }
 

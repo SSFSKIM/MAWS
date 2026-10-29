@@ -226,10 +226,10 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
   };
 
   function capability(key: ControlKey): Capability {
+    const gap = remote === undefined ? undefined : REMOTE_GAPS[key]; // a remote gap first: its words name the machine
+    if (gap !== undefined) return closed(gap);
     const own = OWN_WORDS[key];
     if (own !== undefined) return closed(own);
-    const gap = remote === undefined ? undefined : REMOTE_GAPS[key];
-    if (gap !== undefined) return closed(gap);
     if (key === 'subagent-rows') return AVAILABLE;
     if (key === 'take-over') return record && (record.holder.kind === 'terminal' || record.holder.kind === 'background_job') && canTakeOver(record.holder) ? AVAILABLE : closed(LANE_A_WORDS.takeOver);
     if (live !== null) return closed(live);
