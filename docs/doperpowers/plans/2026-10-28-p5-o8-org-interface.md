@@ -50,6 +50,13 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-28) The desk track reviewed the `deploy/` hunk and shaped the wrapper fix. The final gate, run 40771309800, had two browser reds (`browser-cua.spec.ts:483`, `browser-chrome.spec.ts:681`), none of #314's; its rerun, 40783162110, was green.
   - [ ] The owner's sitting: `root add` on staging, then production (the steps are in the report, `2026-10-28-p5-o8-report.md`).
 - [ ] M4a — The Org page: its shape, people and devices — **executable** (re-planned 2026-10-29; needs M3 and H1, both landed)
+  - [ ] Task 1: the move: the pairing judges and their `PendingEntry` type into `org-protocol`, `admin.ts` importing them (its own commit, the desk track's review).
+  - [ ] Task 2: `successorProblems` and `stateProblems` in `org-protocol`, and `admin.ts`'s `amend` running it (the desk track's review).
+  - [ ] Task 3: the signing paths: `edits.ts`, `Edit.endorse` and `Edit.live`, `StateSigner.sign`'s endorsement and guard, the signer's check before the slot, and `checks.ts` running `successorProblems`.
+  - [ ] Task 4: the session's surface: `org.view`, `org.preview`, `org.change`, `org.pair.*`, `pairing.ts`, `hub-client.ts`'s `pendingOf`, `refused.attempt`, the schema and main's wiring.
+  - [ ] Task 5: `close()`'s fence and join (`HeldOrg.close()`, the parts' operations in flight), and the two test workarounds removed.
+  - [ ] Task 6: the renderer: `settings-tab/org/`, the four groups, the change and pair sheets, `copy.ts`.
+  - [ ] Task 7: `test/org/org-page.local.test.ts`, registered in `TIMING_NODE_TESTS`.
 - [ ] M4b — Machines and their rights — *advisory; needs M4a*
 - [ ] M4c — Delegations — *advisory; needs M4a*
 - [x] M5 — Owners on rows and the People toggle — landed (PR #323, master 0db3870a0, P5 Decision Log 129)
@@ -1130,10 +1137,11 @@ The move commit is the branch's first. Run its checks before any other M4a work:
     # admin as the deploy checkout runs it (bin.ts bundles it): read-only verbs against the local hub, in a scratch org
     # (the deploy README's local recipe)
     pnpm --filter desk-hub local --state ~/.local/share/o8-m4a-move/hub          # a second terminal; Ctrl-C at the end
-    pnpm --filter desk-hub deployment admin init --keys ~/.local/share/o8-m4a-move/keys.json --hub http://127.0.0.1:8747 --user owner@example.com
-    pnpm --filter desk-hub deployment admin genesis --keys ~/.local/share/o8-m4a-move/keys.json --hub http://127.0.0.1:8747 --user owner@example.com --recovery ~/.local/share/o8-m4a-move/recovery.json --yes
-    pnpm --filter desk-hub deployment admin show --keys ~/.local/share/o8-m4a-move/keys.json --hub http://127.0.0.1:8747 --user owner@example.com
-    pnpm --filter desk-hub deployment admin devices --keys ~/.local/share/o8-m4a-move/keys.json --hub http://127.0.0.1:8747 --user owner@example.com
+    mkdir -p ~/.local/share/o8-m4a-move/recovery
+    pnpm --filter desk-hub deployment admin init --keys ~/.local/share/o8-m4a-move/admin/keys.json --hub http://127.0.0.1:8747 --user owner@example.com
+    pnpm --filter desk-hub deployment admin genesis --keys ~/.local/share/o8-m4a-move/admin/keys.json --hub http://127.0.0.1:8747 --user owner@example.com --recovery ~/.local/share/o8-m4a-move/recovery/recovery.json --yes
+    pnpm --filter desk-hub deployment admin show --keys ~/.local/share/o8-m4a-move/admin/keys.json --hub http://127.0.0.1:8747 --user owner@example.com
+    pnpm --filter desk-hub deployment admin devices --keys ~/.local/share/o8-m4a-move/admin/keys.json --hub http://127.0.0.1:8747 --user owner@example.com
     rm -r ~/.local/share/o8-m4a-move
 
 Expected: the import line prints `function function function function`; the suites pass; `show` and `devices` print as they did before the move.
@@ -1638,6 +1646,8 @@ Each is built as its recommendation when its milestone is re-planned, unless the
 - Observation (M5, 2026-10-28): `stores/summary.ts`'s `load()` has no production caller, so `summary.sections` is written but never read back; collapsed summary sections reset at each launch. M5's People store is loaded from `App.tsx` instead.
   Evidence: `grep -rn "getState().load()" src/renderer/src`, outside tests, finds no summary caller.
 - Observation (M5): `App.test.tsx` runs in the `renderer-timing` vitest project, not `renderer` (`vitest.config.ts:57`).
+- Observation (M4a Task 2, 2026-10-29): before `successorProblems`, a machine posting a key another machine already held (the hub doesn't check) made `enroll` sign a successor the package refuses. The admin kept it pending, the hub answered `409 malformed`, and every later verb failed until `abandon-pending`. It is now refused before anything is signed.
+  Evidence: the admin test's RED run in Task 2 (`m4a-task-2-report.md`).
 
 ## Decision Log
 
@@ -2034,6 +2044,26 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
 - Decision: The buildability round's second pass is folded in (on 02bd683e1: 1 P1, 1 P2; it confirmed the other six fixes closed and members kept in M4a).
   1. (P1) The pairing's liveness check moves to the point it can act. `apply` runs before Touch ID, so `Edit.live()` is also checked in the device module after the confirmation (before endorsing or signing) and by the signer before the slot's write. A proposal already in the slot is durable, and cancelling the pairing no longer withdraws it.
   2. `close()` also joins the held view's own adoption queue (`HeldOrg.close()`), which a link's direct `advance` feeds outside the session's producers, and the session's load. Each writer under `org/` belongs to one owner that `close()` joins.
+  Date/Author: 2026-10-29, O8's executor.
+
+- Decision: M4a Task 1, the move (336af704b), settles these points.
+  1. `admin.ts` re-exports `judgeEntry`, `isPairedDeviceId` and `isRpId` from `org-protocol`. Two test-side importers read them from it: `test/local/endpoint.ts` and `test/endpoint/staging/world.ts`.
+  2. `entryDevice`, private in `admin.ts`, is now exported, for Task 4's pairing.
+  3. `PendingEntry` is built from the package's own `DeviceClass`, `KeyStorage` and `Passkey`, and the hub's `PendingDevice` satisfies it.
+  4. The move's local-hub recipe keeps `keys.json` and `recovery.json` in separate directories, since `genesis` refuses a recovery file beside the admin keys (`admin-device.ts:88`).
+  Date/Author: 2026-10-29, O8's executor.
+
+- Decision: M4a Task 2, `successorProblems` (5935f62a5), settles these points.
+  1. `stateInvariants` is exported, so the parity test can compare it with `stateProblems`. That test passed against the old boolean body before the switch.
+  2. `Problem.code` is a `ProblemCode` union, narrower than §M's `string`, so Task 3 can join it with `checks.ts`'s codes.
+  3. The codes:
+     - the link: `other-org`, `version-not-next`, `prev-not-head`;
+     - the whole-state prefix rule: `prefix-overlaps`, since a whole state has no new-or-old direction;
+     - beyond the list, to cover every non-signature check: `shape` (alone), `issued-backwards`, `machine-ref-changed`, and each sub-rule of `stateInvariants`;
+     - where `checks.ts` already names a rule, its name.
+  4. An endorsement by a key outside the member's own (`unknown-signer`) stays `verifySuccessor`'s signature check.
+  5. The admin check sits in `signPending`, so it covers `propose` as well as `amend`.
+  6. Until M4c, `checkSuccessor` shows `prefix-overlaps` beside its own directional prefix code for one collision.
   Date/Author: 2026-10-29, O8's executor.
 
 ## Outcomes & Retrospective

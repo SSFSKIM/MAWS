@@ -49,7 +49,7 @@ const isList = <T>(value: unknown, item: (v: unknown) => v is T): value is T[] =
 const isMemberIdText = (value: unknown): value is string => typeof value === 'string' && isMemberId(value);
 
 /** True when RFC 8785 can write `value`: no lone surrogate in any string or key, no non-finite number. */
-function canonicalizable(value: unknown): boolean {
+export function canonicalizable(value: unknown): boolean {
   try {
     canonicalize(value);
     return true;
