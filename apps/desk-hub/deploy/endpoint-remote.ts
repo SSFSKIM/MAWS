@@ -9,7 +9,7 @@
 // the limit does.
 import { request } from 'node:http';
 import { randomBytes } from 'node:crypto';
-import { CHANNEL_CLOSE, closeReasonName, decodeChannelFrame, encodeChannelFrame, memoryOrgView, openTag, type Action, type ByteDuplex, type Channel, type ChannelMessage, type DeviceClass, type SignedOrgState, type SigningKey } from 'org-protocol';
+import { CHANNEL_CLOSE, closeReasonName, decodeChannelFrame, encodeChannelFrame, memoryOrgView, openTag, type Action, type ByteDuplex, type Certificates, type Channel, type ChannelMessage, type DeviceClass, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { TamperRelay, TestDevice } from 'org-protocol/test-support';
 import { newSocket, opened } from '../../org-protocol/test-support/socket.ts';
 
@@ -440,11 +440,15 @@ export class Remote {
   }
 }
 
-/** A test device over `org`'s chain (the run's own record of the head, verified as it was signed or read). */
-export function testDevice(org: string, device: RunDevice, chain: SignedOrgState[], options: { now?: () => Date; build?: string } = {}): TestDevice {
+/**
+ * A test device over `org`'s chain (the run's own record of the head, verified as it was signed or read) and the
+ * delegated machines' certificates the hub serves beside it: a delegated machine's key is in a certificate, never in
+ * the state, so a device holding the state alone takes it for an unknown machine.
+ */
+export function testDevice(org: string, device: RunDevice, view: { chain: SignedOrgState[]; certificates: Certificates }, options: { now?: () => Date; build?: string } = {}): TestDevice {
   return new TestDevice({
     identity: { org, member: device.member, device: device.id, clientClass: device.clientClass, channelKey: device.channel, build: options.build ?? 'o10-m11-acceptance', capabilities: [] },
-    org: memoryOrgView({ chain: [...chain] }),
+    org: memoryOrgView({ chain: [...view.chain], certificates: view.certificates }),
     ...(device.stepUp === undefined ? {} : { stepUpKey: device.stepUp }),
     ...(options.now === undefined ? {} : { now: options.now }),
   });

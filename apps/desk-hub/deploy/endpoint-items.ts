@@ -113,6 +113,9 @@ export type Scene = {
   ref: string;
   /** The org's states as the run holds them, the head last. */
   chain(): SignedOrgState[];
+  /** The delegated machines' certificates the hub serves with the state, as the run last read them: a delegated
+   * machine's (production's) key is in one, never in the state. */
+  certificates(): Certificates;
   /** The owner's device: a machine owner, an admin's (staging's admin device; production's device paired for the run). */
   owner: RunDevice;
   /** Signs the head's successor as the admin, posts it and adds it to the chain; null where the run holds no admin key
@@ -144,7 +147,18 @@ export type Scene = {
   sessions: string[];
 };
 
-const NO_CERTS: Certificates = { certs: [], retirements: [] };
+/** What the run's devices hold of the org: the chain and the certificates, as a real client's org view does. */
+const deviceView = (scene: Pick<Scene, 'chain' | 'certificates'>) => ({ chain: scene.chain(), certificates: scene.certificates() });
+
+/** A listing the machine signed, judged as a client judges it: against the head and the certificates. */
+export function listingVerdict(scene: Pick<Scene, 'chain' | 'certificates'>, listing: Signed<Listing>, now = new Date()): ReturnType<typeof verifyListing> {
+  return verifyListing(scene.chain().at(-1)!.state, listing, scene.certificates(), now);
+}
+
+/** One of the machine's log events in lane A's project, judged as the hub judges it: against the head and the certificates. */
+export function eventVerdict(scene: Pick<Scene, 'chain' | 'certificates' | 'org'> & { laneA: Pick<LaneA, 'project'> }, event: LogEventV2, now = new Date()): ReturnType<typeof verifyEvent> {
+  return verifyEvent({ org: scene.org, project: scene.laneA.project }, scene.chain().at(-1)!.state, event, scene.certificates(), now);
+}
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 async function until<T>(probe: () => T | null | undefined | false | Promise<T | null | undefined | false>, what: string, ms: number, every = 500): Promise<T> {
@@ -170,13 +184,13 @@ function dialer(scene: Scene, carrier: 'relayed' | 'direct'): () => Promise<Byte
 
 /** A device of the scene's over a carrier, its channel open and `caps` in. */
 function open(scene: Scene, who: RunDevice, carrier: 'relayed' | 'direct', options: { dial?: () => Promise<ByteDuplex>; now?: () => Date } = {}): Promise<Remote> {
-  return openRemote(testDevice(scene.org, who, scene.chain(), { now: options.now }), scene.ref, options.dial ?? dialer(scene, carrier));
+  return openRemote(testDevice(scene.org, who, deviceView(scene), { now: options.now }), scene.ref, options.dial ?? dialer(scene, carrier));
 }
 
 /** Whether a device's channel open is refused (it rejects), and the endpoint's word for it from its log. */
 async function refusedOpen(scene: Scene, who: RunDevice, carrier: 'relayed' | 'direct', reason: string, options: { clientClass?: RunDevice['clientClass'] } = {}): Promise<string> {
   const mark = await scene.machine.logMark();
-  const device = testDevice(scene.org, { ...who, clientClass: options.clientClass ?? who.clientClass }, scene.chain());
+  const device = testDevice(scene.org, { ...who, clientClass: options.clientClass ?? who.clientClass }, deviceView(scene));
   const opened = await device.open(dialer(scene, carrier), scene.ref, { timeoutMs: 15_000 }).then(
     (channel) => {
       channel.close('done');
@@ -337,7 +351,7 @@ export async function item9(scene: Scene, report: ItemReport): Promise<void> {
       onClose: (l) => inner.onClose?.(l),
       close: (r) => inner.close(r),
     };
-    const device = testDevice(scene.org, scene.owner, scene.chain());
+    const device = testDevice(scene.org, scene.owner, deviceView(scene));
     const opening = device.open(() => Promise.resolve(swapped), scene.ref, { timeoutMs: 15_000 }).then(
       () => 'opened',
       () => 'refused',
@@ -772,8 +786,7 @@ export async function item5(scene: Scene, report: ItemReport): Promise<void> {
       const { listings } = await scene.person.json<{ listings: Signed<Listing>[] }>('/api/listings');
       return listings.find((l) => l.body.session === scene.laneA.session && l.body.machine === scene.ref);
     }, 'a listing of the session', 60_000, 2000);
-    const head = scene.chain().at(-1)!.state;
-    const verdict = await verifyListing(head, listing, NO_CERTS, new Date());
+    const verdict = await listingVerdict(scene, listing);
     if (!verdict.ok) throw new Error(`the listing does not verify: ${verdict.code}`);
     return `revision ${listing.body.revision}, owners ${listing.body.fields.owners.length}, verified against the head`;
   });
@@ -803,9 +816,8 @@ export async function item5(scene: Scene, report: ItemReport): Promise<void> {
         if (probe === null) return { skip: 'no real sminos in this scene: nothing writes the machine’s own events' };
         throw new Error(`no event of the machine’s after offset ${scene.logFrom} within 60 s, though lane A’s session runs`);
       }
-      const head = scene.chain().at(-1)!.state;
       for (const { event } of own) {
-        const verdict = await verifyEvent({ org: scene.org, project: scene.laneA.project }, head, event as unknown as LogEventV2, NO_CERTS, new Date());
+        const verdict = await eventVerdict(scene, event as unknown as LogEventV2);
         if (!verdict.ok) throw new Error(`${event.writer}:${event.seq} does not verify: ${verdict.code}`);
       }
       return `the ${own.length} event(s) the run’s sessions wrote after offset ${scene.logFrom} verify under the machine’s key`;

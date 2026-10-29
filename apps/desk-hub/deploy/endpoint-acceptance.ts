@@ -19,7 +19,7 @@ import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { parseArgs } from 'node:util';
-import { generateSigningKey, keyId, signOrgState, type OrgState, type RevokedKey, type SignedOrgState } from 'org-protocol';
+import { generateSigningKey, keyId, NO_CERTIFICATES, signOrgState, type Certificates, type OrgState, type RevokedKey, type SignedOrgState } from 'org-protocol';
 import { machineProjectId, ORG_STATE_PATH, type OrgStateView } from '../src/protocol/identity';
 import { checkTestHub, PRODUCTION_HOST, readDeployConfig } from './config';
 import { readSecrets } from './deploy';
@@ -84,13 +84,17 @@ async function until<T>(probe: () => Promise<T | null | undefined | false>, what
   }
 }
 
-/** The org's chain as the hub serves it, every page followed, from `after` on. */
-export async function readChain(person: Person, after = 0): Promise<SignedOrgState[]> {
+/**
+ * The org's chain as the hub serves it, every page followed, from `after` on, and the delegated machines' certificates
+ * it serves beside the state (the last page's), which a client holds with the chain (desk-web's org view): a delegated
+ * machine's key is in its certificate, never in the state.
+ */
+export async function readOrgState(person: Person, after = 0): Promise<{ chain: SignedOrgState[]; certificates: Certificates }> {
   const chain: SignedOrgState[] = [];
   for (let since = after; ; ) {
     const view = await person.json<OrgStateView>(`${ORG_STATE_PATH}?since=${since}`);
     chain.push(...(view.chain ?? []));
-    if (!view.more || !view.chain?.length) return chain;
+    if (!view.more || !view.chain?.length) return { chain, certificates: view.certificates ?? NO_CERTIFICATES };
     since = view.chain.at(-1)!.state.version;
   }
 }
@@ -136,9 +140,12 @@ export type RunOptions = {
  */
 export async function buildScene(o: RunOptions & { tag: string }, made: Made, log: (line: string) => void): Promise<Scene> {
   const { person, machine, cleanup, tag } = o;
-  let chain = await readChain(person);
+  let { chain, certificates } = await readOrgState(person);
+  const reread = async () => void ({ chain, certificates } = await readOrgState(person));
   const refresh = async () => {
-    chain.push(...(await readChain(person, chain.at(-1)!.state.version)));
+    const read = await readOrgState(person, chain.at(-1)!.state.version);
+    chain.push(...read.chain);
+    certificates = read.certificates;
     return chain.at(-1)!;
   };
 
@@ -146,7 +153,7 @@ export async function buildScene(o: RunOptions & { tag: string }, made: Made, lo
   let owner: RunDevice;
   if (o.admin !== null) {
     admin = await OrgAdmin.open(person, o.admin.scope, o.admin.device, log);
-    chain = await readChain(person);
+    await reread();
     owner = { member: admin.member, id: o.admin.device.id, clientClass: 'native-mac', channel: o.admin.device.channel, stepUp: o.admin.device.stepUp };
   } else if (o.production !== null) {
     // The machine first, before the owner is asked for anything: the one authorized, by its name and its ref.
@@ -159,7 +166,7 @@ export async function buildScene(o: RunOptions & { tag: string }, made: Made, lo
       if (head?.state.members.some((m) => m.devices.some((d) => d.id === id))) throw new Error(`${id} is still in the head: \`production-run.sh admin remove-device ${id}\``);
     });
     owner = await o.production.pair();
-    chain = await readChain(person);
+    await reread();
   } else throw new Error('a run needs an admin device or production’s paired one');
 
   // The machine's own events the run's sessions write (lane A's, the spawn's lifecycle), kept as residue apart from
@@ -275,6 +282,7 @@ export async function buildScene(o: RunOptions & { tag: string }, made: Made, lo
     name,
     ref,
     chain: () => chain,
+    certificates: () => certificates,
     owner,
     amend,
     sign,
