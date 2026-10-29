@@ -1066,11 +1066,11 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   machines.serve();
   shutdown.add('machines', () => machines.stop());
   // P5 O8 M1: the feed and the session stop (every org file is written whole and renamed); M2: the rows' last change is
-  // written to their cache first, so a relaunch keeps every mark
+  // written to their cache first, so a relaunch keeps every mark; M4a: the exit waits for the session's close, which
+  // resolves once nothing more is written under org/ (bounded by the steps' grace)
   shutdown.add('org', () => {
     orgFeed.close();
-    void orgSession?.close();
-    return remoteRows.close();
+    return Promise.all([orgSession?.close(), remoteRows.close()]).then(() => undefined);
   });
   // P5 O3-A: spine.lock is released at the process's exit alone (startSpineData), never at a will-quit step: the steps'
   // promises settle after the last step is called, and a writer still finishing (an intent's rename) must not run

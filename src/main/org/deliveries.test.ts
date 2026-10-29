@@ -923,3 +923,43 @@ describe('retries and the roster', () => {
     expect(told).toBeGreaterThan(0);
   });
 });
+
+describe('close (M4a)', () => {
+  it('resolves once the run in flight has ended; an answer that came after it writes nothing, and the next start sends again', async () => {
+    const g = await genesis();
+    const s2 = await next(g, NOW - DAY);
+    const target = await next(s2, NOW - 3_600_000, revokeDevice('old'));
+    const a = await app([g, s2, target], { roster: [M1] });
+    const m = await machine([g, s2]);
+    a.machines.set(M1, m);
+    await a.oblige(target, s2.state);
+    // The machine applies the run at once; its answer is held until released.
+    let release!: () => void;
+    const answered = new Promise<void>((resolve) => (release = resolve));
+    let acting!: () => void;
+    const sent = new Promise<void>((resolve) => (acting = resolve));
+    const act = m.act.bind(m);
+    m.act = (request) => {
+      const op = act(request);
+      acting();
+      return { ...op, outcome: answered.then(() => op.outcome) };
+    };
+    const sending = a.deliveries.send();
+    await sent;
+    let closed = false;
+    const closing = a.deliveries.close().then(() => void (closed = true));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(closed).toBe(false);
+    release();
+    await closing;
+    await sending;
+    expect(await sameHead(m, target)).toBe(true);
+    expect(owed(a)).toEqual([M1]);
+
+    const b = await a.restart();
+    m.act = act;
+    b.machines.set(M1, m);
+    await b.deliveries.send();
+    expect(owed(b)).toEqual([]);
+  });
+});

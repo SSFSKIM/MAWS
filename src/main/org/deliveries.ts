@@ -60,7 +60,8 @@ export interface Deliveries {
   owing(): Owing[];
   /** `owing()` changed. */
   onChanged(listener: () => void): () => void;
-  close(): void;
+  /** Stops: nothing more is sent or written. Resolves once the run in flight (and a roster's prune) has ended. */
+  close(): Promise<void>;
 }
 
 export type DeliveriesDeps = {
@@ -179,8 +180,12 @@ export function createDeliveries(deps: DeliveriesDeps): Deliveries {
     }
   }
 
-  /** One update of the obligation `hash` names (a no-op once it is gone); the obligation is dropped once nothing is owed. */
+  /**
+   * One update of the obligation `hash` names (a no-op once it is gone); the obligation is dropped once nothing is owed.
+   * Once closed nothing is written: an answer that came after it is asked for again at the next start.
+   */
   async function change(hash: string, fn: (o: Obligation, file: SigningFile) => void): Promise<void> {
+    if (closed) return;
     await store.update((file) => {
       const o = file.deliveries.find((x) => x.hash === hash);
       if (o === undefined) return { next: file, value: undefined };
@@ -287,6 +292,7 @@ export function createDeliveries(deps: DeliveriesDeps): Deliveries {
       const pending = place.pending !== null && last === place.pending.state.version ? place.pending : null;
 
       // Still owed, the slot unchanged, and the machine written into the slot's exposure before a run carries it.
+      if (closed) return;
       const go = await store.update((f) => {
         const x = f.deliveries.find((y) => y.hash === hash);
         if (x === undefined || !x.owed.includes(ref)) return { next: f, value: false };
@@ -294,7 +300,7 @@ export function createDeliveries(deps: DeliveriesDeps): Deliveries {
         if (f.pending === null || canonicalize(f.pending.signed.state) !== canonicalize(pending.state)) return { next: f, value: false };
         return { next: withExposure(f, pending, { machine: ref }), value: true };
       });
-      if (!go) return;
+      if (!go || closed) return;
       // Synchronously from here to the act: the held line the run was planned on must still be the held line. A sibling
       // adopted while the exposure was written makes the pending state a fork; a recovery moves the held chain. Plan again.
       if (deps.view() !== view || view.head() !== head) continue;
@@ -344,7 +350,7 @@ export function createDeliveries(deps: DeliveriesDeps): Deliveries {
     const roster = new Set<string>(deps.roster());
     const named = namedBy(view);
     const gone = (ref: string) => !roster.has(ref) && !named.has(ref);
-    if (!file.deliveries.some((o) => o.owed.some(gone))) return;
+    if (closed || !file.deliveries.some((o) => o.owed.some(gone))) return;
     await store.update((f) => {
       for (const o of f.deliveries) for (const ref of o.owed.filter(gone)) forget(o, ref);
       f.deliveries = f.deliveries.filter((o) => o.owed.length > 0);
@@ -362,7 +368,7 @@ export function createDeliveries(deps: DeliveriesDeps): Deliveries {
       const place = await placement(o, file, view);
       if (!place.on && place.why === 'superseded') off.push(o.hash);
     }
-    if (off.length === 0) return;
+    if (off.length === 0 || closed) return;
     await store.update((f) => {
       f.deliveries = f.deliveries.filter((o) => !off.includes(o.hash));
       return { next: f, value: undefined };
@@ -429,9 +435,13 @@ export function createDeliveries(deps: DeliveriesDeps): Deliveries {
   }
 
   watch();
+  /** The roster's prunes in flight, which `close` joins with the run. */
+  const pruning = new Set<Promise<void>>();
   const offRoster = deps.onRoster(() => {
     watch();
-    void prune().catch((error: unknown) => log(`pruning the roster failed: ${(error as Error).message}`));
+    const p = prune().catch((error: unknown) => log(`pruning the roster failed: ${(error as Error).message}`));
+    pruning.add(p);
+    void p.finally(() => pruning.delete(p));
   });
   const timer = setInterval(sendLogged, timing.DELIVERY_RETRY_MS);
   timer.unref?.();
@@ -457,6 +467,7 @@ export function createDeliveries(deps: DeliveriesDeps): Deliveries {
       for (const w of watched.values()) w.off();
       watched.clear();
       listeners.clear();
+      return Promise.all([running?.catch(() => {}), ...pruning]).then(() => undefined);
     },
   };
 }

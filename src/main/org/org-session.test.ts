@@ -313,9 +313,7 @@ afterEach(async () => {
   // Every status emitted is one org.changed carries: it parses as the schema says (M3: the signer part included).
   for (const text of emitted) OrgStatusSchema.parse(JSON.parse(text));
   await chmod(join(userData, 'org'), 0o700).catch(() => {});
-  // `close()` doesn't wait for a file write already under way (a settle, an obligation, the anchor), so a write can
-  // land in `org/` while it is being removed; `rm` retries ENOTEMPTY rather than failing the case that just passed.
-  await rm(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  await rm(userData, { recursive: true, force: true });
 });
 
 type Overrides = Partial<Omit<OrgSessionDeps, 'timing'>> & { timing?: Partial<typeof TIMING> & OrgSessionDeps['timing'] };
@@ -2032,11 +2030,8 @@ describe('M3: rekey', () => {
     const feed = fakeFeed();
     session.attach(feed.hooks);
     await followHub(session, feed);
-    // The crash's files are written behind the session's back, so the session is closed and its anchor for the head it
-    // just adopted is on disk first: the adoption moves the head in memory before that write, which `close()` doesn't
-    // wait for, and a late one would carry the registration without the intent.
+    // The crash's files are written behind the session's back, once it is closed: nothing is written after that.
     for (const s of opened) await s.close();
-    await until(async () => (await readRegistration()).anchor.version === hub.head.state.version, 'the anchor written');
     const reg = await readRegistration();
     await realFiles().write(REGISTRATION_FILE, { ...reg, rekey: { device: nextEntry.id } });
     return { old: entry, next: nextEntry };
@@ -2369,5 +2364,104 @@ describe('M4a: org.pair.*', () => {
       detail: 'Their next device is paired from one of their own devices, a flow not built yet',
     });
     expect(registered(session).pairing).toBeNull();
+  });
+});
+
+/** Every file under org/ as it stands: its name, its inode and mtime (a rename-over shows), and its bytes. */
+async function orgSnapshot(): Promise<string[]> {
+  const names = (await readdir(orgDir())).sort();
+  return Promise.all(
+    names.map(async (name) => {
+      const path = join(orgDir(), name);
+      const s = await stat(path);
+      return `${name} ${s.ino} ${s.mtimeMs} ${await readFile(path, 'utf8')}`;
+    }),
+  );
+}
+
+/** The hub's fetch, whose next `GET /api/org/state` waits for `release`; `arm` resolves once that read is held. */
+function heldStateRead() {
+  let armed: (() => void) | null = null;
+  let release: () => void = () => {};
+  const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    if (armed !== null && new URL(String(input)).pathname === '/api/org/state' && (init?.method ?? 'GET') === 'GET') {
+      const held = armed;
+      armed = null;
+      await new Promise<void>((resolve) => {
+        release = resolve;
+        held();
+      });
+    }
+    return hub.fetch(input, init);
+  }) as typeof globalThis.fetch;
+  return { fetch, arm: () => new Promise<void>((resolve) => (armed = resolve)), release: () => release() };
+}
+
+describe('M4a: close()', () => {
+  it('resolves only after a queued anchor write lands', async () => {
+    const gate = gatedFiles();
+    const { session } = await signedIn({ files: gate.files });
+    const anchorHeld = gate.arm(REGISTRATION_FILE);
+    const s3 = await successor(hub.head, [a1]);
+    const adopted = session.current()!.view.advance([s3], []);
+    await anchorHeld;
+    let closed = false;
+    const closing = session.close().then(() => void (closed = true));
+    await pause(30);
+    expect(closed).toBe(false);
+    gate.release();
+    await closing;
+    expect((await readJson<RegistrationFile>(REGISTRATION_FILE)).anchor).toEqual({ genesis: await stateHash(s1.state), version: 3, head: await stateHash(s3.state) });
+    await adopted;
+  });
+
+  it('a signer hub read released after close() writes nothing: no file under org/ changes', async () => {
+    const read = heldStateRead();
+    const { session } = await signingRoot({ fetch: read.fetch });
+    const before = headVersion(session);
+    const reading = read.arm();
+    const resigned = session.resign();
+    await reading;
+    // The hub now serves a successor the signer would adopt (chain.json, then the anchor) if nothing fenced it.
+    hub.chain.push(await successor(hub.head, [a1]));
+    let closed = false;
+    const closing = session.close().then(() => void (closed = true));
+    await pause(30);
+    expect(closed).toBe(false); // close() joins the signer's operation in flight
+    read.release();
+    await closing;
+    const files = await orgSnapshot();
+    expect(await resigned).toMatchObject({ ok: false, reason: 'not-root' });
+    await pause(50);
+    expect(await orgSnapshot()).toEqual(files);
+    // Nothing read after close() was adopted: not in memory, not in chain.json.
+    expect(headVersion(session)).toBe(before);
+    expect((await readJson<{ chain: SignedOrgState[] }>(CHAIN_FILE)).chain).toHaveLength(before);
+    expect(signing.prompts).toEqual([]);
+  });
+
+  it('waits for a link\'s direct view.advance whose chain.json write is under way; the anchor it misses moves up at the next load', async () => {
+    const gate = gatedFiles();
+    const { session } = await signedIn({ files: gate.files });
+    const chainHeld = gate.arm(CHAIN_FILE);
+    const s3 = await successor(hub.head, [a1]);
+    // As a link does (remote/link.ts): not awaited.
+    void session.current()!.view.advance([s3], []);
+    await chainHeld;
+    let closed = false;
+    const closing = session.close().then(() => void (closed = true));
+    await pause(30);
+    expect(closed).toBe(false);
+    gate.release();
+    await closing;
+    expect((await readJson<{ chain: SignedOrgState[] }>(CHAIN_FILE)).chain.at(-1)).toEqual(s3);
+    // The session closed while chain.json was written: the anchor's write was refused, as a crash between the two.
+    expect((await readJson<RegistrationFile>(REGISTRATION_FILE)).anchor.version).toBe(2);
+    const files = await orgSnapshot();
+    await pause(50);
+    expect(await orgSnapshot()).toEqual(files);
+    const { session: again } = await restart();
+    expect(headVersion(again)).toBe(3);
+    expect((await readJson<RegistrationFile>(REGISTRATION_FILE)).anchor.version).toBe(3);
   });
 });

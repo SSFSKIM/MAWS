@@ -772,8 +772,12 @@ describe('a sign-out or close while a sign is in flight', () => {
 
   it('a close during Touch ID: nothing kept or sent either', async () => {
     const h = await harness();
-    h.during = () => h.signer.close();
+    // close() answers the sign in flight, so it is joined after the sign rather than awaited inside it.
+    let closing: Promise<void> | undefined;
+    h.during = () => void (closing = h.signer.close());
     expect(await h.signer.sign(noChangeEdit())).toMatchObject({ ok: false });
+    expect(closing).toBeDefined();
+    await closing;
     expect(h.hub.posts).toEqual([]);
     expect(h.disk()).toBeNull();
   });

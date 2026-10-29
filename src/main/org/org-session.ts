@@ -35,6 +35,7 @@
 // digest of `{change, lines, warnings}`; `change` signs only under that digest, composed again on the head the signer
 // drafts from, as `revokeSuperseded` does. The pairing (pairing.ts) is this Mac as the approving device, through the
 // signer, never beside another attempt. A refusal on the status names the attempt it ended (`refused.attempt`).
+// `close` fences every writer under `org/` and joins it (`shut`), so nothing is written there once it resolves.
 //
 // Electron-free: the browser opener, the step-up signer, the state signer, focus, notifications and the RL2 links are
 // injected from main.
@@ -320,6 +321,8 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   let syncAgain = false;
   let lastStatus = '';
   let commits: Promise<unknown> = Promise.resolve();
+  /** `close`'s one run: a second call answers the first's. */
+  let closing: Promise<void> | null = null;
   // ---- M3 ----
   let facts: KeyFacts | null = null;
   let stateSigner: StateSigner | null = null;
@@ -338,12 +341,17 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   /**
    * Runs `body` after every commit queued before it. Nothing run here may wait on a held view's adoption queue, whose
    * anchor writes wait here: a view made inside is given an `anchorSaver` that keeps its anchor until the view is held.
+   * Once closed nothing more is queued (`close`'s fence): the commit is refused, and what was queued before still runs.
    */
   function commit<T>(body: () => Promise<T>): Promise<T> {
+    if (closed) return Promise.reject(new Error('the org session is closed'));
     const turn = commits.then(body);
     commits = turn.catch(() => {});
     return turn;
   }
+
+  /** Every held view's guard (held.ts's `open`): no adoption writes once the session is closed. */
+  const open = (): boolean => !closed;
 
   /** A read the feed or a timer starts: a failure (a chain.json write, say) is logged, and the held state stays as it was. */
   function background(what: string, task: () => Promise<void>): void {
@@ -577,14 +585,14 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     const hub = client(reg.hub, cred);
     const version = view.head().state.version;
     let read = await hub.chain(version);
-    if (credential !== cred || held !== view) return;
+    if (closed || credential !== cred || held !== view) return;
     if (!read.ok) return hubFailed(read);
     // A recovery from below the held head needs the states from its `fromVersion` on, which `?since=<head>` leaves out;
     // and a served head below the held one is judged with the whole chain, which tells a rewind from a rollback.
     const from = rereadFrom(view, read.value);
     if (from !== null) {
       read = await hub.chain(from);
-      if (credential !== cred || held !== view) return;
+      if (closed || credential !== cred || held !== view) return;
       if (!read.ok) return hubFailed(read);
     }
     await adopt(view, read.value);
@@ -596,7 +604,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     const view = held;
     if (closed || reg === null || cred === null || !hubLive() || view === null || !view.ready()) return;
     const read = await client(reg.hub, cred).state();
-    if (credential !== cred || held !== view) return;
+    if (closed || credential !== cred || held !== view) return;
     if (!read.ok) return hubFailed(read);
     const served = read.value;
     // Another head, or another state at the held head's version (a recovery's first state, or a fork): read as the feed's
@@ -609,8 +617,9 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   }
 
   async function adopt(view: HeldOrg, served: Served): Promise<void> {
+    if (closed) return;
     const result = await view.adoptServed(served);
-    if (held !== view) return;
+    if (closed || held !== view) return;
     const before = problem;
     if (result.refused === 'rollback' || result.refused === 'fork') problem = result.refused;
     else if (result.adopted > 0 && (problem === 'rollback' || problem === 'fork')) problem = null;
@@ -696,6 +705,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     const cred = credential;
     if (closed || reg === null || cred === null || !hubLive() || problem !== 'held-chain') return;
     const read = await client(reg.hub, cred).chain(0);
+    if (closed) return;
     if (!read.ok) return hubFailed(read);
     const served = read.value;
     await commit(async () => {
@@ -706,9 +716,12 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
         anchor: reg.anchor,
         saveAnchor: saver.save,
         first: { chain: served.chain, transitions: served.transitions, certificates: served.certificates ?? { certs: [], retirements: [] } },
+        open,
         log,
       });
       if (!started.ok) return log(`the hub's chain does not hold the anchored state (${started.reason}); closed until a re-anchor`);
+      // Closed while chain.json was written: it holds the anchored state on its own line, so the next load takes it.
+      if (closed) return;
       const anchor = saver.kept()!;
       try {
         await files.write(REGISTRATION_FILE, { ...registration, anchor });
@@ -1074,7 +1087,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       }
     }
     const saver = anchorSaver();
-    const started = await startHeldOrg({ files, anchor: reg.anchor, saveAnchor: saver.save, log });
+    const started = await startHeldOrg({ files, anchor: reg.anchor, saveAnchor: saver.save, open, log });
     if (started.ok) {
       saver.hold(started.held);
       // A crash between chain.json and the anchor left the anchor below the held head: it is moved up.
@@ -1277,7 +1290,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       const dir = await files.ensure();
       if (!dir.ok) refuse('directory', dir.detail);
       const saver = anchorSaver();
-      const started = await startHeldOrg({ files, anchor: null, pins, first: { chain, transitions, certificates }, saveAnchor: saver.save, log });
+      const started = await startHeldOrg({ files, anchor: null, pins, first: { chain, transitions, certificates }, saveAnchor: saver.save, open, log });
       if (!started.ok) refuse('chain', started.reason);
       fence();
       await files.write(ACCESS_FILE, toAccessFile(code.hub, cred));
@@ -1389,7 +1402,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
             throw new Fenced();
           }
           const saver = anchorSaver();
-          const started = await startHeldOrg({ files, anchor: null, pins, first, saveAnchor: saver.save, log });
+          const started = await startHeldOrg({ files, anchor: null, pins, first, saveAnchor: saver.save, open, log });
           if (!started.ok) refuse('chain', started.reason);
           fence();
           if (cred !== credential) {
@@ -1580,7 +1593,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   }
 
   function signOut(): Promise<void> {
-    if (registration === null) return Promise.resolve();
+    if (closed || registration === null) return Promise.resolve();
     // The fence moves now, so every attempt's commit queued before the marker writes nothing more; memory too, so the
     // status reads signed out at once and an anchor written before the marker's turn carries it.
     if (attempt !== null) endAttempt('ended by sign-out');
@@ -1626,6 +1639,37 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     if (retired !== null) background('checking the retired keys', checkRetired);
   });
 
+  /**
+   * `close`, in M4a's four steps (*Close*): when it resolves nothing more is written under `org/`. Each writer there is
+   * one of the owners joined here: the commit queue, the held view's adoption queue, the session's load, and the
+   * producers that feed the two queues (the signer's operation, the sync, the deliveries' run, the weekly asking). A new
+   * writer joins one of them.
+   */
+  async function shut(): Promise<void> {
+    // 1. The fence: an attempt writes nothing more, no producer adopts or queues a write after its next await, the
+    //    commit queue takes no new turn, and every held view refuses adoptions (`open`).
+    if (attempt !== null) endAttempt('ended by quit');
+    generation++;
+    attempt?.abort();
+    closed = true;
+    // 2. The parts stop, each answering its operation in flight; a running pairing is cancelled.
+    pairing.cancel();
+    const c = composed;
+    c?.offs.forEach((off) => off());
+    const parts = c === null ? [] : [c.weekly.close(), c.deliveries.close(), c.signer.close()];
+    if (tokenTimer !== null) clearTimeout(tokenTimer);
+    if (certsTimer !== null) clearInterval(certsTimer);
+    if (recoverTimer !== null) clearInterval(recoverTimer);
+    unheld?.();
+    // 3. The producers in flight, joined from outside the commit queue (which never waits on them): the parts, the
+    //    sync and the load; then the held view's adoption queue, a write under way and a link's direct advance
+    //    included, once the load can no longer hold another view.
+    await Promise.all([...parts, syncing?.catch(() => {}), loaded]);
+    await held?.close();
+    // 4. The commit queue's tail.
+    await commits;
+  }
+
   const loaded = load()
     .catch((error: unknown) => log(`the org files did not load: ${(error as Error).message}`))
     .then(async () => {
@@ -1665,24 +1709,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     pairStart: (input) => pairing.start(input),
     pairApprove: (input) => pairing.approve(input),
     pairCancel: () => pairing.cancel(),
-    async close() {
-      if (closed) return;
-      if (attempt !== null) endAttempt('ended by quit');
-      generation++;
-      attempt?.abort();
-      closed = true;
-      if (composed !== null) {
-        composed.offs.forEach((off) => off());
-        composed.weekly.close();
-        composed.deliveries.close();
-        composed.signer.close();
-      }
-      if (tokenTimer !== null) clearTimeout(tokenTimer);
-      if (certsTimer !== null) clearInterval(certsTimer);
-      if (recoverTimer !== null) clearInterval(recoverTimer);
-      unheld?.();
-      await syncing?.catch(() => {});
-    },
+    close: () => (closing ??= shut()),
   };
 }
 

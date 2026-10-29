@@ -20,9 +20,10 @@
 //   doesn't hold the state, read from the hub then and there. A fork waits for it; so does a slot the hub keeps
 //   refusing for another reason (a courtesy check), which settling would otherwise post again forever.
 // - A sign-out or close fences what is in flight (`fence`, `close`): a sign asked for before it stops before Touch ID,
-//   before its slot is written and before any post; a settle or discard stops before its post or its write. A slot
-//   written before the sign-out stays, and settles at the next sign-in. Each post is made on the held line it was
-//   planned on, checked again synchronously after its exposure write, with the hub client of that moment.
+//   before its slot is written and before any post; a settle or discard stops before its post or its write; and none
+//   adopts a hub read it made before the fence. A slot written before the sign-out stays, and settles at the next
+//   sign-in. Each post is made on the held line it was planned on, checked again synchronously after its exposure write,
+//   with the hub client of that moment. `close` resolves once the operation in flight has ended (M4a's *Close*).
 // - The slot's state and its obligation settle apart: the slot at the hub's acceptance, the obligation (deliveries.ts,
 //   Task 5) when its machines acknowledge. A discard moves the obligation to `abandoned` in the same write.
 // - M4a: an edit may name devices this device endorses inside the same Touch ID (`Edit.endorse`; the checks count them
@@ -98,8 +99,11 @@ export interface OrgSigner {
   fence(): void;
   /** `pending()` changed (a slot written or cleared, its fork judged), so the status can be emitted again. */
   onChanged(listener: () => void): () => void;
-  /** Fences as `fence` does, for good: nothing in flight goes further. */
-  close(): void;
+  /**
+   * Fences as `fence` does, for good: nothing in flight goes further. Resolves once the operation in flight (a sign,
+   * settle, discard or reset, and a judging of the slot) has ended, so the session's close can join it.
+   */
+  close(): Promise<void>;
 }
 
 /** What the signer needs of deliveries.ts (Task 5's `Deliveries`). */
@@ -267,13 +271,21 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     judged = next;
     announce();
   }
-  const refreshNow = () => refresh().catch((error: unknown) => log(`judging the pending state failed: ${(error as Error).message}`));
+  /** The judgings in flight, which `close` joins: one may be clearing the slot. */
+  const judgings = new Set<Promise<void>>();
+  const refreshNow = (): Promise<void> => {
+    const judging = refresh().catch((error: unknown) => log(`judging the pending state failed: ${(error as Error).message}`));
+    judgings.add(judging);
+    void judging.finally(() => judgings.delete(judging));
+    return judging;
+  };
   const refreshed = () => void refreshNow();
   const unwatch = deps.session.onChanged(refreshed);
   refreshed();
 
-  /** Clears the slot if it still holds `slot`'s state. */
+  /** Clears the slot if it still holds `slot`'s state (never once closed: the next start settles it). */
   async function clear(slot: Pending): Promise<void> {
+    if (closed) return;
     const key = canonicalize(slot.signed.state);
     const cleared = await store.update((file) => {
       if (file.pending === null || canonicalize(file.pending.signed.state) !== key) return { next: file, value: false };
@@ -297,14 +309,20 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
    * The hub's chain read and adopted, by M1's rule (held.ts's `rereadFrom`): after the held head (or `from`), and again
    * from a recovery's base when the page carries a recovery from below the head, so a rewind is authenticated and taken
    * rather than refused as a rollback. `agreed`: the held head is now the hub's head; `why`: what kept it from being.
+   * Null with no held view, or once the lifecycle `asked` names has ended (a sign-out or close since a read): nothing
+   * read after it is adopted.
    */
-  async function follow(hub: HubClient, from?: number): Promise<{ read: HubResult<Served>; agreed: boolean; why?: string } | null> {
+  async function follow(hub: HubClient, asked: number, from?: number): Promise<{ read: HubResult<Served>; agreed: boolean; why?: string } | null> {
     const view = deps.held();
     if (view === null) return null;
     let read = await hub.chain(from ?? view.head().state.version);
+    if (!live(asked)) return null;
     if (read.ok) {
       const again = rereadFrom(view, read.value);
-      if (again !== null && (from === undefined || again < from)) read = await hub.chain(again);
+      if (again !== null && (from === undefined || again < from)) {
+        read = await hub.chain(again);
+        if (!live(asked)) return null;
+      }
     }
     if (!read.ok) {
       log(`the hub's chain did not read: ${describe(read)}`);
@@ -381,7 +399,9 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     heard(signed, answer.ok || answer.kind === 'unreachable' ? null : lost ? answer.error : describe(answer));
     if (answer.ok) {
       log(`version ${version} accepted by the hub`);
-      let why = (await follow(hub))?.why;
+      let why = (await follow(hub, asked))?.why;
+      // A sign-out or close since the post: nothing is adopted for it here; the slot settles at the next sign-in.
+      if (!live(asked)) return stopped(`version ${version} was posted, and stays pending until this Mac signs in again`);
       const view = deps.held();
       // Adopted directly when the chain's read didn't bring it: the held view verifies it as any state.
       if (view !== null && stateAt(view, version) === undefined) {
@@ -403,7 +423,7 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     }
     log(`version ${version}: the hub answered ${describe(answer)}; it stays pending`);
     if (answer.kind === 'status' && answer.status === 409 && (answer.error === 'not-head' || answer.error === 'rollback')) {
-      await follow(hub);
+      await follow(hub, asked);
       // The hub's chain holds it after all (an earlier post of the same bytes): settled.
       if (await clearIfHeld()) return { ok: true, version };
       return { ok: false, reason: 'hub', detail: answer.error };
@@ -429,7 +449,7 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     if (verdict === 'candidate') {
       const hub = deps.hub();
       if (hub === null) return;
-      const followed = await follow(hub);
+      const followed = await follow(hub, asked);
       if (followed === null || !followed.read.ok) return;
       const now = deps.held();
       if (now === null) return;
@@ -471,7 +491,8 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     // A hub that can't be read is passed over (direct delivery needs no hub); one whose head the held view won't take
     // is not: the held head may be one a recovery superseded, signed for with a root the recovery removed.
     const hub = deps.hub();
-    const followed = hub === null ? null : await follow(hub);
+    const followed = hub === null ? null : await follow(hub, asked);
+    if (!live(asked)) return stopped('nothing was signed');
     if (followed !== null && followed.read.ok && !followed.agreed) {
       return { ok: false, reason: 'hub', detail: `the hub's head was not taken here (${followed.why}): nothing is signed until the two agree` };
     }
@@ -599,7 +620,8 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
         const hub = deps.hub();
         if (hub === null) return { ok: false, reason: 'hub' };
         // The hub's chain from the slot's version, adopted first: the floor after the discard is its head.
-        const followed = await follow(hub, version - 1);
+        const followed = await follow(hub, asked, version - 1);
+        if (!live(asked)) return { ok: false };
         if (followed === null || !followed.read.ok) return { ok: false, reason: 'hub' };
         const served = followed.read.value;
         const there = served.chain.find((s) => s.state.version === version);
@@ -655,6 +677,7 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
       epoch++;
       unwatch();
       listeners.clear();
+      return Promise.all([turns, ...judgings]).then(() => undefined);
     },
   };
 }
