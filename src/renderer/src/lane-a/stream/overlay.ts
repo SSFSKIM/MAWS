@@ -143,7 +143,7 @@ export class LaneAOverlay {
     if (cut.length === 0) return;
     const now = new Date().toISOString();
     const rows = streamingRows(cut, (block) => this.since.get(blockKey(block)) ?? now, { kept: true });
-    const at = (end as StepEnd & { t?: unknown }).t;
+    const at = end.t;
     if (rows.length > 0) this.keeping.keep({ rows, at: typeof at === 'number' && Number.isFinite(at) ? at : null });
   }
 
