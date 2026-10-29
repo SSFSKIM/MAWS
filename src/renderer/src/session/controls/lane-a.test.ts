@@ -225,6 +225,16 @@ describe('the chips', () => {
     expect(port().controls.bindings().model.label).toBe('opus');
   });
 
+  // The O9 sitting (item 4): after `/model haiku` and `/effort low` in the terminal the chip still read Opus. It names
+  // what the session's latest request ran on; an override MAWS set names itself before the next request carries it.
+  it('names the model and effort the session runs on, an override MAWS set winning, each part on its own', () => {
+    expect(port({ model: 'claude-haiku-5-5', effort: 'low' }).controls.bindings().model.label).toBe('haiku low');
+    expect(port({ model: 'claude-haiku-5-5', effort: 'low', override: { model: 'sonnet', effort: null } }).controls.bindings().model.label).toBe('sonnet low');
+    expect(port({ model: 'claude-haiku-5-5', effort: 'low', override: { model: null, effort: 'high' } }).controls.bindings().model.label).toBe('haiku high');
+    // what MAWS set stays the selector's choice: the terminal's own is its Default
+    expect(port({ model: 'claude-haiku-5-5', effort: 'low' }).controls.bindings().model.value).toEqual({ model: null, effort: null });
+  });
+
   it('sends only what changed', async () => {
     const { fake, controls } = port({ override: { model: 'haiku', effort: null } }, { 'laneA.model': { state: 'done', result: {} } });
     expect(await controls.bindings().model.set({ model: 'haiku', effort: 'low' })).toEqual({ ok: true });

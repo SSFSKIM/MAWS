@@ -14,8 +14,9 @@
 //   the composer's upload strip (`lane-a/uploads.ts`). Nothing goes unless all of it can: the count, a `/` text, media's
 //   capability and the words' are checked first.
 // - The model chip lists the catalog's models (with `fable`, which the bridge takes though the catalog leaves it out)
-//   and the five efforts, names the bridge's override when set and the session's model otherwise, and sends only what
-//   changed. The mode and the directories are closed: no bridge op sets them.
+//   and the five efforts, names the bridge's override when set and otherwise the model and effort the session's latest
+//   request ran on, and sends only what changed. The mode and the directories are closed: no bridge op sets them, and
+//   no bridge event or read reports the session's permission mode.
 // - The palette lists the bridge's catalog and opens only the widgets a lane A read or op backs (the model selector,
 //   compact, MCP, the side question).
 // - M6: a card's answer is closed with its reason where §D can't carry it, and every answer once the request is the
@@ -232,7 +233,9 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
       project: null,
       model: {
         value: { model: override?.model ?? null, effort: (override?.effort ?? null) as BridgeEffort | null },
-        label: chipLabel(aliasOf(override?.model ?? state.model, rows), (override?.effort ?? null) as BridgeEffort | null),
+        // what the session runs on (its latest request's, so a `/model` or `/effort` typed in the terminal too), an
+        // override MAWS set naming itself before the next request carries it
+        label: chipLabel(aliasOf(override?.model ?? state.model, rows), (override?.effort ?? state.effort) as BridgeEffort | null),
         options: rows,
         disabled: modelClosed.available ? null : modelClosed.reason,
         // Only what changed goes: the bridge's `model` op replaces both, and main keeps the other as it reads it fresh.
