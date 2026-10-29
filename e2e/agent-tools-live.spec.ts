@@ -69,14 +69,17 @@ const TMP = {
 };
 const TASK_LIST_OVERRIDE = `maws-live-test-${RUN}`;
 const TASK_KINDS = new Set(['subagent.started', 'subagent.progress', 'subagent.finished', 'task.started', 'task.updated', 'task.notification', 'tasks.snapshot', 'workflow.progress', 'process.exited']);
-// The pass-2 script (scenarios/pass2/workflow.mjs) and the pass-3 slow one (scenarios/pass3/stop-task.mjs).
+// The pass-2 script (scenarios/pass2/workflow.mjs) and the pass-3 slow one (scenarios/pass3/stop-task.mjs). The slow agent's
+// command, like the parent's and the foreground agent's in vi and vii, is a `node` timer rather than a `sleep`: the engine's
+// Bash tool refuses a foreground command that starts with `sleep N`, N ≥ 25, on for every session since 2.1.310
+// (spikes/protocol-probe/findings-p5-e312-engine.txt).
 const WORKFLOW_SCRIPT = `export const meta = { name: 'maws-probe', description: 'Two echo agents in one phase', phases: [{ title: 'Echo' }] }
 phase('Echo')
 const out = await parallel([() => agent('Reply with exactly ALPHA and nothing else.', {label: 'alpha', effort: 'low'}), () => agent('Reply with exactly BETA and nothing else.', {label: 'beta', effort: 'low'})])
 return out`;
 const SLOW_WORKFLOW_SCRIPT = `export const meta = { name: 'maws-stop-task', description: 'One slow agent', phases: [{ title: 'Wait' }] }
 phase('Wait')
-return await agent('Run "sleep 90" with Bash, then reply SLOW.', { label: 'slow', effort: 'low' })`;
+return await agent('Run \`node -e "setTimeout(() => {}, 90000)"\` with Bash in the foreground, a 90-second job, then reply SLOW.', { label: 'slow', effort: 'low' })`;
 
 type Ev = { id: string; kind: string; seq: number | null; at: string; agentId: string | null } & Record<string, unknown>;
 type Status = {
@@ -778,13 +781,13 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
         };
       };
 
-      // Busy: the parent's turn is open (its own `sleep 60`) while the agent runs.
+      // Busy: the parent's turn is open (its own 60-second foreground job) while the agent runs.
       // The item's wording ("…; then run "sleep 60" with Bash yourself and reply DONE.") left the parent's own sleep
       // to the model, which folded it into the agent's task on the first run; the two duties are spelled out here.
-      const busyFrom = await s.send(`Do two things in this turn. First, dispatch one general-purpose agent in the background, model haiku: repeat rounds of Read README.md then "sleep 2" with Bash until ${TMP.stop} exists, appending any message you receive to ${TMP.inbox}. Second, once it is dispatched, run "sleep 60" with Bash yourself, in the foreground (not in the background), and then reply DONE.`);
+      const busyFrom = await s.send(`Do two things in this turn. First, dispatch one general-purpose agent in the background, model haiku: repeat rounds of Read README.md then "sleep 2" with Bash until ${TMP.stop} exists, appending any message you receive to ${TMP.inbox}. Second, once it is dispatched, run \`node -e "setTimeout(() => {}, 60000)"\` with Bash yourself, a 60-second job, in the foreground (not in the background), and then reply DONE.`);
       const busyAgent = await s.until('the relay agent’s start', (ev) => ev.find((e) => e.seq !== null && e.seq > busyFrom && e.kind === 'subagent.started' && e.isBackground === true));
       ids.relayBusy = busyAgent.taskId as string;
-      const sleepUse = await s.until('the parent’s sleep 60', (ev) => ev.find((e) => e.seq !== null && e.seq > busyFrom && e.kind === 'tool.use' && e.agentId === null && e.toolName === 'Bash' && JSON.stringify(e.input).includes('sleep 60')), 120_000);
+      const sleepUse = await s.until('the parent’s 60-second job', (ev) => ev.find((e) => e.seq !== null && e.seq > busyFrom && e.kind === 'tool.use' && e.agentId === null && e.toolName === 'Bash' && JSON.stringify(e.input).includes('60000')), 120_000);
       const busyStatus = await s.status();
       const busy = await relay(ids.relayBusy, `RELAY-${RUN}-BUSY`, true);
       expect(busy.resting, 'O3: the line rests at forwarded after delivery').toBe(busy.forwarded);
@@ -815,7 +818,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       await openSurface(pg, 'Subagents');
       const back = pnl.getByRole('button', { name: '‹ Subagents' });
       if (await back.isVisible()) await back.click();
-      const from = await sess.send('Dispatch one general-purpose agent in the foreground, model haiku: run "sleep 30" with Bash and reply OK; wait for it.');
+      const from = await sess.send('Dispatch one general-purpose agent in the foreground, model haiku: run `node -e "setTimeout(() => {}, 30000)"` with Bash, a 30-second job, and reply OK; wait for it.');
       const started = await sess.until('the foreground agent’s start', (ev) => ev.find((e) => e.seq !== null && e.seq > from && e.kind === 'subagent.started'));
       const dispatch = sess.events.find((e) => e.kind === 'tool.use' && e.toolUseId === started.toolUseId);
       await pnl.locator(`[data-agent-row="${started.taskId as string}"]`).click();

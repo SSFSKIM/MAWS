@@ -2,8 +2,9 @@
 // turn in flight, on the packaged build. The packaged app (MAWS_E2E_EXECUTABLE) launched as e2e/supervisor-packaged.spec.ts
 // launches it, with the engine host detached (MAWS_HOST_MODE=detached), the installed Claude Code (unmodified, D-1) through
 // ClaudeUsage's relay (GET /api/hello, one retry two minutes later, else `blocked: relay`), on Haiku in default permission
-// mode, under a scratch config home. One session runs `sleep 45; echo DONE_<nonce>` through Bash (a permission request
-// allowed once if the engine asks); while the sleep runs the app quits and the quit question is answered keep (MAWS_E2E_QUIT_ANSWER=keep); the app
+// mode, under a scratch config home. One session runs a 45-second foreground job through Bash that prints DONE_<nonce> at
+// its end (`foregroundJob`: a `node` timer, since 2.1.310 refuses a leading `sleep 45`; a permission request allowed once
+// if the engine asks); while the job runs the app quits and the quit question is answered keep (MAWS_E2E_QUIT_ANSWER=keep); the app
 // is relaunched within 10 s over the same profile. Asserted: the quit kept one mid-turn session and the supervisor and
 // the engine outlived the app; the relaunch connects to the same supervisor, which lists the session live with its turn
 // open and no DONE yet; DONE_<nonce> then arrives (the host's stream, the relaunched window's live batches and the
@@ -46,7 +47,7 @@ import { journalSpend } from './support/c12-prerun';
 import { menu } from './support/code-product';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { seedTranscripts } from './support/maws-tools';
-import { a15Line, a15Reading, initPluginsOf, installedEngine, liveOutDir, sittingLog } from './support/p1-live';
+import { a15Line, a15Reading, foregroundJob, initPluginsOf, installedEngine, liveOutDir, sittingLog } from './support/p1-live';
 import { isAlive, killScratchProcesses, ps } from './support/processes';
 import { sidebarOf, sidebarRow } from './support/sidebar';
 import { tmpSocketDirOf } from './support/supervisor-socket';
@@ -55,7 +56,7 @@ const EXECUTABLE = process.env.MAWS_E2E_EXECUTABLE ? resolve(REPO_ROOT, process.
 test.skip(process.env.MAWS_P1_LIVE !== '1' || EXECUTABLE === null, 'S5 runs only under MAWS_P1_LIVE=1 over a packaged MAWS_E2E_EXECUTABLE');
 
 const CAP_USD = Number(process.env.MAWS_S5_MAX_USD ?? '0.10');
-const SLEEP_S = 45;
+const JOB_S = 45;
 const RELAUNCH_WITHIN_MS = 10_000;
 
 const statusOf = async (page: Page, id: AppSessionId) => value(await invoke(page, 'session.status', { appSessionId: id }));
@@ -104,7 +105,7 @@ test('S5: a keep-quit mid-turn on the packaged build; the relaunch lists the ses
   const engine = installedEngine();
   const nonce = randomBytes(4).toString('hex');
   const DONE = `DONE_${nonce}`;
-  const PROMPT = `Run the Bash command \`sleep ${SLEEP_S}; echo ${DONE}\` yourself, in the foreground (never in the background, never through an agent, and with no timeout of your own), then reply with its output.`;
+  const PROMPT = `Run the Bash command \`${foregroundJob(JOB_S, DONE)}\` yourself, a ${JOB_S}-second job that prints ${DONE} when it ends, in the foreground (never in the background, never through an agent, and with no timeout of your own), then reply with its output.`;
 
   const root = `/private/tmp/maws-e11-s5-${process.env.MAWS_S5_STAMP ?? new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)}Z`;
   mkdirSync(root, { recursive: true });
@@ -182,7 +183,7 @@ test('S5: a keep-quit mid-turn on the packaged build; the relaunch lists the ses
 
   let failed = false;
   try {
-    // ---- the first app: the session launched, its Bash sleep allowed and running ---------------------------------------
+    // ---- the first app: the session launched, its Bash job allowed and running -----------------------------------------
     const first = await launch({ MAWS_E2E_QUIT_ANSWER: 'keep' });
     const host = await ready(first.page);
     expect(host.transport).toBe('detached');
@@ -199,10 +200,13 @@ test('S5: a keep-quit mid-turn on the packaged build; the relaunch lists the ses
     value(await invoke(first.page, 'session.send', { appSessionId: id, content: PROMPT }));
     note(`prompt sent at ${new Date().toISOString()}: ${PROMPT}`);
 
-    // the Bash call: 2.1.293 runs `sleep` and `echo` in default mode without asking (S5's first run, 2026-10-08), so a
-    // permission request is allowed once through the app's answer if one comes, and not waited for
+    // the Bash call: 2.1.293 ran `sleep` and `echo` in default mode without asking (S5's first run, 2026-10-08); the job's
+    // `node` may ask, so a permission request is allowed once through the app's answer if one comes. A request follows its
+    // tool use within milliseconds, so the call counts as running once its request is answered, or once it has been seen
+    // for 2 s with none
     type ToolUse = Extract<SessionEvent, { kind: 'tool.use' }>;
     let call: ToolUse | undefined;
+    let callSeenAt: number | undefined;
     const allowed: string[] = [];
     await expect
       .poll(async () => {
@@ -213,13 +217,16 @@ test('S5: a keep-quit mid-turn on the packaged build; the relaunch lists the ses
           allowed.push(r.requestId);
           note(`permission requested for ${r.toolName} ${JSON.stringify(r.input).slice(0, 160)}: allowed once`);
         }
-        call = events.find((e): e is ToolUse => e.kind === 'tool.use' && e.toolName === 'Bash' && holds(e.input, DONE));
-        return call !== undefined && events.some((e) => e.kind === 'permission.requested' && (e as { toolUseId: string }).toolUseId === call!.toolUseId && !resolved.has((e as { requestId: string }).requestId)) === false;
+        const found = (call = events.find((e): e is ToolUse => e.kind === 'tool.use' && e.toolName === 'Bash' && holds(e.input, DONE)));
+        if (found === undefined) return false;
+        const seenAt = (callSeenAt ??= Date.now());
+        const asks = events.filter((e) => e.kind === 'permission.requested' && (e as { toolUseId: string }).toolUseId === found.toolUseId).map((e) => (e as { requestId: string }).requestId);
+        return asks.every((r) => resolved.has(r)) && (asks.length > 0 || Date.now() - seenAt >= 2_000);
       }, { timeout: 120_000, message: 'the Bash call runs' })
       .toBe(true);
     const ranAt = Date.now();
     note(`the Bash call ${call!.toolUseId}: ${JSON.stringify(call!.input).slice(0, 200)}; permission requests ${allowed.length === 0 ? 'none (run without asking)' : `${allowed.length}, allowed once`}`);
-    // a few seconds into the sleep: the command runs, its result 40 s away
+    // a few seconds into the job: the command runs, its result 40 s away
     await first.page.waitForTimeout(4_000);
     const toolUseId = call!.toolUseId;
     const resultOf = (events: SessionEvent[]) => events.find((e): e is Extract<SessionEvent, { kind: 'tool.result' }> => e.kind === 'tool.result' && e.toolUseId === toolUseId);
@@ -266,7 +273,7 @@ test('S5: a keep-quit mid-turn on the packaged build; the relaunch lists the ses
     await showSession(second.page, id);
 
     // ---- DONE arrives -----------------------------------------------------------------------------------------------------
-    await expect.poll(async () => resultOf(await hostEvents(second.page, id)) !== undefined, { timeout: (SLEEP_S + 60) * 1000, message: 'the Bash call answers' }).toBe(true);
+    await expect.poll(async () => resultOf(await hostEvents(second.page, id)) !== undefined, { timeout: (JOB_S + 60) * 1000, message: 'the Bash call answers' }).toBe(true);
     const doneAt = Date.now();
     const result = resultOf(await hostEvents(second.page, id))!;
     expect(holds(result.content, DONE), `the command's output is ${DONE}`).toBe(true);

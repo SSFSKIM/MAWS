@@ -248,6 +248,12 @@ export function installedEngine(home: string = homedir()): { bin: string; versio
   return { bin, version };
 }
 
+// A foreground Bash job that runs `seconds` and then prints `marker`, for a case that needs a turn held open by a running
+// command. The engine's Bash tool refuses a command whose first part is `sleep N` with N ≥ 25 unless it runs in the
+// background (on for every session since 2.1.310; spikes/protocol-probe/findings-p5-e312-engine.txt), so the job is a
+// process of its own; `node` is on the login shell's PATH the engine's environment is captured from.
+export const foregroundJob = (seconds: number, marker: string): string => `node -e 'setTimeout(() => console.log("${marker}"), ${seconds * 1000})'`;
+
 // ---- the owner file (A-15) ----------------------------------------------------------------------------------------------
 
 export interface A15Reading {
