@@ -193,6 +193,25 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 
+  // The O9 sitting (item 6): after `/exit` the session left the sidebar. The terminal ending (its registry record and its
+  // bridge gone) leaves it listed, as an ended lane B session is, and no longer marked Terminal.
+  test('the terminal ending: the session stays listed, held by nothing, its bridge state gone', async () => {
+    const c = await begin();
+    const { page } = c;
+    const terminal = await drive(c);
+    const row = await sidebarRow(page, { appSessionId: c.appId });
+    await expect(page.locator('[role="tab"][aria-selected="true"] [data-holder-marker]')).toHaveText('Terminal');
+    await terminal.close();
+    c.terminal = null;
+    await expect.poll(async () => value(await invoke(page, 'session.get', { appSessionId: c.appId }))?.holder.kind, { timeout: 10_000 }).toBe('none');
+    await expect.poll(async () => value(await invoke(page, 'laneA.state', { appSessionId: c.appId })), { timeout: 10_000 }).toBeNull();
+    await expect(page.locator('[role="tab"][aria-selected="true"] [data-holder-marker]')).toHaveCount(0);
+    expect(value(await invoke(page, 'session.get', { appSessionId: c.appId }))?.archived).toBe(false);
+    await expect(row, 'still listed once nothing holds it').toBeVisible();
+    await expect((await sidebarRow(page, { appSessionId: c.appId })), 'and found again from the list').toBeVisible();
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
   test('the jobs list: a background shell the transcript started runs, its Stop reaches the bridge, and the transcript ending it ends it', async () => {
     const shellJob = { taskId: 'bsleep01', command: 'sleep 600', description: 'Wait ten minutes', at: '2026-10-28T10:00:03.000Z' };
     const c = await begin((sid, cwd, after) => backgroundBashRecords(sid, cwd, after, shellJob));
