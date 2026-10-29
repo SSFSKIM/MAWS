@@ -4,7 +4,8 @@
 // `<profile>/spine-ops.jsonl`, a spine file under `spine.lock` (a refused run opens none).
 //
 // `machine.op {opId, opCreated, claim, name, input}` runs only a `machine`-owned command whose grade is an act (any but
-// `list`, `view`, `client` and `internal`; a grade that follows its effect counts as an act), never itself
+// `list`, `view`, `client` and `internal`; a grade that follows its effect counts as an act), never itself, and never the
+// daemon's own namespace, which is no service's (a `daemon.restart` would end the process before its result is kept)
 // (`unavailable`); its input must hold to the command's schema (`malformed`). A known op id answers what the ledger holds
 // and runs nothing; else the claim is fsynced, the command runs through the bus's `invoke` (the table the root
 // registered, its intercept first, its output validated), and its answer (`{ok, value}` or `{ok: false, error}`, a throw
@@ -29,7 +30,7 @@ const NOT_ACTS: ReadonlySet<string> = new Set(['list', 'view', 'client', 'intern
 
 /** Whether `machine.op` claims `name`: a `machine`-owned act. */
 export function claimable(name: string): name is CommandName {
-  if (!Object.hasOwn(REGISTRY.commands, name) || REGISTRY.commands[name as CommandName].owner !== 'machine') return false;
+  if (!Object.hasOwn(REGISTRY.commands, name) || REGISTRY.commands[name as CommandName].owner !== 'machine' || name.startsWith('daemon.')) return false;
   const grade = gradeOf(name);
   if (grade === undefined) return false;
   return typeof grade === 'object' || !NOT_ACTS.has(grade);

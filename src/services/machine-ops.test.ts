@@ -56,6 +56,7 @@ describe('machine.op', () => {
     expect(await ask('session.list', { includeArchived: false })).toEqual({ state: 'refused', reason: 'unavailable' }); // a read
     expect(await ask('session.follow', { sessions: [], live: false })).toEqual({ state: 'refused', reason: 'unavailable' }); // internal
     expect(await ask('machine.op', {})).toEqual({ state: 'refused', reason: 'unavailable' });
+    expect(await ask('daemon.restart', {})).toEqual({ state: 'refused', reason: 'unavailable' }); // mawsd's own, not a service's
     expect(await ask('session.nonesuch', {})).toEqual({ state: 'refused', reason: 'unavailable' });
     expect(await ask('session.rename', { appSessionId: 'app-1', title: 7 })).toEqual({ state: 'refused', reason: 'malformed' });
     expect(invoke).not.toHaveBeenCalled();
