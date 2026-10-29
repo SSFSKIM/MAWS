@@ -399,7 +399,22 @@ export async function item8(scene: Scene, report: ItemReport): Promise<void> {
         return 'daemon.status and endpoint.listings answered';
       });
     } else for (const check of ['a `view` read on a session the member holds nothing on', 'acts refused below their grades', 'the machine’s reads for any member']) report.add('8', 'skip', check, 'no second member in this run');
-    await report.check('8', 'an owner’s spawn needs step-up', async () => refusedAs(mine, mine.device.action({ machine: scene.ref, action: 'sminos.spawn', args: { checkout: scene.laneA.checkout, brief: 'o10-m11: refused' } }), 'step-up'));
+    await report.check('8', 'an owner’s spawn needs step-up', async () => {
+      // The endpoint knows a checkout only from sminos's `machine` presence, which may come a while after lane A
+      // starts, and the checkout is judged before presence: a spawn refused `unknown-checkout` (before anything runs) is
+      // asked again, up to 60 s, and then fails with what the endpoint logged of presences and checkouts.
+      const mark = await scene.machine.logMark();
+      const deadline = Date.now() + 60_000;
+      for (;;) {
+        const said = await mine.act(mine.device.action({ machine: scene.ref, action: 'sminos.spawn', args: { checkout: scene.laneA.checkout, brief: 'o10-m11: refused' } }));
+        if (said === 'step-up') return 'sminos.spawn: step-up';
+        if (said !== 'unknown-checkout' || Date.now() > deadline) {
+          const seen = said === 'unknown-checkout' ? (await scene.machine.logSince(mark)).filter((l) => /presence|checkout/i.test(l)).slice(-3) : [];
+          throw new Error(`sminos.spawn was answered ${said}, not step-up${said === 'unknown-checkout' ? `: the checkout ${scene.laneA.checkout} still unknown after 60 s (the endpoint logged ${seen.join(' / ') || 'nothing of presences or checkouts'})` : ''}`);
+        }
+        await sleep(5000);
+      }
+    });
     await report.check('8', 'what production’s offer table doesn’t offer is refused `not-offered`, the owner’s too', async () => {
       const said: string[] = [];
       said.push(await refusedAs(mine, mine.device.action({ machine: scene.ref, action: 'pty.spawn', args: {} }), 'not-offered'));

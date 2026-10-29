@@ -422,3 +422,25 @@ describe('the machine’s own events, this run’s', () => {
     expect(sessionResidue('proj-m', 10, [])).toBe('the machine’s own events in the project proj-m after offset 10, written by the run’s sessions (lane A, the spawn): none');
   });
 });
+
+describe('the run’s channel, as a device holds one', () => {
+  it('answers the endpoint’s ping with a pong, so a channel the run is quiet on is not closed `timeout`', async () => {
+    const { Remote } = await import('../../deploy/endpoint-remote.ts');
+    let deliver: (m: unknown) => void = () => {};
+    const sent: unknown[] = [];
+    const channel = { onMessage: (f: (m: unknown) => void) => void (deliver = f), onClose: () => {}, send: async (m: unknown) => void sent.push(m) };
+    const remote = new Remote({} as never, channel as never);
+    deliver({ t: 'ping', at: 1234 });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sent).toEqual([{ t: 'pong', at: 1234 }]);
+    expect(remote.inbox).toEqual([{ t: 'ping', at: 1234 }]);
+  });
+});
+
+describe('the hub deploy item 2 runs', () => {
+  it('runs outside the package script the run itself is (pnpm refuses a nested `--filter` run inside one)', async () => {
+    const { hubDeployEnv } = await import('../../deploy/endpoint-acceptance.ts');
+    const env = hubDeployEnv({ HOME: '/h', PATH: '/bin', PNPM_SCRIPT_SRC_DIR: '/w/apps/desk-hub', npm_lifecycle_event: 'deployment', npm_package_name: 'desk-hub', pnpm_config_verify_deps_before_run: 'false', DESK_STAGING_DEVICE: '/d' });
+    expect(env).toEqual({ HOME: '/h', PATH: '/bin', DESK_STAGING_DEVICE: '/d' });
+  });
+});

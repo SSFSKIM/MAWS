@@ -280,7 +280,12 @@ export class Remote {
     readonly device: TestDevice,
     readonly channel: Channel,
   ) {
-    channel.onMessage((m) => void this.inbox.push(m as Msg));
+    channel.onMessage((m) => {
+      // A device answers the endpoint's ping (RL §4.5): a channel left silent for two of them is closed `timeout`, as
+      // the run's would be while it waits on something long (a hub deploy's build).
+      if ((m as Msg).t === 'ping') void channel.send({ t: 'pong', at: (m as Msg).at as number }).catch(() => {});
+      this.inbox.push(m as Msg);
+    });
     this.closed = new Promise<string>((resolve) => channel.onClose((reason) => resolve((this.#reason = reason))));
   }
 

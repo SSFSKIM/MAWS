@@ -372,6 +372,15 @@ export function setupPayload(app: string, repo: string, bundle: string): Record<
   };
 }
 
+/**
+ * The environment item 2's hub deploy runs in: the run's own, less the package-script context pnpm gave the run (its
+ * `npm_*` and `pnpm_*` variables): inside one, the deploy's own `pnpm --filter desk-hub deployment` is refused "None of
+ * the selected packages has a "deployment" script" (part 1b, 2026-10-29).
+ */
+export function hubDeployEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !/^(npm|pnpm)_/i.test(name)));
+}
+
 /** Runs `command` to its end within `ms`, its output through `print` line by line; throws on a non-zero status. */
 function run(command: string, args: string[], print: (line: string) => void, ms: number, options: { cwd?: string; env?: NodeJS.ProcessEnv; input?: string } = {}): Promise<void> {
   return new Promise((done, fail) => {
@@ -506,7 +515,7 @@ export async function main(argv: string[]): Promise<number> {
   const device = await loadAdminDevice(values['device-keys'] as string);
   const machine = new VmMachine(ssh, scratch, { directUrl: directUrlFor('staging', values['direct-url'] as string | undefined), log: (line) => log(`  vm: ${line}`), ...interruption });
   const deployScript = values['hub-deploy'] as string | undefined;
-  const hubDeploy = deployScript === undefined ? null : () => run('zsh', [deployScript, 'deploy'], log, DEPLOY_MS);
+  const hubDeploy = deployScript === undefined ? null : () => run('zsh', [deployScript, 'deploy'], log, DEPLOY_MS, { env: hubDeployEnv(process.env) });
   return runEndpointAcceptance({
     target: 'staging',
     person,
