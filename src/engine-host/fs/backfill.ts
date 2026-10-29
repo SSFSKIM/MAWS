@@ -52,6 +52,9 @@ export interface BackfillContext {
   // the owner's words the bridge delivered while none did, waiting for the turn that answers them (withWaitingWords)
   running: boolean;
   readonly waitingWords: { uuid: MessageUuid; content: string }[];
+  // P5 O9 (the M10 sitting): the latest `<local-command-caveat>` record, whose child is a command the terminal ran
+  // (localCommandTurn, below)
+  localCaveat: MessageUuid | null;
 }
 
 export function createBackfillContext(init: {
@@ -76,6 +79,7 @@ export function createBackfillContext(init: {
     bridgeRows: new Map(),
     running: false,
     waitingWords: [],
+    localCaveat: null,
   };
 }
 
@@ -284,8 +288,10 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
     }
     const origin = notification === null ? humanOrigin : 'task-notification'; // preserve typed provenance; notifications are engine-initiated
     const bash = parseBash(content);
+    const command = localCommandTurn(record, ctx);
     turn(origin);
     events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: bashStripped(content, bash), isReplay: false, isSynthetic: isMeta, origin, bash });
+    if (command) events.push(endedOf(base, uuid, null));
     if (record.isMeta === true) hookFeedback(content, uuid, base, events);
     // The real completion of a background agent: the notification naming the tool use that started it.
     if (notification !== null && notification.toolUseId !== null) {
@@ -521,24 +527,7 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
       events.push({ ...base(), kind: 'turn.started', userMessageUuid: uuid, origin: null });
       prompt();
       blockingHook(uuid, 'UserPromptSubmit', blocked.blockingError, base, events);
-      events.push({
-        ...base(),
-        kind: 'turn.ended',
-        result: 'success',
-        isError: false,
-        terminalReason: null,
-        resultText: blocked.text,
-        durationMs: 0,
-        numTurns: 0,
-        costUsd: 0,
-        usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, thinkingTokens: null },
-        permissionDenials: [],
-        errors: [],
-        userMessageUuids: [uuid],
-        origin: null,
-        resultIndex: null,
-        isEchoReceipt: false,
-      });
+      events.push(endedOf(base, uuid, blocked.text));
       return;
     }
   }
@@ -658,6 +647,43 @@ function isBridgeWake(record: TranscriptRecord): boolean {
     body = envelope?.kind === 'cross-session' && envelope.frame === null ? envelope.body : null;
   }
   return body !== null && body.split('\n', 1)[0] === BRIDGE_WAKE_LINE;
+}
+
+// The end of a turn that ran nothing (`num_turns` 0), as the live stream has one: a prompt a hook blocked, a command the
+// terminal ran.
+function endedOf(base: Base, uuid: MessageUuid, resultText: string | null): SessionEvent {
+  return {
+    ...base(),
+    kind: 'turn.ended',
+    result: 'success',
+    isError: false,
+    terminalReason: null,
+    resultText,
+    durationMs: 0,
+    numTurns: 0,
+    costUsd: 0,
+    usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, thinkingTokens: null },
+    permissionDenials: [],
+    errors: [],
+    userMessageUuids: [uuid],
+    origin: null,
+    resultIndex: null,
+    isEchoReceipt: false,
+  };
+}
+
+// P5 O9 (the M10 sitting): a command typed at the terminal (`/model haiku`, `/effort low`) is written as three user
+// records: the engine's `<local-command-caveat>` (meta), the command's own record under it (`<command-name>…`, not
+// meta), then its output (2.1.312, the sitting's transcript; w1-compact.jsonl lines 30-32 on 2.1.283). The command's
+// record opens its turn as any prompt does, its words the person's bubble, but a local command runs no model: nothing
+// on disk ends that turn (no `turn_duration`), so its turn ends where it starts, as the live stream's `result` for a
+// local command ends it, and the output joins it. Only the record under a caveat: a skill's command record has none,
+// and its turn runs the model. Called on every user record with text a context maps, in order.
+function localCommandTurn(record: TranscriptRecord, ctx: BackfillContext): boolean {
+  const kind = localCommandKind(record);
+  const caveat = ctx.localCaveat;
+  ctx.localCaveat = kind === 'caveat' && typeof record.uuid === 'string' ? (record.uuid as MessageUuid) : null;
+  return kind === 'echo' && caveat !== null && record.parentUuid === caveat;
 }
 
 // A prompt a UserPromptSubmit hook blocked leaves no user record, only a system `informational` record:
