@@ -7,12 +7,13 @@
 // Only the reader's own clicks move: a turn that folds by itself (it finished while followed) or opens for a jump
 // changes at once, as Codex's does (its duration is 0 unless the reader toggled).
 import { CLOSE_MOTION, OPEN_MOTION, prefersReducedMotion } from '../../ui/disclosure';
-import { isPersistentRow } from '../model/derive';
+import { staysInView } from '../model/derive';
 import type { Row, TurnId } from '../model/rows';
 
 // A row the divider folds away: its turn's rows but the divider, the receipt, time separators and the rows that stay in
-// view when the turn folds (the divider's own aria-controls reads the same set off the list).
-export const inWorkArea = (row: Row) => row.turnId !== null && row.kind !== 'divider' && row.kind !== 'receipt' && row.kind !== 'time' && !isPersistentRow(row);
+// view when the turn folds (the divider's own aria-controls reads the same set off the list), an `Agent` call's while its
+// agents work among them.
+export const inWorkArea = (row: Row) => row.turnId !== null && row.kind !== 'divider' && row.kind !== 'receipt' && row.kind !== 'time' && !staysInView(row);
 
 export class WorkMotion {
   private folding = new Map<TurnId, ReturnType<typeof setTimeout>>();

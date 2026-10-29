@@ -134,6 +134,14 @@ export const isPersistentRow = (row: Row): boolean =>
   || isPersistentMessage(row) // E7
   || row.kind === 'owner_record'; // P2-C (2026-10-09): placed by the report projection, never a work row
 
+// P5 O9 (the M10 sitting): the rows the fold leaves in view, the persistent ones and, while any agent it names still
+// works, an `Agent` call's row. A turn can end while the agents it started work in the background (a terminal session's
+// engine runs them so, and its turn ends at once): their row stays in view, as a turn still running shows it, until
+// every one of them has ended, then folds with the turn's other work. It stays the turn's work, so the divider is as
+// before.
+const AGENTS_ENDED: ReadonlySet<SubagentStatus> = new Set(['finished', 'finished_with_errors', 'stopped']);
+export const staysInView = (row: Row): boolean => isPersistentRow(row) || (row.kind === 'subagent' && !AGENTS_ENDED.has(row.status));
+
 // W1: a message held in MAWS's queue until the running turn ends, as the dimmed bubble the transcript's tail shows
 // for it (Claude Desktop's pattern); it becomes its own turn when the queue releases it.
 export function heldRow(entry: Pick<QueueEntry, 'queueId' | 'content' | 'createdAt'>): RowOf<'user'> {
@@ -885,7 +893,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       toolCalls: summary.toolCalls, denied: denied.length, autoDenied: summary.autoDenied, firstDeniedCell: firstDenied, expanded, summary, files: changedFiles(cells, turn),
     });
   }
-  rows.push(...(expanded ? allRows : allRows.filter(isPersistentRow))); // with no divider there is no work: every row is persistent
+  rows.push(...(expanded ? allRows : allRows.filter(staysInView))); // with no divider there is no work: every row is persistent
   return { rows, summary, cells, work: workOf(turn, tools, cells, subagents, state?.cwd ?? null), readAgents };
 }
 
