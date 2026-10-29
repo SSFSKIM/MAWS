@@ -1648,6 +1648,8 @@ Each is built as its recommendation when its milestone is re-planned, unless the
 - Observation (M5): `App.test.tsx` runs in the `renderer-timing` vitest project, not `renderer` (`vitest.config.ts:57`).
 - Observation (M4a Task 2, 2026-10-29): before `successorProblems`, a machine posting a key another machine already held (the hub doesn't check) made `enroll` sign a successor the package refuses. The admin kept it pending, the hub answered `409 malformed`, and every later verb failed until `abandon-pending`. It is now refused before anything is signed.
   Evidence: the admin test's RED run in Task 2 (`m4a-task-2-report.md`).
+- Observation (M4a Task 5, 2026-10-29): the first version of the signer's close test was itself flaky. Its "before" listing was taken while the prior adoption's anchor write was in flight (a `.tmp` entry, 4 against 3). The listing is now taken after `close()` resolves, which is what the spec asserts; the fence is shown by the head staying put in memory and in `chain.json`.
+  Evidence: `m4a-task-5-report.md`, Discoveries; `org-session.test.ts` 20 runs in a row clean with both workarounds removed.
 
 ## Decision Log
 
@@ -2106,6 +2108,19 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   11. `names/org.ts` lists the six new commands. `index.ts` and `grades/org.ts` needed nothing.
   12. A pairing that ends during Touch ID reads `cancelled`. One that ends before Touch ID reads `stale`.
   13. Task 5: `close()` cancels a running pairing in its "stop the parts" step.
+  Date/Author: 2026-10-29, O8's executor.
+
+- Decision: M4a Task 5, `close()`'s fence and join (9b9f8945d), settles these points.
+  1. The commit queue itself refuses a new turn once the session is closed (a rejected promise), so every queued writer is covered without a check of its own; turns already queued still run. Its callers already handle the rejection, and the parts check `closed` before their updates, so a normal quit logs no refusal.
+  2. An adoption whose `chain.json` write lands before close but whose anchor write comes after it has that anchor refused. This is the crash case the load rule already settles (the anchor moved up to the head at the next load), and a session test pins both halves.
+  3. The guard is `StartInput.open`, a property of the held view, optional with absent meaning always open. Being the view's, it also covers a link's direct `advance` and the signer's own `adoptServed`; the session's four call sites pass it.
+  4. The signer's lifecycle epoch fences adoption after a sign-out too, as step 1 says ("checks its lifecycle epoch there, as its posts already do"). One behaviour changes: a 201 post whose follow-up read lands after a sign-out answers `not-root` and the slot stays pending until the next sign-in settles it.
+  5. The join order is the parts, the sync and the load first, then `held.close()`, then the commit queue's tail. The load can hold a new view until it ends, so `held` is read only after it; nothing in the commit queue waits on a producer or on the adoption queue, so the order cannot deadlock.
+  6. Interface §K's `close(): void` becomes `close(): Promise<void>` for `OrgSigner`, `Weekly` and `Deliveries`.
+  7. Main's quit awaits the session's `close()`, bounded by the shutdown steps' grace, so a Touch ID sheet open at quit cannot hold the exit indefinitely.
+  8. The pairing's cancel at close has no test of its own: a pairing whose context reads null already stops itself (Task 4, item 7).
+  9. A signer test that closed inside its Touch ID wait now starts the close there and awaits it after the sign, since awaiting it inside would wait on itself.
+  10. `close()` does not join the two writers under `device/`, `checkRetired`'s key destruction and a fenced rekey's `discardNext`: the rule covers `org/`. They did not trip the teardown's `rm` in 20 runs; if one does, join `retiredWork` and `keyWork` in step 3.
   Date/Author: 2026-10-29, O8's executor.
 
 ## Outcomes & Retrospective
