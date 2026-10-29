@@ -421,7 +421,11 @@ export class Endpoint implements EndpointModule {
         this.laneB.event(owner, message);
       }),
       services.onAttachment((attached) => this.planeB.attachment(attached)),
-      services.onUpstream((link) => void (link.connected && this.laneB.restate())),
+      services.onUpstream((link) => {
+        if (!link.connected) return;
+        this.laneB.restate();
+        this.planeB.relinked(); // P5 O3-D D41: each streaming of the link, every subscription catches up from its cursor
+      }),
     );
     if (state.refusing !== null) return;
     // A provisioning interrupted mid-set (O14 M1) is whole again before anything below reads the directory.
