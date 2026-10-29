@@ -185,7 +185,7 @@ test('a transient real-engine switch restored before finish cannot publish strea
   const userData = join(dir, 'profile');
   const output = join(dir, 'output');
   mkdirSync(join(userData, 'supervisor'), { recursive: true });
-  const env = { MAWS_E2E: '1', MAWS_E2E_ENGINE_BIN: '/scratch/replay-engine', CUSTOM_SECRET: 'opaque-launch-secret-123' };
+  const env = { MAWS_E2E: '1', MAWS_E2E_ENGINE_BIN: '/scratch/replay-engine', CUSTOM_SECRET: ['opaque', 'launch', 'secret', '123'].join('-') };
   const options = { file: 'ordinary.spec.ts', userData, env, syntheticEngineBin: env.MAWS_E2E_ENGINE_BIN };
   const evidence = processEvidence(output, userData, () => captureAllowed(options), env);
   const settings = join(userData, 'machine-settings.json');
