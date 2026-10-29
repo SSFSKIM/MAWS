@@ -5,8 +5,9 @@
 // - a main-loop request whose last user text says `o10-m11 ticks <k> <tag>` starts a tool loop: `echo o10-m11 tick
 //   1/<k> <tag>` through Bash, and each tool result for tick i < k answers tick i + 1, the last a plain text turn; so
 //   the session goes on writing rows by itself (two per tick) while the run cuts its links;
-// - one whose last user text says `o10-m11 ask <tag>` asks its owner a question (AskUserQuestion, which no permission
-//   mode answers for them; the bridge raises the request);
+// - one whose last user text says `o10-m11 ask <tag>` asks its owner a question and waits for it (sminos's
+//   mcp__sminos__AskUserQuestion with async false, which withdraws the built-in; no permission mode answers it; the
+//   bridge raises the request);
 // - any other main-loop request is answered with a short text turn naming the request;
 // - a side request (a title, a classifier) with a short text; count_tokens a fixed count; any other path 404.
 // Each answer waits `--delay-ms` (default 700), so a run of ticks spreads over time. Usage:
@@ -60,7 +61,7 @@ export function answer(body) {
       { label: 'yes', description: 'o10-m11: yes' },
       { label: 'no', description: 'o10-m11: no' },
     ];
-    return toolTurn(`toolu_o10m11_ask_${ask[1]}`, 'AskUserQuestion', { questions: [{ question: `o10-m11 question ${ask[1]}?`, header: 'o10-m11', options, multiSelect: false }] });
+    return toolTurn(`toolu_o10m11_ask_${ask[1]}`, 'mcp__sminos__AskUserQuestion', { questions: [{ question: `o10-m11 question ${ask[1]}?`, header: 'o10-m11', options, multiSelect: false }], async: false });
   }
   const ticks = TICKS.exec(text);
   if (ticks) {
