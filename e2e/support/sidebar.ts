@@ -37,11 +37,18 @@ export async function showProjectList(page: Page): Promise<void> {
 // a read that says collapsed, and the row is read back until it holds expanded; a click the restored state overtook is
 // made again from a fresh read (a click is a discrete event, whose toggle React renders before the event's dispatch
 // returns to Playwright, so the read-back does not race the click it follows).
+// P5 O3-B: a row that never holds expanded is named with every project row then on the list (its tree id and state),
+// so a failure says whether the row was there and collapsing, or gone.
 async function expandRow(page: Page, row: Locator): Promise<void> {
-  await expect(async () => {
-    if ((await row.getAttribute('aria-expanded')) !== 'true') await projectLine(row).click();
-    await expect(row).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 });
-  }).toPass({ timeout: 10_000 });
+  try {
+    await expect(async () => {
+      if ((await row.getAttribute('aria-expanded', { timeout: 1_000 })) !== 'true') await projectLine(row).click({ timeout: 1_000 });
+      await expect(row).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 });
+    }).toPass({ timeout: 10_000 });
+  } catch (error) {
+    const rows = await sidebarOf(page).locator('[data-kind="project"]').evaluateAll((els) => els.map((el) => `${el.getAttribute('data-tree-id')} ${el.getAttribute('aria-expanded')}`)).catch(() => []);
+    throw new Error(`${row} did not hold expanded; the project rows: ${rows.join('; ') || 'none'}`, { cause: error });
+  }
   await settled(page);
 }
 
@@ -98,6 +105,10 @@ export async function sidebarRow(page: Page, match: SessionMatch, machine?: Mach
   let project = sidebarOf(page).locator('[data-kind="project"]').first();
   await expect(async () => {
     const bare = await read();
+    // P5 O3-B (terminal-take-over.ts:26, a flake of after-set 2 on 67ccfdd35, run 40807073983): a project just added
+    // (above) is re-keyed from its address to its org project's key once its machine derives one, as a new row,
+    // collapsed; a row located before that names no row after it. So the read is made again until the key has derived.
+    if (bare !== null && bare.org === null) throw new Error(`project ${bare.id} has no org project yet`);
     const keys = bare === null ? [`machine:${machine ?? (await localRef(page))}`] : [...(bare.org === null ? [] : [bare.org]), await address(bare.id)];
     await showProjectList(page);
     project = sidebarOf(page).locator(keys.map((key) => `[data-kind="project"][data-tree-id="p:${key}"]`).join(', '));

@@ -225,7 +225,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     if (keychainScene) keychainWatch = watchKeychainPrompt(() => child?.pid !== undefined && killTree(child.pid)); // the app, its hosts, their engines and their `security` children
     launchedHook?.(app); // E4b
     app.on('close', () => (closed = true));
-    const page = await app.firstWindow();
+    const page = await appWindow(app); // P5 O3-B: the app's own window, not whichever page came first
     applications.set(page, app);
     const consoleErrors = await collectConsoleErrors(page);
     await sizeForGroup(app, page); // P3-F1
@@ -281,6 +281,29 @@ async function placeForInstance(app: ElectronApplication): Promise<void> {
   });
   const { x, y } = cornerOrigin(corner, area, size);
   await app.evaluate(({ BrowserWindow }, [x, y]) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setPosition(x, y), [x, y] as const);
+}
+
+// P5 O3-B (browser-chrome.spec.ts:747, a flake of after-set 1 on 67ccfdd35, run 40786637414): `firstWindow` resolves on
+// the first page target, which may be another page than the app's (a tab or an extension page a relaunch restores) or the
+// app's own before its document has loaded; either way `window.maws` was missing where the scene read it. The app's
+// window is the one whose preload exposes `window.maws`, so the launch waits, at most 30 s, for a window that does, and
+// says so when the first was not it at once (its URL then, and the one taken).
+const APP_WINDOW_MS = 30_000;
+async function appWindow(app: ElectronApplication): Promise<Page> {
+  const first = await app.firstWindow();
+  const bridged = (page: Page) => page.evaluate(() => typeof window.maws !== 'undefined').catch(() => false);
+  if (await bridged(first)) return first;
+  const firstUrl = first.url();
+  const started = Date.now();
+  for (;;) {
+    for (const page of app.windows()) {
+      if (!(await bridged(page))) continue;
+      console.log(`[e2e] the first window (${firstUrl}) had no window.maws; took ${page === first ? 'it' : 'another window'} at ${page.url()} after ${Date.now() - started} ms`);
+      return page;
+    }
+    if (Date.now() - started >= APP_WINDOW_MS) return first; // the spec's own reads then say what is missing
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
 }
 
 // P5 O3-B: on the daemon shape a launch starts its hosts cold, `mawsd` first and then the engine host and pty host it
