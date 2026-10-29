@@ -63,8 +63,16 @@ describe('rule B: staying code reads the spine only through the view', () => {
     expect(await rulesFired("import type { SpineView } from '@shared/spine/view';\nexport type V = SpineView;\n", CLIENT)).toEqual([]);
   });
 
-  it("leaves main's root and the client's suites free to import the library", async () => {
+  // M4: main's root reaches the library through its one door, the services entry
+  it("holds main's root to the services entry", async () => {
     expect(await rulesFired("import { startSpine } from '../services/entry';\nexport const s = startSpine;\n", 'src/main/index.ts')).toEqual([]);
+    expect(await rulesFired("import type { SpineData } from '../services/entry';\nexport type D = SpineData;\n", 'src/main/index.ts')).toEqual([]);
+    expect(await rulesFired("import { Index } from '../services/index/index';\nexport const i = Index;\n", 'src/main/index.ts')).toEqual(['no-restricted-imports']);
+    expect(await rulesFired("import { startSpine } from '../services/spine-root';\nexport const s = startSpine;\n", 'src/main/index.ts')).toEqual(['no-restricted-imports']);
+    expect(await rulesFired("import { entry } from '../services/entry/x';\nexport const e = entry;\n", 'src/main/index.ts')).toEqual(['no-restricted-imports']);
+  });
+
+  it("leaves the client's suites free to import the library", async () => {
     expect(await rulesFired("import { Index } from '../../services/index/index';\nexport const i = Index;\n", 'src/main/browser/__lint_fixture__.test.ts')).toEqual([]);
     expect(await rulesFired("import { Index } from '../../services/index/index';\nexport const i = Index;\n", 'src/main/connectors/__lint_fixture__.test.ts')).toEqual([]);
   });

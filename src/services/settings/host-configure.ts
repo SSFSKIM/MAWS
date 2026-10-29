@@ -3,12 +3,13 @@
 // (the idle time is process state, and a supervisor main reconnects to may have been started by another app run) and
 // whenever the setting changes while it is. A supervisor never told keeps its own default of 10 minutes. Under the e2e
 // harness MAWS_E2E_SUPERVISOR_IDLE_MS takes the setting's place, so a test sees an idle exit in seconds.
-import type { CommandInput, CommandResult, HostState, Settings } from '@shared/ipc/schema';
+import type { CommandInput, CommandResult, HostState } from '@shared/ipc/schema';
+import type { MachineSettings } from '@shared/ipc/schema/settings';
 import { MAX_IDLE_EXIT_MS } from '@shared/ipc/schema/host';
 
 export interface HostConfigureDeps {
-  settings(): Settings;
-  onSettingsChanged(listener: (settings: Settings) => void): () => void; // settings.changed as main emits it
+  settings(): Pick<MachineSettings, 'supervisor'>;
+  onSettingsChanged(listener: (settings: Pick<MachineSettings, 'supervisor'>) => void): () => void; // the machine half's changes (P5 O3-C D12)
   hostState(): HostState;
   onHostState(listener: (state: HostState) => void): () => void; // the engine host's transitions
   dispatch(input: CommandInput<'host.configure'>): Promise<CommandResult<'host.configure'>>;
@@ -16,7 +17,7 @@ export interface HostConfigureDeps {
 }
 
 // The idle time to push: the e2e seam, else the setting in minutes (null: never).
-export function idleExitMsOf(settings: Settings, env: Record<string, string | undefined>): number | null {
+export function idleExitMsOf(settings: Pick<MachineSettings, 'supervisor'>, env: Record<string, string | undefined>): number | null {
   const seam = env.MAWS_E2E === '1' ? env.MAWS_E2E_SUPERVISOR_IDLE_MS : undefined;
   if (seam !== undefined) {
     const ms = Number(seam);

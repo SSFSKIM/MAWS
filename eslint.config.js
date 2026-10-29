@@ -46,7 +46,7 @@ const CLIENT_PORT_DYNAMIC = { selector: 'ImportExpression[source.value=/^(?:elec
 // (the spine O3-D moves into mawsd and the checkouts O3-E moves), is composed by its roots from injected dependencies.
 // Rule A: it imports nothing from main, mawsd, the renderer or the preload, nor Electron. Rule B: nothing under
 // src/main/ but its root imports from it; staying code reads the spine through the view. Tests are exempt from rule B
-// (a suite may drive both halves); src/main/index.ts, the root, is exempt until M4 narrows it to the services entry.
+// (a suite may drive both halves); src/main/index.ts, the root, imports the services entry alone (M4).
 const SERVICES_BOUNDARY = {
   regex: '^(\\.\\./)+(main|mawsd|renderer|preload)(/|$)',
   message: 'The services library (src/services/, P5 O3-C rule A) imports nothing from main, mawsd, the renderer or the preload: it takes its commands, intercepts and events through the injected ServicesBus (@shared/spine/bus), and staying code reads it through SpineView (@shared/spine/view).',
@@ -54,6 +54,10 @@ const SERVICES_BOUNDARY = {
 const READ_THROUGH_VIEW = {
   regex: '^(\\.\\./)+services(/|$)',
   message: "Staying code reads the spine only through SpineView (@shared/spine/view; P5 O3-C rule B): nothing under src/main/ but main's root imports from src/services/.",
+};
+const ROOT_THROUGH_ENTRY = {
+  regex: '^\\.\\./services/(?!entry$)',
+  message: "Main's root reaches the services library only through its entry, ../services/entry (P5 O3-C rule B): the roots' view, the checkouts' file reads and the stop functions are all it holds of the library.",
 };
 // P5 O3-C end
 // P5 O10 start (docs/doperpowers/plans/2026-10-27-p5-o10-endpoint.md, Constraints, "The module"): the endpoint module is
@@ -175,6 +179,11 @@ module.exports = defineConfig(
     files: ['src/main/**/*.{ts,tsx}'],
     ignores: ['src/main/**/*.test.{ts,tsx}', 'src/main/index.ts'],
     rules: { 'no-restricted-imports': ['error', { patterns: [...YJS_PATTERNS, ...ENDPOINT_PATTERNS, READ_THROUGH_VIEW] }] },
+  },
+  // P5 O3-C (M4): rule B over main's root, narrowed to the services entry
+  {
+    files: ['src/main/index.ts'],
+    rules: { 'no-restricted-imports': ['error', { patterns: [...YJS_PATTERNS, ...ENDPOINT_PATTERNS, ROOT_THROUGH_ENTRY] }] },
   },
   {
     files: ['src/artifacts/**/*.{ts,tsx}'],

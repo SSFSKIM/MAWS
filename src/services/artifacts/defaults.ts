@@ -6,7 +6,8 @@
 // host is ready. Settings without the slot (a build before P3-D's) push nothing at all, so a store's persisted defaults
 // are never overwritten with empties by an older build; P3-D's slot lands into `defaultsOf` with no edit here.
 import * as z from 'zod';
-import type { CommandInput, CommandResult, HostState, Settings } from '@shared/ipc/schema';
+import type { CommandInput, CommandResult, HostState } from '@shared/ipc/schema';
+import type { MachineSettings } from '@shared/ipc/schema/settings';
 
 export type ArtifactDefaults = CommandInput<'artifacts.setDefaults'>;
 
@@ -14,7 +15,7 @@ export type ArtifactDefaults = CommandInput<'artifacts.setDefaults'>;
 const SlotSchema = z.object({ defaultDesignSystem: z.uuid().nullable(), spaceDesignSystems: z.record(z.uuid(), z.uuid()) });
 
 // The defaults the settings carry, or null when they carry no slot 14 (or a malformed one, which is logged).
-export function defaultsOf(settings: Settings): ArtifactDefaults | null {
+export function defaultsOf(settings: Pick<MachineSettings, 'artifacts'>): ArtifactDefaults | null {
   const slot = (settings as { artifacts?: unknown }).artifacts;
   if (slot === undefined) return null;
   const parsed = SlotSchema.safeParse(slot);
@@ -26,8 +27,8 @@ export function defaultsOf(settings: Settings): ArtifactDefaults | null {
 }
 
 export interface ArtifactDefaultsDeps {
-  settings(): Settings;
-  onSettingsChanged(listener: (settings: Settings) => void): () => void;
+  settings(): Pick<MachineSettings, 'artifacts'>;
+  onSettingsChanged(listener: (settings: Pick<MachineSettings, 'artifacts'>) => void): () => void;
   hostState(): HostState; // the engine host's
   onHostState(listener: (state: HostState) => void): () => void;
   dispatch(input: ArtifactDefaults): Promise<CommandResult<'artifacts.setDefaults'>>;

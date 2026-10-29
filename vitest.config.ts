@@ -39,6 +39,7 @@ const TIMING_NODE_TESTS = [
   'test/artifacts/one-schema.test.ts', // P3-B: the portability test's pattern, for the one-schema rule
   'test/one-locale.test.ts', // the same pattern, for the one-locale rule over src/ and the desk's web app
   'test/services/boundary.test.ts', // P5 O3-C M3: the same pattern, for the services library's boundary (rules A and B)
+  'src/services/spine-root.test.ts', // P5 O3-C M4: a replay played at its fastest and a real spine.lock wait (5 s)
   'test/endpoint/enroll.test.ts', // P5 O10 M2: enrolls against desk-hub's local runner, a wrangler dev child process
   'test/endpoint/provision.test.ts', // P5 O14 M1: provisions, retires and unenrolls against the same local runner
   'test/endpoint/hub-link.test.ts', // P5 O10 M3: reconnects on the hub link's backoff, timed against a stand-in hub

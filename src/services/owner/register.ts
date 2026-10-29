@@ -8,7 +8,7 @@
 import { homedir } from 'node:os';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HostState } from '@shared/ipc/schema';
-import type { Settings } from '@shared/ipc/schema/settings';
+import type { MachineSettings } from '@shared/ipc/schema/settings';
 import type { AttentionService } from '../attention/service';
 import { claudeConfigDir } from '@shared/engine/config-dir';
 import type { Index } from '../index/index';
@@ -22,7 +22,7 @@ import { OwnerChannelService, type OwnerChannelServiceDeps } from './service';
 
 export interface OwnerChannelDeps {
   index: Pick<Index, 'ownerChannel' | 'sessions' | 'unavailable'>;
-  settings: () => Settings;
+  settings: () => Pick<MachineSettings, 'mods'>;
   engineEnv: Promise<NodeJS.ProcessEnv>; // the captured login-shell environment the engine is launched with
   onEvent: HostEvents;
   register: ServicesBus['register'];

@@ -58,7 +58,7 @@ export interface ScmServiceDeps {
   status(directory: string): Promise<GitStatus>; // C4's GitService.status: the fresh status a mutation validates against and answers
   mutate: MutateRun;
   refresh(directory: string): void; // GitService.refresh: the watcher re-reads the root after a mutation
-  captured: () => Promise<Record<string, string>>; // the login-shell capture (index.ts's engineEnv): the trust reader's env and both runners' base
+  captured: () => Promise<Record<string, string>>; // the login-shell capture (the roots' engineEnv): the trust reader's env and both runners' base
   env: NodeJS.ProcessEnv; // MAWS_GIT, MAWS_GH only
   emit(event: ScmRemoteOutput): void;
   spawn?: SpawnFn; // the remote runner's and gh reads' seam for tests

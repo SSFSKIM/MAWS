@@ -1,7 +1,7 @@
 // Wires the read side into main (C5): decides the launch mode once, creates the read model, answers `session.digests`
 // and `session.setVisible`, relays every digest as `session.digest`, and attaches the sources the mode allows. In mode
-// `index` those are C4's `IndexSessionSource` (created in C4's block of src/main/index.ts, started here) and the engine
-// host's event feed below; in mode `scenario` only the stub source, and the read model refuses C4's source unstarted,
+// `index` those are C4's `IndexSessionSource` (created by the spine's root, ../spine-root.ts, started here) and the
+// engine host's event feed below; in mode `scenario` only the stub source, and the read model refuses C4's source unstarted,
 // so the index never scans.
 import type { SessionEvent } from '@shared/graph/events'; // E3
 import type { AppSessionId } from '@shared/graph/ids';

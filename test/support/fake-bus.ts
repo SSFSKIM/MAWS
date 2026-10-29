@@ -18,6 +18,7 @@ export interface FakeBus extends ServicesBus {
   emittedOf<N extends EventName>(name: N): EventPayload<N>[];
   registered(): CommandName[];
   intercepted(): CommandName[];
+  tapped(): EventName[]; // the events some tap still hears
 }
 
 type AnyHandler = (input: unknown, context: HandlerContext) => unknown;
@@ -81,5 +82,6 @@ export function fakeBus(): FakeBus {
     emittedOf: <N extends EventName>(name: N) => emitted.filter((entry) => entry.name === name).map((entry) => entry.payload as EventPayload<N>),
     registered: () => [...handlers.keys()],
     intercepted: () => [...interceptors.keys()],
+    tapped: () => [...taps].flatMap(([name, set]) => (set.size > 0 ? [name] : [])),
   };
 }

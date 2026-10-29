@@ -7,13 +7,17 @@
 // settings winning. W13: custody of a pinned copy is retired with the pin; the push carries the chosen path, or null
 // for the installed Claude Code, which the host resolves per launch.
 // C12 end
-import type { CommandInput, CommandResult, EngineBinaryConfig, HostState, Settings } from '@shared/ipc/schema';
+import type { CommandInput, CommandResult, EngineBinaryConfig, HostState } from '@shared/ipc/schema';
+import type { MachineSettings } from '@shared/ipc/schema/settings';
 import { defaultBudgetKiB } from '../../engine-host/budget'; // C12
 import type { LaunchResult } from '@shared/ipc/schema/session'; // C12
 
+// What the coordinator reads of the machine half (P5 O3-C D12)
+type ConfiguredSettings = Pick<MachineSettings, 'engine'>;
+
 export interface EngineConfigureDeps {
-  settings(): Settings;
-  onSettingsChanged(listener: (settings: Settings) => void): () => void; // settings.changed as main emits it
+  settings(): ConfiguredSettings;
+  onSettingsChanged(listener: (settings: ConfiguredSettings) => void): () => void; // the machine half's changes (P5 O3-C D12)
   hostState(): HostState;
   onHostState(listener: (state: HostState) => void): () => void; // the engine host's transitions
   dispatch(config: EngineBinaryConfig): Promise<CommandResult<'engine.configure'>>;
@@ -45,7 +49,7 @@ export type BudgetPolicy = CommandInput<'engine.policy.set'>;
 
 // settings.engine's budget as the host takes it: the setting in KiB, or 25% of physical memory while it is null. W7:
 // whether it is on; the limit goes either way, so the host's state names it and turning the budget on needs no more.
-export const budgetPolicyOf = ({ engine }: Settings, totalMemBytes: number): BudgetPolicy => ({
+export const budgetPolicyOf = ({ engine }: ConfiguredSettings, totalMemBytes: number): BudgetPolicy => ({
   enabled: engine.memoryBudget.enabled, // W7
   limitKiB: engine.memoryBudgetMiB !== null ? engine.memoryBudgetMiB * 1024 : defaultBudgetKiB(totalMemBytes),
   statefulMcpServers: [...engine.statefulMcpServers],
@@ -53,7 +57,7 @@ export const budgetPolicyOf = ({ engine }: Settings, totalMemBytes: number): Bud
 const samePolicy = (a: BudgetPolicy, b: BudgetPolicy) => a.enabled === b.enabled /* W7 */ && a.limitKiB === b.limitKiB && a.statefulMcpServers.join('\n') === b.statefulMcpServers.join('\n');
 
 // The settings a configure push stands for (C11's `configOf` and `same` gave way to it; W13: the path alone).
-const settingsKey = ({ engine }: Settings) => engine.binaryPath ?? '';
+const settingsKey = ({ engine }: ConfiguredSettings) => engine.binaryPath ?? '';
 // C12 end
 
 export function startEngineConfigure(deps: EngineConfigureDeps): EngineConfigure {

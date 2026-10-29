@@ -2,8 +2,8 @@
 // `LibraryStore`, migration 10) kept right by the sync over the engine host's library reads, `library.list`, `.get` and
 // `.spaces` answered from it, and `library.changed` told once per tick after the index committed a change. Main never
 // opens the host's `store.sqlite`. Started after the index opens and before the first window loads.
-// P5 O3-C (D22): the derived index is the spine's; the store's files (`registerLibraryFiles`, ./files.ts) are the
-// client's, composed beside this by main's root.
+// P5 O3-C (D22): the derived index is the spine's, composed by its root (../spine-root.ts); the store's files
+// (`registerLibraryFiles`, src/main/library/files.ts) are the client's, composed by main's root.
 import type { ServicesBus } from '@shared/spine/bus';
 import type { Index } from '../index/index';
 import { registerLibraryHandlers } from './register';

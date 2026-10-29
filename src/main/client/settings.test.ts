@@ -81,8 +81,8 @@ beforeEach(async () => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-// P5 O3-A: as main starts them, holding spine.lock (src/main/index.ts's startSpineData): the split, once, then the machine
-// half and the client service over both files; `refused` as in a run refused the spine.
+// P5 O3-A: as main starts them, holding spine.lock (src/services/spine-root.ts's openSpineData): the split, once, then
+// the machine half and the client service over both files; `refused` as in a run refused the spine.
 let machine: MachineSettingsService;
 const start = ({ refused = null }: { refused?: string | null } = {}) => {
   const paths = settingsPaths(dir);
