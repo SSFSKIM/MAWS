@@ -5,6 +5,7 @@
 // a steer or a delivery the bridge appended and its mirror line, and the bridge's wake as the user or through the inbox.
 // A builder chains each row under the one before unless told its parent, as the engine writes a conversation.
 import type { JsonObject } from 'desk-hub/protocol';
+import { CUT_LINE, PARTWAY } from '@shared/lane-a/interrupt-cut';
 
 export const SESSION = 'sess-chain';
 
@@ -141,6 +142,14 @@ export class Chain {
   /** The bridge's wake as the user (`$.prompt.submit({asUser: true})`): an idle session's. */
   userWake(body: string, parent?: JsonObject | null): JsonObject {
     return this.row('user', { origin: { kind: 'plugin', name: this.plugin, asUser: true }, promptId: `w${this.n}`, message: { role: 'user', content: body } }, parent);
+  }
+
+  /**
+   * The bridge's row of the reply an interrupt cut off (sminos 1.27.16, after the marker and the note), as the desk track
+   * sent its shape: its line, ending with the partway sentence when only a block's tail was kept, then the cut-off text.
+   */
+  cutReply(text: string, partway = false, parent?: JsonObject | null): JsonObject {
+    return this.appended(`${CUT_LINE} The person was shown what you had written of it, the text after this line, but it is not in the conversation as your reply.${partway ? PARTWAY : ''}\n${text}`, parent);
   }
 
   /** An `Agent` call the engine ran in the background, and the result it returns at once (2.1.312: `async_launched`). */

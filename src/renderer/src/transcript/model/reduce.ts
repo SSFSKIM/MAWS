@@ -13,6 +13,7 @@ import { appendStripped, stripAnsi } from '@shared/wire/ansi';
 import { parseAskSteer } from '@shared/maws/ask'; // E1
 import type { AskAnswer } from '@shared/maws/tools'; // E1
 import { isInterruptionMarker, isLocalCommand } from './user-text';
+import { INTERRUPT_CUT } from '@shared/lane-a/interrupt-cut'; // P5 O9
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
 
@@ -541,6 +542,13 @@ function apply(batch: Batch, event: SessionEvent): void {
       // the wire), which falls through to the synthetic rule below: retained, no row
       if (event.bash !== null || (isLocalCommand(event.origin, event.content) && !event.isSynthetic)) {
         if (!pushRouted(null)) batch.loose(event); // a bash or local_command row; never a turn
+        return;
+      }
+      // P5 O9: the reply an interrupt cut off, as the sminos bridge records it after the marker closed its turn: that
+      // turn's, the latest, so derive draws it there marked cut off
+      if (event.origin === INTERRUPT_CUT) {
+        const cut = state.order.at(-1);
+        if (cut === undefined || !pushRouted(cut, false)) batch.loose(event, false);
         return;
       }
       if (isInterruptionMarker(event.origin, event.content) && !event.isSynthetic) {

@@ -11,6 +11,7 @@ import { INTERRUPT_MARKER } from '../normalizer-support';
 import { apiRetryOfApiError } from '../normalizer-system';
 import { messageText, parsePeerMessage, peerEventsOf } from '@shared/engine/peer-envelope'; // E7
 import { isMadeUpFinalAnswer } from '@shared/owner/message-call';
+import { INTERRUPT_CUT, parseInterruptCut } from '@shared/lane-a/interrupt-cut';
 
 // The three engine strings that name a spilled result (SPEC 12.12 and 20.10); the structured field wins when present.
 export const SPILL_MARKER = /(?:Full output saved to|were saved to|was saved to):? (\/[^\r\n]+\.(?:txt|json))(?=[.;\s]|$)/;
@@ -268,6 +269,13 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
     events.push({ ...base(), kind: 'turn.started', userMessageUuid: uuid, origin });
   };
   if (marker) ctx.inToolLoop = false; // an interrupt ends the loop: no model call follows
+  // P5 O9 (the M10 sitting): the reply an interrupt cut off, as the sminos bridge records it after the interrupt's marker
+  // and note (1.27.16): the model's context in the turn it cut, never a prompt or a turn; drawn marked cut off.
+  const cut = interruptCutText(record);
+  if (cut !== null) {
+    events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: cut, isReplay: false, isSynthetic: true, origin: INTERRUPT_CUT, bash: null });
+    return;
+  }
   // E7 start
   if (!marker && isPeerPrompt(record)) {
     peerMessage(record, uuid, ctx, base, events);
@@ -647,6 +655,15 @@ function isBridgeWake(record: TranscriptRecord): boolean {
     body = envelope?.kind === 'cross-session' && envelope.frame === null ? envelope.body : null;
   }
   return body !== null && body.split('\n', 1)[0] === BRIDGE_WAKE_LINE;
+}
+
+// The sminos bridge's row of an interrupt's cut-off reply (`@shared/lane-a/interrupt-cut`), its whole text: a meta user
+// row of its plugin (sminos, or doperpowers before sminos 1.0.0) whose one text block opens with the row's line; else null.
+function interruptCutText(record: TranscriptRecord): string | null {
+  const origin = record.origin as { kind?: unknown; name?: unknown } | undefined;
+  if (record.type !== 'user' || record.isMeta !== true || origin?.kind !== 'plugin' || (origin.name !== 'sminos' && origin.name !== 'doperpowers')) return null;
+  const text = singleText(record);
+  return text !== null && parseInterruptCut(text) !== null ? text : null;
 }
 
 // The end of a turn that ran nothing (`num_turns` 0), as the live stream has one: a prompt a hook blocked, a command the

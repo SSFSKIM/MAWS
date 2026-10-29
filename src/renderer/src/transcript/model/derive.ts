@@ -30,6 +30,7 @@ import { previewHidesBody } from './rows'; // E7
 import { needsSeparator, separatorLabel } from './time';
 import { confirmsSettingChange, isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf, type UserText } from './user-text';
 import { handbackReport, messageText, parsePeerMessage, peerLabel, sendMessageOutcome } from '@shared/engine/peer-envelope'; // E7
+import { INTERRUPT_CUT, parseInterruptCut } from '@shared/lane-a/interrupt-cut'; // P5 O9
 import { parseListing } from './agent-listing'; // E7
 import { peerMessageCopy } from './copy'; // E7
 // E4c start
@@ -130,7 +131,7 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // alone (`/compact`: its boundary and its output) has no work and no "Worked for 0s" divider. A question still counts as
 // work for where the answer starts (WORK_ROWS).
 export const isPersistentRow = (row: Row): boolean =>
-  row.kind === 'to_human' /* P4-R7 */ || row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'browser_action' /* E4c */ || row.kind === 'browser_activity' /* E13: never derived here; placed by the view */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
+  (row.kind === 'assistant_text' && row.cut === true) /* P5 O9: a reply an interrupt cut off, no work of the turn */ || row.kind === 'to_human' /* P4-R7 */ || row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'browser_action' /* E4c */ || row.kind === 'browser_activity' /* E13: never derived here; placed by the view */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
   || isPersistentMessage(row) // E7
   || row.kind === 'owner_record'; // P2-C (2026-10-09): placed by the report projection, never a work row
 
@@ -474,7 +475,10 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   for (const event of turn.events) {
     switch (event.kind) {
       case 'user.message': {
-        if (event.bash?.part === 'input') {
+        if (event.origin === INTERRUPT_CUT) { // P5 O9: the reply an interrupt cut off, as the sminos bridge records it
+          const row = cutRowOf(event, turn.id);
+          if (row) items.push({ kind: 'row', row });
+        } else if (event.bash?.part === 'input') {
           items.push({ kind: 'row', row: bashRowOf(event, turn.id) });
         } else if (event.bash?.part === 'output') {
           const at = items.findIndex((item) => item.kind === 'row' && item.row.kind === 'bash' && item.row.exitCode === null);
@@ -1456,6 +1460,15 @@ function boundaryRow(event: Event<'boundary.compaction' | 'boundary.reset' | 'bo
 
 // The engine's local-command echo, tags stripped; the raw text stands when the wrapper is absent (C3 tagged it). An
 // echo that only confirms a setting change draws nothing (E11 §2.3).
+// P5 O9 (the M10 sitting): the sminos bridge's row of a reply an interrupt cut off (`@shared/lane-a/interrupt-cut`), as
+// the cut-off text a live view kept from the stream draws (`lane-a/view/streaming-rows.ts`): settled, marked cut off,
+// never the turn's answer, and saying when it starts partway through.
+function cutRowOf(event: Event<'user.message'>, turnId: TurnId): RowOf<'assistant_text'> | null {
+  const cut = parseInterruptCut(messageText(event.content));
+  if (cut === null || cut.text.trim() === '') return null;
+  return { id: rowId.cut(event.id), turnId, at: event.at, kind: 'assistant_text', messageUuid: null, blockIndex: 0, markdown: cut.text, live: false, phase: 'commentary', model: null, cut: true, ...(cut.partway && { partway: true as const }) };
+}
+
 function localCommandRow(event: Event<'user.message'>, turnId: TurnId | null): RowOf<'local_command'> | null {
   const content = typeof event.content === 'string' ? event.content : event.content.filter((block) => block.type === 'text').map((block) => str(block.text)).join('\n');
   if (slashCommandLine(content) !== null) return null; // the system echo, not the human's command
