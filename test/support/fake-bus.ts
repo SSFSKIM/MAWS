@@ -12,8 +12,9 @@ import { validateCommandInput, validateCommandOutput, validateEventPayload } fro
 import type { ServicesBus } from '../../src/shared/spine/bus';
 
 export interface FakeBus extends ServicesBus {
-  // A client's command, routed as main's router routes it; the asker is `page:1.1` unless the test names its own.
-  invoke<N extends CommandName>(name: N, input?: unknown, client?: ClientRef): Promise<CommandResult<N>>;
+  // A client's command, routed as main's router routes it; the asker is `page:1.1` unless the test names its own (a ref,
+  // or the bus's own `invoke` context, P5 O3-D M2).
+  invoke<N extends CommandName>(name: N, input?: unknown, client?: ClientRef | HandlerContext): Promise<CommandResult<N>>;
   readonly emitted: { name: EventName; payload: unknown }[]; // what `emit` sent, in order
   emittedOf<N extends EventName>(name: N): EventPayload<N>[];
   registered(): CommandName[];
@@ -69,7 +70,8 @@ export function fakeBus(): FakeBus {
       set.add(entry);
       return () => void set.delete(entry);
     },
-    async invoke(name, rawInput, client = asker) {
+    async invoke(name, rawInput, asked = asker) {
+      const client = 'client' in asked ? asked.client : asked;
       if (REGISTRY.mainOnly.has(name)) return { ok: false, error: ipcError('forbidden_sender', `${name} may only be invoked by main`) };
       const input = validateCommandInput(name, rawInput);
       if (!input.ok) return input;

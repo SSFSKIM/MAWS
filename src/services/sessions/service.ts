@@ -56,6 +56,7 @@ import type { AcquireReason } from '@shared/ipc/schema/session';
 import type { AcquireOutcome } from '@shared/sessions/setup';
 import type { AcquisitionMemory } from './availability';
 import { EXIT_WAIT_MS } from './context';
+import { Work } from '../work'; // P5 O3-D M2
 import { acquireOutcomeOf, acquireOutcomeOfGuard, canonicalOptions, capturingSetup, InflightRegistry, type Registration } from './inflight';
 import { LaunchWatch } from './launch-watch';
 // P2-A end
@@ -104,6 +105,10 @@ export class SessionService {
   // P2-A (X16): every run that can launch an engine for an id, registered before its first await; and what the last
   // acquisition of each id ended with when not ready (this app run only, D-16)
   private readonly inflight = new InflightRegistry((appSessionId) => this.publishAcquisition(appSessionId));
+  // P5 O3-D M2 (Interfaces §A, D27): what runs past a command's answer, or with none (a setup, a reconciliation, a
+  // recovery), so a release waits for it before the index closes. A wait for the host is not counted: nothing is written
+  // until it ends, and a released root's waits are dropped with its host adapter.
+  readonly work = new Work();
   private readonly lastAttempt = new Map<AppSessionId, NonNullable<AcquisitionMemory['last']>>();
   private readonly now: () => string;
   private readonly log: (message: string) => void;
@@ -171,13 +176,13 @@ export class SessionService {
       this.streamed = true;
       this.rerunDeferred();
     }) ?? null;
-    await this.recover();
+    await this.work.track(this.recover()); // P5 O3-D M2
   }
 
   // Runs the deferred recovery again (the host streamed), unless none is owed or one is already running.
   private rerunDeferred(): void {
     if (this.unrecovered === null || this.recovering !== null) return;
-    this.recovering = this.recover()
+    this.recovering = this.work.track(this.recover()) // P5 O3-D M2
       .catch((error: unknown) => this.log(`the deferred recovery failed: ${error instanceof Error ? error.message : String(error)}`))
       .finally(() => (this.recovering = null));
   }
@@ -256,7 +261,7 @@ export class SessionService {
     }
     this.unrecovered = null;
     this.startedSince.clear();
-    if (this.unreconciled.size > 0) void this.settleUnreconciled().catch((error: unknown) => this.log(`the owed reconciliations failed: ${error instanceof Error ? error.message : String(error)}`));
+    if (this.unreconciled.size > 0) void this.work.track(this.settleUnreconciled()).catch((error: unknown) => this.log(`the owed reconciliations failed: ${error instanceof Error ? error.message : String(error)}`));
   }
 
   // P4 W2-A: a reconciliation that waits for its live row's ready (the first message not yet C3's) runs beside the
@@ -266,7 +271,7 @@ export class SessionService {
   private reconcileWhenReady(appSessionId: AppSessionId): void {
     this.starting.add(appSessionId);
     const registration = this.inflight.open(appSessionId, 'setup');
-    void this.serial(appSessionId, async () => {
+    void this.work.track(this.serial(appSessionId, async () => {
       const intent = this.deps.intents.get(appSessionId);
       return intent === null ? null : this.reconcileOne(intent, null);
     })
@@ -277,7 +282,7 @@ export class SessionService {
       .then((result) => {
         this.starting.delete(appSessionId);
         registration.end(result);
-      });
+      })); // P5 O3-D M2: tracked to its end
   }
 
   // What a joiner of that reconciliation is answered: ready when the row is, else why it is not.
@@ -699,7 +704,7 @@ export class SessionService {
       if (run === null) return (answered = outcome);
       handedOff = true;
       const held = release;
-      void run().finally(() => {
+      void this.work.track(run().finally(() => { // P5 O3-D M2: the setup runs past the answer
         this.endStart(appSessionId, claim);
         held();
         const ended = acquireOutcomeOf(appSessionId, captured.outcome());
@@ -707,7 +712,7 @@ export class SessionService {
         // longer describes it once this process exits (published by the end below)
         if (ended.status === 'ready') this.lastAttempt.delete(appSessionId);
         registration.end({ outcome: ended }); // P2-A
-      });
+      }));
       return outcome;
     } catch (error) {
       registration.end({ error }); // P2-A: a guard that could not answer fails its joiners as it fails this start

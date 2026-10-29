@@ -373,6 +373,8 @@ function startMain(data: SpineData, launch: LaunchShape, { local, localName }: {
     intercept: interceptCommand,
     emit,
     onEmitted,
+    // P5 O3-D M2 (Interfaces §H): the router's local route, which answers a `machine` name through the embedded binding
+    invoke: (name, input, context) => dispatchLocal(name, input, { ...context, target: local }) as never,
   };
   remoteLink = (ref) => machines.remote(ref);
   // E11: every will-quit step below joins one ordered list behind one listener (tracker row E10 "14 will-quit listeners");

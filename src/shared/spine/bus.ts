@@ -6,7 +6,7 @@
 // router and every host runtime answer intact. Its members are free functions: a module may take one alone
 // (`Pick<ServicesBus, 'register'>`, or `bus.emit` as an `emit` dependency) and call it detached from the bus.
 import type { HandlerContext } from '@shared/ipc/client';
-import type { CommandInput, CommandName, CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
+import type { CommandInput, CommandName, CommandOutput, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
 
 // A command handler as the library writes it: the asker's ClientRef in `context`, no machine (a library handler
 // always answers its own machine's).
@@ -24,4 +24,9 @@ export interface ServicesBus {
   emit<N extends EventName>(name: N, payload: EventPayload<N>): boolean;
   // An in-process tap on what `emit` sent, from any emitter on this bus.
   onEmitted<N extends EventName>(name: N, listener: (payload: EventPayload<N>) => void): () => void;
+  // P5 O3-D M2 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §H): a command the root registered,
+  // run in process as a client's would be (its intercept first, its output validated), for the services' ledger
+  // (`machine.op`, M4) to run a claimed command through. Main binds it to its router's local route over the embedded
+  // machine handlers; `mawsd` to its services front's table.
+  invoke<N extends CommandName>(name: N, input: unknown, context: HandlerContext): Promise<CommandResult<N>>;
 }

@@ -411,9 +411,9 @@ async function keptIdleLeg(shape: Shape, run: IdleRun): Promise<{ shape: Shape; 
 // under the same Electron binary as Node, `--disable-sigusr1 --expose-gc`, argv0 `maws-spine`, with an environment of
 // its own (HOME the scratch root, MAWS_USER_DATA the profile). It composes the spine with no host, no client and no
 // interest, and says what it read. The loaded window is IDLE_RUN's settle and window; then SIGUSR2 stops the root and
-// releases its data (two full collections), and the released window is SPINE_RELEASED_RUN's. The same readers and
-// validity rule over each window, which the line names with the fixture's counts and whether gc ran; it asserts no
-// bound and writes test-results/daemon-idle-spine.json. `pnpm e2e:daemon-idle-spine` runs this case alone (it needs
+// releases its data (V8's last-resort collection since P5 O3-D M2), and the released window is SPINE_RELEASED_RUN's. The
+// same readers and validity rule over each window, which the line names with the fixture's counts and what the
+// collection gave back; it asserts no bound and writes test-results/daemon-idle-spine.json. `pnpm e2e:daemon-idle-spine` runs this case alone (it needs
 // the plain build; about 20 minutes: two settles and two windows).
 test('daemon idle spine alone: the physical footprint and CPU of the spine composed alone over a profile-sized fixture, idle while loaded and after its data is released', async () => {
   test.setTimeout(35 * 60_000);
@@ -448,7 +448,7 @@ test('daemon idle spine alone: the physical footprint and CPU of the spine compo
 
     spine.kill('SIGUSR2');
     await expect.poll(() => output, { timeout: 60_000, message: 'the spine releases its data' }).toMatch(/^spine idle: released /m);
-    const gc = said(/^spine idle: released /) === 'spine idle: released (gc: true)';
+    const collection = /^spine idle: released \((.*)\)$/.exec(said(/^spine idle: released /) ?? '')?.[1] ?? 'no release line';
     await sleep(SPINE_RELEASED_RUN.settleS * 1_000);
     const released = await measureWindow(procs, SPINE_RELEASED_RUN);
 
@@ -457,8 +457,8 @@ test('daemon idle spine alone: the physical footprint and CPU of the spine compo
       ...windowReasons(released, false).map((reason) => `released: ${reason}`),
     ];
     const [before, after] = [shapeReading(loaded), shapeReading(released)];
-    const line = before === null || after === null ? null : spineLine({ loaded: before, released: after, counts, gc, reasons });
-    report('daemon-idle-spine.json', line, reasons, { shape: 'spine alone', electron, counts, gc, output: output.split('\n').filter(Boolean), loaded: loaded.record, released: released.record });
+    const line = before === null || after === null ? null : spineLine({ loaded: before, released: after, counts, collection, reasons });
+    report('daemon-idle-spine.json', line, reasons, { shape: 'spine alone', electron, counts, collection, output: output.split('\n').filter(Boolean), loaded: loaded.record, released: released.record });
   } finally {
     spine?.kill('SIGKILL');
     await killScratchProcesses(root, spine?.pid === undefined ? [] : [spine.pid]).catch((error: unknown) => (leftover = error));

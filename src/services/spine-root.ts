@@ -63,6 +63,7 @@ import { SessionService } from './sessions/service';
 import { engineHostSettled, registerSessionServiceHandlers } from './sessions/service-register';
 import { createSpineView } from './sessions/spine-view';
 import { stopParts, type Part } from './stop-parts';
+import { allSettling, Work, type Settling } from './work';
 import { startYield } from './sessions/yield';
 
 export interface SpineData {
@@ -72,15 +73,18 @@ export interface SpineData {
   readonly paths: { client: string; machine: string };
 }
 
-// O3-A's data start, unchanged (O3 §2, §3; contracts O3X2, O3X3): `spine.lock` before either settings file is migrated
-// or written and before the index opens (startSpine); then, holding it, the split of a unified settings file, once, and
-// the machine half. Refused, nothing is migrated and the machine half is read, never written. The lock is held for the
-// process's life: released at its exit, never at a shutdown step, since the steps' promises settle after the last step
-// is called and a writer still finishing (an intent's rename) must not run beside a candidate that took the lock.
-export async function openSpineData(profile: string, { build }: { build: string }): Promise<SpineData> {
+// O3-A's data start (O3 §2, §3; contracts O3X2, O3X3): `spine.lock` before either settings file is migrated or written
+// and before the index opens (startSpine); then, holding it, the split of a unified settings file, once, and the machine
+// half. Refused, nothing is migrated and the machine half is read, never written. The lock is held for the process's
+// life: released at its exit, never at a shutdown step, since the steps' promises settle after the last step is called
+// and a writer still finishing (an intent's rename) must not run beside a candidate that took the lock.
+// P5 O3-D M2 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §A, D26): a process that loads the spine
+// more than once (`mawsd`) takes the lock once itself (`takeSpineLock`) and opens each load's data under it (`lock`),
+// since the lock refuses this very process's second take; with none given, the one-shot form above (main's).
+export async function openSpineData(profile: string, { build, lock: given }: { build: string; lock?: SpineLock }): Promise<SpineData> {
   const paths = settingsPaths(profile);
-  const lock = await takeSpineLock(profile, { build });
-  process.once('exit', lock.release);
+  const lock = given ?? (await takeSpineLock(profile, { build }));
+  if (!given) process.once('exit', lock.release);
   const split = lock.refused === null ? splitSettingsFiles(paths) : null;
   const machineSettings = startMachineSettings(paths.machine, { refused: lock.refused ?? split?.machineRefused ?? null, unsplit: split?.unsplit });
   return { lock, refused: lock.refused, machineSettings, paths };
@@ -108,14 +112,23 @@ export interface SpineDeps {
 
 export interface SpineRoot {
   readonly view: SpineView;
+  // P5 O3-D M2 (Interfaces §A, D27): no command or intercept of the spine's running, no session setup, recovery or
+  // reconciliation, sweep run, attention write pass or lane A probe in flight (each part reports its own); a release
+  // and a yield wait for it before `stop` closes the index. `busy` reads the same facts now.
+  settled(): Promise<void>;
+  busy(): boolean;
   stop(): void;
 }
 
 export function startSpine(deps: SpineDeps): SpineRoot {
-  const { profile, data, hosts, bus, engineEnv } = deps;
+  const { profile, data, hosts, engineEnv } = deps;
   const machineSettings = data.machineSettings;
   const spineRuns = data.refused === null;
   const parts: Part[] = []; // in today's shutdown order (D21), each stopped whatever an earlier one threw
+  // P5 O3-D M2: every command and intercept the parts register counted while it runs, and what each part has in flight
+  const commands = new Work();
+  const bus = countingBus(deps.bus, commands);
+  const settling: Settling[] = [commands];
 
   // C4: the index (<profile>/index.sqlite) answers the record side of session.*, and its session source folds the
   // engine host's store events into it once the host is ready; the read model starts the source (refused unstarted in
@@ -140,6 +153,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   if (index.unavailable === null) seedReplayFixtures(index.fixtures, appRoot(deps.appPath));
   if (replays) parts.push(['replays', () => replays.dispose()]);
   if (attention) parts.push(['attention', () => attention.stop()]);
+  if (attention) settling.push(attention.writing);
 
   // P5 O9 M2, M6 (O3 Decision Log 13): the local lane A driver, the spine's: it writes <profile>/lane-a/ and drives the
   // sessions the index holds, so a run refused the spine starts none and its laneA.* commands have no handler (the
@@ -160,6 +174,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       emit: (name, payload) => void bus.emit(name, payload),
     });
     registerLaneA(laneA, bus.register);
+    settling.push(laneA.probes);
     // M6: each bridged session's pending requests are attention items, and its digest reads its live phase from the
     // bridge while the bridge is live (today's `foreign` otherwise)
     const laneAItems = laneAAttention({ set: (appId, entries) => attention.setLaneAItems(appId, entries) });
@@ -300,6 +315,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     });
     registerSessionServiceHandlers(service, bus);
     sessionService = service;
+    settling.push(service.work);
     // The sweep keeps the machine's interest union (D11): on the embedded shape main's interest report's set
     const inactiveArchive = new InactiveArchive({
       index, git: createGitRunner(), status: (id) => sessions.model.engineStatus(id),
@@ -313,8 +329,12 @@ export function startSpine(deps: SpineDeps): SpineRoot {
         return times.length ? Math.max(...times) : null;
       },
     });
-    bus.register('session.archiveOlder', ({ days, projectId }) => inactiveArchive.run(days, projectId as ProjectId | null));
-    parts.push(['inactive archive', scheduleInactiveArchive(inactiveArchive, () => machineSettings.state().sessions.archiveInactiveDays, (changed) => machineSettings.onChange(() => changed()), (scanned) => indexSource.onScanned(scanned))]);
+    // P5 O3-D M2: a sweep's run counted to its end, whether a command or its schedule started it
+    const sweeping = new Work();
+    settling.push(sweeping);
+    const sweep: Pick<InactiveArchive, 'ready' | 'run'> = { ready: () => inactiveArchive.ready(), run: (...args) => sweeping.track(inactiveArchive.run(...args)) };
+    bus.register('session.archiveOlder', ({ days, projectId }) => sweep.run(days, projectId as ProjectId | null));
+    parts.push(['inactive archive', scheduleInactiveArchive(sweep, () => machineSettings.state().sessions.archiveInactiveDays, (changed) => machineSettings.onChange(() => changed()), (scanned) => indexSource.onScanned(scanned))]);
     service.start().catch((error: unknown) => console.error('[sessions] the session service failed to start:', error));
   }
   registerObservedFacts(hosts.dispatch, bus); // P2-A (X17): the engine host's observed facts, beside session.digests
@@ -368,8 +388,22 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   // between them, and after it applies nothing.
   parts.push(['library', startLibrary({ index, hosts, register: bus.register, emit: bus.emit, e2e: deps.env.MAWS_E2E === '1' }).stop]);
 
+  const root = allSettling(settling);
   return {
     view: spineView.view,
+    settled: () => root.settled(),
+    busy: () => root.busy(),
     stop: () => stopParts('spine', parts),
+  };
+}
+
+// The bus the parts register through: each command handler and intercept counted in `work` while it runs (P5 O3-D M2).
+function countingBus(bus: ServicesBus, work: Work): ServicesBus {
+  const counted = <H extends (input: never, context: never) => unknown>(handler: H): H =>
+    ((input: never, context: never) => work.track(Promise.resolve().then(() => handler(input, context)))) as unknown as H;
+  return {
+    ...bus,
+    register: (name, handler) => bus.register(name, counted(handler)),
+    intercept: (name, handler) => bus.intercept(name, counted(handler)),
   };
 }

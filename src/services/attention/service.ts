@@ -25,6 +25,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { CommandInput, CommandName, CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
 import { previewLine } from '@shared/owner/preview';
 import type { AttentionStore } from './store';
+import type { Settling } from '../work'; // P5 O3-D M2
 import type { HostSupervisor } from '@shared/host/host-supervisor';
 
 // SPEC 45.25.4 `qpn`: the terminal reasons that are hard failures (an interrupt is not one).
@@ -99,6 +100,10 @@ export interface AttentionService {
   // P5 O9 M6: the session's lane A items whole (replacing the last), each with its request view.
   setLaneAItems(appSessionId: AppSessionId, entries: readonly { item: AttentionItem; request: SessionEvent }[]): void;
   settled(): Promise<void>; // every change so far has reached the store
+  // P5 O3-D M2 (Interfaces §A, D27): a write pass is queued or running once the persisted items are read (what the root's
+  // `settled` waits for before a release; a pass owed before the load writes nothing until it, and `stop` writes nothing
+  // then either), and its settling, which never rejects
+  readonly writing: Settling;
   stop(): void;
 }
 
@@ -143,29 +148,38 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   const write = (id: AppSessionId, op: 'replace' | 'retire') =>
     op === 'retire' ? deps.store.retireForSession(id) : deps.store.replaceForSession(id, merged(sessions.get(id) ?? stateOf(id)));
+  let passes = 0; // P5 O3-D M2: write passes queued or running
   const writeOwed = () => {
+    passes += 1;
     writes = writes.then(async () => {
-      for (const [id, op] of [...owed]) {
-        if (stopped) return; // the stop wrote what was owed
-        owed.delete(id);
-        try {
-          await write(id, op);
-        } catch (error) {
-          if (!owed.has(id)) owed.set(id, op);
-          failure = error;
-          log(`not persisted (${stopped ? 'stopped' : 'retrying'}): ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
-      if (stopped) return;
-      if (owed.size === 0) failure = null;
-      else if (retryTimer === null) {
-        retryTimer = setTimeout(() => {
-          retryTimer = null;
-          writeOwed();
-        }, PERSIST_RETRY_MS);
-        (retryTimer as { unref?: () => void }).unref?.();
+      try {
+        await writePass();
+      } finally {
+        passes -= 1;
       }
     });
+  };
+  const writePass = async () => {
+    for (const [id, op] of [...owed]) {
+      if (stopped) return; // the stop wrote what was owed
+      owed.delete(id);
+      try {
+        await write(id, op);
+      } catch (error) {
+        if (!owed.has(id)) owed.set(id, op);
+        failure = error;
+        log(`not persisted (${stopped ? 'stopped' : 'retrying'}): ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (stopped) return;
+    if (owed.size === 0) failure = null;
+    else if (retryTimer === null) {
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        writeOwed();
+      }, PERSIST_RETRY_MS);
+      (retryTimer as { unref?: () => void }).unref?.();
+    }
   };
 
   // P5 O3-D (D13): the restored ids among a change's items travel on it, so a reader in another process hears them in band
@@ -391,6 +405,10 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
       if (!loadedOk) throw loadError;
       await writes;
       if (failure !== null) throw failure;
+    },
+    writing: {
+      busy: () => loadedOk && passes > 0,
+      settled: () => (loadedOk ? writes.catch(() => {}) : Promise.resolve()),
     },
     stop: () => {
       stopped = true;

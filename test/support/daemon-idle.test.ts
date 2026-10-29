@@ -459,14 +459,14 @@ describe("the spine's line", () => {
   });
 
   it('reads the loaded and released medians and the drop, each window’s CPU, the fixture’s counts, the collection, the validity and both loads', () => {
-    expect(spineLine({ loaded, released, counts, gc: true, reasons: [] })).toBe(
-      '[daemon-idle] spine loaded footprint 61234 KiB (median of 21) · released 48002 KiB (median of 11), -13232 KiB · cpu 0.05 s over 600 s loaded, 0.01 s over 300 s released · fixture 5000 sessions in 50 projects, 300 attention items (40 pending), 1000 library rows, 50 drafts, 2000 prompt-history lines · gc ran twice before the released window · valid · load 3.1 (30 s pair 2.4) loaded, 2.9 (30 s pair 2.6) released',
+    expect(spineLine({ loaded, released, counts, collection: 'collected: heap 52.0 to 31.0 MiB, used 40.0 to 28.0 MiB', reasons: [] })).toBe(
+      '[daemon-idle] spine loaded footprint 61234 KiB (median of 21) · released 48002 KiB (median of 11), -13232 KiB · cpu 0.05 s over 600 s loaded, 0.01 s over 300 s released · fixture 5000 sessions in 50 projects, 300 attention items (40 pending), 1000 library rows, 50 drafts, 2000 prompt-history lines · before the released window, collected: heap 52.0 to 31.0 MiB, used 40.0 to 28.0 MiB · valid · load 3.1 (30 s pair 2.4) loaded, 2.9 (30 s pair 2.6) released',
     );
   });
 
-  it('says when no collection ran, and names why a run is invalid', () => {
-    expect(spineLine({ loaded, released, counts, gc: false, reasons: ['released: the 1-minute load reached 5.2 and its 30 s pair 4.9 (a valid run stays under 5 throughout, or its 30 s pair under 4.7)'] })).toContain(
-      ' · no gc (the runtime exposed none) · invalid: released: the 1-minute load reached 5.2 and its 30 s pair 4.9 (a valid run stays under 5 throughout, or its 30 s pair under 4.7) · load 3.1 (30 s pair 2.4) loaded, 2.9 (30 s pair 2.6) released',
+  it('says when the collection failed, and names why a run is invalid', () => {
+    expect(spineLine({ loaded, released, counts, collection: 'the collection failed: no gc', reasons: ['released: the 1-minute load reached 5.2 and its 30 s pair 4.9 (a valid run stays under 5 throughout, or its 30 s pair under 4.7)'] })).toContain(
+      ' · before the released window, the collection failed: no gc · invalid: released: the 1-minute load reached 5.2 and its 30 s pair 4.9 (a valid run stays under 5 throughout, or its 30 s pair under 4.7) · load 3.1 (30 s pair 2.4) loaded, 2.9 (30 s pair 2.6) released',
     );
   });
 });

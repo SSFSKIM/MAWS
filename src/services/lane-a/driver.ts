@@ -46,6 +46,7 @@ import { sendMedia, uploadRecords } from './media';
 import { Reshaper } from './reshape';
 import { classify, SessionFold, type BridgeState, type MainTool } from './state';
 import { TranscriptJobs } from './transcript-jobs';
+import { Work, type Settling } from '../work'; // P5 O3-D M2
 
 export interface LaneATiming {
   probeMs: number;
@@ -182,6 +183,7 @@ export interface LaneADriver {
   stopTask(appId: AppSessionId, taskId: string): Promise<ControlResult>;
   media(appId: AppSessionId, files: readonly { name: string; mediaType: string; data: string }[]): Promise<ControlResult>;
   onChange(listener: LaneAListener): () => void; // M6: each session's view as it changes, from now on
+  readonly probes: Settling; // P5 O3-D M2 (Interfaces §A, D27): the probes in flight, which a release waits for
   stop(): void;
 }
 
@@ -197,6 +199,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   let stopped = false;
   const warned = new Set<string>();
   const listeners = new Set<LaneAListener>();
+  const probing = new Work(); // P5 O3-D M2
   const uploads = uploadRecords(join(deps.userData, 'lane-a', 'uploads.json'), { log });
   let git: GitRun | null = deps.git ?? null;
   const sweep = () => {
@@ -246,7 +249,12 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     }
   }
 
-  async function probe(s: Session): Promise<void> {
+  // P5 O3-D M2: each probe counted to its end
+  function probe(s: Session): Promise<void> {
+    return probing.track(probeOnce(s));
+  }
+
+  async function probeOnce(s: Session): Promise<void> {
     if (s.gone || home === null || disabled) return;
     if (s.probing) {
       s.again = true;
@@ -761,6 +769,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
       listeners.add(listener);
       return () => void listeners.delete(listener);
     },
+    probes: probing,
     stop() {
       stopped = true;
       clearInterval(sweeper);

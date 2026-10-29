@@ -6,8 +6,8 @@ import { codecOf } from '@shared/ipc/validate';
 import { REGISTRY } from '@shared/ipc/registry';
 import type { CommandName } from '@shared/ipc/schema';
 import { IDENTITY_FILE } from '@shared/machine/identity-file';
-import { machineName, startMachineIdentity } from './identity';
-import type { Enrollment } from '../index/org-project';
+import { machineName, type Enrollment } from '@shared/machine/identity';
+import { startMachineIdentity } from './identity';
 
 let root: string;
 beforeEach(() => {

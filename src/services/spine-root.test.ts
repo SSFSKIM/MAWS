@@ -23,6 +23,7 @@ import { GitService } from './git/service';
 import { Index } from './index/index';
 import { ScmService } from './scm/service';
 import { openSpineData, startSpine, type SpineData, type SpineRoot } from './spine-root';
+import { takeSpineLock } from './settings/spine-lock';
 
 const JOURNAL = join(FIXTURE_DIR, 'permission-roundtrip.jsonl');
 const MACHINE = 'TestMachineRef00000000' as MachineRef;
@@ -191,6 +192,45 @@ describe('the spine and the checkouts composed under plain Node', () => {
     for (const { name } of bus.emitted) expect(REGISTRY.machineEvents, name).toContain(name);
   });
 
+  // P5 O3-D M2 (Interfaces §A, D26): a process that loads the spine more than once holds the lock itself and opens
+  // each load's data under it; a second one-shot open in the same process would refuse itself
+  it('opens a second load under the lock the process holds, after the first load stopped', async () => {
+    const lock = await takeSpineLock(profile, { build: BUILD });
+    expect(lock.refused).toBeNull();
+    const first = await openSpineData(profile, { build: BUILD, lock });
+    expect(first.refused).toBeNull();
+    const one = compose(first, new FakeSpineHost(), fakeBus(), { checkouts: false });
+    stopBoth(one);
+    const second = await openSpineData(profile, { build: BUILD, lock });
+    expect(second.refused).toBeNull();
+    const two = compose(second, new FakeSpineHost(), fakeBus(), { checkouts: false });
+    expect(two.spine.view.unavailable()).toBeNull();
+    stopBoth(two);
+    lock.release();
+  });
+
+  // P5 O3-D M2 (Interfaces §A, D27): the root reports a command its parts registered while it runs, and settles at its
+  // end, so a release never closes the index under it
+  it('is busy while a command it registered runs and settles once it answered', async () => {
+    const data = await openSpineData(profile, { build: BUILD });
+    const host = new FakeSpineHost();
+    const bus = fakeBus();
+    const { spine } = compose(data, host, bus, { checkouts: false });
+    await spine.settled();
+    expect(spine.busy()).toBe(false);
+    // the session service answers nothing before the engine host streams, so a start waits on it
+    const start = bus.invoke('session.start', { appSessionId: '11111111-1111-4111-8111-111111111111', message: null, options: {} });
+    await vi.waitFor(() => expect(spine.busy()).toBe(true));
+    let settled = false;
+    const settling = spine.settled().then(() => void (settled = true));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(settled).toBe(false);
+    await host.ready();
+    expect(await start).toMatchObject({ ok: true, value: { status: 'refused', reason: 'unknown_session' } });
+    await settling;
+    expect(spine.busy()).toBe(false);
+  });
+
   // P5 O9 (O3 Decision Log 13): lane A drives, from the spine, a terminal session the index held at start, and its
   // bridge's request reaches attention and the session's digest
   it('drives a terminal session the index holds through its bridge: laneA.state, its request in attention, its digest', async () => {
@@ -295,7 +335,7 @@ describe('the spine and the checkouts composed under plain Node', () => {
   });
 
   it('a refused run composes with the view unavailable and registers none of the parts it does not start', async () => {
-    held.push({ data: await openSpineData(profile, { build: BUILD }), spine: { view: null as never, stop: () => {} }, checkouts: null }); // a live holder of spine.lock: this process
+    held.push({ data: await openSpineData(profile, { build: BUILD }), spine: { view: null as never, settled: async () => {}, busy: () => false, stop: () => {} }, checkouts: null }); // a live holder of spine.lock: this process
     const refusal = captureConsole('error', /^\[spine\] spine\.lock is held by pid /);
     const data = await openSpineData(profile, { build: BUILD }); // waits SPINE_LOCK_WAIT_MS for the holder, then is refused
     expect(refusal.lines()).toHaveLength(1);
