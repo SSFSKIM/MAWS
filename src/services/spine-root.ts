@@ -20,6 +20,7 @@ import type { ClientPort } from '@shared/client/port';
 import { claudeConfigDir } from '@shared/engine/config-dir';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
+import { OpLedger } from '@shared/host/op-ledger';
 import type { CommandResult } from '@shared/ipc/schema';
 import type { Enrollment } from '@shared/machine/identity';
 import type { MachineRef } from '@shared/machine/ref';
@@ -42,6 +43,7 @@ import { laneAAttention } from './lane-a/attention';
 import { sminosHome } from './lane-a/discovery';
 import { createLaneADriver, registerLaneA } from './lane-a/driver';
 import { startLibrary } from './library';
+import { registerMachineOps } from './machine-ops';
 import { startOwnerChannel } from './owner/register';
 import { startEngineConfigure } from './settings/engine-configure';
 import { startHostConfigure } from './settings/host-configure';
@@ -391,6 +393,9 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   // .spaces and library.changed answered from it. It stops in the same pass as the index's close, so no sync step runs
   // between them, and after it applies nothing.
   parts.push(['library', startLibrary({ index, hosts, register: bus.register, emit: bus.emit, e2e: deps.env.MAWS_E2E === '1' }).stop]);
+  // P5 O3-D M4 (Interfaces §H; O3X7): the services' operation ledger, a spine file under the lock, none in a refused run;
+  // a remote act on the spine is claimed and run once through it (machine-ops.ts)
+  if (spineRuns) registerMachineOps(bus, OpLedger.open(profile, 'spine-ops.jsonl', { log: (line) => console.warn(`[spine-ops] ${line}`) }));
 
   const root = allSettling(settling);
   return {
