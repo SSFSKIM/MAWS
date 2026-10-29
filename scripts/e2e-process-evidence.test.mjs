@@ -78,7 +78,7 @@ test('credentialed groups and local live/owner launches never enable raw process
   assert.equal(captureAllowed({ file: 'ordinary.spec.ts', env: {}, ownerConfigHome: true }), false);
   assert.equal(captureAllowed({ file: 'ordinary.spec.ts', env: { MAWS_LIVE_DOCUMENT: '1' } }), false);
   assert.equal(captureAllowed({ file: 'machines.spec.ts', env: { ...env, MAWS_E2E_GROUP: 'machines' } }), true);
-  assert.equal(captureAllowed({ file: 'daemon-idle.spec.ts', env: {} }), true);
+  for (const file of ['daemon-idle.spec.ts', 'delivery.spec.ts', 'deliverables.spec.ts']) assert.equal(captureAllowed({ file, env: {} }), true, file);
 });
 
 test('timing evidence persists partial samples without copying tool arguments or results', (t) => {

@@ -9,7 +9,7 @@ export function captureAllowed({ file, env, realEngine = false, ownerConfigHome 
   const privateGroups = ['LIVE_E2E', 'LIVE_GUARD_E2E', 'MAC_SECRET_E2E'].flatMap((key) => (env[key] ?? '').split(/\s+/).filter(Boolean));
   if (privateGroups.includes(env.MAWS_E2E_GROUP)) return false;
   // Local Playwright runs do not have gate.yml's group lists. These scenes use a real engine or real account state.
-  if (/(?:live|prerun|connectors-oauth|discover)/.test(basename(file))) return false;
+  if (/(?:^|-)live(?:-|\.spec\.ts$)|^(?:c12-prerun|connectors-oauth|discover)\.spec\.ts$/.test(basename(file))) return false;
   if (Object.entries(env).some(([key, value]) => /^MAWS_.*LIVE/.test(key) && value === '1')) return false;
   return true;
 }
