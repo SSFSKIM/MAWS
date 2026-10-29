@@ -52,6 +52,14 @@ describe('the session and project entries', () => {
     expect(sessionActionsFor(record('x', { holder: { kind: 'terminal', pid: 1 } }))).toEqual(['open', 'openInNewTab']);
   });
 
+  it('offers Take over in MAWS and Fork for a terminal session its bridge drives, which has no holder notice (P5 O9 M5, Q4)', () => {
+    expect(sessionActionsFor(record('x', { holder: { kind: 'terminal', pid: 1 } }), { bridged: true })).toEqual(['open', 'openInNewTab', 'takeOver', 'fork']);
+    expect(sessionActionsFor(record('x', { holder: { kind: 'background_job', pid: 1, jobId: 'j1' } }), { bridged: true })).toEqual(['open', 'openInNewTab', 'attach', 'takeOver', 'fork']);
+    expect(sessionActionsFor(record('x', { holder: { kind: 'background_job', pid: 1, jobId: null } }), { bridged: true })).toEqual(['open', 'openInNewTab', 'fork']);
+    expect(sessionActionsFor(record('x', { holder: { kind: 'self' } }), { bridged: true })).not.toContain('takeOver');
+    expect(sessionActionsFor(record('x', { holder: { kind: 'none' } }))).not.toContain('takeOver');
+  });
+
   it('archives old sessions only in the chosen project through the guarded main command', async () => {
     act(() => runProjectAction('archiveOlder', P1));
     await waitFor(() => expect(fake.pending('session.archiveOlder')).toBe(1));

@@ -16,11 +16,24 @@ type Env = Record<string, string | undefined>;
 // names its own copy). A test's `env`, applied by launchMaws afterwards, may still name a CLAUDE* variable on purpose.
 // P5 O2 M2: the machine role is pinned to a laptop, so the engine host's idle release keeps the idle time main pushes
 // (the e2e seam's included) on every runner: the mini and a VM read as servers, whose idle time is 24 hours.
-export function launchEnvironment(runner: Env, userData: string): Record<string, string> {
+// P5 O9 M5: `sminosHome`, a scratch sminos home, so lane A looks for terminal sessions' bridges there and never under
+// the owner's ~/.claude/sminos (main refuses that home under a test runner, and lane A is off without one). Short, as a
+// bridge's socket path must fit 103 bytes; launchMaws makes it under /tmp.
+export function launchEnvironment(runner: Env, userData: string, sminosHome?: string): Record<string, string> {
   const env = withoutClaudeVariables(runner);
   delete env.ELECTRON_RENDERER_URL;
   delete env.ELECTRON_RUN_AS_NODE;
-  return { ...env, MAWS_E2E: '1', MAWS_USER_DATA: userData, CLAUDE_CONFIG_DIR: join(userData, 'claude-config'), MAWS_CLAUDE_USAGE_DIR: join(userData, 'claude-usage'), MAWS_MACHINE_ROLE: 'laptop' };
+  delete env.SMINOS_HOME; // P5 O9 M5: the runner's, which may be the owner's
+  delete env.DAEMON_HOME;
+  return {
+    ...env,
+    MAWS_E2E: '1',
+    MAWS_USER_DATA: userData,
+    CLAUDE_CONFIG_DIR: join(userData, 'claude-config'),
+    MAWS_CLAUDE_USAGE_DIR: join(userData, 'claude-usage'),
+    MAWS_MACHINE_ROLE: 'laptop',
+    ...(sminosHome !== undefined && { SMINOS_HOME: sminosHome }),
+  };
 }
 
 // What a parent Claude or Electron process injects into a shell, beside the CLAUDE* variables already dropped.

@@ -8,7 +8,8 @@
 // tree, independent of search and hidden projects, from the same attention table as the Overview. One context menu
 // serves every row, and the tree is one roving tab stop (`tree.ts`). A project removed from the sidebar (I5) is listed
 // nowhere, its sessions with it, and "Hidden projects…" at the end offers it back. P5 O8 M2: other machines' listed
-// sessions the member owns join their rows' sessions (`projectItems`), under the same caps and search.
+// sessions the member owns join their rows' sessions (`projectItems`), under the same caps and search. P5 O8 M5: other
+// people's join them too under a row whose People toggle is on (`stores/people.ts`), each row naming its owners.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { FolderIcon, GearIcon, IconButton, SortIcon } from '../app/IconButton';
@@ -27,6 +28,7 @@ import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { openArtifacts } from '../main/artifacts'; // P3-G
 import { selectHiddenProjects, selectProjectOrder, useSessions } from '../stores/sessions';
+import { usePeople } from '../stores/people'; // P5 O8 M5
 import { openDialog } from '../sessions/dialogs';
 import { filterProjectList, isListedRow, listedMatcher, nestItems, projectItems, projectList, projectSessions, PROJECTS_FIRST, SESSIONS_CAP, sessionMatcher, shownCount, sidebarSessionId, type ProjectEntry, type ProjectKey, type SidebarSession, type SidebarTreeRow } from './derive';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -73,6 +75,7 @@ function SidebarBody() {
   const recordsVersion = useSessions((s) => s.recordsVersion);
   const digests = useSessions((s) => s.digests);
   const listedSessions = useSessions((s) => s.listed); // P5 O8 M2
+  const people = usePeople((s) => s.on); // P5 O8 M5: the rows drawing other people's sessions
   const [projectFilter, setProjectFilter] = useState<ReadonlySet<ProjectKey> | null>(null);
   const allKnownProjects = useSessions(selectProjectOrder);
   const hiddenProjects = useSessions(selectHiddenProjects);
@@ -138,10 +141,10 @@ function SidebarBody() {
   const scroller = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLDivElement>(null);
 
-  const rankedEntries = useMemo((): RankedEntry[] => projectList({ records, digests, projects, rows, local, machineName: (m) => machineName(machines, m, local), alsoListed: projectFilter ?? undefined, listed: listedSessions }).map((entry) => {
+  const rankedEntries = useMemo((): RankedEntry[] => projectList({ records, digests, projects, rows, local, machineName: (m) => machineName(machines, m, local), alsoListed: projectFilter ?? undefined, listed: listedSessions, people }).map((entry) => {
     const sorted = projectSessions({ sessions: entry.sessions, digests, rows, sort: sidebar.sort, matches: () => true });
     return { ...entry, sessions: sorted, items: projectItems({ sorted, listed: entry.listed, digests, rows, sort: sidebar.sort }) };
-  }), [records, digests, projects, rows, local, machines, projectFilter, sidebar.sort, listedSessions]);
+  }), [records, digests, projects, rows, local, machines, projectFilter, sidebar.sort, listedSessions, people]);
   // Hold ranks, not data: titles, glyphs and counts remain live. Pointer presence, keyboard focus (including
   // portalled cards/menus), or an open context menu keeps the same targets in place until the person leaves.
   // A deliberate sort change is immediate; no timer can reshuffle a row between two actions.

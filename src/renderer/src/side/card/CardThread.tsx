@@ -13,7 +13,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { tabId } from '@shared/ipc/schema/layout';
 import { editRowOf } from '../../composer/resubmit-seam'; // P2-F F-C1
-import { sendHumanPrompt, type HumanPromptResult } from '../../composer/submit/send-human-prompt';
+import type { HumanPromptResult } from '../../composer/submit/send-human-prompt';
+import { sendToSession } from '../../session/controls/controls-for'; // P5 O9 M4
 import { failureOf, isStarting, useSetup } from '../../sessions/store';
 import { TrustCard } from '../../sessions/TrustCard';
 import { continueSetup, releaseMessage } from '../../sessions/setup-actions';
@@ -228,7 +229,7 @@ function useReply(serial: number, child: AppSessionId, delivered: (result: Human
     const settled = onSending?.(content); // P3-F (L154): told as it sets out, then whether it went, the card gone or not
     let result: HumanPromptResult;
     try {
-      result = await sendHumanPrompt(child, content, { origin: 'comment' });
+      result = await sendToSession(child, content, { origin: 'comment' });
     } catch (error) {
       result = { disposition: 'refused', started: false, reason: error instanceof Error ? error.message : String(error) };
     }

@@ -24,10 +24,10 @@
 // the view holds the transcript back to its first row. A send whose journey ended without a row (recorded, refused by
 // a read-only machine, failed) stays at the tail whatever history is held.
 import type { Delivery, JsonObject, LogEvent, Recipient } from 'desk-hub/protocol';
-import { deliveredLines } from './delivery-frame';
+import { deliveredLines } from '../../../../src/renderer/src/lane-a/conversation/delivery-frame';
 import { broadcastLabel } from './stream';
-import { failureOf, resultOf } from './outcome';
-import { failureText } from './words';
+import { failureOf, resultOf } from '../../../../src/renderer/src/lane-a/conversation/outcome';
+import { failureText } from '../../../../src/renderer/src/lane-a/conversation/words';
 import { deliveryKey, type OutboxItem, type RpcEntry } from '../project/conversation';
 
 /** Where a send is: on its way (`sending`, `queued`, `delivered` — its row not seen yet), or a journey ended without one. */

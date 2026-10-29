@@ -12,20 +12,21 @@ import { useAvailability } from '../sessions/availability';
 import { useSessions } from '../stores/sessions';
 import { WIDGET_TITLE } from '../widgets/copy';
 import { WidgetFrame } from '../widgets/WidgetFrame';
-import { askSideQuestion, sideBlock, startForSide } from './btw';
+import { askSideQuestion, sideBlock, startForSide, useDrivenAsk } from './btw';
 import { STARTING_SESSION } from '../sessions/acquire'; // P2-A
 import { SIDE_COPY } from './copy';
 
 const COPY = SIDE_COPY.btw;
 
 export function BtwWidget({ appSessionId, args, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
-  const ready = useSessions((s) => s.engine.get(appSessionId)?.process === 'ready');
+  const driven = useDrivenAsk(appSessionId); // P5 O9 M5
+  const ready = useSessions((s) => s.engine.get(appSessionId)?.process === 'ready') || driven?.available === true;
   const holder = useSessions((s) => s.records.get(appSessionId)?.holder ?? null);
   const availability = useAvailability(appSessionId);
   const [question, setQuestion] = useState(args.trim());
   // P2-A: this widget's own start in flight, or the words of the one that was refused
   const [start, setStart] = useState<{ kind: 'idle' } | { kind: 'starting' } | { kind: 'refused'; words: string }>({ kind: 'idle' });
-  const blocked = ready ? null : sideBlock(availability, holder);
+  const blocked = ready ? null : driven?.available === false ? driven.reason : sideBlock(availability, holder);
   const starting = start.kind === 'starting';
   const mounted = useRef(false);
   useEffect(() => {

@@ -89,7 +89,7 @@ import { invoke, value } from './support/c7-replay';
 import { journalSpend, ptyEngine, terminalEnv, transcriptFile, type PtyEngine } from './support/c12-prerun';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { sessionSpent } from './support/live-budget';
-import { clearToasts, eventsOf, frameAt, listOf, mcpCalls, mcpResultOf, ofKind, openArtifacts, pageUrlOf, recordEvents, rowOf, seedTranscripts, show, unfoldWork, viewerOf, type Scene } from './support/maws-tools';
+import { clearToasts, eventsOf, frameAt, listOf, mcpCalls, mcpResultOf, ofKind, openArtifacts, pageUrlOf, pointInFrame, recordEvents, rowOf, seedTranscripts, show, unfoldWork, viewerOf, type Scene } from './support/maws-tools';
 import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, costRecorded, costShown, DEFAULT_CAP_USD, dominantColour, forkOverspend, initPluginsOf, installedEngine, launchReservation, liveOutDir, resumeNoOutput, runRoot, settleAll, settledReservation, sittingLog, SITTING_CAP_USD, spentBySitting, terminalUsdBound, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
 import { isAlive, processesNaming, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
@@ -577,8 +577,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     const frame = await frameAt(l.page, await pageUrlOf(l.page, artifact!.deliverableId, Number(await viewer.getAttribute('data-version'))));
     await l.panel.locator('[data-editor-header]').getByRole('button', { name: 'Comment', exact: true }).click();
     const box = (await viewer.locator('[data-artifact-frame="html"]').boundingBox())!;
-    await l.page.mouse.move(box.x + 60, box.y + 30);
-    await expect(frame.locator('[data-maws-pick-overlay]')).toHaveCount(1);
+    await pointInFrame(l.page, frame, box.x + 60, box.y + 30);
     await l.page.mouse.click(box.x + 60, box.y + 30);
     const card = viewer.locator('[data-comment-card]');
     await expect(card).toHaveAttribute('data-card-phase', 'composing');

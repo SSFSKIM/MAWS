@@ -8,7 +8,9 @@ import * as z from 'zod';
 import type { OperationEvent } from '@shared/engine/operations';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { McpStatusResponse } from '@shared/wire/control';
+import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M5
 import { useSessions } from '../stores/sessions';
+import { McpDriven } from './McpDriven'; // P5 O9 M5
 import { MCP, MCP_ACTIONS, WIDGET_TITLE } from './copy';
 import { operationLine, outcomeWords, useOperation } from './operation';
 import { Mono, parseEach, Row, Rows, TextButton } from './parts';
@@ -214,7 +216,12 @@ export function McpBody({ view, actions, compact = false }: { view: { servers: M
 // A server's status in C3's table moving is reason to read `mcp_status` again.
 const MOVES_MCP = (s: Parameters<typeof MOVES_READS>[0]) => `${MOVES_READS(s)}|${s.mcpServers.map((m) => `${m.name}=${m.status}`).join(',')}`;
 
-export function McpWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
+export function McpWidget(props: { appSessionId: AppSessionId; args: string; close(): void }) {
+  const controls = useSessionControls(props.appSessionId); // P5 O9 M5: a session driven through its bridge reads the bridge
+  return controls && controls.turn() !== null ? <McpDriven appSessionId={props.appSessionId} controls={controls} close={props.close} /> : <McpEngine {...props} />;
+}
+
+function McpEngine({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const read = useEngineRead('session.mcpStatus', { appSessionId }, { refreshOn: MOVES_MCP });
   const ready = useSessions((s) => s.engine.get(appSessionId)?.process === 'ready');
   return (

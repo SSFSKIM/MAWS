@@ -6,9 +6,10 @@
 // D binds B's document exporters) with the deck's overrides, and the uploaded assets it names; the portable halves under
 // `src/artifacts/slides/export/` write the page, the mapping and the zip.
 //
-// Every format but `claude` renders: the deck's standalone page is loaded in a hidden 1920×1080 window on the capture
-// partition (offscreen, sandboxed, its requests limited to its own file and `data:` as A's printer limits them, the window
-// destroyed when the export ends or its budget runs out), fitted and measured (`measureDeckPage`); the page is then
+// Every format but `claude` renders: the deck's standalone page is loaded in a hidden 1920×1080 window (and a row below
+// it, where each staging for a picture draws its mark) on the capture partition (offscreen, sandboxed, its requests
+// limited to its own file and `data:` as A's printer limits them, the window destroyed when the export ends or its
+// budget runs out), fitted and measured (`measureDeckPage`); the page is then
 // written again with what depends on layout drawn from the measure (shapes, connectors, fitted text, crops) for:
 // - `html`: the file itself;
 // - `pdf`: printed by the service's printer, one 1920×1080 px page per visible slide, each embed drawn as the picture the
@@ -21,7 +22,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { BrowserWindow } from 'electron';
+import type { BrowserWindow, NativeImage, Rectangle } from 'electron';
 import { fontFaceCss, systemFaces } from '@artifacts/design-system/assets';
 import { DOCUMENT_CSS_PATH } from '@artifacts/design-system/canon';
 import { readSystem } from '@artifacts/design-system/model';
@@ -168,6 +169,46 @@ export interface DeckWindow {
 
 const MEASURE_ARGS: MeasureArgs = { textTags: [...TEXT_TAGS] };
 
+/** A staging's mark (`STAGE`), as red, green and blue. */
+export type Mark = readonly [number, number, number];
+// Two in turn: a copy can be behind by the staging before at most (the capture before kept a copy of its own), whose mark
+// is the other. Red and blue alike, so the mark reads the same in either byte order a bitmap may have; neither is a
+// colour a slide is likely to draw along its top edge (the row the page as loaded shows there: the second slide's).
+const MARKS: readonly Mark[] = [[255, 7, 255], [7, 255, 7]];
+const MARK_ROW = 1; // px: the window's last row, below every picture
+const STAGED_WAIT_MS = 10_000;
+// Chromium's compositor now and then refuses a copy (capturePage rejects with UnknownVizError, seen on the hosted Macs, as
+// the browser view's still meets it: ../browser/view.ts): it is asked again a frame later, at most this many times.
+const REFUSED_RETRIES = 4;
+const REFUSED_RETRY_MS = 16;
+const refusedCopy = (error: unknown) => error instanceof Error && error.message.includes('UnknownVizError');
+
+/**
+ * The window's copy of `rect` from a frame drawn after the staging that drew `mark` along `row` (the window's last row):
+ * one copy of the rect down to that row, kept (cut to the rect) when the row shows the mark, else taken again after the
+ * window's next paint. A window that has not drawn the staging within STAGED_WAIT_MS fails the capture, naming the slide,
+ * rather than give a picture of another staging; so does a copy refused more than REFUSED_RETRIES times.
+ */
+async function stagedCopy(live: () => BrowserWindow, rect: Rectangle, row: number, mark: Mark, slideId: string): Promise<NativeImage> {
+  const area = { ...rect, height: row + MARK_ROW - rect.y };
+  const until = Date.now() + STAGED_WAIT_MS;
+  for (let refused = 0; ; ) {
+    let copy: NativeImage;
+    try {
+      copy = await live().webContents.capturePage(area);
+    } catch (error) {
+      if (!refusedCopy(error)) throw error;
+      if (++refused > REFUSED_RETRIES) throw new Error(`the export window refused a copy of slide ${slideId} ${refused} times (${(error as Error).message})`, { cause: error });
+      await new Promise((resolve) => setTimeout(resolve, REFUSED_RETRY_MS));
+      continue;
+    }
+    const [b, g, r, a] = copy.crop({ x: 0, y: row - rect.y, width: 1, height: 1 }).toBitmap(); // BGRA (or RGBA: the same here)
+    if (a! > 250 && [r!, g!, b!].every((v, i) => Math.abs(v - mark[i]!) <= 2)) return copy.crop({ x: 0, y: 0, width: rect.width, height: rect.height });
+    if (Date.now() >= until) throw new Error(`the export window did not draw slide ${slideId} within ${STAGED_WAIT_MS / 1000} s`);
+    await settled(live());
+  }
+}
+
 // The page's state for one picture (fix waves 1 and 2): only the job's slide shown at the top; for an element, everything
 // but the element hidden, and the transforms of the element and of every ancestor up to the slide neutralized, so the
 // element stands alone, whole and unturned at its own layout box (a translate no longer moves it, a scale no longer sizes
@@ -183,8 +224,19 @@ const MEASURE_ARGS: MeasureArgs = { textTags: [...TEXT_TAGS] };
 // own) are hidden within it, as a table's rows and cells are not, and the window captures the region the measure says it
 // paints (the job's box, in slide px), moved by the slide's own offset in its frame, which `drawn` answers (a section may
 // carry a transform of its own).
-export const STAGE = (slideId: string, elementId: string | null, mode: PictureJob['mode']) => `(() => {
-  const slide = ${JSON.stringify(slideId)}, eid = ${JSON.stringify(elementId)}, mode = ${JSON.stringify(mode)};
+// The two animation frames show the page has handed its staging to its compositor, not that the window's next copy is of
+// it: a copy is of the frame drawn last, which under load can still be the staging before (the P4 presentations-export
+// flake, two of a deck's three slide PNGs alike). So each staging also draws its `mark` along the window's last row,
+// below every picture (`MARK_ROW`), in the same task as its last change, and the capture keeps only a copy whose row
+// shows that mark (`stagedCopy`). The staging hides the viewport's scrollbars (the root's `scrollbar-width`): one, which
+// an unclipped element can bring by widening the page, would lift the fixed mark off the last row and cover pictures.
+export const STAGE = (slideId: string, elementId: string | null, mode: PictureJob['mode'], mark: Mark) => `(() => {
+  const slide = ${JSON.stringify(slideId)}, eid = ${JSON.stringify(elementId)}, mode = ${JSON.stringify(mode)}, mark = ${JSON.stringify(`rgb(${mark.join(', ')})`)};
+  const marked = () => {
+    let m = document.getElementById('maws-stage-mark');
+    if (!m) { m = document.createElement('div'); m.id = 'maws-stage-mark'; document.body.appendChild(m); }
+    m.style.cssText = 'position: fixed; left: 0; right: 0; bottom: 0; height: ${MARK_ROW}px; margin: 0; z-index: 2147483647; pointer-events: none; background: ' + mark + ' !important;';
+  };
   document.body.setAttribute('data-shown', '');
   let frame = null;
   for (const f of document.querySelectorAll('.maws-frame')) { if (f.getAttribute('data-frame') === slide) { f.setAttribute('data-shown', ''); frame = f; } else f.removeAttribute('data-shown'); }
@@ -202,14 +254,15 @@ export const STAGE = (slideId: string, elementId: string | null, mode: PictureJo
     for (let at = target.parentElement; at && !at.classList.contains('maws-slide'); at = at.parentElement) at.setAttribute('data-maws-open', '');
   }
   const own = el + ' [data-eid]:not(tr):not(th):not(td)';
-  st.textContent = mode === 'slide' ? '' : mode === 'background'
+  st.textContent = 'html { scrollbar-width: none !important; }\\n' + (mode === 'slide' ? '' : mode === 'background'
     ? on + '.maws-slide * { visibility: hidden !important; }'
     : on + '.maws-slide { background: transparent !important; box-shadow: none !important; overflow: visible !important; }\\n' + '.maws-frame[data-shown] { overflow: visible !important; }\\n' + on + '.maws-slide * { visibility: hidden !important; opacity: 1 !important; }\\n'
       + on + '[data-maws-flat] { transform: none !important; }\\n'
       + on + '[data-maws-open] { overflow: visible !important; }\\n'
       + el + ' { visibility: visible !important; opacity: 1 !important;' + (mode === 'self' ? ' color: transparent !important;' : '') + ' }\\n'
       + (mode === 'tree' ? el + ' * { visibility: visible !important; }' : '')
-      + (mode === 'drawn' ? el + ' * { visibility: visible !important; }\\n' + own + ', ' + own + ' * { visibility: hidden !important; }' : '');
+      + (mode === 'drawn' ? el + ' * { visibility: visible !important; }\\n' + own + ', ' + own + ' * { visibility: hidden !important; }' : ''));
+  if (!isolated) marked();
   scrollTo(0, 0);
   const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   const rectOf = () => {
@@ -223,6 +276,7 @@ export const STAGE = (slideId: string, elementId: string | null, mode: PictureJo
     const at = rectOf();
     target.setAttribute('data-maws-moved', '');
     target.style.setProperty('translate', (-at.x) + 'px ' + (-at.y) + 'px', 'important');
+    marked();
     return frames().then(rectOf);
   });
 })()`;
@@ -250,7 +304,7 @@ export async function withDeckWindow<T>(env: SeamEnv, signal: AbortSignal, use: 
   };
   try {
     if (signal.aborted) throw new Error('the export was cancelled');
-    win = openCaptureWindow(SLIDE_W, SLIDE_H, env);
+    win = openCaptureWindow(SLIDE_W, SLIDE_H + MARK_ROW, env);
     signal.addEventListener('abort', cancel, { once: true });
     win.setBackgroundColor('#00000000'); // an element's picture keeps what lies under it see-through
     const contents = win.webContents;
@@ -259,6 +313,7 @@ export async function withDeckWindow<T>(env: SeamEnv, signal: AbortSignal, use: 
       if (!win || win.isDestroyed() || signal.aborted) throw new Error('the export was cancelled');
       return win;
     };
+    let stagings = 0;
     return await use({
       load: async (html) => {
         await writeFile(file, html, 'utf8');
@@ -268,22 +323,23 @@ export async function withDeckWindow<T>(env: SeamEnv, signal: AbortSignal, use: 
       measure: async () => (await live().webContents.executeJavaScript(`(${String(measureDeckPage)})(${JSON.stringify(MEASURE_ARGS)}, ${String(shrinkScale)})`, true)) as MeasuredDeck,
       capture: async (job, size) => {
         const w = live();
-        const staged = (await w.webContents.executeJavaScript(STAGE(job.slideId, job.elementId, job.mode), true)) as { x: number; y: number; w: number; h: number };
+        const mark = MARKS[stagings++ % MARKS.length]!;
+        const staged = (await w.webContents.executeJavaScript(STAGE(job.slideId, job.elementId, job.mode, mark), true)) as { x: number; y: number; w: number; h: number };
         // a `drawn` picture is taken in place, of the region the measure says the element paints (P4), in slide px: moved
         // by where the slide sits in the frame
         const box = job.mode === 'drawn' ? { ...job.box, x: job.box.x + staged.x, y: job.box.y + staged.y } : staged;
-        const x = Math.max(0, Math.floor(box.x));
-        const y = Math.max(0, Math.floor(box.y));
-        // an element larger than the slide: the window grows to hold it for this picture (fix wave 2)
+        // an element larger than the slide: the window grows to hold it for this picture (fix wave 2), the mark's row below
         const [vw, vh] = [Math.max(SLIDE_W, Math.ceil(box.x + box.w)), Math.max(SLIDE_H, Math.ceil(box.y + box.h))];
+        const x = Math.max(0, Math.floor(box.x));
+        const y = Math.min(vh - 1, Math.max(0, Math.floor(box.y)));
         const grown = vw > SLIDE_W || vh > SLIDE_H;
         if (grown) {
-          w.setContentSize(vw, vh);
+          w.setContentSize(vw, vh + MARK_ROW);
           await settled(w);
         }
         const rect = { x, y, width: Math.max(1, Math.min(vw - x, Math.ceil(box.x + box.w) - x)), height: Math.max(1, Math.min(vh - y, Math.ceil(box.y + box.h) - y)) };
-        let image = await w.webContents.capturePage(rect);
-        if (grown) w.setContentSize(SLIDE_W, SLIDE_H);
+        let image = await stagedCopy(live, rect, vh, mark, job.slideId);
+        if (grown) w.setContentSize(SLIDE_W, SLIDE_H + MARK_ROW);
         if (size?.width !== undefined) image = image.resize({ width: size.width, ...(size.height !== undefined && { height: size.height }), quality: 'best' });
         return image.toPNG();
       },

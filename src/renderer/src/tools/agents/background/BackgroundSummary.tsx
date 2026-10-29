@@ -4,10 +4,13 @@
 // monitors are known only while it runs; and Open. The reader sees what C8a's baseline showed; the source is the graph.
 // The section watches the store itself: the tool may not be open. P4: while the session starts (its setup in flight, or
 // its process launching) the runs line reads Starting…, muted: main refuses the read until it has registered the
-// session, and the graph's counts follow at ready.
+// session, and the graph's counts follow at ready. P5 O9 M5: a terminal session driven through its bridge counts the
+// shells and monitors derived from its transcript in place of that sentence.
 import { useEffect } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { actionClass, Row } from '../../../panel/summary/Section';
+import { useDrivenJobs } from '../../../lane-a/jobs/lane-jobs'; // P5 O9 M5
+import { useSessionControls } from '../../../session/controls/controls-for'; // P5 O9 M5
 import { availabilityIn } from '../../../sessions/availability';
 import { isStarting, useSetup } from '../../../sessions/store';
 import { useSessions } from '../../../stores/sessions';
@@ -26,6 +29,10 @@ export function BackgroundSummary({ appSessionId, open }: { appSessionId: AppSes
   const live = useSessions((s) => s.engine.get(appSessionId)?.process === 'ready'); // P2-A: an exited status is not live; nothing here acquires
   const launching = useSessions((s) => availabilityIn(s, appSessionId) === 'starting');
   const settingUp = useSetup((s) => isStarting(s, appSessionId));
+  const controls = useSessionControls(appSessionId); // P5 O9 M5: a terminal session driven through its bridge
+  const driven = controls !== null && controls.turn() !== null;
+  const jobs = useDrivenJobs(appSessionId, driven && !live);
+  const running = (kind: 'shell' | 'monitor') => jobs?.filter((j) => j.kind === kind && j.status === 'running').length ?? 0;
   const action = (
     <button type="button" className={actionClass} onClick={() => open()}>
       {AGENTS_SUMMARY_COPY.open}
@@ -45,7 +52,11 @@ export function BackgroundSummary({ appSessionId, open }: { appSessionId: AppSes
             ) : (
               runsLoaded && <span>{AGENTS_SUMMARY_COPY.runsOnDisk(workflows(graph).length)}</span>
             )}
-            <span className="text-ui-sm text-fg-muted">{BACKGROUND_COPY.shellsDiskOnly}</span>
+            {jobs !== null ? (
+              <span className="block truncate">{AGENTS_SUMMARY_COPY.background({ shells: running('shell'), workflows: 0, monitors: running('monitor') })}</span>
+            ) : (
+              !driven && <span className="text-ui-sm text-fg-muted">{BACKGROUND_COPY.shellsDiskOnly}</span>
+            )}
           </div>
         )}
       </Row>

@@ -13,7 +13,7 @@ import { useSessions } from '../stores/sessions';
 import { attachOrSay } from './attach';
 import { cleanupTargetOf } from './CleanupDialog';
 import { confirm, openDialog } from './dialogs';
-import { archiveSession, forkInPlace } from './record-ops';
+import { archiveSession, forkInPlace, takeOverSession } from './record-ops';
 import { resumeSession } from './setup-actions';
 import { displayTitle } from './title';
 import { machineOf } from '@shared/machine/address';
@@ -133,6 +133,11 @@ export function registerSessionActions(): () => void {
     registerSessionAction('deleteConversation', (id) => openDialog({ kind: 'delete', appSessionId: id })),
     registerSessionAction('removeWorktree', removeWorktree),
     registerSessionAction('attach', (id) => attachOrSay(id)),
+    // P5 O9 M5: Take over from the menu of a terminal session MAWS drives through its bridge, with today's confirm
+    registerSessionAction('takeOver', (id) => {
+      const holder = useSessions.getState().records.get(id)?.holder;
+      if (holder && (holder.kind === 'terminal' || holder.kind === 'background_job')) return takeOverSession(id, holder);
+    }),
     registerProjectAction('removeProject', removeProject),
     registerProjectAction('archiveSessions', archiveProjectSessions),
     registerProjectAction('archiveOlder', archiveOlder),
