@@ -72,13 +72,36 @@ test('a launch with no detached host writes no pretend host log', (t) => {
 test('credentialed groups and local live/owner launches never enable raw process evidence', () => {
   const workflow = readFileSync(new URL('../.github/workflows/gate.yml', import.meta.url), 'utf8');
   const env = Object.fromEntries(['LIVE_E2E', 'LIVE_GUARD_E2E', 'MAC_SECRET_E2E'].map((key) => [key, new RegExp(`^  ${key}: (.+)$`, 'm').exec(workflow)[1]]));
-  for (const group of Object.values(env).join(' ').split(/\s+/)) assert.equal(captureAllowed({ file: 'ordinary.spec.ts', env: { ...env, MAWS_E2E_GROUP: group } }), false, group);
-  for (const file of ['tools-live.spec.ts', 'document-provisional-live.spec.ts', 'c12-prerun.spec.ts', 'connectors-oauth.spec.ts', 'discover.spec.ts']) assert.equal(captureAllowed({ file, env: {} }), false, file);
-  assert.equal(captureAllowed({ file: 'ordinary.spec.ts', env: {}, realEngine: true }), false);
-  assert.equal(captureAllowed({ file: 'ordinary.spec.ts', env: {}, ownerConfigHome: true }), false);
-  assert.equal(captureAllowed({ file: 'ordinary.spec.ts', env: { MAWS_LIVE_DOCUMENT: '1' } }), false);
-  assert.equal(captureAllowed({ file: 'machines.spec.ts', env: { ...env, MAWS_E2E_GROUP: 'machines' } }), true);
-  for (const file of ['daemon-idle.spec.ts', 'delivery.spec.ts', 'deliverables.spec.ts']) assert.equal(captureAllowed({ file, env: {} }), true, file);
+  const replay = { syntheticEngineBin: '/scratch/replay-engine', env: { MAWS_E2E_ENGINE_BIN: '/scratch/replay-engine' } };
+  for (const group of Object.values(env).join(' ').split(/\s+/)) assert.equal(captureAllowed({ ...replay, file: 'ordinary.spec.ts', env: { ...replay.env, ...env, MAWS_E2E_GROUP: group } }), false, group);
+  for (const file of ['tools-live.spec.ts', 'document-provisional-live.spec.ts', 'c12-prerun.spec.ts', 'connectors-oauth.spec.ts', 'discover.spec.ts']) assert.equal(captureAllowed({ ...replay, file }), false, file);
+  assert.equal(captureAllowed({ ...replay, file: 'ordinary.spec.ts', realEngine: true }), false);
+  assert.equal(captureAllowed({ ...replay, file: 'ordinary.spec.ts', ownerConfigHome: true }), false);
+  assert.equal(captureAllowed({ ...replay, file: 'ordinary.spec.ts', env: { ...replay.env, MAWS_LIVE_DOCUMENT: '1' } }), false);
+  assert.equal(captureAllowed({ ...replay, file: 'machines.spec.ts', env: { ...replay.env, ...env, MAWS_E2E_GROUP: 'machines' } }), true);
+  for (const file of ['daemon-idle.spec.ts', 'delivery.spec.ts', 'deliverables.spec.ts']) assert.equal(captureAllowed({ ...replay, file }), true, file);
+});
+
+test('c3-stall activated with an installed engine and no realEngine option cannot publish raw evidence', () => {
+  assert.equal(captureAllowed({ file: 'c3-stall.spec.ts', env: {
+    MAWS_C3_STALL: '1', MAWS_E2E_ENGINE_BIN: '/Users/runner/.local/share/claude/versions/2.1.309',
+    MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: '/private/tmp/maws-c3-stall/h4/config',
+  } }), false);
+});
+
+test('only the chosen test-owned synthetic engine enables evidence, not an unknown override', () => {
+  const file = 'ordinary.spec.ts';
+  for (const bin of ['/scratch/replay-engine', '/scratch/wrapper', '/usr/local/bin/claude', '']) {
+    assert.equal(captureAllowed({ file, env: { MAWS_E2E_ENGINE_BIN: bin } }), false, bin);
+  }
+  assert.equal(captureAllowed({ file, env: {} }), false);
+  const syntheticEngineBin = '/scratch/replay-engine';
+  assert.equal(captureAllowed({ file, env: { MAWS_E2E_ENGINE_BIN: syntheticEngineBin }, syntheticEngineBin }), true);
+  assert.equal(captureAllowed({ file, env: { MAWS_E2E_ENGINE_BIN: '/some/other-engine' }, syntheticEngineBin }), false);
+  for (const group of ['local-latency', 'local-latency-daemon']) {
+    const bin = '/scratch/latency-engine'; // writeLatencyEngine's wrapper, not a forwarding wrapper around a real engine
+    assert.equal(captureAllowed({ file: 'local-latency.spec.ts', env: { MAWS_E2E_ENGINE_BIN: bin, MAWS_E2E_GROUP: group, MAWS_LOCAL_LATENCY_PERF: '1' }, syntheticEngineBin: bin }), true);
+  }
 });
 
 test('timing evidence persists partial samples without copying tool arguments or results', (t) => {

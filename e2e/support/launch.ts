@@ -55,6 +55,9 @@ export interface MawsLaunch {
 // C9 reuse it, through the `mawsEnv` option below, instead of editing this file).
 export interface MawsLaunchOptions {
   env?: Record<string, string>;
+  // Raw CI evidence for this test-owned synthetic engine only (never a wrapper forwarding to an installed engine).
+  // The default replay stub is known automatically; an override is private unless its author identifies it here.
+  syntheticEngineBin?: string;
 }
 // C3 end
 
@@ -157,7 +160,8 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   // FX4: replay launch gates need a version, not an installed engine. Live specs explicitly pass ENGINE_BIN;
   // an environment override or the Engine setting can still name another binary. The scratch owns this stub.
   const keptStub = opts.keepConfigHome && existsSync(join(userData, 'replay-engine')) ? join(userData, 'replay-engine') : null; // E10
-  env.MAWS_E2E_ENGINE_BIN ??= opts.env?.MAWS_E2E_ENGINE_BIN ?? keptStub ?? writeReplayEngine(userData);
+  let replayEngine: string | undefined;
+  env.MAWS_E2E_ENGINE_BIN ??= opts.env?.MAWS_E2E_ENGINE_BIN ?? (replayEngine = keptStub ?? writeReplayEngine(userData));
   // C4 start: an empty engine store (C4 reads the config home the engine would), so the run never reads the owner's
   // ~/.claude; a test's `env` may still name another.
   mkdirSync(env.CLAUDE_CONFIG_DIR!, { recursive: opts.keepConfigHome === true }); // E10: kept, it may exist
@@ -181,7 +185,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   let keychainWatch: { stop(): Error | null } | null = null;
 
   const info = base.info();
-  const evidence = captureAllowed({ file: info.file, env, realEngine: Boolean(opts.realEngine), ownerConfigHome: opts.ownerConfigHome })
+  const evidence = captureAllowed({ file: info.file, env, syntheticEngineBin: opts.syntheticEngineBin ?? replayEngine, realEngine: Boolean(opts.realEngine), ownerConfigHome: opts.ownerConfigHome })
     ? processEvidence(info.outputPath(), userData) : null;
   let app: ElectronApplication | null = null;
   let child: ReturnType<ElectronApplication['process']> | null = null;

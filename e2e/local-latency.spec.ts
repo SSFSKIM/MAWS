@@ -151,6 +151,7 @@ test('local latency: delta to frame and command round trip of a lane B session o
   try {
     maws = await launchMaws({
       userData,
+      syntheticEngineBin: bin, // writeLatencyEngine's test-owned stub: keep measured process evidence, never real-engine logs
       env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1', MAWS_HOST_MODE: process.env.MAWS_HOST_MODE === 'daemon' ? 'daemon' : 'detached', MAWS_E2E_ENGINE_BIN: bin },
       // the bench's directory trusted and the user's default mode `default`, so the launch runs no trust bootstrap and
       // no auto-mode fallback: the stub's prelude is Session's minimal one

@@ -3,6 +3,7 @@ import type { ChildProcess } from 'node:child_process';
 export function captureAllowed(options: {
   file: string;
   env: Record<string, string | undefined>;
+  syntheticEngineBin?: string;
   realEngine?: boolean;
   ownerConfigHome?: boolean;
 }): boolean;

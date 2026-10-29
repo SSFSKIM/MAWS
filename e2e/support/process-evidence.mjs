@@ -4,8 +4,10 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
-export function captureAllowed({ file, env, realEngine = false, ownerConfigHome = false }) {
-  if (realEngine || ownerConfigHome) return false;
+export function captureAllowed({ file, env, syntheticEngineBin, realEngine = false, ownerConfigHome = false }) {
+  // Fail closed for installed engines and unknown overrides, including wrappers around a real engine. The caller
+  // identifies a test-owned synthetic binary; the final environment must still name that exact binary.
+  if (!syntheticEngineBin || env.MAWS_E2E_ENGINE_BIN !== syntheticEngineBin || realEngine || ownerConfigHome) return false;
   const privateGroups = ['LIVE_E2E', 'LIVE_GUARD_E2E', 'MAC_SECRET_E2E'].flatMap((key) => (env[key] ?? '').split(/\s+/).filter(Boolean));
   if (privateGroups.includes(env.MAWS_E2E_GROUP)) return false;
   // Local Playwright runs do not have gate.yml's group lists. These scenes use a real engine or real account state.
