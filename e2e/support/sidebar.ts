@@ -37,11 +37,15 @@ export async function showProjectList(page: Page): Promise<void> {
 // a read that says collapsed, and the row is read back until it holds expanded; a click the restored state overtook is
 // made again from a fresh read (a click is a discrete event, whose toggle React renders before the event's dispatch
 // returns to Playwright, so the read-back does not race the click it follows).
-// P5 O3-B: a row that never holds expanded is named with every project row then on the list (its tree id and state),
-// so a failure says whether the row was there and collapsing, or gone.
-async function expandRow(page: Page, row: Locator): Promise<void> {
+// P5 O3-B: `rowOf` may locate the row afresh at each try (sidebarRow's, whose key can change under it), and the row
+// expanded is returned; a row that never holds expanded is named with every project row then on the list (its tree
+// id and state), so a failure says whether the row was there and collapsing, or gone.
+async function expandRow(page: Page, rowOf: Locator | (() => Promise<Locator>)): Promise<Locator> {
+  const locate = async () => (typeof rowOf === 'function' ? await rowOf() : rowOf);
+  let row = await locate();
   try {
     await expect(async () => {
+      row = await locate();
       if ((await row.getAttribute('aria-expanded', { timeout: 1_000 })) !== 'true') await projectLine(row).click({ timeout: 1_000 });
       await expect(row).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 });
     }).toPass({ timeout: 10_000 });
@@ -50,6 +54,7 @@ async function expandRow(page: Page, row: Locator): Promise<void> {
     throw new Error(`${row} did not hold expanded; the project rows: ${rows.join('; ') || 'none'}`, { cause: error });
   }
   await settled(page);
+  return row;
 }
 
 // Expands a project in place by its name on the list.
@@ -102,19 +107,22 @@ export async function sidebarRow(page: Page, match: SessionMatch, machine?: Mach
   // project's key, or by its address until its machine has derived one, which lands just after the project is made (so
   // the read is made again until the row it names shows); a session of no project sits in its machine's own row.
   const address = async (id: string) => (machine === undefined ? addressed(page, id) : addressOf(machine, id));
-  let project = sidebarOf(page).locator('[data-kind="project"]').first();
-  await expect(async () => {
+  // P5 O3-B (terminal-take-over.ts:26, a flake of after-set 2 on 67ccfdd35, run 40807073983): a project just added
+  // (above) is re-keyed from its address to its org project's key when its machine derives one, as a new row,
+  // collapsed, and a project whose machine never derives one (a stub source's) keeps its address; so the row is located
+  // afresh from a new read at each try, and never by a key an earlier read gave.
+  const locate = async () => {
     const bare = await read();
-    // P5 O3-B (terminal-take-over.ts:26, a flake of after-set 2 on 67ccfdd35, run 40807073983): a project just added
-    // (above) is re-keyed from its address to its org project's key once its machine derives one, as a new row,
-    // collapsed; a row located before that names no row after it. So the read is made again until the key has derived.
-    if (bare !== null && bare.org === null) throw new Error(`project ${bare.id} has no org project yet`);
     const keys = bare === null ? [`machine:${machine ?? (await localRef(page))}`] : [...(bare.org === null ? [] : [bare.org]), await address(bare.id)];
     await showProjectList(page);
-    project = sidebarOf(page).locator(keys.map((key) => `[data-kind="project"][data-tree-id="p:${key}"]`).join(', '));
+    return sidebarOf(page).locator(keys.map((key) => `[data-kind="project"][data-tree-id="p:${key}"]`).join(', '));
+  };
+  let project = sidebarOf(page).locator('[data-kind="project"]').first();
+  await expect(async () => {
+    project = await locate();
     await expect(project).toHaveCount(1, { timeout: 1_000 });
   }).toPass({ timeout: 10_000 });
-  await expandRow(page, project);
+  project = await expandRow(page, locate);
   const key = (await project.getAttribute('data-tree-id'))!.slice('p:'.length);
   const row =
     typeof match === 'string'
