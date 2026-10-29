@@ -1,7 +1,8 @@
 // The hub's HTTP routes as the app uses them (P5 O8 M1, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md,
 // Orientation's "The hub, for an app"): `GET /api/me`, `GET /api/org/state` (from a version, every page), and
-// `POST /api/devices/pending`, and M3's `POST /api/org/state` (a signed successor). None of its answers is trusted (RL §5.9): the session verifies every state against what it
-// holds, and this module only reads and classifies.
+// `POST /api/devices/pending`, M3's `POST /api/org/state` (a signed successor), and M4a's `GET /api/devices/pending`
+// (`?member=`, H1: an admin's read of another member's entries). None of its answers is trusted (RL §5.9): the session
+// verifies every state against what it holds, the pairing judges every entry, and this module only reads and classifies.
 //
 // Who answered matters. Every answer of the Worker carries `X-Desk-Build` (but a `101` or an event stream); a 401, 403 or
 // redirect without it came from Access, so the hub credential has ended (`credentials`). A Worker's
@@ -10,7 +11,17 @@
 // No text of an answer leaves here unchecked: what a refusal, a log or a status may carry (an `error` code, an email, an
 // instant) must match a short grammar, else it reads as `unrecognized` or the answer as `malformed`, so a hostile hub
 // can't reflect the bearer token into the renderer or the log.
-import { isCertificates, isCertRetirement, isMachineCert, isSigned, type Certificates, type RootTransition, type Signed, type SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
+import {
+  isCertificates,
+  isCertRetirement,
+  isMachineCert,
+  isSigned,
+  type Certificates,
+  type PendingEntry as PendingDevice,
+  type RootTransition,
+  type Signed,
+  type SignedOrgState,
+} from '../../../apps/org-protocol/src/index.ts';
 import { orgTiming, type OrgTiming } from './timing';
 
 export const BUILD_HEADER = 'x-desk-build';
@@ -49,6 +60,13 @@ export interface HubClient {
   postPending(entry: PendingEntry, signal?: AbortSignal): Promise<HubResult<PendingAnswer>>;
   /** M3: a signed successor of the hub's head. `201 {version}`; a 409's `error` is the verdict code (`not-head`, `rollback`, …). */
   postState(signed: SignedOrgState, signal?: AbortSignal): Promise<HubResult<{ version: number }>>;
+  /**
+   * M4a: a member's pending device entries, as the approving side judges them (`judgeEntry`). `null` reads the caller's
+   * own (the plain read); another member's id is H1's admin read (`?member=`): `403 not-admin` for a non-admin, `404
+   * no-member` for an id the head doesn't list, `503 hub-updating` from a Registry before H1. An item out of the entry's
+   * shape is dropped; the hub's own fields (its member, its times) are left out.
+   */
+  pendingOf(member: string | null, signal?: AbortSignal): Promise<HubResult<PendingDevice[]>>;
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -70,6 +88,27 @@ function readCertificates(value: unknown): Certificates | null | undefined {
   if (value === undefined || value === null) return null;
   if (!isCertificates(value)) return undefined;
   return { certs: value.certs.filter((c) => isSigned(c, isMachineCert)), retirements: value.retirements.filter((r) => isSigned(r, isCertRetirement)) };
+}
+
+/**
+ * A pending entry's fields as the judges read them, each a string where the entry has one, or null: its grammar (a
+ * device the state could list, its MAC under the code's secret) is `judgeEntry`'s, which trusts nothing of the hub's.
+ */
+function readPendingDevice(item: unknown): PendingDevice | null {
+  if (!isObject(item)) return null;
+  const { deviceId, class: cls, keyStorage, channelPub, stepUpPub, passkey, mac } = item;
+  if (typeof deviceId !== 'string' || typeof cls !== 'string' || typeof keyStorage !== 'string' || typeof channelPub !== 'string' || typeof mac !== 'string') return null;
+  if (stepUpPub !== undefined && typeof stepUpPub !== 'string') return null;
+  if (passkey !== undefined && !(isObject(passkey) && typeof passkey.credentialId === 'string' && typeof passkey.publicKey === 'string' && typeof passkey.rpId === 'string')) return null;
+  return {
+    deviceId,
+    class: cls,
+    keyStorage,
+    channelPub,
+    ...(stepUpPub === undefined ? {} : { stepUpPub }),
+    ...(passkey === undefined ? {} : { passkey: { credentialId: passkey.credentialId, publicKey: passkey.publicKey, rpId: passkey.rpId } }),
+    mac,
+  } as PendingDevice;
 }
 
 export function hubClient(input: {
@@ -163,6 +202,10 @@ export function hubClient(input: {
     postState: (signed, signal) =>
       request(ORG_STATE_PATH, { method: 'POST', body: signed, signal }, (body) =>
         isObject(body) && typeof body.version === 'number' && Number.isInteger(body.version) && body.version >= 1 ? { version: body.version } : null,
+      ),
+    pendingOf: (member, signal) =>
+      request(member === null ? PENDING_DEVICES_PATH : `${PENDING_DEVICES_PATH}?member=${encodeURIComponent(member)}`, { signal }, (body) =>
+        isObject(body) && Array.isArray(body.pending) ? body.pending.map(readPendingDevice).filter((entry) => entry !== null) : null,
       ),
   };
 }

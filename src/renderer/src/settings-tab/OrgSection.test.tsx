@@ -40,6 +40,7 @@ const REGISTERED: OrgStatus = {
   head: { version: 12, issued: new Date(Date.now() - 3 * DAY).toISOString() },
   problem: null,
   signer: null,
+  pairing: null,
 };
 
 type Signer = NonNullable<OrgSignerStatus>;

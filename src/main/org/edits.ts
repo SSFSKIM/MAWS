@@ -13,18 +13,16 @@
 // Lines name members by email and devices by their first 8 characters with their class, as `deployment admin show`
 // does. Electron-free: vitest's node project runs it.
 import { keyId, pairingFingerprint, type Device, type Member, type OrgState, type RevokedKey } from '../../../apps/org-protocol/src/index.ts';
+import type { OrgChange } from '@shared/ipc/schema/org';
 import type { ChangeCode } from './checks';
 import { EMAIL } from './hub-client';
 import { RefusedEdit, StaleEdit, type Edit } from './signer';
 
-/** A change the Org page asks for (§M). `member.add`'s `id` is set by `normalizeChange`, so the id signed is the id shown. */
-export type OrgChange =
-  | { kind: 'member.add'; email: string; role: 'admin' | 'member'; id?: string }
-  | { kind: 'member.remove'; member: string }
-  | { kind: 'member.role'; member: string; role: 'admin' | 'member' }
-  | { kind: 'member.email'; member: string; email: string }
-  | { kind: 'device.remove'; member: string; device: string }
-  | { kind: 'root.add'; member: string; device: string };
+/**
+ * A change the Org page asks for (§M; the shared schema's `OrgChangeSchema`, which `org.preview` and `org.change` take).
+ * `member.add`'s `id` is set by `normalizeChange`, so the id signed is the id shown.
+ */
+export type { OrgChange };
 
 /** This Mac in the org: the registration's member and this profile's device. */
 export type EditSelf = { member: string; device: string };

@@ -163,6 +163,9 @@ class FakeHub implements HubClient {
   postPending(): never {
     throw new Error('unused');
   }
+  pendingOf(): never {
+    throw new Error('unused');
+  }
 }
 
 /** Task 5's deliveries as the signer meets them: an obligation for each state that ends keys, owed to two machines. */

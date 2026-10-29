@@ -684,6 +684,9 @@ class FakeHub implements HubClient {
   postPending(): never {
     throw new Error('unused');
   }
+  pendingOf(): never {
+    throw new Error('unused');
+  }
 }
 
 describe('a removal that loses the hub race', () => {
