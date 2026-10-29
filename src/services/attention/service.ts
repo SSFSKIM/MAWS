@@ -124,26 +124,32 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
 
   // Persistence (M5 review): the sessions whose stored list is behind the in-memory one, written in order; a failed
   // write stays owed, is retried with the next change and after PERSIST_RETRY_MS, and makes settled() reject until a
-  // write succeeds. The in-memory lists keep serving attention.list and attention.changed meanwhile.
+  // write succeeds. The in-memory lists keep serving attention.list and attention.changed meanwhile. P5 O3-C M5: a root
+  // stops the service and then closes its store in one synchronous pass, so `stop` writes what is still owed itself and
+  // nothing queued runs or is retried after it.
   const owed = new Map<AppSessionId, 'replace' | 'retire'>();
+  let stopped = false;
   // No write before the persisted items were read: a live write would replace a session's stored list first.
   let loadFinished!: () => void;
   let writes: Promise<void> = new Promise((resolve) => (loadFinished = resolve));
   let failure: unknown = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  const write = (id: AppSessionId, op: 'replace' | 'retire') =>
+    op === 'retire' ? deps.store.retireForSession(id) : deps.store.replaceForSession(id, merged(sessions.get(id) ?? stateOf(id)));
   const writeOwed = () => {
     writes = writes.then(async () => {
       for (const [id, op] of [...owed]) {
+        if (stopped) return; // the stop wrote what was owed
         owed.delete(id);
         try {
-          if (op === 'retire') await deps.store.retireForSession(id);
-          else await deps.store.replaceForSession(id, merged(sessions.get(id) ?? stateOf(id)));
+          await write(id, op);
         } catch (error) {
           if (!owed.has(id)) owed.set(id, op);
           failure = error;
-          log(`not persisted (retrying): ${error instanceof Error ? error.message : String(error)}`);
+          log(`not persisted (${stopped ? 'stopped' : 'retrying'}): ${error instanceof Error ? error.message : String(error)}`);
         }
       }
+      if (stopped) return;
       if (owed.size === 0) failure = null;
       else if (retryTimer === null) {
         retryTimer = setTimeout(() => {
@@ -316,7 +322,6 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
   let loadedOk = false;
   let loadError: unknown = null;
   let loadTimer: ReturnType<typeof setTimeout> | null = null;
-  let stopped = false;
   let markReady!: () => void;
   const ready = new Promise<void>((resolve) => (markReady = resolve));
   let attempt: Promise<void> = Promise.resolve();
@@ -374,6 +379,13 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
       unsubscribe.forEach((off) => off());
       if (retryTimer !== null) clearTimeout(retryTimer);
       retryTimer = null;
+      // What is still owed, written now, in order, while the store is open (the index store writes synchronously);
+      // nothing before the persisted items were read
+      if (!loadedOk) return;
+      for (const [id, op] of [...owed]) {
+        owed.delete(id);
+        write(id, op).catch((error: unknown) => log(`not persisted (stopped): ${error instanceof Error ? error.message : String(error)}`));
+      }
     },
   };
 }

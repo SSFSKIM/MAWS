@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tempDir } from '../../test/support/index-fixture';
 import { writeSpineFixture, type SpineFixtureCounts } from '../../test/support/spine-fixture';
+import { PERSIST_RETRY_MS } from './attention/service';
 import { idleReading } from './idle-reading';
 import { Index } from './index/index';
 
@@ -45,6 +46,30 @@ describe('the spine idle reading', () => {
     release!();
     await reading.released;
     reading.dispose();
+  });
+
+  // The task review: a release right after composing must leave nothing of the spine running. Attention's startup
+  // writes (each persisted list rewritten once the load merged it) are still queued then; they land before the index
+  // closes, and nothing is retried, or logged, after.
+  it('released right after composing, leaves no write queued or retried and logs nothing', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const warned = vi.spyOn(console, 'warn');
+    const errored = vi.spyOn(console, 'error');
+    let release: (() => void) | undefined;
+    const reading = await idleReading({ profile, build: BUILD, log, onRelease: (trigger) => (release = trigger) });
+    release!();
+    await reading.released;
+    await vi.advanceTimersByTimeAsync(3 * PERSIST_RETRY_MS);
+    expect(vi.getTimerCount()).toBe(0); // no retry armed after the release
+    expect([...warned.mock.calls, ...errored.mock.calls]).toEqual([]);
+    const index = new Index(join(profile, 'index.sqlite'));
+    try {
+      expect(await index.attention.list()).toHaveLength(SMALL.attention); // what was owed was written, not lost
+    } finally {
+      index.close();
+    }
+    reading.dispose();
+    vi.useRealTimers();
   });
 
   it('on its trigger stops the root, collects twice when the runtime exposes gc, and says it released', async () => {

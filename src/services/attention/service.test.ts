@@ -5,7 +5,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { CommandName, EventName, HostState } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
-import { interruptedSummary, startAttentionService, type AttentionServiceDeps } from './service';
+import { interruptedSummary, PERSIST_RETRY_MS, startAttentionService, type AttentionServiceDeps } from './service';
 import type { AttentionStore } from './store';
 
 const APP = 'app-a' as AppSessionId;
@@ -46,7 +46,7 @@ function event(kind: string, payload: Record<string, unknown> = {}): SessionEven
   return { id: `${APP}:L:${seq}:0`, sessionId: SID, at: new Date(Date.parse(AT) + seq).toISOString(), seq, agentId: null, parentToolUseId: null, kind, ...payload } as unknown as SessionEvent;
 }
 
-function setup(opts: { store?: FakeStore; dispatch?: AttentionServiceDeps['dispatch'] } = {}) {
+function setup(opts: { store?: FakeStore; dispatch?: AttentionServiceDeps['dispatch']; log?: (message: string) => void } = {}) {
   const listeners = new Map<string, ((payload: unknown) => void)[]>();
   const handlers = new Map<string, (input: unknown) => unknown>();
   const states = new Set<(state: HostState) => void>();
@@ -67,7 +67,7 @@ function setup(opts: { store?: FakeStore; dispatch?: AttentionServiceDeps['dispa
       return true;
     }) as AttentionServiceDeps['emit'],
     register: ((name: CommandName, handler: (input: unknown) => unknown) => void handlers.set(name, handler)) as AttentionServiceDeps['register'],
-    log: () => {},
+    log: opts.log ?? (() => {}),
   });
   const fire = (name: EventName, payload: unknown) => listeners.get(name)?.forEach((l) => l(payload));
   const batch = (...events: SessionEvent[]) => fire('session.eventBatch', { appSessionId: APP, events });
@@ -478,6 +478,40 @@ describe('attention service persistence failures', () => {
     expect(last()).toEqual([permission, persisted]);
     expect(store.sessions.get(APP)).toEqual([permission, persisted]);
     service.stop();
+  });
+
+  // P5 O3-C M5's task review: a root stops attention and then closes the store in one synchronous pass, so a write still
+  // queued at the stop would reach a closed store, and its retry outlive the service.
+  it('a stop writes what it still owes before the store can close, and queues nothing after', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const store = new FakeStore();
+    const { service, fire } = setup({ store });
+    await service.ready;
+    const first = item({ kind: 'permission', state: 'pending' });
+    fire('session.brokerItems', { appSessionId: APP, items: [first] }); // owed; its queued write has not run
+    expect(store.replaced).toEqual([]);
+    service.stop();
+    expect(store.sessions.get(APP)).toEqual([first]); // written inside the stop
+    await vi.advanceTimersByTimeAsync(3 * PERSIST_RETRY_MS);
+    expect(store.replaced).toEqual([[APP, [first]]]); // once: the queued write found the service stopped
+  });
+
+  it('a write that fails after the stop is not retried', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const logged: string[] = [];
+    const store = new FakeStore();
+    const { service, fire } = setup({ store, log: (message) => void logged.push(message) });
+    await service.ready;
+    let fail!: (error: Error) => void;
+    const attempts = vi.fn(() => new Promise<void>((_, reject) => (fail = reject)));
+    store.replaceForSession = attempts;
+    fire('session.brokerItems', { appSessionId: APP, items: [item({ kind: 'permission', state: 'pending' })] });
+    await vi.waitFor(() => expect(attempts).toHaveBeenCalledOnce()); // in flight
+    service.stop();
+    fail(new Error('database is not open'));
+    await vi.advanceTimersByTimeAsync(3 * PERSIST_RETRY_MS);
+    expect(attempts).toHaveBeenCalledOnce();
+    expect(logged).toEqual(['not persisted (stopped): database is not open']);
   });
 
   it('a load that fails once succeeds on the immediate retry', async () => {

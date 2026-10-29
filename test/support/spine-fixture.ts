@@ -36,7 +36,9 @@ const BASE = Date.parse('2026-10-01T00:00:00.000Z'); // every time is before it,
 const DAY = 86_400_000;
 const WORDS = ['refactor', 'the', 'session', 'index', 'and', 'add', 'a', 'test', 'for', 'attention', 'fix', 'flaky', 'layout', 'review',
   'branch', 'merge', 'library', 'draft', 'prompt', 'history', 'why', 'does', 'build', 'fail', 'on', 'mac', 'update', 'docs', 'spec', 'run'];
-const LIVE_KINDS: AttentionKind[] = ['permission', 'question', 'plan'];
+// The kinds a profile keeps across runs: attention's own derived items. A broker item (a permission, a question, a plan)
+// dies with the process that asked it, so the spine's start drops it from the store (src/services/attention/service.ts's merge).
+const KEPT_KINDS: AttentionKind[] = ['error', 'interrupted', 'auto_mode_unavailable'];
 const SETTLED: AttentionState[] = ['delivered', 'confirmed', 'retired'];
 const ARTIFACT_KINDS: ArtifactKind[] = ['document', 'presentation', 'design', 'dashboard', 'html', 'file'];
 
@@ -105,7 +107,7 @@ export async function writeSpineFixture({ profile, folders, counts = PROFILE_SIZ
       const session = anySession().appId;
       const pending = n < counts.pending;
       const at = new Date(timeBefore(30 * DAY)).toISOString();
-      const kind = LIVE_KINDS[below(LIVE_KINDS.length)]!;
+      const kind = KEPT_KINDS[below(KEPT_KINDS.length)]!;
       items.set(session, [...(items.get(session) ?? []), item(session, kind, at, {
         id: `att-fixture-${n}` as AttentionItem['id'],
         request: { requestId: `req-fixture-${n}` as AttentionItem['request']['requestId'], toolUseId: null, taskId: null, agentId: null },
