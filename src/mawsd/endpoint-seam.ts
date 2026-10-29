@@ -55,6 +55,7 @@ export interface EndpointModule {
   start(services: DaemonServices): Promise<void>; // as soon as mawsd's sockets are up (start step 7)
   stop(): Promise<void>; // first in the exit order; mawsd waits up to 2.5 s
   status(): unknown; // daemon.status's endpoint.detail; no paths, addresses or key material
+  enrollment(): { name: string; org: string } | null; // the enrollment held, null while unenrolled: machine.identity's project id (P5 O3-D D38)
   cli(command: string, args: readonly string[], secret?: string): Promise<{ code: number; out: string }>;
 }
 
@@ -94,6 +95,12 @@ export class LazyEndpoint implements EndpointModule {
 
   status(): unknown {
     return this.#module === null ? UNENROLLED_STATUS : this.#module.status();
+  }
+
+  // Unloaded, there is none: an enrollment on disk loads the module at the daemon's start (an enrollment begun later
+  // loads it at its command), and its start reads the state that `enrollment()` then reports.
+  enrollment(): { name: string; org: string } | null {
+    return this.#module === null ? null : this.#module.enrollment();
   }
 
   async cli(command: string, args: readonly string[], secret?: string): Promise<{ code: number; out: string }> {

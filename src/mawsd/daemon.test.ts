@@ -14,6 +14,11 @@ import { buildIdOf } from '../engine-host/supervisor-files';
 import type { FakeSupervisor } from '../../test/support/fake-supervisor';
 import { takeSpineLock } from '../services/settings/spine-lock';
 import type { SpineEntry } from './spine-seam';
+import type { SpineDeps } from '../services/spine-root';
+import type { EndpointModule } from './endpoint-seam';
+import type { MachineIdentity } from '@shared/ipc/schema/machine';
+import { machineKey } from '@shared/machine/org-key';
+import { machineProjectId } from '@shared/machine/project-ids';
 import { SPINE_REEXECUTE_DEFAULT } from './daemon';
 import { MawsdScene, RawApp, sleep, until, type StandIn } from '../../test/support/mawsd-scene';
 
@@ -556,18 +561,20 @@ describe('the spine (P5 O3-D M2)', () => {
   function standInChunk() {
     const loads = vi.fn();
     const stops = vi.fn();
+    const deps: SpineDeps[] = []; // what each load's root was started with
     const load = async (): Promise<SpineEntry> => {
       loads();
       return {
         takeSpineLock,
         openSpineData: async (_profile, { lock }) => ({ lock: lock!, refused: lock!.refused, machineSettings: null as never, paths: { client: '', machine: '' } }),
-        startSpine: (deps) => {
-          deps.bus.register('session.launchMode', () => ({ mode: 'index' }));
+        startSpine: (started) => {
+          deps.push(started);
+          started.bus.register('session.launchMode', () => ({ mode: 'index' }));
           return { view: { engineStatuses: () => [], on: () => () => {} } as never, settled: async () => {}, busy: () => false, stop: stops };
         },
       };
     };
-    return { load, loads, stops };
+    return { load, loads, stops, deps };
   }
 
   it('loads the services chunk only at the first spine command, answers it on machine.sock, and daemon.status carries the spine', async () => {
@@ -581,6 +588,27 @@ describe('the spine (P5 O3-D M2)', () => {
     expect(chunk.loads).toHaveBeenCalledOnce();
     expect(await client.request('daemon.status')).toMatchObject({ ok: true, value: { spine: { state: 'loaded', loadedAt: expect.any(String) } } });
     expect(scene.logs).toContainEqual(expect.stringMatching(/^spine: loaded in \d+ ms$/));
+  });
+
+  // D38, O10 M9's last piece: the enrollment machine.identity's project and the spine's org projects read is the endpoint
+  // module's in process (D16's injected source); while it holds none the answer is the one before it
+  it('machine.identity’s project and the spine’s enrollment are the endpoint’s in-process enrollment, and none while it holds none', async () => {
+    let held: { name: string; org: string } | null = null;
+    const endpoint: EndpointModule = { start: async () => {}, stop: async () => {}, status: () => null, enrollment: () => held, cli: async () => ({ code: 0, out: '' }) };
+    const chunk = standInChunk();
+    await scene.start({ endpoint, spine: { load: chunk.load } });
+    const client = await scene.app('machine');
+    const identity = async () => ((await client.request('machine.identity')) as { ok: true; value: MachineIdentity }).value;
+    const before = await identity();
+    expect(before.project).toEqual({ key: machineKey(before.ref), name: before.name, smnsId: null });
+    held = { name: 'mini', org: 'org-local' };
+    expect(await identity()).toEqual({ ...before, project: { ...before.project, smnsId: machineProjectId('org-local', 'mini') } });
+    expect(await client.request('session.launchMode')).toMatchObject({ ok: true });
+    expect(chunk.deps).toHaveLength(1);
+    expect(chunk.deps[0]!.enrollment?.()).toEqual({ org: 'org-local', machine: 'mini' });
+    held = null;
+    expect(chunk.deps[0]!.enrollment?.()).toBeNull();
+    expect(await identity()).toEqual(before);
   });
 
   // D38: re-execution is a switch, off by default (SPINE_REEXECUTE_DEFAULT); MAWS_SPINE_REEXECUTE=1 turns it on for one

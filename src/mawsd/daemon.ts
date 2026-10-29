@@ -191,6 +191,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const identity: SupervisorIdentity = { protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, buildId, capabilities: PEER_CAPABILITIES.daemon, wire: wireFingerprint(), pid: process.pid, startedAt }; // P5 O3-D: its own list
   const engineIdentity = appIdentity(options.modules.engineHost, env, 'detached', PEER_CAPABILITIES.daemonToEngineHost); // the e2e seams stand in, as for main
   const endpoint = options.endpoint === undefined ? loadEndpointModule(buildId) : options.endpoint;
+  // The machine's enrollment, the endpoint's in process (D16, D38): machine.identity's project and the spine's org projects
+  const enrollment = () => machineEnrollment(() => endpoint?.enrollment() ?? null);
 
   // --- the upstreams --------------------------------------------------------------------------------------------------
   let stopping: Promise<void> | null = null;
@@ -252,6 +254,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       appPath: join(dirname(options.modules.self), '..', '..'),
       devRoot: process.cwd(),
       home: homedir(),
+      enrollment,
     }),
     quietMs: () => spineQuietMs ?? clocks.idleMs() ?? DEFAULT_IDLE_EXIT_MS,
     reexecute: kind === 'unit' && (SPINE_REEXECUTE_DEFAULT || env.MAWS_SPINE_REEXECUTE === '1'),
@@ -565,7 +568,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     daemon: daemonCommand,
     identity: () => {
       const name = machineName(env, hostname());
-      return { ref, name, project: machineProject(ref, name, machineEnrollment()) };
+      return { ref, name, project: machineProject(ref, name, enrollment()) };
     },
     log,
   });

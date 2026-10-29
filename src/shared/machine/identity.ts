@@ -15,15 +15,20 @@ export function machineName(env: NodeJS.ProcessEnv, hostname: string): string {
 }
 
 // The org this machine is enrolled in and its name there: sminos's `{org, machine}`, the one input to the project rule
-// beyond the filesystem (src/services/index/org-project.ts). Null until O10, which replaces this with the endpoint's
-// enrollment (RL §2.1); MAWS never reads sminos's private `daemon/hub.json`. Until then a terminal session's sminos
-// project and MAWS's key agree by the rule, not by id (a flag for O9).
+// beyond the filesystem (src/services/index/org-project.ts). Its source is the endpoint's enrollment as its module holds
+// it in process (RL §2.1; P5 O3-D D38, O10 M9's last piece), injected so this directory imports nothing of the endpoint:
+// `mawsd` passes its endpoint seam's; main, which runs no endpoint, passes none and is never enrolled. MAWS never reads
+// sminos's private `daemon/hub.json`. While there is none a terminal session's sminos project and MAWS's key agree by the
+// rule, not by id (a flag for O9).
 export interface Enrollment {
   org: string;
   machine: string;
 }
-export function machineEnrollment(): Enrollment | null {
-  return null;
+/** The endpoint's enrollment, `{ name, org }` (src/endpoint/enroll.ts's `EnrollmentState`), or null while it holds none. */
+export type EnrollmentSource = () => { name: string; org: string } | null;
+export function machineEnrollment(source?: EnrollmentSource): Enrollment | null {
+  const held = source?.() ?? null;
+  return held === null ? null : { org: held.org, machine: held.name };
 }
 
 // `machine.identity`'s project: the machine's own, named after it.

@@ -59,6 +59,9 @@ class Module implements EndpointModule {
   status(): unknown {
     return { enrollment: 'loaded' };
   }
+  enrollment(): { name: string; org: string } | null {
+    return { name: 'mini', org: 'org-local' };
+  }
   async cli(command: string): Promise<{ code: number; out: string }> {
     this.events.push(`cli ${command}`);
     return { code: 0, out: command };
@@ -105,6 +108,7 @@ describe('the endpoint loaded when it is needed (lever (a))', () => {
     await endpoint.start(s);
     expect(state.loads).toBe(0);
     expect(endpoint.status()).toEqual(UNENROLLED_STATUS);
+    expect(endpoint.enrollment()).toBeNull(); // machine.identity's, unloaded: no enrollment is on disk, or it would be loaded
     // A read-only command asked while the module loads waits for it, and is the module's to answer.
     const [first, second] = await Promise.all([endpoint.cli('enroll', ['--json'], 'CODE'), endpoint.cli('keys', [])]);
     expect([first, second]).toEqual([
@@ -117,6 +121,7 @@ describe('the endpoint loaded when it is needed (lever (a))', () => {
     expect(m.started).toBe(s);
     expect(m.events).toEqual(['start', 'cli enroll', 'cli keys']);
     expect(endpoint.status()).toEqual({ enrollment: 'loaded' });
+    expect(endpoint.enrollment()).toEqual({ name: 'mini', org: 'org-local' }); // loaded, the module's own
     // Loaded, the module answers every command, the read-only ones too.
     expect(await endpoint.cli('status', [])).toEqual({ code: 0, out: 'status' });
     await endpoint.stop();

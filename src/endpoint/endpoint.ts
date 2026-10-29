@@ -45,7 +45,7 @@ import { DirectListener, type DirectListenerOptions } from './direct-listener';
 import { Actions } from './actions';
 import { runCli } from './cli';
 import { EndpointActions, type EffectResult } from './endpoint-actions';
-import { speaksFor, syncAndPromote, type EnrollContext, type EnrollmentState } from './enroll';
+import { current, speaksFor, syncAndPromote, type EnrollContext, type EnrollmentState } from './enroll';
 import { Freshness } from './freshness';
 import { Gate } from './gate';
 import { acceptGrant, dropRevokedGrants, machineOwnerMembers, machineRights } from './grants';
@@ -479,6 +479,11 @@ export class Endpoint implements EndpointModule {
     const stopped = this.hub.stopped;
     const links = this.links.refusing === undefined && stopped !== null ? { ...this.links, refusing: stopped } : this.links;
     return endpointStatus(this.#state, this.#headHash, links, { endpoint: this.own.closed, engineHost: this.#engineHostLedger });
+  }
+
+  /** The enrollment held (`machine.identity`'s project id, P5 O3-D D38); null while unenrolled, a pending provisioning included. */
+  enrollment(): EnrollmentState | null {
+    return this.#state?.enrolled ? current(this.#state) : null;
   }
 
   cli(command: string, args: readonly string[], secret?: string): Promise<{ code: number; out: string }> {

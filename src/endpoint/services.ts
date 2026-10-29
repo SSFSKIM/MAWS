@@ -46,5 +46,7 @@ export interface EndpointModule {
   stop(): Promise<void>;
   /** daemon.status's endpoint.detail; no paths, addresses or key material. */
   status(): unknown;
+  /** The enrollment held (its name and org), null while unenrolled: `machine.identity`'s project id (P5 O3-D D38). */
+  enrollment(): { name: string; org: string } | null;
   cli(command: string, args: readonly string[], secret?: string): Promise<{ code: number; out: string }>;
 }

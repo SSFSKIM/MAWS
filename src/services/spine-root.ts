@@ -21,6 +21,7 @@ import { claudeConfigDir } from '@shared/engine/config-dir';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
 import type { CommandResult } from '@shared/ipc/schema';
+import type { Enrollment } from '@shared/machine/identity';
 import type { MachineRef } from '@shared/machine/ref';
 import { settingsPaths } from '@shared/settings/paths';
 import type { ServicesBus } from '@shared/spine/bus';
@@ -109,6 +110,7 @@ export interface SpineDeps {
   appPath: string; // the app's code (Electron's app.getAppPath()): replay fixtures' checkout
   devRoot: string; // the development app root: a scenario's relative path
   home: string;
+  enrollment?: () => Enrollment | null; // the machine's (mawsd: its endpoint's in process, D38); main's root has none
 }
 
 export interface SpineRoot {
@@ -135,7 +137,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   // engine host's store events into it once the host is ready; the read model starts the source (refused unstarted in
   // launch mode scenario) and stops it. P5 O3-A: unavailable, its file never opened, in a run refused the spine.
   const index = new Index(join(profile, 'index.sqlite'), { refused: data.refused });
-  void index.refreshOrgProjects({ machine: deps.machine }); // P5 O6 M5: each project's org project, derived again at every start (OX3)
+  void index.refreshOrgProjects({ machine: deps.machine, enrollment: deps.enrollment }); // P5 O6 M5: each project's org project, derived again at every start (OX3)
   registerIndexHandlers(index, bus);
   const indexSource = new IndexSessionSource(index, hosts, { emit: bus.emit });
   // C3's attention service over the index (its fallback file only when the index cannot be read); none when refused
