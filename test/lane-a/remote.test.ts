@@ -493,10 +493,28 @@ describe('remote lane A over a real link', { timeout: 30_000 }, () => {
     await until(() => stateNow(l)?.turn.running === false, 'the step closed');
     expect(stateNow(l)).toMatchObject({ model: STATUS_READ.model, effort: null });
     expect(messagesOf(l, watch).filter((m) => m.kind === 'step-end').at(-1)!.body).toEqual({ turnId: 't1', agentId: null, step: 1 });
-    l.plane.emit('step-end', { turnId: 't2', agentId: null, step: 1, t: 1730000000000, model: 'claude-haiku-4-5', effort: 'low' });
+    // From here the fake machine's own producer (sminos 1.27.12's fields): a step-end names what its start carried.
+    l.plane.step({ k: 'step-start', turnId: 't2', agentId: null, step: 1, model: 'claude-haiku-4-5', effort: 'low' });
+    l.plane.step({ k: 'chunk', turnId: 't2', agentId: null, step: 1, chunkIndex: 0, chunk: { kind: 'text', index: 0, text: 'hi' } });
+    l.plane.step({ k: 'step-end', body: { turnId: 't2', agentId: null, step: 1, t: 1730000000000 } });
     await until(() => stateNow(l)?.model === 'claude-haiku-4-5', 'the model the step ran on');
     expect(stateNow(l)).toMatchObject({ effort: 'low', override: { model: null, effort: 'high' } });
     expect(messagesOf(l, watch).filter((m) => m.kind === 'step-end').at(-1)!.body).toEqual({ turnId: 't2', agentId: null, step: 1, t: 1730000000000, model: 'claude-haiku-4-5', effort: 'low' });
+    // A watch that joins mid-step learns the snapshot's model and no effort: the first watch's effort stands.
+    l.plane.step({ k: 'step-start', turnId: 't3', agentId: null, step: 1, model: 'claude-opus-4-5', effort: 'max' });
+    const late = endableClientRef('page-late');
+    const { watch: joined } = (await l.cmd('laneA.watch', { appSessionId: 'la-1' }, late)) as { watch: string };
+    await until(() => messagesOf(l, joined).some((m) => m.kind === 'snapshot'), 'the late watch’s snapshot');
+    l.plane.step({ k: 'step-end', body: { turnId: 't3', agentId: null, step: 1, t: 1730000000001 } });
+    await until(() => messagesOf(l, joined).some((m) => m.kind === 'step-end'), 'the late watch’s step-end');
+    expect(messagesOf(l, joined).find((m) => m.kind === 'step-end')!.body).toEqual({ turnId: 't3', agentId: null, step: 1, t: 1730000000001, model: 'claude-opus-4-5' });
+    await until(() => stateNow(l)?.effort === 'max', 'the first watch’s step-end, which saw the start');
+    // A request that named no effort ran at the default: `effort: null` is observed, and replaces the last one.
+    l.plane.step({ k: 'step-start', turnId: 't4', agentId: null, step: 1, model: 'claude-opus-4-5', effort: null });
+    l.plane.step({ k: 'step-end', body: { turnId: 't4', agentId: null, step: 1, t: 1730000000002 } });
+    await until(() => stateNow(l)?.effort === null, 'the default effort observed');
+    expect(messagesOf(l, watch).filter((m) => m.kind === 'step-end').at(-1)!.body).toEqual({ turnId: 't4', agentId: null, step: 1, t: 1730000000002, model: 'claude-opus-4-5', effort: null });
+    late.end();
   });
 
   it('ends a watch at laneA.unwatch and at its page’s end; the last one’s end clears the session’s state', async () => {

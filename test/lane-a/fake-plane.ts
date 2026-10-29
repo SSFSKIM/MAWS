@@ -5,13 +5,17 @@
 //   - `rows`, `read`, `diff` and `output` on the subscription that asked;
 //   - `query` and `tombstone` from its ledger by opId, and each `rpc` once per opId: a copy of an op it holds is answered
 //     from the ledger under the copy's nonce, never run again (`runs` holds the effects).
-// Handlers are scripted per RPC name and may be held (`hold`).
-import { toWire } from 'desk-hub/protocol';
+// Handlers are scripted per RPC name and may be held (`hold`). A session's bridge steps (`step`) go through the fake
+// machine's own DX4 producer (desk-hub's `SessionDepth`), so its snapshots' `streaming` and its step-ends are sminos's.
+import { toWire, type SessionMessage } from 'desk-hub/protocol';
+import type { Step } from '../../apps/desk-hub/fake-machine/recording';
+import { SessionDepth } from '../../apps/desk-hub/fake-machine/session';
 import { LINE_LIMIT } from '../../src/endpoint/rl10/server';
 import { CHECKOUT, plane, PROJECT } from '../endpoint/sub-harness';
 import type { FakeSminos, Frame } from '../endpoint/rl10/fake-sminos';
 
-type Outcome = { state: 'done'; result: unknown } | { state: 'failed'; error: { code: string; message?: string } } | { state: 'refused'; reason: string };
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+type Outcome ={ state: 'done'; result: unknown } | { state: 'failed'; error: { code: string; message?: string } } | { state: 'refused'; reason: string };
 type Entry = { rpc: string; state: 'in-progress' | 'done'; outcome?: Outcome; member: string; device: string; fingerprint: string; nonce: string; session: string };
 export type Rpc = { rpc: string; opId: string; nonce: string; args: Record<string, unknown>; context?: unknown; member: string; device: string; fingerprint: string };
 
@@ -41,6 +45,7 @@ export class FakePlane {
   readonly #ledger = new Map<string, Entry>();
   readonly #tombstoned = new Set<string>();
   readonly #upstream = new Map<string, { session: string; n: number }>();
+  readonly #depths = new Map<string, SessionDepth>();
   readonly #handlers = new Map<string, (rpc: Rpc) => Outcome | Promise<Outcome>>();
   readonly #held = new Map<string, Array<() => void>>();
   readonly #holding = new Set<string>();
@@ -66,15 +71,43 @@ export class FakePlane {
 
   /** A message on every upstream subscription of `session`, numbered; returns the numbers it took. */
   emit(kind: string, body: unknown, session = 'la-1'): number[] {
-    const ns: number[] = [];
-    for (const [sub, u] of this.#upstream) {
-      if (u.session !== session) continue;
-      u.n += 1;
-      ns.push(u.n);
-      // A frame past RL10's line limit goes as parts, as sminos's uplink sends it.
-      for (const line of toWire(plane(kind, body, { session, sub, n: u.n }), LINE_LIMIT)) this.s.send(JSON.parse(line) as object);
+    return [...this.#upstream].filter(([, u]) => u.session === session).map(([sub, u]) => this.#numbered(sub, u, kind, body));
+  }
+
+  /** One step of the session's bridge stream, played through the fake machine's `SessionDepth` (desk-hub's DX4 producer):
+   * what it sends each subscription goes up that upstream, so a step-end carries its `t` and what that subscription knew
+   * of the step's start (its model and effort seen live, else the snapshot entry's model alone), as sminos's plane does. */
+  step(step: DistributiveOmit<Step, 'at'>, session = 'la-1'): void {
+    this.#depth(session).apply({ at: 0, ...step } as Step);
+  }
+
+  #depth(session: string): SessionDepth {
+    let depth = this.#depths.get(session);
+    if (depth === undefined) {
+      depth = new SessionDepth(session, null, (m) => this.#fromDepth(m), { project: PROJECT, machine: 'mini' });
+      this.#depths.set(session, depth);
     }
-    return ns;
+    return depth;
+  }
+
+  /** The depth's message to one subscription: its snapshot lends the streaming entries to this fake's own; anything else
+   * goes up that upstream while it is open, numbered with the rest. */
+  #fromDepth(m: SessionMessage): void {
+    if (m.sub === null) return;
+    const u = this.#upstream.get(m.sub);
+    if (u === undefined || m.kind === 'end') return;
+    if (m.kind === 'snapshot') {
+      this.s.send(plane('snapshot', { rows: [{ uuid: 'r1' }], more: true, subagents: [], presence: this.presenceOf(u.session), streaming: m.body.streaming, catalog: this.catalog }, { session: u.session, sub: m.sub, n: 0 }));
+      return;
+    }
+    this.#numbered(m.sub, u, m.kind, m.body);
+  }
+
+  #numbered(sub: string, u: { session: string; n: number }, kind: string, body: unknown): number {
+    u.n += 1;
+    // A frame past RL10's line limit goes as parts, as sminos's uplink sends it.
+    for (const line of toWire(plane(kind, body, { session: u.session, sub, n: u.n }), LINE_LIMIT)) this.s.send(JSON.parse(line) as object);
+    return u.n;
   }
 
   /** A session-wide message (outside any subscription). */
@@ -95,6 +128,7 @@ export class FakePlane {
     const u = this.#upstream.get(sub);
     if (u === undefined) return;
     this.#upstream.delete(sub);
+    this.#depths.get(u.session)?.end(sub, 'session-ended');
     this.s.send(plane('end', { reason }, { session: u.session, sub, n: u.n + 1 }));
   }
 
@@ -131,11 +165,13 @@ export class FakePlane {
     switch (f.t) {
       case 'subscribe':
         this.#upstream.set(sub, { session, n: 0 });
-        this.s.send(plane('snapshot', { rows: [{ uuid: 'r1' }], more: true, subagents: [], presence: this.presenceOf(session), streaming: [], catalog: this.catalog }, { session, sub, n: 0 }));
-        return;
-      case 'unsubscribe':
+        return this.#depth(session).subscribe(sub, null); // its snapshot, then its live part (#fromDepth)
+      case 'unsubscribe': {
+        const u = this.#upstream.get(sub);
         this.#upstream.delete(sub);
+        if (u !== undefined) this.#depths.get(u.session)?.end(sub, 'unsubscribed');
         return;
+      }
       case 'rows':
         return this.#on(sub, 'rows', { rows: [{ uuid: `older-${String(f.before)}` }], before: f.before, more: false });
       case 'diff':

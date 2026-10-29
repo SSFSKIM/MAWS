@@ -9,8 +9,8 @@
 // - `turn.running` comes from the plane alone, never from disk turns (custody, item 2): the engine record's status says
 //   anything but `idle`, or a main-loop model request is open (opened by a snapshot's `streaming` or a chunk, closed by
 //   its `step-end`; sminos's plane closes every open step at its turn's end).
-// - `model` and `effort` are, each on its own, what the main loop's latest step-end naming it said (sminos 1.27.12), else
-//   the model `read status` gave and no effort; `override` is `read status`'s, since the plane carries none (item 4).
+// - `model` and `effort` are, each on its own, what the main loop's latest step-end naming it said (sminos 1.27.12; a
+//   present `effort: null` names the default), else the model `read status` gave and no effort; `override` is `read status`'s, since the plane carries none (item 4).
 // - `pending` is what the plane says now: a snapshot clears it and the endpoint restates the session's pending requests
 //   as `raised` right after it. `settled` keeps the last 100, across snapshots.
 import type { LaneAAct, LaneACatalog, LaneADelivery, LaneALink, LaneARaised, LaneASettled, LaneAState, PlaneMessage } from '@shared/ipc/schema/lane-a';
@@ -82,7 +82,8 @@ export class RemoteFold {
         if (!isMain(body)) return;
         this.#open.delete(stepKey(body));
         const { model, effort } = stepEndFields(body as unknown as StepEnd);
-        // Each on its own: an absent field is one the plane doesn't know, so the last one known stands.
+        // Each on its own: an absent field is one the plane doesn't know, so the last one known stands; a present
+        // `effort: null` is the default effort observed, and replaces it.
         if (model !== undefined) this.#ranModel = model;
         if (effort !== undefined) this.#ranEffort = effort;
         return;

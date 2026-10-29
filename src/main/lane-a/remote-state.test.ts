@@ -78,6 +78,18 @@ describe('a remote lane A session’s state', () => {
     expect(state(fold, status)).toMatchObject({ model: 'claude-haiku-4-5', effort: 'max' });
   });
 
+  it('reads a present `effort: null` as the default effort observed, and an absent effort as unknown', () => {
+    const fold = new RemoteFold(S);
+    fold.message(snapshot());
+    const status = { model: 'claude-opus-4-5', override: null };
+    fold.message(env('step-end', { turnId: 't1', agentId: null, step: 1, model: 'claude-opus-4-5', effort: 'low' }));
+    expect(state(fold, status)).toMatchObject({ effort: 'low' });
+    fold.message(env('step-end', { turnId: 't1', agentId: null, step: 2, model: 'claude-opus-4-5' })); // a watch joined mid-step: no effort known
+    expect(state(fold, status)).toMatchObject({ effort: 'low' });
+    fold.message(env('step-end', { turnId: 't2', agentId: null, step: 1, model: 'claude-opus-4-5', effort: null })); // the request named none
+    expect(state(fold, status)).toMatchObject({ effort: null });
+  });
+
   it('carries the link and the acts in flight it is given, and leaves both out when given none', () => {
     const fold = new RemoteFold(S);
     fold.message(snapshot());
