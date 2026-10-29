@@ -11,7 +11,8 @@
 //   its `step-end`; sminos's plane closes every open step at its turn's end).
 // - `model` and `effort` are, each on its own, what the main loop's latest step-end naming it said (sminos 1.27.12; a
 //   present `effort: null` names the default), else the model `read status` gave and no effort; `override` is `read status`'s, since the plane carries none (item 4).
-// - `mode` is the one `read status` reported (sminos 1.27.14; the plane carries none), from a bridge that reports one.
+// - `mode` is the one `read status` reported (sminos 1.27.14; the plane carries none), from a bridge that reports one,
+//   while the presence names the launch it was read under: a new process starts with none.
 // - `pending` is what the plane says now: a snapshot clears it and the endpoint restates the session's pending requests
 //   as `raised` right after it. `settled` keeps the last 100, across snapshots.
 import type { LaneAAct, LaneACatalog, LaneADelivery, LaneALink, LaneAMode, LaneARaised, LaneASettled, LaneAState, PlaneMessage } from '@shared/ipc/schema/lane-a';
@@ -22,8 +23,9 @@ import { stepEndFields } from '@shared/lane-a/step-end';
 import type { StepEnd } from 'desk-hub/protocol';
 
 /** What the bridge's `read status` says that the plane doesn't: the session's model, its per-request override, and the
- * mode the session last reported (null: none, or a field the bridge doesn't send). */
-export type StatusRead = { model: string | null; override: LaneAState['override']; mode: LaneAMode | null };
+ * mode the session last reported (null: none, or a field the bridge doesn't send); `launch`, the presence's when it was
+ * read. */
+export type StatusRead = { model: string | null; override: LaneAState['override']; mode: LaneAMode | null; launch: string | null };
 
 type Fields = Record<string, unknown>;
 const SETTLED_KEPT = 100;
@@ -137,7 +139,7 @@ export class RemoteFold {
       model: this.#ranModel ?? status?.model ?? null,
       effort: this.#ranEffort,
       override: status?.override ?? null,
-      mode: reportsMode(sminos) ? (status?.mode ?? null) : null,
+      mode: reportsMode(sminos) && status !== null && status.launch === this.launch() ? status.mode : null,
       catalog: this.#catalog === null ? null : { fingerprint: this.#catalog.fingerprint },
       pending: [...this.#pending.values()],
       settled: [...this.#settled.values()],

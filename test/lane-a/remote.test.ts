@@ -565,6 +565,10 @@ describe('remote lane A over a real link', { timeout: 30_000 }, () => {
     expect(stateNow(l)?.mode).toEqual({ mode: 'plan', at: 1_761_700_000_000, from: 'permission_mode_changed' });
     await watched(l, 'la-b');
     expect(stateNow(l, 'la-b')?.mode).toBeNull();
+    // the session resumed in a new process (another launch), which has reported nothing: the earlier read says nothing of it
+    l.plane.wide('presence', { ...l.plane.presenceOf('la-1'), launch: 'L9' });
+    await until(() => stateNow(l)?.launch === 'L9', 'the new launch');
+    expect(stateNow(l)?.mode).toBeNull();
   });
 
   it('ends a watch at laneA.unwatch and at its page’s end; the last one’s end clears the session’s state', async () => {

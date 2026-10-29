@@ -449,12 +449,13 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
     const w = primary(s);
     if (w === null) return;
     s.hydratedAt = now();
+    const launch = w.fold.launch(); // the process the read asks: its mode is that process's alone
     const answer = await read(s, w.id, 'status');
     if (!answer.ok) return deps.log(`lane A: ${s.link.name}/${s.id}: read status: ${answer.message}`);
     const result = record(answer.result);
     const o = record(result?.override);
     const override = o === null ? null : { model: typeof o.model === 'string' ? o.model : null, effort: typeof o.effort === 'string' ? o.effort : null };
-    s.status = { model: typeof result?.model === 'string' ? result.model : null, override: override === null || (override.model === null && override.effort === null) ? null : override, mode: modeOf(result) };
+    s.status = { model: typeof result?.model === 'string' ? result.model : null, override: override === null || (override.model === null && override.effort === null) ? null : override, mode: modeOf(result), launch };
     if (s.watches.size > 0) changed(s);
   }
 
