@@ -36,6 +36,7 @@
     "e2e:requests": "scripts/e2e-build.sh harness && MAWS_ENGINE_REPLAY=1 playwright test e2e/requests.spec.ts",
     "e2e:composer": "scripts/e2e-build.sh harness && MAWS_ENGINE_REPLAY=1 playwright test e2e/composer.spec.ts",
     "e2e:c7": "scripts/e2e-build.sh harness && MAWS_ENGINE_REPLAY=1 playwright test e2e/requests.spec.ts e2e/composer.spec.ts",
+    "e2e:c7-utility": "scripts/e2e-build.sh harness && MAWS_ENGINE_REPLAY=1 MAWS_HOST_MODE=utility playwright test e2e/requests.spec.ts e2e/composer.spec.ts",
     "e2e:voice": "scripts/e2e-build.sh harness && MAWS_ENGINE_REPLAY=1 playwright test e2e/voice.spec.ts",
     "e2e:voice:packaged": "MAWS_E2E_EXECUTABLE=${MAWS_E2E_EXECUTABLE:-dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS} MAWS_ENGINE_REPLAY=1 playwright test e2e/voice.spec.ts --grep packaged:",
     "e2e:code": "scripts/e2e-build.sh harness && MAWS_HARNESS=1 playwright test e2e/code-tools.spec.ts e2e/code-editor.spec.ts",
