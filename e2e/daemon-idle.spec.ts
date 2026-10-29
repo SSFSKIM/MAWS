@@ -49,16 +49,20 @@
 // what O3-D moves into mawsd, composed by the built services entry over a profile the size of the owner's, idle while
 // loaded and again after its data is released; it writes test-results/daemon-idle-spine.json.
 //
-// Seven measured groups (gate.yml's MEASURED_E2E), one case each, chosen by title: `pnpm e2e:daemon-idle` (the
+// The seventh (P5 O3-D M2, docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §K; D5) is `mawsd` with the
+// spine: the built mawsd over the same fixture, the spine loaded by a client's first command, released after the quiet
+// period, and re-executed as a unit daemon; it writes test-results/daemon-idle-mawsd-spine.json.
+//
+// Eight measured groups (gate.yml's MEASURED_E2E), one case each, chosen by title: `pnpm e2e:daemon-idle` (the
 // scene, on the daemon shape since M9), `pnpm e2e:daemon-idle-baseline` (the same case under MAWS_HOST_MODE=detached,
 // today's supervisor alone, recording only: the baseline is re-measured from it on the tree under test when a landing
 // misses), `pnpm e2e:daemon-idle-floor` (the floor, which needs no build), `pnpm e2e:daemon-idle-mawsd` (mawsd
 // alone), `pnpm e2e:daemon-idle-enrolled` (the enrolled endpoint, recording only), `pnpm e2e:daemon-idle-aba` (A-B-A,
-// recording only, its shapes its own whatever MAWS_HOST_MODE says) and `pnpm e2e:daemon-idle-spine` (the spine alone,
-// recording only). Each sets MAWS_DAEMON_IDLE_PERF=1,
+// recording only, its shapes its own whatever MAWS_HOST_MODE says), `pnpm e2e:daemon-idle-spine` (the spine alone,
+// recording only) and `pnpm e2e:daemon-idle-mawsd-spine` (mawsd with the spine, recording only). Each sets MAWS_DAEMON_IDLE_PERF=1,
 // and the gate runs it only when named, on the mini's exclusive instance behind the measured-job guard. None spends
 // anything or touches a keychain: a replay runs no engine, mawsd alone wakes no host, the spine alone has no host to
-// wake, and the enrolled endpoint's hub is a local one on loopback, its machine key a file of the scratch profile.
+// wake, mawsd with the spine wakes an engine host that replays (MAWS_ENGINE_REPLAY=1) and runs no session, and the enrolled endpoint's hub is a local one on loopback, its machine key a file of the scratch profile.
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -69,15 +73,16 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import { daemonPaths } from '@shared/daemon/files';
 import { machineSettingsDefaults } from '@shared/settings/defaults';
-import { abaDeltas, abaLine, boundMisses, busyShare, cpuSeconds, cpuTimes, DAEMON_IDLE_BOUND, ENROLLED_INCREMENT_BUDGET_KIB, enrolledLine, floorLine, IDLE_RUN, idleLine, invalidReasons, loadPair, mawsdLine, measured, median, readerMismatches, readFootprints, readProcessTable, readTopMem, SPINE_RELEASED_RUN, spineLine, topOutside, type CpuTimes, type MeasuredProcess, type ProcessRow, type ShapeReading, type TopMem, type TopProcess } from '../test/support/daemon-idle';
+import { abaDeltas, abaLine, mawsdSpineLine, boundMisses, busyShare, cpuSeconds, cpuTimes, DAEMON_IDLE_BOUND, ENROLLED_INCREMENT_BUDGET_KIB, enrolledLine, floorLine, IDLE_RUN, idleLine, invalidReasons, loadPair, mawsdLine, measured, median, readerMismatches, readFootprints, readProcessTable, readTopMem, SPINE_RELEASED_RUN, spineLine, topOutside, type CpuTimes, type MeasuredProcess, type ProcessRow, type ShapeReading, type SpineWindow, type TopMem, type TopProcess } from '../test/support/daemon-idle';
 import { writeSpineFixture } from '../test/support/spine-fixture';
+import { reachMachine } from '../src/mawsd/machine-client';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { startLocalOrg, type LocalOrg, type Ran } from './support/local-org';
 import { isAlive, killScratchProcesses, processesNaming, ps } from './support/processes';
 import { tmpSocketDirOf } from './support/supervisor-socket';
 
-test.skip(process.env.MAWS_DAEMON_IDLE_PERF !== '1', 'the idle-cost measurement runs under pnpm e2e:daemon-idle, e2e:daemon-idle-baseline, e2e:daemon-idle-floor, e2e:daemon-idle-mawsd, e2e:daemon-idle-enrolled, e2e:daemon-idle-aba and e2e:daemon-idle-spine (MAWS_DAEMON_IDLE_PERF=1)');
+test.skip(process.env.MAWS_DAEMON_IDLE_PERF !== '1', 'the idle-cost measurement runs under pnpm e2e:daemon-idle, e2e:daemon-idle-baseline, e2e:daemon-idle-floor, e2e:daemon-idle-mawsd, e2e:daemon-idle-enrolled, e2e:daemon-idle-aba, e2e:daemon-idle-spine and e2e:daemon-idle-mawsd-spine (MAWS_DAEMON_IDLE_PERF=1)');
 test.describe.configure({ timeout: 20 * 60_000 }); // about 13 minutes: the scene, the settle and the window
 
 // C3's permission round trip: a prompt, ~44 rows, a Bash `can_use_tool` (seq 49) the replay holds at until it is
@@ -466,6 +471,109 @@ test('daemon idle spine alone: the physical footprint and CPU of the spine compo
   }
   if (leftover !== null) throw leftover;
 });
+
+// P5 O3-D M2 (Interfaces §K; D5, D6): mawsd with the spine, §11's mechanism measured. The fixture of the spine-alone case
+// in a scratch profile whose machine-settings.json sets `supervisor.idleExitMinutes: null` (no park, no idle exit), and
+// the built out/main/mawsd.js under the same Electron binary as Node, `--disable-sigusr1`, argv0 `mawsd`, with an
+// environment of its own: MAWS_SPINE_QUIET_MS=60000 (the measured seam of D6: the product's quiet is the idle time) and
+// MAWS_ENGINE_REPLAY=1, so the engine host the spine's start wakes runs no engine. Two daemons in sequence, since a
+// released unit daemon exits at once (D5) and a private one never re-executes (D6): (1) `run --private`, the spine
+// loaded by a bare machine.sock client's session.list (the fixture's sessions read back) that holds its connection, read
+// LOADED; the client closes, the quiet passes, the log reads `spine: released`, read RELEASED; the daemon is stopped
+// (SIGTERM). (2) `run --unit`, restarted here on exit 75 as launchd would, following the new pid: the client loads the
+// spine and closes, the quiet passes, the log reads `exited (spine released, code 75)`, the restart serves, read
+// RE-EXECUTED. Each window is SPINE_RELEASED_RUN's (120 s settle, 300 s, 11 samples, the load rule), over the
+// processes measuredOn('daemon') finds once the window's daemon is stable. The line (mawsdSpineLine) names the three
+// medians for mawsd and the engine host, the peak load and its pair, each window's validity and D5's verdict; it
+// asserts no bound and writes test-results/daemon-idle-mawsd-spine.json. `pnpm e2e:daemon-idle-mawsd-spine` runs this
+// case alone (it needs the plain build; about 24 minutes).
+test('daemon idle mawsd with the spine: loaded, released, re-executed', async () => {
+  test.setTimeout(27 * 60_000);
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-dims-')));
+  const profile = join(root, 'ud');
+  const script = join(REPO_ROOT, 'out', 'main', 'mawsd.js');
+  expect(existsSync(script), 'the build has out/main/mawsd.js (scripts/e2e-build.sh plain)').toBe(true);
+  const binary = electronBinary();
+  const env = { ELECTRON_RUN_AS_NODE: '1', PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: root, TMPDIR: process.env.TMPDIR ?? tmpdir(), MAWS_USER_DATA: profile, MAWS_SPINE_QUIET_MS: '60000', MAWS_ENGINE_REPLAY: '1' };
+  const electron = execFileSync(binary, ['-p', 'process.versions.electron'], { env, encoding: 'utf8' }).trim();
+  const logFile = join(profile, 'mawsd', 'mawsd.log');
+  const log = () => (existsSync(logFile) ? readFileSync(logFile, 'utf8') : '');
+  const lines = (text: string) => log().split('\n').filter((line) => line.includes(text)).length;
+  const daemons: ChildProcess[] = [];
+  let ending = false;
+  const run = (kind: 'private' | 'unit'): ChildProcess => {
+    const child = spawn(binary, ['--disable-sigusr1', script, 'run', `--${kind}`, '--dir', join(profile, 'mawsd')], { env, stdio: 'ignore', argv0: MAWSD_ARGV0 });
+    daemons.push(child);
+    if (kind === 'unit') child.once('exit', (code) => void (code === 75 && !ending && run('unit'))); // launchd's restart on 75
+    return child;
+  };
+  const serving = async (before: number) => expect.poll(() => lines(' serving; '), { timeout: 30_000, message: `mawsd serves:\n${log()}` }).toBeGreaterThan(before);
+  const build = `${process.env.npm_package_version ?? '0.0.0'}+daemon-idle-mawsd-spine`;
+  // A bare machine.sock client (machine-client.ts's hello): its session.list loads the spine and reads the fixture back
+  const load = async () => {
+    const reached = await reachMachine(daemonPaths(profile, env.TMPDIR), { build });
+    if (!reached.ok) throw new Error(`machine.sock: ${reached.state}: ${reached.why}`);
+    const listed = await reached.link.request('session.list', { includeArchived: true }, 180_000);
+    if (!listed.ok) throw new Error(`session.list: ${listed.error.code}: ${listed.error.message}`);
+    return { link: reached.link, sessions: (listed.value as { sessions: unknown[] }).sessions.length };
+  };
+  const settled = async () => {
+    await sleep(SPINE_RELEASED_RUN.settleS * 1_000);
+    const procs = measured(processesNaming(root), root, measuredOn('daemon'));
+    const live = daemons.filter((d) => d.exitCode === null && d.signalCode === null).map((d) => d.pid);
+    expect(procs.filter((p) => p.argv0 === MAWSD_ARGV0).map((p) => p.pid), 'the live mawsd is what is measured').toEqual(live);
+    return procs;
+  };
+  const windows: Record<SpineWindow, IdleWindow | null> = { loaded: null, released: null, reexecuted: null };
+  let leftover: unknown = null;
+  try {
+    const counts = await writeSpineFixture({ profile, folders: join(root, 'projects') });
+    writeFileSync(join(profile, 'machine-settings.json'), JSON.stringify({ ...machineSettingsDefaults(), supervisor: { idleExitMinutes: null } }));
+
+    // (1) a private daemon: loaded, then released
+    const first = run('private');
+    await serving(0);
+    const holding = await load();
+    expect(holding.sessions, 'the spine in mawsd reads the fixture').toBe(counts.sessions);
+    windows.loaded = await measureWindow(await settled(), SPINE_RELEASED_RUN);
+    holding.link.close();
+    await expect.poll(() => lines('spine: released'), { timeout: 5 * 60_000, message: `the spine is released after the quiet:\n${log()}` }).toBe(1);
+    windows.released = await measureWindow(await settled(), SPINE_RELEASED_RUN);
+    first.kill('SIGTERM');
+    await expect.poll(() => first.exitCode !== null || first.signalCode !== null, { timeout: 30_000, message: 'the private mawsd exits at SIGTERM' }).toBe(true);
+
+    // (2) a unit daemon: loaded and closed, released, exit 75, restarted cold: re-executed
+    const servedBefore = lines(' serving; ');
+    run('unit');
+    await serving(servedBefore);
+    const loading = await load();
+    expect(loading.sessions, 'the unit mawsd reads the fixture').toBe(counts.sessions);
+    loading.link.close();
+    await expect.poll(() => lines('exited (spine released, code 75)'), { timeout: 5 * 60_000, message: `the unit mawsd re-executes after its release:\n${log()}` }).toBe(1);
+    await serving(servedBefore + 1);
+    expect(daemons, 'the harness restarted the unit').toHaveLength(3);
+    windows.reexecuted = await measureWindow(await settled(), SPINE_RELEASED_RUN);
+
+    const reasons = { loaded: [] as string[], released: [] as string[], reexecuted: [] as string[] };
+    for (const key of Object.keys(windows) as SpineWindow[]) reasons[key] = windows[key] === null ? ['not read'] : windowReasons(windows[key]!, false);
+    const readings = { loaded: read(windows.loaded), released: read(windows.released), reexecuted: read(windows.reexecuted) };
+    const line = mawsdSpineLine({ windows: readings, reasons, counts });
+    const all = (Object.keys(reasons) as SpineWindow[]).flatMap((key) => reasons[key].map((reason) => `${key}: ${reason}`));
+    const spineLines = log().split('\n').filter((l) => /\bspine: |exit(ing|ed) \(/.test(l));
+    report('daemon-idle-mawsd-spine.json', line, all, { shape: 'mawsd with the spine', electron, counts, readings, reasons, spineLines, loaded: windows.loaded?.record, released: windows.released?.record, reexecuted: windows.reexecuted?.record });
+  } finally {
+    ending = true;
+    for (const daemon of daemons) daemon.kill('SIGTERM');
+    const pids = daemons.flatMap((d) => (d.pid === undefined ? [] : [d.pid]));
+    await killScratchProcesses(root, pids).catch((error: unknown) => (leftover = error));
+    const sockets = daemonPaths(profile, env.TMPDIR).socketDir;
+    if (!sockets.startsWith(root)) rmSync(sockets, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+  if (leftover !== null) throw leftover;
+});
+
+const read = (window: IdleWindow | null): ShapeReading | null => (window === null ? null : shapeReading(window));
 
 // The Electron binary every measured process runs as Node (ELECTRON_RUN_AS_NODE=1), as its `electron` package names it.
 function electronBinary(): string {
