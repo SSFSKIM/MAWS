@@ -75,6 +75,8 @@ export interface QuestionProbe {
   pane(): Promise<string[]>;
   /** A notice the engine shows at start, which holds every prompt behind it, passed (Enter); whether one was up. */
   passNotice(): Promise<boolean>;
+  /** The stub model's last lines (each turn and the last user text it answered). */
+  stubLog(): Promise<string[]>;
 }
 
 export interface EndpointMachine {
@@ -316,6 +318,7 @@ export class VmMachine implements EndpointMachine {
     notified: async () => jsonLine('notified', await this.scene('notified')) as Record<string, { project: string; pending: number }>,
     deny: async () => void (await this.scene('lane-a-deny')),
     pane: async () => (await this.scene('pane')).lines,
+    stubLog: async () => (await this.scene('stub-log')).lines,
     passNotice: async () => (await this.scene('lane-a-notice')).lines.includes('notice passed'),
   };
   readonly #script: string;

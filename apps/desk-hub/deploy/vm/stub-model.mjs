@@ -5,8 +5,8 @@
 // - a main-loop request whose last user text says `o10-m11 ticks <k> <tag>` starts a tool loop: `echo o10-m11 tick
 //   1/<k> <tag>` through Bash, and each tool result for tick i < k answers tick i + 1, the last a plain text turn; so
 //   the session goes on writing rows by itself (two per tick) while the run cuts its links;
-// - one whose last user text says `o10-m11 ask <tag>` asks a question: `touch /tmp/o10-m11-ask-<tag>` through Bash,
-//   which the scene's settings don't allow, so the engine asks its owner (the bridge raises the request);
+// - one whose last user text says `o10-m11 ask <tag>` asks its owner a question (AskUserQuestion, which no permission
+//   mode answers for them; the bridge raises the request);
 // - any other main-loop request is answered with a short text turn naming the request;
 // - a side request (a title, a classifier) with a short text; count_tokens a fixed count; any other path 404.
 // Each answer waits `--delay-ms` (default 700), so a run of ticks spreads over time. Usage:
@@ -55,7 +55,13 @@ export function answer(body) {
     return toolTurn(`toolu_o10m11_${tag}_${next}`, 'Bash', { command: `echo o10-m11 tick ${next}/${k} ${tag}`, description: `tick ${next} of ${k}` });
   }
   const ask = ASK.exec(text);
-  if (ask) return toolTurn(`toolu_o10m11_ask_${ask[1]}`, 'Bash', { command: `touch /tmp/o10-m11-ask-${ask[1]}`, description: 'a question for the owner' });
+  if (ask) {
+    const options = [
+      { label: 'yes', description: 'o10-m11: yes' },
+      { label: 'no', description: 'o10-m11: no' },
+    ];
+    return toolTurn(`toolu_o10m11_ask_${ask[1]}`, 'AskUserQuestion', { questions: [{ question: `o10-m11 question ${ask[1]}?`, header: 'o10-m11', options, multiSelect: false }] });
+  }
   const ticks = TICKS.exec(text);
   if (ticks) {
     const [, k, tag] = ticks;
@@ -88,7 +94,8 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()
       }
       const turn = isMainLoop(body) ? answer(body) : textTurn('o10-m11');
       const id = `msg_o10m11_${++served}`;
-      console.log(`${new Date().toISOString()} ${isMainLoop(body) ? 'main' : 'side'} ${turn.stop} ${turn.blocks.map((b) => b.type).join(',')}`);
+      const last = [...(body.messages ?? [])].reverse().find((m) => m.role === 'user');
+      console.log(`${new Date().toISOString()} ${isMainLoop(body) ? 'main' : 'side'} ${turn.stop} ${turn.blocks.map((b) => b.type).join(',')} ${JSON.stringify(textOf(last?.content).slice(-240))}`);
       setTimeout(() => {
         if (body.stream === true) {
           res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });

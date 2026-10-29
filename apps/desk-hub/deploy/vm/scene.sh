@@ -280,6 +280,7 @@ case $verb in
   notified) f=$P/mawsd/endpoint/notified.json; if [[ -f $f ]]; then tr -d '\n' <"$f"; echo; else say '{}'; fi ;;
   lane-a-deny) as tmux -L $TX send-keys -t lane-a Escape && say "Escape into the session's pane" ;;
   lane-a-notice) if as tmux -L $TX capture-pane -p -t lane-a | grep -F 'Enter to continue' | grep -qvF 'proceed' && as tmux -L $TX capture-pane -p -t lane-a | grep -qF 'auto-mode-classifier-billing'; then as tmux -L $TX send-keys -t lane-a Enter && say "notice passed"; else say none; fi ;;
+  stub-log) tail -n 6 $R/stub.log 2>/dev/null; true ;;
   pane) as tmux -L $TX capture-pane -p -t lane-a | grep -v '^\s*$' | tail -20 ;;
   started) for f in session seat.session; do [[ -s $R/$f ]] && say "${f%.session} $(head -1 $R/$f)"; done; true ;;
   down) stop_verbs; v=$?; down; d=$?; exit $((v | d)) ;;

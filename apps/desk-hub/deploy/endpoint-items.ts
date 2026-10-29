@@ -1171,7 +1171,7 @@ export async function item10(scene: Scene, report: ItemReport): Promise<void> {
         const held = await probe.notified();
         return held[session]?.pending === 1 ? held : null;
       }, 'notified.json holding the session pending 1', 90_000, 2000).catch(async (error: unknown) => {
-        throw new Error(`${error instanceof Error ? error.message : String(error)}; notified.json ${JSON.stringify(await probe.notified())}; the pane: ${(await probe.pane()).slice(-6).join(' / ')}`);
+        throw new Error(`${error instanceof Error ? error.message : String(error)}; notified.json ${JSON.stringify(await probe.notified())}; the pane: ${(await probe.pane()).slice(-6).join(' / ')}; the stub: ${(await probe.stubLog()).join(' / ')}`);
       });
       await until(() => pendingAtHub() === 1, 'the hub’s presence holding the session pending 1', 30_000);
       scene.log(`item 10: notified.json ${JSON.stringify(file)}`);
