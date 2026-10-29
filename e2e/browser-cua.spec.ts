@@ -40,7 +40,8 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { connectFakeHost, type FakeHost } from '../test/support/cua-fake-host';
 import { invoke, value } from './support/c7-replay';
 import { browserIn, tabsOf } from './support/browser-scene';
-import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { launchMaws, onLaunched, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { collectMainOutput } from './support/browser-import-scene';
 import { closeScene, launchScene, scratchProject, seedTranscripts, show } from './support/maws-tools';
 import { launchDefaults } from '../src/shared/composer/launch-defaults';
 import { FIXTURE_ENGINE_VERSION } from '../test/support/engine-pin';
@@ -480,17 +481,36 @@ const ENGINE_STUB = join(REPO_ROOT, 'test/support/cua-engine-stub.mjs');
 type ConnectorReport = { pid: number; hello: Record<string, unknown> | null; closed: boolean };
 const reportOf = (path: string): ConnectorReport | null => (existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as ConnectorReport) : null);
 
+// A red in a case that keeps a witness carries its own cause (gate-offload Decision Log 140 (d); the :493 reds had none,
+// main's lines never reaching the job log): what the case noted as it went, then main's [browser] lines from launch to
+// close, printed once the app has closed and so in full.
+let witness: { mainOutput: () => string; noted: string[] } | null = null;
+test.afterEach(async () => {
+  const kept = witness;
+  witness = null;
+  const info = test.info();
+  if (!kept || info.status === info.expectedStatus) return;
+  const lines = kept.mainOutput().split('\n').filter((line) => line.includes('[browser]'));
+  const text = [...kept.noted, `main's [browser] lines (${lines.length}):`, ...lines].join('\n');
+  console.log(`[browser-cua witness] ${info.titlePath.at(-1)}\n${text}`);
+  await info.attach('witness', { body: text, contentType: 'text/plain' });
+});
+
 test('a same-user process outside every session\'s tree is cut off before the hello: an orphaned connector is refused, the trusted host keeps its connection', async () => {
   const userData = mkdtempSync('/tmp/mcua-e2e-');
   const work = mkdtempSync('/tmp/mcua-orphan-');
-  const maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1' } });
+  const kept = (witness = { mainOutput: () => '', noted: [] as string[] });
+  const maws = await onLaunched((launched) => (kept.mainOutput = collectMainOutput(launched)), () => launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1' } }));
   let host: FakeHost | null = null;
   try {
     const app = seam(maws);
     await app.trustThisProcess();
     const path = (await app.socketPathFor(A))!;
     host = await connectFakeHost(path);
-    expect((await app.inspect())[A]).toMatchObject({ connections: 1, refused: 0 });
+    const atHello = (await app.inspect())[A];
+    kept.noted.push(`read once the hello was heard: ${JSON.stringify(atHello)}; the fake host's socket: ${JSON.stringify(host.socketState())}`);
+    if (atHello?.connections !== 1) kept.noted.push(`read again: ${JSON.stringify((await app.inspect())[A])}; the fake host's socket: ${JSON.stringify(host.socketState())}`);
+    expect(atHello).toMatchObject({ connections: 1, refused: 0 });
 
     // a connector started in a subshell that exits at once, so it runs under launchd when it connects (the Terminal's `nc`)
     const report = join(work, 'orphan.json');

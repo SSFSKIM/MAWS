@@ -125,7 +125,9 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
   const hasLiveRoot = (appSessionId: AppSessionId) => addon !== null && rootsOf(appSessionId).some((root) => addon.process(root.pid)?.start === root.start);
 
   // The verdict on an accepted socket, which nothing has read yet: refused, it is destroyed unread; accepted, it becomes
-  // a connection (whose hello goes at once) and only then is read.
+  // a connection, counted before its hello goes, and only then is read. The order is what a reader of the server sees:
+  // the e2e seam's `inspect`, run by Node's inspector at the next interrupt (between any two calls of this synchronous
+  // code), finds the host counted as soon as the host can hear the hello.
   const decide = (appSessionId: AppSessionId, listening: Listening, socket: Socket, acceptedAt: number) => {
     listening.pending.delete(socket);
     if (socket.destroyed) return;
@@ -136,7 +138,9 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
       log(refusalLine(appSessionId, refusal));
       return;
     }
-    listening.connections.add(new CuaConnection(ctx, appSessionId, socket, (closed) => listening.connections.delete(closed)));
+    const connection = new CuaConnection(ctx, appSessionId, socket, (closed) => listening.connections.delete(closed));
+    listening.connections.add(connection);
+    connection.greet();
     socket.resume();
   };
 

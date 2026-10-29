@@ -145,7 +145,12 @@ export class CuaConnection {
     });
     socket.on('error', () => {});
     socket.on('close', () => this.close());
-    this.peer.notify('hello', { extensionId: 'maws', extensionInstanceId: `maws:${appSessionId}`, version: ctx.version, protocolVersion: PROTOCOL_VERSION, profileName: PROFILE_NAME });
+  }
+
+  // The hello, which the server sends once it counts this connection: from the moment the host can hear it, anything
+  // reading the server finds the host there.
+  greet(): void {
+    this.peer.notify('hello', { extensionId: 'maws', extensionInstanceId: `maws:${this.appSessionId}`, version: this.ctx.version, protocolVersion: PROTOCOL_VERSION, profileName: PROFILE_NAME });
   }
 
   get heldCount(): number {
