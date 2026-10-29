@@ -4,7 +4,7 @@
 // The script is sourced (its verbs dispatch only when it is run), and its selection functions are fed tables as the
 // VM's /proc would give them.
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -99,39 +99,100 @@ describe('the lane A session in the machine project', () => {
     expect(call('member_alias', [sid], JSON.stringify(rows.slice(0, 1)))).toEqual({ lines: [], status: 1 });
     expect(call('member_alias', [sid], '')).toEqual({ lines: [], status: 1 });
   });
+
+  // What `sminos project show <checkout>` prints, as the owner, before the engine starts: sminos's own resolution.
+  const shown = (id: string, source: string) =>
+    [`project  dc-acceptance-7f80`, `id       ${id}`, `kind     machine`, `source   ${source}`, `remote   -`, `hub      https://h (org ssfskim)`, `root     -`, `home     /x`].join('\n') + '\n';
+  const mid = machineProjectId('ssfskim', 'dc-acceptance-7f80');
+
+  it('starts only where sminos itself resolves the checkout to the pinned machine project, as a stray', () => {
+    expect(call('project_verdict', [mid], shown(mid, 'machine project: no remote'))).toEqual({ lines: [], status: 0 });
+  });
+
+  it('is refused where a .smns above the checkout claims it, whatever project that names', () => {
+    const other = '5d1f0e6a-1111-4222-8333-444455556666';
+    expect(call('project_verdict', [mid], shown(other, '.smns at /Users/new'))).toEqual({
+      lines: [`sminos puts the checkout in ${other}, not the machine project ${mid}`, 'its project comes from .smns at /Users/new, not from no .smns or remote (the machine project)'],
+      status: 1,
+    });
+    expect(call('project_verdict', [mid], shown(mid, '.smns at /Users/new')).lines).toEqual(['its project comes from .smns at /Users/new, not from no .smns or remote (the machine project)']);
+    expect(call('project_verdict', [mid], 'sminos: no project at /w\n').status).toBe(1);
+  });
 });
 
+
 // sminos reads the engine's session records from $HOME/.claude/sessions alone, whatever CLAUDE_CONFIG_DIR says, so a
-// lane A engine on the scratch config dir is seen only through a link there to its own record (attempt 2, 2026-10-29).
+// lane A engine on the scratch config dir is seen only through a link there to its own record (attempt 2, 2026-10-29),
+// published under a name of the run's own (o10-m11-lane-a.<record>) that no engine of the owner's writes.
+const PREFIX = 'o10-m11-lane-a.';
+const AS_SELF = 'as_owner() { "$@"; }; '; // the owner's user is this test's own: nothing of the real owner's is touched
+
 describe('the engine records the owner’s sminos reads', () => {
-  function dirs(): { records: string; sessions: string; done: () => void } {
+  function dirs(): { root: string; records: string; sessions: string; done: () => void } {
     const root = mkdtempSync(join(tmpdir(), 'o10-records-'));
     const records = join(root, 'records');
     const sessions = join(root, 'sessions');
-    spawnSync('mkdir', ['-p', records, sessions]);
-    return { records, sessions, done: () => rmSync(root, { recursive: true, force: true }) };
+    mkdirSync(records);
+    mkdirSync(sessions);
+    return { root, records, sessions, done: () => rmSync(root, { recursive: true, force: true }) };
   }
 
-  it('links each of the run’s records not linked yet, keeps one linked already, and never takes a name the owner’s holds', () => {
+  it('plans a link under the run’s own name for each record, keeps its own link, and never takes a name already there', () => {
     const { records, sessions, done } = dirs();
     try {
       for (const pid of ['501', '502', '503']) writeFileSync(join(records, `${pid}.json`), '{}');
-      symlinkSync(join(records, '502.json'), join(sessions, '502.json'));
-      writeFileSync(join(sessions, '503.json'), '{}');
+      writeFileSync(join(sessions, '501.json'), '{}'); // an owner's engine of the same pid: its own name, no clash
+      symlinkSync(join(records, '502.json'), join(sessions, `${PREFIX}502.json`));
+      mkdirSync(join(sessions, `${PREFIX}503.json`));
       expect(call('record_plan', [records, sessions])).toEqual({ lines: ['link 501.json', 'linked 502.json', 'taken 503.json'], status: 0 });
     } finally {
       done();
     }
   });
 
-  it('names for removal only the links into the run’s scratch, never the owner’s own records or other links', () => {
+  it('makes each link with its exact target and fails on a name taken, a directory never receiving a link inside it', () => {
+    const { records, sessions, done } = dirs();
+    try {
+      writeFileSync(join(records, '701.json'), '{}');
+      expect(call(`${AS_SELF}link_records`, [records, sessions]).status).toBe(0);
+      expect(readlinkSync(join(sessions, `${PREFIX}701.json`))).toBe(join(records, '701.json'));
+      writeFileSync(join(records, '702.json'), '{}');
+      mkdirSync(join(sessions, `${PREFIX}702.json`));
+      const taken = call(`${AS_SELF}link_records`, [records, sessions]);
+      expect(taken.status).toBe(1);
+      expect(taken.lines.at(-1)).toContain(`${PREFIX}702.json is there already`);
+      expect(readdirSync(join(sessions, `${PREFIX}702.json`))).toEqual([]);
+    } finally {
+      done();
+    }
+  });
+
+  it('makes the owner’s sessions directory 0700 when it is absent, and leaves an existing one’s mode alone', () => {
+    const { root, records, done } = dirs();
+    try {
+      const absent = join(root, 'absent');
+      expect(call(`${AS_SELF}link_records`, [records, absent]).status).toBe(0);
+      expect(statSync(absent).mode & 0o777).toBe(0o700);
+      const open = join(root, 'open');
+      mkdirSync(open, { mode: 0o755 });
+      expect(call(`${AS_SELF}link_records`, [records, open]).status).toBe(0);
+      expect(statSync(open).mode & 0o777).toBe(0o755);
+    } finally {
+      done();
+    }
+  });
+
+  it('names for removal only links under the run’s name whose target is exactly its record, nothing by a path prefix', () => {
     const { sessions, done } = dirs();
     try {
-      symlinkSync(`${X}/claude/sessions/601.json`, join(sessions, '601.json'));
-      symlinkSync('/Users/new/.claude/elsewhere.json', join(sessions, '602.json'));
-      symlinkSync(`${X}-other/claude/sessions/603.json`, join(sessions, '603.json'));
-      writeFileSync(join(sessions, '604.json'), '{}');
-      expect(call('own_links', [sessions])).toEqual({ lines: [join(sessions, '601.json')], status: 0 });
+      symlinkSync(`${X}/claude/sessions/601.json`, join(sessions, `${PREFIX}601.json`));
+      symlinkSync(`${X}/claude/sessions/other.json`, join(sessions, `${PREFIX}602.json`));
+      symlinkSync(`${X}/claude/sessions/../sessions/603.json`, join(sessions, `${PREFIX}603.json`));
+      symlinkSync(`${X}/claude/sessions/604.json`, join(sessions, '604.json')); // not under the run's name
+      writeFileSync(join(sessions, `${PREFIX}605.json`), '{}');
+      writeFileSync(join(sessions, '606.json'), '{}');
+      expect(call('own_links', [sessions])).toEqual({ lines: [join(sessions, `${PREFIX}601.json`)], status: 0 });
+      expect(lstatSync(join(sessions, '606.json')).isFile()).toBe(true);
     } finally {
       done();
     }

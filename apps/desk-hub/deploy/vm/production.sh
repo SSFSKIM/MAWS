@@ -17,8 +17,9 @@
 # is a git repository with no remote and no .smns, which sminos resolves to the machine project as it does any such
 # directory of the owner's. sminos reads the engine's session records from $HOME/.claude/sessions alone, whatever
 # CLAUDE_CONFIG_DIR says, so for the owner's sminos (its CLI, its hooks, its daemon) to see the run's engines at all,
-# each record the engines write in the scratch config dir is linked there under its own name, and `down` removes
-# those links: the run's one write into the owner's ~/.claude.
+# each record the engines write in the scratch config dir is linked there under a name of the run's own
+# (o10-m11-lane-a.<record>, which no engine writes), and `down` removes those links: the run's one write into the
+# owner's ~/.claude.
 set -uo pipefail
 OWNER=new
 OH=/Users/new
@@ -32,6 +33,7 @@ W=$X/work
 PLUGIN=$X/claude/plugins/sminos
 RECORDS=$X/claude/sessions            # the engine's session records, as the run's engines write them
 ENGINE_SESSIONS=$OH/.claude/sessions  # where sminos reads them
+LINK_PREFIX=o10-m11-lane-a.           # the run's links there: $LINK_PREFIX<record>, never an engine's own <pid>.json
 STUB_PORT=47899
 STUB_URL=http://127.0.0.1:$STUB_PORT
 CLAUDE=$O/bin/claude
@@ -148,20 +150,42 @@ except ValueError:
 hit = next((r["alias"] for r in rows if isinstance(r, dict) and r.get("session") == sys.argv[1] and isinstance(r.get("alias"), str) and r["alias"]), None)
 sys.exit(1) if hit is None else print(hit)' "$1"
 }
-# For each record in directory $1 (the run's), what directory $2 (the owner's) holds of its name: `link` none yet,
-# `linked` the run's link to it, `taken` anything else (the owner's, never replaced).
+# Which project sminos gives the checkout, from `sminos project show <checkout>` on stdin (its own resolver, read only):
+# one line a reason it is not the machine project $1 as a stray (a .smns above the checkout, say); none, status 0, when
+# it is.
+project_verdict() {
+  local line id='' source='' bad=0
+  while IFS= read -r line; do
+    case $line in "id "*) id=${line#id} ;; "source "*) source=${line#source} ;; esac
+  done
+  id=${id#"${id%%[! ]*}"}; source=${source#"${source%%[! ]*}"}
+  [[ $id == "$1" ]] || { say "sminos puts the checkout in ${id:-no project}, not the machine project $1"; bad=1; }
+  [[ $source == "machine project:"* ]] || { say "its project comes from ${source:-nowhere}, not from no .smns or remote (the machine project)"; bad=1; }
+  return $bad
+}
+# For each record in directory $1 (the run's), what directory $2 (the owner's) holds of the run's name for it,
+# $LINK_PREFIX<record>: `link` nothing yet, `linked` the run's link to exactly that record, `taken` anything else
+# (never replaced).
 record_plan() {
-  local f name
+  local f name at
   for f in "$1"/*.json; do
     [[ -f $f ]] || continue
-    name=${f##*/}
-    if [[ -L $2/$name && $(readlink "$2/$name") == "$f" ]]; then say "linked $name"
-    elif [[ -e $2/$name || -L $2/$name ]]; then say "taken $name"
+    name=${f##*/}; at=$2/$LINK_PREFIX$name
+    if [[ -L $at && $(readlink "$at") == "$f" ]]; then say "linked $name"
+    elif [[ -e $at || -L $at ]]; then say "taken $name"
     else say "link $name"; fi
   done
 }
-# The links in directory $1 into the run's scratch $X: the run's, and only those, for `down` to remove.
-own_links() { local f; for f in "$1"/*; do [[ -L $f && $(readlink "$f") == "$X/"* ]] && say "$f"; done; return 0; }
+# The run's links in directory $1, for `down` to remove: a name $LINK_PREFIX<record> whose target is exactly
+# $RECORDS/<record>, compared whole (never by a path prefix).
+own_links() {
+  local f name
+  for f in "$1"/"$LINK_PREFIX"*.json; do
+    name=${f##*/}; name=${name#"$LINK_PREFIX"}
+    [[ -L $f && $(readlink "$f") == "$RECORDS/$name" ]] && say "$f"
+  done
+  return 0
+}
 
 ns_of() { readlink /proc/"$1"/ns/mnt 2>/dev/null; }
 ours_ns() { local a; a=$(anchor) && ns_of "$a"; }
@@ -184,7 +208,7 @@ kill_ours() { local ours p; ours=$(ours_ns) || return 0; for p in "$@"; do [[ $(
 gone() { ! test -S "$1"; }
 
 lane_a_up() {
-  local project=$1 name=$2 org machine sid launch alias
+  local project=$1 name=$2 org machine problems sid launch alias
   [[ $project =~ ^[0-9a-f-]{36}$ ]] || fail "a project id"; word "$name"
   [[ -f $SH/daemon/identity.json ]] || fail "the VM's sminos is not cut over to its endpoint (no daemon/identity.json)"
   [[ -x $CLAUDE && -x $SMINOS && -f $O/sminos/.claude-plugin/plugin.json ]] || fail "no claude or sminos in $O: run setup.sh first"
@@ -205,6 +229,9 @@ lane_a_up() {
   # remote and no .smns: a stray, in the machine project.
   as_session git -c init.defaultBranch=main init -q $W || fail "git init"
   as_session bash -c "cd $W && git -c user.name=o10-m11 -c user.email=o10-m11@scene.invalid commit -q --allow-empty -m scene" || fail "git commit"
+  # Whatever lies above $W (a .smns in an ancestor would claim it), the project sminos itself resolves it to, asked as
+  # the session will be, before any engine starts.
+  problems=$(as_session $SMINOS project show $W 2>&1 | project_verdict "$project") || fail "the checkout is not a stray in the machine project: ${problems//$'\n'/; }"
   as_session python3 -c 'import json,sys; w=sys.argv[2]; json.dump({"hasCompletedOnboarding": True, "projects": {w: {"hasTrustDialogAccepted": True}}}, open(sys.argv[1], "w"))' $X/claude/.claude.json $W
   as_session python3 -c 'import json,sys; json.dump({"permissions": {"allow": ["Bash(echo:*)"]}}, open(sys.argv[1], "w"))' $X/claude/settings.json
   sid=$(cat /proc/sys/kernel/random/uuid) && say "$sid" >$R/session || fail "no session id"
@@ -230,17 +257,20 @@ start_session() {
   check_engine "$sid"
   link_records
 }
-# Every record of the run's engines linked where the owner's sminos reads them (record_plan); a name the owner's
-# records hold already fails the run rather than be replaced.
+# Every record of the run's engines (directory $1, $RECORDS by default) linked where the owner's sminos reads them
+# ($2, $ENGINE_SESSIONS) under the run's name for it (record_plan). The directory is made 0700 when it is absent, an
+# existing one's mode left as it is; a name there already fails the run rather than be replaced, and a link is made
+# only where nothing is (os.symlink: never forced, never nested inside a directory of that name).
 link_records() {
-  local what name
-  as_owner install -d -m 700 $ENGINE_SESSIONS || fail "no $ENGINE_SESSIONS"
+  local records=${1:-$RECORDS} sessions=${2:-$ENGINE_SESSIONS} what name
+  [[ -d $sessions ]] || as_owner mkdir -m 700 "$sessions" || fail "no $sessions"
   while read -r what name; do
     case $what in
-      link) as_owner ln -s "$RECORDS/$name" "$ENGINE_SESSIONS/$name" || fail "could not link the engine record $name" ;;
-      taken) fail "the owner's $ENGINE_SESSIONS/$name is there already: the run's engine record of that name is not linked" ;;
+      link) as_owner python3 -c 'import os, sys; os.symlink(sys.argv[1], sys.argv[2])' "$records/$name" "$sessions/$LINK_PREFIX$name" 2>/dev/null ||
+        fail "could not link the engine record $name: $sessions/$LINK_PREFIX$name is there already" ;;
+      taken) fail "$sessions/$LINK_PREFIX$name is there already: the run's engine record $name is not linked" ;;
     esac
-  done < <(record_plan $RECORDS $ENGINE_SESSIONS)
+  done < <(record_plan "$records" "$sessions")
 }
 # The pane's claude: in the run's namespace, with the scratch config, the stub and the checkout; else lane A fails.
 check_engine() {
