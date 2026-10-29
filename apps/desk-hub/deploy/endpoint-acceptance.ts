@@ -17,7 +17,7 @@
 import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { generateSigningKey, keyId, signOrgState, type OrgState, type RevokedKey, type SignedOrgState } from 'org-protocol';
 import { machineProjectId, ORG_STATE_PATH, type OrgStateView } from '../src/protocol/identity';
@@ -225,10 +225,9 @@ export async function buildScene(o: RunOptions & { tag: string }, made: Made, lo
   const relay = new RelayDialer(person.hub, ref, () => person.headers);
   cleanup.add('close the relay’s Machine socket', async () => relay.close());
 
-  // Lane A in the machine's own project (one the hub keeps for the machine), never one of the run's making; the events
-  // the run writes there are admitted by `hubWrites` and kept as its residue.
+  // Lane A's project (laneAProject); the events the run writes there are admitted by `hubWrites` and kept as residue.
   const org = chain[0].state.org;
-  const project = { id: machineProjectId(org, name), name };
+  const project = laneAProject(o.target, org, name);
   const hubWrites = o.target === 'production' ? HubWrites.production(project.id) : HubWrites.staging(project.id);
   cleanup.add('record what the run keeps on the hub', async () => void made.kept.push(...hubWrites.kept()));
   sessionLog = { project: project.id, from: await projectLogOffset(person, project.id, o.target === 'production') };
@@ -292,6 +291,16 @@ async function readSessionResidue(person: Person, project: string, from: number,
   } finally {
     socket.close();
   }
+}
+
+/**
+ * The project lane A runs in. Production: the machine's own (`machineProjectId`), the one project the owner allows the
+ * run's writes in. Elsewhere: a fresh one of the run's, since sminos lists no checkout for a machine project (a stray
+ * directory resolves to it), and the clauses that spawn into lane A's checkout need the endpoint to know one (part 1b:
+ * item 8's step-up probe was refused `unknown-checkout` in the machine project).
+ */
+export function laneAProject(target: Scene['target'], org: string, name: string): { id: string; name: string } {
+  return { id: target === 'production' ? machineProjectId(org, name) : randomUUID(), name };
 }
 
 /** What is still there after the cleanup: the head's members, machines and devices of the run's, the hub's machine. */

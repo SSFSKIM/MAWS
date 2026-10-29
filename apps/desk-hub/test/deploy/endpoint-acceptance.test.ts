@@ -444,3 +444,15 @@ describe('the hub deploy item 2 runs', () => {
     expect(env).toEqual({ HOME: '/h', PATH: '/bin', DESK_STAGING_DEVICE: '/d' });
   });
 });
+
+describe('lane A’s project', () => {
+  it('is the machine’s own on production (its one writable project), and one of the run’s on staging, whose checkouts sminos lists', async () => {
+    const { laneAProject } = await import('../../deploy/endpoint-acceptance.ts');
+    const { machineProjectId } = await import('../../src/protocol/identity.ts');
+    expect(laneAProject('production', 'org-1', 'dc-acceptance-7f80')).toEqual({ id: machineProjectId('org-1', 'dc-acceptance-7f80'), name: 'dc-acceptance-7f80' });
+    const staging = laneAProject('staging', 'org-1', 'o10-m11-abc123');
+    expect(staging.name).toBe('o10-m11-abc123');
+    expect(staging.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(staging.id).not.toBe(machineProjectId('org-1', 'o10-m11-abc123'));
+  });
+});
