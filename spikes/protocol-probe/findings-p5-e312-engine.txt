@@ -148,12 +148,35 @@ transcript records the chain follower had no name for, so every 2.1.312 transcri
 `frame.unknown` event (`transcript:api-request`, …) per model request: no notice and no row, but noise in the graph. They
 join the follower's known bookkeeping (src/engine-host/fs/chain-follower.ts KNOWN_SILENT_TYPES).
 
-Live re-runs on the mini (docs/doperpowers/evidence/p5-e312/live-mini.txt): PENDING.
+Live re-runs on the mini (docs/doperpowers/evidence/p5-e312/live-mini.txt). Run 40867671676, the nine live groups on
+643234981 (the branch merged with master): eight green with no flaky line; keep-quit-live red in S5's precondition, not in
+MAWS: 2.1.312 refused S5's foreground `sleep 45; echo DONE_<nonce>` (the sleep guard, below), so the command had answered
+before the quit. With S5's job a `node` timer of the same 45 s (below), run 40874225082 on 0960dc0d8: keep-quit-live
+green, no flaky line; the engine asked for the job's permission once and ran it; DONE arrived once, 42.8 s after the
+keep-quit, in the relaunched app; Stop all left no survivor.
+
+The sleep guard, a change of behaviour, not of the wire, that this bump brings to MAWS's sessions (the bundle reading,
+with lines, in live-mini.txt). From 2.1.310 the Bash tool refuses a foreground command whose first part is `sleep N` with
+N >= 25 (`sleep 45`, `sleep 45; echo x`, `sleep 25 && x`; not `sleep 24; x`, `echo a; sleep 60`, or any other program),
+before any permission check and without running it, for the main thread's calls and every agent's alike, unless the call
+runs in the background or the session has background tasks or their completion notices off. The tool's description tells
+the model so ("Long leading `sleep` commands are blocked …"), and the refusal points it at Monitor with an until-loop or
+run_in_background. Up to 2.1.309 the same code sat behind the GrowthBook flag `tengu_amber_sentinel`, off for MAWS's
+sessions (2.1.296, the tested engine before, never refused); 2.1.310's changelog: "long foreground sleeps are now blocked
+there too". What MAWS users see: a Bash row that fails at once with the engine's text, `Blocked: sleep 45 followed by:
+echo … To wait for a condition, use Monitor with an until-loop … Do not chain shorter sleeps to work around this
+block.` (an errored tool result, no permission request), then whatever the model does instead; the refusal steers it
+to a background command or a Monitor loop, which MAWS already shows (Background work, the Monitor cell, the task rows).
+No frame is new,
+so nothing to map; a user who wants the agent to wait in the foreground meets the engine's refusal, as in the terminal.
+The live specs that held a turn open with a leading sleep (S5, p1-live S3 case 3, agents-live v to vii) now run a `node`
+timer of the same length (e2e/support/p1-live.ts `foregroundJob`).
 
 Residue (rows; the architect writes the tracker at landing):
   1. to-human-live (P2-F's R3) cannot run: its arms assert the to-human contract 7 and supplement 2, which P4-R7z withdrew
      (P4 Decision Log 92), so the spec skips itself even under MAWS_C_LIVE=1 and has no live group. It needs a rewrite
-     for the plugin's tool and supplement 3, or retirement.
+     for the plugin's tool and supplement 3, or retirement. Its foreground `sleep 40` falls under the sleep guard; a
+     rewrite holds the turn with a process of its own (`foregroundJob`).
   2. E11 S4's browser cases were retired with the browser tools (A-54); nothing of S4 re-ran.
   3. `permission_check_status`, `memory_recall` and `dev_intent` map to none because no MAWS surface shows a pending
      auto-mode check, a recall or device tooling. Claude Desktop shows the first ("checking") and acts on the third; each
@@ -165,5 +188,9 @@ Residue (rows; the architect writes the tracker at landing):
   6. Probe upkeep: end-session-archive and context-full make their scratch homes under /private/tmp and run only on
      macOS; p1-side-question's disk check counts 2.1.312's `api-request*` records (`querySource: "sdk"`) as side-question
      records and fails though no question's text is on disk; its check should exclude the request-replay records.
+     Five scenarios hold a turn with a leading foreground sleep the sleep guard now refuses: pass3/stop-task (the
+     workflow agent's and the sleeper's `sleep 90`), pass3/e7-peer-message (`sleep 30; echo SLEPT_OK`),
+     pass3/relay-to-child (`sleep 45`), pass2/per-task-stop-workflow (`sleep 25 && …`) and pass3/p5-o2-stop-crons
+     (its scripted model's `sleep 45`, the call question 2 interrupts); a re-record needs a job of its own in its place.
   7. The engine's own SPEC 45 says print mode drops `dev_intent`; 2.1.312 sends it from the project scan every headless
      session starts (`ea` bypasses filter 1). Cite the probe, not the SPEC, for it.
