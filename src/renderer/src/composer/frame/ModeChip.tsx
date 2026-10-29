@@ -4,12 +4,12 @@
 // ⇧Tab's cycle is the Composer's (`composer.cycleMode`, delivered inside the editor).
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
 import { Popover } from 'radix-ui';
-import { useState } from 'react';
 import { ModeMenu, MODE_REFUSAL_WORDS, type ModeBinding } from '../../statusline';
 import { CHIP, POPOVER } from './chip-style';
+import { useOpenWhileShown } from './draft-shown';
 
 export function ModeChip({ binding, onOpen }: { binding: ModeBinding; onOpen?(): void }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useOpenWhileShown();
   const refusal = binding.refusal ? MODE_REFUSAL_WORDS[binding.refusal] : null;
   return (
     <Popover.Root

@@ -6,7 +6,6 @@
 // P2-A (X17): with no live process, the ring draws the last reading the engine host kept for the session, its title
 // saying when ("Last reading, 3 hours ago"), else the digest's sample; reading it starts nothing.
 import { Popover } from 'radix-ui';
-import { useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { FRESHNESS, useObservedFacts } from '../../sessions/observed'; // P2-A
@@ -15,6 +14,7 @@ import { tokens } from '../../statusline/format';
 import { contextOfUsage, useLaneAUsage } from '../../stores/lane-a'; // P5 O9 M5
 import { useSessions } from '../../stores/sessions';
 import { CHIP } from './chip-style';
+import { useOpenWhileShown } from './draft-shown';
 
 const CONTENT = 'z-50 w-80 max-h-[var(--radix-popover-content-available-height)] overflow-auto rounded-md border border-border-strong bg-bg-overlay text-ui text-fg';
 const R = 6;
@@ -44,7 +44,7 @@ function Ring({ record }: { record: SessionRecord }) {
   // writes every sample the digest folds), which carries no time; the digest's stands only when the host kept none.
   const { facts } = useObservedFacts(appSessionId, { enabled: !live });
   const observed = live ? null : (facts?.contextUsage ?? null);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useOpenWhileShown();
   const driven = contextOfUsage(useLaneAUsage(appSessionId)); // P5 O9 M5
   const shown = live ? null : driven;
   const ring = contextRingOf(shown ?? observed?.value ?? sampled);
