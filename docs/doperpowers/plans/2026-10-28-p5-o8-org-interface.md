@@ -2186,6 +2186,36 @@ Evidence:
 
 Still owed: the owner's sitting, `root add` on staging and then on production.
 
+**M4a (2026-10-29, PR from `p5-o8-m4a`).** Settings › Org is the Org page, in Q1's four groups:
+- **You:** this Mac, the hub sign-in, new keys, and your other devices.
+- **People:** each member with their devices, the roots marked.
+- **Machines:** each machine, read-only, with its owners and whether it is up.
+- **Org:** the state, the roots, the recovery key, and M3's signer lines.
+
+A root Mac signs the page's changes from it:
+- add or remove a person, change a role or an email;
+- pair a device: the app makes the code, polls H1, and endorses its own member's later device inside the same Touch ID;
+- remove a device, make a root.
+
+Each change is shown line by line, judged by `org-protocol`'s `successorProblems` before Touch ID, and bound to the digest of what was shown. `Edit.live` guards it at apply, before Touch ID, after the confirmation, and before the slot's write. A refusal shows under the control that sent it, or in a row of its own when it names none. `close()` fences every writer under `org/` and joins it, and the two test workarounds are gone. The desk-hub admin's `amend` runs the same pre-sign check, and the pairing judges moved into `org-protocol`.
+
+Evidence:
+- the unit suites:
+  - `successor-problems` 62, `pairing` (package) 19, `edits` 21, `checks` 38, `step-up` 25, `signer` 46, `pairing` 16, `org-session` 113 (20 runs in a row, the workarounds removed), `held` 24, `page-fixture` 5;
+  - the Org page's renderer suites: `OrgSection` 12, `YouGroup` 11, `PeopleGroup` 9, `MachinesGroup` 3, `OrgGroup` 18, `ChangeSheet` 11, `PairSheet` 6;
+- `test/org/org-page.local.test.ts` 6, on desk-hub's Worker in Miniflare: a second member added, paired through H1, promoted, made a root, demoted, an own device paired endorsed, the device and the member removed, and every accepted state verified from genesis;
+- `e2e/org-page.spec.ts` in `e2e:settings`, the page's look over a seeded org under forced classic scrollbars, its screenshots attached;
+- the gates the PR body lists.
+
+Retrospective (M4a). Built as eight tasks under subagent-driven execution, each reviewed at its frontier, then reviewer-high on the whole branch, which found nothing material.
+- **The task reviews.** They found real defects in five of the eight tasks (2, 3, 5, 6 and 8).
+  - Three had M3's shape, a fact checked before an await and acted on after it: the liveness window during the first write's registration mark (Task 3); a closed commit queue reached after an await (Task 5); a pairing's end, published before approve answered, hiding the answer (Task 6).
+  - Two were a capability a surface kept after losing it: an open sheet still offering Sign (Task 6), and a fixture's seeded status overwritten by the real publisher (Task 8).
+  - One was cost: quadratic diagnostics built for unauthenticated input (Task 2).
+- **Task 8 paid for itself on its first run.** It was added mid-milestone to make the page's look checkable through the gate. That run caught a member name overrunning its label column on both the EC2 and hosted Macs, which happy-dom could never have shown. The architect read the same screenshots and found a second defect, a raw machine ref where a person reads.
+
+A future child that ships a renderer surface should seed it with realistic extremes (long names, many devices, every refusal shape) and photograph it through the gate before the branch review, not after. Structural assertions (overflow, whole actions) catch what unit tests can't, and the screenshots catch what assertions don't name.
+
 **M5 (2026-10-28, PR from `p5-o8-m5`).** A row of a session you don't own alone shows its owners as first names after the title ("you, Ana", "Ana, Ben +3"), and its hover card lists them with their emails. Names are derived from the head's emails in main. A People toggle, remembered per row under `sidebar.people`, draws other people's sessions in place; while it is off the row reads "+N others". It shows only where it can act. Rollups, ranking and search see only what is drawn and yours.
 
 Evidence:
