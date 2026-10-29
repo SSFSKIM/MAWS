@@ -8,7 +8,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { daemonPaths } from '@shared/daemon/files';
 import { createHostRuntime } from '@shared/host/runtime';
 import { writeToken } from '@shared/host/socket-host';
@@ -96,8 +96,9 @@ describe('the mode table', () => {
   // default profile, a packaged build and an installed unit make of it.
   const MODES = [undefined, 'utility', 'detached', 'daemon'] as const;
   const HARNESSES = [{}, { MAWS_E2E: '1' }, { MAWS_HARNESS: '1' }] as const;
-  const expected = (asked: (typeof MODES)[number], harness: boolean, shape: 'embedded' | 'daemon', packaged: boolean, isDefault: boolean, unit: boolean) => {
-    const mode: HostMode = asked ?? (harness ? 'utility' : shape === 'daemon' ? 'daemon' : 'detached');
+  // P5 O3-B: a harness launch takes the setting's shape as any other (it reaches here only off the default profile)
+  const expected = (asked: (typeof MODES)[number], shape: 'embedded' | 'daemon', packaged: boolean, isDefault: boolean, unit: boolean) => {
+    const mode: HostMode = asked ?? (shape === 'daemon' ? 'daemon' : 'detached');
     if (mode !== 'daemon') return { launch: { mode, daemon: null, unavailable: null }, install: false, uninstall: shape === 'embedded' && packaged && isDefault && unit };
     if (!isDefault) return { launch: { mode, daemon: 'private', unavailable: null }, install: false, uninstall: false };
     if (packaged) return { launch: { mode, daemon: 'unit', unavailable: null }, install: true, uninstall: false };
@@ -126,7 +127,7 @@ describe('the mode table', () => {
                   return;
                 }
                 const launch = await settle(resolveLaunch({ env, shape, packaged, profileDir: isDefault ? defaultProfile() : scratchProfile(), program: packaged ? PACKAGED : CHECKOUT }, deps({ env })));
-                const want = expected(asked, Object.keys(harness).length > 0, shape, packaged, isDefault, unit);
+                const want = expected(asked, shape, packaged, isDefault, unit);
                 expect(launch).toEqual(want.launch);
                 const changes = managers.changes();
                 const started = want.launch.daemon === 'unit' ? [`launchctl kickstart gui/501/${LABEL}`] : []; // and its mawsd awaited
@@ -170,11 +171,56 @@ describe('a test or harness launch on the default profile', () => {
             expect(existsSync(plistPath())).toBe(true);
           });
 
-  it('the same launch on a scratch profile plans as before', async () => {
-    const launch = await settle(resolveLaunch({ env: { MAWS_E2E: '1' }, shape: 'daemon', packaged: false, profileDir: scratchProfile(), program: CHECKOUT }, deps({ env: { MAWS_E2E: '1' } })));
-    expect(launch).toEqual({ mode: 'utility', daemon: null, unavailable: null });
+  // P5 O3-B: on its scratch profile a test launch runs the daemon shape with a private mawsd, as the owner's app would
+  it('the same launch on a scratch profile runs a private mawsd, the shape the owner runs', async () => {
+    for (const harness of [{ MAWS_E2E: '1' }, { MAWS_HARNESS: '1' }]) {
+      const launch = await settle(resolveLaunch({ env: harness, shape: 'daemon', packaged: false, profileDir: scratchProfile(), program: CHECKOUT }, deps({ env: harness })));
+      expect(launch).toEqual({ mode: 'daemon', daemon: 'private', unavailable: null });
+    }
     expect(exits).toEqual([]);
+    expect(managers.calls, 'no unit of the default profile is read or touched').toEqual([]);
   });
+});
+
+// P5 O3-B, acceptance 5: the owner's `mawsd` and socket-mode pty host as live processes on the default profile, their locks
+// naming them with their start times, and the real teardown (leaveDaemonShape) in place of the stand-in above. A test or
+// harness launch, with MAWS_HOST_MODE unset or naming any mode, under either setting, packaged or not, leaves both running
+// and never signalled, and the owner's unit as it was.
+describe('the owner’s daemon under a test or harness launch', () => {
+  let record: string;
+  let owner: { mawsd: Awaited<ReturnType<typeof spawnStandIn>>; ptyHost: Awaited<ReturnType<typeof spawnStandIn>> };
+  beforeAll(async () => {
+    record = join(mkdtempSync(join(tmpdir(), 'maws-o3b-')), 'sigterms');
+    owner = { mawsd: await spawnStandIn('mawsd', record), ptyHost: await spawnStandIn('pty host', record) };
+  });
+  afterAll(() => {
+    for (const { child } of Object.values(owner)) child.kill('SIGKILL');
+    rmSync(dirname(record), { recursive: true, force: true });
+  });
+
+  for (const asked of [undefined, 'utility', 'detached', 'daemon'] as const)
+    it(`MAWS_HOST_MODE=${asked ?? '(unset)'}: the owner's mawsd pid and pty host are untouched`, async () => {
+      for (const harness of [{ MAWS_E2E: '1' }, { MAWS_HARNESS: '1' }])
+        for (const shape of ['embedded', 'daemon'] as const)
+          for (const packaged of [false, true]) {
+            await installUnit(); // the owner's LaunchAgent, loaded
+            const paths = daemonPaths(defaultProfile());
+            writeStandInLock(join(paths.dir, 'mawsd.lock'), owner.mawsd);
+            writeStandInLock(join(paths.ptyHost, 'host.lock'), owner.ptyHost);
+            exits.length = 0;
+            const env = { ...harness, ...(asked ? { MAWS_HOST_MODE: asked } : {}) };
+            const launch = () => resolveLaunch({ env, shape, packaged, profileDir: defaultProfile(), program: packaged ? PACKAGED : CHECKOUT }, deps({ env, leaveDaemon: undefined, awaitDaemon: undefined }));
+            expect(launch).toThrow(Exited);
+            expect(exits).toEqual([1]);
+            expect(managers.changes(), 'the owner’s unit is never installed, started or uninstalled').toEqual([]);
+          }
+      await new Promise((resolve) => setTimeout(resolve, 100)); // a SIGTERM sent would have been handled by now
+      expect(existsSync(record), 'neither process was sent SIGTERM').toBe(false);
+      for (const [name, { child, start }] of Object.entries(owner)) {
+        expect(child.exitCode, `${name} runs`).toBeNull();
+        expect(procStartOf(child.pid!), `${name} is the same process`).toBe(start);
+      }
+    });
 });
 
 describe('the default profile’s unit', () => {
@@ -359,21 +405,30 @@ describe('switching the shape', () => {
 // M7 review I2: any profile, not only the default one, leaves the daemon shape at its next embedded launch: its
 // `mawsd` (a private one here) is ended first, then its socket-mode pty host; the engine host, whose sessions carry over
 // to the embedded app, is left running. Real processes stand in for the three, each recording its SIGTERM.
+// A live process that appends `name` to `record` at its SIGTERM and exits, and its start time as its lock records one.
+const spawnStandIn = async (name: string, record: string): Promise<{ child: ChildProcess; start: string }> => {
+  const child = spawn(process.execPath, ['-e', `process.on('SIGTERM', () => { require('node:fs').appendFileSync(${JSON.stringify(record)}, ${JSON.stringify(`${name}\n`)}); process.exit(0); }); setInterval(() => {}, 1000); process.stdout.write('ready');`], { stdio: ['ignore', 'pipe', 'ignore'] });
+  await new Promise((resolve) => child.stdout!.once('data', resolve)); // its SIGTERM handler is in place
+  let start: string | null = null;
+  for (let i = 0; i < 50 && (start = procStartOf(child.pid!)) === null; i++) await new Promise((r) => setTimeout(r, 20));
+  return { child, start: start ?? '' };
+};
+const writeStandInLock = (lockPath: string, { child, start }: { child: ChildProcess; start: string }) => {
+  mkdirSync(dirname(lockPath), { recursive: true });
+  writeLock(lockPath, child.pid!, start);
+};
+
 describe('a profile leaving the daemon shape', () => {
   const standIns: ChildProcess[] = [];
   afterEach(() => {
     for (const child of standIns.splice(0)) child.kill('SIGKILL');
   });
-  // a process that appends `name` to `record` at its SIGTERM and exits, its lock written once its handler is in place
+  // a stand-in whose lock is written once its handler is in place
   const standIn = async (name: string, lockPath: string, record: string): Promise<ChildProcess> => {
-    const child = spawn(process.execPath, ['-e', `process.on('SIGTERM', () => { require('node:fs').appendFileSync(${JSON.stringify(record)}, ${JSON.stringify(`${name}\n`)}); process.exit(0); }); setInterval(() => {}, 1000); process.stdout.write('ready');`], { stdio: ['ignore', 'pipe', 'ignore'] });
-    standIns.push(child);
-    await new Promise((resolve) => child.stdout!.once('data', resolve)); // its SIGTERM handler is in place
-    let start: string | null = null;
-    for (let i = 0; i < 50 && (start = procStartOf(child.pid!)) === null; i++) await new Promise((r) => setTimeout(r, 20));
-    mkdirSync(dirname(lockPath), { recursive: true });
-    writeLock(lockPath, child.pid!, start ?? '');
-    return child;
+    const spawned = await spawnStandIn(name, record);
+    standIns.push(spawned.child);
+    writeStandInLock(lockPath, spawned);
+    return spawned.child;
   };
   const exited = (child: ChildProcess) => new Promise<void>((resolve) => (child.exitCode !== null || child.signalCode !== null ? resolve() : child.once('exit', () => resolve())));
 
