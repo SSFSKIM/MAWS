@@ -32,6 +32,11 @@ export interface SubscriptionListener {
    * plane delivers again. The hub's client never calls it (an ask it cannot carry waits for the fresh snapshot instead).
    */
   unanswered?(ask: UnansweredAsk, message: string): void;
+  /**
+   * P5 O9 M9: the plane's transport is back after a pause (another machine's link): nothing was lost, no snapshot
+   * follows, and the subscription goes on as it was; never a discontinuity. An ask it could not carry is asked again.
+   */
+  resumed?(): void;
 }
 
 export type UnansweredAsk = { kind: 'rows' } | { kind: 'diff' } | { kind: 'output'; taskId: string };

@@ -110,6 +110,28 @@ describe('paging older rows in', () => {
     expect(plane.current.asked).toHaveLength(3); // paging goes on as before
   });
 
+  // Fix wave 2: an idle session's link pauses and resumes with no DX4 data after it; the resume asks the page again.
+  it('asks a page the plane could not carry again when the link resumes, with no further delivery', async () => {
+    const { plane, script, answer } = open([prompt, ...attachments], 3, { scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    await act(async () => {
+      plane.snapshot(script, script.length, 3); // nothing drawn: the pane is underfilled and asks at once
+      await settle();
+    });
+    expect(plane.current.asked).toHaveLength(1);
+    await act(async () => {
+      plane.current.listener.unanswered!({ kind: 'rows' }, 'mini isn’t reachable');
+      await settle();
+    });
+    expect(plane.current.asked).toHaveLength(1);
+    await act(async () => {
+      plane.current.listener.resumed!();
+      await settle();
+    });
+    expect(plane.current.asked).toHaveLength(2);
+    await answer();
+    expect(plane.current.asked).toHaveLength(3); // paging goes on as before
+  });
+
   it('a page that draws nothing new while the reader is at the top asks for the next', async () => {
     const geometry = { scrollHeight: 1000, clientHeight: 300, scrollTop: 700 };
     const { plane, list, script, answer } = open([prompt, ...attachments, second], 3, geometry);

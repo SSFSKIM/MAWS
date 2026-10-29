@@ -79,6 +79,7 @@ export class LaneAOverlay {
   ) {}
 
   receive(event: PlaneEvent): void {
+    if (event.kind === 'resumed') return; // P5 O9 M9: a remote link's resume; nothing streamed was lost
     if (event.kind === 'reset') {
       this.resuming = this.loaded;
       return;

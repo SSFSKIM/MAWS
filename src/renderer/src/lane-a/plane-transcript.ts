@@ -542,6 +542,9 @@ export class PlaneTranscript {
       },
       interrupted: () => this.interrupted(),
       unanswered: (ask, message) => this.unanswered(ask, message),
+      resumed: () => {
+        if (this.lostAsks && this.serving) this.askLostAgain(); // the link is back: what it could not carry is asked again
+      },
       end: (body) => {
         this.subscription = null;
         this.serving = false;

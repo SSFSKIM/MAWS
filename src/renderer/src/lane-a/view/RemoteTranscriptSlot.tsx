@@ -17,6 +17,7 @@ import { useLaneAStreaming } from '../stream/use-overlay';
 import { drawnRows } from './drawn-rows';
 import { useKeepPlaceThroughOlderRows } from './keep-place';
 import { useOlderPages } from './older-pages';
+import { LANE_A_WORDS } from '../../session/controls/lane-a';
 
 const NO_ROWS: readonly Row[] = [];
 
@@ -46,19 +47,31 @@ export function RemoteTranscriptSlot({ appSessionId, className, startAt, present
   useKeepPlaceThroughOlderRows(list, rows, state.loadingOlder, indexOf);
   useOlderPages(transcript, list, state, atRest);
   return (
-    <Transcript
-      source={state.source}
-      variant="session"
-      actions={actions}
-      rewind={rewind}
-      renderRequest={renderRequest}
-      className={className}
-      handle={list}
-      tail={streaming.tail}
-      startAt={startAt}
-      presentation={presentation}
-      atRest={atRest}
-      placed={streaming.kept}
-    />
+    <>
+      {/* An older page the link could not carry: asked again when the link resumes, and here, since a pane too short
+          to scroll has no other way to ask (fix wave 2). */}
+      {state.olderFailed !== null && (
+        <div role="status" data-testid="older-failed" className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-1.5 text-ui-sm text-fg-muted">
+          <span className="min-w-0 flex-1">{LANE_A_WORDS.olderFailed(state.olderFailed)}</span>
+          <button type="button" onClick={() => transcript.loadOlder()} className="shrink-0 rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2">
+            {LANE_A_WORDS.retry}
+          </button>
+        </div>
+      )}
+      <Transcript
+        source={state.source}
+        variant="session"
+        actions={actions}
+        rewind={rewind}
+        renderRequest={renderRequest}
+        className={className}
+        handle={list}
+        tail={streaming.tail}
+        startAt={startAt}
+        presentation={presentation}
+        atRest={atRest}
+        placed={streaming.kept}
+      />
+    </>
   );
 }

@@ -28,7 +28,8 @@ import type { Job } from 'desk-hub/protocol';
 import { laneAJobsWatchEnded, noteLaneAJobs, noteLaneAUsage, useLaneA, type LaneAUsage } from '../stores/lane-a';
 import { isRemoteLaneA } from './remote-session';
 
-export type PlaneEvent = { kind: 'messages'; messages: SessionMessage[] } | { kind: 'reset' } | { kind: 'ended'; reason: string };
+// `resumed` (P5 O9 M9): a remote link's transport is back after a pause, the watch going on as it was (never a reset).
+export type PlaneEvent = { kind: 'messages'; messages: SessionMessage[] } | { kind: 'reset' } | { kind: 'ended'; reason: string } | { kind: 'resumed' };
 
 type Payload = EventPayload<'laneA.plane'>;
 type ReadOutput = Extract<CommandResult<'laneA.read'>, { ok: true }>['value'];
@@ -108,8 +109,10 @@ function receive(appSessionId: AppSessionId, entry: Entry, payload: Payload): vo
     laneAJobsWatchEnded(appSessionId);
     tell(entry, { kind: 'ended', reason: payload.ended });
     open(appSessionId, entry);
+  } else if ('resumed' in payload) {
+    tell(entry, { kind: 'resumed' }); // the replay log stands: nothing was lost
   }
-  // `paused` and `resumed` are a remote link's transport state (M9): nothing to redraw locally
+  // `paused` is a remote link's transport state (M9): the state's link reason says it, and nothing is redrawn
 }
 
 function open(appSessionId: AppSessionId, entry: Entry): void {

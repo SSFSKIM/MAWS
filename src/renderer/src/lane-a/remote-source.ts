@@ -46,7 +46,8 @@ export function remotePlane(client: MawsBridge = ipc): SessionPlane {
           if (!open) return;
           if (event.kind === 'messages') {
             for (const message of event.messages) if (isTranscriptMessage(message)) listener.message(message);
-          } else listener.interrupted(); // a reset, or a watch ended and opened again: a fresh snapshot follows
+          } else if (event.kind === 'resumed') listener.resumed?.(); // the link is back: nothing lost, no snapshot
+          else listener.interrupted(); // a reset, or a watch ended and opened again: a fresh snapshot follows
         },
         { replay: true, client },
       );

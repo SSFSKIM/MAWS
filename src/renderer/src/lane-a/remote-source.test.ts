@@ -116,6 +116,34 @@ describe('a remote lane A session’s transcript', () => {
     close();
   });
 
+  // Fix wave 2: an idle session whose link paused and resumed sends no DX4 data after the resume; main's `resumed` is
+  // the signal, and it is never a discontinuity (no reset, the phase stays live, the rows stay drawn).
+  it('asks a failed page again on a quiet resume of the link, with no further plane data, and draws it', async () => {
+    const c = new Chain('c4a1e400', 'sminos');
+    c.prompt('Older words.');
+    c.answer('Older answer.');
+    const older = c.rows.splice(0);
+    c.prompt('Newer words.');
+    let reads = 0;
+    const { fake, transcript, plane, close } = await opened({ 'laneA.read': () => (++reads === 1 ? { ok: false, code: 'failed', message: 'mini isn’t reachable' } : { ok: true, result: { requested: true } }) });
+    plane([snapshot(c.rows, true)]); // one prompt: the pane is underfilled, and asks at once
+    await wait(() => user('Newer words.') !== undefined);
+    const before = c.rows[0].uuid;
+    transcript.loadOlder();
+    await wait(() => transcript.state.getState().olderFailed !== null);
+    const signal = (payload: Record<string, unknown>) => fake.event('laneA.plane', { appSessionId: APP, watch: 'w1', ...payload }, OTHER_MACHINE);
+    signal({ paused: 'offline' });
+    expect(reads).toBe(1);
+    signal({ resumed: true });
+    await wait(() => reads === 2);
+    expect(transcript.state.getState()).toMatchObject({ phase: 'live', loadingOlder: true, olderFailed: null });
+    expect(user('Newer words.')).toBeDefined();
+    plane([envelope('rows', { rows: [...older].reverse(), before, more: false })]);
+    await wait(() => user('Older words.') !== undefined);
+    expect(transcript.state.getState()).toMatchObject({ phase: 'live', loadingOlder: false, more: false, olderFailed: null });
+    close();
+  });
+
   it('keeps its rows through a reset, and merges the fresh snapshot after it', async () => {
     const c = new Chain('c4a1e200', 'sminos');
     c.prompt('Before the drop.');

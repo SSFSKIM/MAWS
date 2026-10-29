@@ -522,6 +522,35 @@ describe('TranscriptSlot for another machine’s terminal session', () => {
     expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toContain('Two files.');
   });
 
+  // Fix wave 2: an underfilled pane cannot scroll to ask again, so an older page the link could not carry says why at
+  // the top with a Retry, and the pane does not ask again by itself meanwhile.
+  it('offers Retry with the reason for an older page the link could not carry, and asks it again on a click', async () => {
+    listed();
+    const listeners = new Map<string, (payload: unknown, machine: string) => void>();
+    let reads = 0;
+    const invoke = vi.fn((name: string) => {
+      if (name === 'laneA.watch') return Promise.resolve({ ok: true, value: { watch: 'w1' } });
+      if (name === 'laneA.read') return Promise.resolve({ ok: true, value: ++reads === 1 ? { ok: false, code: 'failed', message: 'mini isn’t reachable' } : { ok: true, result: { requested: true } } });
+      return Promise.resolve({ ok: false, error: { code: 'internal', message: 'unexpected' } });
+    });
+    const on = vi.fn((name: string, listener: (payload: unknown, machine: string) => void) => (listeners.set(name, listener), () => {}));
+    window.maws = { localMachine: TEST_MACHINE, invoke, on } as unknown as PreloadBridge;
+    render(<TranscriptSlot appSessionId={REMOTE} />);
+    await settle();
+    const c = new Chain('c4a1f100', 'sminos');
+    c.prompt('Newer words.');
+    const snapshot = { project: 'p', machine: OTHER_MACHINE, session: SESSION, kind: 'snapshot', sub: 'up-1', n: 0, body: { rows: [...c.rows].reverse(), more: true, subagents: [], presence: { record: { status: 'idle' }, bridge: true }, streaming: [] } };
+    act(() => listeners.get('laneA.plane')!({ appSessionId: SESSION, watch: 'w1', messages: [snapshot] }, OTHER_MACHINE));
+    for (let i = 0; i < 10 && screen.queryByRole('button', { name: 'Retry' }) === null; i++) await settle();
+    expect(screen.getByTestId('older-failed').textContent).toContain('mini isn’t reachable');
+    for (let i = 0; i < 5; i++) await settle();
+    expect(reads).toBe(1); // no spin while the link is down
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    for (let i = 0; i < 5 && reads < 2; i++) await settle();
+    expect(reads).toBe(2);
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+  });
+
   it('says a subagent’s own transcript there isn’t shown yet', () => {
     listed();
     render(<TranscriptSlot appSessionId={REMOTE} agentId={'a1' as AgentId} />);

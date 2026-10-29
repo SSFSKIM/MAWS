@@ -80,6 +80,9 @@ export const LANE_A_WORDS = {
   unknown: 'It may have run: the transcript shows it if it did',
   // M9: a session on another machine (Q2's words where it gives them)
   remoteSubagentRows: 'A subagent’s own transcript on another machine isn’t shown yet',
+  // an older page the link could not carry (fix wave 2): the reason main gave, and a way to ask again
+  olderFailed: (reason: string) => `Older messages didn’t load: ${reason}`,
+  retry: 'Retry',
   remoteStopTask: 'A background shell on another machine is stopped there',
   remoteTakeOver: 'A session on another machine is taken over on that machine',
   remoteReopen: 'Reopening a session on another machine isn’t offered yet',
