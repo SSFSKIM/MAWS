@@ -43,7 +43,10 @@ export function invalidateScmQueries(which: (appSessionId: AppSessionId) => bool
 // the poll shows it up to two minutes late. A publish older than the poll (a status first seen after a reload) is one
 // the poll has read already. A publish heard while nothing holds the PR state is left for a later status carrying it:
 // a row opened within the poll reads main's kept answer, which may predate it. An answer that lands after a later
-// publish's lookup began is superseded and leaves the PR state to that lookup.
+// publish's lookup began is superseded and leaves the PR state to that lookup. An ordinary read of the PR state still
+// out when the answer lands (the poll's, or one a ref move asked for), begun before the publish was heard or while its
+// lookup ran, may hold the state from before it: it is cancelled, keeping the data it would have replaced, so the
+// answer is the last written.
 const publishedSeen = new Map<AppSessionId, string>();
 const lookups = new Map<AppSessionId, number>();
 export function refreshPublishedPrState(appSessionId: AppSessionId, published: EngineSessionStatus['published'], client: MawsBridge): void {
@@ -55,8 +58,9 @@ export function refreshPublishedPrState(appSessionId: AppSessionId, published: E
   lookups.set(appSessionId, lookup);
   void client.invoke('scm.pr.state', { appSessionId, refresh: true }).then((result) => {
     if (lookups.get(appSessionId) !== lookup) return;
-    if (result.ok) queryClient.setQueryData(key, result.value);
-    else void queryClient.invalidateQueries({ queryKey: key });
+    if (!result.ok) return void queryClient.invalidateQueries({ queryKey: key });
+    void queryClient.cancelQueries({ queryKey: key }); // reverts the read at once, before the answer is written
+    queryClient.setQueryData(key, result.value);
   });
 }
 

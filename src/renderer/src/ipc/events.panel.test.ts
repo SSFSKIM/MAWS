@@ -96,6 +96,42 @@ describe('panel events', () => {
     queryClient.clear();
   });
 
+  // An ordinary read of the PR state (the poll's, or one a ref move asked for) still out when the publish's answer lands
+  // may hold the state from before the publish: landing after it, it would put that state back for up to two minutes.
+  // Such a read is cancelled, whether it began before the publish was heard or while its lookup ran.
+  it('keeps the publish’s answer over an ordinary read that lands after it', async () => {
+    const fake = fakeClient();
+    const disconnect = connectPanelEvents(fake.client);
+    const E = 'E' as AppSessionId;
+    const ordinaryRead = () =>
+      void queryClient.prefetchQuery({
+        queryKey: prStateKey(E),
+        queryFn: async () => {
+          const result = await fake.client.invoke('scm.pr.state', { appSessionId: E, refresh: false });
+          if (!result.ok) throw new Error(result.error.message);
+          return result.value;
+        },
+      });
+    queryClient.setQueryData(prStateKey(E), prState('before'));
+
+    ordinaryRead();
+    fake.event('session.status', sessionStatus(E, ago(2000), 'created'));
+    expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: E, refresh: false }, { appSessionId: E, refresh: true }]);
+    await fake.reply('scm.pr.state', prState('created', 'OPEN'), 1);
+    await fake.reply('scm.pr.state', prState('before'));
+    expect(queryClient.getQueryData(prStateKey(E))).toEqual(prState('created', 'OPEN'));
+
+    fake.event('session.status', sessionStatus(E, ago(1000), 'merged'));
+    ordinaryRead();
+    expect(fake.invoked('scm.pr.state').slice(2)).toEqual([{ appSessionId: E, refresh: true }, { appSessionId: E, refresh: false }]);
+    await fake.reply('scm.pr.state', prState('merged', 'MERGED'));
+    await fake.reply('scm.pr.state', prState('created', 'OPEN'));
+    expect(queryClient.getQueryData(prStateKey(E))).toEqual(prState('merged', 'MERGED'));
+
+    disconnect();
+    queryClient.clear();
+  });
+
   // A publish heard while no surface holds the session's PR state asks nothing and stays unconsumed: a row opened within
   // the poll then reads main's kept answer from before it, so the next status carrying it asks gh past that answer.
   it('asks for a publish heard before the PR state was held once a later status carries it', async () => {
