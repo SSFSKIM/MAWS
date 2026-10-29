@@ -274,7 +274,7 @@ fresh from the Mac with this command and an admin device of its own. It acts on 
 apply, and no agent runs it against production. Against the suites' local hub, `--hub <loopback url> --user <email>`
 signs in through the stand-in instead, and only there may `--yes` answer its confirmations.
 
-    pnpm --filter desk-hub deployment admin <init | genesis | adopt | refresh | pair | devices | remove-device>
+    pnpm --filter desk-hub deployment admin <init | genesis | adopt | refresh | pair | devices | remove-device | root add>
         [--config deploy/<file>.json] [--keys <file>] [--recovery <path | paper>] [--media-check] [--class web-cards|native-mac] [--ttl <s>] [<device id>]
 
 - `--keys <file>` (or `DESK_ADMIN_KEYS`): the admin device's keys, `{"device": "<id>", "keys": {"<id>.channel": <JWK>,
@@ -314,8 +314,14 @@ signs in through the stand-in instead, and only there may `--yes` answer its con
   the device's panel shows too: compare the two before `y`, since the clipboard exposes `k` to every process under
   your uid. Two entries answering one code are refused and the code is spent. It then signs a successor listing the
   device, endorsed by this device, and prints `listed: version n`.
-- `devices` lists the member's devices; `remove-device <id>` asks, then signs a successor dropping the device, its keys
+- `devices` lists the member's devices; `remove-device -- <id>` asks, then signs a successor dropping the device, its keys
   into `revoked` and its step-up key out of the root set if it was a root. Machines learn it at the hub's `state` notice, within its 10-minute poll at worst.
+- `root add -- <id>` makes a device of the signed-in member a root beside this one (P5 O8 M3: the owner's MAWS, whose
+  Settings › Org shows its id and fingerprint): a native-mac device with a step-up key, as this device is; a web-cards
+  device, another member's, one the head doesn't list or one already a root is refused. It asks `make <device> of
+  <email> (fingerprint <xxxxx-xxxxx>, step-up <kid>) a root of <org>? [y/N]` (the fingerprint `pair` showed for the
+  device, to compare with the app's), then signs a successor adding the step-up key's kid to `root.keys`. Either root
+  then signs any successor alone, and `remove-device` takes the added root out again.
 
 Where it writes: the deployment's own org, under the anchor `<keys>.org.json` (`{hub, org, genesis, version, roots,
 recoveryPub, pending?}`, 0600, each write synced and renamed into place), which `genesis` or `adopt` writes; every
@@ -333,7 +339,7 @@ device that signed it). Each subcommand but `init` holds `<keys>.org.json.lock` 
 a second one is refused, naming the holder's pid, host and start time (and saying when that pid is gone from this host).
 A run ended by Ctrl-C, its terminal closed or a SIGTERM, in `pair`'s wait or at a prompt, removes its own lock as it
 exits; a lock left by a run that died otherwise (a SIGKILL, a crash) is removed by hand once nothing runs (`run-lock.ts`,
-never taken over). Against a deployment, `genesis`, `pair` and `remove-device` open
+never taken over). Against a deployment, `genesis`, `pair`, `remove-device` and `root add` open
 `/dev/tty` before any request and confirm there: a shell with no controlling terminal stops at that open
 (`Device not configured`) and sends nothing.
 
@@ -350,7 +356,7 @@ deletes (`enroll`, `delegation create`, `delegation publish`, `delegation drop`,
 `keys retire`, `keys purge`, `abandon-pending`) opens `/dev/tty` before any request. The token is `DESK_ACCESS_TOKEN` from the environment when it is
 set there (the runners' `--pipe`), else on stdin.
 
-- `show` prints the age line, the members and their devices, the machines as a table (`NAME STATE REF KEY ONLINE
+- `show` prints the age line, the members and their devices, the roots (each with the device that holds it), the machines as a table (`NAME STATE REF KEY ONLINE
   SEEN`: a head entry `listed`; a served certificate `certified`, `retired <notAfter>`, `revoked` or `refused <code>`,
   as `org-protocol`'s checks judge it against the verified head; a hub row neither covers `unlisted` when it posted a
   v2 key the head does not list, `phase-1` otherwise; `ONLINE` and `SEEN` are the row's DX2 presence when
@@ -639,7 +645,7 @@ terminal: it holds the staging admin's `keys.json` and its anchor, `keys.json.or
    - The run ends with its `PASS` lines, its cleanup and `production untouched`. The agent runs it with `--lane-b`
      now that O10's feed has landed.
 5. **Cleanup**: the run's own is automatic (step 4's last lines). The phone stays listed on staging. To take it off:
-   the owner runs `staging-run.sh admin devices` for its id, then `staging-run.sh admin remove-device <id>`, which asks
+   the owner runs `staging-run.sh admin devices` for its id, then `staging-run.sh admin remove-device -- <id>`, which asks
    `revoke <id>? [y/N]` at the terminal and prints `revoked: version <v>`. Then *Forget* in the phone's Device panel,
    and the home-screen icon removed.
 
@@ -704,7 +710,7 @@ hands it to a command, and never printed or passed as an argument; output goes t
     go to stdout. The step refuses the mode when its stdout is a terminal. `code strip-legacy` reads no token and no
     keys.
 
-  The steps that change production (`access-sync`; `admin genesis`, `pair`, `remove-device`, `refresh`, `enroll`,
+  The steps that change production (`access-sync`; `admin genesis`, `pair`, `remove-device`, `root add`, `refresh`, `enroll`,
   `delegation`, `machine drop`, `provisioning revoke`, `keys`) say so in their first line, before they read any credential, and
   stop at the first one they lack.
 

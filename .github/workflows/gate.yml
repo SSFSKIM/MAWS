@@ -151,10 +151,19 @@ env:
   # daemon-idle-enrolled (P5 O10 M10, Decision Log 114), the spec's fourth case, is the increment an enrolled endpoint
   # adds to the daemon shape: the same scene's window unenrolled, then with its mawsd enrolled and listed in an org on
   # desk-hub's local runner (wrangler dev on loopback), recorded without a bound; about 27 minutes, two windows.
+  # daemon-idle-aba (the idle bound's re-derivation, after P5 O10 M10), the spec's fifth case, is A-B-A: the same scene on
+  # today's detached supervisor, on the daemon shape and on the supervisor again, each a fresh launch back to back in
+  # one job, so the daemon shape is read against the mean of two baselines on the same machine state, recorded without
+  # a bound; about 40 minutes, three windows.
   # A group with a timing bound turns its timed cases on with a switch, MAWS_<name>_PERF or MAWS_<name>_SCALE set to 1 in
   # its package script, each such spec skipping without it or asserting its bounds only under it (presentations-drag's
   # one class-1 trial in e2e:presentations logs its p95), and is on this list: ci-kit's VM contract above rests on it.
-  MEASURED_E2E: artifacts-perf daemon-idle daemon-idle-baseline daemon-idle-floor daemon-idle-mawsd daemon-idle-enrolled dashboard-scale design-scale document-scale document-scale-repeat local-latency local-latency-daemon presentations-drag presentations-scale tool-time-heavy-live
+  MEASURED_E2E: artifacts-perf daemon-idle daemon-idle-baseline daemon-idle-floor daemon-idle-mawsd daemon-idle-enrolled daemon-idle-aba dashboard-scale design-scale document-scale document-scale-repeat local-latency local-latency-daemon presentations-drag presentations-scale tool-time-heavy-live
+  # A group whose own run needs more than its class's minutes (30; a measured group's 45, or 60 when its script builds
+  # out/): name=minutes, before the Mac wait is added (gate-plan.mjs); the plan refuses an entry that is not a positive
+  # whole number of minutes for a group with a package script. daemon-idle-aba's three settles and windows take 36 of
+  # them and its scenes about 3 more, which its two settle guards' 15-minute bounds and its build would outgrow in 60.
+  E2E_MINUTES: daemon-idle-aba=90
   # The Mac jobs that may run beside another: e2e groups, and `unit:darwin`, that ask for ci-kit's shared instances
   # ([ci-kit-mac-shared], their only label), which run two jobs at a time on the mini's one desktop (ci-kit's mac-lane
   # concurrency spec, SSFSKIM/ci-kit docs/doperpowers/specs/2026-10-21-mac-lane-concurrency-design.md). Every other Mac
@@ -675,7 +684,8 @@ jobs:
     if: needs.plan.outputs.e2e_host != '[]'
     name: e2e:${{ matrix.group }}
     runs-on: ${{ fromJSON(matrix.runner) }}
-    # 30, a measured group's 45, and on the Mac the wait bound of its instance's start on top (gate-plan.mjs).
+    # 30, a measured group's 45, a group's own on E2E_MINUTES, and on the Mac the wait bound of its instance's start on top
+    # (gate-plan.mjs).
     timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false

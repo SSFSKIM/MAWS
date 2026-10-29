@@ -497,6 +497,7 @@ describe.skipIf(!zsh)('production-run.sh', () => {
       [['keys', 'retire'], /^admin keys retire changes production: it signs a successor of .* retiring the legacy org key/],
       [['keys', 'retire', '--undo'], /^admin keys retire changes production: .*--undo: taking the retirement back/],
       [['keys', 'purge'], /^admin keys purge changes production: it deletes every wrapped copy of .*'s org key at .*, which cannot be undone/],
+      [['root', 'add', 'app-mac'], /^admin root add changes production's roots: it makes a device a root of .*'s org state beside this admin device \(a signed successor\), asking on the terminal first$/],
     ])('admin %s says first what it changes, before it reads any credential', (args, first) => {
       const w = world();
       const run = w.run('production-run.sh', ['admin', ...args]);
@@ -536,10 +537,39 @@ describe.skipIf(!zsh)('production-run.sh', () => {
     const run = w.run('production-run.sh', ['admin', 'devices'], { STUB_PNPM: 'admin', STUB_ACCESS: ACCESS });
     expect(run.status, run.out).toBe(0);
     expect(w.calls('cloudflared')).toEqual([`access token -app=https://${PRODUCTION_HOST}`]);
-    expect(w.calls('pnpm')).toEqual([`-s -C ${w.dir} --filter desk-hub deployment admin devices --keys ${w.out}/device/keys.json --config deploy/config.json`]);
+    expect(w.calls('pnpm')).toEqual([`-s -C ${w.dir} --filter desk-hub deployment admin --config deploy/config.json --keys ${w.out}/device/keys.json devices`]);
     expect(readFileSync(join(w.rec, 'pnpm.stdin'), 'utf8')).toBe(`DESK_ACCESS_TOKEN=${ACCESS}\n`);
     expect(run.out).toContain('head version 1, issued 0 days ago');
     expect(holdsCredential(w, run)).toEqual([]);
+  });
+
+  // The wrapper's own options go after the command word (bin.ts reads argv[0] as the command) and before the caller's
+  // arguments, so a device id after `--` stays the command line's last positional: a base64url id starts with '-' about
+  // one time in 64, and only after `--` is it not read as an option. Today's forms, with no `--`, parse as before.
+  it.each([
+    [['root', 'add', '--', '-Dash-led_id'], 'root add -- -Dash-led_id'],
+    [['remove-device', '--', '-Dash-led_id'], 'remove-device -- -Dash-led_id'],
+    [['show'], 'show'],
+  ])('admin %s reaches the command with the config and the keys first, the caller\'s arguments last and whole', (args, tail) => {
+    const w = world();
+    mkdirSync(join(w.out, 'device'), { recursive: true });
+    writeFileSync(join(w.out, 'device/keys.json'), '{}');
+    const run = w.run('production-run.sh', ['admin', ...args], { STUB_PNPM: 'admin', STUB_ACCESS: ACCESS });
+    expect(run.status, run.out).toBe(0);
+    expect(w.calls('pnpm')).toEqual([`-s -C ${w.dir} --filter desk-hub deployment admin --config deploy/config.json --keys ${w.out}/device/keys.json ${tail}`]);
+  });
+
+  // A verb that is not admin's takes the deployment after its command word too. Which `--config` wins when a caller
+  // names one as well: neither. Every command that takes a caller's arguments reads `--config` as a repeatable option
+  // and refuses two (deployArgs, access-sync's main, admin's `name one --config and one --keys`), and the admin and
+  // access-sync steps refuse a caller's `--config` before anything runs.
+  it('access-sync reaches its command with the deployment after the command word', () => {
+    const w = world();
+    mkdirSync(join(w.out, 'device'), { recursive: true });
+    writeFileSync(join(w.out, 'device/machine.json'), JSON.stringify({ DESK_MACHINE_CLIENT_ID: 'id.synthetic', DESK_MACHINE_CLIENT_SECRET: 'secret.synthetic' }));
+    const run = w.run('production-run.sh', ['access-sync']);
+    expect(run.out).toMatch(/access-sync exit 1;/);
+    expect(w.calls('pnpm')).toEqual([`-s -C ${w.dir} --filter desk-hub deployment access-sync --config deploy/config.json`]);
   });
 
   it('admin logs a run, filtered, but genesis’s output reaches the terminal whole and is kept nowhere', () => {
@@ -555,7 +585,7 @@ describe.skipIf(!zsh)('production-run.sh', () => {
     const genesis = w.run('production-run.sh', ['admin', 'genesis', '--recovery', 'paper'], { STUB_PNPM: 'admin', STUB_ACCESS: ACCESS, STUB_ADMIN_OUT: line });
     expect(genesis.status, genesis.out).toBe(0);
     expect(genesis.out).toContain(line);
-    expect(w.calls('pnpm').at(-1)).toBe(`-s -C ${w.dir} --filter desk-hub deployment admin genesis --recovery paper --keys ${w.out}/device/keys.json --config deploy/config.json`);
+    expect(w.calls('pnpm').at(-1)).toBe(`-s -C ${w.dir} --filter desk-hub deployment admin --config deploy/config.json --keys ${w.out}/device/keys.json genesis --recovery paper`);
     expect(readdirSync(w.out).filter((f) => f.startsWith('admin-genesis'))).toEqual([]);
     expect(holdsCredential(w, genesis)).toEqual([]);
   });
@@ -577,7 +607,7 @@ describe.skipIf(!zsh)('production-run.sh', () => {
     const run = w.run('production-run.sh', ['admin', 'init'], { STUB_PNPM: 'admin' });
     expect(run.status, run.out).toBe(0);
     expect(w.calls('cloudflared')).toEqual([]);
-    expect(w.calls('pnpm')).toEqual([`-s -C ${w.dir} --filter desk-hub deployment admin init --keys ${w.out}/device/keys.json --config deploy/config.json`]);
+    expect(w.calls('pnpm')).toEqual([`-s -C ${w.dir} --filter desk-hub deployment admin --config deploy/config.json --keys ${w.out}/device/keys.json init`]);
     expect(spawnSync('stat', process.platform === 'darwin' ? ['-f', '%Lp', join(w.out, 'device')] : ['-c', '%a', join(w.out, 'device')], { encoding: 'utf8' }).stdout.trim()).toBe('700');
   });
 
@@ -694,7 +724,7 @@ describe.skipIf(!zsh)('production-run.sh', () => {
     // The package's `deployment` script, as the mode's launcher runs it without pnpm: the two must not drift apart.
     const LAUNCHER = (JSON.parse(readFileSync(join(deploy, '../package.json'), 'utf8')) as { scripts: { deployment: string } }).scripts.deployment.replace(/^node /, '');
     it('launches the command as the package\'s deployment script does', () => {
-      for (const script of ['production-run.sh', 'staging-run.sh']) expect(readFileSync(join(deploy, script), 'utf8'), script).toContain(`&& node ${LAUNCHER} "$@" --config `);
+      for (const script of ['production-run.sh', 'staging-run.sh']) expect(readFileSync(join(deploy, script), 'utf8'), script).toContain(`&& node ${LAUNCHER} $c --config `);
     });
     const CREATE = ['delegation', 'create', '--label', 'devcloud', '--prefix', 'dc-', '--code-to-stdout', '--legacy-from-v1-code'];
     // A v1 code in, as B1 step 2 pipes one; a line of its shape the filter would drop, which must pass untouched.
@@ -720,7 +750,7 @@ describe.skipIf(!zsh)('production-run.sh', () => {
       expect(readFileSync(join(w.rec, 'node.env'), 'utf8')).toBe(ACCESS);
       // The command itself, not pnpm's recursive runner, whose own failure lines would reach the stream.
       expect(w.calls('pnpm')).toEqual([]);
-      expect(w.calls('node')).toEqual([`${w.dir}/apps/desk-hub ${LAUNCHER} admin ${CREATE.join(' ')} --keys ${w.out}/device/keys.json --config deploy/config.json`]);
+      expect(w.calls('node')).toEqual([`${w.dir}/apps/desk-hub ${LAUNCHER} admin --config deploy/config.json --keys ${w.out}/device/keys.json ${CREATE.join(' ')}`]);
       expect(run.stderr.split('\n')[0]).toMatch(/^admin delegation create changes production: /);
       expect(run.stderr).toContain('head version 1, issued 0 days ago');
       expect(run.stderr).not.toContain('naming a token');
@@ -741,7 +771,7 @@ describe.skipIf(!zsh)('production-run.sh', () => {
       expect(run.stdout).toBe(INPUT);
       expect(w.calls('cloudflared')).toEqual([]);
       expect(readFileSync(join(w.rec, 'node.env'), 'utf8')).toBe('unset');
-      expect(w.calls('node')).toEqual([`${w.dir}/apps/desk-hub ${LAUNCHER} admin code strip-legacy --config deploy/config.json`]);
+      expect(w.calls('node')).toEqual([`${w.dir}/apps/desk-hub ${LAUNCHER} admin --config deploy/config.json code strip-legacy`]);
     });
 
     it('refuses any other verb, and the two secret verbs outside the mode, with nothing run and nothing on stdout', () => {
