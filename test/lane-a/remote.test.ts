@@ -473,6 +473,22 @@ describe('remote lane A over a real link', { timeout: 30_000 }, () => {
     expect(await l.cmd('laneA.read', { appSessionId: 'la-1', watch, kind: 'mcp' })).toEqual({ ok: true, result: { servers: [{ name: 'github', status: 'connected' }] } });
   });
 
+  // Landing fix wave: a drop the link recovers by replay (the endpoint's `subbed replay`, then only what came after the
+  // cursor) is told to the page as a resume, never a reset, so an ask the drop lost is asked again on an idle session.
+  it('tells a quiet replay resume after a dropped channel as resumed, with no reset and none on the first subscription', async () => {
+    const l = await lab();
+    const watch = await watched(l);
+    await until(() => messagesOf(l, watch).some((m) => m.kind === 'snapshot'), 'the first snapshot');
+    expect(planeOf(l, watch).some((p) => p.resumed === true)).toBe(false); // the first subscription's `subbed` is no resume
+    const before = planeOf(l, watch).length;
+    l.carriers.at(-1)!.carrier.close('dropped'); // the channel drops; the session stays idle: nothing to replay
+    await until(() => planeOf(l, watch).slice(before).some((p) => p.resumed === true), 'the resume after the replay', 15_000);
+    const after = planeOf(l, watch).slice(before);
+    expect(after.some((p) => p.reset === true)).toBe(false);
+    expect(after.flatMap((p) => (p.messages as Array<{ kind: string }> | undefined) ?? []).some((m) => m.kind === 'snapshot')).toBe(false);
+    expect(l.plane.upstreams()).toHaveLength(1); // one upstream throughout: the resume a replay
+  });
+
   it('resets the view cleanly when the endpoint ends its subscription: paused, then reset, the fresh snapshot and the pending set again, then resumed', async () => {
     const l = await lab();
     const watch = await watched(l);

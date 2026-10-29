@@ -259,7 +259,12 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
       {
         subbed(mode) {
           if (!mine()) return;
-          if (mode !== 'replay' && w.started) reset(s, w);
+          if (!w.started) return; // the first subscription: its snapshot follows
+          if (mode !== 'replay') return reset(s, w);
+          // A replay after a drop (only what followed the cursor comes next, maybe nothing): the view went on as it was,
+          // so the page hears a resume, never a reset, and asks again what the drop lost (P5 O9 M9 landing fix wave).
+          w.paused = false;
+          emitPlane(s, { watch: w.id, resumed: true });
         },
         snapshot(_at, value) {
           if (!mine()) return;
