@@ -53,7 +53,9 @@ const SPINE_REFUSED_COMMANDS = [
   'session.recentTurns', 'session.search', 'session.setVisible', 'session.update',
   'settings.engineApplied', 'settings.userEngineDefaults',
 ];
-const SPINE_INTERCEPTS = ['session.answer'];
+// P5 O3-D M4 (D18): the rewind's last-act note and the conversation acts that clear it, in launch mode index
+const SPINE_INTERCEPTS = ['session.answer', 'session.rewind', 'session.send', 'session.steer', 'session.queue.promote', 'session.bash'];
+const SPINE_REFUSED_INTERCEPTS = ['session.answer']; // no session service: nothing to repair
 const SPINE_TAPS = ['attention.changed', 'session.eventBatch', 'session.intent.changed', 'session.projects.changed'];
 const SPINE_REFUSED_TAPS = ['attention.changed', 'session.eventBatch', 'session.intent.changed']; // no projects to follow: the index is unavailable
 // P5 O3-D M1 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §I): what the services front emits of
@@ -354,7 +356,7 @@ describe('the spine and the checkouts composed under plain Node', () => {
     await expect(spine.view.acquire('11111111-1111-4111-8111-111111111111' as AppSessionId, 'read')).rejects.toThrow(`MAWS cannot reach its sessions this run: ${data.refused}`);
     await expect(bus.invoke('settings.engineApplied', undefined)).resolves.toMatchObject({ ok: false, error: { message: `the engine settings are not applied this run: ${data.refused}` } });
     expect(bus.registered().sort()).toEqual(SPINE_REFUSED_COMMANDS);
-    expect(bus.intercepted()).toEqual(SPINE_INTERCEPTS);
+    expect(bus.intercepted()).toEqual(SPINE_REFUSED_INTERCEPTS);
     expect(bus.tapped().sort()).toEqual(SPINE_REFUSED_TAPS);
   });
 });

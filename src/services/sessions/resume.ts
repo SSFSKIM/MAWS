@@ -1,6 +1,7 @@
 // A record's resume (C10 execution document, Interfaces "Session service", Resume): the trust bootstrap under an id of
 // its own when the owner accepted trust for a key the engine has not recorded, the disk-to-live handoff, C3's launch
-// with `--resume`, and the message sent at `ready`. Nothing rolls back: the record is the conversation's. A failure
+// with `--resume`, a rewind the previous launch may have lost repeated at `ready` (P5 O3-D M4, rewind-note.ts), and the
+// message sent after it. Nothing rolls back: the record is the conversation's. A failure
 // hands the message back (`onFailed`; the renderer returns it to the editor), except C3's `relay_unreachable`, whose
 // card's continuation still sends it.
 import type { SessionId } from '@shared/graph/ids';
@@ -90,10 +91,12 @@ export async function runResume(
     }
     if (end.kind === 'timeout') throw new WatchdogFailure();
     if (end.kind === 'exited') throw exitFailure(end.errors);
+    await s.rewinds.replay(appSessionId, previousLaunchId!); // P5 O3-D M4 (D18): a rewind the last launch may have lost, before any input
     let firstTurn: 'sent' | 'queued' | 'none' = 'none';
     if (input.message !== null) {
       const sent = await hostCall(s.dispatch, 'session.send', { appSessionId, content: input.message.content });
       input.onSent();
+      await s.rewinds.clear(appSessionId); // P5 O3-D M4: a later act
       firstTurn = sent.disposition;
     }
     const engineSessionId = end.status.engineSessionId ?? record.engineSessionId ?? spec.sessionId;

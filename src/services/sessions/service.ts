@@ -60,6 +60,8 @@ import { Work } from '../work'; // P5 O3-D M2
 import { acquireOutcomeOf, acquireOutcomeOfGuard, canonicalOptions, capturingSetup, InflightRegistry, type Registration } from './inflight';
 import { LaunchWatch } from './launch-watch';
 // P2-A end
+import type { CommandInput, CommandOutput } from '@shared/ipc/schema'; // P5 O3-D M4
+import { RewindNotes, type ConversationAct } from './rewind-note'; // P5 O3-D M4
 
 // A refusal of an intent command, mapped to X2 by the registration: `invalid` is `invalid_input` naming the field;
 // `starting`, `retained_worktree` and the rest are `internal` with this message.
@@ -111,6 +113,9 @@ export class SessionService {
   readonly work = new Work();
   private disposed = false; // P5 O3-D M2: the root stopped; the startup and a deferred recovery end at their next boundary
   private readonly lastAttempt = new Map<AppSessionId, NonNullable<AcquisitionMemory['last']>>();
+  // P5 O3-D M4 (D18): each session's last act while it is a rewind, which a resume repeats (rewind-note.ts)
+  private readonly rewinds: RewindNotes;
+  private offStatus: (() => void) | null = null;
   private readonly now: () => string;
   private readonly log: (message: string) => void;
 
@@ -118,6 +123,7 @@ export class SessionService {
     this.manifests = new DeletionManifests(join(deps.userData, 'sessions', 'deletions'));
     this.now = deps.now ?? (() => new Date().toISOString());
     this.log = deps.log ?? ((message) => console.warn(`[sessions] ${message}`));
+    this.rewinds = new RewindNotes(join(deps.userData, 'sessions', 'rewinds'), { dispatch: deps.host.dispatch, now: this.now, log: this.log, track: (promise) => this.work.track(promise) });
   }
 
   // D-16 at start: every `self` holder is stale (C3 owns no process yet) and is reset before anything else, then the
@@ -144,6 +150,9 @@ export class SessionService {
     this.disposed = true;
     this.offReady?.();
     this.offReady = null;
+    this.offStatus?.(); // P5 O3-D M4
+    this.offStatus = null;
+    this.rewinds.close();
     for (const watch of [...(this.setup?.watches ?? [])]) watch.halt();
   }
 
@@ -151,6 +160,7 @@ export class SessionService {
   // write counted in `work`; the waits for the environment and for the host are not (nothing is written across them,
   // and a host that never streams would hold a release forever).
   private async boot(): Promise<void> {
+    this.offStatus = this.deps.host.onEvent('session.status', ({ status }) => this.rewinds.observe(status)); // P5 O3-D M4: a launch's end through end_session
     const env = await this.deps.env;
     if (this.disposed) return;
     this.setup = {
@@ -175,6 +185,7 @@ export class SessionService {
       watchdogMs: this.deps.timing?.watchdogMs ?? WATCHDOG_MS,
       stopWaitMs: this.deps.timing?.stopWaitMs ?? STOP_WAIT_MS,
       watches: new Set(),
+      rewinds: this.rewinds, // P5 O3-D M4
     };
     await this.work.track(this.deps.intents.load());
     if (this.disposed) return;
@@ -997,7 +1008,11 @@ export class SessionService {
   }
 
   remove(appSessionId: AppSessionId, stopIfLive: boolean): Promise<DeleteOutcome> {
-    return this.serial(appSessionId, async () => deleteRecord(await this.ready(), { manifests: this.manifests, trash: this.deps.trash }, appSessionId, stopIfLive));
+    return this.serial(appSessionId, async () => {
+      const outcome = await deleteRecord(await this.ready(), { manifests: this.manifests, trash: this.deps.trash }, appSessionId, stopIfLive);
+      if (outcome.status === 'deleted') await this.rewinds.clear(appSessionId); // P5 O3-D M4: no conversation to repair
+      return outcome;
+    });
   }
 
   // What a delete would move, for its sheet; a delete interrupted half-way, for the session's tab ("Finish deleting"
@@ -1013,6 +1028,18 @@ export class SessionService {
   async revealPath(path: string, client: ClientRef | null): Promise<void> {
     const answer = await this.deps.port.reveal(client, await revealablePath(await this.ready(), this.deps.index.projects, path));
     if (isNoClient(answer)) throw new Error(`not revealed: ${NO_CLIENT_REASON}`);
+  }
+
+  // ---- the rewind repair (P5 O3-D M4, D18; rewind-note.ts) --------------------------------------------------------
+
+  // `session.rewind` and the conversation acts that follow it, intercepted on their way to the engine host. Neither waits
+  // for the service's start: a rewind or a send goes to a live session, and the notes are read on their first use.
+  rewind(input: CommandInput<'session.rewind'>): Promise<CommandOutput<'session.rewind'>> {
+    return this.rewinds.rewind(input);
+  }
+
+  conversationAct<N extends ConversationAct>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> {
+    return this.rewinds.act(name, input);
   }
 
   // `session.trust.check`, read with the environment the engine receives.

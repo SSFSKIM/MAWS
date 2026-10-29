@@ -316,7 +316,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       ownerChannel: ownerChannel.launches, // P2-C
       acquisitions: sessions.model, // P2-A (X16): the digest's availability follows each acquisition
     });
-    registerSessionServiceHandlers(service, bus);
+    const unintercept = registerSessionServiceHandlers(service, bus, sessions.mode); // P5 O3-D M4: the rewind repair's intercepts in launch mode index only
     sessionService = service;
     settling.push(service.work);
     // The sweep keeps the machine's interest union (D11): on the embedded shape main's interest report's set
@@ -339,7 +339,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     bus.register('session.archiveOlder', ({ days, projectId }) => sweep.run(days, projectId as ProjectId | null));
     parts.push(['inactive archive', scheduleInactiveArchive(sweep, () => machineSettings.state().sessions.archiveInactiveDays, (changed) => machineSettings.onChange(() => changed()), (scanned) => indexSource.onScanned(scanned))]);
     service.start().catch((error: unknown) => console.error('[sessions] the session service failed to start:', error));
-    parts.push(['session service', () => service.dispose()]); // P5 O3-D M2: a startup still waiting resumes into nothing
+    parts.push(['session service', () => (unintercept(), service.dispose())]); // P5 O3-D M2: a startup still waiting resumes into nothing
   }
   registerObservedFacts(hosts.dispatch, bus); // P2-A (X17): the engine host's observed facts, beside session.digests
   // W7: a live MAWS process yields when a terminal or job that resumed its session starts writing into it; E3: each
