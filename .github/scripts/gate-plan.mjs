@@ -78,6 +78,9 @@
 // Mac on both), `Lane: no-hosted` keeping it on the Mac. Unsigned packaged can also take the direct Mac on a macOS lane when HOSTED_MAC_JOBS admits it, except
 // on reserved final refs. Lane moves e2e groups only; packaged is unadmitted until its hosted failures are fixed and it
 // passes 3/3.
+// A fresh Mac-Backlog: trailer from ci-gate's account-wide count can overflow direct hosted e2e onto EC2 alone.
+// HOSTED_MAC_ONLY_E2E excludes parity failures. Overflow retains the hosted retry policy, uses the exclusive timeout
+// and self-hosted setup, and carries overflow: true (the job name and ci-gate tail identify it). No sample: no change.
 // The peer groups (PEER_E2E; the two-build check, e2e/cross-build.spec.ts): each runs this tree's app against another
 // build's supervisor on one profile, and the reverse. The other build is the commit of the `Peer:` trailer (a push only),
 // which scripts/ci-gate.sh resolves (the merge base with master, unless its --peer names another) beside each tree's
@@ -96,6 +99,7 @@ import { appendFileSync, readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import { affected } from './gate-affected.mjs';
+import { backlogOf } from './gate-backlog.mjs';
 
 const words = (text = '') => text.split(/[\s,]+/).filter(Boolean);
 // `default` is the bare `pnpm e2e` set (after `pnpm build`, as `verify` orders them), which the e2e job narrows to the specs
@@ -112,8 +116,9 @@ const refuse = (message) => {
 };
 
 // Pure planning boundary: all workflow inputs (including its env lists and repository variables), and package scripts.
+// The caller supplies now (epoch milliseconds) for snapshot freshness; absent time makes the advisory fail open.
 // Output values are the exact strings GitHub receives; property order preserves GITHUB_OUTPUT byte for byte.
-export function planOf(env, scripts) {
+export function planOf(env, scripts, now) {
   const dispatched = env.EVENT === 'workflow_dispatch';
   const trailer = (key) =>
     (env.HEAD_MESSAGE ?? '')
@@ -130,6 +135,7 @@ export function planOf(env, scripts) {
     linux: 'ubuntu-24.04',
     macos: ['self-hosted', 'macOS', 'ARM64'],
     macHosted: 'macos-26',
+    macEc2: ['self-hosted', 'macOS', 'ARM64', 'ci-kit-mac-ec2'],
     macHome: ['self-hosted', 'macOS', 'ARM64', 'ci-kit-mac-home'],
     macShared: ['ci-kit-mac-shared'],
     // ci-kit's VM lane: the exclusive instance or the guest; the guest alone; the guest under the trial slot's identity.
@@ -143,7 +149,7 @@ export function planOf(env, scripts) {
   const MAC_SHARED_WAIT_MINUTES = 60;
   // A solo job may land on the exclusive instance, so it carries that wait; a job that asks for the guest alone waits nowhere.
   const timeoutOn = (runner, minutes) =>
-    minutes + (runner === RUNNERS.macos || runner === RUNNERS.macHome || runner === RUNNERS.macSolo ? MAC_EXCLUSIVE_WAIT_MINUTES : runner === RUNNERS.macShared ? MAC_SHARED_WAIT_MINUTES : 0);
+    minutes + (runner === RUNNERS.macos || runner === RUNNERS.macHome || runner === RUNNERS.macSolo || runner === RUNNERS.macEc2 ? MAC_EXCLUSIVE_WAIT_MINUTES : runner === RUNNERS.macShared ? MAC_SHARED_WAIT_MINUTES : 0);
   const poolBox = (cpus) => ['self-hosted', 'ci-kit-pool', `cpus-${cpus}`];
   // The guest's labels: a job asking for one of these may run in the guest.
   const GUEST = [RUNNERS.macSolo, RUNNERS.macVm, RUNNERS.macVmTrial];
@@ -292,12 +298,29 @@ export function planOf(env, scripts) {
   // took 3 min 22 s on the mini (run 40495960740: the peer 47 s, this tree's build 40 s, the crossings 1.4 min), four
   // times over for a cold store or a slow Mac.
   const PEER_MINUTES = 15;
+  // The caller counts all five account repos; capped hosted counts are lower bounds, favoring today's placement.
+  // EC2's queue must be complete. Missing, failed or stale samples never move work; the mini is never overflow.
+  const backlog = !dispatched && direct ? backlogOf(trailer('Mac-Backlog'), now) : null;
+  const hostedOnly = new Set(words(env.HOSTED_MAC_ONLY_E2E));
+  let sentHosted = 0;
+  let sentEc2 = 0;
+  const overflowOf = (group) => {
+    if (!backlog || backlog.ec2 === 'offline' || hostedOnly.has(group)) return false;
+    // Greedy in gate order: EC2 jobs ahead versus full hosted rounds ahead at the account's cap of five.
+    // A tie stays hosted; charge each choice to that queue before placing the next group.
+    return (backlog.ec2 === 'busy' ? 1 : 0) + backlog.ec2Queued + sentEc2 <
+      Math.max(0, Math.floor((backlog.hostedRunning + backlog.hostedQueued + sentHosted - 5) / 5));
+  };
   const e2e = [...gates]
     .filter((gate) => gate.startsWith('e2e:'))
     .map((gate) => {
       const group = gate.slice(4);
-      const hosted = hostedOf(group);
-      const where = hosted ? (direct ? RUNNERS.macHosted : HOSTED_WAITER) : placed(group);
+      const eligible = hostedOf(group);
+      const overflow = eligible && direct && overflowOf(group);
+      const hosted = eligible && !overflow;
+      if (overflow) sentEc2++;
+      else if (hosted && direct) sentHosted++;
+      const where = overflow ? RUNNERS.macEc2 : hosted ? (direct ? RUNNERS.macHosted : HOSTED_WAITER) : placed(group);
       const runner = JSON.stringify(where);
       const guest = GUEST.includes(where) ? { variant: variantOf(group) } : {};
       // A measured group's guard may wait 15 minutes, and a second after its build when its script builds out/ (gate.yml).
@@ -307,7 +330,7 @@ export function planOf(env, scripts) {
       // The build took 39% of the direct Macs' job time (23 jobs, 2026-10-28: 140 s of 368 s at the median), and a set larger
       // than the account's 5 Macs runs in rounds, whose later jobs can restore what the first ones built.
       const cached = hosted && direct ? variantOf(group) : undefined;
-      return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), poppler: poppler.has(group), measured: measured.has(group), ...(prebuild && { prebuild }), ...(hosted && { hosted }), ...(hosted && direct && notHosted(group).length === 0 && { retry: true }), ...(cached && { cached }), runner, timeout, ...guest, ...(peerGroups.has(group) && peer && { peer }) };
+      return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), poppler: poppler.has(group), measured: measured.has(group), ...(prebuild && { prebuild }), ...(hosted && { hosted }), ...(overflow && { overflow }), ...(eligible && direct && notHosted(group).length === 0 && { retry: true }), ...(cached && { cached }), runner, timeout, ...guest, ...(peerGroups.has(group) && peer && { peer }) };
     });
   const e2eHosted = e2e.filter((entry) => entry.hosted && !direct);
   const e2eHost = e2e.filter((entry) => entry.variant === undefined && (!entry.hosted || direct));
@@ -370,6 +393,8 @@ export function planOf(env, scripts) {
     (laneAsked === 'no-hosted' ? ' Lane: no-hosted, so no group of this run is hosted.' : '');
   const laneNote = !vmLane ? '' : laneJobs.length > 0 ? said(`Lane: ${vmLane}, on [${LANES[vmLane]}] alone`, laneJobs) : ` Lane: ${vmLane}, but no job of this run is on MAC_VM_E2E.`;
   const macNote =
+    said('EC2 overflow (ci-kit-mac-ec2)', jobsOn(RUNNERS.macEc2)) +
+    (backlog ? ` Mac backlog at ${backlog.at}: hosted ${backlog.hostedQueued} queued + ${backlog.hostedRunning} running; EC2 ${backlog.ec2}, ${backlog.ec2Queued} queued${backlog.partial.length ? `; hosted lower bound (capped: ${backlog.partial.join(', ')})` : ''}.` : '') +
     said('Home Mac', jobsOn(RUNNERS.macHome)) +
     said('Shared Mac instances', jobsOn(RUNNERS.macShared)) +
     said('On MAC_SHARED_E2E but measured or foreground, so alone', inRun(keptAlone)) +
@@ -411,7 +436,7 @@ export function planOf(env, scripts) {
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const { scripts } = JSON.parse(readFileSync('package.json', 'utf8'));
-    const { outputs, summary, stdout } = planOf(process.env, scripts);
+    const { outputs, summary, stdout } = planOf(process.env, scripts, Date.now());
     appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(outputs).map(([key, value]) => `${key}=${value}\n`).join(''));
     appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
     process.stdout.write(stdout);

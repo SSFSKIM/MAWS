@@ -617,9 +617,12 @@ test("gate.yml builds out/ on the pool for the guest-eligible jobs, and runs the
   assert.match(host, /\n {8}include: \$\{\{ fromJSON\(needs\.plan\.outputs\.e2e_host\) \}\}\n/);
   assert.match(vm, /^ {4}needs: \[plan, e2e-build\]\n {4}if: needs\.plan\.outputs\.e2e_vm != '\[\]'\n/);
   assert.match(vm, /\n {8}include: \$\{\{ fromJSON\(needs\.plan\.outputs\.e2e_vm\) \}\}\n/);
-  for (const line of ['    name: e2e:${{ matrix.group }}', '    runs-on: ${{ fromJSON(matrix.runner) }}', '    timeout-minutes: ${{ matrix.timeout }}']) {
+  for (const line of ['    runs-on: ${{ fromJSON(matrix.runner) }}', '    timeout-minutes: ${{ matrix.timeout }}']) {
     assert.ok(host.includes(`\n${line}\n`) && vm.includes(`\n${line}\n`), line);
   }
+  const renderName = (body) => /^ +name: (.+)$/m.exec(body)[1].replace(/\$\{\{ (.*?) \}\}/g, (_, expression) => Function('matrix', `return (${expression})`)({ group: 'document' }));
+  assert.equal(renderName(host), 'e2e:document');
+  assert.equal(renderName(vm), 'e2e:document');
   // The env and the steps are the e2e job's by alias, so every invariant above on the e2e job's holds for e2e-vm's.
   assert.match(jobBody(raw, 'e2e'), /\n {4}env: &e2e-env\n[^]*\n {4}steps: &e2e-steps\n/);
   assert.match(jobBody(raw, 'e2e-vm'), /\n {4}env: \*e2e-env\n {4}steps: \*e2e-steps\n?$/);
@@ -1814,5 +1817,80 @@ test('route changes only placement of hosted entries across the current lists an
     assert.deepEqual(JSON.parse(direct.e2e), JSON.parse(mirror.e2e).map((entry) => entry.hosted ? { ...entry, runner: '"macos-26"', timeout: 45, retry: true, ...cachedOf(entry.group) } : entry), lane);
     assert.equal(direct.e2e_vm, mirror.e2e_vm, lane);
     assert.equal(direct.e2e_build, mirror.e2e_build, lane);
+  }
+});
+
+const overflowSample = (overrides = {}) => JSON.stringify({ v: 1, at: new Date().toISOString(), hostedQueued: 20, hostedRunning: 5, ec2: 'idle', ec2Queued: 0, partial: [], ...overrides });
+const overflowPlan = (sample = overflowSample(), extra = {}) => plan({
+  HOSTED_MAC_ROUTE: 'direct', HOSTED_MAC_E2E: 'document settings tools library',
+  HEAD_MESSAGE: `Runner: macos\nGates: e2e:document,e2e:settings,e2e:tools,e2e:library\nMac-Backlog: ${sample}`,
+  ...extra,
+});
+test('a full hosted queue overflows only to the EC2 labels, with exclusive wait and the same retry policy', () => {
+  const { outputs, summary } = overflowPlan();
+  const entries = JSON.parse(outputs.e2e_host);
+  assert.equal(entries.length, 4);
+  for (const entry of entries) {
+    assert.deepEqual(JSON.parse(entry.runner), ['self-hosted', 'macOS', 'ARM64', 'ci-kit-mac-ec2']);
+    assert.equal(entry.overflow, true);
+    assert.equal(entry.hosted, undefined);
+    assert.equal(entry.cached, undefined);
+    assert.equal(entry.variant, undefined);
+    assert.equal(entry.timeout, 40);
+    assert.equal(entry.retry, true);
+  }
+  assert.match(summary, /EC2 overflow.*e2e:document.*e2e:settings/);
+  assert.deepEqual([outputs.e2e_hosted, outputs.e2e_vm, outputs.e2e_build], ['[]', '[]', '[]']);
+});
+test('greedy placement charges each newly placed group to its own queue', () => {
+  const { outputs } = overflowPlan(overflowSample({ hostedQueued: 10 }));
+  assert.deepEqual(JSON.parse(outputs.e2e).map((e) => e.overflow || false), [true, true, false, false]);
+});
+test('empty hosted backlog, busy EC2 queue and offline EC2 preserve hosted placement', () => {
+  for (const sample of [
+    { hostedQueued: 0, hostedRunning: 0 }, { ec2: 'busy', ec2Queued: 4 }, { ec2: 'offline' },
+  ]) assert.ok(JSON.parse(overflowPlan(overflowSample(sample)).outputs.e2e).every((e) => e.runner === '"macos-26"' && e.retry && !e.overflow));
+});
+test('absent, invalid, failed, future and stale backlog samples fail open byte for byte', () => {
+  const original = overflowPlan('').outputs;
+  for (const sample of ['', 'failed', '{}', overflowSample({ at: 'yesterday' }),
+    overflowSample({ at: new Date(Date.now() - 301_000).toISOString() }),
+    overflowSample({ at: new Date(Date.now() + 60_000).toISOString() }),
+    overflowSample({ hostedQueued: -1 }), overflowSample({ ec2Queued: null }), overflowSample({ v: 2 }),
+  ]) assert.deepEqual(overflowPlan(sample).outputs, original, sample);
+});
+test('hosted-only groups stay hosted and still count toward that queue', () => {
+  const entries = JSON.parse(overflowPlan(overflowSample(), { HOSTED_MAC_ONLY_E2E: 'document settings' }).outputs.e2e);
+  assert.deepEqual(entries.map((e) => e.overflow || false), [false, false, true, true]);
+});
+test('overflow never moves home, measured, live, unlisted, no-hosted, final, mirror or dispatched groups', () => {
+  const message = `Runner: macos\nGates: e2e:discover,e2e:artifacts-perf,e2e:default,e2e:document\nMac-Backlog: ${overflowSample()}`;
+  const { outputs } = overflowPlan(overflowSample(), { HOSTED_MAC_E2E: 'document', MAC_HOME_E2E: 'discover', MEASURED_E2E: 'artifacts-perf', HEAD_MESSAGE: message });
+  const entries = JSON.parse(outputs.e2e);
+  assert.deepEqual(entries.map((e) => e.overflow || false), [false, false, false, true]);
+  assert.ok(entries.slice(0, 2).every((e) => JSON.parse(e.runner).includes('ci-kit-mac-home')));
+  for (const extra of [
+    { HOSTED_MAC_ROUTE: 'mirror' }, { HOSTED_MAC_E2E: '' },
+    { GITHUB_REF: 'refs/heads/ci/h-final-test' },
+    { HEAD_MESSAGE: `${message}\nLane: no-hosted` },
+    { EVENT: 'workflow_dispatch', INPUT_RUNNER: 'macos', INPUT_GATES: 'e2e:document' },
+    { HEAD_MESSAGE: `Runner: macos\nGates: e2e:design-live\nLive: yes\nMac-Backlog: ${overflowSample()}`, LIVE_E2E: 'design-live' },
+  ]) assert.ok(JSON.parse(overflowPlan(overflowSample(), extra).outputs.e2e).every((e) => !e.overflow));
+});
+
+test('the workflow runs the same retry and flaky notice on hosted and overflow, and names overflow placement', () => {
+  const body = jobBody(readWorkflow(), 'e2e');
+  const retry = /MAWS_E2E_RETRY: \$\{\{ (.+) \}\}/.exec(body)[1];
+  const notice = /- name: Publish flaky tests\n +if: (.+)/.exec(body)[1];
+  const name = /^ +name: (.+)$/m.exec(body)[1];
+  for (const [environment, overflow] of [['github-hosted', false], ['self-hosted', true]]) {
+    const runner = { os: 'macOS', environment };
+    const matrix = { group: 'document', retry: true, overflow };
+    const github = { job: 'e2e' };
+    assert.equal(Function('matrix', 'runner', 'github', `return (${retry})`)(matrix, runner, github), '1');
+    assert.equal(Function('matrix', 'runner', 'github', 'steps', 'always', `return (${notice})`)(matrix, runner, github, { checkout: { outcome: 'success' } }, () => true), true);
+    const rendered = name.replace(/\$\{\{ (.*?) \}\}/g, (_, expression) => Function('matrix', `return (${expression})`)(matrix));
+    assert.equal(rendered, `e2e:document${overflow ? ' (EC2 overflow)' : ''}`);
+    assert.equal(Function('matrix', 'runner', 'github', `return (${retry})`)({ ...matrix, retry: false }, runner, github), '');
   }
 });
