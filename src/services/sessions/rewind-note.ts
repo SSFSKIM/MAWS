@@ -67,9 +67,10 @@ export class RewindNotes {
   private readonly notes = new Map<AppSessionId, RewindNote>();
   private loading: Promise<void> | null = null;
   private readonly tails = new Map<AppSessionId, Promise<unknown>>();
-  // Each session's rewinds begun so far: an act clears only a note no rewind begun after the act wrote (its answer may
-  // come back after a later rewind's).
-  private readonly rewinds = new Map<AppSessionId, number>();
+  // Each session's rewinds forwarded so far, counted as each is handed to the host: an act clears the note only when no
+  // rewind was forwarded after the act was (the act's answer may come back after a later rewind's; and an act forwarded
+  // while a rewind's note is still being written reaches the engine before that rewind does).
+  private readonly forwarded = new Map<AppSessionId, number>();
   private closed = false;
 
   constructor(
@@ -87,7 +88,6 @@ export class RewindNotes {
   // `session.rewind`, through the note. A note that cannot be written refuses the rewind unsent.
   async rewind(input: CommandInput<'session.rewind'>): Promise<CommandOutput<'session.rewind'>> {
     const appSessionId = input.appSessionId as AppSessionId;
-    this.rewinds.set(appSessionId, (this.rewinds.get(appSessionId) ?? 0) + 1);
     const live = await reservationOf(this.deps.dispatch, appSessionId).catch(() => null);
     const note: RewindNote = {
       appSessionId,
@@ -99,7 +99,7 @@ export class RewindNotes {
       at: this.deps.now(),
     };
     await this.update(appSessionId, () => note);
-    const result = await this.deps.dispatch('engine-host', 'session.rewind', input);
+    const result = await this.forward(appSessionId, () => this.deps.dispatch('engine-host', 'session.rewind', input));
     if (!result.ok) {
       if (result.error.code === 'internal' && UNSENT.test(result.error.message)) await this.settle(note, null);
       throw new HostCommandError(result.error);
@@ -109,15 +109,22 @@ export class RewindNotes {
     return outcome;
   }
 
-  // A conversation act, forwarded; once the host accepted it the note it followed has served (a rewind begun after the
-  // act keeps its own).
+  // A conversation act, forwarded; once the host accepted it the note it followed has served (a rewind forwarded after
+  // the act keeps its own).
   async act<N extends ConversationAct>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> {
     const appSessionId = input.appSessionId as AppSessionId;
-    const rewinds = this.rewinds.get(appSessionId) ?? 0;
+    const before = this.forwarded.get(appSessionId) ?? 0; // read as the act is handed to the host, below
     const result = await this.deps.dispatch('engine-host', name, input);
     if (!result.ok) throw new HostCommandError(result.error);
-    await this.quietly(appSessionId, (note) => (note === null || (this.rewinds.get(appSessionId) ?? 0) !== rewinds ? undefined : null));
+    await this.quietly(appSessionId, (note) => (note === null || (this.forwarded.get(appSessionId) ?? 0) !== before ? undefined : null));
     return result.value as CommandOutput<N>;
+  }
+
+  // A rewind handed to the host: counted in the same turn as the hand-off, so the count orders it against the acts as
+  // the host receives them (one link, in call order).
+  private forward<T>(appSessionId: AppSessionId, send: () => Promise<T>): Promise<T> {
+    this.forwarded.set(appSessionId, (this.forwarded.get(appSessionId) ?? 0) + 1);
+    return send();
   }
 
   // ---- what the service tells it -------------------------------------------------------------------------------------
@@ -143,7 +150,7 @@ export class RewindNotes {
     const { targetMessageUuid, lastSeenMessageUuid, files } = note;
     let outcome: RewindOutcome;
     try {
-      outcome = await hostCall(this.deps.dispatch, 'session.rewind', { appSessionId, targetMessageUuid, lastSeenMessageUuid, files });
+      outcome = await this.forward(appSessionId, () => hostCall(this.deps.dispatch, 'session.rewind', { appSessionId, targetMessageUuid, lastSeenMessageUuid, files }));
     } catch (error) {
       throw new SetupFailure('launching', `the last rewind, which the previous launch may have lost, could not be repeated: ${messageOf(error)}`);
     }

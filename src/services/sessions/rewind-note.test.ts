@@ -13,6 +13,7 @@ import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
 import { sessionIdFor, summary } from '../../../test/support/index-fixture';
 import { SessionHarness } from '../../../test/support/session-harness';
 import type { FakeEngineHost } from '../../../test/support/session-host';
+import * as files from './json-files';
 import { registerSessionServiceHandlers } from './service-register';
 
 vi.mock('electron', () => {
@@ -162,9 +163,10 @@ describe('the rewind repair: a last-act note, re-sent at resume', () => {
     const sending = new Promise<void>((resolve) => (sent = resolve));
     vi.spyOn(seam, 'answer').mockImplementation(async (name, input) => {
       if (name !== 'session.send') return answer(name, input);
+      const result = await answer(name, input); // the send has reached the engine
       sent();
-      await held; // the host's answer is on its way back while the rewind goes out
-      return answer(name, input);
+      await held; // its answer is on its way back while the rewind goes out
+      return result;
     });
     const earlier = invoke('session.send', { appSessionId: id, content: 'before the rewind' });
     await sending;
@@ -174,6 +176,31 @@ describe('the rewind repair: a last-act note, re-sent at resume', () => {
     expect(noteOf(id)).toMatchObject({ state: 'confirmed' });
     expect(await invoke('session.send', { appSessionId: id, content: 'after the rewind' })).toMatchObject({ ok: true });
     expect(noteOf(id)).toBeNull(); // an act begun after it still clears it
+  });
+
+  it('an act sent while the rewind’s note is being written goes first, and the rewind sent after it keeps its note', async () => {
+    const id = await liveSession();
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let writing: () => void = () => {};
+    const written = new Promise<void>((resolve) => (writing = resolve));
+    const writeWhole = files.writeWhole;
+    vi.spyOn(files, 'writeWhole').mockImplementation(async (dir, ...rest) => {
+      if (dir.endsWith('rewinds')) {
+        writing();
+        await held; // the `attempted` note is on its way to disk
+      }
+      return writeWhole(dir, ...rest);
+    });
+    const rewound = rewind(id);
+    await written;
+    const sent = invoke('session.send', { appSessionId: id, content: 'sent while the note was written' });
+    await vi.waitFor(() => expect(conversationCalls().slice(-1)).toEqual(['session.send'])); // forwarded at once
+    release();
+    expect(await sent).toMatchObject({ ok: true });
+    expect(await rewound).toMatchObject({ ok: true });
+    expect(conversationCalls().slice(-2)).toEqual(['session.send', 'session.rewind']); // the engine's last act is the rewind
+    expect(noteOf(id)).toMatchObject({ state: 'confirmed' });
   });
 
   it('a refused act keeps the note', async () => {
