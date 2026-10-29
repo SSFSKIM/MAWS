@@ -44,10 +44,13 @@ function page(source: SessionEvent[], afterSeq: number | null, limit: number | n
 const BATCH = 500; // the host's live batch size (SessionStream)
 const CALL_CAP = 100; // more requests than any case here needs
 
-function harness(ids: string[]) {
+function harness(ids: string[], { held = false }: { held?: boolean } = {}) {
   const rows = new Map<string, { status: EngineSessionStatus; events: SessionEvent[] }>();
   const calls: { name: string; input: unknown }[] = [];
-  const listeners = new Map<string, (payload: unknown) => void>();
+  const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  const fire = (name: string, payload: unknown) => listeners.get(name)?.forEach((listener) => listener(payload));
+  // P5 O3-D M2: mawsd's adapter replaying what it held while the spine loaded (Interfaces §A, step 4)
+  const replay = { barrier: false, replaying: false, drained: new Set<() => void>() };
   const stateListeners = new Set<(state: HostState) => void>();
   const logs: string[] = [];
   let resync: HostResync | null = null;
@@ -71,9 +74,20 @@ function harness(ids: string[]) {
     throw new Error(`unscripted ${name}`);
   };
   const hosts = {
-    onEvent: (name: string, listener: (payload: unknown) => void) => (listeners.set(name, listener), () => void listeners.delete(name)),
+    onEvent: (name: string, listener: (payload: unknown) => void) => {
+      if (!listeners.has(name)) listeners.set(name, new Set());
+      listeners.get(name)!.add(listener);
+      return () => void listeners.get(name)!.delete(listener);
+    },
     onState: (_owner: string, listener: (state: HostState) => void) => (stateListeners.add(listener), () => void stateListeners.delete(listener)),
     setResync: (_owner: string, next: HostResync | null) => void (resync = next),
+    ...(held && {
+      replay: {
+        barrier: () => replay.barrier,
+        replaying: () => replay.replaying,
+        onDrained: (listener: () => void) => (replay.drained.add(listener), () => void replay.drained.delete(listener)),
+      },
+    }),
   };
   const model = new SessionReadModel('index');
   model.register({ start: (writer) => (ids.forEach((id) => writer.observeRecord(record(id))), () => {}) });
@@ -106,10 +120,31 @@ function harness(ids: string[]) {
     },
     // events as the host writes them after the ready line (the burst's tail, then live), in batches
     deliver(appSessionId: string, events: SessionEvent[]) {
-      for (let i = 0; i < events.length; i += BATCH) listeners.get('session.eventBatch')!({ appSessionId, events: events.slice(i, i + BATCH) });
+      for (let i = 0; i < events.length; i += BATCH) fire('session.eventBatch', { appSessionId, events: events.slice(i, i + BATCH) });
     },
     status(rowStatus: EngineSessionStatus) {
-      listeners.get('session.status')!({ appSessionId: rowStatus.appSessionId, status: rowStatus });
+      fire('session.status', { appSessionId: rowStatus.appSessionId, status: rowStatus });
+    },
+    // P5 O3-D M2: a listener of raw batches beside the fold (attention's core, the owner channel, side threads)
+    raw() {
+      const seen: SessionEvent[] = [];
+      hosts.onEvent('session.eventBatch', (payload) => void seen.push(...(payload as { events: SessionEvent[] }).events));
+      return seen;
+    },
+    // the load's barrier: from the trigger, then the coalesced parts and the resync; `drain` replays the hold in order
+    // and ends it
+    begin() {
+      replay.barrier = true;
+    },
+    drain(held: () => void) {
+      replay.replaying = true;
+      try {
+        held();
+      } finally {
+        replay.replaying = false;
+        replay.barrier = false;
+      }
+      for (const listener of [...replay.drained]) listener();
     },
     transition(state: HostState['state']) {
       stateListeners.forEach((l) => l({ state, pid: 1, restarts: 0, revision: 0 }));
@@ -401,5 +436,88 @@ describe('main’s resync (E10 Task 2.2)', () => {
     expect(h.digest(B)?.childAgents.done).toBe(2);
     h.deliver(A, pairs(A, 'L1', 1, 2));
     expect(h.digest(A)?.childAgents.done).toBe(2);
+  });
+});
+
+// P5 O3-D M2 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §A, step 4; D8, D31): `mawsd` held the
+// engine host's events while the spine loaded, then subscribes, replays the coalesced parts, resyncs the digest over the
+// journal, and drains the hold in order to every listener. The drain is launch-aware: a held event of the session's
+// current launch (the listing's, or a held status's since) folds through the filter, one of another launch reaches the
+// raw listeners only, and a session that exited meanwhile folds its held batches as its launch's lifecycle before its
+// exited status applies.
+describe('the load’s barrier in mawsd (P5 O3-D M2)', () => {
+  const exited = (appSessionId: string, launchId: string, reason: 'crash' | 'quit') =>
+    live(appSessionId, launchId, { process: 'exited', exit: { reason } } as Parameters<typeof status>[1]);
+
+  it('a held tail at seq 100 against a journal holding 1 to 99 folds after the journal’s pages, each event once', async () => {
+    const A = 'a1';
+    const h = harness([A], { held: true });
+    const raw = h.raw();
+    h.host(A, live(A, 'L1'), pairs(A, 'L1', 1, 99));
+    h.begin();
+    await h.connect();
+    const tail = pairs(A, 'L1', 97, 100); // the burst overlaps the journal's end
+    h.drain(() => h.deliver(A, tail));
+    expect(h.digest(A)?.childAgents).toEqual({ active: 0, done: 100 });
+    expect(raw).toEqual(tail); // the raw listeners hear the held batch once
+  });
+
+  it('a relaunch during the load: the new launch’s 2,400 held events fold once, the old launch’s tail reaches the raw listeners only', async () => {
+    const X = 'x1';
+    const h = harness([X], { held: true });
+    const raw = h.raw();
+    h.begin();
+    h.status(live(X, 'LA')); // coalesced while cold: launch A was live
+    h.host(X, live(X, 'LB'), pairs(X, 'LB', 1, 1_200)); // the listing names B, whose journal the resync pages
+    await h.connect();
+    const tailA = pairs(X, 'LA', 50, 60);
+    const heldB = pairs(X, 'LB', 1, 1_200); // overlapping the journal, past the fold's id window
+    h.drain(() => {
+      h.deliver(X, tailA);
+      h.status(live(X, 'LB'));
+      h.deliver(X, heldB);
+    });
+    expect(h.digest(X)?.childAgents).toEqual({ active: 0, done: 1_200 }); // B once; nothing of A; the filter never reset to A
+    expect(raw.filter((event) => event.id.includes(':LA:'))).toEqual(tailA);
+    h.deliver(X, pairs(X, 'LB', 1_201, 1_201)); // live after the drain
+    expect(h.digest(X)?.childAgents.done).toBe(1_201);
+  });
+
+  it('a session that exits during the load with a crash in its held final batch reads failed, its turn’s end kept', async () => {
+    const A = 'a1';
+    const h = harness([A], { held: true });
+    h.host(A, exited(A, 'L1', 'crash'), row(A, 'L1', 1, ['turn.started', {}])); // listed exited: not paged
+    h.begin();
+    await h.connect();
+    expect(h.digest(A)?.phase).not.toBe('exited'); // its exited status waits for its held batches
+    h.drain(() => {
+      h.deliver(A, [...row(A, 'L1', 2, ['turn.ended', {}]), ...row(A, 'L1', 3, ['process.exited', { reason: 'crash', code: 1 }])]);
+      h.status(exited(A, 'L1', 'crash'));
+    });
+    expect(h.digest(A)).toMatchObject({ phase: 'failed' });
+    expect(h.digest(A)?.lastTurnEndedAt).not.toBeNull();
+    expect(h.model.engineStatus(A as AppSessionId)?.process).toBe('exited');
+  });
+
+  it('a fresh load with no retained live status folds a held crash as its lifecycle, and applies the listed exit after it', async () => {
+    const A = 'a1';
+    const h = harness([A], { held: true });
+    h.begin();
+    h.status(exited(A, 'L1', 'crash')); // coalesced while cold: the exit, before the hold's batch is replayed
+    h.host(A, exited(A, 'L1', 'crash'), []);
+    await h.connect();
+    h.drain(() => h.deliver(A, row(A, 'L1', 9, ['process.exited', { reason: 'crash', code: 1 }])));
+    expect(h.digest(A)?.phase).toBe('failed');
+    expect(h.model.engineStatus(A as AppSessionId)?.process).toBe('exited'); // the deferred status, applied after the drain
+  });
+
+  it('outside a barrier the fold is as before: an exited status applies at once and a later batch is history', async () => {
+    const A = 'a1';
+    const h = harness([A], { held: true });
+    h.host(A, exited(A, 'L1', 'quit'), []);
+    await h.connect(); // a resync with no hold (a reconnect while loaded)
+    expect(h.model.engineStatus(A as AppSessionId)?.process).toBe('exited');
+    h.deliver(A, row(A, 'L1', 4, ['process.exited', { reason: 'crash', code: 1 }]));
+    expect(h.digest(A)?.phase).toBe('exited');
   });
 });

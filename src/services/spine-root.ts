@@ -50,7 +50,7 @@ import { takeSpineLock, type SpineLock } from './settings/spine-lock';
 import { splitSettingsFiles } from './settings/split';
 import { readUserEngineDefaults } from './settings/user-engine-defaults';
 import { sideThreadEvents, startSideThreads } from './side/side-threads';
-import { startSessions } from './sessions';
+import { startSessions, type HeldReplay } from './sessions';
 import { transcriptPathOf } from './sessions/context';
 import { trashFor } from './sessions/e2e-trash';
 import { InactiveArchive, scheduleInactiveArchive } from './sessions/inactive-archive';
@@ -90,7 +90,8 @@ export async function openSpineData(profile: string, { build, lock: given }: { b
   return { lock, refused: lock.refused, machineSettings, paths };
 }
 
-export type SpineHosts = Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onState' | 'onStreaming' | 'streaming' | 'snapshot' | 'setResync'>;
+// P5 O3-D M2: `replay`, a host adapter that replays what it held while the spine loaded (mawsd's; sessions/index.ts)
+export type SpineHosts = Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onState' | 'onStreaming' | 'streaming' | 'snapshot' | 'setResync'> & { replay?: HeldReplay };
 
 export interface SpineDeps {
   profile: string; // <userData>, the daemon's profile (O3 §1)

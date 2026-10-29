@@ -15,13 +15,26 @@ import { isSideThreadEvent } from '../side/side-threads'; // E3
 import { SessionReadModel, type RestoredCostReader, type SessionSource } from './read-model';
 import { launchMode, scenarioClock, scenarioPath, type LaunchMode } from '@shared/sessions/select-source';
 import { stubSource } from './stub-source';
-import { FoldFilter, resyncDigests } from './resync'; // E10
+import { FoldFilter, launchOf, resyncDigests } from './resync'; // E10; P5 O3-D M2: launchOf
+import type { EngineSessionStatus } from '@shared/engine/status';
+
+// P5 O3-D M2 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §A, step 4; D8, D31): what a host
+// adapter that held the engine host's events while the spine loaded (`mawsd`'s) tells the fold. From the hold's start
+// until its drain ended is the barrier: the coalesced parts replay, the resync runs, then the held events are delivered
+// in order (`replaying`), and live delivery begins once `onDrained`'s listeners ran. Main's root has none.
+export interface HeldReplay {
+  barrier(): boolean;
+  replaying(): boolean;
+  onDrained(listener: () => void): () => void;
+}
+
+export type SessionsHosts = Pick<HostSupervisor, 'onEvent' | 'onState' | 'dispatch' | 'setResync'> & { replay?: HeldReplay };
 
 export interface SessionsOptions {
   env: Record<string, string | undefined>;
   packaged: boolean;
   appRoot: string;
-  hosts: Pick<HostSupervisor, 'onEvent' | 'onState' | 'dispatch' | 'setResync'>; // C12: onState; E10: setResync
+  hosts: SessionsHosts; // C12: onState; E10: setResync; P5 O3-D M2: replay
   bus: ServicesBus; // P5 O3-C: the read side's commands, the answer intercept, the digest relay and the emitted taps
   indexSource?: SessionSource; // C4's IndexSessionSource: the records, projects and seed digests, and the unread rule
   // E3 (Design §5): app events kept elsewhere than the read model, answered with its own by `session.appEvents` (the
@@ -44,20 +57,61 @@ export interface Sessions {
 // E10: the engine host's resync (resync.ts) is registered here, run by the supervisor between each connect and its
 // `ready` line: every row's status and launch folded before the host streams. The batches that follow pass the fold
 // filter, so the burst's tail and live events fold once, in order, after what the resync folded.
+// P5 O3-D M2: at a load's barrier (HeldReplay, above) each session's current launch is the one its listing or its latest
+// status named, updated by a held status as the drain applies it. A held batch's events of that launch fold through the
+// filter, which drops what the resync paged; those of another launch (a relaunch during the load) reach the raw
+// listeners alone, so the filter, which keeps one position per session, is never reset to an ended launch. An exited
+// status the barrier met (coalesced while cold, or listed) applies after the drain, unless a held status of the session
+// applied during it, and the session's held batches fold meanwhile as its launch's lifecycle (`asLive`), as the engine
+// host delivers a final batch before its exit.
 export function hostEventSource(
-  hosts: Pick<HostSupervisor, 'onEvent' | 'onState' | 'setResync'>, // C12: onState; E10: setResync
+  hosts: Pick<SessionsHosts, 'onEvent' | 'onState' | 'setResync' | 'replay'>, // C12: onState; E10: setResync; P5 O3-D M2: replay
   log: (line: string) => void = (line) => console.log(`[sessions] ${line}`), // E10
 ): SessionSource {
   return {
     start(writer) {
       const held = new Set<AppSessionId>(); // C12: ids this host generation sent a status for
+      // P5 O3-D M2 start: the barrier's state
+      const replay = hosts.replay ?? null;
+      const current = new Map<AppSessionId, string>(); // the launch a session's held events fold for
+      const deferred = new Map<AppSessionId, EngineSessionStatus>(); // exited statuses waiting for the drain
+      const atBarrier = (status: EngineSessionStatus): boolean => {
+        current.set(status.appSessionId, status.launchId);
+        if (status.process !== 'exited') return false;
+        deferred.set(status.appSessionId, status);
+        return true;
+      };
+      const drained = () => {
+        for (const status of deferred.values()) writer.applyEngineStatus(status);
+        deferred.clear();
+        current.clear();
+      };
+      const foldHeld = (appSessionId: AppSessionId, events: SessionEvent[]) => {
+        const launch = current.get(appSessionId);
+        const own = launch === undefined ? events : events.filter((event) => [null, launch].includes(launchOf(appSessionId, event)));
+        if (own.length > 0) writer.fold(appSessionId, filter.pass(appSessionId, own), { asLive: deferred.has(appSessionId) });
+      };
+      // P5 O3-D M2 end
       // E10 start
       const filter = new FoldFilter();
-      hosts.setResync('engine-host', (dispatch, signal) => resyncDigests({ dispatch, signal, writer, filter, held, log }));
+      hosts.setResync('engine-host', (dispatch, signal) => resyncDigests({ dispatch, signal, writer, filter, held, log, ...(replay?.barrier() && { defer: atBarrier }) })); // P5 O3-D M2: defer
       // E10 end
       const offs = [
-        hosts.onEvent('session.eventBatch', ({ appSessionId, events }) => writer.fold(appSessionId, filter.pass(appSessionId, events))), // E10: the filter
-        hosts.onEvent('session.status', ({ status }) => (held.add(status.appSessionId), writer.applyEngineStatus(status))), // C12: held
+        hosts.onEvent('session.eventBatch', ({ appSessionId, events }) => {
+          if (replay?.replaying()) return foldHeld(appSessionId as AppSessionId, events); // P5 O3-D M2
+          writer.fold(appSessionId, filter.pass(appSessionId, events)); // E10: the filter
+        }),
+        hosts.onEvent('session.status', ({ status }) => {
+          held.add(status.appSessionId); // C12
+          // P5 O3-D M2: a coalesced exit waits for the drain; a held status, applied in order, supersedes what waited
+          if (replay?.barrier() && !replay.replaying() && atBarrier(status)) return;
+          if (replay?.replaying()) {
+            deferred.delete(status.appSessionId);
+            current.set(status.appSessionId, status.launchId);
+          }
+          writer.applyEngineStatus(status);
+        }),
+        ...(replay ? [replay.onDrained(drained)] : []), // P5 O3-D M2
         // C12 start
         hosts.onState('engine-host', (state) => {
           if (state.state === 'ready') return;
