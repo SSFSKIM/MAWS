@@ -17,7 +17,10 @@
 // - The state. A remote session's `LaneAState` exists while a page watches it, from its oldest watch's subscription
 //   (./remote-state.ts), and `laneA.changed` follows it; the last watch's end sends `state: null`. `laneA.list` for the
 //   machine answers the states of the sessions watched there. The override is hydrated by `read status` at each watch,
-//   after each model change's outcome, and at a main-loop step-end at most once per 10 s.
+//   after each model change's outcome, and at a main-loop step-end at most once per 10 s. The state carries the link
+//   (`link`: its state, this device's member, class and machine rights from `caps`, and the reason no control acts, if
+//   so), refreshed at each `caps` and link state change; while that reason stands every act is refused with it here.
+//   It also carries each control's act in flight (`acts`) with the link's progress, until its outcome.
 // - Reads name the watch's subscription (`input.sub`). `rows`, `diff` and `output` answer `{requested: true}` and arrive
 //   as plane messages of their kind; one of each kind is outstanding per watch, a second waiting for the first's answer,
 //   the watch's reset or 10 s. Every other read carries an id minted here and is answered by that id's `read` message
@@ -28,7 +31,9 @@
 // - Sends are `sminos.send` in either turn state, one in flight per session: the next act is created only once the one
 //   before it has its outcome (sminos runs each RPC on its own worker, so two accepted sends could reach the bridge in
 //   either order). At most 8 wait. A send's fate is its outcome; `laneA.send` answers at it or at 5 s, and the fate
-//   follows in `LaneAState.deliveries` under a key minted here (nothing on the wire names it).
+//   follows in `LaneAState.deliveries` under a key minted here (nothing on the wire names it). The lane is the session's,
+//   not a watch's: a session whose last watch ended stays held while a send or an act is still out, so a reopen finds
+//   the same lane.
 // - The gaps: `stopTask` and `media` are refused `unsupported` with their reasons (`stop` isn't offered remotely, P5
 //   Decision Log 51; uploads across machines are O7's).
 import { randomUUID } from 'node:crypto';
@@ -37,13 +42,13 @@ import type { RequestAnswer } from '@shared/engine/answers';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
-import type { ControlResult, DeliveryKey, LaneAAnswerOutput, LaneADelivery, LaneASendOutput, LaneAState, PlaneMessage } from '@shared/ipc/schema/lane-a';
+import type { ControlResult, DeliveryKey, LaneAAct, LaneAAnswerOutput, LaneADelivery, LaneASendOutput, LaneAState, PlaneMessage } from '@shared/ipc/schema/lane-a';
 import { validateCommandOutput } from '@shared/ipc/validate';
 import { answerIntent, suggestionSha256 } from '@shared/lane-a/answers';
 import type { MachineRef } from '@shared/machine/ref';
 import type { MainContext, RemoteDispatch } from '../ipc/router';
-import type { ActRequest, RemoteLink, Subscription } from '../machines/remote/link';
-import { controlOf, sendFate } from './remote-outcomes';
+import type { ActOutcome, ActRequest, RemoteLink, Subscription } from '../machines/remote/link';
+import { controlOf, linkView, sendFate } from './remote-outcomes';
 import { NO_BRIDGE, RemoteFold, type StatusRead } from './remote-state';
 
 export type LaneACommand = Extract<CommandName, `laneA.${string}`>;
@@ -119,6 +124,7 @@ type Session = {
   deliveries: Map<string, Delivery>;
   sends: Send[];
   sending: boolean;
+  acts: Map<string, LaneAAct>; // controls' acts in flight, by opId (a send's is its delivery)
   last: string; // the last state sent
 };
 
@@ -133,7 +139,7 @@ export const MEDIA_GAP = 'attachments to a session on another machine wait for u
 export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
   const timing: RemoteLaneATiming = { ...REMOTE_LANE_A_TIMING, ...deps.timing };
   const now = deps.now ?? Date.now;
-  const machines = new Map<MachineRef, { link: RemoteLink; sessions: Map<string, Session> }>();
+  const machines = new Map<MachineRef, { link: RemoteLink; sessions: Map<string, Session>; off: Array<() => void> }>();
   let sendSeq = 0;
   let readSeq = 0;
   const writer = `remote/${deps.local}`;
@@ -146,17 +152,31 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
     const held = machines.get(link.machine);
     if (held !== undefined && held.link === link) return held.sessions;
     // A new link for the machine (its roster entry was recreated): what the old one carried ends with it.
-    if (held !== undefined) for (const s of [...held.sessions.values()]) for (const w of [...s.watches.values()]) endWatch(s, w, 'closed');
+    if (held !== undefined) {
+      for (const off of held.off) off();
+      for (const s of [...held.sessions.values()]) for (const w of [...s.watches.values()]) endWatch(s, w, 'closed');
+    }
     const sessions = new Map<string, Session>();
-    machines.set(link.machine, { link, sessions });
+    // The link's state and the device's caps are in every watched session's state.
+    const linkChanged = () => {
+      for (const s of [...sessions.values()]) if (s.watches.size > 0) changed(s);
+    };
+    machines.set(link.machine, { link, sessions, off: [link.onState(linkChanged), link.onCaps(linkChanged)] });
     return sessions;
+  }
+
+  /** A session nobody watches and with nothing out is let go; one with a send or an act still out is held for a reopen. */
+  function forget(s: Session): void {
+    if (s.watches.size > 0 || s.sends.length > 0 || s.sending || s.acts.size > 0) return;
+    const sessions = machines.get(s.machine)?.sessions;
+    if (sessions?.get(s.id) === s) sessions.delete(s.id);
   }
 
   function sessionOf(link: RemoteLink, id: string, create: boolean): Session | null {
     const sessions = machineOf(link);
     let s = sessions.get(id) ?? null;
     if (s === null && create) {
-      s = { machine: link.machine, link, id, watches: new Map(), status: null, hydratedAt: 0, deliveries: new Map(), sends: [], sending: false, last: '' };
+      s = { machine: link.machine, link, id, watches: new Map(), status: null, hydratedAt: 0, deliveries: new Map(), sends: [], sending: false, acts: new Map(), last: '' };
       sessions.set(id, s);
     }
     return s;
@@ -168,7 +188,7 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
     const w = primary(s);
     if (w === null) return null;
     const deliveries = [...s.deliveries.values()].map((d): LaneADelivery => ({ key: d.key, at: d.at, state: d.state, ...(d.uuid !== undefined && { uuid: d.uuid }), ...(d.reason !== undefined && { reason: d.reason }) }));
-    return w.fold.state({ appSessionId: s.id, status: s.status, deliveries });
+    return w.fold.state({ appSessionId: s.id, status: s.status, deliveries, link: linkView(s.link), acts: [...s.acts.values()] });
   }
 
   function changed(s: Session): void {
@@ -183,21 +203,40 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
   function liveFor(s: Session | null, rpc: string | null): { s: Session; state: LaneAState; launch: string } | ControlResult {
     const state = s === null ? null : stateOf(s);
     if (s === null || state === null) return refused('no-bridge', NOT_OPEN);
+    const link = state.link!;
+    if (link.reason !== null) return refused(link.refusal !== null ? 'refused' : link.clientClass === 'web-cards' ? 'class' : 'offline', link.reason);
     if (state.bridge !== 'live' || state.launch === null) return refused('no-bridge', state.reason ?? NO_BRIDGE);
     const op = rpc === null ? undefined : OP_OF[rpc];
     if (op !== undefined && !state.ops.includes(op)) return refused('unsupported', `not in this session’s sminos${state.sminos === null ? '' : ` (${state.sminos})`}`);
     return { s, state, launch: state.launch };
   }
 
-  function act(live: { s: Session; launch: string }, rpc: string, args: Fields, requestDigest?: ActRequest['requestDigest']) {
+  /** The act, sealed by the link; a control's (`target`: what it names, if anything) is in the state until its outcome. */
+  function act(live: { s: Session; launch: string }, rpc: string, args: Fields, options: { target?: string; requestDigest?: ActRequest['requestDigest'] } = {}): Promise<ActOutcome> {
     const { s, launch } = live;
-    return s.link.act({ action: `sminos.${rpc}`, session: s.id, context: { lane: 'A', session: s.id, launch }, args: { session: s.id, ...args }, ...(requestDigest !== undefined && { requestDigest }) });
+    const { target, requestDigest } = options;
+    const handle = s.link.act({ action: `sminos.${rpc}`, session: s.id, context: { lane: 'A', session: s.id, launch }, args: { session: s.id, ...args }, ...(requestDigest !== undefined && { requestDigest }) });
+    if (rpc === 'send') return handle.outcome; // a send's progress is its delivery
+    const shown: LaneAAct = { id: handle.opId, control: rpc, ...(target !== undefined && { target }), progress: handle.progress(), at: new Date(now()).toISOString() };
+    s.acts.set(shown.id, shown);
+    changed(s);
+    const off = handle.onProgress((progress) => {
+      shown.progress = progress;
+      changed(s);
+    });
+    return handle.outcome.then((outcome) => {
+      off();
+      s.acts.delete(shown.id);
+      changed(s);
+      forget(s);
+      return outcome;
+    });
   }
 
-  async function control(s: Session | null, rpc: string, args: Fields = {}): Promise<ControlResult> {
+  async function control(s: Session | null, rpc: string, args: Fields = {}, target?: string): Promise<ControlResult> {
     const live = liveFor(s, rpc);
     if (!('s' in live)) return live;
-    return controlOf(await act(live, rpc, args).outcome, live.s.link.name, rpc);
+    return controlOf(await act(live, rpc, args, { target }), live.s.link.name, rpc);
   }
 
   // ---- Watches -----------------------------------------------------------------------------------------------------------
@@ -306,9 +345,9 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
     if (reason !== null) emitPlane(s, { watch: w.id, ended: reason });
     s.watches.delete(w.id);
     if (s.watches.size === 0) {
-      machines.get(s.machine)?.sessions.delete(s.id);
       if (s.last !== '' && s.last !== 'null') deps.emit(s.machine, 'laneA.changed', { appSessionId: s.id as AppSessionId, state: null });
       s.last = 'null';
+      forget(s);
       return;
     }
     changed(s);
@@ -468,7 +507,7 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
           fate = { state: 'refused', reason: r.message, code: r.code };
         } else {
           setDelivery(s, head.key, { state: 'submitted' });
-          fate = sendFate(await act(live, 'send', { text: head.text }).outcome, s.link.name);
+          fate = sendFate(await act(live, 'send', { text: head.text }), s.link.name);
         }
         const { code, ...delivery } = fate;
         setDelivery(s, head.key, delivery);
@@ -482,6 +521,7 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
       }
     } finally {
       s.sending = false;
+      forget(s);
     }
   }
 
@@ -521,7 +561,7 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
       if (sha256 === null) return { outcome: 'refused', code: 'bad-args', message: 'the suggestion has no canonical form' };
       args = { decision: 'allow', scope: { suggestion: 0, sha256, destination: intent.destination }, digest };
     }
-    const outcome = await act(live, rpc, args, digest).outcome;
+    const outcome = await act(live, rpc, args, { target: request, requestDigest: digest });
     if (outcome.state === 'done') return { outcome: 'delivered' };
     if (outcome.state === 'unknown') return { outcome: 'unknown', why: 'gone' };
     const result = controlOf(outcome, live.s.link.name, rpc) as Extract<ControlResult, { state: 'refused' }>;
@@ -565,15 +605,15 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
       case 'laneA.model':
         return model(s, input as { model?: string | null; effort?: string | null });
       case 'laneA.command':
-        return control(s, 'command', { name: input.name, ...(input.args !== '' && { args: input.args }) });
+        return control(s, 'command', { name: input.name, ...(input.args !== '' && { args: input.args }) }, String(input.name));
       case 'laneA.btw':
         return control(s, 'btw', { prompt: input.prompt });
       case 'laneA.compact':
         return control(s, 'compact', input.instructions === undefined ? {} : { instructions: input.instructions });
       case 'laneA.stopAgent':
-        return control(s, 'stop-agent', { agentId: input.agentId });
+        return control(s, 'stop-agent', { agentId: input.agentId }, String(input.agentId));
       case 'laneA.tell':
-        return control(s, 'tell', { agentId: input.agentId, text: input.text });
+        return control(s, 'tell', { agentId: input.agentId, text: input.text }, String(input.agentId));
       case 'laneA.stopTask':
         return refused('unsupported', STOP_TASK_GAP);
       case 'laneA.media':
@@ -592,7 +632,10 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
       }
     },
     stop() {
-      for (const { sessions } of [...machines.values()]) for (const s of [...sessions.values()]) for (const w of [...s.watches.values()]) endWatch(s, w, 'closed');
+      for (const { sessions, off } of [...machines.values()]) {
+        for (const unsubscribe of off) unsubscribe();
+        for (const s of [...sessions.values()]) for (const w of [...s.watches.values()]) endWatch(s, w, 'closed');
+      }
       machines.clear();
     },
   };

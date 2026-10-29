@@ -66,6 +66,28 @@ describe('a remote lane A session’s state', () => {
     expect(state(fold, null)).toMatchObject({ override: null });
   });
 
+  it('folds a step-end’s model and effort each on its own: an effort-only step-end keeps the status read’s model', () => {
+    const fold = new RemoteFold(S);
+    fold.message(snapshot());
+    const status = { model: 'claude-opus-4-5', override: null };
+    fold.message(env('step-end', { turnId: 't1', agentId: null, step: 1, effort: 'low' }));
+    expect(state(fold, status)).toMatchObject({ model: 'claude-opus-4-5', effort: 'low' });
+    fold.message(env('step-end', { turnId: 't1', agentId: null, step: 2, model: 'claude-haiku-4-5' }));
+    expect(state(fold, status)).toMatchObject({ model: 'claude-haiku-4-5', effort: 'low' }); // absent: not known, so kept
+    fold.message(env('step-end', { turnId: 't2', agentId: null, step: 1, effort: 'max' }));
+    expect(state(fold, status)).toMatchObject({ model: 'claude-haiku-4-5', effort: 'max' });
+  });
+
+  it('carries the link and the acts in flight it is given, and leaves both out when given none', () => {
+    const fold = new RemoteFold(S);
+    fold.message(snapshot());
+    const link = { state: 'down' as const, refusal: null, carrier: null, member: 'm-a', clientClass: 'native-mac', rights: [], reason: 'mini isn’t reachable' };
+    const acts = [{ id: 'op-1', control: 'interrupt', progress: 'sent' as const, at: '2026-10-29T00:00:00.000Z' }];
+    expect(fold.state({ appSessionId: S, status: null, deliveries: [], link, acts })).toMatchObject({ link, acts });
+    expect(state(fold)).not.toHaveProperty('link');
+    expect(state(fold)).not.toHaveProperty('acts');
+  });
+
   it('keeps the pending requests a snapshot’s following `raised` restate, and the last settlements with their session', () => {
     const fold = new RemoteFold(S);
     fold.message(snapshot());

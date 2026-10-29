@@ -1,9 +1,10 @@
 // Remote lane A's outcomes in the port's types (P5 O9 M9, "Outcomes"): an act's `ActOutcome` (which never rejects) as a
 // `ControlResult`, a send's fate, and a refusal's code in words. A `failed` reaches the device with its code alone (the
 // endpoint keeps the whole outcome for the sender's `query`), so the words are made here from the code; the renderer may
-// re-word by `code` (M3's `words.ts`).
-import type { ControlResult, LaneADelivery } from '@shared/ipc/schema/lane-a';
-import type { ActOutcome } from '../machines/remote/link';
+// re-word by `code` (M3's `words.ts`). Also the link itself as a remote session's state shows it, with the reason, when
+// there is one, that no control acts from this device ("Capabilities": a link down or refused disables every control).
+import type { ControlResult, LaneADelivery, LaneALink } from '@shared/ipc/schema/lane-a';
+import type { ActOutcome, RemoteLink } from '../machines/remote/link';
 
 const record = (value: unknown): Record<string, unknown> | null => (value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null);
 const refused = (code: string, message: string): ControlResult => ({ state: 'refused', code, message });
@@ -74,4 +75,18 @@ export function sendFate(outcome: ActOutcome, machine: string): Pick<LaneADelive
   if (outcome.state === 'unknown') return { state: 'unconfirmed', reason: 'it may not have arrived: its outcome is unknown' };
   const control = controlOf(outcome, machine, 'send') as Extract<ControlResult, { state: 'refused' }>;
   return { state: 'refused', reason: control.message, code: control.code };
+}
+
+/** The link as a remote session's state carries it: its state, who this device is there, and why no control acts, if so. */
+export function linkView(link: Pick<RemoteLink, 'name' | 'state' | 'refusal' | 'carrier' | 'caps'>): LaneALink {
+  const state = link.state();
+  const refusal = link.refusal();
+  const caps = link.caps();
+  let reason: string | null = null;
+  if (refusal !== null) reason = `${link.name} refused this device (${refusal})`;
+  else if (state === 'down') reason = `${link.name} isn’t reachable`;
+  else if (state === 'connecting') reason = `connecting to ${link.name}`;
+  else if (caps === null) reason = `waiting for ${link.name} to say what this device may do`;
+  else if (caps.clientClass === 'web-cards') reason = 'this device answers cards only';
+  return { state, refusal, carrier: link.carrier(), member: caps?.member ?? null, clientClass: caps?.clientClass ?? null, rights: [...(caps?.machine.grades ?? [])], reason };
 }

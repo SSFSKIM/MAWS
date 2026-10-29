@@ -9,11 +9,11 @@
 // - `turn.running` comes from the plane alone, never from disk turns (custody, item 2): the engine record's status says
 //   anything but `idle`, or a main-loop model request is open (opened by a snapshot's `streaming` or a chunk, closed by
 //   its `step-end`; sminos's plane closes every open step at its turn's end).
-// - `model` and `effort` are what the main loop's latest step ran on when its step-end says so (sminos 1.27.12), else the
-//   model `read status` gave and no effort; `override` is `read status`'s, since the plane carries none (item 4).
+// - `model` and `effort` are, each on its own, what the main loop's latest step-end naming it said (sminos 1.27.12), else
+//   the model `read status` gave and no effort; `override` is `read status`'s, since the plane carries none (item 4).
 // - `pending` is what the plane says now: a snapshot clears it and the endpoint restates the session's pending requests
 //   as `raised` right after it. `settled` keeps the last 100, across snapshots.
-import type { LaneACatalog, LaneADelivery, LaneARaised, LaneASettled, LaneAState, PlaneMessage } from '@shared/ipc/schema/lane-a';
+import type { LaneAAct, LaneACatalog, LaneADelivery, LaneALink, LaneARaised, LaneASettled, LaneAState, PlaneMessage } from '@shared/ipc/schema/lane-a';
 import type { AppSessionId } from '@shared/graph/ids';
 import { controlsMissingReason } from '@shared/lane-a/bridge';
 import { stepEndFields } from '@shared/lane-a/step-end';
@@ -38,7 +38,8 @@ export class RemoteFold {
   #snapshot = false;
   #catalog: LaneACatalog | null = null;
   #open = new Set<string>(); // the main loop's open model requests, by (turnId, step)
-  #ran: { model: string; effort: string | null } | null = null;
+  #ranModel: string | null = null; // what the main loop's latest step-end that named it said
+  #ranEffort: string | null = null;
   #pending = new Map<string, LaneARaised>();
   #settled = new Map<string, LaneASettled>();
 
@@ -81,7 +82,9 @@ export class RemoteFold {
         if (!isMain(body)) return;
         this.#open.delete(stepKey(body));
         const { model, effort } = stepEndFields(body as unknown as StepEnd);
-        if (model !== undefined) this.#ran = { model, effort: effort ?? null };
+        // Each on its own: an absent field is one the plane doesn't know, so the last one known stands.
+        if (model !== undefined) this.#ranModel = model;
+        if (effort !== undefined) this.#ranEffort = effort;
         return;
       }
       default:
@@ -110,7 +113,7 @@ export class RemoteFold {
     return this.#settled.get(request) ?? null;
   }
 
-  state({ appSessionId, status, deliveries }: { appSessionId: string; status: StatusRead | null; deliveries: LaneADelivery[] }): LaneAState {
+  state({ appSessionId, status, deliveries, link, acts }: { appSessionId: string; status: StatusRead | null; deliveries: LaneADelivery[]; link?: LaneALink; acts?: LaneAAct[] }): LaneAState {
     const presence = this.#presence;
     const capabilities = record(presence?.capabilities);
     const controls = record(capabilities?.controls);
@@ -126,13 +129,15 @@ export class RemoteFold {
       reads: strings(capabilities?.reads),
       controls: (controls ?? {}) as LaneAState['controls'],
       turn: { running: (typeof status_ === 'string' && status_ !== 'idle') || this.#open.size > 0, unknown: false },
-      model: this.#ran?.model ?? status?.model ?? null,
-      effort: this.#ran?.effort ?? null,
+      model: this.#ranModel ?? status?.model ?? null,
+      effort: this.#ranEffort,
       override: status?.override ?? null,
       catalog: this.#catalog === null ? null : { fingerprint: this.#catalog.fingerprint },
       pending: [...this.#pending.values()],
       settled: [...this.#settled.values()],
       deliveries,
+      ...(link !== undefined && { link }),
+      ...(acts !== undefined && { acts }),
     };
   }
 

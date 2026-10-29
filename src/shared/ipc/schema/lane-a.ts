@@ -56,6 +56,33 @@ export const LaneADeliverySchema = z.strictObject({
 });
 export type LaneADelivery = z.infer<typeof LaneADeliverySchema>;
 
+// P5 O9 M9: a remote session's link to its machine, as O7's `RemoteLink` and the endpoint's `caps` say it (absent for a
+// local session). `reason`, when set, disables every control with it: the link is down or connecting, the machine refused
+// this device, no `caps` came yet, or the device's class acts on cards only. `rights` are the member's machine rights
+// (`caps.machine.grades`); a session's own rank is the endpoint's to decide (its `grade` refusal).
+export const LaneALinkSchema = z.strictObject({
+  state: z.enum(['connecting', 'up', 'down']),
+  refusal: z.string().nullable(),
+  carrier: z.enum(['direct', 'relay']).nullable(),
+  member: z.string().nullable(),
+  clientClass: z.string().nullable(),
+  rights: z.array(z.string()),
+  reason: z.string().nullable(),
+});
+export type LaneALink = z.infer<typeof LaneALinkSchema>;
+
+// P5 O9 M9: a remote control's act in flight, from its creation to its outcome (`laneA.send`'s are its `deliveries`):
+// `id` its opId, `control` its RPC (`interrupt`, `answer`, `decide`, `model`, `command`, `btw`, `compact`, `stop-agent`,
+// `tell`), `target` what it names when it names one (an answer's or decision's request, a command's name, an agent).
+export const LaneAActSchema = z.strictObject({
+  id: z.string(),
+  control: z.string(),
+  target: z.string().optional(),
+  progress: z.enum(['waiting', 'sent', 'accepted', 'unknown']),
+  at: z.string(), // when it was made (ISO-8601)
+});
+export type LaneAAct = z.infer<typeof LaneAActSchema>;
+
 export const LaneAStateSchema = z.strictObject({
   appSessionId: AppSessionIdSchema,
   engineSessionId: z.string(), // bare: the engine's session id is never lifted (OX2)
@@ -76,6 +103,8 @@ export const LaneAStateSchema = z.strictObject({
   pending: z.array(LaneARaisedSchema),
   settled: z.array(LaneASettledSchema), // the last 100
   deliveries: z.array(LaneADeliverySchema), // this app's sends; settled ones kept 60 s
+  link: LaneALinkSchema.optional(), // M9: a remote session's only
+  acts: z.array(LaneAActSchema).optional(), // M9: a remote session's only
 });
 export type LaneAState = z.infer<typeof LaneAStateSchema>;
 

@@ -71,7 +71,7 @@ type Lab = {
 };
 
 /** The endpoint with sminos on RL10 (la-1, the owner's; la-b, B's, shared with A at `approve`), and main's link up to it. */
-async function lab(options: { relay?: boolean } = {}): Promise<Lab> {
+async function lab(options: { relay?: boolean; upGraceMs?: number } = {}): Promise<Lab> {
   const f = await startEndpoint(org, started, { limits: OPEN });
   const s = await sminos(f, [laneAMember(), laneAMember({ session: 'la-b', alias: 'bob', title: 'bob', launch: 'LB', owners: [org.B], shares: [{ member: org.A, grade: 'approve' }] })]);
   const plane = new FakePlane(s);
@@ -129,7 +129,7 @@ async function lab(options: { relay?: boolean } = {}): Promise<Lab> {
       relays.push(socket);
       return socket;
     },
-    timing: { DIRECT_BUCKET: OPEN.perSource },
+    timing: { DIRECT_BUCKET: OPEN.perSource, ...(options.upGraceMs !== undefined && { UP_GRACE_MS: options.upGraceMs }) },
     log: () => {},
   });
   cleanups.push(() => link.close());
@@ -342,6 +342,60 @@ describe('remote lane A over a real link', { timeout: 30_000 }, () => {
     expect(await l.cmd('laneA.send', { appSessionId: 'la-1', text: 'are you there?' })).toMatchObject({ state: 'refused', code: 'unsupported', reason: 'mini’s sminos predates sends from MAWS: update sminos there' });
     l.plane.handle('send', () => ({ state: 'failed', error: { code: 'refused-delivery', message: 'the turn ended' } }));
     expect(await l.cmd('laneA.send', { appSessionId: 'la-1', text: 'too late' })).toMatchObject({ state: 'refused', code: 'refused-delivery' });
+  });
+
+  it('keeps a session’s send lane past its last watch: a send after a reopen is made only once the one before has its outcome', async () => {
+    const l = await lab();
+    const first = await watched(l);
+    l.plane.hold('send');
+    const before = l.cmd('laneA.send', { appSessionId: 'la-1', text: 'list the files' });
+    await until(() => l.plane.of('send').length === 1, 'the first send at sminos');
+    await l.cmd('laneA.unwatch', { appSessionId: 'la-1', watch: first });
+    await until(() => stateNow(l) === null, 'the state cleared with the last watch');
+    await watched(l);
+    const after = l.cmd('laneA.send', { appSessionId: 'la-1', text: 'and count them' });
+    await until(() => stateNow(l)?.deliveries.some((d) => d.state === 'queued'), 'the second send queued behind the first');
+    await sleep(300);
+    expect(l.plane.of('send')).toHaveLength(1);
+    expect(l.plane.frames.filter((x) => x.t === 'query')).toHaveLength(1);
+    l.plane.release('send');
+    expect(await before).toMatchObject({ state: 'entered' });
+    expect(await after).toMatchObject({ state: 'entered' });
+    expect(l.plane.of('send').map((r) => r.args.text)).toEqual(['list the files', 'and count them']);
+  });
+
+  it('shows a control’s act in flight with its progress, and clears it at its outcome before the command answers', async () => {
+    const l = await lab();
+    await watched(l);
+    expect(stateNow(l)!.acts).toEqual([]);
+    l.plane.hold('stop-agent');
+    const stopping = l.cmd('laneA.stopAgent', { appSessionId: 'la-1', agentId: 'a1' });
+    await until(() => stateNow(l)?.acts?.[0]?.progress === 'accepted', 'the act accepted by the endpoint');
+    await until(() => l.plane.of('stop-agent').length === 1, 'the act at sminos, held');
+    const [inFlight] = stateNow(l)!.acts!;
+    expect(inFlight).toEqual({ id: expect.any(String), control: 'stop-agent', target: 'a1', progress: 'accepted', at: expect.any(String) });
+    expect(inFlight.id).toBe(l.plane.of('stop-agent')[0].opId);
+    l.plane.release('stop-agent');
+    expect(await stopping).toEqual({ state: 'done', result: {} });
+    expect(stateNow(l)!.acts).toEqual([]);
+  });
+
+  it('carries the link in the state: up with this device’s member and class; down, every control refused with its reason and no act made', async () => {
+    const l = await lab({ upGraceMs: 200 });
+    await watched(l);
+    expect(stateNow(l)!.link).toEqual({ state: 'up', refusal: null, carrier: 'direct', member: org.A, clientClass: 'native-mac', rights: l.link.caps()!.machine.grades, reason: null });
+    l.direct.dead = true;
+    l.carriers.at(-1)!.carrier.close('dropped');
+    await until(() => stateNow(l)?.link?.state === 'down', 'the link down past its grace', 10_000);
+    expect(stateNow(l)!.link).toMatchObject({ carrier: null, reason: 'mini isn’t reachable' });
+    const sent = l.plane.rpcs.length;
+    expect(await l.cmd('laneA.interrupt', { appSessionId: 'la-1' })).toEqual({ state: 'refused', code: 'offline', message: 'mini isn’t reachable' });
+    expect(await l.cmd('laneA.send', { appSessionId: 'la-1', text: 'hello?' })).toMatchObject({ key: null, state: 'refused', code: 'offline' });
+    expect(l.plane.rpcs).toHaveLength(sent);
+    l.direct.dead = false;
+    l.link.probe('network');
+    await until(() => stateNow(l)?.link?.state === 'up', 'the link up again', 15_000);
+    expect(stateNow(l)!.link!.reason).toBeNull();
   });
 
   it('resolves an act whose answers were lost to its outcome, with one effect', async () => {
