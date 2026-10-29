@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  abaDeltas,
+  abaLine,
   baselineProblems,
   boundMisses,
   cpuSeconds,
@@ -282,5 +284,38 @@ describe("the enrolled endpoint's line", () => {
   it('names a process measured in one window alone', () => {
     const woken = { ...enrolled, processes: [...enrolled.processes, { argv0: 'maws-pty-host', pid: 13, footprintKiB: 9_000.4, cpuS: 0.01 }] };
     expect(enrolledLine({ unenrolled, enrolled: woken, reasons: [] })).toContain(', maws-pty-host 9000 KiB 0.01 s, in the enrolled window alone ·');
+  });
+});
+
+// The bound's re-derivation (after P5 O10 M10): A-B-A, the supervisor's scene, the daemon shape's and the supervisor's
+// again, each a fresh launch in one job, recorded without a bound asserted.
+describe('the A-B-A line', () => {
+  const a = { footprintKiB: 66_120.4, cpuS: 0.11, samples: 21, load: 3.12, processes: [{ argv0: 'maws-supervisor', pid: 21, footprintKiB: 66_120.4, cpuS: 0.11 }] };
+  const b = {
+    footprintKiB: 98_201.6, cpuS: 0.16, samples: 21, load: 3.44,
+    processes: [{ argv0: 'mawsd', pid: 31, footprintKiB: 31_500, cpuS: 0.03 }, { argv0: 'maws-supervisor', pid: 32, footprintKiB: 66_701.2, cpuS: 0.13 }],
+  };
+  const a2 = { footprintKiB: 66_541, cpuS: 0.13, samples: 20, load: 2.9, processes: [{ argv0: 'maws-supervisor', pid: 41, footprintKiB: 66_541, cpuS: 0.13 }] };
+
+  it('holds B against the mean of A and A’, and A against A’, per process where both A windows measured it', () => {
+    expect(abaDeltas(a, b, a2)).toEqual({
+      aMean: { footprintKiB: 66_331, cpuS: 0.12 }, // 66330.7 KiB
+      footprintKiB: 98_202 - 66_331,
+      cpuS: 0.04,
+      ratio: 1.48,
+      spread: { footprintKiB: 66_120 - 66_541, cpuS: -0.02 },
+      processes: [{ argv0: 'maws-supervisor', footprintKiB: 66_701 - 66_331, cpuS: 0.01 }],
+      alone: ['mawsd'],
+    });
+  });
+
+  it("reads the deltas, B's processes against the A mean, each window's footprint, CPU, processes and load, the sample counts, the window and the validity", () => {
+    expect(abaLine({ a, b, a2, reasons: [], windowS: 600 })).toBe(
+      "[daemon-idle] A-B-A footprint B +31871 KiB against the A mean 66331 KiB (x1.480), A -421 KiB against A' · cpu B +0.04 s against the A mean 0.12 s, A -0.02 s against A' · B's processes against the A mean: mawsd in B alone, maws-supervisor +370 KiB +0.01 s · A detached 66120 KiB 0.11 s (maws-supervisor 66120 KiB 0.11 s; load 3.1) · B daemon 98202 KiB 0.16 s (mawsd 31500 KiB 0.03 s, maws-supervisor 66701 KiB 0.13 s; load 3.4) · A' detached 66541 KiB 0.13 s (maws-supervisor 66541 KiB 0.13 s; load 2.9) · medians of 21, 21 and 20 over 600 s each · valid",
+    );
+  });
+
+  it('names why a run is invalid, each window’s reasons', () => {
+    expect(abaLine({ a, b, a2, reasons: ['B: the 1-minute load reached 5.2 (a valid run stays under 5 throughout)'], windowS: 60 })).toMatch(/ · medians of 21, 21 and 20 over 60 s each · invalid: B: the 1-minute load reached 5\.2 \(a valid run stays under 5 throughout\)$/);
   });
 });

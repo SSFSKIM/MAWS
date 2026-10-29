@@ -167,10 +167,10 @@ const owed: Array<NonNullable<OrgSignerStatus>['owing']> = [];
  * whose notice brings the app to read the hub and rewind. The app's chain now holds the removal only as superseded, and
  * the recovered line lists the device again: the superseded offer revokes it.
  *
- * The endpoint keeps the removal, on the superseded branch: its own sync reads the hub from its head on, and a page
- * after the removal's version never holds the recovered line's first state, so only a delivery carrying the recovery
- * (recovery first) brings it back. From the recovery on its reads of the hub are withheld, so whatever it adopts next
- * it adopts over the link.
+ * The endpoint keeps the removal, on the superseded branch: from the recovery on its reads of the hub are withheld (its
+ * own sync would read the hub again from the recovery's base and rewind, test/endpoint/org-recovery.local.test.ts), so
+ * only a delivery carrying the recovery (recovery first) brings it back, and whatever it adopts next it adopts over the
+ * link.
  */
 async function loseRevocation(n: number): Promise<{ member: string; device: Device; kids: string[]; base: number; removal: SignedOrgState }> {
   const channel = await generateSigningKey();

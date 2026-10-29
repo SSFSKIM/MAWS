@@ -141,6 +141,7 @@ export class DirectListener {
     });
   }
 
+  /** Lets every address go; the next `start()` reports its bound set afresh, though it is the one reported before. */
   async stop(): Promise<void> {
     this.#stopped = true;
     if (this.#timer !== null) clearInterval(this.#timer);
@@ -148,6 +149,7 @@ export class DirectListener {
     await this.#serial(async () => {
       for (const address of [...this.#bound.keys()]) this.#unbind(address);
       for (const client of this.#wss.clients) client.terminate();
+      this.#reported = [];
     });
   }
 

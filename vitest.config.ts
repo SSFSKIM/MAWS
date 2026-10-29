@@ -44,6 +44,7 @@ const TIMING_NODE_TESTS = [
   'test/endpoint/provision.test.ts', // P5 O14 M1: provisions, retires and unenrolls against the same local runner
   'test/endpoint/hub-link.test.ts', // P5 O10 M3: reconnects on the hub link's backoff, timed against a stand-in hub
   'test/endpoint/hub-link.local.test.ts', // P5 O10 M3: RL1 against desk-hub's Worker in Miniflare (cuts, redeploys, leases)
+  'test/endpoint/org-recovery.local.test.ts', // P5 O10: an org recovery whose first state is a sibling of the endpoint's head, followed through desk-hub's Worker in Miniflare
   'test/endpoint/channels.local.test.ts', // P5 O10 M4: RL2 over the hub's multiplex (desk-hub's Worker in Miniflare) and the direct listener
   'test/endpoint/rl10/conversation.local.test.ts', // P5 O10 M6: RL10's conversation replayed against the real socket and desk-hub's Worker in Miniflare
   'test/endpoint/subscriptions.local.test.ts', // P5 O10 M8: subscriptions across a forced drop over the hub's multiplex (desk-hub's Worker in Miniflare) and the direct listener
