@@ -9,7 +9,7 @@ import { isMadeUpFinalAnswer, isMessageTool, messageCallText } from '@shared/own
 import { messageLine, previewLine } from '@shared/owner/preview';
 import { branchName } from '@shared/sessions/branch';
 import type { TranscriptSummary } from '@shared/wire/store';
-import { TranscriptRecordSchema, type TranscriptRecord } from '@shared/wire/transcript';
+import { isNoContent, TranscriptRecordSchema, type TranscriptRecord } from '@shared/wire/transcript';
 
 export const HEAD_TAIL_BYTES = 64 * 1024;
 const TEXT_CAP = 200;
@@ -203,6 +203,7 @@ function firstUserText(records: TranscriptRecord[]): string | null {
   for (const record of records) {
     if (record.type !== 'user' || record.isMeta === true) continue;
     const content = (record.message as { content?: unknown } | undefined)?.content;
+    if (isNoContent(content)) continue; // P5 O9: the engine's word for a message with none titles nothing
     if (typeof content === 'string') {
       // A bash-mode prompt stores its command in tags; it titles as the terminal shows it, `! <command>` (debt wave 4)
       const bash = /^<bash-input>([\s\S]*?)<\/bash-input>/.exec(content);

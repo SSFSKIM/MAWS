@@ -201,20 +201,26 @@ function gatewaySection({ status, facts, directLogin, reads }: SessionInfoInput)
   return { title: INFO.sections.gateway, rows };
 }
 
-function permissionsSection({ record, status, lane, reads, observed, now }: SessionInfoInput): InfoSection { // P2-A: observed, now
+// The Mode row. P2-A: with no live process, the effective mode the engine last reported (an old one never confirms a
+// requested one). P5 O9 (the sitting): a terminal session driven through its bridge names none, since no bridge event
+// or read reports its live mode; an observation from an earlier MAWS run, or the record's default, would be a guess.
+export function modeRow({ record, status, observed, now, driven }: Pick<SessionInfoInput, 'record' | 'status' | 'observed' | 'now' | 'driven'>): InfoRow {
+  if (driven) return { label: INFO.mode, value: LANE_A_WORDS.modeNotReported, note: LANE_A_WORDS.mode };
+  if (observed) return observedRow(INFO.mode, observed, (f) => f.mode, (m) => PERMISSION_MODE_LABELS[m], now);
   const mode = status?.permissionMode ?? record.permissionMode;
+  return { label: INFO.mode, value: PERMISSION_MODE_LABELS[mode.effective], note: mode.refusal ? `${INFO.effectiveNote} · ${MODE_REFUSAL_WORDS[mode.refusal]}` : INFO.effectiveNote };
+}
+
+function permissionsSection(input: SessionInfoInput): InfoSection {
+  const { status, lane, reads } = input;
   const grants = status?.grants.length ?? 0;
   const rules = reads.rules?.state.rules;
   const count = (behavior: string) => rules?.filter((r) => r.behavior === behavior).length ?? 0;
   const laneValue = lane ? lane.sentence : NONE;
-  // P2-A: with no live process, the effective mode the engine last reported (an old one never confirms a requested one)
-  const modeRow: InfoRow = observed
-    ? observedRow(INFO.mode, observed, (f) => f.mode, (m) => PERMISSION_MODE_LABELS[m], now)
-    : { label: INFO.mode, value: PERMISSION_MODE_LABELS[mode.effective], note: mode.refusal ? `${INFO.effectiveNote} · ${MODE_REFUSAL_WORDS[mode.refusal]}` : INFO.effectiveNote };
   return {
     title: INFO.sections.permissions,
     rows: [
-      modeRow,
+      modeRow(input),
       { label: INFO.lane, value: laneValue, note: lane?.reviews ? LANE.reviews(lane.reviews.evaluated, lane.reviews.flagged) : undefined },
       { label: INFO.rules, value: rules ? INFO.ruleCounts(count('allow'), count('ask'), count('deny'), grants) : INFO.grantsOnly(grants), action: 'permissions' },
     ],

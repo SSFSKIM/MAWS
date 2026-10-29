@@ -14,6 +14,7 @@ import { SELECTOR } from '../../widgets/copy';
 import { slashWidget, useRegisteredWidgets } from '../mentions/widgets';
 import type { ModelBinding } from './bindings';
 import { CHIP } from './chip-style';
+import { useDraftShown } from './draft-shown';
 
 const chipWidget = (name: string) => {
   const widget = slashWidget(name);
@@ -31,11 +32,15 @@ export function ModelChip({ appSessionId, binding, onOpen, onClosed }: { appSess
     if (nonce !== null) opened.current?.();
   }, [nonce]);
   useEffect(() => () => closeChipWidget(appSessionId), [appSessionId]); // a menu never outlives its composer
+  const shown = useDraftShown(); // nor its draft: a docked card hiding the toolbar closes it (draft-shown.ts)
+  useEffect(() => {
+    if (!shown) closeChipWidget(appSessionId);
+  }, [shown, appSessionId]);
 
   const Widget = open ? chipWidget(open.name)?.component : undefined;
   return (
     <Popover.Root
-      open={open !== null && Widget !== undefined}
+      open={shown && open !== null && Widget !== undefined}
       onOpenChange={(next) => {
         if (!next) closeChipWidget(appSessionId);
         else if (chipWidget('effort')) requestChipWidget(appSessionId, 'effort', '');
