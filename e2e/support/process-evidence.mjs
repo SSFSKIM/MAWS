@@ -1,5 +1,6 @@
 // Public CI evidence, not a profile backup. Keep only the two main-process streams and the engine host's log.
 // Raw errors can contain upstream responses or account data: credentialed/owner scenes opt out, not regex-redact.
+import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, closeSync, copyFileSync, mkdirSync, openSync, readSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';

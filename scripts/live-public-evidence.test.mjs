@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import console from 'node:console';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

@@ -1,5 +1,6 @@
 // The live harness's public-output boundary: exported journals and sitting notes use the same redactor.
 // Raw engine journals remain faithful in their private scratch profiles; only copies/notes are sanitized.
+import console from 'node:console';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
