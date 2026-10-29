@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LaneAState } from '@shared/ipc/schema/lane-a';
 import { addressOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 import { remoteRow } from '../../../../test/support/builders';
 import { OTHER_MACHINE } from '../../../../test/support/machine';
 import { remoteOpenerFor } from '../sessions/remote-openers';
@@ -40,7 +41,7 @@ describe('connectRemoteLaneA', () => {
   it('puts a remote session’s pending requests in its pane’s attention, each with its request view, until settled or unwatched', () => {
     applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], pending: [raised] }));
     const [item] = useAttention.getState().bySession.get(REMOTE)!;
-    expect(item).toMatchObject({ id: 'lane-a:eng-r:toolu_1', appSessionId: REMOTE, kind: 'permission', summary: 'Bash: npm test', createdAt: '2026-10-29T08:00:00.000Z', request: { requestId: 'toolu_1' } });
+    expect(item).toMatchObject({ id: addressOf(OTHER_MACHINE, 'lane-a:eng-r:toolu_1'), appSessionId: REMOTE, kind: 'permission', summary: 'Bash: npm test', createdAt: '2026-10-29T08:00:00.000Z', request: { requestId: 'toolu_1' } });
     expect(useAttention.getState().requests.get(item.id)).toMatchObject({ kind: 'permission.requested', toolName: 'Bash', input: { command: 'npm test' } });
     applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], pending: [] }));
     expect(useAttention.getState().bySession.get(REMOTE)).toEqual([]);
@@ -48,6 +49,25 @@ describe('connectRemoteLaneA', () => {
     expect(useAttention.getState().bySession.get(REMOTE)).toHaveLength(1);
     applyLaneAState(REMOTE, null); // the last watch ended
     expect(useAttention.getState().bySession.get(REMOTE)).toEqual([]);
+  });
+
+  // OX2: an attention id is machine-bound, so the mirror lifts it to the session's machine as main's ids are lifted at
+  // the IPC boundary; the request view and a question's draft are keyed by it, and two machines' requests stay apart.
+  it('addresses each item to its machine, so one engine session and request id on two machines are two cards', () => {
+    const THIRD = 'ThirdMachineRef0000000' as MachineRef;
+    const there = addressOf(THIRD, 'eng-r' as AppSessionId);
+    const question = { ...raised, tool: 'AskUserQuestion', input: { questions: [{ question: 'Which file?', header: 'File', options: [], multiSelect: false }] } };
+    applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], pending: [raised] }));
+    applyLaneAState(there, laneAState(there, { engineSessionId: 'eng-r', link: LINK, acts: [], pending: [question] }));
+    const here = useAttention.getState().bySession.get(REMOTE)![0];
+    const third = useAttention.getState().bySession.get(there)![0];
+    expect([here.id, third.id]).toEqual([addressOf(OTHER_MACHINE, 'lane-a:eng-r:toolu_1'), addressOf(THIRD, 'lane-a:eng-r:toolu_1')]);
+    expect(useAttention.getState().requests.get(here.id)).toMatchObject({ kind: 'permission.requested', toolName: 'Bash' });
+    expect(useAttention.getState().requests.get(third.id)).toMatchObject({ kind: 'question.requested' });
+    useAttention.getState().setDraft(third.id, { answers: { 'Which file?': 'a.ts' } } as never);
+    applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], pending: [] }));
+    expect(useAttention.getState().bySession.get(there)).toHaveLength(1);
+    expect(useAttention.getState().drafts.has(third.id)).toBe(true); // the other machine's settling leaves this one's draft
   });
 
   it('leaves a local state’s requests to main’s own list', () => {

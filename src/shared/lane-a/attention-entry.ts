@@ -3,7 +3,7 @@
 // the request built from the raised record (tool, input, questions, suggestions) in the shape of the engine's own request
 // event, so the card, the hover preview and the docked swap read it as they read a broker item's. Both halves read it:
 // the local spine's list (src/services/lane-a/attention.ts) and the renderer's remote pane
-// (src/renderer/src/lane-a/remote-attention.ts).
+// (src/renderer/src/lane-a/remote-connect.ts), which lifts the id to the session's machine (OX2).
 import { LANE_A_ITEM_PREFIX } from '@shared/attention/lane-a-item';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { Question, SessionEvent } from '@shared/graph/events';

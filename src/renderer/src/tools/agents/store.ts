@@ -39,6 +39,18 @@ export interface TaskGraphStore {
   stop(appSessionId: AppSessionId, taskId: TaskId): Promise<{ ok: true } | { ok: false; message: string }>;
 }
 
+// P5 O9 M9: another machine's terminal session has no engine status, journal or disk here; its tree and statuses come
+// from its plane transcript (the DX4 metas and statuses over the held rows), fed by whoever registers the feed
+// (`lane-a/remote-agents.ts`). A feed answers null for a session it does not serve, which the store reads as before.
+export type RemoteTaskFeed = (appSessionId: AppSessionId) => ((onGraph: (graph: TaskGraph) => void) => () => void) | null;
+let remoteFeed: RemoteTaskFeed | null = null;
+export function registerRemoteTaskFeed(feed: RemoteTaskFeed): () => void {
+  remoteFeed = feed;
+  return () => {
+    if (remoteFeed === feed) remoteFeed = null;
+  };
+}
+
 // After a resolved stop whose id the status no longer lists, how long the store waits for a terminal frame before
 // removing the node (R6: the frames came 3-9 ms after the request, before the answer, for all three kinds).
 export const STOP_SETTLE_MS = 2000;
@@ -301,6 +313,12 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
         };
         if (w.watchers > 1) return handle;
         write(id, {});
+        const remote = remoteFeed?.(id) ?? null; // P5 O9 M9
+        if (remote !== null) {
+          write(id, { phase: 'loading', disk: { agents: [], runs: [], error: null, runsError: null } }); // no disk here to read
+          w.offs.push(remote((graph) => write(id, { graph, phase: 'live', error: null })));
+          return handle;
+        }
         const client = agentWorkClient();
         w.offs.push(client.onEventBatch(({ appSessionId, events }) => appSessionId === id && onBatch(id, events)));
         // The current status first, the launch check among it, so a relaunch while nobody watched resets the cursor
