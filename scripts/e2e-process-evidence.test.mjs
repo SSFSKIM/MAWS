@@ -49,6 +49,18 @@ test('copies host generations before profile deletion, including a failed launch
   assert.deepEqual(files.map((name) => readFileSync(join(dir, 'output', name), 'utf8')).sort(), ['idle: collected in 13 ms\n', 'older host\n']);
 });
 
+test('utility hosts retain only their forwarded lines, even across stream chunks', async (t) => {
+  const dir = scratch(t);
+  const evidence = processEvidence(join(dir, 'output'), join(dir, 'profile'));
+  const child = spawn(process.execPath, ['-e', "process.stdout.write('[engine-'); process.stdout.write('host] idle: collected in 8 ms\\n[pty-host] other\\nmain only\\n'); process.stderr.write('[engine-host] host warning\\n')"]);
+  evidence.capture(child);
+  await once(child, 'close');
+  evidence.finish();
+  const host = readdirSync(join(dir, 'output')).find((name) => name.endsWith('.utility.log'));
+  assert.ok(host);
+  assert.equal(readFileSync(join(dir, 'output', host), 'utf8'), '[engine-host] idle: collected in 8 ms\n[engine-host] host warning\n');
+});
+
 test('a launch with no detached host writes no pretend host log', (t) => {
   const dir = scratch(t);
   processEvidence(join(dir, 'output'), join(dir, 'missing')).finish();

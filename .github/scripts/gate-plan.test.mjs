@@ -1941,7 +1941,7 @@ test('e2e uploads green flaky reports and every measured JSON set, but never a p
     assert.match(measured, /name: measured-e2e-\$\{\{ matrix.slug \}\}/);
     const paths = /path: \|\n((?: {12}[^\n]+\n)+)/.exec(measured)?.[1].trim().split(/\s+/) ?? [/path: (.+)/.exec(measured)[1]];
     const uploaded = (file) => paths.some((pattern) => matchesGlob(file, pattern));
-    for (const file of ['test-results/daemon-idle.json', 'test-results/attempt/engine-host-abc.log', 'test-results/attempt/engine-host-abc.previous.log', 'test-results/tool-time-heavy-live/timings.json']) assert.equal(uploaded(file), true, file);
+    for (const file of ['test-results/daemon-idle.json', 'test-results/artifacts-perf.jsonl', 'test-results/attempt/engine-host-abc.utility.log', 'test-results/attempt/engine-host-abc.log', 'test-results/attempt/engine-host-abc.previous.log', 'test-results/tool-time-heavy-live/timings.json']) assert.equal(uploaded(file), true, file);
     for (const file of ['test-results/attempt/main-process-abc.stderr.log', 'test-results/attempt/screenshot.png', 'test-results/attempt/profile/host.log', 'playwright-report/index.html']) assert.equal(uploaded(file), false, file);
     for (const upload of [report, measured]) assert.match(upload, /retention-days: 7\n/);
   }

@@ -1,7 +1,7 @@
 // Public CI evidence, not a profile backup. Keep only the two main-process streams and the engine host's log.
 // Raw errors can contain upstream responses or account data: credentialed/owner scenes opt out, not regex-redact.
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
 export function captureAllowed({ file, env, realEngine = false, ownerConfigHome = false }) {
@@ -18,6 +18,7 @@ export function processEvidence(outputDir, userData) {
   mkdirSync(outputDir, { recursive: true });
   const id = randomUUID(); // distinct even for relaunches over the same profile, and retries have their own outputDir
   const listeners = [];
+  const streams = [];
   let finished = false;
   return {
     capture(child) {
@@ -26,6 +27,7 @@ export function processEvidence(outputDir, userData) {
         if (!stream) continue;
         const file = join(outputDir, `main-process-${id}.${name}.log`);
         writeFileSync(file, '');
+        streams.push(file);
         const receive = (chunk) => appendFileSync(file, chunk);
         stream.on('data', receive); // additive: quit specs and scene hooks keep their own listeners and bytes
         listeners.push(() => stream.off('data', receive));
@@ -35,6 +37,10 @@ export function processEvidence(outputDir, userData) {
       if (finished) return;
       finished = true;
       for (const remove of listeners) remove();
+      // Utility hosts (artifacts-perf) have no file: main/hosts/supervisor.ts forwards their lines with this prefix.
+      // Extract after the measurement, from complete bytes already captured. Streams retain their own line order.
+      const utilityLines = streams.flatMap((file) => readFileSync(file, 'utf8').split('\n').filter((line) => line.startsWith('[engine-host] ')));
+      if (utilityLines.length) writeFileSync(join(outputDir, `engine-host-${id}.utility.log`), `${utilityLines.join('\n')}\n`);
       // Called after the profile's processes stop, before its directory is removed. An early failed launch or a
       // utility-mode host may have no file. The rotated generation uses .log too so the narrow upload catches it.
       for (const [source, suffix] of [['host.log', ''], ['host.log.1', '.previous']]) {

@@ -896,6 +896,7 @@ jobs:
           name: measured-e2e-${{ matrix.slug }}
           path: |
             test-results/**/*.json
+            test-results/**/*.jsonl
             test-results/**/engine-host-*.log
           retention-days: 7
           if-no-files-found: ignore
