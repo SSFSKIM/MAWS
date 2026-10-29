@@ -9,11 +9,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EngineSessionStatusSchema, type EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge, Settings } from '@shared/ipc/schema';
-import { compileAddressing } from '@shared/machine/address';
+import { addressOf, compileAddressing } from '@shared/machine/address';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import type { UsageSnapshot } from '@shared/usage/types';
-import { digest } from '../../../../../test/support/builders';
-import { at, TEST_MACHINE } from '../../../../../test/support/machine';
+import { digest, remoteRow } from '../../../../../test/support/builders';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
+import type { LaneAState } from '@shared/ipc/schema/lane-a';
+import { laneAState } from '../../lane-a/test-support/lane-a-state';
+import { LANE_A_WORDS } from '../../session/controls/lane-a';
+import { applyLaneAState, resetLaneAStore } from '../../stores/lane-a';
 import { useReadLoads } from '../../widgets/read';
 import { loadScenario } from '../../../../../test/support/scenario';
 import { createWidgetBackend, fixtureLine, RESPONSES, type WidgetBackend } from '../../../../../test/support/widget-backend';
@@ -374,3 +378,29 @@ describe('session info names the browser’s loaded pages', () => {
   });
 });
 // E4a end
+
+// P5 O9 M9 (fix wave 1): another machine's terminal session (a listed lane A row, no record here) shows what this
+// device can't do to it, each with the reason its controls port gives (Q2: in place, never missing).
+describe('session info for another machine’s terminal session', () => {
+  const REMOTE = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
+  const LINK: NonNullable<LaneAState['link']> = { state: 'up', refusal: null, carrier: 'direct', member: 'm', clientClass: 'native-mac', rights: [], reason: null };
+  afterEach(() => {
+    resetLaneAStore();
+    useSessions.setState({ listed: new Map() });
+  });
+
+  it('lists the remote gaps under Not available here, each with its reason', () => {
+    useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', availability: 'foreign_held' }), appId: REMOTE }]]) });
+    applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], turn: { running: true, unknown: false } }));
+    mount({ ...ctxOf(REMOTE), session: null });
+    const unavailable = screen.getByRole('region', { name: 'Not available here' });
+    const rows = within(unavailable).getAllByRole('term').map((term) => [term.textContent, term.nextElementSibling?.textContent]);
+    expect(rows).toEqual(expect.arrayContaining([
+      ['Subagent rows', LANE_A_WORDS.remoteSubagentRows],
+      ['Stop a background shell', LANE_A_WORDS.remoteStopTask],
+      ['Take over in MAWS', LANE_A_WORDS.remoteTakeOver],
+      ['Reopen', LANE_A_WORDS.remoteReopen],
+      ['Attachments', LANE_A_WORDS.remoteMedia],
+    ]));
+  });
+});

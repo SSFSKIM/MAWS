@@ -5,12 +5,15 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { PreloadBridge } from '@shared/ipc/schema';
-import { bareOf } from '@shared/machine/address';
+import { addressOf, bareOf } from '@shared/machine/address';
 import { askSteerText } from '@shared/maws/ask';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { TEST_MACHINE, at } from '../../../../../test/support/machine';
+import { OTHER_MACHINE, TEST_MACHINE, at } from '../../../../../test/support/machine';
+import { remoteRow } from '../../../../../test/support/builders'; // P5 O9 M9
+import { Chain, SESSION } from '../../lane-a/test-support/chain-rows'; // P5 O9 M9
+import { resetRemoteTranscripts } from '../../lane-a/remote-source'; // P5 O9 M9
 import { laneAState } from '../../lane-a/test-support/lane-a-state'; // P5 O9
 import { resetLaneAWatches, watchLaneA } from '../../lane-a/watches'; // P5 O9
 import { applyLaneAState, resetLaneAStore } from '../../stores/lane-a'; // P5 O9
@@ -41,7 +44,7 @@ afterAll(() => Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offs
 // React's renders and effects): `settle` drains it inside act by yielding the event loop once, and the expectation is
 // read once, so load can slow a case but not fail it.
 beforeAll(async () => {
-  await Promise.all([import('./TranscriptSlot'), import('./Transcript'), import('./markdown/Markdown')]);
+  await Promise.all([import('./TranscriptSlot'), import('./Transcript'), import('./markdown/Markdown'), import('../../lane-a/view/RemoteTranscriptSlot') /* P5 O9 M9 */]);
 });
 const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 
@@ -485,5 +488,72 @@ describe('TranscriptSlot', () => {
       expect(document.body.textContent).not.toMatch(/Working/);
       expect(document.querySelector('[data-kind="divider"][data-turn-id]')).toBeNull();
     });
+  });
+});
+
+// P5 O9 M9: another machine's terminal session (a listed lane A row, no record) draws from its machine's plane through
+// the page's watch; a subagent's own transcript there is a gap, said in its place.
+describe('TranscriptSlot for another machine’s terminal session', () => {
+  const REMOTE = addressOf(OTHER_MACHINE, SESSION as AppSessionId);
+  const listed = () => useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, SESSION, { lane: 'A', availability: 'foreign_held' }), appId: REMOTE }]]) });
+  afterEach(() => {
+    resetRemoteTranscripts();
+    resetLaneAWatches();
+    resetLaneAStore();
+    useSessions.setState({ listed: new Map() });
+  });
+
+  it('opens the page’s watch on its machine and draws the snapshot’s rows', async () => {
+    listed();
+    const listeners = new Map<string, (payload: unknown, machine: string) => void>();
+    const invoke = vi.fn((name: string) => Promise.resolve(name === 'laneA.watch' ? { ok: true, value: { watch: 'w1' } } : { ok: false, error: { code: 'internal', message: 'unexpected' } }));
+    const on = vi.fn((name: string, listener: (payload: unknown, machine: string) => void) => (listeners.set(name, listener), () => {}));
+    window.maws = { localMachine: TEST_MACHINE, invoke, on } as unknown as PreloadBridge;
+    render(<TranscriptSlot appSessionId={REMOTE} />);
+    await settle();
+    expect(invoke).toHaveBeenCalledWith('laneA.watch', { appSessionId: SESSION }, OTHER_MACHINE);
+    const c = new Chain('c4a1f000', 'sminos');
+    c.prompt('List the files.');
+    c.answer('Two files.');
+    const snapshot = { project: 'p', machine: OTHER_MACHINE, session: SESSION, kind: 'snapshot', sub: 'up-1', n: 0, body: { rows: [...c.rows].reverse(), more: false, subagents: [], presence: { record: { status: 'idle' }, bridge: true }, streaming: [] } };
+    act(() => listeners.get('laneA.plane')!({ appSessionId: SESSION, watch: 'w1', messages: [snapshot] }, OTHER_MACHINE));
+    await settle();
+    await settle();
+    expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toContain('Two files.');
+  });
+
+  // Fix wave 2: an underfilled pane cannot scroll to ask again, so an older page the link could not carry says why at
+  // the top with a Retry, and the pane does not ask again by itself meanwhile.
+  it('offers Retry with the reason for an older page the link could not carry, and asks it again on a click', async () => {
+    listed();
+    const listeners = new Map<string, (payload: unknown, machine: string) => void>();
+    let reads = 0;
+    const invoke = vi.fn((name: string) => {
+      if (name === 'laneA.watch') return Promise.resolve({ ok: true, value: { watch: 'w1' } });
+      if (name === 'laneA.read') return Promise.resolve({ ok: true, value: ++reads === 1 ? { ok: false, code: 'failed', message: 'mini isn’t reachable' } : { ok: true, result: { requested: true } } });
+      return Promise.resolve({ ok: false, error: { code: 'internal', message: 'unexpected' } });
+    });
+    const on = vi.fn((name: string, listener: (payload: unknown, machine: string) => void) => (listeners.set(name, listener), () => {}));
+    window.maws = { localMachine: TEST_MACHINE, invoke, on } as unknown as PreloadBridge;
+    render(<TranscriptSlot appSessionId={REMOTE} />);
+    await settle();
+    const c = new Chain('c4a1f100', 'sminos');
+    c.prompt('Newer words.');
+    const snapshot = { project: 'p', machine: OTHER_MACHINE, session: SESSION, kind: 'snapshot', sub: 'up-1', n: 0, body: { rows: [...c.rows].reverse(), more: true, subagents: [], presence: { record: { status: 'idle' }, bridge: true }, streaming: [] } };
+    act(() => listeners.get('laneA.plane')!({ appSessionId: SESSION, watch: 'w1', messages: [snapshot] }, OTHER_MACHINE));
+    for (let i = 0; i < 10 && screen.queryByRole('button', { name: 'Retry' }) === null; i++) await settle();
+    expect(screen.getByTestId('older-failed').textContent).toContain('mini isn’t reachable');
+    for (let i = 0; i < 5; i++) await settle();
+    expect(reads).toBe(1); // no spin while the link is down
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    for (let i = 0; i < 5 && reads < 2; i++) await settle();
+    expect(reads).toBe(2);
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+  });
+
+  it('says a subagent’s own transcript there isn’t shown yet', () => {
+    listed();
+    render(<TranscriptSlot appSessionId={REMOTE} agentId={'a1' as AgentId} />);
+    expect(screen.getByRole('status').textContent).toBe('A subagent’s own transcript on another machine isn’t shown yet');
   });
 });

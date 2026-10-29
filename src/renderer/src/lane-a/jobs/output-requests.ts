@@ -112,6 +112,12 @@ export class OutputRequests {
     for (const entry of this.entries.values()) if (entry.view.phase === 'asking') entry.unsent = true;
   }
 
+  /** P5 O9 M9: the plane could not carry the task's request: it is asked again with the next `resend`. */
+  unsent(taskId: string): void {
+    const entry = this.entries.get(taskId);
+    if (entry?.view.phase === 'asking') entry.unsent = true;
+  }
+
   /** After a fresh snapshot: asks again for every output whose request is not on the wire. */
   resend(): void {
     for (const [taskId, entry] of this.entries) if (entry.unsent) this.request(taskId);

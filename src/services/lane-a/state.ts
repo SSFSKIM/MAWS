@@ -2,6 +2,7 @@
 // what its bridge can do, from `GET /status`, and what the session is doing, folded from its state stream (the snapshot,
 // then the events). Only `live` drives controls.
 import type { LaneACatalog, LaneARaised, LaneASettled, LaneAState } from '@shared/ipc/schema/lane-a';
+import { controlsMissingReason } from '@shared/lane-a/bridge';
 import { raisedOf, settledOf } from './reshape';
 
 type Event = Record<string, unknown>;
@@ -23,10 +24,7 @@ export function classify(status: Record<string, unknown>): BridgeState {
   if (typeof status.lane === 'string' && status.lane !== 'mismatch') return { bridge: 'observer', reason: OBSERVER_REASON };
   if (status.ready !== true) return { bridge: 'starting', reason: 'the session’s bridge is starting' };
   const capabilities = record(status.capabilities);
-  if (!record(capabilities?.controls)) {
-    const version = typeof capabilities?.sminos === 'string' ? ` (${capabilities.sminos})` : '';
-    return { bridge: 'none', reason: `this session’s sminos${version} predates MAWS’s controls: update sminos, then run /reload-plugins in the terminal` };
-  }
+  if (!record(capabilities?.controls)) return { bridge: 'none', reason: controlsMissingReason(capabilities?.sminos) };
   return { bridge: 'live', reason: null };
 }
 

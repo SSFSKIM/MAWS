@@ -7,7 +7,8 @@
 // drawn, and the list grows by nothing; so does a page that folds a turn it marks, which can draw fewer rows than
 // before. A page counts as progress only when the list grew. A page's rows count as drawn only once MAWS's store holds
 // them: a page that brings rows rebuilds the source, which the store installs (`hydrating`, then `live`) after the
-// render that names it.
+// render that names it. P5 O9 M9: a page the plane could not carry (`olderFailed`) is not asked again from here, which
+// would spin while another machine's link is down; the transcript asks it once the plane delivers again, or the reader.
 import { useCallback, useEffect, useRef, type RefObject } from 'react';
 import { useTranscriptStore } from '../../stores/transcript';
 import type { TranscriptSource } from '../../transcript/source/types';
@@ -20,7 +21,7 @@ export const TOP = 160;
 
 type Asked = { drawn: number; source: TranscriptSource; installed: boolean };
 
-export function useOlderPages(controller: PlaneTranscript, list: RefObject<TranscriptListHandle | null>, state: Pick<PlaneTranscriptState, 'phase' | 'more' | 'loadingOlder' | 'source'>, atRest = false): void {
+export function useOlderPages(controller: PlaneTranscript, list: RefObject<TranscriptListHandle | null>, state: Pick<PlaneTranscriptState, 'phase' | 'more' | 'loadingOlder' | 'olderFailed' | 'source'>, atRest = false): void {
   const drawnRows = useDrawnRowCount(controller.key, atRest);
   const storePhase = useTranscriptStore((s) => s.entries[controller.key]?.phase ?? null);
   const drawn = useRef(drawnRows);
@@ -53,6 +54,7 @@ export function useOlderPages(controller: PlaneTranscript, list: RefObject<Trans
 
   useEffect(() => {
     if (state.phase !== 'live' || !state.more || state.loadingOlder || storePhase !== 'live') return;
+    if (state.olderFailed !== null) return; // P5 O9 M9: the plane could not carry the last ask; its next delivery asks again
     const element = list.current?.scrollElement;
     if (!element) return;
     const pending = asked.current;
@@ -60,5 +62,5 @@ export function useOlderPages(controller: PlaneTranscript, list: RefObject<Trans
     asked.current = null;
     const nothingNew = pending !== null && drawnRows <= pending.drawn && element.scrollTop <= TOP;
     if (drawnRows === 0 || element.scrollHeight - element.clientHeight <= TOP || nothingNew) ask();
-  }, [ask, list, drawnRows, storePhase, state.phase, state.more, state.loadingOlder, state.source]);
+  }, [ask, list, drawnRows, storePhase, state.phase, state.more, state.loadingOlder, state.source, state.olderFailed]);
 }

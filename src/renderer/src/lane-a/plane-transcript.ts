@@ -85,7 +85,7 @@ import { createBackfillContext, recordToEvents, type BackfillContext, type Subag
 import type { createTranscriptStore } from '../stores/transcript';
 import { emptyGraph, type TaskGraph } from '../tools/agents/model/task-graph';
 import type { TranscriptSource } from '../transcript/source/types';
-import { ReadError, type SessionPlane, type SessionTarget, type Subscription, type SubscriptionMessage } from './session-plane';
+import { ReadError, type SessionPlane, type SessionTarget, type Subscription, type SubscriptionMessage, type UnansweredAsk } from './session-plane';
 import { taskGraphOf, withEvents, withMetas, withStatuses } from './agents/task-feed';
 import { OutputRequests } from './jobs/output-requests';
 import { StreamingLayer, type StreamBlock } from './stream/layer';
@@ -121,6 +121,11 @@ export type PlaneTranscriptState = {
   /** Older rows exist before the oldest held one. */
   more: boolean;
   loadingOlder: boolean;
+  /**
+   * P5 O9 M9: why the last ask for older rows went unanswered (the plane could not carry it); null otherwise. Cleared
+   * when the plane delivers again, which asks the page again, or when the reader asks.
+   */
+  olderFailed: string | null;
   /** The subagent tree this subscription knows: MAWS's task graph over its metas and its held rows, each agent's DX4 status laid over it. */
   tasks: TaskGraph;
   /** The loop's background jobs and MCP server names (DX4 `subagents`); null until a producer of DC8 or later sends them. */
@@ -381,6 +386,9 @@ export class PlaneTranscript {
   private olderAsked: number | null = null;
   /** The id of the subscription whose snapshot is held (the latency hook names its samples by it). */
   private sub: string | undefined = undefined;
+  /** P5 O9 M9: an ask the plane could not carry waits to be asked again: the older page (its state's `olderFailed`), the diff. */
+  private lostAsks = false;
+  private diffLost = false;
   /** The asks of `read status` made so far: an answer is taken only for the latest. */
   private statusAsks = 0;
   /** The jobs view's open outputs, asked for on this subscription (a main-thread one's). */
@@ -407,6 +415,7 @@ export class PlaneTranscript {
       streaming: [],
       more: false,
       loadingOlder: false,
+      olderFailed: null,
       tasks: emptyGraph(),
       jobs: null,
       mcp: null,
@@ -451,7 +460,7 @@ export class PlaneTranscript {
     const { more, loadingOlder } = this.state.getState();
     const oldest = this.rows[0];
     if (!more || loadingOlder || !this.serving || !this.subscription || !oldest) return;
-    this.state.setState({ loadingOlder: true });
+    this.state.setState({ loadingOlder: true, olderFailed: null });
     this.olderAsked = performance.now();
     this.subscription.rows(oldest.uuid, this.page);
   }
@@ -526,8 +535,16 @@ export class PlaneTranscript {
 
   private subscribe(): void {
     this.subscription = this.plane.subscribe(this.target, {
-      message: (message) => (message.kind === 'snapshot' ? this.snapshot(message.body, message.sub) : this.receive(message)),
+      message: (message) => {
+        if (message.kind === 'snapshot') this.snapshot(message.body, message.sub);
+        else this.receive(message);
+        if (this.lostAsks && this.serving) this.askLostAgain(); // the plane delivers again: what it could not carry is asked again
+      },
       interrupted: () => this.interrupted(),
+      unanswered: (ask, message) => this.unanswered(ask, message),
+      resumed: () => {
+        if (this.lostAsks && this.serving) this.askLostAgain(); // the link is back: what it could not carry is asked again
+      },
       end: (body) => {
         this.subscription = null;
         this.serving = false;
@@ -690,6 +707,34 @@ export class PlaneTranscript {
       this.rebuild();
     }
     this.state.setState({ more: body.more, loadingOlder: false });
+  }
+
+  /**
+   * P5 O9 M9: the plane could not carry an ask (another machine's link down), and the subscription stands: what waited
+   * clears, the older page with why, and each is asked again when the plane next delivers (`askLostAgain`).
+   */
+  private unanswered(ask: UnansweredAsk, message: string): void {
+    this.lostAsks = true;
+    if (ask.kind === 'rows') {
+      this.olderAsked = null;
+      this.state.setState({ loadingOlder: false, olderFailed: message });
+    } else if (ask.kind === 'diff') {
+      this.diffLost = true;
+      this.state.setState((s) => ({ diff: s.diff && { ...s.diff, pending: false } }));
+    } else this.outputs.unsent(ask.taskId);
+  }
+
+  private askLostAgain(): void {
+    this.lostAsks = false;
+    if (this.state.getState().olderFailed !== null) {
+      this.state.setState({ olderFailed: null });
+      this.loadOlder();
+    }
+    if (this.diffLost) {
+      this.diffLost = false;
+      this.requestDiff();
+    }
+    this.outputs.resend();
   }
 
   /**

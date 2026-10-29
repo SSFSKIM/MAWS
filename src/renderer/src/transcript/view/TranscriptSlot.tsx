@@ -17,8 +17,10 @@
 // keeps what an interrupt cut of it in its turn, and is at rest while its controls port says no main turn runs.
 // L197: the slot gives the transcript the session's agents from its task graph (agent-lookup.ts), so a message to an
 // agent no loaded turn launched names it.
+// P5 O9 M9: another machine's terminal session (a listed lane A row) draws through `lane-a/view/RemoteTranscriptSlot.tsx`,
+// from its machine's plane. A subagent's own transcript there is a gap, said in its place.
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
-import { useEffect, useMemo } from 'react';
+import { lazy, Suspense, useEffect, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useShownEffort } from '../../composer/effective-effort';
 import { useOwnerChannel } from '../../stores/owner-channel'; // P2-C
@@ -31,9 +33,15 @@ import { ipcRewind, ipcSource } from '../source/ipc';
 import { useAgentLookup } from './agent-lookup'; // L197
 import type { TranscriptActions } from './context';
 import { useLaneAStreaming } from '../../lane-a/stream/use-overlay'; // P5 O9 M5
+import { useRemoteLaneA } from '../../lane-a/remote-session'; // P5 O9 M9
+import { LANE_A_WORDS } from '../../session/controls/lane-a'; // P5 O9 M9
 import { useSessionControls } from '../../session/controls/controls-for'; // P5 O9 M5
 import { useRegisteredActions, useRegisteredRequestRenderer } from './registry';
 import { storeKeyOf, Transcript } from './Transcript';
+
+// P5 O9 M9: loaded only when another machine's session is shown, so the plane transcript it draws through stays out of
+// the chunk every local transcript loads.
+const RemoteTranscriptSlot = lazy(() => import('../../lane-a/view/RemoteTranscriptSlot').then((module) => ({ default: module.RemoteTranscriptSlot })));
 
 export interface TranscriptSlotProps {
   appSessionId: AppSessionId;
@@ -44,7 +52,20 @@ export interface TranscriptSlotProps {
   actions?: Partial<TranscriptActions>; // P2-E1: merged over the registered actions, for this mount only
 }
 
-export function TranscriptSlot({ appSessionId, agentId, className, startAt, presentation, actions: overrides }: TranscriptSlotProps) {
+export function TranscriptSlot(props: TranscriptSlotProps) {
+  const remote = useRemoteLaneA(props.appSessionId); // P5 O9 M9
+  if (!remote) return <LocalTranscriptSlot {...props} />;
+  if (props.agentId !== undefined) {
+    return <p className={`m-0 px-4 py-3 text-ui-sm text-fg-muted ${props.className ?? ''}`} role="status" data-testid="remote-subagent-gap">{LANE_A_WORDS.remoteSubagentRows}</p>;
+  }
+  return (
+    <Suspense fallback={null}>
+      <RemoteTranscriptSlot {...props} />
+    </Suspense>
+  );
+}
+
+function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presentation, actions: overrides }: TranscriptSlotProps) {
   const registered = useRegisteredActions();
   const actions = useMemo(() => (overrides ? { ...registered, ...overrides } : registered), [registered, overrides]);
   const renderRequest = useRegisteredRequestRenderer(); // C7's card; the placeholder until it registers

@@ -21,7 +21,7 @@ import { builtAtLabel } from '@shared/app/build-time'; // E11 §2.7
 import { registerPtyOpenLink } from './pty-links'; // C9
 import { appUrl, createWindow, installContentSecurityPolicy, prepareHarness } from './window'; // C9: prepareHarness
 // C3 start (the attention service is the spine's: src/services/spine-root.ts)
-import { emit } from './ipc/events';
+import { emit, emitFrom } from './ipc/events'; // P5 O9 M9: emitFrom, remote lane A's events
 import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P5 O6 M1: registerMachineHandler
 import { bindLocalMachine } from './machine/local'; // P5 O6 M2
 import { startMachines } from './machines'; // P5 O6 M3: the connection manager, and the stand-in behind its gate
@@ -38,6 +38,7 @@ import { registerOrgHandlers, registerRowsHandler } from './org/register'; // P5
 import { orgFiles } from './org/files'; // P5 O8 M1
 import { createRemoteRows } from './org/rows'; // P5 O8 M2
 import { installOrgPageFixture } from './org/page-fixture'; // P5 O8 M4a Task 8: a harness build's only
+import { createRemoteLaneA, routeLaneA } from './lane-a/remote'; // P5 O9 M9
 // C3 end
 // C5 start (emit comes with C3's imports)
 import { notificationActions } from './attention/actions';
@@ -355,7 +356,11 @@ function startMain(data: SpineData, launch: LaunchShape, { local, localName }: {
     // P5 O7 M1: the org session the RL2 links read; P5 O8 M1: production's sign-in, or O7's development session
     session,
   });
-  installRouter({ appUrl, local, dispatchToHost: hosts.dispatch, remote: machines.dispatch });
+  // P5 O9 M9: `laneA.*` for a machine O7's link reaches is remote lane A's (src/main/lane-a/remote.ts), over that link;
+  // every other command for another machine, and `laneA.*` for a socket-linked stand-in, goes to the manager. It writes
+  // no file, so it runs in a run that doesn't hold spine.lock too.
+  const remoteLaneA = createRemoteLaneA({ local, emit: (machine, name, payload) => void emitFrom(machine, name, payload), log: (line) => console.log(`[lane-a] ${line}`) });
+  installRouter({ appUrl, local, dispatchToHost: hosts.dispatch, remote: routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA) });
   // P5 O3-C (Interfaces §A): the services bus, how the library (the spine and the checkouts) registers its commands,
   // installs its intercepts, emits its events and taps them, bound here to the router and `emit`, so every tap main's
   // own code holds (the menu's, the stand-in's) still hears the library's events. O3-D's mawsd binds its services front.
@@ -365,6 +370,7 @@ function startMain(data: SpineData, launch: LaunchShape, { local, localName }: {
   // a step's promise (the hosts' draining close of a kept supervisor's socket) holds the exit, bounded by the port's grace;
   // P4 W2-B: the hosts' stop is a drain, run before the rest, which stop once it has settled
   const shutdown = shutdownSteps(app, CLOSE_GRACE_MS);
+  shutdown.add('remote lane A', () => remoteLaneA.stop()); // P5 O9 M9: its subscriptions closed before the links
   // C3 start: the engine host's userData travels in the environment it is forked with (the host protocol's hello carries
   // no fields).
   process.env.MAWS_USER_DATA = app.getPath('userData');

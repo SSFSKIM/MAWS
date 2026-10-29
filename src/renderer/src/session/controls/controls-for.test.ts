@@ -6,14 +6,16 @@ import { createElement } from 'react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { item, record, status, T0 } from '../../../../../test/support/builders';
+import { addressOf } from '@shared/machine/address';
+import { item, record, remoteRow, status, T0 } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
-import { TEST_MACHINE } from '../../../../../test/support/machine';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
+import { useMachines } from '../../stores/machines';
 import { applyLaneAState, resetLaneAStore, useLaneA } from '../../stores/lane-a';
 import { resetQueueStore } from '../../stores/queue';
 import { laneACatalog, laneAState } from '../../lane-a/test-support/lane-a-state';
 import { useSessions } from '../../stores/sessions';
-import { answerSession, askSession, compactSession, controlsFor, sendToSession, sessionControls, stopSessionTask, useSessionControls } from './controls-for';
+import { answerSession, askSession, compactSession, controlsFor, drivenByBridge, sendToSession, sessionControls, stopSessionTask, useSessionControls } from './controls-for';
 
 const APP = 'app-c' as AppSessionId;
 const UUID = '22222222-2222-4222-8222-222222222222' as MessageUuid;
@@ -23,7 +25,7 @@ const job = { kind: 'background_job', pid: null, jobId: 'job-1' } as const;
 beforeEach(() => {
   resetQueueStore();
   resetLaneAStore();
-  useSessions.setState({ engine: new Map(), digests: new Map(), records: new Map() });
+  useSessions.setState({ engine: new Map(), digests: new Map(), records: new Map(), listed: new Map() });
 });
 
 const inputs = () => ({ appSessionId: APP, client: fakeClient().client });
@@ -60,6 +62,25 @@ describe('controlsFor', () => {
     expect(controlsFor(held, laneAState(APP, { bridge: 'starting', reason: 'the session’s bridge is starting' }), inputs())).toBeNull();
     expect(controlsFor(held, laneAState(APP, { bridge: 'none', reason: 'update sminos' }), inputs())).toBeNull();
     expect(controlsFor(record(APP), laneAState(APP), inputs())!.queue(), 'a session MAWS holds stays lane B').not.toBeNull();
+  });
+
+  // P5 O9 M9: another machine's terminal session is a listed row of lane A (O8's R1, R2), with no record.
+  it('gives another machine’s listed lane A row lane A’s port, starting until its watch’s first state; a lane B row stays lane B', () => {
+    const remote = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
+    const laneB = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: T0, generation: 0 }]);
+    useSessions.setState({ listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', availability: 'foreign_held' }), appId: remote }], [laneB, { ...remoteRow(OTHER_MACHINE, 'app-r'), appId: laneB }]]) });
+    const client = fakeClient().client;
+    const starting = controlsFor(null, null, { appSessionId: remote, client })!;
+    expect(starting.queue()).toBeNull();
+    expect(starting.capability('send')).toEqual({ available: false, reason: 'Reading the session from Studio' });
+    expect(starting.capability('take-over')).toMatchObject({ available: false }); // a remote gap
+    const live = controlsFor(null, laneAState(remote, { link: { state: 'up', refusal: null, carrier: 'direct', member: 'm', clientClass: 'native-mac', rights: [], reason: null }, acts: [] }), { appSessionId: remote, client })!;
+    expect(live.capability('send')).toEqual({ available: true });
+    expect(live.capability('stop-task')).toMatchObject({ available: false });
+    expect(controlsFor(null, null, { appSessionId: laneB, client })!.queue(), 'a remote lane B row').not.toBeNull();
+    expect(drivenByBridge(remote)).toBe(true);
+    expect(drivenByBridge(laneB)).toBe(false);
   });
 });
 

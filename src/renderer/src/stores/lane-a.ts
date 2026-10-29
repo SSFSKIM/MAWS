@@ -10,16 +10,19 @@
 // P5 O9 M6: the settlements this page's answers were told (`laneA.answer`'s `not_pending`), beside those the state carries,
 // so a card whose answer lost the race says who won.
 //
-// M5 lists the local machine only: main's driver serves its own sessions, and a remote machine's lane A states come from
-// O9's remote adapter once a pane watches one (M9). A `laneA.changed` from any machine is applied.
+// M5 lists the local machine: main's driver serves its own sessions. M9: another machine's lane A states come from main's
+// remote adapter, for the sessions some page watches there; each machine O8's rows list (`listedMachines`) is listed by
+// that machine as the roster gains it, into its own partition, and a machine the roster loses is emptied. A
+// `laneA.changed` from any machine is applied, after the list of its machine when one is on its way.
 import type { Job } from 'desk-hub/protocol';
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import type { DeliveryKey, LaneACatalog, LaneADelivery, LaneAState } from '@shared/ipc/schema/lane-a';
 import { machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../ipc/client';
+import { useSessions } from './sessions';
 
 // One send the strip keeps: `sending` while the bridge has taken it but not said whether it entered, `refused` with the
 // bridge's reason, `unconfirmed` when the stream that would have said is gone ("may not have arrived").
@@ -224,27 +227,47 @@ export function dismissPendingSend(appSessionId: AppSessionId, key: DeliveryKey)
   useLaneA.setState((s) => ({ pendingSends: withPending(s.pendingSends, appSessionId, (s.pendingSends.get(appSessionId) ?? []).filter((p) => !sameKey(p.key, key))) }));
 }
 
-// Subscribes, then lists this machine's sessions; a change that raced the list is applied after it.
+// Subscribes, then lists this machine's sessions and each listed machine's; a change that raced its machine's list is
+// applied after it.
 export function connectLaneA(client: MawsBridge = ipc): () => void {
   catalogClient = client;
-  let buffer: [AppSessionId, LaneAState | null][] | null = [];
+  const local = client.localMachine;
+  const buffers = new Map<MachineRef, [AppSessionId, LaneAState | null][]>([[local, []]]); // the machines whose list is on its way
+  let listed = new Set<MachineRef>(); // the other machines listed
   let live = true;
   const off = client.on('laneA.changed', ({ appSessionId, state }) => {
     if (!live) return;
+    const buffer = buffers.get(machineOf(appSessionId));
     if (buffer) buffer.push([appSessionId, state]);
     else applyLaneAState(appSessionId, state);
   });
-  void client.invoke('laneA.list', undefined).then((result) => {
+  const settle = (machine: MachineRef, result: CommandResult<'laneA.list'>) => {
+    const raced = buffers.get(machine) ?? [];
+    buffers.delete(machine);
     if (!live) return;
-    if (result.ok) applyLaneAList(client.localMachine, result.value.states);
-    else console.warn('[lane-a] laneA.list unavailable; starting empty', result.error.message);
-    const raced = buffer ?? [];
-    buffer = null;
+    if (result.ok) applyLaneAList(machine, result.value.states);
+    else console.warn(`[lane-a] laneA.list unavailable on ${machine}; starting empty`, result.error.message);
     for (const [id, state] of raced) applyLaneAState(id, state);
+  };
+  void client.invoke('laneA.list', undefined).then((result) => settle(local, result));
+  // M9: each machine the rows list, as the roster gains or loses it
+  const follow = (machines: ReadonlySet<MachineRef>) => {
+    for (const machine of machines) {
+      if (machine === local || listed.has(machine)) continue;
+      buffers.set(machine, []);
+      void client.invoke('laneA.list', undefined, { machine }).then((result) => (listed.has(machine) ? settle(machine, result) : buffers.delete(machine)));
+    }
+    for (const machine of listed) if (!machines.has(machine)) applyLaneAList(machine, []);
+    listed = new Set([...machines].filter((machine) => machine !== local));
+  };
+  follow(useSessions.getState().listedMachines);
+  const offRoster = useSessions.subscribe((state, before) => {
+    if (live && state.listedMachines !== before.listedMachines) follow(state.listedMachines);
   });
   return () => {
     live = false;
     off();
+    offRoster();
     if (catalogClient === client) catalogClient = null;
   };
 }
