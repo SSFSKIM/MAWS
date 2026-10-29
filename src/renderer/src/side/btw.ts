@@ -11,6 +11,8 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { Availability } from '@shared/ipc/schema/session';
+import { sessionControls, useSessionControls } from '../session/controls/controls-for'; // P5 O9 M5
+import type { Capability, SessionControls } from '../session/controls/types'; // P5 O9 M5
 import { acquireSession, refusalWords } from '../sessions/acquire';
 import { availabilityIn, availabilityRefusal } from '../sessions/availability';
 import { toast } from '../stores/notices';
@@ -19,7 +21,14 @@ import { revealSideQuestions } from './actions';
 import { SIDE_COPY } from './copy';
 import { askSide, hostedInSidePane, setInlineQuestions } from './store';
 
-export const canAskSide = (appSessionId: AppSessionId): boolean => useSessions.getState().engine.get(appSessionId)?.process === 'ready';
+// P5 O9 M5 start: a terminal session driven through its bridge (its port names a turn) is asked through its port, so it
+// can take a question when its `btw` control can, and says why not otherwise; null for any other session.
+const drivenAsk = (controls: SessionControls | null): Capability | null => (controls && controls.turn() !== null ? controls.capability('btw') : null);
+export const useDrivenAsk = (appSessionId: AppSessionId): Capability | null => drivenAsk(useSessionControls(appSessionId));
+// P5 O9 M5 end
+
+export const canAskSide = (appSessionId: AppSessionId): boolean =>
+  useSessions.getState().engine.get(appSessionId)?.process === 'ready' || drivenAsk(sessionControls(appSessionId))?.available === true;
 
 // The question's view revealed: under the thread in its parent's pane, else the session's own Side pane.
 function revealQuestions(appSessionId: AppSessionId): void {
@@ -56,6 +65,7 @@ export async function applyBtw(appSessionId: AppSessionId, args: string): Promis
     askSideQuestion(appSessionId, question);
     return true;
   }
+  if (drivenAsk(sessionControls(appSessionId)) !== null) return false; // P5 O9 M5: the widget opens and says why
   // P2-A start (2026-10-09): the view opens at once (its line reads Starting… while the session starts), the question
   // is asked once the session is ready, and a refusal is said in a toast, the typed path having no field of its own
   const state = useSessions.getState();

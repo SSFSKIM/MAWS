@@ -345,6 +345,8 @@ export const SELECTOR = {
   setting: 'setting…',
   reading: 'Reading the models…',
   sessionOnly: 'For this session only',
+  // P5 O9 M5 (the owner's Q1, as recommended): what a model or effort set on a terminal session through its bridge does
+  terminalOnly: "For this session's own requests from now on; the terminal's status line keeps showing its own",
   unknownEffort: (word: string) => `No effort level named ${word}`,
 };
 

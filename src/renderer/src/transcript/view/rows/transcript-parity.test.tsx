@@ -132,6 +132,19 @@ it('restores only after a dry run and a confirmation naming the engine’s files
   await vi.waitFor(() => expect(rewind.undo).toHaveBeenCalledOnce());
 });
 
+// P5 O9 M5 (acceptance 2): a session whose port can't roll files back keeps the control in place, disabled, with why.
+it('keeps Restore files in place, disabled with its reason, where the session can’t roll files back', async () => {
+  const b = builder(); b.turn('u'); b.toolUse('edit', 'Edit', { file_path: '/p/a', old_string: 'a', new_string: 'b' }); b.result('edit', 'done'); b.end(['u']);
+  const store = await storeWith(b.events);
+  const rewind = { canUndo: vi.fn(async () => ({ ok: true, reason: null, files: ['/p/a'] })), undo: vi.fn(async () => {}), unavailable: 'File rollback runs in the terminal' };
+  renderRow(rowOf(store.rows(), 'divider'), { storeKey: store.key, rewind });
+  fireEvent.click(screen.getByRole('button', { name: 'Turn summary' }));
+  const restore = screen.getByRole('button', { name: 'Restore files to before this turn' }) as HTMLButtonElement;
+  expect([restore.disabled, restore.title]).toEqual([true, 'File rollback runs in the terminal']);
+  fireEvent.click(restore);
+  expect(rewind.canUndo).not.toHaveBeenCalled();
+});
+
 it('replays the recorded Edit and empty-patch Write without losing counts or content', async () => {
   const events = journalToEvents(loadJournal('pass1', 'p4/p4-tool-summaries-thinking-edits'));
   const store = await storeWith(events); useTranscriptStore.getState().expandAll(store.key);

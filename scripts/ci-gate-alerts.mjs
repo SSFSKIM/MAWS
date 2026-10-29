@@ -78,15 +78,16 @@ export function macJobs({ gates = '', runner = '', class1a = '', variables = {},
 // Whether the run goes ahead, and what to print: `alerts` the parsed open alerts (each with its issue `number`),
 // `runners` MAWS's self-hosted runners as { name, status, labels }, `guest` the guest the run's Mac jobs can all run in
 // (macPlan): `vm` (a guest that carries ci-kit-mac-solo or ci-kit-mac-vm), `vm-trial` (the trial slot's), or null, a run
-// that needs a host; `home` the run's jobs on the ci-kit-mac-home label (macPlan), which only a runner carrying it takes.
-export function decide({ jobs, alerts, runners, guest = null, home = [] }) {
+// that needs a host; `home` and `ec2` the jobs on each machine's exclusive label, which another free host cannot take.
+export function decide({ jobs, alerts, runners, guest = null, home = [], ec2 = [] }) {
   if (jobs.length === 0 || alerts.length === 0) return { stop: false, lines: [] };
   const blocked = [...new Set(alerts.map((alert) => alert.machine))];
   const machineOf = (runner) => MAC_RUNNER.exec(runner.name)?.[1];
   const online = runners.filter((runner) => runner.status === 'online');
   const machines = [...new Set(online.map(machineOf).filter((machine) => machine !== undefined && !blocked.includes(machine)))];
-  if (home.length > 0) {
-    const homes = runners.filter((runner) => runner.labels.includes(HOME));
+  for (const [required, label, description] of [[home, HOME, 'home Mac'], [ec2, 'ci-kit-mac-ec2', 'EC2 overflow Mac']]) {
+    if (required.length === 0) continue;
+    const homes = runners.filter((runner) => runner.labels.includes(label));
     const homeMachines = [...new Set(homes.map(machineOf).filter((machine) => machine !== undefined))];
     if (!homes.some((runner) => runner.status === 'online' && machines.includes(machineOf(runner)))) {
       const homeAlerts = alerts.filter((alert) => homeMachines.includes(alert.machine));
@@ -94,16 +95,16 @@ export function decide({ jobs, alerts, runners, guest = null, home = [] }) {
       return {
         stop: true,
         lines: [
-          `ci-gate: not pushing: this run puts jobs on the home Mac (${list(home)}), which only a runner labelled ${HOME} takes, and no such runner is online on a machine free of an open ci-kit alert:`,
-          ...(homeMachines.length === 0 ? [`  no runner of ${REPO} carries ${HOME}`] : []),
+          `ci-gate: not pushing: this run puts jobs on the ${description} (${list(required)}), which only a runner labelled ${label} takes, and no such runner is online on a machine free of an open ci-kit alert:`,
+          ...(homeMachines.length === 0 ? [`  no runner of ${REPO} carries ${label}`] : []),
           ...homeMachines.flatMap((machine) => {
             const own = homeAlerts.filter((alert) => alert.machine === machine);
-            return own.length > 0 ? own.map((alert) => `  ${alertLine(alert)}`) : [`  ${machine}: no ${HOME} runner online`];
+            return own.length > 0 ? own.map((alert) => `  ${alertLine(alert)}`) : [`  ${machine}: no ${label} runner online`];
           }),
-          ...(others.length > 0 ? [`ci-gate: ${list(others)} ${others.length === 1 ? 'is online and free of alerts, but carries' : 'are online and free of alerts, but carry'} no ${HOME}, so ${others.length === 1 ? 'it does' : 'they do'} not take these jobs`] : []),
+          ...(others.length > 0 ? [`ci-gate: ${list(others)} ${others.length === 1 ? 'is online and free of alerts, but carries' : 'are online and free of alerts, but carry'} no ${label}, so ${others.length === 1 ? 'it does' : 'they do'} not take these jobs`] : []),
           homeAlerts.length > 0
             ? `ci-gate: rerun once the alert closes: ${homeAlerts.map((alert) => `https://github.com/${ALERTS}/issues/${alert.number}`).join(' ')}`
-            : `ci-gate: rerun once a runner carrying ${HOME} is online`,
+            : `ci-gate: rerun once a runner carrying ${label} is online`,
         ],
       };
     }
@@ -213,9 +214,11 @@ export function macPlan({ gitDir, sha, ref = '', gates = '', runner = '', class1
       ...JSON.parse(out.e2e).map((entry) => [`e2e:${entry.group}`, entry.runner]),
     ].filter(([, json]) => runsOn(json) !== 'other');
     const kinds = new Set(placed.map(([, json]) => runsOn(json)));
+    const ec2 = placed.filter(([, json]) => [JSON.parse(json)].flat().includes('ci-kit-mac-ec2')).map(([name]) => name);
     return {
       jobs: placed.map(([name]) => name),
       guest: placed.length === 0 ? 'none' : kinds.size === 1 && !kinds.has('host') ? [...kinds][0] : null,
+      ...(ec2.length > 0 && { ec2 }),
       home: placed.filter(([, json]) => [JSON.parse(json)].flat().includes(HOME)).map(([name]) => name),
     };
   } catch {
@@ -258,7 +261,7 @@ export function check({ gates, runner, class1a, lane, live, trailers, gitDir, sh
     if (alerts.length === 0) return { stop: false, lines: [] };
     step = `${REPO}'s runners`;
     const runners = read(`repos/${REPO}/actions/runners?per_page=100`, '.runners[] | {name, status, labels: [.labels[].name]}');
-    return decide({ jobs, alerts, runners, guest: placed?.guest ?? null, home: placed?.home ?? [] });
+    return decide({ jobs, alerts, runners, guest: placed?.guest ?? null, home: placed?.home ?? [], ec2: placed?.ec2 ?? [] });
   } catch (error) {
     const reason = String(error.stderr ?? '').split('\n').find((line) => line.trim()) ?? error.message;
     return { stop: false, lines: [`ci-gate: warning: could not read ${step} (${reason.trim()}); going ahead without the ci-kit alert check (the runner's job-started check still refuses jobs under a dialog)`] };

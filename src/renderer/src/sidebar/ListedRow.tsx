@@ -1,7 +1,8 @@
 // Another machine's session as its listing says it (P5 O8 M2, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md,
 // "Drawing"): the title, `@<name>` (T1), greyed in place with "offline" while its machine is not up (T2), the state's glyph
 // and the age of its listing, in a session row's slots. A click calls its lane's opener (`remote-openers.ts`); with none,
-// the row is selected and its hover card shows. No menu, drag, pin or unread: those act on a record.
+// the row is selected and its hover card shows. No menu, drag, pin or unread: those act on a record. P5 O8 M5: its
+// owners after the title when they aren't you alone.
 import { useState } from 'react';
 import { MachineChip } from '../app/MachineChip';
 import { MACHINE_OFFLINE, useMachineMark } from '../app/machine-mark';
@@ -12,6 +13,7 @@ import { remoteOpenerFor } from '../sessions/remote-openers';
 import type { ListedSession } from '../stores/sessions';
 import { formatAge, listedTitle } from './derive';
 import { ListedHoverCard } from './HoverCard';
+import { RowTitle, useOwnersLabel } from './RowTitle'; // P5 O8 M5
 import { sessionNodeId, useTree } from './tree';
 
 export function ListedRow({ listed, level }: { listed: ListedSession; level: number }) {
@@ -22,6 +24,7 @@ export function ListedRow({ listed, level }: { listed: ListedSession; level: num
   const now = useNow();
   const [card, setCard] = useState(false);
   const title = listedTitle(listed);
+  const owners = useOwnersLabel(id);
   const glyph = listedGlyph(listed.state);
   const issued = Date.parse(listed.issued);
   const activate = () => {
@@ -52,7 +55,7 @@ export function ListedRow({ listed, level }: { listed: ListedSession; level: num
         }}
         className={`relative flex h-(--row-h) cursor-default items-center gap-[5px] rounded-sm px-[7px] outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 ${tree.selected === id ? 'bg-bg-active' : ''}`}
       >
-        <span data-session-title className={`min-w-0 flex-1 truncate text-ui ${machine.offline ? 'text-fg-faint' : 'text-fg'}`}>{title}</span>
+        <RowTitle title={title} owners={owners} offline={machine.offline} />
         <MachineChip address={id} className="max-w-[35%]" />
         <GlyphMark glyph={glyph} className="w-[12px] shrink-0" />
         <span className="flex h-[22px] w-[26px] shrink-0 items-center justify-end">

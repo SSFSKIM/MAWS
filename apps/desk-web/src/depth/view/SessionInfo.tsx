@@ -9,7 +9,7 @@ import { useStore } from 'zustand';
 import { capabilities, kindOf, type SessionKind } from '../../conversation/capabilities';
 import type { DeskSession } from '../../shell/sessions';
 import { useConnected } from '../../views/conversation/desk-context';
-import type { DepthTranscriptState, DeskTranscript } from '../source/desk-transcript';
+import type { PlaneTranscriptState, PlaneTranscript } from '../../../../../src/renderer/src/lane-a/plane-transcript';
 import { contextLine, costLine, refreshError, statusLines } from './session-info';
 
 const KIND: Record<SessionKind, string> = {
@@ -21,7 +21,7 @@ const KIND: Record<SessionKind, string> = {
   offline: 'Machine offline',
 };
 
-export function SessionInfo({ session, state, controller }: { session: DeskSession; state: DepthTranscriptState; controller: DeskTranscript }) {
+export function SessionInfo({ session, state, controller }: { session: DeskSession; state: PlaneTranscriptState; controller: PlaneTranscript }) {
   const can = capabilities(session, useConnected()).status;
   const status = useStore(controller.state, (s) => s.status);
   useEffect(() => {

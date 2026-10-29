@@ -18,6 +18,16 @@ export interface FakeHost {
   waitFor(method: string, match?: (params: Record<string, unknown>) => boolean, timeoutMs?: number): Promise<HostNotification>;
   close(): Promise<void>;
   readonly closed: Promise<void>;
+  // The socket as this end has seen it since the hello, for a failing case to tell: still open, ended by MAWS's side
+  // (its FIN arrived), the error it raised, and when it closed.
+  socketState(): FakeHostSocketState;
+}
+
+export interface FakeHostSocketState {
+  open: boolean;
+  endedByMaws: boolean;
+  error: string | null;
+  closedMsAfterHello: number | null;
 }
 
 const frame = (message: unknown) => {
@@ -36,6 +46,8 @@ export function connectFakeHost(path: string, { helloTimeoutMs = 5000 } = {}): P
     const calls = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
     const notifications: HostNotification[] = [];
     const waiters = new Set<{ method: string; match: (params: Record<string, unknown>) => boolean; resolve(n: HostNotification): void }>();
+    let heardAt: number | null = null;
+    const state: FakeHostSocketState = { open: true, endedByMaws: false, error: null, closedMsAfterHello: null };
     let resolveClosed!: () => void;
     const closed = new Promise<void>((resolve) => (resolveClosed = resolve));
     const timer = setTimeout(() => {
@@ -67,6 +79,7 @@ export function connectFakeHost(path: string, { helloTimeoutMs = 5000 } = {}): P
         return closed;
       },
       closed,
+      socketState: () => ({ ...state }),
     };
 
     socket.on('data', (chunk) => {
@@ -80,6 +93,7 @@ export function connectFakeHost(path: string, { helloTimeoutMs = 5000 } = {}): P
           const n = { method: message.method, params: message.params ?? {} };
           if (n.method === 'hello') {
             clearTimeout(timer);
+            heardAt = Date.now();
             resolveHost({ ...host, hello: n.params });
             continue;
           }
@@ -98,11 +112,15 @@ export function connectFakeHost(path: string, { helloTimeoutMs = 5000 } = {}): P
         }
       }
     });
+    socket.on('end', () => void (state.endedByMaws = true));
     socket.on('error', (error) => {
+      state.error = (error as NodeJS.ErrnoException).code ?? error.message;
       clearTimeout(timer);
       rejectHost(error);
     });
     socket.on('close', () => {
+      state.open = false;
+      if (heardAt !== null) state.closedMsAfterHello = Date.now() - heardAt;
       for (const call of calls.values()) call.reject(new Error('the socket closed'));
       calls.clear();
       resolveClosed();

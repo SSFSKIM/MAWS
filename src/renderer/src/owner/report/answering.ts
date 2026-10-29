@@ -20,7 +20,8 @@ import { answerText } from '@shared/owner/answer';
 import type { MarkId } from '@shared/owner/marks';
 import type { AnswerOrigin } from '@shared/owner/state';
 import type { Choice } from '@shared/owner/to-human-parser';
-import { sendHumanPrompt, type HumanPromptResult } from '../../composer/submit/send-human-prompt';
+import type { HumanPromptResult } from '../../composer/submit/send-human-prompt';
+import { sendToSession } from '../../session/controls/controls-for'; // P5 O9 M4
 import { ipc } from '../../ipc/client';
 import { canTakeOver, takeOverSession } from '../../sessions/record-ops';
 import { useComposerStore } from '../../stores/composer';
@@ -43,13 +44,16 @@ async function failureOf(invoke: () => Promise<{ ok: true } | { ok: false; error
   }
 }
 
-// The prompt went out (sent, steered or queued): an answer main follows. `held` and `refused` sent nothing.
-const wentOut = (result: HumanPromptResult) => result.disposition === 'sent' || result.disposition === 'steered' || result.disposition === 'queued';
+// The prompt went out (sent, steered or queued): an answer main follows. `held` and `refused` sent nothing. P5 O9 M5: a
+// lane A send whose fate was not known yet (`unconfirmed`) went to the session's bridge, and the composer's strip follows it.
+const wentOut = (result: HumanPromptResult) => result.disposition === 'sent' || result.disposition === 'steered' || result.disposition === 'queued' || result.disposition === 'unconfirmed';
 
 // The seam's result as main takes it: X22's five dispositions, as the seam said them, and when the seam was called
-// (`sentAt`: a report made again later is read by main from the host's record since then).
+// (`sentAt`: a report made again later is read by main from the host's record since then). P5 O9 M5: lane A's
+// `unconfirmed` is reported as `sent`, the words having gone to the session's bridge.
 export function reportOf(appSessionId: AppSessionId, markId: MarkId, send: AnswerSend, result: HumanPromptResult, sentAt?: string): AnswerReport {
-  const { disposition, started, messageUuid, queueId, reason } = result;
+  const { started, messageUuid, queueId, reason } = result;
+  const disposition = result.disposition === 'unconfirmed' ? 'sent' : result.disposition;
   return {
     appSessionId, markId, text: send.text, origin: send.origin, disposition, started,
     ...(messageUuid !== undefined && { messageUuid }), ...(queueId !== undefined && { queueId }), ...(reason !== undefined && { reason }),
@@ -71,7 +75,7 @@ export async function sendAnswer(appSessionId: AppSessionId, markId: MarkId, sen
   const sentAt = new Date().toISOString();
   let result: HumanPromptResult;
   try {
-    result = await sendHumanPrompt(appSessionId, send.text, { origin: send.origin }, client);
+    result = await sendToSession(appSessionId, send.text, { origin: send.origin }, client);
   } catch (error) {
     result = { disposition: 'refused', started: false, reason: messageOf(error) };
   }

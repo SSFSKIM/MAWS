@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { sendHumanPrompt } from '../composer/submit/send-human-prompt';
+import { sendToSession } from '../session/controls/controls-for'; // P5 O9 M4
 import { displayTitle } from '../sessions/title';
 
 export interface QuickReplyState {
@@ -14,7 +14,7 @@ export interface QuickReplyState {
 
 // The draft and its send belong to the row, not the transient card: closing the card mid-send keeps both, so a reopened
 // card shows the send still out (no second one), and its answer clears only the draft it sent. Sending uses the
-// composer's queue/acquisition seam.
+// session's controls port (lane B: the composer's queue/acquisition seam).
 export function useQuickReply(appSessionId: AppSessionId): QuickReplyState {
   const [value, setValue] = useState('');
   const [sending, setSending] = useState(false);
@@ -27,7 +27,7 @@ export function useQuickReply(appSessionId: AppSessionId): QuickReplyState {
     setSending(true);
     setMessage(null);
     try {
-      const result = await sendHumanPrompt(appSessionId, content, { origin: 'reply' });
+      const result = await sendToSession(appSessionId, content, { origin: 'reply' });
       const refused = result.disposition === 'refused' || result.disposition === 'held';
       setMessage({ failed: refused, text: refused ? result.reason ?? 'Reply was not sent' : result.disposition === 'sent' ? 'Sent' : 'Queued' });
       if (!refused) setValue((current) => (current === content ? '' : current));

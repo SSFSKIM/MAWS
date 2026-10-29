@@ -126,6 +126,9 @@ export class CuaConnection {
   private readonly groupOf = new Map<string, number>(); // MAWS tab id → group id
   private readonly sentState = new Map<string, string>(); // MAWS tab id → the last tabs.updated told
   private closed = false;
+  private readonly connectedAt = Date.now();
+  private ending: string | null = null; // why MAWS ended the connection, when it was MAWS
+  private socketError: string | null = null;
 
   constructor(
     private readonly ctx: ServerContext,
@@ -140,12 +143,17 @@ export class CuaConnection {
         for (const message of decode(chunk)) this.peer.receive(message);
       } catch (error) {
         ctx.log(`a cua host sent an unreadable frame on ${appSessionId}'s socket; closing it: ${(error as Error).message}`);
-        socket.destroy();
+        this.disconnect('an unreadable frame');
       }
     });
-    socket.on('error', () => {});
+    socket.on('error', (error: NodeJS.ErrnoException) => void (this.socketError ??= error.code ?? error.message));
     socket.on('close', () => this.close());
-    this.peer.notify('hello', { extensionId: 'maws', extensionInstanceId: `maws:${appSessionId}`, version: ctx.version, protocolVersion: PROTOCOL_VERSION, profileName: PROFILE_NAME });
+  }
+
+  // The hello, which the server sends once it counts this connection: from the moment the host can hear it, anything
+  // reading the server finds the host there.
+  greet(): void {
+    this.peer.notify('hello', { extensionId: 'maws', extensionInstanceId: `maws:${this.appSessionId}`, version: this.ctx.version, protocolVersion: PROTOCOL_VERSION, profileName: PROFILE_NAME });
   }
 
   get heldCount(): number {
@@ -156,7 +164,9 @@ export class CuaConnection {
     return [...this.leases.keys()];
   }
 
-  disconnect(): void {
+  // MAWS ends the connection, for the reason its close's line names.
+  disconnect(why: string): void {
+    this.ending ??= why;
     this.socket.destroy();
   }
 
@@ -647,6 +657,8 @@ export class CuaConnection {
   private close(): void {
     if (this.closed) return;
     this.closed = true;
+    const cause = this.ending ?? (this.socketError ? `a socket error, ${this.socketError}` : 'the host ended it');
+    this.ctx.log(`a cua host's connection on ${this.appSessionId}'s socket closed after ${Date.now() - this.connectedAt} ms: ${cause}`);
     this.cancelHeld(null, 'disconnected');
     this.ctx.claims.dropReservations(this);
     for (const tabId of this.groupOf.keys()) this.badge(tabId, null); // its tabs are the person's now

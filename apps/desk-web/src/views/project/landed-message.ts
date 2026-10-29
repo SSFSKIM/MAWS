@@ -23,7 +23,7 @@ import { rowId } from '../../../../../src/renderer/src/transcript/model/keys';
 import { marksOfText } from '../../../../../src/renderer/src/transcript/model/owner-marks';
 import type { RowId } from '../../../../../src/renderer/src/transcript/model/rows';
 import type { MessageUuid, ToolUseId } from '@shared/graph/ids';
-import { watchReaderIntent } from '../../depth/view/reader-intent';
+import { watchReaderIntent } from '../../../../../src/renderer/src/lane-a/view/reader-intent';
 
 const object = (value: unknown): JsonObject | null => (typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as JsonObject) : null);
 
@@ -114,7 +114,7 @@ function rowJump(kind: LandingKind, src: string, key: string, rows: readonly Jso
   );
 }
 
-/** What the landing reads of the session's transcript (its `DeskTranscript`). */
+/** What the landing reads of the session's transcript (its `PlaneTranscript`). */
 type Landable = { key: string; heldRows(): readonly JsonObject[]; loadOlder(): void };
 
 /** Where a landing stands, for the view to say: paging toward its row, or the row not in the transcript. */

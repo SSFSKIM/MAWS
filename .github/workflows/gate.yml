@@ -92,7 +92,7 @@ env:
     default artifacts library side tools to-human deliverables panel supervisor browser browser-comment browser-import
     settings transcript terminal code agents widgets c7 scm c12 available document document-app presentations
     design-systems browser-cua browser-chrome desk-web design dashboard connectors connectors-direct connectors-oauth delivery
-    discover supervisor-daemon daemon-unit machines
+    discover supervisor-daemon daemon-unit machines lane-a
   # The groups §3.1's table found green on a Linux runner, the only ones a Linux lane takes (never by default). desk-web
   # (DC5): the desk's web app in a browser, against its DX3 double, which needs no Electron and no Mac.
   LINUX_E2E: library artifacts available tools agents desk-web
@@ -276,6 +276,11 @@ env:
   # same counts as its mini baseline, plus hosted settings/document checks after selecting overlay scrollbars.
   # The unsigned app, daemon-packaged check and launchd sweep are the same on both routes; mirror keeps the mini.
   HOSTED_MAC_JOBS: packaged
+  # Never overflow these hosted-eligible groups to EC2 (Decision Log 123: an EC2-only red leaves at once).
+  # Empty after the 2026-10-29 parity audit: the supplied sessions reds predate #297, shell predates 54aab1ada,
+  # and lane-a used the wrong card address (d81b1441b). None proves an EC2-only red on a tree green elsewhere.
+  # Other hosted groups rely on their mini baseline, on EC2's macOS build and display, not per-group EC2 admission.
+  HOSTED_MAC_ONLY_E2E: ''
   # The groups that need a credential or the login keychain's custody, so never go to a hosted Mac, whatever the lane
   # (maws-app holds no secret): connectors-oauth, and discover, whose custody conditions (a), (b) and (c) stand.
   MAC_SECRET_E2E: connectors-oauth discover
@@ -682,7 +687,7 @@ jobs:
   e2e:
     needs: plan
     if: needs.plan.outputs.e2e_host != '[]'
-    name: e2e:${{ matrix.group }}
+    name: e2e:${{ matrix.group }}${{ matrix.overflow && ' (EC2 overflow)' || '' }}
     runs-on: ${{ fromJSON(matrix.runner) }}
     # 30, a measured group's 45, a group's own on E2E_MINUTES, and on the Mac the wait bound of its instance's start on top
     # (gate-plan.mjs).
@@ -796,7 +801,7 @@ jobs:
           vm: any
       - env:
           SCRIPT: ${{ matrix.script }}
-          MAWS_E2E_RETRY: ${{ github.job == 'e2e' && matrix.retry && runner.environment == 'github-hosted' && runner.os == 'macOS' && '1' || '' }}
+          MAWS_E2E_RETRY: ${{ github.job == 'e2e' && matrix.retry && runner.os == 'macOS' && '1' || '' }}
           MAWS_E2E_FLAKY_FILE: ${{ runner.temp }}/maws-e2e-flaky.txt
           VARIANT: ${{ matrix.variant }}
           CACHED: ${{ matrix.cached }}
@@ -823,7 +828,7 @@ jobs:
       # One aggregate notice in its own step: GitHub caps annotations per step, so even a group with many flakes keeps
       # every location, without competing with the test command's other warnings. The summary above stays one per line.
       - name: Publish flaky tests
-        if: always() && github.job == 'e2e' && matrix.retry && runner.environment == 'github-hosted' && runner.os == 'macOS' && steps.checkout.outcome == 'success'
+        if: always() && github.job == 'e2e' && matrix.retry && runner.os == 'macOS' && steps.checkout.outcome == 'success'
         run: node scripts/ci-flaky-reporter.mjs "$RUNNER_TEMP/maws-e2e-flaky.txt"
       # The peer's supervisors and this tree's outlive their apps by design (detached, each in a process group of its own),
       # so whatever the run did, every one of either build is stopped here, with the peer's apps and checkout: nothing the

@@ -162,3 +162,7 @@ test('the workflow entry point authenticates the API request and writes only a v
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('an overflowed peer job still holds the peer verdict', async () => {
+  assert.equal((await check({ jobs: [job('plan', 'completed', 'success'), job('e2e:cross-build (EC2 overflow)', 'completed', 'success')] })).result, '90 succeeded');
+});

@@ -28,6 +28,7 @@ import { INFO } from './copy';
 import { autoModeLane, reviewsOf } from './lane';
 import { sessionInfoSections, type InfoRow } from './model';
 import { RouteSwitch } from './RouteSwitch';
+import { useSessionControls } from '../../session/controls/controls-for'; // P5 O9 M5
 import { useBudget } from '../../budget/store'; // C12
 import { loadedTabs, useBrowser } from '../browser/store'; // E4a
 
@@ -80,6 +81,8 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
   // P2-A (X17): with no live process the sections show what the engine last reported, labelled with when; a read, never
   // a start (the 30 s reads above stay enabled only while the process is ready)
   const live = status?.process === 'ready';
+  const controls = useSessionControls(appSessionId); // P5 O9 M5
+  const driven = controls !== null && controls.turn() !== null ? controls : null;
   const observed = useObservedFacts(appSessionId, { enabled: visible && !live });
 
   // W2: a session whose first launch C10 still runs (its intent, no status) chooses its route on the intent (the model
@@ -109,13 +112,14 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
     browserTabs, // E4a
     now,
     ...(live ? {} : { observed }), // P2-A
+    driven, // P5 O9 M5
     reads: { status: statusRead.data ?? null, rules: rules.data ?? null, hooks: hooks.data ?? null, mcp: mcp.data ?? null, context: context.data ?? null },
   });
 
   return (
     <div data-session-info={appSessionId} className="h-full overflow-auto p-3 text-ui text-fg">
       {/* P2-A M3: not live, the owner's Refresh starts the session; the 30 s reads follow at ready */}
-      {!live && !firstLaunch && (
+      {!live && !firstLaunch && !driven && (
         <div className="mb-2">
           <DormantGesture appSessionId={appSessionId} label={FRAME.refresh} />
         </div>

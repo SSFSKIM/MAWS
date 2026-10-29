@@ -26,6 +26,7 @@ export interface Serialized {
   pastedContents: Record<string, PastedContent>;
   omitted: number; // unavailable atoms left out of `content`
   empty: boolean;
+  attachmentNames?: string[]; // P5 O9 M7: the attachments' names in the order of `content`'s image and document blocks
 }
 
 // One piece of the flattened document: typed text (wire form and typed form) or an atom.
@@ -134,9 +135,11 @@ export function serializeDraft(doc: JSONContent, ctx: SerializeContext): Seriali
 
   const blocks: ContentBlock[] = [];
   const placeholders: string[] = [];
+  const attachmentNames: string[] = [];
   for (const attachment of [...attachments.filter((a) => a.kind === 'image'), ...attachments.filter((a) => a.kind === 'document')]) {
     n += 1;
     blocks.push({ type: attachment.kind, source: { type: 'base64', media_type: attachment.mediaType, data: attachment.data } });
+    attachmentNames.push(attachment.name);
     if (attachment.kind === 'image') {
       placeholders.push(`[Image #${n}]`);
       pastedContents[String(n)] = { id: n, type: 'image', content: null, contentHash: null, mediaType: attachment.mediaType, filename: attachment.name };
@@ -145,5 +148,5 @@ export function serializeDraft(doc: JSONContent, ctx: SerializeContext): Seriali
   if (placeholders.length > 0) display = [display, ...placeholders].filter((part) => part !== '').join(' ');
 
   const content: string | ContentBlock[] = blocks.length === 0 ? wire : wire.trim() === '' ? blocks : [...blocks, { type: 'text', text: wire }];
-  return { mode: 'send', text: wire, content, display, pastedContents, omitted, empty: wire.trim() === '' && blocks.length === 0 };
+  return { mode: 'send', text: wire, content, display, pastedContents, omitted, empty: wire.trim() === '' && blocks.length === 0, ...(attachmentNames.length > 0 && { attachmentNames }) };
 }

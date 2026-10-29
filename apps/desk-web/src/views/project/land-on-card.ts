@@ -2,7 +2,7 @@
 // in MAWS's virtualized list, focused, and marked (`session-tail.tsx` draws the mark on the landing's card).
 import { useEffect, type RefObject } from 'react';
 import type { TranscriptListHandle } from '../../../../../src/renderer/src/transcript/view/Transcript';
-import { watchReaderIntent } from '../../depth/view/reader-intent';
+import { watchReaderIntent } from '../../../../../src/renderer/src/lane-a/view/reader-intent';
 import type { RowIndex } from '../../depth/view/TranscriptPane';
 
 /** Frames a landing waits for its card to be mounted, after moving the list to it, before it gives up. */

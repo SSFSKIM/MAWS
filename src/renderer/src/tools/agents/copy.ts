@@ -43,6 +43,7 @@ export const SUBAGENTS_COPY = {
   stopConfirmNo: 'Keep running',
   stopping: 'stopping…',
   stopFailed: (message: string) => `Couldn't stop it: ${message}`,
+  stopUncertain: 'May not have stopped', // P5 O9: a terminal session's stop whose outcome is unknown
   waitingToStart: 'Waiting for the agent to start',
   // E7 start: the topology tree (Design §3, §5)
   agents: (running: number) => `Agents · ${running} running`,
@@ -82,6 +83,13 @@ export const RELAY_COPY = {
   failed: (message: string) => `Relay failed: ${message}`,
   dropped: (state: 'cancelled' | 'discarded' | 'refused') => `the engine ${state} it before starting it`, // the failed state's message (O1)
   notSent: 'the session ended that turn without sending it', // E7: a peer relay whose steer's own turn ended with no matching SendMessage
+  // P5 O9 M5: a terminal session driven through its bridge tells the agent directly (the bridge's `tell`)
+  driven: {
+    label: (title: string) => `Message ${title}`,
+    told: (title: string) => `Sent to ${title}`,
+    unknown: 'Sent; the terminal did not confirm it arrived',
+    failed: (message: string) => `Not sent: ${message}`,
+  },
 } as const;
 
 export const BACKGROUND_COPY = {
@@ -107,6 +115,7 @@ export const BACKGROUND_COPY = {
   stop: 'Stop',
   stopping: 'stopping…',
   stopFailed: (message: string) => `Couldn't stop it: ${message}`,
+  stopUncertain: 'May not have stopped', // P5 O9: a terminal session's stop whose outcome is unknown
   running: (description: string, elapsed: string) => `${description} · running ${elapsed}`, // a shell or a monitor
   runningUntimed: (description: string) => `${description} · running · elapsed unavailable`, // known from the status's list alone
   ended: (description: string, status: string, ago: string) => `${description} · ${status} ${ago}`,

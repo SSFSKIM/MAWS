@@ -72,9 +72,10 @@ export function overviewCards(input: OverviewInput): AppSessionId[] {
 
 // A card's activity line (residue *Overview card*): the holder of a foreign-live session; what a waiting session waits
 // for, in words; what a working session is doing; else its state. The last answer is a separate line, so a working
-// session shows both.
+// session shows both. P5 O9 M6 (the owner's Q1): a foreign session MAWS drives through its bridge reads as any session
+// (its digest is never `foreign` then); the holder line is one with no live bridge.
 export function cardActivity(record: SessionRecord, digest: SessionDigest | null, pending: AttentionItem[]): string {
-  const holder = holderLine(record);
+  const holder = digest === null || digest.phase === 'foreign' ? holderLine(record) : null;
   if (holder) return holder;
   const waiting = waitingItem(pending);
   if (waiting && isActionable(waiting.oldest)) {

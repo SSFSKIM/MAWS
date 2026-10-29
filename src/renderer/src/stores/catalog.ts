@@ -21,6 +21,9 @@ export interface SessionCatalog {
   agents: Array<{ name: string; description: string }>;
   skills: string[];
   terminalOnly: string[];
+  // P5 O9 M5: why each listed or declared command can't run here, by name (lane A's port fills it from its bridge's
+  // routes); absent for the engine's own catalogue
+  unavailable?: Readonly<Record<string, string>>;
 }
 
 export const EMPTY_CATALOG: SessionCatalog = Object.freeze({ launchId: '', revision: 0, commands: [], agents: [], skills: [], terminalOnly: [] }) as SessionCatalog;

@@ -602,3 +602,24 @@ test('preflight uses the pushed ref for reserved-final exclusions on either host
     assert.deepEqual(ordinary.jobs, route === 'direct' ? [] : ['packaged']);
   }
 });
+
+test('EC2 overflow cannot pass an EC2 alert just because the mini is free', () => {
+  const runners = [
+    { name: 'ci-kit-mac-ec2', status: 'online', labels: ['self-hosted', 'macOS', 'ARM64', 'ci-kit-mac-ec2'] },
+    { name: 'ci-kit-mac-mini', status: 'online', labels: ['self-hosted', 'macOS', 'ARM64', 'ci-kit-mac-home'] },
+  ];
+  const ec2 = ['e2e:document'];
+  const blocked = decide({ jobs: ec2, ec2, runners, alerts: [{ ...parseAlert('ci-kit alert: ec2: SecurityAgent since 2026-10-29T02:00Z'), number: 99 }] });
+  assert.equal(blocked.stop, true);
+  assert.match(blocked.lines.join('\n'), /ci-kit-mac-ec2/);
+  assert.equal(decide({ jobs: ec2, ec2, runners, alerts: [] }).stop, false);
+  assert.equal(decide({ jobs: ec2, ec2, runners, alerts: [{ ...parseAlert('ci-kit alert: mini: SecurityAgent since 2026-10-29T02:00Z'), number: 99 }] }).stop, false);
+});
+
+test('the committed planner carries overflow labels into the alert check, but stale samples do not', () => {
+  const candidate = tree(envOf('  HOSTED_MAC_E2E: tools\n  HOSTED_MAC_ONLY_E2E: ""\n'));
+  const sample = { v: 1, at: new Date().toISOString(), hostedQueued: 30, hostedRunning: 5, ec2: 'idle', ec2Queued: 0, partial: [] };
+  const ask = (value) => macPlan({ ...candidate, gates: 'e2e:tools', runner: 'macos', variables: { ...today, HOSTED_MAC_ROUTE: 'direct' }, trailers: `Mac-Backlog: ${JSON.stringify(value)}` });
+  assert.deepEqual(ask(sample), { jobs: ['e2e:tools'], guest: null, ec2: ['e2e:tools'], home: [] });
+  assert.deepEqual(ask({ ...sample, at: '2020-01-01T00:00:00Z' }), { jobs: [], guest: 'none', home: [] });
+});

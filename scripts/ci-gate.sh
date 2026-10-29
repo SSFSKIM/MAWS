@@ -86,6 +86,8 @@
 # default set), `Runner:`, `Class1a:`, `Lane:`, `DefaultBeside:`, `Evidence:` and `Live:` trailers; under --affected its subject is
 # `ci-gate: <short> affected` and it carries `Selection: affected`, `Affected-Count:` and an `Affected:` trailer per path.
 # The peer's `Peer:`, `Peer-Wire:` and `Wire:` trailers follow when there is one (--peer).
+# Direct e2e runs add `Mac-Backlog:` when the caller can read the account queues and EC2 runner (cached for 60 s).
+# The plan may overflow eligible groups to EC2; an absent or older-than-five-minute sample preserves normal placement.
 # A successful local plan adds `Pool-Demand:`, ci-kit's advisory attempt-1 pre-launch hint: the exact multiset of pool
 # jobs, or `none` when no job uses the pool. If it fails, no hint is written and the push still proceeds.
 # The pushed tree is always the tested tree plus that one commit. A Linux lane admits only the e2e groups green there (§3.1); the plan refuses the rest.
@@ -275,6 +277,15 @@ variables_ok=true
 gate_runner=$(gh variable get GATE_RUNNER -R "$REPO") || variables_ok=false
 gate_e2e_runner=$(gh variable get GATE_E2E_RUNNER -R "$REPO") || variables_ok=false
 gate_hosted_route=$(gh variable list -R "$REPO" --json name,value --jq '.[] | select(.name == "HOSTED_MAC_ROUTE") | .value') || variables_ok=false
+# Sample only when the direct route could host e2e work (unit may add the peer group). The caller's token sees the
+# account-wide queue and EC2 state. Missing/failed reads leave out the trailer; gate-plan then does exactly as before.
+backlog_trailer=''
+if [[ ${hosted_route:-$gate_hosted_route} == direct && $lane != no-hosted && -z $live ]]; then
+  case $gates in
+    all|*e2e:*|*unit*) backlog_trailer=$(node "$(dirname "$0")/ci-gate-backlog.mjs") || backlog_trailer='' ;;
+  esac
+  [[ -z $backlog_trailer ]] || trailers+=$'\n'"$backlog_trailer"
+fi
 if [[ -z $label ]]; then
   label=$(HEAD_MESSAGE="$trailers" GATE_RUNNER="$gate_runner" GATE_E2E_RUNNER="$gate_e2e_runner" HOSTED_MAC_ROUTE="$gate_hosted_route" \
     node "$(dirname "$0")/ci-gate-identity.mjs" --git-dir "$git_dir" --sha "$sha" --branch "$branch") || exit 2
@@ -289,6 +300,7 @@ if [[ ${MAWS_GATE_IGNORE_ALERTS:-} == 1 ]]; then
 else
   # the peer's trailers, and an iteration run's Selection, which keeps the peer groups off the run
   alert_trailers=$peer_trailers
+  [[ -z $backlog_trailer ]] || alert_trailers+=$'\n'"$backlog_trailer"
   [[ -n $hosted_route ]] && alert_trailers+=$'\n'"Hosted-Route: $hosted_route"
   [[ -n $affected ]] && alert_trailers+=$'\n'"Selection: affected"
   alert_check=$(node "$(dirname "$0")/ci-gate-alerts.mjs" --gates "$gates_trailer" --runner "$runner" --class1a "$class1a" --lane "$lane" --live "$live" --trailers "$alert_trailers" --git-dir "$git_dir" --sha "$sha" --ref "$ref")
@@ -312,6 +324,7 @@ exec > >(tee "$log") 2>&1
 [[ -z $alert_check ]] || printf '%s\n' "$alert_check"
 [[ -z $peer_said ]] || printf '%s\n' "$peer_said"
 [[ -z $affected_note ]] || printf '%s\n' "$affected_note"
+[[ -z $backlog_trailer ]] || printf 'ci-gate: %s\n' "$backlog_trailer"
 
 if [[ $variables_ok == true ]] &&
    pool_demand=$(HEAD_MESSAGE="$trailers" GATE_RUNNER="$gate_runner" GATE_E2E_RUNNER="$gate_e2e_runner" HOSTED_MAC_ROUTE="$gate_hosted_route" \
