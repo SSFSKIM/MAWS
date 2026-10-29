@@ -33,7 +33,7 @@
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
 import { randomUUID } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
@@ -146,16 +146,26 @@ const INPUTS: Record<string, unknown> = {
   'session.update': { appSessionId: 'x', patch: { pinned: true } }, // a patch sets at least one field
 };
 
+// A command whose own handler refuses an input that names no real file: `side.screenshot.preview` reads an image under
+// `<userData>/` (an unknown session's only root) and answers `invalid_input` for anything else, so the scratch profile
+// holds a one-pixel PNG for it to read.
+const PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+function inputsOf(s: Scratch): Record<string, unknown> {
+  const png = join(s.userData, 'cross-build-probe.png');
+  writeFileSync(png, Buffer.from(PIXEL_PNG, 'base64'));
+  return { ...INPUTS, 'side.screenshot.preview': { appSessionId: 'x', screenshot: { path: png, width: 1, height: 1 } } };
+}
+
 // ---- one crossing -----------------------------------------------------------------------------------------------------
 
 type Answer = { ok: true } | { ok: false; code: string; message: string };
 const answerOf = (result: { ok: boolean; error?: { code: string; message: string } }): Answer => (result.ok ? { ok: true } : { ok: false, code: result.error!.code, message: result.error!.message });
 
 // Each command `newer` added that its windows can send, invoked from one of `newer`'s app with its sample input.
-async function probe(page: Page, newer: Build, older: Build): Promise<Map<string, Answer>> {
+async function probe(page: Page, newer: Build, older: Build, inputs: Record<string, unknown>): Promise<Map<string, Answer>> {
   const answers = new Map<string, Answer>();
   for (const name of addedCommands(newer, older).filter((name) => !newer.mainOnly.has(name))) {
-    const input = name in INPUTS ? INPUTS[name] : sampleOf(commandOf(newer, name)!.input);
+    const input = name in inputs ? inputs[name] : sampleOf(commandOf(newer, name)!.input);
     answers.set(name, answerOf(await page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name, input] as const)));
   }
   return answers;
@@ -257,7 +267,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   said.push(`  tail: ${atAttach.filter((e) => seqOf(e) > seqAtQuit).length} events journaled after the keeper's quit; the failure's item and the request's reached main`);
 
   // across the gap: the newer build's commands, as the older supervisor answers them
-  const before = gap ? await probe(second.page, gap.newer, gap.older) : null;
+  const before = gap ? await probe(second.page, gap.newer, gap.older, inputsOf(s)) : null;
 
   // a launch on the kept supervisor plays a turn
   const launched = `xb-launch-${Date.now()}` as AppSessionId;
@@ -293,11 +303,11 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
 
   // across the gap, against what the newer build's own supervisor answers
   if (gap && before) {
-    const after = await probe(second.page, gap.newer, gap.older);
+    const after = await probe(second.page, gap.newer, gap.older, inputsOf(s));
     for (const [name, onOlder] of before) {
       const onOwn = after.get(name)!;
       const { owner } = commandOf(gap.newer, name)!;
-      expect(onOwn.ok || onOwn.code !== 'invalid_input', `${name}: its sample input is refused (${onOwn.ok ? '' : onOwn.message}); give it one in INPUTS`).toBe(true);
+      expect(onOwn.ok || onOwn.code !== 'invalid_input', `${name}: its sample input is refused (${onOwn.ok ? '' : onOwn.message}); give it one in INPUTS (inputsOf for one naming a scratch file)`).toBe(true);
       if (owner === 'engine-host') {
         expect(onOwn, `${name} is served by its own build's supervisor`).not.toMatchObject({ ok: false, code: 'unknown_command' });
         expect(onOlder, `${name}, which the older supervisor lacks`).toMatchObject({ ok: false, code: 'unknown_command' });
