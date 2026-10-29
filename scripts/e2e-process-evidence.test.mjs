@@ -4,7 +4,9 @@ import { once } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import process from 'node:process';
 import test from 'node:test';
+import { URL } from 'node:url';
 import { captureAllowed, processEvidence, writeTimingEvidence } from '../e2e/support/process-evidence.mjs';
 
 const scratch = (t) => {
