@@ -29,6 +29,11 @@
 #                            o13-phone-<n>, the owner's cards answered from the phone (--rehearse: by the run's second
 #                            device in its place); the push sink behind a quick tunnel (start_tunnel); the run's undoing
 #                            run again after it, however it ended; production's X-Desk-Build compared before and after
+#   endpoint [args…]         P5 O10 M11: `deployment endpoint-acceptance`, the scratch mawsd on the devcloud acceptance
+#                            VM enrolled and listed, items 2-5, 8 and 9 over the relay and the tailnet, the hub deploy
+#                            this script's own `deploy`; production's X-Desk-Build compared before and after
+#   endpoint-vm setup <base> | teardown
+#                            that VM's scene set up (the branch built there from a bundle cut at <base>) or removed
 # Any further arguments go to the step's command. Environment (README "Staging runs"):
 #   DESK_STAGING_SECRETS  the directory holding CF_ACCESS_SETUP_TOKEN and CF_DESK_HUB_SERVICE_TOKENS
 #   DESK_STAGING_DIR      logs and state (default ~/.local/state/desk-hub-staging): one log per step; prod/; the
@@ -253,6 +258,48 @@ case $step in
     printf 'DESK_ACCESS_TOKEN=%s\n' "$T" | deployment admin --keys $H/keys.json "$@" 2>&1 | filter | tee -a $LOG
     rc=${pipestatus[2]}; unset T
     print -r -- "admin exit $rc; log $LOG"; exit $rc ;;
+  endpoint)
+    # P5 O10 M11: `deployment endpoint-acceptance`, the scratch mawsd on the devcloud acceptance VM (its scene set up by
+    # `endpoint-vm setup`) enrolled and listed by the admin device, the items run over the relay and the tailnet, its hub
+    # deploy item this script's own `deploy` step; then everything it made undone by the run itself. The token reaches
+    # the command on its stdin alone; what else it handled (the enrollment code and its secrets) is listed in $SCAN for
+    # the search after it; production's X-Desk-Build compared before and after.
+    [[ -f $H/keys.json ]] || { print -r -- "no admin device keys at $H/keys.json (DESK_STAGING_DEVICE): stop. Nothing was changed."; exit 2; }
+    LOG=$O/endpoint-$(stamp).log; : > $LOG
+    SCAN=$O/endpoint.scan; : > $SCAN
+    say() { print -r -- "$*" | tee -a $LOG; }
+    owner_token
+    before=$(header $PROD) || exit 3
+    say "production before: $before"
+    ran=1 finished=0
+    finish() {
+      (( finished )) && return; finished=1
+      after=$(header $PROD) || after="unread"
+      if [[ $after == "$before" ]]; then say "production untouched: $after"; else say "production build CHANGED or unread: $after"; fi
+      leaked=$(secret_scan <(print -r -- "$T"; cat $SCAN) $LOG)
+      unset T
+      rm -f $SCAN
+      say "files holding the Access token or a secret the run handled: $leaked; log $LOG"
+      (( ran == 0 && leaked == 0 )) && [[ $after == "$before" ]] && exit 0
+      exit $(( ran ? ran : 1 ))
+    }
+    trap finish EXIT
+    trap 'exit 130' INT TERM
+    printf 'DESK_ACCESS_TOKEN=%s\n' "$T" | deployment endpoint-acceptance --device-keys $H/keys.json --scan $SCAN --hub-deploy $HERE/staging-run.sh "$@" 2>&1 | filter | tee -a $LOG
+    ran=${pipestatus[2]}
+    say "endpoint acceptance exit $ran"
+    exit $ran ;;
+  endpoint-vm)
+    # P5 O10 M11: the VM scene's setup (vm/setup.sh: the scratch user, the scene's files, the branch built from a bundle
+    # cut at <base>, a commit the VM's MAWS checkout holds) or teardown (vm/teardown.sh), through `devcloud vm ssh`
+    # alone. No token is read: neither touches the hub.
+    case ${1:-} in
+      setup) [[ ${2:-} =~ '^[0-9a-f]{7,40}$' ]] || { print -r -- "endpoint-vm setup <base commit> | teardown"; exit 2; }
+        deployment endpoint-acceptance --vm-setup --base $2 < /dev/null 2>&1 | filter ;;
+      teardown) deployment endpoint-acceptance --vm-teardown < /dev/null 2>&1 | filter ;;
+      *) print -r -- "endpoint-vm setup <base commit> | teardown"; exit 2 ;;
+    esac
+    exit ${pipestatus[1]} ;;
   phone)
     # P5 O13 M7 (Interfaces §H): test/endpoint/staging-phone.live.test.ts, the real endpoint module enrolled on staging as
     # o13-phone-<n>, the owner's cards raised there and answered from the phone (or, --rehearse, by the run's second
@@ -402,5 +449,5 @@ case $step in
       (( holding == 0 )) || checks+=(1)
     fi
     exit 0 ;;
-  *) print -r -- "prod <label> | deploy | build | acceptance [--no-push] | relay-measure | access-sync | admin [--pipe] <args…> | throwaway <n> | desk-web <n> | phone <n> [--rehearse] [--lane-b] [--device <id>]"; exit 2 ;;
+  *) print -r -- "prod <label> | deploy | build | acceptance [--no-push] | relay-measure | access-sync | admin [--pipe] <args…> | throwaway <n> | desk-web <n> | phone <n> [--rehearse] [--lane-b] [--device <id>] | endpoint [args…] | endpoint-vm setup <base> | teardown"; exit 2 ;;
 esac
