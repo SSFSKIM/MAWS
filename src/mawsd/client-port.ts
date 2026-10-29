@@ -6,22 +6,26 @@
 // `clientPort.answer` from that same connection; a notification's events are further answers of its id.
 //
 // Nothing waits on a client that cannot answer (OX4: `noClient`, never a hang): with no connection to ask (a ref the
-// endpoint minted for a remote device, until O7 M5 carries the port across the channel; no app attached) the answer is
-// `noClient` at once; an asking client that ends (its page, or its connection) settles its outstanding requests
-// `noClient`; and a request that awaits an answer settles `noClient` at its deadline. §E names the deadline for `pick`,
-// `save` and `confirm`; `reveal` and `openExternal` await an answer the same way and take it too, so a connection that
-// never answers (a CLI, a test client, an app of a build that reads no port) hangs nothing. `badge` and `focus` return at
-// once; `notify` returns its handle at once, and its events follow as answers until it closes or fails.
+// endpoint minted for a remote device, until O7 M5 carries the port across the channel; no app attached) or an asking
+// ref that has ended (its page, though its connection lives), the answer is `noClient` at once and nothing is posted; an
+// asker that ends (its page, or its connection) settles what it was asked `noClient` and releases the notifications it
+// shows. The interactive kinds (`pick`, `save`, `confirm`) wait for the person while their asker lives (D43(1)): its end
+// is what ends the wait, as a dead client always shows. `reveal` and `openExternal` involve no person and settle
+// `noClient` at the deadline, so a connection that never answers them (a CLI, a test client, an app of a build that
+// reads no port) hangs nothing. `badge` and `focus` return at once; `notify` returns its handle at once, and its events
+// follow as answers until it closes or fails. A pending request holds nothing but its own entry: no lock, ledger slot or
+// queue, so an open dialog never stalls another request (D44(1)).
 import { HostCommandError } from '@shared/host/runtime';
 import type { ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import type { CLIENT_PORT_KINDS } from '@shared/ipc/schema/client-port';
 import { NO_CLIENT, type ClientPort, type NoClient, type NotifyEvent } from '@shared/client/port';
 
-/** How long a request that awaits an answer waits for one (§E). */
+/** How long `reveal` and `openExternal` wait for their answer (§E; the interactive kinds wait while their asker lives). */
 export const CLIENT_PORT_DEADLINE_MS = 10_000;
 
 type Kind = (typeof CLIENT_PORT_KINDS)[number];
+const TIMED: ReadonlySet<Kind> = new Set(['reveal', 'openExternal']);
 export type ClientPortRequest = { id: string; client: string | null; kind: Kind; request: unknown };
 
 /** A connection the port can ask: false when the request could not be posted (the connection is gone). */
@@ -52,9 +56,14 @@ export function createClientPort(options: ClientPortOptions): FrontClientPort {
   let next = 0;
   const deadlineMs = options.deadlineMs ?? CLIENT_PORT_DEADLINE_MS;
 
-  // A request that awaits its answer: noClient at the deadline, the asker's end, or a post that could not go.
+  // Where `client`'s effect goes; null with no connection to ask, or an asking ref that has ended.
+  function routeOf(client: ClientRef | null): { target: PortTarget; client: string | null } | null {
+    return client !== null && ended(client) ? null : options.route(client);
+  }
+
+  // A request that awaits its answer: noClient at the asker's end, a post that could not go, or a timed kind's deadline.
   function ask<A>(kind: Kind, client: ClientRef | null, request: unknown): Promise<A | NoClient> {
-    const to = options.route(client);
+    const to = routeOf(client);
     if (to === null) return Promise.resolve(NO_CLIENT);
     return new Promise((resolve) => {
       const id = `cp-${++next}`;
@@ -68,11 +77,13 @@ export function createClientPort(options: ClientPortOptions): FrontClientPort {
         pending.delete(id);
         resolve(answer as A | NoClient);
       };
-      const timer = setTimeout(() => {
-        options.log(`machine.sock: the client port's ${kind} ${id} had no answer within ${deadlineMs} ms; answered noClient`);
-        settle(NO_CLIENT);
-      }, deadlineMs);
-      timer.unref?.();
+      const timer = TIMED.has(kind)
+        ? setTimeout(() => {
+            options.log(`machine.sock: the client port's ${kind} ${id} had no answer within ${deadlineMs} ms; answered noClient`);
+            settle(NO_CLIENT);
+          }, deadlineMs)
+        : undefined;
+      timer?.unref?.();
       pending.set(id, { target: to.target, kind, settle });
       const off = client?.onGone(() => settle(NO_CLIENT)); // runs at once for a client already gone
       if (off !== undefined) {
@@ -85,7 +96,7 @@ export function createClientPort(options: ClientPortOptions): FrontClientPort {
 
   // An effect asked with no answer awaited: whether a connection could be asked.
   function tell(kind: Kind, client: ClientRef | null, request: unknown): void | NoClient {
-    const to = options.route(client);
+    const to = routeOf(client);
     if (to === null || !to.target.post({ id: `cp-${++next}`, client: to.client, kind, request })) return NO_CLIENT;
   }
 
@@ -98,11 +109,16 @@ export function createClientPort(options: ClientPortOptions): FrontClientPort {
     badge: (client, count) => tell('badge', client, { count }),
     focus: (client, mode) => tell('focus', client, { mode }),
     notify(client, request, onEvent) {
-      const to = options.route(client);
+      const to = routeOf(client);
       if (to === null) return NO_CLIENT;
       const id = `cp-${++next}`;
-      const end = () => void pending.delete(id);
+      let unsubscribe = () => {};
+      const end = () => {
+        unsubscribe();
+        pending.delete(id);
+      };
       pending.set(id, { target: to.target, kind: 'notify', settle: end, event: onEvent });
+      unsubscribe = client?.onGone(end) ?? unsubscribe; // the page that shows it ended: released, nothing more posted
       if (!to.target.post({ id, client: to.client, kind: 'notify', request })) {
         end();
         return NO_CLIENT;
@@ -134,4 +150,11 @@ export function createClientPort(options: ClientPortOptions): FrontClientPort {
       for (const entry of [...pending.values()]) entry.settle(NO_CLIENT);
     },
   };
+}
+
+/** Whether `ref` has ended: its `onGone` runs a listener at once then. */
+function ended(ref: ClientRef): boolean {
+  let gone = false;
+  ref.onGone(() => (gone = true))();
+  return gone;
 }

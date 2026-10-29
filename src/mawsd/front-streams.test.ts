@@ -5,9 +5,15 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { ClientRef } from '@shared/ipc/client';
 import type { MachineRef } from '@shared/machine/ref';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FakeEngineHost } from '../../test/mawsd/fake-engine-host';
+import { OpLedger } from '@shared/host/op-ledger';
+import { registerMachineOps } from '../services/machine-ops';
 import { createServicesFront, type FrontOptions, type ServicesFront } from './front';
+import { FrontStreams } from './front-streams';
 
 const IDENTITY = { ref: 'TestMachineRef00000000' as MachineRef, name: 'test machine', project: { key: 'machine:TestMachineRef00000000', name: 'test machine', smnsId: null } };
 
@@ -44,8 +50,10 @@ function connection() {
 }
 
 const fronts: ServicesFront[] = [];
+const cleanups: Array<() => void> = [];
 afterEach(() => {
   for (const front of fronts.splice(0)) front.close();
+  for (const cleanup of cleanups.splice(0)) cleanup();
   vi.useRealTimers();
 });
 
@@ -121,6 +129,40 @@ describe('a front client’s session streams', () => {
     const live = host.row('s1', 1);
     await vi.waitFor(() => expect(c.batched('s1')).toHaveLength(1));
     expect(ids(c.batched('s1'))).toEqual(ids(live));
+  });
+
+  it('answers a new stream’s first opening even when it opened while a `live: true` follow was still listing the live sessions', async () => {
+    const host = new FakeEngineHost();
+    const s = host.add('s1');
+    const first = host.row('s1', 1);
+    host.row('s1', 1);
+    host.row('s1', 1);
+    s.evicted = { seq: 2, idx: 0 };
+    s.journal = false;
+    let list: (apps: string[]) => void = () => {};
+    const streams = new FrontStreams({ read: async (name, input) => host.answer(name, input), liveSessions: () => new Promise((resolve) => (list = resolve)), log: () => {} });
+    cleanups.push(() => streams.stop());
+    let opened: () => void = () => {};
+    const parts = new Promise<void>((resolve) => (opened = resolve));
+    const follower = streams.follower((name) => void (name === 'session.status' && opened()));
+    const answer = follower.follow({ sessions: [{ appSessionId: 's1', cursor: cursorOf(first[0]) }], live: true });
+    await parts; // s1's opening is answered and its parts sent while the listing is still out
+    list(['s1']);
+    expect(await answer).toEqual({ streams: [{ appSessionId: 's1', mode: 'missing', launchId: s.launchId }] });
+    // a later follow that keeps the stream answers how it goes on now
+    expect(await follower.follow({ sessions: [{ appSessionId: 's1', cursor: null }], live: false })).toEqual({ streams: [{ appSessionId: 's1', mode: 'live', launchId: s.launchId }] });
+  });
+
+  it('carries a followed session’s other events, its archive’s `session.forgotten` among them', async () => {
+    const { host, client } = lab();
+    host.add('s1');
+    host.add('s2');
+    const c = client();
+    await c.request('session.follow', { sessions: [{ appSessionId: 's1', cursor: null }], live: false });
+    host.emit('session.forgotten', { appSessionId: 's1' });
+    host.emit('session.forgotten', { appSessionId: 's2' }); // not followed, and c is no machine.spine client
+    await vi.waitFor(() => expect(c.events().filter((m) => m.name === 'session.forgotten')).toHaveLength(1));
+    expect(c.events().filter((m) => m.name === 'session.forgotten').map((m) => m.payload)).toEqual([{ appSessionId: 's1' }]);
   });
 
   it('replaces the client’s whole set: a dropped stream ends, a kept one goes on untouched', async () => {
@@ -263,20 +305,51 @@ describe('the client port over the front', () => {
     expect(requests(other)).toEqual([]);
   });
 
-  it('settles noClient when the asking client leaves, and at the deadline', async () => {
+  it('keeps a dialog waiting past the deadline while its client lives, settles it noClient when the client leaves; reveal settles at the deadline', async () => {
     const { front, client } = lab({ portDeadlineMs: 10_000 });
     const c = client();
     const ref = await refOf(front, c);
     vi.useFakeTimers();
     const pick = front.port.pick(ref, { kind: 'file', multiple: false });
     const save = front.port.save(ref, { defaultPath: '/tmp/y' });
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(await pick).toEqual({ noClient: true });
-    expect(await save).toEqual({ noClient: true });
+    const reveal = front.port.reveal(ref, '/tmp/x');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await reveal).toEqual({ noClient: true });
+    vi.useRealTimers();
+    const id = requests(c).find((r) => r.kind === 'pick')!.id;
+    expect(await c.request('clientPort.answer', { id, answer: { paths: ['/tmp/a'] } })).toMatchObject({ ok: true });
+    expect(await pick).toEqual({ paths: ['/tmp/a'] });
     const confirm = front.port.confirm(ref, { kind: 'warning', message: 'm', confirm: 'OK', cancel: 'No' });
     c.leave();
+    expect(await save).toEqual({ noClient: true });
     expect(await confirm).toEqual({ noClient: true });
     expect(front.port.badge(ref, 1)).toEqual({ noClient: true });
+  });
+
+  it('holds nothing serialized while a dialog is open: another machine.op, a spine command and a second dialog go on (D44(1))', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'front-port-'));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    const { front, client } = lab();
+    const [a, b] = [client(), client()];
+    // an act that asks its client to confirm before it acts, as a spine service's would
+    front.bus.register('session.drafts.set', async (input, context) => {
+      if (input.appSessionId === 'app-asks') await front.port.confirm(context.client, { kind: 'warning', message: 'sure?', confirm: 'OK', cancel: 'No' });
+    });
+    front.bus.register('session.list', () => ({ sessions: [], revision: 1 }));
+    registerMachineOps(front.bus, OpLedger.open(dir, 'spine-ops.jsonl'));
+    const op = (opId: string, appSessionId: string, c: ReturnType<typeof client>) =>
+      c.request('machine.op', { opId, opCreated: new Date().toISOString(), claim: { member: 'mem-a', device: 'dev-1', fingerprint: 'fp' }, name: 'session.drafts.set', input: { appSessionId, draft: null } });
+    const asking = op('op-asks-0000000001', 'app-asks', a);
+    await vi.waitFor(() => expect(requests(a)).toHaveLength(1)); // the dialog is open on a
+    expect(await op('op-other-000000001', 'app-other', b)).toMatchObject({ ok: true, value: { state: 'done', result: { ok: true } } });
+    expect(await b.request('session.list', { includeArchived: false })).toMatchObject({ ok: true, value: { sessions: [] } });
+    const refB = await refOf(front, b);
+    const second = front.port.confirm(refB, { kind: 'info', message: 'too?', confirm: 'OK', cancel: 'No' });
+    await vi.waitFor(() => expect(requests(b)).toHaveLength(1));
+    await b.request('clientPort.answer', { id: requests(b)[0].id, answer: { confirmed: true } });
+    expect(await second).toEqual({ confirmed: true });
+    await a.request('clientPort.answer', { id: requests(a)[0].id, answer: { confirmed: true } });
+    expect(await asking).toMatchObject({ ok: true, value: { state: 'done', result: { ok: true } } });
   });
 
   it('delivers a notification’s events as further answers until it closes', async () => {
