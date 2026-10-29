@@ -86,7 +86,8 @@
 # default set), `Runner:`, `Class1a:`, `Lane:`, `DefaultBeside:`, `Evidence:` and `Live:` trailers; under --affected its subject is
 # `ci-gate: <short> affected` and it carries `Selection: affected`, `Affected-Count:` and an `Affected:` trailer per path.
 # The peer's `Peer:`, `Peer-Wire:` and `Wire:` trailers follow when there is one (--peer).
-# Direct e2e runs add `Mac-Backlog:` when the caller can read the account queues and EC2 runner (cached for 60 s).
+# Direct e2e runs without --lane hosted or no-hosted add `Mac-Backlog:` when the caller can read the account queues and
+# EC2 runner (cached for 60 s).
 # The plan may overflow eligible groups to EC2; an absent or older-than-five-minute sample preserves normal placement.
 # A successful local plan adds `Pool-Demand:`, ci-kit's advisory attempt-1 pre-launch hint: the exact multiset of pool
 # jobs, or `none` when no job uses the pool. If it fails, no hint is written and the push still proceeds.
@@ -277,10 +278,12 @@ variables_ok=true
 gate_runner=$(gh variable get GATE_RUNNER -R "$REPO") || variables_ok=false
 gate_e2e_runner=$(gh variable get GATE_E2E_RUNNER -R "$REPO") || variables_ok=false
 gate_hosted_route=$(gh variable list -R "$REPO" --json name,value --jq '.[] | select(.name == "HOSTED_MAC_ROUTE") | .value') || variables_ok=false
-# Sample only when the direct route could host e2e work (unit may add the peer group). The caller's token sees the
-# account-wide queue and EC2 state. Missing/failed reads leave out the trailer; gate-plan then does exactly as before.
+# Sample only when the direct route could host e2e work (unit may add the peer group) and the caller named no hosted
+# lane: --lane hosted asks for GitHub's hosted Macs themselves (a trial or an admission), so nothing of it may move to
+# EC2, and no-hosted puts nothing there. The caller's token sees the account-wide queue and EC2 state. Missing/failed
+# reads leave out the trailer; gate-plan then does exactly as before.
 backlog_trailer=''
-if [[ ${hosted_route:-$gate_hosted_route} == direct && $lane != no-hosted && -z $live ]]; then
+if [[ ${hosted_route:-$gate_hosted_route} == direct && $lane != no-hosted && $lane != hosted && -z $live ]]; then
   case $gates in
     all|*e2e:*|*unit*) backlog_trailer=$(node "$(dirname "$0")/ci-gate-backlog.mjs") || backlog_trailer='' ;;
   esac
