@@ -3,6 +3,7 @@
 // while the page watches it.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { LaneAState } from '@shared/ipc/schema/lane-a';
 import { addressOf } from '@shared/machine/address';
 import { remoteRow } from '../../../../test/support/builders';
 import { OTHER_MACHINE } from '../../../../test/support/machine';
@@ -15,7 +16,7 @@ import { laneAState } from './test-support/lane-a-state';
 import { connectRemoteLaneA } from './remote-connect';
 
 const REMOTE = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
-const LINK = { state: 'up', refusal: null, carrier: 'direct', member: 'm', clientClass: 'native-mac', rights: [], reason: null } as const;
+const LINK: NonNullable<LaneAState['link']> = { state: 'up', refusal: null, carrier: 'direct', member: 'm', clientClass: 'native-mac', rights: [], reason: null };
 const raised = { request: 'toolu_1', session: 'eng-r', tool: 'Bash', input: { command: 'npm test' }, t: Date.parse('2026-10-29T08:00:00Z') };
 
 let off: () => void = () => {};

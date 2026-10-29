@@ -324,7 +324,7 @@ describe('answers', () => {
 
 // P5 O9 M9: a terminal session on another machine, driven over main's remote adapter (`state.link` and `state.acts` are
 // a remote state's only).
-const LINK = { state: 'up', refusal: null, carrier: 'direct', member: 'm-a', clientClass: 'native-mac', rights: [], reason: null } as const;
+const LINK: NonNullable<LaneAState['link']> = { state: 'up', refusal: null, carrier: 'direct', member: 'm-a', clientClass: 'native-mac', rights: [], reason: null };
 const asking = (requestId: string) => item(APP, 'permission', T0, { request: { requestId: requestId as RequestId, toolUseId: null, taskId: null, agentId: null } });
 const ALLOW: RequestAnswer = { kind: 'permission', decision: 'allow', scope: 'once' };
 const AT = '2026-10-29T08:00:00.000Z';
@@ -353,7 +353,7 @@ describe('a session on another machine', () => {
     const named = laneACatalog({ commands: [{ name: 'doctor', description: 'Diagnose', source: 'builtin', route: { class: 'local', enabled: false, reason: 'runs only in the terminal on <machine>', measured: 'M' } }] });
     const reasonOf = (controls: ReturnType<typeof port>['controls']) => {
       useLaneA.setState((s) => ({ catalogs: new Map(s.catalogs).set(APP, named) }));
-      return controls.slash(EMPTY_CATALOG, new Set()).catalog.unavailable.doctor;
+      return controls.slash(EMPTY_CATALOG, new Set()).catalog.unavailable?.doctor;
     };
     expect(reasonOf(remotePort().controls)).toBe('runs only in the terminal on mini');
     expect(reasonOf(port().controls)).toBe('runs only in the terminal on this Mac');
@@ -399,7 +399,7 @@ describe('a grade refusal on another machine', () => {
   it('a control: shown pending while its act is out, then usable again, the refusal’s words in its answer', async () => {
     expect(remotePort({ ...running, acts: [{ id: 'op-1', control: 'interrupt', progress: 'accepted', at: AT }] }).controls.capability('interrupt')).toEqual({ available: false, reason: 'mini has it' });
     const after = remotePort(running, { 'laneA.interrupt': { state: 'refused', code: 'grade', message: WORDS } });
-    expect(await after.controls.interrupt({ holdEngineQueued: true })).toEqual({ ok: false, error: expect.objectContaining({ message: WORDS, issues: { refusal: 'grade' } }) });
+    expect(await after.controls.interrupt({ cancelEngineQueued: false, holdEngineQueued: true })).toEqual({ ok: false, error: expect.objectContaining({ message: WORDS, issues: { refusal: 'grade' } }) });
     expect(after.controls.capability('interrupt')).toEqual({ available: true });
     const command = remotePort(running, { 'laneA.command': { state: 'refused', code: 'grade', message: WORDS } });
     expect(await command.controls.command('rename', 'x')).toEqual({ state: 'refused', code: 'grade', message: WORDS });

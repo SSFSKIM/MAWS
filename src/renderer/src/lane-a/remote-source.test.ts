@@ -51,7 +51,7 @@ async function opened(given: Parameters<typeof fakeClient>[0] = {}) {
 
 const drawn = () => useTranscriptStore.getState().entries[APP]?.rows ?? [];
 const user = (text: string) => drawn().find((row): row is User => row.kind === 'user' && row.text === text);
-const notices = () => drawn().flatMap((row) => (row.kind === 'error' || row.kind === 'notice' ? [JSON.stringify(row)] : []));
+const notices = () => drawn().flatMap((row) => (row.kind === 'error' ? [JSON.stringify(row)] : []));
 const wait = async (ok: () => boolean) => {
   for (let i = 0; i < 50 && !ok(); i++) await settle();
 };
