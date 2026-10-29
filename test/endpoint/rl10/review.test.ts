@@ -239,7 +239,7 @@ async function served(options: {
       refresh: async () => {},
       listedSessions: () => options.listed?.() ?? [],
     },
-    notifier: { pendingSet: () => {}, hostMessage: (m, sent) => options.hostMessage?.(m, sent), forget: (session) => void calls.push(`forget ${session}`) },
+    notifier: { pendingSet: () => {}, requestMessage: () => {}, hostMessage: (m, sent) => options.hostMessage?.(m, sent), forget: (session) => void calls.push(`forget ${session}`) },
     machineOwners: options.machineOwners ?? (async () => []),
     dispatch: async () =>
       options.engineSessions === undefined ? Promise.reject(new Error('none')) : { t: 'res' as const, id: '0', ok: true as const, value: options.engineSessions() },

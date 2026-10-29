@@ -14,9 +14,10 @@
 //   - the log plane (`hello`, `events`, `rejected`), relayed to RL1 (log-relay.ts); signed uploads wait for the hub
 //     link's room in the relay's own capped queue, never holding the frames behind them;
 //   - the session lane, which stops here and never reaches the hub: `member` and `restated` (members.ts), `pending`
-//     (M3's notify counts), and `session` messages of every DX4 kind: a `machine` presence gives its project's
-//     checkouts, a sub-less `host` is a to-human event (M3's `wrote`, once per `(writer, seq)`, durably), and every
-//     message goes to the session listeners (M8's subscriptions);
+//     (a project's whole set of requests, for M3's notify counts), and `session` messages of every DX4 kind: a
+//     `machine` presence gives its project's checkouts, a sub-less `host` is a to-human event (M3's `wrote`, once per
+//     `(writer, seq)`, durably), a sub-less `raised` or `settled` moves its session's notify count by one request
+//     between the sets, and every message goes to the session listeners (M8's subscriptions);
 //   - `words?`, answered `words` (words.ts); `policy-set`, the policy changed and restated; `legacy-key`, kept (logged
 //     and dropped once the org state retires the key);
 //   - `rpc-result`, handed to the result listeners (M7) and acknowledged `rpc-ack {opId, nonce}`; `queried` and
@@ -70,7 +71,12 @@ export type Rl10Context = {
   hub: { openProject(project: string, handler: LogProject): () => void; send(frame: Frame): boolean; writable?(): Promise<void> };
   /** M3's listings and notify, which the session lane feeds. */
   listings: MembersContext['listings'] & { refresh(): Promise<void>; listedSessions(): readonly string[] };
-  notifier: { pendingSet(project: string, raised: ReadonlyArray<{ session: string }>): void; hostMessage(message: SessionLaneMessage, sent?: () => void): void; forget(session: string): void };
+  notifier: {
+    pendingSet(project: string, raised: ReadonlyArray<{ session: string; request: string }>): void;
+    requestMessage(message: SessionLaneMessage): void;
+    hostMessage(message: SessionLaneMessage, sent?: () => void): void;
+    forget(session: string): void;
+  };
   machineOwners(): Promise<string[]>;
   dispatch: MembersContext['dispatch'];
   now(): number;
@@ -446,7 +452,8 @@ export class Rl10 {
   #pending(frame: Frame): void {
     const { project, raised } = frame;
     if (typeof project !== 'string' || !Array.isArray(raised)) return this.#ctx.log('endpoint: an RL10 pending frame that is not one was ignored');
-    this.#ctx.notifier.pendingSet(project, raised.filter((r): r is { session: string } => typeof r === 'object' && r !== null && typeof (r as { session?: unknown }).session === 'string'));
+    const requests = raised.filter((r): r is { session: string; request: string } => typeof (r as { session?: unknown } | null)?.session === 'string' && typeof (r as { request?: unknown }).request === 'string');
+    this.#ctx.notifier.pendingSet(project, requests);
     for (const listener of this.#pendings) {
       try {
         listener(project, raised);
@@ -472,6 +479,7 @@ export class Rl10 {
     if (typeof message.kind !== 'string' || typeof message.project !== 'string') return this.#ctx.log('endpoint: an RL10 session message that is not one was ignored');
     if (message.kind === 'machine' && message.session === null) this.members.presence(message.project, message.body);
     if (message.kind === 'host' && message.sub === null) this.#host(message);
+    if (message.kind === 'raised' || message.kind === 'settled') this.#ctx.notifier.requestMessage(message);
     for (const listener of this.#sessions) {
       try {
         listener(message);
