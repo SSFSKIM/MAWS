@@ -3,7 +3,7 @@
 // panels, the interest report, the browser, connectors, the export authors, the org rows, Settings' reveal) and, until
 // O3-E, the checkouts (files, `git.lsFiles`, scm) read the spine: records, both project sets, digests, attention with its
 // restored marks in band, engine statuses, intents, the visible set, `acquire` and files' admission read. In process it
-// is backed by the spine's own parts (src/main/sessions/spine-view.ts); at O3-D main backs it again by a mirror fed by
+// is backed by the spine's own parts (src/services/sessions/spine-view.ts); at O3-D main backs it again by a mirror fed by
 // mawsd's services front. The synchronous reads answer from memory in every backing; only `acquire` and
 // `fileLinkedPaths` may cross a process. A reader declares the narrowest `Pick<SpineView, …>` it reads.
 import type { AttentionItem } from '@shared/graph/attention';
