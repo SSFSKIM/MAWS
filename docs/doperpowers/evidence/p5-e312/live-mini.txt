@@ -1,0 +1,106 @@
+P5-E312 live groups on the mini, Claude Code 2.1.312 (spikes/protocol-probe/findings-p5-e312-engine.txt)
+Runner ci-kit-mac-mini (the mini's exclusive self-hosted runner, macOS 27.0, arm64) through scripts/ci-gate.sh
+--runner macos --live --evidence; every group on the installed engine (~/.local/share/claude/versions/2.1.312,
+unmodified) through ClaudeUsage's relay http://127.0.0.1:8641, on Haiku.
+
+== run 1: 40867671676, the nine live groups
+head 643234981 (the branch at e1739f3f9 merged with master bd6b4b097), ref ci/e312-live-64323498; 11:44Z to 12:14Z
+  e2e:available-live         success   1 passed (sessions-available-live, 18 s)                     11:44:30Z-11:46:26Z
+  e2e:tool-time-heavy-live   success   4 passed (tool-time-heavy.live.test.ts)                      11:46:30Z-11:58:18Z
+  e2e:agents-live            success   1 passed (agent-tools-live, steps i, v and x, 107 s)         11:58:20Z-12:01:19Z
+  e2e:p1-live                success   10 passed (S3 cases 1 to 4, S6 8 and 8t, A-47, S2(b) to (d)) 12:01:21Z-12:04:55Z
+  e2e:keep-quit-live         FAILURE   1 failed (S5, e2e/p1-live-keep-quit.spec.ts:230)             12:07:22Z-12:08:54Z
+  e2e:plugins-library-live   success   1 passed (35 s)                                              12:08:56Z-12:10:05Z
+  e2e:tools-live             success   1 passed (maws-tools-live, 62 s)                             12:10:07Z-12:11:42Z
+  e2e:ask-interrupt-live     success   1 passed (maws-ask-interrupt.live.test.ts, E11 S1)           12:11:44Z-12:12:29Z
+  e2e:plugins-live           success   1 passed (74 s)                                              12:12:31Z-12:14:16Z
+  flaky lines: 0 (gh run view 40867671676 -R SSFSKIM/MAWS --log | grep -cE '\sflaky: [a-z]'); the Playwright reports:
+  0 flaky, 0 skipped in every group.
+
+keep-quit-live failed in S5's precondition, not in MAWS's behaviour. The prompt (12:08:40.882Z) asked for the foreground
+command `sleep 45; echo DONE_e429d176`; Haiku sent it as asked (toolu_01KrzPJ5fM1GhtZokZmhVhVt, no permission request),
+and the engine's Bash tool refused it without running it. The tool result, 1.75 s after the prompt (12:08:42.632Z,
+isError):
+  <tool_use_error>Blocked: sleep 45 followed by: echo DONE_e429d176. To wait for a condition, use Monitor with an
+  until-loop (e.g. `until <check>; do sleep 2; done`). To wait for a command you started, use run_in_background: true.
+  Do not chain shorter sleeps to work around this block.</tool_use_error>
+So the call had answered before the quit, and S5's `the command has not answered before the quit` failed at :230. The
+case's cleanup killed the supervisor and the engine it had recorded (after a failure); A-15 identical before and after
+(17 keys, sha1 05a29a2b9585d4c1fe9143bb9494524a5ad69023); no process naming the scratch root after it.
+
+== the guard, read from the 2.1.312 bundle (~/claude-code-bundle/2.1.312/cli.pretty.js; the binary's strings agree)
+Where: the Bash tool's validateInput (983355-983358; the PowerShell tool has its twin at 1186677), so it refuses before
+any permission check and before anything runs (errorCode 10): the host sees the tool use and, at once, an errored result.
+When: on for every session unless background tasks are off (`kp()`, 751848: the settings' backgroundTasksDisabled or
+CLAUDE_CODE_DISABLE_BACKGROUND_TASKS) or completion notices are (`foe()`, 60368), and only for a call that is not
+run_in_background (and not a remote call that forbids the background, or one with a shell wall cap). No caller condition:
+the main thread's calls and every agent's alike.
+The rule (`xws`, 983120): the command is split into its parts by the bash parse (`gh`, 1181046-1181073: through
+program, list and pipeline nodes; `&&`, `||`, `|`, `;`, `&`, `|&`, newlines and comments dropped; a redirected statement
+by its command), and only the first part is tested, against /^sleep\s+(\d+(?:\.\d*)?)\s*$/ with the number at least 25
+(`mLr = 25`, 937029). Blocked: `sleep 45`, `sleep 45; echo x`, `sleep 25 && x`, `sleep 30 | cat`. Not blocked:
+`sleep 24; x`, `echo a; sleep 60`, `(sleep 45)`, `sleep 45s`, any other program however long it runs. The message is
+`Blocked: sleep N followed by: <the other parts>` or `Blocked: standalone sleep N`, then the fixed advice above.
+Model side too: under the same condition the Bash tool's description (`i3t`, 900919; the list at 901091) tells the model
+"Long leading `sleep` commands are blocked. To poll until a condition is met, use Monitor with an until-loop … Do not
+chain shorter sleeps to work around the block."
+Since when: the code is in every extracted bundle from 2.1.220, but up to 2.1.309 behind the GrowthBook flag
+`tengu_amber_sentinel`, default off (the flag in every bundle to 2.1.309; the gate read at 2.1.292 813080
+`gG() && !yd() && …`, gG at 606450, and at 2.1.309 747921, a8 at 613781),
+which MAWS's sessions never had on (S5 ran its `sleep 45` on 2.1.293). 2.1.310 dropped the flag (81968; its changelog:
+"long foreground sleeps are now blocked there too", beside the Monitor tool reaching gateways and sessions with
+nonessential traffic off), and 2.1.311 and 2.1.312 test only the two conditions above. So the block is new to MAWS with
+this bump: 2.1.296, the tested engine before it, had it off.
+
+== the fix (commit 62642781b on p5-engine-2-1-312, then master merged: 0960dc0d8)
+A case that needs a turn held open runs a process of its own instead of a leading sleep: `foregroundJob(seconds, marker)`
+(e2e/support/p1-live.ts) is `node -e 'setTimeout(() => console.log("<marker>"), <ms>)'`, and the prompt says what it is
+("a 45-second job that prints DONE_<nonce> when it ends"), with the same foreground, no-agent, no-timeout wording. `node`
+is on the login shell's PATH that MAWS captures the engine's environment from (the mini: ~/.nvm/versions/node/v24.18.0,
+read over ssh before the change).
+  S5: the 45-second job. `node` is not read-only, so default mode may ask: the allow-once answer stays, and the call
+      counts as running once its ask is answered, or once it has been seen 2 s with none (an ask follows its tool use
+      within milliseconds; a poll landing between the two would otherwise quit with the ask pending). Everything after
+      is unchanged: the keep-quit mid-turn, the relaunch with the turn open and no DONE yet, DONE once, Stop all, no
+      survivor.
+  p1-live S3 case 3: `sleep 25; echo SLEPT` is blocked too (25 is not below 25); the case passed in run 1 because its
+      assertions hold whether the call ran or was refused (its log: the steer sent 10 s before the turn ended). Now
+      foregroundJob(25, 'SLEPT').
+  agents-live: step v's slow workflow agent (`sleep 90`), step vi's busy parent (`sleep 60`) and step vii's foreground
+      agent (`sleep 30`) run node timers of the same length. Only v is in the gate, and in run 1 its Stop came before the
+      slow agent's first call (v.stop: 0 s, 0 tokens); vi and vii run only in a full sitting.
+  Not changed: every other live prompt's sleep is under 25 s or runs in the background (c11's sleep 120 and c12's
+  sleep 900 and agents iv's sleep 300 in the background; c12 B3's sleep 20, composer's 3, tools' and maws-tools' 15,
+  engine-host's SLOW_COUNT at most 6). to-human-live's foreground `sleep 40` would be blocked, but the spec skips itself
+  (the findings' residue 1).
+
+Class 1a on that head: run 40873601720 (static, unit 1/4 to 4/4, probes) green, its commit's tree 89a81ff2d the head's,
+0 flaky lines.
+
+== run 2: 40874225082, e2e:keep-quit-live (with e2e:tool-time-heavy-live, which rides with any live run)
+head 0960dc0d8 (tree 89a81ff2d, the run's commit's tree), ref ci/e312-live2-0960dc0d
+  e2e:keep-quit-live         success   1 passed (S5, 58.2 s)                                        12:33:35Z-12:36:20Z
+  e2e:tool-time-heavy-live   success                                                                12:36:22Z-12:37:58Z
+  flaky lines: 0 (gh run view 40874225082 -R SSFSKIM/MAWS --log | grep -cE '\sflaky: [a-z]')
+S5's own lines (its log, live-s5.txt, as the job printed them):
+  prompt sent 12:35:13.540Z: Run the Bash command `node -e 'setTimeout(() => console.log("DONE_4aa80b4b"), 45000)'`
+    yourself, a 45-second job that prints DONE_4aa80b4b when it ends, in the foreground (never in the background, never
+    through an agent, and with no timeout of your own), then reply with its output.
+  permission requested for Bash {"command":"node -e 'setTimeout(() => console.log(\"DONE_4aa80b4b\"), 45000)'",
+    "description":"Run 45-second delay script in foreground"}: allowed once (12:35:16.452Z); the call
+    toolu_016oh4J2C9Y1KTL31YfM7bo3 running from 12:35:17.461Z, sent as asked, nothing refused
+  12:35:21.482Z: 31 events before the quit, no result for the call, the turn open
+  quit 12:35:21.648Z (4187 ms after the call ran): quit-guard: 1 mid-turn, auto-answered keep, 1 session kept; A-15
+    identical
+  relaunched 45 ms after the exit (bound 10000 ms); at the connect (674 ms after the exit): process ready, turn open,
+    the same engine pid 70619, the same supervisor 70568, no result yet
+  the result "DONE_4aa80b4b" in the host's stream at 12:36:04.432Z (42784 ms after the exit, 46971 ms after the call
+    ran) and in the window's live batches; the turn ended (success, US$0.0029, reply "Output: `DONE_4aa80b4b` …");
+    20 events reached the window live, none twice; DONE_4aa80b4b shown in the transcript
+  no duplicate: 52 event ids unique; 1 record; 1 sidebar row; 4 rendered rows unique
+  Stop all: supervisor 70568 and engine 70619 exited; a fresh supervisor 74434 served with no session and exited with
+    the app's quit (no question: nothing mid-turn)
+  init plugins: the engine's three builtins, none of the owner's; spend US$0.0029 of US$0.1000; A-15 identical after the
+    app closed (17 keys, sha1 05a29a2b9585d4c1fe9143bb9494524a5ad69023)
+  survivor check: recorded supervisors [70568, 74434], engines [70619]; alive at the cleanup none; no process naming the
+    scratch (the one maws-supervisor pgrep lists is the owner's installed /Applications/MAWS.app's)

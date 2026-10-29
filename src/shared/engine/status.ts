@@ -85,6 +85,11 @@ export const EngineSessionStatusSchema = z.strictObject({
   }).optional(),
   kept: z.boolean().optional(),
   // P5 O2 M2 end
+  // P5 E312 (additive X6): the last change this process's session published for review, from the engine's
+  // `system/code_change_published` (a `gh pr` verb, a push to a PR's branch): its URL as the command printed it
+  // (unverified), the verb, and when. It moves no ref the git watcher sees, so the PR row re-asks gh when `at` moves
+  // rather than at its next poll. Absent before the first, and from an older host.
+  published: z.strictObject({ url: z.string(), action: z.string().nullable(), at: z.string() }).optional(),
 });
 export type EngineSessionStatus = z.infer<typeof EngineSessionStatusSchema>;
 

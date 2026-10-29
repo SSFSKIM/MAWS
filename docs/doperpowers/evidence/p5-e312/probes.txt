@@ -1,0 +1,126 @@
+P5-E312 live probes on Claude Code 2.1.312 (spikes/protocol-probe/findings-p5-e312-engine.txt)
+VM dc-e312probe-c52f (devcloud, GCE us-central1-a, e2-custom-4-8192, 6 h lease); engine /Users/new/.local/share/claude/versions/2.1.312, the only version installed there.
+Each step: devcloud vm ssh --root <vm> -- node root.mjs <runner> <scenario>: a private mount namespace with an empty tmpfs on
+/etc/claude-code (the managed settings that route engines and enable the owner's plugins hidden for the step alone),
+then the user's node run.mjs: a forwarder serving the relay at 127.0.0.1:8641 from mac-mini.tail112c3f.ts.net:8641,
+GET /api/hello 200, then the runner with PROBE_ENGINE and MAWS_E2E_ENGINE_BIN at 2.1.312. Before every step this Mac
+read the mini's ~/.local/state/ci-hold over ssh and waited while its until= was in the future (one held read a minute,
+summarised below); the file was gone from 06:29Z.
+
+== run 1: p5-e312 (all arms) and the sweep
+2026-10-29T04:24:55.162Z waiting: mini held (until=2026-10-29T06:30:00Z)  (first of 122 held reads; the last at 2026-10-29T06:28:00.770Z)
+2026-10-29T06:29:02.295Z start pass3:p5-e312
+2026-10-29T06:30:06.517Z end pass3:p5-e312: exit 0 signal null after 64 s
+2026-10-29T06:30:07.650Z start pass1:init
+2026-10-29T06:30:16.775Z end pass1:init: exit 0 signal null after 9 s
+2026-10-29T06:30:18.005Z start pass1:permission-roundtrip
+2026-10-29T06:30:37.273Z end pass1:permission-roundtrip: exit 0 signal null after 19 s
+2026-10-29T06:30:38.570Z start pass1:question-roundtrip
+2026-10-29T06:30:50.683Z end pass1:question-roundtrip: exit 0 signal null after 12 s
+2026-10-29T06:30:51.558Z start pass1:subagent
+2026-10-29T06:31:08.678Z end pass1:subagent: exit 0 signal null after 17 s
+2026-10-29T06:31:09.480Z start pass1:reads
+2026-10-29T06:31:19.775Z end pass1:reads: exit 0 signal null after 10 s
+2026-10-29T06:31:20.920Z start pass1:queue-and-interrupt
+2026-10-29T06:31:34.587Z end pass1:queue-and-interrupt: exit 0 signal null after 14 s
+2026-10-29T06:31:35.226Z start pass1:resume-fork
+2026-10-29T06:31:51.896Z end pass1:resume-fork: exit 0 signal null after 17 s
+2026-10-29T06:31:52.593Z start pass2:bash-context
+2026-10-29T06:32:10.034Z end pass2:bash-context: exit 0 signal null after 17 s
+2026-10-29T06:32:10.923Z start pass2:hooks
+2026-10-29T06:32:24.154Z end pass2:hooks: exit 0 signal null after 13 s
+2026-10-29T06:32:25.078Z start pass2:rewind
+2026-10-29T06:32:36.229Z end pass2:rewind: exit 0 signal null after 11 s
+2026-10-29T06:32:37.037Z start pass2:per-task-stop
+2026-10-29T06:34:06.239Z end pass2:per-task-stop: exit 0 signal null after 89 s
+2026-10-29T06:34:06.941Z start pass2:dialogs
+2026-10-29T06:34:18.771Z end pass2:dialogs: exit 0 signal null after 12 s
+2026-10-29T06:34:19.547Z start pass2:workflow
+2026-10-29T06:34:38.312Z end pass2:workflow: exit 0 signal null after 19 s
+2026-10-29T06:34:39.303Z start pass3:context-sample
+2026-10-29T06:34:51.959Z end pass3:context-sample: exit 0 signal null after 13 s
+2026-10-29T06:34:52.776Z start pass3:interrupt-text
+2026-10-29T06:35:08.324Z end pass3:interrupt-text: exit 0 signal null after 16 s
+2026-10-29T06:35:09.209Z start pass3:question-deny
+2026-10-29T06:35:20.103Z end pass3:question-deny: exit 0 signal null after 11 s
+2026-10-29T06:35:20.791Z start pass3:end-session-archive
+2026-10-29T06:35:26.155Z end pass3:end-session-archive: exit 1 signal null after 5 s
+2026-10-29T06:35:26.948Z start pass3:w4-question-skip
+2026-10-29T06:35:43.427Z end pass3:w4-question-skip: exit 0 signal null after 16 s
+2026-10-29T06:35:44.430Z start pass3:p1-side-question
+2026-10-29T06:36:20.635Z end pass3:p1-side-question: exit 1 signal null after 36 s
+2026-10-29T06:36:21.608Z start pass3:p1-fork
+2026-10-29T06:36:35.349Z end pass3:p1-fork: exit 0 signal null after 14 s
+2026-10-29T06:36:36.561Z start pass3:p1-question-preview
+2026-10-29T06:36:52.089Z end pass3:p1-question-preview: exit 0 signal null after 16 s
+2026-10-29T06:36:54.495Z start pass3:p1-sdk-mcp
+2026-10-29T06:37:22.800Z end pass3:p1-sdk-mcp: exit 0 signal null after 28 s
+2026-10-29T06:37:23.557Z start pass3:e7-cron
+2026-10-29T06:41:41.449Z end pass3:e7-cron: exit 0 signal null after 258 s
+2026-10-29T06:41:42.438Z start pass3:terminal-queued
+2026-10-29T06:43:54.462Z end pass3:terminal-queued: exit 0 signal null after 132 s
+2026-10-29T06:43:55.140Z start pass3:nested-agents
+2026-10-29T06:44:16.875Z end pass3:nested-agents: exit 0 signal null after 22 s
+2026-10-29T06:44:17.564Z start pass3:stop-task
+2026-10-29T06:45:01.626Z end pass3:stop-task: exit 0 signal null after 44 s
+2026-10-29T06:45:02.566Z start pass3:relay-to-child
+2026-10-29T06:47:02.875Z end pass3:relay-to-child: exit 0 signal null after 120 s
+2026-10-29T06:47:03.990Z start pass3:context-full
+2026-10-29T06:47:10.431Z end pass3:context-full: exit 1 signal null after 6 s
+2026-10-29T06:47:23.557Z fixtures tarball: 4979146 bytes, exit 0
+
+== run 2: the four kept arms with corrected provenance
+2026-10-29T06:54:48.877Z start pass3:p5-e312
+2026-10-29T06:55:29.576Z end pass3:p5-e312: exit 0 signal null after 41 s
+2026-10-29T06:55:45.279Z fixtures tarball: 4979317 bytes, exit 0
+
+== spend, run 1: each journal's largest result total_cost_usd (a process's running total), US$
+  ('init.jsonl', 0.00248)
+  ('pass2/bash-context-alone.jsonl', 0.0479)
+  ('pass2/bash-context-echoed.jsonl', 0.0183)
+  ('pass2/dialogs.jsonl', 0.02392)
+  ('pass2/hooks.jsonl', 0.0208)
+  ('pass2/per-task-stop-off.jsonl', 0.02732)
+  ('pass2/per-task-stop-on.jsonl', 0.02695)
+  ('pass2/rewind.jsonl', 0.0375)
+  ('pass2/workflow.jsonl', 0.06248)
+  ('pass3/context-sample.jsonl', 0.00188)
+  ('pass3/e7-cron-resume.jsonl', 0.00613)
+  ('pass3/e7-cron.jsonl', 0.00549)
+  ('pass3/interrupt-text.jsonl', 0.00043)
+  ('pass3/nested-agents-sidecars/agent-a84c16dadb6df4dd4.jsonl', 0.0)
+  ('pass3/nested-agents-sidecars/agent-aec3a9dcdc00c7648.jsonl', 0.0)
+  ('pass3/nested-agents.jsonl', 0.09134)
+  ('pass3/p1-fork-session-flag.jsonl', 0.00164)
+  ('pass3/p1-fork-start.jsonl', 0.00106)
+  ('pass3/p1-question-preview-html.jsonl', 0.0029)
+  ('pass3/p1-question-preview-unset.jsonl', 0.00139)
+  ('pass3/p1-sdk-mcp-roundtrip.jsonl', 0.00311)
+  ('pass3/p1-side-question-session.jsonl', 0.00403)
+  ('pass3/p5-e312-auto.jsonl', 0.06084)
+  ('pass3/p5-e312-devintent.jsonl', 0.00106)
+  ('pass3/p5-e312-fallback.jsonl', 0.00082)
+  ('pass3/p5-e312-memory.jsonl', 0.00142)
+  ('pass3/p5-e312-title-resume.jsonl', 0.00307)
+  ('pass3/p5-e312-title.jsonl', 0.00247)
+  ('pass3/p5-e312-vcs.jsonl', 0.00234)
+  ('pass3/question-deny.jsonl', 0.00136)
+  ('pass3/relay-to-child.jsonl', 0.08837)
+  ('pass3/stop-task.jsonl', 0.04338)
+  ('pass3/w4-question-none.jsonl', 0.00143)
+  ('pass3/w4-question-partial.jsonl', 0.00151)
+  ('permission-roundtrip.jsonl', 0.00223)
+  ('question-roundtrip.jsonl', 0.00155)
+  ('queue-and-interrupt.jsonl', 0.00141)
+  ('reads.jsonl', 0.00105)
+  ('resume-fork-cli.jsonl', 0.00203)
+  ('resume-fork-no-replay.jsonl', 0.00163)
+  ('resume-fork-replay.jsonl', 0.00183)
+  ('resume-fork-start.jsonl', 0.00105)
+  ('subagent.jsonl', 0.00499)
+  journals 43 total USD 0.6129
+== spend, run 2: p5-e312-title 0.00247, -title-resume 0.00307, -vcs 0.00238, -fallback 0.00082, -devintent 0.00106 (US$0.0098)
+
+== replay of every run-1 journal through this branch's Normalizer (a scratch vitest file, not committed)
+  frame.unknown or invalid_frame on 2.1.312: 0; normaliser throws: 0
+  stdout kinds first seen on 2.1.312 among all recordings: control_request/elicitation, system/code_change_published, system/control_request_progress, system/dev_intent, system/model_fallback, system/session_title_changed, system/vcs_state_changed

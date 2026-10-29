@@ -161,7 +161,7 @@ async function attempt(g: LiveGate, n: number, moment: (typeof MOMENTS)[number],
   return met;
 }
 
-describe('an interrupt during a blocking maws ask, live (E11 S1)', () => {
+describe.skipIf(process.env.MAWS_LIVE !== '1')('an interrupt during a blocking maws ask, live (E11 S1)', () => {
   it('the engine cancels the ask’s tools/call with notifications/cancelled and the host withdraws the ask', async (ctx) => {
     const g = liveCase(gate, ctx);
     const exported = { done: false };

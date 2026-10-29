@@ -19,10 +19,11 @@ describe('versions against the tested one', () => {
   });
 
   it('only a version above the tested one is newer; none, an older one and nonsense are not', () => {
-    expect(TESTED_ENGINE_VERSION).toBe('2.1.296'); // P2-F's live re-runs R1 to R4 (docs/doperpowers/evidence/p2-finish/live-r*.txt), D12
-    expect(newerThanTested('2.1.297')).toBe(true);
+    expect(TESTED_ENGINE_VERSION).toBe('2.1.312'); // P5-E312: the engine the owner runs (spikes/protocol-probe/findings-p5-e312-engine.txt, docs/doperpowers/evidence/p5-e312/)
+    expect(newerThanTested('2.1.313')).toBe(true);
     expect(newerThanTested('3.0.0')).toBe(true);
-    expect(newerThanTested('2.1.296')).toBe(false);
+    expect(newerThanTested('2.1.312')).toBe(false);
+    expect(newerThanTested('2.1.296')).toBe(false); // P2-F's live re-runs R1 to R4, the tested version before P5-E312
     expect(newerThanTested('2.1.293')).toBe(false); // E11's sittings, the tested version before P2-F
     expect(newerThanTested('2.1.287')).toBe(false); // older than tested: the fixtures recorded before E11
     expect(newerThanTested('2.1.200')).toBe(false);
@@ -31,20 +32,20 @@ describe('versions against the tested one', () => {
   });
 
   it('words the notice with both versions', () => {
-    expect(engineCompatNotice('2.1.297')).toBe('Claude Code 2.1.297 is newer than the version MAWS was verified against (2.1.296); some events were not understood');
+    expect(engineCompatNotice('2.1.313')).toBe('Claude Code 2.1.313 is newer than the version MAWS was verified against (2.1.312); some events were not understood');
   });
 });
 
 describe('the watch', () => {
   it('answers once, for an unknown frame or an invalid one, only while the version is newer than tested', () => {
     const watch = new EngineCompatWatch();
-    expect(watch.observe([event('turn.started')], '2.1.297')).toBeNull(); // understood
-    expect(watch.observe([event('frame.unknown')], '2.1.296')).toBeNull(); // the tested version: no notice
+    expect(watch.observe([event('turn.started')], '2.1.313')).toBeNull(); // understood
+    expect(watch.observe([event('frame.unknown')], '2.1.312')).toBeNull(); // the tested version: no notice
     expect(watch.observe([event('frame.unknown')], null)).toBeNull();
-    expect(watch.observe([event('error.raised', { code: 'exited' })], '2.1.297')).toBeNull(); // not a frame MAWS could not read
-    expect(watch.observe([event('error.raised', { code: 'invalid_frame' })], '2.1.297')).toBe(engineCompatNotice('2.1.297'));
-    expect(watch.observe([event('frame.unknown')], '2.1.297')).toBeNull(); // once per session
-    expect(new EngineCompatWatch().observe([event('frame.unknown')], '2.1.298')).toBe(engineCompatNotice('2.1.298'));
+    expect(watch.observe([event('error.raised', { code: 'exited' })], '2.1.313')).toBeNull(); // not a frame MAWS could not read
+    expect(watch.observe([event('error.raised', { code: 'invalid_frame' })], '2.1.313')).toBe(engineCompatNotice('2.1.313'));
+    expect(watch.observe([event('frame.unknown')], '2.1.313')).toBeNull(); // once per session
+    expect(new EngineCompatWatch().observe([event('frame.unknown')], '2.1.314')).toBe(engineCompatNotice('2.1.314'));
   });
 });
 
@@ -68,9 +69,9 @@ describe('a fixture replay meeting a frame of an unknown type', () => {
   const notices = (events: SessionEvent[]) => events.filter((e): e is Extract<SessionEvent, { kind: 'notice.posted' }> => e.kind === 'notice.posted' && e.key === ENGINE_COMPAT_NOTICE_KEY);
 
   it('under a newer version: one notice, journaled, after the first unknown frame, and nothing refused', async () => {
-    const run = await replay('2.1.297');
+    const run = await replay('2.1.313');
     expect(run.events.filter((e) => e.kind === 'frame.unknown')).toHaveLength(2);
-    expect(notices(run.events)).toMatchObject([{ level: 'warning', text: engineCompatNotice('2.1.297') }]);
+    expect(notices(run.events)).toMatchObject([{ level: 'warning', text: engineCompatNotice('2.1.313') }]);
     const firstUnknown = run.events.findIndex((e) => e.kind === 'frame.unknown');
     expect(run.events.findIndex((e) => e.kind === 'notice.posted' && e.key === ENGINE_COMPAT_NOTICE_KEY)).toBe(firstUnknown + 1);
     expect(run.journal.rows.filter((r) => r.direction === 'meta' && (r.frame as { key?: string }).key === ENGINE_COMPAT_NOTICE_KEY)).toHaveLength(1);

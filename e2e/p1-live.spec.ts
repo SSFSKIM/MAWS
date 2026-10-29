@@ -62,7 +62,9 @@
 // docs/doperpowers/evidence/p1-e11/ only under MAWS_E11_SHOTS=1.
 // It spends money; run on purpose only (the script builds, the flag runs):
 //   MAWS_P1_LIVE=1 pnpm e2e:p1-live
-// (`pnpm e2e:p1-live` alone builds and reports every case skipped.)
+// (`pnpm e2e:p1-live` alone builds and reports every case skipped.) The script, the gate's live group
+// (`ci-gate.sh --live`), names the run's cap (every sitting's own summed, so none starves another), the installed
+// engine and the logs' directory under test-results/.
 import { addressed } from './support/address';
 import { activeMainTab, openSurface, surface } from './support/shell';
 import { execFileSync, spawn } from 'node:child_process';
@@ -90,7 +92,7 @@ import { journalSpend, ptyEngine, terminalEnv, transcriptFile, type PtyEngine } 
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { sessionSpent } from './support/live-budget';
 import { clearToasts, eventsOf, frameAt, listOf, mcpCalls, mcpResultOf, ofKind, openArtifacts, pageUrlOf, pointInFrame, recordEvents, rowOf, seedTranscripts, show, unfoldWork, viewerOf, type Scene } from './support/maws-tools';
-import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, costRecorded, costShown, DEFAULT_CAP_USD, dominantColour, forkOverspend, initPluginsOf, installedEngine, launchReservation, liveOutDir, resumeNoOutput, runRoot, settleAll, settledReservation, sittingLog, SITTING_CAP_USD, spentBySitting, terminalUsdBound, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
+import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, costRecorded, costShown, DEFAULT_CAP_USD, dominantColour, forkOverspend, foregroundJob, initPluginsOf, installedEngine, launchReservation, liveOutDir, resumeNoOutput, runRoot, settleAll, settledReservation, sittingLog, SITTING_CAP_USD, spentBySitting, terminalUsdBound, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
 import { isAlive, processesNaming, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
 
@@ -129,7 +131,8 @@ const PROMPTS = {
     'Then call mcp__maws__artifact_read with artifact "p1-page". ' +
     'Then read page-v2.html and call mcp__maws__artifact_publish with artifact "p1-page", baseRevision the revision artifact_read returned, and files {"index.html": the whole text of page-v2.html}. ' +
     'Then reply with exactly one word: ANCHORED.',
-  slow: 'Run the Bash command `sleep 25; echo SLEPT` yourself, in the foreground (never in the background, never through an agent), then reply with its output.',
+  // a turn held open by a running command (`foregroundJob`: 2.1.310 refuses a leading `sleep 25` in the foreground)
+  slow: `Run the Bash command \`${foregroundJob(25, 'SLEPT')}\` yourself, a 25-second job that prints SLEPT when it ends, in the foreground (never in the background, never through an agent), then reply with its output.`,
   steer: 'When you reply, add the word STEER_SEEN at the end.',
   btw: 'In one word: what was the background colour of the artifact’s first version?',
   resumeSeed: 'Reply with exactly: OK',

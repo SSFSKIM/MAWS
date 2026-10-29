@@ -190,7 +190,7 @@ test('the Live: yes trailer, or the live input on a dispatch, turns live on for 
   const on = plan({ ...live, HEAD_MESSAGE: livePush('e2e:library-live,e2e:presentations-live') });
   assert.equal(on.outputs.live, 'true');
   assert.deepEqual(JSON.parse(on.outputs.e2e).map((entry) => entry.group), ['library-live', 'presentations-live']);
-  assert.match(on.summary, /Live: yes \(MAWS_LIVE, MAWS_LIBRARY_LIVE, MAWS_LIVE_DOCUMENT at 1\)\./);
+  assert.match(on.summary, /Live: yes \(every live group's run flag at 1\)\./);
 
   const off = plan({ ...live, HEAD_MESSAGE: livePush('static,e2e:default', '') });
   assert.equal(off.outputs.live, 'false');
@@ -255,7 +255,7 @@ test("every LIVE_E2E group's spec skips on a flag the e2e job sets under live", 
   // The e2e job's env, which e2e-vm aliases: each flag once in either job.
   const exportedBy = (job) => [...jobBody(workflow, job).matchAll(/^ {6}(MAWS_\w+): \$\{\{ needs\.plan\.outputs\.live == 'true' && '1' \|\| '' \}\}$/gm)].map((match) => match[1]).sort();
   const exported = exportedBy('e2e');
-  assert.deepEqual(exported, ['MAWS_LIBRARY_LIVE', 'MAWS_LIVE', 'MAWS_LIVE_DOCUMENT']);
+  assert.deepEqual(exported, ['MAWS_C8B_LIVE', 'MAWS_E1_LIVE', 'MAWS_E8_LIVE', 'MAWS_LIBRARY_LIVE', 'MAWS_LIVE', 'MAWS_LIVE_DOCUMENT', 'MAWS_P1_LIVE', 'MAWS_P2A_LIVE']);
   assert.deepEqual(exportedBy('e2e-vm'), exported);
   const guards = /^ {2}LIVE_GUARD_E2E: (.*)$/m.exec(workflow)[1].split(/\s+/).filter(Boolean);
   assert.deepEqual(guards.filter((group) => !groups.includes(group)), [], 'every LIVE_GUARD_E2E group is a LIVE_E2E group');
@@ -378,9 +378,13 @@ test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; e
   // The measured groups, which only a run naming them takes; class 1a on the Mac carries the wait too.
   const measured = plan({ ...own, HEAD_MESSAGE: `ci-gate: test\n\nGates: ${own.MEASURED_E2E.split(/\s+/).filter((group) => !own.LIVE_E2E.includes(group)).map((group) => `e2e:${group}`).join(',')}\nRunner: macos\nClass1a: macos` }).outputs;
   // daemon-idle-aba's three windows take its own 90 minutes (E2E_MINUTES), the home Mac's wait on top.
-  assert.equal(own.E2E_MINUTES, 'daemon-idle-aba=90');
+  assert.equal(own.E2E_MINUTES, 'daemon-idle-aba=90 p1-live=45');
   for (const [group, where] of Object.entries(placement(measured))) assert.deepEqual(where, [homeMac, group === 'daemon-idle-aba' ? 100 : UNBUILT_MEASURED.has(group) ? 55 : 70], group);
   assert.deepEqual(JSON.parse(measured.timeouts), { static: 40, unit: 40, probes: 40, unit_darwin: 40 });
+  // A live run of every live group: all on the home Mac; p1-live, every sitting in one invocation, its own 45 minutes.
+  const live = plan({ ...own, HEAD_MESSAGE: `ci-gate: test\n\nGates: ${own.LIVE_E2E.split(/\s+/).map((group) => `e2e:${group}`).join(',')}\nRunner: macos\nLive: yes` }).outputs;
+  assert.equal(live.live, 'true');
+  for (const [group, where] of Object.entries(placement(live))) assert.deepEqual(where, [homeMac, group === 'p1-live' ? 55 : UNBUILT_MEASURED.has(group) ? 55 : 40], group);
 });
 
 test('only measured, MAC_HOME_E2E and live e2e jobs ask for the home Mac; other placements keep their labels', () => {
@@ -1001,11 +1005,8 @@ const LIVENESS_BOUNDS = {
   'e2e/dashboard-live-data.spec.ts': {
     "expect(Date.parse(scheduled.at) - Date.parse(last.at), 'the scheduled call within the schedule (and a margin)').toBeLessThanOrEqual(35_000);": 'the product\'s own 30 s schedule; and no gate job runs it (MAWS_DASHBOARD_LIVE_DATA, outside every list)',
   },
-  'e2e/agent-tools-live.spec.ts': {
-    "for (const l of latency) expect(l.rowShownAfterMs, `row of ${l.agentId} shown within a second of its start`).toBeLessThan(1_000);": 'no gate job runs it: no group\'s script names it, and the bare set skips it without its live flags',
-  },
   'e2e/p1-live-keep-quit.spec.ts': {
-    "expect(relaunchMs, 'relaunched within 10 s').toBeLessThan(RELAUNCH_WITHIN_MS);": 'no gate job runs it: MAWS_P1_LIVE over a packaged build, which no group sets',
+    "expect(relaunchMs, 'relaunched within 10 s').toBeLessThan(RELAUNCH_WITHIN_MS);": 'the test\'s own steps from the first app\'s exit to its relaunch (an A-15 read and the launch\'s setup, no wait), against 10 s inside the 45 s sleep the relaunch must land in (keep-quit-live, on the home Mac)',
   },
 };
 const TIME_WORD = /Date\.now\(\)|Date\.parse\(|performance\.now\(\)|\b\w*(?:Ms|MS|_MS)\b|\bms\b|\btimings?\b|\btimes\b|\belapsed\w*|\blatency\b|\bduration\b|\b[a-z]\w*At\b/;

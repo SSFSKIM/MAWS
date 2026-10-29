@@ -8,7 +8,9 @@
 // and `scm.status` when a session's setup records trust: one app-level listener (`connectPanelEvents`, ipc/events.ts)
 // does it through `invalidateScmQueries`, so neither surface subscribes to an event of its own (E11 W-D).
 import { useEffect, useRef } from 'react';
+import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { MawsBridge } from '@shared/ipc/schema';
 import type { ScmStatus } from '@shared/ipc/schema/scm';
 import { queryClient, useCommand } from '../../ipc/query';
 
@@ -33,6 +35,33 @@ export function invalidateScmQueries(which: (appSessionId: AppSessionId) => bool
       },
     });
   }
+}
+
+// P5 E312: the session published a change for review (the status's `published`, from the engine's
+// code_change_published: a PR created, merged, closed, …), which moves no ref the watcher sees. When its time moves, a
+// PR state a surface holds is asked of gh again at once, past main's kept answer, as the row's Refresh asks; otherwise
+// the poll shows it up to two minutes late. A publish older than the poll (a status first seen after a reload) is one
+// the poll has read already. A publish heard while nothing holds the PR state is left for a later status carrying it:
+// a row opened within the poll reads main's kept answer, which may predate it. An answer that lands after a later
+// publish's lookup began is superseded and leaves the PR state to that lookup. An ordinary read of the PR state still
+// out when the answer lands (the poll's, or one a ref move asked for), begun before the publish was heard or while its
+// lookup ran, may hold the state from before it: it is cancelled, keeping the data it would have replaced, so the
+// answer is the last written.
+const publishedSeen = new Map<AppSessionId, string>();
+const lookups = new Map<AppSessionId, number>();
+export function refreshPublishedPrState(appSessionId: AppSessionId, published: EngineSessionStatus['published'], client: MawsBridge): void {
+  if (published === undefined || publishedSeen.get(appSessionId) === published.at) return;
+  const key = prStateKey(appSessionId);
+  if (Date.now() - Date.parse(published.at) >= PR_STATE_POLL.refetchInterval || queryClient.getQueryState(key) === undefined) return;
+  publishedSeen.set(appSessionId, published.at);
+  const lookup = (lookups.get(appSessionId) ?? 0) + 1;
+  lookups.set(appSessionId, lookup);
+  void client.invoke('scm.pr.state', { appSessionId, refresh: true }).then((result) => {
+    if (lookups.get(appSessionId) !== lookup) return;
+    if (!result.ok) return void queryClient.invalidateQueries({ queryKey: key });
+    void queryClient.cancelQueries({ queryKey: key }); // reverts the read at once, before the answer is written
+    queryClient.setQueryData(key, result.value);
+  });
 }
 
 // The checkout's `scm.status`. Read again when its repository's head or refs move (`git remote add`, a remote's URL or an

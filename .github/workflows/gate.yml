@@ -115,13 +115,22 @@ env:
   # MAWS_LIVE_DOCUMENT for document-live and document-provisional-live (P4-A2, the edit seen as it is written on the installed
   # engine), MAWS_LIVE for the rest (presentations-provisional-live among them: P4-A2 G2, a slide's publish seen as it is
   # written); design-live and dashboard-live set theirs in their package scripts) and caps its own spend. A `Live: yes`
-  # run sets the three flags on the e2e job and takes these groups
+  # run sets the flags on the e2e job and takes these groups
   # alone, since `default`'s bare `pnpm e2e` collects every one of their specs; any other run refuses them, since
   # design-live and dashboard-live would spend under their scripts' own flag (Decision Log 75). tool-time-heavy-live
   # (P4-A2, X34) is the tool-time guard's heavy-case fixture, a vitest file of the `live` project that sets MAWS_LIVE in
   # its script and spends nothing; LIVE_GUARD_E2E adds it to every live run, so every gate that runs the live specs holds
   # the heaviest known cases under the guard's bound.
-  LIVE_E2E: library-live document-live document-provisional-live presentations-live presentations-provisional-live design-systems-live design-live dashboard-live tool-time-heavy-live
+  # The core app-level live runs, by hand on the owner's MacBook until no engine ran there (P5 Decision Log 29), keep their
+  # specs' own flags: available-live MAWS_P2A_LIVE, plugins-library-live and plugins-live MAWS_E8_LIVE, p1-live and
+  # keep-quit-live MAWS_P1_LIVE, tools-live MAWS_E1_LIVE, agents-live MAWS_C8B_LIVE. Each script names its cap, and, where
+  # its spec reads test/support/engine-pin, the installer's ~/.local/bin/claude as MAWS_E2E_ENGINE_BIN, so every group runs
+  # the engine a fresh install of MAWS finds (the one the others resolve themselves), never the fixtures' retained pin.
+  # Their own logs go under test-results/, which --evidence uploads. agents-live builds out/ with the renderer's
+  # development surface (e2e/support/dev-surface.vite.config.mjs), keep-quit-live the unsigned packaged app (build:app).
+  # ask-interrupt-live is E11 S1, an interrupt during a blocking maws ask: a vitest file of the `live` project, skipped
+  # by its gate unless MAWS_LIVE is 1, its spend held to its own US$0.15 over three attempts, its log under test-results/.
+  LIVE_E2E: library-live document-live document-provisional-live presentations-live presentations-provisional-live design-systems-live design-live dashboard-live available-live plugins-library-live plugins-live p1-live keep-quit-live tools-live agents-live ask-interrupt-live tool-time-heavy-live
   LIVE_GUARD_E2E: tool-time-heavy-live
   # The timing-measured groups, whose bounds were calibrated on the mini at @2x with no viewer and no foreign load, so a
   # result read under another posture is void (Decision Log 75's posture go). On a Mac each job's first step is ci-kit's
@@ -170,7 +179,9 @@ env:
   # out/): name=minutes, before the Mac wait is added (gate-plan.mjs); the plan refuses an entry that is not a positive
   # whole number of minutes for a group with a package script. daemon-idle-aba's three settles and windows take 36 of
   # them and its scenes about 3 more, which its two settle guards' 15-minute bounds and its build would outgrow in 60.
-  E2E_MINUTES: daemon-idle-aba=90
+  # p1-live runs every sitting in one invocation (S3, S6's twenty resumes, A-47, S2's three cases): about 5 minutes at
+  # E11's pace, but its waits run to minutes each (a turn's 5, a terminal's 3), which a slow engine stretches past 30.
+  E2E_MINUTES: daemon-idle-aba=90 p1-live=45
   # The Mac jobs that may run beside another: e2e groups, and `unit:darwin`, that ask for ci-kit's shared instances
   # ([ci-kit-mac-shared], their only label), which run two jobs at a time on the mini's one desktop (ci-kit's mac-lane
   # concurrency spec, SSFSKIM/ci-kit docs/doperpowers/specs/2026-10-21-mac-lane-concurrency-design.md). Every other Mac
@@ -719,6 +730,11 @@ jobs:
       MAWS_LIVE: ${{ needs.plan.outputs.live == 'true' && '1' || '' }}
       MAWS_LIBRARY_LIVE: ${{ needs.plan.outputs.live == 'true' && '1' || '' }}
       MAWS_LIVE_DOCUMENT: ${{ needs.plan.outputs.live == 'true' && '1' || '' }}
+      MAWS_P2A_LIVE: ${{ needs.plan.outputs.live == 'true' && '1' || '' }}
+      MAWS_E8_LIVE: ${{ needs.plan.outputs.live == 'true' && '1' || '' }}
+      MAWS_P1_LIVE: ${{ needs.plan.outputs.live == 'true' && '1' || '' }}
+      MAWS_E1_LIVE: ${{ needs.plan.outputs.live == 'true' && '1' || '' }}
+      MAWS_C8B_LIVE: ${{ needs.plan.outputs.live == 'true' && '1' || '' }}
     # One list for both e2e jobs (a YAML anchor, which e2e-vm aliases): what differs is the entry's `variant`, which only
     # a guest-eligible entry carries.
     steps: &e2e-steps

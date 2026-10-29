@@ -13,9 +13,10 @@
 // still installed (2.1.291 uninstalls it; the sheet names it). Around every action the config
 // home's file tree is read and its delta set beside the action's `writesOf` manifest in `<scratch>/live-run.txt`; each
 // step leaves `<scratch>/live-<step>.png`; what was seen goes to `<scratch>/observations.json`. The owner's
-// ~/.claude.json check runs around the whole run, outside this file (Concrete Steps). Run on purpose only; it spends
-// usage (two haiku turns):
+// ~/.claude.json is only read: the A-15 reading before the run and after the app closed (Concrete Steps' check, once a
+// wrapper's around the run, now here). Run on purpose only; it spends usage (two haiku turns):
 //   MAWS_HARNESS=1 pnpm exec electron-vite build && unset MAWS_E2E; MAWS_E8_LIVE=1 [MAWS_LIVE_MAX_USD=0.15] pnpm exec playwright test e2e/plugins-live.spec.ts --reporter=line
+// In the gate it is the live group e2e:plugins-live (`ci-gate.sh --live`), its cap and the installed engine in its script.
 // With MAWS_LIVE_MAX_USD set (at most 1), the engine is reached through support/live-budget.ts's forwarding script,
 // which adds `--max-budget-usd <that cap>` to every session process (P2-F's re-run cap); unset, the engine itself.
 import { join } from 'node:path';
@@ -28,10 +29,13 @@ import { launchMaws } from './support/launch';
 import { cappedEngine, capWords } from './support/live-budget';
 import { auditOf, manifestOf, untilQuiet, type Manifest, type Tree } from '../test/support/plugins-audit';
 import { pluginsLiveSkipReason, pluginsScratch, trackPluginReads, type PluginReads, type PluginsScratch } from './support/plugins-live';
+import { a15Line, a15Reading, type A15Reading } from './support/p1-live';
+import { compareA15 } from '../test/support/owner-file';
 import { newChatIn } from './support/sidebar';
 import { mainTab, unfoldSessionCard } from './support/shell';
 
-const skip = pluginsLiveSkipReason();
+test.skip(process.env.MAWS_E8_LIVE !== '1', 'the E8 live run runs only under MAWS_E8_LIVE=1');
+const skip = process.env.MAWS_E8_LIVE === '1' ? pluginsLiveSkipReason() : null;
 test.skip(skip !== null, skip ?? '');
 test.describe.configure({ timeout: 1_800_000 });
 
@@ -45,10 +49,13 @@ const NETWORK_REFUSAL = /could not resolve host|unable to access|failed to conne
 const NOT_FOUND = 'Plugin "nope" not found in marketplace "e8-scratch". Your local copy may be out of date — try `claude plugin marketplace update e8-scratch`. · not_found';
 
 let scratch: PluginsScratch;
+let a15First: A15Reading; // the owner file before the run (A-15), read here since no wrapper around the gate's run reads it
 let reads: PluginReads; // the plugins.* and marketplaces.* invokes main answers (trackPluginReads)
 const QUIET_MS = 1_500; // a window closes this long after the last CLI read settled, with none in flight
 test.beforeAll(() => {
+  a15First = a15Reading();
   scratch = pluginsScratch();
+  scratch.log(a15Line('before the run', a15First, a15First, [scratch.root]));
 });
 
 // ---- the page --------------------------------------------------------------------------------------------------
@@ -238,6 +245,7 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
   // One launch over a fresh profile: the forwarding script's budget is the whole cap (support/live-budget.ts).
   const engine = await cappedEngine({ root: scratch.root, real: ENGINE_BIN });
   scratch.log(`engine cap: ${capWords(engine)}`);
+  console.log(`E8 live: engine ${ENGINE_VERSION} (${ENGINE_BIN}), cap ${capWords(engine)}, log ${join(scratch.root, 'live-run.txt')}`);
   const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config } });
   const { page } = maws;
   reads = await trackPluginReads(maws.app); // before the page issues any CLI read
@@ -535,6 +543,9 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
   } finally {
     await shot('final');
     await maws.cleanup();
+    const a15After = a15Reading();
+    scratch.log(a15Line('after the app closed', a15First, a15After, [scratch.root]));
+    expect.soft(compareA15(a15First.keys, a15After.keys, [scratch.root]).breach, 'A-15: no project of the run’s scratch in the owner file').toEqual([]);
   }
   expect(failures, failures.join('\n')).toEqual([]);
 });
