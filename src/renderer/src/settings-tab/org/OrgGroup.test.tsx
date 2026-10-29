@@ -283,7 +283,7 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
       );
       const discarded = await found('Discarded');
       expect(within(discarded).getByText('Version 5 · the hub may still hold it')).toBeTruthy();
-      expect(within(discarded).getByText(`Version 5 · ${MINI} may still hold it`)).toBeTruthy();
+      expect(await within(discarded).findByText('Version 5 · mini may still hold it')).toBeTruthy(); // named once the view is read
       expect(errors).not.toHaveBeenCalled(); // no duplicate React keys
     } finally {
       errors.mockRestore();
