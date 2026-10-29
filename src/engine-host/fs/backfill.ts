@@ -5,7 +5,7 @@
 // same backfill twice deduplicate.
 import type { ContentBlock, EventBase, SessionEvent } from '@shared/graph/events';
 import type { AgentId, ApiMessageId, EventId, MessageUuid, ParentToolUseId, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
-import type { AgentMeta, TranscriptRecord } from '@shared/wire/transcript';
+import { isNoContent, type AgentMeta, type TranscriptRecord } from '@shared/wire/transcript';
 import { slashCommandLine } from '@shared/wire/local-command';
 import { INTERRUPT_MARKER } from '../normalizer-support';
 import { apiRetryOfApiError } from '../normalizer-system';
@@ -243,6 +243,7 @@ function taskNotificationAttachment(record: TranscriptRecord, uuid: MessageUuid,
 
 function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext, base: Base, events: SessionEvent[], sourceUuid: MessageUuid | null = uuid): void {
   const content = messageContent(record);
+  if (isNoContent(content)) return; // P5 O9: the engine's word for a message with none: no prompt, no turn
   // W1 (A5): the summary `/compact` writes after its boundary (`isCompactSummary`, w1-compact.jsonl line 29) is the
   // engine's context for the model, which the live stream sends as a synthetic frame: no bubble and no turn, like meta.
   const isMeta = record.isMeta === true || record.isCompactSummary === true;
@@ -479,6 +480,7 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
       return;
     case 'local_command':
     case 'local_command_output':
+      if (isNoContent(record.content)) return; // P5 O9: a command that said nothing (`/reload-plugins`)
       events.push({ ...base(), kind: 'user.message', messageUuid: record.uuid as MessageUuid, content: typeof record.content === 'string' ? record.content : '', isReplay: false, isSynthetic: record.isMeta === true, origin: 'local-command', bash: null });
       return;
     case 'informational': {
@@ -621,6 +623,7 @@ function blockedPrompt(record: TranscriptRecord): { text: string; blockingError:
 export function startsTurn(record: TranscriptRecord): boolean {
   if (record.type !== 'user' || record.isMeta === true || record.isCompactSummary === true || isInterruptMarker(record) || isLocalCommandOutput(record)) return false; // W1: a compact summary and a command's output too
   const content = messageContent(record);
+  if (isNoContent(content)) return false; // P5 O9: the engine's word for a message with none
   if (typeof content === 'string') return true;
   if (!Array.isArray(content)) return false;
   const blocks = content.filter(isContentBlock);

@@ -781,6 +781,27 @@ describe('peer messages from disk (E7)', () => {
 });
 // E7 end
 
+// P5 O9 (the M8 sitting, recorded 2026-10-29 on engine 2.1.312): the engine writes `(no content)` for a message with no
+// content, here three records a plugin's start-up left before the first prompt (a meta and a plain user record of the
+// plugin's origin, and the output of the `/reload-plugins` it ran). Each is a record of nothing: no bubble, no turn, no
+// command output.
+describe('records with no content', () => {
+  const doperpowers = { kind: 'plugin', name: 'doperpowers' };
+  const meta = rec({ type: 'user', uuid: 'c1', parentUuid: null, cwd: '/d', isMeta: true, timestamp: at(0), origin: doperpowers, queuePriority: 'later', message: { role: 'user', content: '(no content)' } });
+  const plain = rec({ type: 'user', uuid: 'c2', parentUuid: 'c1', cwd: '/d', timestamp: at(0), origin: doperpowers, queuePriority: 'later', message: { role: 'user', content: '(no content)' } });
+  const output = rec({ type: 'system', subtype: 'local_command', uuid: 'c3', parentUuid: 'c2', timestamp: at(0), content: '(no content)', level: 'info', isMeta: false, commandRun: { command: 'reload-plugins', args: '' } });
+  const blocks = rec({ type: 'user', uuid: 'c4', parentUuid: 'c3', timestamp: at(0), message: { role: 'user', content: [{ type: 'text', text: '(no content)' }] } });
+  const hi = rec({ type: 'user', uuid: 'u1', parentUuid: 'c4', timestamp: at(1), message: { role: 'user', content: 'hi' } });
+
+  it('maps to nothing and opens no turn; the first prompt after them does', () => {
+    const events = mapAll([meta, plain, output, blocks, hi]);
+    expect(kinds(events)).toEqual(['session.started', 'turn.started', 'user.message']);
+    expect(only(events, 'user.message')[0]).toMatchObject({ messageUuid: 'u1', content: 'hi' });
+    expect([meta, plain, output, blocks].map(startsTurn)).toEqual([false, false, false, false]);
+    expect(startsTurn(hi)).toBe(true);
+  });
+});
+
 // P5 O9 (the M8 sitting, recorded 2026-10-29 on sminos 1.27.10 and engine 2.1.312): words a terminal session's sminos
 // bridge delivered while a turn ran. The bridge appends them as the running turn's row, which the engine keeps alike
 // for every row a plugin appends (a meta user record of the plugin's origin), and mirrors them in a transcript line,
