@@ -14,6 +14,7 @@ import { parseAskSteer } from '@shared/maws/ask'; // E1
 import type { AskAnswer } from '@shared/maws/tools'; // E1
 import { isInterruptionMarker, isLocalCommand } from './user-text';
 import { INTERRUPT_CUT } from '@shared/lane-a/interrupt-cut'; // P5 O9
+import { presentationOf } from './classify'; // P5 O9
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
 
@@ -757,9 +758,10 @@ function apply(batch: Batch, event: SessionEvent): void {
         if (state.pluginStatus.size > 0) state.pluginStatus = new Map(); // R1: the plugins' lines went with the process
         for (const id of state.order) {
           const turn = state.turns.get(id)!;
-          if (turn.state !== 'open' || !turn.accepted) continue;
-          const { outcome, cause } = exitClosing(turn, event.reason);
-          batch.closeUnended(batch.touch(id), outcome, event.at, cause);
+          if (turn.state === 'open' && turn.accepted) {
+            const { outcome, cause } = exitClosing(turn, event.reason);
+            batch.closeUnended(batch.touch(id), outcome, event.at, cause);
+          } else if (turn.events.some(isAgentCall)) batch.touch(id).version += 1; // P5 O9: its agents ended with the process (derive.ts, exitedSince)
         }
       }
       return batch.loose(event);
@@ -852,6 +854,8 @@ function applySideThread(batch: Batch, event: Event<'side.thread.opened'> | Even
   batch.loose(event);
 }
 // E3 end
+
+const isAgentCall = (event: SessionEvent) => event.kind === 'tool.use' && presentationOf(event.toolName) === 'subagent';
 
 // Interrupt evidence a turn retains: the engine's interrupt marker, or a call the human rejected.
 const wasInterrupted = (turn: TurnState) =>

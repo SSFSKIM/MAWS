@@ -842,6 +842,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       case 'subagents': {
         if (item.group.refs.length === 0) break;
         for (const ref of item.group.refs) if (ref.toolUseId && agentIds.has(ref.toolUseId)) ref.agentId = agentIds.get(ref.toolUseId)!;
+        if (state !== null && exitedSince(state, item.group.at)) endedByExit(item.group);
         resolved.push({ kind: 'row', row: subagentRow(item.group, turn.id) });
         break;
       }
@@ -1085,6 +1086,22 @@ function summaryOf(turn: TurnState, cells: Cell[], subagents: SubagentGroup[], m
     durationMs: ended?.durationMs ?? null, toolCalls, byCategory, denials, autoDenied: denials.filter((d) => d.disposition === 'auto_denied').length, safeguard,
     costUsd: ended?.costUsd ?? null, usage: ended?.usage ?? null, model, childAgents: subagents.reduce((n, group) => n + group.refs.length, 0), terminalReason: ended?.terminalReason ?? null,
   };
+}
+
+// P5 O9 (the M10 fixes' review): a session's process exiting ends the agents it ran, though no finish of theirs will
+// come (a crash, a kill, E10's idle stop, C4's exit synthesised for a transcript nobody holds): an Agent call made
+// before the session's exit reads its agents still running stopped, so its row folds with its turn rather than staying
+// in view (`staysInView`). An ordinary end of the turn that made the call is no exit: background agents outlive it.
+function exitedSince(state: TranscriptState, at: string): boolean {
+  const call = Date.parse(at);
+  return state.loose.some((event) => event.kind === 'process.exited' && Date.parse(event.at) >= call);
+}
+
+function endedByExit(group: SubagentGroup): void {
+  for (const ref of group.refs) {
+    const status = group.statuses.get(ref.taskId) ?? 'started';
+    if (!AGENTS_ENDED.has(status)) group.statuses.set(ref.taskId, 'stopped');
+  }
 }
 
 function subagentRow(group: SubagentGroup, turnId: TurnId): RowOf<'subagent'> {
