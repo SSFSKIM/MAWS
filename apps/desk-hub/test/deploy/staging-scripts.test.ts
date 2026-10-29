@@ -517,3 +517,85 @@ describe('the phone step', () => {
     expect(run.stdout).toMatch(/tunnel stopped: pid \d+ at .*, process gone/);
   }, 90_000);
 });
+
+describe('the endpoint step', () => {
+  // `staging-run.sh endpoint [args…]` (P5 O10 M11): `deployment endpoint-acceptance` on staging's config with the admin
+  // device's keys, the token on its stdin alone, the run's secrets listed for the search after it, its hub deploy this
+  // script's own `deploy` step; production's build compared before and after. Stubs stand for cloudflared (a synthetic
+  // token), curl (production's build header) and pnpm (recording its arguments and stdin, printing a line holding a
+  // secret it listed and one holding the token).
+  const token = `eyJ${'e'.repeat(20)}.synthetic`;
+  const setup = (leak = false) => {
+    const dir = mkdtempSync(join(tmpdir(), 'staging-endpoint-'));
+    const device = join(dir, 'device');
+    mkdirSync(device);
+    writeFileSync(join(device, 'keys.json'), '{}', { mode: 0o600 });
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'cloudflared'), `#!/bin/sh\nprintf '%s' '${token}'\n`, { mode: 0o755 });
+    writeFileSync(join(bin, 'curl'), `#!/bin/sh\ncat > /dev/null\nprintf 'X-Desk-Build: hub@0123abcd web@master.0123abcd\\r\\n'\n`, { mode: 0o755 });
+    writeFileSync(
+      join(bin, 'pnpm'),
+      [
+        '#!/bin/sh',
+        `printf '%s\\n' "$@" > '${dir}/args'`,
+        `cat > '${dir}/stdin'`,
+        'scan=$(printf "%s\\n" "$@" | sed -n "/^--scan$/{n;p;}")',
+        '[ -n "$scan" ] && echo smns-enroll-v2.synthetic-endpoint-code >> "$scan"',
+        ...(leak ? ['echo "code smns-enroll-v2.synthetic-endpoint-code"'] : []),
+        'echo "PASS 9"',
+        "echo 'a line naming a secret'",
+        'exit 0',
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    );
+    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, DESK_STAGING_DIR: join(dir, 'state'), DESK_STAGING_DEVICE: device, DESK_STAGING_SECRETS: join(dir, 'secrets') };
+    return { dir, device, env };
+  };
+
+  it.skipIf(!zsh)('runs the acceptance on staging with the device’s keys and its own deploy step, the token on stdin alone, production compared', () => {
+    const { dir, device, env } = setup();
+    const run = spawnSync('zsh', [runner, 'endpoint', '--items', '9'], { encoding: 'utf8', env, timeout: 60_000 });
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+    const args = readFileSync(join(dir, 'args'), 'utf8').trim().split('\n');
+    const state = join(dir, 'state');
+    expect(args.slice(args.indexOf('deployment'))).toEqual([
+      'deployment', 'endpoint-acceptance', '--config', 'deploy/staging.json', '--device-keys', `${device}/keys.json`, '--scan', join(state, 'endpoint.scan'), '--hub-deploy', runner, '--items', '9',
+    ]);
+    expect(readFileSync(join(dir, 'stdin'), 'utf8')).toBe(`DESK_ACCESS_TOKEN=${token}\n`);
+    expect(run.stdout).toContain('PASS 9');
+    expect(run.stdout).not.toContain('a line naming a secret');
+    // Production's build header is all it compares: it says so, and claims no more.
+    expect(run.stdout).toContain('production build unchanged: X-Desk-Build: hub@0123abcd web@master.0123abcd');
+    expect(run.stdout).not.toContain('production untouched');
+    expect(run.stdout).toContain('files holding the Access token or a secret the run handled: 0');
+    expect(existsSync(join(state, 'endpoint.scan'))).toBe(false);
+    expect(run.stdout + run.stderr).not.toContain(token);
+  });
+
+  it.skipIf(!zsh)('fails a run that printed a secret it handled, however its items went', () => {
+    const { env } = setup(true);
+    const run = spawnSync('zsh', [runner, 'endpoint'], { encoding: 'utf8', env, timeout: 60_000 });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain('files holding the Access token or a secret the run handled: 1');
+  });
+
+  it.skipIf(!zsh)('sets the VM scene up from a base the VM holds, or tears it down, with no token read', () => {
+    for (const [args, expected] of [
+      [['endpoint-vm', 'setup', 'd392c4d8c'], ['endpoint-acceptance', '--config', 'deploy/staging.json', '--vm-setup', '--base', 'd392c4d8c']],
+      [['endpoint-vm', 'teardown'], ['endpoint-acceptance', '--config', 'deploy/staging.json', '--vm-teardown']],
+    ] as const) {
+      const { dir, env } = setup();
+      const run = spawnSync('zsh', [runner, ...args], { encoding: 'utf8', env, timeout: 60_000 });
+      expect(run.status, run.stdout + run.stderr).toBe(0);
+      const given = readFileSync(join(dir, 'args'), 'utf8').trim().split('\n');
+      expect(given.slice(given.indexOf('deployment') + 1)).toEqual(expected);
+      expect(readFileSync(join(dir, 'stdin'), 'utf8')).toBe('');
+    }
+    const { env } = setup();
+    const bad = spawnSync('zsh', [runner, 'endpoint-vm', 'setup', 'HEAD;rm'], { encoding: 'utf8', env });
+    expect(bad.status).toBe(2);
+    expect(bad.stdout).toMatch(/endpoint-vm setup <base commit> \| teardown/);
+  });
+});
