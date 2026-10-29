@@ -3,7 +3,7 @@ import { Buffer } from 'node:buffer';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
@@ -61,16 +61,41 @@ test('copies host generations before profile deletion, including a failed launch
   const dir = scratch(t);
   const profile = join(dir, 'profile');
   mkdirSync(join(profile, 'supervisor'), { recursive: true });
+  const evidence = processEvidence(join(dir, 'output'), profile);
   writeFileSync(join(profile, 'supervisor', 'host.log'), 'idle: collected in 13 ms\n');
   writeFileSync(join(profile, 'supervisor', 'host.log.1'), 'older host\n');
   writeFileSync(join(profile, 'supervisor', 'host.lock'), 'not evidence');
-  const evidence = processEvidence(join(dir, 'output'), profile);
   evidence.finish();
   rmSync(profile, { recursive: true });
   const files = readdirSync(join(dir, 'output'));
   assert.equal(files.length, 2);
   assert.ok(files.every((name) => /^engine-host-.*(?:\.previous)?\.log$/.test(name)));
   assert.deepEqual(files.map((name) => readFileSync(join(dir, 'output', name), 'utf8')).sort(), ['idle: collected in 13 ms\n', 'older host\n']);
+});
+
+test('a reused profile never publishes either inherited host generation, even after rotation, while new main streams remain eligible', (t) => {
+  const dir = scratch(t);
+  for (const previous of ['host.log', 'host.log.1']) {
+    const userData = join(dir, previous);
+    const supervisor = join(userData, 'supervisor');
+    const output = join(dir, `${previous}-output`);
+    mkdirSync(supervisor, { recursive: true });
+    writeFileSync(join(supervisor, previous), 'private transcript from an earlier excluded credentialed launch\n');
+    const evidence = processEvidence(output, userData);
+    const child = { stdout: new PassThrough() };
+    evidence.capture(child);
+    child.stdout.write('current replay startup\n');
+    if (previous === 'host.log') renameSync(join(supervisor, 'host.log'), join(supervisor, 'host.log.1'));
+    writeFileSync(join(supervisor, 'host.log'), 'current host generation mixed with prior profile state\n');
+    evidence.finish();
+    const files = readdirSync(output);
+    assert.equal(files.length, 2);
+    const main = files.find((file) => file.endsWith('.stdout.log'));
+    assert.equal(readFileSync(join(output, main), 'utf8'), 'current replay startup\n');
+    const marker = files.find((file) => file.endsWith('.host-excluded.log'));
+    assert.ok(marker, 'host provenance exclusion must be explicit and compatible with measured uploads');
+    assert.equal(readFileSync(join(output, marker), 'utf8'), 'Host log evidence excluded: profile already contained host logs.\n');
+  }
 });
 
 test('utility hosts retain only their forwarded lines, even across stream chunks', (t) => {
@@ -192,8 +217,8 @@ test('finishing a noisy detached launch keeps host files and does not invent uti
   const profile = join(dir, 'profile');
   const output = join(dir, 'output');
   mkdirSync(join(profile, 'supervisor'), { recursive: true });
-  writeFileSync(join(profile, 'supervisor', 'host.log'), 'detached host diagnostic\n');
   const evidence = processEvidence(output, profile);
+  writeFileSync(join(profile, 'supervisor', 'host.log'), 'detached host diagnostic\n');
   const child = { stderr: new PassThrough() };
   evidence.capture(child);
   child.stderr.write(Buffer.alloc(4 * 1024 * 1024, 'x')); // no newline: extraction must not retain an unbounded partial line
@@ -315,11 +340,11 @@ test('finish keeps unchanged explicit synthetic settings and bounded process/hos
   mkdirSync(join(userData, 'supervisor'), { recursive: true });
   const bin = '/scratch/latency-engine';
   writeFileSync(join(userData, 'machine-settings.json'), JSON.stringify({ engine: { binaryPath: bin } }));
-  writeFileSync(join(userData, 'supervisor', 'host.log'), 'host shutdown\n');
   const options = { file: 'local-latency.spec.ts', userData, syntheticEngineBin: bin, env: { MAWS_E2E: '1', MAWS_E2E_ENGINE_BIN: '/scratch/replay-engine' } };
   assert.equal(captureAllowed(options), true);
   const output = join(dir, 'output');
   const evidence = processEvidence(output, userData, () => captureAllowed(options));
+  writeFileSync(join(userData, 'supervisor', 'host.log'), 'host shutdown\n');
   const child = { stdout: new PassThrough() };
   evidence.capture(child);
   child.stdout.write('synthetic startup\n');

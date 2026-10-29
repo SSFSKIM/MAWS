@@ -2,7 +2,7 @@
 // Credentialed/owner scenes opt out. Every promoted diagnostic is also redacted: provenance can change during a run.
 import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import process from 'node:process';
 import { createRedactor } from '../../test/live/support/public-evidence.mjs';
@@ -142,6 +142,7 @@ export function processEvidence(outputDir, userData, canKeep = () => true, env =
   mkdirSync(outputDir, { recursive: true });
   const id = randomUUID(); // distinct even for relaunches over the same profile, and retries have their own outputDir
   const stage = join(userData, `.process-evidence-${id}`); // never uploaded if the worker dies before the final check
+  const inheritedHostLogs = ['host.log', 'host.log.1'].some((name) => existsSync(join(userData, 'supervisor', name)));
   const listeners = [];
   const streams = [];
   let finished = false;
@@ -178,6 +179,12 @@ export function processEvidence(outputDir, userData, canKeep = () => true, env =
           utilityLines.push(...retained.utilityLines);
         }
         if (utilityLines.length) writeFileSync(join(outputDir, `engine-host-${id}.utility.log`), redact(`${utilityLines.join('\n')}\n`));
+        // A reused profile can hold diagnostics from an earlier excluded launch. If either generation predates
+        // this capture, refuse both even after rotation; new main streams above are still independently eligible.
+        if (inheritedHostLogs) {
+          writeFileSync(join(outputDir, `engine-host-${id}.host-excluded.log`), 'Host log evidence excluded: profile already contained host logs.\n');
+          return;
+        }
         // Called after the profile's processes stop, before its directory is removed. An early failed launch or a
         // utility-mode host may have no file. The rotated generation uses .log too so the narrow upload catches it.
         for (const [source, suffix] of [['host.log', ''], ['host.log.1', '.previous']]) {
