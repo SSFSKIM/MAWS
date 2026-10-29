@@ -2072,6 +2072,17 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - Past the cap each call site still makes its closure, so full mode is for a caller's own successors, never for posted input. The desk track's note is recorded at the functions (37ce2077d).
   Date/Author: 2026-10-29, O8's executor.
 
+- Decision: M4a Task 3, the signing paths (643d126de), settles these points.
+  1. A composer refuses with `RefusedEdit` and a `ChangeCode` (`self`, `this-mac`, `no-change`, `bad-email`, `not-signing-device`), which the signer reads as `refused` before Touch ID. `no-change` and `bad-email` go beyond the spec; `bad-email` uses the hub's email pattern, exported from `hub-client.ts`.
+  2. Rules the state decides are the package's, not repeated in the composers: `owners-unknown`, `email-taken`, `empty-roots`, `root-not-admin`, `endorsement-missing`.
+  3. Shown equals signed. `composeChange` builds its lines from the state the sheet was shown on. `apply` builds them again on the signer's draft, and throws `StaleEdit` when they differ or the target is gone. Only a normalized change composes, so `member.add`'s id comes from `normalizeChange` alone.
+  4. `OrgChange` is a plain TypeScript type in `edits.ts`, as §M gives it. Task 4 moves it into the shared schema, and the finding codes there are strings.
+  5. `checkSuccessor` drops an M3 row whose code the package already named, and any finding repeated word for word. M3's own `revives-revoked` and `empty-roots` rows are gone. The directional prefix codes still show beside `prefix-overlaps` until M4c.
+  6. `live()` is also checked just before Touch ID, so a pairing that already ended shows no prompt. That makes four checks.
+  7. Asked to endorse a device the state doesn't list, the device module throws. The signer catches that case first and refuses `invalid`.
+  8. M3's `invalid` test now uses a device endorsed by an unknown key (`unknown-signer`), since a changed recovery key is refused before Touch ID.
+  Date/Author: 2026-10-29, O8's executor.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
