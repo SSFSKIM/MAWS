@@ -91,6 +91,7 @@
     // E11 end
     // P2-F: test/support/live-budget.test.ts runs the live specs' engine cap
     "e2e/support/live-budget.ts",
+    "e2e/support/process-evidence.d.mts", // the live heavy guard's timing-only artifact
     // P2-F F-E: test/support/live-turns.test.ts runs the live specs' wait for a submitted turn
     "e2e/support/live-turns.ts",
     // P3-C M9: test/support/text-run.test.ts runs the LibreOffice compare's text matcher

@@ -943,7 +943,7 @@ test('S6 8t: ten terminal resumes of the same session, each bounded 30 s to firs
     owners.push(...ownerPlugins(plugins, [ROOT]));
     const ok = firstOutputMs !== null && firstOutputMs <= FIRST_OUTPUT_MS && result?.subtype === 'success';
     results.push({ i, ok, firstOutputMs, result: result?.result ?? null, costUsd });
-    note(`terminal resume ${i}: ${ok ? 'ok' : 'STALL'}: first output ${firstOutputMs ?? '—'} ms after spawn, exit ${code} after ${Date.now() - t0} ms, pid ${child.pid}; init session ${init?.session_id ?? '—'} model ${init?.model ?? '—'} plugins ${JSON.stringify(plugins.map((p) => p.source))}; result ${result?.subtype ?? 'none'} ${JSON.stringify(result?.result ?? null)} US$${costUsd?.toFixed(4) ?? '—'}${err.trim() ? `; stderr ${JSON.stringify(err.trim().slice(0, 300))}` : ''}${captured ? `; captured under ${captured}` : ''}`);
+    note(`terminal resume ${i}: ${ok ? 'ok' : 'STALL'}: first output ${firstOutputMs ?? '—'} ms after spawn, exit ${code} after ${Date.now() - t0} ms, pid ${child.pid}; init session ${init?.session_id ?? '—'} model ${init?.model ?? '—'} plugins ${JSON.stringify(plugins.map((p) => p.source))}; result ${result?.subtype ?? 'none'} ${JSON.stringify(result?.result ?? null)} US$${costUsd?.toFixed(4) ?? '—'}${err.trim() ? `; stderr ${JSON.stringify(redactJournal(err.trim(), env).slice(0, 300))}` : ''}${captured ? `; captured under ${captured}` : ''}`);
   }
   const a15After = a15Reading();
   note(a15Line('after S6 8t', a15, a15After, [ROOT]));
