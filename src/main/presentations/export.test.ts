@@ -233,6 +233,35 @@ describe('the deck window', () => {
     expect(copies.length).toBeGreaterThan(3); // each first copy was of the frame before
   });
 
+  // Chromium's compositor now and then refuses a copy (capturePage rejects with UnknownVizError; the hosted Macs,
+  // e2e/design-export.spec.ts): the copy is asked for again, within a bound, and then fails naming the slide
+  it('asks again for a copy the compositor refused, and keeps the one it gives', async () => {
+    const { win, copies } = compositorWindow(4646, null);
+    const copy = win.webContents.capturePage;
+    let asked = 0;
+    win.webContents.capturePage = (region: Region) => (++asked === 1 ? Promise.reject(new Error('UnknownVizError')) : copy(region));
+    vi.mocked(openCaptureWindow).mockReturnValueOnce(win as never);
+    const png = await withDeckWindow({}, new AbortController().signal, (deck) => deck.capture(slideJob('body')));
+    expect(pictureOf(png)).toEqual({ slide: 'body', x: 0, y: 0, width: 1920, height: 1080 });
+    expect([asked, copies.length]).toEqual([2, 1]);
+  });
+
+  it('fails, naming the slide, when the compositor keeps refusing the copy; another failure of the copy is not asked again', async () => {
+    const refusing = compositorWindow(4747, null);
+    let asked = 0;
+    refusing.win.webContents.capturePage = () => (++asked, Promise.reject(new Error('UnknownVizError')));
+    vi.mocked(openCaptureWindow).mockReturnValueOnce(refusing.win as never);
+    await expect(withDeckWindow({}, new AbortController().signal, (deck) => deck.capture(slideJob('body')))).rejects.toThrow('the export window refused a copy of slide body 5 times (UnknownVizError)');
+    expect(asked).toBe(5);
+
+    const failing = compositorWindow(4848, null);
+    let failed = 0;
+    failing.win.webContents.capturePage = () => (++failed, Promise.reject(new Error('Object has been destroyed')));
+    vi.mocked(openCaptureWindow).mockReturnValueOnce(failing.win as never);
+    await expect(withDeckWindow({}, new AbortController().signal, (deck) => deck.capture(slideJob('body')))).rejects.toThrow('Object has been destroyed');
+    expect(failed).toBe(1);
+  });
+
   it('fails, naming the slide, rather than take a picture of a frame from before its staging', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true }); // the page's directory is made for real meanwhile
     try {

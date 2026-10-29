@@ -177,18 +177,31 @@ export type Mark = readonly [number, number, number];
 const MARKS: readonly Mark[] = [[255, 7, 255], [7, 255, 7]];
 const MARK_ROW = 1; // px: the window's last row, below every picture
 const STAGED_WAIT_MS = 10_000;
+// Chromium's compositor now and then refuses a copy (capturePage rejects with UnknownVizError, seen on the hosted Macs, as
+// the browser view's still meets it: ../browser/view.ts): it is asked again a frame later, at most this many times.
+const REFUSED_RETRIES = 4;
+const REFUSED_RETRY_MS = 16;
+const refusedCopy = (error: unknown) => error instanceof Error && error.message.includes('UnknownVizError');
 
 /**
  * The window's copy of `rect` from a frame drawn after the staging that drew `mark` along `row` (the window's last row):
  * one copy of the rect down to that row, kept (cut to the rect) when the row shows the mark, else taken again after the
  * window's next paint. A window that has not drawn the staging within STAGED_WAIT_MS fails the capture, naming the slide,
- * rather than give a picture of another staging.
+ * rather than give a picture of another staging; so does a copy refused more than REFUSED_RETRIES times.
  */
 async function stagedCopy(live: () => BrowserWindow, rect: Rectangle, row: number, mark: Mark, slideId: string): Promise<NativeImage> {
   const area = { ...rect, height: row + MARK_ROW - rect.y };
   const until = Date.now() + STAGED_WAIT_MS;
-  for (;;) {
-    const copy = await live().webContents.capturePage(area);
+  for (let refused = 0; ; ) {
+    let copy: NativeImage;
+    try {
+      copy = await live().webContents.capturePage(area);
+    } catch (error) {
+      if (!refusedCopy(error)) throw error;
+      if (++refused > REFUSED_RETRIES) throw new Error(`the export window refused a copy of slide ${slideId} ${refused} times (${(error as Error).message})`, { cause: error });
+      await new Promise((resolve) => setTimeout(resolve, REFUSED_RETRY_MS));
+      continue;
+    }
     const [b, g, r, a] = copy.crop({ x: 0, y: row - rect.y, width: 1, height: 1 }).toBitmap(); // BGRA (or RGBA: the same here)
     if (a! > 250 && [r!, g!, b!].every((v, i) => Math.abs(v - mark[i]!) <= 2)) return copy.crop({ x: 0, y: 0, width: rect.width, height: rect.height });
     if (Date.now() >= until) throw new Error(`the export window did not draw slide ${slideId} within ${STAGED_WAIT_MS / 1000} s`);
