@@ -50,7 +50,7 @@ export interface LazySpineOptions {
   load(): Promise<SpineEntry>; // the deferred chunk
   deps(): Omit<SpineDeps, 'data' | 'hosts'>; // mawsd's bindings, built at each load (one login-shell capture per load)
   quietMs(): number; // the daemon's idle time, or MAWS_SPINE_QUIET_MS under a measured scene (D6)
-  reexecute: boolean; // a unit daemon: exit 75 after a release (D5, D6); a private one: never
+  reexecute: boolean; // exit 75 after a release: a unit daemon with the switch on (D38, daemon.ts); otherwise the link stays open and the hold starts
   wakeOnEvents: boolean; // a session.eventBatch while cold loads the spine (M2: off in the product until main stops composing its own; daemon.ts)
   endLink(): Promise<void>; // re-execution's first step: the engine host's link ended by its terminal draining close
   restart(reason: string): void; // re-execution's last: the daemon's exit order with EXIT_RESTART

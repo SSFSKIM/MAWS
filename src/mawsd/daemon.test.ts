@@ -14,6 +14,7 @@ import { buildIdOf } from '../engine-host/supervisor-files';
 import type { FakeSupervisor } from '../../test/support/fake-supervisor';
 import { takeSpineLock } from '../services/settings/spine-lock';
 import type { SpineEntry } from './spine-seam';
+import { SPINE_REEXECUTE_DEFAULT } from './daemon';
 import { MawsdScene, RawApp, sleep, until, type StandIn } from '../../test/support/mawsd-scene';
 
 let scene: MawsdScene;
@@ -582,22 +583,29 @@ describe('the spine (P5 O3-D M2)', () => {
     expect(scene.logs).toContainEqual(expect.stringMatching(/^spine: loaded in \d+ ms$/));
   });
 
-  it('a unit daemon releases after the quiet period and exits 75; a private one releases and stays', async () => {
-    for (const kind of ['unit', 'private'] as const) {
+  // D38: re-execution is a switch, off by default (SPINE_REEXECUTE_DEFAULT); MAWS_SPINE_REEXECUTE=1 turns it on for one
+  // unit daemon (the measured scene's seam); a private daemon never re-executes
+  it('released after the quiet period: a unit daemon stays unless MAWS_SPINE_REEXECUTE=1, then exits 75; a private one stays even with it', async () => {
+    expect(SPINE_REEXECUTE_DEFAULT).toBe(false);
+    for (const [kind, reexecute] of [['unit', false], ['unit', true], ['private', true]] as const) {
       const chunk = standInChunk();
-      const daemon = await scene.start({ kind, spine: { load: chunk.load }, env: { MAWS_USER_DATA: scene.root, MAWS_SPINE_QUIET_MS: '50' } });
+      const exits = scene.exits.length;
+      const env = { MAWS_USER_DATA: scene.root, MAWS_SPINE_QUIET_MS: '50', ...(reexecute && { MAWS_SPINE_REEXECUTE: '1' }) };
+      const daemon = await scene.start({ kind, spine: { load: chunk.load }, env });
       const client = await scene.app('machine');
       expect(await client.request('session.launchMode')).toMatchObject({ ok: true });
       client.destroy();
       await until(() => scene.logs.includes('spine: released'), 5_000, 'the release');
       expect(chunk.stops).toHaveBeenCalledOnce();
-      if (kind === 'unit') {
-        await until(() => scene.exits.includes(75), 5_000, 'the re-execution');
+      if (kind === 'unit' && reexecute) {
+        await until(() => scene.exits.length > exits, 5_000, 'the re-execution');
+        expect(scene.exits.slice(exits)).toEqual([75]);
         expect(scene.logs).toContainEqual('exited (spine released, code 75)');
       } else {
         await sleep(50);
-        expect(scene.exits).toEqual([75]); // the unit's, nothing more
+        expect(scene.exits.slice(exits), `${kind}${reexecute ? ' with the variable' : ''}`).toEqual([]);
         expect((await daemon.status()).spine).toMatchObject({ state: 'cold' });
+        expect(await (await scene.app('machine')).request('session.launchMode')).toMatchObject({ ok: true }); // loads again in the same process
         await daemon.stop('test');
       }
       scene.logs.length = 0;

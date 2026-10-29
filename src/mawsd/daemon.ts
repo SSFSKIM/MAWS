@@ -25,8 +25,9 @@
 // P5 O3-D M2 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §A and §B): `machine.sock` is served by
 // the services front (front.ts), and the spine runs here too, composed by the seam (spine-seam.ts) from the services
 // chunk at its first trigger, never at start: refused by `spine.lock` while an app that composes its own holds it,
-// released after the quiet period (the daemon's own idle time, or MAWS_SPINE_QUIET_MS under a measured scene), and,
-// for a unit daemon, re-executed after a release (exit 75, its unit restarts it cold). The exit order stops its parts
+// released after the quiet period (the daemon's own idle time, or MAWS_SPINE_QUIET_MS under a measured scene), and
+// loaded again at the next trigger; a unit daemon re-executes after a release (exit 75, its unit restarts it cold) only
+// with the switch on (SPINE_REEXECUTE_DEFAULT, MAWS_SPINE_REEXECUTE=1; D38). The exit order stops its parts
 // once their work settled, before the client connections close.
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
@@ -68,6 +69,10 @@ import { DEPARTURE_BOUND_MS, Relay, type RelayRequest } from './relay';
 import { createLazySpine, loadServicesEntry, type SpineEntry, type SpineTiming } from './spine-seam';
 
 export const EXIT_RESTART = 75; // a requested restart: the units restart on it
+// P5 O3-D D38 (the owner's ruling on D5): re-executing a unit daemon after its spine's release is built and off; a later
+// PR flips this default once M7's whole-set reading asks for it. MAWS_SPINE_REEXECUTE=1, read by a unit daemon at
+// start, turns it on for that daemon (the measured scene's seam). A private daemon never re-executes.
+export const SPINE_REEXECUTE_DEFAULT = false;
 const STATUS_BOUND_MS = 5_000; // daemon.status waits this long for the engine host's own status
 const MAX_INTEREST = 10_000; // host.interest's bound
 
@@ -249,7 +254,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       home: homedir(),
     }),
     quietMs: () => spineQuietMs ?? clocks.idleMs() ?? DEFAULT_IDLE_EXIT_MS,
-    reexecute: kind === 'unit',
+    reexecute: kind === 'unit' && (SPINE_REEXECUTE_DEFAULT || env.MAWS_SPINE_REEXECUTE === '1'),
     wakeOnEvents: options.spine?.wakeOnEvents ?? false,
     endLink: async () => {
       const drained = hosts.stop(); // the terminal draining close: what the engine host wrote before it saw the end folds now

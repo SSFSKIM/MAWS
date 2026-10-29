@@ -481,7 +481,7 @@ test('daemon idle spine alone: the physical footprint and CPU of the spine compo
 // released unit daemon exits at once (D5) and a private one never re-executes (D6): (1) `run --private`, the spine
 // loaded by a bare machine.sock client's session.list (the fixture's sessions read back) that holds its connection, read
 // LOADED; the client closes, the quiet passes, the log reads `spine: released`, read RELEASED; the daemon is stopped
-// (SIGTERM). (2) `run --unit`, restarted here on exit 75 as launchd would, following the new pid: the client loads the
+// (SIGTERM). (2) `run --unit` with MAWS_SPINE_REEXECUTE=1 (re-execution is off by default, D38), restarted here on exit 75 as launchd would, following the new pid: the client loads the
 // spine and closes, the quiet passes, the log reads `exited (spine released, code 75)`, the restart serves, read
 // RE-EXECUTED. Each window is SPINE_RELEASED_RUN's (120 s settle, 300 s, 11 samples, the load rule), over the
 // processes measuredOn('daemon') finds once the window's daemon is stable. The line (mawsdSpineLine) names the three
@@ -503,7 +503,9 @@ test('daemon idle mawsd with the spine: loaded, released, re-executed', async ()
   const daemons: ChildProcess[] = [];
   let ending = false;
   const run = (kind: 'private' | 'unit'): ChildProcess => {
-    const child = spawn(binary, ['--disable-sigusr1', script, 'run', `--${kind}`, '--dir', join(profile, 'mawsd')], { env, stdio: 'ignore', argv0: MAWSD_ARGV0 });
+    // D38: re-execution is off by default; the unit daemon turns it on for itself so the scene reads the re-executed state
+    const own = kind === 'unit' ? { ...env, MAWS_SPINE_REEXECUTE: '1' } : env;
+    const child = spawn(binary, ['--disable-sigusr1', script, 'run', `--${kind}`, '--dir', join(profile, 'mawsd')], { env: own, stdio: 'ignore', argv0: MAWSD_ARGV0 });
     daemons.push(child);
     if (kind === 'unit') child.once('exit', (code) => void (code === 75 && !ending && run('unit'))); // launchd's restart on 75
     return child;

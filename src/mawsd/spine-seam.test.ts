@@ -364,6 +364,18 @@ describe('the release', () => {
     expect(spine.state()).toBe('loaded');
   });
 
+  it('a release without re-execution leaves the link open and starts the hold: a batch after it loads the spine again and folds there', async () => {
+    const spine = seam();
+    await spine.ensure('command');
+    spine.quiet(true);
+    await vi.waitFor(() => expect(spine.state()).toBe('cold'));
+    expect(ended).toBe(0); // the link was not ended
+    spine.quiet(false); // a client again: the next load stays
+    link.batch('s1', 9); // held: the trigger
+    await vi.waitFor(() => expect(spine.state()).toBe('loaded'));
+    expect((roots[1] as FakeRoot).seen).toEqual(['held batch s1 9']);
+  });
+
   it('a working session holds it; a kept session ready and idle with no work does not, and is not ended by it', async () => {
     const spine = seam();
     await spine.ensure('command');
