@@ -164,4 +164,5 @@ async function devIntentArm(){
 }
 
 const ARM_RUNS={title:titleArm,vcs:vcsArm,auto:autoArm,fallback:fallbackArm,memory:memoryArm,devintent:devIntentArm};
-export default async()=>{for(const arm of ARMS){try{await ARM_RUNS[arm]();}catch(e){console.error('p5-e312',arm,e.message);}}};
+// Every arm runs; a failed one is logged as it fails and named in one error at the end, so the runner exits non-zero.
+export default async()=>{const failed=[];for(const arm of ARMS){try{await ARM_RUNS[arm]();}catch(e){console.error('p5-e312',arm,e.message);failed.push(arm);}}if(failed.length>0)throw new Error('p5-e312: arms failed: '+failed.join(', '));};
