@@ -171,7 +171,7 @@ describe('the Notifier’s lane B counts', () => {
 
   it('keeps lane B’s counts apart from lane A’s across a restart: a lane A set leaves a lane B count alone, and the engine host’s set settles it', () => {
     const { notifier, sent, ctx, file } = setup();
-    notifier.pendingSet('p1', [{ session: 'a1' }]);
+    notifier.pendingSet('p1', [{ session: 'a1', request: 'r1' }]);
     notifier.laneBSet(new Map([['b1', 1]]));
     expect(file()).toEqual({ a1: { project: 'p1', pending: 1 }, b1: { project: 'p1', pending: 1, lane: 'B' } });
     const restarted = new Notifier(ctx);
