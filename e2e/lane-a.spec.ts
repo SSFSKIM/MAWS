@@ -14,7 +14,7 @@ import { FULL_CAPABILITIES, startFakeBridge, type FakeBridge, type FakeBridgeOpt
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
-import { assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, backgroundBashRecords, CATALOG, editTurnRecords, taskNotificationRecord, terminalSession, userRecord, type TerminalSession } from './support/lane-a';
+import { assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, backgroundBashRecords, CATALOG, editTurnRecords, taskNotificationRecord, terminalSession, turnEndRecords, userRecord, type TerminalSession } from './support/lane-a';
 import { addressed } from './support/address';
 import { openSurface } from './support/shell';
 import { sidebarOf, sidebarRow } from './support/sidebar';
@@ -505,8 +505,9 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 
-  // The M8 sitting: an interrupt's partial reply stays, settled (no longer streaming), as lane B keeps a stopped reply's.
-  test('a pane opened mid-reply shows what already streamed; the turn aborting with no step end leaves its text settled, none streaming', async () => {
+  // The M8 sitting: an interrupt's partial reply stays, settled (no longer streaming). The M10 sitting: the session kept
+  // none of it, so it is marked cut off, never drawn as the turn's reply.
+  test('a pane opened mid-reply shows what already streamed; the turn aborting with no step end leaves its text settled, none streaming, marked cut off', async () => {
     const c = await begin();
     const { page } = c;
     const { bridge } = await drive(c, { open: false });
@@ -520,7 +521,33 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(main(page).getByText('Half a story and more', { exact: true })).toBeVisible({ timeout: 10_000 });
     bridge.emit({ type: 'turn', phase: 'complete', turnId: 'turn-m', reason: 'aborted' }); // no step end, no block-row
     await expect(main(page).locator('.transcript-prose-live')).toHaveCount(0, { timeout: 10_000 });
-    await expect(main(page).getByText('Half a story and more', { exact: true })).toBeVisible();
+    const cut = main(page).locator('[data-cut]');
+    await expect(cut.getByText('Half a story and more', { exact: true })).toBeVisible();
+    await expect(cut.getByText('Cut off by the interrupt: the session didn’t keep it')).toBeVisible();
+    await expect(main(page).locator('.transcript-answer').getByText('Half a story and more', { exact: true }), 'never drawn as the reply').toHaveCount(0);
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  // The M10 sitting: a terminal session's engine runs an agent in the background, so the turn that started it ends at
+  // once; the row of its Agent call stays in view while the agent works, then folds with the turn's other work.
+  test('an agent started in the background: its row stays in view under the ended turn while it works, then folds', async () => {
+    const agent = { agentId: 'a1e2e000000000002', description: 'Sleep a while', prompt: 'Run sleep 200.', at: '2026-10-28T10:00:03.000Z' };
+    let last = '';
+    const c = await begin((sid, cwd, after) => {
+      const ask = randomUUID();
+      const turn = backgroundAgentRecords(sid, cwd, ask, agent);
+      last = (turn.at(-1)!.uuid as string);
+      return [userRecord(sid, cwd, ask, after, 'Spawn an agent.', '2026-10-28T10:00:03.000Z'), ...turn, ...turnEndRecords(sid, cwd, last, '2026-10-28T10:00:04.000Z')];
+    });
+    await backgroundAgentSidecars(c.store, c.sid, c.repo.root, agent);
+    const { page } = c;
+    await drive(c);
+    const row = main(page).locator('.transcript-subagent', { hasText: 'Sleep a while' });
+    await expect(main(page).getByText('It is working in the background.')).toBeVisible({ timeout: 15_000 });
+    await expect(row, 'the turn ended while its agent works: the call stays in view').toBeVisible();
+    await expect(row).toContainText('Sleep a while started working');
+    await c.store.appendLines(c.transcript, [JSON.stringify(taskNotificationRecord(c.sid, c.repo.root, last, { taskId: agent.agentId, status: 'completed', summary: 'Slept.', at: '2026-10-28T10:00:09.000Z' }))]);
+    await expect(row, 'the agent ended: its row folds with the turn').toHaveCount(0, { timeout: 10_000 });
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 

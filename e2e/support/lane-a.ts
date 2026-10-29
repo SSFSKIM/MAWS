@@ -89,6 +89,16 @@ export function backgroundBashRecords(sessionId: string, cwd: string, parentUuid
   ];
 }
 
+// The rows the engine writes as a turn ends (`stop_hook_summary`, then `turn_duration`), after `parentUuid`.
+export function turnEndRecords(sessionId: string, cwd: string, parentUuid: string, at: string): Record<string, unknown>[] {
+  const base = { cwd, sessionId, timestamp: at, isSidechain: false, userType: 'external', version: '2.1.300' };
+  const summary = randomUUID();
+  return [
+    { ...base, type: 'system', subtype: 'stop_hook_summary', uuid: summary, parentUuid, hookCount: 0, hookInfos: [], hookErrors: [], preventedContinuation: false, stopReason: '', hasOutput: false, level: 'suggestion' },
+    { ...base, type: 'system', subtype: 'turn_duration', uuid: randomUUID(), parentUuid: summary, durationMs: 1200, isMeta: false },
+  ];
+}
+
 // The engine's notification that a background task ended, as the attachment row it queues for the model.
 export function taskNotificationRecord(sessionId: string, cwd: string, parentUuid: string, note: { taskId: string; status: string; summary: string; at: string }): Record<string, unknown> {
   return {
