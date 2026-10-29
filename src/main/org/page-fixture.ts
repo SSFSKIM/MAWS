@@ -4,8 +4,10 @@
 // run a pairing). Under MAWS_E2E=1, in a build that is not packaged, with MAWS_E2E_ORG_PAGE naming a JSON file of
 // `{status, view}` that the `org.*` schemas admit, main answers `org.status` and `org.view` from it through C5's
 // `interceptCommand`, so the real renderer draws what main would send; every act is answered without effect, so the
-// production session behind it stays untouched. `org.rows` stays main's. Only a harness build's main contains this
-// module at all (index.ts's guard on `__MAWS_HARNESS_BUILD__`); a production launch never installs it.
+// production session behind it stays untouched. Its status no longer reaches the renderer either: the fixture stops the
+// session's `org.changed` forwarding (`unpublish`), since even a profile never signed in publishes once its load ends
+// (org-session.ts's `changed(true)`), which would replace the seeded status. `org.rows` stays main's. Only a harness
+// build's main contains this module at all (index.ts's guard on `__MAWS_HARNESS_BUILD__`); a production launch never installs it.
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import * as z from 'zod';
@@ -27,6 +29,8 @@ export interface OrgPageFixtureInstall {
   env: Record<string, string | undefined>;
   packaged: boolean;
   intercept: typeof interceptCommand;
+  /** Stops the production session's `org.changed` forwarding (what `registerOrgHandlers` returns); called once installed. */
+  unpublish(): void;
 }
 
 type FixtureCommand = Exclude<keyof typeof commands, 'org.rows'>;
@@ -39,6 +43,7 @@ export function installOrgPageFixture(deps: OrgPageFixtureInstall): (() => void)
   const parsed = z.strictObject({ status: OrgStatusSchema, view: OrgViewSchema.nullable() }).safeParse(JSON.parse(readFileSync(path, 'utf8')));
   if (!parsed.success) throw new Error(`${ORG_PAGE_FIXTURE_ENV}: ${path} is not an Org page fixture: ${parsed.error.message}`);
   const { status, view } = parsed.data;
+  deps.unpublish();
 
   const detail = 'the e2e Org page fixture is in force';
   const attempt: OrgAttempt = { ok: false, reason: { code: 'busy', detail } };

@@ -386,10 +386,12 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   const session = devOrg ?? orgSession!;
   const orgFeed = createRegistryFeed({ session, log: (line) => console.log(line) });
   orgSession?.attach(orgFeed);
-  registerOrgHandlers({ register: registerMainHandler, emit: (name, status) => void emit(name, status), service: orgSession, development: devOrg });
-  // P5 O8 M4a Task 8: the Org page's e2e look seeds org.* from a fixture (org/page-fixture.ts). The guard folds to false
-  // outside a harness build, which then carries none of it.
-  if (typeof __MAWS_HARNESS_BUILD__ !== 'undefined' && __MAWS_HARNESS_BUILD__) installOrgPageFixture({ env: process.env, packaged: app.isPackaged, intercept: interceptCommand });
+  const unpublishOrgStatus = registerOrgHandlers({ register: registerMainHandler, emit: (name, status) => void emit(name, status), service: orgSession, development: devOrg });
+  // P5 O8 M4a Task 8: the Org page's e2e look seeds org.* from a fixture (org/page-fixture.ts), which also stops the
+  // session's org.changed. The guard folds to false outside a harness build, which then carries none of it.
+  if (typeof __MAWS_HARNESS_BUILD__ !== 'undefined' && __MAWS_HARNESS_BUILD__) {
+    installOrgPageFixture({ env: process.env, packaged: app.isPackaged, intercept: interceptCommand, unpublish: unpublishOrgStatus });
+  }
   powerMonitor.on('resume', () => orgFeed.probe());
   powerMonitor.on('unlock-screen', () => orgFeed.probe());
   // P5 O6 M3: every other machine through the connection manager (one link per machine; MAWS_LOCAL_MACHINES names another

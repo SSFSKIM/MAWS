@@ -3,7 +3,9 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { commands, type OrgStatus, type OrgView } from '@shared/ipc/schema/org';
+import type { OrgSessionService } from './org-session';
 import { installOrgPageFixture, ORG_PAGE_FIXTURE_ENV, type OrgPageFixtureInstall } from './page-fixture';
+import { registerOrgHandlers } from './register';
 
 const STATUS: OrgStatus = {
   state: 'registered',
@@ -43,7 +45,7 @@ function fixtureFile(body: unknown): string {
 }
 
 type Handler = (input: unknown) => unknown;
-function deps(env: Record<string, string>, packaged = false): OrgPageFixtureInstall & { handlers: Map<string, Handler> } {
+function deps(env: Record<string, string>, packaged = false, unpublish = () => {}): OrgPageFixtureInstall & { handlers: Map<string, Handler> } {
   const handlers = new Map<string, Handler>();
   return {
     env,
@@ -52,6 +54,7 @@ function deps(env: Record<string, string>, packaged = false): OrgPageFixtureInst
       handlers.set(name, handler as Handler);
       return () => void handlers.delete(name);
     },
+    unpublish,
     handlers,
   };
 }
@@ -88,6 +91,32 @@ describe("the Org page's e2e fixture in main", () => {
     expect(await ask('org.pair.cancel')).toBeUndefined();
     stop!();
     expect(d.handlers.size).toBe(0);
+  });
+
+  it("stops the production session's org.changed, so a status it publishes late never replaces the seeded one", () => {
+    // main's composition: the production session's handlers and its status forwarding, then the fixture over them
+    let publish: (status: OrgStatus) => void = () => {};
+    const service = {
+      onStatus(listener: (status: OrgStatus) => void) {
+        publish = listener;
+        return () => void (publish = () => {});
+      },
+    } as unknown as OrgSessionService;
+    const emitted: OrgStatus[] = [];
+    const unpublish = registerOrgHandlers({ register: () => {}, emit: (_name, status) => void emitted.push(status), service, development: null });
+    publish({ state: 'none' });
+    expect(emitted).toEqual([{ state: 'none' }]); // forwarded before the fixture
+
+    const stop = installOrgPageFixture(deps({ MAWS_E2E: '1', [ORG_PAGE_FIXTURE_ENV]: fixtureFile({ status: STATUS, view: VIEW }) }, false, unpublish));
+    expect(stop).not.toBeNull();
+    publish({ state: 'none' }); // load()'s completion (`changed(true)`), landing after the page read the seeded status
+    expect(emitted).toEqual([{ state: 'none' }]);
+  });
+
+  it('leaves the forwarding alone when it does not install', () => {
+    let unpublished = false;
+    expect(installOrgPageFixture(deps({ MAWS_E2E: '1' }, false, () => void (unpublished = true)))).toBeNull();
+    expect(unpublished).toBe(false);
   });
 
   it('refuses a file the schemas reject, naming its path', () => {
