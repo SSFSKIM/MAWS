@@ -534,6 +534,28 @@ describe('endorsement and liveness', () => {
     expect(h.signer.pending()).toBeNull();
   });
 
+  it("keeps and posts nothing when it ends during the first write's registration mark, the last await before the slot: `stale`", async () => {
+    const h = await harness();
+    let live = true;
+    const { edit } = await pairOwn({ live: () => live });
+    // signing.json's first write marks registration.json first (fail-closed), an await inside the slot's update.
+    let release!: () => void;
+    let marking!: () => void;
+    const marked = new Promise<void>((resolve) => (marking = resolve));
+    h.gates.write = (name) => (name === 'registration.json' ? new Promise<void>((resolve) => ((release = resolve), marking())) : undefined);
+    const outcome = h.signer.sign(edit);
+    await marked;
+    live = false; // the pairing cancelled, or expired, while the mark is written
+    release();
+    expect(await outcome).toMatchObject({ ok: false, reason: 'stale' });
+    expect(h.hub.posts).toEqual([]);
+    expect(h.signer.pending()).toBeNull();
+    // No slot was written. The mark stays, and the file it promises is written with it, so the next start reads it.
+    expect(h.disk()).toMatchObject({ pending: null, deliveries: [] });
+    expect(h.registration.signing).toBe(true);
+    expect((await h.restart()).store.get()).not.toBe('damaged');
+  });
+
   it('once the slot is written, the proposal is durable: a later end of the pairing withdraws nothing', async () => {
     const h = await harness({ hub: false });
     let live = true;

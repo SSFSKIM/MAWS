@@ -534,8 +534,9 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
       kept = await store.update((f) => {
         // A sign-out since the person was asked: what was signed is never kept, so nothing can post it later.
         if (!live(asked)) return { next: f, value: 'stopped' as const };
-        // The change ended since the person said yes (the verdict and the obligation were awaited): never kept. From
-        // this write on the proposal is durable, and ending the change no longer withdraws it.
+        // The change ended since the person said yes (the verdict and the obligation were awaited, and a first write's
+        // registration mark, after which the store runs this again): never kept. From this write on the proposal is
+        // durable, and ending the change no longer withdraws it.
         if (edit.live !== undefined && !edit.live()) return { next: f, value: 'ended' as const };
         if (f.pending !== null) return { next: f, value: 'pending' as const };
         // An adoption between the verdict and this turn: the slot would name a parent that is no longer the head.
