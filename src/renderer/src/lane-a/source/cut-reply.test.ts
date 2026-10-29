@@ -99,6 +99,14 @@ describe('the bridge’s row of a reply an interrupt cut off', () => {
     expect(placeCuts(state, [kept(Date.parse(marker.timestamp as string))])).toEqual([]);
   });
 
+  it('the bridge’s terminal mirror of the interrupt draws without the reply, which its row draws', async () => {
+    const { c } = interrupted();
+    c.row('system', { subtype: 'informational', content: 'sminos: interrupt: [Request interrupted by user] The interrupt came from the desk. The reply it cut off: 1, 2, 3, 4 5, 6', isMeta: false, level: 'notice' });
+    const { rows } = await load(c.rows);
+    expect(rows.flatMap((r) => (r.kind === 'error' ? [r.text] : []))).toEqual(['sminos: interrupt: [Request interrupted by user] The interrupt came from the desk.']);
+    expect(cuts(rows)).toHaveLength(1);
+  });
+
   it('a row written after another turn started confirms no earlier cut', async () => {
     const c = new Chain('c4a10000', 'sminos');
     c.prompt('Count.');

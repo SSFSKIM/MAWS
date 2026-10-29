@@ -507,7 +507,7 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
       if (sminosDelivery(record, ctx, base, events)) return;
       const blocked = blockedPrompt(record);
       if (blocked === null) {
-        const text = typeof record.content === 'string' ? record.content.trim() : '';
+        const text = typeof record.content === 'string' ? withoutMirroredCut(record.content).trim() : '';
         if (record.level === 'info') return;
         if (record.level !== 'warning' && record.level !== 'notice') break; // preserve unknown shapes as compatibility signals
         if (text) events.push({ ...base(), kind: 'notice.posted', level: record.level, text, key: 'informational' });
@@ -656,6 +656,12 @@ function isBridgeWake(record: TranscriptRecord): boolean {
   }
   return body !== null && body.split('\n', 1)[0] === BRIDGE_WAKE_LINE;
 }
+
+// P5 O9 (the M10 sitting): the sminos bridge's mirror of an interrupt's rows for the terminal (`<plugin>: interrupt: …`)
+// ends, from 1.27.16, with up to 300 characters of the reply the interrupt cut off. That reply is drawn from its own
+// row (interruptCutText), so the notice drops it and keeps the rest.
+const MIRRORED_CUT = / The reply it cut off: [\s\S]*$/;
+const withoutMirroredCut = (text: string) => (/^(?:sminos|doperpowers): interrupt: /.test(text) ? text.replace(MIRRORED_CUT, '') : text);
 
 // The sminos bridge's row of an interrupt's cut-off reply (`@shared/lane-a/interrupt-cut`), its whole text: a meta user
 // row of its plugin (sminos, or doperpowers before sminos 1.0.0) whose one text block opens with the row's line; else null.
