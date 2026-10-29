@@ -30,14 +30,16 @@ const TIMING_NODE_TESTS = [
   'src/engine-host/fs/sidecars.test.ts', // its retry cases wait out the retry schedule against a real writer
   'src/engine-host/fs/watcher.test.ts',
   'src/engine-host/plugins/runner.test.ts', // E8: real /bin/sh children, process-group kills and a ~2 s SIGKILL escalation
-  'src/main/git/watcher.test.ts',
-  'src/main/index/source.test.ts', // its wired cases follow real transcripts through the fs service
-  'src/main/sessions/pause-take-over.pty.test.ts', // real bash and zsh job control in a PTY, read through real `ps` calls
+  'src/services/git/watcher.test.ts',
+  'src/services/index/source.test.ts', // its wired cases follow real transcripts through the fs service
+  'src/services/sessions/pause-take-over.pty.test.ts', // real bash and zsh job control in a PTY, read through real `ps` calls
   'src/main/usage/claude-usage-reader.test.ts',
   'test/artifacts/portability.test.ts', // P3-A: loads the repository's whole ESLint config and lints through it
   'src/engine-host/documents/sigkill.test.ts', // P3-A: bundles and forks a writer, kills it mid-stream, reopens the store
   'test/artifacts/one-schema.test.ts', // P3-B: the portability test's pattern, for the one-schema rule
   'test/one-locale.test.ts', // the same pattern, for the one-locale rule over src/ and the desk's web app
+  'test/services/boundary.test.ts', // P5 O3-C M3: the same pattern, for the services library's boundary (rules A and B)
+  'src/services/spine-root.test.ts', // P5 O3-C M4: a replay played at its fastest and a real spine.lock wait (5 s)
   'test/endpoint/enroll.test.ts', // P5 O10 M2: enrolls against desk-hub's local runner, a wrangler dev child process
   'test/endpoint/provision.test.ts', // P5 O14 M1: provisions, retires and unenrolls against the same local runner
   'test/endpoint/hub-link.test.ts', // P5 O10 M3: reconnects on the hub link's backoff, timed against a stand-in hub
@@ -131,7 +133,7 @@ export default defineConfig({
         test: {
           name: 'node',
           environment: 'node',
-          include: ['src/{shared,main,preload,engine-host,pty-host,endpoint,mawsd}/**/*.test.ts', 'test/**/*.test.ts', RENDERER_NODE_TESTS], // P5 O10: src/endpoint (its suites live in test/endpoint); P5 O2 M5: src/mawsd
+          include: ['src/{shared,main,services,preload,engine-host,pty-host,endpoint,mawsd}/**/*.test.ts', 'test/**/*.test.ts', RENDERER_NODE_TESTS], // P5 O10: src/endpoint (its suites live in test/endpoint); P5 O2 M5: src/mawsd; P5 O3-C: src/services
           exclude: ['**/node_modules/**', 'test/live/**/*.live.test.ts', ...TIMING_NODE_TESTS, ...DISPLAY_NODE_TESTS], // C3: live cases run only in the `live` project; their support's own tests run here
           css: { include: [/\/design_system\/defaults\/.+\.css/] }, // P3-D: the defaults' `document.css` as text (`?raw`) for the host's and main's tests, as in `artifacts`
           // The compile-time suites (`src/**/*.test-d.ts`) are checked by `pnpm typecheck` alone, tsconfig.node.json

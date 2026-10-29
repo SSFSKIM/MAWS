@@ -6,11 +6,11 @@
 import { readFileSync } from 'node:fs';
 import { ClientSettingsSchema, type ClientSettings, type Settings, type SettingsPatch, type SettingsState, type SupervisorShape, type ThemeSetting } from '@shared/ipc/schema/settings';
 import { applyClientPatch, clientSettingsDefaults, isUnifiedSettings, mergeSettings, migrateClientSettings, migrateSettings, splitSettings, splitSettingsPatch } from '@shared/settings/defaults';
-import type { MachineSettingsService } from '../settings/machine';
-import { openSettingsFile, type SettingsFileRules } from '../settings/store';
+import type { MachineSettingsService } from '@shared/spine/machine-settings';
+import { openSettingsFile, type SettingsFileRules } from '@shared/settings/file-store';
 
 // A unified file (version 1 to 20) is read for its client fields and never written here: only the split (run under
-// `spine.lock`, src/main/settings/split.ts) rewrites it, after it has saved the machine's fields, so a run that could not
+// `spine.lock`, src/services/settings/split.ts) rewrites it, after it has saved the machine's fields, so a run that could not
 // split (refused the spine) keeps the person's client settings on screen without losing their machine settings.
 export const clientSettingsRules: SettingsFileRules<ClientSettings> = {
   read: (raw) =>

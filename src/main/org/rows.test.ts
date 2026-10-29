@@ -23,7 +23,7 @@ import { genesis, iso, memberId, newDevice, successor, type TestDevice } from '.
 import type { OrgRows } from '@shared/ipc/schema/org';
 import type { ProjectRecord } from '@shared/ipc/schema/session';
 import type { MachineRef } from '@shared/machine/ref';
-import { repoProjectId } from '../index/org-project';
+import { repoProjectId } from '@shared/machine/project-ids';
 import type { OrgFiles } from './files';
 import type { RegistryFeed } from './registry-feed';
 import { createRemoteRows, LISTINGS_FILE, listingHash, type ListingsFile, type RemoteRows } from './rows';

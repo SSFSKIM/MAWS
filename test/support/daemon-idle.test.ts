@@ -27,6 +27,8 @@ import {
   median,
   processTable,
   readerMismatches,
+  SPINE_RELEASED_RUN,
+  spineLine,
   topMem,
   topOutside,
 } from './daemon-idle';
@@ -442,5 +444,29 @@ describe('the A-B-A line', () => {
 
   it('names why a run is invalid, each window’s reasons', () => {
     expect(abaLine({ a, b, a2, reasons: ['B: the 1-minute load reached 5.2 and its 30 s pair 4.9 (a valid run stays under 5 throughout, or its 30 s pair under 4.7)'], windowS: 60 })).toMatch(/ · medians of 21, 21 and 20 over 60 s each · invalid: B: the 1-minute load reached 5\.2 and its 30 s pair 4\.9 \(a valid run stays under 5 throughout, or its 30 s pair under 4\.7\)$/);
+  });
+});
+
+// P5 O3-C M5 (D18, D19): the spine composed alone over the profile-sized fixture, read idle while loaded and again
+// after its root stopped and its data was released, recorded without a bound.
+describe("the spine's line", () => {
+  const loaded = { footprintKiB: 61_234.4, cpuS: 0.05, samples: 21, load: 3.12, loadPair: 2.41, processes: [{ argv0: 'maws-spine', pid: 51, footprintKiB: 61_234.4, cpuS: 0.05 }] };
+  const released = { footprintKiB: 48_001.6, cpuS: 0.01, samples: 11, load: 2.94, loadPair: 2.63, processes: [{ argv0: 'maws-spine', pid: 51, footprintKiB: 48_001.6, cpuS: 0.01 }] };
+  const counts = { sessions: 5_000, projects: 50, attention: 300, pending: 40, library: 1_000, drafts: 50, history: 2_000 };
+
+  it('reads the released window as a 120 s settle and 300 s of samples every 30 s: 11', () => {
+    expect(SPINE_RELEASED_RUN).toEqual({ settleS: 120, windowS: 300, everyS: 30, samples: 11, maxLoad: 5, pairLoad: 4.7 });
+  });
+
+  it('reads the loaded and released medians and the drop, each window’s CPU, the fixture’s counts, the collection, the validity and both loads', () => {
+    expect(spineLine({ loaded, released, counts, gc: true, reasons: [] })).toBe(
+      '[daemon-idle] spine loaded footprint 61234 KiB (median of 21) · released 48002 KiB (median of 11), -13232 KiB · cpu 0.05 s over 600 s loaded, 0.01 s over 300 s released · fixture 5000 sessions in 50 projects, 300 attention items (40 pending), 1000 library rows, 50 drafts, 2000 prompt-history lines · gc ran twice before the released window · valid · load 3.1 (30 s pair 2.4) loaded, 2.9 (30 s pair 2.6) released',
+    );
+  });
+
+  it('says when no collection ran, and names why a run is invalid', () => {
+    expect(spineLine({ loaded, released, counts, gc: false, reasons: ['released: the 1-minute load reached 5.2 and its 30 s pair 4.9 (a valid run stays under 5 throughout, or its 30 s pair under 4.7)'] })).toContain(
+      ' · no gc (the runtime exposed none) · invalid: released: the 1-minute load reached 5.2 and its 30 s pair 4.9 (a valid run stays under 5 throughout, or its 30 s pair under 4.7) · load 3.1 (30 s pair 2.4) loaded, 2.9 (30 s pair 2.6) released',
+    );
   });
 });

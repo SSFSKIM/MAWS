@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
-import { createGitRunner, gitEnv } from '../../src/main/git/runner';
+import { createGitRunner, gitEnv } from '../../src/services/git/runner';
 import { isolatedGitEnv } from './git-env';
 
 // Oracle reads must honor the same global excludes as the product, but never inherited routing.

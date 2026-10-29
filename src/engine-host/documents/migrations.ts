@@ -1,6 +1,6 @@
 // The artifact store's database file and its schema history (docs/doperpowers/plans/2026-10-12-p3-a-store.md, M2 and
 // Decision Log 5 to 8, 11 and 12; parent §4.1 and §4.2): `<userData>/artifacts/store.sqlite`, opened by the engine host
-// alone. The rules are the index's (src/main/index/db.ts): an append-only list where version N is the N-th entry, every
+// alone. The rules are the index's (src/services/index/db.ts): an append-only list where version N is the N-th entry, every
 // pending entry applied in one transaction with `PRAGMA user_version` recording the count; a file a newer app wrote is
 // opened read-only and left as it is; a file SQLite reports as corrupt or not a database is moved aside, never deleted,
 // and a fresh one created. Never edit a released entry; append.

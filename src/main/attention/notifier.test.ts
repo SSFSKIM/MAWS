@@ -39,30 +39,28 @@ const port: Pick<ClientPort, 'notify' | 'badge' | 'focus'> = {
 const bounces = () => os.focus.mock.calls.filter(([, mode]) => mode === 'request');
 const brought = () => os.focus.mock.calls.filter(([, mode]) => mode === 'bring');
 
-import { SessionReadModel } from '../sessions/read-model';
+import { fakeSpineView, type FakeSpineView } from '../../../test/support/fake-spine-view';
 import { startNotifier } from './notifier';
-type Writer = import('../sessions/read-model').ReadModelWriter;
 
 const CHARTER = 'app-charter' as AppSessionId;
 const LOOSE = 'app-loose' as AppSessionId;
 const T = '2026-09-28T10:00:00Z';
 const SETTINGS: Settings = SETTINGS_DEFAULTS_V21;
 
-function harness(opts: { focused?: boolean; settings?: Settings; before?: (w: Writer) => void; actions?: import('./actions').NotificationActions } = {}) {
-  const model = new SessionReadModel('index');
-  let writer!: Writer;
-  model.register({ start: (w) => ((writer = w), () => {}) });
-  writer.observeProject(project('maws', 0, { name: 'MAWS' }));
-  writer.observeRecord(record(CHARTER, { projectId: 'maws' as never, title: { text: 'Charter + research', source: 'user' } }));
-  writer.observeRecord(record(LOOSE, { title: { text: 'Terminal workflow notes', source: 'user' } }));
-  opts.before?.(writer);
+// P5 O3-C (reader R1): the notifier reads the spine through its view alone
+function harness(opts: { focused?: boolean; settings?: Settings; before?: (v: FakeSpineView) => void; actions?: import('./actions').NotificationActions } = {}) {
+  const view = fakeSpineView({
+    projects: [project('maws', 0, { name: 'MAWS' })],
+    records: [record(CHARTER, { projectId: 'maws' as never, title: { text: 'Charter + research', source: 'user' } }), record(LOOSE, { title: { text: 'Terminal workflow notes', source: 'user' } })],
+  });
+  opts.before?.(view);
   const state = { viewing: null as AppSessionId | null, focused: opts.focused ?? false, settings: opts.settings ?? SETTINGS };
   const emit = vi.fn(() => true);
   const navigate = vi.fn();
   const failure = vi.fn();
-  const stop = startNotifier(model, { port, actions: opts.actions, failure, isFocused: () => state.focused, isViewing: (id) => state.focused && state.viewing === id, navigate, settings: () => state.settings, emit });
-  const set = (appSessionId: AppSessionId, items: AttentionItem[]) => writer.observeAttention(appSessionId, items);
-  return { model, writer, state, emit, navigate, failure, stop, set };
+  const stop = startNotifier(view, { port, actions: opts.actions, failure, isFocused: () => state.focused, isViewing: (id) => state.focused && state.viewing === id, navigate, settings: () => state.settings, emit });
+  const set = (appSessionId: AppSessionId, items: AttentionItem[], silent: AttentionItem['id'][] = []) => view.setAttention(appSessionId, items, silent);
+  return { view, state, emit, navigate, failure, stop, set };
 }
 
 const posted = () => os.instances;
@@ -157,9 +155,25 @@ describe('notifier fires once per item when unfocused', () => {
     }
   });
 
+  // P5 O3-C (O3 §7: the restored marks in band): an item the change marks silent is never announced, then or later
+  it('never posts for an item its change marks silent (restored, or re-projected by the owner channel), though it is badged', () => {
+    const h = harness();
+    const restored = item(CHARTER, 'permission', T);
+    h.set(CHARTER, [restored], [restored.id]);
+    h.set(CHARTER, [restored, item(CHARTER, 'question', '2026-09-28T10:01:00Z')]);
+    expect(posted().map((n) => n.options.body)).toEqual([`question for ${CHARTER}`]);
+    expect(os.badge).toHaveBeenLastCalledWith(null, 1);
+  });
+
+  it('titles a session whose project is hidden by its title alone, as for no project', () => {
+    const h = harness({ before: (v) => v.setProjects([], [project('maws', 0, { name: 'MAWS', hidden: true })]) });
+    h.set(CHARTER, [item(CHARTER, 'permission', T)]);
+    expect(posted()[0].options.title).toBe('Charter + research');
+  });
+
   it('never posts for the items that were already waiting when it started', () => {
     const waiting = item(CHARTER, 'permission', T);
-    const h = harness({ before: (w) => w.observeAttention(CHARTER, [waiting]) });
+    const h = harness({ before: (v) => v.setAttention(CHARTER, [waiting]) });
     h.set(CHARTER, [waiting, item(CHARTER, 'question', '2026-09-28T10:01:00Z')]);
     expect(posted().map((n) => n.options.body)).toEqual([`question for ${CHARTER}`]);
   });
@@ -221,7 +235,7 @@ describe('notifier fires once per item when unfocused', () => {
 describe('dock badge', () => {
   it('counts the tier-1 Needs-you sessions whatever the focus, and clears at zero', () => {
     const waiting = item(CHARTER, 'permission', T);
-    const h = harness({ focused: true, before: (w) => w.observeAttention(CHARTER, [waiting]) });
+    const h = harness({ focused: true, before: (v) => v.setAttention(CHARTER, [waiting]) });
     expect(os.badge).toHaveBeenLastCalledWith(null, 1);
     h.set(LOOSE, [item(LOOSE, 'question', T), item(LOOSE, 'plan', T)]);
     expect(os.badge).toHaveBeenLastCalledWith(null, 2);
@@ -233,7 +247,7 @@ describe('dock badge', () => {
 
   it('leaves out archived sessions and sessions with no record', () => {
     const h = harness();
-    h.writer.observeRecord(record(CHARTER, { archived: true }));
+    h.view.putRecord(record(CHARTER, { archived: true }));
     h.set(CHARTER, [item(CHARTER, 'permission', T)]);
     h.set('app-unknown' as AppSessionId, [item('app-unknown', 'permission', T)]);
     expect(os.badge).toHaveBeenLastCalledWith(null, 0);
@@ -252,20 +266,20 @@ describe('dock badge', () => {
   });
   it('announces a new completed turn once, not a restored idle digest', () => {
     const h = harness();
-    h.writer.setDigest(digest(CHARTER, { lastTurnEndedAt: T }));
+    h.view.putDigest(digest(CHARTER, { lastTurnEndedAt: T }));
     expect(posted()).toHaveLength(0);
-    h.writer.setDigest(digest(CHARTER, { phase: 'working', turnStartedAt: T }));
+    h.view.putDigest(digest(CHARTER, { phase: 'working', turnStartedAt: T }));
     const done = digest(CHARTER, { turnStartedAt: T, lastTurnEndedAt: '2026-09-28T10:01:00Z', lastAssistantLine: 'All tests pass.' });
-    h.writer.setDigest(done);
-    h.writer.setDigest(done);
+    h.view.putDigest(done);
+    h.view.putDigest(done);
     expect(posted()).toHaveLength(1);
     expect(posted()[0].options.body).toBe('All tests pass.');
   });
   it('hands a failed reply to the ready-page relay rather than emitting it to a just-created window', async () => {
     const actions = { reply: vi.fn().mockRejectedValue(new Error('Session unavailable')), canAllow: vi.fn(), allow: vi.fn() };
     const h = harness({ actions });
-    h.writer.setDigest(digest(CHARTER, { phase: 'working', turnStartedAt: T }));
-    h.writer.setDigest(digest(CHARTER, { lastTurnEndedAt: '2026-09-28T10:01:00Z' }));
+    h.view.putDigest(digest(CHARTER, { phase: 'working', turnStartedAt: T }));
+    h.view.putDigest(digest(CHARTER, { lastTurnEndedAt: '2026-09-28T10:01:00Z' }));
     posted()[0].fire('reply', 'Do not lose these words');
     await vi.waitFor(() => expect(brought()).toEqual([[null, 'bring']]));
     expect(h.navigate).toHaveBeenCalledWith({ appSessionId: CHARTER, attentionId: null, source: 'notification' });
@@ -298,8 +312,8 @@ describe('dock badge', () => {
 // join Needs you and the dock badge, with a toast while MAWS is focused, but raise no system notification and no bounce.
 describe('a terminal session’s requests', () => {
   const TERMINAL = 'app-terminal' as AppSessionId;
-  const held = (w: Writer) => w.observeRecord(record(TERMINAL, { title: { text: 'In the terminal', source: 'user' }, holder: { kind: 'terminal', pid: 4242 } }));
-  // a request its bridge raised: the lane A list's item (src/main/lane-a/attention.ts)
+  const held = (v: FakeSpineView) => v.putRecord(record(TERMINAL, { title: { text: 'In the terminal', source: 'user' }, holder: { kind: 'terminal', pid: 4242 } }));
+  // a request its bridge raised: the lane A list's item (src/services/lane-a/attention.ts)
   const raised = (kind: 'permission' | 'question', request: string) => item(TERMINAL, kind, T, { id: `lane-a:eng-1:${request}` as AttentionItem['id'] });
 
   it('post no notification and bounce nothing while unfocused, and still count in the badge', () => {

@@ -4,8 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clientSettingsDefaults, machineSettingsDefaults, SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
-import { startMachineSettings, type MachineSettingsService } from '../settings/machine'; // P5 O3-A
-import { settingsPaths, splitSettingsFiles } from '../settings/split'; // P5 O3-A
+import type { MachineSettingsService } from '@shared/spine/machine-settings';
+import { startMachineSettings } from '../../services/settings/machine'; // P5 O3-A
+import { settingsPaths } from '@shared/settings/paths';
+import { splitSettingsFiles } from '../../services/settings/split'; // P5 O3-A
 
 // A fake nativeTheme that behaves like Electron's (`shouldUseDarkColors` follows `themeSource`, `system` follows the
 // fake OS), one fake app window that records its background colour and the events sent to it, and an `ipcMain` that
@@ -79,8 +81,8 @@ beforeEach(async () => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-// P5 O3-A: as main starts them, holding spine.lock (src/main/index.ts's startSpineData): the split, once, then the machine
-// half and the client service over both files; `refused` as in a run refused the spine.
+// P5 O3-A: as main starts them, holding spine.lock (src/services/spine-root.ts's openSpineData): the split, once, then
+// the machine half and the client service over both files; `refused` as in a run refused the spine.
 let machine: MachineSettingsService;
 const start = ({ refused = null }: { refused?: string | null } = {}) => {
   const paths = settingsPaths(dir);

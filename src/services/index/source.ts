@@ -1,0 +1,596 @@
+// The production session source (C4 execution document, Interfaces "Index", `IndexSessionSource`; wave-2 ledger d.5,
+// d.7, d.14): folds the engine host's `fs.*` events and C3's `session.status` into the index, feeds C5's read model
+// through its writer, tells the renderer (`session.changed`, `session.removed`, `session.projects.changed`, coalesced per
+// tick with the index's revision), and keeps the host's `appSessionId ↔ sessionId` bindings in step with the index
+// (`fs.bind` for every id it allocates or binds, `fs.unbind` for every id it clears, `fs.unfollow` for an id that goes
+// live). Whenever the engine host starts streaming (at start, and after a restart that lost its bindings) it re-sends
+// every binding, scans with what the index already holds, and folds the registry's holders once, since the host's
+// start-up holder events predate the subscription. E10: streaming, not the `ready` state: the host emits nothing before
+// main's `ready` line (X13), which follows the `ready` transition and main's resync, and a scan's discoveries come back
+// only as `fs.sessionChanged` events. It also runs the unread rule, from the visible set C5 reports through `onSetVisible`.
+// E11 (tracker row E3 · C4 "first launch after migration 4 re-summarises for ~10 s"): a scan's discoveries arrive as a
+// burst of `fs.sessionChanged` events, one per transcript. Measured on a copy of the owner's store (5,108 summaries),
+// nearly all of the ~8.5 s the burst cost main was `locate`'s linked-worktree question asked of git synchronously, once
+// per directory the cache had not seen; the transactions were the rest. So the summaries are queued, the directories
+// they name are answered off main's thread first (`warmLinkedWorktrees`, child processes), and they are then applied
+// up to DISCOVERY_BATCH to a transaction instead of one each: under 1 s of main's time for the same burst. Anything
+// else that touches the index from here (another host event, a visibility report, the holder fold, the refold) applies
+// first what of the queue is already warm, and every queued summary of a session it is about, so each session's changes
+// reach the index in the order the host sent them; the cold rest waits for the warm-up (P4 W2-B, `applyBefore`). The
+// stop drops the queue instead (W-B review M3): applying a first launch's burst there would run that git inside the
+// quit, and the next launch's `fs.scan` re-reports every dropped transcript, since the index never recorded its size
+// and mtime. A batch that fails is applied again one summary to a transaction, so one bad summary costs only itself, as
+// before.
+import type { AppSessionId, ProjectId, SessionId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
+import type { CommandInput, CommandName, CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
+import type { Holder, TranscriptSummary } from '@shared/wire/store';
+import type { HostSupervisor } from '@shared/host/host-supervisor';
+import type { ReadModelWriter as ShellReadModelWriter, SessionSource } from '../sessions/read-model';
+import { toSessionRecordPatch } from '@shared/engine/status';
+import { bridgedDigest, type BridgedPhase } from '../sessions/digest'; // P5 O9 M6
+import { previewLine } from '@shared/owner/preview';
+import type { Index } from './index';
+import { locatesWithoutGit, warmLinkedWorktrees } from './projects';
+import { contested, type BindingChange, type ChangeCause } from './sessions';
+
+// C5's read-model port (C5 execution document, "Main modules"), as far as this source writes through it: records,
+// projects and the seed digest of a session with no live fold. The shell's writer also folds event batches, statuses
+// and attention, which main feeds it from the host directly (src/services/sessions/index.ts).
+export type ReadModelWriter = Pick<ShellReadModelWriter, 'observeRecord' | 'observeRemoved' | 'observeProject' | 'observeProjectRemoved' | 'setDigest'>;
+
+export type SourceHost = Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onState' | 'onStreaming' | 'snapshot'>; // E10: onStreaming
+
+export interface SourceOptions {
+  emit: <N extends EventName>(name: N, payload: EventPayload<N>) => boolean; // to every client: the services bus's emit (P5 O3-C)
+  tickMs?: number; // session.changed coalescing and fs.bind batching; 16 ms
+  now?: () => string;
+  warmLinkedWorktrees?: (directories: string[]) => Promise<void>; // projects.ts's; a test holds the warm-up open
+}
+
+const TICK_MS = 16;
+export const DISCOVERY_BATCH = 200; // E11: summaries per transaction
+const LAST_LINE_CHARS = 160; // C5's digest `lastAssistantLine`
+const locatedDirectory = (s: TranscriptSummary) => s.relocatedCwd ?? s.directory; // the one `upsertFromSummary` locates
+
+// A record's change waiting for the tick: its latest committed state and that change's revision.
+type Pending = { t: 'changed'; record: SessionRecord; cause: Exclude<ChangeCause, 'removed'>; revision: number } | { t: 'removed'; revision: number };
+type SearchJob = { summary: TranscriptSummary; failures: number; retryAt: number };
+const SEARCH_RETRY_MS = [250, 1000]; // three attempts per transcript stamp, then an explicit incomplete state
+
+export class IndexSessionSource implements SessionSource {
+  private readonly tickMs: number;
+  private readonly now: () => string;
+  private readonly visible = new Set<AppSessionId>();
+  private readonly holders = new Map<SessionId, Holder>(); // the registry's live holders by engine id, as last reported
+  private readonly pending = new Map<AppSessionId, Pending>();
+  private projectsRevision: number | null = null; // the latest project change waiting for the tick
+  private shownProjects = new Set<ProjectId>();
+  private bindingQueue: BindingChange[] = [];
+  private readonly live = new Set<AppSessionId>(); // app ids with a process in the engine host, from session.status
+  private unfollows: AppSessionId[] = []; // disk follows to stop at the tick (liveStatus)
+  private hostWork: Promise<unknown> = Promise.resolve(); // bindings go to the host in the order the index made them
+  private syncs: Promise<unknown> = Promise.resolve();
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private writer: ReadModelWriter | null = null;
+  private offs: (() => void)[] = [];
+  private unavailableLogged = false;
+  private discoveries: TranscriptSummary[] = []; // E11: fs.sessionChanged summaries not yet applied
+  private draining = false; // E11: a warm-up for the queue is out
+  private searchQueue = new Map<AppSessionId, SearchJob>();
+  private searchTimer: ReturnType<typeof setTimeout> | null = null;
+  private searchGeneration = 0;
+  private indexingGeneration: number | null = null;
+  private stopped = false; // E11: a drain that resumes after the stop applies nothing
+  // l1-sessions-13: whether a scan has answered since the engine host's latest transition (a scan's discoveries all
+  // precede its answer), the generation that transition started, and who waits to hear of the next answered scan
+  private scanned = false;
+  private generation = 0;
+  private readonly scanListeners = new Set<() => void>();
+  private readonly bridged = new Map<AppSessionId, BridgedPhase>(); // P5 O9 M6: what the bridges MAWS drives say
+
+  constructor(
+    private readonly index: Index,
+    private readonly host: SourceHost,
+    private readonly options: SourceOptions,
+  ) {
+    this.tickMs = options.tickMs ?? TICK_MS;
+    this.now = options.now ?? (() => new Date().toISOString());
+  }
+
+  start(writer: ReadModelWriter): () => void {
+    // A newer app's index: this source neither reads nor writes a schema it does not know, and the app runs on without
+    // session records (session.* answers `index unavailable`).
+    if (this.index.unavailable !== null) {
+      this.logUnavailable();
+      return () => {};
+    }
+    this.stopped = false;
+    this.searchGeneration += 1;
+    this.writer = writer;
+    const projects = this.index.projects.list();
+    for (const project of projects) writer.observeProject(project);
+    this.shownProjects = new Set(projects.map((p) => p.id));
+    for (const record of this.index.sessions.list({ includeArchived: true })) {
+      writer.observeRecord(record);
+      this.digest(record);
+    }
+
+    this.offs = [
+      this.index.sessions.onChange((record, cause, revision) => this.recordChanged(record, cause, revision)),
+      this.index.sessions.onBinding((change) => this.bindingChanged(change)),
+      this.index.projects.onChange((revision) => this.projectsChangedNow(revision)),
+      this.host.onEvent('fs.sessionChanged', ({ summary }) => this.queueDiscovery(summary)), // E11: warmed, then batched
+      this.host.onEvent('fs.sessionRemoved', ({ sessionId }) => this.write('fs.sessionRemoved', () => this.index.sessions.markTranscriptRemoved(sessionId), [sessionId])),
+      this.host.onEvent('fs.holderChanged', ({ sessionId, holder }) => {
+        this.applyBefore([sessionId]); // E11: in the order the host sent them
+        this.remember(sessionId, holder);
+        this.write('fs.holderChanged', () => this.index.sessions.setHolder(sessionId, holder));
+      }),
+      this.host.onEvent('session.status', ({ appSessionId, status }) => {
+        // P4 W2-B: no queued summary makes this record (discovery allocates fresh app ids); those of the transcripts
+        // the status binds or leaves go first, in the write
+        const record = this.index.sessions.get(appSessionId);
+        if (record === null) return; // not a record the index holds (yet)
+        // C3's patch leaves the holder out once the process has exited, the index's call. W7: the registry's foreign
+        // holder of the session, remembered from fs.holderChanged, holds it then (the registry tells only changes, and
+        // MAWS's own record is never one); none otherwise. While the process runs it is self, contested when a foreign
+        // process holds the session too.
+        const patch = toSessionRecordPatch(status);
+        const engineId = status.engineSessionId ?? record.engineSessionId;
+        const foreign = (engineId === null ? undefined : this.holders.get(engineId)) ?? { kind: 'none' as const };
+        if (status.process === 'exited') patch.holder = foreign;
+        else patch.holder = contested(foreign);
+        this.write('session.status', () => this.index.sessions.applyEngineStatus(appSessionId, patch), [status.engineSessionId, record.engineSessionId]);
+        this.liveStatus(appSessionId, status.process === 'exited', record.engineSessionId !== null);
+      }),
+      // E10: the reset at every transition, `ready` included; a kept session's burst status re-marks it self after it
+      this.host.onState('engine-host', () => {
+        this.generation += 1; // l1-sessions-13: what the store holds is unknown again until the next scan answers
+        this.scanned = false;
+        this.applyBefore([...this.holders.keys()]); // E11: what the host sent before it went (P4 W2-B: a record made later would miss the holder forgotten here)
+        this.resetSearch(); // the new host's scan requeues every unfinished stamp
+        this.live.clear(); // a host that went away took its processes with it
+        this.holders.clear();
+        this.write('engine-host generation', () => this.index.sessions.resetSelfHolders());
+      }),
+      this.host.onStreaming('engine-host', () => void this.sync()), // E10
+    ];
+    // A source started after the host became ready: it may be streaming already (no streaming call is coming) or still
+    // in its resync (one is, and a second sync then is harmless).
+    if (this.host.snapshot('engine-host').state === 'ready') void this.sync();
+
+    // Sessions an earlier membership rule left in a linked worktree's own project move under its main checkout. Telling
+    // linked worktrees apart takes git, a few hundred calls on a large store, so they run off main's thread first (the
+    // visible projects' directories warm `locate`'s cache), and the refold then reads the cache, its moves going out as
+    // ordinary changes: the sidebar regroups live. A source stopped before the warm-up ends refolds nothing.
+    let stopped = false;
+    const warm = this.options.warmLinkedWorktrees ?? warmLinkedWorktrees;
+    warm(projects.map((p) => p.directory))
+      .then(() => {
+        if (!stopped) this.write('linked-worktree refold', () => this.index.sessions.refoldLinkedWorktrees());
+      })
+      .catch((error: unknown) => console.error('[index] linked-worktree warm-up failed:', error instanceof Error ? error.message : error));
+
+    return () => {
+      stopped = true;
+      this.stopped = true;
+      this.scanned = false;
+      this.resetSearch();
+      this.discoveries = []; // W-B review M3: the next launch's fs.scan reports them again
+      for (const off of this.offs) off();
+      this.offs = [];
+      if (this.timer) clearTimeout(this.timer);
+      this.timer = null;
+      this.pending.clear();
+      this.bindingQueue = [];
+      this.unfollows = [];
+      this.writer = null;
+    };
+  }
+
+  // l1-sessions-13: whether the index holds what the store said of a session as of a scan answered since the engine
+  // host's latest transition: false before that scan's answer (or when it failed, or the source is inert or stopped),
+  // and while a summary of the session's transcript (`engineSessionId`; null asks only about the scan) still waits in
+  // the queue. A decision that reads a session's last activity (the inactivity archive) waits for this, since the index
+  // otherwise still holds what an earlier run saw.
+  discoveryCurrent(engineSessionId: SessionId | null): boolean {
+    if (!this.scanned || this.stopped) return false;
+    return engineSessionId === null || !this.discoveries.some((s) => s.sessionId === engineSessionId);
+  }
+
+  // Called after each scan that answers (every host start's sync), once its discoveries are queued.
+  onScanned(listener: () => void): () => void {
+    this.scanListeners.add(listener);
+    return () => void this.scanListeners.delete(listener);
+  }
+
+  // C5's visibility report. A session becoming visible is seen at once; the unread rule reads the set on every advance.
+  onSetVisible(appSessionId: AppSessionId, visible: boolean): void {
+    // E11: what the host sent before the report, read under the visibility it had
+    if (this.index.unavailable === null && this.discoveries.length > 0) this.applyBefore([this.index.sessions.get(appSessionId)?.engineSessionId ?? null]);
+    if (!visible) {
+      this.visible.delete(appSessionId);
+      return;
+    }
+    this.visible.add(appSessionId);
+    if (this.index.unavailable !== null) return;
+    const record = this.index.sessions.get(appSessionId);
+    if (record === null) return; // an unstarted tab: nothing to mark until its record exists
+    this.write('session.setVisible', () => this.markSeen(record));
+  }
+
+  // E11: a summary joins the queue; one drain at a time, started at the end of this turn of the event loop (so the
+  // rest of the burst that turn delivers joins it), warms the queue's directories and then applies what it warmed,
+  // until the queue is empty. Summaries that arrive during a warm-up wait for the next round.
+  private queueDiscovery(summary: TranscriptSummary): void {
+    this.discoveries.push(summary);
+    if (this.draining) return;
+    this.draining = true;
+    setImmediate(() => void this.drainDiscoveries());
+  }
+
+  private async drainDiscoveries(): Promise<void> {
+    const warm = this.options.warmLinkedWorktrees ?? warmLinkedWorktrees;
+    try {
+      while (this.discoveries.length > 0 && !this.stopped) {
+        const warming = new Set(this.discoveries);
+        const directories = new Set(this.discoveries.flatMap((s) => { const d = locatedDirectory(s); return d ? [d] : []; }));
+        await warm([...directories]).catch((error: unknown) => console.error('[index] the discoveries\' warm-up failed:', error instanceof Error ? error.message : error));
+        // what was warmed and is still queued (another write may have applied some or all of it meanwhile): a prefix of
+        // the queue, since arrivals join its end and a write only takes summaries out
+        let count = 0;
+        while (count < this.discoveries.length && warming.has(this.discoveries[count])) count += 1;
+        if (!this.stopped) this.applyDiscoveries(this.discoveries.splice(0, count));
+      }
+    } finally {
+      this.draining = false;
+    }
+  }
+
+  // P4 W2-B (tracker 2026-10-07 "The index sync's warm-up queue…"): what a write from elsewhere applies before itself.
+  // The queue's warm prefix (summaries whose directory `locate` answers without git) and every queued summary of a
+  // session in `about`, so that session's changes reach the index in the host's order; the rest waits for the drain,
+  // whose warm-up answers its directories off main's thread. A summary of `about` in a cold directory is located here,
+  // git and all: the least bad of the choices, since it costs that one directory once (the cache keeps the answer) and
+  // only when a write concerns a session whose discovery is still queued, where applying the write first loses
+  // ordering (a removal before its record exists, an advance read under a later visibility) and holding the write
+  // for the warm-up would delay a live status by the burst's whole warm-up.
+  private applyBefore(about: readonly (SessionId | null)[] = []): void {
+    if (this.discoveries.length === 0) return;
+    let warm = 0;
+    while (warm < this.discoveries.length && locatesWithoutGit(locatedDirectory(this.discoveries[warm]))) warm += 1;
+    const named = new Set(about);
+    const now = this.discoveries.filter((s, at) => at < warm || named.has(s.sessionId));
+    if (now.length === 0) return;
+    this.discoveries = this.discoveries.filter((s, at) => at >= warm && !named.has(s.sessionId));
+    this.applyDiscoveries(now);
+  }
+
+  // E11: summaries taken from the queue, DISCOVERY_BATCH to a transaction; a batch that throws (rolled back whole) is
+  // applied again one summary to a transaction, each failure logged as a single one always was.
+  private applyDiscoveries(queued: TranscriptSummary[]): void {
+    for (let at = 0; at < queued.length; at += DISCOVERY_BATCH) {
+      const batch = queued.slice(at, at + DISCOVERY_BATCH);
+      try {
+        if (this.index.unavailable !== null) return this.logUnavailable();
+        this.index.transaction(() => {
+          for (const summary of batch) this.discovered(summary);
+        });
+      } catch {
+        for (const summary of batch) this.write('fs.sessionChanged', () => this.discovered(summary));
+      }
+    }
+  }
+
+  // One transcript's summary: the record created or refreshed; a registry holder that arrived before the record is
+  // applied to it; an advance of its last record is read or unread by the visible set (in the same transaction, so a
+  // visible record never goes out unread).
+  private discovered(summary: TranscriptSummary): void {
+    this.index.transaction(() => {
+      const { record, created, advanced } = this.index.sessions.upsertFromSummary(summary);
+      if (!this.index.sessionSearch.current(record.appId, summary.sessionId, summary.size, summary.mtimeMs)
+        && !this.index.sessionSearch.failed(record.appId, summary.sessionId, summary.size, summary.mtimeMs)) {
+        const queued = this.searchQueue.get(record.appId)?.summary;
+        if (!queued || queued.sessionId !== summary.sessionId || queued.size !== summary.size || queued.mtimeMs !== summary.mtimeMs) {
+          this.searchQueue.set(record.appId, { summary, failures: 0, retryAt: 0 });
+        }
+        // Leave the discovery transaction before IPC or a text-index transaction.
+        queueMicrotask(() => void this.indexText());
+      }
+      const holder = this.holders.get(summary.sessionId);
+      if (created && holder !== undefined) this.index.sessions.setHolder(summary.sessionId, holder);
+      if (!advanced) return;
+      if (this.visible.has(record.appId)) this.markSeen(record, summary);
+      else this.index.sessions.setUnread(record.appId, true);
+    });
+  }
+
+  // A process this app runs is the session's live source from its first status to its exit: a disk follow of the same
+  // app id (a `session.events` read before the launch, then a resume of that id) stops then, once per run, so disk and
+  // live events never both flow for one id. Only an id bound before the status can have been followed (the host follows
+  // bound ids only); the unfollow goes out at the tick, in order after the bindings.
+  private liveStatus(appSessionId: AppSessionId, exited: boolean, wasBound: boolean): void {
+    if (exited) {
+      this.live.delete(appSessionId);
+      return;
+    }
+    if (this.live.has(appSessionId)) return;
+    this.live.add(appSessionId);
+    if (!wasBound || this.index.unavailable !== null) return;
+    this.unfollows.push(appSessionId);
+    this.schedule();
+  }
+
+  private markSeen(record: SessionRecord, summary = this.index.sessions.summaryOf(record.appId)): void {
+    this.index.sessions.markSeen(record.appId, { messageUuid: summary?.leafUuid ?? record.lastSeen.messageUuid, at: this.now() });
+  }
+
+  private remember(sessionId: SessionId, holder: Holder): void {
+    if (holder.kind === 'none') this.holders.delete(sessionId);
+    else this.holders.set(sessionId, holder);
+  }
+
+  // The registry as the host sees it now, folded once per sync: live holders applied, and a foreign holder the index
+  // kept from an earlier run whose process is gone cleared (W7: a contest whose foreign process is gone, too). P4 W2-B:
+  // it is about the sessions it remembers holders for, whose records a queued summary would make with a holder this
+  // fold may clear; a live holder needs no record yet (it is remembered for the record's making).
+  private foldHolders(live: { sessionId: SessionId; holder: Holder }[]): void {
+    this.write('fs.state', () =>
+      this.index.transaction(() => {
+        const now = new Map(live.map(({ sessionId, holder }) => [sessionId, holder]));
+        for (const [sessionId, holder] of now) {
+          this.remember(sessionId, holder);
+          this.index.sessions.setHolder(sessionId, holder);
+        }
+        for (const record of this.index.sessions.list({ includeArchived: true })) {
+          const { holder } = record;
+          const foreign = holder.kind === 'terminal' || holder.kind === 'background_job' || (holder.kind === 'self' && holder.contestedBy !== undefined); // W7: a contest too
+          if (foreign && record.engineSessionId !== null && !now.has(record.engineSessionId)) {
+            this.holders.delete(record.engineSessionId);
+            this.index.sessions.setHolder(record.engineSessionId, { kind: 'none' });
+          }
+        }
+      }),
+      [...this.holders.keys()],
+    );
+  }
+
+  private resetSearch(): void {
+    this.searchGeneration += 1;
+    this.searchQueue.clear();
+    if (this.searchTimer) clearTimeout(this.searchTimer);
+    this.searchTimer = null;
+  }
+
+  private async indexText(): Promise<void> {
+    const generation = this.searchGeneration;
+    if (this.indexingGeneration === generation || this.stopped) return;
+    this.indexingGeneration = generation;
+    if (this.searchTimer) clearTimeout(this.searchTimer);
+    this.searchTimer = null;
+    const running = () => !this.stopped && generation === this.searchGeneration;
+    try {
+      while (this.searchQueue.size > 0 && running()) {
+        let next: [AppSessionId, SearchJob] | undefined;
+        for (const entry of this.searchQueue) if (entry[1].retryAt <= Date.now()) { next = entry; break; }
+        if (!next) break;
+        const [appId, job] = next;
+        const { summary } = job;
+        const current = () => running() && this.searchQueue.get(appId) === job;
+        try {
+          let cursor: string | undefined;
+          do {
+            const result = await this.command('fs.sessionText', { sessionId: summary.sessionId, ...(cursor ? { cursor } : {}) });
+            if (!current()) break;
+            if (!result) throw new Error('Conversation text read failed');
+            if (result.size !== summary.size || result.mtimeMs !== summary.mtimeMs) throw new Error('Transcript changed while indexing');
+            this.applyBefore([summary.sessionId]);
+            if (!current()) break;
+            // Do not swallow a failed DB write and call the job successful.
+            if (!cursor) this.index.sessionSearch.replace(appId, summary.sessionId, result.size, result.mtimeMs, result.text, result.cursor === null);
+            else this.index.sessionSearch.append(appId, summary.sessionId, result.text, result.cursor === null);
+            cursor = result.cursor ?? undefined;
+          } while (cursor && current());
+          if (current()) this.searchQueue.delete(appId);
+        } catch (error) {
+          if (!current()) continue;
+          const delay = SEARCH_RETRY_MS[job.failures++];
+          if (delay !== undefined) {
+            job.retryAt = Date.now() + delay;
+            this.searchQueue.delete(appId);
+            this.searchQueue.set(appId, job); // ready jobs do not wait behind a failed one
+          } else {
+            this.searchQueue.delete(appId);
+            try { this.index.sessionSearch.fail(appId, summary.sessionId, summary.size, summary.mtimeMs); }
+            catch (failure) { console.error('[index] could not persist conversation search failure:', failure); }
+            console.error('[index] conversation search incomplete:', error instanceof Error ? error.message : error);
+          }
+        }
+      }
+    } finally {
+      if (this.indexingGeneration === generation) this.indexingGeneration = null;
+      if (running() && this.searchQueue.size > 0) {
+        const delay = Math.max(0, Math.min(...[...this.searchQueue.values()].map((job) => job.retryAt)) - Date.now());
+        this.searchTimer = setTimeout(() => { this.searchTimer = null; void this.indexText(); }, delay);
+      }
+    }
+  }
+
+  private sync(): Promise<unknown> {
+    this.syncs = this.syncs.then(async () => {
+      if (this.stopped) return;
+      this.index.sessionSearch.retryFailures();
+      const bindings = this.index.sessions.bindings();
+      const bare = bindings.filter((b) => b.size === null || b.mtimeMs === null).map(({ sessionId, appSessionId }) => ({ sessionId, appSessionId }));
+      const known = bindings.flatMap(({ sessionId, appSessionId, size, mtimeMs }) => (size === null || mtimeMs === null ? [] : [{ sessionId, appSessionId, size, mtimeMs }]));
+      const generation = this.generation;
+      if (bare.length > 0) await this.command('fs.bind', { bindings: bare });
+      // Keep missing transcripts in known so scan still reports removals; a stale text
+      // stamp forces a summary without losing the app/engine binding.
+      const scan = await this.command('fs.scan', { known: known.map((entry) => this.index.sessionSearch.current(entry.appSessionId, entry.sessionId, entry.size, entry.mtimeMs) ? entry : { ...entry, size: -1, mtimeMs: -1 }) });
+      if (scan !== null && generation === this.generation && !this.stopped) {
+        this.scanned = true;
+        for (const listener of [...this.scanListeners]) listener();
+      }
+      const state = await this.command('fs.state', undefined);
+      if (state !== null) this.foldHolders(state.holders);
+    });
+    return this.syncs;
+  }
+
+  private recordChanged(record: SessionRecord, cause: ChangeCause, revision: number): void {
+    const appId = record.appId;
+    // Within a tick a record goes out once, in its final state, under the first cause the tick saw (a row discovered
+    // and then refreshed is still news of a discovery); re-inserted last, so it follows whatever preceded it.
+    const previous = this.pending.get(appId);
+    this.pending.delete(appId);
+    if (cause === 'removed') {
+      this.writer?.observeRemoved(appId);
+      this.pending.set(appId, { t: 'removed', revision });
+    } else {
+      this.writer?.observeRecord(record);
+      if (cause === 'discovered' || cause === 'facts' || cause === 'holder') this.digest(record);
+      // l1-sessions-13: except an archive, which goes out under its own cause, since the renderer closes the session's
+      // tabs on the owner's (`update`) and not on a transcript gone from disk (`facts`, perhaps a move): an earlier
+      // change in the tick lends it neither. A record discovered this tick stays news of its discovery.
+      const archives = record.archived && previous?.t === 'changed' && !previous.record.archived && previous.cause !== 'discovered';
+      this.pending.set(appId, { t: 'changed', record, cause: previous?.t === 'changed' && !archives ? previous.cause : cause, revision });
+    }
+    this.schedule();
+  }
+
+  private projectsChangedNow(revision: number): void {
+    const projects = this.index.projects.list();
+    const shown = new Set(projects.map((p) => p.id));
+    for (const project of projects) this.writer?.observeProject(project);
+    for (const id of this.shownProjects) if (!shown.has(id)) this.writer?.observeProjectRemoved(id);
+    this.shownProjects = shown;
+    this.projectsRevision = revision;
+    this.schedule();
+  }
+
+  private bindingChanged(change: BindingChange): void {
+    this.bindingQueue.push(change);
+    this.schedule();
+  }
+
+  // P5 O9 M6: a foreign session's live phase from its sminos bridge while MAWS drives it (the spine's lane A driver); null
+  // when it has no live bridge, which leaves today's `foreign` seed.
+  setBridged(appId: AppSessionId, phase: BridgedPhase | null): void {
+    if (phase === null) {
+      if (!this.bridged.delete(appId)) return;
+    } else this.bridged.set(appId, phase);
+    const record = this.index.unavailable === null ? this.index.sessions.get(appId) : null;
+    if (record) this.digest(record);
+  }
+
+  // Sessions nobody runs in MAWS get a digest from what their transcript's tail says, so the sidebar can describe them;
+  // a session MAWS runs (`self`) is C5's live fold. P5 O9 M6: one a terminal holds whose bridge MAWS drives reads its
+  // phase, activity and pending requests from the bridge.
+  // C12: the seed leaves the memory budget's released mark out; main's read model keeps it against a seed with phase
+  // `exited` and drops it against a `foreign` one (a terminal or background job took the session after its release).
+  private digest(record: SessionRecord): void {
+    if (!this.writer || record.holder.kind === 'self') return;
+    const summary = this.index.sessions.summaryOf(record.appId);
+    const text = summary?.lastAssistantText ?? null;
+    const foreign = record.holder.kind === 'terminal' || record.holder.kind === 'background_job';
+    const bridged = foreign ? this.bridged.get(record.appId) : undefined;
+    this.writer.setDigest({
+      appSessionId: record.appId,
+      phase: foreign ? 'foreign' : 'exited',
+      activity: null,
+      lastAssistantLine: text === null ? null : previewLine(text, LAST_LINE_CHARS), // E11 F2b: a summary cached raw reads clean too
+      turnStartedAt: null,
+      lastTurnEndedAt: summary?.lastRecordAt ?? null, // C5's rebase: the session's last activity (age, recency order)
+      context: null,
+      cost: null,
+      childAgents: { active: 0, done: 0 },
+      pendingRequests: 0,
+      ...(bridged && bridgedDigest(bridged)), // P5 O9 M6
+    });
+  }
+
+  private schedule(): void {
+    this.timer ??= setTimeout(() => this.flush(), this.tickMs);
+  }
+
+  // Every change waiting for the tick goes out once, carrying its own revision, in revision order (a project a new
+  // record joins was committed, and stamped, before the record).
+  private flush(): void {
+    this.timer = null;
+    const out: { revision: number; send: () => void }[] = [];
+    for (const [appSessionId, change] of this.pending) {
+      const { revision } = change;
+      out.push({
+        revision,
+        send: () =>
+          change.t === 'removed'
+            ? this.options.emit('session.removed', { appSessionId, revision })
+            : this.options.emit('session.changed', { record: change.record, cause: change.cause, revision }),
+      });
+    }
+    this.pending.clear();
+    if (this.projectsRevision !== null) {
+      const revision = this.projectsRevision;
+      this.projectsRevision = null;
+      const projects = this.index.projects.listWithRemoved(); // W11 (I5): as `session.projects.list` answers
+      out.push({ revision, send: () => this.options.emit('session.projects.changed', { projects, revision }) });
+    }
+    out.sort((a, b) => a.revision - b.revision);
+    for (const { send } of out) send();
+    this.flushBindings();
+  }
+
+  // Consecutive binds become one `fs.bind`; an unbind (cleared engine id, removed record) is its own `fs.unbind`, which
+  // also stops whatever followed it.
+  private flushBindings(): void {
+    const queue = this.bindingQueue;
+    this.bindingQueue = [];
+    const batches: ({ t: 'bind'; bindings: { sessionId: SessionId; appSessionId: AppSessionId }[] } | { t: 'unbind'; appSessionId: AppSessionId })[] = [];
+    for (const { appSessionId, sessionId } of queue) {
+      const last = batches.at(-1);
+      if (sessionId === null) batches.push({ t: 'unbind', appSessionId });
+      else if (last?.t === 'bind') last.bindings.push({ sessionId, appSessionId });
+      else batches.push({ t: 'bind', bindings: [{ sessionId, appSessionId }] });
+    }
+    for (const batch of batches) {
+      this.hostWork = this.hostWork.then(() =>
+        batch.t === 'bind' ? this.command('fs.bind', { bindings: batch.bindings }) : this.command('fs.unbind', { appSessionId: batch.appSessionId }),
+      );
+    }
+    const unfollows = this.unfollows;
+    this.unfollows = [];
+    for (const appSessionId of unfollows) this.hostWork = this.hostWork.then(() => this.command('fs.unfollow', { appSessionId, agentId: null }));
+  }
+
+  private async command<N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N> | null> {
+    const result = await this.host.dispatch('engine-host', name, input);
+    if (!result.ok) {
+      console.error(`[index] ${name} failed:`, result.error.message);
+      return null;
+    }
+    return result.value as CommandOutput<N>;
+  }
+
+  // Index writes from host events: a failed write is logged, never thrown into the supervisor's relay. E11: the queued
+  // discoveries go first, so every write lands in the order the host sent it; P4 W2-B: those already warm, and those
+  // of the sessions the write is `about`.
+  private write(what: string, fn: () => unknown, about: readonly (SessionId | null)[] = []): void {
+    if (this.index.unavailable !== null) {
+      this.logUnavailable();
+      return;
+    }
+    if (what !== 'fs.sessionChanged') this.applyBefore(about);
+    try {
+      fn();
+    } catch (error) {
+      console.error(`[index] ${what} could not be applied:`, error instanceof Error ? error.message : error);
+    }
+  }
+
+  private logUnavailable(): void {
+    if (!this.unavailableLogged) console.error(`[index] index unavailable: ${this.index.unavailable}; session records will not follow the store this run`);
+    this.unavailableLogged = true;
+  }
+}

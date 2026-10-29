@@ -45,15 +45,20 @@
 // launch with its own shape, today's detached supervisor (A), the daemon shape (B) and the supervisor again (A'),
 // recording each window and the deltas without a bound; it writes test-results/daemon-idle-aba.json.
 //
-// Six measured groups (gate.yml's MEASURED_E2E), one case each, chosen by title: `pnpm e2e:daemon-idle` (the
+// The sixth (P5 O3-C M5, docs/doperpowers/plans/2026-10-28-p5-o3-c-spine-library.md, D18 and D19) is the spine alone,
+// what O3-D moves into mawsd, composed by the built services entry over a profile the size of the owner's, idle while
+// loaded and again after its data is released; it writes test-results/daemon-idle-spine.json.
+//
+// Seven measured groups (gate.yml's MEASURED_E2E), one case each, chosen by title: `pnpm e2e:daemon-idle` (the
 // scene, on the daemon shape since M9), `pnpm e2e:daemon-idle-baseline` (the same case under MAWS_HOST_MODE=detached,
 // today's supervisor alone, recording only: the baseline is re-measured from it on the tree under test when a landing
 // misses), `pnpm e2e:daemon-idle-floor` (the floor, which needs no build), `pnpm e2e:daemon-idle-mawsd` (mawsd
-// alone), `pnpm e2e:daemon-idle-enrolled` (the enrolled endpoint, recording only) and `pnpm e2e:daemon-idle-aba` (A-B-A,
-// recording only, its shapes its own whatever MAWS_HOST_MODE says). Each sets MAWS_DAEMON_IDLE_PERF=1,
+// alone), `pnpm e2e:daemon-idle-enrolled` (the enrolled endpoint, recording only), `pnpm e2e:daemon-idle-aba` (A-B-A,
+// recording only, its shapes its own whatever MAWS_HOST_MODE says) and `pnpm e2e:daemon-idle-spine` (the spine alone,
+// recording only). Each sets MAWS_DAEMON_IDLE_PERF=1,
 // and the gate runs it only when named, on the mini's exclusive instance behind the measured-job guard. None spends
-// anything or touches a keychain: a replay runs no engine, mawsd alone wakes no host, and the enrolled endpoint's hub
-// is a local one on loopback, its machine key a file of the scratch profile.
+// anything or touches a keychain: a replay runs no engine, mawsd alone wakes no host, the spine alone has no host to
+// wake, and the enrolled endpoint's hub is a local one on loopback, its machine key a file of the scratch profile.
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -64,14 +69,15 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import { daemonPaths } from '@shared/daemon/files';
 import { machineSettingsDefaults } from '@shared/settings/defaults';
-import { abaDeltas, abaLine, boundMisses, busyShare, cpuSeconds, cpuTimes, DAEMON_IDLE_BOUND, ENROLLED_INCREMENT_BUDGET_KIB, enrolledLine, floorLine, IDLE_RUN, idleLine, invalidReasons, loadPair, mawsdLine, measured, median, readerMismatches, readFootprints, readProcessTable, readTopMem, topOutside, type CpuTimes, type MeasuredProcess, type ProcessRow, type ShapeReading, type TopMem, type TopProcess } from '../test/support/daemon-idle';
+import { abaDeltas, abaLine, boundMisses, busyShare, cpuSeconds, cpuTimes, DAEMON_IDLE_BOUND, ENROLLED_INCREMENT_BUDGET_KIB, enrolledLine, floorLine, IDLE_RUN, idleLine, invalidReasons, loadPair, mawsdLine, measured, median, readerMismatches, readFootprints, readProcessTable, readTopMem, SPINE_RELEASED_RUN, spineLine, topOutside, type CpuTimes, type MeasuredProcess, type ProcessRow, type ShapeReading, type TopMem, type TopProcess } from '../test/support/daemon-idle';
+import { writeSpineFixture } from '../test/support/spine-fixture';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { startLocalOrg, type LocalOrg, type Ran } from './support/local-org';
 import { isAlive, killScratchProcesses, processesNaming, ps } from './support/processes';
 import { tmpSocketDirOf } from './support/supervisor-socket';
 
-test.skip(process.env.MAWS_DAEMON_IDLE_PERF !== '1', 'the idle-cost measurement runs under pnpm e2e:daemon-idle, e2e:daemon-idle-baseline, e2e:daemon-idle-floor, e2e:daemon-idle-mawsd, e2e:daemon-idle-enrolled and e2e:daemon-idle-aba (MAWS_DAEMON_IDLE_PERF=1)');
+test.skip(process.env.MAWS_DAEMON_IDLE_PERF !== '1', 'the idle-cost measurement runs under pnpm e2e:daemon-idle, e2e:daemon-idle-baseline, e2e:daemon-idle-floor, e2e:daemon-idle-mawsd, e2e:daemon-idle-enrolled, e2e:daemon-idle-aba and e2e:daemon-idle-spine (MAWS_DAEMON_IDLE_PERF=1)');
 test.describe.configure({ timeout: 20 * 60_000 }); // about 13 minutes: the scene, the settle and the window
 
 // C3's permission round trip: a prompt, ~44 rows, a Bash `can_use_tool` (seq 49) the replay holds at until it is
@@ -80,6 +86,7 @@ const PERMISSION = 'spikes/protocol-probe/fixtures/permission-roundtrip.jsonl';
 const ROW_MS = '500'; // about 22 s from the answer to the result: the quit lands mid-turn
 const FLOOR_ARGV0 = 'maws-runtime-floor';
 const MAWSD_ARGV0 = 'mawsd'; // P5 O2 M5
+const SPINE_ARGV0 = 'maws-spine'; // P5 O3-C M5
 // P5 O2 M9: the scene's shape, one switch as in e2e/supervisor.spec.ts; `daemon` measures what the daemon shape leaves.
 // The A-B-A case names each launch's shape itself; every other case runs the one this switch names.
 type Shape = 'daemon' | 'detached';
@@ -397,6 +404,68 @@ async function keptIdleLeg(shape: Shape, run: IdleRun): Promise<{ shape: Shape; 
   if (leftover !== null) throw leftover;
   return leg;
 }
+
+// P5 O3-C M5 (D18, D19; O3 §11's diagnostic reading): the spine alone, O3-D's starting point. The profile-sized fixture
+// (test/support/spine-fixture.ts: 5,000 sessions over 50 project folders, attention, library rows, drafts and the
+// prompt history) written into a scratch profile, then the built out/main/services.js's idleReading run by a wrapper
+// under the same Electron binary as Node, `--disable-sigusr1 --expose-gc`, argv0 `maws-spine`, with an environment of
+// its own (HOME the scratch root, MAWS_USER_DATA the profile). It composes the spine with no host, no client and no
+// interest, and says what it read. The loaded window is IDLE_RUN's settle and window; then SIGUSR2 stops the root and
+// releases its data (two full collections), and the released window is SPINE_RELEASED_RUN's. The same readers and
+// validity rule over each window, which the line names with the fixture's counts and whether gc ran; it asserts no
+// bound and writes test-results/daemon-idle-spine.json. `pnpm e2e:daemon-idle-spine` runs this case alone (it needs
+// the plain build; about 20 minutes: two settles and two windows).
+test('daemon idle spine alone: the physical footprint and CPU of the spine composed alone over a profile-sized fixture, idle while loaded and after its data is released', async () => {
+  test.setTimeout(35 * 60_000);
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-dis-')));
+  const profile = join(root, 'ud');
+  const services = join(REPO_ROOT, 'out', 'main', 'services.js');
+  expect(existsSync(services), 'the build has out/main/services.js (scripts/e2e-build.sh plain)').toBe(true);
+  const binary = electronBinary();
+  const env = { ELECTRON_RUN_AS_NODE: '1', PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: root, MAWS_USER_DATA: profile };
+  const electron = execFileSync(binary, ['-p', 'process.versions.electron'], { env, encoding: 'utf8' }).trim();
+  let spine: ChildProcess | null = null;
+  let output = '';
+  const said = (line: RegExp) => output.split('\n').find((l) => line.test(l)) ?? null;
+  let leftover: unknown = null;
+  try {
+    const counts = await writeSpineFixture({ profile, folders: join(root, 'projects') });
+    const wrapper = join(root, 'spine.js');
+    writeFileSync(wrapper, [
+      `const { idleReading } = require(${JSON.stringify(services)});`,
+      "idleReading({ profile: process.env.MAWS_USER_DATA, build: 'daemon-idle-spine', log: (line) => console.log(line) })",
+      '  .catch((error) => { console.error(error); process.exit(1); });',
+    ].join('\n'));
+    spine = spawn(binary, ['--disable-sigusr1', '--expose-gc', wrapper], { env, stdio: ['ignore', 'pipe', 'pipe'], argv0: SPINE_ARGV0 });
+    spine.stdout!.on('data', (chunk) => (output += String(chunk)));
+    spine.stderr!.on('data', (chunk) => (output += String(chunk)));
+    await expect.poll(() => output, { timeout: 60_000, message: 'the spine composes over the fixture' }).toMatch(/^spine idle: composed: /m); // a miss prints what it said
+    expect(said(/^spine idle: composed: /), 'the spine holds the fixture').toBe(`spine idle: composed: ${counts.sessions} sessions in ${counts.projects} projects`);
+    await sleep(IDLE_RUN.settleS * 1_000);
+    const procs = measured(processesNaming(root), root, [SPINE_ARGV0]);
+    expect(procs.map((p) => p.pid), 'the spine alone is what is measured').toEqual([spine.pid]);
+    const loaded = await measureWindow(procs);
+
+    spine.kill('SIGUSR2');
+    await expect.poll(() => output, { timeout: 60_000, message: 'the spine releases its data' }).toMatch(/^spine idle: released /m);
+    const gc = said(/^spine idle: released /) === 'spine idle: released (gc: true)';
+    await sleep(SPINE_RELEASED_RUN.settleS * 1_000);
+    const released = await measureWindow(procs, SPINE_RELEASED_RUN);
+
+    const reasons = [
+      ...windowReasons(loaded, false).map((reason) => `loaded: ${reason}`),
+      ...windowReasons(released, false).map((reason) => `released: ${reason}`),
+    ];
+    const [before, after] = [shapeReading(loaded), shapeReading(released)];
+    const line = before === null || after === null ? null : spineLine({ loaded: before, released: after, counts, gc, reasons });
+    report('daemon-idle-spine.json', line, reasons, { shape: 'spine alone', electron, counts, gc, output: output.split('\n').filter(Boolean), loaded: loaded.record, released: released.record });
+  } finally {
+    spine?.kill('SIGKILL');
+    await killScratchProcesses(root, spine?.pid === undefined ? [] : [spine.pid]).catch((error: unknown) => (leftover = error));
+    rmSync(root, { recursive: true, force: true });
+  }
+  if (leftover !== null) throw leftover;
+});
 
 // The Electron binary every measured process runs as Node (ELECTRON_RUN_AS_NODE=1), as its `electron` package names it.
 function electronBinary(): string {

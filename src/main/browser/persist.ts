@@ -8,7 +8,7 @@ import { readFileSync, renameSync } from 'node:fs';
 import * as z from 'zod';
 import { AppSessionIdSchema } from '@shared/graph/ids';
 import { BrowserTabIdSchema, BrowserTabSchema } from '@shared/browser/tab';
-import { atomicWriteFileSync } from '../files/atomic-write';
+import { atomicWriteFileSync } from '@shared/fs/atomic-write';
 
 const WRITE_INTERVAL_MS = 300;
 

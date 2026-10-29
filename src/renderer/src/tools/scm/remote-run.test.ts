@@ -40,7 +40,7 @@ describe('remote run output', () => {
   });
 
   // Main caps a run at 1 MiB and marks it with one `truncated` chunk; its own notes come outside that budget and must
-  // still show (src/main/scm/remote-runner.ts).
+  // still show (src/services/scm/remote-runner.ts).
   it('keeps main’s timeout note after a capped run, with the truncated mark and the exit', () => {
     const MIB = 1024 * 1024;
     let run = runStarted(null, planOf());

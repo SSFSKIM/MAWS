@@ -100,7 +100,7 @@ vi.mock('electron', () => ({
 }));
 
 import type { HostDispatch } from '../ipc/router';
-import { engineHostSettled } from '../sessions/service-register';
+import { engineHostSettled } from '../../services/sessions/service-register';
 import { createHostSupervisor, RESYNC_BOUND_MS, type HostSupervisor } from './supervisor';
 
 const HOSTS = {

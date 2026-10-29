@@ -24,7 +24,7 @@ import { chmod, mkdir, open, readdir, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as z from 'zod';
 import { OAuthClientInformationFullSchema, OAuthMetadataSchema, OpenIdProviderDiscoveryMetadataSchema } from '@modelcontextprotocol/sdk/shared/auth.js';
-import { atomicWriteFile } from '../files/atomic-write';
+import { atomicWriteFile } from '@shared/fs/atomic-write';
 import type { ConnectorOAuthGrant, ConnectorOAuthIdentity, ConnectorOAuthRecord } from './oauth-types';
 
 export interface ConnectorOAuthSealer {

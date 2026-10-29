@@ -11,7 +11,7 @@
 //   pnpm build && MAWS_CODE_LIVE=1 pnpm exec playwright test e2e/code-tools-live.spec.ts
 import { withProbeFile } from '../test/support/probe-file';
 import { isolatedGitEnv } from '../test/support/git-env';
-import { gitEnv } from '../src/main/git/runner';
+import { gitEnv } from '../src/services/git/runner';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';

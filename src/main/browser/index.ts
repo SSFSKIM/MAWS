@@ -4,15 +4,15 @@
 // `window.open`, the context menu, the keyboard), the input attribution over each tab's TabDebugger (with focus
 // emulation when it is on), the memory sample and its soft cap, `browser.*`, and under MAWS_E2E=1 the e2e's seam
 // (inspect.ts). Tabs belong to sessions (P-21): a session whose record is deleted closes its tabs, and at boot a tab
-// whose session the index does not know is dropped from the file. Main never waits on the renderer. The history,
+// whose session the spine does not know is dropped from the file. Main never waits on the renderer. The history,
 // bookmarks and agent activity are the browser's own database since P5 O3-A (data/), opened by main before the browser
-// starts and told here the sessions the spine knows.
+// starts and told here the sessions the spine knows. P5 O3-C (readers R6, R7): the spine is read through its view.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { app, BrowserWindow, session } from 'electron';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { SpineView } from '@shared/spine/view';
 import type { BrowserSettings } from '@shared/ipc/schema/settings';
-import type { Index } from '../index/index';
 import type { BrowserData } from './data';
 import type { registerMainHandler } from '../ipc/router';
 import { isAppWindow } from '../windows';
@@ -59,7 +59,7 @@ export interface BrowserDeps {
   // Settings 11's `browser` section, read when a tab opens (the profile: a change applies to tabs opened afterwards) and
   // when a page opens a window (`linkTarget`, at the moment of the open).
   settings(): BrowserSettings;
-  index: Pick<Index, 'sessions' | 'unavailable'>;
+  view: Pick<SpineView, 'record' | 'records' | 'unavailable' | 'on'>; // the spine's view (P5 O3-C)
   // P5 O3-A: the history, bookmarks and agent activity (data/index.ts), and the snapshot and changes of the spine's
   // sessions it keeps the activity by
   data: Pick<BrowserData, 'history' | 'bookmarks' | 'activity' | 'reattach' | 'sessionChanged'>;
@@ -87,7 +87,7 @@ export interface Browser {
   extensions: Pick<ExtensionUi, 'removing'>; // cua #90: the action bar's popups and options tabs, for a profile's removal
 }
 
-export function startBrowser({ userData, settings, index, data, register, emit, env, profiles: listProfiles, /* E4c */ hosts }: BrowserDeps): Browser {
+export function startBrowser({ userData, settings, view, data, register, emit, env, profiles: listProfiles, /* E4c */ hosts }: BrowserDeps): Browser {
   const dir = join(userData, 'browser');
   mkdirSync(dir, { recursive: true });
   const tabsFile = join(dir, 'tabs.json');
@@ -95,7 +95,7 @@ export function startBrowser({ userData, settings, index, data, register, emit, 
   const profiles = listProfiles ?? (() => readProfiles(profilesFile));
 
   const { file, broken } = readTabsFile(tabsFile);
-  const restored = knownSessionsOnly(file, index);
+  const restored = knownSessionsOnly(file, view);
   // Each partition's browser preload (Decision Log 56), permission and download handlers. The last two close over `store`
   // and `downloads`, declared below: a partition is first opened by a tab's open or load (resolvePartition,
   // createTabView), never while startBrowser runs, so both exist by then (startBrowser opens no tab, and a restored tab is
@@ -194,7 +194,7 @@ export function startBrowser({ userData, settings, index, data, register, emit, 
       BrowserWindow.getAllWindows()
         .filter((win) => !win.isDestroyed() && isAppWindow(win))
         .map((win) => ({ id: win.id, focused: win.isFocused() })),
-    reaches: (appSessionId, tabSessionId) => reachableSessions(index.sessions, appSessionId).includes(tabSessionId),
+    reaches: (appSessionId, tabSessionId) => reachableSessions(view, appSessionId).includes(tabSessionId),
     userData,
     version: app.getVersion(),
   });
@@ -203,7 +203,7 @@ export function startBrowser({ userData, settings, index, data, register, emit, 
   register('browser.agent.activities.list', ({ appSessionId }) => ({ activities: cua.activities(appSessionId as AppSessionId) }));
   // every status of a known session names its engine to the socket's peer check (the pid while it runs, none once exited)
   const stopCuaStatus = hosts?.onEvent('session.status', ({ appSessionId, status }) => {
-    if (!knownSession(index, appSessionId)) return; // never a trust bootstrap's id
+    if (view.record(appSessionId as AppSessionId) === null) return; // never a trust bootstrap's id
     if (status.process !== 'exited') cua.socketPathFor(appSessionId);
     cua.engineProcess(appSessionId, status.process === 'exited' ? null : status.pid);
   });
@@ -218,14 +218,17 @@ export function startBrowser({ userData, settings, index, data, register, emit, 
   };
   app.on('select-client-certificate', refuseUnownedCertificate);
   // P5 O3-A: every change tells the browser's data which sessions the spine knows (a removal takes the session's activity
-  // rows), and the snapshot taken once that listener is in place reconciles the rows against the index's records
-  const stopSessions = index.sessions.onChange((record, cause) => {
-    data.sessionChanged(record.appId, cause === 'removed');
-    if (cause !== 'removed') return;
-    store.removeSession(record.appId);
-    cua.closeSession(record.appId); // E13
+  // rows), and the snapshot taken once that listener is in place reconciles the rows against the spine's records. P5 O3-C:
+  // reconciled again whenever the view's availability changes (null while it is unavailable, which reconciles nothing;
+  // in process it never changes after start, so the start is the only reconciliation)
+  const stopSessions = view.on('record', (appSessionId, record) => {
+    data.sessionChanged(appSessionId, record === null);
+    if (record !== null) return;
+    store.removeSession(appSessionId);
+    cua.closeSession(appSessionId); // E13
   });
-  data.reattach(sessionSnapshot(index));
+  const stopAvailability = view.on('availability', () => data.reattach(sessionSnapshot(view)));
+  data.reattach(sessionSnapshot(view));
   const inspector = env.MAWS_E2E === '1' ? browserInspector({ store, emit }) : null;
   if (inspector) globalThis.__maws_browser = inspector;
   // E13: the e2e's fake host reads the socket and the leases; `trustRoot` makes a process (the test's own) a root beside
@@ -273,6 +276,7 @@ export function startBrowser({ userData, settings, index, data, register, emit, 
       controls?.dispose(); // E13
       app.removeListener('select-client-certificate', refuseUnownedCertificate);
       stopSessions();
+      stopAvailability();
       memory.stop();
       views.dispose();
       writer.close(); // the pages closed next destroy their webContents, which drops tabs nobody closed
@@ -281,43 +285,16 @@ export function startBrowser({ userData, settings, index, data, register, emit, 
   };
 }
 
-// P5 O3-A: every record's id, the spine's sessions as the browser's data reconciles against them; null when the index
-// cannot be read, which reconciles nothing.
-function sessionSnapshot(index: BrowserDeps['index']): string[] | null {
-  if (index.unavailable !== null) return null;
-  try {
-    return index.sessions.appIds();
-  } catch (error) {
-    console.warn(`[browser] the index's sessions could not be read: ${error instanceof Error ? error.message : String(error)}`);
-    return null;
-  }
+// P5 O3-A: every record's id, the spine's sessions as the browser's data reconciles against them; null while the view is
+// unavailable (P5 O3-C: a refused run, or launch mode scenario, D10), which reconciles nothing.
+function sessionSnapshot(view: BrowserDeps['view']): string[] | null {
+  return view.unavailable() === null ? view.records().map((record) => record.appId) : null;
 }
 
-// E13: whether the index has a record under the id (a trust bootstrap's id never has one); false when it cannot be read.
-function knownSession(index: BrowserDeps['index'], appSessionId: AppSessionId): boolean {
-  try {
-    return index.sessions.get(appSessionId) !== null;
-  } catch {
-    return false;
-  }
-}
-
-// The restored tabs whose session the index knows; all of them when the index cannot be read (nothing is known then).
-function knownSessionsOnly(file: TabsFile, index: BrowserDeps['index']): TabsFile {
-  if (index.unavailable !== null) return file;
-  const known = new Map<string, boolean>();
-  const knows = (appSessionId: string) => {
-    let answer = known.get(appSessionId);
-    if (answer === undefined) {
-      try {
-        answer = index.sessions.get(appSessionId as AppSessionId) !== null;
-      } catch {
-        answer = true;
-      }
-      known.set(appSessionId, answer);
-    }
-    return answer;
-  };
+// The restored tabs whose session the spine knows; all of them while the view is unavailable (nothing is known then).
+function knownSessionsOnly(file: TabsFile, view: BrowserDeps['view']): TabsFile {
+  if (view.unavailable() !== null) return file;
+  const knows = (appSessionId: string) => view.record(appSessionId as AppSessionId) !== null;
   const tabs = file.tabs.filter((tab) => knows(tab.appSessionId));
   const selected = Object.fromEntries(Object.entries(file.selected).filter(([appSessionId]) => knows(appSessionId)));
   return { ...file, tabs, selected };

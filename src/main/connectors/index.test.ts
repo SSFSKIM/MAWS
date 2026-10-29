@@ -13,6 +13,11 @@ import type { MainContext } from '../ipc/router';
 import { startConnectors, WINDOW_RECHECK_MS } from '.';
 import { electronWindowShown } from '../client/window-shown';
 import { CONNECTOR_OPERATION_DEADLINE_MS } from './engine-route';
+import { project, record } from '../../../test/support/builders';
+import { fakeSpineView } from '../../../test/support/fake-spine-view';
+
+// P5 O3-C (reader R8): the spine's view, holding the artifact's creator and its project
+const ownView = () => fakeSpineView({ records: [record('app-own', { projectId: 'proj' as never, directory: '/repo' })], projects: [project('proj', 0, { directory: '/repo' })] });
 
 const ART = '11111111-1111-4111-8111-111111111111';
 const FP = 'f'.repeat(64);
@@ -178,7 +183,7 @@ let handlers: Map<string, (input: unknown, context: MainContext) => unknown>;
 let service: { stop(): void };
 let me: FakeSender;
 let them: FakeSender;
-let records: Map<string, { projectId: string | null; directory: string }>;
+let view: ReturnType<typeof ownView>;
 let windows: Map<number, FakeWindow>; // by its webContents' id: the window that owns it
 let logged: string[];
 
@@ -188,13 +193,13 @@ beforeEach(() => {
   handlers = new Map();
   me = new FakeSender(7);
   them = new FakeSender(8);
-  records = new Map([['app-own', { projectId: 'proj', directory: '/repo' }]]);
+  view = ownView();
   windows = new Map([[7, new FakeWindow()], [8, new FakeWindow()]]);
   logged = [];
   service = startConnectors({
     hosts: { dispatch: fake.dispatch as never, onEvent: fake.onEvent as never, onState: fake.onState as never, onStreaming: fake.onStreaming as never, streaming: fake.streaming as never },
     register: ((name: string, handler: (input: unknown, context: MainContext) => unknown) => void handlers.set(name, handler)) as never,
-    index: { sessions: { get: (id) => records.get(id) ?? null }, projects: { list: () => [{ id: 'proj', directory: '/repo' }] } },
+    view,
     realpath: (path) => path,
     windowShown: (client) => {
       const win = windows.get(pageOf(client)?.id ?? -1);
@@ -252,7 +257,7 @@ describe('main’s connector service (P3-H H3b)', () => {
 
   it('pauses with no route, asking the host nothing about any session, when nothing names the artifact’s directory', async () => {
     fake.grants.set(JSON.stringify(['fixture', 'rows']), 'read');
-    records.clear(); // the creator's record gone
+    view.removeRecord('app-own' as never); // the creator's record gone
     fake.artifact = { ...fake.artifact, projectId: undefined };
     delete fake.artifact.projectId;
     const leaseId = await visiblePage();

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { SessionServiceDeps } from './context';
+import type { SessionServiceDeps } from '../../services/sessions/context';
 import { intentFor } from '../../../test/support/session-host';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import type { Settings } from '@shared/ipc/schema';
@@ -29,38 +29,39 @@ vi.mock('@shared/host/shell-env', () => ({ captureShellEnvironment: async () => 
 vi.mock('../hosts', () => ({ createHosts: () => ({ start: vi.fn(), stop: vi.fn(), onState: vi.fn(() => () => {}) /* E3: the dataset holds follow the host's state */, onEvent: vi.fn(() => () => {}) /* P4-AGG M2: the catalog hears plugins.changed */ }), prepareLaunch: () => ({ mode: 'utility', daemon: null, unavailable: null }), refuseTestLaunchOnDefaultProfile: () => {} /* P5 O2 landing: a scratch-profile test launch */ /* P5 O2 M7: the launch's shape, settled at once */ }));
 vi.mock('../client/settings', () => ({ startSettings: () => ({ state: () => ({ settings: state.settings, resolvedTheme: 'light' }), onChange: vi.fn(() => vi.fn()) }) }));
 vi.mock('../window', () => ({ installContentSecurityPolicy: vi.fn(), appUrl: '', createWindow: vi.fn() }));
-vi.mock('../index/index', () => ({ Index: class { unavailable = 'test'; sessions = { get: () => null, list: () => [] }; projects = { list: () => [] }; refreshOrgProjects = async () => {}; } }));
-vi.mock('../index/source', () => ({ IndexSessionSource: class { onScanned = () => () => {}; discoveryCurrent = () => false; } }));
-vi.mock('../index/attention-service', () => ({ startIndexAttention: () => ({ stop: vi.fn() }) }));
-vi.mock('../index/register', () => ({ registerIndexHandlers: vi.fn() }));
-vi.mock('../index/replay', () => ({ registerReplayHandlers: () => ({ dispose: vi.fn() }) }));
-vi.mock('../git/service', () => ({ GitService: class {} }));
-vi.mock('../git/register', () => ({ registerGitHandlers: vi.fn() }));
-vi.mock('../git/worktrees-register', () => ({ registerWorktreeHandlers: vi.fn() }));
+vi.mock('../../services/index/index', () => ({ Index: class { unavailable = 'test'; sessions = { get: () => null, list: () => [] }; projects = { list: () => [] }; refreshOrgProjects = async () => {}; } }));
+vi.mock('../../services/index/source', () => ({ IndexSessionSource: class { onScanned = () => () => {}; discoveryCurrent = () => false; } }));
+vi.mock('../../services/index/attention-service', () => ({ startIndexAttention: () => ({ stop: vi.fn() }) }));
+vi.mock('../../services/index/register', () => ({ registerIndexHandlers: vi.fn() }));
+vi.mock('../../services/index/replay', () => ({ registerReplayHandlers: () => ({ dispose: vi.fn() }) }));
+vi.mock('../../services/git/service', () => ({ GitService: class {} }));
+vi.mock('../../services/git/register', () => ({ registerGitHandlers: vi.fn() }));
+vi.mock('../../services/git/worktrees-register', () => ({ registerWorktreeHandlers: vi.fn() }));
 vi.mock('../pty-links', () => ({ registerPtyOpenLink: vi.fn() }));
 vi.mock('../open-external', () => ({ registerOpenExternal: vi.fn() }));
 vi.mock('../attention', () => ({ startAttention: vi.fn() }));
 vi.mock('../menu', () => ({ startMenu: vi.fn(), registerMenuHandlers: vi.fn() }));
 vi.mock('../window-state', () => ({ restoreWindowState: vi.fn(), trackWindowState: vi.fn() }));
 vi.mock('../lifecycle/quit-guard', () => ({ installQuitGuard: () => ({}), askToQuit: vi.fn(), listProcesses: vi.fn(), trackUnsavedFiles: () => ({}) /* E5 */ }));
-vi.mock('../sessions', () => ({ startSessions: () => ({ model: state.model, stop: vi.fn() }) }));
-vi.mock('./yield', () => ({ startYield: () => vi.fn() }));
-vi.mock('../side/side-threads', () => ({ startSideThreads: () => vi.fn(), sideThreadEvents: () => [] })); // E3
-vi.mock('./service', () => ({ SessionService: class { constructor(deps: SessionServiceDeps) { state.deps = deps; } async start() { await state.deps!.intents.load(); } } }));
-vi.mock('./service-register', () => ({ registerSessionServiceHandlers: vi.fn(), engineHostSettled: vi.fn() }));
-vi.mock('../files/register', () => ({ registerFilesHandlers: () => ({ dispose: vi.fn() }) }));
+vi.mock('../../services/sessions', () => ({ startSessions: () => ({ model: state.model, stop: vi.fn() }) }));
+vi.mock('../../services/sessions/yield', () => ({ startYield: () => vi.fn() }));
+vi.mock('../../services/side/side-threads', () => ({ startSideThreads: () => vi.fn(), sideThreadEvents: () => [] })); // E3
+vi.mock('../../services/sessions/service', () => ({ SessionService: class { constructor(deps: SessionServiceDeps) { state.deps = deps; } async start() { await state.deps!.intents.load(); } } }));
+vi.mock('../../services/sessions/service-register', () => ({ registerSessionServiceHandlers: vi.fn(), engineHostSettled: vi.fn() }));
+vi.mock('../../services/files/register', () => ({ registerFilesHandlers: () => ({ dispose: vi.fn() }) }));
 vi.mock('../usage/claude-usage-reader', () => ({ claudeUsageDir: () => '', ClaudeUsageReader: class { start() {} } }));
 vi.mock('../usage/claude-usage-control', () => ({ baseUrlFrom: () => null, ClaudeUsageControl: class {} }));
 vi.mock('../gateway/claude-usage-app', () => ({ createClaudeUsageApp: () => ({}), execRunner: vi.fn() }));
-vi.mock('../settings/engine-configure', () => ({ startEngineConfigure: () => ({ stop: vi.fn() }) }));
-vi.mock('../settings/host-configure', () => ({ startHostConfigure: () => vi.fn() })); // E10
-vi.mock('./interest', () => ({ startInterest: () => () => {}, interestSet: () => [] })); // P5 O2 M2: its sibling
+vi.mock('../../services/settings/engine-configure', () => ({ startEngineConfigure: () => ({ stop: vi.fn() }) }));
+vi.mock('../../services/settings/host-configure', () => ({ startHostConfigure: () => vi.fn() })); // E10
+vi.mock('./interest', () => ({ startInterest: () => () => {}, appInterest: () => ({ set: () => new Set(), onChange: () => () => {}, stop: () => {} }) })); // P5 O2 M2: its sibling; P5 O3-C: the app's interest
 vi.mock('../widgets/fixture-backend', () => ({ installWidgetBackend: vi.fn() }));
 vi.mock('../browser', () => ({ startBrowser: (deps: { settings(): unknown }) => { state.browserSettings = deps.settings; return { stop: vi.fn(), partitions: {} /* E4b */ }; } })); // E4a
 vi.mock('../artifacts', () => ({ registerStoreSchemes: vi.fn() /* M7 */, installStorePolicies: vi.fn() /* P3-L M6b: E2's startDeliverables' policies */, startArtifacts: () => ({ stop: vi.fn(), exporters: { register: () => () => {} } /* P3-B: the document exporters register here */ }) })); // P3-A: the artifact store's main side
 vi.mock('../connectors', () => ({ startConnectors: () => ({ stop: vi.fn() }) })); // P3-H H3b: the connector broker's main side
 vi.mock('../design-systems/export', () => ({ registerDesignSystemExporters: vi.fn() })); // P3-D: the design system's exporter, registered into the artifacts' registry
 vi.mock('../artifacts/inspection', () => ({ registerInspectionExporters: vi.fn(() => () => {}) }));
+vi.mock('../../services/artifacts/defaults', () => ({ startArtifactDefaults: vi.fn(() => () => {}) })); // P5 O3-C (D23): the spine's relay, beside the artifacts
 vi.mock('../presentations/export', () => ({ registerPresentationExporters: vi.fn() })); // P3-C M9: the presentation's exporters, registered into the artifacts' registry
 vi.mock('../design/export', () => ({ registerDesignExporters: vi.fn() })); // P3-E (E1's M5): the design's exporters, registered into the artifacts' registry
 vi.mock('../dashboard/export', () => ({ registerDashboardExporters: vi.fn(() => () => {}) })); // P3-E (E2 M5): the dashboard's exporters, registered into the artifacts' registry

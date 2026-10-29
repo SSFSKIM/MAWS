@@ -192,7 +192,17 @@ test('show_pane opens one tab for two windows’ worth of one request; links and
     expect((await tabsOf(s, id)).selected).toBe(popup);
     const pagePopup = await pageAt(s, P);
     await expectOnPane(s, popup, paneIn(panel), 'panel');
-    await pagePopup.locator('#close').click({ noWaitAfter: true });
+    // #close calls window.close(), so the click races its own effect: Playwright may reject it with "Target page, context
+    // or browser has been closed" when the page goes before the click resolves. Wait for the close beside the click, and
+    // let the click's rejection pass only when the page did close.
+    const closed = pagePopup.waitForEvent('close');
+    await pagePopup
+      .locator('#close')
+      .click({ noWaitAfter: true })
+      .catch((error: unknown) => {
+        if (!pagePopup.isClosed()) throw error;
+      });
+    await closed;
     await expect.poll(async () => (await tabsOf(s, id)).tabs.map((tab) => tab.tabId)).toEqual([b, c, expect.any(String)]);
     expect((await tabsOf(s, id)).selected).toBe(c);
     await expect(chipsIn(panel)).toHaveCount(3);

@@ -8,7 +8,7 @@ import type { CommandName, EventName, EventPayload } from '@shared/ipc/schema';
 import { loadScenario } from '../../../test/support/scenario';
 import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../test/support/widget-backend';
 import type { interceptCommand } from '../ipc/router';
-import { launchMode, scenarioPath } from '../sessions/select-source';
+import { launchMode, scenarioPath } from '@shared/sessions/select-source';
 
 declare global {
   var __maws_widget_backend: WidgetBackend | undefined;

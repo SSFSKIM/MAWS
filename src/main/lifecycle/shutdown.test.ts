@@ -6,8 +6,8 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { EventId, SessionId } from '@shared/graph/ids';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { sessionIdFor, summary, tempDir } from '../../../test/support/index-fixture';
-import { Index } from '../index/index';
-import { sideThreadEvents, startSideThreads } from '../side/side-threads';
+import { Index } from '../../services/index/index';
+import { sideThreadEvents, startSideThreads } from '../../services/side/side-threads';
 import { shutdownSteps } from './shutdown';
 
 const BOUND_MS = 1_000;

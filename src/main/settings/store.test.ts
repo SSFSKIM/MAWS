@@ -6,9 +6,10 @@ import * as z from 'zod';
 import { SettingsSchema, type Settings } from '@shared/ipc/schema/settings';
 import { clientSettingsDefaults, machineSettingsDefaults, mergeSettings, migrateClientSettings, migrateMachineSettings, SETTINGS_DEFAULTS_V21, splitSettings as splitOf } from '@shared/settings/defaults';
 import { composeSettings, resolveTheme } from '../client/settings-store';
-import { startMachineSettings } from './machine';
-import { settingsPaths, splitSettingsFiles } from './split';
-import { openSettingsFile } from './store';
+import { startMachineSettings } from '../../services/settings/machine';
+import { settingsPaths } from '@shared/settings/paths';
+import { splitSettingsFiles } from '../../services/settings/split';
+import { openSettingsFile } from '@shared/settings/file-store';
 
 let dir: string;
 let file: string;

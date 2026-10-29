@@ -32,6 +32,8 @@ import { randomUUID } from 'node:crypto';
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import type { DirectCallOutcome, DirectCredential, DirectDiscoverAnswer, DirectOperationOutcome, DirectResolveAnswer, DirectSource, DirectToolMetadata } from '@shared/ipc/schema/connectors';
 import type { ConnectorToolRef } from '@shared/artifacts/connectors';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { SpineView } from '@shared/spine/view';
 import { artifactDirectories, ownSessionOf } from './eligibility';
 import type { ConnectorRoute, ConnectorRouteAnswer, ConnectorRouteCallContext, ConnectorRouteTarget } from './route';
 
@@ -40,8 +42,9 @@ type HostCommand = 'library.entry' | 'spaces.list' | 'connectors.directResolve' 
 export interface DirectRouteDeps {
   // the engine host's commands this route sends (main's dispatch, no window's)
   call<N extends HostCommand>(name: N, input: CommandInput<N>): Promise<CommandResult<N>>;
-  sessions: { get(appSessionId: string): { projectId: string | null; directory: string } | null }; // main's index
-  projects: { list(opts: { includeHidden?: boolean }): readonly { id: string; directory: string }[] }; // main's index
+  // the spine's view (P5 O3-C reader R8): the creator's record, and the artifact's project among every row (D8: a
+  // project with no present session is still its directory)
+  view: Pick<SpineView, 'record' | 'project'>;
   realpath(path: string): string | null;
   streaming(): boolean; // the engine host's events reach main (hosts.streaming)
   log?: (line: string) => void;
@@ -149,8 +152,8 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
     const { artifact, links } = await host('library.entry', { artifactId });
     if (!artifact) return [];
     const own = ownSessionOf(artifact, links);
-    const record = own === null ? null : deps.sessions.get(own);
-    const project = artifact.projectId === undefined ? null : (deps.projects.list({ includeHidden: true }).find((entry) => entry.id === artifact.projectId) ?? null);
+    const record = own === null ? null : deps.view.record(own as AppSessionId);
+    const project = artifact.projectId === undefined ? null : deps.view.project(artifact.projectId as ProjectId);
     const space = artifact.spaceId === undefined ? null : ((await host('spaces.list', undefined)).spaces.find((entry) => entry.id === artifact.spaceId) ?? null);
     return [...artifactDirectories({ artifact, links, space, creator: record && { projectId: record.projectId, directory: record.directory }, project, realpath: deps.realpath }).directories];
   }

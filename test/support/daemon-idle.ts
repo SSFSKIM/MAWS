@@ -20,6 +20,7 @@
 import { execFileSync } from 'node:child_process';
 import { cpus } from 'node:os';
 import { basename } from 'node:path';
+import type { SpineFixtureCounts } from './spine-fixture';
 
 // The window, and its load rule (the architect's Rule B at 4.7). A window is void on load when its 1-minute
 // load reaches maxLoad at a sample and its 30 s pair reaches pairLoad: the highest load two adjacent 30 s intervals both
@@ -475,4 +476,21 @@ export function abaLine(run: { a: ShapeReading; b: ShapeReading; a2: ShapeReadin
   }).join(', ');
   const validity = run.reasons.length === 0 ? 'valid' : `invalid: ${run.reasons.join('; ')}`;
   return `[daemon-idle] A-B-A footprint B ${signed(d.footprintKiB)} KiB against the A mean ${d.aMean.footprintKiB} KiB (x${d.ratio.toFixed(3)}), A ${signed(d.spread.footprintKiB)} KiB against A' · cpu B ${signed(d.cpuS, 2)} s against the A mean ${d.aMean.cpuS.toFixed(2)} s, A ${signed(d.spread.cpuS, 2)} s against A' · B's processes against the A mean: ${processes} · ${window('A', 'detached', a)} · ${window('B', 'daemon', b)} · ${window("A'", 'detached', a2)} · medians of ${a.samples}, ${b.samples} and ${a2.samples} over ${run.windowS} s each · ${validity}`;
+}
+
+// P5 O3-C M5 (docs/doperpowers/plans/2026-10-28-p5-o3-c-spine-library.md, D18 and D19): the spine composed alone, the
+// services entry's idleReading under the Electron binary as Node over the profile-sized fixture, read in IDLE_RUN's
+// window while loaded, then, once its root has stopped and its data is released (two full collections when the runtime
+// exposes gc), after this settle in a window half as long. O3-D's starting point, recorded without a bound.
+export const SPINE_RELEASED_RUN = { settleS: 120, windowS: 300, everyS: 30, samples: 11, maxLoad: IDLE_RUN.maxLoad, pairLoad: IDLE_RUN.pairLoad } as const;
+
+// The job log's line: the loaded and released medians and what the release gave back, each window's CPU, the fixture's
+// counts, whether a full collection ran, the validity (both windows' `reasons`) and both loads, each with its 30 s pair.
+export function spineLine(run: { loaded: ShapeReading; released: ShapeReading; counts: SpineFixtureCounts; gc: boolean; reasons: readonly string[] }): string {
+  const { loaded, released, counts } = run;
+  const drop = Math.round(released.footprintKiB) - Math.round(loaded.footprintKiB);
+  const fixture = `${counts.sessions} sessions in ${counts.projects} projects, ${counts.attention} attention items (${counts.pending} pending), ${counts.library} library rows, ${counts.drafts} drafts, ${counts.history} prompt-history lines`;
+  const gc = run.gc ? 'gc ran twice before the released window' : 'no gc (the runtime exposed none)';
+  const validity = run.reasons.length === 0 ? 'valid' : `invalid: ${run.reasons.join('; ')}`;
+  return `[daemon-idle] spine loaded footprint ${Math.round(loaded.footprintKiB)} KiB (median of ${loaded.samples}) · released ${Math.round(released.footprintKiB)} KiB (median of ${released.samples}), ${signed(drop)} KiB · cpu ${loaded.cpuS.toFixed(2)} s over ${IDLE_RUN.windowS} s loaded, ${released.cpuS.toFixed(2)} s over ${SPINE_RELEASED_RUN.windowS} s released · fixture ${fixture} · ${gc} · ${validity} · load ${loadText(loaded.load, loaded.loadPair)} loaded, ${loadText(released.load, released.loadPair)} released`;
 }

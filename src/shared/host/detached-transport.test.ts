@@ -12,7 +12,7 @@ import { WIRE_CAPABILITIES, WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { SocketPort } from '@shared/host/socket-port';
 import { buildIdOf, SUPERVISOR_FILES } from '../../engine-host/supervisor-files';
-import { engineHostSettled } from '../../main/sessions/service-register';
+import { engineHostSettled } from '../../services/sessions/service-register';
 import { supervisorEnv, type DetachedTransportOptions } from './detached-transport';
 import { appIdentity } from './identity';
 

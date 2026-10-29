@@ -119,7 +119,7 @@ export const useReview = createReviewStore(ipc, { git: useGit });
 
 // ---- what a Review surface shows for a session's directory and a scope ----------------------------------------------
 
-const NOT_A_REPOSITORY = 'not a git repository'; // C4's message (src/main/git/runner.ts), as C8a's Environment reads it
+const NOT_A_REPOSITORY = 'not a git repository'; // C4's message (src/services/git/runner.ts), as C8a's Environment reads it
 
 // Settled: known, available with its base or unavailable with the reason (the disabled chip's tooltip).
 export type BranchAvailability =

@@ -159,10 +159,13 @@ env:
   # today's detached supervisor, on the daemon shape and on the supervisor again, each a fresh launch back to back in
   # one job, so the daemon shape is read against the mean of two baselines on the same machine state, recorded without
   # a bound; about 40 minutes, three windows.
+  # daemon-idle-spine (P5 O3-C M5), the spec's sixth case, is the spine alone, what O3-D moves into mawsd: the built
+  # services entry composing it over a profile-sized fixture with no host and no client, read idle while loaded and after
+  # its data is released, recorded without a bound; about 20 minutes, two windows, within a measured build's 60.
   # A group with a timing bound turns its timed cases on with a switch, MAWS_<name>_PERF or MAWS_<name>_SCALE set to 1 in
   # its package script, each such spec skipping without it or asserting its bounds only under it (presentations-drag's
   # one class-1 trial in e2e:presentations logs its p95), and is on this list: ci-kit's VM contract above rests on it.
-  MEASURED_E2E: artifacts-perf daemon-idle daemon-idle-baseline daemon-idle-floor daemon-idle-mawsd daemon-idle-enrolled daemon-idle-aba dashboard-scale design-scale document-scale document-scale-repeat local-latency local-latency-daemon presentations-drag presentations-scale tool-time-heavy-live
+  MEASURED_E2E: artifacts-perf daemon-idle daemon-idle-baseline daemon-idle-floor daemon-idle-mawsd daemon-idle-enrolled daemon-idle-aba daemon-idle-spine dashboard-scale design-scale document-scale document-scale-repeat local-latency local-latency-daemon presentations-drag presentations-scale tool-time-heavy-live
   # A group whose own run needs more than its class's minutes (30; a measured group's 45, or 60 when its script builds
   # out/): name=minutes, before the Mac wait is added (gate-plan.mjs); the plan refuses an entry that is not a positive
   # whole number of minutes for a group with a package script. daemon-idle-aba's three settles and windows take 36 of

@@ -39,7 +39,7 @@ import { basename } from 'node:path'; // E5
 import { app, type MessageBoxOptions } from 'electron';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { ClientId, ClientRef } from '@shared/ipc/client';
-import type { SessionReadModel } from '../sessions/read-model';
+import type { SpineView } from '@shared/spine/view';
 import { QUIT_KEEP } from './copy'; // E10
 
 // C12 start
@@ -94,7 +94,7 @@ function within<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 export async function busyReport(
-  model: Pick<SessionReadModel, 'midTurnCount' | 'engineStatuses'>,
+  model: Pick<SpineView, 'midTurnCount' | 'engineStatuses'>, // P5 O3-C (reader R3): the spine's view
   pty: QuitPty,
   unsavedFiles: () => readonly string[] = () => [], // E5: the windows' last pushes
 ): Promise<BusyReport> {
@@ -298,7 +298,7 @@ export interface QuitGuard {
   cancelWait(): void; // the banner's Cancel
 }
 
-export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 'engineStatuses' | 'on'>, deps: QuitGuardDeps): QuitGuard {
+export function installQuitGuard(model: Pick<SpineView, 'midTurnCount' | 'engineStatuses' | 'on'>, deps: QuitGuardDeps): QuitGuard {
   let disarmed = false; // set only right before the one final app.quit()
   let quitting: Promise<void> | null = null; // the one quit in flight: outside quits stay held, outstanding work is inert
   let asking = false; // a report or a question is under way

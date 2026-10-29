@@ -136,7 +136,7 @@ test('two machines in one sidebar by org project; one leaving greys only its row
   try {
     // 1. Setup: the repository, its two checkouts on two branches, a folder B never adds and a plain folder A adds. The
     // commit holds no file, so the index keeps the linked worktree a checkout of its own rather than folding it into the
-    // main checkout (src/main/index/projects.ts, holdsHead).
+    // main checkout (src/services/index/projects.ts, holdsHead).
     const shared = join(root, 'shared');
     const worktree = join(root, 'shared-b');
     const [loose, notes] = ['loose-b', 'notes'].map((name) => join(root, name));

@@ -17,7 +17,8 @@ import { oauthIdentityOf, type ConnectorOAuthGrant, type ConnectorOAuthIdentity,
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults'; // P5 O3-A
 import { ConfiguredDeliverySources } from '../../engine-host/connectors/configured-delivery'; // P5 O3-A
 import { publicSource } from '../../engine-host/connectors/direct-calls'; // P5 O3-A
-import { settingsPaths, splitSettingsFiles } from '../settings/split'; // P5 O3-A
+import { settingsPaths } from '@shared/settings/paths';
+import { splitSettingsFiles } from '../../services/settings/split'; // P5 O3-A
 
 const SAVED = '11111111-1111-4111-8111-111111111111';
 const FRESH = '33333333-3333-4333-8333-333333333333';
