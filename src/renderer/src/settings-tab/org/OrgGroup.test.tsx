@@ -4,7 +4,10 @@
 // with their names. M3's old-device line becomes Remove device (M4a's `device.remove`), through the change sheet.
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import type { MachineState } from '@shared/ipc/schema/machines';
 import type { SignResult } from '@shared/ipc/schema/org';
+import type { MachineRef } from '@shared/machine/ref';
+import { useMachines } from '../../stores/machines';
 import { DAY, DEVICE, FINGERPRINT, ME, MINI, REGISTERED, ROOT, VM, emit, found, group, renderSection, resetHarness, row, sent, signing, type Signer } from './test-support';
 
 // The file's own clock (see YouGroup.test.tsx). Only Date is faked; timers stay real for the waits.
@@ -143,14 +146,25 @@ describe('Settings › Org: this Mac as the org’s signer (M3)', () => {
         ],
       }),
     );
+    // each machine by the name the org state gives it (the view's), never its ref
     const deliveries = await found('Deliveries');
-    expect(within(deliveries).getByText(`Version 7 · waiting for ${MINI} to acknowledge · too large to send to ${VM}, which catches up from the hub`)).toBeTruthy();
-    expect(within(row('Discarded')).getByText(`Version 5 · the hub and ${MINI} may still hold it`)).toBeTruthy();
+    expect(await within(deliveries).findByText('Version 7 · waiting for mini to acknowledge · too large to send to build-vm, which catches up from the hub')).toBeTruthy();
+    expect(within(row('Discarded')).getByText('Version 5 · the hub and mini may still hold it')).toBeTruthy();
     expect(within(row('Discarded')).queryByText(/Version 6/)).toBeNull();
+    expect(within(await group('org')).queryByText(new RegExp(`${MINI}|${VM}`))).toBeNull();
 
     emit(signing({ ...ROOT, abandoned: [{ hash: HASH_B, version: 6, hub: false, machines: [] }] }));
     expect(screen.queryByRole('group', { name: 'Deliveries' })).toBeNull();
     expect(screen.queryByRole('group', { name: 'Discarded' })).toBeNull();
+  });
+
+  it('a machine the org state doesn’t list is named by its link, then by its ref only when nothing names it', async () => {
+    const LINKED = 'LinkedOnlyRef0000003' as MachineRef;
+    const UNNAMED = 'UnnamedRef0000000004' as MachineRef;
+    useMachines.setState({ roster: 'answered', machines: new Map([[LINKED, { ref: LINKED, name: 'laptop-b', state: 'up' } as MachineState]]) });
+    renderSection(signing({ ...ROOT, owing: [{ version: 7, machines: [MINI, LINKED, UNNAMED], tooLarge: [] }] }));
+    const deliveries = await found('Deliveries');
+    expect(await within(deliveries).findByText(`Version 7 · waiting for mini, laptop-b and ${UNNAMED} to acknowledge`)).toBeTruthy();
   });
 
   it('pending-fork: Discard behind a confirmation with the fork warning; Cancel sends nothing; Discard sends it confirmed', async () => {

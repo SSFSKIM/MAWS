@@ -40,7 +40,7 @@ export function OrgGroup({ status, view }: { status: Registered; view: OrgView |
         </Setting>
       )}
       {status.problem !== null && status.problem !== 'held-chain' && <Problem problem={status.problem} />}
-      {signing && signer !== null && <SignerLines signer={signer} status={status} />}
+      {signing && signer !== null && <SignerLines signer={signer} status={status} view={view} />}
     </>
   );
 }
@@ -99,7 +99,7 @@ function discardOutcome(version: number, result: DiscardResult): Outcome {
 // This Mac as the org's signer: the root line (or the unmarked keys' words), the weekly line, and every other line
 // only while it has something to say. The acts here (Re-sign now, Revoke again, Discard, the old device's removal) end
 // in one line on the Signer row, since the row that sent them may be gone once they settle.
-function SignerLines({ signer, status }: { signer: Signer; status: Registered }) {
+function SignerLines({ signer, status, view }: { signer: Signer; status: Registered; view: OrgView | null }) {
   const [acting, setActing] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>(null);
   // The proposal Discard was pressed for, by its stateHash: the owner's consent is to that one proposal.
@@ -109,7 +109,9 @@ function SignerLines({ signer, status }: { signer: Signer; status: Registered })
   // The old device Remove was pressed for: the change sheet shows what its removal signs.
   const [removing, setRemoving] = useState<string | null>(null);
   const machines = useMachines((s) => s.machines);
-  const nameOf = (ref: string) => machineName(machines, ref as MachineRef, ipc.localMachine);
+  // A machine by the name the org state signs for it, as the Machines group names it; else its link's name (or This
+  // Mac); its ref only when nothing names it.
+  const nameOf = (ref: string) => view?.machines.find((m) => m.ref === ref)?.name ?? machineName(machines, ref as MachineRef, ipc.localMachine);
   const device = status.device;
 
   const act = <T,>(send: Invoked<T>, said: (value: T) => Outcome) => {

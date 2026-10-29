@@ -117,8 +117,8 @@ function seededOrg(local: string, userData: string, now: number): { status: Regi
       ageDays: 6,
       pending: null,
       offer: null,
-      owing: [{ version: view.version, machines: [studio], tooLarge: [] }],
-      abandoned: [],
+      owing: [{ version: view.version, machines: [studio, farm], tooLarge: [farm] }], // each named by the org state's name, never its ref
+      abandoned: [{ hash: randomBytes(32).toString('base64url'), version: view.version - 1, hub: true, machines: [farm] }],
       rekey: null,
       rekeying: null,
       oldDevice: null,
@@ -217,6 +217,11 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
       const longRow = group('people').getByRole('group', { name: names.get(status.pairing!.member)!, exact: true });
       const show = longRow.getByRole('button', { name: ORG.pairingShow, exact: true });
       await expect(show).toBeVisible();
+
+      // A machine reads by its name wherever the page names one (Machines, Deliveries, Discarded), never by its ref.
+      await expect(group('org').getByRole('group', { name: ORG.deliveries, exact: true })).toContainText('studio-mini');
+      const text = (await section.textContent()) ?? '';
+      expect(view.machines.filter((m) => text.includes(m.ref)).map((m) => `${m.name} (${m.ref})`), 'no machine shows by its raw ref').toEqual([]);
 
       await test.info().attach('org-page-window', { body: await page.screenshot(), contentType: 'image/png' });
       for (const id of GROUPS) await test.info().attach(`org-page-${id}`, { body: await group(id).screenshot(), contentType: 'image/png' });
