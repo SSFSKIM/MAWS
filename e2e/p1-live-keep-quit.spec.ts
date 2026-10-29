@@ -21,6 +21,7 @@
 // MAWS_P1_LIVE_OUT (default /tmp/maws-e11-p1-live), line by line. It spends money; run on purpose only:
 //   pnpm build:app && MAWS_P1_LIVE=1 MAWS_E2E_EXECUTABLE=dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS \
 //     pnpm exec playwright test e2e/p1-live-keep-quit.spec.ts
+// In the gate it is the live group e2e:keep-quit-live (`ci-gate.sh --live`), which builds the unsigned app itself.
 import { execFileSync, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';

@@ -17,6 +17,8 @@
 // MAWS_C8B_LIVE_STEPS=i,ii,… runs a subset (setup always runs); MAWS_C8B_LIVE_KEEP=1 keeps the scratch clone and home.
 // MAWS_C8B_LIVE_MAX_USD (default 3) is the run's cap: every launch carries what the run has left of it as its
 // `--max-budget-usd` (the seed at most US$0.5, the second launch at most US$1), so no session can spend past it unseen.
+// In the gate it is the live group e2e:agents-live (`ci-gate.sh --live`): the build above, E11 S2(a)'s steps i, v and x
+// (the ones E7 adapted), its cap and the installed engine in its script.
 import { isolatedGitEnv } from '../test/support/git-env';
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -29,12 +31,14 @@ import { ENGINE_BIN, ENGINE_VERSION } from '../test/support/engine-pin'; // FX4:
 import { scratchConfigHome } from '../test/live/support/live';
 import { addressed } from './support/address';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
+import { latencyBudgets } from './support/latency';
 import { chargeOf } from './support/p1-live';
 import { sidebarRow } from './support/sidebar';
 import { openSurface, surface } from './support/shell';
 
+test.skip(process.env.MAWS_C8B_LIVE !== '1', 'the C8b live acceptance runs only under MAWS_C8B_LIVE=1');
+// Under the flag only: the engine, the relay and the build the run needs.
 function skipReason(): string | null {
-  if (process.env.MAWS_C8B_LIVE !== '1') return 'the C8b live acceptance runs only under MAWS_C8B_LIVE=1';
   if (!existsSync(ENGINE_BIN)) return `engine binary missing at ${ENGINE_BIN}`;
   if (!ENGINE_VERSION) return `engine did not report a version at ${ENGINE_BIN}`;
   console.info(`[live engine] ${ENGINE_BIN} (${ENGINE_VERSION})`);
@@ -46,7 +50,7 @@ function skipReason(): string | null {
   }
   return null;
 }
-const skip = skipReason();
+const skip = process.env.MAWS_C8B_LIVE === '1' ? skipReason() : null;
 test.skip(skip !== null, skip ?? '');
 test.describe.configure({ timeout: 75 * 60_000 });
 
@@ -410,6 +414,7 @@ function launchCost(path: string, budgetUsd: number): number {
 }
 
 test('live: the agent tools over a real session (acceptance item 4, steps i to x)', async () => {
+  const within = latencyBudgets(); // the load the run starts under (e2e/support/latency.ts)
   const observed: Record<string, unknown> = { run: RUN, tmp: TMP };
   const failures: string[] = [];
   const scratch = realpathSync(mkdtempSync('/tmp/maws-c8b-live-'));
@@ -530,7 +535,11 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
       const latency = started.map((e) => ({ agentId: e.taskId, description: e.description, isBackground: e.isBackground, startedAt: e.at, rowShownAfterMs: rec[e.taskId as string] ? rec[e.taskId as string].firstSeen - Date.parse(e.at) : null }));
       note('i.active', { rows: shownActive, elapsedThen: t1, elapsedLater: t2, latency });
       expect(t1).not.toEqual(t2);
-      for (const l of latency) expect(l.rowShownAfterMs, `row of ${l.agentId} shown within a second of its start`).toBeLessThan(1_000);
+      // An acceptance latency, so through the load-aware budget: a live group shares the home Mac with ci-kit's guest.
+      for (const l of latency) {
+        expect(l.rowShownAfterMs, `row of ${l.agentId} shown`).not.toBeNull();
+        within(`row of ${l.agentId} shown`, l.rowShownAfterMs!, 1_000, `row of ${l.agentId} shown within a second of its start`);
+      }
       await s.until('both agents finished', (ev) => ids.first.every((id) => ev.some((e) => e.kind === 'subagent.finished' && e.taskId === id)), 240_000);
       await expect.poll(() => probe(page, (p) => p.subagents().headings), { timeout: 15_000 }).toContain('Done · 2');
       await openDone(page);

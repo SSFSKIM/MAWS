@@ -15,8 +15,9 @@ import { relaySkipReason } from '../../test/support/relay-health';
 
 export const RELAY = 'http://127.0.0.1:8641';
 
+// Why the run cannot reach the engine or the relay, or null. Read only under MAWS_E8_LIVE=1, on which each spec skips
+// first (its own `test.skip`, the form the gate's live check reads).
 export function pluginsLiveSkipReason(): string | null {
-  if (process.env.MAWS_E8_LIVE !== '1') return 'the E8 live run runs only under MAWS_E8_LIVE=1';
   if (!existsSync(ENGINE_BIN)) return `engine binary missing at ${ENGINE_BIN}`;
   if (!ENGINE_VERSION) return `engine did not report a version at ${ENGINE_BIN}`;
   return relaySkipReason(RELAY); // E11 (scale review E scalpel-1#4): a closed port or a silent relay is a skip, not a throw at collection
