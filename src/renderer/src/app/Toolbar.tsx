@@ -51,8 +51,8 @@ export function toolbarTitle(
     case 'session':
     case 'agent': {
       const record = records.get(tab.appSessionId);
-      const row = record ? undefined : listed.get(tab.appSessionId); // P5 O9 M9: a session of another machine has its row alone
-      const title = displayTitle(record ?? (row && { title: { text: row.title } })); // no record yet (an unstarted session) or no title yet: "New chat"
+      const row = record ? undefined : listed.get(tab.appSessionId)?.title.trim(); // P5 O9 M9: a session of another machine has its row alone
+      const title = row || displayTitle(record); // no record yet (an unstarted session) or no title yet: "New chat"
       return { title: tab.kind === 'agent' ? `${title} · agent` : title, branch: branchLabel(recordBranch(record)) }; // W9 (H2)
     }
     case 'file':

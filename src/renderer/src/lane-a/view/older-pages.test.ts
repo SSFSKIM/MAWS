@@ -102,7 +102,7 @@ describe('paging older rows in', () => {
     });
     expect(plane.current.asked).toHaveLength(1);
     await act(async () => {
-      plane.current.send('presence', { record: { status: 'idle' }, bridge: true }); // the plane delivers again
+      plane.current.send('subagents', { subagents: [] }); // the plane delivers again
       await settle();
     });
     expect(plane.current.asked).toHaveLength(2);
