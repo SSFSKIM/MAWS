@@ -185,8 +185,8 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   let keychainWatch: { stop(): Error | null } | null = null;
 
   const info = base.info();
-  const evidence = captureAllowed({ file: info.file, env, syntheticEngineBin: opts.syntheticEngineBin ?? replayEngine, realEngine: Boolean(opts.realEngine), ownerConfigHome: opts.ownerConfigHome })
-    ? processEvidence(info.outputPath(), userData) : null;
+  const canKeepEvidence = () => captureAllowed({ file: info.file, env, userData, syntheticEngineBin: opts.syntheticEngineBin ?? replayEngine, realEngine: Boolean(opts.realEngine), ownerConfigHome: opts.ownerConfigHome });
+  let evidence: ReturnType<typeof processEvidence> | null = null;
   let app: ElectronApplication | null = null;
   let child: ReturnType<ElectronApplication['process']> | null = null;
   let closed = false;
@@ -230,6 +230,9 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
       if (opts.realEngine?.home === 'runner') assertEngineKeychainEnv(loginShellEnvironment(env), env.CLAUDE_CONFIG_DIR!, 'the login shell the engine host captures');
     }
     opts.prepare?.({ userData, shellHome: shellHome.dir, claudeConfigDir: env.CLAUDE_CONFIG_DIR }); // E6: inside, so a throw still cleans up
+    // A prepared/reused profile may configure a real engine ahead of the environment's replay stub. Check after
+    // preparation, and again at finish so a later unknown override cannot leave raw logs in public test-results.
+    evidence = canKeepEvidence() ? processEvidence(info.outputPath(), userData, canKeepEvidence) : null;
     const launchedAt = Date.now();
     const appArgs = opts.lang ? [`--lang=${opts.lang}`] : E2E_APP_ARGS; // P4-W2L
     const defaults = Object.entries(opts.appKitDefaults ?? {}).flatMap(([key, value]) => [`-${key}`, value]); // P5 O8 M4a Task 8

@@ -3,11 +3,12 @@ import type { ChildProcess } from 'node:child_process';
 export function captureAllowed(options: {
   file: string;
   env: Record<string, string | undefined>;
+  userData?: string;
   syntheticEngineBin?: string;
   realEngine?: boolean;
   ownerConfigHome?: boolean;
 }): boolean;
-export function processEvidence(outputDir: string, userData: string): {
+export function processEvidence(outputDir: string, userData: string, canKeep?: () => boolean): {
   capture(child: ChildProcess): void;
   finish(): void;
 };

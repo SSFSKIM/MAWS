@@ -1,19 +1,54 @@
 // Public CI evidence, not a profile backup. Keep only the two main-process streams and the engine host's log.
 // Raw errors can contain upstream responses or account data: credentialed/owner scenes opt out, not regex-redact.
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, copyFileSync, mkdirSync, openSync, readSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
-export function captureAllowed({ file, env, syntheticEngineBin, realEngine = false, ownerConfigHome = false }) {
+// Settings' explicit binary precedes the e2e environment (engine-host/binary-info.ts). The machine file is
+// authoritative; profiles predating its split still hold the override in settings.json. Read at most 256 KiB + 1.
+function configuredEngineBin(userData) {
+  for (const name of ['machine-settings.json', 'settings.json']) {
+    let fd;
+    try {
+      fd = openSync(join(userData, name), 'r');
+    } catch (error) {
+      if (error.code === 'ENOENT') continue;
+      throw error;
+    }
+    try {
+      const bytes = Buffer.alloc(256 * 1024 + 1);
+      const size = readSync(fd, bytes, 0, bytes.length, 0);
+      if (size === bytes.length) throw new Error('settings exceed evidence read budget');
+      const settings = JSON.parse(bytes.subarray(0, size).toString('utf8'));
+      if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new Error('invalid settings');
+      if (name === 'settings.json' && settings.engine === undefined) return null; // a post-split client file
+      const engine = settings.engine;
+      if (!engine || typeof engine !== 'object' || Array.isArray(engine)) throw new Error('invalid engine settings');
+      const bin = engine.binaryPath;
+      if (bin !== null && (typeof bin !== 'string' || !bin)) throw new Error('invalid engine binary');
+      return bin;
+    } finally {
+      closeSync(fd);
+    }
+  }
+  return null; // a fresh profile uses the known environment binary
+}
+
+export function captureAllowed({ file, env, userData, syntheticEngineBin, realEngine = false, ownerConfigHome = false }) {
   // Fail closed for installed engines and unknown overrides, including wrappers around a real engine. The caller
-  // identifies a test-owned synthetic binary; the final environment must still name that exact binary.
-  if (!syntheticEngineBin || env.MAWS_E2E_ENGINE_BIN !== syntheticEngineBin || realEngine || ownerConfigHome) return false;
+  // identifies one test-owned synthetic binary; settings and environment must resolve to that exact binary.
+  if (!syntheticEngineBin || env.MAWS_E2E !== '1' || realEngine || ownerConfigHome) return false;
   const privateGroups = ['LIVE_E2E', 'LIVE_GUARD_E2E', 'MAC_SECRET_E2E'].flatMap((key) => (env[key] ?? '').split(/\s+/).filter(Boolean));
   if (privateGroups.includes(env.MAWS_E2E_GROUP)) return false;
   // Local Playwright runs do not have gate.yml's group lists. These scenes use a real engine or real account state.
   if (/(?:^|-)live(?:-|\.spec\.ts$)|^(?:c12-prerun|connectors-oauth|discover)\.spec\.ts$/.test(basename(file))) return false;
   if (Object.entries(env).some(([key, value]) => /^MAWS_.*LIVE/.test(key) && value === '1')) return false;
-  return true;
+  try {
+    const configured = userData === undefined ? null : configuredEngineBin(userData);
+    return (configured ?? env.MAWS_E2E_ENGINE_BIN) === syntheticEngineBin;
+  } catch {
+    return false; // unreadable, malformed or oversized settings never authorize public raw logs
+  }
 }
 
 // Per stream: 256 KiB of startup plus a 256 KiB rolling tail. Only the head is written during the run; cleanup
@@ -29,6 +64,7 @@ function boundedStream(file) {
   let total = 0;
   writeFileSync(file, '');
   return {
+    file,
     receive(chunk) {
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       total += bytes.length;
@@ -67,7 +103,7 @@ function boundedStream(file) {
   };
 }
 
-export function processEvidence(outputDir, userData) {
+export function processEvidence(outputDir, userData, canKeep = () => true) {
   mkdirSync(outputDir, { recursive: true });
   const id = randomUUID(); // distinct even for relaunches over the same profile, and retries have their own outputDir
   const listeners = [];
@@ -89,6 +125,12 @@ export function processEvidence(outputDir, userData) {
       if (finished) return;
       finished = true;
       for (const remove of listeners) remove();
+      // Settings can change after launch. Recheck before retaining any raw tail, utility lines or detached-host log.
+      if (!canKeep()) {
+        for (const { file } of streams) rmSync(file, { force: true });
+        writeFileSync(join(outputDir, `engine-host-${id}.excluded.log`), 'Raw process evidence excluded: engine provenance could not be verified.\n');
+        return;
+      }
       // Utility hosts (artifacts-perf) have no file: main/hosts/supervisor.ts forwards their lines with this prefix.
       // Extract after the measurement, within each stream's head/tail budget. Streams retain their own line order.
       const utilityLines = streams.flatMap((stream) => stream.finish());

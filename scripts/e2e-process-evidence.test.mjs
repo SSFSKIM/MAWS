@@ -151,7 +151,7 @@ test('a launch with no detached host writes no pretend host log', (t) => {
 test('credentialed groups and local live/owner launches never enable raw process evidence', () => {
   const workflow = readFileSync(new URL('../.github/workflows/gate.yml', import.meta.url), 'utf8');
   const env = Object.fromEntries(['LIVE_E2E', 'LIVE_GUARD_E2E', 'MAC_SECRET_E2E'].map((key) => [key, new RegExp(`^  ${key}: (.+)$`, 'm').exec(workflow)[1]]));
-  const replay = { syntheticEngineBin: '/scratch/replay-engine', env: { MAWS_E2E_ENGINE_BIN: '/scratch/replay-engine' } };
+  const replay = { syntheticEngineBin: '/scratch/replay-engine', env: { MAWS_E2E: '1', MAWS_E2E_ENGINE_BIN: '/scratch/replay-engine' } };
   for (const group of Object.values(env).join(' ').split(/\s+/)) assert.equal(captureAllowed({ ...replay, file: 'ordinary.spec.ts', env: { ...replay.env, ...env, MAWS_E2E_GROUP: group } }), false, group);
   for (const file of ['tools-live.spec.ts', 'document-provisional-live.spec.ts', 'c12-prerun.spec.ts', 'connectors-oauth.spec.ts', 'discover.spec.ts']) assert.equal(captureAllowed({ ...replay, file }), false, file);
   assert.equal(captureAllowed({ ...replay, file: 'ordinary.spec.ts', realEngine: true }), false);
@@ -163,7 +163,7 @@ test('credentialed groups and local live/owner launches never enable raw process
 
 test('c3-stall activated with an installed engine and no realEngine option cannot publish raw evidence', () => {
   assert.equal(captureAllowed({ file: 'c3-stall.spec.ts', env: {
-    MAWS_C3_STALL: '1', MAWS_E2E_ENGINE_BIN: '/Users/runner/.local/share/claude/versions/2.1.309',
+    MAWS_E2E: '1', MAWS_C3_STALL: '1', MAWS_E2E_ENGINE_BIN: '/Users/runner/.local/share/claude/versions/2.1.309',
     MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: '/private/tmp/maws-c3-stall/h4/config',
   } }), false);
 });
@@ -171,16 +171,95 @@ test('c3-stall activated with an installed engine and no realEngine option canno
 test('only the chosen test-owned synthetic engine enables evidence, not an unknown override', () => {
   const file = 'ordinary.spec.ts';
   for (const bin of ['/scratch/replay-engine', '/scratch/wrapper', '/usr/local/bin/claude', '']) {
-    assert.equal(captureAllowed({ file, env: { MAWS_E2E_ENGINE_BIN: bin } }), false, bin);
+    assert.equal(captureAllowed({ file, env: { MAWS_E2E: '1', MAWS_E2E_ENGINE_BIN: bin } }), false, bin);
   }
   assert.equal(captureAllowed({ file, env: {} }), false);
   const syntheticEngineBin = '/scratch/replay-engine';
-  assert.equal(captureAllowed({ file, env: { MAWS_E2E_ENGINE_BIN: syntheticEngineBin }, syntheticEngineBin }), true);
-  assert.equal(captureAllowed({ file, env: { MAWS_E2E_ENGINE_BIN: '/some/other-engine' }, syntheticEngineBin }), false);
+  assert.equal(captureAllowed({ file, env: { MAWS_E2E: '1', MAWS_E2E_ENGINE_BIN: syntheticEngineBin }, syntheticEngineBin }), true);
+  assert.equal(captureAllowed({ file, env: { MAWS_E2E: '1', MAWS_E2E_ENGINE_BIN: '/some/other-engine' }, syntheticEngineBin }), false);
   for (const group of ['local-latency', 'local-latency-daemon']) {
     const bin = '/scratch/latency-engine'; // writeLatencyEngine's wrapper, not a forwarding wrapper around a real engine
-    assert.equal(captureAllowed({ file: 'local-latency.spec.ts', env: { MAWS_E2E_ENGINE_BIN: bin, MAWS_E2E_GROUP: group, MAWS_LOCAL_LATENCY_PERF: '1' }, syntheticEngineBin: bin }), true);
+    assert.equal(captureAllowed({ file: 'local-latency.spec.ts', env: { MAWS_E2E: '1', MAWS_E2E_ENGINE_BIN: bin, MAWS_E2E_GROUP: group, MAWS_LOCAL_LATENCY_PERF: '1' }, syntheticEngineBin: bin }), true);
   }
+});
+
+test('configured engines take precedence over the replay environment, with bounded fail-closed settings reads', (t) => {
+  const userData = scratch(t);
+  const options = { file: 'ordinary.spec.ts', userData, syntheticEngineBin: '/scratch/replay-engine', env: { MAWS_E2E: '1', MAWS_E2E_ENGINE_BIN: '/scratch/replay-engine' } };
+  assert.equal(captureAllowed(options), true, 'a fresh default replay launch is safe');
+  for (const name of ['settings.json', 'machine-settings.json']) {
+    const file = join(userData, name);
+    writeFileSync(file, JSON.stringify({ engine: { binaryPath: '/installed/claude' } }));
+    assert.equal(captureAllowed(options), false, `${name} overrides the replay binary`);
+    const wrapper = '/scratch/test-owned-wrapper';
+    writeFileSync(file, JSON.stringify({ engine: { binaryPath: wrapper } }));
+    assert.equal(captureAllowed(options), false, 'a scratch path alone does not establish ownership');
+    assert.equal(captureAllowed({ ...options, syntheticEngineBin: wrapper }), true, 'an explicit owned override names the effective binary, not the fallback');
+    for (const text of ['{', 'null', '{"engine":null}', '{"engine":{"binaryPath":42}}', JSON.stringify({ engine: { binaryPath: null }, padding: 'x'.repeat(1024 * 1024) })]) {
+      writeFileSync(file, text);
+      assert.equal(captureAllowed(options), false, `${name} cannot be safely read`);
+    }
+    rmSync(file);
+    mkdirSync(file); // an unreadable settings file without relying on root-vs-user chmod behavior
+    assert.equal(captureAllowed(options), false);
+    rmSync(file, { recursive: true });
+  }
+  writeFileSync(join(userData, 'settings.json'), JSON.stringify({ engine: { binaryPath: '/legacy/claude' } }));
+  writeFileSync(join(userData, 'machine-settings.json'), JSON.stringify({ engine: { binaryPath: null } }));
+  assert.equal(captureAllowed(options), true, 'the machine file is authoritative after the settings split');
+  assert.equal(captureAllowed({ ...options, env: { ...options.env, MAWS_E2E: '0' } }), false, 'without e2e mode the environment no longer pins engine selection');
+});
+
+test('finish excludes only this launch when effective settings or environment stop naming a known synthetic engine', (t) => {
+  const dir = scratch(t);
+  const output = join(dir, 'output');
+  const reasons = ['real', 'unknown', 'unreadable', 'oversized', 'env'];
+  mkdirSync(output);
+  const other = join(output, 'another-launch.log');
+  writeFileSync(other, 'keep the other launch\n');
+  for (const reason of reasons) {
+    const userData = join(dir, reason);
+    mkdirSync(join(userData, 'supervisor'), { recursive: true });
+    writeFileSync(join(userData, 'supervisor', 'host.log'), 'must not publish host data\n');
+    const options = { file: 'ordinary.spec.ts', userData, syntheticEngineBin: '/scratch/replay-engine', env: { MAWS_E2E: '1', MAWS_E2E_ENGINE_BIN: '/scratch/replay-engine' } };
+    assert.equal(captureAllowed(options), true);
+    const evidence = processEvidence(output, userData, () => captureAllowed(options));
+    const child = { stdout: new PassThrough(), stderr: new PassThrough() };
+    evidence.capture(child);
+    child.stdout.write('[engine-host] must not publish utility data\n');
+    child.stderr.write('must not publish stderr\n');
+    const settings = join(userData, 'machine-settings.json');
+    if (reason === 'unreadable') mkdirSync(settings);
+    else if (reason === 'oversized') writeFileSync(settings, JSON.stringify({ padding: 'x'.repeat(1024 * 1024) }));
+    else if (reason === 'env') options.env.MAWS_E2E_ENGINE_BIN = '/another/engine';
+    else writeFileSync(settings, JSON.stringify({ engine: { binaryPath: reason === 'real' ? '/installed/claude' : '/scratch/unknown-wrapper' } }));
+    evidence.finish();
+    evidence.finish();
+    assert.equal(child.stderr.listenerCount('data'), 0);
+    const files = readdirSync(output).filter((file) => file !== 'another-launch.log');
+    assert.equal(files.length, reasons.indexOf(reason) + 1, 'only one exclusion marker per rejected launch remains');
+    assert.ok(files.every((file) => file.endsWith('.excluded.log')));
+    for (const file of files) assert.match(readFileSync(join(output, file), 'utf8'), /^Raw process evidence excluded: engine provenance could not be verified\.\n$/);
+  }
+  assert.equal(readFileSync(other, 'utf8'), 'keep the other launch\n');
+});
+
+test('finish keeps unchanged explicit synthetic settings and bounded process/host evidence', (t) => {
+  const dir = scratch(t);
+  const userData = join(dir, 'profile');
+  mkdirSync(join(userData, 'supervisor'), { recursive: true });
+  const bin = '/scratch/latency-engine';
+  writeFileSync(join(userData, 'machine-settings.json'), JSON.stringify({ engine: { binaryPath: bin } }));
+  writeFileSync(join(userData, 'supervisor', 'host.log'), 'host shutdown\n');
+  const options = { file: 'local-latency.spec.ts', userData, syntheticEngineBin: bin, env: { MAWS_E2E: '1', MAWS_E2E_ENGINE_BIN: '/scratch/replay-engine' } };
+  assert.equal(captureAllowed(options), true);
+  const output = join(dir, 'output');
+  const evidence = processEvidence(output, userData, () => captureAllowed(options));
+  const child = { stdout: new PassThrough() };
+  evidence.capture(child);
+  child.stdout.write('synthetic startup\n');
+  evidence.finish();
+  assert.deepEqual(readdirSync(output).map((file) => readFileSync(join(output, file), 'utf8')).sort(), ['host shutdown\n', 'synthetic startup\n']);
 });
 
 test('timing evidence persists partial samples without copying tool arguments or results', (t) => {
