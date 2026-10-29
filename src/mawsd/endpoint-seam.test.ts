@@ -233,4 +233,14 @@ describe('the endpoint loaded when it is needed (lever (a))', () => {
     expect(await endpoint.cli('keys', [])).toEqual({ code: 3, out: 'the endpoint has not started' });
     expect(state.loads).toBe(0);
   });
+
+  // P5 O3-D M4: MAWS's own projects (the spine's rows) reach the module through its CheckoutSource injection
+  it('hands the module MAWS’s own projects, the source the daemon gave it', async () => {
+    const { load } = loader();
+    const projects = { known: (path: string) => path === '/work/maws' };
+    const endpoint = new LazyEndpoint('b9', load, { projects });
+    await endpoint.start(services());
+    await endpoint.cli('enroll', [], 'CODE');
+    expect(Module.built.at(-1)).toEqual({ build: 'b9', projects });
+  });
 });

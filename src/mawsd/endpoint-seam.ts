@@ -21,6 +21,7 @@ import type { ClientRef } from '@shared/ipc/client';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import type { MachineRef } from '@shared/machine/ref';
 import { enrollmentOnDisk, unloadedAnswer, UNENROLLED_STATUS } from '../endpoint/presence';
+import type { CheckoutSource } from '../endpoint/index';
 
 export const ENDPOINT_STOP_MS = 2_500;
 // `daemon.endpoint`'s answer while there is no module (a daemon a test starts with none), `{code: 2, out:
@@ -64,25 +65,32 @@ export interface EndpointModule {
 
 // O10's endpoint module (P5 O10 M10), one for each daemon, loaded when it is needed; `build` is the daemon's build id,
 // which RL1's hello and RL2's h2 name. Its chunk is emitted beside mawsd.js by the same build (the bundle guard admits
-// that load and no other).
-export function loadEndpointModule(build: string): EndpointModule {
-  return new LazyEndpoint(build, () => import('../endpoint/index'));
+// that load and no other). `projects` is MAWS's own projects as checkouts the module knows (P5 O3-D M4, Interfaces §E):
+// the source authorization reads beside RL10's presences.
+export function loadEndpointModule(build: string, extras: EndpointExtras = {}): EndpointModule {
+  return new LazyEndpoint(build, () => import('../endpoint/index'), extras);
 }
 
-type Loaded = { createEndpoint(options: { build?: string }): EndpointModule };
+/** What the daemon injects into the module besides its services. */
+export type EndpointExtras = { projects?: CheckoutSource };
+export type { CheckoutSource };
+
+type Loaded = { createEndpoint(options: { build?: string } & EndpointExtras): EndpointModule };
 
 /** The seam's module until O10's is needed, then O10's; `load` brings the module's chunk (a test's stand-in). */
 export class LazyEndpoint implements EndpointModule {
   readonly #build: string;
   readonly #load: () => Promise<Loaded>;
+  readonly #extras: EndpointExtras;
   #services: DaemonServices | null = null;
   #module: EndpointModule | null = null;
   #loading: Promise<EndpointModule | null> | null = null;
   #stopped = false;
 
-  constructor(build: string, load: () => Promise<Loaded>) {
+  constructor(build: string, load: () => Promise<Loaded>, extras: EndpointExtras = {}) {
     this.#build = build;
     this.#load = load;
+    this.#extras = extras;
   }
 
   async start(services: DaemonServices): Promise<void> {
@@ -142,7 +150,7 @@ export class LazyEndpoint implements EndpointModule {
         throw error;
       }
       if (this.#stopped) return null;
-      const module = loaded.createEndpoint({ build: this.#build });
+      const module = loaded.createEndpoint({ build: this.#build, ...this.#extras });
       services.log(atStart ? 'loading the endpoint: an enrollment is on disk' : 'loading the endpoint for its first command');
       try {
         await module.start(services);

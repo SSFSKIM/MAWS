@@ -15,7 +15,7 @@ import type { FakeSupervisor } from '../../test/support/fake-supervisor';
 import { takeSpineLock } from '../services/settings/spine-lock';
 import type { SpineEntry } from './spine-seam';
 import type { SpineDeps } from '../services/spine-root';
-import type { EndpointModule } from './endpoint-seam';
+import type { DaemonServices, EndpointModule } from './endpoint-seam';
 import type { MachineIdentity } from '@shared/ipc/schema/machine';
 import { machineKey } from '@shared/machine/org-key';
 import { machineProjectId } from '@shared/machine/project-ids';
@@ -609,6 +609,37 @@ describe('the spine (P5 O3-D M2)', () => {
     held = null;
     expect(chunk.deps[0]!.enrollment?.()).toBeNull();
     expect(await identity()).toEqual(before);
+  });
+
+  // P5 O3-D M4 (Interfaces §B, acceptance 8's endpoint half): the endpoint's reach over the real DaemonServices, with no
+  // app: dispatch('machine', …) loads the spine and answers from it, the spine's events come with owner `machine`, and
+  // its project rows are checkouts the endpoint knows while its view is available
+  it('the endpoint reaches the spine: its machine dispatch, its events with owner machine, and its projects as known checkouts', async () => {
+    let services: DaemonServices | null = null;
+    const endpoint: EndpointModule = { start: async (started) => void (services = started), stop: async () => {}, status: () => null, enrollment: () => null, cli: async () => ({ code: 0, out: '' }) };
+    let unavailable: string | null = null;
+    let root: SpineDeps | null = null;
+    const load = async (): Promise<SpineEntry> => ({
+      takeSpineLock,
+      openSpineData: async (_profile, { lock }) => ({ lock: lock!, refused: lock!.refused, machineSettings: null as never, paths: { client: '', machine: '' } }),
+      startSpine: (started) => {
+        root = started;
+        started.bus.register('session.list', () => ({ sessions: [], revision: 1 }));
+        const rows = [{ id: 'p1', name: 'maws', directory: '/work/maws', order: 0, createdAt: '2026-10-29T00:00:00.000Z' }];
+        return { view: { engineStatuses: () => [], on: () => () => {}, unavailable: () => unavailable, projectRows: () => rows } as never, settled: async () => {}, busy: () => false, stop: () => {} };
+      },
+    });
+    const daemon = await scene.start({ endpoint, spine: { load } });
+    const heard: [string, string][] = [];
+    services!.onEvent((owner, message) => void heard.push([owner, message.name]));
+    expect(daemon.projects.known('/work/maws')).toBe(false); // cold: no view to read
+    expect(await services!.dispatch('machine', 'session.list', { includeArchived: false })).toMatchObject({ ok: true, value: { sessions: [], revision: 1 } });
+    expect(daemon.projects.known('/work/maws')).toBe(true);
+    expect(daemon.projects.known('/work/other')).toBe(false);
+    root!.bus.emit('attention.changed', { appSessionId: 'app-1' as AppSessionId, items: [] });
+    expect(heard).toContainEqual(['machine', 'attention.changed']);
+    unavailable = 'launch mode scenario'; // D11: a scenario's view lends the endpoint no checkout
+    expect(daemon.projects.known('/work/maws')).toBe(false);
   });
 
   // D38: re-execution is a switch, off by default (SPINE_REEXECUTE_DEFAULT); MAWS_SPINE_REEXECUTE=1 turns it on for one

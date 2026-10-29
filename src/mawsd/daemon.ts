@@ -79,7 +79,7 @@ import { buildIdOf, isAlive, procStartOf, readLock, START_EXIT_HELD, takeLock } 
 import { LOG_ROTATE_BYTES, openSupervisorLog } from '../engine-host/supervisor-log';
 import { ptyHostFiles } from '../pty-host/files';
 import { DaemonClocks, DEFAULT_IDLE_EXIT_MS } from './clocks';
-import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOINT_MODULE, type DaemonServices, type EndpointModule } from './endpoint-seam';
+import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOINT_MODULE, type CheckoutSource, type DaemonServices, type EndpointModule } from './endpoint-seam';
 import { createServicesFront } from './front';
 import { DEPARTURE_BOUND_MS, Relay, type RelayRequest } from './relay';
 import { createLazySpine, loadServicesEntry, type SpineEntry, type SpineTiming } from './spine-seam';
@@ -131,6 +131,7 @@ export interface RunningDaemon {
   ref: MachineRef;
   hosts: HostSupervisor;
   services: DaemonServices;
+  projects: CheckoutSource; // the endpoint's injected source of MAWS's own projects
   status(): Promise<DaemonStatus>;
   stop(reason: string, code?: number): Promise<void>; // the exit order; a second call joins the first
 }
@@ -212,7 +213,15 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const permanentClient = options.permanentClient ?? false;
   const engineHello = permanentClient ? PEER_CAPABILITIES.daemonToEngineHost : PEER_CAPABILITIES.daemonToEngineHost.filter((name) => name !== ATTACHMENT_CAPABILITY);
   const engineIdentity = appIdentity(options.modules.engineHost, env, 'detached', engineHello); // the e2e seams stand in, as for main
-  const endpoint = options.endpoint === undefined ? loadEndpointModule(buildId) : options.endpoint;
+  // P5 O3-D M4 (Interfaces §E, D11): MAWS's own projects, checkouts the endpoint knows beside RL10's: every project row of
+  // the loaded spine while its view is available (none while it is cold, refused, or a scenario's)
+  const projects: CheckoutSource = {
+    known: (path) => {
+      const view = spine.root()?.view;
+      return view !== undefined && view.unavailable() === null && view.projectRows().some((row) => row.directory === path);
+    },
+  };
+  const endpoint = options.endpoint === undefined ? loadEndpointModule(buildId, { projects }) : options.endpoint;
   // The machine's enrollment, the endpoint's in process (D16, D38): machine.identity's project and the spine's org projects
   const enrollment = () => machineEnrollment(() => endpoint?.enrollment() ?? null);
 
@@ -838,7 +847,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   log(`serving; engine host ${engineAdopted ? 'adopted' : 'parked'}, pty host ${ptyAdopted ? 'adopted' : 'parked'}`);
   clocks.served(); // its quiet is told from here: no client yet is its first entry, with the start's garbage behind it
 
-  return { paths, ref, hosts, services, status, stop };
+  return { paths, ref, hosts, services, projects, status, stop };
 }
 
 // An endpoint document channel's end, as main's relay holds a window's port (doc-relay.ts's RelayPort).
