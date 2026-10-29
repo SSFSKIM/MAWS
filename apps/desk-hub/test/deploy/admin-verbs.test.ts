@@ -242,6 +242,16 @@ describe('on the local hub', () => {
     expect((await head()).state.version).toBe(before.state.version);
   });
 
+  it('refuses before signing a successor the package would refuse (successorProblems): a machine posting a key m1 holds', async () => {
+    const before = await head();
+    const { f, running, code } = await enrolling('twin');
+    await enrollV2(code, 'twin', { key: m1.key });
+    expect(await running).toBe(1);
+    expect(f.err.join('\n')).toMatch(new RegExp(`version ${before.state.version + 1} would be refused: key-held-twice \\(.*machine ${m1.ref}.*\\): nothing was signed`));
+    expect((await head()).state.version).toBe(before.state.version);
+    expect(anchor().pending).toBeUndefined();
+  });
+
   it('holds the anchor\'s lock for its signing alone: a refresh during its wait signs, and it signs next on the head it reads again', async () => {
     const before = await head();
     const { f, running, code } = await enrolling('m4');

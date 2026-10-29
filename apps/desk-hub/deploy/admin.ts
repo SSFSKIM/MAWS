@@ -54,6 +54,7 @@ import {
   pairingFingerprint,
   signOrgState,
   stateHash,
+  successorProblems,
   verifyEnrollmentMac,
   verifyGenesis,
   verifyPinnedChain,
@@ -449,6 +450,11 @@ async function anchored(ctx: Context, needsSigner: boolean, { unsent = 'refuse' 
   async function signPending(edit: (state: OrgState) => Promise<void> | void, unsent: boolean): Promise<SignedOrgState> {
     const next = await successor(head.state, () => {});
     await edit(next);
+    // What the package would refuse once signed, refused before: the slot never holds a successor no verifier takes.
+    const problems = await successorProblems(head.state, next);
+    if (problems.length > 0) {
+      refuse(`version ${next.version} would be refused: ${problems.map((p) => (p.detail === undefined ? p.code : `${p.code} (${printable(p.detail)})`)).join('; ')}: nothing was signed`);
+    }
     const signed = await signOrgState(next, [keys.stepUp]);
     save({ ...anchor, pending: signed, ...(unsent ? { unsent: true as const } : {}) });
     return signed;
