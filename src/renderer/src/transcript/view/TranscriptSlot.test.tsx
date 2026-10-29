@@ -44,7 +44,7 @@ afterAll(() => Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offs
 // React's renders and effects): `settle` drains it inside act by yielding the event loop once, and the expectation is
 // read once, so load can slow a case but not fail it.
 beforeAll(async () => {
-  await Promise.all([import('./TranscriptSlot'), import('./Transcript'), import('./markdown/Markdown')]);
+  await Promise.all([import('./TranscriptSlot'), import('./Transcript'), import('./markdown/Markdown'), import('../../lane-a/view/RemoteTranscriptSlot') /* P5 O9 M9 */]);
 });
 const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 
