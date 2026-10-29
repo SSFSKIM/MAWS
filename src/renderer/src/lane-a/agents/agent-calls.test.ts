@@ -106,6 +106,18 @@ describe('an Agent call whose session’s process exits', () => {
     expect(shown(applyEvents(revealed, exit(b.at + 1_000, 'crash')))).toEqual([]);
   });
 
+  it('a child resumed through SendMessage, its start naming that call: the process then exiting folds its row too', () => {
+    const b = builder();
+    b.turn('u1', 'Tell the survey to go on.');
+    b.toolUse('s1', 'SendMessage', { to: 'Survey', message: 'go on' }, 'm1', 0);
+    b.emit('subagent.started', { taskId: task('k1'), toolUseId: tool('s1'), description: 'Survey', subagentType: null, isBackground: true, spawnDepth: 1, prompt: null });
+    b.result('s1', 'Message sent.');
+    b.end(['u1']);
+    const state = applyEvents(createState(null, null), b.events);
+    expect(shown(state)).toEqual(['started']);
+    expect(shown(applyEvents(state, exit(b.at + 1_000, 'crash')))).toEqual([]);
+  });
+
   it('an exit before the call (an earlier process’s) ends none of its agents', () => {
     const earlier = exit(Date.parse('2026-09-28T09:00:00.000Z'), 'stop');
     const b = started();

@@ -761,10 +761,10 @@ function apply(batch: Batch, event: SessionEvent): void {
           if (turn.state === 'open' && turn.accepted) {
             const { outcome, cause } = exitClosing(turn, event.reason);
             batch.closeUnended(batch.touch(id), outcome, event.at, cause);
-          } else if (turn.events.some(isAgentCall)) batch.touch(id).version += 1; // P5 O9: its agents ended with the process (derive.ts, exitedSince)
+          } else if (turn.events.some(makesAgentsRow)) batch.touch(id).version += 1; // P5 O9: its agents ended with the process (derive.ts, exitedSince)
         }
-        // P5 O9: a turn a rewind hid draws when its branch is revealed (rowsOf), so its Agent rows derive again too
-        for (const id of state.hidden?.turns ?? []) if (state.turns.get(id)?.events.some(isAgentCall)) batch.touch(id).version += 1;
+        // P5 O9: a turn a rewind hid draws when its branch is revealed (rowsOf), so its agents rows derive again too
+        for (const id of state.hidden?.turns ?? []) if (state.turns.get(id)?.events.some(makesAgentsRow)) batch.touch(id).version += 1;
       }
       return batch.loose(event);
     }
@@ -857,7 +857,12 @@ function applySideThread(batch: Batch, event: Event<'side.thread.opened'> | Even
 }
 // E3 end
 
-const isAgentCall = (event: SessionEvent) => event.kind === 'tool.use' && presentationOf(event.toolName) === 'subagent';
+// An event derive draws an agents row from (derive.ts): an Agent call, or an agent's start with no call of its own (a child
+// resumed through SendMessage names that call's tool use).
+const makesAgentsRow = (event: SessionEvent) =>
+  (event.kind === 'tool.use' && presentationOf(event.toolName) === 'subagent') ||
+  event.kind === 'subagent.started' ||
+  (event.kind === 'task.started' && (event.taskType === 'local_agent' || event.taskType === 'local_workflow'));
 
 // Interrupt evidence a turn retains: the engine's interrupt marker, or a call the human rejected.
 const wasInterrupted = (turn: TurnState) =>
