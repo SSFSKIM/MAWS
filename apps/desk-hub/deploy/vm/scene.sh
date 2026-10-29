@@ -25,6 +25,7 @@
 #   started                      the sessions the scene recorded starting: `session <id>` (lane A), `seat <id>`
 #   notified                     the endpoint's notified.json (the counts it last told the hub), `{}` when none
 #   lane-a-deny | pane           Escape into the session's pane (a question it asks, declined there); the pane's last lines
+#   lane-a-notice                a notice the engine shows at start (`Enter to continue`) passed with Enter; `none` if none
 #   down                         everything of the scene ended and removed; `LEFT …` for what could not be
 # Nothing here names the owner, the owner's profile, sminos or daemon, or the VM's own mawsd (port 47830): the scene is
 # o10acc's alone, and `down` ends that user's processes and nothing else.
@@ -278,6 +279,7 @@ case $verb in
   retire) word "${1:-}"; as bash -c "cd $W && exec $SMINOS retire $1" ;;
   notified) f=$P/mawsd/endpoint/notified.json; if [[ -f $f ]]; then tr -d '\n' <"$f"; echo; else say '{}'; fi ;;
   lane-a-deny) as tmux -L $TX send-keys -t lane-a Escape && say "Escape into the session's pane" ;;
+  lane-a-notice) if as tmux -L $TX capture-pane -p -t lane-a | grep -qF 'Enter to continue'; then as tmux -L $TX send-keys -t lane-a Enter && say "notice passed"; else say none; fi ;;
   pane) as tmux -L $TX capture-pane -p -t lane-a | grep -v '^\s*$' | tail -20 ;;
   started) for f in session seat.session; do [[ -s $R/$f ]] && say "${f%.session} $(head -1 $R/$f)"; done; true ;;
   down) stop_verbs; v=$?; down; d=$?; exit $((v | d)) ;;

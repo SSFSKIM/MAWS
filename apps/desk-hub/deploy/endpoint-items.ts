@@ -1157,6 +1157,8 @@ export async function item10(scene: Scene, report: ItemReport): Promise<void> {
   try {
     const asked = await report.check('10', 'a question lane A asks after its project opened: notified.json and the hub’s presence hold the session pending 1', async () => {
       if (probe === undefined) return { skip: 'the machine has no question probe' };
+      // claude 2.1.312 opens on a notice about the gateway's classifier billing that holds every prompt behind it.
+      if (await probe.passNotice()) scene.log('item 10: the engine’s start notice passed');
       const mine = await open(scene, scene.owner, 'direct');
       try {
         const said = await mine.act(send(scene, mine, `o10-m11 ask ${scene.tag}q`));

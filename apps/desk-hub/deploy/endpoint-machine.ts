@@ -73,6 +73,8 @@ export interface QuestionProbe {
   deny(): Promise<void>;
   /** The session pane's last lines, for a failure's message. */
   pane(): Promise<string[]>;
+  /** A notice the engine shows at start, which holds every prompt behind it, passed (Enter); whether one was up. */
+  passNotice(): Promise<boolean>;
 }
 
 export interface EndpointMachine {
@@ -314,6 +316,7 @@ export class VmMachine implements EndpointMachine {
     notified: async () => jsonLine('notified', await this.scene('notified')) as Record<string, { project: string; pending: number }>,
     deny: async () => void (await this.scene('lane-a-deny')),
     pane: async () => (await this.scene('pane')).lines,
+    passNotice: async () => (await this.scene('lane-a-notice')).lines.includes('notice passed'),
   };
   readonly #script: string;
 
