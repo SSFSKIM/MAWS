@@ -302,6 +302,8 @@ test("an E2E_MINUTES group takes its own minutes before the wait is added, every
   const { outputs } = plan({ ...lists, HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:daemon-idle-aba,e2e:daemon-idle-enrolled,e2e:library,e2e:side\nRunner: macos' });
   assert.deepEqual(placement(outputs), { 'daemon-idle-aba': [homeMac, 100], 'daemon-idle-enrolled': [homeMac, 70], library: [mac, 60], side: [mac, 40] });
   assert.deepEqual(placement(plan({ ...lists, LINUX_E2E: 'library', HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:library\nRunner: linux' }).outputs), { library: ['ubuntu-24.04', 50] }); // off the Mac, no wait on top
+  // The cap itself is accepted, the wait still added on top: 300 + the home Mac's 10.
+  assert.deepEqual(placement(plan({ MEASURED_E2E: 'daemon-idle-aba', E2E_MINUTES: 'daemon-idle-aba=300', HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:daemon-idle-aba\nRunner: macos' }).outputs), { 'daemon-idle-aba': [homeMac, 310] });
   for (const [listed, said] of [
     ['daemon-idle-aba', 'E2E_MINUTES: daemon-idle-aba is not <group>=<minutes>, a positive whole number of minutes'],
     ['daemon-idle-aba=0', 'E2E_MINUTES: daemon-idle-aba=0 is not <group>=<minutes>, a positive whole number of minutes'],
@@ -309,6 +311,8 @@ test("an E2E_MINUTES group takes its own minutes before the wait is added, every
     ['daemon-idle-aba=-90', 'E2E_MINUTES: daemon-idle-aba=-90 is not <group>=<minutes>, a positive whole number of minutes'],
     ['daemon-idle-aba=90m', 'E2E_MINUTES: daemon-idle-aba=90m is not <group>=<minutes>, a positive whole number of minutes'],
     ['=90', 'E2E_MINUTES: =90 is not <group>=<minutes>, a positive whole number of minutes'],
+    [`daemon-idle-aba=${'9'.repeat(309)}`, `E2E_MINUTES: daemon-idle-aba=${'9'.repeat(309)} is not <group>=<minutes>, a positive whole number of minutes, at most 300`], // Infinity, which JSON writes as null
+    ['daemon-idle-aba=301', 'E2E_MINUTES: daemon-idle-aba=301 is not <group>=<minutes>, a positive whole number of minutes, at most 300'],
     ['no-such-group=90', 'E2E_MINUTES names no-such-group, which has no e2e:no-such-group script'],
   ]) {
     for (const message of ['ci-gate: test\n\nGates: e2e:daemon-idle-aba\nRunner: macos', 'ci-gate: test\n\nGates: static\nClass1a: pool']) {

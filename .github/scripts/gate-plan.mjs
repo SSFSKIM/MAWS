@@ -240,9 +240,13 @@ export function planOf(env, scripts) {
   const measured = new Set(words(env.MEASURED_E2E));
   // E2E_MINUTES: a group whose own run needs more than its class's minutes, `name=minutes`, before its runner's start wait
   // is added. Refused, whatever the run, when an entry is not that form, its minutes not a positive whole number, or its
-  // name no group with a package script.
+  // name no group with a package script. At most 300: GitHub-hosted jobs stop at 360 minutes (docs.github.com/en/actions/
+  // reference/limits; self-hosted allow 5 days), and the longest wait added on top is MAC_SHARED_WAIT_MINUTES, 60.
+  const MAX_OWN_MINUTES = 300;
   const ownMinutes = new Map(words(env.E2E_MINUTES).map((entry) => {
     const [, group, minutes] = /^([^=]+)=([1-9]\d*)$/.exec(entry) ?? refuse(`E2E_MINUTES: ${entry} is not <group>=<minutes>, a positive whole number of minutes`);
+    // A huge decimal passes the pattern and becomes Infinity, which JSON writes as null: refuse past the cap, as for a malformed entry.
+    if (!(Number.isSafeInteger(Number(minutes)) && Number(minutes) <= MAX_OWN_MINUTES)) refuse(`E2E_MINUTES: ${entry} is not <group>=<minutes>, a positive whole number of minutes, at most ${MAX_OWN_MINUTES}`);
     if (!(scriptOf(group) in scripts)) refuse(`E2E_MINUTES names ${group}, which has no ${scriptOf(group)} script`);
     return [group, Number(minutes)];
   }));
