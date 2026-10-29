@@ -35,7 +35,8 @@ export interface Weekly {
   resign(): Promise<SignOutcome>;
   /** `due()` or `ageDays()` changed (read at each focus, each check and each change of the signer). */
   onChanged(listener: () => void): () => void;
-  close(): void;
+  /** Stops asking and notifying. Resolves once an ask or a check in flight has ended. */
+  close(): Promise<void>;
 }
 
 export type WeeklyDeps = {
@@ -121,7 +122,8 @@ export function startWeekly(deps: WeeklyDeps): Weekly {
     if (claimed === null) return false;
     // Touch ID follows synchronously, so nothing can take the focus between this check and the prompt.
     if (!closed && deps.focused() && deps.signer.maySign()) return true;
-    await unclaim(claimed);
+    // Closed meanwhile: nothing more is written, and the day stays claimed, as after a crash.
+    if (!closed) await unclaim(claimed);
     return false;
   }
 
@@ -148,17 +150,28 @@ export function startWeekly(deps: WeeklyDeps): Weekly {
     changed();
     if (closed || !due() || deps.focused()) return;
     try {
-      if ((await claim('lastNotified')) === null) return;
+      if ((await claim('lastNotified')) === null || closed) return;
       deps.notify(`The org state is ${ageDays()} days old. MAWS will ask for Touch ID when you next open it.`);
     } catch (error) {
       log(`the notification failed: ${(error as Error).message}`);
     }
   }
 
+  /** The asks and checks in flight, which `close` joins. */
+  const inFlight = new Set<Promise<void>>();
+  const track = (work: Promise<void>): void => {
+    inFlight.add(work);
+    const done = () => void inFlight.delete(work);
+    work.then(done, (error: unknown) => {
+      done();
+      log(`an ask or a check failed: ${(error as Error).message}`);
+    });
+  };
+
   changed();
-  const offFocus = deps.onFocus(() => void ask());
+  const offFocus = deps.onFocus(() => track(ask()));
   const offSigner = deps.signer.onChanged(changed);
-  const timer = setInterval(() => void check(), timing.WEEKLY_CHECK_MS);
+  const timer = setInterval(() => track(check()), timing.WEEKLY_CHECK_MS);
   timer.unref?.();
 
   return {
@@ -175,6 +188,7 @@ export function startWeekly(deps: WeeklyDeps): Weekly {
       offFocus();
       offSigner();
       listeners.clear();
+      return Promise.allSettled(inFlight).then(() => undefined);
     },
   };
 }

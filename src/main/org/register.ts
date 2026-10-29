@@ -4,10 +4,11 @@
 // `development`, from the development session's identity once it has loaded, and every act is refused `busy`.
 //
 // M2 adds `org.rows` (registerRowsHandler). M3 adds the signer's acts: `org.resign`, `org.revokeSuperseded`, `org.rekey`,
-// `org.discardPending` and `org.resetSigning`, each refused under `MAWS_DEV_ORG` as the rest are.
+// `org.discardPending` and `org.resetSigning`, each refused under `MAWS_DEV_ORG` as the rest are. M4a adds the Org page's
+// `org.view`, `org.preview`, `org.change` and `org.pair.*` (under `MAWS_DEV_ORG`: no view, and every act refused).
 //
 // Electron-free: main injects its `registerMainHandler` and `emit`.
-import type { DiscardResult, OrgAttempt, OrgRows, OrgStatus, SignResult } from '@shared/ipc/schema/org';
+import type { DiscardResult, OrgAttempt, OrgRows, OrgStatus, PairStartResult, PreviewResult, SignResult } from '@shared/ipc/schema/org';
 import type { MainHandler } from '../ipc/router';
 import type { OrgSessionService } from './org-session';
 import type { OrgSession } from './session';
@@ -23,7 +24,13 @@ type OrgCommand =
   | 'org.revokeSuperseded'
   | 'org.rekey'
   | 'org.discardPending'
-  | 'org.resetSigning';
+  | 'org.resetSigning'
+  | 'org.view'
+  | 'org.preview'
+  | 'org.change'
+  | 'org.pair.start'
+  | 'org.pair.approve'
+  | 'org.pair.cancel';
 
 export function registerOrgHandlers(deps: {
   register<N extends OrgCommand>(name: N, handler: MainHandler<N>): void;
@@ -53,6 +60,14 @@ export function registerOrgHandlers(deps: {
     deps.register('org.rekey', () => refused);
     deps.register('org.discardPending', () => undiscarded);
     deps.register('org.resetSigning', () => {});
+    const unpreviewed: PreviewResult = { ok: false, reason: 'not-root', detail: 'MAWS_DEV_ORG is in force', findings: [] };
+    const unpaired: PairStartResult = { ok: false, reason: 'busy', detail: 'MAWS_DEV_ORG is in force' };
+    deps.register('org.view', () => null);
+    deps.register('org.preview', () => unpreviewed);
+    deps.register('org.change', () => unsigned);
+    deps.register('org.pair.start', () => unpaired);
+    deps.register('org.pair.approve', () => unsigned);
+    deps.register('org.pair.cancel', () => {});
     return development?.onChanged(() => deps.emit('org.changed', status())) ?? (() => {});
   }
   deps.register('org.status', () => service.status());
@@ -66,6 +81,12 @@ export function registerOrgHandlers(deps: {
   deps.register('org.rekey', ({ code }) => service.rekey(code));
   deps.register('org.discardPending', ({ confirmed, hash }) => service.discardPending(confirmed, hash));
   deps.register('org.resetSigning', ({ confirmed }) => service.resetSigning(confirmed));
+  deps.register('org.view', () => service.view());
+  deps.register('org.preview', ({ change }) => service.preview(change));
+  deps.register('org.change', ({ change, digest }) => service.change(change, digest));
+  deps.register('org.pair.start', (input) => service.pairStart(input));
+  deps.register('org.pair.approve', (input) => service.pairApprove(input));
+  deps.register('org.pair.cancel', () => service.pairCancel());
   return service.onStatus((status) => deps.emit('org.changed', status));
 }
 

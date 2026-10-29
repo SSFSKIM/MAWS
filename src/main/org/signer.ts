@@ -20,11 +20,16 @@
 //   doesn't hold the state, read from the hub then and there. A fork waits for it; so does a slot the hub keeps
 //   refusing for another reason (a courtesy check), which settling would otherwise post again forever.
 // - A sign-out or close fences what is in flight (`fence`, `close`): a sign asked for before it stops before Touch ID,
-//   before its slot is written and before any post; a settle or discard stops before its post or its write. A slot
-//   written before the sign-out stays, and settles at the next sign-in. Each post is made on the held line it was
-//   planned on, checked again synchronously after its exposure write, with the hub client of that moment.
+//   before its slot is written and before any post; a settle or discard stops before its post or its write; and none
+//   adopts a hub read it made before the fence. A slot written before the sign-out stays, and settles at the next
+//   sign-in. Each post is made on the held line it was planned on, checked again synchronously after its exposure write,
+//   with the hub client of that moment. `close` resolves once the operation in flight has ended (M4a's *Close*).
 // - The slot's state and its obligation settle apart: the slot at the hub's acceptance, the obligation (deliveries.ts,
 //   Task 5) when its machines acknowledge. A discard moves the obligation to `abandoned` in the same write.
+// - M4a: an edit may name devices this device endorses inside the same Touch ID (`Edit.endorse`; the checks count them
+//   endorsed, `verifySuccessor` checks the real endorsement after), and may carry a liveness guard (`Edit.live`, a
+//   pairing's) read before Touch ID, by the device module after the person's yes, and inside the slot's write, so a
+//   pairing that ends while Touch ID is open endorses, signs, slots and posts nothing.
 //
 // Network calls and adoptions run outside the signing store's updates (whose queue adoption's anchor write waits on).
 // Electron-free: the state signer is injected (step-up.ts's `createStateSigner`, imported here for its type only).
@@ -37,8 +42,15 @@ import type { HubClient, HubResult, Served } from './hub-client';
 import type { OrgSession } from './session';
 import { SigningDamaged, withExposure, type SigningStore } from './signing-store';
 
-/** A change to the org state, in the words the person confirms: `apply` edits the successor's draft. */
-export type Edit = { summary: string; lines: string[]; apply(draft: OrgState): void | Promise<void> };
+/**
+ * A change to the org state, in the words the person confirms: `apply` edits the successor's draft (M4a's composers are
+ * edits.ts). `endorse`: devices the draft lists that this device endorses with its step-up key inside the same Touch ID
+ * (a later device of this Mac's own member, paired from here); the checks count each as endorsed. `live`: whether the
+ * change still stands (a pairing neither cancelled nor expired), checked before Touch ID, by the device module after the
+ * person's yes, and just before the slot's write; once the slot holds the proposal it is durable, and `live` no longer
+ * withdraws it.
+ */
+export type Edit = { summary: string; lines: string[]; endorse?: ReadonlyArray<{ member: string; device: string }>; live?(): boolean; apply(draft: OrgState): void | Promise<void> };
 
 /**
  * `beforePrompt`: the caller's last word, awaited once everything before Touch ID has passed; Touch ID is asked
@@ -87,8 +99,11 @@ export interface OrgSigner {
   fence(): void;
   /** `pending()` changed (a slot written or cleared, its fork judged), so the status can be emitted again. */
   onChanged(listener: () => void): () => void;
-  /** Fences as `fence` does, for good: nothing in flight goes further. */
-  close(): void;
+  /**
+   * Fences as `fence` does, for good: nothing in flight goes further. Resolves once the operation in flight (a sign,
+   * settle, discard or reset, and a judging of the slot) has ended, so the session's close can join it.
+   */
+  close(): Promise<void>;
 }
 
 /** What the signer needs of deliveries.ts (Task 5's `Deliveries`). */
@@ -118,6 +133,19 @@ export type OrgSignerDeps = {
  * again on the head the signer drafts from). The sign ends `stale` before Touch ID.
  */
 export class StaleEdit extends Error {}
+
+/**
+ * An edit's refusal of what it was asked to do, whatever the head says (edits.ts's composers: changing yourself,
+ * removing this Mac's device, …). The sign ends `refused` with these findings before Touch ID, as the checks' refusals do.
+ */
+export class RefusedEdit extends Error {
+  constructor(readonly findings: Finding[]) {
+    super(findings.map((f) => f.detail).join('; '));
+  }
+}
+
+/** The edit no longer stands: what `live()` saying no reads as before Touch ID and before the slot's write. */
+const ENDED = 'the change ended (a pairing cancelled or expired): nothing was signed';
 
 /**
  * The successor of `head` an edit applies to, as `deploy/org-admin.ts`'s `successor()` composes it: a copy of its state,
@@ -243,13 +271,21 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     judged = next;
     announce();
   }
-  const refreshNow = () => refresh().catch((error: unknown) => log(`judging the pending state failed: ${(error as Error).message}`));
+  /** The judgings in flight, which `close` joins: one may be clearing the slot. */
+  const judgings = new Set<Promise<void>>();
+  const refreshNow = (): Promise<void> => {
+    const judging = refresh().catch((error: unknown) => log(`judging the pending state failed: ${(error as Error).message}`));
+    judgings.add(judging);
+    void judging.finally(() => judgings.delete(judging));
+    return judging;
+  };
   const refreshed = () => void refreshNow();
   const unwatch = deps.session.onChanged(refreshed);
   refreshed();
 
-  /** Clears the slot if it still holds `slot`'s state. */
+  /** Clears the slot if it still holds `slot`'s state (never once closed: the next start settles it). */
   async function clear(slot: Pending): Promise<void> {
+    if (closed) return;
     const key = canonicalize(slot.signed.state);
     const cleared = await store.update((file) => {
       if (file.pending === null || canonicalize(file.pending.signed.state) !== key) return { next: file, value: false };
@@ -273,14 +309,20 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
    * The hub's chain read and adopted, by M1's rule (held.ts's `rereadFrom`): after the held head (or `from`), and again
    * from a recovery's base when the page carries a recovery from below the head, so a rewind is authenticated and taken
    * rather than refused as a rollback. `agreed`: the held head is now the hub's head; `why`: what kept it from being.
+   * Null with no held view, or once the lifecycle `asked` names has ended (a sign-out or close since a read): nothing
+   * read after it is adopted.
    */
-  async function follow(hub: HubClient, from?: number): Promise<{ read: HubResult<Served>; agreed: boolean; why?: string } | null> {
+  async function follow(hub: HubClient, asked: number, from?: number): Promise<{ read: HubResult<Served>; agreed: boolean; why?: string } | null> {
     const view = deps.held();
     if (view === null) return null;
     let read = await hub.chain(from ?? view.head().state.version);
+    if (!live(asked)) return null;
     if (read.ok) {
       const again = rereadFrom(view, read.value);
-      if (again !== null && (from === undefined || again < from)) read = await hub.chain(again);
+      if (again !== null && (from === undefined || again < from)) {
+        read = await hub.chain(again);
+        if (!live(asked)) return null;
+      }
     }
     if (!read.ok) {
       log(`the hub's chain did not read: ${describe(read)}`);
@@ -334,6 +376,8 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
       log(`version ${version}: the held head is not its parent; nothing was posted`);
       return { ok: false, reason: 'hub', detail: `the held org state is no longer version ${version}'s parent: nothing was posted, and it stays pending` };
     }
+    // The parent's hash was an await: a sign-out or close since stops it before the exposure's enqueue.
+    if (!live(asked)) return stopped(unsent);
     try {
       await store.update((file) => ({ next: withExposure(file, signed, { hub: true }), value: undefined }));
     } catch (error) {
@@ -357,7 +401,9 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     heard(signed, answer.ok || answer.kind === 'unreachable' ? null : lost ? answer.error : describe(answer));
     if (answer.ok) {
       log(`version ${version} accepted by the hub`);
-      let why = (await follow(hub))?.why;
+      let why = (await follow(hub, asked))?.why;
+      // A sign-out or close since the post: nothing is adopted for it here; the slot settles at the next sign-in.
+      if (!live(asked)) return stopped(`version ${version} was posted, and stays pending until this Mac signs in again`);
       const view = deps.held();
       // Adopted directly when the chain's read didn't bring it: the held view verifies it as any state.
       if (view !== null && stateAt(view, version) === undefined) {
@@ -379,7 +425,7 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     }
     log(`version ${version}: the hub answered ${describe(answer)}; it stays pending`);
     if (answer.kind === 'status' && answer.status === 409 && (answer.error === 'not-head' || answer.error === 'rollback')) {
-      await follow(hub);
+      await follow(hub, asked);
       // The hub's chain holds it after all (an earlier post of the same bytes): settled.
       if (await clearIfHeld()) return { ok: true, version };
       return { ok: false, reason: 'hub', detail: answer.error };
@@ -405,7 +451,7 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     if (verdict === 'candidate') {
       const hub = deps.hub();
       if (hub === null) return;
-      const followed = await follow(hub);
+      const followed = await follow(hub, asked);
       if (followed === null || !followed.read.ok) return;
       const now = deps.held();
       if (now === null) return;
@@ -447,7 +493,8 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     // A hub that can't be read is passed over (direct delivery needs no hub); one whose head the held view won't take
     // is not: the held head may be one a recovery superseded, signed for with a root the recovery removed.
     const hub = deps.hub();
-    const followed = hub === null ? null : await follow(hub);
+    const followed = hub === null ? null : await follow(hub, asked);
+    if (!live(asked)) return stopped('nothing was signed');
     if (followed !== null && followed.read.ok && !followed.agreed) {
       return { ok: false, reason: 'hub', detail: `the hub's head was not taken here (${followed.why}): nothing is signed until the two agree` };
     }
@@ -462,10 +509,16 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
       await edit.apply(draft);
     } catch (error) {
       if (error instanceof StaleEdit) return { ok: false, reason: 'stale', detail: error.message };
+      if (error instanceof RefusedEdit) return { ok: false, reason: 'refused', findings: error.findings };
       return { ok: false, reason: 'invalid', detail: `the edit failed: ${(error as Error).message}` };
     }
+    // Each device to endorse is one the draft lists under that member: the device module endorses only what it signs.
+    const endorse = edit.endorse ?? [];
+    const unlisted = endorse.find(({ member, device }) => !draft.members.some((m) => m.id === member && m.devices.some((d) => d.id === device)));
+    if (unlisted !== undefined) return { ok: false, reason: 'invalid', detail: `the edit names device ${unlisted.device} to endorse, which the successor doesn't list under that member` };
 
-    const findings = await checkSuccessor(head.state, draft, view.superseded(), new Date(now()));
+    const endorsing = endorse.length === 0 ? undefined : { kid: signer.kid, devices: endorse.map((e) => e.device) };
+    const findings = await checkSuccessor(head.state, draft, view.superseded(), new Date(now()), endorsing === undefined ? {} : { endorsing });
     if (findings.some((f) => f.level === 'refuse')) return { ok: false, reason: 'refused', findings };
     const text = [
       `Org ${draft.org}: version ${head.state.version} → ${draft.version}`,
@@ -482,8 +535,10 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     if (options.beforePrompt !== undefined && !(await options.beforePrompt())) return { ok: false, reason: 'cancelled', detail: 'not asked' };
     // Synchronously from here to Touch ID.
     if (!live(asked)) return stopped('nothing was signed');
-    const answer = await signer.sign(draft, { summary, text });
-    if (!answer.ok) return { ok: false, reason: 'cancelled' };
+    if (edit.live !== undefined && !edit.live()) return { ok: false, reason: 'stale', detail: ENDED };
+    // The device module reads `live` again once the person said yes, before it endorses or signs anything.
+    const answer = await signer.sign(draft, { summary, text }, { endorse, ...(edit.live === undefined ? {} : { live: () => edit.live!() }) });
+    if (!answer.ok) return edit.live !== undefined && !edit.live() ? { ok: false, reason: 'cancelled', detail: ENDED } : { ok: false, reason: 'cancelled' };
     const signed = answer.signed;
 
     // Judged against the head as it is now: one adopted while the person was asked makes it `not-head`.
@@ -497,11 +552,18 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     }
     const obligation = await deliveries.obligation(signed, parent.state);
     const slot: Pending = { signed, parent: await stateHash(parent.state), hash: await stateHash(signed.state), exposed: { hub: false, machines: [] } };
-    let kept: 'kept' | 'pending' | 'moved' | 'stopped';
+    let kept: 'kept' | 'pending' | 'moved' | 'stopped' | 'ended';
+    // Right before the enqueue (the verdict and the obligation were awaits): a close since refuses the store's queue, and
+    // a sign-out since keeps nothing, so either reads as the stopped sign it is.
+    if (!live(asked)) return stopped('what was signed was not kept or sent');
     try {
       kept = await store.update((f) => {
         // A sign-out since the person was asked: what was signed is never kept, so nothing can post it later.
         if (!live(asked)) return { next: f, value: 'stopped' as const };
+        // The change ended since the person said yes (the verdict and the obligation were awaited, and a first write's
+        // registration mark, after which the store runs this again): never kept. From this write on the proposal is
+        // durable, and ending the change no longer withdraws it.
+        if (edit.live !== undefined && !edit.live()) return { next: f, value: 'ended' as const };
         if (f.pending !== null) return { next: f, value: 'pending' as const };
         // An adoption between the verdict and this turn: the slot would name a parent that is no longer the head.
         if (deps.held() !== current || current.head() !== parent) return { next: f, value: 'moved' as const };
@@ -515,6 +577,7 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     if (kept === 'pending') return { ok: false, reason: 'pending' };
     if (kept === 'moved') return { ok: false, reason: 'invalid', detail: 'not-head' };
     if (kept === 'stopped') return stopped('what was signed was not kept or sent');
+    if (kept === 'ended') return { ok: false, reason: 'stale', detail: 'the change ended (a pairing cancelled or expired) after Touch ID: what was signed was not kept or sent' };
     log(`version ${signed.state.version} signed and kept pending${obligation === null ? '' : `, owed to ${obligation.owed.length} machine(s)`}`);
     refreshed();
 
@@ -562,7 +625,8 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
         const hub = deps.hub();
         if (hub === null) return { ok: false, reason: 'hub' };
         // The hub's chain from the slot's version, adopted first: the floor after the discard is its head.
-        const followed = await follow(hub, version - 1);
+        const followed = await follow(hub, asked, version - 1);
+        if (!live(asked)) return { ok: false };
         if (followed === null || !followed.read.ok) return { ok: false, reason: 'hub' };
         const served = followed.read.value;
         const there = served.chain.find((s) => s.state.version === version);
@@ -574,8 +638,10 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
         const hubVersion = isSignedOrgState(served.head) ? served.head.state.version : 0;
         const view = deps.held();
         if (view === null || view.head().state.version < hubVersion) return { ok: false, reason: 'hub' };
-        const hash = await stateHash(slot.signed.state);
+        // The slot's own hash (the store computed it), so no await falls between the lifecycle check and the enqueue.
+        const hash = slot.hash;
         const key = canonicalize(slot.signed.state);
+        if (!live(asked)) return { ok: false };
         const done = await store.update<'stopped' | { unsent: boolean } | null>((f) => {
           // A sign-out since the owner confirmed: the hub was read for the lifecycle that ended, so nothing is discarded on it.
           if (!live(asked)) return { next: f, value: 'stopped' as const };
@@ -597,6 +663,8 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     async resetSigning(confirmed) {
       if (confirmed !== true) return;
       await exclusive(async () => {
+        // Asked for before a close whose fence ran first: nothing is written once closed (the next start asks again).
+        if (closed) return;
         if (store.get() !== 'damaged') {
           log('signing.json reads: nothing to reset');
           return;
@@ -618,6 +686,7 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
       epoch++;
       unwatch();
       listeners.clear();
+      return Promise.all([turns, ...judgings]).then(() => undefined);
     },
   };
 }

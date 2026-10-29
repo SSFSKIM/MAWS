@@ -32,6 +32,8 @@ export interface SigningStore {
   /**
    * In the commit queue: `fn` is given a private copy of the file as it stands at its turn, and its `next` is written
    * (unless unchanged) before the update resolves. Throws `SigningDamaged` on a damaged file, and a write's error.
+   * `fn` is a synchronous, side-effect-free function of the file and what it reads: before the first write it runs
+   * again after the registration's mark, and that run's `next` and `value` are the ones written and returned.
    */
   update<T>(fn: (file: SigningFile) => { next: SigningFile; value: T }): Promise<T>;
   /** A fresh file, whatever was held: `org.resetSigning`'s, which the signer allows only on a damaged file. */
@@ -72,9 +74,9 @@ export async function createSigningStore(deps: {
 
   let file = await commit(read);
 
+  /** Writes `next`; the registration is marked by `update` and `reset` before a first write reaches here. */
   async function persist(next: SigningFile): Promise<void> {
     if (!isSigningFile(next)) throw new TypeError(`an update would write a ${SIGNING_FILE} that does not read back`);
-    if (!flagged()) await deps.markRegistration();
     try {
       await files.write(SIGNING_FILE, next);
       file = next;
@@ -90,12 +92,29 @@ export async function createSigningStore(deps: {
     update(fn) {
       return commit(async () => {
         if (file === 'damaged') throw new SigningDamaged();
-        const { next, value } = fn(structuredClone(file));
-        if (JSON.stringify(next) !== JSON.stringify(file)) await persist(next);
+        const held = file;
+        let { next, value } = fn(structuredClone(held));
+        const changes = (n: SigningFile) => JSON.stringify(n) !== JSON.stringify(held);
+        if (!changes(next)) return value;
+        if (!isSigningFile(next)) throw new TypeError(`an update would write a ${SIGNING_FILE} that does not read back`);
+        if (!flagged()) {
+          // The first write: registration.json is marked first, so the file fails closed from its first byte. That is an
+          // await, and `fn`'s checks (a sign-out, a pairing that ended, a held line that moved) may no longer hold after
+          // it, so `fn` decides again, synchronously before the write. Once marked, a file is written whatever it
+          // decides: the mark promises one, and a marked profile without it reads `damaged`.
+          await deps.markRegistration();
+          ({ next, value } = fn(structuredClone(held)));
+          if (!changes(next)) next = held;
+        }
+        await persist(next);
         return value;
       });
     },
-    reset: () => commit(() => persist(emptySigningFile())),
+    reset: () =>
+      commit(async () => {
+        if (!flagged()) await deps.markRegistration();
+        await persist(emptySigningFile());
+      }),
   };
 }
 

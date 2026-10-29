@@ -2,7 +2,22 @@
 // itself, has the person confirm that text through the injected confirmation (U5's winner; a fake here), and only then
 // signs the action's canonical form with the step-up key. The renderer never supplies the bytes or the text.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { generateSigningKey, isAction, keyId, verifyGenesis, verifyStepUp, type Action, type OrgState, type SigningKey } from '../../../apps/org-protocol/src/index.ts';
+import {
+  endorseDevice,
+  generateSigningKey,
+  isAction,
+  keyId,
+  signOrgState,
+  stateHash,
+  verifyGenesis,
+  verifyStepUp,
+  verifySuccessor,
+  type Action,
+  type Device,
+  type OrgState,
+  type SignedOrgState,
+  type SigningKey,
+} from '../../../apps/org-protocol/src/index.ts';
 
 // Electron's systemPreferences, faked: no test calls the real promptTouchID, so none raises a system prompt.
 const touchID = vi.hoisted(() => ({ reasons: [] as string[], answer: async (): Promise<void> => {} }));
@@ -335,6 +350,88 @@ describe('a state signer (M3: the org state, signed with the step-up key behind 
     if (!result.ok) throw new Error(`refused: ${result.reason}`);
     expect(result.signed.state).toEqual(asked);
     expect(await verifyGenesis(result.signed)).toEqual({ ok: true });
+  });
+
+  describe('endorsing a device inside the same confirmation (M4a: pairing your own device)', () => {
+    /** The genesis signed by `key`, and its successor adding `fresh` (unendorsed) to the member `key`'s device is under. */
+    async function adding(): Promise<{ head: SignedOrgState; next: OrgState; fresh: Device }> {
+      const genesis = await genesisOf(await stepUpKey());
+      const head = await signOrgState(genesis, [await stepUpKey()]);
+      const fresh: Device = { id: 'dev-new', class: 'native-mac', keyStorage: 'software', channelPub: (await generateSigningKey()).pub, stepUpPub: (await generateSigningKey()).pub };
+      const next = structuredClone(genesis);
+      next.version = 2;
+      next.prev = await stateHash(genesis);
+      next.members[0]!.devices.push(fresh);
+      return { head, next, fresh };
+    }
+
+    it('asks once, then endorses the named device with the step-up key and signs the state: the endorsement verifies', async () => {
+      const { head, next, fresh } = await adding();
+      const sigs = signatures();
+      try {
+        const asked: number[] = [];
+        const signer = await createStateSigner({ key: await stepUpKey(), confirm: async () => (asked.push(sigs.count()), { ok: true }) });
+        const result = await signer.sign(next, prompt, { endorse: [{ member: MEMBER, device: fresh.id }] });
+        if (!result.ok) throw new Error(`refused: ${result.reason}`);
+        expect(asked).toEqual([0]); // one confirmation, before either signature
+        expect(sigs.count()).toBe(2); // the endorsement, then the state
+        const listed = result.signed.state.members[0]!.devices.find((d) => d.id === fresh.id)!;
+        expect(listed.endorsement?.kid).toBe(signer.kid);
+        // The package's verdict checks the endorsement under the member's own step-up key in the head.
+        expect(await verifySuccessor(head, result.signed, [])).toEqual({ ok: true });
+        // The caller's state is not touched: the endorsement is on the copy that was signed.
+        expect(next.members[0]!.devices.find((d) => d.id === fresh.id)!.endorsement).toBeUndefined();
+      } finally {
+        sigs.restore();
+      }
+    });
+
+    it('replaces an endorsement the caller left on the device, so only its own key endorses what it signs', async () => {
+      const { head, next, fresh } = await adding();
+      const stranger = await generateSigningKey();
+      next.members[0]!.devices.find((d) => d.id === fresh.id)!.endorsement = await endorseDevice(next.org, MEMBER, fresh, stranger.privateKey, stranger.pub);
+      const signer = await createStateSigner({ key: await stepUpKey(), confirm: harness().confirm });
+      const result = await signer.sign(next, prompt, { endorse: [{ member: MEMBER, device: fresh.id }] });
+      if (!result.ok) throw new Error(`refused: ${result.reason}`);
+      expect(await verifySuccessor(head, result.signed, [])).toEqual({ ok: true });
+    });
+
+    it('endorses and signs nothing when the person cancels', async () => {
+      const { next, fresh } = await adding();
+      const sigs = signatures();
+      try {
+        const signer = await createStateSigner({ key: await stepUpKey(), confirm: async () => ({ ok: false, reason: 'cancelled' }) });
+        expect(await signer.sign(next, prompt, { endorse: [{ member: MEMBER, device: fresh.id }] })).toEqual({ ok: false, reason: 'cancelled' });
+        expect(sigs.count()).toBe(0);
+      } finally {
+        sigs.restore();
+      }
+    });
+
+    it('endorses and signs nothing when the change ended while the person was asked (`live` says no after a yes)', async () => {
+      const { next, fresh } = await adding();
+      const sigs = signatures();
+      try {
+        let live = true;
+        const checked: boolean[] = [];
+        const signer = await createStateSigner({ key: await stepUpKey(), confirm: async () => ((live = false), { ok: true }) });
+        const result = await signer.sign(next, prompt, { endorse: [{ member: MEMBER, device: fresh.id }], live: () => (checked.push(live), live) });
+        expect(result).toEqual({ ok: false, reason: 'cancelled' });
+        expect(checked).toEqual([false]); // read once, after the confirmation
+        expect(sigs.count()).toBe(0);
+      } finally {
+        sigs.restore();
+      }
+    });
+
+    it('refuses, before asking, to endorse a device the state does not list under the named member', async () => {
+      const { next, fresh } = await adding();
+      const h = harness();
+      const signer = await createStateSigner({ key: await stepUpKey(), confirm: h.confirm });
+      await expect(signer.sign(next, prompt, { endorse: [{ member: MEMBER, device: 'dev-absent' }] })).rejects.toThrow(/dev-absent/);
+      await expect(signer.sign(next, prompt, { endorse: [{ member: 'ffffffffffffffffffffffffffffffff', device: fresh.id }] })).rejects.toThrow(/dev-new/);
+      expect(h.prompts).toEqual([]);
+    });
   });
 
   it('asks through promptTouchID when main injects no confirmation', async () => {

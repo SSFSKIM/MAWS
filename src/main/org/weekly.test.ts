@@ -334,10 +334,33 @@ describe('changes and the end', () => {
     await until(() => told === 1, 'the change to due');
     expect(h.weekly.due()).toBe(true);
 
-    h.weekly.close();
+    await h.weekly.close();
     expect(h.focusListeners.size).toBe(0);
     h.t.focused = false;
     await settle();
     expect(h.notes).toEqual([]);
+  });
+
+  it('close() resolves once an ask in flight has ended, and the gate it overtook writes nothing', async () => {
+    const h = await harness({ checkMs: 3_600_000 });
+    h.t.focused = true;
+    let release!: () => void;
+    let reached!: () => void;
+    const before = new Promise<void>((resolve) => (reached = resolve));
+    h.t.before = () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+        reached();
+      });
+    h.focus();
+    await before; // the signer's reads before its gate, held
+    let closed = false;
+    const closing = h.weekly.close().then(() => void (closed = true));
+    await settle(20);
+    expect(closed).toBe(false);
+    release();
+    await closing;
+    expect(h.asked).toEqual([]);
+    expect(h.disk()?.lastAsked ?? null).toBeNull();
   });
 });

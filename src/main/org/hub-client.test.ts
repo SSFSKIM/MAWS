@@ -50,6 +50,32 @@ describe('the hub client', () => {
     expect(read).toMatchObject({ ok: true, value: { certificates: { certs: [cert], retirements: [retirement] } } });
   });
 
+  it('reads a member\'s pending entries (M4a, H1): the plain read for null, `?member=` for another, items out of shape dropped, the hub\'s own fields left out', async () => {
+    const paths: string[] = [];
+    const entry = { deviceId: 'dev-1', class: 'native-mac', keyStorage: 'software', channelPub: 'c', stepUpPub: 's', mac: 'm' } as const;
+    const passkeyed = { deviceId: 'dev-2', class: 'web-cards', keyStorage: 'webcrypto', channelPub: 'c2', passkey: { credentialId: 'i', publicKey: 'p', rpId: 'desk.example' }, mac: 'm2' } as const;
+    const hubFields = { member: 'a'.repeat(32), created: '2026-10-29T12:00:00.000Z', expires: '2026-10-29T12:10:00.000Z' };
+    const client = (answer: () => Response) =>
+      hubClient({
+        url: HUB,
+        headers: () => Promise.resolve({ 'cf-access-token': TOKEN }),
+        fetch: (async (url: string) => {
+          paths.push(new URL(url).pathname + new URL(url).search);
+          return answer();
+        }) as typeof fetch,
+      });
+    const served = { pending: [{ ...entry, ...hubFields }, null, { deviceId: 3 }, { ...entry, stepUpPub: 7 }, { ...passkeyed, ...hubFields }] };
+    expect(await client(() => worker(200, served)).pendingOf(null)).toEqual({ ok: true, value: [entry, passkeyed] });
+    const other = 'b'.repeat(32);
+    expect(await client(() => worker(200, { pending: [] })).pendingOf(other)).toEqual({ ok: true, value: [] });
+    expect(paths).toEqual(['/api/devices/pending', `/api/devices/pending?member=${other}`]);
+
+    expect(await client(() => worker(403, { error: 'not-admin' })).pendingOf(other)).toEqual({ ok: false, kind: 'status', status: 403, error: 'not-admin' });
+    expect(await client(() => worker(404, { error: 'no-member' })).pendingOf(other)).toEqual({ ok: false, kind: 'status', status: 404, error: 'no-member' });
+    expect(await client(() => worker(503, { error: 'hub-updating' })).pendingOf(other)).toEqual({ ok: false, kind: 'status', status: 503, error: 'hub-updating' });
+    expect(await client(() => worker(200, { pending: 'none' })).pendingOf(null)).toEqual({ ok: false, kind: 'status', status: 200, error: 'malformed' });
+  });
+
   it('posts a signed state as its body, reads 201 as its version, and keeps a 409 verdict as its error code', async () => {
     const posted: Array<{ method: string; url: string; body: unknown; type: string | null }> = [];
     const signed = { state: { org: 'o', version: 2 }, sigs: [] } as never;

@@ -28,7 +28,7 @@ export function Sheet({
           {...focus}
           {...data}
           aria-describedby={undefined}
-          className={`fixed top-[18%] left-1/2 z-50 ${width} -translate-x-1/2 rounded-lg border border-border-strong bg-bg-overlay p-4 text-ui text-fg`}
+          className={`fixed top-[18%] left-1/2 z-50 ${width} -translate-x-1/2 rounded-lg border border-border-strong bg-bg-overlay p-4 text-ui text-fg [overflow-wrap:anywhere]`}
         >
           <Dialog.Title className="m-0 mb-3 text-ui font-medium text-fg">{title}</Dialog.Title>
           <SheetClose.Provider value={onClose}>{children}</SheetClose.Provider>
@@ -39,7 +39,8 @@ export function Sheet({
 }
 
 // The sheet's form: `onSubmit` runs only while `canSubmit`; the footer holds Cancel (the sheet's close) and the default
-// button.
+// button, absent while `submitLabel` is (a sheet with nothing to confirm, as an Org change the checks refused), when
+// Enter submits nothing.
 export function SheetForm({
   canSubmit,
   onSubmit,
@@ -53,7 +54,7 @@ export function SheetForm({
   focusSubmit?: boolean; // a sheet with no field: the default button takes focus, so Enter confirms it
   canSubmit: boolean;
   onSubmit(): void;
-  submitLabel: string;
+  submitLabel?: string;
   submitClass: string;
   cancelLabel?: string;
   children: ReactNode;
@@ -62,7 +63,7 @@ export function SheetForm({
   const close = useContext(SheetClose);
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (canSubmit) onSubmit();
+    if (canSubmit && submitLabel !== undefined) onSubmit();
   };
   return (
     <form onSubmit={submit} className="flex flex-col gap-3">
@@ -72,9 +73,11 @@ export function SheetForm({
         <button type="button" onClick={() => close()} className={SECONDARY}>
           {cancelLabel}
         </button>
-        <button type="submit" autoFocus={focusSubmit} disabled={!canSubmit} className={submitClass}>
-          {submitLabel}
-        </button>
+        {submitLabel !== undefined && (
+          <button type="submit" autoFocus={focusSubmit} disabled={!canSubmit} className={submitClass}>
+            {submitLabel}
+          </button>
+        )}
       </div>
     </form>
   );

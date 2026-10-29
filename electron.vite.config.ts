@@ -73,6 +73,7 @@ export default defineConfig(({ command }) => {
         __MAWS_DEV_CSP_NONCE__: JSON.stringify(devNonce),
         __MAWS_VERSION__: JSON.stringify(version),
         __MAWS_BUILD__: JSON.stringify(build),
+        __MAWS_HARNESS_BUILD__: JSON.stringify(harnessInput !== null), // P5 O8 M4a Task 8: what only a harness build's main contains (index.ts)
         'process.env.WS_NO_BUFFER_UTIL': JSON.stringify('1'),
         'process.env.WS_NO_UTF_8_VALIDATE': JSON.stringify('1'),
       },

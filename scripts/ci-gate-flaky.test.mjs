@@ -68,6 +68,27 @@ test('more than ten flaky locations survive one dedicated-step annotation and st
   }
 });
 
+test('gate-run exposes flakes from this command, even on green, without changing its exit status', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ci-flaky-output-'));
+  try {
+    for (const [text, status, expected] of [
+      ['  2 passed\n', 0, ''],
+      ['\u001b[33mflaky: e2e/example.spec.ts:19\u001b[0m\n  1 flaky\n', 0, 'flaky=true\n'],
+      ['flaky: e2e/example.spec.ts:19\n  1 failed\n', 1, 'flaky=true\n'],
+      ['  1 failed\n', 2, ''],
+    ]) {
+      const output = join(dir, 'output');
+      writeFileSync(output, '');
+      const result = spawnSync('bash', [join(root, '.github/scripts/gate-run.sh'), '^flaky:|passed|failed', process.execPath, '-e', 'process.stdout.write(process.argv[1]); process.exit(Number(process.argv[2]))', text, String(status)], {
+        encoding: 'utf8', env: { ...process.env, GITHUB_STEP_SUMMARY: join(dir, 'summary'), GITHUB_OUTPUT: output },
+      });
+      assert.equal(result.status, status, result.stderr);
+      assert.equal(result.stdout, text);
+      assert.equal(readFileSync(output, 'utf8'), expected);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('the tail reader skips jobs that never ran and preserves other jobs and attempts when one annotations read fails', async () => {
   const { flakyReport } = await import('./ci-gate-flaky.mjs');
   const calls = [];

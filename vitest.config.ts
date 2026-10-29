@@ -55,6 +55,7 @@ const TIMING_NODE_TESTS = [
   'test/org/sign-in.local.test.ts', // P5 O8 M1: the app's sign-in against desk-hub's Worker in Miniflare, O13's real `pair` approving
   'test/org/rows.local.test.ts', // P5 O8 M2: a real endpoint's listings as rows through desk-hub's Worker in Miniflare and the app's feed
   'test/org/signer.local.test.ts', // P5 O8 M3: the app as the org's signer against desk-hub's Worker in Miniflare, revocations delivered over O7's link
+  'test/org/org-page.local.test.ts', // P5 O8 M4a: the Org page's people and devices against desk-hub's Worker in Miniflare, a second member added, paired, promoted, demoted and removed
   'src/mawsd/process-endpoint.test.ts', // P5 O10 M10: the built mawsd and its endpoint as processes, enrolling against desk-hub's Worker in Miniflare
   'test/support/local-org.test.ts', // P5 O10 M10: the enrolled idle scene's org, a built mawsd enrolling against desk-hub's local runner (wrangler dev)
 ];
