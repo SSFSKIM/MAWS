@@ -1011,6 +1011,42 @@ describe('a genesis interrupted, then served with a forged head', () => {
   });
 });
 
+describe('a genesis for a member whose email is not an address', () => {
+  let server: Server;
+  let email = '';
+  const requests: string[] = [];
+  beforeAll(async () => {
+    // A hub of the test's own, with no state: `/api/me` names whatever email the case sets.
+    server = createServer((req, res) => {
+      requests.push(`${req.method} ${req.url}`);
+      res.setHeader('content-type', 'application/json');
+      if (req.url === '/api/me') return res.end(JSON.stringify({ org: { id: 'org-email' }, member: { id: 'e'.repeat(32), email } }));
+      if (req.url?.startsWith('/api/org/state') && req.method === 'GET') return res.end(JSON.stringify({ head: null, chain: [], transitions: [], certificates: { certs: [], retirements: [] } }));
+      res.statusCode = 404;
+      res.end('{}');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  });
+  afterAll(() => new Promise((resolve) => server?.close(resolve)));
+
+  it('is refused before the recovery key is made, with nothing written, signed or posted', async () => {
+    const keys = join(dir('email'), 'keys.json');
+    expect(await runAdmin(['init', '--keys', keys], fake().io)).toBe(0);
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    for (const named of ['owner', 'owner@example.com\n', 'owner @example.com']) {
+      email = named;
+      requests.length = 0;
+      const recovery = join(dir('volume'), 'recovery.json');
+      const f = fake();
+      expect(await runAdmin(['genesis', '--recovery', recovery, '--hub', url, '--user', ADMIN, '--yes', '--keys', keys], f.io), JSON.stringify(named)).toBe(1);
+      expect(f.err.join('\n')).toContain(`the hub names this member's email "${printable(named)}", which is not an address`);
+      expect(f.err.join('\n')).toMatch(/: nothing was written or signed$/);
+      expect(existsSync(recovery) || existsSync(anchorFile(keys)) || existsSync(genesisFile(keys))).toBe(false);
+      expect(requests.filter((r) => !r.startsWith('GET '))).toEqual([]);
+    }
+  });
+});
+
 describe('a genesis interrupted between its POST and its anchor', () => {
   let hub: LocalHub;
   let proxy: Server;

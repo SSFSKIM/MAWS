@@ -57,6 +57,10 @@ export const admitted: SessionMessage[] = [
   { ...base, session: 's', kind: 'block-row', sub: 'x', n: 5, body: { uuid: 'u', turnId: 't', agentId: null, step: 0, index: 1 } },
   // A step ended (finished, aborted, or cut off by its turn's end), after every block-row of it.
   { ...base, session: 's', kind: 'step-end', sub: 'x', n: 9, body: { turnId: 't', agentId: 'a1', step: 2 } },
+  // sminos 1.27.12's: the end's stamp and what the step's start carried, each when known; an effort the request named
+  // none of is null.
+  { ...base, session: 's', kind: 'step-end', sub: 'x', n: 9, body: { turnId: 't', agentId: null, step: 0, t: 1760000000500, model: 'claude-opus-5-5', effort: 'high' } },
+  { ...base, session: 's', kind: 'step-end', sub: 'x', n: 9, body: { turnId: 't', agentId: null, step: 1, t: 1760000000900, model: 'claude-opus-5-5', effort: null } },
   { ...base, session: 's', kind: 'end', sub: 'x', n: 6, body: { reason: 'discontinuity' } },
   // An end may come first, before a snapshot could be taken.
   { ...base, session: 's', kind: 'end', sub: 'w', n: 0, body: { reason: 'session-ended', message: 'no such session' } },
@@ -102,6 +106,10 @@ export const refused: SessionMessage[] = [
   { ...base, session: 's', kind: 'step-end', sub: null, n: null, body: { turnId: 't', agentId: null, step: 0 } },
   // @ts-expect-error a step-end names its step, not a block
   { ...base, session: 's', kind: 'step-end', sub: 'x', n: 3, body: { turnId: 't', agentId: null, index: 0 } },
+  // @ts-expect-error a model the producer does not know is absent, never null
+  { ...base, session: 's', kind: 'step-end', sub: 'x', n: 3, body: { turnId: 't', agentId: null, step: 0, model: null } },
+  // @ts-expect-error and so is a time
+  { ...base, session: 's', kind: 'step-end', sub: 'x', n: 3, body: { turnId: 't', agentId: null, step: 0, t: null } },
   // @ts-expect-error a snapshot's streaming entries are per block, not one text per message
   { ...base, session: 's', kind: 'snapshot', sub: 'x', n: 0, body: { rows: [], more: false, subagents: [], presence, streaming: [{ turnId: 't', agentId: null, step: 0, text: 'Hel', upTo: 3 }] } },
   // @ts-expect-error a block is text, thinking, or tool
@@ -161,7 +169,7 @@ describe('the DX4 envelope', () => {
     // The desk control surface's kinds: a read's answer and the catalog on a sub, an op to every browser.
     expect(SUBSCRIPTION_KINDS).toEqual(expect.arrayContaining(['read', 'catalog']));
     expect(SESSION_WIDE_KINDS).toContain('op');
-    expect(admitted).toHaveLength(29);
-    expect(refused).toHaveLength(31);
+    expect(admitted).toHaveLength(31);
+    expect(refused).toHaveLength(33);
   });
 });

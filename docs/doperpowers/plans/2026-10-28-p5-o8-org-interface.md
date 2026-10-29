@@ -720,6 +720,7 @@ M3's own edits are the no-change successor and that revocation. The delegation a
     - the key, name and prefix rules, each by its own code.
   - `recovery-changed`, `legacy-retired`, `machine-names`, `keys-unaccounted`.
   - `endorsement-missing`: a later device of a member who had devices, without an endorsement. A device id in `opts.endorsing.devices` counts as endorsed by `opts.endorsing.kid`, when that kid is one of the member's step-up keys in `before`, since the signer endorses it inside the same Touch ID.
+  - `email-grammar`: a member new in `after`, or whose email changed, whose email is not `isMemberEmail`'s address (`names.ts`). A writer's rule alone, which `verifySuccessor` never makes; the desk track's key-held PR (#338) added it, and `edits.ts` refuses the same grammar up front as `bad-email` through `isMemberEmail`.
   - `stateInvariants(state)` becomes `(await stateProblems(state)).length === 0`.
   - `verifySuccessor` is unchanged in every verdict it returns, and in the order it reaches them. `org-protocol`'s existing suites and vectors pass unchanged, which is the proof.
   - Rejected: app-only rows in `checks.ts`, which leave the CLI to meet the same problems only after signing.
@@ -2163,6 +2164,9 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   6. (The gate's finding.) A word wider than its column breaks inside its cell: `Setting`'s label and value cells take `min-width: 0` and `overflow-wrap: anywhere` (text that fits wraps as before), a text action never shrinks, and the refusal line, the People footer and a sheet's body break the same way. The first run had a widened member name 182px wide in the 168px label column, on the EC2 Mac and on a hosted Mac alike.
   7. (The architect.) The Org group names machines as the Machines group does: the org state's name for a ref, else its link's name or This Mac, the ref only when nothing names it (Deliveries, too-large, Discarded). The superseded offer's lines stay main's words (`describeHolder`, under the offer's digest); they already lead with the name.
   Date/Author: 2026-10-29, O8's executor.
+
+- Decision: the desk track's key-held PR (#338, master 1fe1a74d9, P5 Decision Log 134) landed before M4a, carrying M4a's Tasks 1 and 2 unchanged, so M4a takes its three follow-ons at the merge. `edits.ts` refuses `bad-email` through `org-protocol`'s `isMemberEmail` in place of hub-client's `EMAIL`, which the merge drops (hub-client reads `/api/me` through `isMemberEmail` too). `email-grammar` joins the pre-sign codes (*The pre-sign function*). The admin suite's "twin posts m1's key" case is #338's: the hub now refuses that twin with `409 key-held`, so the case posts a key another signer lists, which only the pre-sign check catches; its assertion is unchanged.
+  Date/Author: 2026-10-29, O8's executor, at the architect's word.
 
 ## Outcomes & Retrospective
 

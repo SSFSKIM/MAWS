@@ -4,6 +4,7 @@
 // E10: one bundle, two modes, decided at load: `process.parentPort` present → `utility` (an Electron utility process
 // forked by main, served over a MessagePort, as before); `--detached <supervisorDir>` in argv → `detached` (the
 // supervisor: the Electron binary as Node, outliving the app, served over a Unix socket; detached.ts).
+import { idleCollector } from '@shared/host/idle-collect';
 import { hostPing, runHost, type HostOn, type HostRegister } from '@shared/host/runtime';
 import { captureShellEnvironment } from '@shared/host/shell-env';
 // C3 start
@@ -106,6 +107,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
   const designs = registerDesigns({ documents, chain: designSystems.chain, refresh: library.refresh }); // P3-E (E1's M2): the design's adapter (its legacy migration among its hooks) and its mirror writer, kept fresh under its governing system
   const googleFaces = registerGoogleFaces({ documents }); // P4-B2 D19: a deck's or a design's named Google Fonts face fetched once into its assets (OFL only), under the host's egress rule
   let connectors: { close(): void; closeDirect(): Promise<void> } | null = null; // P3-H H3b: below, over the process table
+  const idle = idleCollector({ log: (line) => console.log(`[supervisor] ${line}`), quiet: () => supervision?.quiet() ?? false }); // P5 Decision Log 124's lever: a collection at each entry into Supervision's quiet, asked again as it collects
   // C3 start
   ipc = registerEngineIpc(on, emit, {
     afterShutdown: () => {
@@ -119,7 +121,10 @@ const register: HostRegister = (untimedOn, emit, client) => {
       googleFaces.close(); // P4-B2
       documents?.close(); // P3-A
     },
-    duringShutdown: async () => connectors?.closeDirect(), // P3-HD M2: route D's owned processes, ended beside the sessions
+    duringShutdown: async () => {
+      idle.stop(); // every exit runs this body (main's quit, a stop-all, the detached exit order): no collection after
+      await connectors?.closeDirect(); // P3-HD M2: route D's owned processes, ended beside the sessions
+    },
     userData, replayEnabled: process.env.MAWS_ENGINE_REPLAY === '1', appVersion: HOST_VERSION,
     replayRowMs: replayRowDelayMs(process.env), // E10: the e2e pacing seam
     replayTranscripts: replayTranscriptProjects(process.env), // P3-F L242: a replay's transcript, into the e2e scratch store only
@@ -148,6 +153,8 @@ const register: HostRegister = (untimedOn, emit, client) => {
     role: readMachineRole(), // P5 O2 M2: read once, at the start
     emit: (status) => emit('host.supervisorStatus', status),
     log: (line) => console.log(`[supervisor] ${line}`),
+    collector: idle,
+    startup: designSystems.ready, // the register's gate: no collection lands mid-seed
   });
   supervision.register(on, client);
   return designSystems.ready; // one bounded startup admission gate, before any request handler may run

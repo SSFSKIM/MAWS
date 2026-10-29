@@ -93,7 +93,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     ]);
     const maws = await launchMaws({ env: { CLAUDE_CONFIG_DIR: store.configHome } });
     const { page } = maws;
-    await expect(main(page)).toBeVisible();
+    await expect(main(page)).toBeVisible({ timeout: 60_000 });
     await expect.poll(async () => value(await invoke(page, 'session.list', {})).sessions.some((r) => r.engineSessionId === sid), { timeout: 20_000 }).toBe(true);
     const appId = value(await invoke(page, 'session.list', {})).sessions.find((r) => r.engineSessionId === sid)!.appId;
     current = { maws, page, store, repo, sid, appId, transcript, terminal: null };

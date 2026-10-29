@@ -15,6 +15,7 @@ import {
   isCertificates,
   isCertRetirement,
   isMachineCert,
+  isMemberEmail,
   isSigned,
   type Certificates,
   type PendingEntry as PendingDevice,
@@ -72,11 +73,6 @@ export interface HubClient {
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 /** A Worker's error code (`not-a-member`, `too-many`): anything else is reported as `unrecognized`. */
 const ERROR_CODE = /^[a-z][a-z0-9-]{0,39}$/;
-/**
- * An address as Access names it: one `@`, no space or control, within RFC 5321's lengths (a token is far longer). The
- * Org page's member edits (edits.ts) take an email by the same grammar, so a member's is one the hub can name.
- */
-export const EMAIL =/^[^\s@\p{Cc}]{1,64}@[^\s@\p{Cc}]{1,253}$/u;
 /** An ISO 8601 instant in UTC, as the Worker writes one. */
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 
@@ -175,7 +171,8 @@ export function hubClient(input: {
       request(ME_PATH, { signal }, (body) => {
         if (!isObject(body) || !isObject(body.org) || !isObject(body.member)) return null;
         const { org, member } = body;
-        if (typeof org.id !== 'string' || typeof member.id !== 'string' || typeof member.email !== 'string' || !EMAIL.test(member.email)) return null;
+        // Strict on purpose, for security (`isMemberEmail`): a hostile hub can't reflect the token as an email. Writers keep the grammar, so only legacy data can fail it; a grammar change checks the stored emails first.
+        if (typeof org.id !== 'string' || typeof member.id !== 'string' || !isMemberEmail(member.email)) return null;
         return { org: { id: org.id }, member: { id: member.id, email: member.email, role: String(member.role) } };
       }),
     state: (signal) => request(ORG_STATE_PATH, { signal }, readView),

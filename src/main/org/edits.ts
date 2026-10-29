@@ -12,10 +12,9 @@
 //
 // Lines name members by email and devices by their first 8 characters with their class, as `deployment admin show`
 // does. Electron-free: vitest's node project runs it.
-import { keyId, pairingFingerprint, type Device, type Member, type OrgState, type RevokedKey } from '../../../apps/org-protocol/src/index.ts';
+import { isMemberEmail, keyId, pairingFingerprint, type Device, type Member, type OrgState, type RevokedKey } from '../../../apps/org-protocol/src/index.ts';
 import type { OrgChange } from '@shared/ipc/schema/org';
 import type { ChangeCode } from './checks';
-import { EMAIL } from './hub-client';
 import { RefusedEdit, StaleEdit, type Edit } from './signer';
 
 /**
@@ -136,7 +135,7 @@ const memberOf = (state: OrgState, id: string): Member => state.members.find((m)
 const deviceOf = (member: Member, id: string): Device => member.devices.find((d) => d.id === id) ?? gone(`${member.email} no longer has device ${id.slice(0, 8)}`);
 
 function validEmail(email: string): void {
-  if (!EMAIL.test(email)) refused('bad-email', `${JSON.stringify(email)} is not an email address the hub can name`);
+  if (!isMemberEmail(email)) refused('bad-email', `${JSON.stringify(email)} is not an email address the hub can name`);
 }
 
 /** A device's keys as `revoked` lists them, under the holder the head holds them by (`keysAccounted`). */

@@ -338,9 +338,11 @@ describe('subscriptions', () => {
     const row = envelope(m, project, 'row', { row: { uuid: 'r1', type: 'assistant' }, agentId: null }, SESSION, sub, 1);
     const blockRow = envelope(m, project, 'block-row', { uuid: 'r2', turnId: 't', agentId: null, step: 0, index: 0 }, SESSION, sub, 2);
     const stepEnd = envelope(m, project, 'step-end', { turnId: 't', agentId: null, step: 0 }, SESSION, sub, 3);
-    await m.postOk([{ t: 'session', message: snapshot }, { t: 'session', message: row }, { t: 'session', message: blockRow }, { t: 'session', message: stepEnd }]);
-    await b.next((f) => f.t === 'session' && f.message.kind === 'step-end', 'step-end');
-    expect(sessionKinds(b).filter((x) => x.sub === sub)).toEqual([snapshot, row, blockRow, stepEnd]);
+    // sminos 1.27.12's step-end: the end's stamp and what the step's start carried, relayed as they came.
+    const timed = envelope(m, project, 'step-end', { turnId: 't', agentId: null, step: 1, t: 1760000000900, model: 'claude-opus-5-5', effort: null }, SESSION, sub, 4);
+    await m.postOk([{ t: 'session', message: snapshot }, { t: 'session', message: row }, { t: 'session', message: blockRow }, { t: 'session', message: stepEnd }, { t: 'session', message: timed }]);
+    await b.next((f) => f.t === 'session' && f.message.kind === 'step-end' && f.message.n === 4, 'the timed step-end');
+    expect(sessionKinds(b).filter((x) => x.sub === sub)).toEqual([snapshot, row, blockRow, stepEnd, timed]);
     expect(sessionKinds(other).filter((x) => x.sub === sub)).toEqual([]);
 
     b.send({ t: 'rows', sub, before: 'r1', limit: 20 });

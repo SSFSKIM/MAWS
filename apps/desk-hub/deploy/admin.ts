@@ -46,6 +46,7 @@ import {
   endorseDevice,
   generateSigningKey,
   isMachineName,
+  isMemberEmail,
   isSignedOrgState,
   judgeEntry,
   keyId,
@@ -584,6 +585,10 @@ async function genesis(ctx: Context): Promise<number> {
   }
 
   if (served.head !== null) refuse(`the hub holds a state (version ${served.head.state.version}): genesis roots an org with none`);
+  // The genesis writes the admin's email as `/api/me` names it, so it must be an address, as a successor's must.
+  if (!isMemberEmail(me.member.email)) {
+    refuse(`the hub names this member's email "${printable(me.member.email)}", which is not an address (one @, no space or control character, at most 64 characters before it and 253 after): nothing was written or signed`);
+  }
   if (!paper && existsSync(recovery)) refuse(`${recovery} exists: the recovery key is never written over a file; move it aside or name another path`);
   const key = await newRecoveryKey();
   if (paper) {

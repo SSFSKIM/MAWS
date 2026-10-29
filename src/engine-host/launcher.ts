@@ -74,7 +74,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
   let prelude: JournalRow[] | null = null;
   const refused = (reason: Extract<LaunchResult, { status: 'refused' }>['reason'], message: string): LaunchResult => ({ status: 'refused', reason, message });
 
-  return async (spec, artifactScope = []) => {
+  const launch = async (spec: LaunchSpec, artifactScope: readonly AppSessionId[] = []): Promise<LaunchResult> => {
     assertSafeAppSessionId(spec.appSessionId); // before anything names a file after it (M5 review)
     if (spec.replay !== null && !deps.replayEnabled) return refused('replay_disabled', 'replay launches need MAWS_ENGINE_REPLAY=1');
     const liveNow = deps.table.get(spec.appSessionId);
@@ -146,6 +146,8 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
     if (outcome.status === 'refused') return outcome; // a launch that raced this one to the reservation
     return { status: 'launching', session: outcome.session.status() };
   };
+  // the table holds it from its entry (P5 Decision Log 124: no collection lands on its preparation, which has no row yet)
+  return (spec, artifactScope) => deps.table.preparing(() => launch(spec, artifactScope));
 }
 
 // P2-F wave S (S-budget; the owner's D7, Q12 as ruled 2026-10-11): a side thread takes its parent's numeric

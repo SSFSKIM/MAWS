@@ -8,7 +8,9 @@
 // - a block leaves the snapshot state when its `block-row` is applied, and its whole message at its step's end (DX5's
 //   child does the same), so an aborted block reaches no later subscriber;
 // - `step-end` follows every `block-row` of its step, since the timeline keeps the bridge's order; a step still open
-//   when its turn ends gets one then;
+//   when its turn ends gets one then. It carries the recording's stamp of the end (`t`, the turn's for a step cut off)
+//   and what each subscription knew of the step's start, as sminos's plane keeps it: the start seen live, else the
+//   snapshot entry's model alone;
 // - a main-scope subscription carries every agent's chunks, `block-row`s, and `step-end`s, the tree, and `usage`, and
 //   its own transcript's rows; an agent-scope one carries that agent's alone;
 // - as a DC8 producer (`producer: 'dc8'`), the tree is DX4's widened `subagents` body — each agent's status and what it
@@ -33,7 +35,7 @@ import mw3 from './dx4/mw3-scoped.json' with { type: 'json' };
 import mw4 from './dx4/mw4-agents.json' with { type: 'json' };
 // And MW5's (dx4/README.md).
 import mw5 from './dx4/mw5-media.json' with { type: 'json' };
-import type { Catalog, Capabilities, ConfigRead, MediaOpBody, ControlCapabilities, McpRead, PermissionUpdate, SettingsRead, UsageRead, Job, ReadAnswer, SessionBodies, SessionMessage, SessionPresence, StatusRead, Streaming, StreamingBlock, SubagentMeta, SubscriptionKind, Usage } from '../src/protocol/session';
+import type { Catalog, Capabilities, ConfigRead, MediaOpBody, ControlCapabilities, McpRead, PermissionUpdate, SettingsRead, UsageRead, Job, ReadAnswer, SessionBodies, SessionMessage, SessionPresence, StatusRead, StepEnd, Streaming, StreamingBlock, SubagentMeta, SubscriptionKind, Usage } from '../src/protocol/session';
 import type { SuggestionScope } from '../src/protocol/rpc';
 import { derive, fileFacts, LoopIndex, loopJobs, stopNote, type Body, type BridgeAgent, type Derivation } from './jobs';
 import { answerOutput, type Locate } from './output';
@@ -237,6 +239,9 @@ type Sub = {
   /** Rows the snapshot held, and each streaming message's watermark in it: what the live part drops. */
   held: Set<string>;
   marks: Map<string, number>;
+  /** What this subscription knows of each open step's start, as sminos's plane keeps it per subscription: the start it
+   * saw live, else its snapshot entry's model alone (the entry keeps no effort). Its step-end carries it. */
+  starts: Map<string, Pick<StepEnd, 'model' | 'effort'>>;
 };
 
 /** The plugin a session's bridge and ask run in: doperpowers before the sminos plugin existed, sminos from its 1.0.0. */
@@ -474,6 +479,8 @@ export class SessionDepth {
         const key = keyOf(step);
         this.ended.delete(key);
         this.live.set(key, { turnId: step.turnId, agentId: step.agentId, step: step.step, ...(step.model && { model: step.model }), upTo: -1, blocks: new Map(), settled: new Set(), last: null });
+        const start = { ...(step.model && { model: step.model }), ...(step.effort !== undefined && { effort: step.effort }) };
+        for (const s of this.reached(step.agentId, true)) s.starts.set(key, start);
         return;
       }
       case 'chunk': {
@@ -493,10 +500,11 @@ export class SessionDepth {
         return;
       }
       case 'step-end':
-        this.endStep(step.body.turnId, step.body.agentId, step.body.step);
+        this.endStep(step.body.turnId, step.body.agentId, step.body.step, step.body.t);
         return;
       case 'turn-end':
-        for (const m of [...this.live.values()]) if (m.turnId === step.turnId && m.agentId === step.agentId) this.endStep(m.turnId, m.agentId, m.step);
+        // A step it cuts off ends at the turn's end.
+        for (const m of [...this.live.values()]) if (m.turnId === step.turnId && m.agentId === step.agentId) this.endStep(m.turnId, m.agentId, m.step, step.t);
         if (step.agentId === null && this.mainTurn === step.turnId) this.mainTurn = null;
         return;
       case 'row':
@@ -598,21 +606,37 @@ export class SessionDepth {
     block.upTo = body.chunkIndex;
   }
 
-  private endStep(turnId: string, agentId: string | null, step: number): void {
+  /** The step ended, at `t` when the bridge stamped its end: each subscription's step-end carries what it knew of the
+   * step's start. */
+  private endStep(turnId: string, agentId: string | null, step: number, t?: number): void {
     const key = keyOf({ turnId, agentId, step });
     this.live.delete(key);
     this.ended.add(key);
-    this.fanOut(agentId, { kind: 'step-end', body: { turnId, agentId, step } }, true);
+    const ids = { turnId, agentId, step, ...(t !== undefined && { t }) };
+    this.fanOut(agentId, (s) => {
+      const start = s.starts.get(key);
+      s.starts.delete(key);
+      return { kind: 'step-end', body: { ...ids, ...start } };
+    }, true);
   }
 
   /** To the main-scope subscriptions (each agent's stream when `everyAgent`, else only the main loop's) and to the
-   * subscription of the agent it belongs to. */
-  private fanOut(agentId: string | null, out: Out, everyAgent: boolean): void {
+   * subscription of the agent it belongs to; `out` may be each subscription's own. */
+  private fanOut(agentId: string | null, out: Out | ((s: Sub) => Out), everyAgent: boolean): void {
     // Without the bridge a session's depth is its rows alone (§5): no stream, no usage.
-    if (!this.bridge && out.kind !== 'subagents') return;
+    if (!this.bridge && (typeof out === 'function' || out.kind !== 'subagents')) return;
     for (const [sub, s] of this.subs) {
-      if (s.agentId === null ? everyAgent || agentId === null : s.agentId === agentId) this.deliver(sub, s, out);
+      if (this.reaches(s, agentId, everyAgent)) this.deliver(sub, s, typeof out === 'function' ? out(s) : out);
     }
+  }
+
+  /** The subscriptions a loop's stream reaches (`fanOut`'s), while the bridge streams. */
+  private reached(agentId: string | null, everyAgent: boolean): Sub[] {
+    return this.bridge ? [...this.subs.values()].filter((s) => this.reaches(s, agentId, everyAgent)) : [];
+  }
+
+  private reaches(s: Sub, agentId: string | null, everyAgent: boolean): boolean {
+    return s.agentId === null ? everyAgent || agentId === null : s.agentId === agentId;
   }
 
   private deliver(sub: string, s: Sub, out: Out): void {
@@ -654,7 +678,7 @@ export class SessionDepth {
     const streaming = this.bridge ? this.streaming(agentId) : [];
     const scope = this.rows.get(agentId ?? 'main') ?? [];
     const cut = scope.length;
-    const s: Sub = { agentId, n: 1, ready: false, queue: [], held: new Set(), marks: new Map() };
+    const s: Sub = { agentId, n: 1, ready: false, queue: [], held: new Set(), marks: new Map(), starts: new Map(streaming.map((m) => [keyOf(m), m.model ? { model: m.model } : {}])) };
     this.subs.set(sub, s);
     if (options.overlap) {
       const newest = scope[cut - 1];
