@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostEmit } from '@shared/host/runtime';
 import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
-import { WIRE_CAPABILITIES, WIRE_MINOR } from '@shared/ipc/wire';
+import { WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { connectLines, type LineClient } from '../../test/support/socket-lines';
 import { START_EXIT_ABORTED, START_EXIT_HELD, startSupervisor, type DetachedOptions, type RunningSupervisor, type SupervisorLife } from './detached';
@@ -121,7 +121,7 @@ describe('the detached entry', () => {
     expect(statSync(lock.socketPath).mode & 0o777).toBe(0o600);
 
     const client = await connect();
-    expect(await client.next()).toEqual({ t: 'welcome', protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, build: lock.buildId, capabilities: [...WIRE_CAPABILITIES], pid: process.pid, startedAt: lock.startedAt, liveSessions: 1, rows: 2 });
+    expect(await client.next()).toEqual({ t: 'welcome', protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, build: lock.buildId, capabilities: ['socket.ptyFrames'] /* P5 O3-D: its own list; host.attachment from M3 */, pid: process.pid, startedAt: lock.startedAt, liveSessions: 1, rows: 2 });
     client.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined });
     expect(await client.next((line) => (line as { t: string }).t === 'res')).toMatchObject({ id: '1', ok: true, value: { pid: process.pid } });
     client.send({ t: 'ready' });

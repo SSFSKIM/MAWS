@@ -120,7 +120,7 @@ describe('main ipc router', () => {
       const handler = vi.fn(() => ({ sessions: [], revision: 0 }));
       const remote = vi.fn<RemoteDispatch>(async () => ({ ok: true, value: { sessions: [], revision: 7 } }));
       await load(DEV_URL, undefined, remote);
-      router.registerMainHandler('session.list', handler);
+      router.registerMachineHandler('session.list', handler);
       const event = appWindow();
       await expect(invoke(event, 'session.list', {}, OTHER)).resolves.toEqual({ ok: true, value: { sessions: [], revision: 7 } });
       expect(remote).toHaveBeenCalledWith(OTHER, 'session.list', {}, { client: expect.objectContaining({ id: `page:${event.sender.id}.1` }), target: OTHER });
@@ -155,8 +155,8 @@ describe('main ipc router', () => {
     const remoteClient = { id: 'remote:1/page:3.1', onGone: () => () => {} } as unknown as MainContext['client'];
 
     it('validates and dispatches with no sender, handing the given client and target to the handler', async () => {
-      const handler = vi.fn<(input: unknown, context: MainContext) => { sessions: never[]; revision: number }>(() => ({ sessions: [], revision: 3 }));
-      router.registerMainHandler('session.list', handler);
+      const handler = vi.fn<(input: unknown, context: unknown) => { sessions: never[]; revision: number }>(() => ({ sessions: [], revision: 3 })); // a machine handler, handed the main context all the same
+      router.registerMachineHandler('session.list', handler);
       await expect(router.dispatchLocal('session.list', {}, { client: remoteClient, target: LOCAL })).resolves.toEqual({ ok: true, value: { sessions: [], revision: 3 } });
       expect(handler).toHaveBeenCalledWith({}, { client: remoteClient, target: LOCAL });
       await expect(router.dispatchLocal('session.list', { includeArchived: 1 }, { client: remoteClient, target: LOCAL })).resolves.toMatchObject({ ok: false, error: { code: 'invalid_input' } });
@@ -164,7 +164,7 @@ describe('main ipc router', () => {
     });
 
     it('answers a handler’s CommandFailure with its IpcError, and refuses a main-only command', async () => {
-      router.registerMainHandler('session.list', () => {
+      router.registerMachineHandler('session.list', () => {
         throw new router.CommandFailure({ code: 'timeout', message: 'too slow' });
       });
       await expect(router.dispatchLocal('session.list', {}, { client: remoteClient, target: LOCAL })).resolves.toEqual({ ok: false, error: { code: 'timeout', message: 'too slow' } });
@@ -365,17 +365,55 @@ describe('main ipc router', () => {
     expect(bridged.sort()).toEqual(Object.keys(REGISTRY.commands).filter(isBridgedCommandName).sort());
   });
 
-  // P5 O1 M5: no production namespace is `machine`-owned in O1 (machine-forward.test.ts drives a fixture one)
-  it('refuses a machine handler for a command not owned by machine', () => {
+  // P5 O1 M5 (machine-forward.test.ts drives a fixture namespace); P5 O3-D M1: the spine's commands are `machine`-owned
+  it('refuses a machine handler for a command not owned by machine, and a main handler for one that is', () => {
+    expect(() => router.registerMainHandler('session.list', () => ({ sessions: [], revision: 0 }))).toThrow('session.list is owned by machine, not main');
     expect(() => router.registerMachineHandler('settings.get', () => LIGHT)).toThrow('settings.get is owned by main, not machine');
     expect(() => router.registerMachineHandler('engine.ping', () => ({}) as never)).toThrow('engine.ping is owned by engine-host, not machine');
   });
 
+  // P5 O3-D M1 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §I): the spine's commands retagged
+  // `machine` are answered by the embedded binding on either shape until M5, each output checked as a host runtime checks
+  // it before answering
+  describe('the embedded machine binding over a retagged command', () => {
+    it('answers session.list through its machine handler, with the asker and the local machine', async () => {
+      const handler = vi.fn(() => ({ sessions: [], revision: 4 }));
+      router.registerMachineHandler('session.list', handler);
+      const event = appWindow();
+      await expect(invoke(event, 'session.list', { includeArchived: true })).resolves.toEqual({ ok: true, value: { sessions: [], revision: 4 } });
+      expect(handler).toHaveBeenCalledWith({ includeArchived: true }, { client: expect.objectContaining({ id: `page:${event.sender.id}.1` }), target: LOCAL });
+    });
+
+    it('answers internal, and logs, when the handler’s output fails the registry, as a host runtime would', async () => {
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      router.registerMachineHandler('session.list', () => ({ sessions: [], revision: 'four' }) as never);
+      await expect(invoke(appWindow(), 'session.list', {})).resolves.toMatchObject({ ok: false, error: { code: 'internal' } });
+      expect(log).toHaveBeenCalledWith('[ipc] session.list produced an invalid output', expect.any(Array));
+    });
+
+    it('answers internal for a retagged command with no handler, as for any machine command', async () => {
+      await expect(invoke(appWindow(), 'session.get', { appSessionId: 'app-1' })).resolves.toEqual({ ok: false, error: { code: 'internal', message: 'no machine handler registered for session.get' } });
+    });
+  });
+
+  // P5 O3-D M1 (Interfaces §I): what only main or mawsd sends is refused from a window before any handler or host
+  it('refuses a window every command O3-D makes main-only, before any handler or host dispatch', async () => {
+    const dispatch = vi.fn<HostDispatch>(async () => ({ ok: true, value: undefined }));
+    await load(DEV_URL, dispatch);
+    const names = ['session.follow', 'session.visible', 'library.fileLinkedPaths', 'machine.client', 'clientPort.answer', 'machine.op', 'machine.opQuery', 'host.attachment', 'fs.scan', 'fs.bind', 'fs.unbind', 'maws.artifact.captured', 'maws.download.recorded'];
+    const { isBridgedCommandName } = await import('@shared/ipc/names');
+    for (const name of names) {
+      expect(isBridgedCommandName(name), `${name} is bridged by the preload`).toBe(false);
+      await expect(invoke(appWindow(), name, {}), name).resolves.toEqual({ ok: false, error: { code: 'forbidden_sender', message: `${name} may only be invoked by main` } });
+    }
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   describe('interceptCommand (C5 stub source seam)', () => {
-    it('is consulted before the main handler for exactly the intercepted name, and removed by its disposer', async () => {
-      const main = vi.fn(() => ({ digests: [] }));
+    it('is consulted before the handler for exactly the intercepted name, and removed by its disposer', async () => {
+      const machine = vi.fn(() => ({ digests: [] }));
       const stub = vi.fn(() => ({ sessions: [], revision: 7 }));
-      router.registerMainHandler('session.digests', main);
+      router.registerMachineHandler('session.digests', machine); // P5 O3-D M1: the spine's, `machine`-owned
       const dispose = router.interceptCommand('session.list', stub);
       await expect(invoke(appWindow(), 'session.list', {})).resolves.toEqual({ ok: true, value: { sessions: [], revision: 7 } });
       await expect(invoke(appWindow(), 'session.digests')).resolves.toEqual({ ok: true, value: { digests: [] } });
@@ -384,7 +422,7 @@ describe('main ipc router', () => {
       await expect(invoke(appWindow(), 'session.list', {})).resolves.toMatchObject({ ok: false, error: { code: 'internal' } });
     });
 
-    it('shadows a registered main handler and the host dispatcher alike', async () => {
+    it('shadows a registered handler and the host dispatcher alike', async () => {
       const host = vi.fn(async () => ({ ok: true as const, value: { outcome: 'not_pending' as const } }));
       await load(DEV_URL, host);
       router.interceptCommand('session.answer', () => ({ outcome: 'delivered' }));
@@ -395,7 +433,7 @@ describe('main ipc router', () => {
       });
       expect(host).not.toHaveBeenCalled();
       const handler = vi.fn(() => ({ sessions: [], revision: 0 }));
-      router.registerMainHandler('session.list', handler);
+      router.registerMachineHandler('session.list', handler);
       router.interceptCommand('session.list', () => ({ sessions: [], revision: 9 }));
       await expect(invoke(appWindow(), 'session.list', {})).resolves.toMatchObject({ value: { revision: 9 } });
       expect(handler).not.toHaveBeenCalled();

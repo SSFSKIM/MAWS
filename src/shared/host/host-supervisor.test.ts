@@ -313,6 +313,7 @@ describe('raw forwarding', () => {
     events: { 'session.brokerItems': z.unknown(), 'probe.newEvent': z.strictObject({ m: z.number() }) },
     hostEvents: ['session.brokerItems', 'probe.newEvent'],
     ptyHostEvents: [],
+    machineEvents: [],
     mainOnly: new Set<string>(),
   } as const satisfies WireRegistry;
 

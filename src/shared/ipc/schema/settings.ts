@@ -225,6 +225,19 @@ export const SettingsPatchSchema = z.strictObject({
   // P3-D end
 });
 export type SettingsPatch = z.infer<typeof SettingsPatchSchema>;
+// P5 O3-D (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §G): a patch of the machine half alone, the
+// shape `machineSettings.set` takes: the machine file's sections, each patched by field as `SettingsPatchSchema` patches
+// it, the shared sections narrowed to the machine's fields.
+export const MachineSettingsPatchSchema = z.strictObject({
+  engine: SettingsPatchSchema.shape.engine,
+  gateway: SettingsPatchSchema.shape.gateway,
+  permissions: SettingsPatchSchema.shape.permissions,
+  mods: SettingsPatchSchema.shape.mods,
+  supervisor: MachineSettingsSchema.shape.supervisor.partial().optional(),
+  artifacts: MachineSettingsSchema.shape.artifacts.partial().optional(),
+  sessions: SettingsPatchSchema.shape.sessions,
+});
+export type MachineSettingsPatch = z.infer<typeof MachineSettingsPatchSchema>;
 
 export const SettingsStateSchema = z.strictObject({ settings: SettingsSchema, resolvedTheme: z.enum(['light', 'dark']) });
 export type SettingsState = z.infer<typeof SettingsStateSchema>;
@@ -274,12 +287,12 @@ const c11Commands = {
 export const UserEngineDefaultsSchema = z.strictObject({ model: z.string().nullable(), effortLevel: EffortSchema.nullable(), defaultMode: PermissionModeSchema.nullable() });
 export type UserEngineDefaults = z.infer<typeof UserEngineDefaultsSchema>;
 const w3Commands = {
-  'settings.userEngineDefaults': { input: z.void(), output: UserEngineDefaultsSchema, owner: 'main' },
+  'settings.userEngineDefaults': { input: z.void(), output: UserEngineDefaultsSchema, owner: 'machine' },
 } as const satisfies Record<`settings.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // W3 end
 
 const c12Commands = {
-  'settings.engineApplied': { input: z.void(), output: z.void(), owner: 'main' },
+  'settings.engineApplied': { input: z.void(), output: z.void(), owner: 'machine' },
 } as const satisfies Record<`settings.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // C12 end
 

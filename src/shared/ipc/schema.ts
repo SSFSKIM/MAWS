@@ -66,6 +66,8 @@ import * as machine from './schema/machine'; // P5 O6 M1
 import * as machines from './schema/machines'; // P5 O6 M3
 import * as org from './schema/org'; // P5 O8 M1
 import * as laneA from './schema/lane-a'; // P5 O9 M2
+import * as machineSettings from './schema/machine-settings'; // P5 O3-D
+import * as clientPort from './schema/client-port'; // P5 O3-D
 export { CustomizationInventorySchema, type CustomizationInventory, type CustomizationSkill, type CustomizationServer, type CustomizationEndpoint } from './schema/customization';
 
 export {
@@ -170,6 +172,8 @@ export const commands = {
   ...machines.commands, // P5 O6 M3
   ...org.commands, // P5 O8 M1
   ...laneA.commands, // P5 O9 M2
+  ...machineSettings.commands, // P5 O3-D
+  ...clientPort.commands, // P5 O3-D
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -222,6 +226,8 @@ export const events = {
   ...machines.events, // P5 O6 M3
   ...org.events, // P5 O8 M1
   ...laneA.events, // P5 O9 M2
+  ...machineSettings.events, // P5 O3-D
+  ...clientPort.events, // P5 O3-D
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;
@@ -267,6 +273,19 @@ export const HOST_EVENTS = [
 // HOST_EVENTS (not the protocol-2 fingerprint, which no pty host link ever speaks); the host runtime refuses a pty host
 // event outside the list, as it does the engine host's. `pty.hostState` is main's.
 export const PTY_HOST_EVENTS = ['pty.data', 'pty.exit'] as const satisfies readonly EventName[];
+// P5 O3-D (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §I): the events the machine host emits, the
+// services front in `mawsd` on the daemon shape (main's embedded binding emits the same in process): every event the
+// spine's parts emit through the services bus, and the front's own (the machine half's settings, the visible set, the
+// client port). They join the wire manifest beside the other two lists; a name in two lists (`session.eventBatch`, which
+// the spine synthesises too) is one entry and one schema. src/services/spine-root.test.ts holds the list to what the
+// spine's source emits; the front's emit gate is M2's.
+export const MACHINE_EVENTS = [
+  'attention.changed',
+  'session.changed', 'session.removed', 'session.projects.changed', 'session.digest', 'session.setup', 'session.intent.changed',
+  'session.eventBatch', 'session.status', 'engine.budget', // the side threads', setups' and yield's rows; the scenario stub's statuses and budget
+  'library.changed', 'ownerChannel.changed', 'laneA.changed', 'laneA.plane',
+  'machineSettings.changed', 'session.visibleChanged', 'clientPort.request', // the front's own
+] as const satisfies readonly EventName[];
 export type CommandInput<N extends CommandName> = z.input<(typeof commands)[N]['input']>;
 export type CommandOutput<N extends CommandName> = z.output<(typeof commands)[N]['output']>;
 export type EventPayload<N extends EventName> = z.output<(typeof events)[N]>;

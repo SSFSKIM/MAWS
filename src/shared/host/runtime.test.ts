@@ -608,6 +608,7 @@ describe('host runtime: the handler context (P5 O1 M5)', () => {
     events: {},
     hostEvents: [],
     ptyHostEvents: [],
+    machineEvents: [],
     mainOnly: new Set<string>(),
   } as const satisfies WireRegistry;
   const echo = (id: string, client?: string) => ({ t: 'req', id, name: 'probe.echo', input: { text: id }, ...(client ? { client } : {}) });

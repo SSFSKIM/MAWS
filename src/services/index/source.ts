@@ -535,7 +535,8 @@ export class IndexSessionSource implements SessionSource {
       const revision = this.projectsRevision;
       this.projectsRevision = null;
       const projects = this.index.projects.listWithRemoved(); // W11 (I5): as `session.projects.list` answers
-      out.push({ revision, send: () => this.options.emit('session.projects.changed', { projects, revision }) });
+      const rows = this.index.projects.list({ includeHidden: true }); // P5 O3-D (D13): every row, for the spine's view
+      out.push({ revision, send: () => this.options.emit('session.projects.changed', { projects, revision, rows }) });
     }
     out.sort((a, b) => a.revision - b.revision);
     for (const { send } of out) send();

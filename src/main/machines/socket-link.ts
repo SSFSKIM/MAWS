@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import { clientGoneRelay, type ClientGoneRelay } from '@shared/host/client-refs';
 import { assertPrivateSocket } from '@shared/host/private-path';
 import { SocketPort } from '@shared/host/socket-port';
-import { ServerRefuseSchema, ServerWelcomeSchema, SOCKET_PROTOCOL, splitLines, type ClientHello, type ServerWelcome } from '@shared/host/socket-protocol';
+import { PEER_CAPABILITIES, ServerRefuseSchema, ServerWelcomeSchema, SOCKET_PROTOCOL, splitLines, type ClientHello, type ServerWelcome } from '@shared/host/socket-protocol';
 import type { ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import { HostToMainSchema, type HostMessage } from '@shared/ipc/host-protocol';
@@ -27,7 +27,7 @@ import type { WireRegistry } from '@shared/ipc/registry';
 import type { CommandName, CommandResult, EventName } from '@shared/ipc/schema';
 import { readTolerant, tolerantLog } from '@shared/ipc/tolerant';
 import { codecOf } from '@shared/ipc/validate';
-import { WIRE_CAPABILITIES, WIRE_MINOR } from '@shared/ipc/wire';
+import { WIRE_MINOR } from '@shared/ipc/wire';
 import type { MachineRef } from '@shared/machine/ref';
 import { LINK_REGISTRY } from './link-surface';
 import type { LinkState, MachineLink } from './manager';
@@ -165,7 +165,7 @@ export function createSocketLink(options: SocketLinkOptions): MachineLink {
     socket.on('data', onData);
     socket.on('close', onClose);
     socket.once('connect', () => {
-      const hello: ClientHello = { t: 'hello', protocol: SOCKET_PROTOCOL, token, minor: WIRE_MINOR, build, capabilities: [...WIRE_CAPABILITIES], appPid: process.pid };
+      const hello: ClientHello = { t: 'hello', protocol: SOCKET_PROTOCOL, token, minor: WIRE_MINOR, build, capabilities: [...PEER_CAPABILITIES.link], appPid: process.pid }; // P5 O3-D: the link's own list
       socket.write(`${JSON.stringify(hello)}\n`);
     });
   }

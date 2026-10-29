@@ -949,7 +949,8 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     });
   });
 
-  it('emits session.projects.changed with the whole list on every project change', async () => {
+  // P5 O3-D M1 (D13): with every project row the index holds (`rows`), hidden or with no present session, for the view
+  it('emits session.projects.changed with the whole list and every row on every project change', async () => {
     const tree = tempDir('maws-source-');
     try {
       mkdirSync(join(tree.path, 'alpha'));
@@ -959,12 +960,12 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
       fake.fire('fs.sessionChanged', { summary: summary({ directory: join(tree.path, 'alpha') }), appSessionId: null });
       await settle();
       const [project] = index.projects.list();
-      expect(events('session.projects.changed').at(-1)).toEqual({ projects: [project], revision: expect.any(Number) });
+      expect(events('session.projects.changed').at(-1)).toEqual({ projects: [project], revision: expect.any(Number), rows: [project] });
       expect(recorded.of('observeProject')).toContainEqual(project);
       index.projects.hide(project.id);
       await settle();
       // W11 (I5): the event carries the hidden project, marked, as the list does; the writer stops observing it
-      expect(events('session.projects.changed').at(-1)).toMatchObject({ projects: [{ ...project, hidden: true }] });
+      expect(events('session.projects.changed').at(-1)).toMatchObject({ projects: [{ ...project, hidden: true }], rows: [{ ...project, hidden: true }] });
       expect(recorded.of('observeProjectRemoved')).toEqual([project.id]);
     } finally {
       tree.dispose();

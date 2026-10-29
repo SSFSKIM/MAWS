@@ -123,7 +123,9 @@ describe('x2 deadlines fit the bridge', () => {
   it('every host.* command the engine host owns has one deadline shape and a Supervision handler; stopAll alone is bounded', () => {
     const hostOwned = Object.entries(hostSchema.commands).filter(([, spec]) => spec.owner === 'engine-host').map(([name]) => name);
     expect(Object.keys(HOST_DEADLINE_SHAPES).sort()).toEqual(hostOwned.sort());
-    expect(HOST_DEADLINE_SHAPES).toEqual({ 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.interest': 'immediate' /* P5 O2 M2 */, 'host.op': 'bounded', 'host.opQuery': 'immediate' });
+    expect(HOST_DEADLINE_SHAPES).toEqual({ 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.interest': 'immediate' /* P5 O2 M2 */, 'host.op': 'bounded', 'host.opQuery': 'immediate', 'host.attachment': 'immediate' /* P5 O3-D */ });
+    // P5 O3-D: `host.attachment` is declared at M1 (the wire is final there) and registered from M3, with the presence it sets
+    const declaredOnly = ['host.attachment'];
     // P5 O10 M7: lane B's operation ledger is the engine ipc's (ops.ts), not the supervisor's
     const ledgerCommands = ['host.op', 'host.opQuery'];
     expect([...engineHost().handlers.keys()].filter((name) => name.startsWith('host.')).sort()).toEqual(ledgerCommands);
@@ -133,7 +135,7 @@ describe('x2 deadlines fit the bridge', () => {
       table: { onChange: () => () => {}, onRowsChanged: () => () => {}, setIdleRelease: () => {}, setInterest: () => {}, list: () => [] } as never,
       plugins: { busy: () => false, onIdle: () => () => {}, onBusy: () => () => {} }, shutdown: async () => ({ stopped: 0, forced: 0 }), emit: () => true, log: () => {},
     }).register((name) => void registered.push(name), { onConnect: () => {} });
-    expect(registered.sort()).toEqual(hostOwned.filter((name) => !ledgerCommands.includes(name)).sort());
+    expect(registered.sort()).toEqual(hostOwned.filter((name) => !ledgerCommands.includes(name) && !declaredOnly.includes(name)).sort());
   });
 
   it('every bounded wait fits under the router\'s 10 s with the two IPC hops to spare', () => {

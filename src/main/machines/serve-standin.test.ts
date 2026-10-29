@@ -40,8 +40,8 @@ function router() {
   const made = createRouter({ appUrl: 'http://localhost:5173/', local: B, registry: REGISTRY });
   made.install();
   made.registerMachine('machine.identity', () => IDENTITY);
-  made.registerMain('session.list', () => ({ sessions: [], revision: 5 }));
-  made.registerMain('session.drafts.get', () => {
+  made.registerMachine('session.list', () => ({ sessions: [], revision: 5 })); // P5 O3-D M1: the spine's, `machine`-owned
+  made.registerMachine('session.drafts.get', () => {
     throw new CommandFailure({ code: 'timeout', message: 'the index took too long' });
   });
   return made;

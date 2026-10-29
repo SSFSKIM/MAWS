@@ -26,7 +26,7 @@
 //
 // P5 O2 M4: the capability gate. A client whose hello listed `socket.ptyFrames` gets `pty.data` as pty frames (its port
 // is made with `ptyFrames`); any other, a protocol-2 one included, gets the JSON line. The welcome lists what the
-// identity says, which is WIRE_CAPABILITIES for every host.
+// identity says: the serving host's own list (P5 O3-D: PEER_CAPABILITIES in socket-protocol.ts, never the wire's union).
 //
 // P5 O2 M5 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, "The handshake reflects the upstream"): a relay (`mawsd`'s
 // engine-host.sock and pty-host.sock) welcomes with its upstream's facts, not its own. With `admitHello`, a hello that passed

@@ -177,33 +177,33 @@ export const LaneAMediaFileSchema = z.strictObject({
 });
 
 export const commands = {
-  'laneA.list': { input: z.void(), output: z.strictObject({ states: z.array(LaneAStateSchema) }), owner: 'main' }, // this machine's bridged foreign sessions
-  'laneA.state': { input: input({}), output: LaneAStateSchema.nullable(), owner: 'main' },
-  'laneA.watch': { input: input({}), output: z.strictObject({ watch: z.string() }), owner: 'main' }, // its first laneA.plane message is its snapshot
-  'laneA.unwatch': { input: input({ watch: z.string() }), output: z.void(), owner: 'main' },
-  'laneA.catalog': { input: input({}), output: LaneACatalogSchema.nullable(), owner: 'main' },
+  'laneA.list': { input: z.void(), output: z.strictObject({ states: z.array(LaneAStateSchema) }), owner: 'machine' }, // this machine's bridged foreign sessions
+  'laneA.state': { input: input({}), output: LaneAStateSchema.nullable(), owner: 'machine' },
+  'laneA.watch': { input: input({}), output: z.strictObject({ watch: z.string() }), owner: 'machine' }, // its first laneA.plane message is its snapshot
+  'laneA.unwatch': { input: input({ watch: z.string() }), output: z.void(), owner: 'machine' },
+  'laneA.catalog': { input: input({}), output: LaneACatalogSchema.nullable(), owner: 'machine' },
   'laneA.read': {
     input: input({ watch: z.string(), kind: z.enum(['usage', 'config', 'settings', 'mcp', 'status', 'rows', 'diff', 'output']), args: z.record(z.string(), z.unknown()).optional() }),
     output: LaneAReadOutputSchema,
-    owner: 'main',
+    owner: 'machine',
   },
-  'laneA.send': { input: input({ text: z.string().min(1) }), output: LaneASendOutputSchema, owner: 'main' }, // a `/` text is refused: commands go as laneA.command
-  'laneA.interrupt': { input: input({}), output: ControlResultSchema, owner: 'main' },
-  'laneA.answer': { input: input({ request: z.string().min(1), answer: RequestAnswerSchema }), output: LaneAAnswerOutputSchema, owner: 'main' },
+  'laneA.send': { input: input({ text: z.string().min(1) }), output: LaneASendOutputSchema, owner: 'machine' }, // a `/` text is refused: commands go as laneA.command
+  'laneA.interrupt': { input: input({}), output: ControlResultSchema, owner: 'machine' },
+  'laneA.answer': { input: input({ request: z.string().min(1), answer: RequestAnswerSchema }), output: LaneAAnswerOutputSchema, owner: 'machine' },
   'laneA.model': {
     input: input({ model: nullableName.optional(), effort: nullableName.optional() }).refine((v) => v.model !== undefined || v.effort !== undefined, { message: 'model, effort or both' }),
     output: ControlResultSchema,
-    owner: 'main',
+    owner: 'machine',
   },
-  'laneA.command': { input: input({ name: z.string().min(1), args: z.string() }), output: ControlResultSchema, owner: 'main' },
-  'laneA.btw': { input: input({ prompt: z.string().min(1) }), output: ControlResultSchema, owner: 'main' },
-  'laneA.compact': { input: input({ instructions: z.string().optional() }), output: ControlResultSchema, owner: 'main' },
-  'laneA.stopAgent': { input: input({ agentId: z.string().min(1) }), output: ControlResultSchema, owner: 'main' },
-  'laneA.tell': { input: input({ agentId: z.string().min(1), text: z.string().min(1) }), output: ControlResultSchema, owner: 'main' },
-  'laneA.stopTask': { input: input({ taskId: z.string().min(1) }), output: ControlResultSchema, owner: 'main' },
+  'laneA.command': { input: input({ name: z.string().min(1), args: z.string() }), output: ControlResultSchema, owner: 'machine' },
+  'laneA.btw': { input: input({ prompt: z.string().min(1) }), output: ControlResultSchema, owner: 'machine' },
+  'laneA.compact': { input: input({ instructions: z.string().optional() }), output: ControlResultSchema, owner: 'machine' },
+  'laneA.stopAgent': { input: input({ agentId: z.string().min(1) }), output: ControlResultSchema, owner: 'machine' },
+  'laneA.tell': { input: input({ agentId: z.string().min(1), text: z.string().min(1) }), output: ControlResultSchema, owner: 'machine' },
+  'laneA.stopTask': { input: input({ taskId: z.string().min(1) }), output: ControlResultSchema, owner: 'machine' },
   // M7: 1 to 4 images or PDFs, saved by main and handed to the bridge's `media` op; `result.upload` names the `op` messages
   // that follow each file's state (`op: 'media'`, `id` the upload).
-  'laneA.media': { input: input({ files: z.array(LaneAMediaFileSchema).min(1).max(4) }), output: ControlResultSchema, owner: 'main' },
+  'laneA.media': { input: input({ files: z.array(LaneAMediaFileSchema).min(1).max(4) }), output: ControlResultSchema, owner: 'machine' },
 } as const satisfies Record<`laneA.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 const watchEvent = <S extends z.ZodRawShape>(shape: S) => z.strictObject({ ...session, watch: z.string(), ...shape });

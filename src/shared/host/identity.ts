@@ -6,8 +6,10 @@
 // of this build by construction, so once it starts one the seams end: the app then reads as what it is, and the
 // supervisor it started is served rather than replaced again and again. A utility host is never a supervisor and never
 // compared: the seams apply only to the detached mode, or a utility run that set them would misreport host.status.
-import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
-import { WIRE_CAPABILITIES, WIRE_MINOR } from '@shared/ipc/wire';
+// P5 O3-D (Interfaces §I): the capabilities are the caller's own list (PEER_CAPABILITIES): main's by default, `mawsd`'s
+// to each of its hosts as it names them.
+import { PEER_CAPABILITIES, SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
+import { WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { buildIdOf } from '../../engine-host/supervisor-files';
 
@@ -21,7 +23,7 @@ export interface AppIdentity {
 }
 
 // `mode`: the engine host's transport, main's HostMode (src/main/hosts/mode.ts); the seams apply to `detached` only.
-export function appIdentity(modulePath: string, env: NodeJS.ProcessEnv, mode: 'utility' | 'detached' = 'detached'): AppIdentity {
+export function appIdentity(modulePath: string, env: NodeJS.ProcessEnv, mode: 'utility' | 'detached' = 'detached', capabilities: readonly string[] = PEER_CAPABILITIES.app): AppIdentity {
   const e2e = mode === 'detached' && env.MAWS_E2E === '1';
   let buildId = (e2e && env.MAWS_E2E_BUILD_ID) || null;
   let major = (e2e && Number.parseInt(env.MAWS_E2E_WIRE_MAJOR ?? '', 10)) || null;
@@ -32,7 +34,7 @@ export function appIdentity(modulePath: string, env: NodeJS.ProcessEnv, mode: 'u
     wire: () => wireFingerprint(),
     major: () => major ?? SOCKET_PROTOCOL,
     minor: () => WIRE_MINOR,
-    capabilities: () => WIRE_CAPABILITIES,
+    capabilities: () => capabilities,
     startedOwn() {
       buildId = null;
       major = null;

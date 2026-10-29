@@ -17,12 +17,11 @@
 //   are taken; with `drain`, the upstream's draining close starts and every event the host wrote before it saw that end
 //   is still forwarded to the app, until the upstream has closed or `boundMs` passed; only then is the app's side ended.
 //   What arrives past it is counted in one log line.
-import { SOCKET_PROTOCOL, type ServerRefuse } from '@shared/host/socket-protocol';
+import { PEER_CAPABILITIES, SOCKET_PROTOCOL, type ServerRefuse } from '@shared/host/socket-protocol';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
 import type { DocPortEnd, HostPort } from '@shared/host/runtime';
 import type { Admission, ServedRuntime, SocketClients } from '@shared/host/socket-server';
 import type { HostDoc, HostResponse } from '@shared/ipc/host-protocol';
-import { WIRE_CAPABILITIES } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 
 export const HELLO_HOLD_MS = 15_000; // a hello waits this long for its upstream to connect: the app's whole start budget (the architect's ruling)
@@ -126,7 +125,7 @@ export class Relay implements ServedRuntime {
           protocol: SOCKET_PROTOCOL,
           minor: peer.minor,
           buildId: peer.build,
-          capabilities: [...new Set([...peer.capabilities, ...WIRE_CAPABILITIES])],
+          capabilities: [...new Set([...peer.capabilities, ...PEER_CAPABILITIES.daemon])], // the upstream's, and the relay's own (P5 O3-D)
           wire: wireFingerprint(),
           pid: welcome.pid,
           startedAt: this.options.startedAt(welcome.pid),

@@ -32,13 +32,13 @@ export const SendToMainDispositionSchema = z.enum(['steered', 'sent', 'queued'])
 export type SendToMainDisposition = z.infer<typeof SendToMainDispositionSchema>;
 
 export const commands = {
-  'side.thread.open': { input: z.strictObject({ appSessionId: AppSessionIdSchema, from: SideThreadFromSchema }), output: StartOutcomeSchema, owner: 'main' },
+  'side.thread.open': { input: z.strictObject({ appSessionId: AppSessionIdSchema, from: SideThreadFromSchema }), output: StartOutcomeSchema, owner: 'machine' },
   // A turn running → a `next` steer; otherwise a send through the app queue (`queued` when it waits there). Refusals:
   // `invalid_input` naming the screenshot's reason, `internal` with the host's refusal verbatim.
   'side.sendToMain': {
     input: z.strictObject({ appSessionId: AppSessionIdSchema, anchor: AnchorSchema, text: CommentTextSchema, screenshot: AnchorScreenshotSchema.nullable() }),
     output: z.strictObject({ messageUuid: MessageUuidSchema.nullable(), disposition: SendToMainDispositionSchema }),
-    owner: 'main',
+    owner: 'machine',
   },
   // E11 F2b (Q4, owner-decided): the comment composer's thumbnail of a producer's screenshot, read by main through the
   // send's own checks (under `<userData>/` or the session's directories, a regular image of at most 5 MiB); a refusal is
@@ -46,7 +46,7 @@ export const commands = {
   'side.screenshot.preview': {
     input: z.strictObject({ appSessionId: AppSessionIdSchema, screenshot: AnchorScreenshotSchema }),
     output: z.strictObject({ dataUrl: z.string() }),
-    owner: 'main',
+    owner: 'machine',
   },
   // The session's side questions, oldest first (none for a session this host does not hold).
   'side.question.list': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ exchanges: z.array(SideExchangeSchema) }), owner: 'engine-host' },

@@ -50,7 +50,7 @@ function setup(opts: { store?: FakeStore; dispatch?: AttentionServiceDeps['dispa
   const listeners = new Map<string, ((payload: unknown) => void)[]>();
   const handlers = new Map<string, (input: unknown) => unknown>();
   const states = new Set<(state: HostState) => void>();
-  const changed: { appSessionId: string; items: AttentionItem[] }[] = [];
+  const changed: { appSessionId: string; items: AttentionItem[]; silent?: string[] }[] = [];
   const store = opts.store ?? new FakeStore();
   const dispatch = opts.dispatch ?? vi.fn(async () => ({ ok: true as const, value: { event: null } }));
   const service = startAttentionService({
@@ -63,7 +63,7 @@ function setup(opts: { store?: FakeStore; dispatch?: AttentionServiceDeps['dispa
     store,
     emit: ((name: EventName, payload: unknown) => {
       expect(validateEventPayload(name, payload).ok).toBe(true);
-      if (name === 'attention.changed') changed.push(payload as { appSessionId: string; items: AttentionItem[] });
+      if (name === 'attention.changed') changed.push(payload as { appSessionId: string; items: AttentionItem[]; silent?: string[] });
       return true;
     }) as AttentionServiceDeps['emit'],
     register: ((name: CommandName, handler: (input: unknown) => unknown) => void handlers.set(name, handler)) as AttentionServiceDeps['register'],
@@ -331,7 +331,7 @@ describe('attention service merges broker items with the derived kinds', () => {
     batch(event('process.exited', { code: 0, signal: null, reason: 'stop', lostAttentionCount: 1 }));
     expect(last().map((i) => i.kind)).toEqual(['interrupted']);
     batch(event('process.exited', { code: 0, signal: null, reason: 'archive', lostAttentionCount: 3 }));
-    expect(changed.at(-1)).toEqual({ appSessionId: APP, items: [] });
+    expect(changed.at(-1)).toEqual({ appSessionId: APP, items: [], silent: [] });
     await service.settled();
     expect(store.retired).toEqual([APP]);
     expect(await service.list()).toEqual([]);
@@ -392,7 +392,7 @@ describe('attention service merges broker items with the derived kinds', () => {
     batch(event('process.exited', { code: 0, signal: null, reason: 'crash', lostAttentionCount: 2 }));
     expect(changed.at(-1)!.items).toHaveLength(1);
     fire('session.forgotten', { appSessionId: APP });
-    expect(changed.at(-1)).toEqual({ appSessionId: APP, items: [] });
+    expect(changed.at(-1)).toEqual({ appSessionId: APP, items: [], silent: [] });
     await service.settled();
     expect(store.retired).toEqual([APP]);
     expect(service.list()).toEqual([]);
@@ -557,6 +557,7 @@ describe('the owner channel projects its items as a third list (P2-C)', () => {
     expect(changed.length).toBe(before + 1);
     expect(last()).toEqual([permission, question, essential]);
     expect(restoredAtEmit).toEqual([true, false]);
+    expect(changed.at(-1)!.silent).toEqual([essential.id]); // P5 O3-D M1 (D13): the restored marks travel on the event
     // a human turn retires neither kind, nor does a stop
     batch(event('turn.started', { userMessageUuid: null, origin: 'human' }));
     expect(last()).toEqual([permission, question, essential]);
@@ -564,6 +565,22 @@ describe('the owner channel projects its items as a third list (P2-C)', () => {
     expect(store.sessions.get(APP)).toEqual([permission, question, essential]);
     service.setOwnerItems(APP, [essential], []);
     expect(last()).toEqual([permission, essential]);
+    service.stop();
+  });
+
+  // P5 O3-D M1 (D13): an accepted persisted item is restored, and every change that carries it says so in `silent`, the
+  // retirement of a session's list included (an empty one)
+  it('fills silent on every change with the restored ids among its items', async () => {
+    const persisted = item({ kind: 'error', state: 'pending' });
+    const { service, fire, changed } = setup({ store: new FakeStore([persisted]) });
+    await service.ready;
+    expect(changed.at(-1)).toEqual({ appSessionId: APP, items: [persisted], silent: [persisted.id] });
+    const permission = item({ kind: 'permission', state: 'pending' });
+    fire('session.brokerItems', { appSessionId: APP, items: [permission] });
+    expect(changed.at(-1)).toEqual({ appSessionId: APP, items: [permission, persisted], silent: [persisted.id] });
+    fire('session.brokerItems', { appSessionId: APP, items: [] });
+    service.setOwnerItems(APP, [], []);
+    expect(changed.at(-1)!.silent).toEqual([persisted.id]);
     service.stop();
   });
 

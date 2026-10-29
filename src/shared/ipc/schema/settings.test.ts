@@ -104,9 +104,9 @@ describe('settings engine.launchProfile', () => {
 
 // C12 start (C12 execution document, Interfaces "X2 additions"); W13: settings.engineCustody retired with custody
 describe('settings.engineApplied', () => {
-  it('is main’s, answers nothing but its completion, and custody’s read is gone', () => {
+  it('is the machine’s, answers nothing but its completion, and custody’s read is gone', () => {
     expect(commands).not.toHaveProperty('settings.engineCustody');
-    expect(commands['settings.engineApplied'].owner).toBe('main');
+    expect(commands['settings.engineApplied'].owner).toBe('machine');
     expect(commands['settings.engineApplied'].output.safeParse(undefined).success).toBe(true);
   });
 });

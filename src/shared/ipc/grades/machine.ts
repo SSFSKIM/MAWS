@@ -5,4 +5,9 @@ import type { CommandGrades } from '../grades';
 
 export const grades = {
   'machine.identity': 'list',
+  // main-only (P5 O3-D): the attached app's browser socket, and the services' ledger, which a remote caller reaches only
+  // through an `act`, as `host.op`
+  'machine.client': 'internal',
+  'machine.op': 'internal',
+  'machine.opQuery': 'internal',
 } as const satisfies CommandGrades<'machine'>;

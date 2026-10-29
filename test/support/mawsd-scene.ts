@@ -16,10 +16,10 @@ import { createHostSupervisor, type HostSupervisor, type HostSupervisorOptions }
 import type { DocPortEnd, HostEmit, HostRuntime } from '@shared/host/runtime';
 import { createHostRuntime } from '@shared/host/runtime';
 import { SocketPort } from '@shared/host/socket-port';
-import { PTY_FRAMES_CAPABILITY, SOCKET_PROTOCOL, splitLines } from '@shared/host/socket-protocol';
+import { PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY, SOCKET_PROTOCOL, splitLines } from '@shared/host/socket-protocol';
 import type { HostDoc } from '@shared/ipc/host-protocol';
 import type { WireRegistry } from '@shared/ipc/registry';
-import { WIRE_CAPABILITIES, WIRE_MINOR } from '@shared/ipc/wire';
+import { WIRE_MINOR } from '@shared/ipc/wire';
 import { startDaemon, type DaemonOptions, type RunningDaemon } from '../../src/mawsd/daemon';
 import { procStartOf } from '../../src/engine-host/supervisor-files';
 import { ptyHostSocketPath } from '../../src/pty-host/files';
@@ -37,6 +37,7 @@ const ENGINE_REGISTRY = {
   events: { 'probe.event': z.unknown() },
   hostEvents: ['probe.event'],
   ptyHostEvents: [],
+  machineEvents: [],
   mainOnly: new Set<string>(),
 } as const satisfies WireRegistry;
 
@@ -47,6 +48,7 @@ const PTY_REGISTRY = {
   events: { 'pty.exit': z.unknown() },
   hostEvents: [],
   ptyHostEvents: ['pty.exit'],
+  machineEvents: [],
   mainOnly: new Set<string>(),
 } as const satisfies WireRegistry;
 
@@ -323,7 +325,7 @@ export class RawApp {
     return new Promise((resolve) => {
       const socket = createConnection(path);
       const app = new RawApp(socket);
-      const capabilities = options.capabilities ?? [...WIRE_CAPABILITIES];
+      const capabilities = options.capabilities ?? [...PEER_CAPABILITIES.app]; // P5 O3-D: an app's own list, not the wire's union
       socket.on('error', () => {});
       socket.on('end', () => void (app.ended = true));
       socket.on('close', () => {

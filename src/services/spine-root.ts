@@ -214,7 +214,6 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     index,
     intents,
     tap: bus.onEmitted,
-    restoredIds: attention?.restoredIds ?? new Set(),
     acquire: (id, reason) => (sessionService ? sessionService.acquire(id, reason) : Promise.reject(new Error(`MAWS cannot reach its sessions this run: ${data.refused}`))),
   });
   parts.push(['sessions', () => sessions.stop()], ['view', () => spineView.stop()]);

@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as z from 'zod';
 import { describe, expect, it } from 'vitest';
-import { ClientHelloV2Schema, ServerWelcomeV2Schema, SOCKET_PROTOCOL } from '../host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, ClientHelloV2Schema, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY, ServerWelcomeV2Schema, SOCKET_PROTOCOL } from '../host/socket-protocol';
 import { HostRequestSchema, HostRequestV2Schema } from './host-protocol';
 import { REGISTRY, type WireRegistry } from './registry';
 import { classifyWireChange, WIRE_CAPABILITIES, WIRE_MAJOR, WIRE_MINOR, wireManifestOf, type WireManifest } from './wire';
@@ -128,14 +128,15 @@ describe('wireManifestOf', () => {
       'probe.main': { input: z.void(), output: z.void(), owner: 'main' },
       'probe.pty': { input: z.void(), output: z.void(), owner: 'pty-host' },
     },
-    events: { 'probe.hostEvent': z.strictObject({ c: z.boolean() }), 'probe.mainEvent': z.strictObject({}), 'probe.ptyEvent': z.strictObject({}) },
+    events: { 'probe.hostEvent': z.strictObject({ c: z.boolean() }), 'probe.mainEvent': z.strictObject({}), 'probe.ptyEvent': z.strictObject({}), 'probe.machineEvent': z.strictObject({ d: z.string() }) },
     hostEvents: ['probe.hostEvent'],
     ptyHostEvents: ['probe.ptyEvent'], // P5 O2 M4
+    machineEvents: ['probe.machineEvent', 'probe.hostEvent'], // P5 O3-D M1: one name in two lists is one entry
     mainOnly: new Set<string>(),
   } satisfies WireRegistry;
 
   // P5 O2 M4: the pty host's commands and events joined the scope, since under the daemon shape it is mawsd's build
-  it('covers the engine host’s, the pty host’s and machine’s commands, the host and pty host events, the envelope and the socket layer, and nothing else', () => {
+  it('covers the engine host’s, the pty host’s and machine’s commands, the host, pty host and machine events, the envelope and the socket layer, and nothing else', () => {
     const manifest = wireManifestOf(fixture);
     expect(manifest).toMatchObject({ major: WIRE_MAJOR, minor: WIRE_MINOR, capabilities: [...WIRE_CAPABILITIES].sort() });
     expect(wireManifestOf(fixture, ['b.second', 'a.first']).capabilities).toEqual(['a.first', 'b.second']);
@@ -145,6 +146,7 @@ describe('wireManifestOf', () => {
         'commands.probe.machine',
         'commands.probe.pty',
         'events.probe.hostEvent',
+        'events.probe.machineEvent',
         'events.probe.ptyEvent',
         ...['clientGone', 'doc', 'evt', 'ready', 'req', 'res'].map((t) => `envelope.${t}`),
         ...['documents.close', 'documents.closed', 'documents.open', 'exit', 'hello', 'refuse', 'welcome'].map((t) => `socket.${t}`),
@@ -171,6 +173,56 @@ describe('the pty host on the wire (P5 O2 M4)', () => {
   });
   it('lists the pty frames capability', () => {
     expect(manifest.capabilities).toContain('socket.ptyFrames');
+  });
+});
+
+// P5 O3-D M1 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §I): the spine's commands retagged
+// `machine`, the machine host's event list beside the other two, and the capabilities: the manifest's list the union of
+// every name a peer of this major may list, each peer listing only what it implements.
+describe('the machine host on the wire (P5 O3-D M1)', () => {
+  const manifest = wireManifestOf(REGISTRY);
+  const ownerOf = (name: string) => REGISTRY.commands[name as keyof typeof REGISTRY.commands]?.owner;
+
+  it('lists every machine-owned command, the spine’s retagged ones and the additions among them', () => {
+    const machineCommands = Object.keys(REGISTRY.commands).filter((name) => ownerOf(name) === 'machine');
+    for (const name of machineCommands) expect(manifest.entries, name).toHaveProperty([`commands.${name}`]);
+    for (const name of ['session.list', 'attention.acknowledge', 'laneA.send', 'git.worktree.add', 'library.list', 'settings.engineApplied', 'machineSettings.get', 'machineSettings.set', 'session.follow', 'session.visible', 'library.fileLinkedPaths', 'machine.client', 'machine.op', 'machine.opQuery', 'clientPort.answer']) {
+      expect(ownerOf(name), name).toBe('machine');
+    }
+    expect(ownerOf('host.attachment')).toBe('engine-host');
+    expect(manifest.entries).toHaveProperty(['commands.host.attachment']);
+    // the client's and the checkouts' commands stay main's until O3-E, out of the manifest
+    for (const name of ['attention.viewing', 'attention.pendingNavigate', 'git.status', 'settings.get', 'library.content']) {
+      expect(ownerOf(name), name).toBe('main');
+      expect(manifest.entries, name).not.toHaveProperty([`commands.${name}`]);
+    }
+  });
+
+  it('lists the machine host’s events beside the engine host’s and the pty host’s, a name in two lists once', () => {
+    expect(REGISTRY.machineEvents.length).toBeGreaterThan(0);
+    for (const name of REGISTRY.machineEvents) expect(manifest.entries, name).toHaveProperty([`events.${name}`]);
+    for (const name of ['machineSettings.changed', 'session.visibleChanged', 'clientPort.request']) expect(REGISTRY.machineEvents, name).toContain(name);
+    const shared = REGISTRY.machineEvents.filter((name) => (REGISTRY.hostEvents as readonly string[]).includes(name));
+    expect(shared).toEqual(expect.arrayContaining(['session.eventBatch', 'session.status', 'engine.budget']));
+    expect(new Set(REGISTRY.machineEvents).size).toBe(REGISTRY.machineEvents.length);
+  });
+
+  it('lists the union of every capability as the manifest’s, and each peer only what it implements at this milestone', () => {
+    expect([ATTACHMENT_CAPABILITY, MACHINE_SPINE_CAPABILITY]).toEqual(['host.attachment', 'machine.spine']);
+    expect(manifest.capabilities).toEqual(['host.attachment', 'machine.spine', 'socket.ptyFrames']);
+    expect([...WIRE_CAPABILITIES].sort()).toEqual(manifest.capabilities);
+    // M1 changes no peer's list (D4): the engine host lists host.attachment from M3, when it serves the command, and
+    // mawsd's hello to it from M3; main's hellos list machine.spine from M5, when main stops composing the spine
+    expect(PEER_CAPABILITIES).toEqual({
+      engineHost: [PTY_FRAMES_CAPABILITY],
+      ptyHost: [PTY_FRAMES_CAPABILITY],
+      app: [PTY_FRAMES_CAPABILITY],
+      daemonToEngineHost: [PTY_FRAMES_CAPABILITY],
+      daemonToPtyHost: [PTY_FRAMES_CAPABILITY],
+      daemon: [PTY_FRAMES_CAPABILITY],
+      link: [PTY_FRAMES_CAPABILITY],
+    });
+    for (const list of Object.values(PEER_CAPABILITIES)) for (const name of list) expect(WIRE_CAPABILITIES).toContain(name);
   });
 });
 

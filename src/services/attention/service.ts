@@ -168,13 +168,16 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
     });
   };
 
+  // P5 O3-D (D13): the restored ids among a change's items travel on it, so a reader in another process hears them in band
+  const silentOf = (items: readonly AttentionItem[]): AttentionId[] => items.flatMap((item) => (restoredIds.has(item.id) ? [item.id] : []));
+
   // After any change: emit and persist the session's whole list when it differs from the last one.
   const changed = (id: AppSessionId, state: SessionState) => {
     const items = merged(state);
     const signature = JSON.stringify(items);
     if (signature === state.signature) return;
     state.signature = signature;
-    deps.emit('attention.changed', { appSessionId: id, items });
+    deps.emit('attention.changed', { appSessionId: id, items, silent: silentOf(items) });
     owed.set(id, 'replace');
     writeOwed();
   };
@@ -183,7 +186,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
   const retireSession = (id: AppSessionId) => {
     sessions.delete(id);
     forgotten.add(id);
-    deps.emit('attention.changed', { appSessionId: id, items: [] });
+    deps.emit('attention.changed', { appSessionId: id, items: [], silent: [] });
     owed.set(id, 'retire');
     writeOwed();
   };

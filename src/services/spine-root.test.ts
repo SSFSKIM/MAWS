@@ -4,11 +4,13 @@
 // attention, `startCheckouts` over the spine's view, and both roots' stops releasing what they held. The exact commands,
 // intercepts and taps each root installs are pinned here for O3-D's retag.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NO_CLIENT, type ClientPort } from '@shared/client/port';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
+import { REGISTRY } from '@shared/ipc/registry';
+import type { CommandName } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import { captureConsole } from '../../test/support/console-capture';
 import { fakeBus, type FakeBus } from '../../test/support/fake-bus';
@@ -71,6 +73,22 @@ const SPINE_REFUSED_COMMANDS = [
 const SPINE_INTERCEPTS = ['session.answer'];
 const SPINE_TAPS = ['attention.changed', 'session.eventBatch', 'session.intent.changed', 'session.projects.changed'];
 const SPINE_REFUSED_TAPS = ['attention.changed', 'session.eventBatch', 'session.intent.changed']; // no projects to follow: the index is unavailable
+// P5 O3-D M1 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §I): what the services front emits of
+// its own beside the spine's events; with them, the machine host's event list (`REGISTRY.machineEvents`)
+const FRONT_EVENTS = ['clientPort.request', 'machineSettings.changed', 'session.visibleChanged'];
+// Every event the spine's parts emit through the bus, read from the library's source: each `emit('<event>'` under
+// src/services/ but the checkouts' root, whose events (`git.changed`, `files.changed`, `scm.remote.output`) are main's
+// until O3-E moves the checkouts. A part emits through a function it was handed, always with the event's name written.
+function spineEmits(): string[] {
+  const root = __dirname;
+  const names = new Set<string>();
+  for (const entry of readdirSync(root, { recursive: true, withFileTypes: true })) {
+    const path = join(entry.parentPath, entry.name);
+    if (!entry.isFile() || !entry.name.endsWith('.ts') || entry.name.endsWith('.test.ts') || relative(root, path) === 'checkouts-root.ts') continue;
+    for (const [, name] of readFileSync(path, 'utf8').matchAll(/\bemit\(\s*'([a-zA-Z]+(?:\.[a-zA-Z]+)+)'/g)) names.add(name!);
+  }
+  return [...names].sort();
+}
 const CHECKOUTS_COMMANDS = [
   'files.list', 'files.openExternal', 'files.read', 'files.reveal', 'files.unwatch', 'files.watch', 'files.write',
   'git.branches', 'git.diff', 'git.log', 'git.lsFiles', 'git.status', 'git.unwatch', 'git.watch',
@@ -169,6 +187,8 @@ describe('the spine and the checkouts composed under plain Node', () => {
     // the view reads what the renderer was told
     expect(spine.view.record(appSessionId)?.title.text).toBe('replay · permission-roundtrip');
     expect(spine.view.attention(appSessionId).map((item) => item.kind)).toContain('permission');
+    // P5 O3-D M1: everything the spine emitted is the machine host's to emit (the front's gate at M2)
+    for (const { name } of bus.emitted) expect(REGISTRY.machineEvents, name).toContain(name);
   });
 
   // P5 O9 (O3 Decision Log 13): lane A drives, from the spine, a terminal session the index held at start, and its
@@ -234,6 +254,19 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(host.held()).toBe(0);
     expect(spineBus.intercepted()).toEqual([]);
     expect(spineBus.tapped()).toEqual([]);
+  });
+
+  // P5 O3-D M1 (Interfaces §I): the spine's commands are `machine`-owned, so the services front serves them (M2) and main's
+  // embedded binding answers them until the cutover; the checkouts' stay main's until O3-E
+  it('owns by machine every command the spine registers, and by main every command the checkouts register', () => {
+    for (const name of SPINE_COMMANDS) expect(REGISTRY.commands[name as CommandName].owner, name).toBe('machine');
+    for (const name of CHECKOUTS_COMMANDS) expect(REGISTRY.commands[name as CommandName].owner, name).toBe('main');
+  });
+
+  it('lists as the machine host’s events exactly what the spine’s parts emit and the services front’s own', () => {
+    const emitted = spineEmits();
+    expect(emitted).toEqual(expect.arrayContaining(['attention.changed', 'session.changed', 'session.eventBatch', 'laneA.plane']));
+    expect([...REGISTRY.machineEvents].sort()).toEqual([...emitted, ...FRONT_EVENTS].sort());
   });
 
   // D21: one stop per root, which still stops every later part when one throws, as main's shutdown steps did per part

@@ -151,6 +151,10 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.laneA.read.input.args': "a bridge read's argument names (DX5 `read`'s args)",
   'commands.laneA.state.output.controls': BRIDGE_CONTROLS,
   'commands.laneA.state.output.pending[].input': TOOL_ARGUMENTS,
+  'commands.machine.op.input.input': JSON_OBJECT, // P5 O3-D M1: a forwarded spine command's input (machine.op, main-only)
+  'commands.machineSettings.get.output.settings.artifacts.spaceDesignSystems': SPACE_SYSTEMS, // P5 O3-D M1
+  'commands.machineSettings.set.input.patch.artifacts.spaceDesignSystems': SPACE_SYSTEMS,
+  'commands.machineSettings.set.output.settings.artifacts.spaceDesignSystems': SPACE_SYSTEMS,
   'commands.maws.artifact.exported.input.answer<ok=false>.refusal.data': "a refusal's detail fields (ArtifactRefusalSchema.data)",
   'commands.session.appEvents.output.events[]<kind=question.answered>.answers': ANSWERS,
   'commands.session.appEvents.output.events[]<kind=usage.sample>.modelUsage': MODEL_USAGE,
@@ -177,6 +181,7 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'events.connectors.watchUpdate.update.result': JSON_OBJECT,
   'events.laneA.changed.state.controls': BRIDGE_CONTROLS, // P5 O9 M2
   'events.laneA.changed.state.pending[].input': TOOL_ARGUMENTS,
+  'events.machineSettings.changed.settings.artifacts.spaceDesignSystems': SPACE_SYSTEMS, // P5 O3-D M1
   'events.plugins.operation.outcome.result': ENGINE_JSON,
   'events.plugins.operation.outcome.error.shownCommand': ENGINE_JSON,
   'events.session.eventBatch.events[]<kind=question.answered>.answers': ANSWERS,

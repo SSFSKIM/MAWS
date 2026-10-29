@@ -28,7 +28,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { invalidateShellEnvironment } from '@shared/host/shell-env';
 import { runSocketHost, START_EXIT_ABORTED, startSocketHost, type HostProcess } from '@shared/host/socket-host'; // P5 O2 M4
-import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
+import { PEER_CAPABILITIES, SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import type { HostRegister } from '@shared/host/runtime';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { clearLive, signalOrphan, sweepOrphans, writeLive, type LiveRow } from './live-ledger';
@@ -90,6 +90,7 @@ export async function startSupervisor(hostVersion: string, register: HostRegiste
       modulePath: opts.modulePath,
       register,
       badToken: 'refuse', // E10's `refuse token` (P5 Decision Log 29)
+      capabilities: PEER_CAPABILITIES.engineHost, // P5 O3-D: `host.attachment` joins at M3, when the host serves it
       counts: () => opts.counts(),
       shutdown: () => opts.shutdown(EXIT_GRACE_MS), // (2) every live row stopped (grace 3 s) and the plugin runner with it
       clean: (owner) => clearLive(dir, owner), // the orphan ledger, if this process still owns it

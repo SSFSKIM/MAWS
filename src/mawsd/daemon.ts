@@ -37,7 +37,7 @@ import { PrivatePathError } from '@shared/host/private-path';
 import { createHostRuntime } from '@shared/host/runtime';
 import { writeToken } from '@shared/host/socket-host';
 import { CLOSE_GRACE_MS } from '@shared/host/socket-port';
-import { SOCKET_PROTOCOL, type DocumentsOpen } from '@shared/host/socket-protocol';
+import { PEER_CAPABILITIES, SOCKET_PROTOCOL, type DocumentsOpen } from '@shared/host/socket-protocol';
 import { serveSocketClients, type SocketClients, type SupervisorIdentity } from '@shared/host/socket-server';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ClientRef } from '@shared/ipc/client';
@@ -45,7 +45,7 @@ import { ipcError } from '@shared/ipc/errors';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import { MAX_IDLE_EXIT_MS } from '@shared/ipc/schema/host';
 import type { DaemonHost, DaemonStatus } from '@shared/ipc/schema/daemon';
-import { WIRE_CAPABILITIES, WIRE_MINOR } from '@shared/ipc/wire';
+import { WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { readOrMintMachineRef } from '@shared/machine/identity-file';
 import type { MachineRef } from '@shared/machine/ref';
@@ -169,8 +169,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const role = options.role ?? readMachineRole(env);
   const packaged = /\.asar[/\\]/.test(options.modules.self);
   const execPath = options.execPath ?? process.execPath;
-  const identity: SupervisorIdentity = { protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, buildId, capabilities: WIRE_CAPABILITIES, wire: wireFingerprint(), pid: process.pid, startedAt };
-  const engineIdentity = appIdentity(options.modules.engineHost, env, 'detached'); // the e2e seams stand in, as for main
+  const identity: SupervisorIdentity = { protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, buildId, capabilities: PEER_CAPABILITIES.daemon, wire: wireFingerprint(), pid: process.pid, startedAt }; // P5 O3-D: its own list
+  const engineIdentity = appIdentity(options.modules.engineHost, env, 'detached', PEER_CAPABILITIES.daemonToEngineHost); // the e2e seams stand in, as for main
   const endpoint = options.endpoint === undefined ? loadEndpointModule(buildId) : options.endpoint;
 
   // --- the upstreams --------------------------------------------------------------------------------------------------
@@ -187,7 +187,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         detached: {
           buildPolicy: 'replace',
           files: ptyHostFiles(paths.ptyHost),
-          identity: appIdentity(options.modules.ptyHost, env, 'utility'), // never the e2e seams, which are the engine host's
+          identity: appIdentity(options.modules.ptyHost, env, 'utility', PEER_CAPABILITIES.daemonToPtyHost), // never the e2e seams, which are the engine host's
           start: { kind: 'spawn', command: execPath, args: ['--disable-sigusr1', options.modules.ptyHost, '--detached', paths.ptyHost], env: supervisorEnv(env, { userData: profileDir, packaged }), argv0: 'maws-pty-host' },
         },
       },

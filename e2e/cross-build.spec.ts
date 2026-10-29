@@ -134,8 +134,17 @@ function fitTo(schema: unknown, value: unknown, root: unknown = schema): unknown
   return Object.fromEntries(Object.entries(value).filter(([key]) => key in properties).map(([key, v]) => [key, fitTo(properties[key], v, root)]));
 }
 
-// A command the sampler cannot give an input to, named here with one its schema accepts.
-const INPUTS: Record<string, unknown> = {};
+// A command the sampler cannot give an input to, named here with one its schema accepts. P5 O3-D M1: the spine's commands,
+// retagged `machine`, joined the manifest and so the probe; those whose sampled input their schema's own refinement
+// refuses are named here, each with an input that changes nothing on the scratch profile (an id no session has, a
+// journal that does not exist).
+const INPUTS: Record<string, unknown> = {
+  'laneA.answer': { appSessionId: 'x', request: 'x', answer: { kind: 'permission', decision: 'deny' } }, // `allow` needs a scope
+  'laneA.model': { appSessionId: 'x', model: 'x' }, // a model, an effort or both
+  'session.drafts.set': { appSessionId: 'x', draft: null },
+  'session.replay.start': { source: { kind: 'journal', path: '/nonexistent/cross-build-probe.jsonl' }, speed: 'instant' }, // an absolute path; no replay starts
+  'session.update': { appSessionId: 'x', patch: { pinned: true } }, // a patch sets at least one field
+};
 
 // ---- one crossing -----------------------------------------------------------------------------------------------------
 

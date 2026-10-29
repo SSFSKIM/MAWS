@@ -2,6 +2,7 @@
 import { openSpineData, startCheckouts, startMachineIdentity, startSpine, type SpineData } from '../services/entry';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandResult } from '@shared/ipc/schema';
+import { REGISTRY } from '@shared/ipc/registry'; // P5 O3-D M1: the bus's register reads each name's owner
 import { guardStdio } from './stdio-guard'; // cua board #97
 import { disableChromiumFeatures, STARTUP_DISABLED_FEATURES } from './chromium-features'; // P3-F1 fix 3
 import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
@@ -364,7 +365,15 @@ function startMain(data: SpineData, launch: LaunchShape, { local, localName }: {
   // P5 O3-C (Interfaces §A): the services bus, how the library (the spine and the checkouts) registers its commands,
   // installs its intercepts, emits its events and taps them, bound here to the router and `emit`, so every tap main's
   // own code holds (the menu's, the stand-in's) still hears the library's events. O3-D's mawsd binds its services front.
-  const bus: ServicesBus = { register: registerMainHandler, intercept: interceptCommand, emit, onEmitted };
+  // P5 O3-D M1: the spine's commands are `machine`-owned, so a `machine` name goes to the router's embedded machine
+  // binding (its output checked as a host runtime checks it) and a `main` one, the checkouts' until O3-E, to its main
+  // handlers.
+  const bus: ServicesBus = {
+    register: (name, handler) => (REGISTRY.commands[name].owner === 'machine' ? registerMachineHandler(name, handler) : registerMainHandler(name, handler)),
+    intercept: interceptCommand,
+    emit,
+    onEmitted,
+  };
   remoteLink = (ref) => machines.remote(ref);
   // E11: every will-quit step below joins one ordered list behind one listener (tracker row E10 "14 will-quit listeners");
   // a step's promise (the hosts' draining close of a kept supervisor's socket) holds the exit, bounded by the port's grace;

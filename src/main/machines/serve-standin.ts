@@ -28,10 +28,10 @@ import { createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 import { createHostRuntime, HostCommandError, type HostEmit } from '@shared/host/runtime';
 import { serveSocketClients } from '@shared/host/socket-server';
-import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
+import { PEER_CAPABILITIES, SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import type { REGISTRY, WireRegistry } from '@shared/ipc/registry';
 import type { CommandName, EventName } from '@shared/ipc/schema';
-import { WIRE_CAPABILITIES, WIRE_MINOR } from '@shared/ipc/wire';
+import { WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import type { MachineRef } from '@shared/machine/ref';
 import { socketFd, type PeerAddon } from '../browser/cua/peer';
@@ -110,7 +110,7 @@ export function serveMachineStandIn(deps: StandInDeps): StandIn {
   server.on('error', (error) => log(`server error: ${error.message}`));
   const clients = serveSocketClients(server, {
     runtime,
-    identity: () => ({ protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, buildId: deps.build, capabilities: WIRE_CAPABILITIES, wire: wireFingerprint(), pid: process.pid, startedAt }),
+    identity: () => ({ protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, buildId: deps.build, capabilities: PEER_CAPABILITIES.daemon /* P5 O3-D: as mawsd's machine.sock */, wire: wireFingerprint(), pid: process.pid, startedAt }),
     counts: () => counts,
     token: () => token,
     onExit: (when) => log(`ignored exit ${when}: a client never stops this machine`),

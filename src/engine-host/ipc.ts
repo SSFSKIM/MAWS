@@ -138,8 +138,9 @@ export const SIDE_DEADLINE_SHAPES: Record<SideHostCommand, DeadlineShape> = { 's
 // engine.shutdown's body (the ladder's cap and the plugin runner's kill), bounded as engine.shutdown is
 type HostHostCommand = { [N in keyof typeof HostCommands]: (typeof HostCommands)[N]['owner'] extends 'engine-host' ? N : never }[keyof typeof HostCommands];
 // P5 O10 M7: `host.op` runs a session command as its own deadline allows (session.interrupt's is bounded), and
-// `host.opQuery` reads the ledger at once; both registered by registerEngineIpc (ops.ts), not Supervision
-export const HOST_DEADLINE_SHAPES: Record<HostHostCommand, DeadlineShape> = { 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.interest': 'immediate' /* P5 O2 M2 */, 'host.op': 'bounded', 'host.opQuery': 'immediate' };
+// `host.opQuery` reads the ledger at once; both registered by registerEngineIpc (ops.ts), not Supervision. P5 O3-D:
+// `host.attachment` sets the app's presence at once (declared at M1, served from M3)
+export const HOST_DEADLINE_SHAPES: Record<HostHostCommand, DeadlineShape> = { 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.interest': 'immediate' /* P5 O2 M2 */, 'host.op': 'bounded', 'host.opQuery': 'immediate', 'host.attachment': 'immediate' /* P5 O3-D */ };
 // P2-A (2026-10-09; X17): the observed-facts read, bounded: a file read, or a journal recovery under its 5 s reading
 // budget (observed-facts.ts), inside the bridge's 10 s
 export const P2A_DEADLINE_SHAPES: Record<'engine.observedFacts', DeadlineShape> = { 'engine.observedFacts': 'bounded' };
