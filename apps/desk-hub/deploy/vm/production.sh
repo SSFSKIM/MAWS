@@ -333,6 +333,20 @@ verb=${1:-}; (($#)) && shift
 case $verb in check | down | "") ;; *) register "$verb" || fail "cannot register the verb $verb" ;; esac
 case $verb in
   check) say "mawsd: pid $(pid || echo none)"; mawsd_cli endpoint status --json ;;
+  preflight)
+    # Read only, before a run: the production mawsd and its machine (name and ref alone of its keys), its endpoint's
+    # status, the owner's claude processes (pid and terminal; the run may start a lane A only while there are none
+    # outside its namespace, and before lane-a-up every one is), the stub model's start on a spare port.
+    p=$(pid); say "mawsd: pid ${p:-none}"
+    mawsd_cli keys --json | python3 -c 'import json,sys; k=json.loads(sys.stdin.read() or "{}"); print("machine:", k.get("enrollment"), k.get("name"), k.get("ref"))'
+    mawsd_cli endpoint status --json
+    n=0; while read -r cp _; do [[ -n $cp ]] || continue; n=$((n + 1)); say "claude of $OWNER's: pid $cp, tty $(ps -o tty= -p "$cp" | tr -d ' ')"; done < <(claude_table)
+    say "claude processes of $OWNER's: $n"
+    [[ -z $(ss -ltnH "( sport = :$STUB_PORT )") ]] && say "port $STUB_PORT: free" || say "port $STUB_PORT: TAKEN"
+    t=$(mktemp -d) && chmod 755 "$t"
+    setsid -f runuser -u nobody -- env -i PATH=/usr/bin:/bin "$CUR/runtime/bin/node" "$O/stub-model.mjs" --port 47898 </dev/null >"$t/stub.log" 2>&1
+    if within 15 bash -c "exec 3<>/dev/tcp/127.0.0.1/47898" 2>/dev/null; then say "stub model: started and listening (as nobody, port 47898)"; else say "stub model: did NOT listen: $(tail -2 "$t/stub.log")"; fi
+    pkill -u nobody -f "$O/stub-model.mjs --port 47898"; rm -rf "$t" ;;
   up) [[ -n $(pid) ]] || fail "the production mawsd is not running"; say "up: the production mawsd runs (pid $(pid)); nothing started" ;;
   enroll) fail "production enrolls nothing: its machine is cut over and listed already" ;;
   mawsd)
@@ -364,5 +378,5 @@ case $verb in
   retire) retire "${1:-}" ;;
   started) for f in session seat.session; do [[ -s $R/$f ]] && say "${f%.session} $(head -1 $R/$f)"; done; true ;;
   down) stop_verbs; v=$?; lane_a_down; d=$?; exit $((v | d)) ;;
-  *) fail "production.sh check | up | mawsd <keys|endpoint …> | restart | cut-hub | listening | log-size <log> | log-since <log> <bytes> | lane-a-up <project> <name> | lane-a-stop | lane-a-resume | transcript <session> [token] | sminos-status | sminos-revoked | imported <token> | local-spawn <alias> | retire <alias> | started | down" ;;
+  *) fail "production.sh check | preflight | up | mawsd <keys|endpoint …> | restart | cut-hub | listening | log-size <log> | log-since <log> <bytes> | lane-a-up <project> <name> | lane-a-stop | lane-a-resume | transcript <session> [token] | sminos-status | sminos-revoked | imported <token> | local-spawn <alias> | retire <alias> | started | down" ;;
 esac

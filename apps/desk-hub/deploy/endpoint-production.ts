@@ -38,8 +38,9 @@ export function checkProductionMachine(vm: string, keys?: Record<string, unknown
   if (keys.ref !== PRODUCTION_MACHINE.ref) throw new Error(`${vm}'s mawsd has the ref ${String(keys.ref)}, not the authorized ${PRODUCTION_MACHINE.ref}`);
 }
 
-/** How long the owner has for a step by hand. */
-const OWNER_MS = 15 * 60_000;
+/** How long the owner has for a step by hand: arriving at the run included (the code on the clipboard, then the
+ * approval, then the removal), so a run started ahead of the owner stays alive for them. */
+const OWNER_MS = 45 * 60_000;
 
 const sleep = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 
