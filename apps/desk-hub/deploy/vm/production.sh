@@ -179,15 +179,20 @@ except (OSError, ValueError):
 v = d.get("version") if isinstance(d, dict) and d.get("name") == "sminos" else None
 sys.exit(1) if not (isinstance(v, str) and re.fullmatch(r"[0-9]+(\.[0-9]+)*", v)) else print(v)' "$1"
 }
-# The CLI a sminos `daemon run` runs, from its command line on stdin (NUL-separated, as /proc/<pid>/cmdline gives it):
-# its absolute <plugin>/skills/sminos/scripts/sminos.py argument, followed by `daemon run`; status 1 for any other.
+# The CLI a sminos daemon runs, from its command line on stdin (NUL-separated, as /proc/<pid>/cmdline gives it): only
+# a direct `<python> <abs>/skills/sminos/scripts/sminos.py daemon run`, the unit's ExecStart exactly (`daemon install`
+# writes no interpreter flag, a restart in place execs the same argv, and devcloud's scrubber runs it as a child, its
+# argv unchanged), so the plugin.json beside that CLI is the code that runs. Anything else (a wrapper, `-c`, `-m`, a
+# flag, another argument) is one line naming what was found, status 1.
 daemon_cli() {
+  # shellcheck disable=SC2016 # Python's source: its backticks are the refusal's words
   python3 -c '
-import sys
+import os, re, sys
 argv = [a.decode("utf-8", "replace") for a in sys.stdin.buffer.read().split(b"\0") if a]
-at = next((i for i, a in enumerate(argv) if a.endswith("/skills/sminos/scripts/sminos.py")), None)
-ok = at is not None and argv[at].startswith("/") and argv[at + 1 : at + 3] == ["daemon", "run"]
-sys.exit(1) if not ok else print(argv[at])'
+ok = (len(argv) == 4 and argv[0].startswith("/") and re.fullmatch(r"python3?(\.[0-9]+)?", os.path.basename(argv[0]))
+      and argv[1].startswith("/") and argv[1].endswith("/skills/sminos/scripts/sminos.py") and argv[2:] == ["daemon", "run"])
+print(argv[1] if ok else "not a direct `<python> <cli> daemon run`: %s" % (" ".join(argv) or "an empty command line"))
+sys.exit(0 if ok else 1)'
 }
 # The daemon of the sminos home whose run lock is $1 (default $SH's), read from /proc ($2): `<pid> <cli>` for the pid
 # the lock names while that process holds the lock open (so its SMINOS_HOME is that home) and runs `daemon run`; else
@@ -197,7 +202,8 @@ daemon_of() {
   local lock=${1:-$SH/daemon/run.lock} proc=${2:-/proc} p cli f held=0 real
   p=$(sed -n 's/^pid \([0-9][0-9]*\) since .*/\1/p' "$lock" 2>/dev/null | head -1)
   [[ -n $p ]] || { say "no daemon has run for ${lock%/*} (its run lock names no pid)"; return 1; }
-  cli=$(daemon_cli <"$proc/$p/cmdline" 2>/dev/null) || { say "pid $p is no sminos \`daemon run\`"; return 1; }
+  [[ -r $proc/$p/cmdline ]] || { say "pid $p, which the run lock names, runs no more"; return 1; }
+  cli=$(daemon_cli <"$proc/$p/cmdline") || { say "pid $p runs no sminos daemon: $cli"; return 1; }
   real=$(readlink -f "$lock" 2>/dev/null)
   for f in "$proc/$p"/fd/*; do
     case $(readlink "$f" 2>/dev/null) in "$lock" | "${real:-$lock}") held=1; break ;; esac

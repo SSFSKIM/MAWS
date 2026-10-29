@@ -196,7 +196,26 @@ describe('sminos at 1.27.15 or later, on both sides', () => {
     expect(call('daemon_cli', [], argv('/usr/bin/python3', CLI, 'daemon', 'run'))).toEqual({ lines: [CLI], status: 0 });
     expect(call('daemon_cli', [], argv('/usr/bin/python3', CLI, 'list', '--json')).status).toBe(1);
     expect(call('daemon_cli', [], argv('/usr/bin/python3', 'sminos/skills/sminos/scripts/sminos.py', 'daemon', 'run')).status).toBe(1);
-    expect(call('daemon_cli', [], argv('/usr/bin/sleep', 'infinity')).status).toBe(1);
+    expect(call('daemon_cli', [], argv('/usr/bin/sleep', 'infinity'))).toEqual({ lines: ['not a direct `<python> <cli> daemon run`: /usr/bin/sleep infinity'], status: 1 });
+    expect(call('daemon_cli', [], '')).toEqual({ lines: ['not a direct `<python> <cli> daemon run`: an empty command line'], status: 1 });
+  });
+
+  it('takes only a direct `<python> <cli> daemon run`, as the unit runs it, and names any other command line it found', () => {
+    const argv = (...a: string[]) => a.join('\0') + '\0';
+    // The unit's ExecStart is `<python> <cli> daemon run` (references/sminos-daemon.service), and a restart in place
+    // execs the same argv; devcloud's scrubber runs it as a child, its argv unchanged.
+    expect(call('daemon_cli', [], argv('/usr/bin/python3.12', CLI, 'daemon', 'run'))).toEqual({ lines: [CLI], status: 0 });
+    for (const [found, line] of [
+      [['/usr/bin/python3', '/opt/wrapper.py', CLI, 'daemon', 'run'], `/usr/bin/python3 /opt/wrapper.py ${CLI} daemon run`],
+      [['/usr/bin/python3', '-c', 'import runpy', CLI, 'daemon', 'run'], `/usr/bin/python3 -c import runpy ${CLI} daemon run`],
+      [['/usr/bin/python3', '-m', 'sminos', CLI, 'daemon', 'run'], `/usr/bin/python3 -m sminos ${CLI} daemon run`],
+      [['/usr/bin/python3', '-I', CLI, 'daemon', 'run'], `/usr/bin/python3 -I ${CLI} daemon run`],
+      [['/usr/bin/python3', CLI, 'daemon', 'run', '--interval', '5'], `/usr/bin/python3 ${CLI} daemon run --interval 5`],
+      [['/opt/wrapper', CLI, 'daemon', 'run'], `/opt/wrapper ${CLI} daemon run`],
+      [['python3', CLI, 'daemon', 'run'], `python3 ${CLI} daemon run`],
+    ] as const) {
+      expect(call('daemon_cli', [], argv(...found)), line).toEqual({ lines: [`not a direct \`<python> <cli> daemon run\`: ${line}`], status: 1 });
+    }
   });
 
   it('takes the daemon for $SMINOS_HOME’s own only while the run lock’s pid holds that lock open and runs `daemon run`', () => {
@@ -212,7 +231,9 @@ describe('sminos at 1.27.15 or later, on both sides', () => {
       symlinkSync(lock, join(proc, '4242', 'fd', '3'));
       expect(call('daemon_of', [lock, proc])).toEqual({ lines: [`4242 ${CLI}`], status: 0 });
       writeFileSync(join(proc, '4242', 'cmdline'), ['/usr/bin/sleep', 'infinity', ''].join('\0'));
-      expect(call('daemon_of', [lock, proc])).toEqual({ lines: ['pid 4242 is no sminos `daemon run`'], status: 1 });
+      expect(call('daemon_of', [lock, proc])).toEqual({ lines: ['pid 4242 runs no sminos daemon: not a direct `<python> <cli> daemon run`: /usr/bin/sleep infinity'], status: 1 });
+      rmSync(join(proc, '4242'), { recursive: true });
+      expect(call('daemon_of', [lock, proc])).toEqual({ lines: ['pid 4242, which the run lock names, runs no more'], status: 1 });
       writeFileSync(lock, '');
       expect(call('daemon_of', [lock, proc])).toEqual({ lines: [`no daemon has run for ${root} (its run lock names no pid)`], status: 1 });
     } finally {
