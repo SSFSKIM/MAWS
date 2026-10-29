@@ -5,3 +5,4 @@
 export { openSpineData, startSpine, type SpineData, type SpineDeps, type SpineHosts, type SpineRoot } from './spine-root';
 export { startCheckouts, type CheckoutsDeps, type CheckoutsRoot } from './checkouts-root';
 export { startMachineIdentity } from './machine/identity';
+export { idleReading, type IdleReading, type IdleReadingOptions } from './idle-reading'; // M5: e2e:daemon-idle-spine's subject
