@@ -55,7 +55,8 @@ export const DAEMON_IDLE_BASELINE_O2: DaemonIdleBaseline = { commit: 'd6037a48a'
 // (40795119204, load 3.7, 0.11 s), and the A-B-A 40778748076 as the mean of its two detached windows, 66073 KiB (65537
 // at load 4.5 and 66609 at 3.7, 0.12 s each), the reading its own daemon window is paired with. Void on load: 40789442114
 // (66001 KiB, 9.5) and 40793346639 (66273 KiB, 5.4, at 178eb02d8, whose supervisor bundle differs from d0802b29d's only
-// by O8 M3's org ipc schema, 48 lines of module-level zod objects), each from Spotlight's post-reboot reindex.
+// by O8 M3's org ipc schema, 48 lines of module-level zod objects), each from Apple Intelligence's post-reboot
+// app-content indexing (corespotlightd, spotlightknowledged; Spotlight's file indexing is off on the mini).
 export const DAEMON_IDLE_BASELINE: DaemonIdleBaseline = { commit: 'd0802b29d', runs: ['40778748076', '40791210494', '40795119204'], footprintKiB: 66097, cpuS: 0.12 };
 
 // A diagnostic (P5 Decision Log 57), recorded from three valid e2e:daemon-idle-floor runs on the mini at 36704c984:
