@@ -17,7 +17,7 @@ import { DirectPacer, dialDirect, FrameRelay, openRemote, Remote, testDevice, th
 import { laneAProblems, resumeCursor, type ItemReport, type Segment } from './endpoint-verdicts';
 import type { Cleanup } from './proof';
 
-export const ITEMS = ['2', '3', '4', '5', '8', '9'] as const;
+export const ITEMS = ['2', '3', '4', '5', '8', '9', '10'] as const;
 /** The items production runs (item 7's): 8's and 9's probes would ask the real daemon what only staging may. */
 export const PRODUCTION_ITEMS = ['2', '3', '4', '5'] as const;
 export type Item = (typeof ITEMS)[number];
@@ -1138,8 +1138,67 @@ export function productionAdmit(hubWrites: boolean): (item: string, check: strin
 
 /** The items in the run's order: the ones that change the machine's links last, the removal of the run's own device
  * (production's owner step) after everything. */
+// ---- 10: a lane A question at the hub (staging only) ------------------------------------------------------------------
+
+/**
+ * A question the lane A session asks after its project opened (sminos sends it up alone, as a session-wide `raised`, not
+ * in a complete pending set) reaches the hub as the session's count: the endpoint keeps it in notified.json and the
+ * hub's presence for the machine says it, and declining it settles both to nothing (the p5-o10-notify-raised fix).
+ */
+export async function item10(scene: Scene, report: ItemReport): Promise<void> {
+  const probe = scene.machine.questions;
+  const { session } = scene.laneA;
+  const presence = await scene.person.socket(`/api/machines/${encodeURIComponent(scene.ref)}/socket`);
+  scene.cleanup.add('close item 10’s presence socket', async () => presence.close());
+  const pendingAtHub = () => {
+    const last = presence.frames.findLast((f) => f.frame.t === 'presence')?.frame as { pending?: Record<string, { pending: number }> } | undefined;
+    return last === undefined ? null : (last.pending?.[session]?.pending ?? 0);
+  };
+  try {
+    const asked = await report.check('10', 'a question lane A asks after its project opened: notified.json and the hub’s presence hold the session pending 1', async () => {
+      if (probe === undefined) return { skip: 'the machine has no question probe' };
+      const mine = await open(scene, scene.owner, 'direct');
+      try {
+        const said = await mine.act(send(scene, mine, `o10-m11 ask ${scene.tag}q`));
+        if (said !== 'accepted') throw new Error(`the ask's send was answered ${said}`);
+      } finally {
+        mine.close();
+      }
+      const file = await until(async () => ((await probe.notified())[session]?.pending === 1 ? probe.notified() : null), 'notified.json holding the session pending 1', 90_000, 2000).catch(async (error: unknown) => {
+        throw new Error(`${error instanceof Error ? error.message : String(error)}; notified.json ${JSON.stringify(await probe.notified())}; the pane: ${(await probe.pane()).slice(-6).join(' / ')}`);
+      });
+      await until(() => pendingAtHub() === 1, 'the hub’s presence holding the session pending 1', 30_000);
+      scene.log(`item 10: notified.json ${JSON.stringify(file)}`);
+      scene.log(`item 10: the hub's presence for ${session}: ${JSON.stringify(presence.frames.findLast((f) => f.frame.t === 'presence')?.frame)}`);
+      return `notified.json ${JSON.stringify(file[session])}; the hub's presence pending 1`;
+    });
+    await report.check('10', 'the question declined: settled 0, notified.json without the session, the hub’s presence pending 0', async () => {
+      if (probe === undefined) return { skip: 'the machine has no question probe' };
+      if (!asked) return { skip: 'no question was pending' };
+      await probe.deny();
+      const file = await until(async () => {
+        const held = await probe.notified();
+        return session in held ? null : held;
+      }, 'notified.json without the session', 60_000, 2000);
+      await until(() => pendingAtHub() === 0, 'the hub’s presence pending 0', 30_000);
+      const fresh = await scene.person.socket(`/api/machines/${encodeURIComponent(scene.ref)}/socket`);
+      try {
+        const first = (await fresh.next((f) => f.t === 'presence', 'a fresh socket’s presence')) as { pending?: Record<string, unknown> };
+        if (first.pending?.[session] !== undefined) throw new Error(`a fresh socket's presence still holds ${JSON.stringify(first.pending[session])}`);
+        scene.log(`item 10: after the decline, notified.json ${JSON.stringify(file)}; a fresh socket's presence ${JSON.stringify(first)}`);
+      } finally {
+        fresh.close();
+      }
+      return 'notified.json holds the session no longer; the presence says nothing pending, a fresh socket’s too';
+    });
+  } finally {
+    presence.close();
+  }
+}
+
 export async function runItems(scene: Scene, report: ItemReport, items: readonly string[]): Promise<void> {
   const order: Array<[Item, (s: Scene, r: ItemReport) => Promise<void>]> = [
+    ['10', item10],
     ['9', item9],
     ['8', item8],
     ['3', item3],

@@ -65,6 +65,16 @@ export interface LaneAScene {
   started(): Promise<string[]>;
 }
 
+/** A lane A question's means (the VM's scene; staging's item 10): the endpoint's kept counts, the question declined. */
+export interface QuestionProbe {
+  /** The endpoint's notified.json: each session's count it last told the hub. */
+  notified(): Promise<Record<string, { project: string; pending: number }>>;
+  /** The session's pending question declined at its terminal (Escape in its pane). */
+  deny(): Promise<void>;
+  /** The session pane's last lines, for a failure's message. */
+  pane(): Promise<string[]>;
+}
+
 export interface EndpointMachine {
   /** What the run prints for it. */
   readonly label: string;
@@ -88,6 +98,7 @@ export interface EndpointMachine {
   /** The local addresses the direct listener is bound to. */
   listening(): Promise<string[]>;
   laneA: LaneAScene;
+  questions?: QuestionProbe;
   /** Everything of the scene stopped and removed; what could not be. */
   down(): Promise<string[]>;
   /**
@@ -299,6 +310,11 @@ export class VmMachine implements EndpointMachine {
   readonly directUrl: string;
   readonly runner: ScriptRunner;
   readonly laneA: LaneAScene;
+  readonly questions: QuestionProbe = {
+    notified: async () => jsonLine('notified', await this.scene('notified')) as Record<string, { project: string; pending: number }>,
+    deny: async () => void (await this.scene('lane-a-deny')),
+    pane: async () => (await this.scene('pane')).lines,
+  };
   readonly #script: string;
 
   /** `options.script` is the scene's script on the VM: the scratch scene's (SCENE) unless named. */

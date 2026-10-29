@@ -23,6 +23,8 @@
 #   imported <token>             how many events in sminos's project logs hold the token (words it imported)
 #   local-spawn <alias> | retire <alias>   a local `sminos spawn` from the project's checkout; its retirement
 #   started                      the sessions the scene recorded starting: `session <id>` (lane A), `seat <id>`
+#   notified                     the endpoint's notified.json (the counts it last told the hub), `{}` when none
+#   lane-a-deny | pane           Escape into the session's pane (a question it asks, declined there); the pane's last lines
 #   down                         everything of the scene ended and removed; `LEFT …` for what could not be
 # Nothing here names the owner, the owner's profile, sminos or daemon, or the VM's own mawsd (port 47830): the scene is
 # o10acc's alone, and `down` ends that user's processes and nothing else.
@@ -274,6 +276,9 @@ case $verb in
     sed -n 's|^seat [a-z-]*: .*\[[0-9a-z]* / \([0-9a-f-]\{36\}\)\].*|\1|p' <<<"$out" | tail -1 >$R/seat.session
     exit $rc ;;
   retire) word "${1:-}"; as bash -c "cd $W && exec $SMINOS retire $1" ;;
+  notified) f=$P/mawsd/endpoint/notified.json; if [[ -f $f ]]; then tr -d '\n' <"$f"; echo; else say '{}'; fi ;;
+  lane-a-deny) as tmux -L $TX send-keys -t lane-a Escape && say "Escape into the session's pane" ;;
+  pane) as tmux -L $TX capture-pane -p -t lane-a | grep -v '^\s*$' | tail -20 ;;
   started) for f in session seat.session; do [[ -s $R/$f ]] && say "${f%.session} $(head -1 $R/$f)"; done; true ;;
   down) stop_verbs; v=$?; down; d=$?; exit $((v | d)) ;;
   *) fail "scene.sh check | up | enroll <name> | mawsd <args…> | restart | cut-hub | listening | log-size <log> | log-since <log> <bytes> | lane-a-up <project> <name> | lane-a-stop | lane-a-resume | transcript <session> [token] | sminos-status | sminos-revoked | imported <token> | local-spawn <alias> | retire <alias> | started | down" ;;

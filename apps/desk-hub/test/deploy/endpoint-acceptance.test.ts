@@ -492,7 +492,8 @@ describe('production’s items', () => {
     expect(itemsFor('production', '8')).toEqual({ refused: expect.stringMatching(/production runs items 2,3,4,5 alone/) });
     expect(itemsFor('production', '2,9')).toEqual({ refused: expect.stringMatching(/production runs items 2,3,4,5 alone/) });
     expect(itemsFor('production', '3,5')).toEqual({ items: ['3', '5'] });
-    expect(itemsFor('staging', undefined)).toEqual({ items: ['2', '3', '4', '5', '8', '9'] });
+    expect(itemsFor('staging', undefined)).toEqual({ items: ['2', '3', '4', '5', '8', '9', '10'] });
+    expect(itemsFor('production', '10')).toEqual({ refused: expect.stringMatching(/production runs items 2,3,4,5 alone/) });
     expect(itemsFor('staging', '8')).toEqual({ items: ['8'] });
     expect(itemsFor('staging', '7')).toEqual({ refused: expect.stringMatching(/--items names items among/) });
   });

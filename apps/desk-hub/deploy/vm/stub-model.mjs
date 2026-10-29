@@ -5,6 +5,8 @@
 // - a main-loop request whose last user text says `o10-m11 ticks <k> <tag>` starts a tool loop: `echo o10-m11 tick
 //   1/<k> <tag>` through Bash, and each tool result for tick i < k answers tick i + 1, the last a plain text turn; so
 //   the session goes on writing rows by itself (two per tick) while the run cuts its links;
+// - one whose last user text says `o10-m11 ask <tag>` asks a question: `touch /tmp/o10-m11-ask-<tag>` through Bash,
+//   which the scene's settings don't allow, so the engine asks its owner (the bridge raises the request);
 // - any other main-loop request is answered with a short text turn naming the request;
 // - a side request (a title, a classifier) with a short text; count_tokens a fixed count; any other path 404.
 // Each answer waits `--delay-ms` (default 700), so a run of ticks spreads over time. Usage:
@@ -24,6 +26,7 @@ const port = Number(arg('port', '47899'));
 const delayMs = Number(arg('delay-ms', '700'));
 const TICKS = /o10-m11 ticks (\d{1,3}) ([a-z0-9]{1,16})/;
 const TICK = /o10-m11 tick (\d{1,3})\/(\d{1,3}) ([a-z0-9]{1,16})/;
+const ASK = /o10-m11 ask ([a-z0-9]{1,24})/;
 
 /** The text of a message's content, tool results included. */
 function textOf(content) {
@@ -51,6 +54,8 @@ export function answer(body) {
     const next = Number(i) + 1;
     return toolTurn(`toolu_o10m11_${tag}_${next}`, 'Bash', { command: `echo o10-m11 tick ${next}/${k} ${tag}`, description: `tick ${next} of ${k}` });
   }
+  const ask = ASK.exec(text);
+  if (ask) return toolTurn(`toolu_o10m11_ask_${ask[1]}`, 'Bash', { command: `touch /tmp/o10-m11-ask-${ask[1]}`, description: 'a question for the owner' });
   const ticks = TICKS.exec(text);
   if (ticks) {
     const [, k, tag] = ticks;
