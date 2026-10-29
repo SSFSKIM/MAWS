@@ -106,15 +106,17 @@ function boundedStream(file) {
 export function processEvidence(outputDir, userData, canKeep = () => true) {
   mkdirSync(outputDir, { recursive: true });
   const id = randomUUID(); // distinct even for relaunches over the same profile, and retries have their own outputDir
+  const stage = join(userData, `.process-evidence-${id}`); // never uploaded if the worker dies before the final check
   const listeners = [];
   const streams = [];
   let finished = false;
   return {
     capture(child) {
+      mkdirSync(stage, { recursive: true, mode: 0o700 });
       for (const name of ['stdout', 'stderr']) {
         const stream = child[name];
         if (!stream) continue;
-        const file = join(outputDir, `main-process-${id}.${name}.log`);
+        const file = join(stage, `main-process-${id}.${name}.log`);
         const capture = boundedStream(file);
         streams.push(capture);
         stream.on('data', capture.receive); // additive: quit specs and scene hooks keep their own listeners and bytes
@@ -125,24 +127,29 @@ export function processEvidence(outputDir, userData, canKeep = () => true) {
       if (finished) return;
       finished = true;
       for (const remove of listeners) remove();
-      // Settings can change after launch. Recheck before retaining any raw tail, utility lines or detached-host log.
-      if (!canKeep()) {
-        for (const { file } of streams) rmSync(file, { force: true });
-        writeFileSync(join(outputDir, `engine-host-${id}.excluded.log`), 'Raw process evidence excluded: engine provenance could not be verified.\n');
-        return;
-      }
-      // Utility hosts (artifacts-perf) have no file: main/hosts/supervisor.ts forwards their lines with this prefix.
-      // Extract after the measurement, within each stream's head/tail budget. Streams retain their own line order.
-      const utilityLines = streams.flatMap((stream) => stream.finish());
-      if (utilityLines.length) writeFileSync(join(outputDir, `engine-host-${id}.utility.log`), `${utilityLines.join('\n')}\n`);
-      // Called after the profile's processes stop, before its directory is removed. An early failed launch or a
-      // utility-mode host may have no file. The rotated generation uses .log too so the narrow upload catches it.
-      for (const [source, suffix] of [['host.log', ''], ['host.log.1', '.previous']]) {
-        try {
-          copyFileSync(join(userData, 'supervisor', source), join(outputDir, `engine-host-${id}${suffix}.log`));
-        } catch (error) {
-          if (error.code !== 'ENOENT') throw error;
+      try {
+        // Settings can change after launch. Only publish after rechecking; worker death before finish leaves raw
+        // streams private, not in test-results for a red/cancelled job's artifact upload.
+        if (!canKeep()) {
+          writeFileSync(join(outputDir, `engine-host-${id}.excluded.log`), 'Raw process evidence excluded: engine provenance could not be verified.\n');
+          return;
         }
+        // Utility hosts (artifacts-perf) have no file: main/hosts/supervisor.ts forwards their lines with this prefix.
+        // Extract after the measurement, within each stream's head/tail budget. Streams retain their own line order.
+        const utilityLines = streams.flatMap((stream) => stream.finish());
+        for (const { file } of streams) copyFileSync(file, join(outputDir, basename(file)));
+        if (utilityLines.length) writeFileSync(join(outputDir, `engine-host-${id}.utility.log`), `${utilityLines.join('\n')}\n`);
+        // Called after the profile's processes stop, before its directory is removed. An early failed launch or a
+        // utility-mode host may have no file. The rotated generation uses .log too so the narrow upload catches it.
+        for (const [source, suffix] of [['host.log', ''], ['host.log.1', '.previous']]) {
+          try {
+            copyFileSync(join(userData, 'supervisor', source), join(outputDir, `engine-host-${id}${suffix}.log`));
+          } catch (error) {
+            if (error.code !== 'ENOENT') throw error;
+          }
+        }
+      } finally {
+        rmSync(stage, { recursive: true, force: true });
       }
     },
   };

@@ -37,6 +37,25 @@ test('captures both streams for each launch without taking bytes from another li
   assert.equal(child.stderr.listenerCount('data'), 1);
 });
 
+test('raw streams stay in private profile staging until finish authorizes publication', (t) => {
+  const dir = scratch(t);
+  const profile = join(dir, 'profile');
+  const output = join(dir, 'output');
+  const evidence = processEvidence(output, profile);
+  const child = { stdout: new PassThrough(), stderr: new PassThrough() };
+  evidence.capture(child);
+  child.stdout.write('synthetic startup\n');
+  child.stderr.write('synthetic warning\n');
+  assert.deepEqual(readdirSync(output), [], 'a killed worker must leave no raw files for a public artifact upload');
+  const stage = join(profile, readdirSync(profile)[0]);
+  assert.ok(statSync(stage).isDirectory());
+  assert.equal(statSync(stage).mode & 0o077, 0, 'staging is private to the current user');
+  assert.equal(readdirSync(stage).length, 2);
+  evidence.finish();
+  assert.equal(existsSync(stage), false);
+  assert.deepEqual(readdirSync(output).map((file) => readFileSync(join(output, file), 'utf8')).sort(), ['synthetic startup\n', 'synthetic warning\n']);
+});
+
 test('copies host generations before profile deletion, including a failed launch with no child', (t) => {
   const dir = scratch(t);
   const profile = join(dir, 'profile');
@@ -70,9 +89,11 @@ test('utility hosts retain only their forwarded lines, even across stream chunks
 test('oversized streams retain bounded startup and shutdown bytes with exact dropped counts, without changing other listeners', (t) => {
   const dir = scratch(t);
   const output = join(dir, 'output');
-  const evidence = processEvidence(output, join(dir, 'profile'));
+  const profile = join(dir, 'profile');
+  const evidence = processEvidence(output, profile);
   const child = { stdout: new PassThrough(), stderr: new PassThrough() };
   evidence.capture(child);
+  const stage = join(profile, readdirSync(profile)[0]);
   const markers = [];
   for (const name of ['stdout', 'stderr']) {
     const payload = Buffer.from(`[engine-host] ${name} startup\n${'x'.repeat(2 * 1024 * 1024)}\n[engine-host] discarded middle\n${'y'.repeat(2 * 1024 * 1024)}\n[engine-host] ${name} shutdown\n`);
@@ -81,10 +102,12 @@ test('oversized streams retain bounded startup and shutdown bytes with exact dro
     if (name === 'stdout') child[name].write(payload); // one chunk larger than the whole capture budget
     else for (let offset = 0; offset < payload.length; offset += 33727) child[name].write(payload.subarray(offset, offset + 33727));
     assert.equal(seen.copy().digest('hex'), createHash('sha256').update(payload).digest('hex'));
-    const file = join(output, readdirSync(output).find((file) => file.endsWith(`.${name}.log`)));
-    assert.ok(statSync(file).size <= 1024 * 1024, `${name} must be bounded before finish, too`);
-    assert.ok(readFileSync(file, 'utf8').startsWith(`[engine-host] ${name} startup\n`));
-    markers.push({ name, file, payload });
+    assert.deepEqual(readdirSync(output), []);
+    const filename = readdirSync(stage).find((file) => file.endsWith(`.${name}.log`));
+    const staged = join(stage, filename);
+    assert.ok(statSync(staged).size <= 1024 * 1024, `${name} must be bounded before finish, too`);
+    assert.ok(readFileSync(staged, 'utf8').startsWith(`[engine-host] ${name} startup\n`));
+    markers.push({ name, file: join(output, filename), payload });
   }
   evidence.finish();
   evidence.finish();
@@ -233,8 +256,10 @@ test('finish excludes only this launch when effective settings or environment st
     else if (reason === 'oversized') writeFileSync(settings, JSON.stringify({ padding: 'x'.repeat(1024 * 1024) }));
     else if (reason === 'env') options.env.MAWS_E2E_ENGINE_BIN = '/another/engine';
     else writeFileSync(settings, JSON.stringify({ engine: { binaryPath: reason === 'real' ? '/installed/claude' : '/scratch/unknown-wrapper' } }));
+    assert.ok(readdirSync(output).every((file) => file === 'another-launch.log' || file.endsWith('.excluded.log')), 'no raw files are public before the final check');
     evidence.finish();
     evidence.finish();
+    assert.ok(readdirSync(userData).every((file) => !file.startsWith('.process-evidence-')), 'rejected private staging is removed');
     assert.equal(child.stderr.listenerCount('data'), 0);
     const files = readdirSync(output).filter((file) => file !== 'another-launch.log');
     assert.equal(files.length, reasons.indexOf(reason) + 1, 'only one exclusion marker per rejected launch remains');
