@@ -148,6 +148,10 @@ type Report = (code: ProblemCode, detail: () => string) => void;
  * Its cost is bounded, since `verifySuccessor` judges the state before any signature. With `first` it returns at the
  * first problem and builds no detail; otherwise it keeps at most `PROBLEMS_PER_CODE` problems per code and builds no
  * detail past that. `onDetail` is called once per detail built, for a caller counting what diagnostics cost.
+ *
+ * The full mode is for a caller's own proposed state (the admin's and the app's), not for unauthenticated input: past
+ * the cap each call site still makes its detail closure, so a crafted state costs a closure per pair. A caller that
+ * ever needs the full mode on posted input guards its call sites with a cheap count check first.
  */
 export async function stateProblems(state: OrgState, opts: { first?: boolean; onDetail?: (code: ProblemCode) => void } = {}): Promise<Problem[]> {
   const problems: Problem[] = [];
@@ -524,7 +528,8 @@ export async function verifySuccessor(head: SignedOrgState, next: SignedOrgState
  * endorsed by `kid` when `kid` is one of its member's step-up keys in `before`.
  *
  * As `stateProblems`' full diagnostics: at most `PROBLEMS_PER_CODE` problems per code, no detail built past that, and
- * `onDetail` called once per detail built.
+ * `onDetail` called once per detail built. Like `stateProblems`' full mode, it is for a caller's own proposed successor,
+ * never for unauthenticated input.
  */
 export async function successorProblems(
   before: OrgState,
