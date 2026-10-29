@@ -11,6 +11,8 @@ import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { TEST_MACHINE, at } from '../../../../../test/support/machine';
+import { laneAState } from '../../lane-a/test-support/lane-a-state'; // P5 O9
+import { applyLaneAState, resetLaneAStore } from '../../stores/lane-a'; // P5 O9
 import { resetQueueStore } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
 import { applyTaskEvents, emptyGraph } from '../../tools/agents/model/task-graph';
@@ -363,5 +365,65 @@ describe('TranscriptSlot', () => {
     expect(screen.getAllByRole('region', { name: 'Your message' })).toHaveLength(2);
     fireEvent.click(document.querySelector<HTMLElement>('[data-chip="path"]')!);
     expect(registered).toHaveBeenCalledTimes(1);
+  });
+
+  // P5 O9 (the M8 sitting's first defect): a terminal session driven through its bridge is running exactly while its
+  // controls port says a main turn is open (`turn()`, the bridge's turn events and heartbeat), the one source custody
+  // reads. Its disk transcript leaves a turn open that no row ends: a slash command's echo opens one the engine never
+  // closes, and the bridge's interrupt marker is a meta row, so a stopped turn has no row ending it either. Such a turn
+  // draws closed while the port says nothing runs, in the words its own rows give (a stop's marker: "You stopped").
+  describe('a session driven through its bridge', () => {
+    const id = at('app-slot-bridged' as AppSessionId);
+    afterEach(() => resetLaneAStore());
+    function mount(events: SessionEvent[]) {
+      const records = useSessions.getState().records;
+      act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project', worktree: null, holder: { kind: 'terminal', pid: 4242 } } as unknown as SessionRecord]]) }));
+      onTestFinished(() => useSessions.setState({ records }));
+      const invoke = vi.fn((name: string) =>
+        Promise.resolve(
+          name === 'session.queue.list'
+            ? { ok: true, value: EMPTY }
+            : name === 'session.appEvents'
+              ? { ok: true, value: { events: [] } }
+              : name === 'session.events'
+                ? { ok: true, value: { events, lastSeq: events.length, complete: true } }
+                : name === 'laneA.watch'
+                  ? { ok: true, value: { watch: 'w-1' } }
+                  : { ok: true, value: null },
+        ),
+      );
+      window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
+      render(<TranscriptSlot appSessionId={id} />);
+    }
+    const divider = () => document.querySelector('[data-kind="divider"]')?.textContent ?? null;
+    const running = (on: boolean) => act(() => applyLaneAState(id, laneAState(id, { turn: { running: on, unknown: false } })));
+
+    it('reads a stopped turn as working only while the bridge says it runs, then in its stop’s words', async () => {
+      const b = builder();
+      b.turn('u1', 'count slowly to 300, one line each');
+      b.text('m1', 0, '1 2 3');
+      b.emit('user.message', { messageUuid: uuid('u1-stop'), content: '[Request interrupted by user]', isReplay: false, isSynthetic: true, origin: 'interrupt-marker', bash: null }); // the bridge's marker: a meta row
+      running(true);
+      mount(b.events);
+      await settle();
+      expect(divider()).toMatch(/^Working/);
+      running(false);
+      await settle();
+      expect(divider()).toMatch(/^You stopped after/);
+      expect(document.body.textContent).not.toMatch(/Working/);
+    });
+
+    it('never reads a slash command’s turn, which no row ends, as working while no turn runs', async () => {
+      const b = builder();
+      b.turn('u1', 'list the files here');
+      b.text('m1', 0, 'Nothing but .git.');
+      b.end(['u1']);
+      b.turn('u2', '<command-name>/effort</command-name>\n<command-message>effort</command-message>\n<command-args>medium</command-args>');
+      running(false);
+      mount(b.events);
+      await settle();
+      expect(document.body.textContent).not.toMatch(/Working/);
+      expect(document.querySelector('[data-kind="divider"][data-turn-id]')).toBeNull();
+    });
   });
 });
