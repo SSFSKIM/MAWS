@@ -8,7 +8,7 @@
 //
 // endpoint-acceptance.ts reaches this only with `--production --confirm-production <production's host>` and a
 // production config; nothing here runs otherwise. Its machine driver is vm/production.sh; the machine is pinned
-// (PRODUCTION_MACHINE) and checked before the owner is asked for anything.
+// (PRODUCTION_MACHINE), and it and its sminos (checkSminosFloor) are checked before the owner is asked for anything.
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, rmSync } from 'node:fs';
@@ -36,6 +36,15 @@ export function checkProductionMachine(vm: string, keys?: Record<string, unknown
   if (keys.enrollment !== 'org-listed') throw new Error(`${vm}'s mawsd is not org-listed (${String(keys.enrollment)})`);
   if (keys.name !== PRODUCTION_MACHINE.name) throw new Error(`${vm}'s mawsd is the machine ${String(keys.name)}, not the authorized ${PRODUCTION_MACHINE.name}`);
   if (keys.ref !== PRODUCTION_MACHINE.ref) throw new Error(`${vm}'s mawsd has the ref ${String(keys.ref)}, not the authorized ${PRODUCTION_MACHINE.ref}`);
+}
+
+/**
+ * sminos on the VM at the floor lane A needs (vm/production.sh's `sminos-floor`, read only): the daemon of the owner's
+ * SMINOS_HOME and the stub's copy both at 1.27.15 or later, the first that reads a session's engine files under the
+ * config dir its hook recorded. Its one line; a refusal throws with that line, which names both versions.
+ */
+export async function checkSminosFloor(machine: VmMachine): Promise<string> {
+  return (await machine.scene('sminos-floor', [], { what: 'the sminos floor' })).lines.at(-1) ?? '';
 }
 
 /** How long the owner has for a step by hand: arriving at the run included (the code on the clipboard, then the
@@ -144,6 +153,8 @@ export async function productionRun(o: ProductionOptions): Promise<number> {
     return pairRunDevice(o.person, await (o.readCode ?? readClipboard)(), o.secrets, o.log, { id, check });
   };
   const machine = new VmMachine(o.ssh, o.scratch, { directUrl: o.directUrl, log: (line) => o.log(`  vm: ${line}`), script: PRODUCTION_SCENE, label: `the production mawsd on ${o.ssh.vm}`, ...o.interruption });
+  // Before the run writes anything or asks the owner for anything: a lane A that sminos cannot see would fail item 2.
+  o.log(`  vm: ${await checkSminosFloor(machine)}`);
   const ownerStep = async (what: string, done: () => Promise<boolean>) => {
     o.log(`OWNER: ${what}`);
     const deadline = Date.now() + OWNER_MS;
