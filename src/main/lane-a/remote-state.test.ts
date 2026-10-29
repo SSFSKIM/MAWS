@@ -52,6 +52,56 @@ describe('a remote lane A session’s state', () => {
     expect(state(fold).turn.running).toBe(false);
   });
 
+  // The O9 M10 sitting: the engine record is not idle for more than a main turn (2.1.312): `shell` while a background
+  // shell runs beside an idle loop, `busy` while background agents work, `waiting` while a panel a terminal command
+  // opened is up. Stop interrupted nothing there.
+  describe('when no main turn runs', () => {
+    let n = 0;
+    const row = (fields: Record<string, unknown>) => ({ uuid: `r${++n}`, parentUuid: null, timestamp: '2026-10-29T18:57:00.000Z', ...fields });
+    const prompt = (text: string) => row({ type: 'user', origin: { kind: 'human' }, message: { role: 'user', content: text } });
+    const call = () => row({ type: 'assistant', message: { id: `m${n}`, model: 'claude-opus-5-5', content: [{ type: 'tool_use', id: `toolu_${n}`, name: 'Bash', input: {} }] } });
+    const result = () => row({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `toolu_${n}`, content: 'ok' }] } });
+    const ended = () => row({ type: 'system', subtype: 'turn_duration', durationMs: 1000 });
+    const marker = () => row({ type: 'user', isMeta: true, origin: { kind: 'plugin', name: 'sminos' }, message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } });
+    const caveat = () => row({ type: 'user', isMeta: true, message: { role: 'user', content: '<local-command-caveat>The command below was run directly in Claude Code.</local-command-caveat>' } });
+    const echo = () => row({ type: 'user', message: { role: 'user', content: '<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>haiku</command-args>' } });
+    const output = () => row({ type: 'user', message: { role: 'user', content: '<local-command-stdout>Set model to `Haiku 5.5`</local-command-stdout>' } });
+    const status = (fold: RemoteFold, s: string) => fold.message(env('presence', presence({ record: { status: s } }), null, null));
+    const live = (fold: RemoteFold, r: Record<string, unknown>) => fold.message(env('row', { row: r }));
+
+    it('a background shell beside an idle loop (`shell`) runs no turn', () => {
+      const fold = new RemoteFold(S);
+      fold.message(snapshot({ presence: presence({ record: { status: 'shell' } }) }));
+      expect(state(fold).turn.running).toBe(false);
+    });
+
+    it('`busy` or `waiting` after the main turn’s end row runs none, until a row of a turn running again', () => {
+      const fold = new RemoteFold(S);
+      fold.message(snapshot({ rows: [ended(), call(), prompt('Spawn two agents.')], presence: presence({ record: { status: 'busy' } }) }));
+      expect(state(fold).turn.running).toBe(false); // the agents it started work in the background
+      for (const r of [caveat(), echo(), output()]) live(fold, r); // a command typed at the terminal runs no turn
+      status(fold, 'waiting'); // its panel, up in the terminal
+      expect(state(fold).turn.running).toBe(false);
+      live(fold, prompt('Go on.'));
+      status(fold, 'busy');
+      expect(state(fold).turn.running).toBe(true);
+      live(fold, call());
+      live(fold, result());
+      expect(state(fold).turn.running).toBe(true);
+      live(fold, marker()); // the bridge's interrupt
+      expect(state(fold).turn.running).toBe(false);
+    });
+
+    it('a main turn between its steps, a permission prompt up, runs; with no turn row seen, the record says', () => {
+      const fold = new RemoteFold(S);
+      fold.message(snapshot({ rows: [call(), prompt('Edit it.')], presence: presence({ record: { status: 'waiting' } }) }));
+      expect(state(fold).turn.running).toBe(true);
+      const fresh = new RemoteFold(S);
+      fresh.message(snapshot({ presence: presence({ record: { status: 'busy' } }) }));
+      expect(state(fresh).turn.running).toBe(true);
+    });
+  });
+
   it('takes model and effort from a main-loop step-end that carries them, else the model `read status` gave and no effort', () => {
     const fold = new RemoteFold(S);
     fold.message(snapshot());

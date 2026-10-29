@@ -521,6 +521,26 @@ describe('remote lane A over a real link', { timeout: 30_000 }, () => {
     await until(() => l.plane.upstreams().length === 1 && l.plane.upstreams()[0] !== epoch, 'one fresh upstream');
   });
 
+  // The O9 M10 sitting: the engine record is not idle while only background work runs (2.1.312's `shell` beside a
+  // background shell, `busy` while background agents work), and Stop interrupted nothing there.
+  it('runs no turn while only background work does: `shell`, and `busy` after the main turn’s end row, until a turn runs again', async () => {
+    const l = await lab();
+    await watched(l);
+    let n = 0;
+    const row = (fields: Record<string, unknown>) => ({ row: { uuid: `r-${++n}`, parentUuid: null, timestamp: '2026-10-29T18:57:00.000Z', ...fields } });
+    const record = (status: string) => l.plane.wide('presence', { ...l.plane.presenceOf('la-1'), record: { status } });
+    record('busy'); // no row of the snapshot marks a turn: the record says alone
+    await until(() => stateNow(l)?.turn.running === true, 'the record running');
+    record('shell');
+    await until(() => stateNow(l)?.turn.running === false, 'a background shell beside an idle loop');
+    l.plane.emit('row', row({ type: 'user', origin: { kind: 'human' }, message: { role: 'user', content: 'Spawn two agents.' } }));
+    record('busy');
+    await until(() => stateNow(l)?.turn.running === true, 'the turn the prompt opened');
+    l.plane.emit('row', row({ type: 'system', subtype: 'turn_duration', durationMs: 11_000 }));
+    await until(() => stateNow(l)?.turn.running === false, 'the turn ended, its agents working on');
+    expect(stateNow(l)?.turn).toEqual({ running: false, unknown: false });
+  });
+
   it('reads a main-loop step-end’s model and effort when it carries them, and the status read’s model without; the message goes on as sent', async () => {
     const l = await lab();
     const watch = await watched(l);
