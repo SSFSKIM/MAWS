@@ -1137,10 +1137,10 @@ The move commit is the branch's first. Run its checks before any other M4a work:
     # admin as the deploy checkout runs it (bin.ts bundles it): read-only verbs against the local hub, in a scratch org
     # (the deploy README's local recipe)
     pnpm --filter desk-hub local --state ~/.local/share/o8-m4a-move/hub          # a second terminal; Ctrl-C at the end
-    pnpm --filter desk-hub deployment admin init --keys ~/.local/share/o8-m4a-move/keys.json --hub http://127.0.0.1:8747 --user owner@example.com
-    pnpm --filter desk-hub deployment admin genesis --keys ~/.local/share/o8-m4a-move/keys.json --hub http://127.0.0.1:8747 --user owner@example.com --recovery ~/.local/share/o8-m4a-move/recovery.json --yes
-    pnpm --filter desk-hub deployment admin show --keys ~/.local/share/o8-m4a-move/keys.json --hub http://127.0.0.1:8747 --user owner@example.com
-    pnpm --filter desk-hub deployment admin devices --keys ~/.local/share/o8-m4a-move/keys.json --hub http://127.0.0.1:8747 --user owner@example.com
+    pnpm --filter desk-hub deployment admin init --keys ~/.local/share/o8-m4a-move/admin/keys.json --hub http://127.0.0.1:8747 --user owner@example.com
+    pnpm --filter desk-hub deployment admin genesis --keys ~/.local/share/o8-m4a-move/admin/keys.json --hub http://127.0.0.1:8747 --user owner@example.com --recovery ~/.local/share/o8-m4a-move/recovery/recovery.json --yes
+    pnpm --filter desk-hub deployment admin show --keys ~/.local/share/o8-m4a-move/admin/keys.json --hub http://127.0.0.1:8747 --user owner@example.com
+    pnpm --filter desk-hub deployment admin devices --keys ~/.local/share/o8-m4a-move/admin/keys.json --hub http://127.0.0.1:8747 --user owner@example.com
     rm -r ~/.local/share/o8-m4a-move
 
 Expected: the import line prints `function function function function`; the suites pass; `show` and `devices` print as they did before the move.
@@ -2041,6 +2041,13 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
 - Decision: The buildability round's second pass is folded in (on 02bd683e1: 1 P1, 1 P2; it confirmed the other six fixes closed and members kept in M4a).
   1. (P1) The pairing's liveness check moves to the point it can act. `apply` runs before Touch ID, so `Edit.live()` is also checked in the device module after the confirmation (before endorsing or signing) and by the signer before the slot's write. A proposal already in the slot is durable, and cancelling the pairing no longer withdraws it.
   2. `close()` also joins the held view's own adoption queue (`HeldOrg.close()`), which a link's direct `advance` feeds outside the session's producers, and the session's load. Each writer under `org/` belongs to one owner that `close()` joins.
+  Date/Author: 2026-10-29, O8's executor.
+
+- Decision: M4a Task 1, the move (336af704b), settles these points.
+  1. `admin.ts` re-exports `judgeEntry`, `isPairedDeviceId` and `isRpId` from `org-protocol`. Two test-side importers read them from it: `test/local/endpoint.ts` and `test/endpoint/staging/world.ts`.
+  2. `entryDevice`, private in `admin.ts`, is now exported, for Task 4's pairing.
+  3. `PendingEntry` is built from the package's own `DeviceClass`, `KeyStorage` and `Passkey`, and the hub's `PendingDevice` satisfies it.
+  4. The move's local-hub recipe keeps `keys.json` and `recovery.json` in separate directories, since `genesis` refuses a recovery file beside the admin keys (`admin-device.ts:88`).
   Date/Author: 2026-10-29, O8's executor.
 
 ## Outcomes & Retrospective
