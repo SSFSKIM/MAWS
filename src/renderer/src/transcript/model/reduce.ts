@@ -64,6 +64,10 @@ export interface TurnState {
   // Additive (E1, residue 13): the answers an async ask's steer carried, by askId, on the turn that holds the ask's call
   // (the steer usually runs as a turn of its own). Replaced, never mutated, so an earlier snapshot keeps its own map.
   askSteers?: ReadonlyMap<string, AskAnswer[]>;
+  // Additive (P5 O9): how many of `events` the turn held when its session's process exited. The agents of an agents row
+  // made from the events before it ended with the process, though no finish of theirs came (derive.ts); ordered by
+  // arrival, never by time, since a synthesised exit and the engine's events carry different clocks.
+  agentsEndedAt?: number;
 }
 
 export interface TranscriptUi {
@@ -756,15 +760,23 @@ function apply(batch: Batch, event: SessionEvent): void {
       // not seen to go) is no evidence of a stop, so such a turn closes by the superseding start's rule.
       if (event.kind === 'process.exited') {
         if (state.pluginStatus.size > 0) state.pluginStatus = new Map(); // R1: the plugins' lines went with the process
+        // P5 O9: the agents a turn's agents rows name ended with the process, each turn's own up to now, a turn a rewind
+        // hid among them (its branch draws when revealed); the rows derive again
+        const endAgents = (id: TurnId) => {
+          if (!state.turns.get(id)?.events.some(makesAgentsRow)) return;
+          const turn = batch.touch(id);
+          turn.agentsEndedAt = turn.events.length;
+          turn.version += 1;
+        };
         for (const id of state.order) {
           const turn = state.turns.get(id)!;
           if (turn.state === 'open' && turn.accepted) {
             const { outcome, cause } = exitClosing(turn, event.reason);
             batch.closeUnended(batch.touch(id), outcome, event.at, cause);
-          } else if (turn.events.some(makesAgentsRow)) batch.touch(id).version += 1; // P5 O9: its agents ended with the process (derive.ts, exitedSince)
+          }
+          endAgents(id);
         }
-        // P5 O9: a turn a rewind hid draws when its branch is revealed (rowsOf), so its agents rows derive again too
-        for (const id of state.hidden?.turns ?? []) if (state.turns.get(id)?.events.some(makesAgentsRow)) batch.touch(id).version += 1;
+        for (const id of state.hidden?.turns ?? []) endAgents(id);
       }
       return batch.loose(event);
     }

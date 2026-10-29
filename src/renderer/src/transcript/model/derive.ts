@@ -286,7 +286,7 @@ type Item =
   | { kind: 'browser_action'; toolUseId: ToolUseId } // E4c: as E2's, for a browser tool call
   | { kind: 'message'; toolUseId: ToolUseId }; // P4-R7: a message tool's call, a message or (refused) a cell
 
-interface SubagentGroup { id: RowId; at: string; apiMessageId: string | null; refs: SubagentRef[]; statuses: Map<TaskId, SubagentStatus>; lastTool: Map<TaskId, string | null>; phase: string | null }
+interface SubagentGroup { id: RowId; at: string; apiMessageId: string | null; refs: SubagentRef[]; statuses: Map<TaskId, SubagentStatus>; lastTool: Map<TaskId, string | null>; phase: string | null; ended: boolean /* P5 O9: made before the session's process exited (TurnState.agentsEndedAt) */ }
 interface Pending { kind: 'question' | 'plan'; use: Event<'tool.use'>; answers: Record<string, string> | null; outcome: RowOf<'plan'>['outcome']; feedback: string | null; requestId: RequestId | null; error: string | null /* E1: the engine's refusal */ }
 
 // E1 start: what a turn's events say about one `ask` call (its capsule) and one `send_file` call (its delivery row). The
@@ -459,7 +459,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     const previous = items.at(-1);
     const last = previous?.kind === 'subagents' ? previous.group : null;
     if (last && apiMessageId !== null && last.apiMessageId === apiMessageId) return last;
-    const group: SubagentGroup = { id: key, at, apiMessageId, refs: [], statuses: new Map(), lastTool: new Map(), phase: null };
+    const group: SubagentGroup = { id: key, at, apiMessageId, refs: [], statuses: new Map(), lastTool: new Map(), phase: null, ended: turn.agentsEndedAt !== undefined && position < turn.agentsEndedAt };
     subagents.push(group);
     items.push({ kind: 'subagents', group });
     return group;
@@ -472,7 +472,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     if (group.refs.length === 1) group.id = rowId.subagent(ref.taskId);
   };
 
-  for (const event of turn.events) {
+  let position = 0; // the event's place in `turn.events`, for `agentsEndedAt`
+  for (const [at, event] of turn.events.entries()) {
+    position = at;
     switch (event.kind) {
       case 'user.message': {
         if (event.origin === INTERRUPT_CUT) { // P5 O9: the reply an interrupt cut off, as the sminos bridge records it
@@ -842,7 +844,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       case 'subagents': {
         if (item.group.refs.length === 0) break;
         for (const ref of item.group.refs) if (ref.toolUseId && agentIds.has(ref.toolUseId)) ref.agentId = agentIds.get(ref.toolUseId)!;
-        if (state !== null && exitedSince(state, item.group.at)) endedByExit(item.group);
+        if (item.group.ended) endedByExit(item.group);
         resolved.push({ kind: 'row', row: subagentRow(item.group, turn.id) });
         break;
       }
@@ -1089,14 +1091,10 @@ function summaryOf(turn: TurnState, cells: Cell[], subagents: SubagentGroup[], m
 }
 
 // P5 O9 (the M10 fixes' review): a session's process exiting ends the agents it ran, though no finish of theirs will
-// come (a crash, a kill, E10's idle stop, C4's exit synthesised for a transcript nobody holds): an Agent call made
-// before the session's exit reads its agents still running stopped, so its row folds with its turn rather than staying
-// in view (`staysInView`). An ordinary end of the turn that made the call is no exit: background agents outlive it.
-function exitedSince(state: TranscriptState, at: string): boolean {
-  const call = Date.parse(at);
-  return state.loose.some((event) => event.kind === 'process.exited' && Date.parse(event.at) >= call);
-}
-
+// come (a crash, a kill, E10's idle stop, C4's exit synthesised for a transcript nobody holds): an agents row made
+// before the exit (`ended`, by arrival order) reads its agents still running stopped, so it folds with its turn rather
+// than staying in view (`staysInView`). An ordinary end of the turn that made the call is no exit: background agents
+// outlive it.
 function endedByExit(group: SubagentGroup): void {
   for (const ref of group.refs) {
     const status = group.statuses.get(ref.taskId) ?? 'started';

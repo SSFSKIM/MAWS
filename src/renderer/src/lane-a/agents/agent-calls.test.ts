@@ -118,6 +118,21 @@ describe('an Agent call whose session’s process exits', () => {
     expect(shown(applyEvents(state, exit(b.at + 1_000, 'crash')))).toEqual([]);
   });
 
+  it('ordered by arrival, not by clock: an exit stamped ahead of the engine (a host loss the renderer timed) ends only the agents before it', () => {
+    const b = started();
+    b.end(['u1']);
+    let state = applyEvents(createState(null, null), b.events);
+    state = applyEvents(state, exit(b.at + 3_600_000, 'crash')); // an hour ahead of the calls after it
+    const next = builder(new Date(b.at + 1_000).toISOString()); // the resumed process, on the host's clock
+    next.turn('u2', 'Spawn another.');
+    next.toolUse('a2', 'Agent', { description: 'Second survey', prompt: 'p' }, 'm2', 0);
+    next.emit('subagent.started', { taskId: task('k2'), toolUseId: tool('a2'), description: 'Second survey', subagentType: null, isBackground: true, spawnDepth: 1, prompt: null }, { id: 'k2-start' });
+    next.end(['u2']);
+    state = applyEvents(state, next.events.map((event, i) => ({ ...event, id: `n${i}` as never })));
+    expect(shown(state)).toEqual(['started']); // the second agent, still working; the first folded, stopped
+    expect(expanded(state)).toEqual(['stopped', 'started']);
+  });
+
   it('an exit before the call (an earlier process’s) ends none of its agents', () => {
     const earlier = exit(Date.parse('2026-09-28T09:00:00.000Z'), 'stop');
     const b = started();
