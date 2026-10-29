@@ -9,6 +9,7 @@
 // the bridge's DX5 events, so they carry no `mac` (only sminos's daemon seals one).
 import * as z from 'zod';
 import { RequestAnswerSchema } from '../../engine/answers';
+import { PermissionModeSchema } from '../../graph/enums';
 import { AppSessionIdSchema } from '../../graph/ids';
 import type { CommandSpec } from './common';
 
@@ -83,6 +84,11 @@ export const LaneAActSchema = z.strictObject({
 });
 export type LaneAAct = z.infer<typeof LaneAActSchema>;
 
+// The main loop's permission mode as the session last reported it to its bridge (sminos 1.27.14; @shared/lane-a/mode):
+// the engine's word, when the bridge read the report (epoch ms, the session's machine's clock) and the event it came in.
+export const LaneAModeSchema = z.strictObject({ mode: PermissionModeSchema, at: z.number(), from: z.string() });
+export type LaneAMode = z.infer<typeof LaneAModeSchema>;
+
 export const LaneAStateSchema = z.strictObject({
   appSessionId: AppSessionIdSchema,
   engineSessionId: z.string(), // bare: the engine's session id is never lifted (OX2)
@@ -99,6 +105,9 @@ export const LaneAStateSchema = z.strictObject({
   model: z.string().nullable(),
   effort: z.string().nullable(),
   override: z.strictObject({ model: z.string().nullable(), effort: z.string().nullable() }).nullable(), // the bridge's per-request override
+  // The mode the session last reported: the local heartbeat's, a remote status read's. Null until it reports one, and
+  // from a bridge older than sminos 1.27.14.
+  mode: LaneAModeSchema.nullable(),
   catalog: z.strictObject({ fingerprint: z.string() }).nullable(), // the body by laneA.catalog
   pending: z.array(LaneARaisedSchema),
   settled: z.array(LaneASettledSchema), // the last 100

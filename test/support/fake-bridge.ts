@@ -3,7 +3,9 @@
 // `<home>/bridge/<session>.sock`, for main's lane A driver's units and `e2e:lane-a`. It keeps what the child keeps for
 // its routes: the pending requests and recent settlements, the turns, the streaming steps, the override and the catalog
 // (a light fold of the events a test emits), `deliver`'s high-water mark per writer, and the launch fence. It runs no
-// mod: a command is answered by its op's script (default ok), and the events a test emits stand for the mod's.
+// mod: a command is answered by its op's script (default ok), and the events a test emits stand for the mod's. The
+// permission mode the session last reported (sminos 1.27.14) is set by the test, as the mod's hooks would observe it,
+// and carried by `read status` and each heartbeat the test asks for, as the mod carries it.
 import { chmodSync, mkdirSync, realpathSync, renameSync, rmSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { join } from 'node:path';
@@ -19,6 +21,9 @@ export type FakeCapabilities = {
 };
 
 export type FakeReply = { status: number; body: unknown } | { drop: true };
+// The mod's report of the main loop's permission mode (doperpowers `bridge.tsx` `observeMode`): the engine's word, when
+// the mod read it (epoch ms) and the event it came in.
+export type FakeMode = { mode: string; at: number; from: string };
 export type FakeRaised = { request: string; tool: string; input: Record<string, unknown>; agentId?: string | null; deadline?: number; async?: true; toolUseId?: string; suggestions?: unknown[]; truncated?: true };
 
 export interface FakeBridgeOptions {
@@ -44,6 +49,8 @@ export interface FakeBridge {
   settle(request: string, winner: 'terminal' | 'web' | 'other', outcome?: string, by?: string): void;
   setReady(ready: boolean): void;
   setStatus(patch: Partial<Pick<FakeBridgeOptions, 'launch' | 'capabilities' | 'lane'>>): void;
+  setMode(mode: FakeMode | null): void; // the mode the session last reported; null: none yet (a new process)
+  heartbeat(): void; // one heartbeat as the mod posts it every 5 s: the main loop's turn, and the mode while one is reported
   subscribers(): number;
   reset(): void; // ends every stream (a module reload)
   close(): Promise<void>; // the socket goes; probes then fail
@@ -118,6 +125,7 @@ export async function startFakeBridge(options: FakeBridgeOptions): Promise<FakeB
   let override: Record<string, unknown> | null = null;
   let catalog: Record<string, unknown> | null = null;
   let usage: Record<string, unknown> | null = null;
+  let mode: FakeMode | null = null;
   const sessionInfo = options.sessionInfo ?? { session, cwd: home, model: 'claude-opus-4-5', version: '2.1.300' };
   const scripts = new Map<string, (body: Record<string, unknown>) => FakeReply | Promise<FakeReply>>();
   const commands: FakeBridge['commands'] = [];
@@ -128,6 +136,8 @@ export async function startFakeBridge(options: FakeBridgeOptions): Promise<FakeB
   let commandIds = 0;
 
   const observing = () => lane !== undefined && lane !== 'mismatch';
+  // the mode's three fields, as the heartbeat's `state` and `read status`'s result carry them: absent until a report
+  const modeFields = () => (mode === null ? {} : { permissionMode: mode.mode, permissionModeAt: mode.at, permissionModeFrom: mode.from });
 
   const fold = (e: Record<string, unknown>) => {
     const { type, phase } = e;
@@ -212,7 +222,7 @@ export async function startFakeBridge(options: FakeBridgeOptions): Promise<FakeB
     }
     if (body.op === 'read' && body.what === 'status') {
       const cwd = typeof sessionInfo.cwd === 'string' ? sessionInfo.cwd : home;
-      return { status: 200, body: { ok: true, result: { version: { version: '2.1.300' }, model: sessionInfo.model ?? null, cwd, root: cwd, repo: null, surfaces: [], override } } };
+      return { status: 200, body: { ok: true, result: { version: { version: '2.1.300' }, model: sessionInfo.model ?? null, cwd, root: cwd, repo: null, surfaces: [], override, ...modeFields() } } };
     }
     if (body.op === 'media') return acceptMedia(body);
     return { status: 200, body: { ok: true, result: {} } };
@@ -373,6 +383,13 @@ export async function startFakeBridge(options: FakeBridgeOptions): Promise<FakeB
       if (patch.launch !== undefined) launch = patch.launch;
       if (patch.capabilities !== undefined) capabilities = patch.capabilities;
       if ('lane' in patch) lane = patch.lane;
+    },
+    setMode(next) {
+      mode = next;
+    },
+    heartbeat() {
+      const mainTurn = [...turns.values()].find((t) => (t.agentId ?? null) === null)?.turnId ?? null;
+      emit({ type: 'heartbeat', state: { mainTurn, isStreaming: streaming.size > 0, tools: [], ...modeFields() } });
     },
     subscribers: () => subscribers.size,
     reset() {

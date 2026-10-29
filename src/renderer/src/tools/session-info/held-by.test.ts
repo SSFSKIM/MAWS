@@ -6,6 +6,7 @@ import { at } from '../../../../../test/support/machine';
 import { laneAState } from '../../lane-a/test-support/lane-a-state';
 import { LANE_A_WORDS, laneAControls } from '../../session/controls/lane-a';
 import { CONTROL_KEYS } from '../../session/controls/types';
+import { REL } from '../../test-support/relative-time';
 import { drivenSection, heldByRow, modeRow } from './model';
 
 const A = at('app-a') as AppSessionId;
@@ -36,9 +37,17 @@ describe("Session info for a session driven through its terminal's bridge", () =
   it('names no mode for it: not reported, and changed in the terminal', () => {
     const rec = record('s', { holder: { kind: 'terminal', pid: 7 } });
     const observed = { facts: null, loading: false };
-    const driven = { capability: () => ({ available: false as const, reason: LANE_A_WORDS.mode }) };
+    const driven = laneAControls(laneAState(A), rec, { appSessionId: A, client: fakeClient().client });
     expect(modeRow({ record: rec, status: null, observed, now: 0, driven })).toEqual({ label: 'Mode', value: LANE_A_WORDS.modeNotReported, note: LANE_A_WORDS.mode });
     expect(modeRow({ record: rec, status: null, observed, now: 0 }).value).toBe('Not observed yet'); // held, not driven: as before
+  });
+
+  // sminos 1.27.14: the mode the session reported through its bridge, with how long ago; never an observation or a default
+  it('names the mode the terminal session reported, with how long ago', () => {
+    const rec = record('s', { holder: { kind: 'terminal', pid: 7 }, permissionMode: { requested: 'auto', effective: 'auto', refusal: null } });
+    const at = 1_761_700_000_000;
+    const driven = laneAControls(laneAState(A, { mode: { mode: 'plan', at, from: 'UserPromptSubmit' } }), rec, { appSessionId: A, client: fakeClient().client });
+    expect(modeRow({ record: rec, status: null, observed: { facts: null, loading: false }, now: at + 3 * 60_000, driven })).toEqual({ label: 'Mode', value: 'Plan', note: `Reported ${REL.ago(3, 'minute')}` });
   });
 
   it('lists each unavailable control with its reason, in the controls’ order', () => {

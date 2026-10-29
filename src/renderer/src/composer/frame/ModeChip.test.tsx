@@ -4,6 +4,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MODE_OPTIONS, type ModeBinding } from '../../statusline';
+import { REL } from '../../test-support/relative-time';
 import { ModeChip } from './ModeChip';
 
 afterEach(cleanup);
@@ -28,5 +29,14 @@ describe('the Mode chip', () => {
     expect(chip().textContent).not.toMatch(/Auto|Manual|Plan|Accept|Bypass|Don/);
     expect(chip().textContent).toContain('Mode');
     expect(chip().getAttribute('title')).toBe('Not reported by the terminal session: its mode is changed in the terminal');
+  });
+
+  // sminos 1.27.14: a terminal session's mode as it reported it, how long ago on the chip's title
+  it('names a reported mode, with how long ago it was reported and why it is changed elsewhere', () => {
+    const reportedAt = Date.now() - 2 * 60_000 - 5_000;
+    render(<ModeChip binding={binding({ value: 'default', reportedAt, disabled: "A terminal session's mode is changed in the terminal" })} />);
+    expect(chip().textContent).toContain('Manual');
+    expect(chip().getAttribute('aria-label')).toBe('Permission mode Manual');
+    expect(chip().getAttribute('title')).toBe(`Reported ${REL.ago(2, 'minute')} · A terminal session's mode is changed in the terminal`);
   });
 });

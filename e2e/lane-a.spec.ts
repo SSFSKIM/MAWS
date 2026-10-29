@@ -10,7 +10,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
-import { FULL_CAPABILITIES, startFakeBridge, type FakeBridge } from '../test/support/fake-bridge';
+import { FULL_CAPABILITIES, startFakeBridge, type FakeBridge, type FakeBridgeOptions } from '../test/support/fake-bridge';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
@@ -101,8 +101,8 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
   }
 
   // The terminal holds the session (with its bridge unless `bridged` is false), and its pane is open.
-  async function drive(c: Case, opts: { bridged?: boolean; open?: boolean } = {}): Promise<TerminalSession> {
-    c.terminal = await terminalSession({ store: c.store, sminosHome: c.maws.sminosHome, sessionId: c.sid, cwd: c.repo.root, bridged: opts.bridged ?? true });
+  async function drive(c: Case, opts: { bridged?: boolean; open?: boolean; bridge?: Partial<FakeBridgeOptions> } = {}): Promise<TerminalSession> {
+    c.terminal = await terminalSession({ store: c.store, sminosHome: c.maws.sminosHome, sessionId: c.sid, cwd: c.repo.root, bridged: opts.bridged ?? true, ...(opts.bridge && { bridge: opts.bridge }) });
     await expect.poll(async () => value(await invoke(c.page, 'session.get', { appSessionId: c.appId }))?.holder.kind, { timeout: 10_000 }).toBe('terminal');
     if (opts.open !== false) await open(c);
     return c.terminal;
@@ -192,6 +192,42 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     // the session menu offers Take over in MAWS, the pane no longer showing the notice that carried it
     await (await sidebarRow(page, { appSessionId: c.appId })).click({ button: 'right' });
     await expect(page.getByRole('menuitem', { name: 'Take over in MAWS' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  // sminos 1.27.14: the bridge's heartbeat carries the mode the session last reported (a switch in the terminal rides the
+  // next one); MAWS shows it with how long ago, and still sets none.
+  test('the mode the terminal reports: none until it reports one, then the chip and Session info name it with its age, and follow a switch', async () => {
+    const c = await begin();
+    const { page } = c;
+    const { bridge } = await drive(c, { bridge: { capabilities: { ...FULL_CAPABILITIES, sminos: '1.27.14' } } });
+    const chip = main(page).getByRole('button', { name: /^Permission mode/ });
+    const reported = (mode: string) => async () => {
+      await expect(chip).toHaveAttribute('aria-label', `Permission mode ${mode}`);
+      await expect(chip).toHaveText(new RegExp(`^${mode}`));
+      await expect(chip).toHaveAttribute('title', /^Reported (now|1 minute ago) · A terminal session's mode is changed in the terminal$/);
+    };
+    bridge.heartbeat(); // the session's start reports none
+    await expect(chip).toHaveAttribute('aria-label', 'Permission mode not reported');
+    await expect(chip).toHaveAttribute('title', 'Not reported by the terminal session: its mode is changed in the terminal');
+
+    bridge.setMode({ mode: 'plan', at: Date.now(), from: 'UserPromptSubmit' });
+    bridge.heartbeat();
+    await reported('Plan')();
+    await openSurface(page, 'Session info');
+    const info = page.locator('[data-region="panel"] [data-surface][aria-label="Session info"]');
+    await expect(info).toContainText(/Plan · Reported (now|1 minute ago)/);
+
+    // Shift+Tab in the terminal: the engine's switch record, on the next heartbeat
+    bridge.setMode({ mode: 'default', at: Date.now(), from: 'permission_mode_changed' });
+    bridge.heartbeat();
+    await reported('Manual')();
+    await expect(info).toContainText(/Manual · Reported (now|1 minute ago)/);
+    // the menu still sets nothing: the reported mode checked, each choice closed with why
+    await chip.click();
+    await expect(page.getByRole('menuitemradio', { name: /^Manual/ })).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByRole('menuitemradio', { name: /^Plan/ })).toBeDisabled();
     await page.keyboard.press('Escape');
     expect(c.maws.consoleErrors()).toEqual([]);
   });

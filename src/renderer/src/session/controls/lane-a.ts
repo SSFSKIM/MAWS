@@ -15,8 +15,9 @@
 //   capability and the words' are checked first.
 // - The model chip lists the catalog's models (with `fable`, which the bridge takes though the catalog leaves it out)
 //   and the five efforts, names the bridge's override when set and otherwise the model and effort the session's latest
-//   request ran on, and sends only what changed. The mode and the directories are closed: no bridge op sets them, and
-//   no bridge event or read reports the session's permission mode.
+//   request ran on, and sends only what changed. The mode and the directories are closed: no bridge op sets them. The
+//   mode chip names the mode the session last reported and when (`state.mode`: sminos 1.27.14's heartbeat and status
+//   read, which main keeps only from such a bridge), and no mode while none is reported.
 // - The palette lists the bridge's catalog and opens only the widgets a lane A read or op backs (the model selector,
 //   compact, MCP, the side question).
 // - M6: a card's answer is closed with its reason where §D can't carry it, and every answer once the request is the
@@ -57,7 +58,7 @@ export const LANE_A_WORDS = {
   noBridge: 'This session has no bridge MAWS can drive',
   idle: 'Nothing is running in this session',
   mode: "A terminal session's mode is changed in the terminal",
-  // no bridge event or read reports the live mode (the O9 sitting): the chip and Session info name none
+  // no mode reported yet, or a bridge older than sminos 1.27.14 (the O9 sitting): the chip and Session info name none
   modeNotReported: 'Not reported by the terminal session',
   modeUnreported: 'Not reported by the terminal session: its mode is changed in the terminal',
   rewind: 'Rewind is a terminal panel: use /rewind there',
@@ -303,7 +304,14 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
           return result.state === 'done' ? { ok: true } : { ok: false, error: result.state === 'refused' ? result.message : LANE_A_WORDS.unknown };
         },
       },
-      mode: { value: null, unreported: true, options: MODE_OPTIONS.map((o) => o.mode), disabled: LANE_A_WORDS.modeUnreported, refusal: null, autoUnavailable: null, set: refusedWith(LANE_A_WORDS.mode) },
+      // the mode as the session reported it, or none; never set from here
+      mode: {
+        ...(state.mode === null ? { value: null, unreported: true, disabled: LANE_A_WORDS.modeUnreported } : { value: state.mode.mode, reportedAt: state.mode.at, disabled: LANE_A_WORDS.mode }),
+        options: MODE_OPTIONS.map((o) => o.mode),
+        refusal: null,
+        autoUnavailable: null,
+        set: refusedWith(LANE_A_WORDS.mode),
+      },
       directories: { value: [...(record?.additionalDirectories ?? [])], options: [], disabled: LANE_A_WORDS.directories, set: refusedWith(LANE_A_WORDS.directories) },
     };
   };

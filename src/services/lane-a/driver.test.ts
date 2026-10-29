@@ -252,6 +252,39 @@ describe('the bridge’s states', () => {
     b.emit({ type: 'turn', phase: 'complete', turnId: 't1', agentId: null });
     await expect.poll(() => h.state()?.turn.running).toBe(false);
   });
+
+  // sminos 1.27.14: the heartbeat carries the mode the session last reported; a fresh stream's snapshot carries none
+  it('follows the mode its heartbeat reports, kept across a fresh stream until a heartbeat says otherwise', async () => {
+    const b = await bridge({ capabilities: { ...FULL_CAPABILITIES, sminos: '1.27.14' } });
+    const h = harness();
+    h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: terminal });
+    await h.live();
+    await expect.poll(() => b.subscribers()).toBe(1);
+    expect(h.state()?.mode).toBeNull(); // the session's start reports none
+    b.setMode({ mode: 'acceptEdits', at: 1_761_700_000_000, from: 'permission_mode_changed' });
+    b.heartbeat();
+    await expect.poll(() => h.state()?.mode).toEqual({ mode: 'acceptEdits', at: 1_761_700_000_000, from: 'permission_mode_changed' });
+    expect(h.changes.at(-1)?.state?.mode).toEqual({ mode: 'acceptEdits', at: 1_761_700_000_000, from: 'permission_mode_changed' }); // to every page
+    b.reset();
+    await expect.poll(() => b.subscribers()).toBe(1);
+    expect(h.state()?.mode).toMatchObject({ mode: 'acceptEdits' });
+    b.setMode(null); // a new process: its bridge holds none
+    b.heartbeat();
+    await expect.poll(() => h.state()?.mode).toBeNull();
+  });
+
+  it('shows no mode from a bridge older than sminos 1.27.14, whatever its heartbeat carries', async () => {
+    const b = await bridge(); // sminos 1.25.0
+    const h = harness();
+    h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: terminal });
+    await h.live();
+    await expect.poll(() => b.subscribers()).toBe(1);
+    b.setMode({ mode: 'plan', at: 1_761_700_000_000, from: 'UserPromptSubmit' });
+    b.heartbeat();
+    b.emit({ type: 'model', model: 'claude-haiku-4-5', effort: null }); // after the heartbeat on the stream: once it shows, the heartbeat was read
+    await expect.poll(() => h.state()?.override).toEqual({ model: 'claude-haiku-4-5', effort: null });
+    expect(h.state()?.mode).toBeNull();
+  });
 });
 
 describe('watches', () => {

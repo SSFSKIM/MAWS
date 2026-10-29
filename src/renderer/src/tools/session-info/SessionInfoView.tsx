@@ -26,7 +26,7 @@ import { DormantGesture } from '../../widgets/DormantGesture'; // P2-A M3
 import { FRAME } from '../../widgets/copy'; // P2-A M3
 import { INFO } from './copy';
 import { autoModeLane, reviewsOf } from './lane';
-import { drivenSection, sessionInfoSections, type InfoRow } from './model';
+import { drivenModeRow, drivenSection, sessionInfoSections, type InfoRow } from './model';
 import { RouteSwitch } from './RouteSwitch';
 import { useSessionControls } from '../../session/controls/controls-for'; // P5 O9 M5
 import { useRemoteLaneA } from '../../lane-a/remote-session'; // P5 O9 M9
@@ -56,13 +56,21 @@ function SessionInfo({ appSessionId, visible, fallback }: { appSessionId: AppSes
   return <SessionInfoBody appSessionId={appSessionId} visible={visible} record={record} />;
 }
 
-// P5 O9 M9: another machine's terminal session has its listed row alone here, and no engine this machine reads: what
-// this device can't do to it, each control with the reason its port gives (Q2: in place, never missing).
+// P5 O9 M9: another machine's terminal session has its listed row alone here, and no engine this machine reads: the mode
+// it reported (sminos 1.27.14), and what this device can't do to it, each control with the reason its port gives (Q2: in
+// place, never missing).
 function RemoteSessionInfo({ appSessionId }: { appSessionId: AppSessionId }) {
   const controls = useSessionControls(appSessionId);
+  const now = useNow(POPOVER_TICK_MS);
   const unavailable = controls === null ? null : drivenSection((key) => controls.capability(key));
+  const mode = controls === null ? null : drivenModeRow(controls, now);
   return (
     <div data-session-info={appSessionId} className="h-full overflow-auto p-3 text-ui text-fg">
+      {mode && (
+        <Group label={INFO.sections.permissions}>
+          <KeyValues label={INFO.sections.permissions} rows={[{ label: mode.label, value: <Value appSessionId={appSessionId} row={mode} /> }]} />
+        </Group>
+      )}
       {unavailable && (
         <Group label={unavailable.title}>
           <KeyValues label={unavailable.title} rows={unavailable.rows.map((row) => ({ label: row.label, value: <Value appSessionId={appSessionId} row={row} /> }))} />

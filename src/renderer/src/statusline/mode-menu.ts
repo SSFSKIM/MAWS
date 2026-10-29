@@ -2,6 +2,7 @@
 // execution document, "Composer frame" Mode and "Status line popovers and usage" mode: "the same menu"). The chip and
 // the popover show only the engine's effective mode, with a refusal code in words; every change is
 // `session.setPermissionMode`, and what shows afterwards is the engine's answer, never the optimistic choice.
+import { formatAgo } from '@shared/app/date-format';
 import type { AutoModeRefusalCode, PermissionMode } from '@shared/graph/enums';
 import type { SessionRecord } from '@shared/graph/session';
 import type { EngineSessionStatus } from '@shared/engine/status';
@@ -73,7 +74,13 @@ export interface ModeBinding {
   // P5 O9 (the sitting): nothing reports this session's mode (a terminal session driven through its bridge), so the chip
   // names none; `value` null is then no mode, never MAWS's default
   unreported?: boolean;
+  // sminos 1.27.14: when the session reported `value` (epoch ms), where the mode is the one a session reported rather
+  // than one MAWS set (a terminal session driven through its bridge); the chip says how long ago
+  reportedAt?: number;
 }
+
+// How long ago a session reported the mode shown (the chip's title, Session info's note).
+export const modeReported = (at: number, now: number): string => `Reported ${formatAgo(Math.max(0, now - at))}`;
 
 export const NOT_RUNNING = 'The session is not running';
 export { STARTING_SESSION } from '../sessions/acquire'; // P2-A: the menu's line while a choice starts the session

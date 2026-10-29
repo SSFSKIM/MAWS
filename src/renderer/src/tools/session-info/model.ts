@@ -10,7 +10,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { SessionDigest } from '@shared/ipc/schema';
 import { contextTotal, type GetContextUsageResponse, type GetHooksListingResponse, type GetStatusResponse, type ListPermissionRulesResponse, type McpStatusResponse } from '@shared/wire/control';
 import type { SessionWindows } from '../../stores/usage';
-import { MODE_REFUSAL_WORDS } from '../../statusline/mode-menu';
+import { MODE_REFUSAL_WORDS, modeReported } from '../../statusline/mode-menu';
 import { resetsIn, windowShown } from '../../statusline/format';
 import { directLoginOf } from '../../gateway/direct-login';
 import type { Route } from '../../gateway/copy';
@@ -24,7 +24,7 @@ import { num } from '../../widgets/parts';
 import { INFO, LANE } from './copy';
 import { contestLine, holderLine } from '../../attention/derive'; // W7
 import type { Lane } from './lane';
-import { CONTROL_KEYS, type Capability, type ControlKey } from '../../session/controls/types'; // P5 O9 M5
+import { CONTROL_KEYS, type Capability, type ControlKey, type SessionControls } from '../../session/controls/types'; // P5 O9 M5
 import { LANE_A_WORDS } from '../../session/controls/lane-a'; // P5 O9 M5
 // C12 start
 import type { BudgetState } from '@shared/ipc/schema/engine';
@@ -56,7 +56,7 @@ export interface SessionInfoInput {
   // P2-A (X17): present while no process is live: the facts the engine host kept for the session (null when it kept
   // none), which the model, effort, mode, output style, plugin count and context rows show labelled with when
   observed?: { facts: ObservedFactsAnswer | null; loading: boolean };
-  driven?: { capability(key: ControlKey): Capability } | null; // P5 O9 M5: the port of a session driven through its terminal's bridge
+  driven?: Pick<SessionControls, 'capability' | 'bindings'> | null; // P5 O9 M5: the port of a session driven through its terminal's bridge
   reads: {
     status: GetStatusResponse | null;
     rules: ListPermissionRulesResponse | null;
@@ -202,13 +202,21 @@ function gatewaySection({ status, facts, directLogin, reads }: SessionInfoInput)
 }
 
 // The Mode row. P2-A: with no live process, the effective mode the engine last reported (an old one never confirms a
-// requested one). P5 O9 (the sitting): a terminal session driven through its bridge names none, since no bridge event
-// or read reports its live mode; an observation from an earlier MAWS run, or the record's default, would be a guess.
+// requested one). P5 O9: a terminal session driven through its bridge names the mode it reported and how long ago
+// (sminos 1.27.14), as its chip does, and none while it has reported none; an observation from an earlier MAWS run, or
+// the record's default, would be a guess.
 export function modeRow({ record, status, observed, now, driven }: Pick<SessionInfoInput, 'record' | 'status' | 'observed' | 'now' | 'driven'>): InfoRow {
-  if (driven) return { label: INFO.mode, value: LANE_A_WORDS.modeNotReported, note: LANE_A_WORDS.mode };
+  if (driven) return drivenModeRow(driven, now);
   if (observed) return observedRow(INFO.mode, observed, (f) => f.mode, (m) => PERMISSION_MODE_LABELS[m], now);
   const mode = status?.permissionMode ?? record.permissionMode;
   return { label: INFO.mode, value: PERMISSION_MODE_LABELS[mode.effective], note: mode.refusal ? `${INFO.effectiveNote} · ${MODE_REFUSAL_WORDS[mode.refusal]}` : INFO.effectiveNote };
+}
+
+// A driven session's Mode row, from its chip's binding: the mode as the session reported it, with how long ago.
+export function drivenModeRow(driven: Pick<SessionControls, 'bindings'>, now: number): InfoRow {
+  const { value, reportedAt } = driven.bindings().mode;
+  if (value === null || reportedAt === undefined) return { label: INFO.mode, value: LANE_A_WORDS.modeNotReported, note: LANE_A_WORDS.mode };
+  return { label: INFO.mode, value: PERMISSION_MODE_LABELS[value], note: modeReported(reportedAt, now) };
 }
 
 function permissionsSection(input: SessionInfoInput): InfoSection {

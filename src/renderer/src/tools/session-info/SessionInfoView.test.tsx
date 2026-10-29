@@ -403,4 +403,17 @@ describe('session info for another machine’s terminal session', () => {
       ['Attachments', LANE_A_WORDS.remoteMedia],
     ]));
   });
+
+  // sminos 1.27.14: its bridge's status read says the mode the session last reported
+  it('names the mode the session reported, with how long ago, and that none was before it reports one', () => {
+    const rowsOf = () => within(screen.getByRole('region', { name: 'Permissions' })).getAllByRole('term').map((term) => [term.textContent, term.nextElementSibling?.textContent]);
+    useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', availability: 'foreign_held' }), appId: REMOTE }]]) });
+    applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [] }));
+    mount({ ...ctxOf(REMOTE), session: null });
+    expect(rowsOf()).toEqual([['Mode', `${LANE_A_WORDS.modeNotReported} · ${LANE_A_WORDS.mode}`]]);
+    cleanup();
+    applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], mode: { mode: 'plan', at: Date.now() - 5 * 60_000 - 5_000, from: 'UserPromptSubmit' } }));
+    mount({ ...ctxOf(REMOTE), session: null });
+    expect(rowsOf()).toEqual([['Mode', `Plan · Reported ${REL.ago(5, 'minute')}`]]);
+  });
 });
