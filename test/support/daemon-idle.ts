@@ -40,13 +40,23 @@ export interface DaemonIdleRuntimeFloor extends IdleRecord {
 // 3.3, 3.0 and 2.7. It gave the bound 96721 KiB and 1.11 s.
 export const DAEMON_IDLE_BASELINE_M1: DaemonIdleBaseline = { commit: 'd14e92991', runs: ['40490756731', '40492851056', '40495339208'], footprintKiB: 64481, cpuS: 0.11 };
 
+// History, no longer the bound's: O2's landing record, from three valid e2e:daemon-idle-baseline runs on the mini: 65729
+// KiB at 7ff8f582 (40650181035, load 4.2, CPU 0.10 s), 70881 KiB (40669418019, load 3.4, 0.11 s) and 67409 KiB
+// (40673974571, load 4.6, 0.14 s), the latter two at d6037a48a; three more were invalid on the load rule: 40647561480
+// (11.0), 40652728419 (14.8) and 40657230165 (25.8). It gave the bound 101113 KiB and 1.11 s, which master itself read
+// above on 2026-10-28 (103203 KiB) while the mini held 9.76 GB wired from a tart leak.
+export const DAEMON_IDLE_BASELINE_O2: DaemonIdleBaseline = { commit: 'd6037a48a', runs: ['40650181035', '40669418019', '40673974571'], footprintKiB: 67409, cpuS: 0.11 };
+
 // The bound's baseline: today's detached supervisor on the landing tree itself. The architect's ruling at O2's landing
 // (superseding P5 Decision Log 57's fixed number): the bound is 1.5 times today's supervisor measured on the same tree,
-// re-measured with e2e:daemon-idle-baseline whenever a landing misses it. Three valid runs on the mini: 65729 KiB at
-// 7ff8f582 (40650181035, load 4.2, CPU 0.10 s), 70881 KiB (40669418019, load 3.4, 0.11 s) and 67409 KiB (40673974571,
-// load 4.6, 0.14 s), the latter two at d6037a48a; three more were invalid on the load rule: 40647561480 (11.0),
-// 40652728419 (14.8) and 40657230165 (25.8).
-export const DAEMON_IDLE_BASELINE: DaemonIdleBaseline = { commit: 'd6037a48a', runs: ['40650181035', '40669418019', '40673974571'], footprintKiB: 67409, cpuS: 0.11 };
+// re-measured with e2e:daemon-idle-baseline whenever a landing misses it. Re-derived after P5 O10 M10 (P5 Decision Log
+// 107) on the mini rebooted at 2026-10-28 21:27Z (1.83 GB wired, 82% free), Activity Monitor open on its desktop at
+// about 5% CPU in every window, all at d0802b29d: 66737 KiB (40791210494, load 2.4, CPU 0.12 s), 66097 KiB
+// (40795119204, load 3.7, 0.11 s), and the A-B-A 40778748076 as the mean of its two detached windows, 66073 KiB (65537
+// at load 4.5 and 66609 at 3.7, 0.12 s each), the reading its own daemon window is paired with. Void on load: 40789442114
+// (66001 KiB, 9.5) and 40793346639 (66273 KiB, 5.4, at 178eb02d8, whose supervisor bundle differs from d0802b29d's only
+// by O8 M3's org ipc schema, 48 lines of module-level zod objects), each from Spotlight's post-reboot reindex.
+export const DAEMON_IDLE_BASELINE: DaemonIdleBaseline = { commit: 'd0802b29d', runs: ['40778748076', '40791210494', '40795119204'], footprintKiB: 66097, cpuS: 0.12 };
 
 // A diagnostic (P5 Decision Log 57), recorded from three valid e2e:daemon-idle-floor runs on the mini at 36704c984:
 // footprints 12689, 13153 and 13185 KiB (1.04x), CPU 0.00 s each, load 2.9, 4.3 and 3.3; a fourth run (40502284016,
@@ -73,9 +83,9 @@ export function idleBound(baseline: DaemonIdleBaseline, windowS: number = IDLE_R
   };
 }
 
-// 101113 KiB and 1.11 s. The daemon shape at the landing, judged in the same quiet window on d6037a48a: 40671838782 at
-// 97683 KiB (load 3.4) and 40676048769 at 99219 KiB (load 3.8) within it; 40678158535 at 96675 KiB was invalid on load
-// (7.6). Two of the two valid runs are within.
+// 99145 KiB and 1.12 s. The daemon shape in the same series: the A-B-A's daemon window, 95907 KiB (mawsd 29409, engine
+// host 66497; load 4.7), x1.452 its own detached mean, within it. At O2's landing it was 101113 KiB, the daemon shape on
+// d6037a48a reading 97683 KiB (40671838782, load 3.4) and 99219 KiB (40676048769, load 3.8).
 export const DAEMON_IDLE_BOUND: DaemonIdleBound = idleBound(DAEMON_IDLE_BASELINE);
 
 // What is wrong with a recorded baseline or runtime floor, each one line; empty when it is well formed, and for none
