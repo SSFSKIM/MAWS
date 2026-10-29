@@ -2087,6 +2087,27 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - Once marked, the registration stays marked and `signing.json` is written as it stands, so the store stays fail-closed.
   Date/Author: 2026-10-29, O8's executor.
 
+- Decision: M4a Task 4, the session's surface (19730e6ae), settles these points.
+  1. `OrgRefusal.attempt` is optional. Every refusal a session attempt ends carries it. The startup `keys` refusal and the synchronous `{ok: false}` answers name none, and the renderer gives an attempt-less refusal its own place.
+  2. `registered.pairing` is required and nullable, like `signer`.
+  3. A preview refusal is `{ok: false, reason: refused | stale | not-root | unmarked | signing | invalid, detail?, findings}`. Preview refuses up front when this Mac can't sign. `org.change` maps a refusal into `SignResult`.
+  4. A pairing start is refused as one of:
+     - `not-root`;
+     - `later-device` (the page's sentence);
+     - `no-member`;
+     - `busy` (any session attempt runs: sign-in, re-anchor, rekey; a rekey is likewise refused while a pairing runs);
+     - `hub` (no live credential to poll with).
+  5. A pairing is done (`null`) when an approve succeeds, or when the held head lists the candidate. An approve that fails leaves it live for a retry. An ended pairing keeps its `problem` until it is cancelled or a new one starts.
+  6. An entry with the candidate's id and another device ends the pairing as `entry-changed`, whatever its MAC. The candidate vanishing while polling is ignored, since the hub drops a pending entry once its state is accepted. At approve, a missing candidate ends it as `entry-changed`.
+  7. Expiry runs on one unref'd timer per pairing, and `live()` reads the clock exactly. A pairing whose context reads null (closed or signed out) stops itself, and sign-out cancels it.
+  8. `org.change` normalizes its input, so a `member.add` without its previewed id reads `stale`.
+  9. `org.view` answers whenever a verified head is held, signed out (`maySign` false) or removed included.
+  10. `pendingOf` returns the protocol's `PendingEntry[]`, dropping misshapen items and the hub's own fields.
+  11. `names/org.ts` lists the six new commands. `index.ts` and `grades/org.ts` needed nothing.
+  12. A pairing that ends during Touch ID reads `cancelled`. One that ends before Touch ID reads `stale`.
+  13. Task 5: `close()` cancels a running pairing in its "stop the parts" step.
+  Date/Author: 2026-10-29, O8's executor.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
