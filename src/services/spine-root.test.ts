@@ -16,6 +16,7 @@ import { captureConsole } from '../../test/support/console-capture';
 import { fakeBus, type FakeBus } from '../../test/support/fake-bus';
 import { startFakeBridge, type FakeBridge } from '../../test/support/fake-bridge';
 import { FakeSpineHost } from '../../test/support/fake-spine-host';
+import { SPINE_COMMANDS } from '../../test/support/spine-lists';
 import { FIXTURE_DIR } from '../../test/support/fixtures';
 import { summary, tempDir } from '../../test/support/index-fixture';
 import { startCheckouts, type CheckoutsRoot } from './checkouts-root';
@@ -43,27 +44,8 @@ const noClientPort = {
 
 // What each root installs through its bus (D25), sorted: the commands O3-D's services front serves for the spine and
 // O3-E's for the checkouts, the intercepts on another owner's commands, and the emitted events the root taps. A run
-// refused the spine (O3-A) registers the spine's commands but those of the parts it does not start.
-const SPINE_COMMANDS = [
-  'attention.acknowledge', 'attention.list', 'attention.request',
-  'git.worktree.add', 'git.worktree.branch', 'git.worktree.deleteBranch', 'git.worktree.list', 'git.worktree.remove', 'git.worktree.status',
-  // P5 O9's lane A driver (O3 Decision Log 13): composed only while the run holds spine.lock, with no intercept or tap
-  'laneA.answer', 'laneA.btw', 'laneA.catalog', 'laneA.command', 'laneA.compact', 'laneA.interrupt', 'laneA.list', 'laneA.media', 'laneA.model',
-  'laneA.read', 'laneA.send', 'laneA.state', 'laneA.stopAgent', 'laneA.stopTask', 'laneA.tell', 'laneA.unwatch', 'laneA.watch',
-  'library.get', 'library.list', 'library.spaces',
-  'mods.list', 'mods.setSessionOverride',
-  'ownerChannel.answered', 'ownerChannel.cancel', 'ownerChannel.markRead', 'ownerChannel.state',
-  'session.acquire', 'session.appEvents', 'session.archive', 'session.archiveOlder', 'session.create', 'session.delete',
-  'session.deletions.keep', 'session.deletions.list', 'session.deletions.preview', 'session.digests', 'session.drafts.get', 'session.drafts.set',
-  'session.fork', 'session.get', 'session.history.append', 'session.history.list',
-  'session.intent.discard', 'session.intent.get', 'session.intent.list', 'session.intent.patch', 'session.intent.release', 'session.intent.resolveWorktree',
-  'session.launchMode', 'session.list', 'session.observedFacts',
-  'session.projects.add', 'session.projects.addFolder', 'session.projects.list', 'session.projects.remove', 'session.projects.update',
-  'session.recentTurns', 'session.rename', 'session.replay.fixtures', 'session.replay.start', 'session.revealPath', 'session.search',
-  'session.setVisible', 'session.start', 'session.takeOver', 'session.takeOverPane', 'session.trust.check', 'session.update',
-  'settings.engineApplied', 'settings.userEngineDefaults',
-  'side.screenshot.preview', 'side.sendToMain', 'side.thread.open',
-];
+// refused the spine (O3-A) registers the spine's commands but those of the parts it does not start. SPINE_COMMANDS is
+// test/support/spine-lists.ts's, which mawsd's front is held to as well (P5 O3-D M2).
 const SPINE_REFUSED_COMMANDS = [
   'library.get', 'library.list', 'library.spaces',
   'session.appEvents', 'session.digests', 'session.drafts.get', 'session.drafts.set', 'session.get', 'session.launchMode', 'session.list', 'session.observedFacts',

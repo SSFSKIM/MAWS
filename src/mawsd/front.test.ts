@@ -1,0 +1,175 @@
+// The services front's core (P5 O3-D M2; docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §B): a
+// machine.sock client's runtime over a stand-in seam and hosts. The front over the real spine is daemon-spine.test.ts's.
+import { describe, expect, it, vi } from 'vitest';
+import type { HostResponse } from '@shared/ipc/host-protocol';
+import { REGISTRY } from '@shared/ipc/registry';
+import type { CommandName } from '@shared/ipc/schema';
+import type { MachineRef } from '@shared/machine/ref';
+import { status as statusOf } from '../../test/support/builders';
+import { createServicesFront, FRONT_COMMANDS, LATER_COMMANDS, type FrontOptions } from './front';
+import { SpineUnavailable } from './spine-seam';
+
+const IDENTITY = { ref: 'TestMachineRef00000000' as MachineRef, name: 'test machine', project: { key: 'machine:TestMachineRef00000000', name: 'test machine', smnsId: null } };
+
+// A machine.sock client's end of its connection, as the socket layer hands the runtime one
+function connection() {
+  const posted: Record<string, unknown>[] = [];
+  let listener: (event: { data: unknown }) => void = () => {};
+  let open = true;
+  const port = {
+    start: () => {},
+    on: (_event: 'message', l: (event: { data: unknown }) => void) => void (listener = l),
+    postMessage: (message: unknown) => (open ? void posted.push(message as Record<string, unknown>) : false),
+  };
+  let next = 0;
+  return {
+    port,
+    posted,
+    close: () => void (open = false),
+    send: (data: unknown) => listener({ data }),
+    ready: () => listener({ data: { t: 'ready' } }),
+    async request(name: string, input?: unknown, client?: string): Promise<Record<string, unknown>> {
+      const id = `r${++next}`;
+      listener({ data: { t: 'req', id, name, input, ...(client && { client }) } });
+      await vi.waitFor(() => expect(posted.find((m) => m.id === id)).toBeDefined());
+      return posted.find((m) => m.id === id)!;
+    },
+    events: () => posted.filter((m) => m.t === 'evt').map((m) => m.name),
+  };
+}
+
+function front(over: Partial<FrontOptions> = {}) {
+  const raw = new Set<(message: { name: string; payload: unknown }) => void>();
+  const forwarded: { owner: string; name: string; input: unknown }[] = [];
+  const ensure = vi.fn(async () => ({}) as never);
+  const logs: string[] = [];
+  const served = createServicesFront({
+    spine: { ensure },
+    hosts: {
+      forward: async (owner, request) => (forwarded.push({ owner, ...request }), { t: 'res', id: 'x', ok: true, value: { forwarded: request.name } } as HostResponse),
+      onRaw: (_owner, listener) => (raw.add(listener), () => void raw.delete(listener)),
+    },
+    intercept: () => null,
+    daemon: async (name) => (name === 'daemon.status' ? { asked: name } : undefined),
+    identity: () => IDENTITY,
+    log: (line) => void logs.push(line),
+    ...over,
+  });
+  const client = () => {
+    const end = connection();
+    served.runtimeFor({ appPid: 1, capabilities: [] }).serve(end.port);
+    return end;
+  };
+  return { served, client, ensure, forwarded, logs, raw: (name: string, payload: unknown) => raw.forEach((l) => l({ name, payload })) };
+}
+
+describe('the services front', () => {
+  it('answers machine.identity and the daemon namespace cold, with no load', async () => {
+    const { client, ensure } = front();
+    const c = client();
+    expect(await c.request('machine.identity')).toMatchObject({ ok: true, value: IDENTITY });
+    expect(await c.request('daemon.restart')).toMatchObject({ ok: true });
+    expect(ensure).not.toHaveBeenCalled();
+  });
+
+  it('loads at a spine command and answers it from what the spine registered, its intercept first, its output validated', async () => {
+    const { served, client, ensure } = front();
+    served.bus.register('session.search', () => ({ results: 'not a list' }) as never);
+    served.bus.register('session.launchMode', () => ({ mode: 'index' }) as never);
+    const c = client();
+    expect(await c.request('session.search', { query: 'x' })).toMatchObject({ ok: false, error: { code: 'internal' } }); // output refused
+    expect(ensure).toHaveBeenCalledWith('command');
+    const off = served.bus.intercept('session.launchMode', () => ({ mode: 'scenario' }) as never);
+    expect(await c.request('session.launchMode')).toMatchObject({ ok: true, value: { mode: 'scenario' } });
+    off();
+    expect(await c.request('session.launchMode')).toMatchObject({ ok: true, value: { mode: 'index' } });
+  });
+
+  it('answers the refusal on every spine command: host_unavailable naming the holder', async () => {
+    const refusal = 'spine.lock is held by pid 4321 (build 1.0.0+abc), so this run starts none of the machine’s services and writes none of its files';
+    const { client } = front({ spine: { ensure: async () => Promise.reject(new SpineUnavailable(refusal)) } });
+    const c = client();
+    for (const name of ['session.list', 'attention.list', 'library.list']) {
+      expect(await c.request(name, name === 'attention.list' ? undefined : name === 'session.list' ? { includeArchived: false } : {})).toMatchObject({ ok: false, error: { code: 'host_unavailable', message: refusal } });
+    }
+  });
+
+  it('forwards an engine-host name through the bus’s intercept, then the daemon’s, then the host; host.attachment is its own', async () => {
+    const intercepted: string[] = [];
+    const { served, client, forwarded } = front({
+      intercept: ({ name }) => (name === 'host.stopAll' ? (intercepted.push(name), Promise.resolve({ t: 'res', id: 'x', ok: true, value: undefined })) : null),
+    });
+    const c = client();
+    expect(await c.request('host.stopAll', { graceMs: 1000 })).toMatchObject({ ok: true });
+    expect(intercepted).toEqual(['host.stopAll']);
+    expect(await c.request('engine.sessions')).toMatchObject({ ok: true, value: { forwarded: 'engine.sessions' } });
+    served.bus.intercept('session.answer', () => ({ outcome: 'not_pending' }) as never);
+    const answered = await c.request('session.answer', { appSessionId: 'a', requestId: 'r', answer: { kind: 'permission', decision: 'deny' } });
+    expect(answered).toMatchObject({ ok: true, value: { outcome: 'not_pending' } }); // the spine's pending check answered it
+    expect(forwarded.map((f) => f.name)).toEqual(['engine.sessions']);
+    expect(await c.request('host.attachment', { attached: true })).toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+  });
+
+  it('answers a later milestone’s machine name internal, with no load', async () => {
+    const { client, ensure } = front();
+    expect(await client().request('machineSettings.get')).toMatchObject({ ok: false, error: { code: 'internal', message: 'mawsd serves no machineSettings.get yet' } });
+    expect(ensure).not.toHaveBeenCalled();
+  });
+
+  it('every machine name is the front’s own, a later milestone’s, or the spine’s', () => {
+    const machine = Object.entries(REGISTRY.commands).flatMap(([name, { owner }]) => (owner === 'machine' ? [name] : []));
+    for (const name of [...FRONT_COMMANDS, ...LATER_COMMANDS]) expect(machine).toContain(name);
+  });
+
+  it('emits only machineEvents, validated, to the clients that said ready, and to the taps', () => {
+    const { served, client, logs } = front();
+    const [ready, waiting] = [client(), client()];
+    ready.ready();
+    const tapped: unknown[] = [];
+    served.bus.onEmitted('session.status', (payload) => void tapped.push(payload));
+    const payload = { appSessionId: 's1', status: statusOf('s1') };
+    expect(served.bus.emit('session.status', payload as never)).toBe(true);
+    expect(served.bus.emit('session.queue' as never, { appSessionId: 's1', entries: [], paused: false } as never)).toBe(false); // the engine host's, not the machine's
+    expect(served.bus.emit('attention.changed', { nonsense: true } as never)).toBe(false);
+    expect(ready.events()).toEqual(['session.status']);
+    expect(waiting.events()).toEqual([]);
+    expect(tapped).toHaveLength(1);
+    expect(logs).toContainEqual('machine.sock: refused to emit session.queue: it is not in MACHINE_EVENTS');
+  });
+
+  it('relays the engine host’s events raw to the taps, and to every ready client those that name no session', () => {
+    const { served, client, raw } = front();
+    const c = client();
+    c.ready();
+    const tapped: string[] = [];
+    served.bus.onEmitted('session.eventBatch', () => void tapped.push('batch'));
+    raw('session.eventBatch', { appSessionId: 's1', events: [] });
+    raw('plugins.changed', {});
+    expect(tapped).toEqual(['batch']);
+    expect(c.events()).toEqual(['plugins.changed']);
+  });
+
+  it('invoke runs a registered command in process without waiting for a load; unbind drops the load’s registrations', async () => {
+    const { served, ensure } = front();
+    served.bus.register('session.launchMode', () => ({ mode: 'index' }) as never);
+    const context = { client: { id: 'ledger' } } as never;
+    expect(await served.bus.invoke('session.launchMode', undefined, context)).toEqual({ ok: true, value: { mode: 'index' } });
+    expect(ensure).not.toHaveBeenCalled();
+    expect(served.commands()).toEqual([...FRONT_COMMANDS, 'session.launchMode'].sort() as CommandName[]);
+    served.unbind();
+    expect(served.commands()).toEqual([...FRONT_COMMANDS]);
+    served.bus.register('session.launchMode', () => ({ mode: 'index' }) as never); // the next load registers afresh
+  });
+
+  it('a client’s end ends its refs and its events', async () => {
+    const { served, client } = front();
+    let ended = false;
+    served.bus.register('session.launchMode', (_input, { client: ref }) => (ref.onGone(() => void (ended = true)), ({ mode: 'index' }) as never));
+    const c = client();
+    c.ready();
+    await c.request('session.launchMode', undefined, 'page:1');
+    c.close();
+    served.bus.emit('session.status', { appSessionId: 's1', status: statusOf('s1') } as never); // the closed port refuses: the client is gone
+    expect(ended).toBe(true);
+  });
+});
