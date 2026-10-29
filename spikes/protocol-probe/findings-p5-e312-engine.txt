@@ -1,0 +1,149 @@
+P5: MAWS on the engine the owner runs, Claude Code 2.1.312 (charter D-1 as amended 2026-10-01, W13; dispatched by
+P5's architect, session 37052769, 2026-10-29). Findings, fixtures and mappings in one PR; the charter's Decision Log line
+is the architect's at landing.
+
+Question. The owner runs 2.1.312 every day; MAWS was verified against 2.1.296 (TESTED_ENGINE_VERSION) and its replay
+fixtures were recorded on 2.1.283 to 2.1.299. A lane B session on 2.1.312 raised the notice "Claude Code 2.1.312 is newer
+than the version MAWS was verified against (2.1.296); some events were not understood". What does 2.1.312 send in normal
+use that MAWS does not understand, what must MAWS understand, and what may it knowingly ignore?
+
+Verdict. The notice came from a coverage gap older than 2.1.296, not from a change in 2.1.312. `system/session_title_changed`
+ships since 2.1.284 to 2.1.287 (absent from the 2.1.283 bundle, present in 2.1.287's), and two more normal-use frames
+are older still: MAWS's own journals on the owner's machine, replayed through the Normalizer, hold exactly three frames
+it did not understand, `session_title_changed` (2.1.294, 2.1.296, 2.1.303, 2.1.309, 2.1.310), `vcs_state_changed`
+(2.1.283) and `permission_check_status` (2.1.294, 2.1.303, 2.1.309), and no `invalid_frame`. They were silent before only
+because the notice fires on a version newer than tested. Nine `system/*` subtypes a MAWS launch can receive in normal use
+had no schema; each is now typed and mapped knowingly (below). Everything else 2.1.312 can write to stdout needs a
+condition MAWS's launch never creates, and stays unmapped on purpose, so that a frame from such a path still raises the
+notice. The control protocol's semantics are unchanged for MAWS: every engine-to-host request it can receive is one it
+already handles.
+
+Method.
+  1. The bundle. ~/claude-code-bundle/<v>/cli.pretty.js for 2.1.292 (the nearest extracted build at or below 2.1.296)
+     and 2.1.312, read three ways: the SDK protocol schema registry around the published stdout union (the line that
+     `describe`s "Everything the CLI writes to its output stream"), every `{ type: "system", subtype: … }` literal the
+     code emits, and the paths those literals take to stdout: filter 1 of the headless session (`RC`, 2.1.312
+     cli.pretty.js:534845-534965, which passes only status, init, notification, api_retry, model_refusal_*,
+     memory_recall, thinking_tokens, compact_boundary, model_fallback, model_consent_fallback and informational of the
+     internal system messages), and the SDK event queue (`ea`, cli.pretty.js:149986), which every other emitter writes to
+     directly and the headless session drains to stdout unfiltered. Each candidate's emit condition read at its site.
+  2. The owner's journals. MAWS's spawn journals on this MacBook (three profiles, 2.1.283 to 2.1.310) replayed through
+     the Normalizer by a scratch vitest file that never left the machine: counts and versions only, as above. The O9
+     sitting's 2.1.312 journal was removed with its scratch profile.
+  3. Live probes on 2.1.312 (scenarios/pass3/p5-e312.mjs and a sweep of the existing scenarios), run on a devcloud VM:
+     see "Probe results".
+
+The delta 2.1.292 → 2.1.312 (registry and emit literals). One system subtype added to the registry,
+`inherited_asks_settled` (a cloud session's resume reporting the asks it kept; written only on the remote transport),
+and three emitted with no schema, `checkpoint_done`, `rewind_stand_in` (an internal transcript stand-in) and
+`turn_began_before_init` (all three cloud or internal). Six control subtypes added: five client-to-engine requests MAWS
+does not send (`get_cloud_session`, `get_cloud_session_transcript`, `list_cloud_sessions`, `start_shell_task`,
+`submit_survey_feedback`) and `ui_prompt_paint`, an engine-to-surface ask sent only to a client that declares it (below).
+No stdout type added or removed. Fields: the schemas
+of every subtype MAWS already maps (`task_notification`, `session_state_changed`, `hook_response`, `peer_message_hold`,
+`api_retry`, `notification`, `permission_denied`, `status`, `compact_boundary`, init) only added optional keys, which
+MAWS's loose schemas keep.
+
+What a MAWS launch receives in normal use and now understands (src/shared/wire/frames.ts, src/engine-host/
+normalizer-system.ts; the mapping rule: a frame maps to nothing when an existing path already shows its fact promptly,
+and to that path when the fact would show late or not at all):
+  session_title_changed   {title}: the session's custom name (`/rename`, `rename_session`, a hook's sessionTitle; never
+                          the AI title), at startup when the session has one and after every change. None: the same
+                          rename appends a `custom-title` record, which C4's title rule reads through the fs watcher's
+                          re-summary (50 ms debounce); the probe measures the record's lag behind the frame.
+  vcs_state_changed       {kind: commit|push|merge|rebase (open), branch?, cwd}: a foreground Bash command moved the
+                          repository. None: C4's git watcher sees the head and refs move.
+  code_change_published   {provider, url, repo, identifier, action?, branch?}: a `gh pr` verb, or a push to a PR's
+                          branch. To the PR row's Refresh: no ref moves, so the row (polled every 2 minutes, main keeping
+                          an answer 60 s) would show a new or merged PR late. The status tracker keeps it as the status's
+                          additive `published` {url, action, at} (X6; wire minor 6), and the panel's app-level listener
+                          (renderer ipc/events.ts) asks `scm.pr.state` with refresh when its time moves, for a PR state a
+                          surface holds. A new X1 event kind would have been a wire major (a union member set changes).
+  permission_check_status {tool_use_id, agent_id?, status: checking|done}: an auto-mode permission check has waited about
+                          four seconds. None: no MAWS surface shows a pending check (Claude Desktop does; a UX decision).
+  per_turn_effort_changed {per_turn_effort_active: false}: per-turn effort went off after a server refusal. None: it
+                          carries no effort for the effort chip.
+  memory_recall           {mode, memories[{path, scope, content?}]}: auto memory surfaced memories. None: no surface
+                          shows a recall.
+  dev_intent              {kind, trigger?}: the conversation or the repository shows iOS or Android development (an
+                          Xcode project for iOS at the repository root, from the scan every headless session starts).
+                          None: no surface offers device tooling. (The engine's SPEC 45 says print mode drops it; the
+                          2.1.312 headless session starts the scan, cli.pretty.js:545216-545217, and `ea` bypasses
+                          filter 1.)
+  model_fallback          {trigger, original_model, fallback_model, content}: the turn moved to the configured fallback
+                          model. `notice.posted` warning with the engine's text (turn-scoped).
+  model_consent_fallback  {choice, original_model, fallback_model, persisted_as_default?, content}: a pre-send consent
+                          gate (the Fable 5 usage-credit gate) moved the session off the requested model.
+                          `notice.posted` warning; every later turn's system/init reports the model it runs.
+
+What 2.1.312 can write to stdout that MAWS knowingly leaves unmapped, each behind a condition a MAWS launch never
+creates (a frame from these paths still raises the notice, which is the point):
+  turn_preempted                  only for a host that declares `rapidFollowupPreempt` on initialize (MAWS does not)
+  inherited_asks_settled, checkpoint_done, turn_starting, turn_began_before_init, file_attachments_missing,
+  turn_handoff_available, worker_shutting_down, cloud_session_delta, active_goal, autocompact_state
+                                  cloud or remote transports (CLAUDE_CODE_REMOTE, a bridge, CCR), never MAWS's stdio launch
+  bridge_state                    headless Remote Control
+  plugin_install                  CLAUDE_CODE_SYNC_PLUGIN_INSTALL
+  transcript_mirror, mirror_error --session-mirror
+  tool_host_result                a remote tool host's result lines
+  post_turn_summary, task_summary, session_metadata
+                                  only when the engine detects a surface that consumes them (Claude Desktop's Code tab, a
+                                  cloud session); none in any probe or journal
+  instruction_size_warning        "Sent to Claude Desktop's Code tab alone" (its schema), behind a flag off by default
+  feedback_draft_queued           the SendFeedback tool's local draft
+Internal transcript surfaces that never reach stdout (filter 1 drops them): permission_retry, stop_hook_summary,
+memory_saved, agents_killed, away_summary, thinking, file_snapshot, scheduled_task_fire, turn_duration, api_error,
+local_command, rewind_stand_in, bridge_status, cloud_session_status.
+Engine-to-host control requests MAWS does not map: oauth_token_refresh and host_auth_token_refresh (only for a host that
+supplied the credential), remote_tool_call, remote_plumbing_call, remote_tools_probe, remote_tools_reannounce,
+remote_control_work_secret (remote tool hosts and Remote Control), ui_read_selection and ui_prompt_paint (sent only to an
+attached client whose `ui_attach` answers name them, cli.pretty.js:959448 `fU`; MAWS declares ui_copy and the three
+prompt asks, src/shared/engine/surface.ts).
+
+Probe results (2.1.312, devcloud VM dc-e312probe-c52f, GCE us-central1-a; evidence docs/doperpowers/evidence/p5-e312/
+probes.txt). The VM boots the owner's home with managed settings that route every engine through the mini's relay and
+enable the owner's plugins; each step ran as the VM user in a private mount namespace whose /etc/claude-code was an empty
+tmpfs (the owner's plugins and routing hidden, the host's file untouched), with a forwarder serving the relay at
+127.0.0.1:8641 from the mini's, and only while the mini had no measured hold (`~/.local/state/ci-hold`, read from this
+Mac before every step: the VM holds no key for the mini). 06:29Z to 06:47Z, then the five kept arms again at 06:55Z.
+  p5-e312 (scenarios/pass3/p5-e312.mjs, MAWS's launch line and initialize payload, Haiku unless named):
+    title         `rename_session {title, source: host}` sends `session_title_changed {title}`; the transcript held the
+                  `custom-title` record 5 ms after the frame arrived (polled every 10 ms). `generate_session_title` with
+                  persist answers the session's existing custom name and sends nothing. `/rename <name>` as a prompt sends
+                  the frame, the record 18 to 20 ms behind it. A `--resume` of the named session sends the name at startup,
+                  before any turn's system/init (journal seq 5). So the disk path C4's title rule reads lags the frame by
+                  tens of milliseconds plus the watcher's 50 ms debounce: the frame maps to none.
+    vcs           `git commit` sends vcs_state_changed {kind: commit, branch: master, cwd}; `git push -u origin HEAD` to a
+                  scratch bare remote {kind: push, branch: master}; `gh pr create` against a stand-in gh printing a PR
+                  URL sends code_change_published {provider: github, url, repo, identifier: "7", action: created, branch}.
+    fallback      `--model` naming no model with `--fallback-model haiku` sends model_fallback {trigger:
+                  model_not_found, original_model, fallback_model: claude-haiku-5-5, content: "Switched to Haiku 5.5
+                  because claude-e312-no-such-model is not available"}, before the turn's first request.
+    devintent     a repository whose root holds an Xcode project for iOS sends dev_intent {kind: ios_app, trigger:
+                  project_scan} at seq 5, before the first turn.
+    auto          (Sonnet, auto mode, four classified Bash commands; US$0.061) no permission_check_status: every check
+                  answered inside four seconds. Its shape is the owner's journals' (2.1.294 to 2.1.309) and the schema's.
+    memory        (auto memory on, one memory file) no memory_recall: the selector surfaced nothing. Schema only.
+  Kept as fixtures: pass3/p5-e312-{title,title-resume,vcs,fallback,devintent}.jsonl (the conformance suite replays each:
+  no frame.unknown, no invalid_frame, the fallback's notice pinned). auto and memory recorded nothing new and are not kept.
+  The sweep: pass1's seven scenarios, pass2's bash-context, hooks, rewind, per-task-stop, dialogs and workflow, and pass3's
+  context-sample, interrupt-text, question-deny, w4-question-skip, p1-side-question, p1-fork, p1-question-preview,
+  p1-sdk-mcp, e7-cron, terminal-queued, nested-agents, stop-task and relay-to-child, re-recorded on 2.1.312 (36 journals)
+  and replayed through the Normalizer with this branch's mappings: no frame.unknown and no invalid_frame anywhere. Against
+  the committed recordings (2.1.283 to 2.1.299) the frames only gained optional keys (`api_message_id` on stream events,
+  `user_message_uuids` on init and status, `run_id` on task frames, `first_request_input_tokens`,
+  `model_usage_since_last_result` and `safety_stops` on result, `additional_directories` and `original_cwd` on init,
+  `tool_result_meta` on user) and lost two MAWS never reads (`wire_tool_inputs`, `thinking_duration_ms` on assistant);
+  `thinking_tokens` frames came less often on Haiku 5.5, and reads.jsonl's `rename_session` now draws a
+  `session_title_changed`. No committed fixture is wrong for 2.1.312, so none was re-recorded; the new behaviour is in the
+  five new ones. end-session-archive and context-full did not run (they make their scratch homes under /private/tmp, which
+  Linux lacks); p1-side-question's own check failed on a disk fact, not the wire: 2.1.312's transcript carries
+  request-replay records (`api-request-shape`, `api-request-blob`, `api-request` with `querySource: "sdk"`) and a
+  `tools-used` stamp, which the check read as side-question records (it found none of the questions' text, as before).
+  Spend: US$0.613 for the first pass (43 journals, the Sonnet auto arm 0.061 of it), US$0.010 for the five arms re-recorded
+  with corrected provenance; US$0.62 in all.
+
+On disk, which the wire notice never reads: those request-replay records and the `tools-used` stamp are anonymous
+transcript records the chain follower had no name for, so every 2.1.312 transcript MAWS followed produced a
+`frame.unknown` event (`transcript:api-request`, …) per model request: no notice and no row, but noise in the graph. They
+join the follower's known bookkeeping (src/engine-host/fs/chain-follower.ts KNOWN_SILENT_TYPES).
