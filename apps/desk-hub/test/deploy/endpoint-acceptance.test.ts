@@ -408,15 +408,17 @@ describe('the machine’s own events, this run’s', () => {
     { offset: 16, event: { writer: 'dc-acceptance-7f80-twin/s1', seq: 1 } },
   ];
 
-  it('are the machine’s writers’ events after the log stood where it did before lane A started, nothing earlier', async () => {
+  it('are the run’s two sessions’ events after the log stood where it did before lane A started: nothing earlier, no other session’s', async () => {
     const { runOwnEvents } = await import('../../deploy/endpoint-items.ts');
-    expect(runOwnEvents(log, 10, 'dc-acceptance-7f80').map((e) => e.offset)).toEqual([12, 13, 15]);
-    expect(runOwnEvents(log, 15, 'dc-acceptance-7f80')).toEqual([]);
+    const withOther = [...log, { offset: 14, event: { writer: 'dc-acceptance-7f80/owners-own-session', seq: 7 } }];
+    expect(runOwnEvents(withOther, 10, 'dc-acceptance-7f80', ['s1', 's2']).map((e) => e.offset)).toEqual([12, 13, 15]);
+    expect(runOwnEvents(withOther, 10, 'dc-acceptance-7f80', ['s1']).map((e) => e.offset)).toEqual([12, 13]);
+    expect(runOwnEvents(withOther, 15, 'dc-acceptance-7f80', ['s1', 's2'])).toEqual([]);
   });
 
   it('are kept as residue by writer, apart from the run’s marked events', async () => {
     const { runOwnEvents, sessionResidue } = await import('../../deploy/endpoint-items.ts');
-    expect(sessionResidue('proj-m', 10, runOwnEvents(log, 10, 'dc-acceptance-7f80'))).toBe(
+    expect(sessionResidue('proj-m', 10, runOwnEvents(log, 10, 'dc-acceptance-7f80', ['s1', 's2']))).toBe(
       'the machine’s own events in the project proj-m after offset 10, written by the run’s sessions (lane A, the spawn): dc-acceptance-7f80/s1 2 (offsets 12–13), dc-acceptance-7f80/s2 1 (offset 15)',
     );
     expect(sessionResidue('proj-m', 10, [])).toBe('the machine’s own events in the project proj-m after offset 10, written by the run’s sessions (lane A, the spawn): none');
@@ -454,5 +456,32 @@ describe('lane A’s project', () => {
     expect(staging.name).toBe('o10-m11-abc123');
     expect(staging.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(staging.id).not.toBe(machineProjectId('org-1', 'o10-m11-abc123'));
+  });
+});
+
+describe('production’s gate and remote spawns', () => {
+  it('admits no clause that submits a `sminos.spawn` to the machine', async () => {
+    const { productionAdmit } = await import('../../deploy/endpoint-items.ts');
+    const source = (await import('node:fs')).readFileSync(join(import.meta.dirname, '../../deploy/endpoint-items.ts'), 'utf8');
+    const admit = productionAdmit(true);
+    const spawning: string[] = [];
+    const parts = source.split(/(?=report\.check\(')/);
+    for (const part of parts) {
+      const m = /^report\.check\('(\d)', ('[^']*'|`[^`]*`)/.exec(part);
+      if (m === null) continue;
+      // The clause's body: up to the next clause, a sibling clause's code at most.
+      if (!/action: 'sminos\.spawn'/.test(part)) continue;
+      spawning.push(`${m[1]} ${m[2].slice(1, -1)}`);
+    }
+    expect(spawning.length).toBeGreaterThan(3);
+    for (const clause of spawning) expect(admit(clause.slice(0, 1), clause.slice(2)), clause).not.toBeNull();
+  });
+});
+
+describe('the seat a local spawn made', () => {
+  it('is the session `sminos spawn` printed, or none', async () => {
+    const { seatSession } = await import('../../deploy/endpoint-items.ts');
+    expect(seatSession(['banner', 'seat spawned: proj/o10-local-ab12cd  [4f2a9c1 / 0f3e8a52-7c1d-4b9e-9a61-2d4f6b8c0e13]  status=working  (reply: sminos reply 4f2a9c1)'])).toBe('0f3e8a52-7c1d-4b9e-9a61-2d4f6b8c0e13');
+    expect(seatSession(['sminos: spawn failed'])).toBeNull();
   });
 });

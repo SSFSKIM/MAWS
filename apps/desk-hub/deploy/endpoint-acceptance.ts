@@ -143,9 +143,10 @@ export async function buildScene(o: RunOptions & { tag: string }, made: Made, lo
   cleanup.add('record the machine’s own events the run’s sessions wrote', async () => {
     if (sessionLog === null) return;
     const { project, from } = sessionLog;
-    made.kept.push(await readSessionResidue(person, project, from, machineName).catch((error: unknown) => `${sessionResidue(project, from, [])} (unread: ${error instanceof Error ? error.message : String(error)})`));
+    made.kept.push(await readSessionResidue(person, project, from, machineName, sessions).catch((error: unknown) => `${sessionResidue(project, from, [])} (unread: ${error instanceof Error ? error.message : String(error)})`));
   });
   let machineName = '';
+  const sessions: string[] = [];
   cleanup.add(`end the scene on ${machine.label}`, async () => {
     const left = await machine.down();
     if (left.length) throw new Error(left.join('; '));
@@ -233,7 +234,8 @@ export async function buildScene(o: RunOptions & { tag: string }, made: Made, lo
   sessionLog = { project: project.id, from: await projectLogOffset(person, project.id, o.target === 'production') };
   log(`lane A’s project log stands at offset ${sessionLog.from} before lane A starts`);
   const laneA = await machine.laneA.up(project);
-  log(`lane A: session ${laneA.session} (${laneA.alias}) in the machine’s project ${project.id}, launch ${laneA.launch}`);
+  sessions.push(laneA.session);
+  log(`lane A: session ${laneA.session} (${laneA.alias}) in ${o.target === 'production' ? 'the machine’s' : 'the run’s'} project ${project.id}, launch ${laneA.launch}`);
 
   return {
     target: o.target,
@@ -260,6 +262,7 @@ export async function buildScene(o: RunOptions & { tag: string }, made: Made, lo
     made,
     hubWrites,
     logFrom: sessionLog.from,
+    sessions,
   };
 }
 
@@ -283,11 +286,11 @@ async function projectLogOffset(person: Person, project: string, known: boolean)
 }
 
 /** The residue line for the machine's own events in `project` after `from`. */
-async function readSessionResidue(person: Person, project: string, from: number, machine: string): Promise<string> {
+async function readSessionResidue(person: Person, project: string, from: number, machine: string, sessions: readonly string[]): Promise<string> {
   const socket = await ProjectSocket.open(person.hub, person.headers, project, 15_000);
   try {
     await socket.catchUp(from);
-    return sessionResidue(project, from, runOwnEvents(socket.log as LoggedEvent[], from, machine));
+    return sessionResidue(project, from, runOwnEvents(socket.log as LoggedEvent[], from, machine, sessions));
   } finally {
     socket.close();
   }

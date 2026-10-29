@@ -66,11 +66,21 @@ export class HubWrites {
 /** An event of a project's log as the hub serves it: its offset and the event (its writer and seq). */
 export type LoggedEvent = { offset: number; event: { writer: string; seq: number } & Record<string, unknown> };
 
-/** The machine's own events this run's sessions wrote: its writers' (`<machine>/…`), after `since`, the offset the
- * project's log stood at before lane A started; the history before it (a cut-over machine's included) is never the
- * run's. */
-export function runOwnEvents<E extends LoggedEvent>(log: readonly E[], since: number, machine: string): E[] {
-  return log.filter((e) => e.offset > since && e.event.writer.startsWith(`${machine}/`));
+/** The machine's own events this run's sessions wrote: those of the writers `<machine>/<session>` of the run's approved
+ * sessions alone (lane A's, the local spawn's seat), after `since`, the offset the project's log stood at before lane A
+ * started; the history before it, and any other session of the machine's, are never the run's. */
+export function runOwnEvents<E extends LoggedEvent>(log: readonly E[], since: number, machine: string, sessions: readonly string[]): E[] {
+  const writers = new Set(sessions.map((session) => `${machine}/${session}`));
+  return log.filter((e) => e.offset > since && writers.has(e.event.writer));
+}
+
+/** The seat's session as `sminos spawn` prints it (`seat spawned: <group>/<alias>  [<short> / <session>] …`), or null. */
+export function seatSession(lines: readonly string[]): string | null {
+  for (const line of [...lines].reverse()) {
+    const m = /^seat [a-z-]+: .*\[[0-9a-z]+ \/ ([0-9a-f-]{36})\]/.exec(line);
+    if (m) return m[1];
+  }
+  return null;
 }
 
 /** The residue line for the machine's own events the run's sessions wrote, by writer, apart from `HubWrites`' budget. */
@@ -122,6 +132,8 @@ export type Scene = {
   hubWrites: HubWrites;
   /** The offset the lane A project's log stood at before lane A started: the run's own events come after it. */
   logFrom: number;
+  /** The sessions the run started on the machine, its only writers there: lane A's, then the local spawn's seat. */
+  sessions: string[];
 };
 
 const NO_CERTS: Certificates = { certs: [], retirements: [] };
@@ -681,25 +693,30 @@ export async function item4(scene: Scene, report: ItemReport): Promise<void> {
   scene.cleanup.add('restore the endpoint’s policy', async () => void (await scene.machine.policy({ readOnly: before.read_only, ceiling: before.ceiling })));
   const mine = await open(scene, scene.owner, 'direct');
   try {
-    await report.check('4', '`--read-only on` refuses every action, while reads and subscriptions go on', async () => {
-      await scene.machine.policy({ readOnly: true });
-      try {
+    // Two clauses under one read-only stretch: production runs the first, never the second (a remote spawn).
+    await scene.machine.policy({ readOnly: true });
+    try {
+      await report.check('4', '`--read-only on` refuses a send, while reads and subscriptions go on', async () => {
         const text = marker(scene, 'read-only');
         const said = await mine.act(send(scene, mine, text));
-        const spawn = await mine.act(await mine.device.stepUp(mine.device.action({ machine: scene.ref, action: 'sminos.spawn', args: { checkout: scene.laneA.checkout, brief: 'o10-m11: refused' } })));
         const listings = await mine.call('endpoint.listings', {});
         const sub = `ro-${scene.tag}`;
         await mine.channel.send({ t: 'sub', sub, session: { lane: 'A', id: scene.laneA.session }, view: 'full', cursor: null, credit: 1 << 20 });
         const subbed = await mine.waitFor((m) => m.sub === sub && (m.t === 'subbed' || m.t === 'ended'), 'the subscription’s answer');
         await mine.channel.send({ t: 'unsub', sub });
-        if (said !== 'read-only' || spawn !== 'read-only') throw new Error(`a send was answered ${said}, a spawn ${spawn}`);
+        if (said !== 'read-only') throw new Error(`a send was answered ${said}`);
         if (!listings.ok || subbed.t !== 'subbed') throw new Error(`under read-only the listings were ${listings.ok ? 'served' : listings.code}, the subscription ${subbed.t}`);
         if ((await effects(scene, text, 3000)) !== 0) throw new Error('the send ran under read-only');
-        return 'send and spawn refused `read-only`; the listings served and a subscription answered';
-      } finally {
-        await scene.machine.policy({ readOnly: false });
-      }
-    });
+        return 'the send refused `read-only`; the listings served and a subscription answered';
+      });
+      await report.check('4', '`--read-only on` refuses a spawn', async () => {
+        const spawn = await mine.act(await mine.device.stepUp(mine.device.action({ machine: scene.ref, action: 'sminos.spawn', args: { checkout: scene.laneA.checkout, brief: 'o10-m11: refused' } })));
+        if (spawn !== 'read-only') throw new Error(`a stepped-up spawn was answered ${spawn}`);
+        return 'a stepped-up spawn refused `read-only`';
+      });
+    } finally {
+      await scene.machine.policy({ readOnly: false });
+    }
     await report.check('4', 'a spawn whose permission mode is above the ceiling is refused `ceiling`', async () => {
       await scene.machine.policy({ ceiling: 'default' });
       try {
@@ -729,6 +746,9 @@ export async function item4(scene: Scene, report: ItemReport): Promise<void> {
     // nothing was spawned; 11, the seat's environment was not the scratch config's and the stub's, so it was killed.
     if (spawned.rc === 10 || spawned.rc === 11) return { skip: `not shown on production: ${spawned.lines.at(-1) ?? `exit ${spawned.rc}`}` };
     if (spawned.rc !== 0) throw new Error(`sminos spawn exited ${spawned.rc}: ${spawned.lines.slice(-3).join(' / ')}`);
+    const seat = seatSession(spawned.lines);
+    if (seat === null) throw new Error(`sminos spawn named no seat session: ${spawned.lines.slice(-3).join(' / ')}`);
+    scene.sessions.push(seat);
     const touched = (await scene.machine.logSince(mark)).filter((l) => l.includes(alias) || /endpoint: .*(rpc|spawn)/i.test(l));
     if (touched.length) throw new Error(`the endpoint's log mentions it: ${touched[0]}`);
     await probe.retire(alias);
@@ -786,7 +806,7 @@ export async function item5(scene: Scene, report: ItemReport): Promise<void> {
       for (;;) {
         socket.log.length = 0; // each read the whole stretch again, once
         await socket.catchUp(scene.logFrom);
-        own = runOwnEvents(socket.log as LoggedEvent[], scene.logFrom, scene.name);
+        own = runOwnEvents(socket.log as LoggedEvent[], scene.logFrom, scene.name, scene.sessions);
         if (own.length > 0 || Date.now() > deadline) break;
         await sleep(3000);
       }
@@ -1093,7 +1113,7 @@ export const PRODUCTION_CLAUSES: Record<string, 'vm' | 'read' | 'hub-write'> = O
   ['3 an `opCreated` older than OP_HORIZON is refused `expired`, and so is its query', 'vm'],
   ['3 an action frame altered in the relay closes the channel, and nothing runs', 'vm'],
   ['3 the run’s own device, removed by the owner, is refused at once', 'vm'],
-  ['4 `--read-only on` refuses every action, while reads and subscriptions go on', 'vm'],
+  ['4 `--read-only on` refuses a send, while reads and subscriptions go on', 'vm'],
   // Ruled: only when vm/production.sh shows no claude supervisor or background seat of the owner's before it, and the
   // seat's environment the scratch config's and the stub's after it (else the seat is killed and the clause skipped).
   ['4 a local `sminos spawn` from the machine runs, untouched by the endpoint', 'vm'],
@@ -1115,6 +1135,7 @@ const SPAWN_PROBE = 'never in production: a broken refusal would launch a seat w
 
 /** Clauses production never runs, and why. */
 const NEVER_IN_PRODUCTION: Record<string, string> = {
+  '4 `--read-only on` refuses a spawn': SPAWN_PROBE,
   '4 a spawn whose permission mode is above the ceiling is refused `ceiling`': SPAWN_PROBE,
   '4 a spawn into a directory that is no known checkout is refused `unknown-checkout`': SPAWN_PROBE,
   '8 an owner’s spawn needs step-up': SPAWN_PROBE,
