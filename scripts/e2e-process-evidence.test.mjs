@@ -133,6 +133,45 @@ test('oversized streams retain bounded startup and shutdown bytes with exact dro
   assert.equal(readFileSync(join(output, utility), 'utf8'), expectedUtility);
 });
 
+test('a transient real-engine switch restored before finish cannot publish stream, utility or host credentials', (t) => {
+  const dir = scratch(t);
+  const userData = join(dir, 'profile');
+  const output = join(dir, 'output');
+  mkdirSync(join(userData, 'supervisor'), { recursive: true });
+  const env = { MAWS_E2E: '1', MAWS_E2E_ENGINE_BIN: '/scratch/replay-engine', CUSTOM_SECRET: 'opaque-launch-secret-123' };
+  const options = { file: 'ordinary.spec.ts', userData, env, syntheticEngineBin: env.MAWS_E2E_ENGINE_BIN };
+  const evidence = processEvidence(output, userData, () => captureAllowed(options), env);
+  const settings = join(userData, 'machine-settings.json');
+  writeFileSync(settings, JSON.stringify({ engine: { binaryPath: '/installed/claude' } }));
+  const credentials = 'Bearer transientBearer.abc sk-ant-credential123 alice@company.com opaque-launch-secret-123';
+  const safe = 'Bearer [REDACTED] sk-ant-[REDACTED] owner@redacted.invalid [REDACTED]';
+  const child = { stdout: new PassThrough(), stderr: new PassThrough() };
+  evidence.capture(child);
+  child.stdout.write(`[engine-host] startup ${credentials}\n`);
+  child.stdout.write('x'.repeat(2 * 1024 * 1024));
+  child.stdout.write(`\n[engine-host] shutdown ${credentials}\n`);
+  child.stderr.write(`stderr ${credentials}\n`);
+  writeFileSync(join(userData, 'supervisor', 'host.log'), `host startup ${credentials}\n${'h'.repeat(2 * 1024 * 1024)}\nhost shutdown ${credentials}\n`);
+  writeFileSync(join(userData, 'supervisor', 'host.log.1'), `previous ${credentials}\n`);
+  writeFileSync(settings, JSON.stringify({ engine: { binaryPath: null } }));
+  assert.equal(captureAllowed(options), true, 'initial/final provenance cannot observe the transient engine');
+  assert.deepEqual(readdirSync(output), []);
+  evidence.finish();
+  const files = readdirSync(output);
+  assert.equal(files.length, 5);
+  for (const file of files) {
+    const text = readFileSync(join(output, file), 'utf8');
+    for (const credential of ['transientBearer.abc', 'credential123', 'alice@company.com', env.CUSTOM_SECRET]) assert.ok(!text.includes(credential), `${file} must not expose a credential`);
+    assert.ok(statSync(join(output, file)).size < 1024 * 1024);
+    assert.ok(text.includes(safe));
+    if (file.endsWith('.stdout.log')) {
+      assert.ok(text.startsWith(`[engine-host] startup ${safe}\n`));
+      assert.ok(text.endsWith(`[engine-host] shutdown ${safe}\n`));
+      assert.match(text, /\[process-evidence: dropped \d+ bytes\]/);
+    }
+  }
+});
+
 test('capture preserves all bytes through the head-to-tail boundary until the combined budget is exceeded', (t) => {
   const dir = scratch(t);
   for (const size of [0, 256 * 1024 - 1, 256 * 1024 + 1, 512 * 1024]) {

@@ -8,7 +8,7 @@ export function captureAllowed(options: {
   realEngine?: boolean;
   ownerConfigHome?: boolean;
 }): boolean;
-export function processEvidence(outputDir: string, userData: string, canKeep?: () => boolean): {
+export function processEvidence(outputDir: string, userData: string, canKeep?: () => boolean, env?: Record<string, string | undefined>): {
   capture(child: ChildProcess): void;
   finish(): void;
 };

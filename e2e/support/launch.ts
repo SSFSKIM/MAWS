@@ -232,7 +232,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     opts.prepare?.({ userData, shellHome: shellHome.dir, claudeConfigDir: env.CLAUDE_CONFIG_DIR }); // E6: inside, so a throw still cleans up
     // A prepared/reused profile may configure a real engine ahead of the environment's replay stub. Check after
     // preparation, and again at finish so a later unknown override cannot leave raw logs in public test-results.
-    evidence = canKeepEvidence() ? processEvidence(info.outputPath(), userData, canKeepEvidence) : null;
+    evidence = canKeepEvidence() ? processEvidence(info.outputPath(), userData, canKeepEvidence, env) : null;
     const launchedAt = Date.now();
     const appArgs = opts.lang ? [`--lang=${opts.lang}`] : E2E_APP_ARGS; // P4-W2L
     const defaults = Object.entries(opts.appKitDefaults ?? {}).flatMap(([key, value]) => [`-${key}`, value]); // P5 O8 M4a Task 8

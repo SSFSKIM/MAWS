@@ -1,9 +1,11 @@
 // Public CI evidence, not a profile backup. Keep only the two main-process streams and the engine host's log.
-// Raw errors can contain upstream responses or account data: credentialed/owner scenes opt out, not regex-redact.
+// Credentialed/owner scenes opt out. Every promoted diagnostic is also redacted: provenance can change during a run.
 import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, closeSync, copyFileSync, mkdirSync, openSync, readSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import process from 'node:process';
+import { createRedactor } from '../../test/live/support/public-evidence.mjs';
 
 // Settings' explicit binary precedes the e2e environment (engine-host/binary-info.ts). The machine file is
 // authoritative; profiles predating its split still hold the override in settings.json. Read at most 256 KiB + 1.
@@ -56,6 +58,39 @@ export function captureAllowed({ file, env, userData, syntheticEngineBin, realEn
 // flushes the tail and an exact dropped-byte marker. Neither retained memory nor disk grows with the run's output.
 const STREAM_PART_BYTES = 256 * 1024;
 const utilityLinesOf = (bytes) => bytes.toString('utf8').split('\n').filter((line) => line.startsWith('[engine-host] '));
+function retainedEvidence(start, end, total) {
+  if (total === start.length + end.length) {
+    const bytes = Buffer.concat([start, end]);
+    return { bytes, utilityLines: utilityLinesOf(bytes) };
+  }
+  // Never publish a cut line's fragments: cutting away a credential's prefix could defeat redaction.
+  start = start.subarray(0, start.lastIndexOf(10) + 1);
+  end = end.indexOf(10) < 0 ? Buffer.alloc(0) : end.subarray(end.indexOf(10) + 1);
+  const marker = `\n[process-evidence: dropped ${total - start.length - end.length} bytes]\n`;
+  const first = utilityLinesOf(start);
+  const last = utilityLinesOf(end);
+  return {
+    bytes: Buffer.concat([start, Buffer.from(marker), end]),
+    utilityLines: first.length || last.length ? [...first, marker.trim(), ...last] : [],
+  };
+}
+
+function boundedFileBytes(file) {
+  const fd = openSync(file, 'r');
+  try {
+    const total = fstatSync(fd).size;
+    const read = (size, offset) => {
+      const bytes = Buffer.alloc(size);
+      if (readSync(fd, bytes, 0, size, offset) !== size) throw new Error('evidence source changed during read');
+      return bytes;
+    };
+    if (total <= 2 * STREAM_PART_BYTES) return read(total, 0);
+    return retainedEvidence(read(STREAM_PART_BYTES, 0), read(STREAM_PART_BYTES, total - STREAM_PART_BYTES), total).bytes;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 function boundedStream(file) {
   const head = Buffer.alloc(STREAM_PART_BYTES);
   const tail = Buffer.alloc(STREAM_PART_BYTES);
@@ -91,20 +126,19 @@ function boundedStream(file) {
     finish() {
       const start = head.subarray(0, headBytes);
       const end = tailBytes < tail.length ? tail.subarray(0, tailBytes) : Buffer.concat([tail.subarray(cursor), tail.subarray(0, cursor)]);
-      const dropped = total - headBytes - tailBytes;
-      const marker = dropped ? `\n[process-evidence: dropped ${dropped} bytes]\n` : '';
-      appendFileSync(file, Buffer.concat([Buffer.from(marker), end]));
-      // Extraction uses retained bytes, never rereads/splits a growing file (also for detached hosts). A truncation
-      // boundary may cut a line: leave its fragments in raw evidence but don't invent complete utility-host lines.
-      if (!dropped) return utilityLinesOf(Buffer.concat([start, end]));
-      const first = utilityLinesOf(start.subarray(0, start.lastIndexOf(10) + 1));
-      const last = end.indexOf(10) < 0 ? [] : utilityLinesOf(end.subarray(end.indexOf(10) + 1));
-      return first.length || last.length ? [...first, marker.trim(), ...last] : [];
+      // Extraction and publication both use bounded retained bytes, never a growing file reread.
+      return retainedEvidence(start, end, total);
     },
   };
 }
 
-export function processEvidence(outputDir, userData, canKeep = () => true) {
+export function processEvidence(outputDir, userData, canKeep = () => true, env = process.env) {
+  const redact = createRedactor({ ...process.env, ...env });
+  const publicBytes = (bytes) => {
+    const text = bytes.toString('utf8');
+    const safe = redact(text);
+    return safe === text ? bytes : Buffer.from(safe);
+  };
   mkdirSync(outputDir, { recursive: true });
   const id = randomUUID(); // distinct even for relaunches over the same profile, and retries have their own outputDir
   const stage = join(userData, `.process-evidence-${id}`); // never uploaded if the worker dies before the final check
@@ -137,14 +171,18 @@ export function processEvidence(outputDir, userData, canKeep = () => true) {
         }
         // Utility hosts (artifacts-perf) have no file: main/hosts/supervisor.ts forwards their lines with this prefix.
         // Extract after the measurement, within each stream's head/tail budget. Streams retain their own line order.
-        const utilityLines = streams.flatMap((stream) => stream.finish());
-        for (const { file } of streams) copyFileSync(file, join(outputDir, basename(file)));
-        if (utilityLines.length) writeFileSync(join(outputDir, `engine-host-${id}.utility.log`), `${utilityLines.join('\n')}\n`);
+        const utilityLines = [];
+        for (const stream of streams) {
+          const retained = stream.finish();
+          writeFileSync(join(outputDir, basename(stream.file)), publicBytes(retained.bytes));
+          utilityLines.push(...retained.utilityLines);
+        }
+        if (utilityLines.length) writeFileSync(join(outputDir, `engine-host-${id}.utility.log`), redact(`${utilityLines.join('\n')}\n`));
         // Called after the profile's processes stop, before its directory is removed. An early failed launch or a
         // utility-mode host may have no file. The rotated generation uses .log too so the narrow upload catches it.
         for (const [source, suffix] of [['host.log', ''], ['host.log.1', '.previous']]) {
           try {
-            copyFileSync(join(userData, 'supervisor', source), join(outputDir, `engine-host-${id}${suffix}.log`));
+            writeFileSync(join(outputDir, `engine-host-${id}${suffix}.log`), publicBytes(boundedFileBytes(join(userData, 'supervisor', source))));
           } catch (error) {
             if (error.code !== 'ENOENT') throw error;
           }
