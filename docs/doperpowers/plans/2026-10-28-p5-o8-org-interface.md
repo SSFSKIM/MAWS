@@ -57,6 +57,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-29) Task 5, reviewed clean (9b9f8945d, fix 653e60c0b; class 1a green at the fix, run 40824276945): `close()`'s fence and join (`HeldOrg.close()`, the parts' operations in flight), and the two test workarounds removed.
   - [ ] Task 6: the renderer: `settings-tab/org/`, the four groups, the change and pair sheets, `copy.ts`.
   - [ ] Task 7: `test/org/org-page.local.test.ts`, registered in `TIMING_NODE_TESTS`.
+  - [ ] Task 8: the Org page's look made checkable through the gate: one `e2e:settings` case over a seeded org, its four groups screenshotted and attached, run hosted with `--evidence` for the architect's look.
 - [ ] M4b — Machines and their rights — *advisory; needs M4a*
 - [ ] M4c — Delegations — *advisory; needs M4a*
 - [x] M5 — Owners on rows and the People toggle — landed (PR #323, master 0db3870a0, P5 Decision Log 129)
@@ -2125,6 +2126,10 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   12. (Review fix.) The queued reset checks the signer's closed flag, not its sign-in lifecycle: a reset is the owner's repair of a damaged file, which a sign-out does not cancel and a close does.
   13. (Review fix.) The discard uses the slot's stored `hash`, which the store recomputes on every read, instead of awaiting a fresh `stateHash`, so no await sits between its last check and its write.
   Date/Author: 2026-10-29, O8's executor.
+
+- Decision: M4a gains Task 8, the Org page's look checked through the gate. Task 6 was proved in happy-dom only, and this MacBook may not launch the app, so the look would otherwise wait for an owner's sitting. One case in the e2e group that opens Settings seeds an org with real-world variety: a member whose name and email wrap, a member with several devices, a pending pairing, and a refusal with no attempt. It screenshots each of the four groups and attaches the PNGs (`testInfo.attach`), and asserts only structure: no horizontal overflow, and every row's actions visible. The group runs on the hosted lane with `--evidence`, so the attachments upload when green, and the architect reads the screenshots. The PR names the owner's taste look as a later sitting only if the architect finds nothing wrong.
+  Rationale: a renderer whose wrapping nobody has seen is not done; the gate can carry the evidence without an owner present.
+  Date/Author: 2026-10-29, the architect (O8's executor recording).
 
 ## Outcomes & Retrospective
 
