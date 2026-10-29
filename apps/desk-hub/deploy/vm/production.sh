@@ -231,7 +231,8 @@ transcript() {
   [[ $sid =~ ^[0-9a-f-]{36}$ ]] || fail "a session id"
   [[ -z ${2:-} || $2 =~ ^[a-z0-9-]{4,64}$ ]] || fail "a marker token ([a-z0-9-])"
   file=$(find $X/claude/projects -name "$sid.jsonl" 2>/dev/null | head -1)
-  [[ -n $file ]] || fail "no transcript for $sid"
+  # A session that has had no turn yet has no transcript: no rows, and no row holds the token.
+  if [[ -z $file ]]; then [[ -n ${2:-} ]] && { say "rows: none"; say 0; }; return 0; fi
   python3 -c '
 import json, sys
 count, kinds = 0, []
