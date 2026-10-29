@@ -67,6 +67,17 @@ describe('the reshaper', () => {
     expect(r.event({ type: 'turn', phase: 'complete', turnId: 't1', agentId: null })).toEqual([]); // nothing left open
   });
 
+  // P5 O9 (the sitting's fix wave): the bridge's own time of a step's end, which the renderer reads to place what an
+  // interrupt cut in the disk turn running then (the engine stamps that turn's rows on the same clock)
+  it('carries the bridge’s time on a step-end, from the step’s end or its turn’s completion', () => {
+    const r = new Reshaper(ctx);
+    r.snapshot(snap());
+    r.event({ type: 'step', phase: 'start', turnId: 't1', agentId: null, step: 1, t: 100 });
+    expect(bodies(r.event({ type: 'step', phase: 'end', turnId: 't1', agentId: null, step: 1, t: 200 }))).toEqual([{ turnId: 't1', agentId: null, step: 1, t: 200 }]);
+    r.event({ type: 'step', phase: 'start', turnId: 't1', agentId: null, step: 2, t: 300 });
+    expect(bodies(r.event({ type: 'turn', phase: 'complete', turnId: 't1', agentId: null, reason: 'aborted', t: 400 }))).toEqual([{ turnId: 't1', agentId: null, step: 2, t: 400 }]);
+  });
+
   it('seeds its open steps from the snapshot, so a turn that aborts with no step end closes the step it never saw start', () => {
     const r = new Reshaper(ctx);
     r.snapshot(snap({ streaming: [{ turnId: 't9', agentId: null, step: 3, upTo: 0, blocks: [] }] }));

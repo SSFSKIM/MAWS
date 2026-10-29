@@ -24,6 +24,7 @@
 // Roboto Slab (Apache-2.0) is refused by name in Theme ▸ Faces and in the agent's read (the deck scale seam's
 // `artifact_read`, MAWS_PRESENTATIONS_SCALE=1).
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -615,8 +616,26 @@ test('the export entries under Deck actions save each format where the owner cho
   await pick('PNG (all slides)');
   const images = ['slide-01.png', 'slide-02.png', 'slide-03.png'];
   for (const name of images) await appears(`Quarterly slides/${name}`, (bytes) => bytes.length > 24 && pngSize(bytes).join('x') === '1920x1080');
-  expect(new Set(images.map((name) => readFileSync(savedFile(`Quarterly slides/${name}`)).toString('base64'))).size).toBe(3);
+  // each file the picture of its own slide, in deck order, told by the colour at its top-left (the cover's gradient
+  // starts at #0f2a3d, the body is #fbfbf8, the hidden slide #000000); a failure names what each file is and shows
+  const slides = ['cover', 'body', 'gone'];
+  const files = await Promise.all(
+    images.map(async (name, at) => {
+      const bytes = readFileSync(savedFile(`Quarterly slides/${name}`));
+      const [corner] = await pixelsOf(bytes, [[8, 8]]);
+      return { name, slide: slides[at]!, sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length, shows: slideOfCorner(corner!) };
+    }),
+  );
+  const report = files.map((f) => `${f.name}, the capture of slide ${f.slide}: sha256 ${f.sha256.slice(0, 16)}, ${f.size} bytes, shows ${f.shows}`).join('\n');
+  expect(new Set(files.map((f) => f.sha256)).size, `three distinct pictures:\n${report}`).toBe(3);
+  expect(files.map((f) => f.shows), report).toEqual(slides);
 });
+
+/** Which slide of DECK a picture shows, by its pixel at (8, 8), else that pixel. */
+const slideOfCorner = ([r, g, b, a]: number[]) => {
+  const near = (rgb: [number, number, number]) => a! > 200 && [r!, g!, b!].every((v, i) => Math.abs(v - rgb[i]!) <= 12);
+  return near([15, 42, 61]) ? 'cover' : near([251, 251, 248]) ? 'body' : near([0, 0, 0]) ? 'gone' : `rgba(${r}, ${g}, ${b}, ${a})`;
+};
 
 // ---- P4-B2 D19: a named Google Fonts face, fetched once and drawn offline ----
 

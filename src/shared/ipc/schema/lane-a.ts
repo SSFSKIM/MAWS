@@ -67,7 +67,10 @@ export const LaneAStateSchema = z.strictObject({
   reads: z.array(z.string()),
   controls: ControlCapabilitiesSchema,
   turn: z.strictObject({ running: z.boolean(), unknown: z.boolean() }), // the main loop's
-  model: z.string().nullable(), // the session's own, as it started
+  // The session's model and effort as its main loop's latest request ran on them (the bridge's override applied), else
+  // the model it started with and no effort: a `/model` or `/effort` typed in the terminal shows from its next request.
+  model: z.string().nullable(),
+  effort: z.string().nullable(),
   override: z.strictObject({ model: z.string().nullable(), effort: z.string().nullable() }).nullable(), // the bridge's per-request override
   catalog: z.strictObject({ fingerprint: z.string() }).nullable(), // the body by laneA.catalog
   pending: z.array(LaneARaisedSchema),

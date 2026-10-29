@@ -30,14 +30,18 @@ export function classify(status: Record<string, unknown>): BridgeState {
   return { bridge: 'live', reason: null };
 }
 
-export type FoldView = Pick<LaneAState, 'turn' | 'model' | 'override' | 'catalog' | 'pending' | 'settled'>;
+export type FoldView = Pick<LaneAState, 'turn' | 'model' | 'effort' | 'override' | 'catalog' | 'pending' | 'settled'>;
 // The main loop's latest tool call of its running turn (P5 O9 M6: the digest's activity): `running` until its result.
 export type MainTool = { tool: string; input: unknown; running: boolean };
 
 export class SessionFold {
   private mainTurns = new Set<string>();
   private unknown = false;
-  private model: string | null = null;
+  private model: string | null = null; // the session's as it started (the snapshot's `sessionInfo`, a session's start)
+  // What the main loop's latest request ran on (its `step start`, the bridge's override applied): the only word of a
+  // `/model` or `/effort` typed in the terminal, which no event of its own reports. Kept across a fresh stream's
+  // snapshot, whose `sessionInfo` the bridge read when it loaded.
+  private ran: { model: string; effort: string | null } | null = null;
   private override: LaneAState['override'] = null;
   private catalog: LaneACatalog | null = null;
   private pending = new Map<string, LaneARaised>();
@@ -108,8 +112,15 @@ export class SessionFold {
       this.catalog = Object.fromEntries(['fingerprint', 'commands', 'skills', 'models', 'measured'].filter((k) => k in e).map((k) => [k, e[k]])) as LaneACatalog;
       return true;
     }
+    if (type === 'step' && main && phase === 'start' && typeof e.model === 'string') {
+      const effort = typeof e.effort === 'string' ? e.effort : null;
+      if (this.ran?.model === e.model && this.ran.effort === effort) return false;
+      this.ran = { model: e.model, effort };
+      return true;
+    }
     if (type === 'session' && phase === 'start' && typeof e.model === 'string') {
       this.model = e.model;
+      this.ran = null;
       return true;
     }
     return false;
@@ -118,7 +129,8 @@ export class SessionFold {
   view(): FoldView {
     return {
       turn: { running: this.mainTurns.size > 0, unknown: this.unknown },
-      model: this.model,
+      model: this.ran?.model ?? this.model,
+      effort: this.ran?.effort ?? null,
       override: this.override,
       catalog: this.catalog === null ? null : { fingerprint: this.catalog.fingerprint },
       pending: [...this.pending.values()],

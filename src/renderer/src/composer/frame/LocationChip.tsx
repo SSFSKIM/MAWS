@@ -8,6 +8,7 @@ import { Popover } from 'radix-ui';
 import { useState } from 'react';
 import type { LocationView } from './bindings';
 import { CHIP, NOTE, POPOVER } from './chip-style';
+import { useOpenWhileShown } from './draft-shown';
 
 export interface LocationChipProps {
   location: LocationView;
@@ -23,7 +24,7 @@ export const formatCwd = (directory: string): string => directory.replace(/^\/Us
 export const directoryName = (path: string): string => formatCwd(path).split('/').filter(Boolean).at(-1) ?? path;
 
 export function LocationChip({ location, directories, dirty, onOpen }: LocationChipProps) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useOpenWhileShown();
   const [copied, setCopied] = useState<string | null>(null);
   const { path, branch, note } = location;
   const copy = (text: string) => {

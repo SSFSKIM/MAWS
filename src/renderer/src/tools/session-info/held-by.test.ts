@@ -6,7 +6,7 @@ import { at } from '../../../../../test/support/machine';
 import { laneAState } from '../../lane-a/test-support/lane-a-state';
 import { LANE_A_WORDS, laneAControls } from '../../session/controls/lane-a';
 import { CONTROL_KEYS } from '../../session/controls/types';
-import { drivenSection, heldByRow } from './model';
+import { drivenSection, heldByRow, modeRow } from './model';
 
 const A = at('app-a') as AppSessionId;
 
@@ -29,6 +29,16 @@ describe("Session info's Held by row", () => {
 describe("Session info for a session driven through its terminal's bridge", () => {
   it('names the bridge beside the terminal holder', () => {
     expect(heldByRow(record('s', { holder: { kind: 'terminal', pid: 7 } }), { bridged: true })).toEqual({ label: 'Held by', value: 'Terminal · pid 7', note: 'Driven through sminos’s bridge' });
+  });
+
+  // The O9 sitting: no bridge event or read reports a terminal session's mode, so its row names none, never an old
+  // observation or the record's default
+  it('names no mode for it: not reported, and changed in the terminal', () => {
+    const rec = record('s', { holder: { kind: 'terminal', pid: 7 } });
+    const observed = { facts: null, loading: false };
+    const driven = { capability: () => ({ available: false as const, reason: LANE_A_WORDS.mode }) };
+    expect(modeRow({ record: rec, status: null, observed, now: 0, driven })).toEqual({ label: 'Mode', value: LANE_A_WORDS.modeNotReported, note: LANE_A_WORDS.mode });
+    expect(modeRow({ record: rec, status: null, observed, now: 0 }).value).toBe('Not observed yet'); // held, not driven: as before
   });
 
   it('lists each unavailable control with its reason, in the controls’ order', () => {

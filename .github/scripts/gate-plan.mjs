@@ -312,7 +312,8 @@ export function planOf(env, scripts, now) {
   const PEER_MINUTES = 15;
   // The caller counts all five account repos; capped hosted counts are lower bounds, favoring today's placement.
   // EC2's queue must be complete. Missing, failed or stale samples never move work; the mini is never overflow.
-  const backlog = !dispatched && direct ? backlogOf(trailer('Mac-Backlog'), now) : null;
+  // Lane: hosted asks for the hosted Macs themselves (a trial or an admission): nothing of it moves, whatever a sample says.
+  const backlog = !dispatched && direct && laneAsked !== 'hosted' ? backlogOf(trailer('Mac-Backlog'), now) : null;
   const hostedOnly = new Set(words(env.HOSTED_MAC_ONLY_E2E));
   let sentHosted = 0;
   let sentEc2 = 0;

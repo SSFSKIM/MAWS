@@ -397,4 +397,11 @@ test('direct calls put the cached backlog into the pushed commit, and failed cou
   assert.equal(failed.refs.length, 1, failed.stdout + failed.stderr);
   assert.doesNotMatch(failed.message, /^Mac-Backlog:/m);
   assert.match(failed.stdout + failed.stderr, /backlog unavailable/);
+  // A hosted-lane call (a trial or an admission) and a no-hosted one never sample: nothing of them may move to EC2.
+  for (const lane of ['hosted', 'no-hosted']) {
+    const asked = gate(['--gates', 'e2e:document', '--peer', 'none', '--lane', lane], { backlog: 'good' });
+    assert.equal(asked.refs.length, 1, asked.stdout + asked.stderr);
+    assert.doesNotMatch(asked.message, /^Mac-Backlog:/m, lane);
+    assert.equal(asked.calls.filter((call) => /actions\/runs\?status=/.test(call)).length, 0, lane);
+  }
 });
