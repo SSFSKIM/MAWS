@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GitFixture } from '../../../test/support/git-fixture';
-import { createGitRunner } from '../../services/git/runner';
+import { createGitRunner } from '../git/runner';
 import { checkUpload, EXCLUDE_LINE, excludeUploads, removeUpload, rootOf, saveUpload, typeOf, uploadId, uploadRecords, Unsafe, type DecodedFile } from './media';
 
 // A race staged between the walk and a mutation: `node:fs` passes through, but a directory listing first runs the hook

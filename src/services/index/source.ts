@@ -475,7 +475,7 @@ export class IndexSessionSource implements SessionSource {
     this.schedule();
   }
 
-  // P5 O9 M6: a foreign session's live phase from its sminos bridge while MAWS drives it (main's lane A driver); null
+  // P5 O9 M6: a foreign session's live phase from its sminos bridge while MAWS drives it (the spine's lane A driver); null
   // when it has no live bridge, which leaves today's `foreign` seed.
   setBridged(appId: AppSessionId, phase: BridgedPhase | null): void {
     if (phase === null) {

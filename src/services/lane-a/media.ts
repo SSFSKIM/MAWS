@@ -26,8 +26,7 @@ import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdi
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 import type { ControlResult } from '@shared/ipc/schema/lane-a';
 import { atomicWriteFileSync } from '@shared/fs/atomic-write';
-// eslint-disable-next-line no-restricted-imports -- P5 O3-C: lane A is spine (O3 Decision Log 13); the fold after this merge moves it to src/services/lane-a/
-import { NotARepositoryError, type GitRun } from '../../services/git/runner';
+import { NotARepositoryError, type GitRun } from '../git/runner';
 import type { PostResult } from './deliveries';
 
 // DX6 `media`'s types, each with its stored extension.

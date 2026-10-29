@@ -14,8 +14,8 @@
 // P2-C (2026-10-09; the P2-C document, Design §5): a third list per session, the owner channel's `async_input` and
 // `essential_unread` items (`setOwnerItems`), a projection of its marks table: never restored from this store (the owner
 // channel re-projects at start), retired by no turn, and silent when the owner channel says so (`restoredIds`).
-// P5 O9 M6: a fourth list, a local terminal session's requests from main's lane A driver (`setLaneAItems`,
-// src/main/lane-a/attention.ts), each with the request view `attention.request` answers for it; a live projection like
+// P5 O9 M6: a fourth list, a local terminal session's requests from the spine's lane A driver (`setLaneAItems`,
+// src/services/lane-a/attention.ts), each with the request view `attention.request` answers for it; a live projection like
 // the owner channel's, never restored (the bridge re-raises what is still pending), and untouched by the engine host,
 // which holds none of them.
 import type { AttentionItem } from '@shared/graph/attention';

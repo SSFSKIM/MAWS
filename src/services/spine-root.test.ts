@@ -4,17 +4,18 @@
 // attention, `startCheckouts` over the spine's view, and both roots' stops releasing what they held. The exact commands,
 // intercepts and taps each root installs are pinned here for O3-D's retag.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NO_CLIENT, type ClientPort } from '@shared/client/port';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { MachineRef } from '@shared/machine/ref';
 import { captureConsole } from '../../test/support/console-capture';
 import { fakeBus, type FakeBus } from '../../test/support/fake-bus';
+import { startFakeBridge, type FakeBridge } from '../../test/support/fake-bridge';
 import { FakeSpineHost } from '../../test/support/fake-spine-host';
 import { FIXTURE_DIR } from '../../test/support/fixtures';
-import { tempDir } from '../../test/support/index-fixture';
+import { summary, tempDir } from '../../test/support/index-fixture';
 import { startCheckouts, type CheckoutsRoot } from './checkouts-root';
 import { GitService } from './git/service';
 import { Index } from './index/index';
@@ -43,6 +44,9 @@ const noClientPort = {
 const SPINE_COMMANDS = [
   'attention.acknowledge', 'attention.list', 'attention.request',
   'git.worktree.add', 'git.worktree.branch', 'git.worktree.deleteBranch', 'git.worktree.list', 'git.worktree.remove', 'git.worktree.status',
+  // P5 O9's lane A driver (O3 Decision Log 13): composed only while the run holds spine.lock, with no intercept or tap
+  'laneA.answer', 'laneA.btw', 'laneA.catalog', 'laneA.command', 'laneA.compact', 'laneA.interrupt', 'laneA.list', 'laneA.media', 'laneA.model',
+  'laneA.read', 'laneA.send', 'laneA.state', 'laneA.stopAgent', 'laneA.stopTask', 'laneA.tell', 'laneA.unwatch', 'laneA.watch',
   'library.get', 'library.list', 'library.spaces',
   'mods.list', 'mods.setSessionOverride',
   'ownerChannel.answered', 'ownerChannel.cancel', 'ownerChannel.markRead', 'ownerChannel.state',
@@ -77,21 +81,27 @@ const CHECKOUTS_COMMANDS = [
 describe('the spine and the checkouts composed under plain Node', () => {
   let dir: ReturnType<typeof tempDir>;
   let profile: string;
+  let sminos: string; // lane A's sminos home: short, since a bridge's socket path must stay under 104 bytes
   let held: { data: SpineData; spine: SpineRoot; checkouts: CheckoutsRoot | null; stopped?: boolean }[];
+  let bridges: FakeBridge[];
 
   beforeEach(() => {
     dir = tempDir('maws-spine-root-');
     profile = join(dir.path, 'ud');
     mkdirSync(profile);
     mkdirSync(join(dir.path, 'home'));
+    sminos = mkdtempSync('/tmp/o3c-s-');
     held = [];
+    bridges = [];
   });
-  afterEach(() => {
+  afterEach(async () => {
     for (const composed of held.reverse()) {
       stopBoth(composed);
       composed.data.lock.release();
     }
+    for (const bridge of bridges) await bridge.close();
     vi.restoreAllMocks();
+    rmSync(sminos, { recursive: true, force: true });
     dir.dispose();
   });
 
@@ -117,7 +127,7 @@ describe('the spine and the checkouts composed under plain Node', () => {
       browserSocket: () => null,
       trash: async () => {},
       engineEnv,
-      env: {},
+      env: { SMINOS_HOME: sminos },
       packaged: false,
       appPath: dir.path, // no checkout's fixtures beside it
       devRoot: dir.path,
@@ -159,6 +169,29 @@ describe('the spine and the checkouts composed under plain Node', () => {
     // the view reads what the renderer was told
     expect(spine.view.record(appSessionId)?.title.text).toBe('replay · permission-roundtrip');
     expect(spine.view.attention(appSessionId).map((item) => item.kind)).toContain('permission');
+  });
+
+  // P5 O9 (O3 Decision Log 13): lane A drives, from the spine, a terminal session the index held at start, and its
+  // bridge's request reaches attention and the session's digest
+  it('drives a terminal session the index holds through its bridge: laneA.state, its request in attention, its digest', async () => {
+    const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000a1';
+    const seeded = new Index(join(profile, 'index.sqlite'));
+    const appSessionId = seeded.sessions.upsertFromSummary(summary({ sessionId: engineSessionId as SessionId })).record.appId;
+    seeded.sessions.setHolder(engineSessionId as SessionId, { kind: 'terminal', pid: 4242 });
+    seeded.close();
+    const bridge = await startFakeBridge({ home: sminos, session: engineSessionId });
+    bridges.push(bridge);
+    const bus = fakeBus();
+    compose(await openSpineData(profile, { build: BUILD }), new FakeSpineHost(), bus, { checkouts: false });
+
+    await expect.poll(async () => bus.invoke('laneA.state', { appSessionId }), { timeout: 5000 }).toMatchObject({ ok: true, value: { appSessionId, engineSessionId, bridge: 'live' } });
+    bridge.raise({ request: 'req-1', tool: 'Bash', input: { command: 'ls' } });
+    await expect.poll(async () => bus.invoke('attention.list', undefined), { timeout: 5000 }).toMatchObject({
+      ok: true, value: [expect.objectContaining({ id: `lane-a:${engineSessionId}:req-1`, appSessionId, kind: 'permission', state: 'pending' })],
+    });
+    const digests = await bus.invoke('session.digests', undefined);
+    if (!digests.ok) throw new Error(digests.error.message);
+    expect(digests.value.digests.find((d) => d.appSessionId === appSessionId)).toMatchObject({ phase: 'waiting', pendingRequests: 1 });
   });
 
   it('composes the checkouts over the spine’s view: git.status answers for a scratch repository', async () => {

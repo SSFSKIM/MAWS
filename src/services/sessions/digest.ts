@@ -276,7 +276,7 @@ export function applyStatusToDigest(d: SessionDigest, status: EngineSessionStatu
 }
 
 // P5 O9 M6: a session a terminal or a background job holds, driven through its sminos bridge, reads its live phase from
-// the bridge rather than today's `foreign` (main's lane A driver, src/main/lane-a/driver.ts `LaneAView`): waiting while a
+// the bridge rather than today's `foreign` (the spine's lane A driver, src/services/lane-a/driver.ts `LaneAView`): waiting while a
 // request is pending (as `requires_action` reads for a MAWS session), working while its main turn runs, else idle; the
 // activity from the main loop's running tool, as the fold names one, `Working` once its result came, `Thinking` before
 // any. Its availability stays `foreign_held`: MAWS never starts a second writer on it.

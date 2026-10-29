@@ -9,7 +9,7 @@
 import type { AttentionItem } from '@shared/graph/attention';
 import { isNoClient, type ClientPort, type NotificationHandle, type NotifyEvent, type NotifyRequest } from '@shared/client/port';
 import type { AttentionKind } from '@shared/graph/enums';
-import { isLaneAItem } from '../lane-a/attention'; // P5 O9 M6
+import { isLaneAItem } from '@shared/attention/lane-a-item'; // P5 O9 M6; P5 O3-C: neutral, lane A being the spine's
 import type { AppSessionId, AttentionId } from '@shared/graph/ids';
 import type { SpineView } from '@shared/spine/view';
 import type { EventPayload, NotificationKinds, Settings, SessionDigest } from '@shared/ipc/schema';

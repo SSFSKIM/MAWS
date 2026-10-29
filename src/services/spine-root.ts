@@ -3,13 +3,14 @@
 // (src/main/index.ts) calls it today; at O3-D `mawsd` calls the same function. It composes settings' machine half (as
 // `openSpineData` opened it), the index with its session source, replay and the read model, attention's core, the owner
 // channel and mods, the session service with intents, worktrees, prompt history, side threads, yield, observed facts
-// and the sweep, the engine host's configure relays, the design-system defaults relay and the library's derived index,
-// in the order main composed them, and returns the one view staying code reads them through, and its stop.
+// and the sweep, the engine host's configure relays, the design-system defaults relay, the library's derived index and
+// O9's lane A driver, in the order main composed them, and returns the one view staying code reads them through, and
+// its stop.
 //
 // O3-A's refused run (contract O3X2; O3 Decision Log 11) is the root's: a run that does not hold `spine.lock` opens the
 // index unavailable and starts none of the parts that write the machine's files or launch a session (attention's core,
-// replays, the prompt history's commands, the worktree and session services, the owner channel, the sweep, yield, side
-// threads, the configure and defaults relays, the retired custody's removal); the read model, the inert index source,
+// replays, lane A, the prompt history's commands, the worktree and session services, the owner channel, the sweep,
+// yield, side threads, the configure and defaults relays, the retired custody's removal); the read model, the inert index source,
 // observed facts and the library still answer, and the view says why the spine cannot be read.
 import { rm } from 'node:fs/promises';
 import { totalmem } from 'node:os';
@@ -36,6 +37,9 @@ import { registerIndexHandlers } from './index/register';
 import { registerReplayHandlers } from './index/replay';
 import { appRoot, seedReplayFixtures } from './index/replay-fixtures';
 import { IndexSessionSource } from './index/source';
+import { laneAAttention } from './lane-a/attention';
+import { sminosHome } from './lane-a/discovery';
+import { createLaneADriver, registerLaneA } from './lane-a/driver';
 import { startLibrary } from './library';
 import { startOwnerChannel } from './owner/register';
 import { startEngineConfigure } from './settings/engine-configure';
@@ -136,6 +140,46 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   if (index.unavailable === null) seedReplayFixtures(index.fixtures, appRoot(deps.appPath));
   if (replays) parts.push(['replays', () => replays.dispose()]);
   if (attention) parts.push(['attention', () => attention.stop()]);
+
+  // P5 O9 M2, M6 (O3 Decision Log 13): the local lane A driver, the spine's: it writes <profile>/lane-a/ and drives the
+  // sessions the index holds, so a run refused the spine starts none and its laneA.* commands have no handler (the
+  // renderer starts empty). Each session the index holds for a terminal or a `--bg` job is probed for its sminos bridge,
+  // under the sminos home from the process's environment, else the login shell's.
+  if (attention) {
+    const laneA = createLaneADriver({
+      machine: deps.machine,
+      home: engineEnv.then((shellEnv) => sminosHome(deps.env, shellEnv)),
+      userData: profile,
+      // M5: a watched session's jobs are derived from its transcript: the path the index knows, else where the engine writes it
+      transcript: async (appId, engineSessionId) => {
+        if (index.unavailable !== null) return null;
+        const record = index.sessions.get(appId);
+        if (record?.engineSessionId !== engineSessionId) return null; // another transcript now: the driver follows the record
+        return index.sessions.summaryOf(appId)?.transcriptPath || transcriptPathOf(await engineEnv, record.directory, record.engineSessionId);
+      },
+      emit: (name, payload) => void bus.emit(name, payload),
+    });
+    registerLaneA(laneA, bus.register);
+    // M6: each bridged session's pending requests are attention items, and its digest reads its live phase from the
+    // bridge while the bridge is live (today's `foreign` otherwise)
+    const laneAItems = laneAAttention({ set: (appId, entries) => attention.setLaneAItems(appId, entries) });
+    const offLaneAView = laneA.onChange((appId, view) => {
+      laneAItems.update(appId, view);
+      indexSource.setBridged(appId, view?.state.bridge === 'live' ? { running: view.state.turn.running, pending: view.state.pending.length, tool: view.tool } : null);
+    });
+    parts.push(['lane A attention', () => {
+      offLaneAView();
+      laneAItems.stop();
+    }]);
+    if (index.unavailable === null) {
+      for (const record of index.sessions.list({ includeArchived: true })) laneA.observe(record);
+      const offLaneA = index.sessions.onChange((record, cause) => (cause === 'removed' ? laneA.forget(record.appId) : laneA.observe(record)));
+      parts.push(['lane A', () => {
+        offLaneA();
+        laneA.stop();
+      }]);
+    } else parts.push(['lane A', () => laneA.stop()]);
+  }
 
   // C5: the read side (launch mode, read model, the stub source in launch mode scenario). A relative scenario path is
   // the development app root's.

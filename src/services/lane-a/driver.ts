@@ -25,7 +25,8 @@
 // - The uid boundary (RL §5.11): the driver authenticates nothing and is authorized by the uid, as `sminos steer` is, so
 //   it makes the checks sminos's daemon makes on a remote RPC itself.
 //
-// Electron-free and machine-bound (eslint's MACHINE_BOUND), so O3 moves it into `mawsd` with main's other services.
+// The spine's (P5 O3-C; O3 Decision Log 13): a library module under src/services/ (rule A), composed by startSpine
+// while the run holds spine.lock, so O3-D moves it into `mawsd` with the rest of the spine.
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { RequestAnswer } from '@shared/engine/answers';
@@ -34,9 +35,8 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { ClientRef } from '@shared/ipc/client';
 import type { CommandName, EventPayload } from '@shared/ipc/schema';
 import type { ControlResult, LaneAAnswerOutput, LaneACatalog, LaneASendOutput, LaneAState } from '@shared/ipc/schema/lane-a';
-import type { MainHandler } from '../ipc/router';
-// eslint-disable-next-line no-restricted-imports -- P5 O3-C: lane A is spine (O3 Decision Log 13); the fold after this merge moves it to src/services/lane-a/
-import { createGitRunner, type GitRun } from '../../services/git/runner';
+import type { ServiceHandler } from '@shared/spine/bus';
+import { createGitRunner, type GitRun } from '../git/runner';
 import { BridgeUnreachable, call, subscribe, type BridgeAnswer, type EventStream } from './bridge-client';
 import { decisionFor } from './decisions';
 import { DeliveryLane, fileSeqStore, LANE_TIMING, type LaneTiming, type PostResult, type SeqStore } from './deliveries';
@@ -768,9 +768,10 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
 }
 
 type LaneACommand = Extract<CommandName, `laneA.${string}`>;
-type Register = <N extends LaneACommand>(name: N, handler: MainHandler<N>) => void;
+type Register = <N extends LaneACommand>(name: N, handler: ServiceHandler<N>) => void;
 
-// `laneA.*`'s handlers in main, over the driver. Main handles bare ids (the router lowers addresses).
+// `laneA.*`'s handlers, over the driver, registered through the services bus (P5 O3-C: lane A is spine). They handle
+// bare ids (the router lowers addresses).
 export function registerLaneA(driver: LaneADriver, register: Register): void {
   const id = (appSessionId: string) => appSessionId as AppSessionId;
   register('laneA.list', () => ({ states: driver.list() }));

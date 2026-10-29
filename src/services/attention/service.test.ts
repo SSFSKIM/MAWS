@@ -596,7 +596,7 @@ describe('the owner channel projects its items as a third list (P2-C)', () => {
 });
 // P2-C end
 
-// P5 O9 M6: a local terminal session's requests, a fourth list from main's lane A driver (src/main/lane-a/attention.ts)
+// P5 O9 M6: a local terminal session's requests, a fourth list from the spine's lane A driver (src/services/lane-a/attention.ts)
 describe('lane A items', () => {
   const laneA = (request: string): { item: AttentionItem; request: SessionEvent } => ({
     item: AttentionItemSchema.parse({

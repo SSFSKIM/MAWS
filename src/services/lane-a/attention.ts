@@ -7,6 +7,7 @@
 // bridge stops being live, or when it leaves lane A. Each item carries the request view `attention.request` answers for
 // it, built from the raised record (tool, input, questions, suggestions) in the shape of the engine's own request event,
 // so the card, the hover preview and the docked swap read it as they read a broker item's.
+import { LANE_A_ITEM_PREFIX } from '@shared/attention/lane-a-item';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { Question, SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, AttentionId, EventId, RequestId, SessionId, ToolUseId } from '@shared/graph/ids';
@@ -25,10 +26,6 @@ export interface LaneAAttentionDeps {
 }
 
 export const STREAM_GRACE_MS = 5000;
-
-// A lane A item, by its id (`lane-a:<engineSession>:<request>`): a prompt its terminal shows too.
-const PREFIX = 'lane-a:';
-export const isLaneAItem = (id: string): boolean => id.startsWith(PREFIX);
 
 interface Session {
   raised: LaneARaised[];
@@ -65,7 +62,7 @@ function entryOf(appId: AppSessionId, raised: LaneARaised, createdAt: string): L
   const requestId = raised.request as RequestId;
   const toolUseId = (raised.toolUseId ?? raised.request) as ToolUseId;
   const agentId = (raised.agentId ?? null) as AgentId | null;
-  const id = `${PREFIX}${raised.session}:${raised.request}`;
+  const id = `${LANE_A_ITEM_PREFIX}${raised.session}:${raised.request}`; // a prompt its terminal shows too
   const item: AttentionItem = {
     id: id as AttentionId,
     appSessionId: appId,

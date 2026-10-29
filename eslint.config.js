@@ -34,8 +34,8 @@ const PORTABLE_DYNAMIC_SYNTAX = { selector: `ImportExpression[source.value=/${PO
 // the checkouts into src/services/, under rule A below; what stays machine-bound under src/main/ is O4's and O5's (the
 // library's files, connectors, delivery, the catalog, usage, the gateway), one file allowed with its reason.
 const CLIENT_PORT = "A machine-bound service (P5 OX4) imports no Electron and not main's open-external: reach the person's screen through the injected ClientPort (src/shared/client/port.ts).";
-const MACHINE_BOUND = ['src/main/{library,connectors,delivery,catalog,usage,gateway,lane-a}/**/*.{ts,tsx}']; // P5 O6 M1: machine; P5 O9 M2: lane-a
-const MACHINE_BOUND_TESTS = ['src/main/{library,connectors,delivery,catalog,usage,gateway,lane-a}/**/*.test.{ts,tsx}'];
+const MACHINE_BOUND = ['src/main/{library,connectors,delivery,catalog,usage,gateway}/**/*.{ts,tsx}']; // P5 O6 M1: machine
+const MACHINE_BOUND_TESTS = ['src/main/{library,connectors,delivery,catalog,usage,gateway}/**/*.test.{ts,tsx}'];
 const MACHINE_BOUND_ALLOWED = [
   'src/main/connectors/oauth-root.ts', // safeStorage, O4's to replace (U7)
 ];

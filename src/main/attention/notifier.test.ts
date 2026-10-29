@@ -313,7 +313,7 @@ describe('dock badge', () => {
 describe('a terminal session’s requests', () => {
   const TERMINAL = 'app-terminal' as AppSessionId;
   const held = (v: FakeSpineView) => v.putRecord(record(TERMINAL, { title: { text: 'In the terminal', source: 'user' }, holder: { kind: 'terminal', pid: 4242 } }));
-  // a request its bridge raised: the lane A list's item (src/main/lane-a/attention.ts)
+  // a request its bridge raised: the lane A list's item (src/services/lane-a/attention.ts)
   const raised = (kind: 'permission' | 'question', request: string) => item(TERMINAL, kind, T, { id: `lane-a:eng-1:${request}` as AttentionItem['id'] });
 
   it('post no notification and bounce nothing while unfocused, and still count in the badge', () => {
