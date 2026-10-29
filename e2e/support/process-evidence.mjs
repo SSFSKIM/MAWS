@@ -7,8 +7,24 @@ import { basename, dirname, join } from 'node:path';
 import process from 'node:process';
 import { createRedactor } from '../../test/live/support/public-evidence.mjs';
 
+// Native Node cannot load defaults.ts's extensionless TypeScript graph. Keep this check to the current file
+// envelopes and the engine field, not a duplicate product schema. The independent environment pin below means
+// any deeper product-schema rejection still falls back to the same known synthetic engine.
+const record = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const MACHINE_SECTIONS = ['engine', 'gateway', 'permissions', 'mods', 'supervisor', 'artifacts', 'sessions'];
+const CLIENT_SECTIONS = ['keymap', 'notifications', 'usage', 'appearance', 'voice', 'browser', 'supervisor', 'artifacts'];
+function currentSettingsEnvelope(settings, name) {
+  if (!record(settings)) return false;
+  const machine = name === 'machine-settings.json';
+  if (machine ? settings.version !== 1 : settings.version !== 20 && settings.version !== 21) return false;
+  const sections = machine ? MACHINE_SECTIONS : settings.version === 20 ? [...new Set([...MACHINE_SECTIONS, ...CLIENT_SECTIONS])] : CLIENT_SECTIONS;
+  const keys = ['version', ...sections, ...(machine ? [] : ['theme'])];
+  return Object.keys(settings).length === keys.length && keys.every((key) => Object.hasOwn(settings, key))
+    && sections.every((key) => record(settings[key])) && (machine || ['light', 'dark', 'system'].includes(settings.theme));
+}
+
 // Settings' explicit binary precedes the e2e environment (engine-host/binary-info.ts). The machine file is
-// authoritative; profiles predating its split still hold the override in settings.json. Read at most 256 KiB + 1.
+// authoritative; the last unified settings file is version 20. Read at most 256 KiB + 1.
 function configuredEngineBin(userData) {
   for (const name of ['machine-settings.json', 'settings.json']) {
     let fd;
@@ -23,8 +39,8 @@ function configuredEngineBin(userData) {
       const size = readSync(fd, bytes, 0, bytes.length, 0);
       if (size === bytes.length) throw new Error('settings exceed evidence read budget');
       const settings = JSON.parse(bytes.subarray(0, size).toString('utf8'));
-      if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new Error('invalid settings');
-      if (name === 'settings.json' && settings.engine === undefined) return null; // a post-split client file
+      if (!currentSettingsEnvelope(settings, name)) throw new Error('unsupported settings version or shape');
+      if (name === 'settings.json' && settings.version === 21) return null; // a post-split client file
       const engine = settings.engine;
       if (!engine || typeof engine !== 'object' || Array.isArray(engine)) throw new Error('invalid engine settings');
       const bin = engine.binaryPath;
@@ -40,7 +56,7 @@ function configuredEngineBin(userData) {
 export function captureAllowed({ file, env, userData, syntheticEngineBin, realEngine = false, ownerConfigHome = false }) {
   // Fail closed for installed engines and unknown overrides, including wrappers around a real engine. The caller
   // identifies one test-owned synthetic binary; settings and environment must resolve to that exact binary.
-  if (!syntheticEngineBin || env.MAWS_E2E !== '1' || realEngine || ownerConfigHome) return false;
+  if (!syntheticEngineBin || env.MAWS_E2E !== '1' || env.MAWS_E2E_ENGINE_BIN !== syntheticEngineBin || realEngine || ownerConfigHome) return false;
   const privateGroups = ['LIVE_E2E', 'LIVE_GUARD_E2E', 'MAC_SECRET_E2E'].flatMap((key) => (env[key] ?? '').split(/\s+/).filter(Boolean));
   if (privateGroups.includes(env.MAWS_E2E_GROUP)) return false;
   // Local Playwright runs do not have gate.yml's group lists. These scenes use a real engine or real account state.

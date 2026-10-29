@@ -18,6 +18,28 @@ const scratch = (t) => {
   return dir;
 };
 
+// Real current file envelopes, not engine-only fragments that the product's strict parser would reject.
+const machineSettings = (binaryPath = null) => ({
+  version: 1,
+  engine: { binaryPath, subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [], memoryBudget: { enabled: true }, mcpServers: [], launchProfile: { plugins: { off: [] }, hooks: 'user' } },
+  gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', offerDirect: true },
+  permissions: { autoFallback: 'acceptEdits' }, mods: { toHuman: { enabled: true } },
+  supervisor: { idleExitMinutes: 10 }, artifacts: { defaultDesignSystem: null, spaceDesignSystems: {} }, sessions: { archiveInactiveDays: null },
+});
+const clientSettings = () => ({
+  version: 21, theme: 'light', keymap: {},
+  notifications: { enabled: true, sound: false, kinds: { turnFinished: true, approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false, asyncInput: true, essential: true } },
+  usage: { nearLimitPercent: 90 }, appearance: { monoFont: null, transcriptWidth: 768 }, voice: { locale: null },
+  browser: { profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app', bookmarksBar: 'shown' },
+  supervisor: { keepRunningDefault: true, shape: 'daemon' }, artifacts: { commentsView: 'expand' },
+});
+const legacySettings = (binaryPath = null) => {
+  const client = clientSettings();
+  const machine = machineSettings(binaryPath);
+  return { ...client, ...machine, version: 20, supervisor: { ...client.supervisor, ...machine.supervisor }, artifacts: { ...client.artifacts, ...machine.artifacts } };
+};
+const settingsFor = (name, bin) => name === 'machine-settings.json' ? machineSettings(bin) : legacySettings(bin);
+
 test('captures both streams for each launch without taking bytes from another listener; finish removes only its listeners', async (t) => {
   const dir = scratch(t);
   const first = processEvidence(join(dir, 'output'), join(dir, 'profile'));
@@ -167,7 +189,7 @@ test('a transient real-engine switch restored before finish cannot publish strea
   const options = { file: 'ordinary.spec.ts', userData, env, syntheticEngineBin: env.MAWS_E2E_ENGINE_BIN };
   const evidence = processEvidence(output, userData, () => captureAllowed(options), env);
   const settings = join(userData, 'machine-settings.json');
-  writeFileSync(settings, JSON.stringify({ engine: { binaryPath: '/installed/claude' } }));
+  writeFileSync(settings, JSON.stringify(machineSettings('/installed/claude')));
   const credentials = 'Bearer transientBearer.abc sk-ant-credential123 alice@company.com opaque-launch-secret-123';
   const safe = 'Bearer [REDACTED] sk-ant-[REDACTED] owner@redacted.invalid [REDACTED]';
   const child = { stdout: new PassThrough(), stderr: new PassThrough() };
@@ -178,7 +200,7 @@ test('a transient real-engine switch restored before finish cannot publish strea
   child.stderr.write(`stderr ${credentials}\n`);
   writeFileSync(join(userData, 'supervisor', 'host.log'), `host startup ${credentials}\n${'h'.repeat(2 * 1024 * 1024)}\nhost shutdown ${credentials}\n`);
   writeFileSync(join(userData, 'supervisor', 'host.log.1'), `previous ${credentials}\n`);
-  writeFileSync(settings, JSON.stringify({ engine: { binaryPath: null } }));
+  writeFileSync(settings, JSON.stringify(machineSettings()));
   assert.equal(captureAllowed(options), true, 'initial/final provenance cannot observe the transient engine');
   assert.deepEqual(readdirSync(output), []);
   evidence.finish();
@@ -277,12 +299,13 @@ test('configured engines take precedence over the replay environment, with bound
   assert.equal(captureAllowed(options), true, 'a fresh default replay launch is safe');
   for (const name of ['settings.json', 'machine-settings.json']) {
     const file = join(userData, name);
-    writeFileSync(file, JSON.stringify({ engine: { binaryPath: '/installed/claude' } }));
+    writeFileSync(file, JSON.stringify(settingsFor(name, '/installed/claude')));
     assert.equal(captureAllowed(options), false, `${name} overrides the replay binary`);
     const wrapper = '/scratch/test-owned-wrapper';
-    writeFileSync(file, JSON.stringify({ engine: { binaryPath: wrapper } }));
+    writeFileSync(file, JSON.stringify(settingsFor(name, wrapper)));
     assert.equal(captureAllowed(options), false, 'a scratch path alone does not establish ownership');
-    assert.equal(captureAllowed({ ...options, syntheticEngineBin: wrapper }), true, 'an explicit owned override names the effective binary, not the fallback');
+    assert.equal(captureAllowed({ ...options, syntheticEngineBin: wrapper }), false, 'the fallback must also name the owned engine in case the product rejects settings');
+    assert.equal(captureAllowed({ ...options, syntheticEngineBin: wrapper, env: { ...options.env, MAWS_E2E_ENGINE_BIN: wrapper } }), true);
     for (const text of ['{', 'null', '{"engine":null}', '{"engine":{"binaryPath":42}}', JSON.stringify({ engine: { binaryPath: null }, padding: 'x'.repeat(1024 * 1024) })]) {
       writeFileSync(file, text);
       assert.equal(captureAllowed(options), false, `${name} cannot be safely read`);
@@ -292,10 +315,41 @@ test('configured engines take precedence over the replay environment, with bound
     assert.equal(captureAllowed(options), false);
     rmSync(file, { recursive: true });
   }
-  writeFileSync(join(userData, 'settings.json'), JSON.stringify({ engine: { binaryPath: '/legacy/claude' } }));
-  writeFileSync(join(userData, 'machine-settings.json'), JSON.stringify({ engine: { binaryPath: null } }));
+  writeFileSync(join(userData, 'settings.json'), JSON.stringify(legacySettings('/legacy/claude')));
+  writeFileSync(join(userData, 'machine-settings.json'), JSON.stringify(machineSettings()));
   assert.equal(captureAllowed(options), true, 'the machine file is authoritative after the settings split');
   assert.equal(captureAllowed({ ...options, env: { ...options.env, MAWS_E2E: '0' } }), false, 'without e2e mode the environment no longer pins engine selection');
+});
+
+test('only current Settings envelopes and a known synthetic fallback can authorize evidence', (t) => {
+  const userData = scratch(t);
+  const bin = '/scratch/test-owned-engine';
+  const options = { file: 'ordinary.spec.ts', userData, syntheticEngineBin: bin, env: { MAWS_E2E: '1', MAWS_E2E_ENGINE_BIN: bin } };
+  for (const name of ['machine-settings.json', 'settings.json']) {
+    const file = join(userData, name);
+    const valid = settingsFor(name, bin);
+    writeFileSync(file, JSON.stringify(valid));
+    assert.equal(captureAllowed(options), true, `${name}: supported complete current envelope`);
+    const { gateway: _gateway, ...missing } = valid;
+    void _gateway;
+    for (const invalid of [
+      { ...valid, version: 999 }, { ...valid, version: '1' }, { ...valid, version: undefined },
+      { ...valid, engine: [] }, { ...valid, gateway: [] }, missing, { ...valid, unexpected: true },
+    ]) {
+      writeFileSync(file, JSON.stringify(invalid));
+      assert.equal(captureAllowed(options), false, `${name}: unsupported version or malformed file envelope`);
+    }
+    writeFileSync(file, JSON.stringify(valid));
+    assert.equal(captureAllowed({ ...options, env: { ...options.env, MAWS_E2E_ENGINE_BIN: '/installed/real-fallback' } }), false, 'even apparently valid settings cannot authorize an unknown fallback');
+    rmSync(file);
+  }
+  const client = join(userData, 'settings.json');
+  writeFileSync(client, JSON.stringify(clientSettings()));
+  assert.equal(captureAllowed(options), true, 'a current post-split client file has no engine override');
+  writeFileSync(client, JSON.stringify({ ...clientSettings(), version: 999 }));
+  assert.equal(captureAllowed(options), false);
+  writeFileSync(client, JSON.stringify({ ...clientSettings(), engine: { binaryPath: bin } }));
+  assert.equal(captureAllowed(options), false, 'the current client envelope cannot contain machine engine fields');
 });
 
 test('finish excludes only this launch when effective settings or environment stop naming a known synthetic engine', (t) => {
@@ -320,7 +374,7 @@ test('finish excludes only this launch when effective settings or environment st
     if (reason === 'unreadable') mkdirSync(settings);
     else if (reason === 'oversized') writeFileSync(settings, JSON.stringify({ padding: 'x'.repeat(1024 * 1024) }));
     else if (reason === 'env') options.env.MAWS_E2E_ENGINE_BIN = '/another/engine';
-    else writeFileSync(settings, JSON.stringify({ engine: { binaryPath: reason === 'real' ? '/installed/claude' : '/scratch/unknown-wrapper' } }));
+    else writeFileSync(settings, JSON.stringify(machineSettings(reason === 'real' ? '/installed/claude' : '/scratch/unknown-wrapper')));
     assert.ok(readdirSync(output).every((file) => file === 'another-launch.log' || file.endsWith('.excluded.log')), 'no raw files are public before the final check');
     evidence.finish();
     evidence.finish();
@@ -339,8 +393,8 @@ test('finish keeps unchanged explicit synthetic settings and bounded process/hos
   const userData = join(dir, 'profile');
   mkdirSync(join(userData, 'supervisor'), { recursive: true });
   const bin = '/scratch/latency-engine';
-  writeFileSync(join(userData, 'machine-settings.json'), JSON.stringify({ engine: { binaryPath: bin } }));
-  const options = { file: 'local-latency.spec.ts', userData, syntheticEngineBin: bin, env: { MAWS_E2E: '1', MAWS_E2E_ENGINE_BIN: '/scratch/replay-engine' } };
+  writeFileSync(join(userData, 'machine-settings.json'), JSON.stringify(machineSettings(bin)));
+  const options = { file: 'local-latency.spec.ts', userData, syntheticEngineBin: bin, env: { MAWS_E2E: '1', MAWS_E2E_ENGINE_BIN: bin } };
   assert.equal(captureAllowed(options), true);
   const output = join(dir, 'output');
   const evidence = processEvidence(output, userData, () => captureAllowed(options));
