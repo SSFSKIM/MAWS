@@ -209,6 +209,52 @@ export class OrgAdmin {
     return machine;
   }
 
+  /**
+   * A real machine (a `mawsd`) enrolled under `name` and listed, as `listedMachine` lists its in-process one: the code
+   * built the same way and handed to `deliver` (the machine's own `enroll`, which runs until the machine is org-listed),
+   * the key it posts read back and its MAC checked under `k` while `deliver` waits, then the successor listing it, and
+   * `deliver` awaited. `secret` hears the code's secrets (its token, `k`, the code itself) before anything carries them.
+   * Its undoing is registered on `cleanup` as `listedMachine`'s is.
+   */
+  async enrollListed(name: string, cleanup: Cleanup, deliver: (code: string) => Promise<unknown>, { admitMs = ADMIT_MS, secret = () => {} }: { admitMs?: number; secret?: (value: string) => void } = {}): Promise<{ name: string; ref: string; pub: string }> {
+    cleanup.add(`revoke ${name}`, () => revoke(this.person, name));
+    const issued = await this.person.json<EnrollmentIssued>('/api/enrollments', { body: {} }, 201);
+    const k = crypto.getRandomValues(new Uint8Array(32));
+    const { root } = this.head.state;
+    const code = encodeEnrollmentCodeV2({ hub: this.person.hub, token: issued.token, roots: root.keys, recoveryPub: root.recoveryPub, k: base64urlEncode(k) });
+    for (const value of [issued.token, base64urlEncode(k), code]) secret(value);
+    let delivered: unknown = undefined;
+    const delivering = deliver(code).then(
+      (answer) => (delivered = { answer }),
+      (error: unknown) => (delivered = { error }),
+    );
+    const deadline = Date.now() + admitMs;
+    let posted: EnrollmentKey | null = null;
+    while (posted === null) {
+      const response = await this.person.fetch(`/api/enrollments/${issued.enrollment.id}/key`);
+      if (response.status === 200) posted = (await response.json()) as EnrollmentKey;
+      else await response.body?.cancel();
+      if (posted !== null) break;
+      if (delivered !== undefined) throw new Error(`${name}'s enrollment ended before it posted a key: ${describe(delivered)}`);
+      if (Date.now() > deadline) throw new Error(`${name} posted no key within ${admitMs / 1000} s`);
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    const fields = { name: posted.machine, machinePub: posted.pub, ref: posted.ref, tokenId: issued.enrollment.id };
+    if (posted.machine !== name || !(await verifyEnrollmentMac(k, fields, posted.mac))) {
+      throw new Error(`the key the hub holds for ${name}'s enrollment is not one posted under the pairing secret`);
+    }
+    const machine = { name, ref: posted.ref, key: { pub: posted.pub } };
+    cleanup.add(`take ${name} out of the org state`, async () => void (await this.unlist(machine)));
+    await this.amend(`${name} (ref ${posted.ref}) listed`, (s) => {
+      s.machines.push({ name, ref: posted.ref, pub: posted.pub, owners: [this.member] });
+      s.machineNames.push({ name, ref: posted.ref });
+    });
+    await delivering;
+    const ended = delivered as { answer?: unknown; error?: unknown };
+    if ('error' in ended) throw new Error(`${name}'s enrollment: ${describe(ended)}`);
+    return { name, ref: posted.ref, pub: posted.pub };
+  }
+
   /** The head's successor retiring the DX1 org key; nothing when the head retires it already. */
   retireLegacy(): Promise<SignedOrgState | null> {
     return this.amend('the legacy org key retired', (s) => (s.legacyRetired === undefined ? retireLegacyKey(s) : false));
@@ -220,7 +266,7 @@ export class OrgAdmin {
   }
 
   /** Takes `machine` out of the state, its key retired as of now; nothing when the head does not list it. */
-  async unlist(machine: Pick<V2Machine, 'name' | 'ref' | 'key'>): Promise<SignedOrgState | null> {
+  async unlist(machine: Pick<V2Machine, 'name' | 'ref'> & { key: { pub: string } }): Promise<SignedOrgState | null> {
     const kid = await keyId(machine.key.pub);
     return this.amend(`${machine.name} taken out, its key retired`, (s) => {
       if (!s.machines.some((m) => m.ref === machine.ref)) return false;
@@ -229,3 +275,8 @@ export class OrgAdmin {
     });
   }
 }
+
+const describe = (ended: unknown) => {
+  const error = (ended as { error?: unknown }).error;
+  return error instanceof Error ? error.message : error !== undefined ? String(error) : 'it answered before its key was read';
+};
