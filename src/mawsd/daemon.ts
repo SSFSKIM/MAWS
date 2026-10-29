@@ -29,6 +29,16 @@
 // loaded again at the next trigger; a unit daemon re-executes after a release (exit 75, its unit restarts it cold) only
 // with the switch on (SPINE_REEXECUTE_DEFAULT, MAWS_SPINE_REEXECUTE=1; D38). The exit order stops its parts
 // once their work settled, before the client connections close.
+//
+// P5 O3-D M3 (Interfaces §D; D4, D8, D30): the permanent client, built behind the option `permanentClient` (off in the
+// product until M5, src/mawsd/index.ts). With it on, the hello to the engine host lists `host.attachment`, and to a host
+// whose welcome lists it too the engine-host link is one connection for mawsd's life: said ready at its welcome, the
+// loaded spine's resync running at its streaming (the seam's adapter, spine-hosts.ts; nothing while the spine is cold),
+// never recycled at an app's attach or departure, each of which is told by `host.attachment` instead (the departure's
+// drain ends at that request's answer, after every event the host wrote before it). To a host that lists it not, or with
+// the option off, the recycle per attachment above stays, chosen again at each welcome. The endpoint seam's
+// `onAttachment` says whether events are available: true from a permanent link's streaming on, whatever app comes and
+// goes; an app's attachment otherwise.
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import { createServer, type Server } from 'node:net';
@@ -105,6 +115,9 @@ export interface DaemonOptions {
   // product until main stops composing its own spine, M5: an app quitting leaves its last batches to mawsd's link,
   // and a spine loaded by them would hold spine.lock against the app's next launch), the timings and the lock's wait
   spine?: { load?(): Promise<SpineEntry>; wakeOnEvents?: boolean; timing?: Partial<SpineTiming>; lockWaitMs?: number };
+  // P5 O3-D M3 (D30): the engine host's permanent client (above), off in the product until M5 turns it on with the front's
+  // session streams and `wakeOnEvents`: until then a kept session's events while no app is attached would reach no app
+  permanentClient?: boolean;
 }
 
 export interface RunningDaemon {
@@ -189,8 +202,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const packaged = /\.asar[/\\]/.test(options.modules.self);
   const execPath = options.execPath ?? process.execPath;
   const identity: SupervisorIdentity = { protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, buildId, capabilities: PEER_CAPABILITIES.daemon, wire: wireFingerprint(), pid: process.pid, startedAt }; // P5 O3-D: its own list
-  // P5 O3-D M3: `host.attachment` is declared only by a client that sends it, which mawsd's permanent client does
-  const engineHello = PEER_CAPABILITIES.daemonToEngineHost.filter((name) => name !== ATTACHMENT_CAPABILITY);
+  // P5 O3-D M3: `host.attachment` declared only with the permanent client on, since a declaring client must send it
+  const permanentClient = options.permanentClient ?? false;
+  const engineHello = permanentClient ? PEER_CAPABILITIES.daemonToEngineHost : PEER_CAPABILITIES.daemonToEngineHost.filter((name) => name !== ATTACHMENT_CAPABILITY);
   const engineIdentity = appIdentity(options.modules.engineHost, env, 'detached', engineHello); // the e2e seams stand in, as for main
   const endpoint = options.endpoint === undefined ? loadEndpointModule(buildId) : options.endpoint;
   // The machine's enrollment, the endpoint's in process (D16, D38): machine.identity's project and the spine's org projects
@@ -322,7 +336,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   // --- listeners the seam offers ---------------------------------------------------------------------------------------
   const eventListeners = new Set<(owner: 'engine-host' | 'pty-host', message: { name: string; payload: unknown }) => void>();
   const attachmentListeners = new Set<(attached: boolean) => void>();
-  let appAttached = false; // what a listener that comes later is told at once (an endpoint loaded at its first command)
+  let available = false; // what a listener that comes later is told at once (an endpoint loaded at its first command)
   const frameListeners = new Set<FrameListener>();
   const closedListeners = new Set<ClosedListener>();
   const upstreamListeners = new Set<(link: { connected: boolean; generation: number }) => void>();
@@ -334,6 +348,24 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         log(`a listener of the endpoint seam failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+  };
+
+  // --- the engine host's link: recycled per attachment, or permanent (P5 O3-D M3) --------------------------------------
+  // Chosen at each welcome: permanent with the option on and a host that serves `host.attachment`, O2's recycle otherwise.
+  let permanentLink = false;
+  // Whether events are available, as the endpoint seam's onAttachment says it (O2's recycle: an app is attached).
+  const availability = (value: boolean) => {
+    available = value;
+    each(attachmentListeners, value);
+  };
+  // The app's attachment, told to a permanent link's host. Never to a parked one, which has no connection (whose end
+  // already counted as {attached: false}) and must not be woken for it; one restarting hears it once it is up.
+  let departure: Promise<void> = Promise.resolve(); // the latest {attached: false}'s answer: the departure's drain
+  const tellAttachment = (attached: boolean): Promise<void> => {
+    if (hosts.parked('engine-host')) return Promise.resolve();
+    return hosts.forward('engine-host', { name: 'host.attachment', input: { attached } }).then((answer) => {
+      if (!answer.ok) log(`host.attachment {attached: ${attached}} failed: ${answer.error.message}`);
+    });
   };
 
   // --- the engine host's relay ---------------------------------------------------------------------------------------
@@ -391,21 +423,25 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     attached: () => {
       clocks.engineAttached(true); // disarms a park first
       setInterest('app', []);
-      appAttached = true;
-      each(attachmentListeners, true);
+      if (permanentLink) void tellAttachment(true); // before anything of the app's is forwarded
+      else availability(true);
       clientsChanged();
-      recycleEngine(); // a fresh link for this attachment
+      if (!permanentLink) recycleEngine(); // a fresh link for this attachment
     },
-    ready: () => hosts.sayReady('engine-host'),
+    ready: () => {
+      if (!permanentLink) hosts.sayReady('engine-host'); // a permanent link said ready at its own welcome
+    },
     departed: () => {
       clocks.engineAttached(false);
       setInterest('app', null);
       void sendInterest();
-      appAttached = false;
-      each(attachmentListeners, false);
+      if (permanentLink) departure = tellAttachment(false);
+      else availability(false);
       clientsChanged();
     },
-    drain: { start: (drained) => recycleEngine(drained), boundMs: options.departureBoundMs ?? DEPARTURE_BOUND_MS },
+    // the upstream's draining close (O2), or a permanent link's {attached: false}, whose answer follows every event the
+    // host wrote before it saw the departure
+    drain: { start: (drained) => (permanentLink ? void departure.then(drained) : recycleEngine(drained)), boundMs: options.departureBoundMs ?? DEPARTURE_BOUND_MS },
     holdMs: options.helloHoldMs,
     between: () => clientsChanged(), // P5 Decision Log 124: the quiet's
   });
@@ -427,6 +463,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       }
       case 'host.exitWhenIdle':
         return exitWhenIdle(request);
+      case 'host.attachment': // P5 O3-D M3: mawsd's own signal; the relay's welcome lists the upstream's capability, never for an app to use
+        return Promise.resolve({ t: 'res', id: request.id, ok: false, error: ipcError('forbidden_sender', 'host.attachment is mawsd’s own signal to the engine host') });
       default:
         return null;
     }
@@ -485,6 +523,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   hosts.onState('engine-host', (state) => {
     const ready = state.state === 'ready';
     clocks.engineHost(ready ? state.pid : null);
+    if (ready) permanentLink = permanentClient && (hosts.peer('engine-host')?.capabilities.includes(ATTACHMENT_CAPABILITY) ?? false); // P5 O3-D M3: at each welcome
     if (ready && !upstreamConnected) {
       upstreamConnected = true;
       generation += 1;
@@ -495,6 +534,15 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       each(upstreamListeners, { connected: false, generation }); // after every endpoint channel's `upstream` close (doc-relay)
     }
     if (!ready && recycling === 0) engineRelay.dropApp(`the engine host is ${state.state}`);
+    if (!ready) return;
+    // P5 O3-D M3: a permanent link is ready by its own resync (D8): said at once, the loaded spine's resync then runs at
+    // the streaming in the seam's adapter, what arrives meanwhile held; a recycled one waits for the app's ready line,
+    // and what is available follows the app again (a permanent link replaced by an older host's)
+    if (permanentLink) hosts.sayReady('engine-host');
+    else if (available !== engineRelay.attachedApp()) availability(engineRelay.attachedApp());
+  });
+  hosts.onStreaming('engine-host', () => {
+    if (permanentLink && !available) availability(true); // P5 O3-D M3: events are available from here on, with or without an app
   });
   hosts.onRaw('engine-host', (message) => {
     engineRelay.deliver(message);
@@ -608,10 +656,11 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     },
     onEvent: (listener) => (eventListeners.add(listener), () => void eventListeners.delete(listener)),
     // A listener hears the state as it stands when it comes (O10 M10: an endpoint loaded at its first command); at start
-    // step 7 no app is attached and no link is up, so the endpoint's start hears nothing at once.
+    // step 7 no app is attached and no link is up, so the endpoint's start hears nothing at once. P5 O3-D M3: whether
+    // events are available (the permanent link's streaming, or an app's attachment), above.
     onAttachment: (listener) => {
       attachmentListeners.add(listener);
-      if (appAttached) listener(true);
+      if (available) listener(true);
       return () => void attachmentListeners.delete(listener);
     },
     onFrame: (listener) => (frameListeners.add(listener), () => void frameListeners.delete(listener)),

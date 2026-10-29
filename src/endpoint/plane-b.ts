@@ -30,10 +30,11 @@
 // stream whose device stops granting credit just stops taking live events, and reads them from the journal when credit
 // comes back: nothing lost, nothing twice.
 //
-// Live events come from `onEvent`, which until O3 delivers lane B events only while an app is attached (O2's seam: none
-// is when the endpoint starts, and `onAttachment` says each change). With no app, a subscription is `paused {reason:
-// 'no-app'}`; when one attaches, each catches up from its cursor and its state is read again, as a resume does, then
-// `resumed`. A live event or status of another launch (the session launched again), during an opening too, moves the
+// Live events come from `onEvent`, which delivers lane B events while they are available (none is when the endpoint
+// starts, and `onAttachment` says each change): with `mawsd`'s permanent client (P5 O3-D M3) from its engine-host link's
+// streaming on, app or none; with O2's recycle per attachment, only while an app is attached. While none are, a
+// subscription is `paused {reason: 'no-app'}`; once they are, each catches up from its cursor and its state is read
+// again, as a resume does, then `resumed`. A live event or status of another launch (the session launched again), during an opening too, moves the
 // subscription to a snapshot of the new launch, announced by a new `subbed`.
 //
 // A `cards` subscription carries only the session's pending requests: each broker item that stands for a pending request,
@@ -136,7 +137,7 @@ export class PlaneB implements Plane {
     for (const sub of [...this.#streams.keys()]) this.close(sub);
   }
 
-  /** An app attached to the engine host, or left (`onAttachment`). */
+  /** Whether lane B events are available (`onAttachment`): an app's attachment, or `mawsd`'s permanent link (P5 O3-D M3). */
   attachment(attached: boolean): void {
     if (attached === this.#attached) return;
     this.#attached = attached;

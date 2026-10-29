@@ -413,8 +413,8 @@ export class Endpoint implements EndpointModule {
     this.#org = org;
     // What notify told the hub before a restart, read before anything below feeds it.
     this.notifier.restore();
-    // Lane B's live events and the app's attachment (none at start, O2's seam), for the subscriptions; its events and
-    // each engine-host link, for notify's counts.
+    // Lane B's live events and their availability (none at start; an app's attachment, or P5 O3-D's permanent link), for
+    // the subscriptions; its events and each engine-host link, for notify's counts.
     this.#unseam.push(
       services.onEvent((owner, message) => {
         this.planeB.event(owner, message);

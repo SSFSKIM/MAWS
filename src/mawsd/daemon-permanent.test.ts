@@ -1,0 +1,215 @@
+// `mawsd` as the engine host's permanent client (P5 O3-D M3; docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, M3
+// and Interfaces §D; D4, D8, D30), built behind the daemon option `permanentClient`, off in production until M5. With
+// the option on and an engine host whose welcome lists `host.attachment`, mawsd keeps one connection for its life, ready
+// by its own resync, and tells the host each app's attachment; with the option off, or to a host that lists it not,
+// O2's recycle per attachment stays, as master's daemon.test.ts pins it. The endpoint seam's `onAttachment` says whether
+// events are available. Over the daemon in this process and stand-in hosts on real sockets (test/support/mawsd-scene.ts).
+import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
+import { ATTACHMENT_CAPABILITY, PTY_FRAMES_CAPABILITY } from '@shared/host/socket-protocol';
+import type { HostResync } from '@shared/host/host-supervisor';
+import { takeSpineLock } from '../services/settings/spine-lock';
+import type { SpineDeps } from '../services/spine-root';
+import type { DaemonServices, EndpointModule } from './endpoint-seam';
+import type { SpineEntry } from './spine-seam';
+import { MawsdScene, sleep, until } from '../../test/support/mawsd-scene';
+
+let scene: MawsdScene;
+
+beforeEach(() => {
+  scene = new MawsdScene('maws-mp-');
+  onTestFailed(() => void process.stdout.write(`--- mawsd's log\n${scene.logs.join('\n')}\n--- the hosts' logs\n${scene.supervisors.flatMap((s) => s.logs).join('\n')}\n`));
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  vi.spyOn(console, 'info').mockImplementation(() => {});
+});
+
+afterEach(async () => {
+  await scene.dispose();
+  vi.restoreAllMocks();
+});
+
+const INCAPABLE = [PTY_FRAMES_CAPABILITY]; // an engine host of a build before O3-D M3 (O2's update rule keeps one serving)
+
+// What the endpoint module hears through the seam: availability and the engine host's events
+function listening() {
+  let services: DaemonServices | null = null;
+  const availability: boolean[] = [];
+  const events: unknown[] = [];
+  const endpoint: EndpointModule = {
+    start: async (s) => {
+      services = s;
+      s.onAttachment((available) => void availability.push(available));
+      s.onEvent((owner, message) => {
+        if (owner === 'engine-host' && message.name === 'probe.event') events.push(message.payload);
+      });
+    },
+    stop: async () => {},
+    status: () => null,
+    enrollment: () => null,
+    cli: async () => ({ code: 0, out: '' }),
+  };
+  return { endpoint, availability, events, services: () => services! };
+}
+
+const attachments = () => scene.lastEngine().named('host.attachment');
+
+describe('the permanent client, on, to an engine host that lists host.attachment', () => {
+  it('declares the capability, streams from its welcome with no app, and keeps one connection across attaches and departures, telling each', async () => {
+    const seam = listening();
+    await scene.start({ endpoint: seam.endpoint, permanentClient: true });
+    expect(await seam.services().dispatch('engine-host', 'engine.ping', undefined)).toMatchObject({ ok: true }); // wakes it, no app
+    const engine = scene.lastEngine();
+    expect(engine.supervisor.peer()?.capabilities).toEqual([PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY]);
+    // ready by its own resync with the spine cold (nothing to pull): events flow with no app, and are available
+    await until(() => engine.send({ n: 1 }), 3_000, 'the link’s ready line');
+    await until(() => seam.events.length === 1, 3_000, 'the event through the seam');
+    expect(seam.availability).toEqual([true]);
+    expect(attachments()).toEqual([]);
+    const links = engine.supervisor.connections.length;
+
+    const app = await scene.app();
+    expect(app.welcomed()).toBe(true);
+    await until(() => attachments().length === 1, 3_000, 'the attachment');
+    expect(attachments()).toEqual([{ attached: true }]);
+    app.ready();
+    await app.request('engine.ping'); // its ready line is behind it on its own socket
+    expect(engine.send({ n: 2 })).toBe(true);
+    await until(() => app.events().length === 1, 3_000, 'the app’s event');
+    expect(app.events()).toEqual([{ n: 2 }]); // live from its ready: no burst, nothing replayed to it
+    app.leave();
+    await until(() => attachments().length === 2, 3_000, 'the departure');
+    expect(attachments().at(-1)).toEqual({ attached: false });
+    await until(() => app.closed, 3_000, 'the app’s side ended');
+
+    const second = await scene.app();
+    await until(() => attachments().length === 3, 3_000, 'the second attachment');
+    expect(attachments().at(-1)).toEqual({ attached: true });
+    second.leave();
+    await until(() => attachments().length === 4, 3_000, 'the second departure');
+    await sleep(100);
+    expect(engine.supervisor.connections.length).toBe(links); // never recycled
+    expect(scene.spawn).toHaveBeenCalledOnce();
+    expect(seam.availability).toEqual([true]); // plane B's attachment(false) never fires
+    expect(engine.send({ n: 3 })).toBe(true); // still streaming between attachments
+    await until(() => seam.events.length === 3);
+  });
+
+  it('the departure drains through {attached: false}: what the host wrote before it saw that reaches the departing app', async () => {
+    scene.engineSpawn = {
+      answers: {
+        'host.attachment': (input) => {
+          if ((input as { attached: boolean }).attached === false) scene.lastEngine().send({ n: 'last' }); // written before the answer
+          return null;
+        },
+      },
+    };
+    await scene.start({ permanentClient: true });
+    const app = await scene.app();
+    app.ready();
+    await app.request('engine.ping'); // its ready line is behind it on its own socket: events reach it from here
+    await until(() => attachments().length === 1);
+    const engine = scene.lastEngine();
+    expect(engine.send({ n: 'first' })).toBe(true);
+    await until(() => app.events().length === 1);
+    app.leave();
+    await until(() => app.closed, 3_000, 'the app’s side ended');
+    expect(app.events()).toEqual([{ n: 'first' }, { n: 'last' }]);
+  });
+
+  it('a parked engine host is not woken to hear a departure', async () => {
+    const daemon = await scene.start({ permanentClient: true });
+    const app = await scene.app();
+    app.ready();
+    await until(() => attachments().length === 1);
+    app.exit('now');
+    await until(() => daemon.hosts.parked('engine-host'), 3_000, 'the park');
+    app.leave();
+    await until(() => app.closed);
+    await sleep(200);
+    expect(scene.spawn).toHaveBeenCalledOnce();
+    expect(daemon.hosts.parked('engine-host')).toBe(true);
+  });
+
+  it('an app’s own host.attachment on engine-host.sock is refused and never reaches the host', async () => {
+    await scene.start({ permanentClient: true });
+    const app = await scene.app();
+    await until(() => attachments().length === 1);
+    expect(await app.request('host.attachment', { attached: false })).toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+    await sleep(50);
+    expect(attachments()).toEqual([{ attached: true }]);
+  });
+
+  // D8: the link is ready by its own resync: nothing while the spine is cold (above), the loaded spine's once it is loaded,
+  // which the seam's adapter runs at each streaming with what arrives meanwhile held (spine-hosts.ts)
+  it('a loaded spine’s resync runs at the link’s streaming with no app; with the option off nothing streams without one', async () => {
+    for (const permanentClient of [true, false]) {
+      const resyncs: string[] = [];
+      const load = async (): Promise<SpineEntry> => ({
+        takeSpineLock,
+        openSpineData: async (_profile, { lock }) => ({ lock: lock!, refused: lock!.refused, machineSettings: null as never, paths: { client: '', machine: '' } }),
+        startSpine: (started: SpineDeps) => {
+          const resync: HostResync = async () => void resyncs.push('engine-host');
+          started.hosts.setResync('engine-host', resync);
+          started.bus.register('session.launchMode', () => ({ mode: 'index' }));
+          return { view: { engineStatuses: () => [], on: () => () => {} } as never, settled: async () => {}, busy: () => false, stop: () => {} };
+        },
+      });
+      const seam = listening();
+      const daemon = await scene.start({ endpoint: seam.endpoint, permanentClient, spine: { load } });
+      const client = await scene.app('machine');
+      expect(await client.request('session.launchMode')).toMatchObject({ ok: true }); // loaded while the engine host is parked
+      expect(resyncs).toEqual([]);
+      expect(await seam.services().dispatch('engine-host', 'engine.ping', undefined)).toMatchObject({ ok: true });
+      if (permanentClient) await until(() => resyncs.length === 1, 3_000, 'the loaded spine’s resync at the streaming');
+      else {
+        await sleep(200);
+        expect(resyncs, 'no app, no ready line').toEqual([]);
+      }
+      client.destroy();
+      await daemon.stop('test');
+      await scene.lastEngine().supervisor.die();
+    }
+  });
+});
+
+describe('O2’s recycle per attachment stays', () => {
+  it('with the option on, to an engine host that lists it not: no signal, a fresh link at each attach and departure, availability per app', async () => {
+    scene.engineSpawn = { capabilities: INCAPABLE };
+    const seam = listening();
+    await scene.start({ endpoint: seam.endpoint, permanentClient: true });
+    const app = await scene.app();
+    const engine = scene.lastEngine();
+    expect(engine.supervisor.peer()?.capabilities).toContain(ATTACHMENT_CAPABILITY); // declared; an older host ignores it
+    const linksAtWelcome = engine.supervisor.connections.length;
+    await until(() => engine.supervisor.connections.length > linksAtWelcome, 3_000, 'the recycle at attach');
+    await sleep(100);
+    expect(engine.send({ n: 1 })).toBe(false); // the recycled link waits for the app's ready
+    app.ready();
+    await until(() => app.events().length === 1, 3_000, 'the burst');
+    const linksBefore = engine.supervisor.connections.length;
+    app.leave();
+    await until(() => engine.supervisor.connections.length > linksBefore, 3_000, 'the recycle at departure');
+    await sleep(100);
+    expect(engine.send({ n: 2 })).toBe(false); // between attachments: nothing streams
+    expect(engine.named('host.attachment')).toEqual([]);
+    expect(seam.availability).toEqual([true, false]);
+  });
+
+  it('with the option off, to an engine host that lists it: no capability in its hello, no signal, the recycle as master', async () => {
+    const seam = listening();
+    await scene.start({ endpoint: seam.endpoint });
+    const app = await scene.app();
+    const engine = scene.lastEngine();
+    await until(() => engine.supervisor.peer() !== null);
+    expect(engine.supervisor.peer()?.capabilities).toEqual([PTY_FRAMES_CAPABILITY]);
+    const linksAtWelcome = engine.supervisor.connections.length;
+    await until(() => engine.supervisor.connections.length > linksAtWelcome, 3_000, 'the recycle at attach');
+    app.ready();
+    app.leave();
+    await until(() => seam.availability.length === 2, 3_000, 'the departure');
+    await sleep(100);
+    expect(engine.send({ n: 1 })).toBe(false);
+    expect(engine.named('host.attachment')).toEqual([]);
+    expect(seam.availability).toEqual([true, false]);
+  });
+});

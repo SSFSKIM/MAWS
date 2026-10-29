@@ -72,6 +72,9 @@ function run({ kind, dir }: RunArgs, profileDir: string): void {
     build: { version: __MAWS_VERSION__, ...__MAWS_BUILD__ },
     env: process.env,
     exit: (code) => process.exit(code),
+    // P5 O3-D M3 (D30): the engine host's permanent client stays off until M5 turns it on with the front's session
+    // streams and the spine's event trigger (`spine.wakeOnEvents`); until then O2's recycle per attachment serves the app
+    permanentClient: false,
     openLog: (at) => {
       const opened = openSupervisorLog(at, LOG_ROTATE_BYTES, DAEMON_FILES.log);
       log = opened;

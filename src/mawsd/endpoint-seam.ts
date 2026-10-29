@@ -35,8 +35,11 @@ export const ENDPOINT_CHANNEL_BASE = 2 ** 31;
 export interface DaemonServices {
   machine: { ref: MachineRef; profileDir: string; stateDir: string; kind: 'unit' | 'private' }; // stateDir: <profile>/mawsd/endpoint, 0700; only `unit` binds the tailnet listener by default
   dispatch(owner: 'engine-host' | 'pty-host' | 'machine', name: string, input: unknown, client?: ClientRef): Promise<HostResponse>; // raw; wakes a parked host; pty.attach goes with credit: false, pty.ack and pty.checkpoint are refused
-  onEvent(listener: (owner: 'engine-host' | 'pty-host', message: { name: string; payload: unknown }) => void): () => void; // lane B events only while an app is attached, until O3
-  onAttachment(listener: (attached: boolean) => void): () => void; // an app attached to, or left, engine-host.sock (a recycle: the endpoint's document channels ended)
+  onEvent(listener: (owner: 'engine-host' | 'pty-host', message: { name: string; payload: unknown }) => void): () => void; // lane B events whenever they are available (onAttachment)
+  // whether lane B events are available (P5 O3-D M3): with the permanent client, true from its link's streaming on, app or
+  // none; with O2's recycle per attachment, an app attached to, or left, engine-host.sock (a recycle: the endpoint's
+  // document channels ended)
+  onAttachment(listener: (attached: boolean) => void): () => void;
   onFrame(listener: (frame: { owner: 'pty-host'; ptyId: string; offset: number; data: Uint8Array } | { owner: 'engine-host'; channel: number; bytes: Uint8Array }) => void): () => void; // pty.data frames, and document frames on the endpoint's channels only
   documents: {
     // channels >= 2^31 only

@@ -12,9 +12,13 @@ export interface EndpointServices {
   machine: { ref: MachineRef; profileDir: string; stateDir: string; kind: 'unit' | 'private' };
   /** Raw; wakes a parked host; pty.attach goes with credit: false, pty.ack and pty.checkpoint are refused. */
   dispatch(owner: 'engine-host' | 'pty-host' | 'machine', name: string, input: unknown, client?: ClientRef): Promise<HostResponse>;
-  /** Lane B events only while an app is attached, until O3. */
+  /** Lane B events whenever they are available (`onAttachment`). */
   onEvent(listener: (owner: 'engine-host' | 'pty-host', message: { name: string; payload: unknown }) => void): () => void;
-  /** An app attached to, or left, engine-host.sock (a recycle: the endpoint's document channels ended). */
+  /**
+   * Whether lane B events are available (P5 O3-D M3): with `mawsd`'s permanent client, true from its link's streaming on,
+   * app or none; with O2's recycle per attachment, an app attached to, or left, engine-host.sock (a recycle: the
+   * endpoint's document channels ended).
+   */
   onAttachment(listener: (attached: boolean) => void): () => void;
   /** pty.data frames, and document frames on the endpoint's channels only. */
   onFrame(
