@@ -28,7 +28,7 @@ export function Sheet({
           {...focus}
           {...data}
           aria-describedby={undefined}
-          className={`fixed top-[18%] left-1/2 z-50 ${width} -translate-x-1/2 rounded-lg border border-border-strong bg-bg-overlay p-4 text-ui text-fg`}
+          className={`fixed top-[18%] left-1/2 z-50 ${width} -translate-x-1/2 rounded-lg border border-border-strong bg-bg-overlay p-4 text-ui text-fg [overflow-wrap:anywhere]`}
         >
           <Dialog.Title className="m-0 mb-3 text-ui font-medium text-fg">{title}</Dialog.Title>
           <SheetClose.Provider value={onClose}>{children}</SheetClose.Provider>

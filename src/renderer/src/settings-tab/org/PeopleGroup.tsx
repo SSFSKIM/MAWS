@@ -33,7 +33,7 @@ export function PeopleGroup({ view, pairing }: { view: OrgView; pairing: OrgPair
       {view.members.map((member) => (
         <MemberRow key={member.id} member={member} may={may} pairing={pairing?.member === member.id ? pairing : null} ask={ask} pair={(follow) => setPairOn({ member, follow })} />
       ))}
-      <div className="flex min-h-[34px] flex-wrap items-center gap-2 py-1 text-ui-sm">
+      <div className="flex min-h-[34px] min-w-0 flex-wrap items-center gap-2 py-1 text-ui-sm [overflow-wrap:anywhere]">
         {may ? (
           <button type="button" className={TEXT_ACTION} onClick={() => ask(ORG.changeTitles['member.add'], { kind: 'member.add', email: '', role: 'member' })}>
             {ORG.addPerson}

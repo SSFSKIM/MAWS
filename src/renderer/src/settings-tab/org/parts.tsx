@@ -102,7 +102,7 @@ export function CodeField({ action, note, pending, refusal, onSend }: { action: 
 export function Refusal({ refusal }: { refusal: OrgRefusal | null }) {
   if (refusal === null) return null;
   return (
-    <span role="alert" className="basis-full text-ui-sm text-warning">
+    <span role="alert" className="min-w-0 basis-full text-ui-sm text-warning [overflow-wrap:anywhere]">
       {refusalText(refusal)}
     </span>
   );
