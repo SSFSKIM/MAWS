@@ -15,4 +15,8 @@ status=${PIPESTATUS[0]}
   sed 's/\x1b\[[0-9;]*[A-Za-z]//g' "$log" | grep -E -- "$pattern" || true
   echo '```'
 } >>"$GITHUB_STEP_SUMMARY"
+# The e2e upload keeps a flaky pass's failed attempt too. Read this command's log, not a marker a prior job could leave.
+if [[ -n ${GITHUB_OUTPUT:-} ]] && sed 's/\x1b\[[0-9;]*[A-Za-z]//g' "$log" | grep -E '^flaky: ' >/dev/null; then
+  echo 'flaky=true' >>"$GITHUB_OUTPUT"
+fi
 exit "$status"
