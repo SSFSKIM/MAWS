@@ -55,6 +55,7 @@ function plan(scenarioEnv) {
         HOSTED_MAC_E2E: '',
         MAC_SECRET_E2E: '',
         MAC_HOME_E2E: '',
+        E2E_MINUTES: '',
         // The run's ref: a test chooses its own, never the ref the tests themselves run on.
         GITHUB_REF: '',
         GITHUB_REF_NAME: '',
@@ -294,6 +295,34 @@ test('a MEASURED_E2E group is marked measured in its matrix entry, and gate.yml 
   assert.match(job, /\n {6}- if: \(failure\(\) \|\| needs\.plan\.outputs\.evidence == 'true'\) && steps\.checkout\.outcome == 'success'\n {8}uses: actions\/upload-artifact@v7\n/);
 });
 
+// E2E_MINUTES: a group's own minutes replace its class's, the wait of its runner's start still added on top; a group not
+// on the list keeps its class's. A malformed entry refuses the plan whatever the run, as the other lists' checks do.
+test("an E2E_MINUTES group takes its own minutes before the wait is added, every other group its class's; a malformed entry refuses the plan", () => {
+  const lists = { MEASURED_E2E: 'daemon-idle-aba daemon-idle-enrolled', E2E_MINUTES: 'daemon-idle-aba=90 library=50' };
+  const { outputs } = plan({ ...lists, HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:daemon-idle-aba,e2e:daemon-idle-enrolled,e2e:library,e2e:side\nRunner: macos' });
+  assert.deepEqual(placement(outputs), { 'daemon-idle-aba': [homeMac, 100], 'daemon-idle-enrolled': [homeMac, 70], library: [mac, 60], side: [mac, 40] });
+  assert.deepEqual(placement(plan({ ...lists, LINUX_E2E: 'library', HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:library\nRunner: linux' }).outputs), { library: ['ubuntu-24.04', 50] }); // off the Mac, no wait on top
+  // The cap itself is accepted, the wait still added on top: 300 + the home Mac's 10.
+  assert.deepEqual(placement(plan({ MEASURED_E2E: 'daemon-idle-aba', E2E_MINUTES: 'daemon-idle-aba=300', HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:daemon-idle-aba\nRunner: macos' }).outputs), { 'daemon-idle-aba': [homeMac, 310] });
+  for (const [listed, said] of [
+    ['daemon-idle-aba', 'E2E_MINUTES: daemon-idle-aba is not <group>=<minutes>, a positive whole number of minutes'],
+    ['daemon-idle-aba=0', 'E2E_MINUTES: daemon-idle-aba=0 is not <group>=<minutes>, a positive whole number of minutes'],
+    ['daemon-idle-aba=1.5', 'E2E_MINUTES: daemon-idle-aba=1.5 is not <group>=<minutes>, a positive whole number of minutes'],
+    ['daemon-idle-aba=-90', 'E2E_MINUTES: daemon-idle-aba=-90 is not <group>=<minutes>, a positive whole number of minutes'],
+    ['daemon-idle-aba=90m', 'E2E_MINUTES: daemon-idle-aba=90m is not <group>=<minutes>, a positive whole number of minutes'],
+    ['=90', 'E2E_MINUTES: =90 is not <group>=<minutes>, a positive whole number of minutes'],
+    [`daemon-idle-aba=${'9'.repeat(309)}`, `E2E_MINUTES: daemon-idle-aba=${'9'.repeat(309)} is not <group>=<minutes>, a positive whole number of minutes, at most 300`], // Infinity, which JSON writes as null
+    ['daemon-idle-aba=301', 'E2E_MINUTES: daemon-idle-aba=301 is not <group>=<minutes>, a positive whole number of minutes, at most 300'],
+    ['no-such-group=90', 'E2E_MINUTES names no-such-group, which has no e2e:no-such-group script'],
+  ]) {
+    for (const message of ['ci-gate: test\n\nGates: e2e:daemon-idle-aba\nRunner: macos', 'ci-gate: test\n\nGates: static\nClass1a: pool']) {
+      const { status, stderr } = refusal({ ...lists, E2E_MINUTES: listed, HEAD_MESSAGE: message });
+      assert.equal(status, 1, listed);
+      assert.equal(stderr, `gate-plan: ${said}\n`, listed);
+    }
+  }
+});
+
 // ci-kit's mac-lane concurrency spec (M2): a Mac job asks for today's labels, which only ci-kit's exclusive instance
 // carries, so it runs alone, unless MAC_SHARED_E2E names it; then it asks for the shared instances' one label, which no
 // `self-hosted` job reaches. Each start may wait in ci-kit's hook, and the timeout carries that wait: an exclusive job's
@@ -313,7 +342,7 @@ const placement = (outputs) => Object.fromEntries(JSON.parse(outputs.e2e).map((e
 // class-1 set, only when a run names them); no group shares the host desktop.
 test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; every other Mac job keeps today's labels and waits", () => {
   const workflow = readWorkflow();
-  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E', 'MAC_HOME_E2E'];
+  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E', 'MAC_HOME_E2E', 'E2E_MINUTES'];
   // The mini's own placement, as with no group on HOSTED_MAC_E2E; the list's waiters are pinned by their own test below.
   const own = { ...Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)])), HOSTED_MAC_E2E: '' };
   assert.equal(own.MAC_SHARED_E2E, '');
@@ -350,7 +379,9 @@ test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; e
   assert.deepEqual(placement(plan({ ...named, HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:composer,e2e:layout\nLane: vm' }).outputs), { composer: [vmMac, 30], layout: [vmMac, 30] });
   // The measured groups, which only a run naming them takes; class 1a on the Mac carries the wait too.
   const measured = plan({ ...own, HEAD_MESSAGE: `ci-gate: test\n\nGates: ${own.MEASURED_E2E.split(/\s+/).filter((group) => !own.LIVE_E2E.includes(group)).map((group) => `e2e:${group}`).join(',')}\nRunner: macos\nClass1a: macos` }).outputs;
-  for (const [group, where] of Object.entries(placement(measured))) assert.deepEqual(where, [homeMac, UNBUILT_MEASURED.has(group) ? 55 : 70], group);
+  // daemon-idle-aba's three windows take its own 90 minutes (E2E_MINUTES), the home Mac's wait on top.
+  assert.equal(own.E2E_MINUTES, 'daemon-idle-aba=90');
+  for (const [group, where] of Object.entries(placement(measured))) assert.deepEqual(where, [homeMac, group === 'daemon-idle-aba' ? 100 : UNBUILT_MEASURED.has(group) ? 55 : 70], group);
   assert.deepEqual(JSON.parse(measured.timeouts), { static: 40, unit: 40, probes: 40, unit_darwin: 40 });
 });
 
@@ -549,7 +580,7 @@ test("a MAC_VM_E2E group not built through scripts/e2e-build.sh stays off the gu
 // The workflow's proven-VM groups build only the variants this run needs, even when a solo job lands on the host.
 test("gate.yml's proven-VM groups split into e2e_vm with just their build variants; Linux and class 1a alone build nothing", () => {
   const workflow = readWorkflow();
-  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E', 'MAC_HOME_E2E'];
+  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E', 'MAC_HOME_E2E', 'E2E_MINUTES'];
   // The mini's own placement, as with no group on HOSTED_MAC_E2E; the list's waiters are pinned by their own test below.
   const own = { ...Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)])), HOSTED_MAC_E2E: '' };
   assert.equal(own.MAC_VM_E2E, 'document-app widgets to-human transcript panel c7 code scm library document settings tools dashboard side presentations deliverables supervisor browser browser-comment browser-import agents c12 available design-systems browser-chrome composer layout delivery connectors-oauth artifacts browser-cua connectors connectors-direct');
@@ -647,7 +678,7 @@ const cachedOf = (group) => {
 };
 const ownLists = () => {
   const workflow = readWorkflow();
-  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E', 'MAC_HOME_E2E'];
+  const names = ['CLASS1_E2E', 'LINUX_E2E', 'POOL_E2E', 'LIBREOFFICE_E2E', 'POPPLER_E2E', 'LIVE_E2E', 'LIVE_GUARD_E2E', 'MEASURED_E2E', 'MAC_SHARED_E2E', 'MAC_VM_E2E', 'HOSTED_MAC_E2E', 'MAC_SECRET_E2E', 'MAC_HOME_E2E', 'E2E_MINUTES'];
   return Object.fromEntries(names.map((name) => [name, workflowList(workflow, name)]));
 };
 
