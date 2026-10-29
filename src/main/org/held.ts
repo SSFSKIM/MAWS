@@ -54,6 +54,11 @@ export interface HeldOrg extends OrgView {
   /** The states recoveries rewound away, oldest rewind first (kept for M3's offer). */
   superseded(): readonly SignedOrgState[];
   highWater(): number;
+  /**
+   * M4a: fences the adoption queue (an adoption asked for after it, or queued and run after it, adopts nothing and reads
+   * `refused: 'closed'`) and resolves at the queue's tail, a chain.json write under way included.
+   */
+  close(): Promise<void>;
 }
 
 export type StartInput = {
@@ -66,6 +71,11 @@ export type StartInput = {
   pins?: OrgPins;
   /** The hub's chain from genesis: the first chain (with `pins`), or the one that may reopen a held chain that failed. */
   first?: { chain: SignedOrgState[]; transitions: Signed<RootTransition>[]; certificates: Certificates };
+  /**
+   * M4a: the owner's guard, false once it closes: read when an adoption is asked for and again when its turn comes, so
+   * no adoption writes after it (a link's direct `advance` included). Absent: always open.
+   */
+  open?(): boolean;
   log(line: string): void;
 };
 
@@ -240,6 +250,9 @@ const sameAnchor = (a: Anchor, b: Anchor) => a.genesis === b.genesis && a.versio
 
 const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
+/** An adoption asked of, or run by, a closed view: nothing adopted, nothing written. */
+const CLOSED: AdoptResult = { adopted: 0, rewound: false, certificatesChanged: false, refused: 'closed' };
+
 class HeldChain implements HeldOrg {
   #held: Held;
   readonly #genesis: string;
@@ -248,6 +261,7 @@ class HeldChain implements HeldOrg {
   /** The states logged as following nothing held, by hash: each is logged once. */
   readonly #ignored = new Set<string>();
   #queue: Promise<unknown> = Promise.resolve();
+  #closed = false;
 
   constructor(input: StartInput, held: Held, genesis: string) {
     this.#input = input;
@@ -287,9 +301,19 @@ class HeldChain implements HeldOrg {
   }
 
   adoptServed(served: Served): Promise<AdoptResult> {
-    const run = this.#queue.then(() => this.#adopt(served));
+    if (!this.#open()) return Promise.resolve({ ...CLOSED });
+    const run = this.#queue.then(() => (this.#open() ? this.#adopt(served) : { ...CLOSED }));
     this.#queue = run.catch(() => {});
     return run;
+  }
+
+  close(): Promise<void> {
+    this.#closed = true;
+    return this.#queue.then(() => undefined);
+  }
+
+  #open(): boolean {
+    return !this.#closed && (this.#input.open?.() ?? true);
   }
 
   onAdopted(listener: () => void): () => void {

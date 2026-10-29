@@ -44,6 +44,10 @@ export interface OrgTiming {
    * less 1 KiB (src/endpoint/calls.ts). An eighth of it, which leaves margin for the call's envelope and the transitions.
    */
   DELIVERY_MAX_BYTES: number;
+  /** M4a's. A pairing code this Mac makes lives this long: `deployment admin pair`'s maximum, the hub's entry TTL. */
+  PAIR_TTL_MS: number;
+  /** How often a pairing reads the target member's pending entries (`pair`'s 2 s). */
+  PAIR_POLL_MS: number;
 }
 
 export const ORG_TIMING: Readonly<OrgTiming> = Object.freeze({
@@ -67,6 +71,8 @@ export const ORG_TIMING: Readonly<OrgTiming> = Object.freeze({
   WEEKLY_CHECK_MS: 3_600_000,
   DELIVERY_RETRY_MS: 3_600_000,
   DELIVERY_MAX_BYTES: 524_288,
+  PAIR_TTL_MS: 600_000,
+  PAIR_POLL_MS: 2_000,
 });
 
 export const orgTiming = (overrides: Partial<OrgTiming> = {}): OrgTiming => ({ ...ORG_TIMING, ...overrides });

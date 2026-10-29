@@ -79,6 +79,7 @@
     "src/renderer/src/harness/document/api.ts", // P3-B M3
     "src/renderer/src/harness/panel/api.ts",
     "src/renderer/src/harness/widgets/api.ts",
+    "src/renderer/src/settings-tab/copy.ts", // P5 O8 M4a Task 8: the Org page spec reads the page's own words
     "src/renderer/src/tools/agents/copy.ts",
     "src/renderer/src/tools/agents/model/elapsed.ts",
     "src/renderer/src/tools/agents/model/relay.ts",
