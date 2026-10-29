@@ -268,9 +268,10 @@ env:
   # by the rule above on the tree that lists it, its three `Lane: hosted` runs and its `Lane: no-hosted` baseline
   # recorded in that document's Outcomes.
   # lane-a (CI-opt, after P5 O9): 3/3 green under `Lane: hosted` at master 3d1f3ff6d in runs 40812590308 (10 passed),
-  # 40812578726 (9 passed, 1 flaky at lane-a.spec.ts:129: begin() waits expect's default 5 s for the main window after
-  # launchMaws, green on its retry) and 40814382935 (10 passed), each against the `Lane: no-hosted` baseline 40831064338
-  # on the same tree (10 passed, on ci-kit-mac-ec2).
+  # 40812578726 (9 passed, 1 flaky at lane-a.spec.ts:129, green on its retry) and 40814382935 (10 passed), each against
+  # the `Lane: no-hosted` baseline 40831064338 on the same tree (10 passed, on ci-kit-mac-ec2). The flake was begin()
+  # waiting expect's default 5 s for the main window after launchMaws, short of a fresh hosted Mac's first launch; it
+  # now waits 60 s, as c12-prerun does.
   HOSTED_MAC_E2E: >-
     document-app browser-chrome available artifacts settings connectors connectors-direct delivery to-human widgets side
     supervisor c12 browser-import document code scm agents library deliverables presentations dashboard design
