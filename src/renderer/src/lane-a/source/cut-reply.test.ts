@@ -10,7 +10,8 @@ import type { TranscriptState } from '../../transcript/model/reduce';
 import type { Row, RowId } from '../../transcript/model/rows';
 import { placeCuts, type Cut } from '../stream/overlay';
 import { Chain, SESSION } from '../test-support/chain-rows';
-import { freshSource, subagentLookupOf } from '../plane-transcript';
+import { FakePlane, mount, settle } from '../test-support/fake-plane';
+import { PlaneTranscript, freshSource, subagentLookupOf } from '../plane-transcript';
 import { bridgeRowKind } from './bridge-rows';
 
 const CUT = '1, 2, 3, 4\n\n5, 6';
@@ -67,6 +68,27 @@ describe('the bridge’s row of a reply an interrupt cut off', () => {
     const before = await load(c.rows.slice(0, -1));
     expect(placeCuts(before.state, [kept(at)]).map((r) => r.id)).toEqual(['desk-stream:t1:main:0:1']);
     expect(cuts(before.rows)).toEqual([]);
+  });
+
+  it('live, its rows arriving one at a time: the row lands in the turn the marker closed, drawn there once', async () => {
+    const { c } = interrupted();
+    const plane = new FakePlane('proj');
+    const store = createTranscriptStore();
+    const controller = new PlaneTranscript({ plane, sessionKey: 'mini/sess', target: { machine: 'mini', session: SESSION, agentId: null }, store });
+    controller.open();
+    const unmount = mount(controller, store);
+    plane.send('snapshot', { rows: c.rows.slice(0, 2).toReversed(), more: false, subagents: [], streaming: [] } as never);
+    await settle();
+    for (const row of c.rows.slice(2)) {
+      plane.send('row', { row } as never);
+      await settle();
+    }
+    const entry = store.getState().entries[controller.key];
+    unmount();
+    controller.close();
+    const turn = entry.rows.find((r) => r.kind === 'user')!.turnId;
+    expect(cuts(entry.rows)).toEqual([expect.objectContaining({ markdown: CUT, turnId: turn })]);
+    expect(placeCuts(entry.state, [kept(Date.parse(c.rows[2].timestamp as string))])).toEqual([]);
   });
 
   it('a row written after another turn started confirms no earlier cut', async () => {

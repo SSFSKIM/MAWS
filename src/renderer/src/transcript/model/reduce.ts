@@ -545,10 +545,10 @@ function apply(batch: Batch, event: SessionEvent): void {
         return;
       }
       // P5 O9: the reply an interrupt cut off, as the sminos bridge records it after the marker closed its turn: that
-      // turn's, the latest, so derive draws it there marked cut off
+      // turn's, the latest, so derive draws it there marked cut off (a row: the turn's rows derive again)
       if (event.origin === INTERRUPT_CUT) {
         const cut = state.order.at(-1);
-        if (cut === undefined || !pushRouted(cut, false)) batch.loose(event, false);
+        if (cut === undefined || !pushRouted(cut)) batch.loose(event);
         return;
       }
       if (isInterruptionMarker(event.origin, event.content) && !event.isSynthetic) {
