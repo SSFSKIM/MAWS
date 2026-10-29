@@ -74,6 +74,32 @@ describe('the agents tool for another machine’s terminal session', () => {
     expect(fake.invoked('laneA.unwatch')).toEqual([{ appSessionId: SESSION, watch: 'w1' }]);
   });
 
+  // Landing fix wave: a session restored with the Agents tool open is watched before O8's listing (`org.rows`) arrives;
+  // once the listing names it a lane A row of another machine, the watch rebinds to the plane, and back if it goes.
+  it('rebinds a watch started before the listing to the plane once the listing names the session', async () => {
+    const row = useSessions.getState().listed.get(REMOTE)!;
+    useSessions.setState({ listed: new Map() });
+    const store = createTaskGraphStore();
+    const release = store.getState().watch(REMOTE);
+    await settle();
+    expect(fake.calls).toContain('invoke fs.subagents'); // the engine and disk path, the session not yet known as remote
+    expect(fake.invoked('laneA.watch')).toEqual([]);
+    useSessions.setState({ listed: new Map([[REMOTE, row]]) });
+    await wait(() => fake.invoked('laneA.watch').length > 0);
+    expect(fake.invoked('laneA.watch')).toEqual([{ appSessionId: SESSION }]);
+    plane([envelope('snapshot', { rows: [], more: false, subagents: [meta('running')], presence: { record: { status: 'busy' }, bridge: true, launch: 'L1' }, streaming: [] })]);
+    const node = () => store.getState().entries.get(REMOTE)?.graph.tasks.get(AGENT as TaskId);
+    await wait(() => node() !== undefined);
+    expect(node()).toMatchObject({ status: 'running' });
+    expect(store.getState().entries.get(REMOTE)).toMatchObject({ phase: 'live', disk: { agents: [], runs: [], error: null, runsError: null } });
+    const reads = fake.calls.filter((call) => call === 'invoke fs.subagents').length;
+    useSessions.setState({ listed: new Map() }); // the row gone: back to this machine's reads, the plane let go
+    await settle();
+    expect(fake.invoked('laneA.unwatch')).toEqual([{ appSessionId: SESSION, watch: 'w1' }]);
+    expect(fake.calls.filter((call) => call === 'invoke fs.subagents').length).toBe(reads + 1);
+    release();
+  });
+
   it('leaves a session of this machine to the agent-work reads', () => {
     const local = addressOf(OTHER_MACHINE, 'not-listed' as AppSessionId);
     const store = createTaskGraphStore();

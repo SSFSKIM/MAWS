@@ -83,13 +83,15 @@ interface Watch {
   settle: Map<TaskId, ReturnType<typeof setTimeout>>;
   workflowTimer: ReturnType<typeof setTimeout> | null;
   initializing: boolean;
+  remote: boolean; // P5 O9 M9: bound to another machine's plane (the remote feed), not this machine's reads
+  binding: number; // bumped at each rebind, so a disk read the old binding started is dropped
 }
 
 export function createTaskGraphStore({ sessions = useSessions }: { sessions?: typeof useSessions } = {}) {
   const watches = new Map<AppSessionId, Watch>();
   const watchOf = (id: AppSessionId): Watch => {
     let w = watches.get(id);
-    if (!w) watches.set(id, (w = { watchers: 0, offs: [], wire: false, held: null, generation: 0, cursorN: Infinity, frozen: null, status: null, settle: new Map(), workflowTimer: null, initializing: false }));
+    if (!w) watches.set(id, (w = { watchers: 0, offs: [], wire: false, held: null, generation: 0, cursorN: Infinity, frozen: null, status: null, settle: new Map(), workflowTimer: null, initializing: false, remote: false, binding: 0 }));
     return w;
   };
 
@@ -235,21 +237,31 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
       write(id, { disk: { ...e.disk, ...patch }, graph });
     };
 
+    // A read's answer is dropped once its watch was rebound (P5 O9 M9: the session found to be another machine's, or no longer).
+    const current = (id: AppSessionId) => {
+      const binding = watchOf(id).binding;
+      return (apply: () => void) => {
+        if (watchOf(id).binding === binding) apply();
+      };
+    };
+
     const readRuns = (id: AppSessionId) => {
+      const still = current(id);
       agentWorkClient()
         .workflows(id)
         .then(
-          (runs) => applyDisk(id, { runs, runsError: null }),
-          (error: unknown) => applyDisk(id, { runsError: messageOf(error) }),
+          (runs) => still(() => applyDisk(id, { runs, runsError: null })),
+          (error: unknown) => still(() => applyDisk(id, { runsError: messageOf(error) })),
         );
     };
 
     const readDisk = (id: AppSessionId) => {
+      const still = current(id);
       agentWorkClient()
         .subagents(id)
         .then(
-          (agents) => applyDisk(id, { agents, error: null }),
-          (error: unknown) => applyDisk(id, { error: messageOf(error) }),
+          (agents) => still(() => applyDisk(id, { agents, error: null })),
+          (error: unknown) => still(() => applyDisk(id, { error: messageOf(error) })),
         );
       readRuns(id);
     };
@@ -286,10 +298,9 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
       if (w.watchers > 0 && !w.initializing && (relaunched || !w.wire)) startWire(id);
     };
 
-    const release = (id: AppSessionId) => {
+    // The current binding's subscriptions let go: its reads and a snapshot still in flight are dropped.
+    const unbind = (id: AppSessionId) => {
       const w = watchOf(id);
-      w.watchers -= 1;
-      if (w.watchers > 0) return;
       w.offs.forEach((off) => off());
       w.offs = [];
       if (w.workflowTimer) clearTimeout(w.workflowTimer);
@@ -297,6 +308,75 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
       w.wire = false;
       w.held = null;
       w.generation += 1; // nobody holds the session: a snapshot still in flight is dropped, and the next watch reads again
+    };
+
+    const release = (id: AppSessionId) => {
+      const w = watchOf(id);
+      w.watchers -= 1;
+      if (w.watchers > 0) return;
+      unbind(id);
+    };
+
+    // P5 O9 M9: another machine's terminal session reads its tree from its plane (the remote feed); every other session
+    // reads this machine's engine and disk.
+    const bindRemote = (id: AppSessionId, remote: (onGraph: (graph: TaskGraph) => void) => () => void) => {
+      const w = watchOf(id);
+      w.remote = true;
+      write(id, { phase: 'loading', disk: { agents: [], runs: [], error: null, runsError: null } }); // no disk here to read
+      w.offs.push(remote((graph) => write(id, { graph, phase: 'live', error: null })));
+    };
+
+    const bindLocal = (id: AppSessionId) => {
+      const w = watchOf(id);
+      w.remote = false;
+      const client = agentWorkClient();
+      w.offs.push(client.onEventBatch(({ appSessionId, events }) => appSessionId === id && onBatch(id, events)));
+      // The current status first, the launch check among it, so a relaunch while nobody watched resets the cursor
+      // before any snapshot is read.
+      w.initializing = true;
+      applyStatus(id, sessions.getState().engine.get(id) ?? null);
+      w.initializing = false;
+      w.offs.push(
+        sessions.subscribe((state, previous) => {
+          const next = state.engine.get(id);
+          if (next !== previous.engine.get(id)) applyStatus(id, next ?? null);
+          // P4: main refuses the runs read until it has registered the session (a new chat's start registers it a
+          // moment after the watch asked); a refused read is asked again once the record arrives
+          if (state.records.has(id) && !previous.records.has(id) && read(id).disk.runsError !== null) readRuns(id);
+        }),
+      );
+      w.offs.push(client.onSubagentsChanged(({ appSessionId, agents }) => appSessionId === id && applyDisk(id, { agents, error: null })));
+      w.offs.push(
+        client.onWorkflowChanged(({ appSessionId }) => {
+          if (appSessionId !== id) return;
+          if (w.workflowTimer) clearTimeout(w.workflowTimer);
+          w.workflowTimer = setTimeout(() => {
+            w.workflowTimer = null;
+            readRuns(id);
+          }, WORKFLOW_REREAD_MS);
+        }),
+      );
+      if (w.status) startWire(id);
+      readDisk(id);
+    };
+
+    const bind = (id: AppSessionId) => {
+      const remote = remoteFeed?.(id) ?? null;
+      if (remote !== null) bindRemote(id, remote);
+      else bindLocal(id);
+      // P5 O9 M9: a session restored with the tool open is watched before O8's listing arrives (layout hydration does not
+      // wait for it), so the watch follows the session's transport as the listing and the records change.
+      watchOf(id).offs.push(
+        sessions.subscribe((state, previous) => {
+          if (state.listed === previous.listed && state.records === previous.records) return;
+          if (((remoteFeed?.(id) ?? null) !== null) === watchOf(id).remote) return;
+          unbind(id);
+          watchOf(id).binding += 1; // a disk read the old binding started is dropped
+          write(id, { graph: emptyGraph(), launchId: null, lastSeq: null, error: null, disk: { agents: null, runs: null, error: null, runsError: null }, pendingStops: new Map() });
+          watchOf(id).status = null;
+          bind(id);
+        }),
+      );
     };
 
     return {
@@ -313,41 +393,7 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
         };
         if (w.watchers > 1) return handle;
         write(id, {});
-        const remote = remoteFeed?.(id) ?? null; // P5 O9 M9
-        if (remote !== null) {
-          write(id, { phase: 'loading', disk: { agents: [], runs: [], error: null, runsError: null } }); // no disk here to read
-          w.offs.push(remote((graph) => write(id, { graph, phase: 'live', error: null })));
-          return handle;
-        }
-        const client = agentWorkClient();
-        w.offs.push(client.onEventBatch(({ appSessionId, events }) => appSessionId === id && onBatch(id, events)));
-        // The current status first, the launch check among it, so a relaunch while nobody watched resets the cursor
-        // before any snapshot is read.
-        w.initializing = true;
-        applyStatus(id, sessions.getState().engine.get(id) ?? null);
-        w.initializing = false;
-        w.offs.push(
-          sessions.subscribe((state, previous) => {
-            const next = state.engine.get(id);
-            if (next !== previous.engine.get(id)) applyStatus(id, next ?? null);
-            // P4: main refuses the runs read until it has registered the session (a new chat's start registers it a
-            // moment after the watch asked); a refused read is asked again once the record arrives
-            if (state.records.has(id) && !previous.records.has(id) && read(id).disk.runsError !== null) readRuns(id);
-          }),
-        );
-        w.offs.push(client.onSubagentsChanged(({ appSessionId, agents }) => appSessionId === id && applyDisk(id, { agents, error: null })));
-        w.offs.push(
-          client.onWorkflowChanged(({ appSessionId }) => {
-            if (appSessionId !== id) return;
-            if (w.workflowTimer) clearTimeout(w.workflowTimer);
-            w.workflowTimer = setTimeout(() => {
-              w.workflowTimer = null;
-              readRuns(id);
-            }, WORKFLOW_REREAD_MS);
-          }),
-        );
-        if (w.status) startWire(id);
-        readDisk(id);
+        bind(id);
         return handle;
       },
 
