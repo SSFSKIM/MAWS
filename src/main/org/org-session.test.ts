@@ -2464,4 +2464,83 @@ describe('M4a: close()', () => {
     expect(headVersion(again)).toBe(3);
     expect((await readJson<RegistrationFile>(REGISTRATION_FILE)).anchor.version).toBe(3);
   });
+
+  // Review fix: a command whose queued write meets the closed commit queue answers as stopped, never as a failure.
+  it('a reset asked for just before close() answers quietly and writes nothing', async () => {
+    const { session } = await signingRoot();
+    expect((await session.resign()).ok).toBe(true);
+    await rm(join(orgDir(), SIGNING_FILE));
+    const { session: again, logs } = await restart();
+    await until(() => registered(again).problem === 'signing', 'problem signing');
+    const resetting = again.resetSigning(true);
+    const closing = again.close();
+    await expect(resetting).resolves.toBeUndefined();
+    await closing;
+    expect(await exists(join(orgDir(), SIGNING_FILE))).toBe(false);
+    expect(logs.filter((l) => l.includes('closed'))).toEqual([]);
+  });
+
+  it('a close during Touch ID reads as a stopped sign, not a signing-storage failure; nothing is kept', async () => {
+    const { session, logs } = await signingRoot();
+    const signingFile = () => readFile(join(orgDir(), SIGNING_FILE), 'utf8').catch(() => null);
+    const kept = await signingFile();
+    let closing: Promise<void> | undefined;
+    signing.during = () => void (closing = session.close());
+    expect(await session.resign()).toMatchObject({ ok: false, reason: 'not-root' });
+    await closing;
+    expect(await signingFile()).toBe(kept);
+    expect(hub.posted).toEqual([]);
+    expect(logs.filter((l) => l.includes('closed'))).toEqual([]);
+  });
+
+  it('a close during a discard\'s hub read discards nothing and answers quietly', async () => {
+    const read = heldStateRead();
+    const { session, logs } = await signingRoot({ fetch: read.fetch });
+    hub.postAnswer = () => worker(409, { error: 'key-purged' });
+    expect(await session.resign()).toMatchObject({ ok: false, reason: 'hub' });
+    const slot = (await readJson<SigningFile>(SIGNING_FILE)).pending;
+    const reading = read.arm();
+    const discarding = session.discardPending(true, signerOf(session).pending!.hash);
+    await reading;
+    const closing = session.close();
+    read.release();
+    expect(await discarding).toEqual({ ok: false });
+    await closing;
+    expect((await readJson<SigningFile>(SIGNING_FILE)).pending).toEqual(slot);
+    expect(logs.filter((l) => l.includes('closed'))).toEqual([]);
+  });
+});
+
+describe('M4a: a sign-out after a post the hub took (Task 5, Decision 4)', () => {
+  it('reads not-root, adopts nothing late, keeps the slot\'s bytes, and the next sign-in settles it with no new confirmation', async () => {
+    const read = heldStateRead();
+    const { session, feed } = await signingRoot({ fetch: read.fetch });
+    const before = headVersion(session);
+    let reading: Promise<void> | undefined;
+    // The hub takes the post; the signer's read of the hub's chain after it is held.
+    hub.postAnswer = () => {
+      hub.postAnswer = undefined;
+      reading = read.arm();
+      return undefined;
+    };
+    const signed = session.resign();
+    await until(() => reading !== undefined, 'posted');
+    await reading;
+    const slot = await readFile(join(orgDir(), SIGNING_FILE), 'utf8');
+    const prompts = signing.prompts.length;
+    await session.signOut();
+    read.release();
+    expect(await signed).toMatchObject({ ok: false, reason: 'not-root' });
+    await pause(50);
+    expect(headVersion(session)).toBe(before);
+    expect((await readJson<{ chain: SignedOrgState[] }>(CHAIN_FILE)).chain).toHaveLength(before);
+    expect(await readFile(join(orgDir(), SIGNING_FILE), 'utf8')).toBe(slot);
+
+    expect(session.signIn()).toEqual({ ok: true });
+    await until(() => isSignedIn(session), 'signed in again');
+    feed.open();
+    await until(() => signerOf(session).pending === null && headVersion(session) === before + 1, 'settled at the sign-in');
+    expect(signing.prompts).toHaveLength(prompts);
+    expect(hub.posted).toHaveLength(1);
+  });
 });

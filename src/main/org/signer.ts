@@ -376,6 +376,8 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
       log(`version ${version}: the held head is not its parent; nothing was posted`);
       return { ok: false, reason: 'hub', detail: `the held org state is no longer version ${version}'s parent: nothing was posted, and it stays pending` };
     }
+    // The parent's hash was an await: a sign-out or close since stops it before the exposure's enqueue.
+    if (!live(asked)) return stopped(unsent);
     try {
       await store.update((file) => ({ next: withExposure(file, signed, { hub: true }), value: undefined }));
     } catch (error) {
@@ -551,6 +553,9 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     const obligation = await deliveries.obligation(signed, parent.state);
     const slot: Pending = { signed, parent: await stateHash(parent.state), hash: await stateHash(signed.state), exposed: { hub: false, machines: [] } };
     let kept: 'kept' | 'pending' | 'moved' | 'stopped' | 'ended';
+    // Right before the enqueue (the verdict and the obligation were awaits): a close since refuses the store's queue, and
+    // a sign-out since keeps nothing, so either reads as the stopped sign it is.
+    if (!live(asked)) return stopped('what was signed was not kept or sent');
     try {
       kept = await store.update((f) => {
         // A sign-out since the person was asked: what was signed is never kept, so nothing can post it later.
@@ -633,8 +638,10 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
         const hubVersion = isSignedOrgState(served.head) ? served.head.state.version : 0;
         const view = deps.held();
         if (view === null || view.head().state.version < hubVersion) return { ok: false, reason: 'hub' };
-        const hash = await stateHash(slot.signed.state);
+        // The slot's own hash (the store computed it), so no await falls between the lifecycle check and the enqueue.
+        const hash = slot.hash;
         const key = canonicalize(slot.signed.state);
+        if (!live(asked)) return { ok: false };
         const done = await store.update<'stopped' | { unsent: boolean } | null>((f) => {
           // A sign-out since the owner confirmed: the hub was read for the lifecycle that ended, so nothing is discarded on it.
           if (!live(asked)) return { next: f, value: 'stopped' as const };
@@ -656,6 +663,8 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     async resetSigning(confirmed) {
       if (confirmed !== true) return;
       await exclusive(async () => {
+        // Asked for before a close whose fence ran first: nothing is written once closed (the next start asks again).
+        if (closed) return;
         if (store.get() !== 'damaged') {
           log('signing.json reads: nothing to reset');
           return;
