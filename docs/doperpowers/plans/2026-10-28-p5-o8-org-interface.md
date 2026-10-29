@@ -1137,6 +1137,7 @@ The move commit is the branch's first. Run its checks before any other M4a work:
     # admin as the deploy checkout runs it (bin.ts bundles it): read-only verbs against the local hub, in a scratch org
     # (the deploy README's local recipe)
     pnpm --filter desk-hub local --state ~/.local/share/o8-m4a-move/hub          # a second terminal; Ctrl-C at the end
+    mkdir -p ~/.local/share/o8-m4a-move/recovery
     pnpm --filter desk-hub deployment admin init --keys ~/.local/share/o8-m4a-move/admin/keys.json --hub http://127.0.0.1:8747 --user owner@example.com
     pnpm --filter desk-hub deployment admin genesis --keys ~/.local/share/o8-m4a-move/admin/keys.json --hub http://127.0.0.1:8747 --user owner@example.com --recovery ~/.local/share/o8-m4a-move/recovery/recovery.json --yes
     pnpm --filter desk-hub deployment admin show --keys ~/.local/share/o8-m4a-move/admin/keys.json --hub http://127.0.0.1:8747 --user owner@example.com
@@ -1645,6 +1646,8 @@ Each is built as its recommendation when its milestone is re-planned, unless the
 - Observation (M5, 2026-10-28): `stores/summary.ts`'s `load()` has no production caller, so `summary.sections` is written but never read back; collapsed summary sections reset at each launch. M5's People store is loaded from `App.tsx` instead.
   Evidence: `grep -rn "getState().load()" src/renderer/src`, outside tests, finds no summary caller.
 - Observation (M5): `App.test.tsx` runs in the `renderer-timing` vitest project, not `renderer` (`vitest.config.ts:57`).
+- Observation (M4a Task 2, 2026-10-29): before `successorProblems`, a machine posting a key another machine already held (the hub doesn't check) made `enroll` sign a successor the package refuses. The admin kept it pending, the hub answered `409 malformed`, and every later verb failed until `abandon-pending`. It is now refused before anything is signed.
+  Evidence: the admin test's RED run in Task 2 (`m4a-task-2-report.md`).
 
 ## Decision Log
 
@@ -2048,6 +2051,19 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   2. `entryDevice`, private in `admin.ts`, is now exported, for Task 4's pairing.
   3. `PendingEntry` is built from the package's own `DeviceClass`, `KeyStorage` and `Passkey`, and the hub's `PendingDevice` satisfies it.
   4. The move's local-hub recipe keeps `keys.json` and `recovery.json` in separate directories, since `genesis` refuses a recovery file beside the admin keys (`admin-device.ts:88`).
+  Date/Author: 2026-10-29, O8's executor.
+
+- Decision: M4a Task 2, `successorProblems` (5935f62a5), settles these points.
+  1. `stateInvariants` is exported, so the parity test can compare it with `stateProblems`. That test passed against the old boolean body before the switch.
+  2. `Problem.code` is a `ProblemCode` union, narrower than §M's `string`, so Task 3 can join it with `checks.ts`'s codes.
+  3. The codes:
+     - the link: `other-org`, `version-not-next`, `prev-not-head`;
+     - the whole-state prefix rule: `prefix-overlaps`, since a whole state has no new-or-old direction;
+     - beyond the list, to cover every non-signature check: `shape` (alone), `issued-backwards`, `machine-ref-changed`, and each sub-rule of `stateInvariants`;
+     - where `checks.ts` already names a rule, its name.
+  4. An endorsement by a key outside the member's own (`unknown-signer`) stays `verifySuccessor`'s signature check.
+  5. The admin check sits in `signPending`, so it covers `propose` as well as `amend`.
+  6. Until M4c, `checkSuccessor` shows `prefix-overlaps` beside its own directional prefix code for one collision.
   Date/Author: 2026-10-29, O8's executor.
 
 ## Outcomes & Retrospective
