@@ -60,12 +60,13 @@ describe('LaneAOverlay', () => {
 
   // P5 O9 (the M8 sitting): the engine writes no row for what a step streamed before an interrupt cut it, so at its
   // step-end that text leaves the stream and is kept, settled, with the bridge's time of that end (`placeCuts` finds its
-  // disk turn by it), as lane B keeps a stopped reply's partial text: no streaming text is left behind, none is lost.
+  // disk turn by it): no streaming text is left behind, none is lost. The M10 sitting: it is marked cut off, since the
+  // session kept none of it (the next turn won't see it), never drawn as the reply.
   it('keeps an unnamed block’s text at its step-end, settled, with the time its step ended: an interrupted reply leaves no streaming text and loses none', () => {
     overlay.receive({ kind: 'messages', messages: [snapshot(), chunk(0, 0, 'Abandoned'), chunk(1, 0, ' halfway')] });
     overlay.receive({ kind: 'messages', messages: [msg('step-end', { ...step, t: 1_000 })] });
     expect(texts()).toEqual([]);
-    expect(cuts).toEqual([{ at: 1_000, rows: [expect.objectContaining({ kind: 'assistant_text', markdown: 'Abandoned halfway', live: false, turnId: null })] }]);
+    expect(cuts).toEqual([{ at: 1_000, rows: [expect.objectContaining({ kind: 'assistant_text', markdown: 'Abandoned halfway', live: false, turnId: null, cut: true })] }]);
     overlay.receive({ kind: 'messages', messages: [snapshot(), chunk(0, 0, 'Again'), msg('step-end', step)] }); // a step-end with no time
     expect(cuts[1]).toEqual({ at: null, rows: [expect.objectContaining({ markdown: 'Again' })] });
   });
@@ -79,7 +80,7 @@ describe('LaneAOverlay', () => {
     });
     expect(overlay.rows(null).map((row) => row.kind)).toEqual(['thinking', 'to_human']);
     overlay.receive({ kind: 'messages', messages: [msg('step-end', step)] });
-    expect(kept()).toEqual([expect.objectContaining({ kind: 'to_human', toolUseId: 'toolu_1', text: '1\n2\n3', pending: false })]);
+    expect(kept()).toEqual([expect.objectContaining({ kind: 'assistant_text', markdown: '1\n2\n3', cut: true })]); // never sent: no message row
     expect(overlay.rows(null).map((row) => row.kind)).toEqual(['thinking']); // the named block waits for its row
   });
 

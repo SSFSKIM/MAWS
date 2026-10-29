@@ -17,3 +17,17 @@ export function AssistantTextRow({ row, text }: { row: Extract<Row, { kind: 'ass
     </div>
   );
 }
+
+// P5 O9 (the M10 sitting): a terminal session's reply an interrupt cut before the engine wrote it (`cut`). The engine
+// keeps an assistant block only once it completes, so the session holds none of these words and its next turn won't
+// see them: drawn as far as they streamed, muted, under the note that says so, never as the turn's answer.
+export const CUT_NOTE = 'Cut off by the interrupt: the session didn’t keep it';
+
+export function CutTextRow({ row }: { row: Extract<Row, { kind: 'assistant_text' }> }) {
+  return (
+    <div className="transcript-cut" data-cut="">
+      <div className="transcript-cut-note">{CUT_NOTE}</div>
+      <Markdown markdown={row.markdown} live={false} />
+    </div>
+  );
+}

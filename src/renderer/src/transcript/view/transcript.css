@@ -109,6 +109,9 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 
 /* Assistant text: a long path or URL wraps rather than scrolling a narrow transcript sideways (as the bubble does) */
 .transcript-answer { padding: 4px 0 12px; line-height: var(--lh-prose); overflow-wrap: anywhere; }
+/* P5 O9: a terminal session's reply an interrupt cut before the engine kept it: muted, under its note */
+.transcript-cut { padding: 2px 0 6px; color: var(--fg-muted); line-height: var(--lh-prose); overflow-wrap: anywhere; }
+.transcript-cut-note { font-size: var(--text-ui-sm); color: var(--fg-muted); margin-bottom: 2px; }
 /* M2: intermediate assistant prose is message ink, even while it remains inside the work fold. */
 .transcript-commentary { padding: 2px 0 6px; color: var(--fg); line-height: var(--lh-prose); overflow-wrap: anywhere; }
 /* The streaming caret after the last word. Streamdown puts it on its root's last child, which under `dir="auto"` is the

@@ -60,7 +60,7 @@ export type Row = RowBase &
         anchorFrame?: AnchorFrame; // E11 (scale-review C scalpel-2#1): how MAWS framed it, beside `anchor`, so an edit resends the comment framed again
         // E3 end
       } // steer: sent while its turn was running (joins that turn at its delivery position, no turn of its own); dropped: the engine never ran it; lines: its hard line breaks (W2: the bubble folds by its rendered height, not by these)
-    | { kind: 'assistant_text'; messageUuid: MessageUuid | null; blockIndex: number; markdown: string; live: boolean; phase: 'answer' | 'commentary'; forHuman?: boolean; model: string | null }
+    | { kind: 'assistant_text'; messageUuid: MessageUuid | null; blockIndex: number; markdown: string; live: boolean; phase: 'answer' | 'commentary'; forHuman?: boolean; model: string | null; cut?: true } // cut (P5 O9): a terminal session's reply an interrupt cut before the engine wrote it, which the session kept none of
     | {
         kind: 'divider'; state: 'working' | 'completed' | 'stopped' | 'failed'; cause?: 'crash' /* E11: present when the engine, not the reader, stopped it */; origin: 'human' | 'engine' | 'peer'; startedAt: string; endedAt: string | null;
         toolCalls: number; denied: number; autoDenied: number; firstDeniedCell: CellId | null; expanded: boolean; summary: TurnSummary; files?: ChangedFile[];

@@ -138,14 +138,15 @@ describe('the streaming rows', () => {
     ]); // the third has no text yet
   });
 
-  // P5 O9 (the M8 sitting): the text of a reply its step ended before the engine wrote it (an interrupt) is kept as
-  // lane B keeps a stopped reply's partial text: settled, no longer streaming. Thinking, which streams no text, and a
-  // tool call's input, which MAWS never draws, leave nothing to keep.
-  it('draws a reply cut before its row as kept rows, settled: its answer and its message, nothing else', () => {
+  // P5 O9 (the M8 sitting, then the M10 sitting): the text of a reply its step ended before the engine wrote it (an
+  // interrupt) is settled, no longer streaming, and marked cut off: the session kept none of it, so it is neither the
+  // turn's answer nor a message sent. Thinking, which streams no text, and a tool call's input, which MAWS never draws,
+  // leave nothing.
+  it('draws a reply cut before its row as cut-off text, settled: its answer and its message, nothing else', () => {
     const rows = streamingRows([block(0, 'thinking', ''), block(1, 'text', 'Half an answer'), call(2, 'mcp__to-human__message', '{"text": "1\\n2\\n3'), call(3, 'Bash', '{"command": "ls')], since, { turn: 'turn-9' as never, kept: true });
     expect(rows).toEqual([
-      { id: 'desk-stream:t1:main:0:1', turnId: 'turn-9', at: since(), kind: 'assistant_text', messageUuid: null, blockIndex: 1, markdown: 'Half an answer', live: false, phase: 'answer', model: null },
-      { id: 'desk-stream:t1:main:0:2', turnId: 'turn-9', at: since(), kind: 'to_human', toolUseId: 'toolu_2', text: '1\n2\n3', pending: false },
+      { id: 'desk-stream:t1:main:0:1', turnId: 'turn-9', at: since(), kind: 'assistant_text', messageUuid: null, blockIndex: 1, markdown: 'Half an answer', live: false, phase: 'commentary', model: null, cut: true },
+      { id: 'desk-stream:t1:main:0:2', turnId: 'turn-9', at: since(), kind: 'assistant_text', messageUuid: null, blockIndex: 2, markdown: '1\n2\n3', live: false, phase: 'commentary', model: null, cut: true },
     ]);
     expect(streamingRows([block(0, 'text', '  ')], since, { kept: true })).toEqual([]); // no words, nothing kept
   });
