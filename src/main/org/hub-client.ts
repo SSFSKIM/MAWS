@@ -131,7 +131,7 @@ export function hubClient(input: {
       request(ME_PATH, { signal }, (body) => {
         if (!isObject(body) || !isObject(body.org) || !isObject(body.member)) return null;
         const { org, member } = body;
-        // The email only as an address (`isMemberEmail`): a token is far longer than its lengths allow.
+        // Strict on purpose, for security (`isMemberEmail`): a hostile hub can't reflect the token as an email. Writers keep the grammar, so only legacy data can fail it; a grammar change checks the stored emails first.
         if (typeof org.id !== 'string' || typeof member.id !== 'string' || !isMemberEmail(member.email)) return null;
         return { org: { id: org.id }, member: { id: member.id, email: member.email, role: String(member.role) } };
       }),

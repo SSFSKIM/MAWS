@@ -13,7 +13,8 @@ const MEMBER_EMAIL = /^[^\s@\p{Cc}]{1,64}@[^\s@\p{Cc}]{1,253}$/u;
  * lengths. Strict where an email is written: `successorProblems` (`email-grammar`, for a member new or whose email
  * changed) and the admin's genesis. A reader takes any text and compares it lower-cased (`isOrgState`, `verifySuccessor`,
  * the hub), but for the app's hub client, which reads `/api/me`'s email only in this grammar so that a hostile hub can't
- * reflect the bearer token as an email.
+ * reflect the bearer token as an email. With the writers held to the grammar, that read can refuse only an email
+ * written before them; a change to the grammar checks the stored emails before it ships.
  */
 export const isMemberEmail = (email: unknown): email is string => typeof email === 'string' && MEMBER_EMAIL.test(email);
 
