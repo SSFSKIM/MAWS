@@ -15,7 +15,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { boardPath } from '@artifacts/design/canvas';
 import { benchBoards, benchDesignFiles } from '@artifacts/design/fixtures/bench';
 import { TABS } from '@artifacts/document/tabs';
@@ -24,12 +24,13 @@ import { applyV2 } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
 import type { JournalRow } from '@shared/wire/journal';
 import { seedDocument } from '../../e2e/support/document-seed';
+import { writeTimingEvidence } from '../../e2e/support/process-evidence.mjs';
 import { scriptedSession } from '../../src/engine-host/conformance/session-harness';
 import { registerDesigns } from '../../src/engine-host/designs';
 import { openDocuments, type Documents } from '../../src/engine-host/documents';
 import { registerDocumentKind } from '../../src/engine-host/documents/kinds/document';
 import { registerPresentations } from '../../src/engine-host/presentations';
-import { expectToolTime, guardToolTime, readToolSpans, RENDER_TOOL_TIME_BOUND_MS, TOOL_TIME_BOUND_MS, TOOL_TIME_MEDIAN_MS } from './support/tool-time';
+import { expectToolTime, guardToolTime, readToolCalls, readToolSpans, RENDER_TOOL_TIME_BOUND_MS, TOOL_TIME_BOUND_MS, TOOL_TIME_MEDIAN_MS } from './support/tool-time';
 
 const HUMAN: Actor = { kind: 'human' };
 const DOCUMENT_SECTIONS = 160; // ≈ 200 pages, as e2e/document-scale.spec.ts seeds them
@@ -90,9 +91,15 @@ const report = async (line: string, annotate: Annotate) => {
 
 describe.skipIf(process.env.MAWS_LIVE !== '1')(`the tool-time guard's heavy cases (bound ${TOOL_TIME_BOUND_MS} ms per call, the median ${TOOL_TIME_MEDIAN_MS} ms, render ${RENDER_TOOL_TIME_BOUND_MS} ms)`, () => {
   let s: Awaited<ReturnType<typeof heavySession>>;
+  const saveTimings = () => {
+    const { spans, unanswered } = readToolCalls(s?.rows() ?? []);
+    writeTimingEvidence(join('test-results', 'tool-time-heavy-live', 'timings.json'), spans, unanswered, loadavg());
+  };
   beforeAll(async () => {
+    saveTimings();
     s = await heavySession();
   });
+  afterEach(saveTimings); // partial calls survive a thrown assertion or timeout, not only the final guard's success
   afterAll(async () => {
     await s?.close();
   });

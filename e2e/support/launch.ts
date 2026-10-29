@@ -18,6 +18,7 @@ import { endProfileProcesses, killProfileProcessesNow, processesNaming, shellsUn
 import { realEngine, type RealEngine } from './real-engine'; // P4-AGG M1
 import { assertEngineKeychainEnv, assertNoKeychainPrompt, killTree, loginShellEnvironment, watchKeychainPrompt } from './keychain-guard'; // fixB
 import { launchEnvironment } from './scratch-env';
+import { captureAllowed, processEvidence } from './process-evidence.mjs';
 import { cornerOrigin, windowCorner } from './window-origin';
 
 export const REPO_ROOT = resolve(__dirname, '../..');
@@ -179,6 +180,9 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   const keychainScene = Boolean(opts.realEngine) && process.platform === 'darwin';
   let keychainWatch: { stop(): Error | null } | null = null;
 
+  const info = base.info();
+  const evidence = captureAllowed({ file: info.file, env, realEngine: Boolean(opts.realEngine), ownerConfigHome: opts.ownerConfigHome })
+    ? processEvidence(info.outputPath(), userData) : null;
   let app: ElectronApplication | null = null;
   let child: ReturnType<ElectronApplication['process']> | null = null;
   let closed = false;
@@ -204,8 +208,12 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
       uncleaned.delete(entry);
       const left = await untilExited(shells, SHELL_EXIT_MS);
       if (left.length > 0) console.error(`[e2e] shells still running ${SHELL_EXIT_MS} ms after the app closed: ${left.map((p) => p.pid).join(', ')}`);
-      if (ownsUserData) rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); // C5: a given profile is the caller's
-      rmSync(sminosHome, { recursive: true, force: true }); // P5 O9 M5
+      try {
+        evidence?.finish(); // preserve the stopped host's log even on failure, before the scratch profile disappears
+      } finally {
+        if (ownsUserData) rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); // C5: a given profile is the caller's
+        rmSync(sminosHome, { recursive: true, force: true }); // P5 O9 M5
+      }
     }
     if (prompted) throw prompted;
     if (leftover) throw leftover;
@@ -227,6 +235,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     // Playwright's process() reads its live application channel, which may already be disposed before 'close' arrives.
     // Keep the actual ChildProcess while available, including for cleanup's failed-close fallback.
     child = app.process();
+    evidence?.capture(child);
     if (keychainScene) keychainWatch = watchKeychainPrompt(() => child?.pid !== undefined && killTree(child.pid)); // the app, its hosts, their engines and their `security` children
     launchedHook?.(app); // E4b
     app.on('close', () => (closed = true));

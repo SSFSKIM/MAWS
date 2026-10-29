@@ -724,6 +724,7 @@ jobs:
         include: ${{ fromJSON(needs.plan.outputs.e2e_host) }}
     env: &e2e-env
       MAWS_E2E_QUIET: '1'
+      MAWS_E2E_GROUP: ${{ matrix.group }} # raw process evidence excludes the credentialed groups named above
       SHELL: /bin/zsh # the Mac's login shell, which the app's terminals and its login-shell capture start (setup installs it)
       # The live groups' run flags, `1` only when the plan says live, which it says only for a set of LIVE_E2E groups;
       # empty otherwise, which every spec reads as off (`!== '1'`), in a run the plan admits no live group to.
@@ -886,13 +887,16 @@ jobs:
             apps/desk-web/test-results/
           retention-days: 7
           if-no-files-found: ignore
-      # Measured samples remain re-readable even on green or cancellation, without the HTML report and screenshots.
+      # Measured samples and the engine host's idle-collection log remain re-readable even on green or cancellation,
+      # without the HTML report, screenshots or main-process streams.
       # A separate name lets a red measured job keep both artifacts without a collision.
       - if: always() && matrix.measured && steps.checkout.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: measured-e2e-${{ matrix.slug }}
-          path: test-results/**/*.json
+          path: |
+            test-results/**/*.json
+            test-results/**/engine-host-*.log
           retention-days: 7
           if-no-files-found: ignore
 
