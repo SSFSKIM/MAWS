@@ -53,7 +53,8 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
 - [ ] M5 — Owners on rows and the People toggle — **executable** (re-planned 2026-10-28; needs M2, landed)
   - [x] (2026-10-28) Built on `p5-o8-m5` at b78445447, one task: `memberName`, `OrgRows.members` and `member`, the `sidebar.people` key and `stores/people.ts`, `ownersLabel` and `RowTitle`, `projectList`'s ownership-first filing, the People hover action and menu item, owners in the hover cards. The focused suites pass locally, each file alone.
   - [x] (2026-10-28) Class 1a at the merge with master (df6c2826a, run 40786128124) found one typecheck error in `derive.test.ts`, fixed at 50a1ab992. reviewer-medium found one P2, the early toggle's replay (Decision Log, M5's build, item 11), fixed at 854178726.
-  - [ ] The final gate (class 1a and the full hosted set) on the merge with master.
+  - [x] (2026-10-28) The first final gate (run 40786951312 on 53f147ef1) found one M5 regression. The People action sat on every row and took a line-center click at the sidebar's 200px floor (`e2e/shell.spec.ts:50`). Fixed at 54aab1ada: the toggle shows only where it can act. The same run's unit red was a test-side race, fixed with two others in tests: `OrgSection`'s clock, the teardown's `rm`, and the rekey crash setup.
+  - [x] (2026-10-28) The final gate on 7e58d6984: run 40794571273, 48 jobs green and 3 skipped, `e2e:default` and `e2e:discover` among the green. One flaky line, `browser-cua.spec.ts:483` (M3's known one), was green on retry.
 - [ ] M5b — Add owner — *later; needs O10's `record.owners` offer row and O12's sminos executor*
 - [ ] M6 — Visibility, shares and per-member reader state — *advisory; taste (Q4); needs O3*
 - [ ] M7 — The project channel — *advisory; taste (Q5); needs O7 M2 and M6, O3, O12's to-human store; its people's words wait for O14's last machine*
@@ -1613,6 +1614,14 @@ Evidence:
 - the gates the PR body lists.
 
 Still owed: the owner's sitting, `root add` on staging and then on production.
+
+**M5 (2026-10-28, PR from `p5-o8-m5`).** A row of a session you don't own alone shows its owners as first names after the title ("you, Ana", "Ana, Ben +3"), and its hover card lists them with their emails. Names are derived from the head's emails in main. A People toggle, remembered per row under `sidebar.people`, draws other people's sessions in place; while it is off the row reads "+N others". It shows only where it can act. Rollups, ranking and search see only what is drawn and yours.
+
+Evidence:
+- the unit suites: `member-name` 6, `rows` 23, `owners` 6, `people` 7, `derive` 45, `Sidebar` 100, `HoverCard` 40, `events` 43;
+- the final gate, run 40794571273.
+
+Retrospective (M5). Only the whole hosted set caught the build's one real regression: a new hover button took the click an e2e helper aimed at the line's center at the 200px floor. Its unit tests couldn't see it, since happy-dom has no layout. The underlying fault was a design one, a control shown where it can't act, and fixing that also fixed the geometry. The task review's one finding was the shape M3's retrospective named: an early toggle replayed over state it hadn't seen. A future child adding a control to a dense row should show it only where it acts, and run the e2e groups that click that row.
 
 Retrospective (M3). Built as eight tasks under subagent-driven execution, each reviewed at its frontier, then reviewer-high on the whole branch.
 - What the reviews found: ten task reviews found real defects in five of the eight tasks, and the whole-branch review found five more across tasks.
