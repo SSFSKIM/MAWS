@@ -606,3 +606,16 @@ describe('a lost acknowledgement', () => {
     expect(lost.dropped.map((m) => m.t)).toEqual(['ack', 'done']);
   });
 });
+
+describe('the endpoint ready for the run', () => {
+  const status = { enrollment: 'org-listed', hub: { connected: true }, listener: { bound: true }, stateVersion: 5, channels: { relayed: 0, direct: 0 }, rl10: { connected: true } } as const;
+
+  it('is org-listed, on the hub, at the head, and bound: by its status, or by the sockets it listens on when its status flag is stale (#320)', async () => {
+    const { endpointReady } = await import('../../deploy/endpoint-acceptance.ts');
+    expect(endpointReady(status as never, 5, [])).toBe('bound');
+    expect(endpointReady({ ...status, listener: { bound: false } } as never, 5, ['100.116.205.27:47830'])).toBe('bound by its sockets (its status says unbound)');
+    expect(endpointReady({ ...status, listener: { bound: false } } as never, 5, [])).toBeNull();
+    expect(endpointReady({ ...status, stateVersion: 4 } as never, 5, [])).toBeNull();
+    expect(endpointReady({ ...status, hub: { connected: false } } as never, 5, [])).toBeNull();
+  });
+});

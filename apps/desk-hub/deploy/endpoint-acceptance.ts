@@ -46,6 +46,17 @@ export function itemsFor(mode: 'production' | 'staging', given: string | undefin
   return { items };
 }
 
+/**
+ * Whether the endpoint is ready for the run: org-listed, on the hub, at the head's version, and its direct listener
+ * bound, as its status says or, where its status flag is stale (a release before #320 reports a listener it bound
+ * as unbound), as the sockets it listens on show. How it is bound, or null while it is not ready.
+ */
+export function endpointReady(s: Awaited<ReturnType<EndpointMachine['status']>>, head: number, listening: readonly string[]): string | null {
+  if (s.enrollment !== 'org-listed' || !s.hub.connected || (s.stateVersion ?? 0) < head) return null;
+  if (s.listener.bound) return 'bound';
+  return listening.length > 0 ? 'bound by its sockets (its status says unbound)' : null;
+}
+
 /** Adds to the run's sessions those the scene recorded and the run had not heard of. */
 export function mergeSessions(sessions: string[], recorded: readonly string[]): void {
   for (const id of recorded) if (!sessions.includes(id)) sessions.push(id);
@@ -229,16 +240,17 @@ export async function buildScene(o: RunOptions & { tag: string }, made: Made, lo
     log(`${name}: org-listed, ref ${ref} (the authorized machine)`);
   }
   machineName = name;
-  const status = await until(
+  const { status, bound } = await until(
     async () => {
       const s = await machine.status();
-      return s.enrollment === 'org-listed' && s.hub.connected && s.listener.bound && (s.stateVersion ?? 0) >= chain.at(-1)!.state.version ? s : null;
+      const ready = endpointReady(s, chain.at(-1)!.state.version, s.listener.bound ? [] : await machine.listening());
+      return ready === null ? null : { status: s, bound: ready };
     },
     'the endpoint org-listed, on the hub and listening at the head',
     120_000,
     2000,
   );
-  log(`${name}: endpoint org-listed at version ${status.stateVersion}, on the hub (generation ${status.hub.generation ?? '?'}), the direct listener bound`);
+  log(`${name}: endpoint org-listed at version ${status.stateVersion}, on the hub (generation ${status.hub.generation ?? '?'}), the direct listener ${bound}`);
 
   const relay = new RelayDialer(person.hub, ref, () => person.headers);
   cleanup.add('close the relay’s Machine socket', async () => relay.close());
@@ -248,7 +260,7 @@ export async function buildScene(o: RunOptions & { tag: string }, made: Made, lo
   const project = laneAProject(o.target, org, name);
   const hubWrites = o.target === 'production' ? HubWrites.production(project.id) : HubWrites.staging(project.id);
   cleanup.add('record what the run keeps on the hub', async () => void made.kept.push(...hubWrites.kept()));
-  sessionLog = { project: project.id, from: await projectLogOffset(person, project.id, o.target === 'production') };
+  sessionLog = { project: project.id, from: await projectLogOffset(person, project.id) };
   log(`lane A’s project log stands at offset ${sessionLog.from} before lane A starts`);
   const laneA = await machine.laneA.up(project);
   sessions.push(laneA.session);
@@ -284,15 +296,15 @@ export async function buildScene(o: RunOptions & { tag: string }, made: Made, lo
 }
 
 /**
- * Where `project`'s log stands now, the offset the hub is caught up to. A project the hub does not know yet (a staging
- * machine's, before its sminos says hello) has nothing in it: 0, unless `known` (production's machine has a history).
+ * Where `project`'s log stands now, the offset the hub is caught up to. A project the hub does not know yet (lane A's,
+ * before its sminos says hello) has nothing in it: 0. A baseline of 0 counts nothing that is not the run's either way,
+ * since the run's own events are its sessions' writers' alone (runOwnEvents).
  */
-async function projectLogOffset(person: Person, project: string, known: boolean): Promise<number> {
+async function projectLogOffset(person: Person, project: string): Promise<number> {
   let socket: ProjectSocket;
   try {
     socket = await ProjectSocket.open(person.hub, person.headers, project, 15_000);
-  } catch (error) {
-    if (known) throw error;
+  } catch {
     return 0;
   }
   try {

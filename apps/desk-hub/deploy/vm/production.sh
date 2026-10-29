@@ -344,9 +344,10 @@ case $verb in
     say "claude processes of $OWNER's: $n"
     [[ -z $(ss -ltnH "( sport = :$STUB_PORT )") ]] && say "port $STUB_PORT: free" || say "port $STUB_PORT: TAKEN"
     t=$(mktemp -d) && chmod 755 "$t"
-    setsid -f runuser -u nobody -- env -i PATH=/usr/bin:/bin "$CUR/runtime/bin/node" "$O/stub-model.mjs" --port 47898 </dev/null >"$t/stub.log" 2>&1
-    if within 15 bash -c "exec 3<>/dev/tcp/127.0.0.1/47898" 2>/dev/null; then say "stub model: started and listening (as nobody, port 47898)"; else say "stub model: did NOT listen: $(tail -2 "$t/stub.log")"; fi
-    pkill -u nobody -f "$O/stub-model.mjs --port 47898"; rm -rf "$t" ;;
+    # As lane-a-up starts it: the owner's user, `env -i`, the run's node; on a spare port, and ended at once.
+    setsid -f runuser -u $OWNER -- env -i "${OWNER_ENV[@]}" "$CUR/runtime/bin/node" "$O/stub-model.mjs" --port 47898 </dev/null >"$t/stub.log" 2>&1
+    if within 15 bash -c "exec 3<>/dev/tcp/127.0.0.1/47898" 2>/dev/null; then say "stub model: started and listening (as $OWNER under env -i, port 47898)"; else say "stub model: did NOT listen: $(tail -2 "$t/stub.log")"; fi
+    pkill -u $OWNER -f "$O/stub-model.mjs --port 47898"; rm -rf "$t" ;;
   up) [[ -n $(pid) ]] || fail "the production mawsd is not running"; say "up: the production mawsd runs (pid $(pid)); nothing started" ;;
   enroll) fail "production enrolls nothing: its machine is cut over and listed already" ;;
   mawsd)
