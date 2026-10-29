@@ -546,7 +546,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(main(page).getByText('It is working in the background.')).toBeVisible({ timeout: 15_000 });
     await expect(row, 'the turn ended while its agent works: the call stays in view').toBeVisible();
     await expect(row).toContainText('Sleep a while started working');
-    await c.store.appendLines(c.transcript, [JSON.stringify(taskNotificationRecord(c.sid, c.repo.root, last, { taskId: agent.agentId, status: 'completed', summary: 'Slept.', at: '2026-10-28T10:00:09.000Z' }))]);
+    await c.store.appendLines(c.transcript, [JSON.stringify(taskNotificationRecord(c.sid, c.repo.root, last, { taskId: agent.agentId, toolUseId: `toolu_${agent.agentId}`, status: 'completed', summary: 'Slept.', at: '2026-10-28T10:00:09.000Z' }))]);
     await expect(row, 'the agent ended: its row folds with the turn').toHaveCount(0, { timeout: 10_000 });
     expect(c.maws.consoleErrors()).toEqual([]);
   });

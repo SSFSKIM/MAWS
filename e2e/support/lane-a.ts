@@ -100,10 +100,12 @@ export function turnEndRecords(sessionId: string, cwd: string, parentUuid: strin
 }
 
 // The engine's notification that a background task ended, as the attachment row it queues for the model.
-export function taskNotificationRecord(sessionId: string, cwd: string, parentUuid: string, note: { taskId: string; status: string; summary: string; at: string }): Record<string, unknown> {
+// `toolUseId`: the call that started the task, which an agent's notification names (2.1.312).
+export function taskNotificationRecord(sessionId: string, cwd: string, parentUuid: string, note: { taskId: string; status: string; summary: string; at: string; toolUseId?: string }): Record<string, unknown> {
+  const toolUse = note.toolUseId === undefined ? '' : `<tool-use-id>${note.toolUseId}</tool-use-id>\n`;
   return {
     type: 'attachment', uuid: randomUUID(), parentUuid, cwd, sessionId, timestamp: note.at, isSidechain: false, userType: 'external', version: '2.1.300',
-    attachment: { type: 'queued_command', commandMode: 'task-notification', prompt: `<task-notification>\n<task-id>${note.taskId}</task-id>\n<status>${note.status}</status>\n<summary>${note.summary}</summary>\n</task-notification>` },
+    attachment: { type: 'queued_command', commandMode: 'task-notification', prompt: `<task-notification>\n<task-id>${note.taskId}</task-id>\n${toolUse}<status>${note.status}</status>\n<summary>${note.summary}</summary>\n</task-notification>` },
   };
 }
 
