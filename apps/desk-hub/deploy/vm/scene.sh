@@ -22,6 +22,7 @@
 #   sminos-status | sminos-revoked   `sminos daemon status` (and whether hub.json exists); daemon/revoked.json
 #   imported <token>             how many events in sminos's project logs hold the token (words it imported)
 #   local-spawn <alias> | retire <alias>   a local `sminos spawn` from the project's checkout; its retirement
+#   started                      the sessions the scene recorded starting: `session <id>` (lane A), `seat <id>`
 #   down                         everything of the scene ended and removed; `LEFT …` for what could not be
 # Nothing here names the owner, the owner's profile, sminos or daemon, or the VM's own mawsd (port 47830): the scene is
 # o10acc's alone, and `down` ends that user's processes and nothing else.
@@ -265,8 +266,15 @@ case $verb in
   sminos-status) as $SMINOS daemon status; [[ -e $S/daemon/hub.json ]] && say "hub.json: present" || say "hub.json: absent" ;;
   imported) [[ ${1:-} =~ ^[a-z0-9-]{4,64}$ ]] || fail "a marker token"; { find $S -path '*/log/*.jsonl' -type f -exec cat {} + 2>/dev/null | grep -cF -- "$1"; true; } ;;
   sminos-revoked) if [[ -f $S/daemon/revoked.json ]]; then python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))))' $S/daemon/revoked.json; else say none; fi ;;
-  local-spawn) word "${1:-}"; inns runuser -u $U -- env -i "${SCENE_ENV[@]}" bash -c "cd $W && exec $SMINOS spawn $1 'o10-m11: a local spawn; answer ok' --cwd $W" ;;
+  local-spawn)
+    word "${1:-}"
+    out=$(inns runuser -u $U -- env -i "${SCENE_ENV[@]}" bash -c "cd $W && exec $SMINOS spawn $1 'o10-m11: a local spawn; answer ok' --cwd $W" 2>&1); rc=$?
+    say "$out"
+    # The seat's session, for the run's residue whatever becomes of the seat: `seat spawned: …  [<short> / <session>] …`.
+    sed -n 's|^seat [a-z-]*: .*\[[0-9a-z]* / \([0-9a-f-]\{36\}\)\].*|\1|p' <<<"$out" | tail -1 >$R/seat.session
+    exit $rc ;;
   retire) word "${1:-}"; as bash -c "cd $W && exec $SMINOS retire $1" ;;
+  started) for f in session seat.session; do [[ -s $R/$f ]] && say "${f%.session} $(head -1 $R/$f)"; done; true ;;
   down) stop_verbs; v=$?; down; d=$?; exit $((v | d)) ;;
-  *) fail "scene.sh check | up | enroll <name> | mawsd <args…> | restart | cut-hub | listening | log-size <log> | log-since <log> <bytes> | lane-a-up <project> <name> | lane-a-stop | lane-a-resume | transcript <session> [token] | sminos-status | sminos-revoked | imported <token> | local-spawn <alias> | retire <alias> | down" ;;
+  *) fail "scene.sh check | up | enroll <name> | mawsd <args…> | restart | cut-hub | listening | log-size <log> | log-since <log> <bytes> | lane-a-up <project> <name> | lane-a-stop | lane-a-resume | transcript <session> [token] | sminos-status | sminos-revoked | imported <token> | local-spawn <alias> | retire <alias> | started | down" ;;
 esac

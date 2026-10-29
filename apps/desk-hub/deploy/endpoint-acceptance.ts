@@ -26,7 +26,7 @@ import { readSecrets } from './deploy';
 import { Person } from './hub';
 import { composeScript, ScriptRunner, stopMachineWork, VmMachine, type EndpointMachine } from './endpoint-machine';
 import { ProjectSocket } from 'org-protocol/test-support';
-import { HubWrites, runItems, runOwnEvents, sessionResidue, ITEMS, type LoggedEvent, type Scene } from './endpoint-items';
+import { HubWrites, runItems, runOwnEvents, sessionResidue, ITEMS, PRODUCTION_ITEMS, type LoggedEvent, type Scene } from './endpoint-items';
 import { DirectPacer, RelayDialer, type RunDevice } from './endpoint-remote';
 import { ItemReport, Secrets } from './endpoint-verdicts';
 import { loadAdminDevice, OrgAdmin, successor, type AdminDevice, type OrgScope } from './org-admin';
@@ -36,6 +36,20 @@ export const DEFAULT_VM = 'dc-acceptance-7f80';
 export const DEFAULT_DIRECT_URL = 'ws://100.116.205.27:47831';
 /** Production's direct listener: the VM's own mawsd, on its own port. */
 export const PRODUCTION_DIRECT_URL = 'ws://100.116.205.27:47830';
+
+/** The items a run of `mode` runs: those named, else the mode's own (production's are 2–5, and it refuses others). */
+export function itemsFor(mode: 'production' | 'staging', given: string | undefined): { items: string[] } | { refused: string } {
+  const allowed: readonly string[] = mode === 'production' ? PRODUCTION_ITEMS : ITEMS;
+  const items = given === undefined ? [...allowed] : given.split(',').map((item) => item.trim());
+  if (items.some((item) => !(ITEMS as readonly string[]).includes(item))) return { refused: `--items names items among ${ITEMS.join(',')}` };
+  if (items.some((item) => !allowed.includes(item))) return { refused: `production runs items ${PRODUCTION_ITEMS.join(',')} alone (8's and 9's probes are staging's), not ${items.join(',')}` };
+  return { items };
+}
+
+/** Adds to the run's sessions those the scene recorded and the run had not heard of. */
+export function mergeSessions(sessions: string[], recorded: readonly string[]): void {
+  for (const id of recorded) if (!sessions.includes(id)) sessions.push(id);
+}
 
 /** The direct listener the run dials: the one the command names, else the mode's own. */
 export function directUrlFor(mode: 'production' | 'staging', given: string | undefined): string {
@@ -151,6 +165,9 @@ export async function buildScene(o: RunOptions & { tag: string }, made: Made, lo
     const left = await machine.down();
     if (left.length) throw new Error(left.join('; '));
   });
+  // Before the scene ends (the cleanup runs last-added first), the sessions its records say it started, a lane A whose
+  // start failed after its id was chosen and a seat a guard stopped among them, so the residue counts them.
+  cleanup.add('recover the sessions the scene started', async () => mergeSessions(sessions, await machine.laneA.started()));
   await machine.up();
   log(`${machine.label}: a fresh scratch mawsd serving, unenrolled`);
 
@@ -420,7 +437,7 @@ function run(command: string, args: string[], print: (line: string) => void, ms:
 export const OPTIONS = {
   config: { type: 'string' },
   'device-keys': { type: 'string' },
-  items: { type: 'string', default: ITEMS.join(',') },
+  items: { type: 'string' },
   vm: { type: 'string', default: DEFAULT_VM },
   devcloud: { type: 'string', default: DEVCLOUD },
   'direct-url': { type: 'string' },
@@ -473,11 +490,12 @@ export async function main(argv: string[]): Promise<number> {
     console.error(chosen.refused);
     return 2;
   }
-  const items = (values.items as string).split(',').map((item) => item.trim());
-  if (items.some((item) => !(ITEMS as readonly string[]).includes(item))) {
-    console.error(`--items names items among ${ITEMS.join(',')}`);
+  const chosenItems = itemsFor(chosen.mode === 'production' ? 'production' : 'staging', values.items as string | undefined);
+  if ('refused' in chosenItems) {
+    console.error(chosenItems.refused);
     return 2;
   }
+  const { items } = chosenItems;
   const scratch = (values.scratch as string | undefined) ?? join(process.env.HOME ?? '/tmp', '.local', 'share', 'o10-m11-scratch');
   mkdirSync(scratch, { recursive: true, mode: 0o700 });
   const ssh = { devcloud: values.devcloud as string, vm: values.vm as string };

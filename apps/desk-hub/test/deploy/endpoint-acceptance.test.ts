@@ -244,15 +244,15 @@ describe('production’s allowlist', () => {
     report.admit = productionAdmit(false);
     const ran: string[] = [];
     const run = (name: string) => async () => (ran.push(name), 'ran');
-    await report.check('9', 'the handshake and caps over the direct carrier', run('caps'));
-    await report.check('9', 'a revoked device refused, and one a new state removes closed `removed`, over both carriers', run('revoked'));
+    await report.check('3', 'an action resent under a used nonce is refused `replayed`', run('caps'));
+    await report.check('3', 'a device a new org state removes is refused at once', run('revoked'));
     await report.check('2', 'a hub deploy, then the forced cut: the relayed channel resumes by replay', run('deploy'));
     await report.check('5', 'a device’s words arrive verified and are delivered into the session', run('words'));
     await report.check('3', 'a clause nobody listed', run('unlisted'));
     expect(ran).toEqual(['caps']);
     expect(lines).toEqual([
-      'ok   9 the handshake and caps over the direct carrier: ran',
-      'skip 9 a revoked device refused, and one a new state removes closed `removed`, over both carriers: never in production: the run amends no org state there',
+      'ok   3 an action resent under a used nonce is refused `replayed`: ran',
+      'skip 3 a device a new org state removes is refused at once: never in production: the run amends no org state there',
       'skip 2 a hub deploy, then the forced cut: the relayed channel resumes by replay: never in production: no hub deploy',
       'skip 5 a device’s words arrive verified and are delivered into the session: writes the production hub’s stored data, which this run is not allowed',
       'skip 3 a clause nobody listed: not on production’s allowlist',
@@ -358,9 +358,8 @@ describe('production’s spawn probes', () => {
     for (const [item, check] of [
       ['4', 'a spawn whose permission mode is above the ceiling is refused `ceiling`'],
       ['4', 'a spawn into a directory that is no known checkout is refused `unknown-checkout`'],
-      ['8', 'an owner’s spawn needs step-up'],
-      ['8', 'a spawn by a member without the machine’s `spawn` right'],
     ]) expect(admit(item, check), check).toMatch(/^never in production: .*launch a seat.*staging.*test\/endpoint\/grades\.test\.ts/);
+    for (const check of ['an owner’s spawn needs step-up', 'a spawn by a member without the machine’s `spawn` right']) expect(admit('8', check), check).toMatch(/^never in production: item 8/);
     // The guarded local spawn still runs.
     expect(admit('4', 'a local `sminos spawn` from the machine runs, untouched by the endpoint')).toBeNull();
   });
@@ -483,5 +482,74 @@ describe('the seat a local spawn made', () => {
     const { seatSession } = await import('../../deploy/endpoint-items.ts');
     expect(seatSession(['banner', 'seat spawned: proj/o10-local-ab12cd  [4f2a9c1 / 0f3e8a52-7c1d-4b9e-9a61-2d4f6b8c0e13]  status=working  (reply: sminos reply 4f2a9c1)'])).toBe('0f3e8a52-7c1d-4b9e-9a61-2d4f6b8c0e13');
     expect(seatSession(['sminos: spawn failed'])).toBeNull();
+  });
+});
+
+describe('production’s items', () => {
+  it('are 2–5 when none are named, and a selection outside them is refused', async () => {
+    const { itemsFor } = await import('../../deploy/endpoint-acceptance.ts');
+    expect(itemsFor('production', undefined)).toEqual({ items: ['2', '3', '4', '5'] });
+    expect(itemsFor('production', '8')).toEqual({ refused: expect.stringMatching(/production runs items 2,3,4,5 alone/) });
+    expect(itemsFor('production', '2,9')).toEqual({ refused: expect.stringMatching(/production runs items 2,3,4,5 alone/) });
+    expect(itemsFor('production', '3,5')).toEqual({ items: ['3', '5'] });
+    expect(itemsFor('staging', undefined)).toEqual({ items: ['2', '3', '4', '5', '8', '9'] });
+    expect(itemsFor('staging', '8')).toEqual({ items: ['8'] });
+    expect(itemsFor('staging', '7')).toEqual({ refused: expect.stringMatching(/--items names items among/) });
+  });
+
+  it('never admit a clause of item 8 or 9 on production, the not-offered probe included', async () => {
+    const { productionAdmit, PRODUCTION_CLAUSES } = await import('../../deploy/endpoint-items.ts');
+    expect(Object.keys(PRODUCTION_CLAUSES).filter((c) => /^[89] /.test(c))).toEqual([]);
+    const admit = productionAdmit(true);
+    expect(admit('8', 'what production’s offer table doesn’t offer is refused `not-offered`, the owner’s too')).not.toBeNull();
+    expect(admit('9', 'the handshake and caps over the direct carrier')).not.toBeNull();
+  });
+});
+
+describe('item 3’s replaying relay', () => {
+  it('replays the action frame it was armed for, not a pong sent after it', async () => {
+    const { replaying } = await import('../../deploy/endpoint-items.ts');
+    const sent: string[] = [];
+    const inner = { send: (b: Uint8Array) => void sent.push(Buffer.from(b).toString()), onBytes: () => {}, onClose: () => {}, close: () => {} };
+    const relay = replaying(inner as never);
+    relay.device.send(Buffer.from('hello'));
+    relay.arm();
+    relay.device.send(Buffer.from('act'));
+    relay.device.send(Buffer.from('pong'));
+    relay.replayLast();
+    expect(sent).toEqual(['hello', 'act', 'pong', 'act']);
+  });
+
+  it('is fed no pong while the run holds them: a ping between the act and the replay is answered after', async () => {
+    const { Remote } = await import('../../deploy/endpoint-remote.ts');
+    let deliver: (m: unknown) => void = () => {};
+    const sent: unknown[] = [];
+    const channel = { onMessage: (f: (m: unknown) => void) => void (deliver = f), onClose: () => {}, send: async (m: unknown) => void sent.push(m) };
+    const remote = new Remote({} as never, channel as never);
+    remote.holdPongs(true);
+    deliver({ t: 'ping', at: 1 });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sent).toEqual([]);
+    remote.holdPongs(false);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sent).toEqual([{ t: 'pong', at: 1 }]);
+  });
+});
+
+describe('the sessions the run started', () => {
+  it('count a seat the production guard stopped, from the spawn’s own words', async () => {
+    const { recordSeat } = await import('../../deploy/endpoint-items.ts');
+    const sessions = ['lane-a'];
+    const guarded = ['before the spawn: no claude of new’s but the run’s own', 'seat spawned: p/o10-local-x  [4f2a9c1 / 0f3e8a52-7c1d-4b9e-9a61-2d4f6b8c0e13]  status=working  (reply: sminos reply 4f2a9c1)', 'seat pid 301: CLAUDE_CONFIG_DIR=/Users/new/.claude', 'the seat was stopped at once: kill 301'];
+    recordSeat(sessions, guarded);
+    recordSeat(sessions, guarded);
+    expect(sessions).toEqual(['lane-a', '0f3e8a52-7c1d-4b9e-9a61-2d4f6b8c0e13']);
+  });
+
+  it('are merged with what the VM recorded, a lane A whose start failed after its id was chosen included', async () => {
+    const { mergeSessions } = await import('../../deploy/endpoint-acceptance.ts');
+    const sessions = ['a'];
+    mergeSessions(sessions, ['a', 'b', 'c']);
+    expect(sessions).toEqual(['a', 'b', 'c']);
   });
 });

@@ -253,3 +253,12 @@ describe('the VM machine', () => {
     await expect(vm.keys()).rejects.toThrow(/keys on vm1 exited 3: mawsd: not running/);
   });
 });
+
+describe('the VM’s record of the sessions the run started', () => {
+  it('reads `started`’s lines: lane A’s session and the seat’s, whichever exist', async () => {
+    const fake = standin(() => '@@BEGIN\nsession 0f3e8a52-7c1d-4b9e-9a61-2d4f6b8c0e13\nseat 1a2b3c4d-7c1d-4b9e-9a61-2d4f6b8c0e13\n@@END 0\n');
+    const machine = new VmMachine({ devcloud: fake.bin, vm: 'vm1' }, scratch(), { directUrl: 'ws://vm1:47831' });
+    expect(await machine.laneA.started()).toEqual(['0f3e8a52-7c1d-4b9e-9a61-2d4f6b8c0e13', '1a2b3c4d-7c1d-4b9e-9a61-2d4f6b8c0e13']);
+    expect(fake.calls()[0].script).toContain('/opt/o10-m11/scene.sh started');
+  });
+});

@@ -147,6 +147,11 @@ export class LocalLaneA implements LaneAScene {
     return [...this.rows_];
   }
 
+  /** The fake starts no session of sminos's: the run knows lane A's from `up`. */
+  async started(): Promise<string[]> {
+    return [];
+  }
+
   async count(_session: string, token: string): Promise<number> {
     return this.sends.filter((text) => text.endsWith(` ${token}`)).length;
   }

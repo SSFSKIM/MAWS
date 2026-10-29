@@ -60,6 +60,9 @@ export interface LaneAScene {
   /** How many times a send whose text ends in `token` (a marker the run made) reached the session as a user's row. */
   count(session: string, token: string): Promise<number>;
   sminos: SminosProbe | null;
+  /** The sessions the scene recorded starting for the run (lane A's, a local spawn's seat), whatever became of them:
+   * read before the scene's records go with its `down`. */
+  started(): Promise<string[]>;
 }
 
 export interface EndpointMachine {
@@ -413,6 +416,13 @@ class VmLaneA implements LaneAScene {
   async ticks(count: number, tag: string, send: (text: string) => Promise<void>): Promise<void> {
     if (!Number.isSafeInteger(count) || count < 1 || count > 500 || !/^[a-z0-9]{1,16}$/.test(tag)) throw new Error('ticks: a count 1-500 and a tag [a-z0-9]');
     await send(`o10-m11 ticks ${count} ${tag}`);
+  }
+
+  async started(): Promise<string[]> {
+    return (await this.vm.scene('started')).lines.flatMap((line) => {
+      const m = /^(session|seat) ([0-9a-f-]{36})$/.exec(line);
+      return m ? [m[2]] : [];
+    });
   }
 
   async rows(session: string): Promise<string[]> {

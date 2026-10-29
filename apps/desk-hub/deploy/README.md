@@ -282,8 +282,9 @@ after), `staging-run.sh endpoint-vm setup <base> | teardown` sets the scene up o
 mode of its own, refused unless asked for by `--production --confirm-production <production's host>` with production's
 config (`endpoint-production.ts`), and driven by `vm/production.sh` against the VM's own `mawsd` and sminos. Its
 machine is pinned (`PRODUCTION_MACHINE`: the VM `dc-acceptance-7f80`, its name and its ref), checked before the owner
-is asked for anything, and dialled directly on 47830 unless `--direct-url` names another address. It runs only the
-clauses its allowlist names (`PRODUCTION_CLAUSES` in `endpoint-items.ts`): VM-local work, reads, and at most five
+is asked for anything, and dialled directly on 47830 unless `--direct-url` names another address. It runs items 2–5
+(its default; `--items` naming 8 or 9 is refused, their probes being staging's), and of them only the clauses its
+allowlist names (`PRODUCTION_CLAUSES` in `endpoint-items.ts`): VM-local work, reads, and at most five
 events marked `o10 m11 acceptance` posted in the machine's own project (`HubWrites`, which refuses a sixth or any other
 project itself); never a hub deploy, an org-state change, or a spawn the daemon is asked to refuse (a broken refusal
 would launch a seat), which it reports `NOT SHOWN`. Its lane A session runs as the owner's user, since that sminos

@@ -18,6 +18,8 @@ import { laneAProblems, resumeCursor, type ItemReport, type Segment } from './en
 import type { Cleanup } from './proof';
 
 export const ITEMS = ['2', '3', '4', '5', '8', '9'] as const;
+/** The items production runs (item 7's): 8's and 9's probes would ask the real daemon what only staging may. */
+export const PRODUCTION_ITEMS = ['2', '3', '4', '5'] as const;
 export type Item = (typeof ITEMS)[number];
 
 /** The words every event the run posts to a project log carries, so the owner can tell its residue from anything else. */
@@ -81,6 +83,12 @@ export function seatSession(lines: readonly string[]): string | null {
     if (m) return m[1];
   }
   return null;
+}
+
+/** Adds the seat `sminos spawn`'s words name to the run's sessions, once. */
+export function recordSeat(sessions: string[], lines: readonly string[]): void {
+  const seat = seatSession(lines);
+  if (seat !== null && !sessions.includes(seat)) sessions.push(seat);
 }
 
 /** The residue line for the machine's own events the run's sessions wrote, by writer, apart from `HubWrites`' budget. */
@@ -462,21 +470,30 @@ function gated(inner: ByteDuplex): { device: ByteDuplex; hold(on: boolean): void
   };
 }
 
-/** A relay of the run's own that keeps the last frame the device sent, to send it again on the run's word. */
-function replaying(inner: ByteDuplex): { device: ByteDuplex; replayLast(): void } {
+/**
+ * A relay of the run's own that keeps the first frame the device sends once `arm`ed (the action's: the run holds its
+ * pongs meanwhile, and a frame after it never takes its place), to send it again on the run's word.
+ */
+export function replaying(inner: ByteDuplex): { device: ByteDuplex; arm(): void; replayLast(): void } {
+  let armed = false;
   let last: Uint8Array | null = null;
   return {
     device: {
       send: (b) => {
-        last = Uint8Array.from(b);
+        if (armed && last === null) last = Uint8Array.from(b);
         inner.send(b);
       },
       onBytes: (l) => inner.onBytes(l),
       onClose: (l) => inner.onClose?.(l),
       close: (r) => inner.close(r),
     },
+    arm() {
+      armed = true;
+      last = null;
+    },
     replayLast() {
-      if (last !== null) inner.send(last);
+      if (last === null) throw new Error('the relay holds no armed frame to replay');
+      inner.send(last);
     },
   };
 }
@@ -503,10 +520,18 @@ export async function item3(scene: Scene, report: ItemReport): Promise<void> {
     });
     const text = marker(scene, 'replayed');
     const action = send(scene, r, text);
-    const said = await r.act(action);
-    if (said !== 'accepted') throw new Error(`the original was answered ${said}`);
-    await r.done(action.opId);
-    relay!.replayLast();
+    // The run's pongs held while the frame is taken and replayed, so the frame replayed is the action's.
+    r.holdPongs(true);
+    let said: string;
+    try {
+      relay!.arm();
+      said = await r.act(action);
+      if (said !== 'accepted') throw new Error(`the original was answered ${said}`);
+      await r.done(action.opId);
+      relay!.replayLast();
+    } finally {
+      r.holdPongs(false);
+    }
     const reason = await Promise.race([r.closed, sleep(20_000).then(() => 'still open')]);
     if (reason !== 'sequence') throw new Error(reason === 'still open' ? 'the channel stayed open after a replayed frame' : `the channel closed ${reason}, not sequence`);
     const count = await effects(scene, text);
@@ -639,6 +664,7 @@ export async function item3(scene: Scene, report: ItemReport): Promise<void> {
       },
     });
     const text = marker(scene, 'altered');
+    r.holdPongs(true); // the next frame to the endpoint, the one altered, is the action's
     relay!.tamper('to-endpoint', { flip: -1 });
     await r.channel.send({ t: 'act', action: send(scene, r, text) });
     const reason = await Promise.race([r.closed, sleep(20_000).then(() => 'still open')]);
@@ -742,13 +768,12 @@ export async function item4(scene: Scene, report: ItemReport): Promise<void> {
     const mark = await scene.machine.logMark();
     scene.cleanup.add(`retire ${alias}`, () => probe.retire(alias));
     const spawned = await probe.localSpawn(alias);
+    recordSeat(scene.sessions, spawned.lines); // a seat the guard stopped is still one the run started
     // Production's guard (vm/production.sh): 10, a claude supervisor or background seat of the owner's ran already, so
     // nothing was spawned; 11, the seat's environment was not the scratch config's and the stub's, so it was killed.
     if (spawned.rc === 10 || spawned.rc === 11) return { skip: `not shown on production: ${spawned.lines.at(-1) ?? `exit ${spawned.rc}`}` };
     if (spawned.rc !== 0) throw new Error(`sminos spawn exited ${spawned.rc}: ${spawned.lines.slice(-3).join(' / ')}`);
-    const seat = seatSession(spawned.lines);
-    if (seat === null) throw new Error(`sminos spawn named no seat session: ${spawned.lines.slice(-3).join(' / ')}`);
-    scene.sessions.push(seat);
+    if (seatSession(spawned.lines) === null) throw new Error(`sminos spawn named no seat session: ${spawned.lines.slice(-3).join(' / ')}`);
     const touched = (await scene.machine.logSince(mark)).filter((l) => l.includes(alias) || /endpoint: .*(rpc|spawn)/i.test(l));
     if (touched.length) throw new Error(`the endpoint's log mentions it: ${touched[0]}`);
     await probe.retire(alias);
@@ -1093,17 +1118,6 @@ const both = (check: string) => ['relayed', 'direct'].map((carrier) => check.rep
  * skipped, so a clause added later runs in production only once someone lists it.
  */
 export const PRODUCTION_CLAUSES: Record<string, 'vm' | 'read' | 'hub-write'> = Object.fromEntries([
-  ...both('9 the handshake and caps over the <carrier> carrier').map((c) => [c, 'vm']),
-  ...both('9 an unknown device refused over the <carrier> carrier').map((c) => [c, 'vm']),
-  ...both('9 a device claiming another class refused over the <carrier> carrier').map((c) => [c, 'vm']),
-  ...both('9 an altered frame closes the channel over the <carrier> carrier').map((c) => [c, 'vm']),
-  ['9 the direct listener binds only the tailnet’s addresses', 'vm'],
-  ['9 a call before the handshake verifies closes the connection', 'vm'],
-  ['9 handshakes past the per-source limit answered `busy`', 'vm'],
-  ['8 a `view` read on a session the member holds nothing on', 'vm'],
-  ['8 a `converse`, an `approve` and a `manage` act refused below their grades', 'vm'],
-  ['8 the machine’s content-free reads, for any member', 'vm'],
-  ['8 what production’s offer table doesn’t offer is refused `not-offered`, the owner’s too', 'vm'],
   ['3 an action frame the relay replays closes the channel, and the action runs once', 'vm'],
   ['3 an action resent under a used nonce is refused `replayed`', 'vm'],
   ['3 an action more than 60 s old by the machine’s clock is refused `stale`', 'vm'],
@@ -1138,8 +1152,6 @@ const NEVER_IN_PRODUCTION: Record<string, string> = {
   '4 `--read-only on` refuses a spawn': SPAWN_PROBE,
   '4 a spawn whose permission mode is above the ceiling is refused `ceiling`': SPAWN_PROBE,
   '4 a spawn into a directory that is no known checkout is refused `unknown-checkout`': SPAWN_PROBE,
-  '8 an owner’s spawn needs step-up': SPAWN_PROBE,
-  '8 a spawn by a member without the machine’s `spawn` right': SPAWN_PROBE,
   '2 a hub deploy, then the forced cut: the relayed channel resumes by replay': 'never in production: no hub deploy',
   '9 a revoked device refused, and one a new state removes closed `removed`, over both carriers': 'never in production: the run amends no org state there',
   '3 a device a new org state removes is refused at once': 'never in production: the run amends no org state there',
@@ -1151,6 +1163,7 @@ const NEVER_IN_PRODUCTION: Record<string, string> = {
 export function productionAdmit(hubWrites: boolean): (item: string, check: string) => string | null {
   return (item, check) => {
     const key = `${item} ${check}`;
+    if (!(PRODUCTION_ITEMS as readonly string[]).includes(item)) return `never in production: item ${item} is not among production’s items (${PRODUCTION_ITEMS.join(',')})`;
     if (NEVER_IN_PRODUCTION[key] !== undefined) return NEVER_IN_PRODUCTION[key];
     const kind = PRODUCTION_CLAUSES[key];
     if (kind === undefined) return 'not on production’s allowlist';

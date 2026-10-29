@@ -283,10 +283,32 @@ export class Remote {
     channel.onMessage((m) => {
       // A device answers the endpoint's ping (RL §4.5): a channel left silent for two of them is closed `timeout`, as
       // the run's would be while it waits on something long (a hub deploy's build).
-      if ((m as Msg).t === 'ping') void channel.send({ t: 'pong', at: (m as Msg).at as number }).catch(() => {});
+      if ((m as Msg).t === 'ping') this.#pong((m as Msg).at as number);
       this.inbox.push(m as Msg);
     });
     this.closed = new Promise<string>((resolve) => channel.onClose((reason) => resolve((this.#reason = reason))));
+  }
+
+  #held: number[] | null = null;
+
+  #pong(at: number): void {
+    if (this.#held !== null) this.#held.push(at);
+    else void this.channel.send({ t: 'pong', at }).catch(() => {});
+  }
+
+  /**
+   * Holds the pongs (`on`), and sends those held once released: while a relay of the run's takes or alters a frame by
+   * its place in the stream, the frame there is the one the run sent, never a pong. A few seconds held is well inside
+   * the endpoint's two unanswered pings.
+   */
+  holdPongs(on: boolean): void {
+    if (on) {
+      this.#held ??= [];
+      return;
+    }
+    const held = this.#held ?? [];
+    this.#held = null;
+    for (const at of held) this.#pong(at);
   }
 
   /** How the channel closed, once it has. */

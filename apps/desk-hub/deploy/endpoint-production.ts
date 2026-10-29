@@ -20,6 +20,7 @@ import { VmMachine, type Ssh } from './endpoint-machine';
 import type { RunDevice } from './endpoint-remote';
 import type { Secrets } from './endpoint-verdicts';
 import { runEndpointAcceptance } from './endpoint-acceptance';
+import { PRODUCTION_ITEMS } from './endpoint-items';
 import type { Cleanup } from './proof';
 
 /** Where vm/production.sh would be installed on the VM (part 2's setup; never installed in part 1). */
@@ -128,6 +129,8 @@ export async function waitForFile(file: string, ms: number, check: () => void = 
 export async function productionRun(o: ProductionOptions): Promise<number> {
   if (new URL(o.person.hub).hostname !== PRODUCTION_HOST) throw new Error(`the production run is production's alone, not ${o.person.hub}'s`);
   checkProductionMachine(o.ssh.vm);
+  const outside = o.items.filter((item) => !(PRODUCTION_ITEMS as readonly string[]).includes(item));
+  if (outside.length) throw new Error(`production runs items ${PRODUCTION_ITEMS.join(',')} alone, not ${outside.join(',')}`);
   const tag = randomBytes(3).toString('hex');
   const id = `o10-p-${tag}`;
   const readyMs = o.readyMs ?? OWNER_MS;
