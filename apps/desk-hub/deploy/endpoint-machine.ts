@@ -87,8 +87,11 @@ export interface EndpointMachine {
   laneA: LaneAScene;
   /** Everything of the scene stopped and removed; what could not be. */
   down(): Promise<string[]>;
-  /** Waits until nothing the run asked of the machine is still running (after an interruption cancelled it). */
-  settle(): Promise<void>;
+  /**
+   * Waits until nothing the run asked of the machine is still running (after the run's end cancelled it), at most
+   * `ms`; what still runs then, by name.
+   */
+  settle(ms?: number): Promise<string[]>;
 }
 
 // ---- the steps -------------------------------------------------------------------------------------------------------
@@ -124,7 +127,8 @@ export function composeScript(body: string, files: Record<string, Buffer>, { tra
  */
 export class ScriptRunner {
   #n = 0;
-  readonly #inflight = new Set<Promise<unknown>>();
+  /** The steps running, each by its name. */
+  readonly #inflight = new Map<Promise<unknown>, string>();
   constructor(
     readonly ssh: Ssh,
     private readonly dir: string,
@@ -136,11 +140,16 @@ export class ScriptRunner {
     private readonly options: { gate?: () => void; signal?: AbortSignal } = {},
   ) {}
 
-  /** Waits until no step is running (each is bounded, and a cancelled one settles within its kill's deadline). */
-  async settle(ms = 15_000): Promise<void> {
+  /**
+   * Waits until no step is running, at most `ms`; the names of those still running then (none: every step ended, and a
+   * cancelled one only once its whole process group was gone). A step still running here is not proof its script on
+   * the VM ended: the scene's `down` stops the scene's verbs still running there.
+   */
+  async settle(ms = 15_000): Promise<string[]> {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    await Promise.race([Promise.allSettled([...this.#inflight]), new Promise((done) => (timer = setTimeout(done, ms)))]);
+    await Promise.race([Promise.allSettled([...this.#inflight.keys()]), new Promise((done) => (timer = setTimeout(done, ms)))]);
     clearTimeout(timer);
+    return [...this.#inflight.values()];
   }
 
   /** The step's lines and status; throws when it never reached its end marker, ran past `ms`, or was cancelled. */
@@ -151,7 +160,7 @@ export class ScriptRunner {
       return Promise.reject(error as Error);
     }
     const running = this.#step(name, body, options);
-    this.#inflight.add(running);
+    this.#inflight.set(running, name);
     void running.then(
       () => this.#inflight.delete(running),
       () => this.#inflight.delete(running),
@@ -187,30 +196,49 @@ export class ScriptRunner {
         settled = true;
         for (const t of timers) clearTimeout(t);
         signal?.removeEventListener('abort', onAbort);
-        if (outcome instanceof Error) reject(outcome);
-        else resolve({ code: outcome.code, out });
+        if (outcome instanceof Error) {
+          child.stdout!.destroy();
+          child.stderr!.destroy();
+          reject(outcome);
+        } else resolve({ code: outcome.code, out });
       };
-      const group = (sig: NodeJS.Signals) => {
+      const group = (sig: NodeJS.Signals | 0): boolean => {
         try {
           process.kill(-child.pid!, sig);
+          return true;
         } catch {
-          // the group is gone
+          return false; // the group is gone
         }
       };
-      /** Ends the step: the group sent TERM, then KILL, and the step settled on a deadline of its own, its close or not. */
+      /**
+       * Ends the step: the group sent TERM, then KILL at 2 s whatever devcloud's own exit does (a child may ignore
+       * TERM, and may hold none of the pipes whose closing reports that exit), and the step ended only once no
+       * process of the group is left, or on a deadline of its own that says one outlived the KILL.
+       */
       let ended: Error | null = null;
       const end = (why: Error) => {
         if (ended !== null) return;
         ended = why;
         group('SIGTERM');
-        timers.push(setTimeout(() => group('SIGKILL'), 2000));
-        timers.push(setTimeout(() => finish(why), 4000));
+        const escalate = setTimeout(() => group('SIGKILL'), 2000);
+        const deadline = Date.now() + 6000;
+        const watch = () => {
+          if (!group(0)) {
+            clearTimeout(escalate);
+            return finish(why);
+          }
+          if (Date.now() > deadline) return finish(new Error(`${why.message}; a process of its group (${child.pid}) outlived SIGKILL`));
+          timers.push(setTimeout(watch, 100));
+        };
+        timers.push(setTimeout(watch, 100));
       };
       const onAbort = () => end(new Error(`the step ${name} on ${this.ssh.vm} was cancelled: ${(signal!.reason as Error | undefined)?.message ?? 'the run was interrupted'}`));
       signal?.addEventListener('abort', onAbort, { once: true });
       timers.push(setTimeout(() => end(new Error(`the step ${name} on ${this.ssh.vm} took longer than ${ms / 1000} s`)), ms));
       child.once('error', (error) => finish(error));
-      child.once('close', (exit) => finish(ended ?? { code: exit }));
+      child.once('close', (exit) => {
+        if (ended === null) finish({ code: exit });
+      });
     });
     const lines = out.split('\n');
     const begin = lines.indexOf('@@BEGIN');
@@ -221,6 +249,16 @@ export class ScriptRunner {
     this.log(`vm ${this.ssh.vm}: ${name} exited ${rc} in ${((Date.now() - started) / 1000).toFixed(1)} s`);
     return { rc, lines: said };
   }
+}
+
+/**
+ * The run's end, however it ended (an item's failure as much as a signal): what the machine still runs for it
+ * cancelled, and settled before anything is undone, so no step lands after the teardown; a line for each step still
+ * running when settling ran out of time.
+ */
+export async function stopMachineWork(run: { interrupt(why: string): void }, machine: Pick<EndpointMachine, 'label' | 'settle'>, status: number): Promise<string[]> {
+  run.interrupt(status === 0 ? 'the run ended' : 'the run failed');
+  return (await machine.settle()).map((step) => `the step ${step} on ${machine.label} still ran when the run ended; the scene’s down stops it there`);
 }
 
 // ---- the VM ----------------------------------------------------------------------------------------------------------
@@ -324,8 +362,8 @@ export class VmMachine implements EndpointMachine {
     return (await this.scene('listening')).lines.filter((line) => line.trim() !== '');
   }
 
-  settle(): Promise<void> {
-    return this.runner.settle();
+  settle(ms?: number): Promise<string[]> {
+    return this.runner.settle(ms);
   }
 
   async down(): Promise<string[]> {

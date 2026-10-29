@@ -33,6 +33,31 @@ fail() { say "production.sh: $*"; exit 1; }
 word() { [[ $1 =~ ^[A-Za-z0-9._:/=@+-]+$ ]] || fail "a word, not '$1'"; }
 uid=$(id -u $OWNER) || fail "no user $OWNER"
 within() { local s=$1 i; shift; for ((i = 0; i < s * 2; i++)); do "$@" && return 0; sleep 0.5; done; return 1; }
+
+# Every verb but check and down registers its pid in $VERBS while it runs: the run's end kills a step's local ssh,
+# which is no proof that this script stopped on the VM, so down stops a verb still running here, its whole process
+# tree frozen first so nothing forks past it, and says LEFT for one it could not.
+VERBS=/run/o10-m11-production-verbs
+register() { install -d -m 700 $VERBS && say "$1" >$VERBS/$$ && trap 'rm -f $VERBS/$$' EXIT; }
+# Pid $1 and every process beneath it.
+tree() { ps -e -o pid=,ppid= | awk -v root="$1" '{ parent[$1] = $2 } END { for (p in parent) { q = p; while (q in parent && q != root && q > 1) q = parent[q]; if (q == root) print p } }'; }
+stop_verbs() {
+  local f p what pids left=0
+  for f in "$VERBS"/*; do
+    [[ -f $f ]] || continue
+    p=${f##*/}; what=$(cat "$f" 2>/dev/null)
+    [[ $p == "$$" ]] && continue
+    if ! tr '\0' ' ' </proc/"$p"/cmdline 2>/dev/null | grep -qF -- "/opt/o10-m11/production.sh "; then rm -f "$f"; continue; fi # ended, or another process now
+    for _ in 1 2 3; do pids=$(tree "$p"); [[ -n $pids ]] && kill -STOP $pids 2>/dev/null; done
+    pids=$(tree "$p"); [[ -n $pids ]] && kill -KILL $pids 2>/dev/null
+    if within 5 bash -c "! kill -0 $p 2>/dev/null"; then
+      say "stopped the verb $what (pid $p), still running when the run ended"; rm -f "$f"
+    else
+      say "LEFT the verb $what (pid $p) running on the VM"; left=1
+    fi
+  done
+  return $left
+}
 pid() { pgrep -u $OWNER -f "$CUR/.*mawsd.js run" | head -1; }
 logfile() { case $1 in mawsd) say $DIR/mawsd.log ;; sminos) say $SH/daemon.log ;; *) fail "a log: mawsd or sminos" ;; esac; }
 
@@ -248,6 +273,7 @@ lane_a_down() {
 }
 
 verb=${1:-}; (($#)) && shift
+case $verb in check | down | "") ;; *) register "$verb" || fail "cannot register the verb $verb" ;; esac
 case $verb in
   check) say "mawsd: pid $(pid || echo none)"; mawsd_cli endpoint status --json ;;
   up) [[ -n $(pid) ]] || fail "the production mawsd is not running"; say "up: the production mawsd runs (pid $(pid)); nothing started" ;;
@@ -279,6 +305,6 @@ case $verb in
   imported) [[ ${1:-} =~ ^[a-z0-9-]{4,64}$ ]] || fail "a marker token"; { find $SH -path '*/log/*.jsonl' -type f -exec cat {} + 2>/dev/null | grep -cF -- "$1"; true; } ;;
   local-spawn) local_spawn "${1:-}" ;;
   retire) retire "${1:-}" ;;
-  down) lane_a_down ;;
+  down) stop_verbs; v=$?; lane_a_down; d=$?; exit $((v | d)) ;;
   *) fail "production.sh check | up | mawsd <keys|endpoint …> | restart | cut-hub | listening | log-size <log> | log-since <log> <bytes> | lane-a-up <project> <name> | lane-a-stop | lane-a-resume | transcript <session> [token] | sminos-status | sminos-revoked | imported <token> | local-spawn <alias> | retire <alias> | down" ;;
 esac

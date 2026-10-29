@@ -398,7 +398,9 @@ export class LocalMachine implements EndpointMachine {
   }
 
   /** Nothing to wait for: the suite's own commands are bounded, and none is cancelled. */
-  async settle(): Promise<void> {}
+  async settle(): Promise<string[]> {
+    return [];
+  }
 
   async down(): Promise<string[]> {
     this.#stopping = true;

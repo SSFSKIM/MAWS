@@ -875,6 +875,32 @@ class Track {
   }
 }
 
+/**
+ * New rows asked for (`start`), and each track's events growing past where they stood before the asking: a replay that
+ * caught up while it ran, or rows that landed before `start` returned, count as progress; none within `ms` is a stall.
+ */
+export async function flowingAfter(start: () => Promise<void>, tracks: Array<{ carrier: string; count(): number }>, what: string, ms = 60_000): Promise<void> {
+  const from = tracks.map((track) => track.count());
+  await start();
+  for (const [i, track] of tracks.entries()) await until(() => track.count() > from[i], `${track.carrier} events ${what}`, ms, 500);
+}
+
+/** A watcher run beside a long step: its failure held as its answer while the step runs (never an unhandled
+ * rejection), and thrown when it is joined. */
+export function watchDuring<T>(watch: () => Promise<T>): { join(): Promise<T> } {
+  const held = watch().then(
+    (value) => ({ ok: true as const, value }),
+    (error: unknown) => ({ ok: false as const, error }),
+  );
+  return {
+    join: async () => {
+      const answer = await held;
+      if (!answer.ok) throw answer.error;
+      return answer.value;
+    },
+  };
+}
+
 export async function item2(scene: Scene, report: ItemReport): Promise<void> {
   const relayed = new Track(scene, `r-${scene.tag}`, 'relayed');
   const direct = new Track(scene, `d-${scene.tag}`, 'direct');
@@ -893,27 +919,25 @@ export async function item2(scene: Scene, report: ItemReport): Promise<void> {
     });
     if (via !== direct.remote) via.close();
   };
-  const flowing = async (track: Track, what: string) => {
-    const from = track.count();
-    await until(() => track.count() > from, `${track.carrier} events ${what}`, 60_000, 500);
-  };
+  /** A new stretch of `count` rows, and each track's events growing from before it was asked for. */
+  const fresh = (what: string, tracks: Track[], count = 10) => flowingAfter(() => ticks(count), tracks, what);
   const ok = await report.check('2', 'both carriers subscribed to the lane A session, rows flowing', async () => {
     const a = await relayed.subscribe('first', 'snapshot');
     const b = await direct.subscribe('first', 'snapshot');
-    await ticks(40);
-    await flowing(relayed, 'from the first stretch');
-    await flowing(direct, 'from the first stretch');
+    await fresh('from the first stretch', [relayed, direct], 40);
     return `relayed ${a}, direct ${b}`;
   });
   if (!ok) return;
 
   await report.check('2', 'the endpoint’s RL1 socket cut by force: the relayed channel resumes by replay, the direct one never drops', async () => {
+    await ticks(40); // rows being written as the cut lands
     const cut = await scene.machine.cutHubSocket();
     const reason = await relayed.closed(60_000);
     const resumed = await relayed.subscribe('the hub socket cut', 'replay');
-    await flowing(direct, 'through the cut');
     if (direct.remote === null) throw new Error('the direct channel dropped');
-    await flowing(relayed, 'after the replay');
+    // Rows asked for after the resume: a replay that caught up with the stretch meanwhile is no stall.
+    await fresh('after the cut and the replay', [relayed, direct]);
+    if (direct.remote === null) throw new Error('the direct channel dropped');
     return `${cut}; the relayed channel closed ${reason} and resumed (${resumed})`;
   });
 
@@ -923,7 +947,7 @@ export async function item2(scene: Scene, report: ItemReport): Promise<void> {
     // The deploy may or may not cut RL1 or the Machine socket within its window (O11 M8): any cut while it runs is
     // resumed at once, inside the 120 s window; the forced cut after it makes the cut certain.
     let deploying = true;
-    const watching = (async () => {
+    const watching = watchDuring(async () => {
       const said: string[] = [];
       while (deploying) {
         const remote = relayed.remote;
@@ -935,28 +959,26 @@ export async function item2(scene: Scene, report: ItemReport): Promise<void> {
         said.push(`cut by the deploy (${reason}), resumed ${await relayed.subscribe('a cut during the hub deploy', 'replay')}`);
       }
       return said;
-    })();
+    });
     let during: string[];
     try {
       await scene.hubDeploy!();
     } finally {
       // The watcher stops at its next turn (2 s at most, or the resume it is in), and is joined before anything else.
       deploying = false;
-      during = await watching;
+      during = await watching.join();
     }
     // A long deploy outlasts the stretch it started with: a new one, so the forced cut falls among rows being written.
-    await ticks(30);
-    await flowing(relayed, 'after the deploy, before the forced cut');
+    await fresh('after the deploy, before the forced cut', [relayed], 30);
     const cut = await scene.machine.cutHubSocket();
     const reason = await relayed.closed(60_000);
     const resumed = await relayed.subscribe('the hub deploy and its forced cut', 'replay');
-    await flowing(relayed, 'after the forced cut');
+    await fresh('after the forced cut', [relayed]);
     return `${during.length ? `${during.join('; ')}; ` : 'the deploy cut nothing; '}${cut}; closed ${reason}, resumed (${resumed})`;
   });
 
   await report.check('2', '`mawsd restart`: both channels close `restart` and resume by snapshot under a new epoch', async () => {
-    await ticks(40);
-    await flowing(direct, 'before the restart');
+    await fresh('before the restart', [direct], 40);
     await scene.machine.restart();
     const [r, d] = await Promise.all([relayed.closed(60_000), direct.closed(60_000)]);
     if (r !== 'restart' || d !== 'restart') throw new Error(`the channels closed ${r} and ${d}`);
@@ -966,9 +988,7 @@ export async function item2(scene: Scene, report: ItemReport): Promise<void> {
     }, 'the endpoint back on the hub, the listener and RL10', 120_000, 2000);
     const a = await relayed.subscribe('mawsd restart', 'snapshot');
     const b = await direct.subscribe('mawsd restart', 'snapshot');
-    await ticks(10);
-    await flowing(relayed, 'after the restart');
-    await flowing(direct, 'after the restart');
+    await fresh('after the restart', [relayed, direct]);
     return `relayed ${a}, direct ${b}`;
   });
 

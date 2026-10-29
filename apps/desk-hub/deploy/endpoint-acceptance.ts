@@ -24,7 +24,7 @@ import { machineProjectId, ORG_STATE_PATH, type OrgStateView } from '../src/prot
 import { checkTestHub, PRODUCTION_HOST, readDeployConfig } from './config';
 import { readSecrets } from './deploy';
 import { Person } from './hub';
-import { composeScript, ScriptRunner, VmMachine, type EndpointMachine } from './endpoint-machine';
+import { composeScript, ScriptRunner, stopMachineWork, VmMachine, type EndpointMachine } from './endpoint-machine';
 import { HubWrites, runItems, ITEMS, type Scene } from './endpoint-items';
 import { DirectPacer, RelayDialer, type RunDevice } from './endpoint-remote';
 import { ItemReport, Secrets } from './endpoint-verdicts';
@@ -268,9 +268,9 @@ export function runEndpointAcceptance(o: RunOptions, interrupt: InterruptOptions
       return report.summary() ? 0 : 1;
     },
     async (status) => {
-      // What the machine was doing when the run was interrupted settles (cancelled, each within its kill's deadline)
-      // before anything is undone, so a slow step can't land after the teardown.
-      await o.machine.settle();
+      // What the machine still runs for the run is cancelled and settles before anything is undone, so a slow step
+      // can't land after the teardown; the scene's down stops a verb still running on the VM.
+      for (const line of await stopMachineWork(o.cleanup, o.machine, status)) print(line);
       const failed = await o.cleanup.run();
       const left = await afterEndpointCleanup(o.person, made, AbortSignal.timeout(STEP_MS)).catch((error: unknown) => [`the check after cleanup failed: ${error instanceof Error ? error.message : String(error)}`]);
       for (const line of [...failed.map((f) => `cleanup: ${f}`), ...left]) print(`LEFT ${line}`);

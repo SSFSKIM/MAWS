@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { composeScript, ScriptRunner, VmMachine, type Ssh } from '../../deploy/endpoint-machine.ts';
+import { composeScript, ScriptRunner, stopMachineWork, VmMachine, type Ssh } from '../../deploy/endpoint-machine.ts';
 import { Cleanup } from '../../deploy/proof.ts';
 
 /** A stand-in for devcloud: records its argv, the mode of the file on its stdin and the script, answers `reply`. */
@@ -101,11 +101,16 @@ describe('a step on the VM', () => {
   });
 });
 
-/** A devcloud that never answers: it starts a child (as devcloud's python starts `ssh`) and waits on it; both pids kept. */
-function hung(): { bin: string; pids: () => number[] } {
+/**
+ * A devcloud that never answers: it starts a child (as devcloud's python starts `ssh`) and waits on it; both pids kept.
+ * `stubborn`: the child ignores SIGTERM and holds none of the step's pipes, so devcloud's own exit on TERM closes them
+ * while the child runs on.
+ */
+function hung({ stubborn = false } = {}): { bin: string; pids: () => number[] } {
   const dir = mkdtempSync(join(tmpdir(), 'ep-hung-'));
   const bin = join(dir, 'devcloud');
-  writeFileSync(bin, `#!/bin/sh\ncat > /dev/null\nsleep 60 &\necho $! > '${dir}/child.pid'\necho $$ > '${dir}/parent.pid'\nwait\n`, { mode: 0o755 });
+  const child = stubborn ? "(trap '' TERM; exec sleep 60) >/dev/null 2>&1 &" : 'sleep 60 &';
+  writeFileSync(bin, `#!/bin/sh\ncat > /dev/null\n${child}\necho $! > '${dir}/child.pid'\necho $$ > '${dir}/parent.pid'\nwait\n`, { mode: 0o755 });
   const read = (f: string) => (existsSync(join(dir, f)) ? Number(readFileSync(join(dir, f), 'utf8')) : NaN);
   return { bin, pids: () => [read('parent.pid'), read('child.pid')] };
 }
@@ -135,6 +140,29 @@ describe('a step that does not end', () => {
     expect(await until(() => !alive(parent) && !alive(child), 3000)).toBe(true);
   }, 15_000);
 
+  it('is killed whole, a child that ignores SIGTERM too, before the step says it ended', async () => {
+    const fake = hung({ stubborn: true });
+    const run = new ScriptRunner({ devcloud: fake.bin, vm: 'vm1' }, scratch());
+    const stuck = run.step('stuck', 'true', { ms: 800 });
+    await until(() => Number.isInteger(fake.pids()[1]), 5000);
+    await expect(stuck).rejects.toThrow(/took longer than 0.8 s/);
+    const [parent, child] = fake.pids();
+    expect(alive(parent)).toBe(false);
+    expect(alive(child)).toBe(false);
+  }, 15_000);
+
+  it('names the steps still running when settling runs out of time, and none once they ended', async () => {
+    const fake = hung();
+    const cleanup = new Cleanup();
+    const run = new ScriptRunner({ devcloud: fake.bin, vm: 'vm1' }, scratch(), () => {}, { gate: () => cleanup.check(), signal: cleanup.signal });
+    const stuck = run.step('lane-a-up', 'true', { ms: 60_000 }).catch((error: Error) => error);
+    await until(() => Number.isInteger(fake.pids()[1]), 5000);
+    expect(await run.settle(300)).toEqual(['lane-a-up']);
+    cleanup.interrupt('the run failed');
+    expect(await run.settle()).toEqual([]);
+    expect(String(await stuck)).toMatch(/cancelled: the run failed/);
+  }, 20_000);
+
   it('is cancelled by the run’s interruption, and the run starts no step after it but the cleanup’s', async () => {
     const fake = hung();
     const cleanup = new Cleanup();
@@ -154,6 +182,23 @@ describe('a step that does not end', () => {
     cleanup.add('down', async () => void (said = (await down.step('down', 'true')).lines));
     expect(await cleanup.run()).toEqual([]);
     expect(said).toEqual(['down']);
+  }, 20_000);
+});
+
+describe('the run’s end, however it ends', () => {
+  it('cancels what the machine still runs after an ordinary failure, and names what outlived the cancellation', async () => {
+    const fake = hung();
+    const cleanup = new Cleanup();
+    const machine = new VmMachine({ devcloud: fake.bin, vm: 'vm1' }, scratch(), { directUrl: 'ws://vm1:47831', gate: () => cleanup.check(), signal: cleanup.signal });
+    const up = machine.up().catch((error: Error) => error);
+    await until(() => Number.isInteger(fake.pids()[1]), 5000);
+    expect(await stopMachineWork(cleanup, machine, 1)).toEqual([]);
+    expect(String(await up)).toMatch(/the step up on vm1 was cancelled: the run failed/);
+    const [parent, child] = fake.pids();
+    expect(alive(parent) || alive(child)).toBe(false);
+    // A step the cancellation did not end within the bound is named, for the scene's down to stop on the VM.
+    const slow = { label: 'the scratch mawsd on vm1', settle: async () => ['lane-a-up'] };
+    expect(await stopMachineWork(new Cleanup(), slow, 0)).toEqual(['the step lane-a-up on the scratch mawsd on vm1 still ran when the run ended; the scene’s down stops it there']);
   }, 20_000);
 });
 

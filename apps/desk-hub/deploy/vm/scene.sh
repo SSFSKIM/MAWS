@@ -51,6 +51,31 @@ anchor() { local p; p=$(cat $R/anchor.pid 2>/dev/null) && [[ -d /proc/$p ]] && [
 inns() { local p; p=$(anchor) || fail "no scene namespace: run up first"; nsenter --mount=/proc/$p/ns/mnt -- "$@"; }
 # Waits up to <s> seconds for <command…> to succeed.
 within() { local s=$1 i; shift; for ((i = 0; i < s * 2; i++)); do "$@" && return 0; sleep 0.5; done; return 1; }
+
+# Every verb but check and down registers its pid in $VERBS while it runs: the run's end kills a step's local ssh,
+# which is no proof that this script stopped on the VM, so down stops a verb still running here, its whole process
+# tree frozen first so nothing forks past it, and says LEFT for one it could not.
+VERBS=/run/o10-m11-scene-verbs
+register() { install -d -m 700 $VERBS && say "$1" >$VERBS/$$ && trap 'rm -f $VERBS/$$' EXIT; }
+# Pid $1 and every process beneath it.
+tree() { ps -e -o pid=,ppid= | awk -v root="$1" '{ parent[$1] = $2 } END { for (p in parent) { q = p; while (q in parent && q != root && q > 1) q = parent[q]; if (q == root) print p } }'; }
+stop_verbs() {
+  local f p what pids left=0
+  for f in "$VERBS"/*; do
+    [[ -f $f ]] || continue
+    p=${f##*/}; what=$(cat "$f" 2>/dev/null)
+    [[ $p == "$$" ]] && continue
+    if ! tr '\0' ' ' </proc/"$p"/cmdline 2>/dev/null | grep -qF -- "/opt/o10-m11/scene.sh "; then rm -f "$f"; continue; fi # ended, or another process now
+    for _ in 1 2 3; do pids=$(tree "$p"); [[ -n $pids ]] && kill -STOP $pids 2>/dev/null; done
+    pids=$(tree "$p"); [[ -n $pids ]] && kill -KILL $pids 2>/dev/null
+    if within 5 bash -c "! kill -0 $p 2>/dev/null"; then
+      say "stopped the verb $what (pid $p), still running when the run ended"; rm -f "$f"
+    else
+      say "LEFT the verb $what (pid $p) running on the VM"; left=1
+    fi
+  done
+  return $left
+}
 mawsd_pid() { pgrep -u $U -f -- "$MAWSD_JS run --unit" | head -1; }
 serving() { local n; n=$(grep -c ' serving;' $P/mawsd/mawsd.log 2>/dev/null); say "${n:-0}"; }
 served() { (($(serving) >= $1)); }
@@ -221,6 +246,7 @@ down() {
 }
 
 verb=${1:-}; (($#)) && shift
+case $verb in check | down | "") ;; *) register "$verb" || fail "cannot register the verb $verb" ;; esac
 case $verb in
   check) check ;;
   up) up ;;
@@ -240,6 +266,6 @@ case $verb in
   sminos-revoked) if [[ -f $S/daemon/revoked.json ]]; then python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))))' $S/daemon/revoked.json; else say none; fi ;;
   local-spawn) word "${1:-}"; inns runuser -u $U -- env -i "${SCENE_ENV[@]}" bash -c "cd $W && exec $SMINOS spawn $1 'o10-m11: a local spawn; answer ok' --cwd $W" ;;
   retire) word "${1:-}"; as bash -c "cd $W && exec $SMINOS retire $1" ;;
-  down) down ;;
+  down) stop_verbs; v=$?; down; d=$?; exit $((v | d)) ;;
   *) fail "scene.sh check | up | enroll <name> | mawsd <args…> | restart | cut-hub | listening | log-size <log> | log-since <log> <bytes> | lane-a-up <project> <name> | lane-a-stop | lane-a-resume | transcript <session> [token] | sminos-status | sminos-revoked | imported <token> | local-spawn <alias> | retire <alias> | down" ;;
 esac

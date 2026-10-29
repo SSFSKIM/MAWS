@@ -319,3 +319,34 @@ describe('the read-back after the cleanup', () => {
     expect(left).toEqual(['the state still lists the device o10-o2-abc123']);
   });
 });
+
+describe('item 2’s rows flowing', () => {
+  it('counts what arrives from the moment new rows are asked for, so a replay that caught up meanwhile is not a stall', async () => {
+    const { flowingAfter } = await import('../../deploy/endpoint-items.ts');
+    let events = 10;
+    const track = { carrier: 'relayed', count: () => events };
+    // The new stretch's rows land while it is being asked for (a fast stub), and none after: progress all the same.
+    expect(await flowingAfter(async () => void (events += 3), [track], 'after the replay', 1500)).toBeUndefined();
+    // Nothing new at all is a stall.
+    await expect(flowingAfter(async () => {}, [track], 'after the replay', 600)).rejects.toThrow(/relayed events after the replay/);
+  });
+});
+
+describe('item 2’s deploy watcher', () => {
+  it('holds a failed resume as its answer instead of rejecting while the deploy still runs', async () => {
+    const { watchDuring } = await import('../../deploy/endpoint-items.ts');
+    const unhandled: unknown[] = [];
+    const listen = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', listen);
+    try {
+      const watched = watchDuring(async () => {
+        throw new Error('the resume was refused');
+      });
+      await new Promise((r) => setTimeout(r, 50)); // the deploy, still running
+      expect(unhandled).toEqual([]);
+      await expect(watched.join()).rejects.toThrow(/the resume was refused/);
+    } finally {
+      process.off('unhandledRejection', listen);
+    }
+  });
+});
