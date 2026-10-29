@@ -26,6 +26,8 @@ type Step = { turnId: unknown; agentId: unknown; step: unknown };
 const stepKey = (s: Step) => JSON.stringify([s.turnId, s.agentId ?? null, s.step]);
 const without = (e: Event, ...keys: string[]): Event => Object.fromEntries(Object.entries(e).filter(([k]) => !keys.includes(k)));
 const OP_OF: Record<string, 'command' | 'btw'> = { run: 'command', btw: 'btw' };
+// The bridge's time of an event (epoch ms), kept on a step-end: the renderer places what an interrupt cut by it.
+const stamp = (e: Event) => (typeof e.t === 'number' ? { t: e.t } : {});
 
 // DX5 `raised` (an event or a snapshot's pending entry) as DX4's: `session` set, the window's deadline as ISO-8601, no
 // `agentId` for the main loop; `t`, the bridge's stamp, kept.
@@ -76,12 +78,12 @@ export class Reshaper {
         if (phase === 'start') this.opened(e);
         if (phase !== 'end') return [];
         this.open.delete(stepKey(e as Step));
-        return [this.sub('step-end', { turnId: e.turnId, agentId: e.agentId ?? null, step: e.step })];
+        return [this.sub('step-end', { turnId: e.turnId, agentId: e.agentId ?? null, step: e.step, ...stamp(e) })];
       case 'turn': {
         if (phase !== 'complete') return [];
         const cut = [...this.open.entries()].filter(([, s]) => s.turnId === e.turnId);
         for (const [key] of cut) this.open.delete(key);
-        return cut.map(([, s]) => this.sub('step-end', { turnId: s.turnId, agentId: s.agentId ?? null, step: s.step }));
+        return cut.map(([, s]) => this.sub('step-end', { turnId: s.turnId, agentId: s.agentId ?? null, step: s.step, ...stamp(e) }));
       }
       case 'usage':
         return [this.sub('usage', { context: e.context, cost: e.cost ?? null })];

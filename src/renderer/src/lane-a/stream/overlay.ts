@@ -12,11 +12,16 @@
 // same wait from the resume, its row landing still settling them sooner.
 //
 // The M8 sitting: a block still unnamed at its step's end is what an interrupt cut before the engine wrote it, and no
-// row will ever carry it. So its words leave the stream as kept rows (`keep`), settled, under the turn the store's rows
-// were answering then (`turn`), as lane B keeps a stopped reply's partial text: an aborted reply leaves no streaming
-// text behind and loses none of what was shown. The mount places them in that turn (`withPlacedRows`).
+// row will ever carry it. So its words leave the stream as kept rows (`keep`), settled, as lane B keeps a stopped
+// reply's partial text: an aborted reply leaves no streaming text behind and loses none of what was shown. A cut
+// carries the bridge's time of its step's end (main's reshaper keeps the bridge's `t`), which names its disk turn:
+// the engine stamps that turn's rows on the same clock, so the turn running then is the latest that started at or
+// before it, and it is known once the store holds a turn started after it (`placeCuts`). Until then the rows wait, last
+// and in no turn: they are never frozen under whatever turn was latest when the step-end was heard, which a replay
+// (a mount opened later, on a watch another holds) or a disk read still behind the stream would make the wrong one.
 import type { BlockRow, SessionBodies, StepEnd, Streaming } from 'desk-hub/protocol';
 import type { Row, TurnId } from '../../transcript/model/rows';
+import type { TranscriptState } from '../../transcript/model/reduce';
 import { streamingRows } from '../view/streaming-rows';
 import type { PlaneEvent } from '../watches';
 import { StreamingLayer, type StreamBlock } from './layer';
@@ -26,13 +31,39 @@ export const NAMED_ROW_WAIT_MS = 5_000;
 const stepKey = (s: { turnId: string; agentId?: string | null; step: number }) => `${s.turnId}\u0000${s.agentId ?? ''}\u0000${s.step}`;
 const blockKey = (b: Pick<StreamBlock, 'turnId' | 'agentId' | 'step' | 'index'>) => `${b.turnId}\u0000${b.agentId ?? ''}\u0000${b.step}\u0000${b.index}`;
 
-/** What becomes of a reply cut before its rows: the turn it belongs to, and where its kept rows go. */
-export interface Keeping {
-  turn: () => TurnId | null;
-  keep: (rows: Row[]) => void;
+/** A reply cut before its rows: its kept rows, in no turn, and the bridge's time of its step's end (null: none said). */
+export interface Cut {
+  rows: Row[];
+  at: number | null;
 }
 
-const NO_KEEPING: Keeping = { turn: () => null, keep: () => {} };
+/** Where a reply cut before its rows goes. */
+export interface Keeping {
+  keep: (cut: Cut) => void;
+}
+
+const NO_KEEPING: Keeping = { keep: () => {} };
+
+/** The cuts' rows, each under the disk turn running at its time once the store shows which that is, else in none. */
+export function placeCuts(state: TranscriptState | undefined, cuts: readonly Cut[]): Row[] {
+  return cuts.flatMap((cut) => {
+    const turn = turnAt(state, cut.at);
+    return turn === null ? cut.rows : cut.rows.map((row) => ({ ...row, turnId: turn }));
+  });
+}
+
+function turnAt(state: TranscriptState | undefined, at: number | null): TurnId | null {
+  if (state === undefined || at === null) return null;
+  let running: { id: TurnId; started: number } | null = null;
+  let later = false;
+  for (const id of state.order) {
+    const started = Date.parse(state.turns.get(id)?.startedAt ?? '');
+    if (Number.isNaN(started)) continue;
+    if (started > at) later = true;
+    else if (running === null || started >= running.started) running = { id, started };
+  }
+  return later && running !== null ? running.id : null;
+}
 
 export class LaneAOverlay {
   private layer = new StreamingLayer();
@@ -105,14 +136,15 @@ export class LaneAOverlay {
     return streamingRows(blocks, (block) => this.since.get(blockKey(block)) ?? now, { turn });
   }
 
-  // The main loop's blocks of the step `end` closes that no row named: kept, settled, under the turn answered now.
+  // The main loop's blocks of the step `end` closes that no row named: kept, settled, with the time the step ended.
   private keepCut(end: StepEnd): void {
     if ((end.agentId ?? null) !== null) return;
     const cut = this.layer.blocks(null).filter((b) => b.turnId === end.turnId && b.step === end.step && b.settledBy === null);
     if (cut.length === 0) return;
     const now = new Date().toISOString();
-    const rows = streamingRows(cut, (block) => this.since.get(blockKey(block)) ?? now, { turn: this.keeping.turn(), kept: true });
-    if (rows.length > 0) this.keeping.keep(rows);
+    const rows = streamingRows(cut, (block) => this.since.get(blockKey(block)) ?? now, { kept: true });
+    const at = (end as StepEnd & { t?: unknown }).t;
+    if (rows.length > 0) this.keeping.keep({ rows, at: typeof at === 'number' && Number.isFinite(at) ? at : null });
   }
 
   dispose(): void {

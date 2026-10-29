@@ -12,7 +12,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { TEST_MACHINE, at } from '../../../../../test/support/machine';
 import { laneAState } from '../../lane-a/test-support/lane-a-state'; // P5 O9
-import { resetLaneAWatches } from '../../lane-a/watches'; // P5 O9
+import { resetLaneAWatches, watchLaneA } from '../../lane-a/watches'; // P5 O9
 import { applyLaneAState, resetLaneAStore } from '../../stores/lane-a'; // P5 O9
 import { resetQueueStore } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
@@ -429,7 +429,7 @@ describe('TranscriptSlot', () => {
 
     // The M8 sitting's second defect: Stop dropped the partly streamed reply. The engine writes no row for what an
     // interrupt cut, so the text stays as lane B keeps a stopped reply's: settled, in its turn, never streaming.
-    it('keeps the partly streamed reply an interrupt cut, settled in its turn', async () => {
+    it('keeps the partly streamed reply an interrupt cut, settled, after the rows while no later turn says which turn it was', async () => {
       const b = builder();
       b.turn('u1', 'count slowly to 300, one line each');
       running(true);
@@ -444,8 +444,33 @@ describe('TranscriptSlot', () => {
       const kept = document.querySelectorAll('[data-kind="assistant_text"]');
       expect(kept).toHaveLength(1);
       expect(kept[0].textContent).toContain('3');
-      expect(kept[0].getAttribute('data-turn-id')).toBe(document.querySelector('[data-kind="user"]')?.getAttribute('data-turn-id'));
+      expect(kept[0].getAttribute('data-turn-id')).toBeNull(); // its turn is the latest, or a later one not read yet
+      expect(document.querySelectorAll('[data-kind]')[document.querySelectorAll('[data-kind]').length - 1]).toBe(kept[0]); // last
       expect(document.body.textContent).not.toMatch(/Working/); // at rest, the turn closed
+    });
+
+    // The fix wave's review: a mount opened later, on the watch another consumer holds, is replayed the interrupt's
+    // step-end after a newer prompt is on disk; the cut stays in the turn that ran at its time, not the latest one.
+    it('places a cut a later mount is replayed in the turn that ran at its time, before a newer prompt', async () => {
+      const b = builder();
+      b.turn('u1', 'count slowly to 300, one line each');
+      b.tick(10_000);
+      b.turn('u2', 'something else');
+      const interrupted = Date.parse(b.events[1].at) + 2_000; // the bridge's time of the cut, inside u1's turn
+      running(false);
+      mount([]); // the plane listener, the watch's opener
+      cleanup();
+      const holder = watchLaneA(id, () => {}); // another consumer holds the page's watch
+      await settle();
+      hear({ kind: 'snapshot', body: { streaming: [], usage: null } }, { kind: 'chunk', body: { ...step, chunkIndex: 0, chunk: { kind: 'text', index: 0, text: 'one, two, three' } } }, { kind: 'step-end', body: { ...step, t: interrupted } });
+      for (const key of Object.keys(useTranscriptStore.getState().entries)) useTranscriptStore.getState().drop(key);
+      mount(b.events);
+      await settle();
+      const kept = [...document.querySelectorAll('[data-kind="assistant_text"]')].find((el) => el.textContent?.includes('one, two, three'));
+      const users = [...document.querySelectorAll('[data-kind="user"]')];
+      expect(kept?.getAttribute('data-turn-id')).toBe(users[0].getAttribute('data-turn-id'));
+      expect(kept!.compareDocumentPosition(users[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // before the newer prompt
+      holder();
     });
 
     it('never reads a slash command’s turn, which no row ends, as working while no turn runs', async () => {

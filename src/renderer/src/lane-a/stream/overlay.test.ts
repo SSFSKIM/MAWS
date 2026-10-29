@@ -4,8 +4,11 @@
 // dropped 5 s after its step ended, and everything dropped when the watch ends; a reset's fresh snapshot resumes.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionMessage } from 'desk-hub/protocol';
-import type { Row, TurnId } from '../../transcript/model/rows';
-import { LaneAOverlay, NAMED_ROW_WAIT_MS } from './overlay';
+import type { RowId, TurnId } from '../../transcript/model/rows';
+import { turnId } from '../../transcript/model/keys';
+import { applyEvents, createState } from '../../transcript/model/reduce';
+import { builder, uuid } from '../../transcript/model/test-events';
+import { LaneAOverlay, NAMED_ROW_WAIT_MS, placeCuts, type Cut } from './overlay';
 
 const msg = (kind: string, body: unknown, n = 1) => ({ project: '', machine: 'm', session: 'eng-1', kind, sub: 'w-1', n, body }) as unknown as SessionMessage;
 const step = { turnId: 'turn-1', agentId: null, step: 0 };
@@ -15,22 +18,21 @@ const ROW = '0d4c4001-0000-4000-8000-000000000009';
 
 let landed: Set<string>;
 let changes: number;
-let kept: Row[];
-let turn: TurnId | null;
+let cuts: Cut[];
+const kept = () => cuts.flatMap((cut) => cut.rows);
 let overlay: LaneAOverlay;
 const texts = () => overlay.rows(null).map((row) => (row.kind === 'assistant_text' ? row.markdown : row.kind));
 
 beforeEach(() => {
   landed = new Set();
   changes = 0;
-  kept = [];
-  turn = null;
+  cuts = [];
   overlay = new LaneAOverlay(
     (uuid) => landed.has(uuid),
     () => {
       changes += 1;
     },
-    { turn: () => turn, keep: (rows) => kept.push(...rows) },
+    { keep: (cut) => cuts.push(cut) },
   );
 });
 afterEach(() => {
@@ -57,14 +59,15 @@ describe('LaneAOverlay', () => {
   });
 
   // P5 O9 (the M8 sitting): the engine writes no row for what a step streamed before an interrupt cut it, so at its
-  // step-end that text leaves the stream and is kept, settled, under the turn it was answering, as lane B keeps a
-  // stopped reply's partial text: no streaming text is left behind, and none of the reply is lost.
-  it('keeps an unnamed block’s text at its step-end, settled under the turn it answered: an interrupted reply leaves no streaming text and loses none', () => {
+  // step-end that text leaves the stream and is kept, settled, with the bridge's time of that end (`placeCuts` finds its
+  // disk turn by it), as lane B keeps a stopped reply's partial text: no streaming text is left behind, none is lost.
+  it('keeps an unnamed block’s text at its step-end, settled, with the time its step ended: an interrupted reply leaves no streaming text and loses none', () => {
     overlay.receive({ kind: 'messages', messages: [snapshot(), chunk(0, 0, 'Abandoned'), chunk(1, 0, ' halfway')] });
-    turn = 't-3' as TurnId;
-    overlay.receive({ kind: 'messages', messages: [msg('step-end', step)] });
+    overlay.receive({ kind: 'messages', messages: [msg('step-end', { ...step, t: 1_000 })] });
     expect(texts()).toEqual([]);
-    expect(kept).toEqual([expect.objectContaining({ kind: 'assistant_text', markdown: 'Abandoned halfway', live: false, turnId: 't-3' })]);
+    expect(cuts).toEqual([{ at: 1_000, rows: [expect.objectContaining({ kind: 'assistant_text', markdown: 'Abandoned halfway', live: false, turnId: null })] }]);
+    overlay.receive({ kind: 'messages', messages: [snapshot(), chunk(0, 0, 'Again'), msg('step-end', step)] }); // a step-end with no time
+    expect(cuts[1]).toEqual({ at: null, rows: [expect.objectContaining({ markdown: 'Again' })] });
   });
 
   it('keeps a message tool’s cut message, and nothing of a named block, a thinking block or another tool’s input', () => {
@@ -76,13 +79,13 @@ describe('LaneAOverlay', () => {
     });
     expect(overlay.rows(null).map((row) => row.kind)).toEqual(['thinking', 'to_human']);
     overlay.receive({ kind: 'messages', messages: [msg('step-end', step)] });
-    expect(kept).toEqual([expect.objectContaining({ kind: 'to_human', toolUseId: 'toolu_1', text: '1\n2\n3', pending: false })]);
+    expect(kept()).toEqual([expect.objectContaining({ kind: 'to_human', toolUseId: 'toolu_1', text: '1\n2\n3', pending: false })]);
     expect(overlay.rows(null).map((row) => row.kind)).toEqual(['thinking']); // the named block waits for its row
   });
 
   it('keeps nothing of a step whose blocks were all named', () => {
     overlay.receive({ kind: 'messages', messages: [snapshot(), chunk(0, 0, 'Whole'), msg('block-row', { ...step, uuid: ROW, index: 0 }), msg('step-end', step)] });
-    expect(kept).toEqual([]);
+    expect(kept()).toEqual([]);
   });
 
   it('drops a named block whose row has not landed 5 s after its step ended', () => {
@@ -144,3 +147,36 @@ describe('LaneAOverlay', () => {
     expect(texts()).toEqual([]);
   });
 });
+
+// A cut's disk turn (the fix wave's review): the turn the engine was running at the bridge's time of the cut, which is
+// the latest turn the store holds that started at or before it, known only once the store holds a turn started after
+// it. Until then the turn running at the cut may still be on its way from disk (or is the latest), so the rows wait,
+// last, in no turn, rather than being frozen under whichever turn was latest.
+describe('placeCuts', () => {
+  const T = (s: number) => Date.parse(`2026-09-28T10:00:${String(s).padStart(2, '0')}.000Z`);
+  function state(...starts: number[]) {
+    const b = builder();
+    starts.forEach((at, i) => {
+      b.tick(at - b.at);
+      b.turn(`u${i}`, `prompt ${i}`);
+    });
+    return applyEvents(createState(null, null), b.events);
+  }
+  const cut = (at: number | null, id = 'k1'): Cut => ({ at, rows: [{ id: id as RowId, turnId: null, at: '2026-09-28T10:00:00.000Z', kind: 'assistant_text', messageUuid: null, blockIndex: 0, markdown: id, live: false, phase: 'answer', model: null }] });
+  const placed = (s: ReturnType<typeof state> | undefined, ...cuts: Cut[]) => placeCuts(s, cuts).map((row) => [row.id, row.turnId]);
+
+  it('places a cut in the turn running at its time once a later turn is in the store: a replay spanning turns keeps it there', () => {
+    expect(placed(state(T(0), T(10), T(20)), cut(T(5)), cut(T(15), 'k2'))).toEqual([
+      ['k1', turnId.ofMessage(uuid('u0'))],
+      ['k2', turnId.ofMessage(uuid('u1'))],
+    ]);
+  });
+
+  it('leaves a cut in no turn while no later turn is in the store, whatever turn is latest: its own may still be hydrating', () => {
+    expect(placed(state(T(0)), cut(T(5)))).toEqual([['k1', null]]); // its turn, or a later one not read yet
+    expect(placed(state(), cut(T(5)))).toEqual([['k1', null]]);
+    expect(placed(undefined, cut(T(5)))).toEqual([['k1', null]]);
+    expect(placed(state(T(0), T(10)), cut(null))).toEqual([['k1', null]]); // no time: never guessed
+  });
+});
+
