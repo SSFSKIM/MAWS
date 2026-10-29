@@ -38,7 +38,7 @@ export interface SpineTiming {
   yieldCheckMs: number; // the yielded-to pid's liveness, by pid and start time
   yieldSettleMs: number; // a yield whose writers have not settled by then ends the process
   settleLogMs: number; // a release still waiting for the root's work logs again after this
-  stopSettleMs: number; // the daemon's exit waits this long for the root's work before leaving it to the exit
+  stopSettleMs: number; // the daemon's exit waits this long in all for a load, a release or the root's work, then leaves them to the exit
 }
 export const SPINE_TIMING: SpineTiming = { refusalRetryMs: 60_000, yieldCheckMs: 5_000, yieldSettleMs: 60_000, settleLogMs: 30_000, stopSettleMs: 5_000 };
 
@@ -171,6 +171,7 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
     let root: SpineRoot | null = null;
     try {
       entry ??= await options.load();
+      throwIfExiting();
       if (!lock) {
         const taken = await entry.takeSpineLock(options.profileDir, { build: options.build, log, ...(options.lockWaitMs !== undefined && { waitMs: options.lockWaitMs }) });
         if (taken.refused !== null) return refuse(taken.refused);
@@ -180,7 +181,9 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
         process.once('exit', releaseAtExit); // a yield's or a fault's exit with a writer alive: the lock goes by the exit path
       }
       throwIfYielded();
+      throwIfExiting();
       const data = await entry.openSpineData(options.profileDir, { build: options.build, lock });
+      throwIfExiting(); // no composition once the exit began
       adapter = new SpineHostsAdapter({ link: options.hosts, events, intercept: options.intercept, log });
       root = entry.startSpine({ ...options.deps(), data, hosts: adapter });
       await adapter.load();
@@ -209,6 +212,11 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
     log(`spine: loaded in ${ms} ms`);
     evaluate();
     return root;
+  }
+
+  // read through a call: the exit begins while the load awaits
+  function throwIfExiting(): void {
+    if (stopped) throw new SpineUnavailable('the daemon is exiting');
   }
 
   // read through a call: a yield arrives while the load awaits
@@ -248,13 +256,14 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
     }, options.quietMs());
   }
 
-  function release(why: 'quiet' | 'stop' | 'yield'): Promise<void> {
+  // `exitBy` (a stop's): when the exit's deadline passes, after which nothing is stopped under the root's work
+  function release(why: 'quiet' | 'stop' | 'yield', exitBy: Promise<unknown> | null = null): Promise<void> {
     releasing ??= (async () => {
       const current = loaded!;
       set('releasing');
       log(`spine: releasing (${why})`);
       const reexecute = why === 'quiet' && options.reexecute;
-      await settle(current.root, why === 'stop' ? timing.stopSettleMs : null);
+      await settle(current.root, exitBy);
       if (why === 'stop' && current.root.busy()) {
         log('spine: the exit leaves the spine’s work in flight to the exit; nothing stopped under it');
         return;
@@ -287,15 +296,14 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
     return releasing;
   }
 
-  // root.settled(), logging the wait; `boundMs` null waits as long as it takes.
-  async function settle(root: SpineRoot, boundMs: number | null): Promise<void> {
+  // root.settled(), logging the wait; `until` null waits as long as it takes.
+  async function settle(root: SpineRoot, until: Promise<unknown> | null): Promise<void> {
     if (!root.busy()) return root.settled();
     log('spine: the release waits for the spine’s work in flight');
     const started = now();
     const every = setInterval(() => log(`spine: the release still waits for the spine’s work in flight (${Math.round((now() - started) / 1000)} s)`), timing.settleLogMs);
     try {
-      if (boundMs === null) await root.settled();
-      else await Promise.race([root.settled(), new Promise<void>((resolve) => setTimeout(resolve, boundMs))]);
+      await (until === null ? root.settled() : Promise.race([root.settled(), until]));
     } finally {
       clearInterval(every);
     }
@@ -387,11 +395,21 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
       stopped = true;
       if (quietTimer) clearTimeout(quietTimer);
       if (yieldTo) clearInterval(yieldTo.check);
-      if (loading) await loading.catch(() => {});
-      if (releasing) await Promise.race([releasing, new Promise<void>((resolve) => setTimeout(resolve, timing.stopSettleMs))]);
-      if (loaded && !releasing) await release('stop');
-      if (!loaded && !releasing) giveLockUp(); // nothing writes: the exit follows
-      events.close();
+      // one deadline for the whole exit (D34): a load, a release or the root's work still running when it passes is
+      // left to the process's exit, which ends every writer and frees spine.lock; nothing is closed or handed over
+      let expire!: () => void;
+      const exitBy = new Promise<'expired'>((resolve) => (expire = () => resolve('expired')));
+      const timer = setTimeout(expire, timing.stopSettleMs);
+      try {
+        const finished = (work: Promise<unknown>) => Promise.race([work.then(() => 'done', () => 'done'), exitBy]);
+        if (loading && (await finished(loading)) === 'expired') return log('spine: the exit leaves the load in flight to the exit; nothing closed or handed over under it');
+        if (releasing && (await finished(releasing)) === 'expired') return log('spine: the exit leaves the release in flight to the exit');
+        if (loaded && !releasing) await release('stop', exitBy);
+        if (!loaded && !releasing) giveLockUp(); // nothing writes: the exit follows
+      } finally {
+        clearTimeout(timer);
+        events.close();
+      }
     },
   };
 }

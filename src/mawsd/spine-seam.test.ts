@@ -443,6 +443,49 @@ describe('the release', () => {
   });
 });
 
+describe('the daemon’s exit during a load', () => {
+  it('stop is bounded while a load-time resync stalls: nothing stopped, closed or handed over under it', async () => {
+    link.stream();
+    const release = link.gate('engine.sessions'); // the load's resync stalls (its own bound is 30 s)
+    const spine = seam();
+    void spine.ensure('command').catch(() => {});
+    await vi.waitFor(() => expect(roots).toHaveLength(1));
+    const started = Date.now();
+    await spine.stop();
+    expect(Date.now() - started).toBeLessThan(1_000); // the exit's deadline (100 ms here, 5 s in the daemon)
+    expect(roots[0]!.stop).not.toHaveBeenCalled(); // the root's barrier is still running: nothing closed under it
+    const candidate = await takeSpineLock(profile, { build: 'the next writer', waitMs: 10, log: () => {} });
+    expect(candidate.refused).not.toBeNull(); // the lock is left to the process's exit
+    expect(logs).toContainEqual(expect.stringContaining('the exit leaves the load in flight'));
+    release();
+    await sleep(20);
+    expect(roots[0]!.stop).not.toHaveBeenCalled();
+  });
+
+  it('a load that has not composed yet when the exit begins composes nothing afterwards', async () => {
+    let open!: () => void;
+    const opening = new Promise<void>((resolve) => (open = resolve));
+    const spine = seam({
+      load: async () => ({
+        takeSpineLock,
+        openSpineData: async (_profile, { lock }) => (await opening, { lock: lock!, refused: lock!.refused, machineSettings: null as never, paths: { client: '', machine: '' } }),
+        startSpine: (deps) => {
+          const root = new FakeRoot(deps.hosts, deps);
+          roots.push(root);
+          return root;
+        },
+      }),
+    });
+    const loaded = spine.ensure('command');
+    await vi.waitFor(() => expect(logs).toContain('spine: loading (command)'));
+    await sleep(20); // the lock is taken; the data's open waits
+    await spine.stop(); // bounded: the open is still in flight
+    open();
+    await expect(loaded).rejects.toThrow(/exiting/);
+    expect(roots).toHaveLength(0); // no composition after the exit began
+  });
+});
+
 describe('the yield', () => {
   const live = new Map<number, string>();
   const processes = { isAlive: (pid: number) => live.has(pid), procStartOf: (pid: number) => live.get(pid) ?? null };
