@@ -144,6 +144,14 @@ describe('overview card lines', () => {
     expect(cardActivity(record('n'), null, [])).toBe('Idle');
   });
 
+  // P5 O9 M6 (Q1): a terminal session MAWS drives through its bridge reads as any session; one with no live bridge, its holder
+  it('reads a bridged terminal session as any session, and its holder without a live bridge', () => {
+    const held = record('t', { holder: { kind: 'terminal', pid: 7 } });
+    expect(cardActivity(held, digest('t', { phase: 'foreign' }), [])).toBe('Terminal · pid 7');
+    expect(cardActivity(held, digest('t', { phase: 'working', activity: 'Running ls' }), [])).toBe('Running ls');
+    expect(cardActivity(held, digest('t', { phase: 'waiting' }), [item('t', 'permission', '2026-10-28T10:00:00Z')])).toBe('Waiting for approval');
+  });
+
   it('the footer carries context, cost since seen and active child agents, each only when known', () => {
     const r = byTitle('Charter + research');
     expect(cardFooter(digests.get(r.appId)!)).toEqual(['ctx 41%', '$0.00 since seen', '2 agents']);

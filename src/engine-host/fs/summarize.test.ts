@@ -161,6 +161,19 @@ describe('head and tail summary', () => {
     expect(summarize(blankBytes, blankBytes, { size: blankBytes.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p').firstPrompt).toBe('Then this one');
   });
 
+  // P5 O9 (the M8 sitting, engine 2.1.312): `(no content)` is the engine's word for a message with none, here what a
+  // plugin's start-up left before the first prompt; the session titled "(no content)"
+  it('a record of no content is no prompt: the first with words is', () => {
+    const doperpowers = { kind: 'plugin', name: 'doperpowers' };
+    const text =
+      line({ type: 'user', uuid: 'c1', parentUuid: null, cwd: '/d', isMeta: true, origin: doperpowers, message: { role: 'user', content: '(no content)' } }) +
+      line({ type: 'user', uuid: 'c2', parentUuid: 'c1', cwd: '/d', origin: doperpowers, message: { role: 'user', content: '(no content)' } }) +
+      line({ type: 'system', subtype: 'local_command', uuid: 'c3', parentUuid: 'c2', content: '(no content)', commandRun: { command: 'reload-plugins', args: '' } }) +
+      line({ type: 'user', uuid: 'u1', parentUuid: 'c3', message: { role: 'user', content: 'hi' } });
+    const bytes = Buffer.from(text, 'utf8');
+    expect(summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p').firstPrompt).toBe('hi');
+  });
+
   it('a first prompt longer than the head window falls back to the earliest last-prompt the windows hold', () => {
     const big = line({ parentUuid: null, type: 'user', uuid: 'u1', timestamp: '2026-09-29T10:00:00.000Z', cwd: '/d', message: { role: 'user', content: 'y'.repeat(150 * 1024) } });
     const rest =

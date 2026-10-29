@@ -67,6 +67,7 @@ export function replyOutcomeOf(result: HumanPromptResult): ReplyOutcome {
     case 'sent':
     case 'steered':
     case 'queued':
+    case 'unconfirmed': // P5 O9 M5: lane A's send whose fate is not known yet; the composer's strip follows it
       return { kind: 'delivered' }; // P2-A: `started` or not, the seam sent it once the thread was ready
     case 'held': // P2-A: a trust or relay card took the text (only a composer send's; the card's are refused)
       return { kind: 'refused', reason: result.reason === 'trust' ? TRUST_FIRST : result.reason === 'relay' ? RELAY_FIRST : SIDE_COPY.card.replyRefused };

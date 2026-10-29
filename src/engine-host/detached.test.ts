@@ -358,7 +358,7 @@ describe('the detached entry', () => {
         supervision = new Supervision({
           mode: 'detached', identity: { pid: process.pid, startedAt: 'now', buildId: 'b', protocol: SOCKET_PROTOCOL, wire: 'w', socketPath: null, logPath: null },
           table: { list: () => rows, onChange: () => () => {}, onRowsChanged: () => () => {}, setIdleRelease: () => {}, setInterest: () => {} } as never, role: 'laptop',
-          plugins: { busy: () => false, onIdle: () => () => {} },
+          plugins: { busy: () => false, onIdle: () => () => {}, onBusy: () => () => {} },
           shutdown: async () => {
             for (const row of rows) row.lifecycle = 'exited';
             return { stopped: 1, forced: 0 };

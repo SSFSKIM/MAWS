@@ -22,7 +22,7 @@ import { formatAgo } from '@shared/app/date-format';
 import { useMachineMark } from '../app/machine-mark';
 import { useSlot } from '../app/slots';
 import { useNow } from '../app/use-now';
-import { holderLine, waitingItem } from '../attention/derive';
+import { BRIDGED_LINE, holderLine, waitingItem } from '../attention/derive';
 import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor, listedGlyph } from '../attention/glyph';
 import { ipc } from '../ipc/client';
@@ -32,6 +32,8 @@ import { useSessions } from '../stores/sessions';
 import { listedTitle, rowBranch, sessionAge } from './derive';
 import { ownerEntries, ownersLabel } from './owners'; // P5 O8 M5
 import { displayTitle } from '../sessions/title';
+import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M4
+import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
 import { SidebarInteractionContext } from './interaction';
 import { SIDE_COPY } from '../side/copy'; // E3
 
@@ -166,12 +168,16 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
   });
   const now = useNow();
   const machine = useMachineMark(appSessionId);
+  const controlled = useSessionControls(appSessionId) !== null; // P5 O9 M4: a session held elsewhere takes no reply
+  const bridged = useLaneAState(appSessionId)?.bridge === 'live'; // P5 O9 M5
   if (!record) return null;
   const glyph = glyphFor(record, digest, pending, ended, now);
   const waiting = waitingItem(pending);
   const place = placeOf(record);
   const working = digest?.phase === 'working' || digest?.phase === 'starting';
-  const doing = holderLine(record) ?? (working ? digest?.activity : null) ?? null;
+  const held = holderLine(record);
+  // P5 O9 M5 (the owner's Q1): a foreign session MAWS drives through its bridge says so
+  const doing = (held !== null && bridged ? BRIDGED_LINE(record.holder.kind === 'terminal' ? null : held) : held) ?? (working ? digest?.activity : null) ?? null;
   const meta = [glyph.label, sessionAge(record, digest, now), digest?.context ? `ctx ${Math.round(digest.context.percent)}%` : null].filter(Boolean).join(' · ');
 
   return (
@@ -213,7 +219,7 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
           <Request item={waiting.oldest} />
         </div>
       )}
-      {!pending.some((item) => item.kind === 'question') && !record.archived && record.holder.kind !== 'terminal' && record.holder.kind !== 'background_job' &&
+      {!pending.some((item) => item.kind === 'question') && !record.archived && controlled &&
         <QuickReply record={record} reply={reply} />}
     </div>
   );

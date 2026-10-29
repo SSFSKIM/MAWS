@@ -10,6 +10,7 @@ import { ipc } from '../../ipc/client';
 import type { EditorHandle } from '../editor/controller';
 import { ADD_DIRECTORY, useAddDirectory } from '../frame/add-directory';
 import type { ChipBinding } from '../frame/bindings';
+import { useOpenWhileShown } from '../frame/draft-shown';
 import { UNAVAILABLE_HINT } from '../mentions/items';
 import { useRegisteredWidgets, type WidgetCommandName } from '../mentions/widgets';
 import { toast } from '../../stores/notices';
@@ -29,6 +30,7 @@ export interface PlusMenuProps {
 
 export function PlusMenu({ appSessionId, cwd, editor, directories }: PlusMenuProps) {
   const widgets = useRegisteredWidgets();
+  const [open, setOpen] = useOpenWhileShown(); // closed as a docked card hides the toolbar
   const status = useSessions((s) => appSessionId ? s.engine.get(appSessionId) : undefined);
   const projectId = useSessions((s) => (appSessionId ? s.records.get(appSessionId)?.projectId : null) ?? [...s.projects.values()].find((project) => project.directory === cwd)?.id ?? null);
   const addDirectory = useAddDirectory(directories ?? NO_DIRECTORIES, cwd);
@@ -56,7 +58,7 @@ export function PlusMenu({ appSessionId, cwd, editor, directories }: PlusMenuPro
   };
   return (
     <>
-      <DropdownMenu.Root modal={false}>
+      <DropdownMenu.Root modal={false} open={open} onOpenChange={setOpen}>
         <DropdownMenu.Trigger aria-label="Add files, photos or commands" className="inline-flex size-7 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2">
           +
         </DropdownMenu.Trigger>

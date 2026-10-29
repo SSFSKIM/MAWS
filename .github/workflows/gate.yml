@@ -92,7 +92,7 @@ env:
     default artifacts library side tools to-human deliverables panel supervisor browser browser-comment browser-import
     settings transcript terminal code agents widgets c7 scm c12 available document document-app presentations
     design-systems browser-cua browser-chrome desk-web design dashboard connectors connectors-direct connectors-oauth delivery
-    discover supervisor-daemon daemon-unit machines
+    discover supervisor-daemon daemon-unit machines lane-a
   # The groups §3.1's table found green on a Linux runner, the only ones a Linux lane takes (never by default). desk-web
   # (DC5): the desk's web app in a browser, against its DX3 double, which needs no Electron and no Mac.
   LINUX_E2E: library artifacts available tools agents desk-web
@@ -267,10 +267,15 @@ env:
   # machines (P5 O6 M6, docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md): the two-profile scenes, admitted
   # by the rule above on the tree that lists it, its three `Lane: hosted` runs and its `Lane: no-hosted` baseline
   # recorded in that document's Outcomes.
+  # lane-a (CI-opt, after P5 O9): 3/3 green under `Lane: hosted` at master 3d1f3ff6d in runs 40812590308 (10 passed),
+  # 40812578726 (9 passed, 1 flaky at lane-a.spec.ts:129, green on its retry) and 40814382935 (10 passed), each against
+  # the `Lane: no-hosted` baseline 40831064338 on the same tree (10 passed, on ci-kit-mac-ec2). The flake was begin()
+  # waiting expect's default 5 s for the main window after launchMaws, short of a fresh hosted Mac's first launch; it
+  # now waits 60 s, as c12-prerun does.
   HOSTED_MAC_E2E: >-
     document-app browser-chrome available artifacts settings connectors connectors-direct delivery to-human widgets side
     supervisor c12 browser-import document code scm agents library deliverables presentations dashboard design
-    design-systems tools panel browser-cua terminal c7 browser transcript supervisor-daemon daemon-unit machines
+    design-systems tools panel browser-cua terminal c7 browser transcript supervisor-daemon daemon-unit machines lane-a
   # Non-e2e jobs admitted to the direct hosted route. Lane: hosted/no-hosted never changes these.
   # packaged (CI-opt): PR #297 records the admission evidence: 3/3 direct hosted greens on one tree, with the
   # same counts as its mini baseline, plus hosted settings/document checks after selecting overlay scrollbars.
