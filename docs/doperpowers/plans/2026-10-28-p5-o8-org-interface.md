@@ -50,8 +50,8 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-28) The desk track reviewed the `deploy/` hunk and shaped the wrapper fix. The final gate, run 40771309800, had two browser reds (`browser-cua.spec.ts:483`, `browser-chrome.spec.ts:681`), none of #314's; its rerun, 40783162110, was green.
   - [ ] The owner's sitting: `root add` on staging, then production (the steps are in the report, `2026-10-28-p5-o8-report.md`).
 - [ ] M4a — The Org page: its shape, people and devices — **executable** (re-planned 2026-10-29; needs M3 and H1, both landed)
-  - [ ] Task 1: the move: the pairing judges and their `PendingEntry` type into `org-protocol`, `admin.ts` importing them (its own commit, the desk track's review).
-  - [ ] Task 2: `successorProblems` and `stateProblems` in `org-protocol`, and `admin.ts`'s `amend` running it (the desk track's review).
+  - [x] (2026-10-29) Task 1, reviewed clean and approved by the desk track (336af704b): the move: the pairing judges and their `PendingEntry` type into `org-protocol`, `admin.ts` importing them (its own commit, the desk track's review).
+  - [x] (2026-10-29) Task 2, reviewed clean and approved by the desk track (5935f62a5; review fix 592211929; boundary comment 37ce2077d): `successorProblems` and `stateProblems` in `org-protocol`, and `admin.ts`'s `amend` running it (the desk track's review).
   - [ ] Task 3: the signing paths: `edits.ts`, `Edit.endorse` and `Edit.live`, `StateSigner.sign`'s endorsement and guard, the signer's check before the slot, and `checks.ts` running `successorProblems`.
   - [ ] Task 4: the session's surface: `org.view`, `org.preview`, `org.change`, `org.pair.*`, `pairing.ts`, `hub-client.ts`'s `pendingOf`, `refused.attempt`, the schema and main's wiring.
   - [ ] Task 5: `close()`'s fence and join (`HeldOrg.close()`, the parts' operations in flight), and the two test workarounds removed.
@@ -2064,6 +2064,12 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   4. An endorsement by a key outside the member's own (`unknown-signer`) stays `verifySuccessor`'s signature check.
   5. The admin check sits in `signPending`, so it covers `propose` as well as `amend`.
   6. Until M4c, `checkSuccessor` shows `prefix-overlaps` beside its own directional prefix code for one collision.
+  7. (Review fix, 592211929.) The task review found that full diagnostics ran inside `verifySuccessor` before authentication. 120 duplicate delegations built 7,140 `prefix-overlaps` diagnostics.
+     - `stateInvariants` now uses `stateProblems(s, {first: true})`, which returns at the first problem and builds no detail.
+     - Full mode keeps at most `PROBLEMS_PER_CODE` (8) problems per code, and builds each detail lazily, never past the cap. `onDetail` counts the details built, for the test.
+     - The pairwise comparison stays quadratic, as the desk track allowed.
+     - `key-held-twice`'s detail names the holders without the key id.
+     - Past the cap each call site still makes its closure, so full mode is for a caller's own successors, never for posted input. The desk track's note is recorded at the functions (37ce2077d).
   Date/Author: 2026-10-29, O8's executor.
 
 ## Outcomes & Retrospective
