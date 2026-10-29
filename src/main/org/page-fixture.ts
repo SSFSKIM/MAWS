@@ -15,8 +15,6 @@ import {
   type commands,
   type DiscardResult,
   type OrgAttempt,
-  type OrgStatus,
-  type OrgView,
   type PairStartResult,
   type PreviewResult,
   type SignResult,
@@ -24,9 +22,6 @@ import {
 import type { interceptCommand, MainHandler } from '../ipc/router';
 
 export const ORG_PAGE_FIXTURE_ENV = 'MAWS_E2E_ORG_PAGE';
-
-/** What the file holds, as the spec writes it. */
-export type OrgPageFixture = { status: OrgStatus; view: OrgView | null };
 
 export interface OrgPageFixtureInstall {
   env: Record<string, string | undefined>;
