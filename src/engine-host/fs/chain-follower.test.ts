@@ -538,6 +538,19 @@ describe('follows the leaf across a rewind', () => {
     expect(follower.snapshot().skippedLines).toBe(0);
   });
 
+  // P5 E312 (spikes/protocol-probe/findings-p5-e312-engine.txt): 2.1.312 writes the request-replay records (SPEC 35
+  // ApiRequestShapeRecord, ApiRequestBlobRecord, ApiRequestRecord) into every session's transcript, one set per model
+  // request, and a `tools-used` stamp of the tool registry's names; nothing reads them back into a conversation.
+  it('keeps the engine’s request-replay records and tools-used stamp silent', async () => {
+    const { out } = await started(joined([
+      line({ type: 'tools-used', tools: ['Bash', 'Read'], sessionId: SESSION }),
+      line({ type: 'api-request-shape', sessionId: SESSION, shapeHash: 'h1', timestamp: at(0), version: '2.1.312', shape: {} }),
+      line({ type: 'api-request-blob', sessionId: SESSION, hash: 'm1', message: { role: 'user', content: 'one' } }),
+      line({ type: 'api-request', sessionId: SESSION, id: 'r1', timestamp: at(0), version: '2.1.312', querySource: 'sdk', shapeHash: 'h1', params: {}, keep: 0, tail: ['m1'], cacheControl: [] }),
+    ]));
+    expect(out.of('frame.unknown')).toEqual([]);
+  });
+
   it('delivers events in batches of at most 500 and materialises everything delivered', async () => {
     const lines: string[] = [];
     let parent: string | null = null;
