@@ -76,6 +76,7 @@ function recordedCut(state: TranscriptState | undefined): (at: number | null) =>
     starts.push(Date.parse(turn.startedAt));
     for (const event of turn.events) if (event.kind === 'user.message' && event.origin === INTERRUPT_CUT) written.push(Date.parse(event.at));
   }
+  for (const event of state.loose) if (event.kind === 'user.message' && event.origin === INTERRUPT_CUT) written.push(Date.parse(event.at)); // its turn not loaded
   if (written.length === 0) return () => false;
   return (at) => at !== null && written.some((t) => t >= at && !starts.some((s) => s > at && s <= t));
 }

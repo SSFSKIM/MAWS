@@ -91,6 +91,14 @@ describe('the bridge’s row of a reply an interrupt cut off', () => {
     expect(placeCuts(entry.state, [kept(Date.parse(c.rows[2].timestamp as string))])).toEqual([]);
   });
 
+  it('a window starting at the marker, its turn not loaded: the row still draws its cut-off part, in no turn', async () => {
+    const { c, marker } = interrupted();
+    const { rows, state } = await load(c.rows.slice(2));
+    expect(cuts(rows)).toEqual([expect.objectContaining({ markdown: CUT, turnId: null })]);
+    expect(rows.some((r) => r.kind === 'user')).toBe(false);
+    expect(placeCuts(state, [kept(Date.parse(marker.timestamp as string))])).toEqual([]);
+  });
+
   it('a row written after another turn started confirms no earlier cut', async () => {
     const c = new Chain('c4a10000', 'sminos');
     c.prompt('Count.');

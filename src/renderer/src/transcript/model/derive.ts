@@ -1463,7 +1463,7 @@ function boundaryRow(event: Event<'boundary.compaction' | 'boundary.reset' | 'bo
 // P5 O9 (the M10 sitting): the sminos bridge's row of a reply an interrupt cut off (`@shared/lane-a/interrupt-cut`), as
 // the cut-off text a live view kept from the stream draws (`lane-a/view/streaming-rows.ts`): settled, marked cut off,
 // never the turn's answer, and saying when it starts partway through.
-function cutRowOf(event: Event<'user.message'>, turnId: TurnId): RowOf<'assistant_text'> | null {
+function cutRowOf(event: Event<'user.message'>, turnId: TurnId | null): RowOf<'assistant_text'> | null {
   const cut = parseInterruptCut(messageText(event.content));
   if (cut === null || cut.text.trim() === '') return null;
   return { id: rowId.cut(event.id), turnId, at: event.at, kind: 'assistant_text', messageUuid: null, blockIndex: 0, markdown: cut.text, live: false, phase: 'commentary', model: null, cut: true, ...(cut.partway && { partway: true as const }) };
@@ -1518,7 +1518,10 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
   for (const event of events) {
     switch (event.kind) {
       case 'user.message': {
-        if (event.bash?.part === 'input') rows.push(bashRowOf(event, null));
+        if (event.origin === INTERRUPT_CUT) { // P5 O9: a recorded cut whose turn is not loaded (a page starting at its marker)
+          const row = cutRowOf(event, null);
+          if (row) rows.push(row);
+        } else if (event.bash?.part === 'input') rows.push(bashRowOf(event, null));
         else if (event.bash?.part === 'output') {
           const at = rows.findIndex((row) => row.kind === 'bash' && row.exitCode === null);
           if (at >= 0) rows[at] = withBashOutput(rows[at] as RowOf<'bash'>, event);
