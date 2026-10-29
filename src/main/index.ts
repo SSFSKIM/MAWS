@@ -40,6 +40,7 @@ import { createRegistryFeed } from './org/registry-feed'; // P5 O8 M1
 import { registerOrgHandlers, registerRowsHandler } from './org/register'; // P5 O8 M1; M2: org.rows
 import { orgFiles } from './org/files'; // P5 O8 M1
 import { createRemoteRows } from './org/rows'; // P5 O8 M2
+import { installOrgPageFixture } from './org/page-fixture'; // P5 O8 M4a Task 8: a harness build's only
 // C3 end
 // C4 start (emit comes with C3's imports)
 import { startIndexAttention } from './index/attention-service';
@@ -386,6 +387,9 @@ function startMain({ settings, spine }: { settings: SettingsService; spine: Spin
   const orgFeed = createRegistryFeed({ session, log: (line) => console.log(line) });
   orgSession?.attach(orgFeed);
   registerOrgHandlers({ register: registerMainHandler, emit: (name, status) => void emit(name, status), service: orgSession, development: devOrg });
+  // P5 O8 M4a Task 8: the Org page's e2e look seeds org.* from a fixture (org/page-fixture.ts). The guard folds to false
+  // outside a harness build, which then carries none of it.
+  if (typeof __MAWS_HARNESS_BUILD__ !== 'undefined' && __MAWS_HARNESS_BUILD__) installOrgPageFixture({ env: process.env, packaged: app.isPackaged, intercept: interceptCommand });
   powerMonitor.on('resume', () => orgFeed.probe());
   powerMonitor.on('unlock-screen', () => orgFeed.probe());
   // P5 O6 M3: every other machine through the connection manager (one link per machine; MAWS_LOCAL_MACHINES names another
