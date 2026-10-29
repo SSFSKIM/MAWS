@@ -10,6 +10,10 @@
 // - A private daemon exits once no client has been on any of its sockets for `idleExitMs`, both hosts are parked and no
 //   hold is out; a unit daemon never exits by itself.
 // - `idleExitMs` is the last `host.configure` an app sent, 10 minutes until then; `null` arms nothing.
+// - Quiet (P5 Decision Log 124's lever, @shared/host/idle-collect.ts): once the daemon serves, no client on any socket
+//   and none between its socket and the count (a hello waiting on its admission, a departure's drain), an empty interest
+//   union and no hold out. It is told at every evaluation, so `mawsd` collects at every entry, and `quiet()` answers it
+//   again at the moment of collecting.
 // (The pty host's park is a check, not a clock: the daemon asks `pty.list` at the app's departure and at each `pty.exit`.)
 
 export const DEFAULT_IDLE_EXIT_MS = 10 * 60_000;
@@ -18,6 +22,7 @@ export interface ClockActions {
   armEnginePark(): void; // `exit {when: 'idle'}` to the served engine host
   disarmEnginePark(): void; // `host.exitWhenIdle {armed: false}`, and the transport told
   exitDaemon(): void; // a private daemon's idle exit
+  quiet(quiet: boolean): void; // the daemon's quiet as it stands, told at each evaluation from `served()` on
 }
 
 export class DaemonClocks {
@@ -29,9 +34,11 @@ export class DaemonClocks {
   private parkSince: number;
   private parked = { engine: true, pty: true };
   private clientCount = 0;
+  private between = false; // an app between a relay's socket and the count (the quiet's alone: the exit clock counts welcomed clients)
   private holdCount = 0;
   private clientsGoneSince: number;
   private exited = false;
+  private serving = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
 
@@ -88,6 +95,21 @@ export class DaemonClocks {
     this.evaluate();
   }
 
+  relaysBetween(between: boolean): void {
+    this.between = between;
+    this.evaluate();
+  }
+
+  quiet(): boolean {
+    return this.serving && !this.stopped && this.clientCount === 0 && !this.between && this.interestEmpty && this.holdCount === 0;
+  }
+
+  // Start step (8) is done: the daemon serves, and its quiet is told from now on.
+  served(): void {
+    this.serving = true;
+    this.evaluate();
+  }
+
   // A private daemon's exit clock while no client is on any socket; null otherwise.
   idleExitAt(): string | null {
     const due = this.exitDue();
@@ -122,6 +144,7 @@ export class DaemonClocks {
 
   private evaluate(): void {
     if (this.stopped) return;
+    if (this.serving) this.actions.quiet(this.quiet());
     this.clearTimer();
     const now = Date.now();
     const waits: number[] = [];
