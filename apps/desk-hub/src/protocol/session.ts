@@ -176,6 +176,12 @@ export type SessionPresence = {
   capabilities?: Capabilities;
   /** The bridge's reading of the session's permission mode and when it was read (M3); absent before any reading. */
   mode?: ModeReading;
+  /**
+   * The launch the session's bridge serves (its `GET /status` `launch`, O12 M7), on RL10's plane only: what a lane A act
+   * names in its context, so one sealed for an earlier process is refused at the effect (P5 O9). Absent elsewhere, and
+   * from a bridge that names none.
+   */
+  launch?: string;
 };
 
 /**

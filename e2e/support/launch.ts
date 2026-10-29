@@ -39,6 +39,7 @@ export interface MawsLaunch {
   consoleErrors(): string[]; // the first window's console errors and uncaught errors so far, from its first load on
   userData: string;
   shellHome: string; // the scratch shell home under `userData` (ZDOTDIR, and where the shells' history goes)
+  sminosHome: string; // P5 O9 M5: the scratch sminos home lane A looks for bridges under (a test's `env` may name another)
   packaged: boolean;
   launchedAt: number; // Date.now() just before the process was started
   // P4-AGG M1: under the `realEngine` option, the engine the app runs and the scratch written around it
@@ -136,7 +137,8 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   // E11 W-E (Decision Log 22): the runner's environment without its CLAUDE* variables or the dev-server and Node
   // switches, with the e2e mark, the profile, the empty engine store (C4) and no ClaudeUsage data (C7):
   // scratch-env.ts's launchEnvironment, pinned by its unit test. A test's `env` may name a CLAUDE* variable on purpose.
-  const env = launchEnvironment(process.env, userData);
+  const sminosHome = mkdtempSync('/tmp/mws-'); // P5 O9 M5: short, so a bridge's socket path fits 103 bytes
+  const env = launchEnvironment(process.env, userData, sminosHome);
   if (engine) env.MAWS_E2E_ENGINE_BIN = engine.bin; // P4-AGG M1: the real engine, never the replay stub
   // FX4: replay launch gates need a version, not an installed engine. Live specs explicitly pass ENGINE_BIN;
   // an environment override or the Engine setting can still name another binary. The scratch owns this stub.
@@ -180,6 +182,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
       const left = await untilExited(shells, SHELL_EXIT_MS);
       if (left.length > 0) console.error(`[e2e] shells still running ${SHELL_EXIT_MS} ms after the app closed: ${left.map((p) => p.pid).join(', ')}`);
       if (ownsUserData) rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); // C5: a given profile is the caller's
+      rmSync(sminosHome, { recursive: true, force: true }); // P5 O9 M5
     }
     if (prompted) throw prompted;
     if (keychainScene) assertNoKeychainPrompt('after the app closed');
@@ -209,7 +212,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     await sizeForGroup(app, page); // P3-F1
     await placeForInstance(app); // ci-kit's mac-lane concurrency spec, M2
     await reportForeground(app);
-    return { app, page, consoleErrors, userData, shellHome: shellHome.dir, packaged: executable !== null, launchedAt, ...(engine && discover && { realEngine: { ...engine, scratch: discover } }), cleanup };
+    return { app, page, consoleErrors, userData, shellHome: shellHome.dir, sminosHome: env.SMINOS_HOME ?? sminosHome, packaged: executable !== null, launchedAt, ...(engine && discover && { realEngine: { ...engine, scratch: discover } }), cleanup };
   } catch (error) {
     await cleanup().catch((cleanupError) => console.error('[e2e] cleanup after a failed launch also failed', cleanupError));
     throw error;

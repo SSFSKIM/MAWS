@@ -8,10 +8,11 @@ import { createRef } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { useTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
 import type { TranscriptListHandle } from '../../../../../src/renderer/src/transcript/view/Transcript';
-import { FakePlane } from '../../../test/double/fake-plane';
-import { readRecording, scriptOf } from '../../../test/double/session-stream';
+import type { PlaneTranscript } from '../../../../../src/renderer/src/lane-a/plane-transcript';
+import { FakePlane } from '../../../../../src/renderer/src/lane-a/test-support/fake-plane';
+import { readRecording, scriptOf } from '../../../../../src/renderer/src/lane-a/test-support/session-stream';
 import type { DeskSession } from '../../shell/sessions';
-import { DeskTranscript } from '../source/desk-transcript';
+import { deskTranscript } from '../source/desk-source';
 import { TranscriptPane, useDeskTranscript } from './TranscriptPane';
 
 const script = scriptOf(readRecording().session, null);
@@ -36,7 +37,7 @@ const session = {
 
 afterEach(cleanup);
 
-function Pane({ controller }: { controller: DeskTranscript }) {
+function Pane({ controller }: { controller: PlaneTranscript }) {
   const state = useDeskTranscript(controller, session);
   return <TranscriptPane controller={controller} state={state} variant="session" actions={{}} list={createRef<TranscriptListHandle>()} />;
 }
@@ -45,7 +46,7 @@ it('draws a session’s transcript without asking MAWS for its browser activity:
   const errors = vi.spyOn(console, 'error');
   try {
     const plane = new FakePlane('proj');
-    const controller = new DeskTranscript({ plane, project: 'proj', target: { machine: 'mini', session: 'sess-1', agentId: null }, store: useTranscriptStore });
+    const controller = deskTranscript({ plane, project: 'proj', target: { machine: 'mini', session: 'sess-1', agentId: null }, store: useTranscriptStore });
     render(<Pane controller={controller} />);
     await act(async () => plane.current.snapshot(script, 4));
     expect(controller.state.getState().phase).toBe('live');

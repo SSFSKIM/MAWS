@@ -15,9 +15,9 @@ import type { TranscriptActions } from '../../../../../src/renderer/src/transcri
 import type { TranscriptListHandle } from '../../../../../src/renderer/src/transcript/view/Transcript';
 import { SubagentGlyph } from '../../../../../src/renderer/src/transcript/view/rows/Subagent';
 import { sessionName } from '../../log/projection';
-import type { SessionPlane } from '../../shell/session-plane';
+import type { SessionPlane } from '../../../../../src/renderer/src/lane-a/session-plane';
 import type { DeskSession } from '../../shell/sessions';
-import { DeskTranscript } from '../source/desk-transcript';
+import { deskTranscript } from '../source/desk-source';
 import { JobsPane } from './JobsPane';
 import { TranscriptPane, transcriptStatus, useDeskTranscript } from './TranscriptPane';
 
@@ -33,7 +33,7 @@ type Props = {
 };
 
 export function SubagentDetail({ project, session, plane, agentId, node, actions, onBack }: Props) {
-  const [controller] = useState(() => new DeskTranscript({ plane, project, target: { machine: session.machine, session: session.session, agentId }, store: useTranscriptStore }));
+  const [controller] = useState(() => deskTranscript({ plane, project, target: { machine: session.machine, session: session.session, agentId }, store: useTranscriptStore }));
   const state = useDeskTranscript(controller, session);
   const list = useRef<TranscriptListHandle>(null);
 

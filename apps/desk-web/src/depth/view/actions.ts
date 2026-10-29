@@ -6,7 +6,7 @@
 // read it (`source/off-chain.ts`: the desk's rows carry no engine cancel of their own), and says so.
 import type { TranscriptActions } from '../../../../../src/renderer/src/transcript/view/context';
 import { openExternal } from '../../views/conversation/browser-actions';
-import { UNDONE } from '../source/off-chain';
+import { UNDONE } from '../../../../../src/renderer/src/lane-a/source/off-chain';
 
 export const DESK_ACTIONS: Partial<TranscriptActions> = {
   openExternal,

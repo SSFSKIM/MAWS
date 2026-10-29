@@ -13,6 +13,8 @@
 // local (`Transcript`'s). Absent, the slot draws as before.
 // P2-C (2026-10-09): a session's slot follows its owner channel (`stores/owner-channel.ts`) and tells the transcript
 // whether the lane is on, which the report view and the report module read.
+// P5 O9 M5: a terminal session driven through its bridge streams its reply into the tail (`lane-a/stream/overlay.ts`),
+// keeps what an interrupt cut of it in its turn, and is at rest while its controls port says no main turn runs.
 // L197: the slot gives the transcript the session's agents from its task graph (agent-lookup.ts), so a message to an
 // agent no loaded turn launched names it.
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
@@ -28,6 +30,8 @@ import type { Row } from '../model/rows';
 import { ipcRewind, ipcSource } from '../source/ipc';
 import { useAgentLookup } from './agent-lookup'; // L197
 import type { TranscriptActions } from './context';
+import { useLaneAStreaming } from '../../lane-a/stream/use-overlay'; // P5 O9 M5
+import { useSessionControls } from '../../session/controls/controls-for'; // P5 O9 M5
 import { useRegisteredActions, useRegisteredRequestRenderer } from './registry';
 import { storeKeyOf, Transcript } from './Transcript';
 
@@ -47,7 +51,15 @@ export function TranscriptSlot({ appSessionId, agentId, className, startAt, pres
   const source = ipcSource(appSessionId, agentId); // memoised per key
   const storeKey = storeKeyOf(source);
   useAgentLookup(storeKey, appSessionId); // L197: an agent no loaded turn launched, named from the session's task graph
-  const rewind = useMemo(() => (agentId === undefined ? ipcRewind(appSessionId) : undefined), [appSessionId, agentId]);
+  // P5 O9 M5: a session driven through its bridge keeps Restore files in place, disabled with its reason (acceptance 2)
+  const controls = useSessionControls(appSessionId);
+  const filesGap = controls !== null && controls.turn() !== null ? controls.capability('rewind-files') : null;
+  // P5 O9 (the M8 sitting): such a session runs exactly while its port says a main turn is open, the one source custody
+  // reads. Its disk rows leave turns open that nothing there ends (a slash command's echo, a turn the bridge
+  // interrupted), so while the port says none runs those draw closed, as the desk draws a session its host calls idle.
+  const atRest = agentId === undefined && controls?.turn()?.running === false;
+  const filesReason = filesGap !== null && !filesGap.available ? filesGap.reason : null;
+  const rewind = useMemo(() => (agentId === undefined ? { ...ipcRewind(appSessionId), unavailable: filesReason } : undefined), [appSessionId, agentId, filesReason]);
   // Where the session runs, from its record (its worktree's checkout when it has one): the engine's Bash input names no
   // cwd, so a shell call shows this, labelled as the session's directory. Not for a child agent's transcript: a
   // worktree-isolated subagent's shell ran elsewhere.
@@ -68,7 +80,9 @@ export function TranscriptSlot({ appSessionId, agentId, className, startAt, pres
       return askIds.map((askId) => askId !== null && state !== undefined && askAnsweredHere(state, askId));
     }),
   );
-  const tail = useMemo(() => held.filter((_, i) => !answered[i]).map(heldRow), [held, answered]);
+  // P5 O9 M5: a terminal session driven through its bridge draws its reply as it is written, after the rows on disk
+  const streaming = useLaneAStreaming(agentId === undefined ? appSessionId : null, storeKey);
+  const tail = useMemo(() => [...streaming.tail, ...held.filter((_, i) => !answered[i]).map(heldRow)], [streaming.tail, held, answered]);
   const withdrawn = useMemo(() => new Set<string>(queue.withdrawn), [queue.withdrawn]);
   const effort = useShownEffort(appSessionId);
   const ownerLane = useOwnerChannel(agentId === undefined ? appSessionId : null)?.lane.on ?? false; // P2-C: a session's, never a child's
@@ -87,6 +101,8 @@ export function TranscriptSlot({ appSessionId, agentId, className, startAt, pres
       startAt={startAt}
       presentation={presentation}
       ownerLane={agentId === undefined ? ownerLane : undefined}
+      atRest={atRest}
+      placed={streaming.kept}
     />
   );
 }

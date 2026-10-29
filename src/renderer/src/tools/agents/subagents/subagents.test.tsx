@@ -32,6 +32,9 @@ import { SubagentsSummary } from './SubagentsSummary';
 import type { BackgroundHandle } from '../background/BackgroundTool';
 import { subagentsTool, type SubagentsHandle, type SubagentsParams } from './SubagentsTool';
 import { REL } from '../../../test-support/relative-time';
+import { laneAState } from '../../../lane-a/test-support/lane-a-state'; // P5 O9
+import { applyLaneAState, resetLaneAStore } from '../../../stores/lane-a'; // P5 O9
+import { STOP_DOUBT_MS } from './shared'; // P5 O9
 
 const M3 = REL.agoNarrow(3, 'minute'); // 3m ago, 3분 전
 
@@ -547,6 +550,74 @@ describe('drill-in', () => {
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Stop' }));
     expect(fake.inputs.stopTask).toEqual([[A, 'a1']]);
     expect(screen.getByRole('button', { name: 'stopping…' })).toBeTruthy();
+  });
+
+  // P5 O9: a terminal session driven through its bridge stops a subagent by its id, whatever engine status MAWS kept
+  // from an earlier run of the session; a stop whose outcome is unknown says so and is offered again after a wait.
+  describe('of a terminal session driven through its bridge', () => {
+    let stopAgent: unknown;
+    const invoked: [string, unknown][] = [];
+    beforeEach(() => {
+      invoked.splice(0);
+      stopAgent = { state: 'done', result: null };
+      window.maws = {
+        localMachine: TEST_MACHINE,
+        invoke: async (name: string, input: unknown) => {
+          invoked.push([name, input]);
+          if (name === 'session.events') return { ok: true, value: { events: [], lastSeq: 0, complete: true } };
+          if (name === 'laneA.stopAgent') return { ok: true, value: stopAgent };
+          return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
+        },
+        on: () => () => {},
+      } as unknown as PreloadBridge;
+    });
+    afterEach(() => resetLaneAStore());
+
+    async function mountDriven() {
+      await mount({ status: live({ process: 'exited' }), events: [started('a1', 1, { description: 'Long survey' })], params: { agentId: 'a1' as AgentId } });
+      act(() => {
+        useSessions.setState((s) => ({ records: new Map(s.records).set(A, { ...s.records.get(A)!, holder: { kind: 'terminal', pid: 4242 } }) }));
+        applyLaneAState(A, laneAState(A));
+      });
+    }
+    const stopThroughBridge = async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Stop agent' }));
+      fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Stop' }));
+      await waitFor(() => expect(invoked.filter(([name]) => name === 'laneA.stopAgent')).toHaveLength(1));
+    };
+
+    it('reads the lists as not live here once a terminal drives the session, whatever engine status was kept', async () => {
+      await mount({ events: [started('a1', 1, { description: 'Long survey' })] });
+      expect(screen.getByText('Live activity · includes nested agents')).toBeTruthy();
+      expect(screen.queryByText('Status is known only while the session runs here')).toBeNull();
+      act(() => {
+        useSessions.setState((s) => ({ records: new Map(s.records).set(A, { ...s.records.get(A)!, holder: { kind: 'terminal', pid: 4242 } }) }));
+        applyLaneAState(A, laneAState(A));
+      });
+      expect(screen.queryByText('Live activity · includes nested agents')).toBeNull();
+      expect(screen.getByText('Status is known only while the session runs here')).toBeTruthy();
+    });
+
+    it('stops the agent through the bridge, though an exited engine status is kept', async () => {
+      await mountDriven();
+      expect(screen.getAllByRole('button', { name: 'Stop agent' })).toHaveLength(1);
+      await stopThroughBridge();
+      expect(invoked.find(([name]) => name === 'laneA.stopAgent')?.[1]).toEqual({ appSessionId: 'A', agentId: 'a1' }); // the bare id, as the client sends it
+      expect(fake.inputs.stopTask).toEqual([]);
+      expect(screen.getByRole('button', { name: 'stopping…' })).toBeTruthy();
+    });
+
+    it('says a stop with an unknown outcome may not have stopped, and offers Stop again after the wait', async () => {
+      stopAgent = { state: 'unknown', why: 'timeout' };
+      await mountDriven();
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      await stopThroughBridge();
+      await waitFor(() => expect(screen.getByText('May not have stopped')).toBeTruthy());
+      expect((screen.getByRole('button', { name: 'stopping…' }) as HTMLButtonElement).disabled).toBe(true);
+      await act(async () => vi.advanceTimersByTimeAsync(STOP_DOUBT_MS));
+      expect((screen.getByRole('button', { name: 'Stop agent' }) as HTMLButtonElement).disabled).toBe(false);
+      expect(screen.getByText('May not have stopped')).toBeTruthy();
+    });
   });
 });
 

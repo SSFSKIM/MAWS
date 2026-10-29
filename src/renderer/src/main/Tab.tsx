@@ -8,7 +8,9 @@ import { useEffect, type KeyboardEvent, type MouseEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { UNPINNABLE_KINDS, type TabRef } from '@shared/ipc/schema/layout';
 import { PinIcon, useChordHint } from '../app/IconButton';
+import { BRIDGED_LINE, holderLine } from '../attention/derive'; // P5 O9
 import { GlyphMark } from '../attention/GlyphMark';
+import { useSessionControls } from '../session/controls/controls-for'; // P5 O9
 import { glyphFor, type Glyph } from '../attention/glyph';
 import { requestCloseTab, useUnstartedTitle } from '../keymap/actions-runtime';
 import { selectEndedWithErrorOf, selectPendingOf, useAttention } from '../stores/attention';
@@ -109,6 +111,18 @@ export function useTabLabel(tab: TabRef): TabLabel {
   }
 }
 
+// P5 O9 (the owner's Q1): a session a terminal or a `--bg` job holds reads like any MAWS session while MAWS drives it
+// through its bridge (its controls port is lane A: `turn()` non-null), with a small mark of where it runs, titled with
+// the hover card's line, in the tab's own `small` style. Null for every other tab.
+function useHolderMark(tab: TabRef): { text: string; title: string } | null {
+  const appSessionId = tab.kind === 'session' ? tab.appSessionId : null;
+  const record = useSessions((s) => (appSessionId === null ? null : (s.records.get(appSessionId) ?? null)));
+  const controls = useSessionControls(appSessionId ?? ('' as AppSessionId));
+  if (record === null || controls === null || controls.turn() === null) return null;
+  const terminal = record.holder.kind === 'terminal';
+  return { text: terminal ? 'Terminal' : 'Background job', title: BRIDGED_LINE(terminal ? null : holderLine(record)) };
+}
+
 function useSessionOffline(tab: TabRef): boolean {
   const appSessionId = tab.kind === 'session' || tab.kind === 'agent' ? tab.appSessionId : null;
   return useMachines((s) => appSessionId !== null && selectOffline(s, machineOf(appSessionId)));
@@ -132,8 +146,9 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
   const name = label.secondary ? `${label.title} · ${label.secondary}` : label.title;
   const closeChord = useChordHint('tab.close');
   const dirty = useFileTabDirty(tab); // E5
+  const holderMark = useHolderMark(tab); // P5 O9
   // Keep plain tabs compact, but reserve each nonshrinking mark plus its gap before truncating the title.
-  const minWidth = Math.max(active ? 24 : 16, 16 + (label.glyph ? 4 : 0) + (label.fileType ? 8 : 0) + (tab.pinned ? 4 : 0) + (dirty ? 4 : 0) + (label.secondary ? 20 : 0));
+  const minWidth = Math.max(active ? 24 : 16, 16 + (label.glyph ? 4 : 0) + (label.fileType ? 8 : 0) + (tab.pinned ? 4 : 0) + (dirty ? 4 : 0) + (label.secondary ? 20 : 0) + (holderMark ? 16 : 0));
 
   const onAuxClick = (event: MouseEvent) => {
     if (event.button === 1) void requestCloseTab(tab.id);
@@ -172,6 +187,11 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
       )}
       {dirty && <DirtyMark />}{/* E5 */}
       <span className={`truncate ${offline ? 'text-fg-faint' : ''}`}>{label.title}</span>
+      {holderMark && ( // P5 O9 (Q1)
+        <small data-holder-marker title={holderMark.title} className="shrink-0 text-fg-muted">
+          {holderMark.text}
+        </small>
+      )}
       {label.secondary && <small className="max-w-16 shrink-0 truncate text-fg-muted">{label.secondary}</small>}
       <button
         type="button"

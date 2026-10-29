@@ -8,7 +8,7 @@
 // sessions were seen answering from (`state/models.ts`), and takes any id.
 import { useId, useState, type FormEvent } from 'react';
 import { useStore } from 'zustand';
-import { resultOf } from '../../conversation/outcome';
+import { resultOf } from '../../../../../src/renderer/src/lane-a/conversation/outcome';
 import { FAMILY_ALIASES, useProjectModels } from '../../state/models';
 import { buttonPrimary, buttonSecondary, Dialog, textInput } from '../common/Dialog';
 import { useConnected, useDesk } from '../conversation/desk-context';

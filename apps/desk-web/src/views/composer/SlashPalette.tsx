@@ -1,6 +1,6 @@
 // MAWS's grouped palette and list keyboard, adapted to the desk's textarea (no Tiptap dependency).
 import { useLayoutEffect, useRef } from 'react';
-import { ORIGIN_LABEL, ORIGIN_ORDER, type SlashItem } from '../../conversation/catalog';
+import { ORIGIN_LABEL, ORIGIN_ORDER, type SlashItem } from '../../../../../src/renderer/src/lane-a/conversation/catalog';
 import { latency } from '../../latency/latency';
 export function groupedItems(ranked: SlashItem[]): SlashItem[] { return ORIGIN_ORDER.flatMap((origin) => ranked.filter((item) => item.origin === origin)); }
 export function SlashPalette({ id, rows, active, setActive, pick, stamp, note, opened }: {

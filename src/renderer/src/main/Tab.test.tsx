@@ -20,7 +20,12 @@ import { fail, installFakeMain, ok } from '../test-support/code';
 import { A, panelOf, resetPanelStores, sessionTab } from '../test-support/panel';
 import { ARTIFACTS_TOOL_ID, artifactsTool, type ArtifactsHandle } from '../tools/artifacts/ArtifactsTool';
 import { MainArea } from './MainArea';
-import { SHOW_IN_PANEL_COPY, useTabLabel } from './Tab';
+import { SHOW_IN_PANEL_COPY, Tab, useTabLabel } from './Tab';
+import type { SessionRecord } from '@shared/graph/session';
+import { record } from '../../../../test/support/builders';
+import { laneAState } from '../lane-a/test-support/lane-a-state'; // P5 O9
+import { applyLaneAState, resetLaneAStore } from '../stores/lane-a'; // P5 O9
+import { useSessions } from '../stores/sessions';
 import { addressOf } from '@shared/machine/address';
 import type { AppSessionId } from '@shared/graph/ids';
 import { OTHER_MACHINE } from '../../../../test/support/machine';
@@ -163,5 +168,38 @@ describe('a session tab’s label without its record', () => {
     const onB = addressOf(OTHER_MACHINE, 'b-session' as AppSessionId);
     const { result } = renderHook(() => useTabLabel({ id: `session:${onB}`, kind: 'session', appSessionId: onB, pinned: false, title: 'B’s shared session' }));
     expect(result.current.title).toBe('B’s shared session');
+  });
+});
+
+// P5 O9 (the owner's Q1): a session a terminal or a `--bg` job holds and MAWS drives through its bridge reads like any
+// MAWS session, with a small marker in its pane's tab naming where it runs, the hover card's line as its title; only
+// while the session's controls port is lane A.
+describe('a session tab driven through its holder’s bridge', () => {
+  const tab = sessionTab(A);
+  const holding = (holder: SessionRecord['holder']) => act(() => useSessions.setState({ records: new Map([[A, record(A, { title: { text: 'Fix drag', source: 'user' }, holder })]]) }));
+  const marker = () => document.querySelector<HTMLElement>(`[data-tab-id="${tab.id}"] [data-holder-marker]`);
+  afterEach(() => resetLaneAStore());
+
+  it('marks a bridged terminal session Terminal, titled with the hover card’s line, and nothing else', () => {
+    holding({ kind: 'self' });
+    render(<Tab tab={tab} pane={0} domId="t-0" active stop onKeyDown={() => {}} />);
+    expect(marker()).toBeNull(); // MAWS's own
+    holding({ kind: 'terminal', pid: 4242 });
+    expect(marker()).toBeNull(); // read-only: no bridge drives it
+    act(() => applyLaneAState(A, laneAState(A, { bridge: 'starting', reason: 'the session’s bridge is starting' })));
+    expect(marker()).toBeNull(); // no port yet
+    act(() => applyLaneAState(A, laneAState(A)));
+    expect(marker()?.textContent).toBe('Terminal');
+    expect(marker()?.title).toBe('Running in Terminal · driven through sminos’s bridge');
+    act(() => applyLaneAState(A, null));
+    expect(marker()).toBeNull();
+  });
+
+  it('marks a bridged background job’s session Background job', () => {
+    holding({ kind: 'background_job', pid: null, jobId: 'job-1' });
+    act(() => applyLaneAState(A, laneAState(A)));
+    render(<Tab tab={tab} pane={0} domId="t-0" active stop onKeyDown={() => {}} />);
+    expect(marker()?.textContent).toBe('Background job');
+    expect(marker()?.title).toBe('Running as bg · job-1 · driven through sminos’s bridge');
   });
 });

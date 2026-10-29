@@ -23,6 +23,7 @@ import { useShellGeometry, useShellView } from './shell-view';
 import { mountChromeTabs } from '../main/chrome-tabs';
 import { SurfaceRow } from '../panel/SurfaceRow';
 import { runSessionAction, SESSION_ACTIONS, sessionActionsFor, useSessionActionEnabled, type SessionActionId } from './session-actions';
+import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
 import { displayTitle } from '../sessions/title';
 // P3-L start
 import { LIBRARY_COPY } from '../library/copy';
@@ -208,7 +209,8 @@ const BoardIcon = () => (
 // with no record (an unstarted one) offers nothing yet, and with nothing to offer the menu is disabled.
 function SessionMenuOverflow({ appSessionId }: { appSessionId: AppSessionId }) {
   const record = useSessions((s) => s.records.get(appSessionId));
-  const ids = record ? sessionActionsFor(record).filter((id) => id !== 'open' && id !== 'openInNewTab') : [];
+  const bridged = useLaneAState(appSessionId)?.bridge === 'live'; // P5 O9 M5: Take over and Fork for a bridged terminal session
+  const ids = record ? sessionActionsFor(record, { bridged }).filter((id) => id !== 'open' && id !== 'openInNewTab') : [];
   return <DropdownMenu.Sub>
     <DropdownMenu.SubTrigger onPointerLeave={preserveSubmenuPointer} disabled={ids.length === 0} className="flex h-8 items-center rounded-sm px-2 text-ui outline-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover">Session actions</DropdownMenu.SubTrigger>
     <DropdownMenu.Portal><DropdownMenu.SubContent className="z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">

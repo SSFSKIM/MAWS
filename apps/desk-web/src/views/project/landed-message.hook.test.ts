@@ -7,8 +7,8 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import type { JsonObject } from 'desk-hub/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import { useTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
-import { readRecording } from '../../../test/double/session-stream';
-import { freshSource, subagentLookupOf } from '../../depth/source/desk-transcript';
+import { readRecording } from '../../../../../src/renderer/src/lane-a/test-support/session-stream';
+import { freshSource, subagentLookupOf } from '../../../../../src/renderer/src/lane-a/plane-transcript';
 import { useLandOnMessage } from './landed-message';
 
 const frames = async (n: number) => {

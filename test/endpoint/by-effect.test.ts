@@ -101,6 +101,27 @@ describe('the other rows', () => {
     expect(await grade('session.answer', { requestId: 'gone', answer: { kind: 'dialog', behavior: 'completed' } }, reads)).toBe('approve');
   });
 
+  // P5 O9 M2: main's local lane A rows (the driver refuses an answer that does not fit its request's kind).
+  it('grades lane A’s answer by its kind, agreeing with lane B on a decline, and its command as its slash command', async () => {
+    const answers = { kind: 'question', answers: { 'Which?': 'A' } };
+    const skipped = { kind: 'question', answers: {} }; // every question skipped: a native question's decline (§D)
+    const deny = { kind: 'permission', decision: 'deny' }; // a question's decline, and lane B's
+    expect(await grade('laneA.answer', { appSessionId: 'a', request: 'q', answer: answers })).toBe('converse');
+    expect(await grade('laneA.answer', { appSessionId: 'a', request: 'q', answer: skipped })).toBe('converse');
+    expect(await grade('laneA.answer', { appSessionId: 'a', request: 'q', answer: deny })).toBe('approve');
+    expect(await grade('laneA.answer', { appSessionId: 'a', request: 'p', answer: { kind: 'permission', decision: 'allow', scope: 'once' } })).toBe('approve');
+    expect(await grade('laneA.answer', { appSessionId: 'a', request: 'plan', answer: { kind: 'plan', outcome: 'implement', feedback: null } })).toBe('approve');
+    // lane B gives the same answers the same grades on a pending question
+    const reads = pending({ q: 'question.requested' });
+    expect(await grade('session.answer', { requestId: 'q', answer: skipped }, reads)).toBe('converse');
+    expect(await grade('session.answer', { requestId: 'q', answer: deny }, reads)).toBe('approve');
+
+    expect(await grade('laneA.command', { appSessionId: 'a', name: 'model', args: 'opus' })).toBe(slashGrade('model'));
+    expect(await grade('laneA.command', { appSessionId: 'a', name: 'model', args: 'opus' })).toBe('converse');
+    expect(await grade('laneA.command', { appSessionId: 'a', name: '/clear', args: '' })).toBe('manage');
+    expect(await grade('laneA.command', { appSessionId: 'a', args: '' })).toBe('manage');
+  });
+
   it('grades an acquire by what its options change: the model or effort converse, anything else manage', async () => {
     expect(await grade('session.acquire', { reason: 'send' })).toBe('converse');
     expect(await grade('session.acquire', { reason: 'resume', options: { model: 'opus', effort: 'high' } })).toBe('converse');

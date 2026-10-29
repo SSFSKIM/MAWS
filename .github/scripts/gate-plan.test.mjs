@@ -1894,7 +1894,7 @@ test('hosted-only groups stay hosted and still count toward that queue', () => {
   const entries = JSON.parse(overflowPlan(overflowSample(), { HOSTED_MAC_ONLY_E2E: 'document settings' }).outputs.e2e);
   assert.deepEqual(entries.map((e) => e.overflow || false), [false, false, true, true]);
 });
-test('overflow never moves home, measured, live, unlisted, no-hosted, final, mirror or dispatched groups', () => {
+test('overflow never moves home, measured, live, unlisted, hosted-lane, no-hosted, final, mirror or dispatched groups', () => {
   const message = `Runner: macos\nGates: e2e:discover,e2e:artifacts-perf,e2e:default,e2e:document\nMac-Backlog: ${overflowSample()}`;
   const { outputs } = overflowPlan(overflowSample(), { HOSTED_MAC_E2E: 'document', MAC_HOME_E2E: 'discover', MEASURED_E2E: 'artifacts-perf', HEAD_MESSAGE: message });
   const entries = JSON.parse(outputs.e2e);
@@ -1904,6 +1904,7 @@ test('overflow never moves home, measured, live, unlisted, no-hosted, final, mir
     { HOSTED_MAC_ROUTE: 'mirror' }, { HOSTED_MAC_E2E: '' },
     { GITHUB_REF: 'refs/heads/ci/h-final-test' },
     { HEAD_MESSAGE: `${message}\nLane: no-hosted` },
+    { HEAD_MESSAGE: `${message}\nLane: hosted` },
     { EVENT: 'workflow_dispatch', INPUT_RUNNER: 'macos', INPUT_GATES: 'e2e:document' },
     { HEAD_MESSAGE: `Runner: macos\nGates: e2e:design-live\nLive: yes\nMac-Backlog: ${overflowSample()}`, LIVE_E2E: 'design-live' },
   ]) assert.ok(JSON.parse(overflowPlan(overflowSample(), extra).outputs.e2e).every((e) => !e.overflow));

@@ -13,7 +13,7 @@ import { isReadOnlyRequest } from '@shared/attention/read-only-tools';
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { Slots } from '../app/slots';
 import { useNow } from '../app/use-now';
-import { ipc } from '../ipc/client';
+import { answerSession, useSessionControls } from '../session/controls/controls-for'; // P5 O9 M4
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { isOpen } from '../attention/derive';
@@ -65,8 +65,8 @@ export const RequestPreview: Slots['requestCard'] = ({ item, request, placement 
 
   const heading = HEADINGS[item.kind];
   const shown = request ? describe(request) : { title: item.summary, input: null };
-  const foreign = record?.holder.kind === 'terminal' || record?.holder.kind === 'background_job';
-  const canAnswer = placement === 'hover' && item.kind === 'permission' && isOpen(item) && !foreign && isReadOnlyRequest(request);
+  const answerable = useSessionControls(item.appSessionId)?.capability('answer').available === true; // P5 O9 M4: none for a session held elsewhere
+  const canAnswer = placement === 'hover' && item.kind === 'permission' && isOpen(item) && answerable && isReadOnlyRequest(request);
   const where = [projectName, record ? displayTitle(record) : null, itemAge(item, now)].filter(Boolean).join(' · ');
 
   // The button a pointer pressed; a click counts only as the release of that press (`detail` > 0: a keyboard- or
@@ -84,7 +84,7 @@ export const RequestPreview: Slots['requestCard'] = ({ item, request, placement 
   const answer = async (value: RequestAnswer) => {
     if (request?.kind !== 'permission.requested') return;
     setDelivery('sending');
-    const result = await ipc.invoke('session.answer', { appSessionId: item.appSessionId, requestId: request.requestId, answer: value });
+    const result = await answerSession({ ...item, request: { ...item.request, requestId: request.requestId } }, value); // the request this preview shows
     // A delivered answer retires the item, and with it this card; anything else leaves the request where it was.
     setDelivery(result.ok && result.value.outcome === 'delivered' ? 'idle' : 'not_delivered');
   };

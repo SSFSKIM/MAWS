@@ -156,9 +156,7 @@ export const resubmitProvider: ResubmitProvider = {
 
 // ---- take over (W7) ----------------------------------------------------------------------------------------------
 
-// The holder "Take over here" can end: an interactive terminal (signalled), or a `--bg` job with the id `claude stop`
-// takes. A job MAWS cannot name is left to "Fork a copy".
-export const canTakeOver = (holder: ForeignHolder): boolean => holder.kind === 'terminal' || holder.jobId !== null;
+export { canTakeOver } from './holder-words'; // P5 O9: kept there, light enough for the lane A port and desk-web to import
 
 export function takeOverWords(holder: ForeignHolder, paneTitle?: string): { title: string; body: string } {
   const what =
