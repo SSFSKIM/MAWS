@@ -13,6 +13,7 @@ export const SPINE_COMMANDS = [
   'ownerChannel.answered', 'ownerChannel.cancel', 'ownerChannel.markRead', 'ownerChannel.state',
   'session.acquire', 'session.appEvents', 'session.archive', 'session.archiveOlder', 'session.create', 'session.delete',
   'session.deletions.keep', 'session.deletions.list', 'session.deletions.preview', 'session.digests', 'session.drafts.get', 'session.drafts.set',
+  'session.engineStatuses', // P5 O3-D M5b fix round 6: a scenario's statuses, for main's mirror
   'session.fork', 'session.get', 'session.history.append', 'session.history.list',
   'session.intent.discard', 'session.intent.get', 'session.intent.list', 'session.intent.patch', 'session.intent.release', 'session.intent.resolveWorktree',
   'session.launchMode', 'session.list', 'session.observedFacts',

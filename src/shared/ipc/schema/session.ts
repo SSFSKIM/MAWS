@@ -691,6 +691,9 @@ const o3dCommands = {
   },
   // The sessions some client shows (session.setVisible's union), the mirror's snapshot of `visibleSessions`
   'session.visible': { input: z.void(), output: z.strictObject({ sessions: z.array(AppSessionIdSchema) }), owner: 'machine' },
+  // M5b fix round 6: the engine statuses the spine's read model holds, for the mirror of a launch in mode `scenario`,
+  // whose statuses are the spine's own (D11) and reach no stream; in mode `index` main reads them from its streams (D19)
+  'session.engineStatuses': { input: z.void(), output: z.strictObject({ statuses: z.array(EngineSessionStatusSchema) }), owner: 'machine' },
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 const o3dEvents = {
   'session.visibleChanged': z.strictObject({ appSessionId: AppSessionIdSchema, visible: z.boolean() }), // one session's change of the union

@@ -53,6 +53,7 @@ class FakeMachine implements MirrorHosts {
     this.answers.set('session.intent.list', ok({ intents: seed.intents ?? [] }));
     this.answers.set('session.visible', ok({ sessions: seed.visible ?? [] }));
     this.answers.set('session.launchMode', ok({ mode: seed.mode ?? 'index' }));
+    this.answers.set('session.engineStatuses', ok({ statuses: seed.statuses ?? [] })); // M5b fix round 6
     this.answers.set('machine.client', ok(undefined));
     this.answers.set('session.follow', ok({ streams: [] }));
   }
@@ -332,6 +333,52 @@ describe('the spine mirror (Interfaces §F)', () => {
     await vi.waitFor(() => expect(host.asked.filter((a) => a.name === 'session.follow')).toHaveLength(2));
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(view.midTurnCount()).toBe(1);
+  });
+
+  // M5b fix round 6 (e2e:layout shell.spec.ts:60): a scenario's statuses are the spine's own (D11) and its load emits
+  // none of them, so no event or stream ever carries them to main; at each streaming the mirror reads them over
+  // machine.sock, an event heard while the read is out winning, and a status it learns opens its cursor as a first-heard
+  // one does. In launch mode index the streams carry every live session's status (D19), and the read is not applied.
+  it('in launch mode scenario takes the statuses the spine holds, which no event carried, into the mid-turn count and the cursors', async () => {
+    const statuses = [status({ appSessionId: A, process: 'ready', turn: true, launchId: 'LA', lastEventSeq: 5 }), status({ appSessionId: B, process: 'ready', launchId: 'LB', lastEventSeq: 2 })];
+    const host = new FakeMachine({ mode: 'scenario', records: [record({ appId: A }), record({ appId: B })], statuses });
+    const { view } = mirrorOver(host);
+    const engine: string[] = [];
+    view.on('engine', (id) => void engine.push(id));
+    host.stream();
+    await vi.waitFor(() => expect(view.unavailable()).toBe(SCENARIO_UNAVAILABLE));
+    expect(view.engineStatuses()).toEqual(statuses);
+    expect(view.midTurnCount()).toBe(1);
+    expect(engine.sort()).toEqual([A, B]);
+    host.lose();
+    host.stream();
+    await vi.waitFor(() => expect(host.asked.filter((a) => a.name === 'session.follow')).toHaveLength(2));
+    expect(host.asked.filter((a) => a.name === 'session.follow')[1]!.input).toEqual({
+      sessions: [{ appSessionId: A, cursor: { launchId: 'LA', seq: 5, idx: -1 } }, { appSessionId: B, cursor: { launchId: 'LB', seq: 2, idx: -1 } }],
+      live: true,
+    });
+  });
+
+  it('lets a status heard while the statuses read is out win over the read’s answer', async () => {
+    const host = new FakeMachine({ mode: 'scenario', records: [record({ appId: A })], statuses: [status({ appSessionId: A, process: 'ready', turn: true, launchId: 'LA', lastEventSeq: 5 })] });
+    const { view } = mirrorOver(host);
+    host.held.add('session.engineStatuses');
+    host.stream();
+    await vi.waitFor(() => expect(host.asked.map((a) => a.name)).toContain('session.engineStatuses'));
+    const newer = status({ appSessionId: A, process: 'ready', launchId: 'LA', lastEventSeq: 8 }); // the turn ended meanwhile
+    host.fire('session.status', { appSessionId: A, status: newer });
+    host.release('session.engineStatuses');
+    await vi.waitFor(() => expect(view.unavailable()).toBe(SCENARIO_UNAVAILABLE));
+    expect(view.engineStatuses()).toEqual([newer]);
+    expect(view.midTurnCount()).toBe(0);
+  });
+
+  it('in launch mode index leaves the statuses to the streams (D19): the spine’s answer is not applied', async () => {
+    const host = new FakeMachine({ records: [record({ appId: A })], statuses: [status({ appSessionId: A, process: 'ready', turn: true, launchId: 'LA', lastEventSeq: 5 })] });
+    const { view } = mirrorOver(host);
+    host.stream();
+    await loaded(view);
+    expect(view.engineStatuses()).toEqual([]);
   });
 
   it('dispatches acquire and files’ admission read; a failed read answers no paths', async () => {

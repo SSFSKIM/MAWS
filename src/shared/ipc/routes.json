@@ -443,6 +443,7 @@
   "session.archiveOlder",
   "session.deletions.list",
   "session.digests",
+  "session.engineStatuses",
   "session.follow",
   "session.intent.list",
   "session.launchMode",

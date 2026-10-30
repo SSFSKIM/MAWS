@@ -216,6 +216,9 @@ export function startSessions({ env, packaged, appRoot, hosts, bus, indexSource,
   model.on('digest', (digest) => bus.emit('session.digest', digest));
   // P5 O3-D M5b (Interfaces §F): the visible set for main's mirror of the view on the daemon shape, and each change of it
   bus.register('session.visible', () => ({ sessions: model.visibleSessions() }));
+  // M5b fix round 6: the statuses the read model holds, which in launch mode scenario are the spine's own and reach main's
+  // mirror by no stream (the scenario's load emits none of them)
+  bus.register('session.engineStatuses', () => ({ statuses: model.engineStatuses() }));
   model.on('visible', (appSessionId, visible) => bus.emit('session.visibleChanged', { appSessionId, visible }));
 
   const stops: (() => void)[] = [];

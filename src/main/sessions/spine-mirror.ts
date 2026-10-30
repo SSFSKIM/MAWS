@@ -5,7 +5,8 @@
 //
 // At each streaming of the `machine` host (main's transport registers no resync, so it streams from its welcome) the
 // mirror reads its snapshot: `session.list {includeArchived: true}`, `session.projects.list` (its `rows`),
-// `session.digests`, `attention.list`, `session.intent.list`, `session.visible` and `session.launchMode`; and, beside it,
+// `session.digests`, `attention.list`, `session.intent.list`, `session.visible` and `session.launchMode`, and in launch
+// mode scenario `session.engineStatuses` (M5b fix round 6: the scenario's statuses, which no stream carries); and, beside it,
 // tells `mawsd` this app's browser socket directory (`machine.client`) and follows every live session from the cursors
 // it holds (`session.follow`, `live: true`). It follows the front's events through `hosts.onEvent` (validated by main's
 // supervisor): `session.changed`, `session.removed`, `session.projects.changed`, `session.digest`, `attention.changed`
@@ -62,7 +63,7 @@ export interface SpineMirror {
 export const RETRY_MS = 2_000;
 export const RETRY_MAX_MS = 60_000;
 
-type Member = 'records' | 'projects' | 'digests' | 'attention' | 'intents' | 'visible' | 'mode';
+type Member = 'records' | 'projects' | 'digests' | 'attention' | 'intents' | 'visible' | 'mode' | 'statuses';
 // What an event touched while its member's snapshot was out: ids, or the whole list
 type Raced = { ids: Set<string>; whole: boolean };
 
@@ -218,6 +219,18 @@ export function createMirrorSpineView(options: SpineMirrorOptions): SpineMirror 
         if (gen === generation) mode = answer.mode;
       },
     },
+    {
+      // M5b fix round 6: a scenario's statuses are the spine's own (D11), its load emits none of them and no engine host
+      // holds them, so no stream carries them; read here, each taken as a first-heard status is unless one was heard
+      // while the read was out. In launch mode index every live session's status comes from its stream (D19), and the
+      // spine's fold, which may lag the streams, is not applied.
+      member: 'statuses',
+      take: async (gen, race) => {
+        const [launch, answer] = await Promise.all([read('session.launchMode', undefined), read('session.engineStatuses', undefined)]);
+        if (gen !== generation || launch.mode !== 'scenario') return;
+        for (const status of answer.statuses) if (!race.ids.has(status.appSessionId)) takeStatus(status.appSessionId as AppSessionId, status);
+      },
+    },
   ];
 
   let retry: ReturnType<typeof setTimeout> | null = null;
@@ -286,6 +299,14 @@ export function createMirrorSpineView(options: SpineMirrorOptions): SpineMirror 
     }
   };
 
+  // A status heard, or (in launch mode scenario) read: a launch new to the mirror opens its cursor at its last journaled row
+  function takeStatus(id: AppSessionId, status: EngineSessionStatus): void {
+    const cursor = cursors.get(id);
+    if (cursor?.launchId !== status.launchId) cursors.set(id, { launchId: status.launchId, seq: status.lastEventSeq, idx: -1 });
+    statuses.set(id, status);
+    fire('engine', id, status);
+  }
+
   // ---- the events -----------------------------------------------------------------------------------------------------
   const offs = [
     hosts.onEvent('session.changed', ({ record }) => {
@@ -339,11 +360,8 @@ export function createMirrorSpineView(options: SpineMirrorOptions): SpineMirror 
       fire('visible', id, shown);
     }),
     hosts.onEvent('session.status', ({ appSessionId, status }) => {
-      const id = appSessionId as AppSessionId;
-      const cursor = cursors.get(id);
-      if (cursor?.launchId !== status.launchId) cursors.set(id, { launchId: status.launchId, seq: status.lastEventSeq, idx: -1 });
-      statuses.set(id, status);
-      fire('engine', id, status);
+      touch('statuses', appSessionId);
+      takeStatus(appSessionId as AppSessionId, status);
     }),
     hosts.onEvent('session.eventBatch', ({ appSessionId, events }) => advance(appSessionId as AppSessionId, events)),
     hosts.onStreaming('machine', () => {

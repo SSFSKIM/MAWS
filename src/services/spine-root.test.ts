@@ -49,7 +49,7 @@ const noClientPort = {
 const SPINE_REFUSED_COMMANDS = [
   'library.fileLinkedPaths', 'library.get', 'library.list', 'library.spaces',
   'machineSettings.get', 'machineSettings.set', // P5 O3-D M5b: read, and a set refused (the machine half is read-only)
-  'session.appEvents', 'session.digests', 'session.drafts.get', 'session.drafts.set', 'session.get', 'session.launchMode', 'session.list', 'session.observedFacts',
+  'session.appEvents', 'session.digests', 'session.drafts.get', 'session.drafts.set', 'session.engineStatuses', 'session.get', 'session.launchMode', 'session.list', 'session.observedFacts',
   'session.projects.add', 'session.projects.addFolder', 'session.projects.list', 'session.projects.remove', 'session.projects.update',
   'session.recentTurns', 'session.search', 'session.setVisible', 'session.update', 'session.visible',
   'settings.engineApplied', 'settings.userEngineDefaults',
@@ -309,6 +309,7 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(await bus.main('session.visible', undefined)).toEqual({ ok: true, value: { sessions: [id] } });
     expect(await bus.invoke('session.setVisible', { appSessionId: id, visible: false })).toMatchObject({ ok: true });
     expect(bus.emittedOf('session.visibleChanged')).toEqual([{ appSessionId: id, visible: true }, { appSessionId: id, visible: false }]);
+    expect(await bus.main('session.engineStatuses', undefined)).toEqual({ ok: true, value: { statuses: [] } }); // M5b fix round 6
 
     expect(await bus.main('library.fileLinkedPaths', { appSessionId: id })).toEqual({ ok: true, value: { paths: [] } });
   });
