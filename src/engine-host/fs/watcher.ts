@@ -6,8 +6,13 @@
 // home has no `jobs/`) is retried every 5 s. FSEvents starts its stream asynchronously after `fs.watch` returns and
 // does not report a write made in its first milliseconds, so every root is rescanned once 250 ms after its watch
 // opens (at start, on appearing, on re-opening). Nothing here reads or writes a file.
-import { watch as fsWatch } from 'node:fs';
+// P5 O3-E M1: the recursive watch is the platform's (`recursiveWatch`): on Linux the watch tree, one inotify watch per
+// directory rather than Node's watch per transcript, reconciling every STORE_RECONCILE_MS, with `storePrune` dropping
+// the subtrees the classifier never reads. A root whose watch runs out of inotify's budget (ENOSPC, EMFILE), at its
+// open or later through its handle, stays `failed` and is rescanned every STORE_POLL_MS until stopped, rather than
+// re-opened into the same exhaustion.
 import { join, sep } from 'node:path';
+import { isExhaustion, recursiveWatch } from '@shared/fs/watch-tree';
 import type { SessionId } from '@shared/graph/ids';
 import type { StorePaths } from './paths';
 
@@ -28,12 +33,14 @@ export interface WatchHandle {
   on(event: 'error', listener: (error: Error) => void): unknown;
   close(): void;
 }
-export type WatchFn = (path: string, options: { recursive: boolean }, listener: (event: string, filename: string | null) => void) => WatchHandle;
+export type WatchFn = (path: string, options: { recursive: boolean; prune?: (dir: string) => boolean }, listener: (event: string, filename: string | null) => void) => WatchHandle;
 
 export const DEBOUNCE_MS = 50;
 export const REOPEN_MS = 1_000;
 export const MISSING_RETRY_MS = 5_000;
 export const SETTLE_MS = 250;
+export const STORE_POLL_MS = 30_000; // an exhausted root's rescan period: the store service's own reconcile
+export const STORE_RECONCILE_MS = 600_000; // the tree's slow pass, whose null event costs a readdir-diff of the root
 
 // The engine lists only transcripts whose stem is a UUID (SPEC 35.14.1, 35.16.2), which also excludes the
 // `.orphaned-` and `.superseded-` names (SPEC 35.2.6, 35.23).
@@ -71,6 +78,19 @@ export function classifyStoreEvent(paths: StorePaths, root: StoreRoot, rel: stri
   }
 }
 
+// The directories under a root that the watch never walks (relative to the root), each a subtree every path of which
+// `classifyStoreEvent` nulls: under `projects/`, a project's directory that is no session's (`memory/`) and a session's
+// `tool-results/`. A session's own `memory/` holds sidecars and stays.
+export function storePrune(root: StoreRoot): ((dir: string) => boolean) | undefined {
+  return root === 'projects' ? pruneProjects : undefined;
+}
+
+function pruneProjects(dir: string): boolean {
+  const parts = dir.split('/');
+  if (parts.length === 2) return !SESSION_ID.test(parts[1]);
+  return parts.length === 3 && SESSION_ID.test(parts[1]) && parts[2] === 'tool-results';
+}
+
 function changeKey(change: StoreChange): string {
   switch (change.kind) {
     case 'transcript':
@@ -105,7 +125,7 @@ export class StoreWatcher {
     private readonly sink: (change: StoreChange) => void,
     deps: { watch?: WatchFn } = {},
   ) {
-    this.watch = deps.watch ?? ((path, options, listener) => fsWatch(path, { recursive: options.recursive, encoding: 'utf8' }, listener));
+    this.watch = deps.watch ?? recursiveWatch(process.platform, { reconcileMs: STORE_RECONCILE_MS });
     for (const root of STORE_ROOTS) this.roots.set(root, { status: 'missing', handle: null, timer: null });
   }
 
@@ -134,11 +154,13 @@ export class StoreWatcher {
     watch.timer = null;
     let handle: WatchHandle;
     try {
-      handle = this.watch(this.paths[root], { recursive: root !== 'sessions' }, (_event, filename) => this.onEvent(root, filename));
+      handle = this.watch(this.paths[root], { recursive: root !== 'sessions', prune: storePrune(root) }, (_event, filename) => this.onEvent(root, filename));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         watch.status = 'missing';
         watch.timer = setTimeout(() => this.open(root), MISSING_RETRY_MS);
+      } else if (isExhaustion(error)) {
+        this.exhausted(root, error);
       } else {
         watch.status = 'failed';
         console.error(`[fs] cannot watch ${this.paths[root]}:`, error instanceof Error ? error.message : error);
@@ -157,11 +179,36 @@ export class StoreWatcher {
   private onError(root: StoreRoot, handle: WatchHandle, error: Error): void {
     const watch = this.roots.get(root)!;
     if (this.stopped || watch.handle !== handle) return;
+    if (isExhaustion(error)) {
+      handle.close();
+      return this.exhausted(root, error);
+    }
     console.error(`[fs] watch on ${this.paths[root]} failed; re-opening in ${REOPEN_MS} ms:`, error.message);
     handle.close();
     if (watch.timer) clearTimeout(watch.timer);
     Object.assign(watch, { status: 'reopening', handle: null, timer: setTimeout(() => this.open(root), REOPEN_MS) });
     this.enqueue({ kind: 'rescan', root });
+  }
+
+  // Out of inotify's budget: a re-open would meet the same limit while the other watches hold it, so the root is
+  // rescanned on a timer instead (the store service's sidecar reconcile would not see a new transcript).
+  private exhausted(root: StoreRoot, error: NodeJS.ErrnoException): void {
+    const watch = this.roots.get(root)!;
+    if (watch.timer) clearTimeout(watch.timer);
+    console.error(`[fs] watch on ${this.paths[root]} ran out of inotify's budget (${error.code}); rescanning it every ${STORE_POLL_MS / 1000} s:`, error.message);
+    Object.assign(watch, { status: 'failed', handle: null, timer: null });
+    this.enqueue({ kind: 'rescan', root });
+    this.rescanEvery(root);
+  }
+
+  private rescanEvery(root: StoreRoot): void {
+    const watch = this.roots.get(root)!;
+    watch.timer = setTimeout(() => {
+      watch.timer = null;
+      if (this.stopped) return;
+      this.enqueue({ kind: 'rescan', root });
+      this.rescanEvery(root);
+    }, STORE_POLL_MS);
   }
 
   private onEvent(root: StoreRoot, filename: string | null): void {

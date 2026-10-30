@@ -1,10 +1,11 @@
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { drain, errno, FakeWatchFs } from '../../../test/support/fake-watch-fs';
+import { inotifyOf, until } from '../../../test/support/inotify';
 import { BURST_EVENTS, BURST_SETTLE_MS, RECONCILE_MS, recursiveWatch, watchTree, type WatchHandle } from './watch-tree';
 
 type Heard = [string, string | null];
@@ -458,34 +459,7 @@ describe.runIf(process.platform === 'linux')('the watch tree over inotify', () =
     rmSync(root, { recursive: true, force: true });
   });
 
-  // The inotify watches this process holds, from /proc/self/fdinfo (what O3-G's measure read).
-  function inotifyWatches(): number {
-    let watches = 0;
-    for (const fd of readdirSync('/proc/self/fd')) {
-      let target: string;
-      try {
-        target = readlinkSync(`/proc/self/fd/${fd}`);
-      } catch {
-        continue;
-      }
-      if (target !== 'anon_inode:inotify') continue;
-      try {
-        watches += readFileSync(`/proc/self/fdinfo/${fd}`, 'utf8').split('\n').filter((line) => line.startsWith('inotify wd:')).length;
-      } catch {
-        // the descriptor closed meanwhile
-      }
-    }
-    return watches;
-  }
-
-  async function until(check: () => boolean, withinMs: number, what: string): Promise<number> {
-    const start = Date.now();
-    while (!check()) {
-      if (Date.now() - start > withinMs) throw new Error(`${what}: not within ${withinMs} ms`);
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    return Date.now() - start;
-  }
+  const inotifyWatches = () => inotifyOf().watches;
 
   function start(): void {
     handle = watchTree(root, {}, (_event, filename) => heard.push(filename ?? '<null>'));
