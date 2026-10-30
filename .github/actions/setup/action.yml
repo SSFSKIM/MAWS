@@ -56,8 +56,9 @@ runs:
     # shim into Xcode's toolchain, and a fresh VM's first call through it can pass the bound: each hosted git timeout so far
     # (a session start's `git rev-parse`, the index's org project) was the job's first call. One call here, in the
     # runner's reduced environment, pays it before any spec runs, and the line keeps both calls' times. It never fails the
-    # job: a call still running after 120 s is ended and named.
+    # job: a call still running after 120 s is ended and named, and any other failure in the step is let through.
     - if: runner.environment == 'github-hosted' && runner.os == 'macOS'
+      continue-on-error: true
       shell: bash
       run: |
         call() {
