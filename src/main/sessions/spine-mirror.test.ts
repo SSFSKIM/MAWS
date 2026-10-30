@@ -423,6 +423,22 @@ describe('the spine mirror (Interfaces §F)', () => {
     });
   });
 
+  // A launch the front replays from its first event (one launched after the follow) opens on a status that already names
+  // its last row: the cursor goes by the rows received, not by that status
+  it('tracks a launch replayed from its start by the rows it received, below the status’s lastEventSeq', async () => {
+    const host = new FakeMachine({ records: [record({ appId: A })] });
+    const { view } = mirrorOver(host);
+    host.stream();
+    await loaded(view);
+    host.fire('session.status', { appSessionId: A, status: status({ appSessionId: A, process: 'ready', launchId: 'LA', lastEventSeq: 1000 }) });
+    host.fire('session.eventBatch', { appSessionId: A, events: Array.from({ length: 500 }, (_, i) => ({ id: `${A}:LA:${i + 1}:0`, seq: i + 1 })) });
+    host.lose();
+    host.stream();
+    const follows = () => host.asked.filter((a) => a.name === 'session.follow').map((a) => a.input);
+    await vi.waitFor(() => expect(follows()).toHaveLength(2));
+    expect(follows()[1]).toEqual({ sessions: [{ appSessionId: A, cursor: { launchId: 'LA', seq: 500, idx: 0 } }], live: true });
+  });
+
   it('forgets the status of a session its follow finds not live (the engine host replaced meanwhile)', async () => {
     const host = new FakeMachine({ records: [record({ appId: A })] });
     const { view } = mirrorOver(host);

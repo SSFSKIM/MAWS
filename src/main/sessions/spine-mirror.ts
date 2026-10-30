@@ -29,7 +29,8 @@
 //
 // The cursor main presents for a session (§C) is the last delivered event of its current launch; with none yet, the row
 // its stream opened at (the launch's `lastEventSeq` at its first status, `idx` -1), so a re-follow after a `mawsd`
-// restart replays exactly what the first opening would have sent.
+// restart replays exactly what the first opening would have sent. A stream that replays a launch from its first event
+// sends its rows after that status: the first event received replaces the status's row, below it or not.
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, AttentionId } from '@shared/graph/ids';
@@ -294,7 +295,10 @@ export function createMirrorSpineView(options: SpineMirrorOptions): SpineMirror 
       const at = eventPosition(appSessionId, event);
       if (at === null) continue;
       const cursor = cursors.get(appSessionId);
-      if (cursor && cursor.launchId === at.launch && (at.seq < cursor.seq || (at.seq === cursor.seq && at.idx <= cursor.idx))) continue;
+      // A cursor still at its status's row (`idx` -1: no event of the launch received yet) takes the launch's first event
+      // received, wherever it is: a stream replaying the launch from its start sends rows below that status's
+      // `lastEventSeq`, and the cursor goes by what was received.
+      if (cursor && cursor.launchId === at.launch && cursor.idx >= 0 && (at.seq < cursor.seq || (at.seq === cursor.seq && at.idx <= cursor.idx))) continue;
       cursors.set(appSessionId, { launchId: at.launch, seq: at.seq, idx: at.idx });
     }
   };
