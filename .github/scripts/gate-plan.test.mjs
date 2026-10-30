@@ -973,6 +973,7 @@ const LIVENESS_BOUNDS = {
     'expect(Date.now() - refusedAt).toBeLessThan(2_000);': 'the refusal of an acting command while a person holds the tab is immediate; 2 s against the command\'s own 3 s timeout tells it from a timeout',
   },
   'e2e/c12-quit.spec.ts': {
+    "expect(exitAt - started, 'no stop-all: the quit is the report and the exit').toBeLessThan(PROBE_BOUND_MS + 8_000);": 'the daemon shape\'s quit (P5 O3-D): the same probe and quit path as the embedded bound below, with nothing to stop',
     'expect(exitAt - ended).toBeLessThan(10_000);': 'the quit\'s own 2 s re-read after the last busy thing ends, then the hosts\' stop',
     'expect(reportMs).toBeLessThan(PROBE_BOUND_MS);': 'the quit probe\'s own 2 s bound (C12 acceptance 8), a timer of the product\'s',
     'expect(exitAt - started).toBeLessThan(PROBE_BOUND_MS + 8_000); // the report, then the existing quit path (the hosts stop)': 'that probe and the existing quit path, with 8 s of margin',
