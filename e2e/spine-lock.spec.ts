@@ -27,7 +27,7 @@ import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { isAlive } from './support/processes';
-import { spineFiles } from './support/spine-files'; // P5 O3-D M6: shared with cross-build's (pre-O3 app, daemon) scene
+import { spineFiles } from '../test/support/spine-files'; // P5 O3-D M6: shared with cross-build's (pre-O3 app, daemon) scene
 
 const HOLDER_BUILD = '9.9.9+e2e-holder';
 

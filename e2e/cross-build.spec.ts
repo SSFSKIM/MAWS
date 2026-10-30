@@ -72,7 +72,7 @@ import { reachMachine } from '../src/mawsd/machine-client';
 import { invoke, replaySpec, turnsJournal, value } from './support/c7-replay';
 import { REPO_ROOT } from './support/launch';
 import { isAlive } from './support/processes';
-import { spineFiles } from './support/spine-files';
+import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
 import { attentionOf, eventsOf, isRequestRow, isTaskFailureRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, tailFixture, TASK_FAILED, withScratch, type Run, type Scratch } from './support/supervisor-scratch';
 
 const PEER = process.env.MAWS_E2E_PEER_ROOT || null;
@@ -81,6 +81,16 @@ test.skip(PEER === null, 'no peer build beside this checkout (MAWS_E2E_PEER_ROOT
 
 const ROW_MS = '250'; // the kept turn: about 11 s from the prompt to the request, 10 s from the answer to the result
 const IDLE_MS = 10_000; // the attaching app's idle time: its sessions on the kept supervisor are released this long after they idle
+// P5 O3-D M6 fix round 1 (item 6): on the daemon shape the kept turn ends while no app runs and the app reattaches after
+// it, so the kept supervisor must stay that long: its released session would let it exit before the reattach
+const REATTACH_IDLE_MS = 30_000;
+// P5 O3-D M6 fix round 1 (item 5): the ceiling on the yield's refusal-to-release, provisional until the mini's --peer run
+// measures it. Its basis is what the code bounds: the refusal and the yield are the hello's own synchronous check
+// (spine.lock read, the pid's liveness and start; the SingletonLock is read only at a load attempt, not here); the release
+// waits for the spine's work in flight at most SPINE_TIMING.yieldSettleMs (60 s), after which `mawsd` ends itself
+// instead of releasing; then its stores close (milliseconds). Margin: 5 s for the close, the log's writes and a loaded Mac
+const YIELD_SETTLE_MS = 60_000; // src/mawsd/spine-seam.ts's SPINE_TIMING.yieldSettleMs (its module pulls the services into this project)
+const REFUSAL_TO_RELEASE_MS = YIELD_SETTLE_MS + 5_000;
 
 // ---- the two builds ---------------------------------------------------------------------------------------------------
 
@@ -286,7 +296,8 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   await expect.poll(() => s.journal(id).some(isRequestRow), { timeout: 30_000, message: 'the request reaches the journal while no app runs' }).toBe(true);
 
   // the other build's app attaches, and is served as another build until the kept sessions are idle
-  const attach = () => s.launch({ MAWS_HOST_MODE: shapes.attacher, MAWS_E2E_SUPERVISOR_IDLE_MS: String(IDLE_MS) }, attacher.root);
+  const idleMs = shapes.attacher === 'daemon' ? REATTACH_IDLE_MS : IDLE_MS;
+  const attach = () => s.launch({ MAWS_HOST_MODE: shapes.attacher, MAWS_E2E_SUPERVISOR_IDLE_MS: String(idleMs) }, attacher.root);
   let second = await attach();
   const attacherRuns: Run[] = [second]; // P5 O3-D M6: the attacher's launches (acceptance 9 quits and reattaches it)
   const served = await s.ready(second.page, (st) => st.supervisor!.exitWhenIdle && onShape(shapes.attacher)(st));
@@ -363,7 +374,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   said.push(`  served: a launch played its turn on the kept supervisor; the kept turn played on after this app's answer, ${live} rows live`);
 
   // the move: once both sessions are idle they are released, the kept supervisor exits, and the app starts its own
-  const moved = await s.ready(second.page, (st) => st.supervisor!.pid !== kept.pid && onShape(shapes.attacher)(st), IDLE_MS + 45_000);
+  const moved = await s.ready(second.page, (st) => st.supervisor!.pid !== kept.pid && onShape(shapes.attacher)(st), idleMs + 45_000);
   expect(moved, `${attacher.label} on a supervisor of its own build`).toMatchObject({ matches: 'same', supervisor: { buildId: build, exitWhenIdle: false } });
   if (attacherDaemon !== null) expect(moved.daemon!.pid, 'the same mawsd serves the new engine host').toBe(attacherDaemon);
   await expect.poll(() => isAlive(kept.pid), { timeout: 10_000, message: 'the kept supervisor is gone' }).toBe(false);
@@ -442,6 +453,9 @@ async function quitAndReattach(s: Scratch, run: Run, attach: () => Promise<Run>,
     await expect.poll(() => departuresIn(s.log()), { timeout: 15_000, message: 'the older host’s log: its client left at the quit (client disconnected)' }).toBeGreaterThan(leftBefore);
     await expect.poll(() => connectsFrom(s.log(), o.daemon), { timeout: 15_000, message: 'the older host’s log: mawsd connects afresh after the departure' }).toBeGreaterThan(before);
   }
+  // the turn ends while no app runs (fix round 1, item 6): what the reattach recovers is then known, the end included
+  const endRow = () => s.journal(o.id).find((r) => r.seq > awayFrom && r.direction === 'in' && r.frame.type === 'result');
+  await expect.poll(() => endRow() !== undefined, { timeout: 30_000, message: 'the turn ends while no app runs' }).toBe(true);
   const departed = connectsFrom(s.log(), o.daemon);
   const leftAway = departuresIn(s.log());
   const recycledAway = recyclesTo(s.daemonLog(), o.kept.pid);
@@ -459,24 +473,30 @@ async function quitAndReattach(s: Scratch, run: Run, attach: () => Promise<Run>,
     await expect.poll(() => connectsFrom(s.log(), o.daemon), { timeout: 15_000, message: 'the older host’s log: mawsd connects afresh at the reattach' }).toBeGreaterThan(departed);
   }
   expect(s.daemonLog(), o.capable ? 'the host of this build hears each attachment' : 'mawsd sent no host.attachment to the older host, which would answer unknown_command, logged as failed').not.toMatch(/host\.attachment \{attached: (true|false)\} failed/);
-  // the catch-up at the reattach: the turn's end reaches main's view (the engine status, through the front's follow
-  // from the app's cursor) and the spine's (the digest, folded from the recycled link's burst on an older host), and
-  // the refold adds no second item for the failure folded before the quit
+  // the catch-up at the reattach, by identity (fix round 1, item 6): the rows journaled while no app ran (awayFrom <
+  // seq <= atReattach, the turn's end among them) are the session's events, and the turn's end, its `turn.ended` at the
+  // end row's seq, reaches main's view (the engine status, through the front's follow from the app's cursor) and the
+  // spine's (the digest's lastTurnEndedAt is that event's own time, folded from the recycled link's burst on an older
+  // host: the spine heard no event while no app ran there); the refold adds no second item for the failure folded before
+  // the quit
+  const ended = endRow()!;
+  expect(ended.seq, 'the turn’s end was journaled before the reattach').toBeLessThanOrEqual(atReattach);
+  const seqOfEvent = (e: SessionEvent) => Number(suffix(e.id).split(':')[0]);
+  const awayEvents = (await eventsOf(next.page, o.id)).filter((e) => seqOfEvent(e) > awayFrom && seqOfEvent(e) <= atReattach);
+  const endEvent = awayEvents.find((e) => e.kind === 'turn.ended');
+  expect(endEvent && seqOfEvent(endEvent), 'the turn’s end is the event of the end row journaled while no app ran').toBe(ended.seq);
   await turnEnded(next.page, o.id);
   await expect
     .poll(async () => {
       const digest = value(await invoke(next.page, 'session.digests', undefined)).digests.find((d) => d.appSessionId === o.id);
-      return digest !== undefined && digest.lastTurnEndedAt !== null && digest.phase !== 'working';
-    }, { message: 'the spine’s digest has the turn’s end' })
-    .toBe(true);
-  const journal = s.journal(o.id);
-  const away = journal.filter((r) => r.seq > awayFrom && r.seq <= atReattach).length;
-  const endedAway = journal.some((r) => r.seq <= atReattach && r.direction === 'in' && r.frame.type === 'result');
+      return digest === undefined ? null : { lastTurnEndedAt: digest.lastTurnEndedAt, working: digest.phase === 'working' };
+    }, { message: 'the spine’s digest has the turn’s end recovered at the reattach' })
+    .toEqual({ lastTurnEndedAt: endEvent!.at, working: false });
+  const away = s.journal(o.id).filter((r) => r.seq > awayFrom && r.seq <= atReattach).length;
   expect((await attentionOf(next.page, o.id, 'error')).map((i) => i.summary), 'the background failure is still one Needs-you item').toEqual([`Background task failed: ${TASK_FAILED}`]);
   expect(await pendingPermissions(next.page, o.id), 'the request answered before the quit stays answered').toEqual([]);
-  expect((await eventsOf(next.page, o.id)).filter((e) => Number(suffix(e.id).split(':')[0]) > awayFrom).length, 'the rows journaled while no app ran are the session’s').toBeGreaterThan(0);
   o.said.push(
-    `  reattach (acceptance 9, ${o.capable ? 'a host that serves host.attachment: one permanent connection' : 'an older host: O2’s link per attachment'}): connections from mawsd pid ${o.daemon} ${before} → ${departed} at the departure → ${connectsFrom(s.log(), o.daemon)} at the reattach; ${away} rows journaled while no app ran${endedAway ? ', the turn’s end among them' : ''}`,
+    `  reattach (acceptance 9, ${o.capable ? 'a host that serves host.attachment: one permanent connection' : 'an older host: O2’s link per attachment'}): connections from mawsd pid ${o.daemon} ${before} → ${departed} at the departure → ${connectsFrom(s.log(), o.daemon)} at the reattach; ${away} rows journaled while no app ran, the turn’s end (seq ${ended.seq}) among them; ${awayEvents.length} events of theirs, the end’s recovered by the digest`,
   );
   return next;
 }
@@ -539,10 +559,21 @@ test('(downgrade, daemon) this build’s app keeps a session under its mawsd; th
 // with the ruling it rests on:
 //   1. the relay's refusal (§L; D32): `mawsd` answers the old app's engine-host.sock hello `refuse wire` on its own
 //      account, with its own identity, and the old app's main reads the refusal;
-//   2. the yield (§L; D32): the old app holds no spine.lock, so `mawsd` yields its spine to that pid, releasing it;
+//   2. the yield (§L; D32): the old app holds no spine.lock, so `mawsd` yields its spine to that pid, releasing it
+//      within REFUSAL_TO_RELEASE_MS of the refusal (a late or missing release fails as a §L ordering failure);
 //   3. the old app's index unavailable (acceptance 11's wording; D32): its own main opens the index `mawsd` migrated to
-//      14 and finds it newer than it knows (13), so leaves it unopened for its run;
-//   4. no spine file changed after the yield (D32, by SPINE_PATHS, e2e/support/spine-files.ts) while the old app idles.
+//      14 and finds it newer than it knows (13), so leaves it unopened for its run (which keeps index.sqlite out of the
+//      two writers' overlap below);
+//   4. the post-D `mawsd` writes no spine file after the refusal (D32; the architect's ruling, fix round 1 item 5), per
+//      process, since the old app's main runs a spine of its own on the same files from its launch (before O3-A the
+//      spine is main's) and a file's bytes cannot say which process wrote them:
+//      (a) from the refusal to `[spine] released` its only spine writes are its stores closing (the index's WAL
+//          checkpointed, -wal and -shm removed): src/mawsd/process-yield.test.ts pins it on the built `mawsd`;
+//      (b) at the release and at the window's end it holds no spine file open (lsof), or it is gone;
+//      (c) no writer at idle: every spine file (SPINE_PATHS, test/support/spine-files.ts) byte-identical over 10 s
+//          after the release while the old app idles.
+//      The overlap is bounded and recorded: the refusal-to-release and the old app's launch-to-release times are
+//      annotated, with the first spine file change seen after the old app's launch.
 // What follows is O2's downgrade, which D29 keeps: the old app's `watchDaemon` asks `daemon.restart` of a private daemon
 // of another build, so the post-D `mawsd` exits 75 and the old app's own build of `mawsd` (which runs no spine) serves
 // it, its main running its spine alone with the index unavailable to it. The scene records what it sees of that end
@@ -567,27 +598,97 @@ test('(pre-O3 app, daemon) an O2-era app on a profile whose mawsd runs the spine
     expect(status, 'mawsd runs the spine, loaded').toMatchObject({ ok: true, value: { pid: daemon, spine: { state: 'loaded' } } });
     const logFrom = s.daemonLog().length; // what this build's mawsd says from here
 
-    // the O2-era app, on the daemon shape over the same profile
-    const old = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+    // the O2-era app, on the daemon shape over the same profile. Its own main runs a spine from its start (before O3-A
+    // the spine is main's), so the first change to a spine file after its launch is sampled, for the order's record
+    const beforeOld = spineFiles(s.userData);
+    const launchedAt = Date.now();
+    let firstSpineChange: { at: number; path: string } | null = null;
+    const sampler = setInterval(() => {
+      if (firstSpineChange !== null) return;
+      const now = spineFiles(s.userData);
+      const path = [...new Set([...beforeOld.keys(), ...now.keys()])].find((key) => beforeOld.get(key) !== now.get(key));
+      if (path !== undefined) firstSpineChange = { at: Date.now(), path };
+    }, 100);
+    sampler.unref(); // a failure before its clearInterval leaves it holding nothing (it stops sampling at its first change)
+    const old = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root).catch((error: unknown) => {
+      clearInterval(sampler);
+      throw error;
+    });
     const oldPid = old.child.pid!;
     const daemonSaid = () => s.daemonLog().slice(logFrom);
+    // The race §L leaves between the old app's two sockets (fix round 1, item 4): its main connects machine.sock and
+    // engine-host.sock at once (host-supervisor.ts's start), and O2's `watchDaemon` checks the build and asks
+    // `daemon.restart` on machine.sock's readiness alone. Each competing event in the order mawsd logged it, so a
+    // restart that came before the refusal fails here naming the order, not on a generic wait.
+    const refusedLine = `engine-host.sock: refuse wire to appPid ${oldPid} (build `;
+    const competing = () => {
+      const log = daemonSaid();
+      const at = (needle: string) => log.indexOf(needle);
+      return ([['relay refusal', at(refusedLine)], ['daemon.restart received', at('restart asked')], ['yield', at(`[spine] yielding to pid ${oldPid}`)], ['exit', at('exiting (')]] as const)
+        .filter(([, index]) => index >= 0)
+        .sort((a, b) => a[1] - b[1])
+        .map(([name]) => name);
+    };
+    // each event's time from the old app's launch, by its log line's own stamp (the supervisor log's ISO prefix)
+    const timed = () => {
+      const lines = daemonSaid().split('\n');
+      const when = (needle: string) => {
+        const line = lines.find((l) => l.includes(needle));
+        return line === undefined ? null : Date.parse(line.slice(0, 24)) - launchedAt;
+      };
+      const change = firstSpineChange as { at: number; path: string } | null;
+      return [
+        `relay refusal +${when(refusedLine)} ms`, `daemon.restart received +${when('restart asked')} ms`, `yield +${when(`[spine] yielding to pid ${oldPid}`)} ms`,
+        `released +${when('[spine] released')} ms`, `exit +${when('exiting (')} ms`,
+        `first spine file change ${change === null ? 'none seen' : `+${change.at - launchedAt} ms (${change.path})`}`,
+      ].join('; ');
+    };
+    await expect.poll(() => competing().some((name) => name === 'relay refusal' || name === 'daemon.restart received') || !isAlive(daemon), { timeout: 30_000, message: 'mawsd hears the old app: its hello at the relay, or its restart' }).toBe(true);
+    const order = competing();
+    said.push(`  order in mawsd's log: ${order.join(' → ') || 'nothing'}; the old app: ${old.output().split('\n').filter((line) => line.includes('asking it to restart') || /speaks wire \S+ with |is incompatible \(wire\)/.test(line)).map((line) => line.trim()).join(' | ') || 'nothing yet'}`);
+    if (!order.includes('relay refusal') || order.indexOf('daemon.restart received') >= 0 && order.indexOf('daemon.restart received') < order.indexOf('relay refusal')) {
+      clearInterval(sampler);
+      said.push(`  times from the old app's launch: ${timed()}`);
+      await test.info().attach('pre-o3-order', { body: `${said.join('\n')}\n\n--- mawsd.log since the old app's launch\n${daemonSaid()}\n--- the old app's output\n${old.output()}`, contentType: 'text/plain' });
+      throw new Error(`§L ordering: the old app's daemon.restart reached mawsd before its relay hello was refused (D29); order: ${order.join(' → ') || 'nothing'}`);
+    }
     // 1. the relay's refusal: mawsd's own `refuse wire`, and the old app's main reading it
-    await expect.poll(daemonSaid, { timeout: 30_000, message: 'mawsd refuses the old app’s hello at the relay' }).toContain(`engine-host.sock: refuse wire to appPid ${oldPid} (build `);
+    expect(daemonSaid(), 'mawsd refuses the old app’s hello at the relay').toContain(refusedLine);
     expect(daemonSaid(), 'its hello lists no machine.spine, and it holds no spine.lock').toMatch(new RegExp(`refuse wire to appPid ${oldPid} \\(build [^)]+\\): its hello lists no machine\\.spine, so it runs a spine of its own\n`));
     await expect.poll(() => old.output(), { timeout: 30_000, message: 'the old app’s main reads the refusal of its wire' }).toMatch(/speaks wire \S+ with |is incompatible \(wire\)/);
-    // 2. the yield: to the old app's pid, the loaded spine released (or the process ending under the restart first)
+    // 2. the yield: to the old app's pid, the loaded spine released within the yield's own bound of the refusal
     expect(daemonSaid(), 'mawsd yields its spine to the old app').toContain(`[spine] yielding to pid ${oldPid}, an app that runs its own spine`);
-    await expect.poll(() => /\[spine\] released/.test(daemonSaid().slice(daemonSaid().indexOf('[spine] yielding to pid'))) || !isAlive(daemon), { timeout: 70_000, message: 'the yielded spine released, or mawsd gone' }).toBe(true);
+    const releasedSaid = () => daemonSaid().slice(daemonSaid().indexOf('[spine] yielding to pid')).includes('[spine] released');
+    for (const until = Date.now() + REFUSAL_TO_RELEASE_MS + 5_000; !releasedSaid() && isAlive(daemon) && Date.now() < until; ) await old.page.waitForTimeout(250);
+    const stamp = (needle: string) => {
+      const line = daemonSaid().split('\n').find((l) => l.includes(needle));
+      return line === undefined ? null : Date.parse(line.slice(0, 24));
+    };
+    if (!releasedSaid()) {
+      clearInterval(sampler);
+      said.push(`  times from the old app's launch: ${timed()}`);
+      await test.info().attach('pre-o3-order', { body: `${said.join('\n')}\n\n--- mawsd.log since the old app's launch\n${daemonSaid()}\n--- the old app's output\n${old.output()}`, contentType: 'text/plain' });
+      throw new Error(`§L ordering: the spine yielded to pid ${oldPid} was not released ${isAlive(daemon) ? `within ${REFUSAL_TO_RELEASE_MS + 5_000} ms` : 'before mawsd ended'}; order: ${competing().join(' → ')}`);
+    }
+    const refusalToRelease = stamp('[spine] released')! - stamp(refusedLine)!;
+    test.info().annotations.push({ type: 'pre-O3 overlap', description: `refusal → released ${refusalToRelease} ms; the old app's launch → released ${stamp('[spine] released')! - launchedAt} ms` });
+    expect(refusalToRelease, '§L ordering: the yielded spine released within the yield’s own bound of the refusal').toBeLessThanOrEqual(REFUSAL_TO_RELEASE_MS);
+    // 4(b) at the release: the post-D mawsd holds no spine file open, or is gone
+    expect(isAlive(daemon) ? spineFilesOpen(daemon, s.userData) : [], 'released: the post-D mawsd holds no spine file open').toEqual([]);
     // 3. the old app's index unavailable: the version mawsd migrated it to is newer than the old build knows
     await expect.poll(() => old.output(), { timeout: 30_000, message: 'the old app finds the index unavailable' }).toMatch(/user_version 14 is newer than this app knows \(13\); the index is unavailable this run/);
-    // 4. no spine file changes after the yield while the old app idles
+    // 4(c) no writer at idle: no spine file changes over 10 s after the release while the old app idles; 4(b) again at the
+    // window's end. 4(a), the release's own writes, is src/mawsd/process-yield.test.ts's
+    clearInterval(sampler);
+    said.push(`  times from the old app's launch: ${timed()}`);
     const afterYield = spineFiles(s.userData);
     await old.page.waitForTimeout(10_000);
-    expect(spineFiles(s.userData), 'every spine file byte-identical after the yield, and none new, while the old app idles').toEqual(afterYield);
+    expect(spineFiles(s.userData), 'no writer at idle: every spine file byte-identical over 10 s after the release, and none new').toEqual(afterYield);
+    expect(isAlive(daemon) ? spineFilesOpen(daemon, s.userData) : [], 'the window’s end: the post-D mawsd holds no spine file open').toEqual([]);
     said.push(`  refused: ${daemonSaid().split('\n').find((line) => line.includes(`refuse wire to appPid ${oldPid}`))?.trim()}`);
     said.push(`  yielded: ${daemonSaid().split('\n').filter((line) => line.includes('[spine] ')).map((line) => line.trim()).join(' | ')}`);
     said.push(`  the old app's index: ${old.output().split('\n').find((line) => line.includes('is newer than this app knows'))?.trim()}`);
-    said.push(`  spine files unchanged over 10 s of the old app's idle: ${afterYield.size} entries`);
+    said.push(`  no writer at idle: spine files unchanged over 10 s after the release (${afterYield.size} entries); the post-D mawsd held none open at the release and at the end`);
     // O2's downgrade (D29), recorded, not asserted
     const lock = s.daemonLock();
     said.push(`  then (O2's downgrade, D29; recorded only): mawsd pid ${daemon} ${isAlive(daemon) ? 'still runs' : `exited${s.daemonLog().includes('exited (restart, code 75)') ? ' 75 at the old app’s daemon.restart' : ''}`}; the profile’s mawsd lock names ${lock === null ? 'nothing' : `pid ${lock.pid}`}; spine.lock ${spineLockOf(s.userData) === null ? 'absent' : `names pid ${spineLockOf(s.userData)!.pid}`}`);
