@@ -462,11 +462,24 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   // already counted as {attached: false}) and must not be woken for it; one restarting hears it once it is up.
   let departure: Promise<void> = Promise.resolve(); // the latest {attached: false}'s answer: the departure's drain
   let appOnEngine = false; // an app is attached on engine-host.sock (a second attach without a departure replaces it)
+  let appReadsMachine = false; // its hello listed machine.spine: its events come on machine.sock, not on the relay
+  let toldPresent = false; // the last attachment told the permanent link's host
   const tellAttachment = (attached: boolean): Promise<void> => {
     if (hosts.parked('engine-host')) return Promise.resolve();
     return hosts.forward('engine-host', { name: 'host.attachment', input: { attached } }).then((answer) => {
       if (!answer.ok) log(`host.attachment {attached: ${attached}} failed: ${answer.error.message}`);
     });
+  };
+  // P5 O3-D fix wave (scalpel-4#1; D40): the app is present while the connection that receives its events can: the relay
+  // for an app that hears them there, machine.sock once that app's connection there said ready for one that reads them
+  // there (the front drops an event until then). A machine.sock-only departure is a departure for the host: its
+  // app-bound requests settle noClient and its holds go, as at the relay's.
+  const appPresent = () => appOnEngine && (!appReadsMachine || front.appReady());
+  const presenceChanged = () => {
+    const present = appPresent();
+    if (!permanentLink || present === toldPresent) return;
+    toldPresent = present;
+    void tellAttachment(present);
   };
 
   // --- the engine host's relay ---------------------------------------------------------------------------------------
@@ -524,15 +537,21 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       log('exit now from the app: the engine host exits now and parks');
       hosts.exitSupervisor('now', 'engine-host');
     },
-    attached: () => {
+    attached: (app) => {
       clocks.engineAttached(true); // disarms a park first
       setInterest('app', []);
       // before anything of the app's is forwarded; an app it replaced departs first (the relay calls no departed() for
-      // it), so its route E, direct operations and holds end and the new one is the owner back, on the same connection
-      if (permanentLink && appOnEngine) void tellAttachment(false);
-      if (permanentLink) void tellAttachment(true);
-      else availability(true);
+      // it), so its route E, direct operations and holds end and the new one is the owner back, on the same connection;
+      // one that reads its events on machine.sock is told once that connection is ready (presenceChanged)
+      if (permanentLink && toldPresent) {
+        toldPresent = false;
+        void tellAttachment(false);
+      }
       appOnEngine = true;
+      appReadsMachine = app.capabilities.includes(MACHINE_SPINE_CAPABILITY);
+      engineAppPid = null; // the replaced app's: this one's comes with its welcome (onClient), just after
+      if (permanentLink) presenceChanged();
+      else availability(true);
       clientsChanged();
       if (!permanentLink) recycleEngine(); // a fresh link for this attachment
     },
@@ -543,9 +562,11 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       clocks.engineAttached(false);
       setInterest('app', null);
       void sendInterest();
-      if (permanentLink) departure = tellAttachment(false);
-      else availability(false);
       appOnEngine = false;
+      if (permanentLink) {
+        toldPresent = false;
+        departure = tellAttachment(false); // told even when it was not present: its answer ends the drain
+      } else availability(false);
       clientsChanged();
     },
     // the upstream's draining close (O2), or a permanent link's {attached: false}, whose answer follows every event the
@@ -755,6 +776,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       return { ref, name, project: machineProject(ref, name, enrollment()) };
     },
     isApp: (appPid) => engineAppPid !== null && engineRelay.attachedApp() && appPid === engineAppPid,
+    readiness: () => presenceChanged(),
     beforeSpineCommand: wakeForDiscovery,
     log,
   });
@@ -876,6 +898,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       onClientEnd: () => engineRelay.ended(),
       onClient: (connected, peer, appPid) => {
         engineAppPid = connected ? (appPid ?? null) : null;
+        presenceChanged(); // its machine.sock connection may be ready already
         announced(connected, peer, appPid);
       },
       identity: () => identity,

@@ -185,6 +185,50 @@ describe('the permanent client, on, to an engine host that lists host.attachment
     expect(daemon.hosts.parked('engine-host')).toBe(true);
   });
 
+  // P5 O3-D fix wave (scalpel-4#1): a post-D app hears its app-bound events on machine.sock, where the front drops them
+  // until that connection is ready; the host must not raise one for it before then, and a machine.sock-only departure
+  // ends its presence (its pending app-bound requests settle noClient) as a relay departure does
+  it('a post-D app is present only while its machine.sock connection is ready: attached at its ready line, gone at its departure', async () => {
+    await scene.start({ permanentClient: true });
+    const app = await scene.app('engine-host', { capabilities: [MACHINE_SPINE_CAPABILITY] });
+    app.ready();
+    await app.request('engine.ping'); // the host is up: an attachment would have been told by now
+    const engine = scene.lastEngine();
+    await sleep(100);
+    expect(attachments(), 'no machine.sock connection yet').toEqual([]);
+    const machine = await scene.app('machine', { capabilities: [MACHINE_SPINE_CAPABILITY] });
+    await sleep(100);
+    expect(attachments(), 'machine.sock not ready yet').toEqual([]);
+    machine.ready();
+    await until(() => attachments().length === 1, 3_000, 'the attachment at machine.sock’s ready line');
+    expect(attachments()).toEqual([{ attached: true }]);
+    machine.leave();
+    await until(() => attachments().length === 2, 3_000, 'the machine.sock departure');
+    expect(attachments().at(-1)).toEqual({ attached: false });
+    expect(engine.appGone).toBe(1); // its app-bound requests settled, its holds released
+    const again = await scene.app('machine', { capabilities: [MACHINE_SPINE_CAPABILITY] });
+    again.ready();
+    await until(() => attachments().length === 3, 3_000, 'the attachment again');
+    expect(attachments().at(-1)).toEqual({ attached: true });
+    app.leave();
+    await until(() => attachments().length === 4, 3_000, 'the relay departure');
+    expect(attachments().at(-1)).toEqual({ attached: false });
+    again.destroy();
+  });
+
+  it('a post-D app whose machine.sock connection was ready before its relay attached is present at its welcome', async () => {
+    await scene.start({ permanentClient: true });
+    const machine = await scene.app('machine', { capabilities: [MACHINE_SPINE_CAPABILITY] });
+    machine.ready();
+    const app = await scene.app('engine-host', { capabilities: [MACHINE_SPINE_CAPABILITY] });
+    await until(() => attachments().length === 1, 3_000, 'the attachment at the welcome');
+    expect(attachments()).toEqual([{ attached: true }]);
+    app.leave();
+    await until(() => attachments().length === 2, 3_000, 'the relay departure');
+    expect(attachments().at(-1)).toEqual({ attached: false });
+    machine.destroy();
+  });
+
   it('an app’s own host.attachment on engine-host.sock is refused and never reaches the host', async () => {
     await scene.start({ permanentClient: true });
     const app = await scene.app();

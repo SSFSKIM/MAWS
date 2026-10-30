@@ -84,6 +84,7 @@ export interface FrontOptions {
   daemon(name: string, input: unknown): Promise<unknown>; // daemon.*
   identity(): MachineIdentity; // machine.identity, cold
   isApp(appPid: number): boolean; // the app attached on engine-host.sock: where the port's requests with no client go
+  readiness?(): void; // a client said ready, or a ready one left: `appReady()` may have changed (the daemon's app presence)
   log(line: string): void;
   portDeadlineMs?: number; // the client port's deadline (CLIENT_PORT_DEADLINE_MS unless a test shortens it)
   // P5 O3-D M6 (fix round 1): before a client's or the endpoint's spine command runs, the spine loaded (daemon.ts's
@@ -104,6 +105,9 @@ export interface ServicesFront {
   intercepts(): CommandName[]; // the names the loaded spine intercepts now
   events(listener: (name: string, payload: unknown) => void): () => void; // every event `bus.emit` sent (the endpoint's owner `machine`)
   browserSocket(): string | null; // the attached app's cua socket directory, from its machine.client; null with no app
+  // P5 O3-D fix wave (scalpel-4#1): the attached app's connection here said ready with machine.spine in its hello, so the
+  // engine host's app-bound events reach it (the daemon's app presence for such an app, D40)
+  appReady(): boolean;
   clients(): number;
   commands(): CommandName[]; // what the front answers now: its own names and what the loaded spine registered
   unbind(): void; // the spine's parts stopped: its registrations, intercepts and taps go
@@ -320,7 +324,11 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       clients.add(this);
       port.on('message', ({ data }) => {
         if (this.port !== port) return;
-        if (readTolerant(HostReadySchema, data).ok) return void (this.ready = true);
+        if (readTolerant(HostReadySchema, data).ok) {
+          if (this.ready) return;
+          this.ready = true;
+          return void options.readiness?.();
+        }
         const gone = readTolerant(HostClientGoneSchema, data);
         if (gone.ok) return refs.gone(gone.value.client);
         const request = readTolerant(HostRequestSchema, data);
@@ -352,8 +360,14 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       return this.send('clientPort.request', request);
     }
 
+    // ready for the engine host's app-bound events (the attached app's connection, appReady)
+    readsAppEvents(): boolean {
+      return this.ready && readsHostEvents(this);
+    }
+
     detach(): void {
       if (this.port === null && !clients.has(this)) return;
+      const wasReady = this.ready;
       this.port = null;
       this.ready = false;
       this.refs?.end();
@@ -361,6 +375,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       clients.delete(this);
       this.follower.end();
       clientPort.gone(this);
+      if (wasReady) options.readiness?.();
     }
 
     docPort(_message: HostDoc, end: DocPortEnd): void {
@@ -387,6 +402,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       return () => void emitted.delete(listener);
     },
     browserSocket: () => [...clients].find((client) => options.isApp(client.facts.appPid))?.browserSocket ?? null,
+    appReady: () => [...clients].some((client) => client.readsAppEvents() && options.isApp(client.facts.appPid)),
     clients: () => clients.size,
     commands: () => [...FRONT_COMMANDS, ...table.keys()].sort() as CommandName[],
     unbind() {

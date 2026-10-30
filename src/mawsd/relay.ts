@@ -53,7 +53,7 @@ export interface RelayOptions {
   deliverTo?(capabilities: readonly string[]): boolean; // P5 O3-D M5: false keeps every event from an app whose hello listed these (default: every app hears them)
   onDocument?(message: HostDoc, end: DocPortEnd): void; // a document channel the app opened; without it, closed at once
   onExit(when: 'now' | 'idle', refused: boolean): void; // an `exit` line from the app
-  attached(): void; // an app was welcomed, before anything is forwarded to it
+  attached(app: RelayApp): void; // an app was welcomed, before anything is forwarded to it (P5 O3-D fix wave: told its capabilities)
   ready(): void; // its `ready` line
   departed(): void; // it left (its FIN or its close, whichever came first), once
   drain?: { start(drained: () => void): void; boundMs?: number }; // the upstream's draining close (the engine relay)
@@ -180,7 +180,7 @@ export class Relay implements ServedRuntime {
     const capabilities = peer?.capabilities ?? [];
     const app: App = { port, capabilities, delivered: this.options.deliverTo?.(capabilities) ?? true, ready: false, leaving: false, gone: false, lost: 0 };
     this.current = app;
-    this.options.attached();
+    this.options.attached(app);
     port.on('message', ({ data }) => this.receive(app, data));
     port.start();
   }
