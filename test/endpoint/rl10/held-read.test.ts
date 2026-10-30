@@ -343,6 +343,22 @@ describe('a state notice whose read fails', () => {
     expect(w.reads.length).toBe(before + 3);
   });
 
+  it('ends with an adoption from elsewhere that reaches the version announced, its waiting retry reading nothing', async () => {
+    const w = await world();
+    const s3 = await successor(w.s2, [w.a1]);
+    w.view.chain.push(s3);
+    w.failing.reads = 2;
+    const before = w.reads.length;
+    w.hub.current.send(JSON.stringify({ t: 'state', version: 3 }));
+    await until(() => w.reads.length === before + 2 && w.failing.reads === 0, 'both reads failed');
+    // The retry waits (a second at most); an admin delivers version 3 by hand meanwhile.
+    const answer = await w.endpoint.cli('revoke', ['-'], JSON.stringify(s3));
+    expect(answer.code, answer.out).toBe(0);
+    expect(head(w)).toBe(3);
+    await sleep(2500);
+    expect(w.reads.length).toBe(before + 2);
+  });
+
   it('reads toward the newest version announced, past one a newer notice replaced', async () => {
     const w = await world();
     const s3 = await successor(w.s2, [w.a1]);

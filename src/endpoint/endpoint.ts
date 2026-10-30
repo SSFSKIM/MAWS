@@ -642,7 +642,10 @@ export class Endpoint implements EndpointModule {
     return this.#target > 0 && (org?.ready !== true || org.head().state.version < this.#target);
   }
 
-  /** The `sync` retry waiting while the head is short of the target and the endpoint runs enrolled; settled otherwise. */
+  /**
+   * The `sync` retry waiting while the head is short of the target and the endpoint runs enrolled; settled otherwise.
+   * Whatever adoption reaches the target settles it (`#adopted`): an admin's delivery or a channel's catch-up as well.
+   */
   #chase(): void {
     if (!this.#short() || this.#stopped || this.#state?.enrolled !== true) {
       this.#target = 0;
@@ -650,7 +653,7 @@ export class Endpoint implements EndpointModule {
       return;
     }
     const again = () => this.#chase();
-    this.#retries.retry('sync', () => void this.syncNow().then(again, again));
+    this.#retries.retry('sync', () => (this.#short() ? void this.syncNow().then(again, again) : again()));
   }
 
   /**
@@ -765,6 +768,8 @@ export class Endpoint implements EndpointModule {
       this.#stand(false);
     }
     this.channels.adopted(change.head.state);
+    // A notice's read chased no further than this head (`#chase`).
+    if (this.#target > 0 && !this.#short()) this.#chase();
     const log = (line: string) => parts.services.log(line);
     void stateHash(change.head.state).then((hash) => (this.#headHash = hash));
     const { members, devices, keys } = change.removed;
