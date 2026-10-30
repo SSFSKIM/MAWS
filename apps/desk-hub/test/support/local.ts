@@ -455,10 +455,10 @@ export async function startLocalHub(options: { script?: string } = {}) {
     async summariesBeforeLive() {
       await seam('REGISTRY', ORG, SUMMARIES_BEFORE_LIVE_PATH);
     },
-    /** Has the Registry take its next summary report as the version before `live` did: stored without it, answered with
-     * nothing. */
-    async nextSummaryAsPrevious() {
-      await seam('REGISTRY', ORG, SUMMARY_AS_PREVIOUS_PATH);
+    /** Has the Registry take `project`'s next summary report as the version before `live` did: stored without it,
+     * answered with nothing. */
+    async nextSummaryAsPrevious(project: string) {
+      await seam('REGISTRY', ORG, SUMMARY_AS_PREVIOUS_PATH, { project });
     },
     /** Puts `count` projects straight into the Registry, with long names. */
     async addProjects(count: number, prefix: string) {

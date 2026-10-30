@@ -1618,7 +1618,7 @@ describe("the grid's live count", () => {
     const grid = await GridClient.open(hub, ADMIN);
     await gridReached(grid, project, 0, { machines_online: 1, live: 0 }, 'the machine online, no session yet');
     // During a deploy, the Registry still on the previous version takes the report's counts but not `live`, and answers nothing.
-    await hub.nextSummaryAsPrevious();
+    await hub.nextSummaryAsPrevious(project);
     const running = { t: 'session', message: envelope(m, project, 'presence', presence('busy')) } as const;
     const from = grid.frames.length;
     await m.postOk([running]);

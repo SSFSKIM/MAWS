@@ -1160,9 +1160,12 @@ describe('the capture bridge and an agent’s downloads (E2 M1, E13)', () => {
     const launch = commands['session.launch'].input;
     expect(launch.safeParse({ spec: spec(), artifactScope: [parent] }).success).toBe(true);
     expect(launch.safeParse({ spec: spec(), artifactScope: Array.from({ length: 17 }, (_, k) => `app-${k}`) }).success).toBe(false);
+    // A launch answers before its process spawns (the session loads its state first), so two launches in flight spawn in
+    // either order; the queue hands transports out in spawn order, so the thread launches once the parent's process is up.
     await host.call('session.launch', { spec: spec({ appSessionId: parent }) });
+    await until(() => host.statuses(parent).some((s) => s.process === 'ready'), 'the parent ready');
     await host.call('session.launch', { spec: spec({ appSessionId: thread }), artifactScope: [parent] });
-    await until(() => host.statuses(parent).some((s) => s.process === 'ready') && host.statuses(thread).some((s) => s.process === 'ready'), 'both ready');
+    await until(() => host.statuses(thread).some((s) => s.process === 'ready'), 'the thread ready');
     const call = (transport: ScriptedTransport, requestId: string, name: string, args: unknown) =>
       transport.push({ type: 'control_request', request_id: requestId, request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name, arguments: args } } } });
     const answerOf = (transport: ScriptedTransport, requestId: string) =>

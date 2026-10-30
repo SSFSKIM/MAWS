@@ -6,6 +6,7 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'electron-vite';
 import type { Rollup } from 'vite';
+import { latin1Bundles } from './scripts/latin1-bundles';
 // C8c start
 import { createRequire } from 'node:module';
 // C8c end
@@ -84,6 +85,10 @@ export default defineConfig(({ command }) => {
       build: {
         rollupOptions: {
           input: { index: resolve(__dirname, 'src/main/index.ts'), mawsd: resolve(__dirname, 'src/mawsd/index.ts'), services: resolve(__dirname, 'src/services/entry.ts') },
+          // Every main-process file as Latin-1 text, so V8 holds its source at a byte a character (scripts/latin1-bundles.ts).
+          // The `?modulePath` hosts' builds take this config's output options too, so their files are re-printed there;
+          // here they arrive as assets, which the plugin's check reads with the rest.
+          output: { plugins: [latin1Bundles()] },
         },
       },
     },
@@ -99,6 +104,7 @@ export default defineConfig(({ command }) => {
         rollupOptions: {
           ...rollupOptions,
           input: { index: resolve(__dirname, 'src/preload/index.ts'), browser: resolve(__dirname, 'src/preload/browser.ts') },
+          output: { plugins: [latin1Bundles()] }, // as main's: each renderer process holds its preload's source too
         },
       },
       // E4a end

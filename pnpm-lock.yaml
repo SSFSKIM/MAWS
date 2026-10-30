@@ -237,6 +237,9 @@ importers:
       '@y/y':
         specifier: 14.0.0-rc.28
         version: 14.0.0-rc.28
+      acorn:
+        specifier: 8.18.0
+        version: 8.18.0
       babel-plugin-react-compiler:
         specifier: ^1.0.0
         version: 1.0.0

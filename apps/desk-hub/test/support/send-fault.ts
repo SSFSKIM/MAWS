@@ -71,8 +71,8 @@ export const REPORT_PATH = '/__test/report';
 /** Where the suites' `Registry` drops `live` from its `summaries`, as a registry stored before that column had it; its
  * next construction adds the column again. */
 export const SUMMARIES_BEFORE_LIVE_PATH = '/__test/summaries-before-live';
-/** Where the suites' `Registry` is armed to take its next summary report as the version before `live` took it: the
- * counts stored without `live`, nothing answered. */
+/** Where the suites' `Registry` is armed (`{project}`) to take that project's next summary report as the version before
+ * `live` took it: the counts stored without `live`, nothing answered. */
 export const SUMMARY_AS_PREVIOUS_PATH = '/__test/summary-as-previous';
 /** Where the suites' `Registry` moves times back (`{machines?: [{name, seen?, confirmed?}], key?: {id, expires},
  * enrollment?: {machine, expires}}`, all in one step), as an hour or a pending window having passed would leave them, schedules its alarm as its own
