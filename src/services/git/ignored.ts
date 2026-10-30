@@ -12,6 +12,7 @@
 import type { GitRun } from './runner';
 
 export const CHECK_IGNORE_BATCH_MS = 250; // the repository watcher's own debounce
+const PARSE_CHUNK = 5_000;
 
 export async function gitIgnored(run: GitRun, root: string): Promise<(dir: string) => Promise<boolean>> {
   const [ignoredOut, listedOut] = await Promise.all([
@@ -21,11 +22,14 @@ export async function gitIgnored(run: GitRun, root: string): Promise<(dir: strin
   const ignoredEntries = entries(ignoredOut);
   const known = new Set<string>(); // every directory either listing reaches
   const above = new Set<string>(); // every directory with an entry of the ignored listing beneath it
-  for (const entry of [...ignoredEntries, ...entries(listedOut)]) {
-    if (entry.endsWith('/')) known.add(entry.slice(0, -1));
-    for (const ancestor of ancestors(entry)) known.add(ancestor);
+  for (const entry of ignoredEntries) addAncestors(above, entry);
+  for (const entry of ignoredEntries) addAncestors(known, entry, true);
+  // A kernel-sized checkout lists 100k paths: read in chunks, the loop free between them (the tree's walk runs meanwhile).
+  const listed = entries(listedOut);
+  for (let i = 0; i < listed.length; i += PARSE_CHUNK) {
+    if (i > 0) await new Promise((resolve) => setImmediate(resolve));
+    for (let j = i; j < Math.min(i + PARSE_CHUNK, listed.length); j++) addAncestors(known, listed[j], true);
   }
-  for (const entry of ignoredEntries) for (const ancestor of ancestors(entry)) above.add(ancestor);
   const ignored = new Set(ignoredEntries.filter((entry) => entry.endsWith('/')).map((entry) => entry.slice(0, -1)).filter((dir) => !above.has(dir)));
   const batch = new CheckIgnoreBatch(run, root);
   return async (dir) => {
@@ -39,7 +43,19 @@ function entries(out: string): string[] {
   return out.split('\0').filter((entry) => entry !== '');
 }
 
-// `a/b/c` (or `a/b/c/`) → `a`, `a/b`.
+// Adds every directory above `entry` (and a `dir/` entry's own, with `self`), from the deepest up, stopping at one
+// already there: its own ancestors were added with it.
+function addAncestors(set: Set<string>, entry: string, self = false): void {
+  let end = entry.endsWith('/') ? (self ? entry.length - 1 : entry.lastIndexOf('/', entry.length - 2)) : entry.lastIndexOf('/');
+  while (end > 0) {
+    const dir = entry.slice(0, end);
+    if (set.has(dir)) return;
+    set.add(dir);
+    end = entry.lastIndexOf('/', end - 1);
+  }
+}
+
+// `a/b/c` → `a`, `a/b`.
 function ancestors(path: string): string[] {
   const parts = path.replace(/\/$/, '').split('/');
   return parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join('/'));
