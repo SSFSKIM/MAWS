@@ -201,3 +201,21 @@ it('reads work proportional to the appended bytes, not to the transcript, when i
     expect(read).toBeLessThanOrEqual(Buffer.byteLength(appended) + 4 * 4096);
   } finally { await rm(dir, { recursive: true }); }
 });
+
+it('fails a resumed pass whose already-indexed prefix was rewritten while it ran, instead of publishing a checkpoint over it', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'maws-search-incremental-'));
+  try {
+    const path = join(dir, 'session.jsonl');
+    const head = JSON.stringify({ type: 'user', message: { content: 'old-head' } });
+    await writeFile(path, head + '\n');
+    const first = await pass(path);
+    const big = JSON.stringify({ type: 'assistant', message: { content: 'word '.repeat(60_000) } }); // several pages
+    await appendFile(path, big + '\n');
+    const page = await reader.read(path, undefined, first.checkpoint);
+    expect(page.from).toBe(first.checkpoint.offset);
+    expect(page.cursor).not.toBeNull();
+    await writeFile(path, Buffer.from(JSON.stringify({ type: 'user', message: { content: 'new-head' } }) + '\n' + big + '\n'));
+    let next = page;
+    await expect((async () => { while (next.cursor) next = await reader.read(path, next.cursor); })()).rejects.toThrow('rewritten');
+  } finally { await rm(dir, { recursive: true }); }
+});

@@ -55,7 +55,7 @@ function blocksOf(line) {
   }
   return [];
 }
-async function* extract(file, size, from, started) {
+async function* extract(file, size, from, started, expectHead) {
   let page = '', first = !started, scanned = 0, consumed = from, readBytes = 0, bytesRead = 0;
   async function* emit(blocks) {
     for (const block of blocks) {
@@ -74,6 +74,8 @@ async function* extract(file, size, from, started) {
   }
   // Destroying the stream closes the file, so the fingerprint is read before it.
   const finish = async () => {
+    // A resumed pass keeps the text before from: if that prefix changed while this pass ran, the text is not the file's.
+    if (expectHead && (await fingerprint(createHash, file, from, FINGERPRINT_BYTES)).digest !== expectHead) throw new Error('Transcript rewritten while indexing');
     const head = await fingerprint(createHash, file, consumed, FINGERPRINT_BYTES);
     return { text: page, offset: consumed, started: !first, head: head.digest, bytesRead: bytesRead + head.bytes };
   };
@@ -117,7 +119,7 @@ parentPort.on('message', (message) => {
       if (file) await file.close();
       file = message.file;
       id = message.id;
-      reader = extract(file, message.size, message.from, message.started);
+      reader = extract(file, message.size, message.from, message.started, message.expectHead);
     } else if (message.id === id) {
       const result = await reader.next();
       if (result.done) { await file.close(); file = null; reader = null; }
@@ -153,7 +155,7 @@ export class SearchTextReader {
         const worker = this.ensureWorker();
         this.active?.reject?.(new Error('Conversation read superseded'));
         this.active = { id: randomUUID(), path, size: info.size, mtimeMs: info.mtimeMs, from, ino, lastProgressAt: Date.now(), pending: null };
-        worker.postMessage({ type: 'start', id: this.active.id, size: info.size, from, started: from > 0 && resume!.started, file }, [file]);
+        worker.postMessage({ type: 'start', id: this.active.id, size: info.size, from, started: from > 0 && resume!.started, expectHead: from > 0 ? resume!.head : null, file }, [file]);
       } catch (error) { await file.close(); throw error; }
     }
     const active = this.active!;
