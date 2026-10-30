@@ -1,2 +1,13 @@
-/* The fallback's only output-style treatment: the mod's message ink, in the authored Markdown flow. */
-.owner-message-ink { color: var(--accent); }
+/* Interim treatment for #332. A message to the person keeps the text colour; one thin accent bar runs down the left
+   edge of the message and a small accent "To you" label sits at its top. `owner-message-ink` is on one wrapper per
+   message: the div that groups its blocks (message-ink.ts) or the message tool's row (Presenter.tsx), never on each
+   text span. */
+.owner-message-ink { border-left: 2px solid var(--accent); padding-left: calc(var(--space) * 3); }
+.owner-message-ink::before { content: "To you"; display: block; margin-bottom: var(--space); color: var(--accent); font-size: var(--text-ui-sm); font-weight: 600; line-height: 1.2; }
+/* The tool's row is its own bar: its vertical padding becomes margin so the bar is only as tall as the text. */
+.transcript-answer.owner-message-ink { padding-block: 0; margin-block: 4px 12px; }
+/* A grouping div is a block of the answer; the blocks inside space themselves as the answer's own do (Streamdown's
+   space-y-4 on a completed answer, first and last flush with the wrapper). */
+.transcript-prose:not(.transcript-prose-live) .owner-message-ink > :not(:last-child) { margin-bottom: calc(var(--space) * 4); }
+.transcript-prose .owner-message-ink > :first-child { margin-top: 0; }
+.transcript-prose .owner-message-ink > :last-child { margin-bottom: 0; }

@@ -115,7 +115,7 @@ describe('the report view', () => {
     // level 0
     await waitFor(() => expect(record()?.textContent).toBe('Working record · 1 tool call · 2 messages'));
     expect(record()!.getAttribute('aria-expanded')).toBe('false');
-    expect(screen.getByText('The plan is to add the table.')).toBeTruthy();
+    expect(screen.getByText('The plan is to add the table.', { exact: false })).toBeTruthy();
     expect(screen.getByText('Checking the tree.', { exact: false })).toBeTruthy(); // no within-message fold
     expect(screen.queryByText('Unmarked closing words.')).toBeNull();
     expect(dividers()).toHaveLength(1); // the unmarked turn's own divider: drawn as the full transcript
@@ -200,7 +200,7 @@ describe('the report view', () => {
     await waitFor(() => expect(record()).toBeNull());
     expect(dividers()).toHaveLength(2);
     expect(screen.getByText('Unmarked closing words.')).toBeTruthy();
-    expect(document.querySelector('.owner-message-ink')?.textContent).toBe('The plan is to add the table.');
+    expect(document.querySelector('.owner-message-ink')?.textContent).toContain('The plan is to add the table.');
     expect(screen.getByText('Checking the tree.', { exact: false })).toBeTruthy();
   });
 

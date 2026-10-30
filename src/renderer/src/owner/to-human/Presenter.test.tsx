@@ -32,9 +32,31 @@ it('hides closed legacy marks without cards or tint, and keeps quoted message ta
   expect(view.container.textContent).not.toContain('<essential>');
   expect(view.container.textContent).toContain('Reason.');
   expect(view.container.textContent).not.toContain('<insight>');
-  expect([...view.container.querySelectorAll('.owner-message-ink')].map((node) => node.textContent).join('')).toBe('Report.');
+  expect([...view.container.querySelectorAll('.owner-message-ink')].map((node) => node.textContent?.trim())).toEqual(['Report.']);
   expect(view.container.querySelector('code')?.textContent).toBe('<message>example</message>');
   expect(view.container.querySelector('code .owner-message-ink')).toBeNull();
+});
+
+it('draws one mark around a multi-block message and leaves narration on neighbouring lines outside it', () => {
+  const view = render(draw('Private notes.\n<message>\nFirst **point**.\n\n- one\n- two\n\n```js\nlet x = 1;\n```\n</message>\nMore notes.'));
+  const marks = view.container.querySelectorAll('.owner-message-ink');
+  expect(marks).toHaveLength(1);
+  expect([...marks[0]!.children].map((node) => node.tagName)).toEqual(['P', 'UL', 'DIV']);
+  expect(marks[0]!.textContent).toContain('First point.');
+  expect(marks[0]!.textContent).toContain('let x = 1;');
+  expect(marks[0]!.textContent).not.toContain('notes');
+  expect(view.container.textContent).toContain('Private notes.');
+  expect(view.container.textContent).toContain('More notes.');
+  expect(view.container.querySelector('.owner-message-ink span.owner-message-ink')).toBeNull();
+});
+
+it('marks each of two adjacent messages once, and a legacy mark alone draws none', () => {
+  const two = render(draw('<message>A</message>\n\n<message>B</message>\n\nC'));
+  expect([...two.container.querySelectorAll('.owner-message-ink')].map((node) => node.textContent?.trim())).toEqual(['A', 'B']);
+  cleanup();
+  const legacy = render(draw('<essential>Risk.</essential>'));
+  expect(legacy.container.textContent).toBe('Risk.');
+  expect(legacy.container.querySelector('.owner-message-ink')).toBeNull();
 });
 
 it('declines ordinary text, quoted tags, and unfinished messages', () => {
@@ -64,11 +86,13 @@ it('message-tool content has the same unboxed ink and authored Markdown', () => 
 it.each([false, true])('keeps entity and backslash-escaped tag examples literal beside real marks (live=%s)', (live) => {
   const view = render(draw('Use &lt;message&gt;entity&lt;/message&gt; and \\<message>escaped\\</message> literally.\n<message>Real **message**.</message>\nThen &#60;message&#62;numeric&#60;/message&#62;.\n\n<message>Done.</message>\n\nUse &lt;message&gt;example&lt;/message&gt; literally.', live));
   expect([...view.container.querySelectorAll('p')].map((node) => node.textContent)).toEqual([
-    'Use <message>entity</message> and <message>escaped</message> literally.\nReal message.\nThen <message>numeric</message>.',
+    'Use <message>entity</message> and <message>escaped</message> literally.',
+    'Real message.',
+    'Then <message>numeric</message>.',
     'Done.',
     'Use <message>example</message> literally.',
   ]);
-  expect([...view.container.querySelectorAll('.owner-message-ink')].map((node) => node.textContent).join('')).toBe('Real message.Done.');
+  expect([...view.container.querySelectorAll('.owner-message-ink')].map((node) => node.textContent?.trim())).toEqual(['Real message.', 'Done.']);
 });
 
 it('does not promote escaped-tag-only commentary as owner ink', () => {
