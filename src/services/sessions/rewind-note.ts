@@ -242,7 +242,7 @@ export class RewindNotes {
     void this.deps.track(this.quietly(status.appSessionId, (note) => (note !== null && (note.launchId === null || note.launchId === status.launchId) ? null : undefined)));
   }
 
-  // A later act the service made itself (the resume's message), or a session deleted.
+  // A session deleted: no conversation is left to repair. (The resume's own message goes through `act`.)
   clear(appSessionId: AppSessionId): Promise<void> {
     return this.quietly(appSessionId, (note) => (note === null ? undefined : null));
   }

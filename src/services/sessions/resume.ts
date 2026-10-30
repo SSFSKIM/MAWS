@@ -94,9 +94,9 @@ export async function runResume(
     await s.rewinds.replay(appSessionId, previousLaunchId!); // P5 O3-D M4 (D18): a rewind the last launch may have lost, before any input
     let firstTurn: 'sent' | 'queued' | 'none' = 'none';
     if (input.message !== null) {
-      const sent = await hostCall(s.dispatch, 'session.send', { appSessionId, content: input.message.content });
+      // P5 O3-D M4: a later act, through the note's act, so a queued answer or a rewind forwarded meanwhile keeps the note
+      const sent = await s.rewinds.act('session.send', { appSessionId, content: input.message.content });
       input.onSent();
-      if (sent.disposition === 'sent') await s.rewinds.clear(appSessionId); // P5 O3-D M4: a later act (a queued one wrote nothing)
       firstTurn = sent.disposition;
     }
     const engineSessionId = end.status.engineSessionId ?? record.engineSessionId ?? spec.sessionId;

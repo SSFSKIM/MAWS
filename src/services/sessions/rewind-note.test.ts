@@ -270,6 +270,37 @@ describe('the rewind repair: a last-act note, re-sent at resume', () => {
     expect(noteOf(id), 're-sent in this launch, and nothing written after it').toMatchObject({ state: 'confirmed' });
   });
 
+  // Fix wave (scalpel-5#3): the resume's message is an act like any other, ordered against the rewinds forwarded while it
+  // is in flight (a local or claimed rewind does not take the resume's session lock)
+  it('a rewind that lands while the resume’s message is in flight keeps its note when the message is answered', async () => {
+    const id = await liveSession();
+    expect(await rewind(id)).toMatchObject({ ok: true });
+    h.host.exitNow(id);
+
+    await restart();
+    const seam = h.host as unknown as { answer: Answer };
+    const answer = seam.answer.bind(h.host);
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let sent: () => void = () => {};
+    const sending = new Promise<void>((resolve) => (sent = resolve));
+    vi.spyOn(seam, 'answer').mockImplementation(async (name, input) => {
+      if (name !== 'session.send') return answer(name, input);
+      const result = await answer(name, input); // the message has reached the engine
+      sent();
+      await held; // its answer is on its way back while the rewind goes out
+      return result;
+    });
+    expect(await h.service.startSession(id, { message: OK_MESSAGE, options: {} })).toMatchObject({ status: 'starting' });
+    await sending;
+    const later = { ...rewindInput(id), targetMessageUuid: randomUUID() };
+    expect(await invoke('session.rewind', later)).toMatchObject({ ok: true, value: { rewound: true } });
+    release();
+    expect(await h.settled(id, 2)).toMatchObject({ phase: 'ready', outcome: { firstTurn: 'sent' } });
+    expect(conversationCalls()).toEqual(['session.launch', 'session.rewind', 'session.send', 'session.rewind']);
+    expect(noteOf(id), 'the later rewind’s').toMatchObject({ state: 'confirmed', targetMessageUuid: later.targetMessageUuid });
+  });
+
   it('a refused act keeps the note', async () => {
     const id = await liveSession();
     expect(await rewind(id)).toMatchObject({ ok: true });
