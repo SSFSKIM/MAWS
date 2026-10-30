@@ -62,6 +62,7 @@ vi.mock('./client/settings', () => ({ startSettings: () => ({ state: () => ({ se
 // with an empty view, and the checkouts; each root's start and stop recorded
 const roots = vi.hoisted(() => ({ release: vi.fn(), spineStarted: 0, checkoutsStarted: 0, stopSpine: vi.fn(), stopCheckouts: vi.fn() }));
 vi.mock('../services/entry', () => ({
+  COMMAND_BUDGETS_MS: {}, // main's `machine` budgets (sweep#3): none here, every name at the host's 10 s
   startMachineIdentity: vi.fn(() => ({ ref: 'TestMachineRef00000000' })),
   openSpineData: async (profile: string) => ({ lock: { refused: null, holder: null, release: roots.release }, refused: null, machineSettings: {}, paths: { client: `${profile}/settings.json`, machine: `${profile}/machine-settings.json` } }),
   startSpine: () => {
