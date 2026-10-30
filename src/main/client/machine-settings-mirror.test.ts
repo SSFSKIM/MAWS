@@ -99,6 +99,20 @@ describe('the machine settings mirror (Interfaces §G)', () => {
     expect(mirror.state()).toEqual(withIdle(45));
   });
 
+  // M5b fix round 1: another client's change lands after this app's set persisted and before its answer arrives
+  it('lets a change heard while its set was out win over that set’s answer', async () => {
+    const host = machineHost();
+    const set = deferred();
+    host.answers.set('machineSettings.set', set.answer);
+    const mirror = createMachineSettingsMirror({ file, hosts: host.hosts, log: () => {} });
+    const updating = mirror.update({ supervisor: { idleExitMinutes: 30 } });
+    host.fire('machineSettings.changed', { settings: withIdle(30) }); // this app's own change, as mawsd tells every client
+    host.fire('machineSettings.changed', { settings: withIdle(45) }); // another client's, after it
+    set.release({ ok: true, value: { settings: withIdle(30) } });
+    expect(await updating).toEqual(withIdle(45));
+    expect(mirror.state()).toEqual(withIdle(45));
+  });
+
   // P5 O3-D M5b follow-up: mawsd answers only from a loaded spine, and its load ran the settings split under its lock
   it('answered resolves at mawsd’s first answer (a read, a set or a change heard), never at a refusal', async () => {
     const answered = async (mirror: ReturnType<typeof createMachineSettingsMirror>) => {

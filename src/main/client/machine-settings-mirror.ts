@@ -2,8 +2,8 @@
 // Interfaces §G; D20, D25; contract O3X3): a mirror of `mawsd`'s, which holds `spine.lock` and alone writes
 // `machine-settings.json`. It starts from that file, read and never written (the defaults when it is absent or
 // unreadable), so the first window opens without waiting for `mawsd` (D20); then it reads `machineSettings.get` at each
-// streaming of the `machine` host and follows `machineSettings.changed`, a change heard while a read is out winning over
-// that read. `update` sends the patch as `machineSettings.set` and resolves once `mawsd` answered (its write persisted,
+// streaming of the `machine` host and follows `machineSettings.changed`, a change heard while a read or a set is out
+// winning over its answer. `update` sends the patch as `machineSettings.set` and resolves once `mawsd` answered (its write persisted,
 // its listeners told), rejecting on a refusal with nothing changed here. `state()` and `onChange` answer from memory.
 import { readFileSync } from 'node:fs';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
@@ -58,11 +58,14 @@ export function createMachineSettingsMirror({ file, hosts, log }: MachineSetting
   return {
     state: () => current,
     async update(patch) {
+      const before = heard;
       const answer = await hosts.dispatch('machine', 'machineSettings.set', { patch: patch as MachineSettingsPatch });
       if (!answer.ok) throw new Error(answer.error.message);
-      heard += 1;
       markAnswered();
-      take((answer.value as CommandOutput<'machineSettings.set'>).settings);
+      // as a read: a change heard while the set was out is newer than its answer (mawsd tells every client of a change,
+      // this set's own included, before it answers), so it stands
+      if (heard === before) take((answer.value as CommandOutput<'machineSettings.set'>).settings);
+      heard += 1;
       return current;
     },
     onChange(listener) {
