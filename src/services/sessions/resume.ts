@@ -96,7 +96,7 @@ export async function runResume(
     if (input.message !== null) {
       const sent = await hostCall(s.dispatch, 'session.send', { appSessionId, content: input.message.content });
       input.onSent();
-      await s.rewinds.clear(appSessionId); // P5 O3-D M4: a later act
+      if (sent.disposition === 'sent') await s.rewinds.clear(appSessionId); // P5 O3-D M4: a later act (a queued one wrote nothing)
       firstTurn = sent.disposition;
     }
     const engineSessionId = end.status.engineSessionId ?? record.engineSessionId ?? spec.sessionId;

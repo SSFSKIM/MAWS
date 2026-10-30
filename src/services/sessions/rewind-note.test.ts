@@ -247,6 +247,29 @@ describe('the rewind repair: a last-act note, re-sent at resume', () => {
     expect(noteOf(id)).toMatchObject({ state: 'confirmed' });
   });
 
+  // Fix wave (scalpel-5#2): `queued` persists only the app's queue (paused, or behind a turn); nothing reaches the
+  // engine's conversation, so the rewind's anchor may still be lost
+  it('a send the app only queued keeps the note', async () => {
+    const id = await liveSession();
+    expect(await rewind(id)).toMatchObject({ ok: true });
+    h.host.send = 'queue';
+    expect(await invoke('session.send', { appSessionId: id, content: 'held in the queue' })).toMatchObject({ ok: true, value: { disposition: 'queued' } });
+    expect(noteOf(id)).toMatchObject({ state: 'confirmed' });
+  });
+
+  it('a resume whose message the app only queued keeps the note it re-sent', async () => {
+    const id = await liveSession();
+    expect(await rewind(id)).toMatchObject({ ok: true });
+    h.host.exitNow(id);
+
+    await restart();
+    h.host.send = 'queue';
+    expect(await h.service.startSession(id, { message: OK_MESSAGE, options: {} })).toMatchObject({ status: 'starting' });
+    expect(await h.settled(id, 2)).toMatchObject({ phase: 'ready', outcome: { firstTurn: 'queued' } });
+    expect(conversationCalls()).toEqual(['session.launch', 'session.rewind', 'session.send']);
+    expect(noteOf(id), 're-sent in this launch, and nothing written after it').toMatchObject({ state: 'confirmed' });
+  });
+
   it('a refused act keeps the note', async () => {
     const id = await liveSession();
     expect(await rewind(id)).toMatchObject({ ok: true });
@@ -465,6 +488,14 @@ describe('the rewind repair on lane B’s claimed op (host.op)', () => {
     expect(await second).toMatchObject({ ok: true, value: competing ? { state: 'refused', reason: 'op-conflict' } : { state: 'done' } }); // the ledger's replay, or its conflict
     expect(noteOf(id)).toMatchObject({ state: 'confirmed', targetMessageUuid: TARGET });
     expect(h.host.calledWith('session.rewind')).toHaveLength(2); // A once, B once
+  });
+
+  it('a claimed send the app only queued keeps the note (scalpel-5#2)', async () => {
+    const id = await liveSession();
+    expect(await op(opId(15), 'session.rewind', rewindArgs(id))).toMatchObject({ ok: true });
+    h.host.send = 'queue';
+    expect(await op(opId(16), 'session.send', { appSessionId: id, content: 'from the phone' })).toMatchObject({ ok: true, value: { state: 'done', result: { ok: true, value: { disposition: 'queued' } } } });
+    expect(noteOf(id)).toMatchObject({ state: 'confirmed' });
   });
 
   it('a query that fails or finds the ledger unavailable refuses the op unsent, touching no note', async () => {

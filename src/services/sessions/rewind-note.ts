@@ -16,7 +16,7 @@
 // its op ledger. One whose inner command is the rewind or a conversation act goes through the note as a local one does
 // (`claimed`): the rewind's `attempted` written before the op is forwarded, its outcome read from the op's answer
 // (`rewound: true` confirms; a refusal before it ran, `rewound: false` or the host's refusal before it wrote the request
-// puts back the note it replaced), an act's accepted answer clearing the note. An op the host's ledger already knows (a retried action, whose
+// puts back the note it replaced), an act's answer clearing the note once it wrote the conversation. An op the host's ledger already knows (a retried action, whose
 // answer the ledger replays and which runs nothing) touches no note.
 //
 // A note names the launch it was sent to (the live row's at the rewind; the resume's own once a re-send landed), so only
@@ -53,6 +53,10 @@ export type RewindNote = z.infer<typeof RewindNoteSchema>;
 export const CONVERSATION_ACTS = ['session.send', 'session.steer', 'session.queue.promote', 'session.bash'] as const;
 export type ConversationAct = (typeof CONVERSATION_ACTS)[number];
 const isAct = (name: string): name is ConversationAct => (CONVERSATION_ACTS as readonly string[]).includes(name);
+// Whether an act's accepted answer wrote the engine's conversation. Each does once answered (a steer, a promotion and a
+// `!` command are written at once, or refused) except a send the app only queued (`disposition: 'queued'`: the app's
+// queue persisted, paused or behind a turn, or a submission that never reached the pipe), which writes nothing.
+const wroteConversation = (name: ConversationAct, value: unknown): boolean => name !== 'session.send' || (value as CommandOutput<'session.send'>).disposition === 'sent';
 type Op = CommandOutput<'host.op'>;
 
 // The engine host's refusals before it writes the request to the engine (src/engine-host/ipc.ts `sessionOf`, rewind.ts
@@ -161,7 +165,7 @@ export class RewindNotes {
     if (isAct(name)) {
       const before = this.forwarded.get(appSessionId) ?? 0;
       const op = answered(await send());
-      if (op.state === 'done' && op.result.ok) await this.quietly(appSessionId, (note) => (note === null || (this.forwarded.get(appSessionId) ?? 0) !== before ? undefined : null));
+      if (op.state === 'done' && op.result.ok && wroteConversation(name, op.result.value)) await this.quietly(appSessionId, (note) => (note === null || (this.forwarded.get(appSessionId) ?? 0) !== before ? undefined : null));
       return op;
     }
     const note = await this.attempt(inner as CommandInput<'session.rewind'>);
@@ -177,14 +181,14 @@ export class RewindNotes {
     return op; // `in-progress`, or a failure after the request may have been written: `attempted` kept
   }
 
-  // A conversation act, forwarded; once the host accepted it the note it followed has served (a rewind forwarded after
-  // the act keeps its own).
+  // A conversation act, forwarded; once the host wrote it to the engine's conversation the note it followed has served (a
+  // rewind forwarded after the act keeps its own; a send the app only queued wrote nothing).
   async act<N extends ConversationAct>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> {
     const appSessionId = input.appSessionId as AppSessionId;
     const before = this.forwarded.get(appSessionId) ?? 0; // read as the act is handed to the host, below
     const result = await this.deps.dispatch('engine-host', name, input);
     if (!result.ok) throw new HostCommandError(result.error);
-    await this.quietly(appSessionId, (note) => (note === null || (this.forwarded.get(appSessionId) ?? 0) !== before ? undefined : null));
+    if (wroteConversation(name, result.value)) await this.quietly(appSessionId, (note) => (note === null || (this.forwarded.get(appSessionId) ?? 0) !== before ? undefined : null));
     return result.value as CommandOutput<N>;
   }
 
