@@ -67,6 +67,7 @@ import { createHostSupervisor, type HostSupervisor } from '@shared/host/host-sup
 import { supervisorEnv, type DetachedTransportOptions } from '@shared/host/detached-transport';
 import type { RelayPort } from '@shared/host/doc-relay';
 import { appIdentity } from '@shared/host/identity';
+import { cuaSocketPath } from '@shared/browser/cua-socket';
 import { idleCollector, type Collect } from '@shared/host/idle-collect';
 import { makePrivateDirectory, clearSocketPath } from '@shared/host/private-listen';
 import { PrivatePathError } from '@shared/host/private-path';
@@ -136,15 +137,16 @@ export interface DaemonOptions {
   helloHoldMs?: number;
   restartBackoffMs?: readonly number[];
   collect?: Collect; // the idle collection (@shared/host/idle-collect.ts's lastResortCollect)
-  // P5 O3-D M2: the spine seam's (spine-seam.ts): the chunk's load, whether a batch while cold loads the spine (off in the
-  // product until main stops composing its own spine, M5: an app quitting leaves its last batches to mawsd's link,
-  // and a spine loaded by them would hold spine.lock against the app's next launch), the timings and the lock's wait
+  // P5 O3-D M2: the spine seam's (spine-seam.ts): the chunk's load, whether a batch while cold loads the spine (on in the
+  // product since M5b, when main stopped composing its own spine; off, an app quitting would leave its last batches to
+  // mawsd's link, and a spine loaded by them would hold spine.lock against an embedded app's next launch), the timings
+  // and the lock's wait
   spine?: { load?(): Promise<SpineEntry>; wakeOnEvents?: boolean; timing?: Partial<SpineTiming>; lockWaitMs?: number };
-  // P5 O3-D M3 (D30): the engine host's permanent client (above), off in the product until M5 turns it on with the front's
-  // session streams and `wakeOnEvents`: until then a kept session's events while no app is attached would reach no app
+  // P5 O3-D M3 (D30): the engine host's permanent client (above), on in the product since M5b with the front's session
+  // streams and `wakeOnEvents` (off, a kept session's events while no app is attached would reach no spine)
   permanentClient?: boolean;
   // P5 O3-D M5a (Interfaces §L): the spine is the machine's, and an app that runs its own is refused at engine-host.sock
-  // and yielded to (above); off in the product until M5b turns it on with permanentClient, when apps list machine.spine
+  // and yielded to (above); on in the product since M5b, with permanentClient, when apps list machine.spine
   claimSpine?: boolean;
   singletonSignal?: boolean; // D21's second signal (SINGLETON_LOCK_SIGNAL_DEFAULT unless a test says), under claimSpine
 }
@@ -301,7 +303,11 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       bus: front.bus,
       clientPort: front.port, // §E: the asking client's connection, or the attached app's
       interest: () => new Set(union()),
-      browserSocket: () => front.browserSocket(), // the attached app's, from its machine.client
+      // the session's socket in the attached app's cua directory, from its machine.client (P5 O3-D M5b)
+      browserSocket: (appSessionId) => {
+        const dir = front.browserSocket();
+        return dir === null ? null : cuaSocketPath(dir, appSessionId);
+      },
       trash: (path) => trashPath(path, { platform, home: homedir(), env }), // D10: mawsd's own move into the user's trash
       engineEnv: captureShellEnvironment({ cache: false }), // one capture per load
       env,

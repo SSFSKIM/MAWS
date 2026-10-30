@@ -282,6 +282,16 @@ describe('the spine mirror (Interfaces §F)', () => {
     host.stream();
     await vi.waitFor(() => expect(view.unavailable()).toBe(SCENARIO_UNAVAILABLE));
     expect(view.record(A)).not.toBeNull();
+    // the scenario's statuses are the spine's emits, no engine host's: counted, and kept across a reconnection whose
+    // follow finds no launch for them (D11)
+    host.fire('session.status', { appSessionId: A, status: status({ appSessionId: A, process: 'ready', turn: true }) });
+    expect(view.midTurnCount()).toBe(1);
+    host.answers.set('session.follow', () => ({ ok: true, value: { streams: [{ appSessionId: A, mode: 'live', launchId: null }] } }));
+    host.lose();
+    host.stream();
+    await vi.waitFor(() => expect(host.asked.filter((a) => a.name === 'session.follow')).toHaveLength(2));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(view.midTurnCount()).toBe(1);
   });
 
   it('dispatches acquire and files’ admission read; a failed read answers no paths', async () => {

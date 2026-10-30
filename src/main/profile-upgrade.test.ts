@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Settings } from '@shared/ipc/schema/settings';
 import { SETTINGS_DEFAULTS_V21, splitSettings } from '@shared/settings/defaults';
@@ -14,6 +14,8 @@ import { item } from '../../test/support/builders';
 import { summary, tempDir } from '../../test/support/index-fixture';
 import { BrowserData } from './browser/data';
 import { composeSettings } from './client/settings-store';
+import { createMachineSettingsMirror } from './client/machine-settings-mirror';
+import { openSpineData } from '../services/spine-root';
 import { Index } from '../services/index/index';
 import { MIGRATIONS } from '../services/index/migrations';
 import { startMachineSettings } from '../services/settings/machine';
@@ -143,5 +145,53 @@ describe('a profile O2 left starts under O3-A’s build with no visible change',
       spine.release();
     }
     expect(existsSync(join(profile, 'spine.lock'))).toBe(false);
+  });
+
+  // P5 O3-D M5b (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, acceptance 1): on the daemon shape `mawsd` migrates
+  // the profile, at its spine's first load (its own lock, then the data start under it, D26), while main, started first,
+  // reads both halves without writing either: the client file as it finds it, the machine half from its file and then
+  // from `mawsd`'s answer.
+  it('on the daemon shape mawsd splits the settings under its lock, and main shows every value, writing neither file', async () => {
+    const profile = dir.path;
+    const paths = settingsPaths(profile);
+    const unified = JSON.stringify({ ...CHOSEN, version: 20 });
+    writeFileSync(paths.client, unified);
+
+    // main starts first: the client file read as it is (unified: read-only until a launch after the split), the machine
+    // half from its file (absent: the defaults) until mawsd answers
+    let streaming = false;
+    const onStreaming = new Set<() => void>();
+    let answer: unknown = null;
+    const hosts = {
+      dispatch: async (_owner: string, name: string) => (name === 'machineSettings.get' ? { ok: true, value: answer } : { ok: false, error: { code: 'unknown_command', message: name } }),
+      onEvent: () => () => {},
+      onStreaming: (_owner: string, listener: () => void) => (onStreaming.add(listener), () => void onStreaming.delete(listener)),
+      streaming: () => streaming,
+    };
+    const mirror = createMachineSettingsMirror({ file: paths.machine, hosts: hosts as never, log: () => {} });
+    const settings = composeSettings({ clientFile: paths.client, machine: mirror });
+    expect(settings.settings).toMatchObject({ theme: 'dark', gateway: SETTINGS_DEFAULTS_V21.gateway }); // the client's value; the machine's defaults
+    await expect(settings.update({ theme: 'light' })).rejects.toThrow(); // the unified file is read-only until the split
+    expect(readFileSync(paths.client, 'utf8')).toBe(unified);
+
+    // mawsd's spine loads: its lock, the split under it, the machine half
+    const lock = await takeSpineLock(profile, { build: '0.0.0+mawsd' });
+    try {
+      const data = await openSpineData(profile, { build: '0.0.0+mawsd', lock });
+      expect(data.refused).toBeNull();
+      expect(JSON.parse(readFileSync(paths.client, 'utf8'))).toEqual(splitSettings(CHOSEN).client);
+      expect(JSON.parse(readFileSync(paths.machine, 'utf8'))).toEqual(splitSettings(CHOSEN).machine);
+      // mawsd answers main's read at the machine host's streaming: Settings shows every value as before
+      answer = { settings: data.machineSettings.state(), version: 0 };
+      streaming = true;
+      for (const listener of onStreaming) listener();
+      await vi.waitFor(() => expect(settings.settings).toEqual(CHOSEN));
+      // and main rewrote neither file
+      expect(JSON.parse(readFileSync(paths.client, 'utf8'))).toEqual(splitSettings(CHOSEN).client);
+      expect(JSON.parse(readFileSync(paths.machine, 'utf8'))).toEqual(splitSettings(CHOSEN).machine);
+    } finally {
+      mirror.stop();
+      lock.release();
+    }
   });
 });

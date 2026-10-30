@@ -591,6 +591,20 @@ describe('the build check', () => {
     expect(calls).toEqual(['machine daemon.status']);
   });
 
+  // P5 O3-D M5b: the spine's state is in the status, and it changes at no host transition (a load refused by the lock)
+  it('reads the status again when asked, once the machine host is ready', async () => {
+    const status = daemonStatus({ build: { ...daemonStatus().build, buildId: THIS } });
+    const { watch, calls, changes, ready } = scene({ status });
+    watch.refresh(); // not ready yet: nothing asked
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toEqual([]);
+    await ready('machine');
+    watch.refresh();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toEqual(['machine daemon.status', 'machine daemon.status']);
+    expect(changes).toHaveLength(2);
+  });
+
   it('reads the status at each ready of the machine host and of the engine host, and at no other transition', async () => {
     const status = daemonStatus({ build: { ...daemonStatus().build, buildId: THIS } });
     const { watch, calls, changes, ready } = scene({ status });

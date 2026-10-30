@@ -16,6 +16,7 @@ import engineHostPath from '../../engine-host/index?modulePath';
 import ptyHostPath from '../../pty-host/index?modulePath';
 import { daemonPaths } from '@shared/daemon/files';
 import { appIdentity } from '@shared/host/identity';
+import type { DaemonStatus } from '@shared/ipc/schema/daemon';
 import type { MainBuild } from '@shared/ipc/schema/host'; // E11 §2.7
 import type { SupervisorShape } from '@shared/ipc/schema/settings';
 import { buildIdOf, SUPERVISOR_FILES } from '../../engine-host/supervisor-files';
@@ -76,8 +77,16 @@ function refuse(code: number, line: string): never {
   process.exit(code);
 }
 
-// P5 O3-A: `spineRefused`, why this run does not run the spine, for host.status
-export function createHosts(mainBuild: MainBuild, launch: LaunchShape, { spineRefused = null }: { spineRefused?: string | null } = {}): HostSupervisor {
+// P5 O3-D M5b: on the daemon shape, the daemon's last `daemon.status` and each new one, for main's mirror of the spine
+export interface DaemonStatusWatch {
+  status(): DaemonStatus | null;
+  refresh(): void; // read it again (src/main/hosts/daemon.ts)
+  onStatus(listener: () => void): () => void;
+}
+
+// P5 O3-A: `spineRefused`, why this run does not run the spine, for host.status (the embedded shape's; on the daemon
+// shape the daemon's status says it)
+export function createHosts(mainBuild: MainBuild, launch: LaunchShape, { spineRefused = null }: { spineRefused?: string | null } = {}): { hosts: HostSupervisor; daemon: DaemonStatusWatch | null } {
   const { mode } = launch;
   const daemon = mode === 'daemon';
   const userData = app.getPath('userData');
@@ -107,12 +116,16 @@ export function createHosts(mainBuild: MainBuild, launch: LaunchShape, { spineRe
   supervisor.onState('pty-host', (state) => emit('pty.hostState', state));
   // P5 O2 M7: the daemon's status for host.status and Diagnostics, and its build checked once for the launch
   let status: HostStatusService | null = null;
+  const statusListeners = new Set<() => void>();
   const watch = daemon
     ? watchDaemon({
         hosts: supervisor,
         buildId: buildIdOf(mawsdPath()),
         unitRunsThisApp: () => unitRunsThisApp({ profileDir: userData, program: program() }, unitDeps()),
-        onChange: () => status?.refresh(),
+        onChange: () => {
+          status?.refresh();
+          for (const listener of [...statusListeners]) listener();
+        },
         log: (line) => console.log(line),
       })
     : null;
@@ -130,5 +143,15 @@ export function createHosts(mainBuild: MainBuild, launch: LaunchShape, { spineRe
     daemonUnavailable: launch.unavailable,
     spineRefused, // P5 O3-A
   });
-  return supervisor;
+  const daemonWatch = watch
+    ? {
+        status: () => watch.status(),
+        refresh: () => watch.refresh(),
+        onStatus: (listener: () => void) => {
+          statusListeners.add(listener);
+          return () => void statusListeners.delete(listener);
+        },
+      }
+    : null;
+  return { hosts: supervisor, daemon: daemonWatch };
 }

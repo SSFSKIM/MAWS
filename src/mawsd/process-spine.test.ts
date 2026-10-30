@@ -3,8 +3,7 @@
 // replayed lane B session. `onEvent` delivers the session's events (owner `engine-host`), `dispatch('machine',
 // 'session.list', …)` answers the spine's records, `onEvent` carries `attention.changed` with owner `machine` for the
 // session's pending permission, and MAWS's projects answer `CheckoutSource.known`. The daemon runs in this process with
-// the options M5b turns on in the product (`permanentClient`, `spine.wakeOnEvents`), so the proof does not wait for that
-// switch; the engine host is the built bundle (`out/main/`), spawned by `mawsd` as its own process under
+// the product's options since M5b (`permanentClient`, `spine.wakeOnEvents`, `claimSpine`); the engine host is the built bundle (`out/main/`), spawned by `mawsd` as its own process under
 // MAWS_ENGINE_REPLAY=1, whose replay runs no engine; the spine is the services entry, loaded on demand as the seam loads
 // it. The endpoint module is a stand-in that keeps the seam it is started with (the real one needs a hub; its use of the
 // same seam is process-endpoint.test.ts's). Skipped without a build, as the bundle guard is; class 1a builds first.
@@ -125,8 +124,10 @@ describe.skipIf(!existsSync(MAWSD))('the endpoint reaches the machine with no ap
       exit: (code) => void exits.push(code),
       openLog: () => (line) => void logs.push(line),
       endpoint,
-      permanentClient: true, // M5b's switch, on here (D41(1)): events flow to mawsd with no app
+      // the product's options since M5b (src/mawsd/index.ts): events flow to mawsd with no app, and the spine is the machine's
+      permanentClient: true,
       spine: { load: () => import('../services/entry'), wakeOnEvents: true },
+      claimSpine: true,
     });
     expect(daemon, `mawsd did not start (exits ${JSON.stringify(exits)})`).not.toBeNull();
     const seam = services as DaemonServices | null;

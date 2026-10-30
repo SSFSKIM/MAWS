@@ -42,7 +42,7 @@ vi.mock('electron', () => {
     powerMonitor: { on: vi.fn() }, // P5 O8 M1: the Registry feed's wake and unlock probes
   };
 });
-vi.mock('./hosts', () => ({ createHosts: () => fake.hosts, prepareLaunch: () => ({ mode: 'utility', daemon: null, unavailable: null }), refuseTestLaunchOnDefaultProfile: () => {} /* P5 O2 landing: a scratch-profile test launch */ })); // P5 O2 M7: the launch's shape, settled at once
+vi.mock('./hosts', () => ({ createHosts: () => ({ hosts: fake.hosts, daemon: null }) /* P5 O3-D M5b: the embedded shape */, prepareLaunch: () => ({ mode: 'utility', daemon: null, unavailable: null }), refuseTestLaunchOnDefaultProfile: () => {} /* P5 O2 landing: a scratch-profile test launch */ })); // P5 O2 M7: the launch's shape, settled at once
 vi.mock('./windows', () => ({ appWindows: () => fake.windows })); // E2: the app-window registry `activate` reads
 vi.mock('./browser', () => ({ startBrowser: () => ({ stop: vi.fn(), partitions: {} /* E4b */ }) })); // E4a: the in-app browser's main side
 vi.mock('./artifacts', () => ({ registerStoreSchemes: vi.fn() /* M7 */, installStorePolicies: vi.fn() /* P3-L M6b: E2's startDeliverables' policies */, startArtifacts: () => ({ stop: vi.fn(), exporters: { register: () => () => {} } /* P3-B: the document exporters register here */ }) })); // P3-A: the artifact store's main side

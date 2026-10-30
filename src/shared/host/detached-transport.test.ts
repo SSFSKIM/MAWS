@@ -700,7 +700,7 @@ describe('the detached transport: the wire major and the protocol-2 window (P5 O
     expect(state()).toMatchObject({ state: 'ready', pid: fake.pid });
     expect(supervisor.peer('engine-host')).toEqual({ major: 3, minor: 7, build: buildIdOf(profile.modulePath), capabilities: ['probe.extra'] });
     expect(logs).toContain(`connected to supervisor pid ${fake.pid} build ${buildIdOf(profile.modulePath)} wire 3.7 capabilities [probe.extra] (0 live of 0 rows)`);
-    expect(fake.peer()).toEqual({ major: 3, minor: WIRE_MINOR, build: buildIdOf(profile.modulePath), capabilities: ['socket.ptyFrames'] }); // P5 O2 M4: socket.ptyFrames; P5 O3-D: the app's own list, not the wire's union (machine.spine from M5)
+    expect(fake.peer()).toEqual({ major: 3, minor: WIRE_MINOR, build: buildIdOf(profile.modulePath), capabilities: ['socket.ptyFrames', 'machine.spine'] }); // P5 O2 M4: socket.ptyFrames; P5 O3-D: the app's own list, not the wire's union (machine.spine from M5b)
     fake.dropClient();
     await until(() => state().state === 'restarting');
     expect(supervisor.peer('engine-host')).toBeNull();

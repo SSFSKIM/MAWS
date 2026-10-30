@@ -321,6 +321,7 @@ export interface DaemonWatchDeps {
 
 export interface DaemonWatch {
   status(): DaemonStatus | null;
+  refresh(): void; // P5 O3-D M5b: read it again now (the spine's state changes at no host transition); none until ready
   stop(): void;
 }
 
@@ -350,13 +351,16 @@ export function watchDaemon(deps: DaemonWatchDeps): DaemonWatch {
     const answer = await deps.hosts.dispatch('machine', 'daemon.restart', undefined);
     if (!answer.ok) deps.log(`[hosts] daemon.restart: ${answer.error.code} ${answer.error.message}`);
   };
+  let machineReady = false;
   const onReady = (owner: 'machine' | 'engine-host') =>
     deps.hosts.onState(owner, (state) => {
+      if (owner === 'machine') machineReady = state.state === 'ready';
       if (state.state === 'ready' && !stopped) void read();
     });
   const offs = [onReady('machine'), onReady('engine-host')];
   return {
     status: () => current,
+    refresh: () => void (machineReady && !stopped && read()),
     stop() {
       stopped = true;
       for (const off of offs) off();

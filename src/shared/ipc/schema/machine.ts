@@ -26,7 +26,7 @@ export const MachineOpInputSchema = z.strictObject({ opId: OpIdSchema, opCreated
 
 export const commands = {
   'machine.identity': { input: z.void(), output: MachineIdentitySchema, owner: 'machine' },
-  'machine.client': { input: z.strictObject({ browserSocket: z.string().nullable() }), output: z.void(), owner: 'machine' }, // the attached app's browser socket (E13): null, none
+  'machine.client': { input: z.strictObject({ browserSocket: z.string().nullable() }), output: z.void(), owner: 'machine' }, // the attached app's browser socket directory (E13; each session's `<dir>/<appSessionId>.sock`, @shared/browser/cua-socket): null, none
   'machine.op': { input: MachineOpInputSchema, output: HostOpOutputSchema, owner: 'machine' },
   'machine.opQuery': { input: z.strictObject({ opId: OpIdSchema, opCreated: z.string(), tombstoneIfAbsent: z.boolean() }), output: HostOpQueryOutputSchema, owner: 'machine' },
 } as const satisfies Record<`machine.${string}`, CommandSpec<z.ZodType, z.ZodType>>;

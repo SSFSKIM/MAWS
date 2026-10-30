@@ -98,7 +98,7 @@ export interface ServicesFront {
   intercepted(name: string, input: unknown, client?: ClientRef): Promise<CommandResult<CommandName> | null>;
   intercepts(): CommandName[]; // the names the loaded spine intercepts now
   events(listener: (name: string, payload: unknown) => void): () => void; // every event `bus.emit` sent (the endpoint's owner `machine`)
-  browserSocket(): string | null; // the attached app's, from its machine.client; null with no app
+  browserSocket(): string | null; // the attached app's cua socket directory, from its machine.client; null with no app
   clients(): number;
   commands(): CommandName[]; // what the front answers now: its own names and what the loaded spine registered
   unbind(): void; // the spine's parts stopped: its registrations, intercepts and taps go

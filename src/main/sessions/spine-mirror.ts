@@ -222,13 +222,16 @@ export function createMirrorSpineView(options: SpineMirrorOptions): SpineMirror 
 
   let retry: ReturnType<typeof setTimeout> | null = null;
   let backoff = options.retryMs ?? RETRY_MS;
+  let loading: number | null = null; // the generation whose snapshot is out: one at a time per streaming
   function load(): void {
-    if (stopped || !hosts.streaming('machine')) return;
+    if (stopped || !hosts.streaming('machine') || loading === generation) return;
     if (retry) clearTimeout(retry);
     retry = null;
     const gen = generation;
+    loading = gen;
     const races = snapshotReads.map(({ member }) => (raced[member] = { ids: new Set(), whole: false }));
     void Promise.allSettled(snapshotReads.map(({ take }, i) => take(gen, races[i]!))).then((results) => {
+      if (loading === gen) loading = null;
       if (gen !== generation || stopped) return;
       for (const { member } of snapshotReads) delete raced[member];
       const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
@@ -263,8 +266,9 @@ export function createMirrorSpineView(options: SpineMirrorOptions): SpineMirror 
       for (const stream of (answer.value as CommandOutput<'session.follow'>).streams) {
         const id = stream.appSessionId as AppSessionId;
         if (stream.mode === 'missing') log(`[spine-mirror] ${id}'s stream lost the range after its cursor; it goes on from its journal's last row`);
-        // not live on the engine host now (replaced, or parked, meanwhile): the status held is stale
-        if (stream.launchId === null && statuses.has(id) && statuses.get(id)!.process !== 'exited') {
+        // not live on the engine host now (replaced, or parked, meanwhile): the status held is stale. A scenario's
+        // statuses are the spine's own emits, which no engine host holds (D11)
+        if (mode !== 'scenario' && stream.launchId === null && statuses.has(id) && statuses.get(id)!.process !== 'exited') {
           statuses.delete(id);
           cursors.delete(id);
           fire('engine', id, null);

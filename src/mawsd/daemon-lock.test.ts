@@ -10,7 +10,7 @@ import { existsSync, lutimesSync, mkdirSync, readFileSync, rmSync, symlinkSync, 
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
-import { MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
+import { PEER_CAPABILITIES, SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import type { AppSessionId } from '@shared/graph/ids';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { buildIdOf, procStartOf } from '../engine-host/supervisor-files';
@@ -38,7 +38,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-const POST_D = [...PEER_CAPABILITIES.app, MACHINE_SPINE_CAPABILITY]; // an app's hello from M5b on
+const POST_D = [...PEER_CAPABILITIES.app]; // an app's hello from M5b on, which lists MACHINE_SPINE_CAPABILITY
 const REWOUND = { rewound: true, reason: null, error: null, prefillText: null, precedingAssistantUuid: null, files: null };
 const REWIND = { appSessionId: 'app-1', targetMessageUuid: 'm-target', lastSeenMessageUuid: 'm-seen', files: false };
 
@@ -337,7 +337,9 @@ describe('the spine’s bindings (§A)', () => {
     expect(readFileSync(join(data, 'Trash', 'info', 'gone.trashinfo'), 'utf8')).toContain(`Path=${join(scene.root, 'gone')}`);
   });
 
-  it('browserSocket: the attached app’s, from its machine.client; another client’s is not the app’s; null once the app left', async () => {
+  // P5 O3-D M5b: machine.client names the app's cua socket directory; each session's socket is `<dir>/<appSessionId>.sock`
+  // (E13), none for a path longer than a Unix socket allows
+  it('browserSocket: the session’s socket in the attached app’s directory, from its machine.client; another client’s is not the app’s; null once the app left', async () => {
     const chunk = standInChunk();
     await scene.start({ spine: { load: chunk.load } });
     const app = await scene.app(); // attached on engine-host.sock, this process's pid
@@ -346,10 +348,13 @@ describe('the spine’s bindings (§A)', () => {
     expect(await machine.request('session.launchMode')).toMatchObject({ ok: true });
     const id = 'app-1' as AppSessionId;
     expect(chunk.deps[0]!.browserSocket(id)).toBeNull();
-    expect(await other.request('machine.client', { browserSocket: '/tmp/not-the-app.sock' })).toMatchObject({ ok: true });
+    expect(await other.request('machine.client', { browserSocket: '/tmp/not-the-app' })).toMatchObject({ ok: true });
     expect(chunk.deps[0]!.browserSocket(id)).toBeNull();
-    expect(await machine.request('machine.client', { browserSocket: '/tmp/cua.sock' })).toMatchObject({ ok: true });
-    expect(chunk.deps[0]!.browserSocket(id)).toBe('/tmp/cua.sock');
+    expect(await machine.request('machine.client', { browserSocket: '/tmp/cua' })).toMatchObject({ ok: true });
+    expect(chunk.deps[0]!.browserSocket(id)).toBe('/tmp/cua/app-1.sock');
+    expect(await machine.request('machine.client', { browserSocket: `/tmp/${'d'.repeat(100)}` })).toMatchObject({ ok: true });
+    expect(chunk.deps[0]!.browserSocket(id)).toBeNull(); // past sun_path
+    expect(await machine.request('machine.client', { browserSocket: '/tmp/cua' })).toMatchObject({ ok: true });
     app.leave();
     await until(() => app.closed, 3_000, 'the app’s departure');
     expect(chunk.deps[0]!.browserSocket(id)).toBeNull();

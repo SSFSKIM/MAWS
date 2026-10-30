@@ -188,6 +188,18 @@ describe('host.status', () => {
     expect(validateEventPayload('host.status', h.emitted.at(-1)).ok).toBe(true);
   });
 
+  // P5 O3-D M5b: on the daemon shape the spine is `mawsd`'s, so why it does not run is the daemon's last word on it
+  it('on the daemon shape carries the daemon’s spine refusal, read at each status', async () => {
+    const refused = 'spine.lock is held by pid 4242 (build 1.0.0+abc)';
+    let daemon: DaemonStatus | null = null;
+    const h = harness('detached', { daemon: () => daemon, spineRefused: 'this run’s own refusal, which the daemon shape never has' });
+    await expect(h.call('host.status')).resolves.toMatchObject({ spineRefused: null }); // no daemon.status yet
+    daemon = daemonStatus({ spine: { state: 'refused', refused, loadedAt: null, heldDropped: 0 } });
+    await expect(h.call('host.status')).resolves.toMatchObject({ spineRefused: refused });
+    daemon = daemonStatus({ spine: { state: 'loaded', refused: null, loadedAt: '2026-10-29T10:00:00.000Z', heldDropped: 0 } });
+    await expect(h.call('host.status')).resolves.toMatchObject({ spineRefused: null });
+  });
+
   it('stop unsubscribes', () => {
     const h = harness();
     h.service.stop();

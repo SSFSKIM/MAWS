@@ -2,7 +2,7 @@
 // whatever the page does, a `host.status` read still pending included, returns at once on any other shape or a read
 // that fails, and gives the line the launch prints. Runs on vitest's clock, the window answering 500 ms after the launch.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { untilHostReady, type HostStatusLike } from '../../e2e/support/host-ready';
+import { untilHostReady, untilSpineReady, type HostStatusLike } from '../../e2e/support/host-ready';
 
 const LAUNCHED_AT = 1_000_000;
 
@@ -66,5 +66,41 @@ describe('untilHostReady', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(run.line()).toBeNull();
     expect(run.reads).toHaveBeenCalledTimes(1);
+  });
+});
+
+// P5 O3-D M5b (D24): the cold-start line, the first available `session.list` answer after the host's ready
+describe('untilSpineReady', () => {
+  function spineWait(list: () => Promise<{ ok: true } | { ok: false; error: string }>) {
+    const lists = vi.fn(list);
+    let line: string | undefined;
+    void untilSpineReady({ list: lists, now: () => Date.now(), sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }, LAUNCHED_AT).then((result) => (line = result));
+    return { lists, line: () => line };
+  }
+
+  it('returns at the first available answer, asking again 100 ms after each unavailable one', async () => {
+    const answers = [{ ok: false as const, error: 'host_unavailable: the spine is loading' }, { ok: true as const }];
+    const run = spineWait(async () => answers.shift()!);
+    await vi.advanceTimersByTimeAsync(99);
+    expect(run.line()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(run.line()).toBe('[e2e] spine ready: waited 100 ms after the host, 600 ms after the launch');
+    expect(run.lists).toHaveBeenCalledTimes(2);
+  });
+
+  it('ends at the bound with the last unavailable answer, or when an answer never settles', async () => {
+    const refused = spineWait(async () => ({ ok: false, error: 'host_unavailable: spine.lock is held by pid 4242' }));
+    const pending = spineWait(() => new Promise(() => {}));
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(refused.line()).toBe('[e2e] spine ready: waited 30000 ms after the host, 30500 ms after the launch (the 30 s bound: host_unavailable: spine.lock is held by pid 4242; the launch goes on)');
+    expect(pending.line()).toBe('[e2e] spine ready: waited 30000 ms after the host, 30500 ms after the launch (the 30 s bound: session.list unanswered; the launch goes on)');
+    expect(pending.lists).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts a read that rejects as unavailable', async () => {
+    const answers: (() => Promise<{ ok: true }>)[] = [() => Promise.reject(new Error('Execution context was destroyed')), async () => ({ ok: true })];
+    const run = spineWait(() => answers.shift()!());
+    await vi.advanceTimersByTimeAsync(100);
+    expect(run.line()).toBe('[e2e] spine ready: waited 100 ms after the host, 600 ms after the launch');
   });
 });

@@ -212,12 +212,12 @@ describe('the machine host on the wire (P5 O3-D M1)', () => {
     expect(manifest.capabilities).toEqual(['host.attachment', 'machine.spine', 'socket.ptyFrames']);
     expect([...WIRE_CAPABILITIES].sort()).toEqual(manifest.capabilities);
     // D4: the engine host lists host.attachment from M3, when it serves the command, and mawsd's hello to it from M3
-    // (under its permanent-client option, which drops the name otherwise); main's hellos list machine.spine from M5,
-    // when main stops composing the spine
+    // (under its permanent-client option, which drops the name otherwise); main's hellos list machine.spine from M5b,
+    // when main stops composing the spine on the daemon shape
     expect(PEER_CAPABILITIES).toEqual({
       engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY],
       ptyHost: [PTY_FRAMES_CAPABILITY],
-      app: [PTY_FRAMES_CAPABILITY],
+      app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY],
       daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY],
       daemonToPtyHost: [PTY_FRAMES_CAPABILITY],
       daemon: [PTY_FRAMES_CAPABILITY],

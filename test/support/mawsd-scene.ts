@@ -16,7 +16,8 @@ import { createHostSupervisor, type HostSupervisor, type HostSupervisorOptions }
 import type { DocPortEnd, HostEmit, HostOn, HostRuntime } from '@shared/host/runtime';
 import { createHostRuntime } from '@shared/host/runtime';
 import { SocketPort } from '@shared/host/socket-port';
-import { PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY, SOCKET_PROTOCOL, splitLines } from '@shared/host/socket-protocol';
+import { appIdentity } from '@shared/host/identity';
+import { PTY_FRAMES_CAPABILITY, SOCKET_PROTOCOL, splitLines } from '@shared/host/socket-protocol';
 import type { HostDoc } from '@shared/ipc/host-protocol';
 import type { WireRegistry } from '@shared/ipc/registry';
 import { WIRE_MINOR } from '@shared/ipc/wire';
@@ -25,6 +26,10 @@ import { registerAttachment } from '../../src/engine-host/attachment';
 import { procStartOf } from '../../src/engine-host/supervisor-files';
 import { ptyHostSocketPath } from '../../src/pty-host/files';
 import { fakeProfile, FakeProcesses, FakeSupervisor, type FakeProfile, type FakeSupervisorOptions } from './fake-supervisor';
+
+// P5 O3-D M5b (D47): a raw app's hello lists what an app listed before the cutover (no `machine.spine`): the existing
+// daemon tests' apps, which a daemon with `claimSpine` off serves as before; a test of the cutover names its own list
+export const APP_BEFORE_SPINE_CAPABILITIES = [PTY_FRAMES_CAPABILITY] as const;
 
 export const TIMING = { connectTimeoutMs: 200, helloTimeoutMs: 300, startTimeoutMs: 2_000, pidPollMs: 20, waitRetryMs: 80, killGraceMs: 60 };
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -300,6 +305,7 @@ export class MawsdScene {
         },
         timing: { ...TIMING, startTimeoutMs: 6_000 },
         log: (line) => void this.logs.push(`[app] ${line}`),
+        identity: appIdentity(this.profile.modulePath, {}, 'detached', APP_BEFORE_SPINE_CAPABILITIES), // D47: an app of before the cutover
       },
       ...options,
     });
@@ -339,7 +345,7 @@ export class RawApp {
     return new Promise((resolve) => {
       const socket = createConnection(path);
       const app = new RawApp(socket);
-      const capabilities = options.capabilities ?? [...PEER_CAPABILITIES.app]; // P5 O3-D: an app's own list, not the wire's union
+      const capabilities = options.capabilities ?? [...APP_BEFORE_SPINE_CAPABILITIES]; // P5 O3-D: an app's own list, not the wire's union
       socket.on('error', () => {});
       socket.on('end', () => void (app.ended = true));
       socket.on('close', () => {
