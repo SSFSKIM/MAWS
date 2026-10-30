@@ -71,10 +71,14 @@ describe.runIf(process.platform === 'linux' && ROOTS.length > 0)('the watch tree
         const root = realpathSync(given);
         const kind = kindOf(root);
         if (kind === 'maws') {
+          // O3-G's workload is the checkout with node_modules installed: a bare one cannot stand in for it.
+          expect(existsSync(join(root, 'node_modules')), `${root}/node_modules (devenv/setup.sh installs it)`).toBe(true);
           const unpruned = await unprunedArm(root);
           results[`${root} (prune off)`] = unpruned;
           line(`${root} (prune off)`, `watches ${unpruned.watches} (bound ${BOUND.mawsUnprunedWatches}) · rss +${unpruned.rssMiB} MiB · walk lag ${unpruned.walkLagMs} ms`);
           expect.soft(unpruned.watches, 'MAWS with the prune off').toBeLessThanOrEqual(BOUND.mawsUnprunedWatches);
+          expect.soft(unpruned.rssMiB, 'RSS growth with the prune off').toBeLessThanOrEqual(BOUND.rssMiB);
+          expect.soft(unpruned.walkLagMs, "the initial walk's worst lag with the prune off").toBeLessThanOrEqual(BOUND.walkLagMs);
         }
         const worktree = kind === 'maws' ? addWorktree(root) : null;
         try {
@@ -254,7 +258,7 @@ async function unprunedArm(root: string) {
   try {
     await walked;
     const walkLagMs = lag.stop();
-    return { watches: inotifyOf().watches - watchesBefore, rssMiB: round1((memory() - rssBefore) / MiB), walkLagMs, nodeModules: existsSync(join(root, 'node_modules')) };
+    return { watches: inotifyOf().watches - watchesBefore, rssMiB: round1((memory() - rssBefore) / MiB), walkLagMs };
   } finally {
     handle.close();
   }
