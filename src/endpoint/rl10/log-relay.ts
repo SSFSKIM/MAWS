@@ -43,6 +43,11 @@
 //     or the certificates move or the legacy key arrives (`retry`). The hold is bounded (`HOLD_MAX` events, each
 //     `HOLD_MS`); one let go is only forgotten, and comes again from the hub at sminos's next log-plane hello, since
 //     sminos's `have` stops below it.
+//     A hold a newer head or certificate set could settle (its signer or key unknown, its certificate lapsed) asks the
+//     endpoint for a read of the hub's org state (`behind`): storing or retiring a certificate moves no org-state
+//     version, so no `state` notice tells the endpoint of it, and a machine's first events after it enrolls, cuts over
+//     or renews would otherwise wait for the next periodic read. A key asks at most once per `HELD_READ_MS`: a burst of
+//     its events asks once, and a key the read left unknown asks no more until then, however many of its events come.
 
 // Lost on the way. RL10 takes what is written, but RL1 can be down while sminos uploads (its first `have` came on an
 // earlier RL1 connection), and what the hub never took would be lost: sminos's upload cursor only moves forward. So the
@@ -83,15 +88,17 @@ export type Rejected = { t: 'rejected'; project: string; event: { writer: string
 type Uploaded = { event: Record<string, unknown> } | { reason: string; message: string };
 /** Why a position was spent (`spent`'s `reason`): the endpoint's own words for a final verdict. */
 export type SpentReason = 'bad-shape' | 'conflict' | 'replayed' | 'bad-signature' | 'revoked' | 'expired';
-/** What the endpoint makes of an arriving event (see the header). */
+/** What the endpoint makes of an arriving event (see the header). `read`: the key a read of the hub's state may bring. */
 type Judged =
   | { deliver: Wrapped }
   | { spent: SpentReason; reason: Rejected['reason']; message: string }
-  | { hold: string };
+  | { hold: string; read?: string };
 
 /** How many arriving events the relay holds at most, and how long each, while their verdict waits on the head. */
 export const HOLD_MAX = 1000;
 export const HOLD_MS = 3_600_000;
+/** How often one key a held event names may ask for a read of the hub's org state (`RelayContext.behind`). */
+export const HELD_READ_MS = 60_000;
 
 export type RelayContext = {
   /** The head and certificates, the machine's ref and its current name; null while none is held. */
@@ -107,6 +114,11 @@ export type RelayContext = {
   toSminos(frame: Frame): void;
   /** A project sminos opened (listings re-judge what they relay). */
   opened(project: string): void;
+  /**
+   * An event is held for a key a newer head or certificate set may bring: a read of the hub's org state, begun after
+   * this call, whose adoption judges the held events again (`retry`).
+   */
+  behind?(): void;
   now(): number;
   log(line: string): void;
   /** The uplink's cap, reserve and ask wait (uplink.ts's defaults unless given). */
@@ -135,6 +147,8 @@ export class LogRelay {
   readonly #uplink: Uplink;
   /** The arriving events held for a head that can judge them, by project, then `writer\nseq`, in arrival order. */
   readonly #held = new Map<string, Map<string, { event: unknown; since: number }>>();
+  /** The keys that asked for a read, and when, in that order: each asks again only `HELD_READ_MS` later. */
+  readonly #asked = new Map<string, number>();
 
   constructor(ctx: RelayContext) {
     this.#ctx = ctx;
@@ -314,6 +328,7 @@ export class LogRelay {
   async #arrived(project: string, events: unknown, since?: (key: string) => number | undefined): Promise<void> {
     if (!Array.isArray(events)) return;
     let down: Wrapped[] = [];
+    let read = false;
     const flush = () => {
       if (down.length > 0) this.#ctx.toSminos({ t: 'events', project, events: down });
       down = [];
@@ -324,7 +339,8 @@ export class LogRelay {
       if ('deliver' in judged) {
         down.push(judged.deliver);
       } else if ('hold' in judged) {
-        if (at !== null) this.#hold(project, at, e, judged.hold, since?.(`${at.writer}\n${at.seq}`));
+        const kept = at !== null && this.#hold(project, at, e, judged.hold, since?.(`${at.writer}\n${at.seq}`));
+        if (kept && judged.read !== undefined && this.#ask(judged.read)) read = true;
       } else {
         this.#ctx.log(`endpoint: refused an event the hub sent in project ${project}${at === null ? '' : ` at ${at.writer}:${at.seq}`}: ${judged.message}`);
         this.#ctx.hub.send({ t: 'rejected', project, event: at, reason: judged.reason, message: judged.message } satisfies Rejected);
@@ -335,10 +351,11 @@ export class LogRelay {
       }
     }
     flush();
+    if (read) this.#ctx.behind?.();
   }
 
-  /** An arriving event kept for a head that can judge it (see the header), within the hold's bounds. */
-  #hold(project: string, at: { writer: string; seq: number }, event: unknown, why: string, first?: number): void {
+  /** An arriving event kept for a head that can judge it (see the header), within the hold's bounds; false once let go. */
+  #hold(project: string, at: { writer: string; seq: number }, event: unknown, why: string, first?: number): boolean {
     const now = this.#ctx.now();
     let held = this.#held.get(project);
     if (held === undefined) this.#held.set(project, (held = new Map()));
@@ -347,7 +364,7 @@ export class LogRelay {
     held.delete(key);
     if (now - since > HOLD_MS) {
       this.#ctx.log(`endpoint: let go of ${at.writer}:${at.seq} in project ${project}, held ${Math.round((now - since) / 60_000)} min (${why}); the hub sends it again at sminos's next hello`);
-      return;
+      return false;
     }
     held.set(key, { event, since });
     if (since === now) this.#ctx.log(`endpoint: holding ${at.writer}:${at.seq} in project ${project} until the head can judge it (${why})`);
@@ -358,6 +375,19 @@ export class LogRelay {
       oldest.delete(first);
       this.#ctx.log(`endpoint: let go of ${first.replace('\n', ':')} in project ${oldestProject}: more than ${HOLD_MAX} events held`);
     }
+    return true;
+  }
+
+  /** Whether the key `kid` asks for a read now: not within `HELD_READ_MS` of its last ask (see the header). */
+  #ask(kid: string): boolean {
+    const now = this.#ctx.now();
+    for (const [k, at] of this.#asked) {
+      if (now - at < HELD_READ_MS && this.#asked.size <= HOLD_MAX) break;
+      this.#asked.delete(k);
+    }
+    if (this.#asked.has(kid)) return false;
+    this.#asked.set(kid, now);
+    return true;
   }
 
   async #verify(project: string, e: unknown): Promise<Judged> {
@@ -375,14 +405,14 @@ export class LogRelay {
       if (!verdict.ok) {
         switch (verdict.code) {
           case 'unknown-signer':
-            return { hold: 'its signer is not in the head this endpoint holds' };
+            return { hold: 'its signer is not in the head this endpoint holds', read: event.sig.kid };
           case 'revoked':
             return { spent: 'revoked', reason: 'bad-code', message: 'revoked: the head revokes its signing key' };
           case 'expired':
             // A key the state retired keeps its notAfter for good; a machine certificate's runs to its delegation's
             // expiry or retirement, and a renewal this endpoint hasn't received yet may still accept it. verifyEvent
             // names no signer, so a certificate bearing the signing key is held.
-            if (await certifies(org.certificates, event.sig.kid)) return { hold: 'its machine certificate had lapsed at its created, and a renewal may be on its way' };
+            if (await certifies(org.certificates, event.sig.kid)) return { hold: 'its machine certificate had lapsed at its created, and a renewal may be on its way', read: event.sig.kid };
             return { spent: 'expired', reason: 'bad-code', message: 'expired: its key was retired before its created' };
           case 'bad-signature':
             return { spent: 'bad-signature', reason: 'bad-code', message: 'forged: its v2 signature does not verify under the key it names' };
@@ -391,7 +421,7 @@ export class LogRelay {
         }
       }
       const signer = await signerOf(org.head, org.certificates, event);
-      if (signer === null) return { hold: 'its signer could not be named under the head this endpoint holds' };
+      if (signer === null) return { hold: 'its signer could not be named under the head this endpoint holds', read: event.sig.kid };
       const content = sha256(eventSigningInput({ org: org.head.org, project }, event));
       const seen = this.#ctx.index.seen(project, content, event.writer, event.seq);
       if (seen.kind === 'replayed') return { spent: 'replayed', reason: 'seen-nonce', message: `replayed: its signed content arrived at ${seen.writer}:${seen.seq} before` };
