@@ -315,6 +315,19 @@ describe('the watch tree reconciles', () => {
     handle.close();
   });
 
+  it('keeps the watches beneath a directory whose listing failed for a reason of its own', async () => {
+    const fake = new FakeWatchFs();
+    fake.mkdir('a/b/c');
+    const { handle } = open(fake);
+    await drain();
+    const opendir = fake.fs.opendir;
+    fake.fs.opendir = async (path: string) => (path === fake.abs('a') ? Promise.reject(errno('EMFILE', path)) : opendir(path));
+    await vi.advanceTimersByTimeAsync(RECONCILE_MS);
+    await drain();
+    expect(fake.watched().sort()).toEqual(['', 'a', 'a/b', 'a/b/c']);
+    handle.close();
+  });
+
   it('drops the watches of a directory a pass finds gone', async () => {
     const fake = new FakeWatchFs();
     fake.mkdir('a/b');

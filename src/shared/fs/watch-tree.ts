@@ -312,7 +312,10 @@ class WatchTree implements WatchHandle {
       }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT' || code === 'ENOTDIR') this.drop(rel);
+      if (code === 'ENOENT' || code === 'ENOTDIR') return this.drop(rel);
+      // A listing that failed otherwise (no permission, no descriptor left) says nothing of what lies beneath: a pass
+      // keeps those watches rather than sweep them.
+      if (walk.seen) for (const key of this.watches.keys()) if (key.startsWith(`${rel}/`)) walk.seen.add(key);
       return;
     }
     await Promise.all(children.map((child) => this.admit(child, walk)));
