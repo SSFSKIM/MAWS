@@ -8,7 +8,7 @@ import { connectLines } from '../../../test/support/socket-lines';
 import { fakeProfile, FakeProcesses, FakeSupervisor, type FakeProfile, type FakeSupervisorOptions } from '../../../test/support/fake-supervisor';
 import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import type { HostState } from '@shared/ipc/schema';
-import { WIRE_CAPABILITIES, WIRE_MINOR } from '@shared/ipc/wire';
+import { WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { SocketPort } from '@shared/host/socket-port';
 import { buildIdOf, SUPERVISOR_FILES } from '../../engine-host/supervisor-files';
@@ -700,7 +700,7 @@ describe('the detached transport: the wire major and the protocol-2 window (P5 O
     expect(state()).toMatchObject({ state: 'ready', pid: fake.pid });
     expect(supervisor.peer('engine-host')).toEqual({ major: 3, minor: 7, build: buildIdOf(profile.modulePath), capabilities: ['probe.extra'] });
     expect(logs).toContain(`connected to supervisor pid ${fake.pid} build ${buildIdOf(profile.modulePath)} wire 3.7 capabilities [probe.extra] (0 live of 0 rows)`);
-    expect(fake.peer()).toEqual({ major: 3, minor: WIRE_MINOR, build: buildIdOf(profile.modulePath), capabilities: [...WIRE_CAPABILITIES] }); // P5 O2 M4: socket.ptyFrames
+    expect(fake.peer()).toEqual({ major: 3, minor: WIRE_MINOR, build: buildIdOf(profile.modulePath), capabilities: ['socket.ptyFrames', 'machine.spine'] }); // P5 O2 M4: socket.ptyFrames; P5 O3-D: the app's own list, not the wire's union (machine.spine from M5b)
     fake.dropClient();
     await until(() => state().state === 'restarting');
     expect(supervisor.peer('engine-host')).toBeNull();

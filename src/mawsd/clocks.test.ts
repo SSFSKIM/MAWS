@@ -5,7 +5,7 @@ import { GROWTH_BYTES, idleCollector } from '@shared/host/idle-collect';
 import { DaemonClocks, DEFAULT_IDLE_EXIT_MS } from './clocks';
 
 const MIN = 60_000;
-const action = () => vi.fn<() => void>();
+const action = () => vi.fn<(why?: 'idle' | 'discovery') => boolean>(() => true);
 let actions: { armEnginePark: ReturnType<typeof action>; disarmEnginePark: ReturnType<typeof action>; exitDaemon: ReturnType<typeof action>; quiet: ReturnType<typeof vi.fn<(quiet: boolean) => void>> };
 const made: DaemonClocks[] = [];
 
@@ -92,6 +92,136 @@ describe('the engine host’s park clock', () => {
     c.engineHost(4001);
     vi.advanceTimersByTime(48 * 60 * MIN);
     expect(actions.armEnginePark).not.toHaveBeenCalled();
+  });
+
+  // P5 O3-D M6 (fix round 1): the discovery wake's park, at once, for the woken host only
+  it('parkNow arms exit-when-idle at once for the served engine host, only with no app and no interest, its clock untouched', () => {
+    const c = clocks();
+    c.configure(null); // idleExitMs null: the park clock never arms by itself
+    c.parkNow(); // no engine host served yet
+    expect(actions.armEnginePark).not.toHaveBeenCalled();
+    c.hosts({ engine: false, pty: true }); // woken
+    c.engineHost(4001);
+    c.engineAttached(true);
+    c.parkNow(); // an app attached
+    c.engineAttached(false);
+    c.interest(false);
+    c.parkNow(); // a session in the union
+    expect(actions.armEnginePark).not.toHaveBeenCalled();
+    c.interest(true);
+    c.parkNow();
+    expect(actions.armEnginePark).toHaveBeenCalledExactlyOnceWith('discovery');
+    c.parkNow(); // asked already of this host
+    expect(actions.armEnginePark).toHaveBeenCalledOnce();
+    c.engineAttached(true); // an app attaches: taken back, as the clock's own park is
+    expect(actions.disarmEnginePark).toHaveBeenCalledOnce();
+    expect(c.idleMs()).toBeNull();
+    // with an idle time, the clock still counts from the last time both came true, not from parkNow
+    c.configure(5 * MIN);
+    c.engineAttached(false);
+    vi.advanceTimersByTime(5 * MIN);
+    expect(actions.armEnginePark).toHaveBeenLastCalledWith('idle');
+  });
+
+  // P5 O3-D M6 (fix round 2): admission-safe, and armed only once the ask is sent
+  it('parkNow waits out an app between its socket and the count, and is dropped if that app attaches', () => {
+    const c = clocks();
+    c.configure(null);
+    c.hosts({ engine: false, pty: true });
+    c.engineHost(4001);
+    c.relaysBetween(true); // a hello waiting on its admission: the host it is acquiring
+    c.parkNow();
+    expect(actions.armEnginePark, 'nothing asked of a host an app is acquiring').not.toHaveBeenCalled();
+    c.relaysBetween(false); // the admission ended without an attach (refused, or its host failed)
+    expect(actions.armEnginePark).toHaveBeenCalledExactlyOnceWith('discovery');
+
+    const d = clocks();
+    d.configure(null);
+    d.hosts({ engine: false, pty: true });
+    d.engineHost(4002);
+    d.relaysBetween(true);
+    d.parkNow();
+    d.engineAttached(true); // the admission ended in an attach: the host is the app's
+    d.relaysBetween(false);
+    d.engineAttached(false); // and when it leaves, its own idle clock decides, not the old ask
+    expect(actions.armEnginePark).toHaveBeenCalledOnce();
+  });
+
+  it('parkNow asked while interest arrives is dropped; asked of a parked host it is nothing', () => {
+    const c = clocks();
+    c.configure(null);
+    c.parkNow(); // parked: nothing to ask, and nothing kept for the next wake
+    c.hosts({ engine: false, pty: true });
+    c.engineHost(4001);
+    expect(actions.armEnginePark).not.toHaveBeenCalled();
+    c.relaysBetween(true);
+    c.parkNow();
+    c.interest(false); // a remote viewer took a session meanwhile
+    c.relaysBetween(false);
+    c.interest(true);
+    expect(actions.armEnginePark, 'the viewer took the host: the ask went with it').not.toHaveBeenCalled();
+  });
+
+  it('an ask that was not sent arms nothing: the same host reconnected is asked again', () => {
+    const c = clocks();
+    c.configure(null);
+    c.hosts({ engine: false, pty: true });
+    c.engineHost(4001);
+    actions.armEnginePark.mockReturnValueOnce(false); // no transport to send it on
+    c.parkNow();
+    expect(actions.armEnginePark).toHaveBeenCalledOnce();
+    c.engineHost(null); // the link dropped
+    c.engineHost(4001); // and reconnected to the same process
+    expect(actions.armEnginePark).toHaveBeenCalledTimes(2);
+    expect(actions.armEnginePark).toHaveBeenLastCalledWith('discovery');
+    c.engineHost(null);
+    c.engineHost(4001); // sent this time: not again
+    expect(actions.armEnginePark).toHaveBeenCalledTimes(2);
+  });
+
+  // P5 O3-D M6 (fix round 3): the idle clock's own ask, overdue on an aged daemon, holds for a discovery wake and an admission
+  it('an aged daemon at the default idle time: a demand wake keeps its host through the pass, then parks it', () => {
+    const c = clocks();
+    vi.advanceTimersByTime(DEFAULT_IDLE_EXIT_MS + 5 * MIN); // long idle, no app: parkSince far behind
+    c.discoveryWaking(); // a read woke the parked host for its pass
+    c.hosts({ engine: false, pty: true });
+    c.engineHost(4001); // its ready: the idle ask is overdue
+    vi.advanceTimersByTime(30_000); // the scan
+    expect(actions.armEnginePark, 'nothing asked of the host before its pass').not.toHaveBeenCalled();
+    c.parkNow(); // the pass is heard (or the wake gave up)
+    expect(actions.armEnginePark).toHaveBeenCalledExactlyOnceWith('discovery');
+  });
+
+  it('an overdue idle ask with an app in admission sends nothing until the admission ends', () => {
+    const c = clocks();
+    vi.advanceTimersByTime(DEFAULT_IDLE_EXIT_MS + MIN);
+    c.relaysBetween(true); // a hello waiting on its admission woke the host
+    c.hosts({ engine: false, pty: true });
+    c.engineHost(4001);
+    vi.advanceTimersByTime(MIN);
+    expect(actions.armEnginePark, 'nothing asked of the host an app is acquiring').not.toHaveBeenCalled();
+    c.relaysBetween(false); // refused, say: no attach
+    expect(actions.armEnginePark).toHaveBeenCalledExactlyOnceWith('idle');
+
+    const d = clocks();
+    vi.advanceTimersByTime(DEFAULT_IDLE_EXIT_MS + MIN);
+    d.relaysBetween(true);
+    d.hosts({ engine: false, pty: true });
+    d.engineHost(4002);
+    d.engineAttached(true); // the admission ended in an attach
+    d.relaysBetween(false);
+    expect(actions.armEnginePark).toHaveBeenCalledOnce(); // only c's
+  });
+
+  it('the idle clock’s ask that was not sent is asked again at the same host’s reconnect', () => {
+    const c = clocks();
+    c.configure(MIN);
+    c.engineHost(4001);
+    actions.armEnginePark.mockReturnValueOnce(false);
+    vi.advanceTimersByTime(MIN);
+    expect(actions.armEnginePark).toHaveBeenCalledOnce();
+    c.engineHost(4001); // the reconnect's ready
+    expect(actions.armEnginePark).toHaveBeenCalledTimes(2);
   });
 });
 

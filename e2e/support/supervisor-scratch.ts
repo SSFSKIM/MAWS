@@ -60,6 +60,10 @@ export interface Lock { pid: number; procStart: string; socketPath: string; buil
 // The shape the suite runs on: the daemon's under `e2e:supervisor-daemon`, else the embedded shape's detached supervisor.
 export const HOST_MODE = process.env.MAWS_HOST_MODE === 'daemon' ? 'daemon' : 'detached';
 export const DAEMON = HOST_MODE === 'daemon';
+// The quit guard's line for a quit that leaves one session running mid-turn (`parts`, the report's words): a keep the
+// embedded shape asks and the case answers; on the daemon shape nothing is asked, the sessions outliving the app (P5
+// O3-D, Q1)
+export const keptQuitLine = (parts = '1 mid-turn') => (DAEMON ? `quit-guard: ${parts}, not asked: they outlive the app` : `quit-guard: ${parts}, auto-answered keep, 1 session kept`);
 export interface JournalRow { seq: number; direction: string; at: string; frame: Record<string, unknown> }
 export const isRequestRow = (r: JournalRow) => r.direction === 'in' && (r.frame.request as { subtype?: string } | undefined)?.subtype === 'can_use_tool';
 export const isTaskFailureRow = (r: JournalRow) => r.direction === 'in' && r.frame.type === 'system' && r.frame.subtype === 'task_notification';

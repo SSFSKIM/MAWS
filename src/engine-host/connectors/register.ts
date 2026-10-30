@@ -4,8 +4,8 @@
 // answered at once from the store at its commit or from the operation table, so none outlives the supervisor's 10 s
 // dispatch; a tool's own duration is carried by `connectors.operation` and `connectors.take`. The store's committed grant
 // changes go out as `connectors.grantChanged` (the tool and the change, nothing more). Every operation and outcome ends
-// when main's client goes, and at the host's shutdown.
-import { HostCommandError, type HostClientHooks, type HostEmit, type HostOn } from '@shared/host/runtime';
+// when the app goes (P5 O3-D M3: the app's presence, @shared/host/runtime's AppPresence), and at the host's shutdown.
+import { HostCommandError, type AppPresence, type HostEmit, type HostOn } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
 import type { ArtifactRefusal } from '@shared/ipc/schema/artifacts';
@@ -59,7 +59,7 @@ function refused(reason: ArtifactRefusal['reason'], message: string, data: Recor
 
 // `close` (the end of the host's shutdown) ends everything. P3-HD M2: `closeDirect`, which the shutdown starts beside the
 // sessions' stop and awaits, ends route D's work and resolves once every owned process of its connections is gone.
-export function registerConnectors(on: HostOn, emit: HostEmit, client: Pick<HostClientHooks, 'onClientGone'>, deps: ConnectorsSurfaceDeps): { close(): void; closeDirect(): Promise<void>; statusCache: ConnectorStatusCache } {
+export function registerConnectors(on: HostOn, emit: HostEmit, presence: Pick<AppPresence, 'onGone'>, deps: ConnectorsSurfaceDeps): { close(): void; closeDirect(): Promise<void>; statusCache: ConnectorStatusCache } {
   const { store } = deps;
   // P3-HD: route D's observations, host memory for main's attachment only (cleared with the operations below)
   const statusCache = deps.statusCache ?? new ConnectorStatusCache();
@@ -121,9 +121,9 @@ export function registerConnectors(on: HostOn, emit: HostEmit, client: Pick<Host
       statusCache.launched(appSessionId, launchId);
     }
   });
-  // Main's going ends its attachment, not the host: everything of it goes now (P3-HD: the observations, and direct work
+  // The app's going ends its attachment, not the host: everything of it goes now (P3-HD: the observations, and direct work
   // with its credentials, whose processes' end follows), and the next attachment starts afresh.
-  const stopGone = client.onClientGone(() => {
+  const stopGone = presence.onGone(() => {
     calls.close();
     statusCache.clear(); // P3-HD
     void direct.close(); // P3-HD M2

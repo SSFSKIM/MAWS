@@ -45,7 +45,7 @@ import { DirectListener, type DirectListenerOptions } from './direct-listener';
 import { Actions } from './actions';
 import { runCli } from './cli';
 import { EndpointActions, type EffectResult } from './endpoint-actions';
-import { speaksFor, syncAndPromote, type EnrollContext, type EnrollmentState } from './enroll';
+import { current, speaksFor, syncAndPromote, type EnrollContext, type EnrollmentState } from './enroll';
 import { Freshness } from './freshness';
 import { Gate } from './gate';
 import { acceptGrant, dropRevokedGrants, machineOwnerMembers, machineRights } from './grants';
@@ -64,7 +64,7 @@ import { retireInto, type Retired } from './retire';
 import { Queries } from './queries';
 import { Rl10 } from './rl10/link';
 import type { EndpointModule, EndpointServices } from './services';
-import type { CheckoutSource, RecordSource, SessionTarget } from './sources';
+import { anyCheckout, type CheckoutSource, type RecordSource, type SessionTarget } from './sources';
 import { EndpointState } from './state/store';
 import { Subscriptions } from './subscriptions';
 import { endpointStatus, NO_LINKS, type EndpointLinks, type EndpointStatus } from './status';
@@ -87,6 +87,8 @@ export type EndpointOptions = {
   pingMs?: readonly [number, number];
   direct?: { interfaces?(): InterfaceTable } & Pick<DirectListenerOptions, 'listen' | 'limits' | 'rescanMs'>;
   authorization?: { records?: RecordSource; checkouts?: CheckoutSource; settingsMode?(): string } & Pick<AuthorizeContext, 'offers' | 'gradeOf' | 'registry'>;
+  /** MAWS's own projects as checkouts (P5 O3-D M4, `mawsd` injects them), known beside RL10's; `authorization.checkouts` replaces both. */
+  projects?: CheckoutSource;
   /** The suites' seams for subscriptions: the resume window, lane A's ring and the unsent stream's bound. */
   subscriptions?: { resumeMs?: number; ringBytes?: number; backlogBytes?: number; recheckRetryMs?: readonly number[]; transmitDeadlineMs?: number };
 };
@@ -119,6 +121,8 @@ export class Endpoint implements EndpointModule {
   readonly gate: Gate;
   /** RL10 (M6): the sminos daemon's socket; its members are the records and checkouts authorization reads. */
   readonly rl10: Rl10;
+  /** The checkouts a remote spawn may run in: RL10's projects' presences and MAWS's own projects. */
+  readonly checkouts: CheckoutSource;
   /** Actions to their executing side (M7), and the endpoint's own under its ledger. */
   readonly actions: Actions;
   readonly own: EndpointActions;
@@ -269,6 +273,7 @@ export class Endpoint implements EndpointModule {
     });
     this.hub.setChannels(this.channels.relay(this.hub));
     const authorization = options.authorization ?? {};
+    this.checkouts = authorization.checkouts ?? (options.projects === undefined ? this.rl10.members : anyCheckout(this.rl10.members, options.projects));
     this.authorizer = new Authorizer({
       ref: () => this.#services?.machine.ref ?? null,
       org: () => {
@@ -279,7 +284,7 @@ export class Endpoint implements EndpointModule {
       policy: () => this.policy.current(),
       settingsMode: authorization.settingsMode ?? (() => settingsDefaultMode(homedir())),
       records: authorization.records ?? this.rl10.members,
-      checkouts: authorization.checkouts ?? this.rl10.members,
+      checkouts: this.checkouts,
       dispatch: (owner, name, input) => {
         if (this.#services === null) return Promise.reject(new Error('the endpoint has not started'));
         return this.#services.dispatch(owner, name, input);
@@ -413,15 +418,19 @@ export class Endpoint implements EndpointModule {
     this.#org = org;
     // What notify told the hub before a restart, read before anything below feeds it.
     this.notifier.restore();
-    // Lane B's live events and the app's attachment (none at start, O2's seam), for the subscriptions; its events and
-    // each engine-host link, for notify's counts.
+    // Lane B's live events and their availability (none at start; an app's attachment, or P5 O3-D's permanent link), for
+    // the subscriptions; its events and each engine-host link, for notify's counts.
     this.#unseam.push(
       services.onEvent((owner, message) => {
         this.planeB.event(owner, message);
         this.laneB.event(owner, message);
       }),
       services.onAttachment((attached) => this.planeB.attachment(attached)),
-      services.onUpstream((link) => void (link.connected && this.laneB.restate())),
+      services.onUpstream((link) => {
+        if (!link.connected) return;
+        this.laneB.restate();
+        this.planeB.relinked(); // P5 O3-D D41: each streaming of the link, every subscription catches up from its cursor
+      }),
     );
     if (state.refusing !== null) return;
     // A provisioning interrupted mid-set (O14 M1) is whole again before anything below reads the directory.
@@ -479,6 +488,11 @@ export class Endpoint implements EndpointModule {
     const stopped = this.hub.stopped;
     const links = this.links.refusing === undefined && stopped !== null ? { ...this.links, refusing: stopped } : this.links;
     return endpointStatus(this.#state, this.#headHash, links, { endpoint: this.own.closed, engineHost: this.#engineHostLedger });
+  }
+
+  /** The enrollment held (`machine.identity`'s project id, P5 O3-D D38); null while unenrolled, a pending provisioning included. */
+  enrollment(): EnrollmentState | null {
+    return this.#state?.enrolled ? current(this.#state) : null;
   }
 
   cli(command: string, args: readonly string[], secret?: string): Promise<{ code: number; out: string }> {

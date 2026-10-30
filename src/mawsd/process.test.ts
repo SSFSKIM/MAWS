@@ -10,6 +10,7 @@ import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readOrMintMachineRef } from '@shared/machine/identity-file';
 import { RawApp, until } from '../../test/support/mawsd-scene';
+import { PEER_CAPABILITIES } from '@shared/host/socket-protocol';
 
 const MAWSD = resolve(__dirname, '../../out/main/mawsd.js');
 vi.setConfig({ testTimeout: 60_000 });
@@ -61,6 +62,9 @@ const log = (profile: string) => {
   }
 };
 
+// P5 O3-D M5b (D47): the built mawsd claims the spine, so an app's hello lists machine.spine, as this build's main does
+const THIS_APP = { capabilities: [...PEER_CAPABILITIES.app] };
+
 // The nth mawsd over the profile serves (the log is the profile's, across runs)
 async function served(profile: string, mawsd: ReturnType<typeof run>, nth: number): Promise<void> {
   const machineSock = join(profile, 'mawsd', 'machine.sock');
@@ -78,7 +82,7 @@ describe.skipIf(!existsSync(MAWSD))('the built mawsd under plain Node', () => {
     await served(profile, first, 1);
     const token = () => readFileSync(join(profile, 'mawsd', 'mawsd.token'), 'utf8').trim();
 
-    const app = await RawApp.connect(join(profile, 'mawsd', 'engine-host.sock'), token());
+    const app = await RawApp.connect(join(profile, 'mawsd', 'engine-host.sock'), token(), THIS_APP); // P5 O3-D M5b: an app of this build
     expect(app.first, log(profile)).toMatchObject({ t: 'welcome' });
     const enginePid = app.first!.pid as number;
     pids.push(enginePid);
@@ -97,7 +101,7 @@ describe.skipIf(!existsSync(MAWSD))('the built mawsd under plain Node', () => {
     const second = run(profile); // as the unit restarts it
     await served(profile, second, 2);
     expect(second.child.pid).not.toBe(first.child.pid);
-    const back = await RawApp.connect(join(profile, 'mawsd', 'engine-host.sock'), token());
+    const back = await RawApp.connect(join(profile, 'mawsd', 'engine-host.sock'), token(), THIS_APP);
     expect(back.first, log(profile)).toMatchObject({ t: 'welcome', pid: enginePid });
     back.destroy();
     machine.destroy();

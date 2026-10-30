@@ -1,7 +1,8 @@
 // The connection manager (P5 O6 M3, docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "Machine links"; P5 §3):
 // main reaches every machine through one link per machine. The local machine's is in-process (local-link.ts, main's own
-// services through the router's local path); every other profile's machine on this Mac is reached over its serve
-// directory's socket (socket-link.ts). The links O7 and O10 add (RL2 channels) plug in here the same way.
+// services through the router's local path); every other profile's machine on this Mac is reached over that profile's
+// `mawsd` (socket-link.ts; P5 O3-D M6: the directory configured is the profile's). The links O7 and O10 add (RL2
+// channels) plug in here the same way.
 //
 // - The router hands it every command whose target is another machine (`RouterOptions.remote`); a machine that is not
 //   `up`, or not known, answers `host_unavailable` at once.
@@ -54,9 +55,9 @@ export interface ConnectionManagerDeps {
   localName: string;
   localLink: MachineLink;
   knownMachinesFile: string;
-  configured: string[]; // the serve directories this app links to (config.ts)
+  configured: string[]; // the profile directories this app links to (config.ts)
   emitFrom: <N extends EventName>(machine: MachineRef, name: N, payload: EventPayload<N>) => boolean;
-  connect(dir: string): MachineLink; // a socket link to `dir` (socket-link.ts); a test's fake otherwise
+  connect(dir: string): MachineLink; // a socket link to the profile `dir`'s mawsd (socket-link.ts); a test's fake otherwise
   remote?: RemoteSource; // the RL2 machines (P5 O7 M1)
   log(line: string): void;
 }
@@ -83,7 +84,7 @@ export function createConnectionManager(deps: ConnectionManagerDeps): Connection
   const known = readKnownMachines(knownMachinesFile, log);
   const kept = known.filter((machine) => configured.has(machine.carrier.dir) && machine.ref !== local);
   if (kept.length !== known.length) {
-    log(`forgot ${known.length - kept.length} known machines whose serve directory is no longer configured`);
+    log(`forgot ${known.length - kept.length} known machines whose directory is no longer configured`);
     persist(kept);
   }
   const knownByDir = new Map(kept.map((machine) => [machine.carrier.dir, machine]));

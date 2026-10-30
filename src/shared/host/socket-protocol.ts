@@ -179,6 +179,28 @@ export function encodeDocFrame(channel: number, frame: Uint8Array): Buffer {
 // P5 O2 M4 start: the pty frame (above), for one `pty.data` event's payload
 export const PTY_MARK = 0x01;
 export const PTY_FRAMES_CAPABILITY = 'socket.ptyFrames';
+// P5 O3-D (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §D, §I, §L; D4): one capability per
+// direction. `host.attachment` on the engine host's welcome says it serves the command of that name, and on a client's
+// hello that the client will send it (only `mawsd` does); `machine.spine` on an app's hello says the app runs no spine of
+// its own and reads the machine's.
+export const ATTACHMENT_CAPABILITY = 'host.attachment';
+export const MACHINE_SPINE_CAPABILITY = 'machine.spine';
+// What each peer lists of itself in its hello or welcome: only what it implements. The wire's capability list
+// (WIRE_CAPABILITIES, the manifest's) is the union of every name a peer of this major may list, and no peer reads it as
+// its own. At O3-D M1 every list was the one it was; from M3 the engine host's welcome and `mawsd`'s hello to it list
+// `host.attachment` (the engine host serves it; `mawsd` declares it only with its permanent-client option on, which
+// drops the name from this list otherwise, src/mawsd/daemon.ts); main's hellos list `machine.spine` from M5b, when main
+// stops composing the spine on the daemon shape (`mawsd` refuses a hello on engine-host.sock that does not list it).
+// `mawsd`'s relays welcome with the upstream's list and `daemon`'s added.
+export const PEER_CAPABILITIES = {
+  engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY], // the engine host's welcome (P5 O3-D M3: it serves host.attachment)
+  ptyHost: [PTY_FRAMES_CAPABILITY], // the pty host's welcome
+  app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY], // main's hellos, to `mawsd`'s sockets and to a direct engine host (P5 O3-D M5b: machine.spine)
+  daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY], // `mawsd`'s hello to the engine host (P5 O3-D M3: under its permanent-client option)
+  daemonToPtyHost: [PTY_FRAMES_CAPABILITY], // `mawsd`'s hello to the pty host
+  daemon: [PTY_FRAMES_CAPABILITY], // `mawsd`'s welcome on machine.sock, and what its relays add
+  link: [PTY_FRAMES_CAPABILITY], // O6's link's hello to another profile's machine.sock
+} as const satisfies Record<string, readonly string[]>;
 const PTY_FIXED = 9; // the id's length byte and the offset's two words, inside L
 const OFFSET_HIGH_LIMIT = 2 ** 21; // the offset's high word stays below this: offset < 2^53
 

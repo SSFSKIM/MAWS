@@ -25,7 +25,8 @@ export function startMachineSettings(file: string, { refused, unsplit = null }: 
   const listeners = new Set<(state: MachineSettings) => void>();
   return {
     state: () => store.value,
-    update: (patch) => {
+    // P5 O3-D M5b (Interfaces §G): persisted and told synchronously, as before; the promise settles at once
+    update: async (patch) => {
       const next = store.update((current) => applyMachinePatch(current, patch));
       for (const listener of listeners) listener(next);
       return next;

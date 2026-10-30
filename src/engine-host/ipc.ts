@@ -138,8 +138,9 @@ export const SIDE_DEADLINE_SHAPES: Record<SideHostCommand, DeadlineShape> = { 's
 // engine.shutdown's body (the ladder's cap and the plugin runner's kill), bounded as engine.shutdown is
 type HostHostCommand = { [N in keyof typeof HostCommands]: (typeof HostCommands)[N]['owner'] extends 'engine-host' ? N : never }[keyof typeof HostCommands];
 // P5 O10 M7: `host.op` runs a session command as its own deadline allows (session.interrupt's is bounded), and
-// `host.opQuery` reads the ledger at once; both registered by registerEngineIpc (ops.ts), not Supervision
-export const HOST_DEADLINE_SHAPES: Record<HostHostCommand, DeadlineShape> = { 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.interest': 'immediate' /* P5 O2 M2 */, 'host.op': 'bounded', 'host.opQuery': 'immediate' };
+// `host.opQuery` reads the ledger at once; both registered by registerEngineIpc (ops.ts), not Supervision. P5 O3-D:
+// `host.attachment` sets the app's presence at once (declared at M1, served from M3)
+export const HOST_DEADLINE_SHAPES: Record<HostHostCommand, DeadlineShape> = { 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.interest': 'immediate' /* P5 O2 M2 */, 'host.op': 'bounded', 'host.opQuery': 'immediate', 'host.attachment': 'immediate' /* P5 O3-D */ };
 // P2-A (2026-10-09; X17): the observed-facts read, bounded: a file read, or a journal recovery under its 5 s reading
 // budget (observed-facts.ts), inside the bridge's 10 s
 export const P2A_DEADLINE_SHAPES: Record<'engine.observedFacts', DeadlineShape> = { 'engine.observedFacts': 'bounded' };
@@ -175,7 +176,8 @@ export interface EngineIpcDeps {
   heldElsewhere?: (appSessionId: AppSessionId, since: string | null) => boolean;
   pluginsTimers?: Timers; // E8: the plugin runner's timers (its settle, its CLI ceiling); default the real ones
   onConnect?: (hook: () => void) => void; // E10: the runtime's connect hooks, where the connect burst registers
-  hasClient?: () => boolean; // E10: the runtime's, whether a client is connected and ready
+  hasClient?: () => boolean; // E10: the runtime's, whether a client is connected and ready (the stream's refused batch)
+  appAttached?: () => boolean; // P5 O3-D M3: the app's presence (the runtime's AppPresence), the bridges' gate; absent, always
   observedStore?: ObservedFactsStore; // P2-A (X17): default the file beside each state file under userData
   afterShutdown?: () => void; // P3-A: runs at the end of engine.shutdown's body (closes the artifact store)
   // P3-HD M2: started with the sessions' stop and awaited with it, so route D's owned MCP processes are gone (within their
@@ -285,7 +287,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     spawn: deps.spawn ?? ((plan) => spawnEngine(plan, { maxLineChars: MAX_LINE_CHARS })),
     appVersion: deps.appVersion ?? 'unknown',
     log,
-    hasClient: deps.hasClient, // E10: each session's bridges fail fast with no client
+    appAttached: deps.appAttached, // E10: each session's bridges fail fast with no app (P5 O3-D M3: its presence)
     observedFacts: observed, // P2-A
     artifacts: deps.artifacts, // P3-A (M6)
     datasetRefresh: deps.datasetRefresh, // E3

@@ -9,7 +9,8 @@ import { openDb, refusedDb, type Db } from './db';
 import { DraftStore } from './drafts';
 import { MIGRATIONS, REPAIRS } from './migrations';
 import { ProjectStore, type OrgRow } from './projects';
-import { deriveOrg, machineEnrollment, ORG_GIT_TIMEOUT_MS, type Enrollment } from './org-project'; // P5 O6 M5
+import { machineEnrollment, type Enrollment } from '@shared/machine/identity'; // P5 O3-D M2 (D16)
+import { deriveOrg, ORG_GIT_TIMEOUT_MS } from './org-project'; // P5 O6 M5
 import { GIT_TIMEOUT_MS } from '../git/runner';
 import type { MachineRef } from '@shared/machine/ref';
 import { ReplayFixtureStore } from './replay-fixtures';

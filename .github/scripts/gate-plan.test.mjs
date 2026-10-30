@@ -973,9 +973,13 @@ const LIVENESS_BOUNDS = {
     'expect(Date.now() - refusedAt).toBeLessThan(2_000);': 'the refusal of an acting command while a person holds the tab is immediate; 2 s against the command\'s own 3 s timeout tells it from a timeout',
   },
   'e2e/c12-quit.spec.ts': {
+    "expect(exitAt - started, 'no stop-all: the quit is the report and the exit').toBeLessThan(PROBE_BOUND_MS + 8_000);": 'the daemon shape\'s quit (P5 O3-D): the same probe and quit path as the embedded bound below, with nothing to stop',
     'expect(exitAt - ended).toBeLessThan(10_000);': 'the quit\'s own 2 s re-read after the last busy thing ends, then the hosts\' stop',
     'expect(reportMs).toBeLessThan(PROBE_BOUND_MS);': 'the quit probe\'s own 2 s bound (C12 acceptance 8), a timer of the product\'s',
     'expect(exitAt - started).toBeLessThan(PROBE_BOUND_MS + 8_000); // the report, then the existing quit path (the hosts stop)': 'that probe and the existing quit path, with 8 s of margin',
+  },
+  'e2e/cross-build.spec.ts': {
+    "expect(refusalToReleaseMs, '§L ordering: the yielded spine released within the yield’s own bound of the refusal').toBeLessThanOrEqual(REFUSAL_TO_RELEASE_MS);": 'the yield of an idle spine (P5 O3-D M6): the hello\'s synchronous check and the stores\' close, measured at 10 ms (run 41036338153), against 5 s; a release that waits on work in flight (the product\'s 60 s settle) is itself the finding',
   },
   'e2e/connectors-direct.spec.ts': {
     'expect(closedMs).toBeLessThan(5_000);': 'the transport\'s close of its process group: a signal, against 5 s',
@@ -987,8 +991,8 @@ const LIVENESS_BOUNDS = {
     "expect(Date.now() - composingAt, 'the batch landed inside the hold’s cap').toBeLessThan(4_500);": 'the hold\'s own cap, a timer of the product\'s',
   },
   'e2e/machines.spec.ts': {
-    "expect(Date.parse(down.since) - exitedAt, 'B down within 2 s of its exit').toBeLessThanOrEqual(2_000);": 'the link\'s close when the far app\'s process ends: a signal, against acceptance 6\'s 2 s (P5 O6)',
-    "expect(liveAt - loadedAt, 'B’s rows live within 5 s of its window loading').toBeLessThanOrEqual(5_000);": 'the socket link\'s own 1 s retry, then one snapshot, against acceptance 6\'s 5 s (P5 O6)',
+    "expect(Date.parse(down.since) - exitedAt, 'B down within 2 s of its exit').toBeLessThanOrEqual(2_000);": 'the link\'s close when the far daemon stops (its clients closed before it exits): a signal, against acceptance 6\'s 2 s (P5 O6; P5 O3-D M6, B a daemon alone)',
+    "expect(liveAt - servingAt, 'B’s rows live within 5 s of its services answering').toBeLessThanOrEqual(5_000);": 'the socket link\'s own 1 s retry, then one snapshot from the far daemon\'s loaded spine, against acceptance 6\'s 5 s (P5 O6; P5 O3-D M6, B a daemon alone)',
   },
   'e2e/engine-replay.spec.ts': {
     'expect(ms).toBeLessThan(10_000);': 'the host\'s own 8 s deadline, read before the router\'s 10 s',

@@ -28,7 +28,9 @@ export interface ReadModelWriter {
   observeProject(p: ProjectRecord): void;
   observeProjectRemoved(id: ProjectId): void;
   setDigest(d: Omit<SessionDigest, 'revision' | 'availability'>): void; // stub and tests; C4's seed for sessions with no live fold; production digests come from fold(). P2-A: availability is the read model's own
-  fold(appSessionId: AppSessionId, events: SessionEvent[]): void; // the digest reducer over a `session.eventBatch`
+  // the digest reducer over a `session.eventBatch`; P5 O3-D M2: `asLive`, a batch of the launch's own stream replayed at
+  // a load's barrier before its exited status applies, which is not history (its phase moves as live delivery's would)
+  fold(appSessionId: AppSessionId, events: SessionEvent[], options?: { asLive?: boolean }): void;
   applyEngineStatus(s: EngineSessionStatus): void; // C3's session.status: phase facts, and the process and turn state the quit guard reads
   forgetEngineStatus(appSessionId: AppSessionId): void; // no process is owned any more (the scenario's `engine: null`)
   observeReplay(appSessionId: AppSessionId): void; // C4's `session.replay.progress`: the host plays this session's events live
@@ -339,7 +341,7 @@ export class SessionReadModel {
     },
     // A status or batch for a session with no observed record is dropped (C10's trust bootstrap launches under the
     // session's id before the record exists): the model describes only sessions a source has listed.
-    fold: (appSessionId, events) => {
+    fold: (appSessionId, events, options) => {
       if (!this.records.has(appSessionId)) return;
       let seen = this.seen.get(appSessionId);
       if (!seen) this.seen.set(appSessionId, (seen = new Set()));
@@ -348,7 +350,8 @@ export class SessionReadModel {
       let messages = this.messageCalls.get(appSessionId); // P4-R7
       if (!messages) this.messageCalls.set(appSessionId, (messages = new Map()));
       const current = this.current(appSessionId);
-      this.commit(this.onceReleased(current, foldEvents(current, seen, events, ledger, this.live(appSessionId), messages))); // C12: onceReleased
+      const live = this.live(appSessionId) || options?.asLive === true; // P5 O3-D M2
+      this.commit(this.onceReleased(current, foldEvents(current, seen, events, ledger, live, messages))); // C12: onceReleased
       this.settleRestored(appSessionId, ledger);
     },
     applyEngineStatus: (s) => {

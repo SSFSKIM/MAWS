@@ -46,6 +46,7 @@ import { sendMedia, uploadRecords } from './media';
 import { Reshaper } from './reshape';
 import { classify, SessionFold, type BridgeState, type MainTool } from './state';
 import { TranscriptJobs } from './transcript-jobs';
+import { Work, type Settling } from '../work'; // P5 O3-D M2
 
 export interface LaneATiming {
   probeMs: number;
@@ -58,6 +59,8 @@ export interface LaneATiming {
   sweepMs: number; // how often the upload roots are swept of those a day old (M7)
   lane: LaneTiming;
 }
+
+export const BRIDGE_SLACK_MS = 2_000; // a bridge command's socket deadline past its `wait`
 
 export const LANE_A_TIMING: LaneATiming = {
   probeMs: 2000,
@@ -182,6 +185,7 @@ export interface LaneADriver {
   stopTask(appId: AppSessionId, taskId: string): Promise<ControlResult>;
   media(appId: AppSessionId, files: readonly { name: string; mediaType: string; data: string }[]): Promise<ControlResult>;
   onChange(listener: LaneAListener): () => void; // M6: each session's view as it changes, from now on
+  readonly probes: Settling; // P5 O3-D M2 (Interfaces §A, D27): the probes in flight, which a release waits for
   stop(): void;
 }
 
@@ -197,6 +201,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   let stopped = false;
   const warned = new Set<string>();
   const listeners = new Set<LaneAListener>();
+  const probing = new Work(); // P5 O3-D M2
   const uploads = uploadRecords(join(deps.userData, 'lane-a', 'uploads.json'), { log });
   let git: GitRun | null = deps.git ?? null;
   const sweep = () => {
@@ -246,7 +251,12 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     }
   }
 
-  async function probe(s: Session): Promise<void> {
+  // P5 O3-D M2: each probe counted to its end
+  function probe(s: Session): Promise<void> {
+    return probing.track(probeOnce(s));
+  }
+
+  async function probeOnce(s: Session): Promise<void> {
     if (s.gone || home === null || disabled) return;
     if (s.probing) {
       s.again = true;
@@ -561,7 +571,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
 
   async function post(s: Session, body: Record<string, unknown>, launch: string | null): Promise<PostResult> {
     try {
-      const answer = await call(s.socket.path, 'POST', `/command?wait=${timing.commandWaitMs}`, { ...body, ...(launch !== null && { launch }) }, timing.commandWaitMs + 2000);
+      const answer = await call(s.socket.path, 'POST', `/command?wait=${timing.commandWaitMs}`, { ...body, ...(launch !== null && { launch }) }, timing.commandWaitMs + BRIDGE_SLACK_MS);
       return { kind: 'answer', status: answer.status, body: answer.body };
     } catch (error) {
       return { kind: 'lost', why: error instanceof BridgeUnreachable ? error.why : 'gone' };
@@ -761,6 +771,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
       listeners.add(listener);
       return () => void listeners.delete(listener);
     },
+    probes: probing,
     stop() {
       stopped = true;
       clearInterval(sweeper);

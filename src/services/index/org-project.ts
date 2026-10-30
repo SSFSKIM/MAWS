@@ -16,31 +16,12 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import type { MachineProject } from '@shared/ipc/schema/machine';
 import type { ProjectOrg } from '@shared/ipc/schema/session';
-import { machineKey, type OrgKey } from '@shared/machine/org-key';
+import type { Enrollment } from '@shared/machine/identity'; // P5 O3-D M2 (D16): the enrollment moved to shared
+import type { OrgKey } from '@shared/machine/org-key';
 import type { MachineRef } from '@shared/machine/ref';
-import { machineProjectId, repoProjectId } from '@shared/machine/project-ids';
+import { repoProjectId } from '@shared/machine/project-ids';
 import { gitBinary, gitEnv } from '../git/runner';
-
-// ---- the enrollment -----------------------------------------------------------------------------------------------------
-
-// The org this machine is enrolled in and its name there: sminos's `{org, machine}`, the one input to the rule beyond
-// the filesystem. Null until O10, which replaces this with the endpoint's enrollment (RL §2.1); MAWS never reads
-// sminos's private `daemon/hub.json`. Until then a terminal session's sminos project and MAWS's key agree by the rule,
-// not by id (a flag for O9).
-export interface Enrollment {
-  org: string;
-  machine: string;
-}
-export function machineEnrollment(): Enrollment | null {
-  return null;
-}
-
-// `machine.identity`'s project: the machine's own, named after it.
-export function machineProject(machine: MachineRef, name: string, enrollment: Enrollment | null): MachineProject {
-  return { key: machineKey(machine), name, smnsId: enrollment ? machineProjectId(enrollment.org, enrollment.machine) : null };
-}
 
 // ---- sminos's remote rule -----------------------------------------------------------------------------------------------
 

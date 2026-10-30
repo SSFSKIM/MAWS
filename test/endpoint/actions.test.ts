@@ -22,6 +22,7 @@ import { requestDigestOf } from '@shared/host/request-digest';
 import type { CommandInput } from '@shared/ipc/schema';
 import { validateCommandInput } from '@shared/ipc/validate';
 import { opCommands } from '../../src/engine-host/ops';
+import { machineOps } from '../../src/services/machine-ops';
 import { createEndpoint, type Endpoint } from '../../src/endpoint';
 import { OFFERS, type Offers } from '../../src/endpoint/offers';
 import { EndpointOrg } from '../../src/endpoint/org-sync';
@@ -70,6 +71,8 @@ function engineHost() {
     ['session.answer', async () => (runs.push('answer'), { outcome: 'delivered' })],
     ['session.interrupt', async () => (hang ? new Promise(() => {}) : (runs.push('interrupt'), { stillQueued: [], cancelled: [] }))],
   ]);
+  // P5 O3-D M4: the services' ledger, as mawsd's front answers machine.op over the spine's invoke
+  const machine = machineOps({ ledger: OpLedger.open(hostDir, 'spine-ops.jsonl'), invoke: (async (name: string, input: unknown) => (runs.push(`machine ${name}`), { ok: true, value: { ran: input } })) as never });
   let ops = opCommands({
     ledger: OpLedger.open(hostDir, 'ops.jsonl'),
     handler: (name) => handlers.get(name),
@@ -79,6 +82,11 @@ function engineHost() {
   const ok = (value: unknown): HostResponse => ({ t: 'res', id: '0', ok: true, value });
   const no = (code: 'unknown_command' | 'internal' | 'invalid_input'): HostResponse => ({ t: 'res', id: '0', ok: false, error: { code, message: code } });
   const dispatch = async (owner: string, name: string, input: unknown): Promise<HostResponse> => {
+    if (owner === 'machine' && (name === 'machine.op' || name === 'machine.opQuery')) {
+      const checked = validateCommandInput(name, input);
+      if (!checked.ok) return no('invalid_input');
+      return ok(name === 'machine.op' ? await machine.op(checked.value as CommandInput<'machine.op'>, CTX) : machine.opQuery(checked.value as CommandInput<'machine.opQuery'>));
+    }
     if (owner !== 'engine-host') return no('unknown_command');
     const { appSessionId, requestId } = (input ?? {}) as { appSessionId?: string; requestId?: string };
     if (name === 'session.status') return appSessionId !== undefined && sessions[appSessionId] !== undefined ? ok({ appSessionId, ...sessions[appSessionId] }) : no('internal');
@@ -354,19 +362,31 @@ describe('the endpoint’s checks, before anything is handed on', () => {
     expect(f.host.runs).toEqual([]);
   });
 
-  it('refuses an action for an executor that keeps no ledger (`no-ledger`): pty.spawn, daemon.restart', async () => {
+  it('refuses an action for an executor that keeps no ledger (`no-ledger`): pty.spawn', async () => {
     const offers: Offers = {
       ...OFFERS,
       commands: {
         ...OFFERS.commands,
         'pty.spawn': { kind: 'act', executor: 'pty-host', target: 'machine', grade: 'shell' },
-        'daemon.restart': { kind: 'act', executor: 'machine', target: 'machine', grade: 'machine-admin' },
       },
     };
     const f = await start({ offers });
     const a = await open(f, a1, A);
     expect(await act(a, await a.device.stepUp(a.device.action({ machine: f.ref, action: 'pty.spawn', args: {} })))).toBe('no-ledger');
-    expect(await act(a, await a.device.stepUp(a.device.action({ machine: f.ref, action: 'daemon.restart', args: {} })))).toBe('no-ledger');
+  });
+
+  // P5 O3-D M4 (Interfaces §H; D28): the services' ledger. No production row names the executor yet (O7's, O8's), so the
+  // route is proved with injected rows.
+  it('sends a `machine`-executor action through machine.op, run once whatever its reseals', async () => {
+    const offers: Offers = { ...OFFERS, commands: { ...OFFERS.commands, 'session.rename': { kind: 'act', executor: 'machine', target: 'appSessionId' } } };
+    const f = await start({ offers });
+    const a = await open(f, a1, A);
+    // A session's act carries the session's context (RL4); the services' ledger claims no launch, so it reads none
+    const action = laneB(f, a, 'session.rename', 'app-own', { title: 'Renamed' });
+    const first = await run(a, action);
+    expect(first).toEqual({ state: 'done', result: { ran: { appSessionId: 'app-own', title: 'Renamed' } } });
+    expect(await run(a, a.device.reseal(action))).toEqual(first);
+    expect(f.host.runs).toEqual(['machine session.rename']);
   });
 });
 

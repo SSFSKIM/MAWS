@@ -58,7 +58,7 @@ beforeEach(() => {
     return true;
   };
   const direct = new DirectCalls({ cache, pool: pool as never, store: () => documents.store, completed: (operationId) => void emit('connectors.directOperation', { operationId }) });
-  surface = registerConnectors(on, emit, { onClientGone: (hook) => (gone.push(hook), () => {}) }, { sessions: { get: () => undefined }, store: documents.store, statusCache: cache, direct });
+  surface = registerConnectors(on, emit, { onGone: (hook) => (gone.push(hook), () => {}) }, { sessions: { get: () => undefined }, store: documents.store, statusCache: cache, direct });
 });
 afterEach(() => {
   surface.close();

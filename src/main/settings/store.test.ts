@@ -130,7 +130,7 @@ const FIXTURES = join(__dirname, '../../../test/fixtures/settings');
 describe('settings persistence regressions', () => {
   // P5 O3-A: the split's writes fail; the run keeps the unified file's values in memory, writes neither file, and the
   // next start splits it
-  it('keeps migrated dark settings when the split cannot write, refuses writes this run, and splits at the next start', () => {
+  it('keeps migrated dark settings when the split cannot write, refuses writes this run, and splits at the next start', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const original = JSON.stringify({ ...before6('dark'), version: 5, engine: { ...ENGINE_BEFORE_V7, subagentModel: 'haiku' } });
     writeFileSync(file, original);
@@ -144,37 +144,37 @@ describe('settings persistence regressions', () => {
     } finally {
       chmodSync(dir, 0o700);
     }
-    expect(() => store.update({ notifications: { enabled: false } })).toThrow(/not written this run/);
-    expect(() => store.update({ engine: { subagentModel: null } })).toThrow(/not written this run/);
+    await expect(store.update({ notifications: { enabled: false } })).rejects.toThrow(/not written this run/);
+    await expect(store.update({ engine: { subagentModel: null } })).rejects.toThrow(/not written this run/);
     expect(readFileSync(file, 'utf8')).toBe(original);
-    expect(open().update({ notifications: { enabled: false } })).toMatchObject({ theme: 'dark', engine: { subagentModel: 'haiku' }, notifications: { enabled: false } });
+    expect(await open().update({ notifications: { enabled: false } })).toMatchObject({ theme: 'dark', engine: { subagentModel: 'haiku' }, notifications: { enabled: false } });
     expect(onDisk()).toMatchObject({ theme: 'dark', engine: { subagentModel: 'haiku' }, notifications: { enabled: false } });
   });
 
-  it('refuses a patch when the disk file is unreadable or invalid instead of persisting defaults', () => {
+  it('refuses a patch when the disk file is unreadable or invalid instead of persisting defaults', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const original = '{"version":1,"theme":"dark"';
     writeFileSync(file, original);
     const store = open();
-    expect(() => store.update({ notifications: { sound: true } })).toThrow();
+    await expect(store.update({ notifications: { sound: true } })).rejects.toThrow();
     expect(readFileSync(file, 'utf8')).toBe(original);
-    expect(() => store.update({ engine: { subagentModel: 'haiku' } })).toThrow(/not written this run/); // P5 O3-A: nor a machine file over it
+    await expect(store.update({ engine: { subagentModel: 'haiku' } })).rejects.toThrow(/not written this run/); // P5 O3-A: nor a machine file over it
     expect(readdirSync(dir)).toEqual(['settings.json']);
     writeFileSync(file, clientJson('dark'));
     chmodSync(file, 0o000);
     try {
-      expect(() => store.update({ notifications: { sound: true } })).toThrow();
+      await expect(store.update({ notifications: { sound: true } })).rejects.toThrow();
     } finally {
       chmodSync(file, 0o600);
     }
     expect(readFileSync(file, 'utf8')).toBe(clientJson('dark'));
   });
 
-  it('merges an unrelated patch against the latest disk settings, not a stale snapshot', () => {
+  it('merges an unrelated patch against the latest disk settings, not a stale snapshot', async () => {
     const first = open();
     const second = open();
-    first.update({ engine: { binaryPath: '/opt/custom/claude' }, notifications: { enabled: false } });
-    second.update({ gateway: { offerDirect: false }, notifications: { sound: true } }); // P5 O3-A: each file merged against its own latest
+    await first.update({ engine: { binaryPath: '/opt/custom/claude' }, notifications: { enabled: false } });
+    await second.update({ gateway: { offerDirect: false }, notifications: { sound: true } }); // P5 O3-A: each file merged against its own latest
     expect(open().settings).toMatchObject({ engine: { binaryPath: '/opt/custom/claude' }, gateway: { offerDirect: false }, notifications: { enabled: false, sound: true } });
   });
 });
@@ -220,9 +220,9 @@ describe('settings store', () => {
     expect(warn).toHaveBeenCalledOnce();
   });
 
-  it('persists an update as compact JSON through a temporary file, leaving only the two settings files', () => {
+  it('persists an update as compact JSON through a temporary file, leaving only the two settings files', async () => {
     const store = open();
-    expect(store.update({ theme: 'dark', gateway: { relayUnreachable: 'wait' } })).toEqual({ ...v3('dark'), gateway: { ...v3('dark').gateway, relayUnreachable: 'wait' } });
+    expect(await store.update({ theme: 'dark', gateway: { relayUnreachable: 'wait' } })).toEqual({ ...v3('dark'), gateway: { ...v3('dark').gateway, relayUnreachable: 'wait' } });
     expect(store.settings).toEqual({ ...v3('dark'), gateway: { ...v3('dark').gateway, relayUnreachable: 'wait' } });
     for (const persisted of [readFileSync(file, 'utf8'), readFileSync(machineFile, 'utf8')]) expect(persisted, 'compact JSON without whitespace or a trailing newline').toBe(JSON.stringify(JSON.parse(persisted)));
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ ...clientSettingsDefaults(), theme: 'dark' });
@@ -230,24 +230,24 @@ describe('settings store', () => {
     expect(open().settings).toEqual({ ...v3('dark'), gateway: { ...v3('dark').gateway, relayUnreachable: 'wait' } });
   });
 
-  it('creates the settings directory when it does not exist yet', () => {
+  it('creates the settings directory when it does not exist yet', async () => {
     const nested = join(dir, 'fresh');
     const paths = settingsPaths(nested);
-    composeSettings({ clientFile: paths.client, machine: startMachineSettings(paths.machine, { refused: null }) }).update({ theme: 'system', sessions: { archiveInactiveDays: 30 } });
+    await composeSettings({ clientFile: paths.client, machine: startMachineSettings(paths.machine, { refused: null }) }).update({ theme: 'system', sessions: { archiveInactiveDays: 30 } });
     expect(JSON.parse(readFileSync(paths.client, 'utf8'))).toEqual({ ...clientSettingsDefaults(), theme: 'system' });
     expect(JSON.parse(readFileSync(paths.machine, 'utf8'))).toEqual({ ...machineSettingsDefaults(), sessions: { archiveInactiveDays: 30 } });
   });
 
-  it('keeps what a patch leaves out, including a key present as undefined', () => {
+  it('keeps what a patch leaves out, including a key present as undefined', async () => {
     const store = open();
-    store.update({ theme: 'dark' });
-    expect(store.update({})).toEqual(v3('dark'));
-    expect(store.update({ theme: undefined })).toEqual(v3('dark'));
+    await store.update({ theme: 'dark' });
+    expect(await store.update({})).toEqual(v3('dark'));
+    expect(await store.update({ theme: undefined })).toEqual(v3('dark'));
   });
 
-  it('persists keymap overrides and the notification policy', () => {
+  it('persists keymap overrides and the notification policy', async () => {
     const store = open();
-    store.update({ keymap: { 'attention.next': 'Cmd+Alt+J', 'tab.close': null }, notifications: { enabled: false, sound: true } });
+    await store.update({ keymap: { 'attention.next': 'Cmd+Alt+J', 'tab.close': null }, notifications: { enabled: false, sound: true } });
     expect(open().settings).toEqual({
       ...SETTINGS_DEFAULTS_V21,
       keymap: { 'attention.next': 'Cmd+Alt+J', 'tab.close': null },
@@ -344,7 +344,7 @@ describe('settings migrate v1 and v2 to v3', () => {
   // W13 end
 
   // E9 start: W13's version 8 file gains the voice section, the system locale, and is rewritten once
-  it('migrates a version 8 file to version 9 with the voice section, keeping every other value, rewrites it once and logs one line', () => {
+  it('migrates a version 8 file to version 9 with the voice section, keeping every other value, rewrites it once and logs one line', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const v8 = { ...before9('dark'), keymap: { 'attention.next': 'Cmd+Alt+J' }, usage: { nearLimitPercent: 80 } };
     writeFileSync(file, JSON.stringify(v8));
@@ -353,14 +353,14 @@ describe('settings migrate v1 and v2 to v3', () => {
     expect(onDisk()).toEqual(migrated);
     expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 8\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/));
     log.mockClear();
-    expect(open().update({ voice: { locale: 'en-US' } }).voice).toEqual({ locale: 'en-US' });
+    expect((await open().update({ voice: { locale: 'en-US' } })).voice).toEqual({ locale: 'en-US' });
     expect(onDisk()).toEqual({ ...migrated, voice: { locale: 'en-US' } });
     expect(log).not.toHaveBeenCalled();
   });
   // E9 end
 
   // E10 start: E9's version 9 file gains the supervisor section with its defaults, and is rewritten once
-  it('migrates a version 9 file to version 10 with the supervisor section, keeping every other value, rewrites it once and logs one line', () => {
+  it('migrates a version 9 file to version 10 with the supervisor section, keeping every other value, rewrites it once and logs one line', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const v9 = { ...before10('dark'), voice: { locale: 'en-GB' }, usage: { nearLimitPercent: 80 } };
     writeFileSync(file, JSON.stringify(v9));
@@ -370,14 +370,14 @@ describe('settings migrate v1 and v2 to v3', () => {
     expect(onDisk()).toEqual(migrated);
     expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 9\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/));
     log.mockClear();
-    expect(open().update({ supervisor: { idleExitMinutes: null } }).supervisor).toEqual({ idleExitMinutes: null, keepRunningDefault: true, shape: 'daemon' });
+    expect((await open().update({ supervisor: { idleExitMinutes: null } })).supervisor).toEqual({ idleExitMinutes: null, keepRunningDefault: true, shape: 'daemon' });
     expect(onDisk()).toEqual({ ...migrated, supervisor: { idleExitMinutes: null, keepRunningDefault: true, shape: 'daemon' } });
     expect(log).not.toHaveBeenCalled();
   });
   // E10 end
 
   // E4a start: E10's version 10 file gains the browser section with its defaults, and is rewritten once
-  it('migrates a version 10 file to version 11 with the browser section, keeping every other value, rewrites it once and logs one line', () => {
+  it('migrates a version 10 file to version 11 with the browser section, keeping every other value, rewrites it once and logs one line', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const v10 = { ...before11('dark'), supervisor: { idleExitMinutes: 30, keepRunningDefault: false }, voice: { locale: 'en-GB' } };
     writeFileSync(file, JSON.stringify(v10));
@@ -387,7 +387,7 @@ describe('settings migrate v1 and v2 to v3', () => {
     expect(onDisk()).toEqual(migrated);
     expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 10\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/));
     log.mockClear();
-    expect(open().update({ browser: { linkTarget: 'external' } }).browser).toEqual({ ...migrated.browser, linkTarget: 'external' });
+    expect((await open().update({ browser: { linkTarget: 'external' } })).browser).toEqual({ ...migrated.browser, linkTarget: 'external' });
     expect(onDisk()).toEqual({ ...migrated, browser: { ...migrated.browser, linkTarget: 'external' } });
     expect(log).not.toHaveBeenCalled();
   });
@@ -406,7 +406,7 @@ describe('settings migrate v1 and v2 to v3', () => {
   // cua #90 end
 
   // P2-C start (2026-10-09): cua #90's version 12 file gains the mods section and the two owner-channel groups, rewritten once
-  it('migrates a version 12 file to version 13 with the to-human lane and its two groups on, keeping every other value, rewrites it once and logs one line', () => {
+  it('migrates a version 12 file to version 13 with the to-human lane and its two groups on, keeping every other value, rewrites it once and logs one line', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const v12 = before13('dark');
     writeFileSync(file, JSON.stringify({ ...v12, notifications: { ...v12.notifications, kinds: { ...v12.notifications.kinds, errors: false } }, browser: { ...v12.browser, bookmarksBar: 'hidden' } }));
@@ -416,7 +416,7 @@ describe('settings migrate v1 and v2 to v3', () => {
     expect(onDisk()).toEqual(migrated);
     expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 12\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/));
     log.mockClear();
-    expect(open().update({ mods: { toHuman: { enabled: false } } }).mods).toEqual({ toHuman: { enabled: false } });
+    expect((await open().update({ mods: { toHuman: { enabled: false } } })).mods).toEqual({ toHuman: { enabled: false } });
     expect(onDisk()).toEqual({ ...migrated, mods: { toHuman: { enabled: false } } });
     expect(log).not.toHaveBeenCalled();
   });
@@ -462,7 +462,7 @@ describe('settings migrate v1 and v2 to v3', () => {
   // P4-R8 end
 
   // P4-A2 start (2026-10-21): P4-R8's version 16 file gains the user scope, rewritten once; the profile then persists
-  it('migrates a version 16 file to version 20 with the user scope, keeps every other value and rewrites it once', () => {
+  it('migrates a version 16 file to version 20 with the user scope, keeps every other value and rewrites it once', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const v16 = { ...before17('dark'), engine: { ...before17('dark').engine, binaryPath: '/opt/claude', statefulMcpServers: ['plugin:ptc:ptc'], mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }] }, mods: { toHuman: { enabled: false } } };
     writeFileSync(file, JSON.stringify(v16));
@@ -472,7 +472,7 @@ describe('settings migrate v1 and v2 to v3', () => {
     expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\(version 16\) into machine-settings\.json \(version 1\) and the client file \(version 21\)$/));
     log.mockClear();
     const launchProfile = { plugins: { off: ['ptc@ptc-tool'] }, hooks: 'none' as const };
-    expect(open().update({ engine: { launchProfile } }).engine).toEqual({ ...migrated.engine, launchProfile });
+    expect((await open().update({ engine: { launchProfile } })).engine).toEqual({ ...migrated.engine, launchProfile });
     expect(onDisk()).toEqual({ ...migrated, engine: { ...migrated.engine, launchProfile } });
     expect(open().settings.engine.launchProfile).toEqual(launchProfile);
     expect(log).not.toHaveBeenCalled();
@@ -675,23 +675,23 @@ describe('the settings split', () => {
 });
 
 describe('settings patch merges one kind and keeps its siblings', () => {
-  it('changes one gateway field and keeps the rest of the state', () => {
+  it('changes one gateway field and keeps the rest of the state', async () => {
     const store = open();
-    expect(store.update({ gateway: { relayUnreachable: 'wait' } })).toEqual({ ...DEFAULT_SETTINGS, gateway: { ...DEFAULT_SETTINGS.gateway, relayUnreachable: 'wait' } });
+    expect(await store.update({ gateway: { relayUnreachable: 'wait' } })).toEqual({ ...DEFAULT_SETTINGS, gateway: { ...DEFAULT_SETTINGS.gateway, relayUnreachable: 'wait' } });
   });
 
-  it('patches one notification kind and leaves its four siblings; a notifications field leaves kinds alone', () => {
+  it('patches one notification kind and leaves its four siblings; a notifications field leaves kinds alone', async () => {
     const store = open();
     const siblings = { turnFinished: false, approvals: false, questions: false, planReviews: false, errors: true, heldPeerMessages: true, asyncInput: false, essential: true /* P2-C */ };
-    store.update({ notifications: { kinds: siblings } });
-    expect(store.update({ notifications: { kinds: { errors: false } } }).notifications.kinds).toEqual({ ...siblings, errors: false });
-    expect(store.update({ notifications: { enabled: false } }).notifications).toEqual({ enabled: false, sound: false, kinds: { ...siblings, errors: false } });
+    await store.update({ notifications: { kinds: siblings } });
+    expect((await store.update({ notifications: { kinds: { errors: false } } })).notifications.kinds).toEqual({ ...siblings, errors: false });
+    expect((await store.update({ notifications: { enabled: false } })).notifications).toEqual({ enabled: false, sound: false, kinds: { ...siblings, errors: false } });
     expect(open().settings.notifications.kinds).toEqual({ ...siblings, errors: false });
   });
 
-  it('refuses a merged state the schema refuses, and keeps the previous one', () => {
+  it('refuses a merged state the schema refuses, and keeps the previous one', async () => {
     const store = open();
-    expect(() => store.update({ usage: { nearLimitPercent: 20 } })).toThrow();
+    await expect(store.update({ usage: { nearLimitPercent: 20 } })).rejects.toThrow();
     expect(store.settings).toEqual(DEFAULT_SETTINGS);
   });
 });

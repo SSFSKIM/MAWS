@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { app, BrowserWindow, session } from 'electron';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SpineView } from '@shared/spine/view';
+import type { EngineSessionStatus } from '@shared/engine/status';
 import type { BrowserSettings } from '@shared/ipc/schema/settings';
 import type { BrowserData } from './data';
 import type { registerMainHandler } from '../ipc/router';
@@ -59,7 +60,7 @@ export interface BrowserDeps {
   // Settings 11's `browser` section, read when a tab opens (the profile: a change applies to tabs opened afterwards) and
   // when a page opens a window (`linkTarget`, at the moment of the open).
   settings(): BrowserSettings;
-  view: Pick<SpineView, 'record' | 'records' | 'unavailable' | 'on'>; // the spine's view (P5 O3-C)
+  view: Pick<SpineView, 'record' | 'records' | 'unavailable' | 'on' | 'engineStatuses'>; // the spine's view (P5 O3-C)
   // P5 O3-A: the history, bookmarks and agent activity (data/index.ts), and the snapshot and changes of the spine's
   // sessions it keeps the activity by
   data: Pick<BrowserData, 'history' | 'bookmarks' | 'activity' | 'reattach' | 'sessionChanged'>;
@@ -202,11 +203,18 @@ export function startBrowser({ userData, settings, view, data, register, emit, e
   // board #93 (in the browser's own database since P5 O3-A)
   register('browser.agent.activities.list', ({ appSessionId }) => ({ activities: cua.activities(appSessionId as AppSessionId) }));
   // every status of a known session names its engine to the socket's peer check (the pid while it runs, none once exited)
-  const stopCuaStatus = hosts?.onEvent('session.status', ({ appSessionId, status }) => {
-    if (view.record(appSessionId as AppSessionId) === null) return; // never a trust bootstrap's id
+  const engineSeen = (appSessionId: AppSessionId, status: Pick<EngineSessionStatus, 'process' | 'pid'>) => {
+    if (view.record(appSessionId) === null) return; // never a trust bootstrap's id
     if (status.process !== 'exited') cua.socketPathFor(appSessionId);
     cua.engineProcess(appSessionId, status.process === 'exited' ? null : status.pid);
-  });
+  };
+  const stopCuaStatus = hosts?.onEvent('session.status', ({ appSessionId, status }) => engineSeen(appSessionId as AppSessionId, status));
+  // P5 O3-D M5b fix round 1: on the daemon shape a kept session's status can arrive before the snapshot holds its record
+  // (the mirror's snapshot and follow run independently, and the snapshot fires no record event), so the records'
+  // arrival sets each known session up from the statuses the view kept
+  const engineStatusesSeen = () => {
+    if (hosts && view.unavailable() === null) for (const status of view.engineStatuses()) engineSeen(status.appSessionId as AppSessionId, status);
+  };
   // E13 end
   // A request with no page behind it, a favicon fetched on a tab's partition (`ses.fetch`) among them, asks the app for a
   // client certificate, and Electron's default hands over the keychain's first identity: no certificate is chosen, as
@@ -227,8 +235,12 @@ export function startBrowser({ userData, settings, view, data, register, emit, e
     store.removeSession(appSessionId);
     cua.closeSession(appSessionId); // E13
   });
-  const stopAvailability = view.on('availability', () => data.reattach(sessionSnapshot(view)));
+  const stopAvailability = view.on('availability', () => {
+    data.reattach(sessionSnapshot(view));
+    engineStatusesSeen();
+  });
   data.reattach(sessionSnapshot(view));
+  engineStatusesSeen();
   const inspector = env.MAWS_E2E === '1' ? browserInspector({ store, emit }) : null;
   if (inspector) globalThis.__maws_browser = inspector;
   // E13: the e2e's fake host reads the socket and the leases; `trustRoot` makes a process (the test's own) a root beside

@@ -16,7 +16,7 @@ describe('the session service’s commands, answered on the services bus', () =>
 
   beforeAll(async () => {
     h = await new SessionHarness().start();
-    registerSessionServiceHandlers(h.service, bus);
+    registerSessionServiceHandlers(h.service, bus, 'index');
   });
   afterAll(() => h.dispose());
 

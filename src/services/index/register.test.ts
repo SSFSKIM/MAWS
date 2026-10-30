@@ -76,11 +76,11 @@ describe('main answers the record side of session.* from the index', () => {
       const added = await invoke('session.projects.add', { directory });
       expect(added).toMatchObject({ ok: true, value: { name: 'alpha', directory, order: 0 } });
       const id = (added.value as { id: string }).id;
-      expect(await invoke('session.projects.list', undefined)).toEqual({ ok: true, value: { projects: [added.value], revision: index.revision } });
+      expect(await invoke('session.projects.list', undefined)).toEqual({ ok: true, value: { projects: [added.value], revision: index.revision, rows: [added.value] } }); // P5 O3-D M1: every row too (D13)
       expect(await invoke('session.projects.update', { id, patch: { name: 'Alpha' } })).toMatchObject({ ok: true, value: { id, name: 'Alpha' } });
       expect(await invoke('session.projects.remove', { id })).toEqual({ ok: true, value: undefined });
       // W11 (I5): the removed project stays on the list, marked, and an add shows it again
-      expect(await invoke('session.projects.list', undefined)).toMatchObject({ value: { projects: [{ id, name: 'Alpha', hidden: true }] } });
+      expect(await invoke('session.projects.list', undefined)).toMatchObject({ value: { projects: [{ id, name: 'Alpha', hidden: true }], rows: [{ id, name: 'Alpha', hidden: true }] } });
       expect(await invoke('session.projects.add', { directory })).toMatchObject({ ok: true, value: { id } });
       expect(((await invoke('session.projects.list', undefined)).value as { projects: { hidden?: boolean }[] }).projects[0].hidden).toBeUndefined();
       expect(await invoke('session.projects.add', { directory: join(tree.path, 'missing') })).toMatchObject({ ok: false, error: { code: 'internal', message: expect.stringContaining('not a directory') } });

@@ -87,6 +87,7 @@ export class IndexSessionSource implements SessionSource {
   private scanned = false;
   private generation = 0;
   private readonly scanListeners = new Set<() => void>();
+  private readonly appliedListeners = new Set<() => void>(); // P5 O3-D M6: who waits for a scan's discoveries applied
   private readonly bridged = new Map<AppSessionId, BridgedPhase>(); // P5 O9 M6: what the bridges MAWS drives say
 
   constructor(
@@ -205,6 +206,25 @@ export class IndexSessionSource implements SessionSource {
     return () => void this.scanListeners.delete(listener);
   }
 
+  // P5 O3-D M6 (fix round 1; mawsd's discovery wake): whether the index holds what the store said as of a scan answered
+  // since the engine host's latest transition, every summary that scan queued applied. False while the host is away (a
+  // transition resets it) and until its next scan's discoveries are in the index.
+  discoveryApplied(): boolean {
+    return this.scanned && !this.stopped && this.discoveries.length === 0 && !this.draining;
+  }
+
+  // Called each time discoveryApplied() becomes true: at a scan's answer with nothing queued, or when the drain empties
+  // the queue after it.
+  onDiscoveryApplied(listener: () => void): () => void {
+    this.appliedListeners.add(listener);
+    return () => void this.appliedListeners.delete(listener);
+  }
+
+  private tellApplied(): void {
+    if (!this.discoveryApplied()) return;
+    for (const listener of [...this.appliedListeners]) listener();
+  }
+
   // C5's visibility report. A session becoming visible is seen at once; the unread rule reads the set on every advance.
   onSetVisible(appSessionId: AppSessionId, visible: boolean): void {
     // E11: what the host sent before the report, read under the visibility it had
@@ -246,6 +266,7 @@ export class IndexSessionSource implements SessionSource {
     } finally {
       this.draining = false;
     }
+    this.tellApplied(); // P5 O3-D M6: a scan's discoveries drained into the index
   }
 
   // P4 W2-B (tracker 2026-10-07 "The index sync's warm-up queue…"): what a write from elsewhere applies before itself.
@@ -432,6 +453,7 @@ export class IndexSessionSource implements SessionSource {
       if (scan !== null && generation === this.generation && !this.stopped) {
         this.scanned = true;
         for (const listener of [...this.scanListeners]) listener();
+        this.tellApplied(); // P5 O3-D M6: nothing queued, or the drain tells it when the queue empties
       }
       const state = await this.command('fs.state', undefined);
       if (state !== null) this.foldHolders(state.holders);
@@ -535,7 +557,8 @@ export class IndexSessionSource implements SessionSource {
       const revision = this.projectsRevision;
       this.projectsRevision = null;
       const projects = this.index.projects.listWithRemoved(); // W11 (I5): as `session.projects.list` answers
-      out.push({ revision, send: () => this.options.emit('session.projects.changed', { projects, revision }) });
+      const rows = this.index.projects.list({ includeHidden: true }); // P5 O3-D (D13): every row, for the spine's view
+      out.push({ revision, send: () => this.options.emit('session.projects.changed', { projects, revision, rows }) });
     }
     out.sort((a, b) => a.revision - b.revision);
     for (const { send } of out) send();

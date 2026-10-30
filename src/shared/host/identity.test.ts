@@ -4,8 +4,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
-import { WIRE_CAPABILITIES, WIRE_MINOR } from '@shared/ipc/wire';
+import { PEER_CAPABILITIES, SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
+import { WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { buildIdOf } from '../../engine-host/supervisor-files';
 import { appIdentity, type AppIdentity } from './identity';
@@ -31,8 +31,15 @@ describe('appIdentity', () => {
   it('is the bundle’s build id, the wire’s major, minor and capabilities, and the wire fingerprint', () => {
     const identity = appIdentity(modulePath, {});
     expect(identity.buildId()).toBe(buildIdOf(modulePath));
-    expect([identity.major(), identity.minor(), identity.capabilities()]).toEqual([SOCKET_PROTOCOL, WIRE_MINOR, WIRE_CAPABILITIES]);
+    expect([identity.major(), identity.minor(), identity.capabilities()]).toEqual([SOCKET_PROTOCOL, WIRE_MINOR, ['socket.ptyFrames', 'machine.spine']]); // P5 O3-D: main's own list (M5b: machine.spine)
     expect(identity.wire()).toBe(wireFingerprint());
+  });
+
+  // P5 O3-D (Interfaces §I): each caller presents its own list, never the wire's union of every capability
+  it('presents the list its caller names: main’s by default, mawsd’s to each of its hosts', () => {
+    expect(appIdentity(modulePath, {}).capabilities()).toBe(PEER_CAPABILITIES.app);
+    expect(appIdentity(modulePath, {}, 'detached', PEER_CAPABILITIES.daemonToEngineHost).capabilities()).toBe(PEER_CAPABILITIES.daemonToEngineHost);
+    expect(appIdentity(modulePath, {}, 'utility', ['socket.ptyFrames', 'area.only']).capabilities()).toEqual(['socket.ptyFrames', 'area.only']);
   });
 
   it('under the e2e harness, MAWS_E2E_BUILD_ID and MAWS_E2E_WIRE_MAJOR stand in for the build and the major', () => {

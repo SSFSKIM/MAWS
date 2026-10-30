@@ -21,43 +21,98 @@
 // today (its resync, its connect burst and undelivered tail, its client-gone hooks, its per-connection interest and its
 // login-shell recapture). Between attachments `mawsd` holds a link that never says ready, for its own requests. The pty
 // relay is not recycled; while no app holds `pty-host.sock`, `mawsd` owns the pty host's output credit.
+//
+// P5 O3-D M2 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §A and §B): `machine.sock` is served by
+// the services front (front.ts), and the spine runs here too, composed by the seam (spine-seam.ts) from the services
+// chunk at its first trigger, never at start: refused by `spine.lock` while an app that composes its own holds it,
+// released after the quiet period (the daemon's own idle time, or MAWS_SPINE_QUIET_MS under a measured scene), and
+// loaded again at the next trigger; a unit daemon re-executes after a release (exit 75, its unit restarts it cold) only
+// with the switch on (SPINE_REEXECUTE_DEFAULT, MAWS_SPINE_REEXECUTE=1; D38). The exit order stops its parts
+// once their work settled, before the client connections close.
+//
+// P5 O3-D M3 (Interfaces §D; D4, D8, D30): the permanent client, built behind the option `permanentClient` (off in the
+// product until M5, src/mawsd/index.ts). With it on, the hello to the engine host lists `host.attachment`, and to a host
+// whose welcome lists it too the engine-host link is one connection for mawsd's life: said ready at its welcome, the
+// loaded spine's resync running at its streaming (the seam's adapter, spine-hosts.ts; nothing while the spine is cold),
+// never recycled at an app's attach or departure, each of which is told by `host.attachment` instead (the departure's
+// drain ends at that request's answer, after every event the host wrote before it). To a host that lists it not, or with
+// the option off, the recycle per attachment above stays, chosen again at each welcome. The endpoint seam's
+// `onAttachment` says whether events are available: true from a permanent link's streaming on, whatever app comes and
+// goes; an app's attachment otherwise.
+//
+// P5 O3-D M4 (Interfaces §B, §C, §E): each machine.sock client follows its sessions' streams with its own cursors on the
+// front (front-streams.ts), every stream catching up at each streaming of the engine-host link (D41); the spine's
+// client port asks the client whose request minted the asking ref, or the app attached on engine-host.sock for none
+// (client-port.ts); the endpoint's `dispatch('machine', …)` is the front's table and its `onEvent` carries the spine's
+// events with owner `machine`.
+//
+// P5 O3-D M5a (Interfaces §L; D10, D21, D44(3)): `mawsd`'s side of the cutover, built behind the option `claimSpine`,
+// off in the product until M5b turns it on with `permanentClient`, `spine.wakeOnEvents` and the app's `machine.spine`
+// (src/mawsd/index.ts), so nothing changes for an app of today. With it on, a hello on engine-host.sock that lists no
+// `machine.spine` (an app that runs a spine of its own) is refused with `mawsd`'s own `refuse wire` line, waking no
+// host, and its one exit asks nothing of the engine host; and when that app's pid holds no `spine.lock` (an app from
+// before O3-A) the spine yields to it while it lives. The second signal, the profile's `SingletonLock` read at each load
+// attempt, has its own switch (`singletonSignal`), on since its probe (e2e/spine-lock.spec.ts) showed macOS Electron
+// writes the app's pid there. Whatever the option, an app whose hello lists `machine.spine` hears no event on its
+// engine relay (its events come on machine.sock), and its relayed requests that the spine intercepts go through the
+// spine's intercepts, as a machine.sock client's and the endpoint's do (front.ts). The spine's trash is `mawsd`'s own
+// move into the user's trash directory (trash.ts), and a load logs `[spine] loaded in N ms`.
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import { createServer, type Server } from 'node:net';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { homedir, hostname, tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { daemonPaths, DAEMON_FILES, DAEMON_LOCK_BREAKER, type DaemonPaths } from '@shared/daemon/files';
 import { createHostSupervisor, type HostSupervisor } from '@shared/host/host-supervisor';
 import { supervisorEnv, type DetachedTransportOptions } from '@shared/host/detached-transport';
 import type { RelayPort } from '@shared/host/doc-relay';
 import { appIdentity } from '@shared/host/identity';
+import { cuaSocketPath } from '@shared/browser/cua-socket';
 import { idleCollector, type Collect } from '@shared/host/idle-collect';
 import { makePrivateDirectory, clearSocketPath } from '@shared/host/private-listen';
 import { PrivatePathError } from '@shared/host/private-path';
-import { createHostRuntime } from '@shared/host/runtime';
+import { captureShellEnvironment } from '@shared/host/shell-env';
 import { writeToken } from '@shared/host/socket-host';
 import { CLOSE_GRACE_MS } from '@shared/host/socket-port';
-import { SOCKET_PROTOCOL, type DocumentsOpen } from '@shared/host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL, type DocumentsOpen, type ServerRefuse } from '@shared/host/socket-protocol';
 import { serveSocketClients, type SocketClients, type SupervisorIdentity } from '@shared/host/socket-server';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { ClientRef } from '@shared/ipc/client';
+import { endableClientRef, type ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import { MAX_IDLE_EXIT_MS } from '@shared/ipc/schema/host';
 import type { DaemonHost, DaemonStatus } from '@shared/ipc/schema/daemon';
-import { WIRE_CAPABILITIES, WIRE_MINOR } from '@shared/ipc/wire';
+import type { CommandInput } from '@shared/ipc/schema';
+import { WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
+import { machineEnrollment, machineName, machineProject } from '@shared/machine/identity';
 import { readOrMintMachineRef } from '@shared/machine/identity-file';
 import type { MachineRef } from '@shared/machine/ref';
 import { readMachineRole, type MachineRole } from '../engine-host/role';
 import { buildIdOf, isAlive, procStartOf, readLock, START_EXIT_HELD, takeLock } from '../engine-host/supervisor-files';
 import { LOG_ROTATE_BYTES, openSupervisorLog } from '../engine-host/supervisor-log';
 import { ptyHostFiles } from '../pty-host/files';
-import { DaemonClocks } from './clocks';
-import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOINT_MODULE, type DaemonServices, type EndpointModule } from './endpoint-seam';
+import { DaemonClocks, DEFAULT_IDLE_EXIT_MS } from './clocks';
+import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOINT_MODULE, type CheckoutSource, type DaemonServices, type EndpointModule } from './endpoint-seam';
+import { createServicesFront, spineTakes } from './front';
+import { runE2eSeam } from './e2e-seam'; // M5b fix round 2
 import { DEPARTURE_BOUND_MS, Relay, type RelayRequest } from './relay';
+import { createLazySpine, loadServicesEntry, type SpineEntry, type SpineTiming } from './spine-seam';
+import { SpineReaders } from './spine-readers';
+import { discoveryWake } from './discovery-wake';
+import { trashPath } from './trash';
 
 export const EXIT_RESTART = 75; // a requested restart: the units restart on it
+// P5 O3-D D38 (the owner's ruling on D5): re-executing a unit daemon after its spine's release is built and off; a later
+// PR flips this default once M7's whole-set reading asks for it. MAWS_SPINE_REEXECUTE=1, read by a unit daemon at
+// start, turns it on for that daemon (the measured scene's seam). A private daemon never re-executes.
+export const SPINE_REEXECUTE_DEFAULT = false;
+// P5 O3-D M5a (D21): whether the profile's `SingletonLock` is read as the yield's second signal, under claimSpine. On
+// since M5's probe (e2e/spine-lock.spec.ts, hosted e2e:settings run 40978897272) answered: macOS Electron writes a
+// symlink `<host>-<pid>` naming the app's own pid there, and removes it at a clean quit.
+export const SINGLETON_LOCK_SIGNAL_DEFAULT = true;
+export const SPINE_LOCK_FILE = 'spine.lock'; // src/services/settings/spine-lock.ts's SPINE_LOCK, which mawsd's eager graph cannot import
+export const SINGLETON_LOCK_FILE = 'SingletonLock'; // Electron's single-instance lock in the profile (src/main/files/profile-lock.ts)
 const STATUS_BOUND_MS = 5_000; // daemon.status waits this long for the engine host's own status
 const MAX_INTEREST = 10_000; // host.interest's bound
 
@@ -86,6 +141,18 @@ export interface DaemonOptions {
   helloHoldMs?: number;
   restartBackoffMs?: readonly number[];
   collect?: Collect; // the idle collection (@shared/host/idle-collect.ts's lastResortCollect)
+  // P5 O3-D M2: the spine seam's (spine-seam.ts): the chunk's load, whether a batch while cold loads the spine (on in the
+  // product since M5b, when main stopped composing its own spine; off, an app quitting would leave its last batches to
+  // mawsd's link, and a spine loaded by them would hold spine.lock against an embedded app's next launch), the timings
+  // and the lock's wait
+  spine?: { load?(): Promise<SpineEntry>; wakeOnEvents?: boolean; timing?: Partial<SpineTiming>; lockWaitMs?: number };
+  // P5 O3-D M3 (D30): the engine host's permanent client (above), on in the product since M5b with the front's session
+  // streams and `wakeOnEvents` (off, a kept session's events while no app is attached would reach no spine)
+  permanentClient?: boolean;
+  // P5 O3-D M5a (Interfaces §L): the spine is the machine's, and an app that runs its own is refused at engine-host.sock
+  // and yielded to (above); on in the product since M5b, with permanentClient, when apps list machine.spine
+  claimSpine?: boolean;
+  singletonSignal?: boolean; // D21's second signal (SINGLETON_LOCK_SIGNAL_DEFAULT unless a test says), under claimSpine
 }
 
 export interface RunningDaemon {
@@ -93,6 +160,7 @@ export interface RunningDaemon {
   ref: MachineRef;
   hosts: HostSupervisor;
   services: DaemonServices;
+  projects: CheckoutSource; // the endpoint's injected source of MAWS's own projects
   status(): Promise<DaemonStatus>;
   stop(reason: string, code?: number): Promise<void>; // the exit order; a second call joins the first
 }
@@ -169,9 +237,25 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const role = options.role ?? readMachineRole(env);
   const packaged = /\.asar[/\\]/.test(options.modules.self);
   const execPath = options.execPath ?? process.execPath;
-  const identity: SupervisorIdentity = { protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, buildId, capabilities: WIRE_CAPABILITIES, wire: wireFingerprint(), pid: process.pid, startedAt };
-  const engineIdentity = appIdentity(options.modules.engineHost, env, 'detached'); // the e2e seams stand in, as for main
-  const endpoint = options.endpoint === undefined ? loadEndpointModule(buildId) : options.endpoint;
+  const identity: SupervisorIdentity = { protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, buildId, capabilities: PEER_CAPABILITIES.daemon, wire: wireFingerprint(), pid: process.pid, startedAt }; // P5 O3-D: its own list
+  // P5 O3-D M3: `host.attachment` declared only with the permanent client on, since a declaring client must send it
+  const permanentClient = options.permanentClient ?? false;
+  const engineHello = permanentClient ? PEER_CAPABILITIES.daemonToEngineHost : PEER_CAPABILITIES.daemonToEngineHost.filter((name) => name !== ATTACHMENT_CAPABILITY);
+  const engineIdentity = appIdentity(options.modules.engineHost, env, 'detached', engineHello); // the e2e seams stand in, as for main
+  // P5 O3-D M5a (§L): off until M5b; the second signal under it, behind its own switch until its probe answers (D21)
+  const claimSpine = options.claimSpine ?? false;
+  const singletonSignal = options.singletonSignal ?? SINGLETON_LOCK_SIGNAL_DEFAULT;
+  // P5 O3-D M4 (Interfaces §E, D11): MAWS's own projects, checkouts the endpoint knows beside RL10's: every project row of
+  // the loaded spine while its view is available (none while it is cold, refused, or a scenario's)
+  const projects: CheckoutSource = {
+    known: (path) => {
+      const view = spine.root()?.view;
+      return view !== undefined && view.unavailable() === null && view.projectRows().some((row) => row.directory === path);
+    },
+  };
+  const endpoint = options.endpoint === undefined ? loadEndpointModule(buildId, { projects }) : options.endpoint;
+  // The machine's enrollment, the endpoint's in process (D16, D38): machine.identity's project and the spine's org projects
+  const enrollment = () => machineEnrollment(() => endpoint?.enrollment() ?? null);
 
   // --- the upstreams --------------------------------------------------------------------------------------------------
   let stopping: Promise<void> | null = null;
@@ -187,7 +271,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         detached: {
           buildPolicy: 'replace',
           files: ptyHostFiles(paths.ptyHost),
-          identity: appIdentity(options.modules.ptyHost, env, 'utility'), // never the e2e seams, which are the engine host's
+          identity: appIdentity(options.modules.ptyHost, env, 'utility', PEER_CAPABILITIES.daemonToPtyHost), // never the e2e seams, which are the engine host's
           start: { kind: 'spawn', command: execPath, args: ['--disable-sigusr1', options.modules.ptyHost, '--detached', paths.ptyHost], env: supervisorEnv(env, { userData: profileDir, packaged }), argv0: 'maws-pty-host' },
         },
       },
@@ -209,12 +293,109 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     },
   });
 
+  // --- the spine (P5 O3-D M2; spine-seam.ts): cold at start, loaded from the services chunk at the first trigger ---------
+  const spineQuietMs = positiveInteger(env.MAWS_SPINE_QUIET_MS); // the measured scene's quiet period (D6)
+  const spine = createLazySpine({
+    profileDir,
+    build: `${options.build.version}+${options.build.commit}`,
+    hosts,
+    intercept: (request) => interceptEngine(request),
+    load: options.spine?.load ?? loadServicesEntry,
+    deps: () => ({
+      profile: profileDir,
+      machine: ref,
+      bus: front.bus,
+      clientPort: front.port, // §E: the asking client's connection, or the attached app's
+      interest: () => new Set(union()),
+      // the session's socket in the attached app's cua directory, from its machine.client (P5 O3-D M5b)
+      browserSocket: (appSessionId) => {
+        const dir = front.browserSocket();
+        return dir === null ? null : cuaSocketPath(dir, appSessionId);
+      },
+      trash: (path) => trashPath(path, { platform, home: homedir(), env }), // D10: mawsd's own move into the user's trash
+      engineEnv: captureShellEnvironment({ cache: false }), // one capture per load
+      env,
+      packaged,
+      appPath: join(dirname(options.modules.self), '..', '..'),
+      devRoot: process.cwd(),
+      home: homedir(),
+      enrollment,
+    }),
+    quietMs: () => spineQuietMs ?? clocks.idleMs() ?? DEFAULT_IDLE_EXIT_MS,
+    reexecute: kind === 'unit' && (SPINE_REEXECUTE_DEFAULT || env.MAWS_SPINE_REEXECUTE === '1'),
+    wakeOnEvents: options.spine?.wakeOnEvents ?? false,
+    endLink: async () => {
+      const drained = hosts.stop(); // the terminal draining close: what the engine host wrote before it saw the end folds now
+      if (drained) await Promise.race([drained, sleep(CLOSE_GRACE_MS + 250)]);
+    },
+    restart: (reason) => void stop(reason, EXIT_RESTART),
+    exitForYield: () => void stop('yield', kind === 'unit' ? EXIT_RESTART : 0),
+    collected: () => idle.dropped(),
+    yieldCandidate: () => (claimSpine && singletonSignal ? singletonHolder() : null), // D21's second signal
+    onState: (state) => {
+      if (state !== 'loading' && state !== 'loaded' && state !== 'releasing') front.unbind(); // the parts stopped: the next load registers afresh
+    },
+    log,
+    ...(options.spine?.timing && { timing: options.spine.timing }),
+    ...(options.spine?.lockWaitMs !== undefined && { lockWaitMs: options.spine.lockWaitMs }),
+  });
+
+  // --- the lock's daemon side (P5 O3-D M5a, Interfaces §L) -------------------------------------------------------------
+  // The apps whose hello listed machine.spine, on any of the three sockets, by pid and start: never yielded to.
+  const spineReaders = new SpineReaders(procStartOf); // M6 fix round 1: pruned at each client change, so a departed app's entry goes
+  const readsSpine = (pid: number) => spineReaders.reads(pid);
+  const announced = (connected: boolean, peer: { capabilities: readonly string[] } | undefined, appPid: number | undefined) => {
+    spineReaders.prune();
+    if (!connected || appPid === undefined || !peer?.capabilities.includes(MACHINE_SPINE_CAPABILITY)) return;
+    spineReaders.announce(appPid);
+    if (spine.yieldedTo() !== appPid) return;
+    log(`[spine] pid ${appPid} reads the machine’s spine (its hello lists ${MACHINE_SPINE_CAPABILITY}): the yield to it lifted`);
+    spine.yield(null);
+  };
+  // `spine.lock` names this pid, at this start (the lock's own liveness rule)
+  const holdsSpineLock = (pid: number) => {
+    const lock = readLock(profileDir, fs, SPINE_LOCK_FILE);
+    return lock !== null && lock.pid === pid && lock.procStart === procStartOf(pid);
+  };
+  // The first signal: a hello refused for lacking machine.spine. An app from before O3-A holds no spine.lock and is
+  // yielded to; one from O3-A to O3-C holds it, and the lock refuses mawsd's spine while it runs.
+  const refuseSpineless = (peer: { build: string; capabilities: readonly string[] }, appPid: number): ServerRefuse | null => {
+    if (!claimSpine || peer.capabilities.includes(MACHINE_SPINE_CAPABILITY)) return null;
+    const holds = holdsSpineLock(appPid);
+    log(`engine-host.sock: refuse wire to appPid ${appPid} (build ${peer.build}): its hello lists no ${MACHINE_SPINE_CAPABILITY}, so it runs a spine of its own${holds ? ', and holds spine.lock' : ''}`);
+    if (!holds) spine.yield(appPid);
+    return { t: 'refuse', reason: 'wire', protocol: identity.protocol, buildId: identity.buildId, wire: identity.wire, liveSessions: hosts.welcome('engine-host')?.liveSessions ?? 0 };
+  };
+  // The second signal (D21): the profile's SingletonLock, a symlink `<host>-<pid>` as Chromium writes it, naming a live
+  // app of this host that no post-D hello announced and that holds no spine.lock.
+  // A lock a crash left behind (a clean quit removes it) is no signal: its pid gone, or alive but known to have started
+  // after the lock was written, so not its writer (a pid reused since). A start ps cannot give leaves the signal standing.
+  const singletonHolder = (): number | null => {
+    let target: string;
+    let written: number;
+    try {
+      const path = join(profileDir, SINGLETON_LOCK_FILE);
+      target = fs.readlinkSync(path);
+      written = fs.lstatSync(path).mtimeMs;
+    } catch {
+      return null; // none, or not a symlink
+    }
+    const named = /^(.+)-(\d+)$/.exec(target);
+    if (!named || named[1] !== hostname()) return null;
+    const pid = Number(named[2]);
+    if (pid === process.pid || !isAlive(pid) || !startedBy(pid, written) || readsSpine(pid) || holdsSpineLock(pid)) return null;
+    log(`[spine] ${SINGLETON_LOCK_FILE} names pid ${pid}, a live app that reads no spine of the machine’s and holds no spine.lock`);
+    return pid;
+  };
+
   // --- the clocks -----------------------------------------------------------------------------------------------------
   const idle = idleCollector({ log, collect: options.collect, quiet: () => clocks.quiet() }); // P5 Decision Log 124's lever: a collection at each quiet entry, asked again as it collects
   const clocks = new DaemonClocks(kind, {
-    armEnginePark: () => {
-      log('no app and no interest for the idle time: asking the engine host to exit when idle');
-      hosts.exitSupervisor('idle', 'engine-host');
+    armEnginePark: (why) => {
+      log(why === 'discovery' ? '[spine] discovery: the wake is over: asking the engine host to exit when idle' : 'no app and no interest for the idle time: asking the engine host to exit when idle');
+      const sent = hosts.exitSupervisor('idle', 'engine-host');
+      if (!sent) log('the engine host’s exit when idle was not sent (no link): asked again at its next ready');
+      return sent;
     },
     disarmEnginePark: () => {
       log('taking back the engine host’s exit when idle');
@@ -227,7 +408,10 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       log('no client, both hosts parked and no hold for the idle time');
       void stop('idle', 0);
     },
-    quiet: (quiet) => idle.set(quiet),
+    quiet: (quiet) => {
+      idle.set(quiet);
+      spine.quiet(quiet); // the spine's release runs on the daemon's quiet, with no working session (spine-seam.ts)
+    },
   });
 
   // --- the interest union (OX5): the relay connection's set and the endpoint's remote viewers -------------------------
@@ -250,9 +434,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   };
 
   // --- listeners the seam offers ---------------------------------------------------------------------------------------
-  const eventListeners = new Set<(owner: 'engine-host' | 'pty-host', message: { name: string; payload: unknown }) => void>();
+  const eventListeners = new Set<(owner: 'engine-host' | 'pty-host' | 'machine', message: { name: string; payload: unknown }) => void>();
   const attachmentListeners = new Set<(attached: boolean) => void>();
-  let appAttached = false; // what a listener that comes later is told at once (an endpoint loaded at its first command)
+  let available = false; // what a listener that comes later is told at once (an endpoint loaded at its first command)
   const frameListeners = new Set<FrameListener>();
   const closedListeners = new Set<ClosedListener>();
   const upstreamListeners = new Set<(link: { connected: boolean; generation: number }) => void>();
@@ -264,6 +448,38 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         log(`a listener of the endpoint seam failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+  };
+
+  // --- the engine host's link: recycled per attachment, or permanent (P5 O3-D M3) --------------------------------------
+  // Chosen at each welcome: permanent with the option on and a host that serves `host.attachment`, O2's recycle otherwise.
+  let permanentLink = false;
+  // Whether events are available, as the endpoint seam's onAttachment says it (O2's recycle: an app is attached).
+  const availability = (value: boolean) => {
+    available = value;
+    each(attachmentListeners, value);
+  };
+  // The app's attachment, told to a permanent link's host. Never to a parked one, which has no connection (whose end
+  // already counted as {attached: false}) and must not be woken for it; one restarting hears it once it is up.
+  let departure: Promise<void> = Promise.resolve(); // the latest {attached: false}'s answer: the departure's drain
+  let appOnEngine = false; // an app is attached on engine-host.sock (a second attach without a departure replaces it)
+  let appReadsMachine = false; // its hello listed machine.spine: its events come on machine.sock, not on the relay
+  let toldPresent = false; // the last attachment told the permanent link's host
+  const tellAttachment = (attached: boolean): Promise<void> => {
+    if (hosts.parked('engine-host')) return Promise.resolve();
+    return hosts.forward('engine-host', { name: 'host.attachment', input: { attached } }).then((answer) => {
+      if (!answer.ok) log(`host.attachment {attached: ${attached}} failed: ${answer.error.message}`);
+    });
+  };
+  // P5 O3-D fix wave (scalpel-4#1; D40): the app is present while the connection that receives its events can: the relay
+  // for an app that hears them there, machine.sock once that app's connection there said ready for one that reads them
+  // there (the front drops an event until then). A machine.sock-only departure is a departure for the host: its
+  // app-bound requests settle noClient and its holds go, as at the relay's.
+  const appPresent = () => appOnEngine && (!appReadsMachine || front.appReady());
+  const presenceChanged = () => {
+    const present = appPresent();
+    if (!permanentLink || present === toldPresent) return;
+    toldPresent = present;
+    void tellAttachment(present);
   };
 
   // --- the engine host's relay ---------------------------------------------------------------------------------------
@@ -298,7 +514,10 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     hosts,
     log: (line) => log(`engine-host.sock: ${line}`),
     startedAt: (pid) => lockStartedAt(join(profileDir, 'supervisor'), pid),
-    intercept: (request) => interceptEngine(request),
+    // P5 O3-D M5a (D44(3)): a post-D app's request the spine intercepts goes through it, the spine loaded for it if cold
+    intercept: (request, app) => (app.capabilities.includes(MACHINE_SPINE_CAPABILITY) && spineTakes(request.name, request.input) ? throughSpine(request) : interceptEngine(request)),
+    refuseHello: refuseSpineless, // P5 O3-D M5a (§L), under claimSpine
+    deliverTo: (capabilities) => !capabilities.includes(MACHINE_SPINE_CAPABILITY), // P5 O3-D M5a: a post-D app's events come on machine.sock
     onDocument: (message, end) => {
       // the app's channels are below 2^31; one at or above is the endpoint's range (P5 Decision Log 42: a value rule)
       if (message.channel >= ENDPOINT_CHANNEL_BASE) return end.close();
@@ -318,27 +537,53 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       log('exit now from the app: the engine host exits now and parks');
       hosts.exitSupervisor('now', 'engine-host');
     },
-    attached: () => {
+    attached: (app) => {
       clocks.engineAttached(true); // disarms a park first
       setInterest('app', []);
-      appAttached = true;
-      each(attachmentListeners, true);
+      // before anything of the app's is forwarded; an app it replaced departs first (the relay calls no departed() for
+      // it), so its route E, direct operations and holds end and the new one is the owner back, on the same connection;
+      // one that reads its events on machine.sock is told once that connection is ready (presenceChanged)
+      if (permanentLink && toldPresent) {
+        toldPresent = false;
+        void tellAttachment(false);
+      }
+      appOnEngine = true;
+      appReadsMachine = app.capabilities.includes(MACHINE_SPINE_CAPABILITY);
+      engineAppPid = null; // the replaced app's: this one's comes with its welcome (onClient), just after
+      if (permanentLink) presenceChanged();
+      else availability(true);
       clientsChanged();
-      recycleEngine(); // a fresh link for this attachment
+      if (!permanentLink) recycleEngine(); // a fresh link for this attachment
     },
-    ready: () => hosts.sayReady('engine-host'),
+    ready: () => {
+      if (!permanentLink) hosts.sayReady('engine-host'); // a permanent link said ready at its own welcome
+    },
     departed: () => {
       clocks.engineAttached(false);
       setInterest('app', null);
       void sendInterest();
-      appAttached = false;
-      each(attachmentListeners, false);
+      appOnEngine = false;
+      if (permanentLink) {
+        toldPresent = false;
+        departure = tellAttachment(false); // told even when it was not present: its answer ends the drain
+      } else availability(false);
       clientsChanged();
     },
-    drain: { start: (drained) => recycleEngine(drained), boundMs: options.departureBoundMs ?? DEPARTURE_BOUND_MS },
+    // the upstream's draining close (O2), or a permanent link's {attached: false}, whose answer follows every event the
+    // host wrote before it saw the departure
+    drain: { start: (drained) => (permanentLink ? void departure.then(drained) : recycleEngine(drained)), boundMs: options.departureBoundMs ?? DEPARTURE_BOUND_MS },
     holdMs: options.helloHoldMs,
     between: () => clientsChanged(), // P5 Decision Log 124: the quiet's
   });
+
+  // A post-D app's relayed request through the spine's intercept for it; one the spine cannot take (it cannot load: the
+  // lock's holder keeps its own note) goes on raw, its client named, as the relay forwards any other.
+  const relayClient = endableClientRef('engine-host.sock');
+  async function throughSpine(request: RelayRequest): Promise<HostResponse> {
+    const answered = await front.intercepted(request.name, request.input, relayClient);
+    if (answered) return { t: 'res', id: request.id, ...answered } as HostResponse;
+    return hosts.forward('engine-host', { name: request.name, input: request.input, ...(request.client && { client: request.client }) });
+  }
 
   function interceptEngine(request: RelayRequest): Promise<HostResponse> | null {
     const input = (request.input ?? {}) as Record<string, unknown>;
@@ -357,6 +602,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       }
       case 'host.exitWhenIdle':
         return exitWhenIdle(request);
+      case 'host.attachment': // P5 O3-D M3: mawsd's own signal; the relay's welcome lists the upstream's capability, never for an app to use
+        return Promise.resolve({ t: 'res', id: request.id, ok: false, error: ipcError('forbidden_sender', 'host.attachment is mawsd’s own signal to the engine host') });
       default:
         return null;
     }
@@ -415,6 +662,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   hosts.onState('engine-host', (state) => {
     const ready = state.state === 'ready';
     clocks.engineHost(ready ? state.pid : null);
+    if (ready) permanentLink = permanentClient && (hosts.peer('engine-host')?.capabilities.includes(ATTACHMENT_CAPABILITY) ?? false); // P5 O3-D M3: at each welcome
     if (ready && !upstreamConnected) {
       upstreamConnected = true;
       generation += 1;
@@ -425,6 +673,15 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       each(upstreamListeners, { connected: false, generation }); // after every endpoint channel's `upstream` close (doc-relay)
     }
     if (!ready && recycling === 0) engineRelay.dropApp(`the engine host is ${state.state}`);
+    if (!ready) return;
+    // P5 O3-D M3: a permanent link is ready by its own resync (D8): said at once, the loaded spine's resync then runs at
+    // the streaming in the seam's adapter, what arrives meanwhile held; a recycled one waits for the app's ready line,
+    // and what is available follows the app again (a permanent link replaced by an older host's)
+    if (permanentLink) hosts.sayReady('engine-host');
+    else if (available !== engineRelay.attachedApp()) availability(engineRelay.attachedApp());
+  });
+  hosts.onStreaming('engine-host', () => {
+    if (permanentLink && !available) availability(true); // P5 O3-D M3: events are available from here on, with or without an app
   });
   hosts.onRaw('engine-host', (message) => {
     engineRelay.deliver(message);
@@ -471,8 +728,12 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       idleExitAt: clocks.idleExitAt(),
       logPath: paths.log,
       endpoint: { present: endpoint !== null, detail: endpoint ? safely(() => endpoint.status(), log) : null },
+      spine: spine.status(),
     };
   }
+  // M5b fix round 2, round 3: whether the e2e's spine seams answer, read once from mawsd's own environment at its start,
+  // never from a request (daemon.e2eSeam, ./e2e-seam.ts)
+  const e2eSeamsAllowed = env.MAWS_E2E === '1';
   async function daemonCommand(name: string, input: unknown): Promise<unknown> {
     switch (name) {
       case 'daemon.status':
@@ -481,6 +742,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         log('restart asked');
         setImmediate(() => void stop('restart', EXIT_RESTART)); // after the answer is written
         return undefined;
+      case 'daemon.e2eSeam':
+        return runE2eSeam(input as CommandInput<'daemon.e2eSeam'>, e2eSeamsAllowed); // M5b fix round 2: the e2e's seams with the spine
       case 'daemon.endpoint': {
         const { command, args, secret } = input as { command: string; args: string[]; secret?: string };
         if (!endpoint) return { code: 2, out: NO_ENDPOINT_MODULE };
@@ -491,6 +754,34 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     }
   }
 
+  // --- the discovery wake (P5 O3-D M6 fix rounds 1, 2; discovery-wake.ts) ---------------------------------------------
+  const wakeForDiscovery = discoveryWake({
+    discovery: () => spine.root()?.discovery,
+    parked: () => hosts.parked('engine-host'),
+    wake: () => hosts.wake('engine-host'),
+    waking: () => clocks.discoveryWaking(),
+    parkNow: () => clocks.parkNow(),
+    log,
+  });
+
+  // --- the services front (P5 O3-D M2, M4; front.ts): machine.sock's commands, events, streams and client port --------
+  let engineAppPid: number | null = null; // the app welcomed on engine-host.sock: the port's requests with no client go to its machine.sock connection
+  const front = createServicesFront({
+    spine,
+    hosts,
+    intercept: (request) => interceptEngine(request),
+    daemon: daemonCommand,
+    identity: () => {
+      const name = machineName(env, hostname());
+      return { ref, name, project: machineProject(ref, name, enrollment()) };
+    },
+    isApp: (appPid) => engineAppPid !== null && engineRelay.attachedApp() && appPid === engineAppPid,
+    readiness: () => presenceChanged(),
+    beforeSpineCommand: wakeForDiscovery,
+    log,
+  });
+  front.events((name, payload) => each(eventListeners, 'machine', { name, payload })); // the endpoint's owner `machine`
+
   // --- the endpoint seam -----------------------------------------------------------------------------------------------
   const holds = new Map<number, string>();
   let nextHold = 0;
@@ -499,19 +790,22 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     machine: { ref, profileDir, stateDir: paths.endpoint, kind },
     async dispatch(host, name, input, client?: ClientRef) {
       const refused = (why: string): HostResponse => ({ t: 'res', id: 'endpoint', ok: false, error: ipcError('internal', why) });
-      if (host === 'machine') {
-        try {
-          return { t: 'res', id: 'endpoint', ok: true, value: await daemonCommand(name, input) };
-        } catch (error) {
-          return refused(error instanceof Error ? error.message : String(error));
-        }
-      }
+      // P5 O3-D M4: the front's table, as a machine.sock client's request (the spine loaded for a spine command), the
+      // endpoint's ref for its device the asking client (the client port answers it noClient until O7 M5)
+      if (host === 'machine') return { t: 'res', id: 'endpoint', ...(await front.dispatch(name, input, client)) } as HostResponse;
       if (host === 'pty-host' && (name === 'pty.ack' || name === 'pty.checkpoint')) return refused(`${name} through the endpoint: the credit is the app's or the daemon's`);
       if (host === 'engine-host' && name === 'host.interest') return refused('a remote viewer’s interest arrives through interest.report');
       if (host === 'engine-host' && name === 'host.stopAll') return stopAll({ input, ...(client && { client: client.id }) });
       if (host === 'engine-host' && name === 'host.exitWhenIdle') return exitWhenIdle({ input, ...(client && { client: client.id }) });
       // a remote viewer never holds a pty's output credit: every attach through the seam reads without taking it
       const sent = host === 'pty-host' && name === 'pty.attach' ? { ...(input as object), credit: false } : input;
+      // P5 O3-D M5a (D44(3), D47): under claimSpine, an intercepted name (a phone's claimed `host.op` of one included)
+      // goes through the spine's intercept, the spine loaded for it, so its rewind is noted with the spine cold; one the
+      // spine cannot take goes on raw, as every one does with claimSpine off
+      if (host === 'engine-host' && claimSpine && spineTakes(name, input)) {
+        const answered = await front.intercepted(name, input, client);
+        if (answered) return { t: 'res', id: 'endpoint', ...answered } as HostResponse;
+      }
       if (host === 'engine-host') return hosts.forward(host, { name, input: sent, ...(client && { client: client.id }) });
       // the pty host it woke stays up for the request (a spawn), and parks after it if nothing lives and no app is on
       ptyRequests += 1;
@@ -524,10 +818,11 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     },
     onEvent: (listener) => (eventListeners.add(listener), () => void eventListeners.delete(listener)),
     // A listener hears the state as it stands when it comes (O10 M10: an endpoint loaded at its first command); at start
-    // step 7 no app is attached and no link is up, so the endpoint's start hears nothing at once.
+    // step 7 no app is attached and no link is up, so the endpoint's start hears nothing at once. P5 O3-D M3: whether
+    // events are available (the permanent link's streaming, or an app's attachment), above.
     onAttachment: (listener) => {
       attachmentListeners.add(listener);
-      if (appAttached) listener(true);
+      if (available) listener(true);
       return () => void attachmentListeners.delete(listener);
     },
     onFrame: (listener) => (frameListeners.add(listener), () => void frameListeners.delete(listener)),
@@ -599,8 +894,13 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     engineClients = serveSocketClients(engineServer, {
       runtime: engineRelay,
       badToken: 'close',
-      admitHello: () => engineRelay.admit(),
+      admitHello: (peer, appPid) => engineRelay.admit(peer, appPid),
       onClientEnd: () => engineRelay.ended(),
+      onClient: (connected, peer, appPid) => {
+        engineAppPid = connected ? (appPid ?? null) : null;
+        presenceChanged(); // its machine.sock connection may be ready already
+        announced(connected, peer, appPid);
+      },
       identity: () => identity,
       counts: counts('engine-host'),
       token: () => token,
@@ -612,24 +912,18 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     ptyClients = serveSocketClients(ptyServer, {
       runtime: ptyRelay,
       badToken: 'close',
-      admitHello: () => ptyRelay.admit(),
+      admitHello: (peer, appPid) => ptyRelay.admit(peer, appPid),
       identity: () => identity,
       counts: counts('pty-host'),
       token: () => token,
       onExit: (when, from) => ptyRelay.exit(when, from),
+      onClient: announced,
       log: (line) => log(`pty-host.sock: ${line}`),
     });
     ptyRelay.bind(ptyClients);
     const machineServer = createServer();
     machineClients = serveSocketClients(machineServer, {
-      many: {
-        runtimeFor: () =>
-          createHostRuntime((on) => {
-            on('daemon.status', async () => status());
-            on('daemon.restart', async () => void (await daemonCommand('daemon.restart', undefined)));
-            on('daemon.endpoint', async (input) => (await daemonCommand('daemon.endpoint', input)) as { code: number; out: string });
-          }),
-      },
+      many: { runtimeFor: (client) => front.runtimeFor(client) },
       badToken: 'close',
       identity: () => identity,
       counts: () => ({ liveSessions: 0, rows: 0 }),
@@ -639,7 +933,10 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         log('exit now on machine.sock: restarting');
         void stop('exit', EXIT_RESTART);
       },
-      onClient: () => clientsChanged(),
+      onClient: (connected, peer, appPid) => {
+        announced(connected, peer, appPid);
+        clientsChanged();
+      },
       log: (line) => log(`machine.sock: ${line}`),
     });
     for (const [server, path] of [
@@ -671,8 +968,10 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       if (endpoint) {
         await Promise.race([endpoint.stop().catch((error: unknown) => log(`the endpoint's stop failed: ${error instanceof Error ? error.message : String(error)}`)), sleep(ENDPOINT_STOP_MS)]);
       }
+      await spine.stop(); // a loaded spine's work settled, the engine link drained into it (endLink), its parts stopped (bounded: the exit ends what is left)
       for (const clients of [engineClients, ptyClients, machineClients]) clients?.closeClient();
-      const drained = hosts.stop(); // both hosts keep running: mawsd never stops a session
+      front.close();
+      const drained = hosts.stop(); // both hosts keep running: mawsd never stops a session (nothing left to drain once the spine ended the link)
       if (drained) await Promise.race([drained, sleep(CLOSE_GRACE_MS + 250)]);
       if (code !== 1 && lockNamesMe()) {
         for (const path of Object.values(paths.sockets)) unlinkQuietly(path);
@@ -698,7 +997,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   log(`serving; engine host ${engineAdopted ? 'adopted' : 'parked'}, pty host ${ptyAdopted ? 'adopted' : 'parked'}`);
   clocks.served(); // its quiet is told from here: no client yet is its first entry, with the start's garbage behind it
 
-  return { paths, ref, hosts, services, status, stop };
+  return { paths, ref, hosts, services, projects, status, stop };
 }
 
 // An endpoint document channel's end, as main's relay holds a window's port (doc-relay.ts's RelayPort).
@@ -784,6 +1083,11 @@ function excludeFromBackups(dir: string, run: NonNullable<DaemonOptions['runComm
   }
 }
 
+function positiveInteger(value: string | undefined): number | null {
+  const parsed = value === undefined ? NaN : Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 function runCommand(command: string, args: string[]): { status: number | null; stdout: string } {
   try {
     return { status: 0, stdout: execFileSync(command, args, { encoding: 'utf8', timeout: 5_000, stdio: ['ignore', 'pipe', 'ignore'] }) };
@@ -834,4 +1138,18 @@ function rmdirQuietly(path: string): void {
   } catch {
     // not empty, or already gone
   }
+}
+
+// Whether `pid` can have written what was written at `writtenMs` (`ps`'s start, whole seconds UTC, read as procStartOf
+// reads it)
+function startedBy(pid: number, writtenMs: number): boolean {
+  return couldHaveWritten(procStartOf(pid), writtenMs);
+}
+
+// A process of start `start` (procStartOf's line) against what was written at `writtenMs`: only a start known to come
+// after it rules the process out; an unknown one (ps failed, or its line does not parse) does not, so a live pid named
+// by the lock holds the signal.
+export function couldHaveWritten(start: string | null, writtenMs: number): boolean {
+  const startMs = start === null ? NaN : Date.parse(`${start} UTC`);
+  return !Number.isFinite(startMs) || startMs <= writtenMs;
 }

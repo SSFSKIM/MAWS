@@ -15,7 +15,7 @@ import { CommandFailure, type registerMainHandler } from '../ipc/router';
 import type { HostSupervisor } from './supervisor';
 
 export interface HostStatusDeps {
-  hosts: Pick<HostSupervisor, 'snapshot' | 'onState' | 'onEvent' | 'facts' | 'restartSupervisor'>;
+  hosts: Pick<HostSupervisor, 'snapshot' | 'onState' | 'onEvent' | 'facts' | 'restartSupervisor' | 'dispatch' | 'onStreaming' | 'streaming'>;
   appBuildId(): string; // the build id of the engine-host bundle this app would start
   appWire(): string; // this app's wire fingerprint
   mainBuild: MainBuild; // E11 §2.7: main's own build, for Diagnostics
@@ -25,7 +25,7 @@ export interface HostStatusDeps {
   openPath(path: string): Promise<string>; // shell.openPath: '' when opened, else the reason
   daemon?(): DaemonStatus | null; // P5 O2 M7: the daemon shape's last daemon.status (null until it first answers)
   daemonUnavailable?: string | null; // P5 O2 M7: why the daemon shape the setting asks for does not run this launch
-  spineRefused?: string | null; // P5 O3-A: why this run does not run the spine (src/services/settings/spine-lock.ts)
+  spineRefused?: string | null; // P5 O3-A: why this run does not run the spine (src/services/settings/spine-lock.ts); the embedded shape's
 }
 
 export interface HostStatusService {
@@ -70,22 +70,46 @@ export function startHostStatus(deps: HostStatusDeps): HostStatusService {
       lastExit,
       daemon: deps.daemon?.() ?? null, // P5 O2 M7
       daemonUnavailable: deps.daemonUnavailable ?? null,
-      spineRefused: deps.spineRefused ?? null, // P5 O3-A
+      // P5 O3-A; P5 O3-D M5b: on the daemon shape the spine is mawsd's, and its last daemon.status says why it does not run
+      spineRefused: deps.daemon ? (deps.daemon()?.spine?.refused ?? null) : (deps.spineRefused ?? null),
     };
   };
 
+  const take = (next: SupervisorStatus) => {
+    supervisor = next;
+    liveAtLastStatus = next.liveSessions;
+    deps.emit(status());
+  };
+  // M5b fix round 2: on the daemon shape `mawsd`'s link to the engine host is permanent, so an app that attaches to a host
+  // already running gets no connect burst, and so no status, until the host's status changes; main asks for it at each
+  // ready, a status heard while the answer is out winning over it.
+  // M5b fix round 4: asked over machine.sock, where a post-D app hears the host's events (mawsd's relay keeps them off
+  // engine-host.sock), so on one ordered connection an event sent before the answer arrives before it and the rule above
+  // covers one sent after (D19's one connection); and asked again when machine.sock streams again, its events between lost.
+  // Fix round 5: from its streaming, not its `ready` state, which comes before main's ready line: the front sends a
+  // connection no event before that line, so a change in between would be in neither the events nor an earlier answer
+  let heard = 0;
+  const ask = () => {
+    const before = heard;
+    void deps.hosts.dispatch('machine', 'host.supervisorStatus', undefined).then((answer) => {
+      if (answer.ok && heard === before && deps.hosts.snapshot('engine-host').state === 'ready') take(answer.value as SupervisorStatus);
+    });
+  };
+  const bothReady = () => deps.hosts.snapshot('engine-host').state === 'ready' && deps.hosts.streaming('machine');
   const offs = [
     deps.hosts.onState('engine-host', (state) => {
       if (state.state !== 'ready') supervisor = null;
       deps.emit(status());
+      if (deps.daemon && bothReady()) ask();
     }),
+    ...(deps.daemon ? [deps.hosts.onStreaming('machine', () => void (bothReady() && ask()))] : []),
     deps.hosts.onEvent('host.supervisorStatus', (next) => {
-      supervisor = next;
-      liveAtLastStatus = next.liveSessions;
-      deps.emit(status());
+      heard += 1;
+      take(next);
     }),
   ];
 
+  if (deps.daemon && bothReady()) ask();
   deps.register('host.status', () => status());
   deps.register('host.restart', async ({ stopSessions }) => {
     const result = await deps.hosts.restartSupervisor({ stopSessions });

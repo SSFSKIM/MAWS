@@ -13,4 +13,5 @@ export const events = ['library.changed'] as const;
 
 // The engine host's reads main rebuilds its index from (P3-L Decision Log 2): main's alone to send, so no window can
 // read the host's store around the index.
-export const mainOnlyCommands = ['library.snapshot', 'library.entry', 'library.text'] as const;
+// P5 O3-D: files' admission read, which main's mirror of the spine's view dispatches to mawsd.
+export const mainOnlyCommands = ['library.snapshot', 'library.entry', 'library.text', 'library.fileLinkedPaths'] as const;

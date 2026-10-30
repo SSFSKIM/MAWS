@@ -15,7 +15,7 @@ export function registerIndexHandlers(index: Index, { register }: Pick<ServicesB
   register('session.get', ({ appSessionId }) => index.sessions.get(appSessionId as AppSessionId));
   register('session.update', ({ appSessionId, patch }) => applyPatch(index, appSessionId as AppSessionId, patch as SessionPatch));
   // W11 (I5): hidden projects included, marked `hidden`, so the renderer keeps their sessions out of Other sessions
-  register('session.projects.list', () => ({ projects: index.projects.listWithRemoved(), revision: index.revision }));
+  register('session.projects.list', () => ({ projects: index.projects.listWithRemoved(), revision: index.revision, rows: index.projects.list({ includeHidden: true }) })); // P5 O3-D: every row too (D13)
   register('session.projects.add', ({ directory }) => index.projects.add(directory));
   register('session.projects.addFolder', ({ directory }) => addFolder(index.projects, directory)); // New chat: "Open folder…"
   register('session.projects.update', ({ id, patch }) => index.projects.update(id as ProjectId, patch));

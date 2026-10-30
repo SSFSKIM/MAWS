@@ -4,16 +4,19 @@
 // attention, `startCheckouts` over the spine's view, and both roots' stops releasing what they held. The exact commands,
 // intercepts and taps each root installs are pinned here for O3-D's retag.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NO_CLIENT, type ClientPort } from '@shared/client/port';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
+import { REGISTRY } from '@shared/ipc/registry';
+import type { CommandName } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import { captureConsole } from '../../test/support/console-capture';
 import { fakeBus, type FakeBus } from '../../test/support/fake-bus';
 import { startFakeBridge, type FakeBridge } from '../../test/support/fake-bridge';
 import { FakeSpineHost } from '../../test/support/fake-spine-host';
+import { SPINE_COMMANDS } from '../../test/support/spine-lists';
 import { FIXTURE_DIR } from '../../test/support/fixtures';
 import { summary, tempDir } from '../../test/support/index-fixture';
 import { startCheckouts, type CheckoutsRoot } from './checkouts-root';
@@ -21,6 +24,7 @@ import { GitService } from './git/service';
 import { Index } from './index/index';
 import { ScmService } from './scm/service';
 import { openSpineData, startSpine, type SpineData, type SpineRoot } from './spine-root';
+import { takeSpineLock } from './settings/spine-lock';
 
 const JOURNAL = join(FIXTURE_DIR, 'permission-roundtrip.jsonl');
 const MACHINE = 'TestMachineRef00000000' as MachineRef;
@@ -40,37 +44,40 @@ const noClientPort = {
 
 // What each root installs through its bus (D25), sorted: the commands O3-D's services front serves for the spine and
 // O3-E's for the checkouts, the intercepts on another owner's commands, and the emitted events the root taps. A run
-// refused the spine (O3-A) registers the spine's commands but those of the parts it does not start.
-const SPINE_COMMANDS = [
-  'attention.acknowledge', 'attention.list', 'attention.request',
-  'git.worktree.add', 'git.worktree.branch', 'git.worktree.deleteBranch', 'git.worktree.list', 'git.worktree.remove', 'git.worktree.status',
-  // P5 O9's lane A driver (O3 Decision Log 13): composed only while the run holds spine.lock, with no intercept or tap
-  'laneA.answer', 'laneA.btw', 'laneA.catalog', 'laneA.command', 'laneA.compact', 'laneA.interrupt', 'laneA.list', 'laneA.media', 'laneA.model',
-  'laneA.read', 'laneA.send', 'laneA.state', 'laneA.stopAgent', 'laneA.stopTask', 'laneA.tell', 'laneA.unwatch', 'laneA.watch',
-  'library.get', 'library.list', 'library.spaces',
-  'mods.list', 'mods.setSessionOverride',
-  'ownerChannel.answered', 'ownerChannel.cancel', 'ownerChannel.markRead', 'ownerChannel.state',
-  'session.acquire', 'session.appEvents', 'session.archive', 'session.archiveOlder', 'session.create', 'session.delete',
-  'session.deletions.keep', 'session.deletions.list', 'session.deletions.preview', 'session.digests', 'session.drafts.get', 'session.drafts.set',
-  'session.fork', 'session.get', 'session.history.append', 'session.history.list',
-  'session.intent.discard', 'session.intent.get', 'session.intent.list', 'session.intent.patch', 'session.intent.release', 'session.intent.resolveWorktree',
-  'session.launchMode', 'session.list', 'session.observedFacts',
-  'session.projects.add', 'session.projects.addFolder', 'session.projects.list', 'session.projects.remove', 'session.projects.update',
-  'session.recentTurns', 'session.rename', 'session.replay.fixtures', 'session.replay.start', 'session.revealPath', 'session.search',
-  'session.setVisible', 'session.start', 'session.takeOver', 'session.takeOverPane', 'session.trust.check', 'session.update',
-  'settings.engineApplied', 'settings.userEngineDefaults',
-  'side.screenshot.preview', 'side.sendToMain', 'side.thread.open',
-];
+// refused the spine (O3-A) registers the spine's commands but those of the parts it does not start. SPINE_COMMANDS is
+// test/support/spine-lists.ts's, which mawsd's front is held to as well (P5 O3-D M2).
 const SPINE_REFUSED_COMMANDS = [
-  'library.get', 'library.list', 'library.spaces',
-  'session.appEvents', 'session.digests', 'session.drafts.get', 'session.drafts.set', 'session.get', 'session.launchMode', 'session.list', 'session.observedFacts',
+  'library.fileLinkedPaths', 'library.get', 'library.list', 'library.spaces',
+  'machineSettings.get', 'machineSettings.set', // P5 O3-D M5b: read, and a set refused (the machine half is read-only)
+  'session.appEvents', 'session.digests', 'session.drafts.get', 'session.drafts.set', 'session.engineStatuses', 'session.get', 'session.launchMode', 'session.list', 'session.observedFacts',
   'session.projects.add', 'session.projects.addFolder', 'session.projects.list', 'session.projects.remove', 'session.projects.update',
-  'session.recentTurns', 'session.search', 'session.setVisible', 'session.update',
+  'session.recentTurns', 'session.search', 'session.setVisible', 'session.update', 'session.visible',
   'settings.engineApplied', 'settings.userEngineDefaults',
 ];
-const SPINE_INTERCEPTS = ['session.answer'];
+// P5 O3-D M4 (D18): the rewind's last-act note and the conversation acts that clear it, in launch mode index; M5a (D47):
+// lane B's claimed op, for a phone's rewind or act
+const SPINE_INTERCEPTS = ['session.answer', 'session.rewind', 'session.send', 'session.steer', 'session.queue.promote', 'session.bash', 'host.op'];
+const SPINE_REFUSED_INTERCEPTS = ['session.answer']; // no session service: nothing to repair
 const SPINE_TAPS = ['attention.changed', 'session.eventBatch', 'session.intent.changed', 'session.projects.changed'];
 const SPINE_REFUSED_TAPS = ['attention.changed', 'session.eventBatch', 'session.intent.changed']; // no projects to follow: the index is unavailable
+// P5 O3-D M1 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §I): what the services front emits of
+// its own beside the spine's events; with them, the machine host's event list (`REGISTRY.machineEvents`). M5b: the
+// machine half's and the visible set's changes are the spine's own emits (the parts that hold them emit them), so the
+// front's own is the client port's request alone.
+const FRONT_EVENTS = ['clientPort.request'];
+// Every event the spine's parts emit through the bus, read from the library's source: each `emit('<event>'` under
+// src/services/ but the checkouts' root, whose events (`git.changed`, `files.changed`, `scm.remote.output`) are main's
+// until O3-E moves the checkouts. A part emits through a function it was handed, always with the event's name written.
+function spineEmits(): string[] {
+  const root = __dirname;
+  const names = new Set<string>();
+  for (const entry of readdirSync(root, { recursive: true, withFileTypes: true })) {
+    const path = join(entry.parentPath, entry.name);
+    if (!entry.isFile() || !entry.name.endsWith('.ts') || entry.name.endsWith('.test.ts') || relative(root, path) === 'checkouts-root.ts') continue;
+    for (const [, name] of readFileSync(path, 'utf8').matchAll(/\bemit\(\s*'([a-zA-Z]+(?:\.[a-zA-Z]+)+)'/g)) names.add(name!);
+  }
+  return [...names].sort();
+}
 const CHECKOUTS_COMMANDS = [
   'files.list', 'files.openExternal', 'files.read', 'files.reveal', 'files.unwatch', 'files.watch', 'files.write',
   'git.branches', 'git.diff', 'git.log', 'git.lsFiles', 'git.status', 'git.unwatch', 'git.watch',
@@ -114,8 +121,7 @@ describe('the spine and the checkouts composed under plain Node', () => {
   };
 
   // Both roots as main composes them, each on its bus (one bus for both unless a test tells them apart)
-  const compose = (data: SpineData, host: FakeSpineHost, bus: FakeBus, { checkouts = true, checkoutsBus = bus } = {}) => {
-    const engineEnv = Promise.resolve({ HOME: join(dir.path, 'home'), CLAUDE_CONFIG_DIR: join(dir.path, 'claude') });
+  const compose = (data: SpineData, host: FakeSpineHost, bus: FakeBus, { checkouts = true, checkoutsBus = bus, engineEnv = Promise.resolve<Record<string, string>>({ HOME: join(dir.path, 'home'), CLAUDE_CONFIG_DIR: join(dir.path, 'claude') }) } = {}) => {
     const spine = startSpine({
       profile,
       machine: MACHINE,
@@ -169,6 +175,101 @@ describe('the spine and the checkouts composed under plain Node', () => {
     // the view reads what the renderer was told
     expect(spine.view.record(appSessionId)?.title.text).toBe('replay · permission-roundtrip');
     expect(spine.view.attention(appSessionId).map((item) => item.kind)).toContain('permission');
+    // P5 O3-D M1: everything the spine emitted is the machine host's to emit (the front's gate at M2)
+    for (const { name } of bus.emitted) expect(REGISTRY.machineEvents, name).toContain(name);
+  });
+
+  // P5 O3-D M2 (Interfaces §A, D26): a process that loads the spine more than once holds the lock itself and opens
+  // each load's data under it; a second one-shot open in the same process would refuse itself
+  it('opens a second load under the lock the process holds, after the first load stopped', async () => {
+    const lock = await takeSpineLock(profile, { build: BUILD });
+    expect(lock.refused).toBeNull();
+    const first = await openSpineData(profile, { build: BUILD, lock });
+    expect(first.refused).toBeNull();
+    const one = compose(first, new FakeSpineHost(), fakeBus(), { checkouts: false });
+    stopBoth(one);
+    const second = await openSpineData(profile, { build: BUILD, lock });
+    expect(second.refused).toBeNull();
+    const two = compose(second, new FakeSpineHost(), fakeBus(), { checkouts: false });
+    expect(two.spine.view.unavailable()).toBeNull();
+    stopBoth(two);
+    lock.release();
+  });
+
+  // P5 O3-D M2 (Interfaces §A, D27): the root reports a command its parts registered while it runs, and settles at its
+  // end, so a release never closes the index under it
+  it('is busy while a command it registered runs and settles once it answered', async () => {
+    const data = await openSpineData(profile, { build: BUILD });
+    const host = new FakeSpineHost();
+    const bus = fakeBus();
+    const { spine } = compose(data, host, bus, { checkouts: false });
+    await spine.settled();
+    expect(spine.busy()).toBe(false);
+    // the session service answers nothing before the engine host streams, so a start waits on it
+    const start = bus.invoke('session.start', { appSessionId: '11111111-1111-4111-8111-111111111111', message: null, options: {} });
+    await vi.waitFor(() => expect(spine.busy()).toBe(true));
+    let settled = false;
+    const settling = spine.settled().then(() => void (settled = true));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(settled).toBe(false);
+    await host.ready();
+    expect(await start).toMatchObject({ ok: true, value: { status: 'refused', reason: 'unknown_session' } });
+    await settling;
+    expect(spine.busy()).toBe(false);
+  });
+
+  // P5 O3-D M2 review (Interfaces §A, D27): a yield settles the root and gives spine.lock up while the session service's
+  // startup still waits at an async boundary (here the login-shell capture); the startup must not resume into the
+  // recovery, a subscription or a write once the root stopped and another process may hold the lock
+  it('a root stopped while the session service’s startup waits resumes into no recovery and no subscription after the handover', async () => {
+    const data = await openSpineData(profile, { build: BUILD });
+    const host = new FakeSpineHost();
+    await host.ready(); // the host streams: nothing but the environment holds the startup
+    let capture!: (env: Record<string, string>) => void;
+    const engineEnv = new Promise<Record<string, string>>((resolve) => (capture = resolve));
+    const composed = compose(data, host, fakeBus(), { checkouts: false, engineEnv });
+    await composed.spine.settled();
+    expect(composed.spine.busy()).toBe(false);
+    stopBoth(composed);
+    data.lock.release(); // the yield's handover
+    const candidate = await takeSpineLock(profile, { build: 'the next writer', waitMs: 10, log: () => {} });
+    expect(candidate.refused).toBeNull();
+    const asked = host.calls.length;
+    capture({ HOME: join(dir.path, 'home'), CLAUDE_CONFIG_DIR: join(dir.path, 'claude') });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(host.calls.slice(asked).map((call) => call.name)).toEqual([]); // no recovery's engine.sessions, nothing at all
+    expect(host.held()).toBe(0); // no late subscription
+    candidate.release();
+  });
+
+  // P5 O3-D fix wave (D27): the owner channel's transcript-chain read for a rewind this run cannot place continues into
+  // the index (the marks it retires), so the root is busy until it settled and a release never closes the index under it
+  it('is busy while the owner channel’s read for a rewind is in flight, and settles once it folded', async () => {
+    const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000b2';
+    const seeded = new Index(join(profile, 'index.sqlite'));
+    const appSessionId = seeded.sessions.upsertFromSummary(summary({ sessionId: engineSessionId as SessionId })).record.appId;
+    seeded.close();
+    const data = await openSpineData(profile, { build: BUILD });
+    const host = new FakeSpineHost();
+    await host.ready();
+    let capture!: (env: Record<string, string>) => void;
+    const engineEnv = new Promise<Record<string, string>>((resolve) => (capture = resolve)); // holds the transcript's path
+    const { spine } = compose(data, host, fakeBus(), { checkouts: false, engineEnv });
+    await spine.settled();
+    expect(spine.busy()).toBe(false);
+    const rewind = {
+      id: 'ev-rewind-1', sessionId: engineSessionId, at: '2026-10-30T10:00:00.000Z', seq: 1, agentId: null, parentToolUseId: null,
+      kind: 'boundary.rewind', targetMessageUuid: '6f1d2c3b-0000-4000-8000-0000000000c3', precedingAssistantUuid: null, prefillText: null,
+    } as const;
+    host.emit('session.eventBatch', { appSessionId, events: [rewind] } as never);
+    expect(spine.busy()).toBe(true);
+    let settled = false;
+    const settling = spine.settled().then(() => void (settled = true));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(settled).toBe(false);
+    capture({ HOME: join(dir.path, 'home'), CLAUDE_CONFIG_DIR: join(dir.path, 'claude') });
+    await settling;
+    expect(spine.busy()).toBe(false);
   });
 
   // P5 O9 (O3 Decision Log 13): lane A drives, from the spine, a terminal session the index held at start, and its
@@ -216,6 +317,33 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(pushed().at(-1)).toEqual({ idleExitMs: 7 * 60_000 });
   });
 
+  // P5 O3-D M5b (Interfaces §F, §G): what main's mirror and its settings mirror read of the spine over the services front
+  // on the daemon shape: the machine half with its revision and its changes, the visible set with its changes, and files'
+  // admission read
+  it('answers the machine half, the visible set and files’ admission read, and emits each change', async () => {
+    const data = await openSpineData(profile, { build: BUILD });
+    const host = new FakeSpineHost();
+    const bus = fakeBus();
+    compose(data, host, bus, { checkouts: false });
+    await host.ready();
+    expect(await bus.main('machineSettings.get', undefined)).toEqual({ ok: true, value: { settings: data.machineSettings.state(), version: 0 } });
+    const set = await bus.main('machineSettings.set', { patch: { supervisor: { idleExitMinutes: 7 } } });
+    expect(set).toMatchObject({ ok: true, value: { settings: { supervisor: { idleExitMinutes: 7 } } } });
+    expect(JSON.parse(readFileSync(data.paths.machine, 'utf8'))).toMatchObject({ supervisor: { idleExitMinutes: 7 } }); // persisted before the answer
+    expect(bus.emittedOf('machineSettings.changed')).toEqual([{ settings: data.machineSettings.state() }]);
+    expect(await bus.main('machineSettings.get', undefined)).toMatchObject({ ok: true, value: { version: 1 } });
+
+    const id = '11111111-1111-4111-8111-111111111111';
+    expect(await bus.main('session.visible', undefined)).toEqual({ ok: true, value: { sessions: [] } });
+    expect(await bus.invoke('session.setVisible', { appSessionId: id, visible: true })).toMatchObject({ ok: true });
+    expect(await bus.main('session.visible', undefined)).toEqual({ ok: true, value: { sessions: [id] } });
+    expect(await bus.invoke('session.setVisible', { appSessionId: id, visible: false })).toMatchObject({ ok: true });
+    expect(bus.emittedOf('session.visibleChanged')).toEqual([{ appSessionId: id, visible: true }, { appSessionId: id, visible: false }]);
+    expect(await bus.main('session.engineStatuses', undefined)).toEqual({ ok: true, value: { statuses: [] } }); // M5b fix round 6
+
+    expect(await bus.main('library.fileLinkedPaths', { appSessionId: id })).toEqual({ ok: true, value: { paths: [] } });
+  });
+
   it('installs exactly its commands, intercepts and taps, and both stops release every listener the spine held on the host', async () => {
     const host = new FakeSpineHost();
     const spineBus = fakeBus();
@@ -234,6 +362,19 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(host.held()).toBe(0);
     expect(spineBus.intercepted()).toEqual([]);
     expect(spineBus.tapped()).toEqual([]);
+  });
+
+  // P5 O3-D M1 (Interfaces §I): the spine's commands are `machine`-owned, so the services front serves them (M2) and main's
+  // embedded binding answers them until the cutover; the checkouts' stay main's until O3-E
+  it('owns by machine every command the spine registers, and by main every command the checkouts register', () => {
+    for (const name of SPINE_COMMANDS) expect(REGISTRY.commands[name as CommandName].owner, name).toBe('machine');
+    for (const name of CHECKOUTS_COMMANDS) expect(REGISTRY.commands[name as CommandName].owner, name).toBe('main');
+  });
+
+  it('lists as the machine host’s events exactly what the spine’s parts emit and the services front’s own', () => {
+    const emitted = spineEmits();
+    expect(emitted).toEqual(expect.arrayContaining(['attention.changed', 'session.changed', 'session.eventBatch', 'laneA.plane']));
+    expect([...REGISTRY.machineEvents].sort()).toEqual([...emitted, ...FRONT_EVENTS].sort());
   });
 
   // D21: one stop per root, which still stops every later part when one throws, as main's shutdown steps did per part
@@ -262,7 +403,7 @@ describe('the spine and the checkouts composed under plain Node', () => {
   });
 
   it('a refused run composes with the view unavailable and registers none of the parts it does not start', async () => {
-    held.push({ data: await openSpineData(profile, { build: BUILD }), spine: { view: null as never, stop: () => {} }, checkouts: null }); // a live holder of spine.lock: this process
+    held.push({ data: await openSpineData(profile, { build: BUILD }), spine: { view: null as never, settled: async () => {}, busy: () => false, stop: () => {} }, checkouts: null }); // a live holder of spine.lock: this process
     const refusal = captureConsole('error', /^\[spine\] spine\.lock is held by pid /);
     const data = await openSpineData(profile, { build: BUILD }); // waits SPINE_LOCK_WAIT_MS for the holder, then is refused
     expect(refusal.lines()).toHaveLength(1);
@@ -276,7 +417,11 @@ describe('the spine and the checkouts composed under plain Node', () => {
     await expect(spine.view.acquire('11111111-1111-4111-8111-111111111111' as AppSessionId, 'read')).rejects.toThrow(`MAWS cannot reach its sessions this run: ${data.refused}`);
     await expect(bus.invoke('settings.engineApplied', undefined)).resolves.toMatchObject({ ok: false, error: { message: `the engine settings are not applied this run: ${data.refused}` } });
     expect(bus.registered().sort()).toEqual(SPINE_REFUSED_COMMANDS);
-    expect(bus.intercepted()).toEqual(SPINE_INTERCEPTS);
+    // P5 O3-D M5b: the machine half is read, and a set is refused with nothing changed or told
+    expect(await bus.main('machineSettings.get', undefined)).toMatchObject({ ok: true, value: { settings: data.machineSettings.state() } });
+    expect(await bus.main('machineSettings.set', { patch: { supervisor: { idleExitMinutes: 7 } } })).toMatchObject({ ok: false });
+    expect(bus.emittedOf('machineSettings.changed')).toEqual([]);
+    expect(bus.intercepted()).toEqual(SPINE_REFUSED_INTERCEPTS);
     expect(bus.tapped().sort()).toEqual(SPINE_REFUSED_TAPS);
   });
 });

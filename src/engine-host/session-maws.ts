@@ -50,7 +50,7 @@ export interface MawsListeners {
 export interface SessionMawsHost {
   appSessionId: AppSessionIdOf;
   appVersion?: string;
-  hasClient?: () => boolean; // E10: whether an app is connected
+  appAttached?: () => boolean; // E10: whether an app is attached (P5 O3-D M3: its presence)
   artifactScope?: readonly AppSessionIdOf[]; // P2-E1: EngineSessionOptions.artifactScope, handed to the artifact tools
   artifacts?: () => ArtifactStore | null; // P3-A (M6): EngineSessionOptions.artifacts
   datasetRefresh?: Pick<DatasetRefreshRequests, 'ask'>; // E3: EngineSessionOptions.datasetRefresh
@@ -82,9 +82,9 @@ export class SessionMaws {
 
   constructor(private readonly host: SessionMawsHost) {
     // E1 start: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
-    this.panes = new PaneBridge({ show: (request) => host.emit('paneShow', { appSessionId: host.appSessionId, ...request }), hasClient: host.hasClient /* E10 */ });
-    this.captures = new HostBridge({ send: (request) => host.emit('artifactCapture', { appSessionId: host.appSessionId, ...request }), answerMs: CAPTURE_ANSWER_MS, hasClient: host.hasClient /* E10 */ }); // E2
-    this.exports = new HostBridge({ send: (request) => host.emit('artifactExport', request), answerMs: EXPORT_ANSWER_MS, hasClient: host.hasClient }); // P3-A M7
+    this.panes = new PaneBridge({ show: (request) => host.emit('paneShow', { appSessionId: host.appSessionId, ...request }), hasClient: host.appAttached /* E10 */ });
+    this.captures = new HostBridge({ send: (request) => host.emit('artifactCapture', { appSessionId: host.appSessionId, ...request }), answerMs: CAPTURE_ANSWER_MS, hasClient: host.appAttached /* E10 */ }); // E2
+    this.exports = new HostBridge({ send: (request) => host.emit('artifactExport', request), answerMs: EXPORT_ANSWER_MS, hasClient: host.appAttached }); // P3-A M7
     this.askTable = new AskTable({
       onChange: () => {
         this.publishAsks(); // E1 M4b

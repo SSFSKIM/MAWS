@@ -75,8 +75,8 @@ export type HostStatus = z.infer<typeof HostStatusSchema>;
 // command through the host's own handler table and keeps its result; a known id answers what the ledger holds and runs
 // nothing. `host.opQuery` is RL4's query, which tombstones an absent id when asked, so `not-received` is said only once a
 // late copy can no longer run. Neither is bridged to a window: only the endpoint sends them (`internal`).
-const OpIdSchema = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/); // sminos's OP_ID_RE, as org-protocol's action has it
-const OpBindingShape = { member: z.string().min(1), device: z.string().min(1), fingerprint: z.string().min(1) };
+export const OpIdSchema = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/); // sminos's OP_ID_RE, as org-protocol's action has it
+export const OpBindingShape = { member: z.string().min(1), device: z.string().min(1), fingerprint: z.string().min(1) };
 export const OpRequestDigestSchema = z.strictObject({ session: z.string(), request: z.string(), tool: z.string(), input_sha256: z.string().regex(/^[0-9a-f]{64}$/) });
 export const HostOpInputSchema = z.strictObject({
   opId: OpIdSchema,
@@ -120,6 +120,10 @@ export const commands = {
   'host.interest': host(z.strictObject({ sessions: z.array(AppSessionIdSchema).max(10_000) }), z.void()),
   'host.op': host(HostOpInputSchema, HostOpOutputSchema), // P5 O10 M7: the endpoint's only
   'host.opQuery': host(z.strictObject({ opId: OpIdSchema, opCreated: z.string(), tombstoneIfAbsent: z.boolean() }), HostOpQueryOutputSchema), // P5 O10 M7
+  // P5 O3-D (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §D; O3X5): whether an app is attached, told
+  // by a client that listed the capability `host.attachment` (ATTACHMENT_CAPABILITY), which only `mawsd` does; the engine
+  // host keys its app-bound gates on it for such a client (served from O3-D M3). Main-only.
+  'host.attachment': host(z.strictObject({ attached: z.boolean() }), z.void()),
   'host.status': main(z.void(), HostStatusSchema),
   'host.restart': main(z.strictObject({ stopSessions: z.boolean() }), z.void()), // the banner's Restart now and Settings' Stop all
   'host.openLog': main(z.void(), z.void()), // shell.openPath on host.log

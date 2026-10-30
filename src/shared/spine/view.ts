@@ -15,6 +15,9 @@ import type { AcquireReason } from '@shared/ipc/schema/session';
 import type { SetupIntent } from '@shared/sessions/intent';
 import type { AcquireOutcome } from '@shared/sessions/setup';
 
+// What `unavailable()` says in launch mode `scenario` (O3-C's D10), in process and in main's mirror alike (P5 O3-D M5b)
+export const SCENARIO_UNAVAILABLE = 'launch mode scenario: the sessions shown are a scenario’s';
+
 export interface SpineView {
   unavailable(): string | null; // null while the spine can be read; else why not
   record(appSessionId: AppSessionId): SessionRecord | null;

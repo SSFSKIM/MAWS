@@ -4,7 +4,9 @@
 // or one pending when the process ended, settles at once (the server answers an aborted call with nothing). Nothing
 // here waits on a window: every request has its deadline (X13). `show_pane`'s pane bridge and `artifact_screenshot`'s
 // capture bridge are instances. E10: the host may run with no app connected (the detached supervisor), and then nothing
-// can answer; a request made while `hasClient()` is false settles `noClient` at once and is never sent.
+// can answer; a request made while `hasClient()` is false settles `noClient` at once and is never sent. P5 O3-D M3: the
+// entry hands it the app's presence (Interfaces §D), which for `mawsd`'s permanent connection is its signal, not the
+// connection.
 import type { RequestId } from '@shared/graph/ids';
 
 export type BridgeOutcome<Answer> = { kind: 'answered'; answer: Answer } | { kind: 'timeout' } | { kind: 'withdrawn' } | { kind: 'ended' } | { kind: 'noClient' };

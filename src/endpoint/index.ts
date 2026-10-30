@@ -7,6 +7,7 @@ import type { DelegatedInput } from './provision';
 export type { Endpoint, EndpointOptions };
 export type { DelegatedInput, EnrollmentState };
 export type { EndpointModule, EndpointServices } from './services';
+export type { CheckoutSource } from './sources';
 export type { EndpointStatus } from './status';
 
 export function createEndpoint(options?: EndpointOptions): Endpoint {

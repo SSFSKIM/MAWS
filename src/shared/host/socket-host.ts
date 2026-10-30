@@ -21,7 +21,7 @@ import { dirname, join } from 'node:path';
 import { format } from 'node:util';
 import { buildIdOf, isAlive, procStartOf, readLock, START_EXIT_HELD, takeLock, type LockNames } from '../../engine-host/supervisor-files';
 import { wireFingerprint } from '../ipc/wire-fingerprint';
-import { WIRE_CAPABILITIES, WIRE_MINOR } from '../ipc/wire';
+import { WIRE_MINOR, type WirePeer } from '../ipc/wire';
 import { clearSocketPath, makePrivateDirectory } from './private-listen';
 import { createHostRuntime, type HostRegister } from './runtime';
 import { SOCKET_PROTOCOL } from './socket-protocol';
@@ -59,11 +59,12 @@ export interface SocketHostOptions {
   modulePath: string; // this bundle's entry file, hashed into the build id
   register: HostRegister;
   badToken: 'refuse' | 'close'; // what a wrong token gets (socket-server.ts)
+  capabilities: readonly string[]; // P5 O3-D: what the welcome lists, this host's own (PEER_CAPABILITIES)
   counts(): { liveSessions: number; rows: number }; // the welcome's and the refusal's
   shutdown(): Promise<unknown>; // exit order step (2)
   clean?(owner: LockOwner): void; // step (3), a clean exit's, before the files go
   exitWhenIdle(): void; // a client's `exit {when: 'idle'}`
-  onClient?(connected: boolean): void; // a client was welcomed, or the client left
+  onClient?(connected: boolean, peer?: WirePeer): void; // a client was welcomed (P5 O3-D M3: with what its hello said of it), or the client left
   listening?(host: SocketHost): void; // serving, synchronously after the listen and before anything can be asked
   log(line: string): void;
 }
@@ -150,7 +151,7 @@ export async function startSocketHost(opts: SocketHostOptions, proc: HostProcess
   const clients = serveSocketClients(server, {
     runtime,
     badToken: opts.badToken,
-    identity: () => ({ protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, buildId, capabilities: WIRE_CAPABILITIES, wire: wireFingerprint(), pid, startedAt }), // P5 O1 M6: the major, minor and capabilities (OX1)
+    identity: () => ({ protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, buildId, capabilities: opts.capabilities, wire: wireFingerprint(), pid, startedAt }), // P5 O1 M6: the major, minor and capabilities (OX1)
     counts: () => opts.counts(),
     token: () => token,
     onExit: (when) => {

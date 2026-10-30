@@ -239,10 +239,12 @@ test('packaged, the daemon shape: mawsd is the app binary run as Node, named maw
     expect(mawsdLog()).toContain('loading the endpoint for its first command');
     expect(mawsdLog()).not.toContain('could not be loaded');
 
-    // an unbusy quit parks the engine host; mawsd stays for its idle time
+    // the quit stops nothing (P5 O3-D Q1, D12): mawsd and its engine host outlive the app, the host parked by mawsd's
+    // idle clock only after the idle time (D38: 10 min; e2e:supervisor-daemon (a) proves the park with its idle seam set);
+    // the scene's cleanup ends them
     await app.evaluate(({ app: electronApp }) => electronApp.quit());
     await exited;
-    await expect.poll(() => isAlive(enginePid), { timeout: 10_000, message: 'the unbusy quit parks the engine host' }).toBe(false);
+    expect([daemonPid, enginePid].filter((pid) => !isAlive(pid)), 'mawsd and its engine host outlive the app').toEqual([]);
     expect(canonicalDifferences(canonicalBefore, snapshotCanonical(canonical)), "the account's canonical mawsd (its plist, sockets, lock and profile) is untouched").toEqual([]);
   } finally {
     if (maws) await maws.cleanup().catch((error: unknown) => console.error(error));

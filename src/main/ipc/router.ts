@@ -18,8 +18,8 @@
 // P5 O6 M3 ("Machine links"): any other command for another machine, its input validated here, goes to the connection
 // manager (`RouterOptions.remote`, src/main/machines/manager.ts), which answers it through that machine's link, or
 // `host_unavailable` while the machine is not up; with no manager it answers `host_unavailable` itself. `dispatchLocal` is
-// the route minus the sender check, the entry by which another profile's app reaches this machine's services through the
-// stand-in (src/main/machines/serve-standin.ts).
+// the route minus the sender check, the local link's entry to this machine's services (src/main/machines/local-link.ts);
+// another profile's app reaches them through this profile's mawsd (P5 O3-D M6, O6's stand-in gone).
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type { HostDispatch, HostOwner } from '@shared/host/host-supervisor'; // P5 O2 M3
 import { HostCommandError, thrownError } from '@shared/host/runtime';
@@ -237,7 +237,7 @@ export const registerMainHandler: <N extends CommandName>(name: N, handler: Main
 export const registerMachineHandler: <N extends CommandName>(name: N, handler: MachineHandler<N>) => void = production.registerMachine;
 // C5: the stub source's seam (above).
 export const interceptCommand: <N extends CommandName>(name: N, handler: MainHandler<N>) => () => void = production.intercept;
-// P5 O6 M3: the stand-in's entry to this machine's services (src/main/machines/serve-standin.ts), and the local link's.
+// P5 O6 M3: the local link's entry to this machine's services (src/main/machines/local-link.ts).
 export const dispatchLocal: (name: CommandName, input: unknown, ctx: MainContext) => Promise<CommandResult<CommandName>> = production.dispatchLocal;
 
 // The sender must be the top frame of an app window (not a subframe, not a webContents without a window) and its

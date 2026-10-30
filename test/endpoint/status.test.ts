@@ -33,7 +33,9 @@ describe('status()', () => {
     services = fakeServices();
     const endpoint = createEndpoint();
     expect(endpoint.status()).toMatchObject({ enrollment: 'none' });
+    expect(endpoint.enrollment()).toBeNull();
     await endpoint.start(services);
+    expect(endpoint.enrollment()).toBeNull(); // machine.identity's: no project id while unenrolled
     expect(endpoint.status()).toEqual({
       enrollment: 'none',
       hub: { connected: false },
@@ -88,6 +90,7 @@ describe('status()', () => {
     await endpoint.start(services);
     const status = endpoint.status() as Record<string, unknown>;
     expect(status).toMatchObject({ enrollment: 'org-listed', name: 'mini', org: 'org-local', stateVersion: 2, headHash: await stateHash(head.state), legacyKey: true, legacyRetired: false, delegated: true });
+    expect(endpoint.enrollment()).toEqual({ state: 'org-listed', name: 'mini', org: 'org-local', ref }); // machine.identity's source (D38)
     expect(leaks(status)).toEqual([]);
     expect(JSON.stringify(status)).not.toContain(privateJwk.d);
     // The walk itself catches what it should.
@@ -101,6 +104,7 @@ describe('status()', () => {
     const endpoint = createEndpoint();
     await endpoint.start(services);
     expect(endpoint.status()).toMatchObject({ enrollment: 'none', refusing: 'state-mode' });
+    expect(endpoint.enrollment()).toBeNull();
     expect(leaks(endpoint.status())).toEqual([]);
     expect(services.lines.join('\n')).toContain(services.machine.stateDir);
     await endpoint.stop();

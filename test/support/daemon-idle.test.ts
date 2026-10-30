@@ -29,6 +29,7 @@ import {
   readerMismatches,
   SPINE_RELEASED_RUN,
   spineLine,
+  mawsdSpineLine,
   topMem,
   topOutside,
 } from './daemon-idle';
@@ -459,14 +460,40 @@ describe("the spine's line", () => {
   });
 
   it('reads the loaded and released medians and the drop, each window’s CPU, the fixture’s counts, the collection, the validity and both loads', () => {
-    expect(spineLine({ loaded, released, counts, gc: true, reasons: [] })).toBe(
-      '[daemon-idle] spine loaded footprint 61234 KiB (median of 21) · released 48002 KiB (median of 11), -13232 KiB · cpu 0.05 s over 600 s loaded, 0.01 s over 300 s released · fixture 5000 sessions in 50 projects, 300 attention items (40 pending), 1000 library rows, 50 drafts, 2000 prompt-history lines · gc ran twice before the released window · valid · load 3.1 (30 s pair 2.4) loaded, 2.9 (30 s pair 2.6) released',
+    expect(spineLine({ loaded, released, counts, collection: 'collected: heap 52.0 to 31.0 MiB, used 40.0 to 28.0 MiB', reasons: [] })).toBe(
+      '[daemon-idle] spine loaded footprint 61234 KiB (median of 21) · released 48002 KiB (median of 11), -13232 KiB · cpu 0.05 s over 600 s loaded, 0.01 s over 300 s released · fixture 5000 sessions in 50 projects, 300 attention items (40 pending), 1000 library rows, 50 drafts, 2000 prompt-history lines · before the released window, collected: heap 52.0 to 31.0 MiB, used 40.0 to 28.0 MiB · valid · load 3.1 (30 s pair 2.4) loaded, 2.9 (30 s pair 2.6) released',
     );
   });
 
-  it('says when no collection ran, and names why a run is invalid', () => {
-    expect(spineLine({ loaded, released, counts, gc: false, reasons: ['released: the 1-minute load reached 5.2 and its 30 s pair 4.9 (a valid run stays under 5 throughout, or its 30 s pair under 4.7)'] })).toContain(
-      ' · no gc (the runtime exposed none) · invalid: released: the 1-minute load reached 5.2 and its 30 s pair 4.9 (a valid run stays under 5 throughout, or its 30 s pair under 4.7) · load 3.1 (30 s pair 2.4) loaded, 2.9 (30 s pair 2.6) released',
+  it('says when the collection failed, and names why a run is invalid', () => {
+    expect(spineLine({ loaded, released, counts, collection: 'the collection failed: no gc', reasons: ['released: the 1-minute load reached 5.2 and its 30 s pair 4.9 (a valid run stays under 5 throughout, or its 30 s pair under 4.7)'] })).toContain(
+      ' · before the released window, the collection failed: no gc · invalid: released: the 1-minute load reached 5.2 and its 30 s pair 4.9 (a valid run stays under 5 throughout, or its 30 s pair under 4.7) · load 3.1 (30 s pair 2.4) loaded, 2.9 (30 s pair 2.6) released',
     );
+  });
+});
+
+// P5 O3-D M2 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §K): mawsd with the spine, read loaded,
+// released and re-executed, each window mawsd's median and the engine host's; the verdict D5 reads is the released
+// mawsd against the headroom, then the re-executed one.
+describe("mawsd with the spine's line", () => {
+  const reading = (mawsd: number, engine: number | null, load: number, loadPair: number) => ({
+    footprintKiB: mawsd + (engine ?? 0), cpuS: 0.04, samples: 11, load, loadPair,
+    processes: [{ argv0: 'mawsd', pid: 61, footprintKiB: mawsd, cpuS: 0.03 }, ...(engine === null ? [] : [{ argv0: 'maws-supervisor', pid: 62, footprintKiB: engine, cpuS: 0.01 }])],
+  });
+  const counts = { sessions: 5_000, projects: 50, attention: 300, pending: 40, library: 1_000, drafts: 50, history: 2_000 };
+  const windows = { loaded: reading(98_765.4, 60_123.6, 3.1, 2.4), released: reading(41_000.2, 60_200, 4.2, 3.0), reexecuted: reading(31_500, null, 2.9, 2.2) };
+  const valid = { loaded: [], released: [], reexecuted: [] };
+
+  it('reads each window’s medians for mawsd and the engine host, the peak load with its pair, each window’s validity, and both verdicts', () => {
+    expect(MAWSD_HEADROOM_KIB).toBe(33_048);
+    expect(mawsdSpineLine({ windows, reasons: valid, counts })).toBe(
+      '[daemon-idle] mawsd with the spine · loaded: mawsd 98765 KiB, engine host 60124 KiB (medians of 11), cpu 0.04 s, load 3.1 (30 s pair 2.4), valid · released: mawsd 41000 KiB, engine host 60200 KiB (medians of 11), cpu 0.04 s, load 4.2 (30 s pair 3.0), valid · re-executed: mawsd 31500 KiB, engine host not running (medians of 11), cpu 0.04 s, load 2.9 (30 s pair 2.2), valid · peak load 4.2 (30 s pair 3.0) · released mawsd over the 33048 KiB headroom, re-executed mawsd within it · fixture 5000 sessions in 50 projects',
+    );
+  });
+
+  it('names an unread window and why a window is invalid', () => {
+    const line = mawsdSpineLine({ windows: { ...windows, reexecuted: null }, reasons: { ...valid, released: ['the 1-minute load reached 5.2 and its 30 s pair 4.9'] }, counts });
+    expect(line).toContain(' · released: mawsd 41000 KiB, engine host 60200 KiB (medians of 11), cpu 0.04 s, load 4.2 (30 s pair 3.0), invalid: the 1-minute load reached 5.2 and its 30 s pair 4.9 · re-executed: not read, valid · ');
+    expect(line).toContain(' · released mawsd over the 33048 KiB headroom, re-executed mawsd not read · ');
   });
 });

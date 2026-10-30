@@ -1,6 +1,6 @@
 // The link surface (P5 O6 M3, docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "The link surface"): what a
-// machine's services answer for another machine's app, as one derived `WireRegistry`. It is the same for the stand-in
-// (serve-standin.ts), for O3's `mawsd` and for O7's channels.
+// machine's services answer for another machine's app, as one derived `WireRegistry`. It is the same for a profile's
+// `mawsd` (P5 O3-D M6: its services front answers it; O6's stand-in is gone) and for O7's channels.
 //
 // - Commands: every command whose route class is not `client` (src/shared/ipc/routes.ts), and no `internal` one (main's
 //   own, which no caller holds), each presented with owner `machine` and its own schemas.
@@ -19,12 +19,13 @@ import type { CommandName, EventName } from '@shared/ipc/schema';
 // partition of the registry's events, so a new event lands on the side its author chose.
 const LINK_RULES = {
   namespaces: ['session', 'fs', 'laneA'], // P5 O9 M2: laneA.changed and laneA.plane name a session
-  names: ['attention.changed', 'engine.hostState', 'pty.hostState', 'pty.data', 'pty.exit', 'git.changed', 'files.changed', 'scm.remote.output', 'ownerChannel.changed'],
+  names: ['attention.changed', 'engine.hostState', 'pty.hostState', 'pty.data', 'pty.exit', 'git.changed', 'files.changed', 'scm.remote.output', 'ownerChannel.changed', 'machineSettings.changed' /* P5 O3-D: the machine's half of the settings */],
 };
 const CLIENT_RULES = {
   // `maws.*` are the host-to-app bridges, which the machine's own app answers
   namespaces: ['layout', 'voice', 'browser', 'maws', 'settings', 'catalog', 'connectors', 'delivery', 'library', 'spaces', 'artifacts', 'plugins', 'machines', 'org'],
-  names: ['attention.navigate', 'attention.notified', 'engine.budget', 'host.status', 'host.supervisorStatus'],
+  // P5 O3-D: `clientPort.request` is the machine's request to the client that asked, answered by that client's own app
+  names: ['attention.navigate', 'attention.notified', 'engine.budget', 'host.status', 'host.supervisorStatus', 'clientPort.request'],
 };
 
 const placedBy = (rules: { namespaces: string[]; names: string[] }) => (name: string) => rules.names.includes(name) || rules.namespaces.includes(name.slice(0, name.indexOf('.')));
@@ -47,5 +48,6 @@ export const LINK_REGISTRY: WireRegistry = {
   events: Object.fromEntries(LINK_EVENTS.map((name) => [name, REGISTRY.events[name]])),
   hostEvents: [],
   ptyHostEvents: [], // P5 O2 M4: as hostEvents, the link serves no host
+  machineEvents: LINK_EVENTS, // P5 O3-D: what the link's `machine` host carries
   mainOnly: new Set(),
 };

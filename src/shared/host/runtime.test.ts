@@ -516,6 +516,121 @@ describe('host runtime: a ready client going (E4c)', () => {
 });
 // E4c end
 
+// P5 O3-D M3 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §D): the app's presence. A client whose
+// hello listed `host.attachment` is attached only once it said so; any other is attached while it is the ready client.
+describe('host runtime: the app’s presence (P5 O3-D M3)', () => {
+  beforeEach(() => vi.restoreAllMocks());
+  const DECLARING = { capabilities: ['socket.ptyFrames', 'host.attachment'] };
+
+  function host() {
+    let gone = 0;
+    let connectionGone = 0;
+    const runtime = createHostRuntime((on, _emit, client) => {
+      on('engine.ping', async () => PING);
+      client.presence.onGone(() => void gone++);
+      client.onClientGone(() => void connectionGone++);
+    });
+    return { runtime, gone: () => gone, connectionGone: () => connectionGone };
+  }
+
+  it('a client that did not declare the capability: attached while it is the ready client, its signal refused', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const h = host();
+    expect(h.runtime.presence.attached()).toBe(false);
+    h.runtime.serve(fakePort().port, { capabilities: ['socket.ptyFrames'] });
+    expect(h.runtime.presence.attached()).toBe(false); // served, not yet ready
+    h.runtime.setReady();
+    expect(h.runtime.presence.attached()).toBe(true);
+    expect(h.runtime.setAttachment(false)).toBe('refused');
+    expect(h.runtime.presence.attached()).toBe(true); // nothing changed
+    h.runtime.detach();
+    expect(h.runtime.presence.attached()).toBe(false);
+    expect(h.gone()).toBe(1);
+    expect(h.connectionGone()).toBe(1);
+  });
+
+  it('a utility port lists nothing, so its client is keyed on the connection', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const h = host();
+    h.runtime.serve(fakePort().port);
+    h.runtime.setReady();
+    expect(h.runtime.presence.attached()).toBe(true);
+    expect(h.runtime.setAttachment(true)).toBe('refused');
+  });
+
+  it('a declaring client: not attached at its connect, attached from {attached: true}, gone at {attached: false} with the connection kept', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const h = host();
+    h.runtime.serve(fakePort().port, DECLARING);
+    h.runtime.setReady();
+    expect(h.runtime.hasClient()).toBe(true);
+    expect(h.runtime.presence.attached()).toBe(false);
+    expect(h.runtime.setAttachment(true)).toBe('changed');
+    expect(h.runtime.presence.attached()).toBe(true);
+    expect(h.runtime.setAttachment(true)).toBe('unchanged');
+    expect(h.runtime.setAttachment(false)).toBe('changed');
+    expect(h.runtime.presence.attached()).toBe(false);
+    expect(h.gone()).toBe(1);
+    expect(h.connectionGone()).toBe(0); // the connection holds
+    expect(h.runtime.hasClient()).toBe(true);
+    expect(h.runtime.setAttachment(false)).toBe('unchanged');
+    expect(h.gone()).toBe(1);
+  });
+
+  it('a declaring client’s signal before its ready line counts from the ready line on', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const h = host();
+    h.runtime.serve(fakePort().port, DECLARING);
+    expect(h.runtime.setAttachment(true)).toBe('changed');
+    expect(h.runtime.presence.attached()).toBe(false);
+    h.runtime.setReady();
+    expect(h.runtime.presence.attached()).toBe(true);
+  });
+
+  it('a declaring client’s connection end counts as {attached: false}: by detach, by a replacing serve, by a failed write', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    const h = host();
+    h.runtime.serve(fakePort().port, DECLARING);
+    h.runtime.setReady();
+    h.runtime.setAttachment(true);
+    h.runtime.detach();
+    expect(h.gone()).toBe(1);
+    // a new connection of the same client starts unattached, whatever the last one said
+    h.runtime.serve(fakePort().port, DECLARING);
+    h.runtime.setReady();
+    expect(h.runtime.presence.attached()).toBe(false);
+    h.runtime.setAttachment(true);
+    h.runtime.serve(fakePort().port, DECLARING);
+    expect(h.gone()).toBe(2);
+    h.runtime.setReady();
+    expect(h.runtime.presence.attached()).toBe(false);
+    let emit!: HostEmit;
+    let failed = 0;
+    const runtime = createHostRuntime((on, e, client) => {
+      on('engine.ping', async () => PING);
+      emit = e;
+      client.presence.onGone(() => void failed++);
+    });
+    runtime.serve({ ...fakePort().port, postMessage: () => false }, DECLARING);
+    runtime.setReady();
+    runtime.setAttachment(true);
+    expect(emit('session.brokerItems', { appSessionId: 'app-1', items: [] } as never)).toBe(false);
+    expect(failed).toBe(1);
+    expect(runtime.presence.attached()).toBe(false);
+  });
+
+  it('a declaring client that never said it was attached leaves with no app-gone hook, its connection’s going told as before', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const h = host();
+    h.runtime.serve(fakePort().port, DECLARING);
+    h.runtime.setReady();
+    h.runtime.detach();
+    expect(h.gone()).toBe(0);
+    expect(h.connectionGone()).toBe(1);
+  });
+});
+
 // P3-A M4 start: a document's port on the parent port (docs/doperpowers/plans/2026-10-12-p3-a-store.md, Decision Log 13).
 // Main posts `{t: 'doc', channel, artifactId, actor}` with one end of the document's channel; the runtime hands it to
 // the handler the register installed, and closes what it cannot hand anywhere.
@@ -608,6 +723,7 @@ describe('host runtime: the handler context (P5 O1 M5)', () => {
     events: {},
     hostEvents: [],
     ptyHostEvents: [],
+    machineEvents: [],
     mainOnly: new Set<string>(),
   } as const satisfies WireRegistry;
   const echo = (id: string, client?: string) => ({ t: 'req', id, name: 'probe.echo', input: { text: id }, ...(client ? { client } : {}) });

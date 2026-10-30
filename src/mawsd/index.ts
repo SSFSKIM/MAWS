@@ -18,7 +18,6 @@ import { startDaemon, type RunningDaemon } from './daemon';
 import { LOG_ROTATE_BYTES, openSupervisorLog } from '../engine-host/supervisor-log';
 import { DAEMON_FILES } from '@shared/daemon/files';
 import { buildIdOf } from '../engine-host/supervisor-files';
-import { runCli } from './cli';
 import { nodeFloorProblem } from './node-floor';
 import { parseRun, USAGE, type RunArgs } from './run-args';
 
@@ -72,6 +71,12 @@ function run({ kind, dir }: RunArgs, profileDir: string): void {
     build: { version: __MAWS_VERSION__, ...__MAWS_BUILD__ },
     env: process.env,
     exit: (code) => process.exit(code),
+    // P5 O3-D M5b (D34, D41(1), D47): the cutover, four switches in one step with the app's `machine.spine`
+    // (PEER_CAPABILITIES.app): the engine host's permanent client, the spine's event trigger, and the refusal of an app
+    // that runs a spine of its own with the yield to one from before O3-A
+    permanentClient: true,
+    spine: { wakeOnEvents: true },
+    claimSpine: true,
     openLog: (at) => {
       const opened = openSupervisorLog(at, LOG_ROTATE_BYTES, DAEMON_FILES.log);
       log = opened;
@@ -100,7 +105,9 @@ function commandLine(argv: readonly string[]): void {
   const stop = new AbortController(); // an interrupt ends a `logs --follow` as done; any other command it ends at once
   if (argv.includes('logs') && argv.includes('--follow')) for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => stop.abort());
   const self = process.argv[1]!;
-  void runCli(argv, {
+  // The command line is loaded at its first use: a daemon (`run`) never needs it, so its graph (cli.ts, install.ts,
+  // release.ts, machine-client.ts, units/) stays out of the daemon's heap
+  void import('./cli').then(({ runCli }) => runCli(argv, {
     env: process.env,
     platform: process.platform,
     home: homedir(),
@@ -119,7 +126,7 @@ function commandLine(argv: readonly string[]): void {
     self: { runtime: process.execPath, entry: realpathSync(self) },
     build: buildIdOf(self),
     follow: { signal: stop.signal },
-  }).then((code) => {
+  })).then((code) => {
     process.exitCode = code;
     setTimeout(() => process.exit(code), 2_000).unref(); // should a handle outlive the command
   });

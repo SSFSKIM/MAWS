@@ -23,7 +23,7 @@ export interface FoldPosition {
 
 // The launch an event of `appSessionId` belongs to, read from its id (`${appSessionId}:${launchId}:${seq}:${i}`, the
 // normaliser's form); null for an event that is not a launch's (main's own, `seq: null`, or another id form).
-function launchOf(appSessionId: AppSessionId, event: SessionEvent): string | null {
+export function launchOf(appSessionId: AppSessionId, event: SessionEvent): string | null {
   const prefix = `${appSessionId}:`;
   if (event.seq === null || !event.id.startsWith(prefix)) return null;
   const rest = event.id.slice(prefix.length);
@@ -81,6 +81,9 @@ export interface ResyncDeps {
   filter: FoldFilter;
   held: Set<AppSessionId>; // the ids whose status this host generation sent (forgotten when the host leaves `ready`)
   log: (line: string) => void;
+  // P5 O3-D M2 (the cutover's Interfaces §A, step 4): told each listed status first; true keeps it from the fold for now
+  // (an exited row's, at a load's barrier: it applies after the row's held batches)
+  defer?(status: EngineSessionStatus): boolean;
 }
 
 // One resync. Every row's status is applied; only live rows (process not `exited`) are paged: an exited row's history
@@ -94,7 +97,7 @@ export interface ResyncDeps {
 // cursor (a disk answer still backfilling says `complete: false` with the same `lastSeq`).
 // Cancelled (the signal), it stops asking and folding at once; at the bound it logs the rows it left, whose digests then
 // fold from the burst with whatever position the filter holds for them.
-export async function resyncDigests({ dispatch, signal, writer, filter, held, log }: ResyncDeps): Promise<void> {
+export async function resyncDigests({ dispatch, signal, writer, filter, held, log, defer }: ResyncDeps): Promise<void> {
   const listed = await dispatch('engine-host', 'engine.sessions', undefined);
   if (signal.aborted) {
     if (signal.reason === 'bound') log(`resync: stopped at its bound before the host's sessions were listed; every digest folds from the tail`);
@@ -104,7 +107,7 @@ export async function resyncDigests({ dispatch, signal, writer, filter, held, lo
   const statuses = listed.value as EngineSessionStatus[];
   for (const status of statuses) {
     held.add(status.appSessionId);
-    writer.applyEngineStatus(status);
+    if (!defer?.(status)) writer.applyEngineStatus(status);
   }
   const paged = statuses.filter((status) => status.process !== 'exited' || filter.position(status.appSessionId)?.launchId === status.launchId);
   const left = new Set(paged.map((s) => s.appSessionId));

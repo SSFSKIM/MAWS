@@ -34,7 +34,7 @@ beforeEach(() => {
   handlers = new Map();
   gone = [];
   const on: HostOn = (name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>);
-  surface = registerArtifacts(on, () => true, { onDocPort: () => {}, onClientGone: (hook) => (gone.push(hook), () => {}) }, { documents, env: {} });
+  surface = registerArtifacts(on, () => true, { onDocPort: () => {}, presence: { onGone: (hook) => (gone.push(hook), () => {}) } }, { documents, env: {} });
 });
 afterEach(() => {
   surface.close();
@@ -160,7 +160,7 @@ describe('the hold commands (E3)', () => {
     handlers = new Map();
     gone = [];
     const on: HostOn = (name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>);
-    surface = registerArtifacts(on, () => true, { onDocPort: () => {}, onClientGone: (hook) => (gone.push(hook), () => {}) }, { documents, env: {} });
+    surface = registerArtifacts(on, () => true, { onDocPort: () => {}, presence: { onGone: (hook) => (gone.push(hook), () => {}) } }, { documents, env: {} });
     expect(exists(board.id, old)).toBe(false); // collected at the reopen
     expect(await call('artifacts.releaseAssets', { assetHoldId })).toEqual({ released: false });
     const refused = await call('artifacts.holdAssets', { artifactId: board.id, refs: [old] }).catch((error: unknown) => error);

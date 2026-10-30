@@ -19,6 +19,7 @@ import { OwnerChannelLaunches } from './launch';
 import { modsList, setSessionOverride, type ModsDeps } from './mods';
 import { transcriptChain, transcriptEvidence } from './prompt-state';
 import { OwnerChannelService, type OwnerChannelServiceDeps } from './service';
+import type { Settling } from '../work';
 
 export interface OwnerChannelDeps {
   index: Pick<Index, 'ownerChannel' | 'sessions' | 'unavailable'>;
@@ -40,6 +41,7 @@ export interface OwnerChannelDeps {
 
 export interface OwnerChannel {
   launches: OwnerChannelLaunches; // the session service's
+  work: Settling; // P5 O3-D (D27): the reads in flight whose continuations write the index; the root's barrier counts them
   stop(): void;
 }
 
@@ -118,6 +120,7 @@ export function startOwnerChannel(deps: OwnerChannelDeps): OwnerChannel {
   });
   return {
     launches,
+    work: { busy: () => service.busy(), settled: () => service.settled() },
     stop: () => {
       offs.forEach((off) => off());
       service.stop();

@@ -135,13 +135,13 @@ test('MAWS opens light, hosts answer, pty echoes, survives reload and window clo
   expect(maws.consoleErrors(), 'the console stays free of errors, first load included').toEqual([]);
   expect(reopenedConsoleErrors(), 'the re-created window\'s console stays free of errors').toEqual([]);
 
-  // Clean exit: within five seconds of close, both hosts and the shell are gone. P5 O3-B: on the daemon shape the quit
-  // stops the engine host (it parks, as the supervisor suite's unbusy quit shows) while the pty host and its shell keep
-  // running under `mawsd`, the terminals outliving the app (P5 O2); the launch's cleanup ends them.
+  // Clean exit: within five seconds of close, both hosts and the shell are gone. On the daemon shape the quit stops
+  // nothing (P5 O3-D Q1, D12: no stop-all, no question): the engine host, the pty host and its shell keep running under
+  // `mawsd`, the sessions and terminals outliving the app; `mawsd`'s idle clock parks the engine host only after the idle
+  // time (D38: 10 min; e2e:supervisor-daemon (a) proves the park with its idle seam set). The launch's cleanup ends them.
   await app.close();
   if (daemon) {
-    await expect.poll(() => isAlive(enginePid), { timeout: 10_000, message: 'the quit parks the engine host' }).toBe(false);
-    expect([ptyPid, shellPid].filter((pid) => !isAlive(pid)), 'the pty host and its shell outlive the app').toEqual([]);
+    expect([enginePid, ptyPid, shellPid].filter((pid) => !isAlive(pid)), 'the engine host, the pty host and its shell outlive the app').toEqual([]);
     return;
   }
   await expect

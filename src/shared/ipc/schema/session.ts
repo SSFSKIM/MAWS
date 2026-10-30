@@ -275,33 +275,35 @@ export type SessionChangeCause = (typeof SESSION_CHANGE_CAUSES)[number];
 
 const appSession = z.strictObject({ appSessionId: AppSessionIdSchema });
 const c4Commands = {
-  'session.search': { input: z.strictObject({ query: z.string().max(1000) }), output: z.strictObject({ hits: z.array(z.strictObject({ appSessionId: AppSessionIdSchema, snippet: z.string().nullable() })), indexing: z.boolean(), incomplete: z.boolean() }), owner: 'main' },
+  'session.search': { input: z.strictObject({ query: z.string().max(1000) }), output: z.strictObject({ hits: z.array(z.strictObject({ appSessionId: AppSessionIdSchema, snippet: z.string().nullable() })), indexing: z.boolean(), incomplete: z.boolean() }), owner: 'machine' },
   'session.list': {
     input: z.strictObject({ includeArchived: z.boolean().optional() }),
     output: z.strictObject({ sessions: z.array(SessionRecordSchema), revision: z.number().int() }),
-    owner: 'main',
+    owner: 'machine',
   },
-  'session.get': { input: appSession, output: SessionRecordSchema.nullable(), owner: 'main' },
+  'session.get': { input: appSession, output: SessionRecordSchema.nullable(), owner: 'machine' },
   // pin, archive, mark read, C10's rename with provenance
-  'session.update': { input: z.strictObject({ appSessionId: AppSessionIdSchema, patch: SessionPatchSchema }), output: SessionRecordSchema, owner: 'main' },
-  'session.projects.list': { input: z.void(), output: z.strictObject({ projects: z.array(ProjectRecordSchema), revision: z.number().int() }), owner: 'main' },
+  'session.update': { input: z.strictObject({ appSessionId: AppSessionIdSchema, patch: SessionPatchSchema }), output: SessionRecordSchema, owner: 'machine' },
+  // P5 O3-D (D13): `rows`, every project row the index holds (hidden ones, and those with no present session), for the
+  // spine's view in another process (main's mirror, Interfaces §F)
+  'session.projects.list': { input: z.void(), output: z.strictObject({ projects: z.array(ProjectRecordSchema), revision: z.number().int(), rows: z.array(ProjectRecordSchema).optional() }), owner: 'machine' },
   // realpathed; an existing directory is required; origin 'user'
-  'session.projects.add': { input: z.strictObject({ directory: z.string() }), output: ProjectRecordSchema, owner: 'main' },
+  'session.projects.add': { input: z.strictObject({ directory: z.string() }), output: ProjectRecordSchema, owner: 'machine' },
   'session.projects.update': {
     input: z.strictObject({ id: ProjectIdSchema, patch: z.strictObject({ name: z.string().optional(), order: z.number().int().optional() }) }),
     output: ProjectRecordSchema,
-    owner: 'main',
+    owner: 'machine',
   },
   // hides; rediscovery does not resurrect it
-  'session.projects.remove': { input: z.strictObject({ id: ProjectIdSchema }), output: z.void(), owner: 'main' },
-  'session.drafts.get': { input: appSession, output: DraftSchema.nullable(), owner: 'main' },
-  'session.drafts.set': { input: z.strictObject({ appSessionId: AppSessionIdSchema, draft: DraftSchema.nullable() }), output: z.void(), owner: 'main' },
+  'session.projects.remove': { input: z.strictObject({ id: ProjectIdSchema }), output: z.void(), owner: 'machine' },
+  'session.drafts.get': { input: appSession, output: DraftSchema.nullable(), owner: 'machine' },
+  'session.drafts.set': { input: z.strictObject({ appSessionId: AppSessionIdSchema, draft: DraftSchema.nullable() }), output: z.void(), owner: 'machine' },
   // Main allocates the ids and the `kind: 'replay'` record, then dispatches session.replay.launch; a failed launch
   // removes the record again and fails with the launch's error (a `timeout` also cancels the launch on the host).
   'session.replay.start': {
     input: z.strictObject({ source: ReplaySourceSchema, speed: SpeedSchema }),
     output: z.strictObject({ appSessionId: AppSessionIdSchema, sessionId: SessionIdSchema, totalRows: z.number().int(), spanMs: z.number() }),
-    owner: 'main',
+    owner: 'machine',
   },
   // The host-side start: loads and validates the source and binds the ids before any event; fails `internal` otherwise.
   'session.replay.launch': {
@@ -315,7 +317,7 @@ const c4Commands = {
     output: z.void(),
     owner: 'engine-host',
   },
-  'session.replay.fixtures': { input: z.void(), output: z.strictObject({ fixtures: z.array(ReplayFixtureSchema) }), owner: 'main' },
+  'session.replay.fixtures': { input: z.void(), output: z.strictObject({ fixtures: z.array(ReplayFixtureSchema) }), owner: 'machine' },
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // `revision` is one index-wide counter bumped on every session or project change; a consumer keeps the higher of
 // snapshot and event (C5's rule).
@@ -323,7 +325,7 @@ const c4Events = {
   'session.changed': z.strictObject({ record: SessionRecordSchema, cause: z.enum(SESSION_CHANGE_CAUSES), revision: z.number().int() }),
   'session.removed': z.strictObject({ appSessionId: AppSessionIdSchema, revision: z.number().int() }),
   // the whole list, for C5's project tree (wave-2 ledger, d.6)
-  'session.projects.changed': z.strictObject({ projects: z.array(ProjectRecordSchema), revision: z.number().int() }),
+  'session.projects.changed': z.strictObject({ projects: z.array(ProjectRecordSchema), revision: z.number().int(), rows: z.array(ProjectRecordSchema).optional() }), // P5 O3-D: `rows`, as session.projects.list's
   // every 25 rows and on every state or speed change of a replay run
   'session.replay.progress': ReplayProgressSchema,
 } as const satisfies Record<`session.${string}`, z.ZodType>;
@@ -366,14 +368,14 @@ export const SessionDigestSchema = z.strictObject({
 export type SessionDigest = z.infer<typeof SessionDigestSchema>;
 
 const c5Commands = {
-  'session.digests':    { input: z.void(), output: z.strictObject({ digests: z.array(SessionDigestSchema) }), owner: 'main' },   // snapshot for a page that missed the events
-  'session.setVisible': { input: z.strictObject({ appSessionId: AppSessionIdSchema, visible: z.boolean() }), output: z.void(), owner: 'main' },
+  'session.digests':    { input: z.void(), output: z.strictObject({ digests: z.array(SessionDigestSchema) }), owner: 'machine' },   // snapshot for a page that missed the events
+  'session.setVisible': { input: z.strictObject({ appSessionId: AppSessionIdSchema, visible: z.boolean() }), output: z.void(), owner: 'machine' },
   // The launch mode main decided at app ready (select-source.ts), so the page can register the scenario's session
   // creator in mode `scenario` (the owner's design 2026-09-28: the stub stands in for C10's `session.create`).
-  'session.launchMode': { input: z.void(), output: z.strictObject({ mode: z.enum(['index', 'scenario']) }), owner: 'main' },
+  'session.launchMode': { input: z.void(), output: z.strictObject({ mode: z.enum(['index', 'scenario']) }), owner: 'machine' },
   // Debt wave 5 (additive X2, flagged to the architect): the events main synthesised for the session and keeps in its
   // read model (`isAppSynthesised`, as C10's route notice), oldest first, which no `session.events` snapshot carries.
-  'session.appEvents': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ events: z.array(SessionEventSchema) }), owner: 'main' },
+  'session.appEvents': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ events: z.array(SessionEventSchema) }), owner: 'machine' },
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 const c5Events = {
   'session.digest': SessionDigestSchema,
@@ -388,14 +390,14 @@ const c7Commands = {
   'session.history.list': {
     input: z.strictObject({ appSessionId: AppSessionIdSchema, limit: z.number().int().positive().max(500) }),
     output: z.strictObject({ entries: z.array(HistoryEntrySchema) }),
-    owner: 'main',
+    owner: 'machine',
   },
   'session.history.append': {
     // project: the directory an unstarted session will run in (its setup intent's location); main files the row under it
     // only when the session has no record yet, so the first prompt of a new session is recalled there once it starts
     input: z.strictObject({ appSessionId: AppSessionIdSchema, display: z.string().min(1).max(65_536) /* a prompt as typed; the bodies ride in pastedContents */, pastedContents: z.record(z.string(), PastedContentSchema), project: z.string().nullable().optional() }),
     output: z.void(),
-    owner: 'main',
+    owner: 'machine',
   },
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 const c7Events = {
@@ -465,71 +467,71 @@ export type DeletionManifestView = z.infer<typeof DeletionManifestSchema>;
 
 const appSessionC10 = z.strictObject({ appSessionId: AppSessionIdSchema });
 const c10Commands = {
-  'session.trust.check': { input: z.strictObject({ directory: z.string() }), output: TrustStateSchema, owner: 'main' },
+  'session.trust.check': { input: z.strictObject({ directory: z.string() }), output: TrustStateSchema, owner: 'machine' },
   'session.forget': { input: appSessionC10, output: z.void(), owner: 'engine-host' },
   // the unstarted session: an app id and a persisted intent, nothing launched
   'session.create': {
     input: z.strictObject({ projectId: ProjectIdSchema.nullable(), location: LocationSchema.nullable() }),
     output: z.strictObject({ appSessionId: AppSessionIdSchema, intent: SetupIntentSchema }),
-    owner: 'main',
+    owner: 'machine',
   },
-  'session.intent.get': { input: appSessionC10, output: SetupIntentSchema.nullable(), owner: 'main' },
-  'session.intent.list': { input: z.void(), output: z.strictObject({ intents: z.array(SetupIntentSchema) }), owner: 'main' },
+  'session.intent.get': { input: appSessionC10, output: SetupIntentSchema.nullable(), owner: 'machine' },
+  'session.intent.list': { input: z.void(), output: z.strictObject({ intents: z.array(SetupIntentSchema) }), owner: 'machine' },
   // refused `invalid_input` naming the field; `internal` `starting` while a start is in flight, `retained_worktree` for a
   // location patch while a failed attempt's checkout is retained
-  'session.intent.patch': { input: z.strictObject({ appSessionId: AppSessionIdSchema, patch: SetupIntentPatchSchema }), output: SetupIntentSchema, owner: 'main' },
+  'session.intent.patch': { input: z.strictObject({ appSessionId: AppSessionIdSchema, patch: SetupIntentPatchSchema }), output: SetupIntentSchema, owner: 'machine' },
   // the hand-back: `message` cleared, `draft` untouched; for a record's id, the message a resume retained behind its card
   // is dropped and the answer is null
-  'session.intent.release': { input: appSessionC10, output: SetupIntentSchema.nullable(), owner: 'main' },
+  'session.intent.release': { input: appSessionC10, output: SetupIntentSchema.nullable(), owner: 'machine' },
   'session.intent.discard': {
     input: appSessionC10,
     output: z.strictObject({ leftover: z.strictObject({ worktree: z.strictObject({ path: z.string(), branch: z.string().nullable() }) }).nullable() }),
-    owner: 'main',
+    owner: 'machine',
   },
   // the failure card's resolutions of a checkout a failed attempt created and kept: "Discard changes and remove" (the
   // acknowledged discard, then the branch step) or "Keep the worktree" (the location becomes that existing worktree)
   'session.intent.resolveWorktree': {
     input: z.strictObject({ appSessionId: AppSessionIdSchema, resolution: z.enum(['discard', 'keep']) }),
     output: z.strictObject({ intent: SetupIntentSchema, worktree: SetupResourcesSchema.shape.worktree.unwrap() }),
-    owner: 'main',
+    owner: 'machine',
   },
   // an intent: its setup; a record: a resume
   'session.start': {
     input: z.strictObject({ appSessionId: AppSessionIdSchema, message: FirstMessageSchema.nullable(), options: StartOptionsSchema }),
     output: StartOutcomeSchema,
-    owner: 'main',
+    owner: 'machine',
   },
   // the outcome's appSessionId is the fork's once it is allocated
   'session.fork': {
     input: z.strictObject({ appSessionId: AppSessionIdSchema, target: ForkTargetSchema, message: FirstMessageSchema.nullable(), rewindTo: MessageUuidSchema.nullable() }),
     output: StartOutcomeSchema,
-    owner: 'main',
+    owner: 'machine',
   },
-  'session.archiveOlder': { input: z.strictObject({ projectId: ProjectIdSchema.nullable(), days: z.union([z.literal(7), z.literal(14), z.literal(30)]) }), output: z.strictObject({ archived: z.number().int(), skipped: z.number().int() }), owner: 'main' },
-  'session.archive': { input: z.strictObject({ appSessionId: AppSessionIdSchema, onlyIfIdle: z.boolean().optional() }), output: ArchiveOutcomeSchema, owner: 'main' },
+  'session.archiveOlder': { input: z.strictObject({ projectId: ProjectIdSchema.nullable(), days: z.union([z.literal(7), z.literal(14), z.literal(30)]) }), output: z.strictObject({ archived: z.number().int(), skipped: z.number().int() }), owner: 'machine' },
+  'session.archive': { input: z.strictObject({ appSessionId: AppSessionIdSchema, onlyIfIdle: z.boolean().optional() }), output: ArchiveOutcomeSchema, owner: 'machine' },
   // W7 (D-12 as amended 2026-10-01): "Take over here": ends the holder the owner confirmed (`claude stop` for a `--bg`
   // job, SIGTERM to an interactive holder's verified pid) and waits for the registry to clear; on `released` the
   // renderer resumes the record with `session.start`
-  'session.takeOverPane': { input: z.strictObject({ pid: z.number().int().positive() }), output: z.strictObject({ ptyId: PtyIdSchema, label: z.string() }).nullable(), owner: 'main' },
-  'session.takeOver': { input: z.strictObject({ appSessionId: AppSessionIdSchema, holder: ForeignHolderSchema, paneId: PtyIdSchema.nullable().optional() }), output: TakeOverOutcomeSchema, owner: 'main' }, // P5 O6 M2: the pane `session.takeOverPane` answered, a PtyId (lowered like any)
-  'session.delete': { input: z.strictObject({ appSessionId: AppSessionIdSchema, stopIfLive: z.boolean() }), output: DeleteOutcomeSchema, owner: 'main' },
+  'session.takeOverPane': { input: z.strictObject({ pid: z.number().int().positive() }), output: z.strictObject({ ptyId: PtyIdSchema, label: z.string() }).nullable(), owner: 'machine' },
+  'session.takeOver': { input: z.strictObject({ appSessionId: AppSessionIdSchema, holder: ForeignHolderSchema, paneId: PtyIdSchema.nullable().optional() }), output: TakeOverOutcomeSchema, owner: 'machine' }, // P5 O6 M2: the pane `session.takeOverPane` answered, a PtyId (lowered like any)
+  'session.delete': { input: z.strictObject({ appSessionId: AppSessionIdSchema, stopIfLive: z.boolean() }), output: DeleteOutcomeSchema, owner: 'machine' },
   // validators never transform: the service trims; a title that is only whitespace is refused here
   'session.rename': {
     input: z.strictObject({ appSessionId: AppSessionIdSchema, title: z.string().max(200).refine((title) => title.trim().length > 0, 'a title is not empty') }),
     output: z.strictObject({ record: SessionRecordSchema, via: z.enum(['engine', 'override']) }),
-    owner: 'main',
+    owner: 'machine',
   },
-  'session.revealPath': { input: z.strictObject({ path: z.string() }), output: z.void(), owner: 'main' },
+  'session.revealPath': { input: z.strictObject({ path: z.string() }), output: z.void(), owner: 'machine' },
   // (M4a) a delete interrupted half-way, found at start, offered in the session's tab: "Finish deleting" is
   // `session.delete` again; "Keep" drops the manifest and leaves every file that did not move where it is
-  'session.deletions.list': { input: z.void(), output: z.strictObject({ manifests: z.array(DeletionManifestSchema) }), owner: 'main' },
-  'session.deletions.keep': { input: appSessionC10, output: z.void(), owner: 'main' },
+  'session.deletions.list': { input: z.void(), output: z.strictObject({ manifests: z.array(DeletionManifestSchema) }), owner: 'machine' },
+  'session.deletions.keep': { input: appSessionC10, output: z.void(), owner: 'machine' },
   // what `session.delete` would move, for its sheet (the transcript, null when already gone; its subagent transcripts;
   // its recordings; every path); nothing moves
   'session.deletions.preview': {
     input: appSessionC10,
     output: z.strictObject({ transcript: z.string().nullable(), subagents: z.number().int(), recordings: z.number().int(), paths: z.number().int(), store: z.string() }), // store: the config home the engine reads, `~`-abbreviated under the home directory
-    owner: 'main',
+    owner: 'machine',
   },
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 const c10Events = {
@@ -545,7 +547,7 @@ const newChatCommands = {
   'session.projects.addFolder': {
     input: z.strictObject({ directory: z.string() }),
     output: z.strictObject({ project: ProjectRecordSchema, location: LocationSchema }),
-    owner: 'main',
+    owner: 'machine',
   },
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // New chat end ----------------------------------------------------------------------------------------------------------
@@ -633,14 +635,14 @@ export type AcquireReason = (typeof ACQUIRE_REASONS)[number];
 // each fact with when and in which launch; null for a session MAWS never ran. Owner main, beside `session.digests`:
 // it relays the host's `engine.observedFacts` and answers null when the host cannot (src/main/sessions/observed.ts).
 const p2aCommands = {
-  'session.observedFacts': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: ObservedFactsAnswerSchema.nullable(), owner: 'main' },
+  'session.observedFacts': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: ObservedFactsAnswerSchema.nullable(), owner: 'machine' },
   // P2-A (2026-10-09; X16): the one acquisition entry. Answers at once for a ready session, joins a launch already in
   // flight, or runs the guarded resume, and answers when the engine is ready or the attempt failed (service.ts
   // `acquire`). `reason` is logged; nothing branches on it. `options`: a card's trust decision or route.
   'session.acquire': {
     input: z.strictObject({ appSessionId: AppSessionIdSchema, reason: z.enum(ACQUIRE_REASONS), options: StartOptionsSchema.optional() }),
     output: AcquireOutcomeSchema,
-    owner: 'main',
+    owner: 'machine',
   },
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // P2-A end --------------------------------------------------------------------------------------------------------------
@@ -665,7 +667,7 @@ export type RecentTurn = z.infer<typeof RecentTurnSchema>;
 export const RecentTurnsSchema = z.strictObject({ turns: z.array(RecentTurnSchema).max(RECENT_TURNS_LIMIT_MAX), earlier: z.boolean(), source: z.enum(['transcript', 'none']) });
 export type RecentTurns = z.infer<typeof RecentTurnsSchema>;
 const p2dCommands = {
-  'session.recentTurns': { input: z.strictObject({ appSessionId: AppSessionIdSchema, limit: z.number().int().min(1).max(RECENT_TURNS_LIMIT_MAX) }), output: RecentTurnsSchema, owner: 'main' },
+  'session.recentTurns': { input: z.strictObject({ appSessionId: AppSessionIdSchema, limit: z.number().int().min(1).max(RECENT_TURNS_LIMIT_MAX) }), output: RecentTurnsSchema, owner: 'machine' },
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 export const P2D_SESSION_COMMANDS = Object.keys(p2dCommands) as (keyof typeof p2dCommands)[];
 // P2-D end --------------------------------------------------------------------------------------------------------------
@@ -678,6 +680,30 @@ const p5o2Commands = {
 } as const;
 export const P5O2_SESSION_COMMANDS = Object.keys(p5o2Commands) as (keyof typeof p5o2Commands)[];
 // P5 O2 M2 end ----------------------------------------------------------------------------------------------------------
+
+// P5 O3-D (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §C, §F, §I): a client's session streams on
+// `mawsd`'s services front, and the visible set for main's mirror of the spine's view. Main-only (`internal`): main and a
+// second local client send them over `machine.sock`, never a window.
+// A position in a session's stream (RL3's): the launch, and the last delivered event's `seq` and `idx` in it.
+export const StreamCursorSchema = z.strictObject({ launchId: z.string().min(1), seq: z.number().int(), idx: z.number().int() });
+export type StreamCursor = z.infer<typeof StreamCursorSchema>;
+const o3dCommands = {
+  // The client's whole set, replacing its last, each from its cursor (null: from the snapshot); `live: true` also streams
+  // every other live session from now, opening at the first status or batch that names one not yet followed.
+  'session.follow': {
+    input: z.strictObject({ sessions: z.array(z.strictObject({ appSessionId: AppSessionIdSchema, cursor: StreamCursorSchema.nullable() })), live: z.boolean() }),
+    output: z.strictObject({ streams: z.array(z.strictObject({ appSessionId: AppSessionIdSchema, mode: z.enum(['live', 'replay', 'missing']), launchId: z.string().nullable() })) }),
+    owner: 'machine',
+  },
+  // The sessions some client shows (session.setVisible's union), the mirror's snapshot of `visibleSessions`
+  'session.visible': { input: z.void(), output: z.strictObject({ sessions: z.array(AppSessionIdSchema) }), owner: 'machine' },
+  // M5b fix round 6: the engine statuses the spine's read model holds, for the mirror of a launch in mode `scenario`,
+  // whose statuses are the spine's own (D11) and reach no stream; in mode `index` main reads them from its streams (D19)
+  'session.engineStatuses': { input: z.void(), output: z.strictObject({ statuses: z.array(EngineSessionStatusSchema) }), owner: 'machine' },
+} as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+const o3dEvents = {
+  'session.visibleChanged': z.strictObject({ appSessionId: AppSessionIdSchema, visible: z.boolean() }), // one session's change of the union
+} as const satisfies Record<`session.${string}`, z.ZodType>;
 
 export const commands = {
   ...c3Commands, // C3
@@ -693,6 +719,7 @@ export const commands = {
   ...p2dCommands, // P2-D
   ...p5o2Commands, // P5 O2 M2
   ...o10Commands, // P5 O10 M8
+  ...o3dCommands, // P5 O3-D
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -701,4 +728,5 @@ export const events = {
   ...c5Events, // C5
   ...c7Events, // C7
   ...c10Events, // C10
+  ...o3dEvents, // P5 O3-D
 } as const satisfies Record<`session.${string}`, z.ZodType>;

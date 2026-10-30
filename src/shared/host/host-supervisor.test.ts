@@ -11,11 +11,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as z from 'zod';
 import { fakeProfile, FakeProcesses, FakeSupervisor, type FakeProfile, type FakeSupervisorOptions } from '../../../test/support/fake-supervisor';
 import type { WireRegistry } from '../ipc/registry';
-import type { HostState } from '../ipc/schema';
+import type { CommandName, CommandResult, HostState } from '../ipc/schema';
 import { HostPingSchema } from '../ipc/schema/common';
 import { createHostRuntime, type HostEmit } from './runtime';
 import { SOCKET_PROTOCOL } from './socket-protocol';
-import { createHostSupervisor, type HostOwner, type HostSpec, type HostSupervisor, type HostSupervisorOptions } from './host-supervisor';
+import { createHostSupervisor, REQUEST_TIMEOUT_MS, type HostOwner, type HostSpec, type HostSupervisor, type HostSupervisorOptions } from './host-supervisor';
 import type { DetachedTransportOptions, HostFiles } from './detached-transport';
 
 const TIMING = { connectTimeoutMs: 200, helloTimeoutMs: 150, startTimeoutMs: 1_200, pidPollMs: 20, waitRetryMs: 80, killGraceMs: 60 };
@@ -306,6 +306,37 @@ describe('an on-demand host', () => {
   });
 });
 
+// The panel's sweep#3: a command the daemon runs for main keeps its own completion budget across the host binding.
+describe('a request’s deadline', () => {
+  it('is its name’s own budget where the host spec gives one, REQUEST_TIMEOUT_MS for every other name', async () => {
+    let answer: (value: { stopped: number; forced: number }) => void = () => {};
+    await startFake({
+      register: (on) => {
+        on('host.stopAll', () => new Promise((resolve) => (answer = resolve)));
+        on('engine.binaryInfo', () => new Promise(() => {})); // never answered
+      },
+    });
+    const supervisor = makeSupervisor({ 'engine-host': { requestBudgetsMs: { 'host.stopAll': REQUEST_TIMEOUT_MS + 5_000 } } });
+    await supervisor.start();
+    await until(() => supervisor.snapshot('engine-host').state === 'ready');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); // the host is up: only the requests' timers run from here
+    try {
+      let budgeted: CommandResult<CommandName> | null = null;
+      void supervisor.dispatch('engine-host', 'host.stopAll', { graceMs: 1 }).then((result) => (budgeted = result));
+      const other = supervisor.dispatch('engine-host', 'engine.binaryInfo', undefined);
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS + 1_000); // an 11 s stop
+      await expect(other).resolves.toMatchObject({ ok: false, error: { code: 'timeout' } });
+      expect(budgeted, 'still within its own budget').toBeNull();
+      answer({ stopped: 1, forced: 0 });
+      vi.useRealTimers();
+      await until(() => budgeted !== null);
+      expect(budgeted).toEqual({ ok: true, value: { stopped: 1, forced: 0 } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('raw forwarding', () => {
   // A newer build's registry: engine.ping answers a field this build lacks, and it emits an event this build lacks.
   const NEWER = {
@@ -313,6 +344,7 @@ describe('raw forwarding', () => {
     events: { 'session.brokerItems': z.unknown(), 'probe.newEvent': z.strictObject({ m: z.number() }) },
     hostEvents: ['session.brokerItems', 'probe.newEvent'],
     ptyHostEvents: [],
+    machineEvents: [],
     mainOnly: new Set<string>(),
   } as const satisfies WireRegistry;
 

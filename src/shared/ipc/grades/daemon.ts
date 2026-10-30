@@ -10,4 +10,5 @@ export const grades = {
   'daemon.status': 'list',
   'daemon.restart': 'machine-admin',
   'daemon.endpoint': 'internal',
+  'daemon.e2eSeam': 'internal', // M5b fix round 2: the e2e's seams, never a remote caller's
 } as const satisfies CommandGrades<'daemon'>;

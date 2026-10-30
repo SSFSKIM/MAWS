@@ -121,7 +121,7 @@ describe('registerConnectors and the observation cache', () => {
     const gone: (() => void)[] = [];
     const launch = context();
     const session = { lifecycle: 'ready', control: client, status: () => ({ launchId: 'L1', cwd: project }), connectorLaunchContext: () => launch };
-    const surface = registerConnectors(on, (() => true) as unknown as HostEmit, { onClientGone: (listener) => (gone.push(listener), () => {}) }, { sessions: { get: (id) => (id === SESSION ? (session as never) : undefined) }, store: null });
+    const surface = registerConnectors(on, (() => true) as unknown as HostEmit, { onGone: (listener) => (gone.push(listener), () => {}) }, { sessions: { get: (id) => (id === SESSION ? (session as never) : undefined) }, store: null });
     await handlers.get('connectors.resolve')!(tool());
     expect(await surface.statusCache.resolveSource(project, 'usertoy')).toMatchObject({ ok: true });
     for (const listener of gone) listener();
@@ -140,7 +140,7 @@ describe('registerConnectors and the observation cache', () => {
     const second = connectorLaunchContext({ appSessionId: SESSION, launchId: 'L2', cwd: project, environment: { HOME: dir, PATH: join(dir, 'bin') } });
     let row = { lifecycle: 'ready', control: scriptedClient(), status: () => ({ appSessionId: SESSION, launchId: 'L1', cwd: project }), connectorLaunchContext: () => first };
     const sessions = { get: (id: string) => (id === SESSION ? (row as never) : undefined), list: () => [row as never], onRowsChanged: (listener: () => void) => ((rowsChanged = listener), () => {}) };
-    const surface = registerConnectors(on, (() => true) as unknown as HostEmit, { onClientGone: () => () => {} }, { sessions, store: null });
+    const surface = registerConnectors(on, (() => true) as unknown as HostEmit, { onGone: () => () => {} }, { sessions, store: null });
     const pending = surface.statusCache.begin(first); // L1's request, still unanswered
     row = { lifecycle: 'ready', control: scriptedClient(), status: () => ({ appSessionId: SESSION, launchId: 'L2', cwd: project }), connectorLaunchContext: () => second };
     rowsChanged();
@@ -160,7 +160,7 @@ describe('registerConnectors and the observation cache', () => {
     let probing!: AbortSignal;
     let probed!: (support: 'supported') => void;
     const calls = new ConnectorCalls({ session: (id) => (id === SESSION ? session : undefined), store: () => null, completed: () => {}, statusCache, probe: (_client, signal) => ((probing = signal), new Promise((resolve) => (probed = resolve))) });
-    const surface = registerConnectors(on, (() => true) as unknown as HostEmit, { onClientGone: (listener) => (gone.push(listener), () => {}) }, { sessions: { get: (id) => (id === SESSION ? (session as never) : undefined) }, store: null, calls, statusCache });
+    const surface = registerConnectors(on, (() => true) as unknown as HostEmit, { onGone: (listener) => (gone.push(listener), () => {}) }, { sessions: { get: (id) => (id === SESSION ? (session as never) : undefined) }, store: null, calls, statusCache });
     const resolving = handlers.get('connectors.resolve')!(tool()).catch(() => null);
     for (const listener of gone) listener();
     probed('supported'); // a probe answering after all

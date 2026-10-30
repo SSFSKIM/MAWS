@@ -535,6 +535,15 @@ describe('main’s hosts on the daemon shape', () => {
     }
     expect(specs.machine!.modulePath).toBe('/app/out/main/mawsd.js');
   });
+
+  it('give the machine host the spine’s command budgets, and the engine and pty hosts none (the panel’s sweep#3)', () => {
+    const start = daemonStart('private', { paths, modules, execPath: '/app/Electron', env, packaged: false, unitStart: () => {} });
+    const budgets = { 'session.takeOver': 40_000 };
+    const specs = daemonHostSpecs(paths, start, modules, env, budgets);
+    expect(specs.machine!.requestBudgetsMs).toEqual(budgets);
+    expect(specs['engine-host']!.requestBudgetsMs).toBeUndefined();
+    expect(specs['pty-host']!.requestBudgetsMs).toBeUndefined();
+  });
 });
 
 describe('the build check', () => {
@@ -589,6 +598,20 @@ describe('the build check', () => {
     const { calls, ready } = scene({ status: daemonStatus({ build: { ...daemonStatus().build, buildId: THIS } }) });
     await ready('machine');
     expect(calls).toEqual(['machine daemon.status']);
+  });
+
+  // P5 O3-D M5b: the spine's state is in the status, and it changes at no host transition (a load refused by the lock)
+  it('reads the status again when asked, once the machine host is ready', async () => {
+    const status = daemonStatus({ build: { ...daemonStatus().build, buildId: THIS } });
+    const { watch, calls, changes, ready } = scene({ status });
+    watch.refresh(); // not ready yet: nothing asked
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toEqual([]);
+    await ready('machine');
+    watch.refresh();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toEqual(['machine daemon.status', 'machine daemon.status']);
+    expect(changes).toHaveLength(2);
   });
 
   it('reads the status at each ready of the machine host and of the engine host, and at no other transition', async () => {

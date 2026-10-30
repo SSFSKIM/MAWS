@@ -11,7 +11,7 @@ import type { HostRegister } from '@shared/host/runtime';
 import { START_EXIT_HELD, type SocketHost } from '@shared/host/socket-host';
 import { SocketPort } from '@shared/host/socket-port';
 import { PTY_FRAMES_CAPABILITY, PTY_MARK, SOCKET_PROTOCOL, splitLines } from '@shared/host/socket-protocol';
-import { WIRE_CAPABILITIES, WIRE_MINOR } from '@shared/ipc/wire';
+import { WIRE_MINOR } from '@shared/ipc/wire';
 import { writeScratchShellHome } from '../../test/support/shell-home';
 import { buildIdOf, isAlive, readLock } from '../engine-host/supervisor-files';
 import { startPtyHost } from './detached';
@@ -109,8 +109,7 @@ describe('the pty host in socket mode', () => {
     expect(statSync(join(dir, 'host.sock')).mode & 0o777).toBe(0o600);
 
     const client = await connect();
-    expect(client.welcome).toMatchObject({ t: 'welcome', protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, capabilities: [...WIRE_CAPABILITIES], pid: process.pid, liveSessions: 0, rows: 0 });
-    expect(WIRE_CAPABILITIES).toContain(PTY_FRAMES_CAPABILITY);
+    expect(client.welcome).toMatchObject({ t: 'welcome', protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, capabilities: [PTY_FRAMES_CAPABILITY], pid: process.pid, liveSessions: 0, rows: 0 }); // P5 O3-D: its own list
     client.port!.postMessage({ t: 'ready' });
     const spawned = await client.request!('pty.spawn', { appSessionId: 'app-1', label: 't1', cwd: '/tmp', cols: 80, rows: 24, shell: '/bin/sh', args: ['-c', 'printf "through the socket\\n"; sleep 30'] });
     expect(spawned.ok).toBe(true);

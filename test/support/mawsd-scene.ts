@@ -13,17 +13,23 @@ import { vi, type Mock } from 'vitest';
 import * as z from 'zod';
 import { daemonHostFiles, daemonPaths, type DaemonPaths, type DaemonSocket } from '@shared/daemon/files';
 import { createHostSupervisor, type HostSupervisor, type HostSupervisorOptions } from '@shared/host/host-supervisor';
-import type { DocPortEnd, HostEmit, HostRuntime } from '@shared/host/runtime';
+import type { DocPortEnd, HostEmit, HostOn, HostRuntime } from '@shared/host/runtime';
 import { createHostRuntime } from '@shared/host/runtime';
 import { SocketPort } from '@shared/host/socket-port';
+import { appIdentity } from '@shared/host/identity';
 import { PTY_FRAMES_CAPABILITY, SOCKET_PROTOCOL, splitLines } from '@shared/host/socket-protocol';
 import type { HostDoc } from '@shared/ipc/host-protocol';
 import type { WireRegistry } from '@shared/ipc/registry';
-import { WIRE_CAPABILITIES, WIRE_MINOR } from '@shared/ipc/wire';
+import { WIRE_MINOR } from '@shared/ipc/wire';
 import { startDaemon, type DaemonOptions, type RunningDaemon } from '../../src/mawsd/daemon';
+import { registerAttachment } from '../../src/engine-host/attachment';
 import { procStartOf } from '../../src/engine-host/supervisor-files';
 import { ptyHostSocketPath } from '../../src/pty-host/files';
 import { fakeProfile, FakeProcesses, FakeSupervisor, type FakeProfile, type FakeSupervisorOptions } from './fake-supervisor';
+
+// P5 O3-D M5b (D47): a raw app's hello lists what an app listed before the cutover (no `machine.spine`): the existing
+// daemon tests' apps, which a daemon with `claimSpine` off serves as before; a test of the cutover names its own list
+export const APP_BEFORE_SPINE_CAPABILITIES = [PTY_FRAMES_CAPABILITY] as const;
 
 export const TIMING = { connectTimeoutMs: 200, helloTimeoutMs: 300, startTimeoutMs: 2_000, pidPollMs: 20, waitRetryMs: 80, killGraceMs: 60 };
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -31,12 +37,13 @@ export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve
 // What the stand-in engine host serves: every command it is sent, read as received (z.unknown), so a test sees the
 // relay's inputs exactly; one event, `probe.event`, whose payload is anything (keys no registry names included).
 const ANY = { input: z.unknown(), output: z.unknown(), owner: 'engine-host' as const };
-export const ENGINE_COMMANDS = ['engine.ping', 'host.interest', 'host.stopAll', 'host.configure', 'host.exitWhenIdle', 'host.supervisorStatus', 'probe.newer'] as const;
+export const ENGINE_COMMANDS = ['engine.ping', 'host.interest', 'host.stopAll', 'host.configure', 'host.exitWhenIdle', 'host.supervisorStatus', 'host.attachment' /* P5 O3-D M3 */, 'probe.newer', 'host.op', 'session.rewind' /* P5 O3-D M5a (D47): what reaches the host raw */] as const;
 const ENGINE_REGISTRY = {
   commands: Object.fromEntries(ENGINE_COMMANDS.map((name) => [name, ANY])),
   events: { 'probe.event': z.unknown() },
   hostEvents: ['probe.event'],
   ptyHostEvents: [],
+  machineEvents: [],
   mainOnly: new Set<string>(),
 } as const satisfies WireRegistry;
 
@@ -47,6 +54,7 @@ const PTY_REGISTRY = {
   events: { 'pty.exit': z.unknown() },
   hostEvents: [],
   ptyHostEvents: ['pty.exit'],
+  machineEvents: [],
   mainOnly: new Set<string>(),
 } as const satisfies WireRegistry;
 
@@ -58,6 +66,9 @@ export interface StandInOptions extends Partial<Omit<FakeSupervisorOptions, 'run
 // ready client for the next client's connect burst, as SessionStream's undelivered tail does.
 export class StandIn {
   readonly calls: { name: string; input: unknown }[] = [];
+  // P5 O3-D M3: the engine host's presence as attachment.ts keeps it: its gone hooks run, its shell recaptures counted
+  appGone = 0;
+  shellRecaptured = 0;
   readonly pending: unknown[] = [];
   readonly docs: { message: HostDoc; end: DocPortEnd; frames: Uint8Array[]; closed: boolean }[] = [];
   supervisor!: FakeSupervisor;
@@ -77,12 +88,21 @@ export class StandIn {
     return createHostRuntime<WireRegistry>(
       (on, emit, client) => {
         this.hostEmit = emit;
-        for (const name of names)
+        for (const name of names.filter((n) => n !== 'host.attachment'))
           on(name, async (input) => {
             this.calls.push({ name, input });
             return (this.answers[name]?.(input) ?? null) as never;
           });
         if (this.kind !== 'engine-host') return;
+        // P5 O3-D M3: host.attachment served as the engine host serves it (recorded, and an `answers` hook run first)
+        const recorded = ((name: string, handler: (input: unknown, ctx: never) => Promise<unknown>) =>
+          on(name as never, async (input, ctx) => {
+            this.calls.push({ name, input });
+            this.answers[name]?.(input);
+            return handler(input, ctx as never) as never;
+          })) as unknown as HostOn;
+        registerAttachment(recorded, client, () => void this.shellRecaptured++);
+        client.presence.onGone(() => void this.appGone++);
         client.onConnect(() => {
           for (const payload of this.pending.splice(0)) this.send(payload);
         });
@@ -285,6 +305,7 @@ export class MawsdScene {
         },
         timing: { ...TIMING, startTimeoutMs: 6_000 },
         log: (line) => void this.logs.push(`[app] ${line}`),
+        identity: appIdentity(this.profile.modulePath, {}, 'detached', APP_BEFORE_SPINE_CAPABILITIES), // D47: an app of before the cutover
       },
       ...options,
     });
@@ -304,6 +325,7 @@ export class MawsdScene {
 export interface RawHelloOptions {
   token?: string;
   capabilities?: string[];
+  appPid?: number; // P5 O3-D M5: the app's pid its hello names (this process's unless a test names another)
 }
 
 // An app on a relay socket, raw: its hello, then (once welcomed) C1's envelope and the document frames through the real
@@ -323,7 +345,7 @@ export class RawApp {
     return new Promise((resolve) => {
       const socket = createConnection(path);
       const app = new RawApp(socket);
-      const capabilities = options.capabilities ?? [...WIRE_CAPABILITIES];
+      const capabilities = options.capabilities ?? [...APP_BEFORE_SPINE_CAPABILITIES]; // P5 O3-D: an app's own list, not the wire's union
       socket.on('error', () => {});
       socket.on('end', () => void (app.ended = true));
       socket.on('close', () => {
@@ -353,7 +375,7 @@ export class RawApp {
       };
       socket.on('data', onData);
       socket.on('connect', () => {
-        socket.write(`${JSON.stringify({ t: 'hello', protocol: SOCKET_PROTOCOL, token, minor: WIRE_MINOR, build: 'raw-app', capabilities, appPid: process.pid })}\n`);
+        socket.write(`${JSON.stringify({ t: 'hello', protocol: SOCKET_PROTOCOL, token, minor: WIRE_MINOR, build: 'raw-app', capabilities, appPid: options.appPid ?? process.pid })}\n`);
       });
     });
   }
