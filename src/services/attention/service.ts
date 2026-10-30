@@ -343,8 +343,9 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
   // The session's last-seen mark moved to `at`: what it showed at or before then was seen.
   const seen = (id: AppSessionId, at: number) => {
     const state = sessions.get(id);
-    if (!state) return;
-    for (const item of state.derived.values()) if (item.kind === 'error' && item.state !== 'retired' && Date.parse(item.createdAt) <= at) state.derived.set(item.id, retired(item));
+    const covered = [...(state?.derived.values() ?? [])].filter((item) => item.kind === 'error' && item.state !== 'retired' && Date.parse(item.createdAt) <= at);
+    if (!state || covered.length === 0) return; // every index change of the record reaches here
+    for (const item of covered) state.derived.set(item.id, retired(item));
     changed(id, state);
   };
   deps.register('attention.request', async ({ appSessionId, requestId }) => {
