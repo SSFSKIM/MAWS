@@ -3,7 +3,8 @@
 // the real services chunk over a profile an O2-era build left, loaded and migrated by a machine.sock client's first spine
 // command) refuses an app from before O3-A at engine-host.sock and yields its spine to it. From the refusal to `[spine]
 // released` its only spine writes are its stores closing: the index's WAL checkpointed into index.sqlite and the -wal and
-// -shm files removed, every other spine file (SPINE_PATHS) byte-identical and none new; once released it holds no spine
+// -shm files removed, the index's logical contents (schema and every row) unchanged by it (fix round 2: the files'
+// allowance is for the checkpoint alone), every other spine file (SPINE_PATHS) byte-identical and none new; once released it holds no spine
 // file open. e2e/cross-build.spec.ts's `(pre-O3 app, daemon)` scene rests its window from the refusal on this, and checks
 // the open files (lsof) and the idle there. Skipped without a build, as the bundle guard is; class 1a builds first.
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -14,7 +15,7 @@ import { daemonPaths } from '@shared/daemon/files';
 import { tempDir } from '../../test/support/index-fixture';
 import { RawApp, until } from '../../test/support/mawsd-scene';
 import { writeO2Profile } from '../../test/support/o2-profile';
-import { spineFiles, spineFilesOpen } from '../../test/support/spine-files';
+import { indexContents, spineFiles, spineFilesOpen } from '../../test/support/spine-files';
 
 const MAWSD = resolve(__dirname, '../../out/main/mawsd.js');
 vi.setConfig({ testTimeout: 90_000 });
@@ -70,6 +71,8 @@ describe.skipIf(!existsSync(MAWSD))('the yield’s writes: the spine released th
     children.push(oldApp);
     await new Promise((started) => oldApp.once('spawn', started));
     const atRefusal = spineFiles(profile);
+    const contentsAtRefusal = indexContents(profile);
+    expect(Object.values(contentsAtRefusal.rows).flat().length, 'the migrated index holds rows to compare').toBeGreaterThan(0);
     const refused = await RawApp.connect(paths.sockets['engine-host'], token, { appPid: oldApp.pid! });
     opened.push(refused);
     expect(refused.first, daemonLog(profile)).toMatchObject({ t: 'refuse', reason: 'wire' });
@@ -82,6 +85,7 @@ describe.skipIf(!existsSync(MAWSD))('the yield’s writes: the spine released th
     expect(changed.filter((path) => !closing.includes(path)), 'no spine file but the index’s changed from the refusal to the release').toEqual([]);
     expect(released.has('index.sqlite-wal') || released.has('index.sqlite-shm'), 'the close checkpointed the WAL and removed -wal and -shm').toBe(false);
     expect(released.has('index.sqlite'), 'the index itself stays').toBe(true);
+    expect(indexContents(profile), 'the checkpoint changed no row and no schema of the index').toEqual(contentsAtRefusal);
     expect(spineFilesOpen(mawsd.pid!, profile), 'released: mawsd holds no spine file open').toEqual([]);
     expect(mawsd.exitCode, 'mawsd runs on, its spine yielded').toBeNull();
   });

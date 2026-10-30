@@ -4,9 +4,12 @@
 // refused the spine (O3-A acceptance 5); e2e/cross-build.spec.ts's `(pre-O3 app, daemon)` scene across an O2-era app's
 // idle after `mawsd` yielded to it (P5 O3-D acceptance 11), and src/mawsd/process-yield.test.ts across the yield itself.
 // spineFilesOpen: the spine files a process holds open, by lsof (P5 O3-D M6 fix round 1: the yield's per-process proof).
+// indexContents: the index's logical contents, schema and rows, read from a copy (fix round 2: what a checkpoint keeps).
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 export const SPINE_PATHS = ['index.sqlite', 'index.sqlite-wal', 'index.sqlite-shm', 'machine-settings.json', 'sessions', 'prompt-history.jsonl', 'attention.json', 'lane-a'];
 
@@ -29,4 +32,30 @@ export function spineFilesOpen(pid: number, userData: string): string[] {
   if (listed.error) throw listed.error;
   const roots = SPINE_PATHS.map((name) => join(userData, name));
   return listed.stdout.split('\n').filter((line) => line.startsWith('n')).map((line) => line.slice(1)).filter((path) => roots.some((root) => path === root || path.startsWith(`${root}/`)));
+}
+
+// The index's schema (sqlite_master, user_version) and every row of every stored table (an FTS table's content through its
+// shadow tables), read from a copy of index.sqlite with its -wal and -shm, so the reading neither takes a lock on the
+// live files nor checkpoints them. A checkpoint moves pages from the WAL into the main file and leaves this unchanged;
+// any write to a row or the schema changes it.
+export function indexContents(userData: string): { schema: unknown[]; userVersion: unknown; rows: Record<string, string[]> } {
+  const copy = mkdtempSync(join(tmpdir(), 'maws-index-copy-'));
+  try {
+    for (const suffix of ['', '-wal', '-shm']) {
+      const from = join(userData, `index.sqlite${suffix}`);
+      if (existsSync(from)) copyFileSync(from, join(copy, `index.sqlite${suffix}`));
+    }
+    const db = new DatabaseSync(join(copy, 'index.sqlite'));
+    try {
+      const schema = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all();
+      const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND sql NOT LIKE 'CREATE VIRTUAL TABLE%' ORDER BY name").all() as { name: string }[];
+      const rows: Record<string, string[]> = {};
+      for (const { name } of tables) rows[name] = db.prepare(`SELECT * FROM "${name.replaceAll('"', '""')}"`).all().map((row) => JSON.stringify(row, (_key, value: unknown) => (value instanceof Uint8Array ? Buffer.from(value).toString('base64') : value))).sort();
+      return { schema, userVersion: db.prepare('PRAGMA user_version').get(), rows };
+    } finally {
+      db.close();
+    }
+  } finally {
+    rmSync(copy, { recursive: true, force: true });
+  }
 }
