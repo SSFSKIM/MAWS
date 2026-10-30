@@ -52,7 +52,7 @@ vi.mock('../../services/files/register', () => ({ registerFilesHandlers: () => (
 vi.mock('../usage/claude-usage-reader', () => ({ claudeUsageDir: () => '', ClaudeUsageReader: class { start() {} } }));
 vi.mock('../usage/claude-usage-control', () => ({ baseUrlFrom: () => null, ClaudeUsageControl: class {} }));
 vi.mock('../gateway/claude-usage-app', () => ({ createClaudeUsageApp: () => ({}), execRunner: vi.fn() }));
-vi.mock('../../services/settings/engine-configure', () => ({ startEngineConfigure: () => ({ stop: vi.fn() }) }));
+vi.mock('../../services/settings/engine-configure', async (original) => ({ ...(await original<object>()), startEngineConfigure: () => ({ stop: vi.fn() }) })); // the budgets (command-budgets.ts) read its CONFIGURE_WAIT_MS
 vi.mock('../../services/settings/host-configure', () => ({ startHostConfigure: () => vi.fn() })); // E10
 vi.mock('./interest', () => ({ startInterest: () => () => {}, appInterest: () => ({ set: () => new Set(), onChange: () => () => {}, stop: () => {} }) })); // P5 O2 M2: its sibling; P5 O3-C: the app's interest
 vi.mock('../widgets/fixture-backend', () => ({ installWidgetBackend: vi.fn() }));
