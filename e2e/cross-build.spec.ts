@@ -670,9 +670,9 @@ test('(pre-O3 app, daemon) an O2-era app on a profile whose mawsd runs the spine
       await test.info().attach('pre-o3-order', { body: `${said.join('\n')}\n\n--- mawsd.log since the old app's launch\n${daemonSaid()}\n--- the old app's output\n${old.output()}`, contentType: 'text/plain' });
       throw new Error(`§L ordering: the spine yielded to pid ${oldPid} was not released ${isAlive(daemon) ? `within ${REFUSAL_TO_RELEASE_MS + 5_000} ms` : 'before mawsd ended'}; order: ${competing().join(' → ')}`);
     }
-    const refusalToRelease = stamp('[spine] released')! - stamp(refusedLine)!;
-    test.info().annotations.push({ type: 'pre-O3 overlap', description: `refusal → released ${refusalToRelease} ms; the old app's launch → released ${stamp('[spine] released')! - launchedAt} ms` });
-    expect(refusalToRelease, '§L ordering: the yielded spine released within the yield’s own bound of the refusal').toBeLessThanOrEqual(REFUSAL_TO_RELEASE_MS);
+    const refusalToReleaseMs = stamp('[spine] released')! - stamp(refusedLine)!;
+    test.info().annotations.push({ type: 'pre-O3 overlap', description: `refusal → released ${refusalToReleaseMs} ms; the old app's launch → released ${stamp('[spine] released')! - launchedAt} ms` });
+    expect(refusalToReleaseMs, '§L ordering: the yielded spine released within the yield’s own bound of the refusal').toBeLessThanOrEqual(REFUSAL_TO_RELEASE_MS);
     // 4(b) at the release: the post-D mawsd holds no spine file open, or is gone
     expect(isAlive(daemon) ? spineFilesOpen(daemon, s.userData) : [], 'released: the post-D mawsd holds no spine file open').toEqual([]);
     // 3. the old app's index unavailable: the version mawsd migrated it to is newer than the old build knows
