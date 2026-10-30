@@ -151,7 +151,8 @@ function boundedStream(file) {
 
 // `daemon` (P5 O3-D M2): a mawsd directory whose own log (`mawsd.log`, and `mawsd.log.1`) is published beside the host's,
 // for a scene that runs mawsd itself rather than through a launch; the same redaction, bounds and inherited-log rule.
-export function processEvidence(outputDir, userData, canKeep = () => true, env = process.env, { daemon = null } = {}) {
+// `host` false (P5 O3-D M6): the host's log is a launch's own evidence to publish, so this one publishes only mawsd's.
+export function processEvidence(outputDir, userData, canKeep = () => true, env = process.env, { daemon = null, host = true } = {}) {
   const redact = createRedactor({ ...process.env, ...env });
   const publicBytes = (bytes) => {
     const text = bytes.toString('utf8');
@@ -213,6 +214,7 @@ export function processEvidence(outputDir, userData, canKeep = () => true, env =
           if (inheritedDaemonLogs) writeFileSync(join(outputDir, `engine-host-${id}.mawsd-excluded.log`), 'mawsd log evidence excluded: its directory already contained logs.\n');
           else publishGenerations(daemon, 'mawsd.log', '.mawsd');
         }
+        if (!host) return;
         // A reused profile can hold diagnostics from an earlier excluded launch. If either generation predates
         // this capture, refuse both even after rotation; new main streams above are still independently eligible.
         if (inheritedHostLogs) {

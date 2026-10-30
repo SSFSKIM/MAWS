@@ -147,7 +147,7 @@ const lockOf = (userData: string): { pid: number; socketPath: string } | null =>
 
 // The processes the scene leaves behind, filled in as they start, so the cleanup ends whatever started. `endUnit` stops
 // the harness's restarts of a unit daemon (D7), before the cleanup kills it.
-interface Held { maws: MawsLaunch | null; supervisor: number | null; daemon: number | null; endUnit?: () => void }
+interface Held { maws: MawsLaunch | null; supervisor: number | null; daemon: number | null; endUnit?: () => void; evidence?: ReturnType<typeof processEvidence> }
 
 // The scene's launch environment beyond launchMaws's own
 const sceneEnv = (shape: Shape) => ({ MAWS_HARNESS: '0', MAWS_HOST_MODE: shape, MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_ROW_MS: ROW_MS, MAWS_E2E_QUIT_ANSWER: 'keep' });
@@ -197,6 +197,9 @@ async function keptIdleScene(root: string, userData: string, held: Held, shape: 
   const seeded = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: 'daemon idle session' }, uuid: randomUUID(), timestamp: '2026-10-27T10:00:00.000Z', cwd: repo, sessionId: engineId, version: '2.1.283' };
   writeFileSync(join(project, `${engineId}.jsonl`), `${JSON.stringify(seeded)}\n`);
 
+  // P5 O3-D M6 (fix round 1): mawsd's own log published beside the launch's host log (as the mawsd-spine case does), so
+  // a run can be read for mawsd's attach and spine lines; taken before the harness's unit starts, so its log is this scene's
+  if (daemon) held.evidence = processEvidence(test.info().outputDir, userData, () => true, process.env, { daemon: join(userData, 'mawsd'), host: false });
   if (daemon && daemonKind === 'unit') await startUnitDaemon(userData, held);
   const maws = (held.maws = await launchMaws({ userData, keepConfigHome: true, env: sceneEnv(shape) }));
   const { page, app } = maws;
@@ -266,7 +269,7 @@ test('daemon idle: the physical footprint and CPU of what stays behind holding o
     expect(misses, `the daemon shape's processes together are within DAEMON_IDLE_BOUND (${line})`).toEqual([]);
   } finally {
     held.endUnit?.();
-    leftover = await removeScratch(root, userData, held.maws, [held.supervisor, held.daemon]);
+    leftover = await removeScratch(root, userData, held.maws, [held.supervisor, held.daemon], held.evidence);
   }
   if (leftover !== null) throw leftover; // the body passed: a process of the scratch outliving it is the case's failure
 });
@@ -399,7 +402,7 @@ test('daemon idle enrolled endpoint: the footprint and CPU an enrolled, listed e
     const increment = before === null || after === null ? null : { footprintKiB: Math.round(after.footprintKiB) - Math.round(before.footprintKiB), cpuS: Math.round((after.cpuS - before.cpuS) * 100) / 100 };
     report('daemon-idle-enrolled.json', line, reasons, { shape: 'daemon, enrolled', electron, budgetKiB: ENROLLED_INCREMENT_BUDGET_KIB, increment, linkUp, sessionEnded, unenrolled: unenrolled.record, enrolled: enrolled.record });
   } finally {
-    leftover = await removeScratch(root, userData, held.maws, [held.supervisor, held.daemon]);
+    leftover = await removeScratch(root, userData, held.maws, [held.supervisor, held.daemon], held.evidence);
     await org?.stop().catch((error: unknown) => console.error(error));
   }
   if (leftover !== null) throw leftover;
@@ -443,7 +446,7 @@ async function keptIdleLeg(shape: Shape, run: IdleRun): Promise<{ shape: Shape; 
     const measurement = await measureWindow(await settledProcesses(root, held, shape, run), run);
     leg = { shape, electron, measurement, sessionEnded: launchEnded(journal(userData, id)) };
   } finally {
-    leftover = await removeScratch(root, userData, held.maws, [held.supervisor, held.daemon]);
+    leftover = await removeScratch(root, userData, held.maws, [held.supervisor, held.daemon], held.evidence);
   }
   if (leftover !== null) throw leftover;
   return leg;
@@ -720,7 +723,7 @@ function report(file: string, line: string | null, reasons: string[], record: Re
 // The app closed if it is still open, then every process of the scratch killed (the supervisor by its lock's pid too,
 // and on the daemon shape `mawsd` by the pid main reported), then the supervisor's socket directory, `mawsd`'s sockets'
 // $TMPDIR fallback when they took it, and the scratch removed. A survivor is answered, after the files are removed.
-async function removeScratch(root: string, userData: string, maws: MawsLaunch | null, pids: readonly (number | null)[]): Promise<unknown> {
+async function removeScratch(root: string, userData: string, maws: MawsLaunch | null, pids: readonly (number | null)[], evidence?: { finish(): void }): Promise<unknown> {
   const lock = lockOf(userData);
   await maws?.cleanup().catch((error: unknown) => console.error(error));
   let leftover: unknown = null;
@@ -729,6 +732,10 @@ async function removeScratch(root: string, userData: string, maws: MawsLaunch | 
   if (socketDir !== null) rmSync(socketDir, { recursive: true, force: true });
   const daemonSockets = daemonPaths(userData).socketDir; // the daemon shape's, when its sockets took the fallback
   if (!daemonSockets.startsWith(root)) rmSync(daemonSockets, { recursive: true, force: true });
-  rmSync(root, { recursive: true, force: true });
+  try {
+    evidence?.finish(); // the processes stopped, the directory not yet removed
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
   return leftover;
 }

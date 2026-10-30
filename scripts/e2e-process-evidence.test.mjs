@@ -127,6 +127,21 @@ test('publishes a mawsd directory’s log generations beside the host’s, redac
   assert.deepEqual(marked.map((name) => name.replace(/^engine-host-[0-9a-f-]{36}/, '<id>')), ['<id>.mawsd-excluded.log']);
 });
 
+// P5 O3-D M6: beside a launch, which publishes the host's log itself, a scene's own evidence publishes mawsd's alone
+test('with host false, publishes the mawsd directory’s log and not the host’s', (t) => {
+  const dir = scratch(t);
+  const profile = join(dir, 'profile');
+  const daemon = join(profile, 'mawsd');
+  const evidence = processEvidence(join(dir, 'output'), profile, () => true, process.env, { daemon, host: false });
+  mkdirSync(join(profile, 'supervisor'), { recursive: true });
+  mkdirSync(daemon, { recursive: true });
+  writeFileSync(join(profile, 'supervisor', 'host.log'), 'idle: collected in 13 ms\n');
+  writeFileSync(join(daemon, 'mawsd.log'), 'engine-host.sock: attached\n');
+  evidence.finish();
+  const files = readdirSync(join(dir, 'output'));
+  assert.deepEqual(files.map((name) => name.replace(/^engine-host-[0-9a-f-]{36}/, '<id>')), ['<id>.mawsd.log']);
+});
+
 test('a reused profile never publishes either inherited host generation, even after rotation, while new main streams remain eligible', (t) => {
   const dir = scratch(t);
   for (const previous of ['host.log', 'host.log.1']) {

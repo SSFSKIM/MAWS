@@ -8,8 +8,9 @@ export function captureAllowed(options: {
   realEngine?: boolean;
   ownerConfigHome?: boolean;
 }): boolean;
-// `daemon` (P5 O3-D M2): a mawsd directory whose own log is published beside the engine host's
-export function processEvidence(outputDir: string, userData: string, canKeep?: () => boolean, env?: Record<string, string | undefined>, options?: { daemon?: string | null }): {
+// `daemon` (P5 O3-D M2): a mawsd directory whose own log is published beside the engine host's; `host` false (P5 O3-D
+// M6): mawsd's log alone, the host's being a launch's own evidence
+export function processEvidence(outputDir: string, userData: string, canKeep?: () => boolean, env?: Record<string, string | undefined>, options?: { daemon?: string | null; host?: boolean }): {
   capture(child: ChildProcess): void;
   finish(): void;
 };
