@@ -15,7 +15,7 @@ import { CommandFailure, type registerMainHandler } from '../ipc/router';
 import type { HostSupervisor } from './supervisor';
 
 export interface HostStatusDeps {
-  hosts: Pick<HostSupervisor, 'snapshot' | 'onState' | 'onEvent' | 'facts' | 'restartSupervisor'>;
+  hosts: Pick<HostSupervisor, 'snapshot' | 'onState' | 'onEvent' | 'facts' | 'restartSupervisor' | 'dispatch'>;
   appBuildId(): string; // the build id of the engine-host bundle this app would start
   appWire(): string; // this app's wire fingerprint
   mainBuild: MainBuild; // E11 §2.7: main's own build, for Diagnostics
@@ -75,18 +75,34 @@ export function startHostStatus(deps: HostStatusDeps): HostStatusService {
     };
   };
 
+  const take = (next: SupervisorStatus) => {
+    supervisor = next;
+    liveAtLastStatus = next.liveSessions;
+    deps.emit(status());
+  };
+  // M5b fix round 2: on the daemon shape `mawsd`'s link to the engine host is permanent, so an app that attaches to a host
+  // already running gets no connect burst, and so no status, until the host's status changes; main asks for it at each
+  // ready, a status heard while the answer is out winning over it
+  let heard = 0;
+  const ask = () => {
+    const before = heard;
+    void deps.hosts.dispatch('engine-host', 'host.supervisorStatus', undefined).then((answer) => {
+      if (answer.ok && heard === before && deps.hosts.snapshot('engine-host').state === 'ready') take(answer.value as SupervisorStatus);
+    });
+  };
   const offs = [
     deps.hosts.onState('engine-host', (state) => {
       if (state.state !== 'ready') supervisor = null;
       deps.emit(status());
+      if (state.state === 'ready' && deps.daemon) ask();
     }),
     deps.hosts.onEvent('host.supervisorStatus', (next) => {
-      supervisor = next;
-      liveAtLastStatus = next.liveSessions;
-      deps.emit(status());
+      heard += 1;
+      take(next);
     }),
   ];
 
+  if (deps.daemon && deps.hosts.snapshot('engine-host').state === 'ready') ask();
   deps.register('host.status', () => status());
   deps.register('host.restart', async ({ stopSessions }) => {
     const result = await deps.hosts.restartSupervisor({ stopSessions });

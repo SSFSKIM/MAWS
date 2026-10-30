@@ -33,9 +33,12 @@ function harness(transport: HostFacts['transport'] = 'detached', shape: Pick<Hos
   const emitted: HostStatus[] = [];
   const restartSupervisor = vi.fn(async (): Promise<CommandResult<'host.restart'>> => ({ ok: true, value: undefined }));
   const openPath = vi.fn<(path: string) => Promise<string>>(async () => '');
+  const asked: string[] = [];
+  let answer: () => Promise<CommandResult<'host.supervisorStatus'>> = async () => ({ ok: false, error: { code: 'host_unavailable', message: 'not yet' } });
   const deps: HostStatusDeps = {
     hosts: {
       snapshot: () => state,
+      dispatch: (async (_owner: string, name: string) => (asked.push(name), answer())) as HostStatusDeps['hosts']['dispatch'],
       onState: (_owner, l) => (stateListeners.add(l), () => void stateListeners.delete(l)),
       onEvent: ((_name: string, l: (s: SupervisorStatus) => void) => (eventListeners.add(l), () => void eventListeners.delete(l))) as HostStatusDeps['hosts']['onEvent'],
       facts: () => facts,
@@ -64,6 +67,10 @@ function harness(transport: HostFacts['transport'] = 'detached', shape: Pick<Hos
     },
     status(next: SupervisorStatus) {
       eventListeners.forEach((l) => l(next));
+    },
+    asked,
+    answerWith(next: () => Promise<CommandResult<'host.supervisorStatus'>>) {
+      answer = next;
     },
     listeners: () => stateListeners.size + eventListeners.size,
   };
@@ -171,6 +178,34 @@ describe('host.status', () => {
     h.move({ state: 'crashed' }, { reason: 'incompatible', refused: 'protocol', waitingLiveSessions: 1 });
     expect(h.emitted.at(-1)).toMatchObject({ transport: 'daemon', matches: 'protocol' }); // a refusal says itself, as embedded
     for (const status of h.emitted) expect(validateEventPayload('host.status', status).ok).toBe(true);
+  });
+
+  // M5b fix round 2 (e2e:connectors hot relaunch): on the daemon shape mawsd's link to the engine host is permanent, so an
+  // app that attaches to a running host gets no connect burst and no host.supervisorStatus until the host's status
+  // changes; main asks for it each time the host is ready, an event heard while the answer is out winning over it
+  it('on the daemon shape asks the supervisor’s status at each ready, a status heard meanwhile winning', async () => {
+    const h = harness('detached', { daemon: () => null });
+    h.answerWith(async () => ({ ok: true, value: supervisorStatus({ pid: 4242 }) }));
+    h.move({ state: 'ready', pid: 4242 });
+    expect(h.asked).toEqual(['host.supervisorStatus']);
+    await vi.waitFor(() => expect(h.emitted.at(-1)?.supervisor?.pid).toBe(4242));
+
+    let release!: (result: CommandResult<'host.supervisorStatus'>) => void;
+    h.answerWith(() => new Promise((resolve) => (release = resolve)));
+    h.move({ state: 'restarting', pid: null });
+    expect(h.emitted.at(-1)?.supervisor).toBeNull();
+    h.move({ state: 'ready', pid: 5151 });
+    h.status(supervisorStatus({ pid: 5151, liveSessions: 4 })); // the host's own, newer than the answer below
+    release({ ok: true, value: supervisorStatus({ pid: 5151, liveSessions: 1 }) });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.emitted.at(-1)?.supervisor).toMatchObject({ pid: 5151, liveSessions: 4 });
+    expect(h.asked).toHaveLength(2);
+  });
+
+  it('the embedded shape waits for the connect burst and asks nothing', () => {
+    const h = harness('detached');
+    h.move({ state: 'ready', pid: 4242 });
+    expect(h.asked).toEqual([]);
   });
 
   it('says why a launch asked for the daemon runs embedded', async () => {
