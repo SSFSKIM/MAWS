@@ -81,6 +81,8 @@ export class RewindNotes {
   // rewind was forwarded after the act was (the act's answer may come back after a later rewind's; and an act forwarded
   // while a rewind's note is still being written reaches the engine before that rewind does).
   private readonly forwarded = new Map<AppSessionId, number>();
+  // P5 O3-D M5a (D47): lane B's claimed ops being admitted, by their binding (opId, opCreated); one at a time per op
+  private readonly admitting = new Map<string, Promise<unknown>>();
   private closed = false;
 
   constructor(
@@ -110,22 +112,44 @@ export class RewindNotes {
   }
 
   // P5 O3-D M5a (D47): lane B's claimed op (above). Its inner input is read as the command's own; one the command's schema
-  // refuses goes on untouched, for the host's ledger to refuse `malformed`.
+  // refuses goes on untouched, for the host's ledger to refuse `malformed`. The ledger's query reserves nothing, so a copy
+  // of an op (a device's retry) waits for the copy being admitted to settle and is then admitted alone: by then the ledger
+  // knows an op that reached it, and the copy touches no note.
   async claimed(input: CommandInput<'host.op'>): Promise<Op> {
+    const name = input.name;
+    if (name !== 'session.rewind' && !isAct(name)) return this.sendOp(input);
+    const inner = validateCommandInput(name, input.input);
+    if (!inner.ok) return this.sendOp(input);
+    const key = `${input.opId}\n${input.opCreated}`;
+    for (let earlier = this.admitting.get(key); earlier; earlier = this.admitting.get(key)) await earlier.catch(() => {});
+    const admitted = this.admit(input, name, inner.value as { appSessionId: string });
+    this.admitting.set(key, admitted);
+    try {
+      return await admitted;
+    } finally {
+      if (this.admitting.get(key) === admitted) this.admitting.delete(key);
+    }
+  }
+
+  private async sendOp(input: CommandInput<'host.op'>): Promise<Op> {
+    const result = await this.deps.dispatch('engine-host', 'host.op', input);
+    if (!result.ok) throw new HostCommandError(result.error);
+    return result.value as Op;
+  }
+
+  private async admit(input: CommandInput<'host.op'>, name: 'session.rewind' | ConversationAct, inner: { appSessionId: string }): Promise<Op> {
     const send = () => this.deps.dispatch('engine-host', 'host.op', input);
     const answered = (result: Awaited<ReturnType<typeof send>>): Op => {
       if (!result.ok) throw new HostCommandError(result.error);
       return result.value as Op;
     };
-    const name = input.name;
-    if (name !== 'session.rewind' && !isAct(name)) return answered(await send());
-    const inner = validateCommandInput(name, input.input);
-    if (!inner.ok) return answered(await send());
-    const appSessionId = (inner.value as { appSessionId: string }).appSessionId as AppSessionId;
-    // a retried action: the ledger answers what it holds and runs nothing (or refuses it as expired); no note moves
-    const known = await this.deps.dispatch('engine-host', 'host.opQuery', { opId: input.opId, opCreated: input.opCreated, tombstoneIfAbsent: false });
-    const state = known.ok ? (known.value as CommandOutput<'host.opQuery'>).state : 'unavailable';
-    if (state === 'done' || state === 'in-progress' || state === 'expired') return answered(await send());
+    const appSessionId = inner.appSessionId as AppSessionId;
+    // a retried action: the ledger answers what it holds and runs nothing (or refuses it as expired); no note moves. A
+    // ledger that cannot say is no proof the op is new: it is refused unsent, as the host refuses with its ledger closed.
+    const known = await this.deps.dispatch('engine-host', 'host.opQuery', { opId: input.opId, opCreated: input.opCreated, tombstoneIfAbsent: false }).catch(() => null);
+    const query = known?.ok ? (known.value as CommandOutput<'host.opQuery'>) : null;
+    if (query === null || query.state === 'unavailable') return { state: 'refused', reason: 'unavailable', ...(query?.ledger !== undefined && { ledger: query.ledger }) };
+    if (query.state !== 'not-received') return answered(await send());
 
     if (isAct(name)) {
       const before = this.forwarded.get(appSessionId) ?? 0;
@@ -133,7 +157,7 @@ export class RewindNotes {
       if (op.state === 'done' && op.result.ok) await this.quietly(appSessionId, (note) => (note === null || (this.forwarded.get(appSessionId) ?? 0) !== before ? undefined : null));
       return op;
     }
-    const note = await this.attempt(inner.value as CommandInput<'session.rewind'>);
+    const note = await this.attempt(inner as CommandInput<'session.rewind'>);
     const result = await this.forward(appSessionId, send);
     if (!result.ok) {
       if (result.error.code === 'internal' && UNSENT.test(result.error.message)) await this.settle(note, null);

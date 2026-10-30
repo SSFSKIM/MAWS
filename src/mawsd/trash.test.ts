@@ -1,7 +1,7 @@
 // `mawsd`'s trash (P5 O3-D M5; docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, D10): the session service's Delete
 // moves its paths into the user's trash directory, by a rename, or a copy then an unlink across devices, never over a
 // name the trash already holds. Over a scratch home: nothing here reaches the person's own trash.
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -26,6 +26,13 @@ function file(name: string, body = name): string {
 }
 
 const AT = new Date(2026, 9, 29, 17, 5, 9); // local time, as a .trashinfo records it
+const existsLink = (path: string) => {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+};
 
 describe('the trash on macOS', () => {
   it('moves a file and a directory into ~/.Trash under their names', async () => {
@@ -112,6 +119,20 @@ describe('two moves of one name at once', () => {
       });
     }
   }
+
+  it('across devices (EXDEV), a symlink lands as itself, the original gone and nothing else left in the trash', async () => {
+    const link = join(root, 'shortcut');
+    symlinkSync('../elsewhere/target', link);
+    const exdev = async () => Promise.reject(Object.assign(new Error('cross-device link not permitted'), { code: 'EXDEV' }));
+    for (const platform of ['darwin', 'linux'] as const) {
+      if (!existsLink(link)) symlinkSync('../elsewhere/target', link);
+      await trashPath(link, { platform, home, env: { XDG_DATA_HOME: join(root, 'xdg') }, rename: exdev });
+      expect(existsLink(link)).toBe(false);
+      const trash = platform === 'darwin' ? join(home, '.Trash') : join(root, 'xdg', 'Trash', 'files');
+      expect(readdirSync(trash)).toEqual(['shortcut']);
+      expect(readlinkSync(join(trash, 'shortcut'))).toBe('../elsewhere/target');
+    }
+  });
 
   it('across devices (EXDEV), a directory lands whole on the name it claimed', async () => {
     const dir = join(root, 'worktree');

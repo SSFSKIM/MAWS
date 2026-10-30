@@ -357,8 +357,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   };
   // The second signal (D21): the profile's SingletonLock, a symlink `<host>-<pid>` as Chromium writes it, naming a live
   // app of this host that no post-D hello announced and that holds no spine.lock.
-  // A lock a crash left behind (a clean quit removes it) is no signal: its pid gone, or alive but started after the lock
-  // was written, so not its writer (a pid reused since).
+  // A lock a crash left behind (a clean quit removes it) is no signal: its pid gone, or alive but known to have started
+  // after the lock was written, so not its writer (a pid reused since). A start ps cannot give leaves the signal standing.
   const singletonHolder = (): number | null => {
     let target: string;
     let written: number;
@@ -1088,10 +1088,16 @@ function rmdirQuietly(path: string): void {
   }
 }
 
-// Whether `pid` began at or before `writtenMs` (`ps`'s start, whole seconds UTC, read as procStartOf reads it), so it
-// can have written what was written then; unknown is false.
+// Whether `pid` can have written what was written at `writtenMs` (`ps`'s start, whole seconds UTC, read as procStartOf
+// reads it)
 function startedBy(pid: number, writtenMs: number): boolean {
-  const start = procStartOf(pid);
+  return couldHaveWritten(procStartOf(pid), writtenMs);
+}
+
+// A process of start `start` (procStartOf's line) against what was written at `writtenMs`: only a start known to come
+// after it rules the process out; an unknown one (ps failed, or its line does not parse) does not, so a live pid named
+// by the lock holds the signal.
+export function couldHaveWritten(start: string | null, writtenMs: number): boolean {
   const startMs = start === null ? NaN : Date.parse(`${start} UTC`);
-  return Number.isFinite(startMs) && startMs <= writtenMs;
+  return !Number.isFinite(startMs) || startMs <= writtenMs;
 }

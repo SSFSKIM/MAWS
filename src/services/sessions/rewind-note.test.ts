@@ -263,6 +263,7 @@ describe('the rewind repair on lane B’s claimed op (host.op)', () => {
   let ledger: Map<string, unknown>;
   let refuseOps: string | null;
   let hangOps: (() => void) | null; // the process dies before the ledger answers: told as the op is forwarded
+  let queryAnswer: ((opId: string) => Promise<unknown>) | null; // host.opQuery's answer, when a case sets its own
   const bind = () => {
     bus = fakeBus();
     registerSessionServiceHandlers(h.service, bus, 'index');
@@ -272,7 +273,7 @@ describe('the rewind repair on lane B’s claimed op (host.op)', () => {
     const seam = h.host as unknown as { answer: Answer };
     const answer = seam.answer.bind(h.host);
     vi.spyOn(seam, 'answer').mockImplementation(async (name, input) => {
-      if (name === 'host.opQuery') return { state: ledger.has(input.opId as string) ? 'done' : 'not-received' };
+      if (name === 'host.opQuery') return queryAnswer ? queryAnswer(input.opId as string) : { state: ledger.has(input.opId as string) ? 'done' : 'not-received' };
       if (name !== 'host.op') return answer(name, input);
       const opId = input.opId as string;
       if (hangOps !== null) {
@@ -300,6 +301,7 @@ describe('the rewind repair on lane B’s claimed op (host.op)', () => {
     ledger = new Map();
     refuseOps = null;
     hangOps = null;
+    queryAnswer = null;
     bind();
     withLedger();
   });
@@ -370,6 +372,43 @@ describe('the rewind repair on lane B’s claimed op (host.op)', () => {
     expect(noteOf(id)).toMatchObject({ state: 'confirmed' });
     expect(await op(opId(6), 'session.send', { appSessionId: id, content: 'from the phone' })).toMatchObject({ ok: true }); // the act retried
     expect(noteOf(id), 'a replayed act clears nothing').toMatchObject({ state: 'confirmed' });
+  });
+
+  // Fix round 2: the ledger's query reserves nothing, so two copies of one op asked at once both hear `not-received`. Here
+  // each query is answered as the ledger stood when it arrived, the first held until the second could have arrived; the
+  // second's answer is delivered only after the first copy ran and a newer local rewind B wrote its note.
+  it('two copies of one op at once: the second touches no note, so a newer local rewind’s note survives', async () => {
+    const id = await liveSession();
+    const held: (() => void)[] = [];
+    queryAnswer = (asked) => {
+      const state = ledger.has(asked) ? 'done' : 'not-received';
+      return new Promise((answer) => held.push(() => answer({ state })));
+    };
+    const targetA = randomUUID();
+    const first = op(opId(9), 'session.rewind', { ...rewindArgs(id), targetMessageUuid: targetA });
+    const second = op(opId(9), 'session.rewind', { ...rewindArgs(id), targetMessageUuid: targetA });
+    await h.until(() => held.length >= 1);
+    await new Promise((settle) => setTimeout(settle, 50)); // the second copy's query, had it one, has arrived
+    held.shift()!();
+    expect(await first).toMatchObject({ ok: true, value: { state: 'done', result: { ok: true, value: { rewound: true } } } });
+    expect(noteOf(id)).toMatchObject({ state: 'confirmed', targetMessageUuid: targetA });
+    queryAnswer = null;
+    expect(await bus.invoke('session.rewind', rewindArgs(id))).toMatchObject({ ok: true }); // B, newer, local
+    for (const answer of held.splice(0)) answer();
+    expect(await second).toMatchObject({ ok: true, value: { state: 'done' } }); // the ledger's replay
+    expect(noteOf(id)).toMatchObject({ state: 'confirmed', targetMessageUuid: TARGET });
+    expect(h.host.calledWith('session.rewind')).toHaveLength(2); // A once, B once
+  });
+
+  it('a query that fails or finds the ledger unavailable refuses the op unsent, touching no note', async () => {
+    const id = await liveSession();
+    expect(await bus.invoke('session.rewind', rewindArgs(id))).toMatchObject({ ok: true });
+    queryAnswer = async () => ({ state: 'unavailable', ledger: 'unwritable' });
+    expect(await op(opId(10), 'session.rewind', { ...rewindArgs(id), targetMessageUuid: randomUUID() })).toMatchObject({ ok: true, value: { state: 'refused', reason: 'unavailable', ledger: 'unwritable' } });
+    queryAnswer = async () => Promise.reject(new Error('the engine host is gone'));
+    expect(await op(opId(11), 'session.send', { appSessionId: id, content: 'from the phone' })).toMatchObject({ ok: true, value: { state: 'refused', reason: 'unavailable' } });
+    expect(h.host.calledWith('host.op')).toEqual([]);
+    expect(noteOf(id)).toMatchObject({ state: 'confirmed', targetMessageUuid: TARGET });
   });
 
   it('a claimed op of another command goes on untouched', async () => {

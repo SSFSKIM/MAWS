@@ -16,7 +16,7 @@ import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { buildIdOf, procStartOf } from '../engine-host/supervisor-files';
 import { SPINE_LOCK, takeSpineLock } from '../services/settings/spine-lock';
 import type { SpineDeps } from '../services/spine-root';
-import { SINGLETON_LOCK_SIGNAL_DEFAULT, SPINE_LOCK_FILE } from './daemon';
+import { couldHaveWritten, SINGLETON_LOCK_SIGNAL_DEFAULT, SPINE_LOCK_FILE } from './daemon';
 import type { DaemonServices, EndpointModule } from './endpoint-seam';
 import type { SpineEntry } from './spine-seam';
 import { MawsdScene, sleep, until } from '../../test/support/mawsd-scene';
@@ -205,6 +205,15 @@ describe('the second signal (D21), on since the probe answered, under claimSpine
     const again = standInChunk();
     await scene.start({ claimSpine: true, spine: { load: again.load } });
     expect(await (await scene.app('machine')).request('session.launchMode')).toMatchObject({ ok: true });
+  });
+
+  // Fix round 2: a start `ps` cannot give (it failed, or its line does not parse) proves nothing stale: the signal holds
+  it('the lock’s writer: a pid that started at or before the lock was written, or whose start is unknown', () => {
+    const written = Date.parse('2026-10-29T17:05:09Z');
+    expect(couldHaveWritten('Thu Oct 29 17:05:09 2026', written)).toBe(true);
+    expect(couldHaveWritten('Thu Oct 29 17:05:10 2026', written)).toBe(false);
+    expect(couldHaveWritten(null, written)).toBe(true);
+    expect(couldHaveWritten('not a start', written)).toBe(true);
   });
 
   it('a SingletonLock of another host, or naming a pid that holds spine.lock, is no signal', async () => {

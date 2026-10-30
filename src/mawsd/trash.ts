@@ -7,11 +7,12 @@
 //
 // Never over a name the trash already holds: a taken name becomes `<stem> <hh.mm.ss><ext>`, then with a count; when the
 // trash cannot be read (macOS's privacy protection may refuse a look inside `~/.Trash`), a random suffix is used instead
-// of a guess. The chosen name is claimed before the move, by an exclusive create of an empty item of the source's kind
-// that the rename then replaces, so two moves of one name at once never land on one item: the second finds it taken and
-// chooses again. The root applies the e2e seam (`trashFor`, MAWS_E2E_TRASH_DIR) around this, as it does around main's.
+// of a guess. The chosen name is claimed before the move, by an exclusive create the rename then replaces, so two moves of
+// one name at once never land on one item: the second finds it taken and chooses again. A directory claims it with an
+// empty directory and a file with an empty file, which a copy across devices fills; a symlink with its own copy (the link
+// it names), which needs no copy across devices. The root applies the e2e seam (`trashFor`, MAWS_E2E_TRASH_DIR) around this, as it does around main's.
 import { randomUUID } from 'node:crypto';
-import { cp, lstat, mkdir, rename as fsRename, rm, rmdir, unlink, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, readlink, rename as fsRename, rm, rmdir, symlink, unlink, writeFile } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
 
 export interface TrashOptions {
@@ -24,12 +25,15 @@ export interface TrashOptions {
 
 export async function trashPath(path: string, options: TrashOptions): Promise<void> {
   const source = resolve(path);
-  const directory = (await lstat(source)).isDirectory(); // a path that is not there is refused before the trash is touched
+  const kind = await lstat(source); // a path that is not there is refused before the trash is touched
+  const directory = kind.isDirectory();
+  const link = kind.isSymbolicLink() ? await readlink(source) : null;
   const now = options.now?.() ?? new Date();
-  // true: `to` is this move's, an empty file or directory the move replaces; false: the name is taken
+  // true: `to` is this move's, the claim the move replaces; false: the name is taken
   const claim = async (to: string): Promise<boolean> => {
     try {
-      await (directory ? mkdir(to, { mode: 0o700 }) : writeFile(to, '', { flag: 'wx', mode: 0o600 }));
+      if (link !== null) await symlink(link, to);
+      else await (directory ? mkdir(to, { mode: 0o700 }) : writeFile(to, '', { flag: 'wx', mode: 0o600 }));
       return true;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
@@ -45,7 +49,7 @@ export async function trashPath(path: string, options: TrashOptions): Promise<vo
         await (directory ? rmdir(to) : unlink(to)).catch(() => {});
         throw error;
       }
-      await cp(source, to, { recursive: true, force: true, verbatimSymlinks: true });
+      if (link === null) await cp(source, to, { recursive: true, force: true, verbatimSymlinks: true }); // a symlink's claim is its copy
       await rm(source, { recursive: true, force: true });
     }
   };
