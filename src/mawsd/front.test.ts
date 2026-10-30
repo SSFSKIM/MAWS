@@ -270,6 +270,22 @@ describe('the services front', () => {
     expect(spine.events()).toEqual(['plugins.changed', 'session.status']);
   });
 
+  // M5b fix round 2 (e2e:lane-a): a session the engine host follows on disk (a terminal session, a discovered one) has no
+  // launch, so no stream can carry its batches: they go as any event that names a session does, to the machine.spine
+  // clients and its followers; a launch's batch stays its streams'
+  it('gives a disk follow’s batch to a ready machine.spine client, and keeps a launch’s batch to its streams', () => {
+    const { client, raw } = front();
+    const [plain, spine] = [client(['host.attachment']), client([MACHINE_SPINE_CAPABILITY])];
+    plain.ready();
+    spine.ready();
+    const event = (id: string, seq: number | null) => ({ id, sessionId: 'e1', at: '2026-10-28T10:00:00.000Z', seq, agentId: null, parentToolUseId: null, kind: 'assistant.text', text: 'x' });
+    raw('session.eventBatch', { appSessionId: 's1', events: [event('9a1c0e2f-row@1', null)] });
+    expect(spine.events()).toEqual(['session.eventBatch']);
+    expect(plain.events()).toEqual([]);
+    raw('session.eventBatch', { appSessionId: 's1', events: [event('s1:L1:3:0', 3)] });
+    expect(spine.events()).toEqual(['session.eventBatch']);
+  });
+
   it('invoke runs a registered command in process without waiting for a load; unbind drops the load’s registrations', async () => {
     const { served, ensure } = front();
     served.bus.register('session.launchMode', () => ({ mode: 'index' }) as never);

@@ -38,6 +38,8 @@ import { thrownError, type DocPortEnd, type HostPort } from '@shared/host/runtim
 import type { HostSupervisor } from '@shared/host/host-supervisor';
 import { MACHINE_SPINE_CAPABILITY } from '@shared/host/socket-protocol';
 import { remoteClients, type RemoteClients } from '@shared/host/client-refs';
+import { eventPosition } from '@shared/host/stream-catchup';
+import type { SessionEvent } from '@shared/graph/events';
 import type { ServedRuntime } from '@shared/host/socket-server';
 import type { ClientPort } from '@shared/client/port';
 import { endableClientRef, type ClientRef, type HandlerContext } from '@shared/ipc/client';
@@ -174,7 +176,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
 
   const offRaw = options.hosts.onRaw('engine-host', ({ name, payload }) => {
     tap(name, payload);
-    if (STREAM_EVENTS.has(name)) return streams.liveEvent(name, payload);
+    if (STREAM_EVENTS.has(name) && !diskBatch(name, payload)) return streams.liveEvent(name, payload);
     const app = sessionOf(payload);
     post(name, payload, app === null ? readsHostEvents : (client) => readsHostEvents(client) || client.follower.carries(app));
   });
@@ -402,6 +404,15 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
 
 // A client that reads the engine host's app-bound events on machine.sock rather than on its relay (the post-D app, M5).
 const readsHostEvents = (client: { facts: ClientFacts }) => client.facts.capabilities.includes(MACHINE_SPINE_CAPABILITY);
+
+// M5b fix round 2: a batch of a session the engine host follows on disk (a terminal session, a discovered one): none of
+// its events is a launch's (`<app>:<launch>:<seq>:<idx>`), so no stream carries it, and it goes as any event that names a
+// session does.
+function diskBatch(name: string, payload: unknown): boolean {
+  if (name !== 'session.eventBatch') return false;
+  const { appSessionId, events } = payload as { appSessionId?: unknown; events?: unknown };
+  return typeof appSessionId === 'string' && Array.isArray(events) && events.length > 0 && events.every((event) => eventPosition(appSessionId, event as SessionEvent) === null);
+}
 
 // The session a payload names, if any.
 function sessionOf(payload: unknown): string | null {
