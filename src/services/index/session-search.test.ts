@@ -35,6 +35,34 @@ describe('conversation search', () => {
     expect(index.sessionSearch.incomplete()).toBe(false);
   });
 
+  it('extends a ready text only from its stored checkpoint, and never resumes a pass cut short', () => {
+    const transcript = summary();
+    const record = index.sessions.upsertFromSummary(transcript).record;
+    const { appId } = record;
+    const checkpoint = (offset: number) => ({ offset, ino: '1', head: 'h', started: true });
+    expect(index.sessionSearch.resume(appId, transcript.sessionId)).toBeNull();
+    index.sessionSearch.replace(appId, transcript.sessionId, 100, 1000, 'First needle-a', true, checkpoint(100));
+    expect(index.sessionSearch.resume(appId, transcript.sessionId)).toEqual(checkpoint(100));
+    // A checkpoint other than the stored one is refused and changes nothing.
+    expect(index.sessionSearch.extend(appId, transcript.sessionId, 150, 1500, 90, '\nnever', true, checkpoint(150))).toBe(false);
+    expect(index.sessionSearch.search('never')).toEqual([]);
+    expect(index.sessionSearch.current(appId, transcript.sessionId, 100, 1000)).toBe(true);
+    // A two-page extension: the checkpoint is gone while it is part-appended, back with the last page.
+    expect(index.sessionSearch.extend(appId, transcript.sessionId, 150, 1500, 100, '\nsecond needle-', false)).toBe(true);
+    expect(index.sessionSearch.resume(appId, transcript.sessionId)).toBeNull();
+    expect(index.sessionSearch.current(appId, transcript.sessionId, 150, 1500)).toBe(false);
+    index.sessionSearch.append(appId, transcript.sessionId, 'b done', true, checkpoint(150));
+    expect(index.sessionSearch.resume(appId, transcript.sessionId)).toEqual(checkpoint(150));
+    expect(index.sessionSearch.current(appId, transcript.sessionId, 150, 1500)).toBe(true);
+    expect(index.sessionSearch.search('needle-a')).toHaveLength(1);
+    expect(index.sessionSearch.search('needle-b')).toHaveLength(1); // across the page edge
+    // A full pass, or a failed one, leaves no checkpoint to resume.
+    index.sessionSearch.replace(appId, transcript.sessionId, 200, 2000, 'Again', false, checkpoint(200));
+    expect(index.sessionSearch.resume(appId, transcript.sessionId)).toBeNull();
+    index.sessionSearch.append(appId, transcript.sessionId, '', true, null);
+    expect(index.sessionSearch.resume(appId, transcript.sessionId)).toBeNull();
+  });
+
   it('reports terminal failure even when SQLite cannot persist the failure stamp', () => {
     const transcript = summary();
     const record = index.sessions.upsertFromSummary(transcript).record;

@@ -1,4 +1,5 @@
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
+import type { SearchCheckpoint } from '@shared/ipc/schema/fs';
 import type { Db } from './db';
 
 export interface SessionSearchHit { appSessionId: AppSessionId; snippet: string | null }
@@ -27,16 +28,33 @@ export class SessionSearchStore {
   private stamped(appId: AppSessionId, sessionId: SessionId, size: number, mtimeMs: number, status: string): boolean {
     return this.db.get('SELECT 1 FROM session_text_state WHERE app_id = ? AND session_id = ? AND size = ? AND mtime_ms = ? AND status = ?', appId, sessionId, size, mtimeMs, status) !== null;
   }
-  replace(appId: AppSessionId, sessionId: SessionId, size: number, mtimeMs: number, body: string, complete = true): void {
+  // Where a ready text ended, for the next pass to resume at; null when the text is not ready, or was written without one.
+  resume(appId: AppSessionId, sessionId: SessionId): SearchCheckpoint | null {
+    const row = this.db.get<{ resume: string | null }>("SELECT st.resume FROM session_text_state st JOIN sessions s ON s.app_id = st.app_id AND s.engine_session_id = st.session_id WHERE st.app_id = ? AND st.session_id = ? AND st.status = 'ready'", appId, sessionId);
+    return row?.resume ? JSON.parse(row.resume) as SearchCheckpoint : null;
+  }
+  replace(appId: AppSessionId, sessionId: SessionId, size: number, mtimeMs: number, body: string, complete = true, checkpoint: SearchCheckpoint | null = null): void {
     this.db.transaction(() => {
       // A deleted/rebound session must never get an old in-flight read attached to it.
       if (!this.db.get('SELECT 1 FROM sessions WHERE app_id = ? AND engine_session_id = ?', appId, sessionId)) return;
-      this.db.run("INSERT INTO session_text_state(app_id, session_id, size, mtime_ms, status) VALUES (?, ?, ?, ?, 'indexing') ON CONFLICT(app_id) DO UPDATE SET session_id=excluded.session_id, size=excluded.size, mtime_ms=excluded.mtime_ms, status='indexing', tail=''", appId, sessionId, size, mtimeMs);
+      this.db.run("INSERT INTO session_text_state(app_id, session_id, size, mtime_ms, status) VALUES (?, ?, ?, ?, 'indexing') ON CONFLICT(app_id) DO UPDATE SET session_id=excluded.session_id, size=excluded.size, mtime_ms=excluded.mtime_ms, status='indexing', tail='', resume=NULL", appId, sessionId, size, mtimeMs);
       this.db.run('DELETE FROM session_text_chunks WHERE app_id = ?', appId);
-      this.append(appId, sessionId, body, complete);
+      this.append(appId, sessionId, body, complete, checkpoint);
     });
   }
-  append(appId: AppSessionId, sessionId: SessionId, body: string, complete: boolean): void {
+  // The first page of a pass that carries on from `from` (a stored checkpoint's offset): the text after it joins what is
+  // stored, whose tail keeps the overlap. Until the pass completes the checkpoint is gone, so a pass cut short (the
+  // text is then only part-appended) is never resumed, and the next one reads the whole file. False when the stored
+  // text is no longer ready at `from`.
+  extend(appId: AppSessionId, sessionId: SessionId, size: number, mtimeMs: number, from: number, body: string, complete = true, checkpoint: SearchCheckpoint | null = null): boolean {
+    return this.db.transaction(() => {
+      if (this.resume(appId, sessionId)?.offset !== from) return false;
+      this.db.run("UPDATE session_text_state SET size = ?, mtime_ms = ?, status = 'indexing', resume = NULL WHERE app_id = ?", size, mtimeMs, appId);
+      this.append(appId, sessionId, body, complete, checkpoint);
+      return true;
+    });
+  }
+  append(appId: AppSessionId, sessionId: SessionId, body: string, complete: boolean, checkpoint: SearchCheckpoint | null = null): void {
     this.db.transaction(() => {
       const state = this.db.get<{ tail: string }>("SELECT st.tail FROM session_text_state st JOIN sessions s ON s.app_id = st.app_id AND s.engine_session_id = st.session_id WHERE st.app_id = ? AND st.session_id = ? AND st.status = 'indexing'", appId, sessionId);
       if (!state) return;
@@ -45,7 +63,7 @@ export class SessionSearchStore {
         const chunk = this.db.prepare('INSERT INTO session_text_chunks(app_id) VALUES (?)').run(appId).lastInsertRowid;
         this.db.run('INSERT INTO session_text(rowid, body) VALUES (?, ?)', chunk, text);
       }
-      this.db.run('UPDATE session_text_state SET tail = ?, status = ? WHERE app_id = ?', text.slice(-OVERLAP), complete ? 'ready' : 'indexing', appId);
+      this.db.run('UPDATE session_text_state SET tail = ?, status = ?, resume = ? WHERE app_id = ?', text.slice(-OVERLAP), complete ? 'ready' : 'indexing', complete && checkpoint ? JSON.stringify(checkpoint) : null, appId);
       if (complete) this.db.defer(`session-search:${appId}`, () => this.unpersisted.delete(appId));
     });
   }
