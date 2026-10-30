@@ -27,6 +27,12 @@
 // A client's own commands (main-only): `session.follow` (its streams), `clientPort.answer` (the port's answers, refused
 // for an id it was not asked) and `machine.client` (the attached app's browser socket, which the spine reads through
 // `browserSocket()`). A client's end ends its streams and settles what the port asked it `noClient`.
+//
+// P5 O3-D M5 (D44(3)): the engine host's names the spine intercepts (SPINE_ENGINE_INTERCEPTS: the stale answer's check,
+// the rewind's note and the acts that clear it) load a cold spine first, so the intercept applies whatever path the
+// request came by: a client here, the endpoint's `machine` route, and (`intercepted`, daemon.ts) a post-D app's relay.
+// A spine that cannot load (refused by the lock, yielded) leaves the request to go on unintercepted, as a request did
+// before the spine moved here: the note is then the lock holder's to keep.
 import { thrownError, type DocPortEnd, type HostPort } from '@shared/host/runtime';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
 import { MACHINE_SPINE_CAPABILITY } from '@shared/host/socket-protocol';
@@ -55,6 +61,10 @@ const CLIENT_COMMANDS: ReadonlySet<string> = new Set(['clientPort.answer', 'mach
 // `machine` names a later milestone gives a handler (the machine half of settings and the mirror's visible set and files'
 // admission read, M5): `internal` until then, and no trigger.
 export const LATER_COMMANDS: ReadonlySet<string> = new Set(['library.fileLinkedPaths', 'machineSettings.get', 'machineSettings.set', 'session.visible']);
+// P5 O3-D M5 (D44(3)): the engine host's names the spine's session service intercepts in launch mode `index`
+// (src/services/sessions/index.ts's `session.answer`, service-register.ts's `session.rewind` and CONVERSATION_ACTS);
+// daemon-spine.test.ts pins it to what the spine registers.
+export const SPINE_ENGINE_INTERCEPTS: ReadonlySet<string> = new Set(['session.answer', 'session.bash', 'session.queue.promote', 'session.rewind', 'session.send', 'session.steer']);
 
 export interface ClientFacts {
   appPid: number;
@@ -78,6 +88,10 @@ export interface ServicesFront {
   port: ClientPort; // §E: the spine's client port
   // The endpoint's `dispatch('machine', …)`: a client's request in process, `client` the endpoint's ref for its device
   dispatch(name: string, input: unknown, client?: ClientRef): Promise<CommandResult<CommandName>>;
+  // P5 O3-D M5 (D44(3)): an engine-host request through the spine's intercept for its name, the spine loaded for it if
+  // cold; null when the spine intercepts no such name or cannot load, for the caller to forward it raw as before
+  intercepted(name: string, input: unknown, client: ClientRef): Promise<CommandResult<CommandName> | null>;
+  intercepts(): CommandName[]; // the names the loaded spine intercepts now
   events(listener: (name: string, payload: unknown) => void): () => void; // every event `bus.emit` sent (the endpoint's owner `machine`)
   browserSocket(): string | null; // the attached app's, from its machine.client; null with no app
   clients(): number;
@@ -184,6 +198,20 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
     return (response.ok ? { ok: true, value: response.value } : { ok: false, error: response.error }) as CommandResult<CommandName>;
   }
 
+  // The intercept the spine installs for an engine-host name it intercepts, through the seam as a spine command is (a
+  // cold spine loaded for it, a releasing one waited for); undefined when there is none, or the spine cannot load now
+  // (logged). Another engine-host name keeps what is installed now (the scenario stub's).
+  async function spineIntercept(name: string): Promise<AnyHandler | undefined> {
+    if (!SPINE_ENGINE_INTERCEPTS.has(name)) return intercepts.get(name);
+    try {
+      await options.spine.ensure('command');
+    } catch (error) {
+      log(`[spine] ${name} goes on without the spine’s intercept: ${messageOf(error)}`);
+      return undefined;
+    }
+    return intercepts.get(name);
+  }
+
   // A client's request (`from`: its connection; null for the endpoint's), or the bus's invoke (`loaded`: the spine asks
   // it of itself, so it is not waited for).
   async function answer(name: string, rawInput: unknown, context: HandlerContext, loaded: boolean, from: FrontClient | null): Promise<CommandResult<CommandName>> {
@@ -191,8 +219,10 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
     const input = codec.readCommandInput(name, rawInput);
     if (!input.ok) return input;
     const { owner } = REGISTRY.commands[name];
-    const intercept = intercepts.get(name);
-    if (owner !== 'machine') return intercept ? run(name, intercept, input.value, context) : forward(name, rawInput);
+    if (owner !== 'machine') {
+      const intercept = loaded ? intercepts.get(name) : await spineIntercept(name); // the spine's own invoke never waits on it
+      return intercept ? run(name, intercept, input.value, context) : forward(name, rawInput);
+    }
     if (CLIENT_COMMANDS.has(name) && from === null) return { ok: false, error: ipcError('internal', `${name} is a machine.sock client's own`) };
     if (OWN.has(name)) return run(name, (value, ctx) => own[name as keyof typeof own](value, ctx, from), input.value, context);
     if (LATER_COMMANDS.has(name)) return { ok: false, error: ipcError('internal', `mawsd serves no ${name} yet`) };
@@ -324,6 +354,14 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
     bus,
     port: clientPort,
     dispatch: (name, input, client) => answer(name, input, { client: client ?? endpointClient }, false, null),
+    async intercepted(name, rawInput, client) {
+      if (!codec.isCommandName(name) || REGISTRY.commands[name].owner !== 'engine-host') return null;
+      const intercept = await spineIntercept(name);
+      if (!intercept) return null;
+      const input = codec.readCommandInput(name, rawInput);
+      return input.ok ? run(name, intercept, input.value, { client }) : input;
+    },
+    intercepts: () => [...intercepts.keys()].sort() as CommandName[],
     events(listener) {
       emitted.add(listener);
       return () => void emitted.delete(listener);

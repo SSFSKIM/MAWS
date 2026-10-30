@@ -7,7 +7,7 @@ import { REGISTRY } from '@shared/ipc/registry';
 import type { CommandName } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import { status as statusOf } from '../../test/support/builders';
-import { createServicesFront, FRONT_COMMANDS, LATER_COMMANDS, type FrontOptions } from './front';
+import { createServicesFront, FRONT_COMMANDS, LATER_COMMANDS, SPINE_ENGINE_INTERCEPTS, type FrontOptions } from './front';
 import { SpineUnavailable } from './spine-seam';
 
 const IDENTITY = { ref: 'TestMachineRef00000000' as MachineRef, name: 'test machine', project: { key: 'machine:TestMachineRef00000000', name: 'test machine', smnsId: null } };
@@ -112,6 +112,65 @@ describe('the services front', () => {
     expect(answered).toMatchObject({ ok: true, value: { outcome: 'not_pending' } }); // the spine's pending check answered it
     expect(forwarded.map((f) => f.name)).toEqual(['engine.sessions']);
     expect(await c.request('host.attachment', { attached: true })).toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+  });
+
+  // P5 O3-D M5 (D44(3)): the spine's engine-host intercepts apply whatever path a request came by, the spine cold included
+  const REWOUND = { rewound: true, reason: null, error: null, prefillText: null, precedingAssistantUuid: null, files: null };
+  const REWIND = { appSessionId: 'a', targetMessageUuid: 'm-target', lastSeenMessageUuid: 'm-seen', files: false };
+
+  it('loads a cold spine for an engine-host name it intercepts, then answers through the intercept the load installed', async () => {
+    const noted: unknown[] = [];
+    const harness = front({
+      spine: {
+        ensure: vi.fn(async () => {
+          if (harness.served.intercepts().length === 0) harness.served.bus.intercept('session.rewind', (input) => (noted.push(input), REWOUND) as never); // what the load registers
+          return {} as never;
+        }),
+      },
+    });
+    const c = harness.client();
+    expect(await c.request('session.rewind', REWIND)).toMatchObject({ ok: true, value: REWOUND });
+    expect(noted).toEqual([REWIND]);
+    expect(harness.forwarded).toEqual([]);
+    expect(await harness.served.dispatch('session.rewind', REWIND)).toMatchObject({ ok: true, value: REWOUND }); // the endpoint's machine route
+    expect(noted).toHaveLength(2);
+    expect(harness.served.intercepts()).toEqual(['session.rewind']);
+  });
+
+  it('forwards an intercepted name raw when the spine cannot load, and never loads it for a name it does not intercept', async () => {
+    const ensure = vi.fn(async () => Promise.reject(new SpineUnavailable('spine.lock is held by pid 4321 (build old)')));
+    const { client, forwarded, logs } = front({ spine: { ensure } });
+    const c = client();
+    expect(await c.request('session.rewind', REWIND)).toMatchObject({ ok: true, value: { forwarded: 'session.rewind' } });
+    expect(logs).toContainEqual('[spine] session.rewind goes on without the spine’s intercept: spine.lock is held by pid 4321 (build old)');
+    ensure.mockClear();
+    expect(await c.request('engine.sessions')).toMatchObject({ ok: true });
+    expect(ensure).not.toHaveBeenCalled();
+    expect(forwarded.map((f) => f.name)).toEqual(['session.rewind', 'engine.sessions']);
+  });
+
+  it('intercepted: the spine’s intercept for a relayed request, loaded for it; null for another name or an unloadable spine', async () => {
+    let loadable = true;
+    const harness = front({
+      spine: {
+        ensure: vi.fn(async () => {
+          if (!loadable) throw new SpineUnavailable('yielded');
+          if (harness.served.intercepts().length === 0) harness.served.bus.intercept('session.rewind', () => REWOUND as never);
+          return {} as never;
+        }),
+      },
+    });
+    const ref = { id: 'app' } as never;
+    expect(await harness.served.intercepted('engine.sessions', undefined, ref)).toBeNull();
+    expect(await harness.served.intercepted('session.rewind', REWIND, ref)).toEqual({ ok: true, value: REWOUND });
+    expect(await harness.served.intercepted('session.rewind', { appSessionId: 'a' }, ref)).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+    harness.served.unbind();
+    loadable = false;
+    expect(await harness.served.intercepted('session.rewind', REWIND, ref)).toBeNull();
+  });
+
+  it('SPINE_ENGINE_INTERCEPTS names engine-host commands only', () => {
+    for (const name of SPINE_ENGINE_INTERCEPTS) expect(REGISTRY.commands[name as CommandName].owner, name).toBe('engine-host');
   });
 
   it('answers a later milestone’s machine name internal, with no load', async () => {

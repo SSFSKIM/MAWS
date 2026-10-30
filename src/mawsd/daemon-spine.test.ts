@@ -12,7 +12,7 @@ import type { MachineRef } from '@shared/machine/ref';
 import { FakeSpineHost } from '../../test/support/fake-spine-host';
 import { SPINE_COMMANDS } from '../../test/support/spine-lists';
 import { takeSpineLock, type SpineLock } from '../services/settings/spine-lock';
-import { createServicesFront, FRONT_COMMANDS, type ServicesFront } from './front';
+import { createServicesFront, FRONT_COMMANDS, SPINE_ENGINE_INTERCEPTS, type ServicesFront } from './front';
 import { createLazySpine, type LazySpine, type SpineEntry, type SpineState } from './spine-seam';
 
 const MACHINE = 'TestMachineRef00000000' as MachineRef;
@@ -124,6 +124,8 @@ describe('the spine inside mawsd', () => {
     expect(spine.state()).toBe('loaded');
     expect(link.calls.map((call) => call.name)).toContain('engine.sessions'); // the resync's listing, through the adapter
     expect(front.commands()).toEqual([...SPINE_COMMANDS, ...FRONT_COMMANDS].sort());
+    // P5 O3-D M5 (D44(3)): the engine-host names the front loads a cold spine for are those the spine intercepts
+    expect(front.intercepts()).toEqual([...SPINE_ENGINE_INTERCEPTS].sort());
   }, 30_000);
 
   it('releases after the quiet period, every part stopped and its listeners gone, and loads again at the next trigger', async () => {
