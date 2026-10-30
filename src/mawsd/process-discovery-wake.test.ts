@@ -118,7 +118,9 @@ describe.skipIf(!existsSync(MAWSD))('the discovery wake: a read that needs the i
     expect(spawns(), 'one engine host started').toBe(1);
 
     // the host parks again at once: asked to exit when idle for the wake, then gone
-    const host = readLock(join(profile, 'supervisor'))!.pid;
+    // the woken host's pid from the spawn line, not its lock: the park can be over before the answers are read (run 41021922751)
+    const host = Number(/spawned a supervisor, pid (\d+)/.exec(logs.find((line) => line.includes('spawned a supervisor, pid ')) ?? '')?.[1]);
+    expect(host, 'the woken host’s pid').toBeGreaterThan(0);
     await until(() => logs.some((line) => line.includes('[spine] discovery: the wake is over: asking the engine host to exit when idle')), 'the park asked after the pass', 10_000);
     await until(() => !isAlive(host), 'the woken engine host parked again', 30_000);
 
