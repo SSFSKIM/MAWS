@@ -12,6 +12,12 @@
 // probe records it (one `[probe] SingletonLock …` line, an annotation and an attachment) and asserts nothing about its
 // form. Its line (hosted e2e:settings run 40978897272): a symlink `<host>-<pid>` naming the app's pid, removed at a
 // clean quit, so `mawsd` reads it (SINGLETON_LOCK_SIGNAL_DEFAULT on, under claimSpine).
+//
+// P5 O3-D M5b (acceptance 1's one writer, on the daemon shape): the lock's holder by shape. On the embedded shape it is
+// main; on the daemon shape it is the profile's `mawsd`, which outlives the app, so a launch's end there closes the app
+// and stops `mawsd` as its own clean stop does (SIGTERM), which releases the lock, before the profile's cleanup (whose
+// SIGKILL would leave the lock behind, stale). A refused spine is `mawsd`'s on the daemon shape, said by host.status
+// from its daemon.status, and the client half still runs in main.
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
@@ -19,7 +25,8 @@ import { join, relative } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { invoke, value } from './support/c7-replay';
-import { launchMaws } from './support/launch';
+import { launchMaws, type MawsLaunch } from './support/launch';
+import { isAlive } from './support/processes';
 
 const HOLDER_BUILD = '9.9.9+e2e-holder';
 
@@ -40,6 +47,22 @@ function spineFiles(userData: string): Map<string, string> {
 
 const procStartOf = (pid: number) => execFileSync('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], { env: { LC_ALL: 'C', TZ: 'UTC' }, encoding: 'utf8' }).trim();
 const hostStatus = async (page: Parameters<typeof invoke>[0]) => value(await invoke(page, 'host.status', undefined));
+// P5 O3-D M5b: the pid that holds the spine for this launch, main's or its mawsd's
+const spineHolder = async (maws: MawsLaunch) => {
+  const status = await hostStatus(maws.page);
+  return status.transport === 'daemon' ? status.daemon!.pid : maws.app.process().pid!;
+};
+// A launch's end with its spine's holder stopped cleanly: on the daemon shape the app closed, then its mawsd stopped
+async function endLaunch(maws: MawsLaunch): Promise<void> {
+  const status = await hostStatus(maws.page).catch(() => null);
+  const daemon = status?.transport === 'daemon' ? (status.daemon?.pid ?? null) : null;
+  if (daemon !== null) {
+    await maws.app.close();
+    process.kill(daemon, 'SIGTERM');
+    await expect.poll(() => isAlive(daemon), { timeout: 15_000, message: 'mawsd stops at SIGTERM' }).toBe(false);
+  }
+  await maws.cleanup();
+}
 
 test('beside a live holder of spine.lock a launch writes no spine file and finishes no split; once the holder is gone the next launch takes the lock', async () => {
   test.setTimeout(240_000);
@@ -52,7 +75,7 @@ test('beside a live holder of spine.lock a launch writes no spine file and finis
       value(await invoke(maws.page, 'settings.set', { theme: 'dark', gateway: { defaultRoute: 'direct' } }));
       expect(JSON.parse(readFileSync(join(userData, 'machine-settings.json'), 'utf8'))).toMatchObject({ version: 1, gateway: { defaultRoute: 'direct' } });
     } finally {
-      await maws.cleanup();
+      await endLaunch(maws);
     }
     expect(existsSync(join(userData, 'spine.lock')), 'the lock is released when its holder quits').toBe(false);
     // the machine's other files, as a holder's services would have left them
@@ -101,10 +124,11 @@ test('beside a live holder of spine.lock a launch writes no spine file and finis
     maws = await launchMaws({ userData });
     try {
       expect((await hostStatus(maws.page)).spineRefused ?? null).toBeNull();
-      expect(JSON.parse(readFileSync(join(userData, 'spine.lock'), 'utf8'))).toMatchObject({ pid: maws.app.process().pid });
+      const holds = await spineHolder(maws); // P5 O3-D M5b: main, or on the daemon shape its mawsd
+      await expect.poll(() => JSON.parse(readFileSync(join(userData, 'spine.lock'), 'utf8')).pid, { timeout: 30_000 }).toBe(holds);
       expect(value(await invoke(maws.page, 'settings.get', undefined)).settings).toMatchObject({ theme: 'dark', gateway: { defaultRoute: 'direct' } });
     } finally {
-      await maws.cleanup();
+      await endLaunch(maws);
     }
     expect(JSON.parse(readFileSync(join(userData, 'settings.json'), 'utf8'))).toMatchObject({ version: 21, theme: 'dark' });
     expect(JSON.parse(readFileSync(join(userData, 'settings.json'), 'utf8'))).not.toHaveProperty('gateway');

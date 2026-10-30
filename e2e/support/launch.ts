@@ -13,11 +13,12 @@ import { _electron, test as base, type ElectronApplication, type Page } from '@p
 import { writeReplayEngine } from '../../test/support/replay-engine';
 import { writeScratchShellHome } from '../../test/support/shell-home';
 import { writeDiscoverScratch, type DiscoverScratch, type DiscoverScratchOptions } from './discover-scratch'; // P4-AGG M1
-import { untilHostReady } from './host-ready'; // P5 O3-B
+import { untilHostReady, untilSpineReady } from './host-ready'; // P5 O3-B; P5 O3-D M5b: the spine's line
 import { endProfileProcesses, killProfileProcessesNow, processesNaming, shellsUnder, untilExited } from './processes';
 import { realEngine, type RealEngine } from './real-engine'; // P4-AGG M1
 import { assertEngineKeychainEnv, assertNoKeychainPrompt, killTree, loginShellEnvironment, watchKeychainPrompt } from './keychain-guard'; // fixB
 import { launchEnvironment } from './scratch-env';
+import { launchMode } from '@shared/sessions/select-source';
 import { captureAllowed, processEvidence } from './process-evidence.mjs';
 import { cornerOrigin, windowCorner } from './window-origin';
 
@@ -177,6 +178,10 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   if (discover) Object.assign(env, discover.env);
   Object.assign(env, opts.env); // C3
   if (opts.ownerConfigHome) delete env.CLAUDE_CONFIG_DIR; // P4-A1
+  // P5 O3-D M5b (D11): on the daemon shape a scenario plays in the profile's mawsd, started with the launch's environment
+  // and outliving the app; a relaunch over a given profile in launch mode scenario ends it first, so the relaunch's mawsd
+  // plays this launch's scenario from its start, as main's own spine did before the cutover
+  if (!ownsUserData && launchMode(env, executable !== null) === 'scenario') await endProfileProcesses(userData);
   // fixB keychain conditions (b)(c): a real engine on a Mac can reach the login keychain (under the runner's HOME it is
   // the owner's). No prompt may be pending before the app starts; under the runner's HOME, the login shell the engine
   // host builds every engine's environment from must name the scratch store and nothing that renames the engine's items
@@ -334,14 +339,22 @@ async function appWindow(app: ElectronApplication): Promise<Page> {
 // never failing, so a spec about a host that does not come up still reads its state itself (host-ready.ts). Any other
 // shape, or a page without the bridge, returns at once. Each daemon-shape launch prints one line with the wait and the
 // time from the launch to the host's ready (`[e2e] daemon host ready:`), so a slower cold start shows in the job logs
-// rather than hiding behind the wait.
+// rather than hiding behind the wait. P5 O3-D M5b (D24): then it waits for the spine in `mawsd` the same way and prints
+// `[e2e] spine ready:`, the cold-start budget's reading.
 async function untilDaemonHostReady(page: Page, launchedAt: number): Promise<void> {
   const line = await untilHostReady({
     read: () => page.evaluate(() => window.maws.invoke('host.status', undefined)).then((status) => (status.ok ? status.value : null)),
     now: () => Date.now(),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms).unref()), // the bound's timer outlives an early return; it holds no worker open
   }, launchedAt);
-  if (line !== null) console.log(line);
+  if (line === null) return;
+  console.log(line);
+  // P5 O3-D M5b (D24): then the spine's cold start, the first available session.list (host-ready.ts)
+  console.log(await untilSpineReady({
+    list: () => page.evaluate(() => window.maws.invoke('session.list', {})).then((answer) => (answer.ok ? { ok: true as const } : { ok: false as const, error: `${answer.error.code}: ${answer.error.message}` })),
+    now: () => Date.now(),
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms).unref()),
+  }, launchedAt));
 }
 
 // Under MAWS_E2E_FOREGROUND=1 (src/main/window-show.ts) the app activates and its window

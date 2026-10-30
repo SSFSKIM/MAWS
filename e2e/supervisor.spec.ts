@@ -44,7 +44,10 @@ import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
-import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol'; // P3-A M5
+import { MACHINE_SPINE_CAPABILITY, SOCKET_PROTOCOL } from '@shared/host/socket-protocol'; // P3-A M5
+import type { AttentionItem } from '@shared/graph/attention';
+import { daemonPaths } from '@shared/daemon/files';
+import { reachMachine } from '../src/mawsd/machine-client';
 import { WIRE_MINOR } from '@shared/ipc/wire'; // P3-A M5; P5 O1 M6: the hello's minor
 import { invoke, launchReady, replaySpec, turnsJournal, value } from './support/c7-replay';
 import { menu, otherThemeColours } from './support/code-product';
@@ -54,7 +57,7 @@ import { REPO_ROOT, type MawsLaunch } from './support/launch';
 import { isAlive, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
 // the case's scratch profile, its supervisors and the kept session's fixtures (moved there for e2e/cross-build.spec.ts)
-import { attentionOf, DAEMON, eventsOf, firstPrompt, isRequestRow, isTaskFailureRow, pendingPermissions, PERMISSION, startTurn, statusOf, suffix, tailFixture, TASK_FAILED, untilRequested, withScratch, type JournalRow, type Scratch } from './support/supervisor-scratch';
+import { attentionOf, DAEMON, eventsOf, firstPrompt, isRequestRow, isTaskFailureRow, keptQuitLine, pendingPermissions, PERMISSION, startTurn, statusOf, suffix, tailFixture, TASK_FAILED, untilRequested, withScratch, type JournalRow, type Scratch } from './support/supervisor-scratch';
 import { CLOCK } from './support/clock'; // L129
 
 test.skip(process.env.MAWS_SUPERVISOR_E2E !== '1', 'the supervisor e2e runs under pnpm e2e:supervisor (MAWS_SUPERVISOR_E2E=1)');
@@ -307,19 +310,23 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     await expect.poll(async () => (await eventsOf(first.page, id)).length, { message: 'a few rows have streamed' }).toBeGreaterThan(5);
     const seenBeforeQuit = (await eventsOf(first.page, id)).length;
     await s.quit(first);
-    const keepLine = first.quitLines().find((l) => l.includes('auto-answered keep'));
-    expect(keepLine).toBe('quit-guard: 1 mid-turn, auto-answered keep, 1 session kept');
+    expect(first.quitLines()).toEqual([keptQuitLine()]);
     expect(isAlive(pid), 'the supervisor outlives the app').toBe(true);
     // the precondition, read once the app has exited: neither the failure nor the request is journaled yet
     const atQuit = s.journal(id);
     const seqAtQuit = Math.max(...atQuit.map((r) => r.seq));
     expect(atQuit.filter((r) => isTaskFailureRow(r) || isRequestRow(r)), 'the failure and the request come after the app has exited').toEqual([]);
-    log.push(`first run: supervisor pid ${pid}; ${seenBeforeQuit} events read just before ⌘Q`, keepLine!, `after the app exited: pid ${pid} alive ${isAlive(pid)}; journal at seq ${seqAtQuit}, holding neither the task failure nor the permission request`);
+    log.push(`first run: supervisor pid ${pid}; ${seenBeforeQuit} events read just before ⌘Q`, keptQuitLine(), `after the app exited: pid ${pid} alive ${isAlive(pid)}; journal at seq ${seqAtQuit}, holding neither the task failure nor the permission request`);
 
     // unobserved: the replay streams on; the failure and the request land while no app is connected
     await expect.poll(() => s.journal(id).some(isRequestRow), { timeout: 30_000, message: 'the request reaches the journal while the app is closed' }).toBe(true);
     const closed = s.journal(id);
     log.push(`while closed: ${closed.length - atQuit.length} journal rows written, the task failure (seq ${closed.find(isTaskFailureRow)!.seq}) and the permission request (seq ${closed.find(isRequestRow)!.seq}) among them`);
+    if (DAEMON) {
+      // P5 O3-D (acceptance 1): with no app, `mawsd`'s spine derives the session's items; a second client of machine.sock reads them
+      await expect.poll(async () => (await attentionWithNoApp(s)).filter((i) => i.appSessionId === id).map((i) => i.kind), { timeout: 15_000, message: 'attention.list over machine.sock shows the failure and the request raised while away' }).toEqual(expect.arrayContaining(['error', 'permission']));
+      log.push('while closed: attention.list over machine.sock, a second client, shows the task failure’s item and the pending request');
+    }
 
     const second = await s.launch(pace);
     // L102's dwell, anchored in the page (the review of S-dwell): from the moment the error's notice first shows in its
@@ -617,7 +624,7 @@ test('(e) G3: an idle kept session is released as idle and the supervisor exits 
       const id = await s.record(first.page);
       await startTurn(first.page, s, id, fixture, 'turn 1');
       await s.quit(first);
-      expect(first.quitLines()).toContain('quit-guard: 1 mid-turn, auto-answered keep, 1 session kept');
+      expect(first.quitLines()).toContain(keptQuitLine());
       await expect.poll(() => ended(s, id), { timeout: 30_000, message: 'the turn ends while the app is closed' }).toBe(true);
       await expect.poll(() => released(s, id)?.frame.reason, { timeout: IDLE_MS + 15_000, message: 'the idle row is released' }).toBe('idle');
       lines.push('', 'keep-quit (daemon shape):', `  ${at()} the row was released: journal ${JSON.stringify(released(s, id)!.frame)}`);
@@ -646,7 +653,7 @@ test('(e) G3: an idle kept session is released as idle and the supervisor exits 
     const id = await s.record(first.page);
     await startTurn(first.page, s, id, fixture, 'turn 1');
     await s.quit(first);
-    expect(first.quitLines()).toContain('quit-guard: 1 mid-turn, auto-answered keep, 1 session kept');
+    expect(first.quitLines()).toContain(keptQuitLine());
     lines.push('', 'keep-quit:', `  ${at()} quit mid-turn, answered keep (pid ${pid} alive ${isAlive(pid)})`);
     await expect.poll(() => ended(s, id), { timeout: 30_000, message: 'the turn ends while the app is closed' }).toBe(true);
     lines.push(`  ${at()} the turn ended with no app connected`);
@@ -704,7 +711,7 @@ async function keptMidTurn(s: Scratch): Promise<{ pid: number; id: AppSessionId 
   await startTurn(first.page, s, id);
   await untilRequested(first.page, id);
   await s.quit(first);
-  expect(first.quitLines()).toContain('quit-guard: 1 mid-turn, auto-answered keep, 1 session kept');
+  expect(first.quitLines()).toContain(keptQuitLine());
   expect(isAlive(pid)).toBe(true);
   if (DAEMON) {
     const daemon = status.daemon!.pid;
@@ -778,7 +785,7 @@ test('(h) G4: after a keep-quit a restored terminal tab says its shell closed wi
       return layout?.tabs.map((t) => t.id) ?? [];
     }, { message: 'the tab reaches layout.json' }).toContain(label);
     await s.quit(first);
-    expect(first.quitLines()).toContain('quit-guard: 1 mid-turn, auto-answered keep, 1 session kept');
+    expect(first.quitLines()).toContain(keptQuitLine());
 
     const second = await s.launch();
     expect((await s.ready(second.page)).supervisor!.pid).toBe(pid);
@@ -840,8 +847,8 @@ async function terminalsOutliveTheApp(): Promise<void> {
     value(await invoke(first.page, 'pty.write', { ptyId, data: `sleep ${DELAY_S}; echo m7-closed-$((40+2))\n` }));
     const writer = value(await invoke(first.page, 'pty.spawn', { appSessionId: id, label: 'm7-writer', cwd: s.repo, cols: 80, rows: 24, shell: '/bin/sh', args: [], command: `sleep ${DELAY_S}; head -c ${WRITTEN} /dev/zero | tr '\\0' x; echo; echo m7-end-$((40+2))` }));
     await s.quit(first);
-    // the two shells run a command, so the log names them; on the daemon shape they keep running whatever the answer
-    expect(first.quitLines()).toContainEqual(expect.stringMatching(/^quit-guard: 1 mid-turn, (\d+ busy terminals?|terminals unknown), auto-answered keep, 1 session kept$/));
+    // the two shells run a command, so the log names them; on the daemon shape they keep running and nothing is asked (P5 O3-D, Q1)
+    expect(first.quitLines()).toContainEqual(expect.stringMatching(/^quit-guard: 1 mid-turn, (\d+ busy terminals?|terminals unknown), not asked: they outlive the app$/));
     expect(isAlive(shellPid), 'the shell outlives the app').toBe(true);
     expect(isAlive(daemonPid), 'mawsd serves the terminals').toBe(true);
     await new Promise((r) => setTimeout(r, (DELAY_S + 10) * 1_000)); // both commands run to their end with no app
@@ -876,6 +883,18 @@ async function terminalsOutliveTheApp(): Promise<void> {
 // in the supervisor with no main at all.
 // On the daemon shape the stand-in is a client of `mawsd`'s engine-host relay (its token), as the app is: the engine host
 // has one client, `mawsd`, and a second would replace it.
+async function attentionWithNoApp(s: Scratch): Promise<AttentionItem[]> {
+  const reached = await reachMachine(daemonPaths(s.userData), { build: 'e2e-second-client' });
+  if (!reached.ok) throw new Error(`machine.sock: ${reached.state}: ${reached.why}`);
+  try {
+    const answer = await reached.link.request('attention.list', undefined);
+    if (!answer.ok) throw new Error(`attention.list: ${answer.error.code} ${answer.error.message}`);
+    return answer.value as AttentionItem[];
+  } finally {
+    reached.link.close();
+  }
+}
+
 async function askWithNoApp(s: Scratch, name: string, input: unknown): Promise<unknown> {
   const socketPath = DAEMON ? s.daemonSockets()['engine-host'] : s.lock()!.socketPath;
   const token = readFileSync(DAEMON ? s.daemonFile('mawsd.token') : s.file('host.token'), 'utf8').trim();
@@ -891,7 +910,9 @@ async function askWithNoApp(s: Scratch, name: string, input: unknown): Promise<u
         buffered = buffered.slice(at + 1);
       }
     });
-    socket.write(`${JSON.stringify({ t: 'hello', protocol: SOCKET_PROTOCOL, token, minor: WIRE_MINOR, build: 'e2e-session-stand-in', capabilities: [], appPid: process.pid })}\n`);
+    // P5 O3-D: on the daemon shape the stand-in runs no spine of its own, so its hello says so (`mawsd` refuses one that does not)
+    const capabilities = DAEMON ? [MACHINE_SPINE_CAPABILITY] : [];
+    socket.write(`${JSON.stringify({ t: 'hello', protocol: SOCKET_PROTOCOL, token, minor: WIRE_MINOR, build: 'e2e-session-stand-in', capabilities, appPid: process.pid })}\n`);
     await expect.poll(() => lines[0]?.t, { message: 'the supervisor welcomes a client with no app running' }).toBe('welcome');
     socket.write(`${JSON.stringify({ t: 'req', id: 'm5', name, input })}\n`);
     await expect.poll(() => lines.some((line) => line.t === 'res' && line.id === 'm5'), { message: `${name} is answered` }).toBe(true);
@@ -977,7 +998,7 @@ test('(j) P3-L M7: the library is right after a detached edit: what a kept sessi
     const before = (await libraryRow(first.page, notes.id))!;
     expect((await libraryRow(first.page, doomed.id))?.title).toBe('Doomed draft');
     await s.quit(first);
-    expect(first.quitLines()).toContain('quit-guard: 1 mid-turn, auto-answered keep, 1 session kept');
+    expect(first.quitLines()).toContain(keptQuitLine());
     expect(isAlive(pid), 'the supervisor outlives the app').toBe(true);
 
     // while no window and no main exist, the session's stand-in edits the notes, makes a report and deletes the draft

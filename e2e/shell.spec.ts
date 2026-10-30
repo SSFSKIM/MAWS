@@ -53,15 +53,18 @@ test('shell: sidebar, overview, hover approve, tabs and split, persistence, them
   try {
     const firstStderr = collectStderr(first.app);
     const saved = await firstInstance(first, test.info());
+    // P5 O3-D (Q1): on the daemon shape the sessions outlive the app, so the quit asks nothing and says what it left
+    const daemon = value(await invoke(first.page, 'host.status', undefined)).transport === 'daemon';
+    const quitLine = (parts: string) => `quit-guard: ${parts}, ${daemon ? 'not asked: they outlive the app' : 'auto-answered quit'}`;
     await first.app.close();
-    expect(quitLines(firstStderr()), 'the quit guard counts four mid-turn after the 8 s entry').toEqual(['quit-guard: 4 mid-turn, auto-answered quit']);
+    expect(quitLines(firstStderr()), 'the quit guard counts four mid-turn after the 8 s entry').toEqual([quitLine('4 mid-turn')]);
 
     const second = await launchMaws({ env: SHELL_ENV, userData: first.userData });
     try {
       const secondStderr = collectStderr(second.app);
       await relaunchedInstance(second, saved);
       await second.app.close();
-      expect(quitLines(secondStderr()), 'the relaunched clock is back at 0: five mid-turn').toEqual(['quit-guard: 5 mid-turn, auto-answered quit']);
+      expect(quitLines(secondStderr()), 'the relaunched clock is back at 0: five mid-turn').toEqual([quitLine('5 mid-turn')]);
     } finally {
       await second.cleanup();
     }

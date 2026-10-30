@@ -215,7 +215,8 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   await expect.poll(async () => (await eventsOf(first.page, id)).length, { message: 'a few rows have streamed' }).toBeGreaterThan(5);
   expect(first.maws.consoleErrors()).toEqual([]);
   await s.quit(first);
-  expect(first.quitLines()).toContain('quit-guard: 1 mid-turn, auto-answered keep, 1 session kept');
+  // P5 O3-D (Q1): a keeper on the daemon shape (this build) is not asked; its sessions outlive the app under its mawsd
+  expect(first.quitLines()).toContain(shapes.keeper === 'daemon' ? 'quit-guard: 1 mid-turn, not asked: they outlive the app' : 'quit-guard: 1 mid-turn, auto-answered keep, 1 session kept');
   expect(isAlive(kept.pid), 'the kept supervisor outlives its app').toBe(true);
   if (keeperDaemon !== null) expect(isAlive(keeperDaemon), 'the keeper’s mawsd serves its kept session').toBe(true);
   const atQuit = s.journal(id);

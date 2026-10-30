@@ -13,6 +13,8 @@ import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { TESTED_ENGINE_VERSION } from '../src/engine-host/engine-compat';
 import { launchMaws, REPO_ROOT } from './support/launch';
+import { invoke, value } from './support/c7-replay'; // P5 O3-D M5b: the shape flip's raw reads
+import { isAlive } from './support/processes';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
 const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
@@ -557,4 +559,58 @@ test('Customize and Projects are reachable without a chat, at desktop and narrow
       expect(await page.evaluate(async () => { const snapshot = await window.maws.invoke('session.list', {}); return snapshot.ok ? snapshot.value.sessions.length : -1; })).toBe(0);
     } finally { await maws.cleanup(); }
   } finally { rmSync(userData, { recursive: true, force: true }); }
+});
+
+// P5 O3-D M5b (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, acceptance 2): the profile flips between the shapes
+// by the client file's `supervisor.shape`, read at the next launch, and the spine's one writer follows it: on the daemon
+// shape `mawsd` holds spine.lock; on the embedded shape main does, the launch having ended the profile's `mawsd`; and back.
+// Each launch's app is closed rather than cleaned up, so the profile's processes live on into the next launch as an
+// owner's would; the cleanups run at the end.
+test('settings: the shape flips by the client file, and spine.lock names the spine’s one writer on each shape', async () => {
+  test.setTimeout(180_000);
+  const userData = realpathSync(mkdtempSync(join(tmpdir(), 'maws-e2e-shape-')));
+  const lockPid = () => {
+    try {
+      return (JSON.parse(readFileSync(join(userData, 'spine.lock'), 'utf8')) as { pid: number }).pid;
+    } catch {
+      return null;
+    }
+  };
+  const status = async (page: Page) => value(await invoke(page, 'host.status', undefined));
+  const launches: Awaited<ReturnType<typeof launchMaws>>[] = [];
+  try {
+    // the daemon shape (the default): mawsd holds the lock
+    const first = await launchMaws({ userData });
+    launches.push(first);
+    const before = await status(first.page);
+    expect(before.transport).toBe('daemon');
+    const daemon = before.daemon!.pid;
+    await expect.poll(lockPid, { timeout: 30_000, message: 'mawsd holds spine.lock' }).toBe(daemon);
+    value(await invoke(first.page, 'settings.set', { supervisor: { shape: 'embedded' } }));
+    expect(readSettings(userData)).toMatchObject({ supervisor: { shape: 'embedded' } });
+    await first.app.close();
+    expect(isAlive(daemon), 'mawsd outlives the app that quit').toBe(true);
+
+    // embedded: the launch ends mawsd, and main composes the spine and holds the lock
+    const second = await launchMaws({ userData });
+    launches.push(second);
+    expect((await status(second.page)).transport).not.toBe('daemon');
+    await expect.poll(() => isAlive(daemon), { timeout: 15_000, message: 'the embedded launch ended the profile’s mawsd' }).toBe(false);
+    await expect.poll(lockPid, { timeout: 30_000, message: 'main holds spine.lock' }).toBe(second.app.process().pid);
+    value(await invoke(second.page, 'settings.set', { supervisor: { shape: 'daemon' } }));
+    await second.app.close();
+    await expect.poll(lockPid, { timeout: 10_000, message: 'main released spine.lock at its exit' }).toBeNull();
+
+    // daemon again: the next launch runs the spine in a mawsd of its own
+    const third = await launchMaws({ userData });
+    launches.push(third);
+    const after = await status(third.page);
+    expect(after.transport).toBe('daemon');
+    expect(after.daemon!.pid).not.toBe(daemon);
+    await expect.poll(lockPid, { timeout: 30_000, message: 'the new mawsd holds spine.lock' }).toBe(after.daemon!.pid);
+    expect(after.spineRefused).toBeNull();
+  } finally {
+    for (const launch of launches.reverse()) await launch.cleanup().catch((error: unknown) => console.error(error));
+    rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
 });

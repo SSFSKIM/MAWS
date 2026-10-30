@@ -22,7 +22,9 @@
 // the baseline; `daemon` is M9's (acceptance 7): main reaches the engine host through a private `mawsd` on the profile,
 // and what stays behind is `mawsd` and the engine host (and the pty host if it runs), measured together against
 // DAEMON_IDLE_BOUND. The settings' `idleExitMinutes: null` reaches `mawsd` as `host.configure`'s, so neither its park
-// clock nor its own idle exit arms.
+// clock nor its own idle exit arms. P5 O3-D (D7, Q1): on the daemon shape this case's `mawsd` is the harness's unit,
+// started before the app as the owner's LaunchAgent runs it, holding the spine, which it releases 60 s after the app
+// has gone (MAWS_SPINE_QUIET_MS), inside the settle; and the quit mid-turn is not asked, the session outliving the app.
 //
 // A run is valid when its load passes IDLE_RUN's rule, every measured process lives through it, the kept session is
 // still held at its end and the two footprint readers agree; an invalid run fails, saying why. The load rule voids
@@ -82,6 +84,10 @@ import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { startLocalOrg, type LocalOrg, type Ran } from './support/local-org';
 import { isAlive, killScratchProcesses, processesNaming, ps } from './support/processes';
 import { tmpSocketDirOf } from './support/supervisor-socket';
+import { launchEnvironment } from './support/scratch-env';
+import { writeReplayEngine } from '../test/support/replay-engine';
+import { writeScratchShellHome } from '../test/support/shell-home';
+import { supervisorEnv } from '@shared/host/detached-transport';
 
 test.skip(process.env.MAWS_DAEMON_IDLE_PERF !== '1', 'the idle-cost measurement runs under pnpm e2e:daemon-idle, e2e:daemon-idle-baseline, e2e:daemon-idle-floor, e2e:daemon-idle-mawsd, e2e:daemon-idle-enrolled, e2e:daemon-idle-aba, e2e:daemon-idle-spine and e2e:daemon-idle-mawsd-spine (MAWS_DAEMON_IDLE_PERF=1)');
 test.describe.configure({ timeout: 20 * 60_000 }); // about 13 minutes: the scene, the settle and the window
@@ -139,13 +145,45 @@ const lockOf = (userData: string): { pid: number; socketPath: string } | null =>
   }
 };
 
-// The processes the scene leaves behind, filled in as they start, so the cleanup ends whatever started.
-interface Held { maws: MawsLaunch | null; supervisor: number | null; daemon: number | null }
+// The processes the scene leaves behind, filled in as they start, so the cleanup ends whatever started. `endUnit` stops
+// the harness's restarts of a unit daemon (D7), before the cleanup kills it.
+interface Held { maws: MawsLaunch | null; supervisor: number | null; daemon: number | null; endUnit?: () => void }
+
+// The scene's launch environment beyond launchMaws's own
+const sceneEnv = (shape: Shape) => ({ MAWS_HARNESS: '0', MAWS_HOST_MODE: shape, MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_ROW_MS: ROW_MS, MAWS_E2E_QUIT_ANSWER: 'keep' });
+
+// P5 O3-D D7 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md): the daemon as the harness's unit, as the owner's
+// LaunchAgent runs it: `mawsd run --unit` started on the scratch profile before the app, with the environment the app
+// would give a private one (launchMaws's base, the replay stub launchMaws then keeps, the scratch shell home, the scene's
+// seams; supervisorEnv's rewrite) and MAWS_SPINE_QUIET_MS=60000 (D6's measured seam), so the app's launch finds it up
+// and the lock arbitrates. Restarted on exit 75 as launchd would, following the new pid in `held.daemon`; re-execution
+// is off by default (D38), so a restart is not expected and, before the window, not a lost process.
+async function startUnitDaemon(userData: string, held: Held): Promise<void> {
+  const script = join(REPO_ROOT, 'out', 'main', 'mawsd.js');
+  expect(existsSync(script), 'the build has out/main/mawsd.js (scripts/e2e-build.sh plain)').toBe(true);
+  const binary = electronBinary();
+  const base: Record<string, string> = { ...launchEnvironment(process.env, userData), MAWS_E2E_ENGINE_BIN: writeReplayEngine(userData), ...writeScratchShellHome(join(userData, 'shell-home')).env, ...sceneEnv('daemon') };
+  const env = { ...supervisorEnv(base, { userData, packaged: false }), MAWS_SPINE_QUIET_MS: '60000' };
+  const logFile = join(userData, 'mawsd', 'mawsd.log');
+  const serving = () => (existsSync(logFile) ? readFileSync(logFile, 'utf8').split('\n').filter((line) => line.includes(' serving; ')).length : 0);
+  let ending = false;
+  held.endUnit = () => void (ending = true);
+  const run = () => {
+    const child = spawn(binary, ['--disable-sigusr1', script, 'run', '--unit', '--dir', join(userData, 'mawsd')], { env, stdio: 'ignore', argv0: MAWSD_ARGV0 });
+    held.daemon = child.pid ?? null;
+    child.once('exit', (code) => void (code === 75 && !ending && run()));
+  };
+  run();
+  await expect.poll(serving, { timeout: 30_000, message: 'the unit mawsd serves before the app launches' }).toBeGreaterThan(0);
+}
 
 // The scene up to its idle: the app launched on `shape`, the seeded session's turn played to its request, the answer
-// given, the app quit mid-turn with the keep answer, and the turn ended with no app connected, the session held at its
-// next prompt. Answers the session's id and the Electron version every measured process runs as Node.
-async function keptIdleScene(root: string, userData: string, held: Held, shape: Shape): Promise<{ id: AppSessionId; electron: string }> {
+// given, the app quit mid-turn, and the turn ended with no app connected, the session held at its next prompt. The
+// embedded shape asks the quit and the scene answers keep; the daemon shape's sessions outlive the app, so nothing is
+// asked (P5 O3-D, Q1). On the daemon shape `daemonKind` says whose daemon the app reaches: its private one, or the
+// harness's unit (D7), started here before the launch. Answers the session's id and the Electron version every measured
+// process runs as Node.
+async function keptIdleScene(root: string, userData: string, held: Held, shape: Shape, daemonKind: 'private' | 'unit' = 'private'): Promise<{ id: AppSessionId; electron: string }> {
   const daemon = shape === 'daemon';
   const repo = join(root, 'repo');
   mkdirSync(repo, { recursive: true });
@@ -159,10 +197,8 @@ async function keptIdleScene(root: string, userData: string, held: Held, shape: 
   const seeded = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: 'daemon idle session' }, uuid: randomUUID(), timestamp: '2026-10-27T10:00:00.000Z', cwd: repo, sessionId: engineId, version: '2.1.283' };
   writeFileSync(join(project, `${engineId}.jsonl`), `${JSON.stringify(seeded)}\n`);
 
-  const maws = (held.maws = await launchMaws({
-    userData, keepConfigHome: true,
-    env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: shape, MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_ROW_MS: ROW_MS, MAWS_E2E_QUIT_ANSWER: 'keep' },
-  }));
+  if (daemon && daemonKind === 'unit') await startUnitDaemon(userData, held);
+  const maws = (held.maws = await launchMaws({ userData, keepConfigHome: true, env: sceneEnv(shape) }));
   const { page, app } = maws;
   const child = app.process();
   let output = '';
@@ -173,16 +209,16 @@ async function keptIdleScene(root: string, userData: string, held: Held, shape: 
   await expect.poll(async () => {
     const status = await invoke(page, 'host.status', undefined);
     if (!status.ok || status.value.state !== 'ready' || status.value.supervisor?.mode !== 'detached') return null;
-    if (daemon && (status.value.transport !== 'daemon' || status.value.daemon?.kind !== 'private')) return null;
+    if (daemon && (status.value.transport !== 'daemon' || status.value.daemon?.kind !== daemonKind)) return null;
     held.daemon = status.value.daemon?.pid ?? null;
     return status.value.supervisor.pid;
-  }, { timeout: 30_000, message: daemon ? 'main is connected to the engine host through a private mawsd' : 'main is connected to a detached supervisor' }).not.toBeNull();
+  }, { timeout: 30_000, message: daemon ? `main is connected to the engine host through a ${daemonKind} mawsd` : 'main is connected to a detached supervisor' }).not.toBeNull();
   const supervisor = (held.supervisor = lockOf(userData)!.pid);
   const electron = await app.evaluate(() => process.versions.electron); // the binary every measured process runs as Node
   let id = '' as AppSessionId;
   await expect.poll(async () => (id = (value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === engineId)?.appId ?? '') as AppSessionId), { timeout: 20_000, message: 'the seeded session has a record' }).not.toBe('');
 
-  // The session holds at its request; the answer is given, and the app quits with the keep answer mid-turn.
+  // The session holds at its request; the answer is given, and the app quits mid-turn (keeping the session).
   await launchReady(page, id, PERMISSION, { cwd: repo });
   value(await invoke(page, 'session.send', { appSessionId: id, content: firstPrompt() }));
   let requested: SessionEvent | undefined;
@@ -193,7 +229,8 @@ async function keptIdleScene(root: string, userData: string, held: Held, shape: 
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`MAWS did not quit; it said ${JSON.stringify(output.split('\n').filter((l) => l.startsWith('quit-guard:')))}`)), 20_000)));
   await Promise.race([exited, late]).finally(() => clearTimeout(timer));
-  expect(output.split('\n'), 'the quit was asked mid-turn and answered keep').toContain('quit-guard: 1 mid-turn, auto-answered keep, 1 session kept');
+  if (daemon) expect(output.split('\n'), 'the quit mid-turn is not asked: the session outlives the app').toContain('quit-guard: 1 mid-turn, not asked: they outlive the app');
+  else expect(output.split('\n'), 'the quit was asked mid-turn and answered keep').toContain('quit-guard: 1 mid-turn, auto-answered keep, 1 session kept');
   expect(isAlive(supervisor), 'the supervisor outlives the app').toBe(true);
   if (daemon) expect(isAlive(held.daemon!), 'mawsd outlives the app').toBe(true);
   await expect.poll(() => turnEnded(journal(userData, id)), { timeout: 60_000, message: 'the turn ends with no app connected' }).toBe(true);
@@ -216,7 +253,7 @@ test('daemon idle: the physical footprint and CPU of what stays behind holding o
   const held: Held = { maws: null, supervisor: null, daemon: null };
   let leftover: unknown;
   try {
-    const { id, electron } = await keptIdleScene(root, userData, held, SHAPE);
+    const { id, electron } = await keptIdleScene(root, userData, held, SHAPE, DAEMON ? 'unit' : 'private'); // D7
     const measurement = await measureWindow(await settledProcesses(root, held, SHAPE));
     const sessionEnded = launchEnded(journal(userData, id));
 
@@ -228,6 +265,7 @@ test('daemon idle: the physical footprint and CPU of what stays behind holding o
     report('daemon-idle.json', line, reasons, { shape: SHAPE, electron, bound, misses, ...measurement.record, sessionEnded });
     expect(misses, `the daemon shape's processes together are within DAEMON_IDLE_BOUND (${line})`).toEqual([]);
   } finally {
+    held.endUnit?.();
     leftover = await removeScratch(root, userData, held.maws, [held.supervisor, held.daemon]);
   }
   if (leftover !== null) throw leftover; // the body passed: a process of the scratch outliving it is the case's failure
