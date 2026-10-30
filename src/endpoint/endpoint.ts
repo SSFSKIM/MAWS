@@ -257,6 +257,7 @@ export class Endpoint implements EndpointModule {
         if (this.#services === null) return Promise.reject(new Error('the endpoint has not started'));
         return this.#services.dispatch(owner, name, input);
       },
+      behind: () => void this.#syncAfter(),
       now: this.deps.now,
       log,
     });
@@ -604,6 +605,17 @@ export class Endpoint implements EndpointModule {
       this.#ensureLink();
     });
     return this.#syncing;
+  }
+
+  /**
+   * A read that begins after this call, for RL10's held events (`Rl10Context.behind`): one in flight may have begun
+   * before the certificate they wait on was stored, so another follows it. Asks while it waits share that one.
+   */
+  #syncAfter(): Promise<unknown> {
+    const syncing = this.#syncing;
+    if (syncing === null) return this.syncNow();
+    const read = () => this.syncNow();
+    return syncing.then(read, read);
   }
 
   /** A `state {version}` notice: read until the head reaches `version` (a read in flight may have begun before it). */

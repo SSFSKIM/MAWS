@@ -49,6 +49,7 @@ const TIMING_NODE_TESTS = [
   'test/endpoint/rl10/conversation.local.test.ts', // P5 O10 M6: RL10's conversation replayed against the real socket and desk-hub's Worker in Miniflare
   'test/endpoint/subscriptions.local.test.ts', // P5 O10 M8: subscriptions across a forced drop over the hub's multiplex (desk-hub's Worker in Miniflare) and the direct listener
   'test/endpoint/rl10/uplink.test.ts', // P5 O10: the log plane's uploads held at a stand-in hub's real socket and RL10's, a burst signed and sent
+  'test/endpoint/rl10/held-read.test.ts', // P5 O10: a started endpoint's held events and revocations against a stand-in hub's real socket and RL10's
   'test/machines/remote-link.test.ts', // P5 O7 M1: main's RL2 link against a real endpoint on its direct listener (real sockets, the handshake's WebCrypto)
   'test/lane-a/remote.test.ts', // P5 O9 M9: remote lane A through main's RL2 link against a real endpoint (real sockets, the handshake's WebCrypto)
   'test/machines/remote-link.local.test.ts', // P5 O7 M1: the link over the hub's multiplex (desk-hub's Worker in Miniflare), a relay drop, the switch to direct, the hub away

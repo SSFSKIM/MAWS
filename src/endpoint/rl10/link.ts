@@ -79,6 +79,8 @@ export type Rl10Context = {
   };
   machineOwners(): Promise<string[]>;
   dispatch: MembersContext['dispatch'];
+  /** A read of the hub's org state, asked for an arriving event held for a key it may bring (log-relay.ts). */
+  behind?(): void;
   now(): number;
   log(line: string): void;
 };
@@ -140,6 +142,7 @@ export class Rl10 {
       hub: ctx.hub,
       toSminos: (frame) => this.send(frame),
       opened: () => void ctx.listings.refresh(),
+      behind: () => ctx.behind?.(),
       now: ctx.now,
       log: ctx.log,
     });
