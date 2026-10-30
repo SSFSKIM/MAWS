@@ -5,9 +5,15 @@
 // adds, and a split the holder left in progress (its machine file written, settings.json still unified) is not finished
 // by the refused run; host.status names the holder. Once the holder is gone, the next launch breaks the stale lock, takes
 // it, finishes the split, and releases the lock when it quits.
+//
+// P5 O3-D M5a (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §L, D21): the `SingletonLock` probe. The
+// yield's second signal reads Electron's single-instance lock in the profile, which Chromium writes on Linux as a
+// symlink `<host>-<pid>`; what macOS Electron writes there is unknown until a launch on a scratch profile shows it. The
+// probe records it (one `[probe] SingletonLock …` line, an annotation and an attachment) and asserts nothing about its
+// form; `mawsd`'s use of it stays switched off (SINGLETON_LOCK_SIGNAL_DEFAULT) until the line is read.
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { hostname, tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
@@ -104,6 +110,48 @@ test('beside a live holder of spine.lock a launch writes no spine file and finis
     expect(existsSync(join(userData, 'spine.lock'))).toBe(false);
   } finally {
     holder?.kill('SIGKILL');
+    rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+// What the profile's Singleton* entries are while the app runs: each one's kind, and for SingletonLock its link target
+// or content read as `<host>-<pid>` (the host reported only as whether it is this machine's name).
+function singletonEntries(userData: string, appPid: number): Record<string, unknown> {
+  const entries: Record<string, unknown> = {};
+  for (const name of readdirSync(userData).filter((entry) => entry.startsWith('Singleton')).sort()) {
+    const path = join(userData, name);
+    const stat = lstatSync(path);
+    const kind = stat.isSymbolicLink() ? 'symlink' : stat.isFile() ? 'file' : stat.isSocket() ? 'socket' : stat.isDirectory() ? 'directory' : 'other';
+    const entry: Record<string, unknown> = { kind };
+    if (name === 'SingletonLock') {
+      const raw = stat.isSymbolicLink() ? readlinkSync(path) : stat.isFile() ? readFileSync(path, 'utf8').trim() : null;
+      const named = raw === null ? null : /^(.+)-(\d+)$/.exec(raw);
+      entry.shape = raw === null ? 'unreadable' : named ? '<host>-<pid>' : `other (${raw.length} characters)`;
+      if (named) Object.assign(entry, { hostIsThisMachine: named[1] === hostname(), pid: Number(named[2]), pidIsTheApp: Number(named[2]) === appPid });
+    }
+    entries[name] = entry;
+  }
+  return entries;
+}
+
+test('the SingletonLock probe (D21): what macOS Electron writes as the profile’s single-instance lock, recorded', async () => {
+  test.setTimeout(120_000);
+  const userData = mkdtempSync(join(tmpdir(), 'maws-e2e-singleton-'));
+  try {
+    const maws = await launchMaws({ userData });
+    let reading: Record<string, unknown>;
+    try {
+      const appPid = maws.app.process().pid!;
+      reading = { platform: process.platform, entries: singletonEntries(userData, appPid) };
+    } finally {
+      await maws.cleanup();
+    }
+    reading.afterQuit = readdirSync(userData).filter((entry) => entry.startsWith('Singleton')).sort();
+    const line = `[probe] SingletonLock ${JSON.stringify(reading)}`;
+    console.log(line);
+    test.info().annotations.push({ type: 'SingletonLock probe', description: line });
+    await test.info().attach('singleton-lock-probe.json', { body: JSON.stringify(reading, null, 2), contentType: 'application/json' });
+  } finally {
     rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
