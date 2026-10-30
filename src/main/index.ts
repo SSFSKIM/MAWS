@@ -1,5 +1,5 @@
 // P5 O3-C (docs/doperpowers/plans/2026-10-28-p5-o3-c-spine-library.md): the library's one door, its two roots
-import { openSpineData, startCheckouts, startMachineIdentity, startSpine, type SpineData } from '../services/entry';
+import { COMMAND_BUDGETS_MS, openSpineData, startCheckouts, startMachineIdentity, startSpine, type SpineData } from '../services/entry';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandResult } from '@shared/ipc/schema';
 import { REGISTRY } from '@shared/ipc/registry'; // P5 O3-D M1: the bus's register reads each name's owner
@@ -282,7 +282,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   // P5 O3-A (the O3 document §2): whether this run holds `spine.lock`. Refused, none of the spine's services that write
   // the machine's files or launch a session starts (startSpine says which), the index is opened unavailable, and the
   // client half runs.
-  const { hosts, daemon } = createHosts(MAIN_BUILD, launch, { spineRefused: data?.refused ?? null }); // E11 §2.7: main's build for host.status; P5 O2 M7: the launch's shape; P5 O3-A: why the spine does not run
+  const { hosts, daemon } = createHosts(MAIN_BUILD, launch, { spineRefused: data?.refused ?? null, machineBudgetsMs: COMMAND_BUDGETS_MS }); // E11 §2.7: main's build for host.status; P5 O2 M7: the launch's shape; P5 O3-A: why the spine does not run
   // P5 O3-D M5b (§G, D20): the daemon shape's machine half mirrors mawsd's, from machine-settings.json read and never written;
   // a client change waits for mawsd's settings split at the first launch on a profile before it (composeSettings)
   const mirror = data === null ? createMachineSettingsMirror({ file: settingsPaths(profile).machine, hosts, log: (line) => console.log(line) }) : null;

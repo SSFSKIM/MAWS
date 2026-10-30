@@ -19,6 +19,8 @@ import { trustStateOf } from './trust';
 import { ownerChannelLaunch, ownerChannelLaunched } from '../owner/launch'; // P2-C (2026-10-09)
 import { launchScopeOf } from './artifact-scope'; // P2-E1
 
+export const PAUSED_READY_MS = 15_000; // W14: a resume over a paused terminal CLI is ready within this, or rolled back
+
 // C3 corrective: the host's code for an engine that wrote nothing before its first-output bound, and what the retry says
 const NO_OUTPUT = 'no_output';
 export const RETRY_REASON = 'The engine gave no output for 30 s.';
@@ -72,7 +74,7 @@ export async function runResume(
     let previousLaunchId: string | null = null;
     const scope = launchScopeOf(s.sessions, record.lineage); // P2-E1: a side thread's ancestors' artifacts, resolved at every resume
     for (;;) {
-      watch = new LaunchWatch(s, appSessionId, previousLaunchId, input.paused ? 15_000 : undefined);
+      watch = new LaunchWatch(s, appSessionId, previousLaunchId, input.paused ? PAUSED_READY_MS : undefined);
       const answer = await hostCall(s.dispatch, 'session.launch', { spec, ...scope });
       if (answer.status === 'relay_unreachable') throw new RelayFailure(answer.health);
       if (answer.status === 'refused') throw new SetupFailure('launching', `${answer.reason}: ${answer.message}`);

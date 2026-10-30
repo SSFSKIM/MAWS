@@ -535,6 +535,15 @@ describe('main’s hosts on the daemon shape', () => {
     }
     expect(specs.machine!.modulePath).toBe('/app/out/main/mawsd.js');
   });
+
+  it('give the machine host the spine’s command budgets, and the engine and pty hosts none (the panel’s sweep#3)', () => {
+    const start = daemonStart('private', { paths, modules, execPath: '/app/Electron', env, packaged: false, unitStart: () => {} });
+    const budgets = { 'session.takeOver': 40_000 };
+    const specs = daemonHostSpecs(paths, start, modules, env, budgets);
+    expect(specs.machine!.requestBudgetsMs).toEqual(budgets);
+    expect(specs['engine-host']!.requestBudgetsMs).toBeUndefined();
+    expect(specs['pty-host']!.requestBudgetsMs).toBeUndefined();
+  });
 });
 
 describe('the build check', () => {

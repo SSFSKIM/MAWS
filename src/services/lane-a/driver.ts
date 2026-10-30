@@ -60,6 +60,8 @@ export interface LaneATiming {
   lane: LaneTiming;
 }
 
+export const BRIDGE_SLACK_MS = 2_000; // a bridge command's socket deadline past its `wait`
+
 export const LANE_A_TIMING: LaneATiming = {
   probeMs: 2000,
   commandWaitMs: 10_000,
@@ -569,7 +571,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
 
   async function post(s: Session, body: Record<string, unknown>, launch: string | null): Promise<PostResult> {
     try {
-      const answer = await call(s.socket.path, 'POST', `/command?wait=${timing.commandWaitMs}`, { ...body, ...(launch !== null && { launch }) }, timing.commandWaitMs + 2000);
+      const answer = await call(s.socket.path, 'POST', `/command?wait=${timing.commandWaitMs}`, { ...body, ...(launch !== null && { launch }) }, timing.commandWaitMs + BRIDGE_SLACK_MS);
       return { kind: 'answer', status: answer.status, body: answer.body };
     } catch (error) {
       return { kind: 'lost', why: error instanceof BridgeUnreachable ? error.why : 'gone' };

@@ -16,6 +16,7 @@ import engineHostPath from '../../engine-host/index?modulePath';
 import ptyHostPath from '../../pty-host/index?modulePath';
 import { daemonPaths } from '@shared/daemon/files';
 import { appIdentity } from '@shared/host/identity';
+import type { HostSpec } from '@shared/host/host-supervisor';
 import type { DaemonStatus } from '@shared/ipc/schema/daemon';
 import type { MainBuild } from '@shared/ipc/schema/host'; // E11 §2.7
 import type { SupervisorShape } from '@shared/ipc/schema/settings';
@@ -86,7 +87,13 @@ export interface DaemonStatusWatch {
 
 // P5 O3-A: `spineRefused`, why this run does not run the spine, for host.status (the embedded shape's; on the daemon
 // shape the daemon's status says it)
-export function createHosts(mainBuild: MainBuild, launch: LaunchShape, { spineRefused = null }: { spineRefused?: string | null } = {}): { hosts: HostSupervisor; daemon: DaemonStatusWatch | null } {
+// The panel's sweep#3: `machineBudgetsMs`, the spine's commands that run past a request's default deadline (the services
+// entry's COMMAND_BUDGETS_MS), which the daemon shape's `machine` host applies.
+export function createHosts(
+  mainBuild: MainBuild,
+  launch: LaunchShape,
+  { spineRefused = null, machineBudgetsMs }: { spineRefused?: string | null; machineBudgetsMs?: HostSpec['requestBudgetsMs'] } = {},
+): { hosts: HostSupervisor; daemon: DaemonStatusWatch | null } {
   const { mode } = launch;
   const daemon = mode === 'daemon';
   const userData = app.getPath('userData');
@@ -100,7 +107,7 @@ export function createHosts(mainBuild: MainBuild, launch: LaunchShape, { spineRe
   const unit = () => unitFor(DEFAULT_LABEL, unitDeps());
   const supervisor = createHostSupervisor({
     hosts: daemon
-      ? daemonHostSpecs(paths, daemonStart(launch.daemon ?? 'private', { paths, modules, execPath: process.execPath, env: process.env, packaged: app.isPackaged, unitStart: () => unit().start() }), modules, process.env)
+      ? daemonHostSpecs(paths, daemonStart(launch.daemon ?? 'private', { paths, modules, execPath: process.execPath, env: process.env, packaged: app.isPackaged, unitStart: () => unit().start() }), modules, process.env, machineBudgetsMs)
       : {
           'engine-host': { modulePath: engineHostPath, serviceName: 'maws-engine-host', transport: mode },
           'pty-host': { modulePath: ptyHostPath, serviceName: 'maws-pty-host' },

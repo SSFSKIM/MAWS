@@ -294,7 +294,9 @@ const SERVICE: Record<DaemonSocket, string> = { 'engine-host': 'maws-engine-host
 // The three hosts, each over its own relay socket. Every hello presents this build with no e2e seam (the identity's
 // `utility` mode): the seams are `mawsd`'s to apply to the engine host it reaches (they pass through in its
 // environment), and a hello a relay refuses on a seam would never reach the host at all.
-export function daemonHostSpecs(paths: DaemonPaths, start: StartStrategy, modules: DaemonModules, env: NodeJS.ProcessEnv): Partial<Record<HostOwner, HostSpec>> {
+// `machineBudgetsMs`: the spine's commands that run past a request's default deadline, with their own (the services
+// entry's COMMAND_BUDGETS_MS, which main's root hands over; the panel's sweep#3)
+export function daemonHostSpecs(paths: DaemonPaths, start: StartStrategy, modules: DaemonModules, env: NodeJS.ProcessEnv, machineBudgetsMs?: HostSpec['requestBudgetsMs']): Partial<Record<HostOwner, HostSpec>> {
   const spec = (socket: DaemonSocket, modulePath: string): HostSpec => {
     const detached: Partial<Omit<DetachedTransportOptions, 'modulePath'>> = {
       files: daemonHostFiles(paths, socket),
@@ -306,7 +308,7 @@ export function daemonHostSpecs(paths: DaemonPaths, start: StartStrategy, module
     };
     return { modulePath, serviceName: SERVICE[socket], transport: 'detached', detached };
   };
-  return { 'engine-host': spec('engine-host', modules.engineHost), 'pty-host': spec('pty-host', modules.ptyHost), machine: spec('machine', modules.mawsd) };
+  return { 'engine-host': spec('engine-host', modules.engineHost), 'pty-host': spec('pty-host', modules.ptyHost), machine: { ...spec('machine', modules.mawsd), ...(machineBudgetsMs && { requestBudgetsMs: machineBudgetsMs }) } };
 }
 
 // ---- the daemon's status and the build check ---------------------------------------------------------------------------
