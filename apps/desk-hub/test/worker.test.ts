@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { DownFrame } from '../src/protocol/machine';
-import { SESSION_KINDS } from '../src/protocol/session';
 import { ADMIN, DEPLOY_VARS, ORG, startHub, type Hub } from './support/hub';
 
 const PROJECT = '6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f';
@@ -49,13 +48,13 @@ describe('the Worker admits only what Access signed and the Registry knows', () 
   });
 
   it('refuses a service token the Registry never enrolled, though Access admitted it', async () => {
-    const response = await hub.fetch('/machine/stream', { assertion: await hub.service('0123abcd.access') });
+    const response = await hub.fetch('/machine/enrollment', { assertion: await hub.service('0123abcd.access') });
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ error: 'not-enrolled' });
   });
 
   it('serves a member no machine path', async () => {
-    expect((await hub.fetch('/machine/stream', { assertion: await hub.human(ADMIN) })).status).toBe(404);
+    expect((await hub.fetch('/machine/enrollment', { assertion: await hub.human(ADMIN) })).status).toBe(404);
   });
 });
 
@@ -89,57 +88,12 @@ describe("a project's socket", () => {
   });
 });
 
-describe("a machine's stream, held by its Machine object", () => {
-  async function open(name: string) {
-    const namespace = await hub.mf.getDurableObjectNamespace('MACHINE');
-    const stub = namespace.get(namespace.idFromName(`${ORG}:${name}`));
-    const response = await stub.fetch('https://machine/stream', { headers: { 'X-Desk-Org': ORG, 'X-Desk-Machine': name } });
-    expect(response.headers.get('Content-Type')).toBe('text/event-stream');
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    const next = async (): Promise<{ event: string; frame: DownFrame } | 'ended'> => {
-      for (;;) {
-        const end = buffer.indexOf('\n\n');
-        if (end >= 0) {
-          const block = buffer.slice(0, end);
-          buffer = buffer.slice(end + 2);
-          const event = /^event: (.*)$/m.exec(block)![1];
-          return { event, frame: JSON.parse(/^data: (.*)$/m.exec(block)![1]) as DownFrame };
-        }
-        const { value, done } = await reader.read();
-        if (done) return 'ended';
-        buffer += decoder.decode(value, { stream: true });
-      }
-    };
-    return { stub, next, cancel: () => reader.cancel() };
-  }
-
-  it("opens with a welcome naming the machine, its connection generation and the session kinds the hub lists, then the org's directory, and a newer stream ends the older", async () => {
-    const first = await open('mini');
-    expect(await first.next()).toEqual({ event: 'welcome', frame: { t: 'welcome', org: ORG, machine: 'mini', generation: 1, heartbeat_ms: 15_000, kinds: [...SESSION_KINDS] } });
-    // The kinds the desk control surface adds are listed, so a daemon sends them to this hub (the spec's §13.3).
-    expect(SESSION_KINDS).toEqual(expect.arrayContaining(['read', 'op', 'catalog']));
-    expect(await first.next()).toMatchObject({ event: 'org', frame: { t: 'org', projects: expect.any(Array), machines: expect.any(Array) } });
-    const second = await open('mini');
-    expect(await second.next()).toMatchObject({ frame: { t: 'welcome', generation: 2 } });
-    expect(await first.next()).toBe('ended');
-    await second.cancel();
-  });
-
-  it('takes a frame for the machine from another object and writes it down the stream, or answers offline at once', async () => {
+describe("a machine's name-addressed Machine object", () => {
+  it('answers a frame for a machine with no connection offline at once, and serves no stream since DX2 left the hub', async () => {
     const namespace = await hub.mf.getDurableObjectNamespace('MACHINE');
     const idle = namespace.get(namespace.idFromName(`${ORG}:asleep`));
-    expect(await (idle as unknown as { send(frame: DownFrame): Promise<string> }).send({ t: 'hb', at: 'x' })).toBe('offline');
-
-    const stream = await open('SK.local');
-    await stream.next(); // welcome
-    await stream.next(); // the org's directory
-    const send = (stream.stub as unknown as { send(frame: DownFrame): Promise<string> }).send.bind(stream.stub);
-    const frame: DownFrame = { t: 'rpc-ack', project: PROJECT, nonce: 'AQEBAQEBAQEBAQEBAQEBAQ' };
-    expect(await send(frame)).toBe('written');
-    expect(await stream.next()).toEqual({ event: 'rpc-ack', frame });
-    await stream.cancel();
+    expect(await (idle as unknown as { send(frame: DownFrame): Promise<string> }).send({ t: 'have', project: PROJECT, have: {}, archive: false })).toBe('offline');
+    expect((await idle.fetch('https://machine/stream', { headers: { 'X-Desk-Org': ORG, 'X-Desk-Machine': 'asleep' } })).status).toBe(404);
   });
 });
 

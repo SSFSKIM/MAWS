@@ -7,19 +7,23 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { FakeMachine } from '../../fake-machine';
 import { compare, countWriters, main, readHub, type Snapshot } from '../../deploy/counts.ts';
 import { Person } from '../../deploy/hub.ts';
 import { IDENTITY_HEADER } from '../../local/standin.ts';
-import { enroll } from '../support/clients';
+import { base64urlEncode } from '../../src/protocol/base64url';
+import { newNonce } from '../../src/protocol/codes';
+import type { LogEvent } from '../../src/protocol/log';
 import { ADMIN, startLocalHub, type LocalHub } from '../support/local';
+import { TestOrg } from '../support/rl1';
 
 process.env.DESK_HUB_APP ??= join(import.meta.dirname, '../..');
 const MACHINE_COUNTS = join(import.meta.dirname, '../../deploy/machine-counts.py');
 
 let hub: LocalHub;
+let org: TestOrg;
 beforeAll(async () => {
   hub = await startLocalHub();
+  org = await TestOrg.root(hub);
 });
 afterAll(() => hub?.close());
 
@@ -166,11 +170,22 @@ describe('the hub half', () => {
   it('reads a project log through a resume, sending nothing but resume, and compares', async () => {
     const name = `counts-${Math.random().toString(36).slice(2, 7)}`;
     const project = randomUUID();
-    const credentials = await enroll(hub, ADMIN, name);
-    const fm = new FakeMachine({ hub: hub.url, machine: name, credentials, orgKey: new Uint8Array(32).fill(7), project, projectName: 'counts' });
-    await fm.connect();
+    const m = await org.machine(name);
+    await m.sync(project, 'counts');
     const writer = `${name}/${randomUUID()}`;
-    for (const text of ['one', 'two', 'three']) await fm.write(text, writer, { kind: 'say', from: 'x', to: '*', text });
+    // Codes the hub carries and never checks, spelled canonically as it requires.
+    const events = ['one', 'two', 'three'].map((text, i): LogEvent => ({
+      ts: new Date().toISOString(),
+      writer,
+      seq: i + 1,
+      kind: 'say',
+      from: 'x',
+      to: '*',
+      text,
+      mac: { nonce: newNonce(), value: base64urlEncode(crypto.getRandomValues(new Uint8Array(32))) },
+    }));
+    m.send([{ t: 'events', project, events }]);
+    await m.settled(project, 'counts');
     const person = new LocalPerson(hub.url, 'unused');
     const sent: unknown[] = [];
     const open = person.socket.bind(person);
@@ -216,7 +231,7 @@ describe('the hub half', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-    await fm.close();
+    m.close();
   });
 
   it('needs a project id', async () => {

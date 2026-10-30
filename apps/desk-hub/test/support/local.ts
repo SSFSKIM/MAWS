@@ -9,24 +9,20 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { convertV4MiniflareOptions, Miniflare, Response as MiniflareResponse, type V4WorkerOptions } from 'miniflare';
 import { inject } from 'vitest';
-import { codeHelpers } from '../../local/helpers.ts';
 import { startProxy, type Proxy } from '../../local/proxy.ts';
 import { AccessStandin, IDENTITY_HEADER } from '../../local/standin.ts';
-import type { OrgFrame } from '../../src/protocol/machine';
+import type { MachineView } from '../../src/protocol/identity';
 import { generateVapidKey } from '../../src/push/web-push';
 import {
   ABORT_REASON,
   ALARM_PATH,
   BACKDATE_PATH,
-  DIRECTORY_FAULT_PATH,
   LEAVE_HELD_PATH,
   LEAVE_HOLD_PATH,
   LEAVE_RELEASE_PATH,
   OFFLINE_RETRY_PATH,
   MACHINE_ABORT_PATH,
-  MACHINE_FETCH_FAULT_PATH,
   MACHINE_PROBE_PATH,
-  MACHINE_REPLACE_PATH,
   MEMBER_PATH,
   ORG_ROW_PATH,
   PROJECT_ARCHIVE_HOLD_PATH,
@@ -55,7 +51,6 @@ import {
   SUMMARY_FAULT_PATH,
   TIMING_PATH,
   UNREGISTER_PATH,
-  WRITE_STALL_PATH,
   PROJECT_MACHINES_PATH,
   PROJECTION_PATH,
   PROJECT_STATE_FAULT_PATH,
@@ -73,6 +68,9 @@ import {
   UPGRADE_RELEASE_PATH,
   RELAY_FAULT_PATH,
   CLAIM_PATH,
+  WRAPPED_KEY_SEED_PATH,
+  PROJECT_RPCS_PATH,
+  PHASE_ONE_SINK_PATH,
 } from './send-fault';
 
 const require = createRequire(import.meta.url);
@@ -183,7 +181,6 @@ export async function startLocalHub(options: { script?: string } = {}) {
   const proxy: Proxy = await startProxy({
     standin,
     upstream: () => `http://127.0.0.1:${port}`,
-    extra: codeHelpers({ origin: () => proxy.url, org: ORG, standin, admin: ADMIN }),
   });
 
   /** A request to an object's own fetch, which only Miniflare reaches: the suites' seams. */
@@ -221,19 +218,6 @@ export async function startLocalHub(options: { script?: string } = {}) {
     /** A push service's answer per endpoint (201 when unset): 404 or 410 says the subscription is gone. */
     pushAnswers,
     /**
-     * A request straight to a machine's object (`/stream` or `/frames`) with the identity headers the Worker sets once it
-     * has verified a request: how a request the Worker admitted reaches the object late, after a revocation, say.
-     */
-    async machineRequest(machine: string, path: '/stream' | '/frames', headers: Record<string, string>, body?: string) {
-      const namespace = await mf.getDurableObjectNamespace('MACHINE');
-      const response = await namespace
-        .get(namespace.idFromName(`${ORG}:${machine}`))
-        .fetch(`https://machine${path}`, { method: body === undefined ? 'GET' : 'POST', headers: { 'X-Desk-Org': ORG, 'X-Desk-Machine': machine, ...headers }, body });
-      const status = response.status;
-      await response.body?.cancel();
-      return status;
-    },
-    /**
      * A member's socket upgrade straight to a project's object (`/socket`) or the Registry (`/grid`), with the headers
      * the Worker sets once it resolved the member: how an upgrade the Worker admitted reaches the object late, after
      * a state that dropped the member. Answers the status; an accepted socket is closed at once.
@@ -253,23 +237,15 @@ export async function startLocalHub(options: { script?: string } = {}) {
       } else await response.body?.cancel();
       return response.status;
     },
-    /** Shortens a machine's heartbeat and lease (and its grace, the heartbeat's unless given, and its probe); set before
-     * its stream opens (the suites' Worker only). */
-    async timing(machine: string, timing: { heartbeatMs: number; leaseMs: number; graceMs?: number; probeMs?: number; writeTimeoutMs?: number }) {
+    /** Shortens a machine's heartbeat and lease (and its grace, the heartbeat's unless given); set before its connection
+     * opens (the suites' Worker only). */
+    async timing(machine: string, timing: { heartbeatMs: number; leaseMs: number; graceMs?: number }) {
       const query = new URLSearchParams(Object.entries(timing).map(([name, value]): [string, string] => [name, String(value)]));
       await seam('MACHINE', machine, `${TIMING_PATH}?${query}`);
     },
-    /** Arms a machine's object to find itself replaced at its next probe, as one Cloudflare replaced under its stream. */
-    async replace(machine: string) {
-      await seam('MACHINE', machine, MACHINE_REPLACE_PATH);
-    },
-    /** Arms a machine's object to throw from its next request to `path` (`/frames` or `/stream`). */
-    async failFetch(machine: string, path: '/frames' | '/stream') {
-      await seam('MACHINE', machine, `${MACHINE_FETCH_FAULT_PATH}?path=${path}`);
-    },
-    /** Probes a machine's object once: its own instance, and the one its probe reached. */
-    async probe(machine: string): Promise<{ life: string; current: string | null }> {
-      return JSON.parse(await seam('MACHINE', machine, MACHINE_PROBE_PATH)) as { life: string; current: string | null };
+    /** Which instance of a machine's object answers (an evicted object woken is another). */
+    async probe(machine: string): Promise<{ life: string }> {
+      return JSON.parse(await seam('MACHINE', machine, MACHINE_PROBE_PATH)) as { life: string };
     },
     /** Adds a member to the org (the suites' Worker only: the hub has no such endpoint before the org phase). */
     async addMember(email: string, role: 'admin' | 'member') {
@@ -278,6 +254,17 @@ export async function startLocalHub(options: { script?: string } = {}) {
     /** Which instance of a project's object answers; a different one after an eviction or a hibernation. */
     async projectLife(project: string): Promise<string> {
       return seam('PROJECT', project, PROJECT_LIFE_PATH);
+    },
+    /**
+     * Keeps one wrapped copy of the org key at the Registry, as a hub from before O14 M5b holds them (its bytes and the
+     * key's check `copy`'s where given); answers its id.
+     */
+    async seedWrappedKey(copy: { wrapped?: string; check?: string } = {}): Promise<string> {
+      return (JSON.parse(await seam('REGISTRY', ORG, WRAPPED_KEY_SEED_PATH, copy)) as { id: string }).id;
+    },
+    /** How many RPC records a project keeps: none since O14 M5b dropped their table (0 for a table that is gone). */
+    async projectRpcs(project: string): Promise<number> {
+      return (JSON.parse(await seam('PROJECT', project, PROJECT_RPCS_PATH)) as { rpcs: number }).rpcs;
     },
     /** Rewrites the org's stored record, as an object still on a deploy's previous version would have made it. */
     async rewriteOrgRow(row: { id: string; name: string }) {
@@ -290,6 +277,20 @@ export async function startLocalHub(options: { script?: string } = {}) {
     /** How many calls machines made to a project's object, and how many frames they carried. */
     async projectCalls(project: string): Promise<{ calls: number; frames: number }> {
       return JSON.parse(await seam('PROJECT', project, PROJECT_CALLS_PATH)) as { calls: number; frames: number };
+    },
+    /**
+     * Hands a project a machine's frames as DX2's stream handed them, under that machine's credential and a generation of
+     * the suite's: how a suite seeds the history phase 1 left in a log (DX1 writers, mac-only events) now that no machine
+     * reaches the hub but on RL1, whose machines the org state lists. Answers the project's account of them.
+     */
+    async phaseOneFrames(project: string, machine: string, client: string, generation: number, frames: unknown[]) {
+      // The project's replies (a hello's `have`, the backlog) are owed to a stream: the machine's object takes them.
+      await seam('MACHINE', machine, PHASE_ONE_SINK_PATH);
+      const namespace = await mf.getDurableObjectNamespace('PROJECT');
+      const stub = namespace.get(namespace.idFromName(`${ORG}:${project}`)) as unknown as {
+        fromMachine(ctx: object, frames: unknown[]): Promise<{ applied: number; stale: boolean; failed: boolean; refused: unknown[] }>;
+      };
+      return stub.fromMachine({ org: ORG, project, machine, client, generation, leaseMs: 60_000 }, frames);
     },
     /** Hands a project a lease's renewal or close for any generation, as a late one from an older stream would come. */
     async lease(project: string, change: { op: 'renew' | 'closed' | 'forget'; machine: string; generation: number; leaseMs?: number }) {
@@ -319,11 +320,6 @@ export async function startLocalHub(options: { script?: string } = {}) {
     /** Holds the machine's next send of a `kind` frame until `releaseSend` (the suites' Worker only). */
     async holdSend(machine: string, kind: string) {
       await seam('MACHINE', machine, `${SEND_HOLD_PATH}?kind=${kind}`);
-    },
-    /** Stalls the machine's next write of a `kind` frame for good, as a stream whose client stopped reading never takes
-     * it (the suites' Worker only); the write bound ends the stream. */
-    async stallNextWrite(machine: string, kind: string) {
-      await seam('MACHINE', machine, `${WRITE_STALL_PATH}?kind=${kind}`);
     },
     /** The machine streams a project fans out to: its `machines` rows. */
     async projectMachines(project: string): Promise<Array<{ name: string; generation: number }>> {
@@ -404,12 +400,6 @@ export async function startLocalHub(options: { script?: string } = {}) {
     async projectSend(project: string, machine: string, generation: number, frame: unknown) {
       await seam('PROJECT', project, PROJECT_SEND_PATH, { machine, generation, frame });
     },
-    /** Makes the machine's object throw from its next `times` calls of `directory` (0 disarms), as the Registry's push to
-     * an object a code update reset fails; without `times`, arms nothing. Answers the throws still armed and the calls
-     * taken since it was armed (the suites' Worker only). */
-    async directoryFault(machine: string, times?: number): Promise<{ remaining: number; calls: number }> {
-      return JSON.parse(await seam('MACHINE', machine, DIRECTORY_FAULT_PATH, { times })) as { remaining: number; calls: number };
-    },
     /** Makes the Registry throw from the project's next `times` summary reports (0 disarms), as a report to a Registry a
      * code update reset fails; without `times`, arms nothing. Answers the throws still armed and the reports taken since
      * it was armed (the suites' Worker only). */
@@ -446,9 +436,9 @@ export async function startLocalHub(options: { script?: string } = {}) {
     async unregister(id: string) {
       await seam('REGISTRY', ORG, UNREGISTER_PATH, { id });
     },
-    /** Hands the Registry a project's summary report, as one delivered late would arrive; the org's directory after. */
-    async report(project: string, report: unknown): Promise<OrgFrame> {
-      return JSON.parse(await seam('REGISTRY', ORG, REPORT_PATH, { project, report })) as OrgFrame;
+    /** Hands the Registry a project's summary report, as one delivered late would arrive; the org's machines after. */
+    async report(project: string, report: unknown): Promise<{ machines: MachineView[] }> {
+      return JSON.parse(await seam('REGISTRY', ORG, REPORT_PATH, { project, report })) as { machines: MachineView[] };
     },
     /** Drops `live` from the Registry's `summaries`, as a registry stored before it; evict the Registry next, and its
      * construction adds the column again. */

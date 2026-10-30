@@ -3,6 +3,10 @@
 // assertion is enrollment's redemption (`/machine/enroll`), which Access does not guard either: its one-time token, or
 // a provisioning key's secret, does. Every path it answers is under `/api/*` or `/machine/*`, the routes wrangler.jsonc runs it first for; the web
 // app's assets answer the rest.
+//
+// Desk phase 1's routes are gone (P5 O14 M5b): DX2's `/machine/stream` and `/machine/frames` and the org key's
+// `POST /api/org/keys` and `DELETE /api/org/keys/<id>` get the Worker's own 404, as any path it does not serve. A
+// machine reaches the hub over RL1 alone; `GET /api/org/keys` stays, answering `410 retired` once the copies are purged.
 import {
   HISTORY_ATTESTATIONS_ROUTE,
   HISTORY_INVENTORY_PATH,
@@ -40,7 +44,7 @@ import {
   type MachineSelf,
   type PushSubscriptions,
 } from './protocol/identity';
-import { APP_SOCKET_PATH, MACHINE_SOCKET_PATH, POST_LIMIT } from './protocol/machine';
+import { APP_SOCKET_PATH, MACHINE_SOCKET_PATH } from './protocol/machine';
 import { FRAME_LIMIT } from './protocol/parts';
 
 export { Machine } from './objects/machine';
@@ -51,9 +55,8 @@ const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const PROJECT_SOCKET = new RegExp(`^/api/projects/(${UUID})/socket$`);
 const PROJECT_ARCHIVE = new RegExp(`^/api/projects/(${UUID})/archive$`);
 const MACHINE_PATH = /^\/api\/machines\/([^/]+)$/;
-const ORG_KEY_PATH = /^\/api\/org\/keys\/([^/]+)$/;
 const PROVISIONING_KEY_PATH = /^\/api\/provisioning-keys\/([^/]+)$/;
-/** A JSON body of an endpoint other than the machine's POST is small. */
+/** A JSON body of an endpoint is small. */
 const BODY_LIMIT = 64 * 1024;
 /** A signed org state grows with the org (members, devices, every machine name it ever held): it may take a frame. */
 const STATE_LIMIT = FRAME_LIMIT;
@@ -157,10 +160,8 @@ export default {
       response = failure(error);
     }
     if (request.body && !request.bodyUsed) await drain(request.body);
-    // A WebSocket's upgrade (its socket rides on the answer) and a machine's stream are passed on untouched, as before
-    // the build was named: re-wrapping the stream's body would put a pipe of the Worker's between the client and the
-    // Machine object, whose close detection M1's probe measured without one. Every other answer names the build.
-    if (response.status === 101 || response.headers.get('Content-Type') === 'text/event-stream') return response;
+    // A WebSocket's upgrade is passed on untouched (its socket rides on the answer). Every other answer names the build.
+    if (response.status === 101) return response;
     const named = new Response(response.body, response);
     named.headers.set('X-Desk-Build', BUILD);
     return named;
@@ -229,9 +230,6 @@ async function member(request: Request, url: URL, env: Env, registry: DurableObj
     return answer(listed);
   }
   if (pathname === ORG_KEYS_PURGE_PATH && method === 'POST') return answer(await registry.purgeOrgKeys(you));
-  if (pathname === ORG_KEYS_PATH && method === 'POST') return answer(await registry.addOrgKey(you, await body(request)), 201);
-  const orgKey = ORG_KEY_PATH.exec(pathname);
-  if (orgKey && method === 'DELETE') return answer(await registry.removeOrgKey(you, orgKey[1], await body(request)));
   if (pathname === PROVISIONING_KEYS_PATH && method === 'GET') return json(200, { keys: await registry.provisioningKeys() });
   if (pathname === PROVISIONING_KEYS_PATH && method === 'POST') return answer(await registry.createProvisioningKey(you, await body(request)), 201);
   const provisioningKey = PROVISIONING_KEY_PATH.exec(pathname);
@@ -333,10 +331,10 @@ async function machine(request: Request, url: URL, env: Env, registry: DurableOb
     const posted = (await body(request)) as { record?: unknown } | undefined;
     return kept(await stub.keepAttestation(principal.org.id, attestations[1], typeof posted === 'object' && posted !== null ? posted.record : undefined));
   }
-  const identity = { [ORG_HEADER]: principal.org.id, [MACHINE_HEADER]: principal.machine.name, [CLIENT_HEADER]: principal.machine.client_id ?? '' };
   // RL1 (O11 M6): the endpoint's one socket, held by the object its ref addresses; its ref is the hub's own record of
   // this machine, never the client's word.
   if (url.pathname === MACHINE_SOCKET_PATH && request.method === 'GET') {
+    const identity = { [ORG_HEADER]: principal.org.id, [MACHINE_HEADER]: principal.machine.name, [CLIENT_HEADER]: principal.machine.client_id ?? '' };
     const found = await refFrom(async () => {
       const resolved = await registry.machineRefOf(principal.machine);
       return 'error' in resolved ? { error: resolved.error } : { ref: resolved.ref };
@@ -353,17 +351,6 @@ async function machine(request: Request, url: URL, env: Env, registry: DurableOb
     }
     const relay = env.MACHINE.get(env.MACHINE.idFromName(relayObjectName(principal.org.id, found.ref)));
     return relay.fetch(forward(request, 'https://machine/socket', { ...identity, [REF_HEADER]: found.ref }));
-  }
-  // DX2 is the phase-1 transport: a credential its enrollment's key post marked v2 never opens it (O14 M5a), so the
-  // credential a re-enrollment mints carries nothing but RL1 until its machine is listed.
-  if (principal.v2 && ((url.pathname === '/machine/stream' && request.method === 'GET') || (url.pathname === '/machine/frames' && request.method === 'POST'))) {
-    return json(403, { error: 'v2-credential', message: 'this credential belongs to a v2 enrollment (its machine key is posted): it connects over RL1 (/machine/socket), never DX2' });
-  }
-  const stub = env.MACHINE.get(env.MACHINE.idFromName(`${principal.org.id}:${principal.machine.name}`));
-  if (url.pathname === '/machine/stream' && request.method === 'GET') return stub.fetch(forward(request, 'https://machine/stream', identity));
-  if (url.pathname === '/machine/frames' && request.method === 'POST') {
-    if (Number(request.headers.get('Content-Length') ?? 0) > POST_LIMIT) return json(413, { error: 'too-large' });
-    return stub.fetch(forward(request, 'https://machine/frames', identity));
   }
   return json(404, { error: 'not-found' });
 }

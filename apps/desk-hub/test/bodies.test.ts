@@ -3,9 +3,7 @@
 // reads it whole before checking never answers.
 import { request as httpRequest } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { POST_LIMIT } from '../src/protocol/machine';
-import { enroll, MachineClient } from './support/clients';
-import { ADMIN, startLocalHub, type LocalHub } from './support/local';
+import { startLocalHub, type LocalHub } from './support/local';
 
 let hub: LocalHub;
 beforeAll(async () => {
@@ -41,18 +39,5 @@ describe('a body past its limit, which then stalls', () => {
   it("is refused on enrollment's anonymous redeem path once it passes 64 KiB", async () => {
     const answer = await stalledPost('/machine/enroll', { 'content-type': 'application/json' }, 128 * 1024);
     expect(answer.status).toBe(400);
-  });
-
-  it("is refused on a machine's POST once it passes 4 MiB", async () => {
-    const creds = await enroll(hub, ADMIN, 'big-poster');
-    const machine = new MachineClient(hub, 'big-poster', creds);
-    await machine.connect();
-    const answer = await stalledPost(
-      '/machine/frames',
-      { 'CF-Access-Client-Id': creds.clientId, 'CF-Access-Client-Secret': creds.clientSecret, 'content-type': 'application/x-ndjson', 'X-Desk-Generation': String(machine.generation) },
-      POST_LIMIT + 128 * 1024,
-    );
-    expect(answer.status).toBe(413);
-    await machine.close();
   });
 });

@@ -1,7 +1,7 @@
 // The Machines dialog's removal, in a browser against the DX3 double (its machine records: ../test/double/machines.ts):
 // an admin removes a machine past a confirmation that says what removal means, and the list is the hub's again
 // afterwards; the hub's refusal is explained on the confirmation; a member who is not an admin is offered no removal.
-// Against DC3's real hub, with a connected machine refused once removed: e2e-hub/session-plane.spec.ts.
+// Against DC3's real hub, with an enrolled machine's credential refused once removed: e2e-hub/local-hub.spec.ts.
 import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures';
 

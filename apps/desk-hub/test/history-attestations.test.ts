@@ -7,7 +7,7 @@ import { enrollV2, machineFetch, type V2Machine } from '../fake-machine/org';
 import { newNonce } from '../src/protocol/codes';
 import { encodeEnrollmentCodeV2, type OrgStateView } from '../src/protocol/identity';
 import type { LogEvent } from '../src/protocol/log';
-import { enroll, MachineClient, refusal } from './support/clients';
+import { enroll, refusal, type Credentials } from './support/clients';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from './support/local';
 import { genesis, newDevice, next, signedBy, type TestDevice } from './support/org';
 
@@ -18,7 +18,7 @@ let A: string;
 let head: SignedOrgState;
 let mini: V2Machine;
 let studio: V2Machine;
-let oldmini: MachineClient;
+let oldmini: PhaseOne;
 
 const P1 = '1f0e2d3c-4b5a-4968-8776-a5b4c3d2e1f0';
 const P2 = '2f0e2d3c-4b5a-4968-8776-a5b4c3d2e1f0';
@@ -38,15 +38,24 @@ const say = (machine: string, seq: number, session = S): LogEvent => ({
   mac: { nonce: newNonce(), value: base64urlEncode(crypto.getRandomValues(new Uint8Array(32))) },
 });
 
-/** A DX2 machine that writes `counts[project]` events into each project, as phase 1 did. */
-async function phaseOne(name: string, counts: Record<string, number>): Promise<MachineClient> {
-  const client = new MachineClient(hub, name, await enroll(hub, ADMIN, name));
-  await client.connect();
+/** A phase-1 machine: enrolled v1, its uploads handed to a project as DX2's stream handed them (`phaseOneFrames`). */
+type PhaseOne = { name: string; credentials: Credentials; upload(project: string, events: LogEvent[]): Promise<void> };
+
+/** A phase-1 machine that writes `counts[project]` events into each project, as phase 1 did. */
+async function phaseOne(name: string, counts: Record<string, number>): Promise<PhaseOne> {
+  const credentials = await enroll(hub, ADMIN, name);
+  // Its first request confirms it, as its stream's first connect did.
+  expect((await hub.fetchAs(credentials, '/machine/enrollment')).status).toBe(200);
+  const upload = async (project: string, events: LogEvent[]) => {
+    const answered = await hub.phaseOneFrames(project, name, credentials.clientId, 1, [{ t: 'events', project, events }]);
+    if (answered.applied !== 1 || answered.refused.length) throw new Error(`upload: ${JSON.stringify(answered)}`);
+  };
   for (const [project, n] of Object.entries(counts)) {
-    await client.sync(project, `project ${project.slice(0, 1)}`);
-    await client.postOk([{ t: 'events', project, events: Array.from({ length: n }, (_, i) => say(name, i + 1)) }]);
+    const opened = await hub.phaseOneFrames(project, name, credentials.clientId, 1, [{ t: 'hello', project, name: `project ${project.slice(0, 1)}`, have: {} }]);
+    if (opened.applied !== 1) throw new Error(`hello: ${JSON.stringify(opened)}`);
+    await upload(project, Array.from({ length: n }, (_, i) => say(name, i + 1)));
   }
-  return client;
+  return { name, credentials, upload };
 }
 
 async function accept(edit: Parameters<typeof next>[1]): Promise<void> {
@@ -88,20 +97,15 @@ beforeAll(async () => {
   A = ((await (await hub.fetchAs(ADMIN, '/api/me')).json()) as { member: { id: string } }).member.id;
   head = await signedBy(await genesis(ORG, A, ADMIN, a1, recovery), a1);
   expect((await hub.fetchAs(ADMIN, '/api/org/state', { body: head })).status).toBe(201);
-  // Phase 1: `mini` and `oldmini` (the same Mac before a rename) and `other` write their projects on DX2.
-  const dx2Mini = await phaseOne('mini', { [P1]: 3 });
-  await dx2Mini.close();
+  // Phase 1: `mini` and `oldmini` (the same Mac before a rename) and `other` wrote their projects on DX2.
+  await phaseOne('mini', { [P1]: 3 });
   oldmini = await phaseOne('oldmini', { [P1]: 2, [P2]: 1 });
-  const other = await phaseOne('other', { [P1]: 1, [P3]: 2 });
-  await other.close();
+  await phaseOne('other', { [P1]: 1, [P3]: 2 });
   // The cutover: `mini` re-enrolled in place with its own key, and listed; `studio`, another machine, listed too.
   mini = await listed('mini', true);
   studio = await listed('studio');
 }, 120_000);
-afterAll(async () => {
-  await oldmini?.close();
-  await hub?.close();
-});
+afterAll(() => hub?.close());
 
 describe('the inventory', () => {
   it('names every project whose log holds a DX1 writer under the names, with its highest DX1 seq, and nothing else', async () => {
@@ -176,7 +180,7 @@ describe('the attestations', () => {
   });
 
   it('replaces a writer’s record by one at a higher upTo, and refuses a lower one', async () => {
-    await oldmini.postOk([{ t: 'events', project: P1, events: [say('oldmini', 3)] }]);
+    await oldmini.upload(P1, [say('oldmini', 3)]);
     const further = await attestation(mini, P1, `oldmini/${S}`, ['mini', 'oldmini']);
     expect(further.body.upTo).toBe(3);
     expect((await post(P1, further)).status).toBe(201);

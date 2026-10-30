@@ -4,7 +4,7 @@
 // revocation, bound to its enrollment. The offline sweep is provisioning-sweep.test.ts's.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { serviceTokenName, type MachineSelf, type ProvisioningKeyRecord } from '../src/protocol/identity';
-import { enroll, enrollmentToken, enrollThrough, MachineClient, provisioningKey, refusal, waitFor } from './support/clients';
+import { enroll, enrollmentToken, enrollThrough, provisioningKey, refusal, waitFor, type Credentials } from './support/clients';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from './support/local';
 
 let hub: LocalHub;
@@ -28,6 +28,10 @@ const keys = async (who = ADMIN) => ((await (await hub.fetchAs(who, '/api/provis
 const keyOf = async (id: string) => (await keys()).find((k) => k.id === id)!;
 const revokeKey = (id: string, who = ADMIN) => hub.fetchAs(who, `/api/provisioning-keys/${id}`, { method: 'DELETE' });
 const self = (creds: { clientId: string; clientSecret: string }) => hub.fetchAs(creds, '/machine/enrollment');
+/** Its first request confirms a pending machine, as any of a machine's requests does: 200 or the test fails. */
+async function admitted(creds: Credentials): Promise<void> {
+  expect((await self(creds)).status).toBe(200);
+}
 const leave = (creds: { clientId: string; clientSecret: string }) => hub.fetchAs(creds, '/machine/enrollment', { method: 'DELETE' });
 const ago = (seconds: number) => new Date(Date.now() - seconds * 1000).toISOString();
 let keyCount = 0;
@@ -133,10 +137,8 @@ describe('redemption through a key', () => {
     expect(await keyOf(id)).toMatchObject({ uses: 1, machines: [{ name: 'DC-Case-1', state: 'pending' }] });
 
     // Its first authenticated request confirms it, as any machine's does.
-    const machine = new MachineClient(hub, 'DC-Case-1', { clientId: body.client_id, clientSecret: body.client_secret });
-    await machine.connect();
+    await admitted({ clientId: body.client_id, clientSecret: body.client_secret });
     expect((await keyOf(id)).machines).toEqual([{ name: 'DC-Case-1', state: 'active' }]);
-    await machine.close();
   });
 
   it('refuses a name not under the prefix, binding nothing', async () => {
@@ -172,8 +174,7 @@ describe('redemption through a key', () => {
   it('refuses a name an active machine holds, or a pending one of a one-time token or of another key, binding nothing', async () => {
     const { id, token } = await newKey();
     const other = await newKey();
-    const active = new MachineClient(hub, 'dc-held-1', await enrollThrough(hub, other.token, 'dc-held-1'));
-    await active.connect();
+    await admitted(await enrollThrough(hub, other.token, 'dc-held-1'));
     expect((await redeem(await enrollmentToken(hub, ADMIN), 'dc-held-2')).status).toBe(200);
     expect((await redeem(other.token, 'dc-held-3')).status).toBe(200);
     for (const name of ['dc-held-1', 'DC-HELD-2', 'dc-held-3']) {
@@ -185,7 +186,6 @@ describe('redemption through a key', () => {
     // A one-time token never rotates a key's pending name either.
     expect(await refusal(await redeem(await enrollmentToken(hub, ADMIN), 'dc-held-3'))).toBe('409 name-taken');
     expect(tokensNamed('dc-held-3')).toHaveLength(1);
-    await active.close();
   });
 
   it("rotates its own pending machine's credential when redeemed again under the name, counting no use", async () => {
@@ -271,8 +271,8 @@ describe('redemption through a key', () => {
 
   it("revoking the key stops new enrollments only: its pending machine confirms, its active machine stays, neither rotates", async () => {
     const { id, token } = await newKey();
-    const active = new MachineClient(hub, 'dc-stay-1', await enrollThrough(hub, token, 'dc-stay-1'));
-    await active.connect();
+    const active = await enrollThrough(hub, token, 'dc-stay-1');
+    await admitted(active);
     const pending = await enrollThrough(hub, token, 'dc-stay-2');
     expect((await revokeKey(id)).status).toBe(200);
     expect(await refusal(await redeem(token, 'dc-stay-3'))).toBe('410 key-revoked');
@@ -282,12 +282,11 @@ describe('redemption through a key', () => {
     const confirmed = await self(pending);
     expect(confirmed.status).toBe(200);
     expect(((await confirmed.json()) as MachineSelf).state).toBe('active');
-    expect(active.isEnded).toBe(false);
+    await admitted(active);
     expect((await keyOf(id)).machines).toEqual([
       { name: 'dc-stay-1', state: 'active' },
       { name: 'dc-stay-2', state: 'active' },
     ]);
-    await active.close();
   });
 });
 
@@ -309,14 +308,13 @@ describe("a machine's own enrollment", () => {
     expect(await refusal(await hub.fetchAs(ADMIN, '/machine/enrollment', { method: 'DELETE' }))).toBe('404 not-found');
   });
 
-  it('is revoked by the machine: its stream ends, its record and token go, its machine project retires; Access refuses it after', async () => {
+  it('is revoked by the machine: its record and token go, its machine project retires; Access refuses it after', async () => {
     const { id, token } = await newKey();
-    const machine = new MachineClient(hub, 'dc-leave-1', await enrollThrough(hub, token, 'dc-leave-1'));
-    await machine.connect();
+    const machine = { creds: await enrollThrough(hub, token, 'dc-leave-1') };
+    await admitted(machine.creds);
     const response = await leave(machine.creds);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ revoked: 'dc-leave-1' });
-    await waitFor(() => (machine.isEnded ? true : undefined));
     expect((await machines()).map((m) => m.name)).not.toContain('dc-leave-1');
     expect(tokensNamed('dc-leave-1')).toHaveLength(0);
     const projects = ((await (await hub.fetchAs(ADMIN, '/api/projects')).json()) as { projects: Array<{ name: string; kind: string; retired: boolean }> }).projects;
@@ -344,29 +342,24 @@ describe("a machine's own enrollment", () => {
 
   it('is bound to the enrollment: a revoke-and-replace of the name between resolve and leave leaves the replacement be', async () => {
     const { id, token } = await newKey();
-    const first = new MachineClient(hub, 'dc-x', await enrollThrough(hub, token, 'dc-x'));
-    await first.connect();
+    const first = { creds: await enrollThrough(hub, token, 'dc-x') };
+    await admitted(first.creds);
     await hub.holdNextLeave();
     const leaving = leave(first.creds);
     // The Worker resolved the first machine's credential; the Registry's revocation waits. Meanwhile an admin removes
     // the machine and the name is enrolled anew.
     await waitFor(async () => ((await hub.leaveHeld()) ? true : undefined));
     expect((await hub.fetchAs(ADMIN, '/api/machines/dc-x', { method: 'DELETE' })).status).toBe(200);
-    const replacement = new MachineClient(hub, 'dc-x', await enrollThrough(hub, token, 'dc-x'));
-    await replacement.connect();
+    const replacement = { creds: await enrollThrough(hub, token, 'dc-x') };
+    await admitted(replacement.creds);
     await hub.releaseLeave();
     const answered = await leaving;
     expect(answered.status).toBe(200);
     expect(await answered.json()).toEqual({ revoked: 'dc-x' });
-    // The replacement is untouched: its record, its token, its stream; and its credential still opens a stream.
+    // The replacement is untouched: its record and its token; and its credential is still admitted.
     expect((await machines()).find((m) => m.name === 'dc-x')).toMatchObject({ state: 'active', client_id: replacement.creds.clientId });
     expect(tokensNamed('dc-x').map((t) => t.client_id)).toEqual([replacement.creds.clientId]);
-    expect(replacement.isEnded).toBe(false);
-    await replacement.close();
-    await replacement.connect();
-    expect(replacement.isEnded).toBe(false);
+    await admitted(replacement.creds);
     expect((await keyOf(id)).machines).toEqual([{ name: 'dc-x', state: 'active' }]);
-    await replacement.close();
-    await first.close();
   });
 });
