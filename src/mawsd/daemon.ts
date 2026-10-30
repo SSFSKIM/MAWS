@@ -98,6 +98,7 @@ import { createServicesFront, spineTakes } from './front';
 import { runE2eSeam } from './e2e-seam'; // M5b fix round 2
 import { DEPARTURE_BOUND_MS, Relay, type RelayRequest } from './relay';
 import { createLazySpine, loadServicesEntry, type SpineEntry, type SpineTiming } from './spine-seam';
+import { SpineReaders } from './spine-readers';
 import { trashPath } from './trash';
 
 export const EXIT_RESTART = 75; // a requested restart: the units restart on it
@@ -340,11 +341,12 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
 
   // --- the lock's daemon side (P5 O3-D M5a, Interfaces §L) -------------------------------------------------------------
   // The apps whose hello listed machine.spine, on any of the three sockets, by pid and start: never yielded to.
-  const spineReaders = new Map<number, string | null>();
-  const readsSpine = (pid: number) => spineReaders.has(pid) && spineReaders.get(pid) === procStartOf(pid);
+  const spineReaders = new SpineReaders(procStartOf); // M6 fix round 1: pruned at each client change, so a departed app's entry goes
+  const readsSpine = (pid: number) => spineReaders.reads(pid);
   const announced = (connected: boolean, peer: { capabilities: readonly string[] } | undefined, appPid: number | undefined) => {
+    spineReaders.prune();
     if (!connected || appPid === undefined || !peer?.capabilities.includes(MACHINE_SPINE_CAPABILITY)) return;
-    spineReaders.set(appPid, procStartOf(appPid));
+    spineReaders.announce(appPid);
     if (spine.yieldedTo() !== appPid) return;
     log(`[spine] pid ${appPid} reads the machine’s spine (its hello lists ${MACHINE_SPINE_CAPABILITY}): the yield to it lifted`);
     spine.yield(null);
