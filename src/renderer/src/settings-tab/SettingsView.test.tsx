@@ -222,6 +222,25 @@ describe('settings tab writes one field per row', () => {
   });
   // P2-C end
 
+  // M5b fix round 2 (e2e:settings settings.spec.ts:121): on the daemon shape a machine field's write crosses to mawsd and
+  // back before the store moves, so a segment shows the option chosen while its write is out, then the store's value
+  it('a segment shows the chosen option while its write is out, then what the store holds', async () => {
+    renderView();
+    const invoke = b.bridge.invoke as unknown as ReturnType<typeof vi.fn<(name: string, input: unknown) => Promise<unknown>>>;
+    const real = invoke.getMockImplementation()!;
+    let release!: () => void;
+    invoke.mockImplementation(async (name: string, input: unknown) => {
+      if (name === 'settings.set') await new Promise<void>((resolve) => (release = resolve));
+      return real(name, input);
+    });
+    const direct = () => within(row('Default route')).getByRole('radio', { name: 'Direct' }) as HTMLInputElement;
+    fireEvent.click(direct());
+    expect(direct().checked).toBe(true);
+    await act(async () => release());
+    await vi.waitFor(() => expect(b.sets).toEqual([{ gateway: { defaultRoute: 'direct' } }]));
+    expect(direct().checked).toBe(true);
+  });
+
   it('a refused write shows a toast and the row keeps the value the store holds', async () => {
     renderView();
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});

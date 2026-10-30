@@ -90,7 +90,7 @@ export function SupervisorSettings({ settings }: { settings: Settings }) {
             { value: 'keep', label: SUPERVISOR.quitKeep },
             { value: 'stop', label: SUPERVISOR.quitStop },
           ]}
-          onChange={(next) => void writeSettings({ supervisor: { keepRunningDefault: next === 'keep' } })}
+          onChange={(next) => writeSettings({ supervisor: { keepRunningDefault: next === 'keep' } })}
         />
       </Setting>
       <StopAll status={status} keepFocus={keepFocus} />

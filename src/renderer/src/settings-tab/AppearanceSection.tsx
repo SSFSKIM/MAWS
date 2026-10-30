@@ -15,7 +15,7 @@ export function AppearanceSection({ settings }: { settings: Settings }) {
   return (
     <>
       <Setting label={APPEARANCE.theme}>
-        <Segment label={APPEARANCE.theme} value={settings.theme} options={THEMES} onChange={(theme) => void writeSettings({ theme })} />
+        <Segment label={APPEARANCE.theme} value={settings.theme} options={THEMES} onChange={(theme) => writeSettings({ theme })} />
         <span className="text-ui-sm text-fg-muted">{APPEARANCE.themeHint}</span>
       </Setting>
       <Setting label={APPEARANCE.transcriptWidth} note={APPEARANCE.transcriptWidthNote}>
@@ -23,7 +23,7 @@ export function AppearanceSection({ settings }: { settings: Settings }) {
           label={APPEARANCE.transcriptWidth}
           value={String(settings.appearance.transcriptWidth) as `${TranscriptWidth}`}
           options={WIDTHS}
-          onChange={(width) => void writeSettings({ appearance: { transcriptWidth: Number(width) as TranscriptWidth } })}
+          onChange={(width) => writeSettings({ appearance: { transcriptWidth: Number(width) as TranscriptWidth } })}
         />
       </Setting>
       <Setting label={APPEARANCE.monoFont} note={APPEARANCE.monoFontNote}>
