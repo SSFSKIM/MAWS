@@ -639,6 +639,17 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         const refused = refusedOn(refuse);
         crashed(`has an incompatible supervisor running ${refuse.liveSessions} sessions; waiting for it`, { reason: 'incompatible', refused, waitingLiveSessions: refuse.liveSessions, refusal: refuse });
       },
+      // P5 O2 (the bundle swap): a spawn declined counts no exit; what waited for it fails with the reason, and an
+      // on-demand host parks again, so the next request or wake asks once more
+      notLaunched(reason) {
+        if (stopped) return;
+        console.error(`[hosts] ${host.owner} not launched: ${reason}`);
+        failHeld(host, `is not launched (${reason})`);
+        if (!host.spec.onDemand) return crashed(`is not launched: ${reason}`);
+        park(host, true);
+        settle(host);
+        host.settleFirstLaunch();
+      },
     };
   }
   // E10 end

@@ -66,9 +66,13 @@ export interface EndpointModule {
 // O10's endpoint module (P5 O10 M10), one for each daemon, loaded when it is needed; `build` is the daemon's build id,
 // which RL1's hello and RL2's h2 name. Its chunk is emitted beside mawsd.js by the same build (the bundle guard admits
 // that load and no other). `projects` is MAWS's own projects as checkouts the module knows (P5 O3-D M4, Interfaces §E):
-// the source authorization reads beside RL10's presences.
-export function loadEndpointModule(build: string, extras: EndpointExtras = {}): EndpointModule {
-  return new LazyEndpoint(build, () => import('../endpoint/index'), extras);
+// the source authorization reads beside RL10's presences. P5 O2 (the bundle swap): `refused`, asked at each load, names
+// why the chunk on disk is no longer this daemon's build, and the load fails with it.
+export function loadEndpointModule(build: string, extras: EndpointExtras = {}, refused: () => string | null = () => null): EndpointModule {
+  return new LazyEndpoint(build, () => {
+    const why = refused();
+    return why === null ? import('../endpoint/index') : Promise.reject(new Error(why));
+  }, extras);
 }
 
 /** What the daemon injects into the module besides its services. */
