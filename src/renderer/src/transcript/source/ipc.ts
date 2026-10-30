@@ -55,7 +55,7 @@ interface KnownWatch {
 // an empty, incomplete page (never the oldest records), and sends the newest window as a batch once it has; the
 // snapshot asks again at that batch or the follow's next state, for the window and its `earlier` cursor.
 export const BACKFILL_WAIT_MS = 60_000;
-const backfilling = (result: CommandResult<'session.events'>) => result.ok && !result.value.complete && result.value.events.length === 0 && result.value.historyUnavailable !== true;
+const backfilling = (page: CommandOutput<'session.events'>) => !page.complete && page.events.length === 0 && page.historyUnavailable !== true;
 
 async function eventsOnceKnown(client: MawsBridge, appSessionId: AppSessionId, watch: KnownWatch | null): Promise<CommandResult<'session.events'>> {
   let signalled = false;
@@ -77,7 +77,7 @@ async function eventsOnceKnown(client: MawsBridge, appSessionId: AppSessionId, w
     for (;;) {
       signalled = false;
       const result = await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null });
-      const reading = backfilling(result);
+      const reading = result.ok && backfilling(result.value);
       if (!reading && (result.ok || !result.error.message.startsWith(UNKNOWN_SESSION) || ended?.aborted)) return result;
       if (reading && (ended?.aborted || Date.now() >= backfillDeadline)) return result;
       if (signalled) continue;
@@ -409,6 +409,42 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
       for (const listener of [...resets]) listener();
     }),
   );
+  // The parent's events for this child. A disk-backed parent whose follow is still reading its transcript through
+  // answers an empty, incomplete page, which says nothing of the child's lifecycle, and since the parent then
+  // broadcasts only its newest window, an old finish would never arrive later: a completed child would read working.
+  // Such a page is asked again once the parent's follow reports its next state, or once BACKFILL_WAIT_MS pass, unless
+  // the child's subscribers all detach.
+  const parentEvents = async (attached: Subscriber[], detached: () => boolean): Promise<SessionEvent[]> => {
+    let signalled: boolean; // a state heard since the latest read was asked
+    let wake: (() => void) | null = null;
+    const signal = () => {
+      signalled = true;
+      wake?.();
+    };
+    const off = client.on('fs.followState', (state) => state.appSessionId === appSessionId && state.agentId === null && state.state !== 'backfilling' && signal());
+    for (const subscriber of attached) subscriber.ended.signal.addEventListener('abort', signal);
+    const deadline = Date.now() + BACKFILL_WAIT_MS;
+    try {
+      for (;;) {
+        signalled = false;
+        const page = valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null, agentId }));
+        if (!backfilling(page) || detached() || Date.now() >= deadline) return page.events;
+        if (!signalled) {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          await new Promise<void>((resolve) => {
+            wake = resolve;
+            timer = setTimeout(resolve, deadline - Date.now());
+          });
+          clearTimeout(timer);
+          wake = null;
+        }
+        if (detached()) return [];
+      }
+    } finally {
+      off();
+      for (const subscriber of attached) subscriber.ended.signal.removeEventListener('abort', signal);
+    }
+  };
   const toDisk = () => {
     decide('disk');
     if (resetPending) return;
@@ -457,7 +493,7 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
       // Even disk provenance must refresh lifecycle: a closed/reopened child may have resumed unobserved. The parent's
       // events for this child alone (`agentId`: its own and the parent's reports on it, with the parent's exits, in
       // order), however long the parent's history: a disk-backed parent answers one window, which may not hold them.
-      const parent = valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null, agentId })).events;
+      const parent = await parentEvents(attached, detached);
       if (detached()) return [];
       const started = parent.findLastIndex(starts);
       startAt = started;

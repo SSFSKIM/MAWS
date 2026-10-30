@@ -541,6 +541,35 @@ describe('child source provenance', () => {
     expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual([...disk, done].map((e) => e.id));
   });
 
+  it('reads its parent again once the parent\'s follow has read through, and decides its lifecycle from that, not from an empty page', async () => {
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const done = finish(AGENT, '2026-09-28T10:00:09.000Z', 'completed');
+    const fake = fakeClient();
+    const hydrated = useTranscriptStore.getState().attach(CHILD_KEY, childSource(fake), { agentId: AGENT });
+    answer(fake, 'session.events', { events: [], lastSeq: 0, complete: false }); // the parent's follow still reads its transcript through
+    await flush();
+    expect(fake.calls.map((call) => call.name)).toEqual(['session.events']);
+    fake.emit('fs.followState', { ...followState('following'), agentId: null });
+    await flush();
+    answer(fake, 'session.events', { events: [...parent, done].map((e) => ({ ...e, seq: null })), lastSeq: 0, complete: true });
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+    await hydrated;
+    expect(dividerOf(CHILD_KEY).state).toBe('completed');
+    useTranscriptStore.getState().detach(CHILD_KEY);
+
+    // Detached while it waits: it stops, asking nothing more and listening to nothing.
+    const again = fakeClient();
+    const reading = useTranscriptStore.getState().attach(CHILD_KEY, childSource(again), { agentId: AGENT });
+    answer(again, 'session.events', { events: [], lastSeq: 0, complete: false });
+    await flush();
+    useTranscriptStore.getState().detach(CHILD_KEY);
+    await reading;
+    expect(again.calls.map((call) => call.name)).toEqual(['session.events']);
+    expect(again.listeners.get('fs.followState')?.size ?? 0).toBe(0);
+  });
+
   it('holds the disk follow\'s batches until fs.agentEvents answers, and drops what they carry from before its window', async () => {
     const { parent, child } = live();
     const disk = onDisk(child);
