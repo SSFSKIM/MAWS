@@ -49,25 +49,26 @@ export function startSettings({ clientFile, machine }: { clientFile: string; mac
   nativeTheme.on('updated', () => {
     if (!writingThemeSource && state().resolvedTheme !== published?.resolvedTheme) publish();
   });
-  // P5 O3-A: a change to the machine half publishes, except the one a set below makes, which publishes once itself
-  let setting = false;
+  // P5 O3-A: a change to the machine half publishes, except the one a set below makes, which publishes once itself.
+  // P5 O3-D M5b: a set awaits the machine half (Interfaces §G), so sets may overlap; each one in flight is counted
+  let setting = 0;
   machine.onChange(() => {
-    if (!setting) publish();
+    if (setting === 0) publish();
   });
 
   registerMainHandler('settings.get', state);
-  registerMainHandler('settings.set', (patch) => {
+  registerMainHandler('settings.set', async (patch) => {
     // P5 O3-A: each half takes only its own fields (composeSettings). A half that refuses its write (a file this build
-    // cannot own; the machine file in a run refused the spine) fails the set; what the other half already wrote is
-    // published before the error is answered.
-    setting = true;
+    // cannot own; the machine file in a run refused the spine; P5 O3-D M5b: `mawsd`'s refusal on the daemon shape) fails
+    // the set; what the other half already wrote is published before the error is answered.
+    setting += 1;
     try {
-      setThemeSource(store.update(patch).theme);
+      setThemeSource((await store.update(patch)).theme);
     } catch (error) {
       publish();
       throw error;
     } finally {
-      setting = false;
+      setting -= 1;
     }
     return publish();
   });

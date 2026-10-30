@@ -47,10 +47,11 @@ const noClientPort = {
 // refused the spine (O3-A) registers the spine's commands but those of the parts it does not start. SPINE_COMMANDS is
 // test/support/spine-lists.ts's, which mawsd's front is held to as well (P5 O3-D M2).
 const SPINE_REFUSED_COMMANDS = [
-  'library.get', 'library.list', 'library.spaces',
+  'library.fileLinkedPaths', 'library.get', 'library.list', 'library.spaces',
+  'machineSettings.get', 'machineSettings.set', // P5 O3-D M5b: read, and a set refused (the machine half is read-only)
   'session.appEvents', 'session.digests', 'session.drafts.get', 'session.drafts.set', 'session.get', 'session.launchMode', 'session.list', 'session.observedFacts',
   'session.projects.add', 'session.projects.addFolder', 'session.projects.list', 'session.projects.remove', 'session.projects.update',
-  'session.recentTurns', 'session.search', 'session.setVisible', 'session.update',
+  'session.recentTurns', 'session.search', 'session.setVisible', 'session.update', 'session.visible',
   'settings.engineApplied', 'settings.userEngineDefaults',
 ];
 // P5 O3-D M4 (D18): the rewind's last-act note and the conversation acts that clear it, in launch mode index; M5a (D47):
@@ -60,8 +61,10 @@ const SPINE_REFUSED_INTERCEPTS = ['session.answer']; // no session service: noth
 const SPINE_TAPS = ['attention.changed', 'session.eventBatch', 'session.intent.changed', 'session.projects.changed'];
 const SPINE_REFUSED_TAPS = ['attention.changed', 'session.eventBatch', 'session.intent.changed']; // no projects to follow: the index is unavailable
 // P5 O3-D M1 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §I): what the services front emits of
-// its own beside the spine's events; with them, the machine host's event list (`REGISTRY.machineEvents`)
-const FRONT_EVENTS = ['clientPort.request', 'machineSettings.changed', 'session.visibleChanged'];
+// its own beside the spine's events; with them, the machine host's event list (`REGISTRY.machineEvents`). M5b: the
+// machine half's and the visible set's changes are the spine's own emits (the parts that hold them emit them), so the
+// front's own is the client port's request alone.
+const FRONT_EVENTS = ['clientPort.request'];
 // Every event the spine's parts emit through the bus, read from the library's source: each `emit('<event>'` under
 // src/services/ but the checkouts' root, whose events (`git.changed`, `files.changed`, `scm.remote.output`) are main's
 // until O3-E moves the checkouts. A part emits through a function it was handed, always with the event's name written.
@@ -284,6 +287,32 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(pushed().at(-1)).toEqual({ idleExitMs: 7 * 60_000 });
   });
 
+  // P5 O3-D M5b (Interfaces §F, §G): what main's mirror and its settings mirror read of the spine over the services front
+  // on the daemon shape: the machine half with its revision and its changes, the visible set with its changes, and files'
+  // admission read
+  it('answers the machine half, the visible set and files’ admission read, and emits each change', async () => {
+    const data = await openSpineData(profile, { build: BUILD });
+    const host = new FakeSpineHost();
+    const bus = fakeBus();
+    compose(data, host, bus, { checkouts: false });
+    await host.ready();
+    expect(await bus.main('machineSettings.get', undefined)).toEqual({ ok: true, value: { settings: data.machineSettings.state(), version: 0 } });
+    const set = await bus.main('machineSettings.set', { patch: { supervisor: { idleExitMinutes: 7 } } });
+    expect(set).toMatchObject({ ok: true, value: { settings: { supervisor: { idleExitMinutes: 7 } } } });
+    expect(JSON.parse(readFileSync(data.paths.machine, 'utf8'))).toMatchObject({ supervisor: { idleExitMinutes: 7 } }); // persisted before the answer
+    expect(bus.emittedOf('machineSettings.changed')).toEqual([{ settings: data.machineSettings.state() }]);
+    expect(await bus.main('machineSettings.get', undefined)).toMatchObject({ ok: true, value: { version: 1 } });
+
+    const id = '11111111-1111-4111-8111-111111111111';
+    expect(await bus.main('session.visible', undefined)).toEqual({ ok: true, value: { sessions: [] } });
+    expect(await bus.invoke('session.setVisible', { appSessionId: id, visible: true })).toMatchObject({ ok: true });
+    expect(await bus.main('session.visible', undefined)).toEqual({ ok: true, value: { sessions: [id] } });
+    expect(await bus.invoke('session.setVisible', { appSessionId: id, visible: false })).toMatchObject({ ok: true });
+    expect(bus.emittedOf('session.visibleChanged')).toEqual([{ appSessionId: id, visible: true }, { appSessionId: id, visible: false }]);
+
+    expect(await bus.main('library.fileLinkedPaths', { appSessionId: id })).toEqual({ ok: true, value: { paths: [] } });
+  });
+
   it('installs exactly its commands, intercepts and taps, and both stops release every listener the spine held on the host', async () => {
     const host = new FakeSpineHost();
     const spineBus = fakeBus();
@@ -357,6 +386,10 @@ describe('the spine and the checkouts composed under plain Node', () => {
     await expect(spine.view.acquire('11111111-1111-4111-8111-111111111111' as AppSessionId, 'read')).rejects.toThrow(`MAWS cannot reach its sessions this run: ${data.refused}`);
     await expect(bus.invoke('settings.engineApplied', undefined)).resolves.toMatchObject({ ok: false, error: { message: `the engine settings are not applied this run: ${data.refused}` } });
     expect(bus.registered().sort()).toEqual(SPINE_REFUSED_COMMANDS);
+    // P5 O3-D M5b: the machine half is read, and a set is refused with nothing changed or told
+    expect(await bus.main('machineSettings.get', undefined)).toMatchObject({ ok: true, value: { settings: data.machineSettings.state() } });
+    expect(await bus.main('machineSettings.set', { patch: { supervisor: { idleExitMinutes: 7 } } })).toMatchObject({ ok: false });
+    expect(bus.emittedOf('machineSettings.changed')).toEqual([]);
     expect(bus.intercepted()).toEqual(SPINE_REFUSED_INTERCEPTS);
     expect(bus.tapped().sort()).toEqual(SPINE_REFUSED_TAPS);
   });

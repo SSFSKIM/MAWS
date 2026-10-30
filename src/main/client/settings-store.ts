@@ -23,11 +23,12 @@ export const clientSettingsRules: SettingsFileRules<ClientSettings> = {
 
 // The renderer's one `Settings` over the two halves: the client file, read and written here, and the machine half's
 // service. A patch is cut by owner, field by field, so a machine field changes only `machine-settings.json` and a client
-// field only `settings.json`; the machine half is written first, and a half that refuses its write throws (what the
-// other half wrote stays written).
+// field only `settings.json`; the machine half is written first and awaited (P5 O3-D M5b: on the daemon shape it
+// crosses a socket to `mawsd`, Interfaces §G), and a half that refuses its write rejects (what the other half wrote
+// stays written; a machine refusal leaves the client file untouched).
 export interface ComposedSettings {
   readonly settings: Settings;
-  update(patch: SettingsPatch): Settings; // persists before returning
+  update(patch: SettingsPatch): Promise<Settings>; // resolves once both halves persisted
 }
 
 export function composeSettings({ clientFile, machine }: { clientFile: string; machine: MachineSettingsService }): ComposedSettings {
@@ -36,9 +37,9 @@ export function composeSettings({ clientFile, machine }: { clientFile: string; m
     get settings() {
       return mergeSettings(store.value, machine.state());
     },
-    update(patch) {
+    async update(patch) {
       const routed = splitSettingsPatch(patch);
-      if (routed.machine) machine.update(routed.machine);
+      if (routed.machine) await machine.update(routed.machine);
       if (routed.client) store.update((current) => applyClientPatch(current, routed.client!));
       return mergeSettings(store.value, machine.state());
     },

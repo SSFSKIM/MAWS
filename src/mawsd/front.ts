@@ -1,9 +1,9 @@
 // The services front (P5 O3-D M2, M4; docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §B, §C, §E): what
 // `mawsd` serves on `machine.sock` for the machine's services: the command table the spine registers through the front's
 // bus, the event fan-out, the forwarded owners, each client's session streams (front-streams.ts) and the client port's
-// requests back to the asking client (client-port.ts). Not yet the machine half of settings or the mirror's two reads
-// (M5), whose names answer `internal` until then. The endpoint reaches the same table in process (`dispatch`), and
-// hears every event the spine emits (`events`).
+// requests back to the asking client (client-port.ts). The machine half of settings and the mirror's two reads (M5b)
+// are the spine's commands like any other. The endpoint reaches the same table in process (`dispatch`), and hears every
+// event the spine emits (`events`).
 //
 // A client's runtime answers a `machine`-owned name: `daemon.*` and `machine.identity` without the spine (the identity
 // cold, from @shared/machine/identity's helpers, D16); a spine command once `spine.ensure('command')` answered, from the
@@ -59,9 +59,6 @@ import type { EngineIntercept } from './spine-hosts';
 export const FRONT_COMMANDS = ['clientPort.answer', 'daemon.endpoint', 'daemon.restart', 'daemon.status', 'machine.client', 'machine.identity', 'session.follow'] as const;
 // The names a machine.sock client asks of the front for itself, never the endpoint.
 const CLIENT_COMMANDS: ReadonlySet<string> = new Set(['clientPort.answer', 'machine.client', 'session.follow']);
-// `machine` names a later milestone gives a handler (the machine half of settings and the mirror's visible set and files'
-// admission read, M5): `internal` until then, and no trigger.
-export const LATER_COMMANDS: ReadonlySet<string> = new Set(['library.fileLinkedPaths', 'machineSettings.get', 'machineSettings.set', 'session.visible']);
 // P5 O3-D M5 (D44(3)): the engine host's names the spine's session service intercepts in launch mode `index`
 // (src/services/sessions/index.ts's `session.answer`, service-register.ts's `session.rewind` and CONVERSATION_ACTS);
 // daemon-spine.test.ts pins it to what the spine registers.
@@ -241,7 +238,6 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
     }
     if (CLIENT_COMMANDS.has(name) && from === null) return { ok: false, error: ipcError('internal', `${name} is a machine.sock client's own`) };
     if (OWN.has(name)) return run(name, (value, ctx) => own[name as keyof typeof own](value, ctx, from), input.value, context);
-    if (LATER_COMMANDS.has(name)) return { ok: false, error: ipcError('internal', `mawsd serves no ${name} yet`) };
     if (!loaded) {
       try {
         await options.spine.ensure('command');

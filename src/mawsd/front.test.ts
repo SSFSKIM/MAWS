@@ -7,7 +7,7 @@ import { REGISTRY } from '@shared/ipc/registry';
 import type { CommandName } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import { status as statusOf } from '../../test/support/builders';
-import { createServicesFront, FRONT_COMMANDS, LATER_COMMANDS, SPINE_ENGINE_INTERCEPTS, spineTakes, type FrontOptions } from './front';
+import { createServicesFront, FRONT_COMMANDS, SPINE_ENGINE_INTERCEPTS, spineTakes, type FrontOptions } from './front';
 import { SpineUnavailable } from './spine-seam';
 
 const IDENTITY = { ref: 'TestMachineRef00000000' as MachineRef, name: 'test machine', project: { key: 'machine:TestMachineRef00000000', name: 'test machine', smnsId: null } };
@@ -193,15 +193,22 @@ describe('the services front', () => {
     for (const name of SPINE_ENGINE_INTERCEPTS) expect(REGISTRY.commands[name as CommandName].owner, name).toBe('engine-host');
   });
 
-  it('answers a later milestone’s machine name internal, with no load', async () => {
-    const { client, ensure } = front();
-    expect(await client().request('machineSettings.get')).toMatchObject({ ok: false, error: { code: 'internal', message: 'mawsd serves no machineSettings.get yet' } });
-    expect(ensure).not.toHaveBeenCalled();
+  // P5 O3-D M5b (Interfaces §F, §G): the mirror's two reads and the machine half are the spine's commands, served from
+  // what it registered once loaded (they answered internal until the cutover)
+  it('loads the spine for the mirror’s reads and the machine half, and answers them from what it registered', async () => {
+    const { served, client, ensure } = front();
+    served.bus.register('session.visible', () => ({ sessions: ['s1'] }) as never);
+    served.bus.register('machineSettings.get', () => ({ nope: true }) as never);
+    const c = client();
+    expect(await c.request('session.visible')).toMatchObject({ ok: true, value: { sessions: ['s1'] } });
+    expect(ensure).toHaveBeenCalledWith('command');
+    expect(await c.request('machineSettings.get')).toMatchObject({ ok: false, error: { code: 'internal' } }); // output refused
+    expect(await c.request('library.fileLinkedPaths', { appSessionId: 's1' })).toMatchObject({ ok: false, error: { code: 'internal', message: 'the spine registered no handler for library.fileLinkedPaths' } });
   });
 
-  it('every machine name is the front’s own, a later milestone’s, or the spine’s', () => {
+  it('every machine name is the front’s own or the spine’s', () => {
     const machine = Object.entries(REGISTRY.commands).flatMap(([name, { owner }]) => (owner === 'machine' ? [name] : []));
-    for (const name of [...FRONT_COMMANDS, ...LATER_COMMANDS]) expect(machine).toContain(name);
+    for (const name of FRONT_COMMANDS) expect(machine).toContain(name);
   });
 
   it('emits only machineEvents, validated, to the clients that said ready, and to the taps', () => {

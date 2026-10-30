@@ -214,6 +214,9 @@ export function startSessions({ env, packaged, appRoot, hosts, bus, indexSource,
     refreshVisibility(id);
   });
   model.on('digest', (digest) => bus.emit('session.digest', digest));
+  // P5 O3-D M5b (Interfaces §F): the visible set for main's mirror of the view on the daemon shape, and each change of it
+  bus.register('session.visible', () => ({ sessions: model.visibleSessions() }));
+  model.on('visible', (appSessionId, visible) => bus.emit('session.visibleChanged', { appSessionId, visible }));
 
   const stops: (() => void)[] = [];
   if (mode === 'index') {

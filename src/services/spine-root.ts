@@ -237,6 +237,9 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     acquire: (id, reason) => (sessionService ? sessionService.acquire(id, reason) : Promise.reject(new Error(`MAWS cannot reach its sessions this run: ${data.refused}`))),
   });
   parts.push(['sessions', () => sessions.stop()], ['view', () => spineView.stop()]);
+  // P5 O3-D M5b (Interfaces §F): files' admission read for main's mirror of the view on the daemon shape, as the view
+  // answers it in process ([] while the index is unavailable)
+  bus.register('library.fileLinkedPaths', async ({ appSessionId }) => ({ paths: await spineView.view.fileLinkedPaths(appSessionId as AppSessionId) }));
   // registered after the read model's stop, so the index source has stopped before the index it reads closes
   parts.push(['index', () => index.close()]);
 
@@ -378,6 +381,17 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       env: deps.env,
     })]);
   }
+  // P5 O3-D M5b (Interfaces §G; contract O3X3): the machine half as main's settings mirror reads it on the daemon shape:
+  // the settings with their revision (bumped at each persisted change), a patch answered once it persisted and every
+  // listener was told (refused, with nothing changed, in a run that may not write the file), and each change emitted
+  let machineRevision = 0;
+  const offMachineChanged = machineSettings.onChange((settings) => {
+    machineRevision += 1;
+    bus.emit('machineSettings.changed', { settings });
+  });
+  parts.push(['machine settings', offMachineChanged]);
+  bus.register('machineSettings.get', () => ({ settings: machineSettings.state(), version: machineRevision }));
+  bus.register('machineSettings.set', async ({ patch }) => ({ settings: await machineSettings.update(patch) }));
   // C12: the Settings tab's read of the configuration the spine holds for it (P5 O3-A: rejects when refused); W3
   bus.register('settings.engineApplied', () => (engineConfigure ? engineConfigure.applied() : Promise.reject(new Error(`the engine settings are not applied this run: ${data.refused}`))));
   bus.register('settings.userEngineDefaults', userDefaults);

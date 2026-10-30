@@ -250,3 +250,65 @@ describe('the settings route each field to its owner’s file', () => {
     expect(() => bytes(machineFile())).toThrow();
   });
 });
+
+// P5 O3-D M5b (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §G, D25): on the daemon shape the machine
+// half is main's mirror of mawsd's, whose write crosses a socket; `settings.set` awaits it before the client half
+describe('settings.set over a machine half that answers later (the daemon shape’s mirror)', () => {
+  const bytes = (path: string) => readFileSync(path, 'utf8');
+  // A machine half whose every update waits for the test's answer: `persist` applies the patch and tells the listeners
+  // before resolving, as the mirror does on `machineSettings.set`'s answer; `refuse` rejects with nothing changed
+  const answering = () => {
+    let current = machineSettingsDefaults();
+    const listeners = new Set<(state: typeof current) => void>();
+    const pending: { patch: unknown; persist(): void; refuse(message: string): void }[] = [];
+    const service: MachineSettingsService = {
+      state: () => current,
+      update: (patch) =>
+        new Promise((resolve, reject) => {
+          pending.push({
+            patch,
+            persist: () => {
+              current = { ...current, ...(patch as object), supervisor: { ...current.supervisor, ...(patch as { supervisor?: object }).supervisor } };
+              for (const listener of listeners) listener(current);
+              resolve(current);
+            },
+            refuse: (message) => reject(new Error(message)),
+          });
+        }),
+      onChange: (listener) => {
+        listeners.add(listener);
+        return () => void listeners.delete(listener);
+      },
+    };
+    return { service, pending };
+  };
+
+  it('routes a mixed patch to both halves, the machine first and awaited, then the client file, and publishes once', async () => {
+    const machineHalf = answering();
+    writeFileSync(file, JSON.stringify(clientSettingsDefaults())); // the client file O3-A's split leaves
+    startSettings({ clientFile: file, machine: machineHalf.service });
+    const before = bytes(file);
+    clearRecords();
+    const set = invoke('settings.set', { theme: 'dark', supervisor: { idleExitMinutes: 30 } });
+    await vi.waitFor(() => expect(machineHalf.pending).toHaveLength(1));
+    expect(machineHalf.pending[0]!.patch).toEqual({ supervisor: { idleExitMinutes: 30 } }); // the machine's fields alone
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(bytes(file)).toBe(before); // the client half waits for the machine's answer
+    machineHalf.pending[0]!.persist();
+    await expect(set).resolves.toMatchObject({ ok: true, value: { settings: { theme: 'dark', supervisor: { idleExitMinutes: 30 } } } });
+    expect(JSON.parse(bytes(file))).toMatchObject({ theme: 'dark' });
+    expect(electron.win.sent).toHaveLength(1); // the machine half's own change during the set publishes nothing more
+  });
+
+  it('a refusal of the machine half fails the set and writes nothing to the client file', async () => {
+    const machineHalf = answering();
+    writeFileSync(file, JSON.stringify(clientSettingsDefaults()));
+    startSettings({ clientFile: file, machine: machineHalf.service });
+    const before = bytes(file);
+    const set = invoke('settings.set', { theme: 'dark', gateway: { relayUnreachable: 'wait' } });
+    await vi.waitFor(() => expect(machineHalf.pending).toHaveLength(1));
+    machineHalf.pending[0]!.refuse('mawsd refused the machine settings: spine.lock is held by pid 4242');
+    await expect(set).resolves.toMatchObject({ ok: false, error: { message: expect.stringContaining('pid 4242') } });
+    expect(bytes(file)).toBe(before);
+  });
+});
