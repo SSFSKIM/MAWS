@@ -31,6 +31,7 @@ describe('historyWindowStart', () => {
     expect(historyWindowStart(events, events.length, sizeOf, budget(20, 100))).toBe(3);
     const cut = historyWindowStart(events, events.length, sizeOf, budget(20, 30));
     expect(cut).toBe(5); // within the cap only the big turn's end fits: [turn.ended]; its prompt goes to the next page
+    expect(historyWindowStart(events, 5, sizeOf, budget(20, 30))).toBe(4); // the prompt alone passes the cap: it goes alone
   });
 
   it('takes the prelude before the first turn with it', () => {

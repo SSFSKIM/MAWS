@@ -20,7 +20,7 @@ import { ChainFollower, type ChainFollowerOptions, type FileReader, type FollowS
 import { isMissing } from './sidecars';
 
 // How long a read waits for a fresh follower's backfill before answering: long enough that a transcript of up to a few
-// hundred MB answers its window at once (a 600 MB one reads through in about 3.5 s on an M-series Mac), well inside the
+// hundred MB answers its window at once (a 625 MB one reads through in 1.7 s on an M-series Mac), well inside the
 // host protocol's 10 s deadline. A backfill still running answers an empty page; its window then arrives as
 // `session.eventBatch`.
 export const SNAPSHOT_WAIT_MS = 2_000;

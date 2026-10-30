@@ -54,6 +54,8 @@ export function historyWindowStart(events: readonly SessionEvent[], end: number,
   // The walk reached the first event: what lies before the window's first turn is the session's prelude (its start),
   // taken with it. No turn starts within the hard cap: the window is cut at the cap.
   if (whole || start === -1) start = lowest;
+  // One event bigger than the hard cap still goes, alone: a page always moves the cursor back.
+  if (start === end && end > 0) return end - 1;
   return pullBackToRewinds(events, start, end, bytes - sizeBetween(lowest, start, sizeOf), sizeOf, budget);
 }
 
