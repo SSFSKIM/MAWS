@@ -1013,6 +1013,33 @@ describe('the repository watcher over the watch tree', () => {
     watcher.dispose();
   });
 
+  // Review of M1 (finding 2): a poll that finds a status already running waits for it, and the next poll is timed from
+  // that pass's end; the debounce's own continuation never adds a second schedule while the root polls.
+  it('times each poll from the end of the pass before it, a status in flight included, at twice POLL_MS after a timeout', async () => {
+    const fs = new FakeWatchFs(ROOT);
+    fs.failWatch = (path) => errno('ENOSPC', path);
+    const start = Date.now();
+    const starts: number[] = [];
+    let first = true;
+    const read = vi.fn(() => {
+      starts.push(Date.now() - start);
+      if (first) {
+        first = false;
+        return Promise.resolve(status());
+      }
+      // Every later status times out at the runner's 10 s.
+      return new Promise<GitStatus>((_resolve, reject) => setTimeout(() => reject(new GitTimeoutError('git status timed out after 10 s in /repo')), 10_000));
+    });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const watcher = new GitWatcher({ status: read, emit: () => {}, watch: treeOver(fs), statFile: async () => null });
+    await watcher.watch(ROOT);
+    await drain();
+    await vi.advanceTimersByTimeAsync(45_000);
+    // The settle pass at 250 ms runs until 10,250; the poll due at 5,000 waits for it, then 10 s after it ends.
+    expect(starts).toEqual([0, 250, 20_250, 40_250]);
+    watcher.dispose();
+  });
+
   it("finds a tracked file's modification whose event was lost at the tree's next slow reconcile", async () => {
     const fs = new FakeWatchFs(ROOT);
     fs.write('a.ts');

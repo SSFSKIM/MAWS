@@ -212,6 +212,7 @@ interface Root {
   clones: string[]; // the repositories nested in the status's untracked directories that a pass found, root-relative
   state: 'events' | 'polling'; // polling once a watch ran out of inotify's budget, until the root closes
   pollTimer: NodeJS.Timeout | null;
+  active: Promise<void> | null; // the status pass running now
   rescan: boolean; // the pending pass re-reads every cached fact beneath untracked directories
 }
 
@@ -324,6 +325,7 @@ export class GitWatcher {
       clones: [],
       state: 'events',
       pollTimer: null,
+      active: null,
       rescan: false,
     };
     const inside = relative(root.root, status.gitDir);
@@ -421,13 +423,14 @@ export class GitWatcher {
     root.pollTimer = setTimeout(() => void this.pollOnce(root), root.backoff ? 2 * POLL_MS : POLL_MS);
   }
 
+  // A pass already running stands for this poll; the next is timed from the end of whichever ran, so a timeout's
+  // back-off holds from where it was learnt.
   private async pollOnce(root: Root): Promise<void> {
     root.pollTimer = null;
     if (root.closed) return;
     root.rescan = true;
-    if (root.inFlight) root.again = true;
-    else await this.refresh(root);
-    if (!root.closed && root.pollTimer === null) this.schedulePoll(root); // after the pass, so a timeout backs it off
+    await (root.active ?? this.refresh(root));
+    if (!root.closed && root.pollTimer === null) this.schedulePoll(root);
   }
 
   // An event with no filename: the tree reconciled, or the platform dropped what changed.
@@ -505,7 +508,16 @@ export class GitWatcher {
     );
   }
 
-  private async refresh(root: Root): Promise<void> {
+  private refresh(root: Root): Promise<void> {
+    const pass = this.read(root);
+    root.active = pass;
+    void pass.finally(() => {
+      if (root.active === pass) root.active = null;
+    });
+    return pass;
+  }
+
+  private async read(root: Root): Promise<void> {
     root.inFlight = true;
     const retrying = root.retry;
     root.retry = false;
@@ -544,7 +556,10 @@ export class GitWatcher {
       root.inFlight = false;
       if (root.again && !root.closed) {
         root.again = false;
-        if (root.backoff) this.schedule(root); // a timed-out root waits out the long debounce first
+        // A polling root's period is the poll's alone: a timed-out one leaves what asked meanwhile to the next poll.
+        if (root.state === 'polling') {
+          if (!root.backoff) void this.refresh(root);
+        } else if (root.backoff) this.schedule(root); // a timed-out root waits out the long debounce first
         else void this.refresh(root);
       }
     }
