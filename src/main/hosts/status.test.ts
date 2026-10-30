@@ -26,20 +26,27 @@ const supervisorStatus = (over: Partial<SupervisorStatus> = {}): SupervisorStatu
 
 function harness(transport: HostFacts['transport'] = 'detached', shape: Pick<HostStatusDeps, 'daemon' | 'daemonUnavailable' | 'spineRefused'> = {}) {
   let state: HostState = { state: 'starting', pid: null, restarts: 0, revision: 0 };
+  let machine: HostState = { state: 'ready', pid: 77, restarts: 0, revision: 0 }; // the daemon shape's machine.sock
   let facts: HostFacts = { transport, reason: null, refused: null, waitingLiveSessions: null, lastExit: null };
   const stateListeners = new Set<(s: HostState) => void>();
+  const machineListeners = new Set<(s: HostState) => void>();
   const eventListeners = new Set<(s: SupervisorStatus) => void>();
   const handlers = new Map<string, (input: unknown) => unknown>();
   const emitted: HostStatus[] = [];
   const restartSupervisor = vi.fn(async (): Promise<CommandResult<'host.restart'>> => ({ ok: true, value: undefined }));
   const openPath = vi.fn<(path: string) => Promise<string>>(async () => '');
   const asked: string[] = [];
-  let answer: () => Promise<CommandResult<'host.supervisorStatus'>> = async () => ({ ok: false, error: { code: 'host_unavailable', message: 'not yet' } });
+  const askedOn: string[] = []; // the host each ask went to
+  let answer: (owner: string) => Promise<CommandResult<'host.supervisorStatus'>> = async () => ({ ok: false, error: { code: 'host_unavailable', message: 'not yet' } });
   const deps: HostStatusDeps = {
     hosts: {
-      snapshot: () => state,
-      dispatch: (async (_owner: string, name: string) => (asked.push(name), answer())) as HostStatusDeps['hosts']['dispatch'],
-      onState: (_owner, l) => (stateListeners.add(l), () => void stateListeners.delete(l)),
+      snapshot: (owner) => (owner === 'machine' ? machine : state),
+      dispatch: (async (owner: string, name: string) => (asked.push(name), askedOn.push(owner), answer(owner))) as HostStatusDeps['hosts']['dispatch'],
+      onState: (owner, l) => {
+        const listeners = owner === 'machine' ? machineListeners : stateListeners;
+        listeners.add(l);
+        return () => void listeners.delete(l);
+      },
       onEvent: ((_name: string, l: (s: SupervisorStatus) => void) => (eventListeners.add(l), () => void eventListeners.delete(l))) as HostStatusDeps['hosts']['onEvent'],
       facts: () => facts,
       restartSupervisor,
@@ -65,14 +72,19 @@ function harness(transport: HostFacts['transport'] = 'detached', shape: Pick<Hos
       state = { ...state, ...next, revision: state.revision + 1 };
       stateListeners.forEach((l) => l(state));
     },
+    moveMachine(next: Partial<HostState>) {
+      machine = { ...machine, ...next, revision: machine.revision + 1 };
+      machineListeners.forEach((l) => l(machine));
+    },
     status(next: SupervisorStatus) {
       eventListeners.forEach((l) => l(next));
     },
     asked,
-    answerWith(next: () => Promise<CommandResult<'host.supervisorStatus'>>) {
+    askedOn,
+    answerWith(next: (owner: string) => Promise<CommandResult<'host.supervisorStatus'>>) {
       answer = next;
     },
-    listeners: () => stateListeners.size + eventListeners.size,
+    listeners: () => stateListeners.size + machineListeners.size + eventListeners.size,
   };
 }
 
@@ -200,6 +212,48 @@ describe('host.status', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(h.emitted.at(-1)?.supervisor).toMatchObject({ pid: 5151, liveSessions: 4 });
     expect(h.asked).toHaveLength(2);
+  });
+
+  // M5b fix round 4: a post-D app hears host.supervisorStatus on machine.sock (mawsd's relay keeps engine-host events off
+  // engine-host.sock), so the ask goes there too: on one ordered connection an event the host sent before its answer
+  // arrives before it, and the event-wins rule above covers the one sent after. Asked over engine-host.sock, the answer
+  // could overtake an older event still on machine.sock, which then rolled the status back.
+  it('on the daemon shape asks over machine.sock, where the events come, so an event sent before the answer never lands after it', async () => {
+    const h = harness('detached', { daemon: () => null });
+    // each socket delivers in the order the engine host sent; engine-host.sock is the faster one here
+    const sockets: Record<string, (() => void)[]> = { machine: [], other: [] };
+    const sent = (on: string, deliver: () => void) => void sockets[on === 'machine' ? 'machine' : 'other']!.push(deliver);
+    sent('machine', () => h.status(supervisorStatus({ liveSessions: 1 }))); // sent before the read, still on its way
+    sent('machine', () => h.status(supervisorStatus({ liveSessions: 2 }))); // the change the read reflects
+    h.answerWith((owner) => new Promise((resolve) => sent(owner, () => resolve({ ok: true, value: supervisorStatus({ liveSessions: 2 }) }))));
+    h.move({ state: 'ready', pid: 4242 });
+    expect(h.askedOn).toEqual(['machine']);
+    const from = h.emitted.length;
+    for (const on of ['other', 'machine']) {
+      for (const deliver of sockets[on]!) {
+        deliver();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    }
+    expect(h.emitted.slice(from).map((status) => status.supervisor?.liveSessions)).toEqual([1, 2]); // never back to 1
+    expect(h.service.status().supervisor?.liveSessions).toBe(2);
+  });
+
+  // M5b fix round 4: machine.sock can restream while engine-host.sock stays (a dropped socket), losing the events between;
+  // main asks again then, and only while the engine host is ready
+  it('on the daemon shape asks again when machine.sock is ready again, while the engine host is ready', async () => {
+    const h = harness('detached', { daemon: () => null });
+    h.answerWith(async () => ({ ok: true, value: supervisorStatus({ liveSessions: 3 }) }));
+    h.move({ state: 'ready', pid: 4242 });
+    h.moveMachine({ state: 'restarting', pid: null }); // machine.sock drops; engine-host.sock stays
+    h.moveMachine({ state: 'ready', pid: 78 });
+    expect(h.askedOn).toEqual(['machine', 'machine']); // the engine host's ready, then machine.sock's
+    h.move({ state: 'restarting', pid: null });
+    h.moveMachine({ state: 'restarting', pid: null });
+    h.moveMachine({ state: 'ready', pid: 79 }); // the engine host is not ready: nothing to ask yet
+    h.move({ state: 'ready', pid: 5151 });
+    expect(h.askedOn).toHaveLength(3); // asked once both are ready
+    await vi.waitFor(() => expect(h.emitted.some((status) => status.supervisor?.liveSessions === 3)).toBe(true));
   });
 
   it('the embedded shape waits for the connect burst and asks nothing', () => {
