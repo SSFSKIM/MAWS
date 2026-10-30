@@ -159,6 +159,7 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.session.appEvents.output.events[]<kind=question.answered>.answers': ANSWERS,
   'commands.session.appEvents.output.events[]<kind=usage.sample>.modelUsage': MODEL_USAGE,
   'commands.session.applyFlagSettings.input.settings': "the engine's flag-settings keys",
+  'commands.session.engineStatuses.output.statuses[].modelOverrides': MODEL_OVERRIDES,
   'commands.session.events.output.events[]<kind=question.answered>.answers': ANSWERS,
   'commands.session.events.output.events[]<kind=usage.sample>.modelUsage': MODEL_USAGE,
   'commands.session.getSettings.output.effective': ENGINE_JSON,

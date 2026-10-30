@@ -132,6 +132,7 @@
 "commands.session.digests.output":[".digests[].appSessionId AppSessionId"],
 "commands.session.drafts.get.input":[".appSessionId AppSessionId"],
 "commands.session.drafts.set.input":[".appSessionId AppSessionId"],
+"commands.session.engineStatuses.output":[".statuses[].appSessionId AppSessionId"],
 "commands.session.events.input":[".appSessionId AppSessionId"],
 "commands.session.events.output":[".events[]<kind=maws.delivery.artifact>.ownerAppSessionId AppSessionId",".events[]<kind=side.thread.opened>.childAppSessionId AppSessionId",".events[]<kind=side.thread.summarised>.childAppSessionId AppSessionId"],
 "commands.session.exportConversation.input":[".appSessionId AppSessionId"],
