@@ -2,8 +2,9 @@
 // signer its head doesn't know asks for a read of the hub's state at once (a certificate stored or retired moves no
 // version, so no `state` notice tells of it), once for a burst, and not again for a signer the read left unknown; and a
 // revocation, which is a new version, arrives on the hub's `state` notice, after which the revoked key's events are
-// refused at once. A started endpoint with a stand-in hub: its RL1 socket (fake-hub.ts) and its org state read (the
-// endpoint's `fetch`), sminos connected over RL10.
+// refused at once, its notice's reads tried again on the link's backoff when they fail, until the head reaches the
+// highest version announced. A started endpoint with a stand-in hub: its RL1 socket (fake-hub.ts) and its org state
+// read (the endpoint's `fetch`), sminos connected over RL10.
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { MACHINE_ORG_STATE_PATH, type OrgStateView } from 'desk-hub/protocol';
@@ -74,11 +75,17 @@ async function world(options: { certified?: string[] } = {}) {
   closers.push(() => hub.close());
   const view = { chain: [s1, s2] as SignedOrgState[], certificates: { certs: machines.map((m) => m.cert), retirements: [] } as Certificates };
   const reads: number[] = [];
+  /** How many reads to come the hub answers `503`, as a Registry busy or unreachable does. */
+  const failing = { reads: 0 };
   const fetch = (async (input: string | URL | Request) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
     if (url.pathname !== MACHINE_ORG_STATE_PATH) return new Response(JSON.stringify({ error: 'not-found' }), { status: 404 });
     const since = Number(url.searchParams.get('since'));
     reads.push(since);
+    if (failing.reads > 0) {
+      failing.reads--;
+      return new Response(JSON.stringify({ error: 'busy', message: 'the stand-in hub is busy' }), { status: 503, headers: { 'content-type': 'application/json' } });
+    }
     const body: OrgStateView = { head: view.chain[view.chain.length - 1], chain: view.chain.filter((s) => s.state.version > since), transitions: [], certificates: view.certificates, more: false };
     return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
   }) as typeof globalThis.fetch;
@@ -110,7 +117,7 @@ async function world(options: { certified?: string[] } = {}) {
   /** The seqs sminos was handed for `writer`, in the order it got them. */
   const delivered = (writer: string) =>
     sminos.received.flatMap((f) => (f.t === 'events' && f.project === P ? (f.events as Array<{ event: { writer: string; seq: number } }>).filter((w) => w.event.writer === writer).map((w) => w.event.seq) : []));
-  return { endpoint, services, hub, sminos, view, reads, certify, machines, down, delivered, a1, b1, b2, A, B, delegation, s2 };
+  return { endpoint, services, hub, sminos, view, reads, failing, certify, machines, down, delivered, a1, b1, b2, A, B, delegation, s2 };
 }
 
 /** A machine's event at `seq`, signed by its key as sminos's endpoint signs it. */
@@ -307,5 +314,49 @@ describe('a revocation', () => {
     expect(w.delivered('vm-two/human')).toEqual([1]);
     expect(w.endpoint.rl10.relay.holding).toBe(0);
     expect(w.reads.length).toBe(before + 1);
+  });
+});
+
+describe('a state notice whose read fails', () => {
+  const head = (w: Awaited<ReturnType<typeof world>>) => w.endpoint.parts!.org.head().state.version;
+
+  it('is read again on the link’s backoff: the revocation it announces applies before the periodic read, and the retry stops there', async () => {
+    const w = await world();
+    const s3 = await successor(w.s2, [w.a1], async (s) => {
+      s.members.find((m) => m.id === w.B)!.devices = [w.b2.device];
+      s.revoked.push(...(await revokedDevice(w.B, w.b1.device)));
+    });
+    w.view.chain.push(s3);
+    // Both reads the notice makes fail; the first retry, a second or less later, succeeds.
+    w.failing.reads = 2;
+    const before = w.reads.length;
+    w.hub.current.send(JSON.stringify({ t: 'state', version: 3 }));
+    await until(() => w.reads.length === before + 2 && w.failing.reads === 0, 'both reads failed');
+    expect(head(w)).toBe(2);
+    await until(() => head(w) === 3, 'the revoking head adopted on the retry', 5000);
+    expect(w.reads.length).toBe(before + 3);
+    expect(w.services.lines.filter((l) => l.includes('the org state could not be read'))).toHaveLength(2);
+    w.down([await words(w.b1, w.B, 1)]);
+    expect(await w.sminos.next((f) => f.t === 'spent', 'the revoked key’s event spent')).toEqual({ t: 'spent', project: P, writer: `hub/${w.B}`, seq: 1, reason: 'revoked' });
+    // The head reached the version announced: no read follows, though the next step of the backoff (2 s at most) has passed.
+    await sleep(2500);
+    expect(w.reads.length).toBe(before + 3);
+  });
+
+  it('reads toward the newest version announced, past one a newer notice replaced', async () => {
+    const w = await world();
+    const s3 = await successor(w.s2, [w.a1]);
+    const s4 = await successor(s3, [w.a1]);
+    // The hub announces 3 and then 4, but serves only 3 at first, and the notices' first reads fail.
+    w.view.chain.push(s3);
+    w.failing.reads = 2;
+    w.hub.current.send(JSON.stringify({ t: 'state', version: 3 }));
+    w.hub.current.send(JSON.stringify({ t: 'state', version: 4 }));
+    await until(() => head(w) === 3, 'version 3 adopted on a retry', 5000);
+    // Still short of 4: the retry goes on, and takes 4 once the hub serves it, with no notice more.
+    const at3 = w.reads.length;
+    w.view.chain.push(s4);
+    await until(() => head(w) === 4, 'version 4 adopted on a later retry', 8000);
+    expect(w.reads.length).toBeGreaterThan(at3);
   });
 });

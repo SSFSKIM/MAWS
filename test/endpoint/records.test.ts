@@ -329,6 +329,17 @@ describe('a record the hub refused for now (review finding 5)', () => {
     expect(timers.slice(1).every((t) => t.cleared)).toBe(true);
     retries.retry('listing s1 5', () => {});
     expect(timers.at(-1)!.ms).toBe(1000);
+    // Settled (the org-state read's `sync` once the head reaches the notice's version): its waiting retry dropped, the
+    // next one waiting from the start again, the others untouched.
+    retries.retry('sync', () => void ran.push('sync'));
+    timers.at(-1)!.run();
+    retries.retry('sync', () => void ran.push('sync again'));
+    expect(timers.at(-1)!.ms).toBe(2000);
+    retries.settle('sync');
+    expect(timers.at(-1)!.cleared).toBe(true);
+    expect(timers.at(-3)!.cleared).toBe(false);
+    retries.retry('sync', () => {});
+    expect(timers.at(-1)!.ms).toBe(1000);
   });
 });
 

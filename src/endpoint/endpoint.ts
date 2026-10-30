@@ -153,6 +153,8 @@ export class Endpoint implements EndpointModule {
   #engineHostLedger: string | null = null;
   #timer: ReturnType<typeof setInterval> | null = null;
   #syncing: Promise<unknown> | null = null;
+  /** The highest version a `state` notice announced while the head is short of it (`#syncTo`); 0 when none is. */
+  #target = 0;
   /** `stop()` was called: nothing in flight then (a sync, an adoption) opens the link or a timer again. */
   #stopped = false;
   /** Records the hub refused for now, tried again while the connection lasts. */
@@ -188,6 +190,7 @@ export class Endpoint implements EndpointModule {
         ended: () => {
           this.links.hub = { connected: false };
           this.#retries.clear();
+          this.#target = 0;
         },
         state: (version) => void this.#syncTo(version),
         stopped: () => this.#syncRl10(),
@@ -618,11 +621,36 @@ export class Endpoint implements EndpointModule {
     return syncing.then(read, read);
   }
 
-  /** A `state {version}` notice: read until the head reaches `version` (a read in flight may have begun before it). */
+  /**
+   * A `state {version}` notice: read until the head reaches `version` (a read in flight may have begun before it). A head
+   * still short of it after that, the read having failed or served less, is read again on the link's backoff
+   * (`#retries`, key `sync`), toward the highest version announced, until the head reaches it or the link ends; the next
+   * welcome reads anyway, and the periodic read stays the backstop. A revocation is a new version, so this is how one
+   * reaches the endpoint when its first read fails. Notices are unsigned: one the hub can't serve costs a read per step
+   * of the backoff while the link lasts, and holds nothing back.
+   */
   async #syncTo(version: number): Promise<void> {
+    this.#target = Math.max(this.#target, version);
     await this.syncNow();
+    if (this.#short()) await this.syncNow();
+    this.#chase();
+  }
+
+  /** Whether the head is short of the version a notice announced. */
+  #short(): boolean {
     const org = this.#org;
-    if (org?.ready && org.head().state.version < version) await this.syncNow();
+    return this.#target > 0 && (org?.ready !== true || org.head().state.version < this.#target);
+  }
+
+  /** The `sync` retry waiting while the head is short of the target and the endpoint runs enrolled; settled otherwise. */
+  #chase(): void {
+    if (!this.#short() || this.#stopped || this.#state?.enrolled !== true) {
+      this.#target = 0;
+      this.#retries.settle('sync');
+      return;
+    }
+    const again = () => this.#chase();
+    this.#retries.retry('sync', () => void this.syncNow().then(again, again));
   }
 
   /**
