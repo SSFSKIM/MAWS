@@ -280,15 +280,17 @@ export function createMirrorSpineView(options: SpineMirrorOptions): SpineMirror 
     });
     const gen = generation;
     const sessions = [...statuses].filter(([, status]) => status.process !== 'exited').map(([appSessionId]) => ({ appSessionId, cursor: cursors.get(appSessionId) ?? null }));
+    const asked = new Map(statuses); // the statuses this follow answers for: one heard since is newer than its answer
     void hosts.dispatch('machine', 'session.follow', { sessions, live: true }).then((answer) => {
       if (!answer.ok) return log(`[spine-mirror] session.follow: ${answer.error.code} ${answer.error.message}`);
       if (gen !== generation || stopped) return;
       for (const stream of (answer.value as CommandOutput<'session.follow'>).streams) {
         const id = stream.appSessionId as AppSessionId;
         if (stream.mode === 'missing') log(`[spine-mirror] ${id}'s stream lost the range after its cursor; it goes on from its journal's last row`);
-        // not live on the engine host now (replaced, or parked, meanwhile): the status held is stale. A scenario's
-        // statuses are the spine's own emits, which no engine host holds (D11)
-        if (mode !== 'scenario' && stream.launchId === null && statuses.has(id) && statuses.get(id)!.process !== 'exited') {
+        // not live on the engine host now (replaced, or parked, meanwhile): the status held is stale, unless a status was
+        // heard since the follow went out (its stream opened a launch meanwhile). A scenario's statuses are the spine's own
+        // emits, which no engine host holds (D11)
+        if (mode !== 'scenario' && stream.launchId === null && statuses.has(id) && statuses.get(id) === asked.get(id) && statuses.get(id)!.process !== 'exited') {
           statuses.delete(id);
           cursors.delete(id);
           fire('engine', id, null);

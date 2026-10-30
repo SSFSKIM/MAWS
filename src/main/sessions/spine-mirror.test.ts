@@ -480,6 +480,32 @@ describe('the spine mirror (Interfaces §F)', () => {
     expect(view.engineStatuses()).toEqual([]);
   });
 
+  // The front answers a follow once every stream's opening did: a stream whose first read failed answers no launch, and
+  // the session may launch and send its status before another opening finishes
+  it('keeps a status heard after its follow went out, though the follow answers no launch for the session', async () => {
+    const host = new FakeMachine({ records: [record({ appId: A })] });
+    const { view } = mirrorOver(host);
+    host.stream();
+    await loaded(view);
+    host.fire('session.status', { appSessionId: A, status: status({ appSessionId: A, process: 'ready', launchId: 'LA', lastEventSeq: 1 }) });
+    host.answers.set('session.follow', () => ({ ok: true, value: { streams: [{ appSessionId: A, mode: 'live', launchId: null }] } }));
+    host.held.add('session.follow');
+    host.lose();
+    host.stream();
+    const follows = () => host.asked.filter((a) => a.name === 'session.follow').map((a) => a.input);
+    await vi.waitFor(() => expect(follows()).toHaveLength(2));
+    const running = status({ appSessionId: A, process: 'ready', turn: true, launchId: 'LA2', lastEventSeq: 4 });
+    host.fire('session.status', { appSessionId: A, status: running });
+    host.release('session.follow');
+    await new Promise((resolve) => setTimeout(resolve, 10)); // the stale answer landed
+    expect(view.engineStatuses()).toEqual([running]);
+    host.answers.set('session.follow', () => ({ ok: true, value: { streams: [] } }));
+    host.lose();
+    host.stream();
+    await vi.waitFor(() => expect(follows()).toHaveLength(3));
+    expect(follows()[2]).toEqual({ sessions: [{ appSessionId: A, cursor: { launchId: 'LA2', seq: 4, idx: -1 } }], live: true });
+  });
+
   it('stops: no event, no streaming and no daemon status reaches it any more', async () => {
     const host = new FakeMachine({ records: [record({ appId: A })] });
     const { mirror, view } = mirrorOver(host);
