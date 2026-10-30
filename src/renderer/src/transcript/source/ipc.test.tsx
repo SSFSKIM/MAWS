@@ -411,7 +411,7 @@ describe('child source provenance', () => {
     const received: EventId[][] = [];
     source.subscribe((events) => received.push(events.map((event) => event.id)));
     const snapshot = source.snapshot();
-    expect(fake.calls.map((call) => [call.name, call.input])).toEqual([['session.events', { appSessionId: APP, afterSeq: null, limit: null }]]);
+    expect(fake.calls.map((call) => [call.name, call.input])).toEqual([['session.events', { appSessionId: APP, afterSeq: null, limit: null, agentId: AGENT }]]);
     answer(fake, 'session.events', { events: [...parent, ...child.slice(0, 2)], lastSeq: 9, complete: true });
     await expect(snapshot).resolves.toEqual(child.slice(0, 2));
     expect(fake.calls.map((call) => call.name)).toEqual(['session.events']);
@@ -446,7 +446,7 @@ describe('child source provenance', () => {
     answer(fake, 'session.events', { events: parent.filter((event) => event.kind !== 'subagent.started'), lastSeq: 3, complete: true });
     await flush();
     expect(fake.calls.map((call) => [call.name, call.input])).toEqual([
-      ['session.events', { appSessionId: APP, afterSeq: null, limit: null }],
+      ['session.events', { appSessionId: APP, afterSeq: null, limit: null, agentId: AGENT }],
       ['fs.agentEvents', { appSessionId: APP, agentId: AGENT }],
     ]);
     answer(fake, 'fs.agentEvents', { events: disk, complete: true });

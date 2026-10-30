@@ -182,6 +182,7 @@ interface Attached {
   attachment: Attachment | null;
   settled: Promise<void>;
   offReset: (() => void) | null;
+  offRebuild: (() => void) | null; // the long-transcript window: the source's rebuild subscription
   // Set while the key is being started over: each hydration builds a fresh state (with this ui, what the reader had
   // opened) and installs it only once its snapshot has applied, so the old rows stay on screen until then, and stay if
   // the snapshot fails (a retry stages afresh).
@@ -204,6 +205,8 @@ export function createTranscriptStore() {
     const release = (attached: Attached) => {
       attached.attachment?.detach();
       attached.attachment = null;
+      attached.offRebuild?.();
+      attached.offRebuild = null;
       attached.offReset?.();
     };
     // The hydration protocol (source/hydrate.ts) over the key's current state. Resolves either way; a failure is
@@ -325,7 +328,7 @@ export function createTranscriptStore() {
         // finish nobody observed it may carry the other id form (disk uuids for live ids), which id deduplication
         // cannot recognise. The reducer state starts over in a staged state installed once the snapshot has applied;
         // what the reader opened is kept, keyed by ids that resolve again when the history is in the same form.
-        const attached: Attached = { source, agentId: options.agentId ?? null, count: 1, attachment: null, settled: Promise.resolve(), offReset: null, restartUi: kept ? kept.state.ui : null, stagedJump: null };
+        const attached: Attached = { source, agentId: options.agentId ?? null, count: 1, attachment: null, settled: Promise.resolve(), offReset: null, offRebuild: null, restartUi: kept ? kept.state.ui : null, stagedJump: null };
         attachments.set(key, attached);
         // A reset (a child source switching from its live stream to its disk transcript): the key starts over.
         attached.offReset = source.onReset?.(() => {
@@ -334,6 +337,14 @@ export function createTranscriptStore() {
           attached.stagedJump = null;
           const state = fresh(key, attached.agentId);
           put(key, { state, localAssistantInk: undefined, phase: 'hydrating', error: null, clock: null, jump: null });
+          hydrate(key, attached);
+        }) ?? null;
+        // A rebuild (an older page joined the source's history): the key hydrates again from the source's snapshot,
+        // staged under what the reader had opened, so the drawn rows stay until the rebuilt state is whole.
+        attached.offRebuild = source.onRebuild?.(() => {
+          if (attachments.get(key) !== attached) return;
+          attached.restartUi = entry(key)?.state.ui ?? null;
+          put(key, { phase: 'hydrating', error: null });
           hydrate(key, attached);
         }) ?? null;
         return hydrate(key, attached);
