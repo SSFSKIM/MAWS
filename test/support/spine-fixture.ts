@@ -6,7 +6,11 @@
 // (`sessions.upsertFromSummary`, the attention store, the library store, the drafts) and the prompt history's append.
 // The same seed writes the same records; only what the index mints itself (app and project ids, a record's creation
 // time) differs from one profile to the next.
-import { mkdirSync, readFileSync } from 'node:fs';
+// P5 O3-D M6 (fix round 1; the architect's ruling (a) on the discovery wake): with `transcripts` (an engine config
+// directory), each session's transcript is written there too, its row's size and mtime the file's own stat and its
+// search text stamped ready, so the store on disk matches the index exactly and an engine host's scan finds nothing to
+// summarise, remove or re-index. Without it (the unit suite's cases that never scan) no file is written, as before.
+import { mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ArtifactKind, ArtifactSessionLink } from '@shared/artifacts/entity';
 import type { AttentionItem } from '@shared/graph/attention';
@@ -54,15 +58,29 @@ function generator(seed: number): () => number {
   };
 }
 
+// A session's transcript as the engine writes one (its prompt, then the answer), its mtime the session's last record
+// on a whole second (so the stat reads it back exactly); the row records the file's own size and mtime.
+function writeTranscript(folder: string, t: { sessionId: string; directory: string; first: number; last: number; firstPrompt: string; lastAssistantText: string }): { transcriptPath: string; size: number; mtimeMs: number } {
+  mkdirSync(folder, { recursive: true });
+  const transcriptPath = join(folder, `${t.sessionId}.jsonl`);
+  const row = (n: number, at: number, message: object) => ({ parentUuid: n === 0 ? null : uuid(n), isSidechain: false, type: n === 0 ? 'user' : 'assistant', message, uuid: uuid(n + 1), timestamp: new Date(at).toISOString(), cwd: t.directory, sessionId: t.sessionId, version: '2.1.291' });
+  writeFileSync(transcriptPath, `${JSON.stringify(row(0, t.first, { role: 'user', content: t.firstPrompt }))}\n${JSON.stringify(row(1, t.last, { role: 'assistant', content: [{ type: 'text', text: t.lastAssistantText }] }))}\n`);
+  const seconds = Math.floor(t.last / 1000);
+  utimesSync(transcriptPath, seconds, seconds);
+  const stat = statSync(transcriptPath);
+  return { transcriptPath, size: stat.size, mtimeMs: stat.mtimeMs };
+}
+
 const uuid = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
 
 // Writes the fixture into `profile` (its index and its prompt history) with its project folders under `folders`, and
 // answers the counts read back from what was written.
-export async function writeSpineFixture({ profile, folders, counts = PROFILE_SIZED, seed = 1 }: {
+export async function writeSpineFixture({ profile, folders, counts = PROFILE_SIZED, seed = 1, transcripts }: {
   profile: string;
   folders: string;
   counts?: SpineFixtureCounts;
   seed?: number;
+  transcripts?: string; // the engine config directory (CLAUDE_CONFIG_DIR) to write each session's transcript into
 }): Promise<SpineFixtureCounts> {
   if (counts.pending > counts.attention || counts.projects > counts.sessions || counts.drafts > counts.sessions) throw new Error(`not a fixture: ${JSON.stringify(counts)}`);
   const random = generator(seed);
@@ -83,20 +101,27 @@ export async function writeSpineFixture({ profile, folders, counts = PROFILE_SIZ
         const sessionId = sessionIdFor(n + 1);
         const first = timeBefore(365 * DAY);
         const last = first + below(3 * DAY);
-        return index.sessions.upsertFromSummary(summary({
+        const slug = directory.replace(/[^a-zA-Z0-9]/g, '-');
+        // drawn in the order the fixture always drew them, so a seed writes the same records with or without transcripts
+        let stamp = { transcriptPath: join(profile, 'claude-config', 'projects', slug, `${sessionId}.jsonl`), size: 2_000 + below(4_000_000), mtimeMs: last };
+        const aiTitle = random() < 0.8 ? words(2, 6) : null;
+        const firstPrompt = words(4, 40);
+        const lastAssistantText = words(6, 60);
+        if (transcripts !== undefined) stamp = writeTranscript(join(transcripts, 'projects', slug), { sessionId, directory, first, last, firstPrompt, lastAssistantText });
+        const record = index.sessions.upsertFromSummary(summary({
           sessionId,
           directory,
-          slug: directory.replace(/[^a-zA-Z0-9]/g, '-'),
-          transcriptPath: join(profile, 'claude-config', 'projects', directory.replace(/[^a-zA-Z0-9]/g, '-'), `${sessionId}.jsonl`),
-          size: 2_000 + below(4_000_000),
-          mtimeMs: last,
+          slug,
+          ...stamp,
           birthtimeMs: first,
           firstRecordAt: new Date(first).toISOString(),
           lastRecordAt: new Date(last).toISOString(),
-          aiTitle: random() < 0.8 ? words(2, 6) : null,
-          firstPrompt: words(4, 40),
-          lastAssistantText: words(6, 60),
+          aiTitle,
+          firstPrompt,
+          lastAssistantText,
         })).record;
+        if (transcripts !== undefined) index.sessionSearch.replace(record.appId, sessionId, stamp.size, stamp.mtimeMs, `${firstPrompt}\n${lastAssistantText}`, true);
+        return record;
       }),
     );
     const anySession = () => records[below(records.length)]!;

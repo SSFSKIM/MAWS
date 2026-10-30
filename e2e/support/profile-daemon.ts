@@ -6,9 +6,10 @@
 // the replay engine stub, the scratch shell and sminos homes; then the scene's own; then supervisorEnv's rewrite).
 //
 // - start: spawned, then ready once its log says ` serving; ` and its machine.sock answers a client (reachMachine, the
-//   CLI's link): `daemon.status` (which wakes its engine host, as `mawsd status` does, so the spine's index hears the
-//   host's scan) and a first `session.list` (which loads the spine). `readyAt` is that answer's time: what the app's
-//   window loading was for a scene that launched the profile's app, its services up.
+//   CLI's link) a first `session.list`, which loads the spine and, its engine host parked with no app, wakes the host
+//   for its discovery pass and answers once that pass is in the index (P5 O3-D M6 fix round 1, the discovery wake,
+//   src/mawsd/daemon.ts): what is on disk is listed with nobody waking the host first. `readyAt` is that answer's time:
+//   what the app's window loading was for a scene that launched the profile's app, its services up.
 // - request: one command over that client (a bare machine.sock client, as the CLI's), its value or a thrown error that
 //   names the code and message.
 // - stop: SIGTERM (the daemon's clean stop, its spine released and `spine.lock` given up), its exit's time, then every
@@ -30,7 +31,8 @@ import { launchEnvironment } from './scratch-env';
 const MAWSD_ARGV0 = 'mawsd'; // as main's daemonStart names it (src/main/hosts/daemon.ts)
 // The daemon's own start (its log's ` serving; `): a bound of O2's start, which the launch's host wait also allows
 const SERVE_WITHIN_MS = 30_000;
-// The first spine command's answer, the spine's cold load included (D24's launch-to-spine-ready bound)
+// The first spine command's answer, the spine's cold load and the discovery wake's pass included (D24's
+// launch-to-spine-ready bound)
 const SPINE_WITHIN_MS = 30_000;
 
 export interface ProfileDaemon {
@@ -99,8 +101,7 @@ export async function startProfileDaemon(opts: ProfileDaemonOptions): Promise<Pr
     return answer.value as T;
   }
   try {
-    await request('daemon.status'); // wakes its engine host, whose scan the spine's index hears
-    await request('session.list', {}, SPINE_WITHIN_MS); // loads the spine
+    await request('session.list', {}, SPINE_WITHIN_MS); // loads the spine, and wakes the parked engine host for its discovery pass
   } catch (error) {
     machine.close();
     child.kill('SIGKILL');

@@ -1,7 +1,7 @@
 // The spine's profile-sized fixture (P5 O3-C, docs/doperpowers/plans/2026-10-28-p5-o3-c-spine-library.md, D19): written
 // through the index's own API and the prompt history's file, it holds exactly the counts it is asked for, and the same
 // seed writes the same records twice.
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Actor } from '@shared/artifacts/actor';
@@ -76,6 +76,32 @@ describe('the spine fixture', () => {
     const history = readFileSync(join(profile, 'prompt-history.jsonl'), 'utf8').split('\n').filter(Boolean);
     expect(history).toHaveLength(SMALL.history);
     expect(JSON.parse(history[0]!)).toEqual(expect.objectContaining({ display: expect.any(String), timestamp: expect.any(Number), project: expect.stringContaining(join(dir.path, 'projects')) }));
+  });
+
+  // P5 O3-D M6 (fix round 1): the disk matches the index, so an engine host's scan finds nothing to do
+  it('with transcripts, writes each session’s transcript under the engine config, the row its stat and its text stamped ready', async () => {
+    const profile = profileAt('ud');
+    const config = join(dir.path, 'claude-config');
+    await writeSpineFixture({ profile, folders: join(dir.path, 'projects'), counts: SMALL, transcripts: config });
+    const index = new Index(join(profile, 'index.sqlite'));
+    try {
+      const bindings = index.sessions.bindings();
+      expect(bindings).toHaveLength(SMALL.sessions);
+      for (const { sessionId, appSessionId, size, mtimeMs } of bindings) {
+        const transcriptPath = index.sessions.summaryOf(appSessionId)!.transcriptPath;
+        expect(transcriptPath.startsWith(join(config, 'projects'))).toBe(true);
+        const stat = statSync(transcriptPath);
+        expect({ size, mtimeMs }, transcriptPath).toEqual({ size: stat.size, mtimeMs: stat.mtimeMs });
+        expect(index.sessionSearch.current(appSessionId, sessionId, stat.size, stat.mtimeMs), 'its text indexed: no re-index').toBe(true);
+      }
+    } finally {
+      index.close();
+    }
+    // the same seed, the same records but for their transcripts' stamps
+    const plain = profileAt('plain');
+    await writeSpineFixture({ profile: plain, folders: join(dir.path, 'projects'), counts: SMALL });
+    const titles = async (at: string) => (await contents(at)).sessions.map((record) => [record.engineSessionId, record.directory, record.title]);
+    expect(await titles(profile)).toEqual(await titles(plain));
   });
 
   it('writes the same records from the same seed, and others from another', async () => {

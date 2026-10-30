@@ -70,6 +70,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { expect, test } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -524,7 +525,13 @@ test('daemon idle spine alone: the physical footprint and CPU of the spine compo
 // LOADED; the client closes, the quiet passes, the log reads `[spine] released`, read RELEASED; the daemon is stopped
 // (SIGTERM). (2) `run --unit` with MAWS_SPINE_REEXECUTE=1 (re-execution is off by default, D38), restarted here on exit 75 as launchd would, following the new pid: the client loads the
 // spine and closes, the quiet passes, the log reads `exited (spine released, code 75)`, the restart serves, read
-// RE-EXECUTED. Each window is SPINE_RELEASED_RUN's (120 s settle, 300 s, 11 samples, the load rule), over the
+// RE-EXECUTED. P5 O3-D M6 (fix round 1, the architect's ruling (a)): each load's bare session.list finds the engine
+// host parked, so it wakes the host for its discovery pass (daemon.ts's discovery wake) and the host is asked to park
+// again once the pass is heard. The fixture writes the transcripts its index rows name (CLAUDE_CONFIG_DIR is the
+// profile's claude-config), each row the file's own stat and its text stamped ready, so the scan finds nothing to do:
+// the case asserts the index unchanged by it (no removal, addition or re-index) and the host parked again before the
+// LOADED window's settle ends, and annotates both; the RELEASED and RE-EXECUTED windows run with the host parked
+// (asserted). M2's LOADED readings followed no wake, so they and these are not one-to-one comparable. Each window is SPINE_RELEASED_RUN's (120 s settle, 300 s, 11 samples, the load rule), over the
 // processes measuredOn('daemon') finds once the window's daemon is stable. The line (mawsdSpineLine) names the three
 // medians for mawsd and the engine host, the peak load and its pair, each window's validity and D5's verdict; it
 // asserts no bound and writes test-results/daemon-idle-mawsd-spine.json. `pnpm e2e:daemon-idle-mawsd-spine` runs this
@@ -536,7 +543,8 @@ test('daemon idle mawsd with the spine: loaded, released, re-executed', async ()
   const script = join(REPO_ROOT, 'out', 'main', 'mawsd.js');
   expect(existsSync(script), 'the build has out/main/mawsd.js (scripts/e2e-build.sh plain)').toBe(true);
   const binary = electronBinary();
-  const env = { ELECTRON_RUN_AS_NODE: '1', PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: root, TMPDIR: process.env.TMPDIR ?? tmpdir(), MAWS_USER_DATA: profile, MAWS_SPINE_QUIET_MS: '60000', MAWS_ENGINE_REPLAY: '1' };
+  const claudeConfig = join(profile, 'claude-config'); // P5 O3-D M6: the store the fixture's transcripts are in, which the woken host scans
+  const env = { ELECTRON_RUN_AS_NODE: '1', PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: root, TMPDIR: process.env.TMPDIR ?? tmpdir(), MAWS_USER_DATA: profile, CLAUDE_CONFIG_DIR: claudeConfig, MAWS_SPINE_QUIET_MS: '60000', MAWS_ENGINE_REPLAY: '1' };
   const electron = execFileSync(binary, ['-p', 'process.versions.electron'], { env, encoding: 'utf8' }).trim();
   const logFile = join(profile, 'mawsd', 'mawsd.log');
   const log = () => (existsSync(logFile) ? readFileSync(logFile, 'utf8') : '');
@@ -554,13 +562,51 @@ test('daemon idle mawsd with the spine: loaded, released, re-executed', async ()
   const serving = async (before: number) => expect.poll(() => lines(' serving; '), { timeout: 30_000, message: `mawsd serves:\n${log()}` }).toBeGreaterThan(before);
   const build = `${process.env.npm_package_version ?? '0.0.0'}+daemon-idle-mawsd-spine`;
   // A bare machine.sock client (machine-client.ts's hello): its session.list loads the spine and reads the fixture back
-  const load = async () => {
+  // What the wake's scan could change in the index: each session's transcript stamp, archive and removal, and its text
+  // index's stamp (P5 O3-D M6: compared before the first daemon and after each load)
+  const indexFacts = () => {
+    const db = new DatabaseSync(join(profile, 'index.sqlite'), { readOnly: true });
+    try {
+      return {
+        sessions: db.prepare('SELECT app_id, engine_session_id, transcript_path, transcript_size, transcript_mtime_ms, archived, removed_at FROM sessions ORDER BY app_id').all(),
+        text: db.prepare('SELECT app_id, session_id, size, mtime_ms, status FROM session_text_state ORDER BY app_id').all(),
+      };
+    } finally {
+      db.close();
+    }
+  };
+  const hostPid = () => {
+    try {
+      return (JSON.parse(readFileSync(join(profile, 'supervisor', 'host.lock'), 'utf8')) as { pid: number }).pid;
+    } catch {
+      return null;
+    }
+  };
+  const wakeNotes: string[] = [];
+  let factsBefore: ReturnType<typeof indexFacts> | null = null;
+  // A bare machine.sock client (machine-client.ts's hello): its session.list loads the spine, wakes the parked engine
+  // host for its discovery pass and reads the fixture back; then the host parks again, and the index is as it was
+  const load = async (which: string) => {
+    const wakesBefore = lines('[spine] discovery: session.list wakes the parked engine host');
+    const startedAt = Date.now();
     const reached = await reachMachine(daemonPaths(profile, env.TMPDIR), { build });
     if (!reached.ok) throw new Error(`machine.sock: ${reached.state}: ${reached.why}`);
     const listed = await reached.link.request('session.list', { includeArchived: true }, 180_000);
     if (!listed.ok) throw new Error(`session.list: ${listed.error.code}: ${listed.error.message}`);
+    const answeredAt = Date.now();
+    expect(lines('[spine] discovery: session.list wakes the parked engine host'), `${which}: the read woke the parked engine host for its discovery pass:\n${log()}`).toBe(wakesBefore + 1);
+    const heard = log().split('\n').filter((l) => l.includes('[spine] discovery: the pass is heard ')).at(-1) ?? 'no pass heard';
+    const woken = hostPid();
+    await expect.poll(() => woken === null || !isAlive(woken), { timeout: 60_000, message: `${which}: the woken engine host parks again:\n${log()}` }).toBe(true);
+    const parkedAt = Date.now();
+    const facts = indexFacts();
+    const noOp = JSON.stringify(facts) === JSON.stringify(factsBefore);
+    wakeNotes.push(`${which}: the read answered ${answeredAt - startedAt} ms after it was sent (${heard.trim()}); the woken engine host (pid ${woken ?? 'none'}) parked again ${parkedAt - answeredAt} ms after the answer, before the LOADED settle (${SPINE_RELEASED_RUN.settleS} s) ends; the scan was ${noOp ? 'a no-op: the index unchanged' : 'NOT a no-op: the index changed'}`);
+    test.info().annotations.push({ type: 'discovery wake', description: wakeNotes.at(-1)! });
+    expect(facts, `${which}: the wake's scan changed nothing in the index (no removal, addition or re-index)`).toEqual(factsBefore);
     return { link: reached.link, sessions: (listed.value as { sessions: unknown[] }).sessions.length };
   };
+  const hostParked = (procs: MeasuredProcess[], window: string) => expect(procs.filter((p) => p.argv0 === 'maws-supervisor').map((p) => p.pid), `the ${window} window runs with the engine host parked (D36)`).toEqual([]);
   const settled = async () => {
     await sleep(SPINE_RELEASED_RUN.settleS * 1_000);
     const procs = measured(processesNaming(root), root, measuredOn('daemon'));
@@ -577,18 +623,24 @@ test('daemon idle mawsd with the spine: loaded, released, re-executed', async ()
   const evidence = processEvidence(test.info().outputDir, profile, () => true, env, { daemon: join(profile, 'mawsd') });
   let leftover: unknown = null;
   try {
-    const counts = await writeSpineFixture({ profile, folders: join(root, 'projects') });
+    const counts = await writeSpineFixture({ profile, folders: join(root, 'projects'), transcripts: claudeConfig });
     writeFileSync(join(profile, 'machine-settings.json'), JSON.stringify({ ...machineSettingsDefaults(), supervisor: { idleExitMinutes: null } }));
+    factsBefore = indexFacts();
 
     // (1) a private daemon: loaded, then released
     const first = run('private');
     await serving(0);
-    const holding = await load();
+    const holding = await load('private');
     expect(holding.sessions, 'the spine in mawsd reads the fixture').toBe(counts.sessions);
-    windows.loaded = await measureWindow(await settled(), SPINE_RELEASED_RUN);
+    const loadedProcs = await settled();
+    const overlap = loadedProcs.some((p) => p.argv0 === 'maws-supervisor');
+    test.info().annotations.push({ type: 'discovery wake', description: `the LOADED window ${overlap ? 'OVERLAPS the woken engine host: it is still measured' : 'starts with the engine host parked: no sample overlaps the host or its scan'}` });
+    windows.loaded = await measureWindow(loadedProcs, SPINE_RELEASED_RUN);
     holding.link.close();
     await expect.poll(() => lines('[spine] released'), { timeout: 5 * 60_000, message: `the spine is released after the quiet:\n${log()}` }).toBe(1);
-    windows.released = await measureWindow(await settled(), SPINE_RELEASED_RUN);
+    const releasedProcs = await settled();
+    hostParked(releasedProcs, 'RELEASED');
+    windows.released = await measureWindow(releasedProcs, SPINE_RELEASED_RUN);
     first.kill('SIGTERM');
     await expect.poll(() => first.exitCode !== null || first.signalCode !== null, { timeout: 30_000, message: 'the private mawsd exits at SIGTERM' }).toBe(true);
 
@@ -596,13 +648,15 @@ test('daemon idle mawsd with the spine: loaded, released, re-executed', async ()
     const servedBefore = lines(' serving; ');
     run('unit');
     await serving(servedBefore);
-    const loading = await load();
+    const loading = await load('unit');
     expect(loading.sessions, 'the unit mawsd reads the fixture').toBe(counts.sessions);
     loading.link.close();
     await expect.poll(() => lines('exited (spine released, code 75)'), { timeout: 5 * 60_000, message: `the unit mawsd re-executes after its release:\n${log()}` }).toBe(1);
     await serving(servedBefore + 1);
     expect(daemons, 'the harness restarted the unit').toHaveLength(3);
-    windows.reexecuted = await measureWindow(await settled(), SPINE_RELEASED_RUN);
+    const reexecutedProcs = await settled();
+    hostParked(reexecutedProcs, 'RE-EXECUTED');
+    windows.reexecuted = await measureWindow(reexecutedProcs, SPINE_RELEASED_RUN);
 
     const reasons = { loaded: [] as string[], released: [] as string[], reexecuted: [] as string[] };
     for (const key of Object.keys(windows) as SpineWindow[]) reasons[key] = windows[key] === null ? ['not read'] : windowReasons(windows[key]!, false);
@@ -610,7 +664,7 @@ test('daemon idle mawsd with the spine: loaded, released, re-executed', async ()
     const line = mawsdSpineLine({ windows: readings, reasons, counts });
     const all = (Object.keys(reasons) as SpineWindow[]).flatMap((key) => reasons[key].map((reason) => `${key}: ${reason}`));
     const spineLines = log().split('\n').filter((l) => /\[spine\] |exit(ing|ed) \(/.test(l));
-    report('daemon-idle-mawsd-spine.json', line, all, { shape: 'mawsd with the spine', electron, counts, readings, reasons, spineLines, loaded: windows.loaded?.record, released: windows.released?.record, reexecuted: windows.reexecuted?.record });
+    report('daemon-idle-mawsd-spine.json', line, all, { shape: 'mawsd with the spine', electron, counts, readings, reasons, spineLines, discoveryWake: wakeNotes, loaded: windows.loaded?.record, released: windows.released?.record, reexecuted: windows.reexecuted?.record });
   } finally {
     ending = true;
     for (const daemon of daemons) daemon.kill('SIGTERM');

@@ -1081,6 +1081,8 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
       source = new IndexSessionSource(index, fake.host, { emit, tickMs: 5, warmLinkedWorktrees: () => new Promise<void>((release) => void warmUps.push(release)) });
       const scanned = vi.fn();
       source.onScanned(scanned);
+      const applied = vi.fn(); // P5 O3-D M6: mawsd's discovery wake waits for this
+      source.onDiscoveryApplied(applied);
       stop = source.start(recordingWriter().writer);
       const archiver = archiverOver(source);
 
@@ -1092,18 +1094,23 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
       expect(scanned).toHaveBeenCalledTimes(1);
       expect(source.discoveryCurrent(null)).toBe(true);
       expect(source.discoveryCurrent(cached.sessionId)).toBe(false); // its summary waits for the warm-up
+      expect(source.discoveryApplied(), 'the scan answered, its discovery not yet in the index').toBe(false);
+      expect(applied).not.toHaveBeenCalled();
       expect(await archiver.run(7, null)).toEqual({ archived: 0, skipped: 1 });
       expect(index.sessions.get(record.appId)?.archived).toBe(false);
 
       warmUps.forEach((release) => release());
       await settle();
       expect(source.discoveryCurrent(cached.sessionId)).toBe(true);
+      expect(source.discoveryApplied(), 'the drain applied the scan’s discovery').toBe(true);
+      expect(applied).toHaveBeenCalledOnce();
       expect(index.sessions.summaryOf(record.appId)?.lastRecordAt).toBe('2026-10-23T12:00:00.000Z');
       expect(await archiver.run(7, null)).toEqual({ archived: 0, skipped: 1 });
       expect(index.sessions.get(record.appId)?.archived).toBe(false);
 
       fake.setState('crashed'); // the next host's scan has to answer again
       expect(source.discoveryCurrent(null)).toBe(false);
+      expect(source.discoveryApplied()).toBe(false);
       await expect(archiver.run(7, null)).rejects.toBeInstanceOf(DiscoveryPendingError);
     });
 

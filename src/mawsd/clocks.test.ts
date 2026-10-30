@@ -5,7 +5,7 @@ import { GROWTH_BYTES, idleCollector } from '@shared/host/idle-collect';
 import { DaemonClocks, DEFAULT_IDLE_EXIT_MS } from './clocks';
 
 const MIN = 60_000;
-const action = () => vi.fn<() => void>();
+const action = () => vi.fn<(why?: 'idle' | 'discovery') => void>();
 let actions: { armEnginePark: ReturnType<typeof action>; disarmEnginePark: ReturnType<typeof action>; exitDaemon: ReturnType<typeof action>; quiet: ReturnType<typeof vi.fn<(quiet: boolean) => void>> };
 const made: DaemonClocks[] = [];
 
@@ -92,6 +92,34 @@ describe('the engine host’s park clock', () => {
     c.engineHost(4001);
     vi.advanceTimersByTime(48 * 60 * MIN);
     expect(actions.armEnginePark).not.toHaveBeenCalled();
+  });
+
+  // P5 O3-D M6 (fix round 1): the discovery wake's park, at once, for the woken host only
+  it('parkNow arms exit-when-idle at once for the served engine host, only with no app and no interest, its clock untouched', () => {
+    const c = clocks();
+    c.configure(null); // idleExitMs null: the park clock never arms by itself
+    c.parkNow(); // no engine host served yet
+    expect(actions.armEnginePark).not.toHaveBeenCalled();
+    c.engineHost(4001);
+    c.engineAttached(true);
+    c.parkNow(); // an app attached
+    c.engineAttached(false);
+    c.interest(false);
+    c.parkNow(); // a session in the union
+    expect(actions.armEnginePark).not.toHaveBeenCalled();
+    c.interest(true);
+    c.parkNow();
+    expect(actions.armEnginePark).toHaveBeenCalledExactlyOnceWith('discovery');
+    c.parkNow(); // asked already of this host
+    expect(actions.armEnginePark).toHaveBeenCalledOnce();
+    c.engineAttached(true); // an app attaches: taken back, as the clock's own park is
+    expect(actions.disarmEnginePark).toHaveBeenCalledOnce();
+    expect(c.idleMs()).toBeNull();
+    // with an idle time, the clock still counts from the last time both came true, not from parkNow
+    c.configure(5 * MIN);
+    c.engineAttached(false);
+    vi.advanceTimersByTime(5 * MIN);
+    expect(actions.armEnginePark).toHaveBeenLastCalledWith('idle');
   });
 });
 

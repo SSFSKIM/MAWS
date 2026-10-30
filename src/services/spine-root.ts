@@ -123,6 +123,9 @@ export interface SpineRoot {
   settled(): Promise<void>;
   busy(): boolean;
   stop(): void;
+  // P5 O3-D M6 (fix round 1; mawsd's discovery wake): whether the index holds the engine host's latest scan, its
+  // discoveries applied (IndexSessionSource.discoveryApplied), and each time it comes to. Optional for a stand-in root.
+  discovery?: { applied(): boolean; onApplied(listener: () => void): () => void };
 }
 
 export function startSpine(deps: SpineDeps): SpineRoot {
@@ -417,6 +420,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     settled: () => root.settled(),
     busy: () => root.busy(),
     stop: () => stopParts('spine', parts),
+    discovery: { applied: () => indexSource.discoveryApplied(), onApplied: (listener) => indexSource.onDiscoveryApplied(listener) },
   };
 }
 

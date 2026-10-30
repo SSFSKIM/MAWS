@@ -86,6 +86,9 @@ export interface FrontOptions {
   isApp(appPid: number): boolean; // the app attached on engine-host.sock: where the port's requests with no client go
   log(line: string): void;
   portDeadlineMs?: number; // the client port's deadline (CLIENT_PORT_DEADLINE_MS unless a test shortens it)
+  // P5 O3-D M6 (fix round 1): before a client's or the endpoint's spine command runs, the spine loaded (daemon.ts's
+  // discovery wake); `app` is a client whose hello listed machine.spine, the app, which keeps the index current itself
+  beforeSpineCommand?(name: CommandName, app: boolean): Promise<void>;
 }
 
 export interface ServicesFront {
@@ -247,6 +250,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       } catch (error) {
         return { ok: false, error: ipcError('host_unavailable', error instanceof SpineUnavailable ? error.message : `the spine did not load: ${messageOf(error)}`) };
       }
+      await options.beforeSpineCommand?.(name, from !== null && readsHostEvents(from));
     }
     const handler = intercepts.get(name) ?? table.get(name);
     if (!handler) return { ok: false, error: ipcError('internal', `the spine registered no handler for ${name}`) };
