@@ -133,6 +133,7 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
   let loading: Promise<SpineRoot> | null = null;
   let releasing: Promise<void> | null = null;
   let yieldTo: { pid: number; procStart: string | null; check: ReturnType<typeof setInterval> } | null = null;
+  const yieldDeadlines = new Set<ReturnType<typeof setTimeout>>(); // the yields' settle deadlines; a lift cancels them
   let quietFact = false;
   let quietTimer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
@@ -349,6 +350,8 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
   function lift(): void {
     if (!yieldTo) return;
     clearInterval(yieldTo.check);
+    for (const timer of yieldDeadlines) clearTimeout(timer); // nobody left to yield to: the writers settle in their own time
+    yieldDeadlines.clear();
     log(`[spine] the yield to pid ${yieldTo.pid} lifted`);
     yieldTo = null;
     if (state === 'loading') events.beginHold(true); // the load goes on: its barrier drains what arrives from here
@@ -375,7 +378,11 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
         log(`[spine] the spine’s writers did not settle within ${timing.yieldSettleMs / 1000} s of the yield; ending the process`);
         options.exitForYield();
       }, timing.yieldSettleMs);
-      return () => clearTimeout(timer);
+      yieldDeadlines.add(timer);
+      return () => {
+        clearTimeout(timer);
+        yieldDeadlines.delete(timer);
+      };
     };
     if (state === 'loading') {
       events.discard('the spine yielded while it loaded', 'off');

@@ -542,6 +542,21 @@ describe('the yield', () => {
     expect(candidate.refused).not.toBeNull();
   });
 
+  it('a yield lifted while its writer is still pending cancels the deadline: no exit with no app left to yield to', async () => {
+    const spine = seam({ processes });
+    const first = (await spine.ensure('command')) as FakeRoot;
+    const done = first.hold();
+    spine.yield(777);
+    await sleep(30);
+    live.delete(777); // the older app departs while the writer is pending
+    await vi.waitFor(() => expect(spine.yieldedTo()).toBeNull());
+    await sleep(300); // past yieldSettleMs (200)
+    expect(yieldExits).toBe(0);
+    done();
+    await vi.waitFor(() => expect(spine.state()).toBe('cold'));
+    expect(first.stop).toHaveBeenCalledOnce();
+  });
+
   it('a yield lifted while the load goes on: the load completes and what arrives from then on folds', async () => {
     link.stream();
     const release = link.gate('engine.sessions');
