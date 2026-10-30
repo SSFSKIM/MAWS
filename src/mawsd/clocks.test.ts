@@ -179,6 +179,40 @@ describe('the engine host’s park clock', () => {
     expect(actions.armEnginePark).toHaveBeenCalledTimes(2);
   });
 
+  // P5 O3-D M6 (fix round 3): the idle clock's own ask, overdue on an aged daemon, holds for a discovery wake and an admission
+  it('an aged daemon at the default idle time: a demand wake keeps its host through the pass, then parks it', () => {
+    const c = clocks();
+    vi.advanceTimersByTime(DEFAULT_IDLE_EXIT_MS + 5 * MIN); // long idle, no app: parkSince far behind
+    c.discoveryWaking(); // a read woke the parked host for its pass
+    c.hosts({ engine: false, pty: true });
+    c.engineHost(4001); // its ready: the idle ask is overdue
+    vi.advanceTimersByTime(30_000); // the scan
+    expect(actions.armEnginePark, 'nothing asked of the host before its pass').not.toHaveBeenCalled();
+    c.parkNow(); // the pass is heard (or the wake gave up)
+    expect(actions.armEnginePark).toHaveBeenCalledExactlyOnceWith('discovery');
+  });
+
+  it('an overdue idle ask with an app in admission sends nothing until the admission ends', () => {
+    const c = clocks();
+    vi.advanceTimersByTime(DEFAULT_IDLE_EXIT_MS + MIN);
+    c.relaysBetween(true); // a hello waiting on its admission woke the host
+    c.hosts({ engine: false, pty: true });
+    c.engineHost(4001);
+    vi.advanceTimersByTime(MIN);
+    expect(actions.armEnginePark, 'nothing asked of the host an app is acquiring').not.toHaveBeenCalled();
+    c.relaysBetween(false); // refused, say: no attach
+    expect(actions.armEnginePark).toHaveBeenCalledExactlyOnceWith('idle');
+
+    const d = clocks();
+    vi.advanceTimersByTime(DEFAULT_IDLE_EXIT_MS + MIN);
+    d.relaysBetween(true);
+    d.hosts({ engine: false, pty: true });
+    d.engineHost(4002);
+    d.engineAttached(true); // the admission ended in an attach
+    d.relaysBetween(false);
+    expect(actions.armEnginePark).toHaveBeenCalledOnce(); // only c's
+  });
+
   it('the idle clock’s ask that was not sent is asked again at the same host’s reconnect', () => {
     const c = clocks();
     c.configure(MIN);

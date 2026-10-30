@@ -738,6 +738,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     discovery: () => spine.root()?.discovery,
     parked: () => hosts.parked('engine-host'),
     wake: () => hosts.wake('engine-host'),
+    waking: () => clocks.discoveryWaking(),
     parkNow: () => clocks.parkNow(),
     log,
   });

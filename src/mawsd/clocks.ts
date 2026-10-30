@@ -12,6 +12,10 @@
 //   two conditions and with no app between its socket and the count (a hello on its admission acquires this host); one
 //   asked meanwhile waits for that to end, and goes if an app attaches or a session enters the union first, or the host
 //   parks. The clock's own start (`parkSince`) and `idleExitMs` are untouched, and an attach or interest takes it back.
+//   P5 O3-D M6 (fix round 3): no ask, the clock's or parkNow's, is sent while an app is between its socket and the count,
+//   nor while a discovery wake is out (`discoveryWaking()` to its `parkNow()`): on a daemon idle past `idleExitMs` the
+//   clock's ask is overdue the moment the woken host is ready, and would end it before its pass. Either one's end
+//   evaluates again, the clock's ask still due from `parkSince`.
 // - A private daemon exits once no client has been on any of its sockets for `idleExitMs`, both hosts are parked and no
 //   hold is out; a unit daemon never exits by itself.
 // - `idleExitMs` is the last `host.configure` an app sent, 10 minutes until then; `null` arms nothing.
@@ -37,6 +41,7 @@ export class DaemonClocks {
   private enginePid: number | null = null; // the served engine host, null while none is served
   private armedPid: number | null = null; // the engine host asked to exit when idle, the ask sent
   private discoveryPark = false; // parkNow's ask, until it is sent or no longer wanted
+  private discoveryWake = false; // a discovery wake is out: no ask until its parkNow
   private parkSince: number;
   private parked = { engine: true, pty: true };
   private clientCount = 0;
@@ -101,10 +106,15 @@ export class DaemonClocks {
     this.evaluate();
   }
 
-  // P5 O3-D M6 (fix rounds 1, 2): the discovery wake's park of the engine host it woke (the header's terms)
+  // P5 O3-D M6 (fix round 3): a discovery wake starts; its parkNow() ends it, heard or given up
+  discoveryWaking(): void {
+    this.discoveryWake = true;
+  }
+
+  // P5 O3-D M6 (fix rounds 1, 2, 3): the discovery wake's park of the engine host it woke (the header's terms)
   parkNow(): void {
-    if (this.stopped || this.parked.engine || this.attached || !this.interestEmpty) return;
-    this.discoveryPark = true;
+    this.discoveryWake = false;
+    if (!this.stopped && !this.parked.engine && !this.attached && this.interestEmpty) this.discoveryPark = true;
     this.evaluate();
   }
 
@@ -163,8 +173,8 @@ export class DaemonClocks {
     const now = Date.now();
     const waits: number[] = [];
     const park = this.parkDue();
-    if (this.enginePid !== null && this.armedPid !== this.enginePid) {
-      const discovery = this.discoveryPark && !this.attached && this.interestEmpty && !this.between;
+    if (this.enginePid !== null && this.armedPid !== this.enginePid && !this.between && !this.discoveryWake) {
+      const discovery = this.discoveryPark && !this.attached && this.interestEmpty;
       if (discovery || (park !== null && now >= park)) {
         if (this.actions.armEnginePark(discovery ? 'discovery' : 'idle')) [this.armedPid, this.discoveryPark] = [this.enginePid, false];
       } else if (park !== null) waits.push(park);

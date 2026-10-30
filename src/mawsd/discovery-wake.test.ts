@@ -8,6 +8,7 @@ let parked: boolean;
 let listeners: Set<() => void>;
 let wakes: number;
 let parks: number;
+let waking: number;
 let lines: string[];
 let before: ReturnType<typeof discoveryWake>;
 
@@ -21,11 +22,13 @@ beforeEach(() => {
   listeners = new Set();
   wakes = 0;
   parks = 0;
+  waking = 0;
   lines = [];
   before = discoveryWake({
     discovery: () => ({ onApplied: (listener) => (listeners.add(listener), () => void listeners.delete(listener)) }),
     parked: () => parked,
     wake: () => void ((wakes += 1), (parked = false)),
+    waking: () => void (waking += 1),
     parkNow: () => void (parks += 1),
     log: (line) => void lines.push(line),
   });
@@ -37,7 +40,7 @@ describe('the discovery wake', () => {
     let answered = 0;
     const reads = [before('session.list', false), before('session.projects.list', false)].map((read) => read.then(() => void (answered += 1)));
     await vi.advanceTimersByTimeAsync(1_000);
-    expect([wakes, answered]).toEqual([1, 0]);
+    expect([wakes, waking, answered], 'the clocks told a wake is out, before the host is woken').toEqual([1, 1, 0]);
     pass();
     await Promise.all(reads);
     expect([answered, parks, listeners.size]).toEqual([2, 1, 0]);

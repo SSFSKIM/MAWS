@@ -1,7 +1,7 @@
 // The discovery wake (P5 O3-D M6 fix rounds 1 and 2, the architect's ruling (a) on discovery): a read whose answer
 // depends on the index's discovery, from a client that is not the app (the CLI, another machine's link, the endpoint),
 // on a parked engine host, wakes it and waits for its first discovery pass (the scan, its discoveries applied) before
-// answering. Reads meanwhile join that wake. The host the wake woke is asked to park again (DaemonClocks.parkNow: only
+// answering. Reads meanwhile join that wake, and no park of the host is asked until it ends (fix round 3). The host the wake woke is asked to park again (DaemonClocks.parkNow: only
 // with no app attached or being admitted and no interest) once the pass is heard, and equally when the wake gives up,
 // so a host whose scan failed or ran late is not left up; once it has parked, the next read wakes it again.
 
@@ -28,6 +28,7 @@ export interface DiscoveryWakeOptions {
   discovery(): DiscoverySignal | undefined; // the loaded spine's; undefined for a stand-in root, which nothing waits for
   parked(): boolean; // the engine host's on-demand park
   wake(): void; // the engine host woken from its park
+  waking(): void; // DaemonClocks.discoveryWaking: no park of the host until parkNow
   parkNow(): void; // DaemonClocks.parkNow
   log(line: string): void;
 }
@@ -57,6 +58,7 @@ export function discoveryWake(options: DiscoveryWakeOptions): (name: string, app
       const giveUp = setTimeout(() => done(false), DISCOVERY_WAKE_GIVE_UP_MS);
       giveUp.unref?.();
       off = discovery.onApplied(() => done(true));
+      options.waking();
       options.wake();
     });
   };
