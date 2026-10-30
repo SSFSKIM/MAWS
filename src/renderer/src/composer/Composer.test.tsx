@@ -639,15 +639,19 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(within(composerOf(0)).queryByRole('note', { name: 'Permission mode notice' })).toBeNull();
   });
 
-  // E11 F2b (plan 2.4): an error seen in its session stays as the notice above the frame until dismissed or the next turn
-  it('keeps an error it has seen as its notice, and drops it once dismissed', () => {
+  // The owner's ruling (2026-10-30): an unseen error is the notice above the frame, in its own words; seen or dismissed
+  // it retires, and no notice stays behind
+  it('shows an unseen API error in its own words as its notice, and nothing once it is seen or dismissed', () => {
     live(A);
-    const error = pageItem(item(A_ID, 'error', '2026-10-08T10:00:00.000Z', { summary: 'The turn ended with an error', state: 'confirmed', request: { requestId: null, toolUseId: null, taskId: null, agentId: null } }));
+    const words = 'API Error: 529 Overloaded. This is a server-side issue, usually temporary — try again in a moment.';
+    const error = pageItem(item(A_ID, 'error', '2026-10-08T10:00:00.000Z', { summary: words, request: { requestId: null, toolUseId: null, taskId: null, agentId: null } }));
     useAttention.setState((s) => ({ bySession: new Map(s.bySession).set(A, [error]), version: s.version + 1 }));
     mount([{ index: 0, id: A }]);
-    expect(within(composerOf(0)).getByText('The turn ended with an error')).toBeTruthy();
-    act(() => useAttention.setState((s) => ({ bySession: new Map(s.bySession).set(A, [{ ...error, state: 'retired' }]), version: s.version + 1 })));
-    expect(within(composerOf(0)).queryByText('The turn ended with an error')).toBeNull();
+    expect(within(composerOf(0)).getByText(words)).toBeTruthy();
+    for (const state of ['confirmed', 'retired'] as const) {
+      act(() => useAttention.setState((s) => ({ bySession: new Map(s.bySession).set(A, [{ ...error, state }]), version: s.version + 1 })));
+      expect(within(composerOf(0)).queryByText(words)).toBeNull();
+    }
   });
 
   it('renews the route’s catalogue when the process becomes ready, not at each mount of a ready session', async () => {

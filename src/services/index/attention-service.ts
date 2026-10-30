@@ -4,7 +4,12 @@
 // or a transcript removed from disk — reaches the service as the `session.forgotten` the engine host sends when it
 // archives a live session, so the service retires the session in memory, in the renderer and in the store at once. An
 // index this app cannot read (a newer version's) leaves the items to C3's file store, as before the index existed.
+// The owner's ruling (2026-10-30): the service reads "seen" from the index's unread rule (IndexSessionSource): a
+// session a client shows is being seen now (`showing`), else it was last seen at its record's `lastSeen.at` (set when
+// a client starts showing it, at each transcript advance while one does, and by Mark all read); each move of that mark
+// reaches the service as `seen`, which retires the errors it covers.
 import type { AppSessionId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
 import type { EventPayload } from '@shared/ipc/schema';
 import { FileAttentionStore } from '../attention/file-attention-store';
 import { startAttentionService, type AttentionService, type AttentionServiceDeps } from '../attention/service';
@@ -12,8 +17,10 @@ import type { Index } from './index';
 
 type Forgotten = (payload: EventPayload<'session.forgotten'>) => void;
 
-export function startIndexAttention(index: Index, deps: Omit<AttentionServiceDeps, 'store'> & { fallbackFile: string }): AttentionService {
-  const { fallbackFile, ...serviceDeps } = deps;
+const lastSeenOf = (record: SessionRecord | null): number | null => (record?.lastSeen.at ? Date.parse(record.lastSeen.at) : null);
+
+export function startIndexAttention(index: Index, deps: Omit<AttentionServiceDeps, 'store' | 'seenAt'> & { fallbackFile: string; showing?: (appSessionId: AppSessionId) => boolean }): AttentionService {
+  const { fallbackFile, showing, ...serviceDeps } = deps;
   const forgotten = new Set<Forgotten>();
   const onEvent: AttentionServiceDeps['onEvent'] = (name, listener) => {
     const off = deps.onEvent(name, listener);
@@ -25,12 +32,15 @@ export function startIndexAttention(index: Index, deps: Omit<AttentionServiceDep
     };
   };
   const usable = index.unavailable === null;
-  const service = startAttentionService({ ...serviceDeps, onEvent, store: usable ? index.attention : new FileAttentionStore(fallbackFile) });
+  const seenAt = (id: AppSessionId) => (showing?.(id) ? Infinity : usable ? lastSeenOf(index.sessions.get(id)) : null);
+  const service = startAttentionService({ ...serviceDeps, onEvent, seenAt, store: usable ? index.attention : new FileAttentionStore(fallbackFile) });
   if (!usable) return service;
 
   // Archive transitions, from the records as the index commits them; one already archived at start is not retired again.
   const archived = new Set<AppSessionId>(index.sessions.list({ includeArchived: true }).flatMap((record) => (record.archived ? [record.appId] : [])));
   const offChange = index.sessions.onChange((record) => {
+    const seen = lastSeenOf(record);
+    if (seen !== null) service.seen(record.appId, seen);
     if (!record.archived) {
       archived.delete(record.appId);
       return;

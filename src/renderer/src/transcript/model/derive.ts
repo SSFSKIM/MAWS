@@ -885,7 +885,12 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const cells = collectCells(workRows);
   const summary = summaryOf(turn, cells, subagents, model);
   const denials = summary.denials;
-  const dividerState: RowOf<'divider'>['state'] = turn.state === 'open' ? 'working' : turn.closedBy !== null ? turn.closedBy : isAborted(turn.ended?.terminalReason ?? null) ? 'stopped' : turn.ended?.isError ? 'failed' : turn.ended ? 'completed' : 'stopped';
+  // The owner's ruling (2026-10-30): a turn that ended on an API error (its last assistant message the engine's API error
+  // envelope, what the engine's own `api_error` reason means) shows that error as its row, where it happened; its divider
+  // reads the work it did rather than Failed, as Claude Desktop drops its turn-error card when the turn has that row.
+  const lastReply = turn.events.findLast((event) => event.kind === 'assistant.block.complete');
+  const endedOnApiError = lastReply?.kind === 'assistant.block.complete' && lastReply.isApiErrorMessage === true;
+  const dividerState: RowOf<'divider'>['state'] = turn.state === 'open' ? 'working' : turn.closedBy !== null ? turn.closedBy : isAborted(turn.ended?.terminalReason ?? null) ? 'stopped' : turn.ended?.isError && !endedOnApiError ? 'failed' : turn.ended ? 'completed' : 'stopped';
   const rows: Row[] = [];
   if (user) rows.push(user);
   // The divider summarises a work area. A turn the owner did not start (engine, peer) always has one, because it is

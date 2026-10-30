@@ -40,8 +40,9 @@ describe('attention persists through the index and retires on the archive path',
     dir.dispose();
   });
 
-  const start = (target: Index = index) => {
+  const start = (target: Index = index, showing?: (appSessionId: AppSessionId) => boolean) => {
     const service = startIndexAttention(target, {
+      ...(showing && { showing }),
       onEvent: ((name: EventName, listener: (payload: unknown) => void) => {
         listeners.set(name, [...(listeners.get(name) ?? []), listener]);
         return () => listeners.set(name, (listeners.get(name) ?? []).filter((l) => l !== listener));
@@ -104,6 +105,52 @@ describe('attention persists through the index and retires on the archive path',
     await service.ready;
     index.sessions.setPinned(appId, true);
     expect(changed).toEqual([]);
+  });
+
+  // The owner's ruling (2026-10-30): "seen" is the index's unread rule, the record's last-seen mark and the shown set.
+  describe('an error is raised only when newer than the session\'s last-seen mark', () => {
+    const FAILED_AT = '2026-10-01T09:00:00.000Z';
+    let n = 0;
+    const failure = (appSessionId: AppSessionId, at = FAILED_AT) => {
+      n += 1;
+      fire('session.eventBatch', { appSessionId, events: [{ id: `${appSessionId}:disk:${n}`, sessionId: 'sid', at, seq: null, agentId: null, parentToolUseId: null, kind: 'turn.ended', isError: true, terminalReason: null, result: 'error_during_execution', resultText: null, isEchoReceipt: false, origin: null, errors: [], userMessageUuids: [] }] });
+    };
+    const errors = (service: ReturnType<typeof start>, appSessionId: AppSessionId) => service.list().filter((item) => item.appSessionId === appSessionId).map((item) => item.state);
+
+    it('a session never seen tells once; marking it seen retires the error for good, in the service and the store', async () => {
+      const appId = index.sessions.upsertFromSummary(summary()).record.appId;
+      const service = start();
+      await service.ready;
+      failure(appId);
+      expect(errors(service, appId)).toEqual(['pending']);
+      index.sessions.markSeen(appId, { messageUuid: null, at: '2026-10-29T12:00:00.000Z' });
+      expect(errors(service, appId)).toEqual(['retired']);
+      await service.settled();
+      expect((await index.attention.list()).map((item) => item.state)).toEqual(['retired']);
+    });
+
+    it('an error older than the session\'s last-seen mark raises nothing; one newer than it does', async () => {
+      const appId = index.sessions.upsertFromSummary(summary()).record.appId;
+      index.sessions.markSeen(appId, { messageUuid: null, at: '2026-10-29T12:00:00.000Z' });
+      const service = start();
+      await service.ready;
+      failure(appId);
+      expect(errors(service, appId)).toEqual([]);
+      failure(appId, '2026-10-30T08:00:00.000Z');
+      expect(errors(service, appId)).toEqual(['pending']);
+    });
+
+    it('a session a client shows sees its error as it arrives', async () => {
+      const appId = index.sessions.upsertFromSummary(summary()).record.appId;
+      let showing = true;
+      const service = start(index, () => showing);
+      await service.ready;
+      failure(appId, '2026-10-30T08:00:00.000Z');
+      expect(errors(service, appId)).toEqual([]);
+      showing = false;
+      failure(appId, '2026-10-30T08:00:01.000Z');
+      expect(errors(service, appId)).toEqual(['pending']);
+    });
   });
 
   it('an index this app cannot read falls back to C3\'s file store', async () => {

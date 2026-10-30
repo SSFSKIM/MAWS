@@ -225,6 +225,11 @@ export class IndexSessionSource implements SessionSource {
     for (const listener of [...this.appliedListeners]) listener();
   }
 
+  // Whether a client shows the session: it is being seen now (the attention service's unseen rule, 2026-10-30).
+  isVisible(appSessionId: AppSessionId): boolean {
+    return this.visible.has(appSessionId);
+  }
+
   // C5's visibility report. A session becoming visible is seen at once; the unread rule reads the set on every advance.
   onSetVisible(appSessionId: AppSessionId, visible: boolean): void {
     // E11: what the host sent before the report, read under the visibility it had

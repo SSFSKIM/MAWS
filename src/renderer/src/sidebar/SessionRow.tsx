@@ -11,7 +11,7 @@ import { SessionOverflow } from './menus';
 import { useNow } from '../app/use-now';
 import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor } from '../attention/glyph';
-import { selectEndedWithErrorOf, selectPendingOf, useAttention } from '../stores/attention';
+import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { lineageCaption, sessionAge } from './derive';
@@ -41,8 +41,7 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
   const now = useNow();
   const tree = useTree();
   const nodeId = sessionNodeId(id);
-  const ended = useAttention((s) => selectEndedWithErrorOf(s, id)); // E11 F2b
-  const glyph = glyphFor(record, digest ?? null, pending, ended, now);
+  const glyph = glyphFor(record, digest ?? null, pending);
   const selected = tree.selected === id;
   const title = displayTitle(record);
   const hasActions = sessionActionsFor(record).includes('rename');
