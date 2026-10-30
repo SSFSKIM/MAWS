@@ -99,6 +99,39 @@ describe('the machine settings mirror (Interfaces §G)', () => {
     expect(mirror.state()).toEqual(withIdle(45));
   });
 
+  // P5 O3-D M5b follow-up: mawsd answers only from a loaded spine, and its load ran the settings split under its lock
+  it('answered resolves at mawsd’s first answer (a read, a set or a change heard), never at a refusal', async () => {
+    const answered = async (mirror: ReturnType<typeof createMachineSettingsMirror>) => {
+      let heard = false;
+      void mirror.answered().then(() => (heard = true));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return heard;
+    };
+    const host = machineHost();
+    host.answers.set('machineSettings.get', async () => ({ ok: false, error: { code: 'host_unavailable', message: 'the spine is refused' } }));
+    const read = createMachineSettingsMirror({ file, hosts: host.hosts, log: () => {} });
+    host.stream();
+    expect(await answered(read)).toBe(false);
+    host.answers.set('machineSettings.get', async () => ({ ok: true, value: { settings: withIdle(30), version: 1 } }));
+    host.stream();
+    expect(await answered(read)).toBe(true);
+    read.stop();
+
+    const other = machineHost();
+    other.answers.set('machineSettings.set', async () => ({ ok: true, value: { settings: withIdle(5) } }));
+    const set = createMachineSettingsMirror({ file, hosts: other.hosts, log: () => {} });
+    expect(await answered(set)).toBe(false);
+    await set.update({ supervisor: { idleExitMinutes: 5 } });
+    expect(await answered(set)).toBe(true);
+    set.stop();
+
+    const third = machineHost();
+    const heard = createMachineSettingsMirror({ file, hosts: third.hosts, log: () => {} });
+    third.fire('machineSettings.changed', { settings: withIdle(7) });
+    expect(await answered(heard)).toBe(true);
+    heard.stop();
+  });
+
   it('update resolves on machineSettings.set’s answer, however late, with the state its listeners were told; a refusal rejects and changes nothing', async () => {
     const host = machineHost();
     const set = deferred();

@@ -19,6 +19,9 @@ export interface MachineSettingsMirrorOptions {
 }
 
 export interface MachineSettingsMirror extends MachineSettingsService {
+  // Resolves at `mawsd`'s first answer (a read, a set, a change heard): it answers only from a loaded spine, whose load
+  // ran the settings split under `spine.lock` (D26), so the client file is converted by then if it could be
+  answered(): Promise<void>;
   stop(): void;
 }
 
@@ -31,17 +34,21 @@ export function createMachineSettingsMirror({ file, hosts, log }: MachineSetting
     for (const listener of [...listeners]) listener(current);
   };
 
+  let markAnswered!: () => void;
+  const firstAnswer = new Promise<void>((resolve) => (markAnswered = resolve));
   let heard = 0; // changes heard; a read that saw one land while it was out is dropped
   const refresh = () => {
     const before = heard;
     void hosts.dispatch('machine', 'machineSettings.get', undefined).then((answer) => {
       if (!answer.ok) return log(`[settings] machineSettings.get: ${answer.error.code} ${answer.error.message}`);
+      markAnswered();
       if (heard === before) take((answer.value as CommandOutput<'machineSettings.get'>).settings);
     });
   };
   const offs = [
     hosts.onEvent('machineSettings.changed', ({ settings }) => {
       heard += 1;
+      markAnswered();
       take(settings);
     }),
     hosts.onStreaming('machine', refresh),
@@ -54,6 +61,7 @@ export function createMachineSettingsMirror({ file, hosts, log }: MachineSetting
       const answer = await hosts.dispatch('machine', 'machineSettings.set', { patch: patch as MachineSettingsPatch });
       if (!answer.ok) throw new Error(answer.error.message);
       heard += 1;
+      markAnswered();
       take((answer.value as CommandOutput<'machineSettings.set'>).settings);
       return current;
     },
@@ -61,6 +69,7 @@ export function createMachineSettingsMirror({ file, hosts, log }: MachineSetting
       listeners.add(listener);
       return () => void listeners.delete(listener);
     },
+    answered: () => firstAnswer,
     stop: () => offs.forEach((off) => off()),
   };
 }

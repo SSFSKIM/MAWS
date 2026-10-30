@@ -149,16 +149,16 @@ describe('a profile O2 left starts under O3-A’s build with no visible change',
 
   // P5 O3-D M5b (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, acceptance 1): on the daemon shape `mawsd` migrates
   // the profile, at its spine's first load (its own lock, then the data start under it, D26), while main, started first,
-  // reads both halves without writing either: the client file as it finds it, the machine half from its file and then
-  // from `mawsd`'s answer.
-  it('on the daemon shape mawsd splits the settings under its lock, and main shows every value, writing neither file', async () => {
+  // reads both halves without migrating either: the client file as it finds it, the machine half from its file and then
+  // from `mawsd`'s answer. A change made before the split waits for it and lands in the converted file.
+  it('on the daemon shape mawsd splits the settings under its lock, main shows every value, and a change made before the split persists after it', async () => {
     const profile = dir.path;
     const paths = settingsPaths(profile);
     const unified = JSON.stringify({ ...CHOSEN, version: 20 });
     writeFileSync(paths.client, unified);
 
-    // main starts first: the client file read as it is (unified: read-only until a launch after the split), the machine
-    // half from its file (absent: the defaults) until mawsd answers
+    // main starts first: the client file read as it is (unified: not written until mawsd has split it), the machine half
+    // from its file (absent: the defaults) until mawsd answers
     let streaming = false;
     const onStreaming = new Set<() => void>();
     let answer: unknown = null;
@@ -169,9 +169,13 @@ describe('a profile O2 left starts under O3-A’s build with no visible change',
       streaming: () => streaming,
     };
     const mirror = createMachineSettingsMirror({ file: paths.machine, hosts: hosts as never, log: () => {} });
-    const settings = composeSettings({ clientFile: paths.client, machine: mirror });
+    const settings = composeSettings({ clientFile: paths.client, machine: mirror, split: mirror.answered });
     expect(settings.settings).toMatchObject({ theme: 'dark', gateway: SETTINGS_DEFAULTS_V21.gateway }); // the client's value; the machine's defaults
-    await expect(settings.update({ theme: 'light' })).rejects.toThrow(); // the unified file is read-only until the split
+    // the person changes the theme before mawsd has loaded: the change waits for the split, nothing written yet
+    let changed = false;
+    const changing = settings.update({ theme: 'light' }).finally(() => (changed = true));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(changed).toBe(false);
     expect(readFileSync(paths.client, 'utf8')).toBe(unified);
 
     // mawsd's spine loads: its lock, the split under it, the machine half
@@ -185,9 +189,10 @@ describe('a profile O2 left starts under O3-A’s build with no visible change',
       answer = { settings: data.machineSettings.state(), version: 0 };
       streaming = true;
       for (const listener of onStreaming) listener();
-      await vi.waitFor(() => expect(settings.settings).toEqual(CHOSEN));
-      // and main rewrote neither file
-      expect(JSON.parse(readFileSync(paths.client, 'utf8'))).toEqual(splitSettings(CHOSEN).client);
+      await vi.waitFor(() => expect(settings.settings).toEqual({ ...CHOSEN, theme: 'light' }));
+      // the change made in the window is in the converted client file; main wrote nothing else
+      expect(await changing).toEqual({ ...CHOSEN, theme: 'light' });
+      expect(JSON.parse(readFileSync(paths.client, 'utf8'))).toEqual({ ...splitSettings(CHOSEN).client, theme: 'light' });
       expect(JSON.parse(readFileSync(paths.machine, 'utf8'))).toEqual(splitSettings(CHOSEN).machine);
     } finally {
       mirror.stop();

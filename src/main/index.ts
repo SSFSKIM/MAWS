@@ -283,9 +283,10 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   // the machine's files or launch a session starts (startSpine says which), the index is opened unavailable, and the
   // client half runs.
   const { hosts, daemon } = createHosts(MAIN_BUILD, launch, { spineRefused: data?.refused ?? null }); // E11 §2.7: main's build for host.status; P5 O2 M7: the launch's shape; P5 O3-A: why the spine does not run
-  // P5 O3-D M5b (§G, D20): the daemon shape's machine half mirrors mawsd's, from machine-settings.json read and never written
-  const machineSettings = data?.machineSettings ?? createMachineSettingsMirror({ file: settingsPaths(profile).machine, hosts, log: (line) => console.log(line) });
-  const settings: SettingsService = startSettings({ clientFile: settingsPaths(profile).client, machine: machineSettings });
+  // P5 O3-D M5b (§G, D20): the daemon shape's machine half mirrors mawsd's, from machine-settings.json read and never written;
+  // a client change waits for mawsd's settings split at the first launch on a profile before it (composeSettings)
+  const mirror = data === null ? createMachineSettingsMirror({ file: settingsPaths(profile).machine, hosts, log: (line) => console.log(line) }) : null;
+  const settings: SettingsService = startSettings({ clientFile: settingsPaths(profile).client, machine: data?.machineSettings ?? mirror!, ...(mirror && { split: mirror.answered }) });
   installContentSecurityPolicy();
   // C9 block begin: the harness's fake session directories; a terminal's links open through pty.openLink
   if (process.env.MAWS_HARNESS === '1') prepareHarness();

@@ -21,8 +21,9 @@ export interface SettingsService {
   onChange(listener: (state: SettingsState) => void): () => void;
 }
 
-export function startSettings({ clientFile, machine }: { clientFile: string; machine: MachineSettingsService }): SettingsService {
-  const store = composeSettings({ clientFile, machine });
+// `split`: on the daemon shape, when `mawsd` has run the settings split (composeSettings)
+export function startSettings({ clientFile, machine, split }: { clientFile: string; machine: MachineSettingsService; split?: () => Promise<void> }): SettingsService {
+  const store = composeSettings({ clientFile, machine, ...(split && { split }) });
   const state = (): SettingsState => ({ settings: store.settings, resolvedTheme: resolveTheme(store.settings.theme, nativeTheme.shouldUseDarkColors) });
 
   const listeners = new Set<(state: SettingsState) => void>(); // P2-C M4
