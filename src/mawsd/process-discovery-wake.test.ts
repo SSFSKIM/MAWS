@@ -15,7 +15,8 @@ import { RawApp } from '../../test/support/mawsd-scene';
 import { writeReplayEngine } from '../../test/support/replay-engine';
 import { seedTranscript } from '../../test/support/transcripts';
 import { isAlive, readLock } from '../engine-host/supervisor-files';
-import { DISCOVERY_FRESH_MS, startDaemon, type RunningDaemon } from './daemon';
+import { startDaemon, type RunningDaemon } from './daemon';
+import { DISCOVERY_FRESH_MS } from './discovery-wake';
 
 const REPO_ROOT = resolve(__dirname, '../..');
 const OUT = join(REPO_ROOT, 'out/main');
@@ -118,7 +119,7 @@ describe.skipIf(!existsSync(MAWSD))('the discovery wake: a read that needs the i
 
     // the host parks again at once: asked to exit when idle for the wake, then gone
     const host = readLock(join(profile, 'supervisor'))!.pid;
-    await until(() => logs.some((line) => line.includes('the discovery pass is heard: asking the engine host to exit when idle')), 'the park asked after the pass', 10_000);
+    await until(() => logs.some((line) => line.includes('[spine] discovery: the wake is over: asking the engine host to exit when idle')), 'the park asked after the pass', 10_000);
     await until(() => !isAlive(host), 'the woken engine host parked again', 30_000);
 
     // a read within DISCOVERY_FRESH_MS of the pass wakes nothing

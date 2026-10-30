@@ -6,9 +6,12 @@
 //   for `idleExitMs`, the served engine host is asked to exit when idle (it exits once no row is live and its plugin
 //   runner is idle, and the exit parks it). An app's attach, or any session entering the union, takes it back first and
 //   restarts the clock. It never arms while anything holds interest: under an armed exit-when-idle M2's release ignores
-//   interest, so arming then would release a session a remote viewer holds. P5 O3-D M6 (fix round 1): `parkNow()` arms
-//   it at once, under the same two conditions, for the host the discovery wake woke, once its pass is heard; the clock's
-//   own start (`parkSince`) and `idleExitMs` are untouched, and an attach or interest takes it back the same way.
+//   interest, so arming then would release a session a remote viewer holds. Armed means sent: an ask the transport did
+//   not take (`armEnginePark` false) is asked again at the next evaluation, the same host's reconnect included.
+//   P5 O3-D M6 (fix rounds 1, 2): `parkNow()` asks the same of the host the discovery wake woke, at once, under the same
+//   two conditions and with no app between its socket and the count (a hello on its admission acquires this host); one
+//   asked meanwhile waits for that to end, and goes if an app attaches or a session enters the union first, or the host
+//   parks. The clock's own start (`parkSince`) and `idleExitMs` are untouched, and an attach or interest takes it back.
 // - A private daemon exits once no client has been on any of its sockets for `idleExitMs`, both hosts are parked and no
 //   hold is out; a unit daemon never exits by itself.
 // - `idleExitMs` is the last `host.configure` an app sent, 10 minutes until then; `null` arms nothing.
@@ -21,7 +24,7 @@
 export const DEFAULT_IDLE_EXIT_MS = 10 * 60_000;
 
 export interface ClockActions {
-  armEnginePark(why: 'idle' | 'discovery'): void; // `exit {when: 'idle'}` to the served engine host: the clock's, or parkNow's
+  armEnginePark(why: 'idle' | 'discovery'): boolean; // `exit {when: 'idle'}` to the served engine host: the clock's, or parkNow's; false when not sent
   disarmEnginePark(): void; // `host.exitWhenIdle {armed: false}`, and the transport told
   exitDaemon(): void; // a private daemon's idle exit
   quiet(quiet: boolean): void; // the daemon's quiet as it stands, told at each evaluation from `served()` on
@@ -32,7 +35,8 @@ export class DaemonClocks {
   private attached = false;
   private interestEmpty = true;
   private enginePid: number | null = null; // the served engine host, null while none is served
-  private armedPid: number | null = null; // the engine host asked to exit when idle
+  private armedPid: number | null = null; // the engine host asked to exit when idle, the ask sent
+  private discoveryPark = false; // parkNow's ask, until it is sent or no longer wanted
   private parkSince: number;
   private parked = { engine: true, pty: true };
   private clientCount = 0;
@@ -80,7 +84,7 @@ export class DaemonClocks {
   }
 
   hosts(parked: { engine: boolean; pty: boolean }): void {
-    if (parked.engine) [this.armedPid, this.enginePid] = [null, null]; // it exited: the next one is asked afresh
+    if (parked.engine) [this.armedPid, this.enginePid, this.discoveryPark] = [null, null, false]; // it exited: the next one is asked afresh
     this.parked = { ...parked };
     this.evaluate();
   }
@@ -97,12 +101,11 @@ export class DaemonClocks {
     this.evaluate();
   }
 
-  // P5 O3-D M6 (fix round 1): the discovery wake's park, at once, of the served engine host, only with no app attached
-  // and an empty interest union, once per host as the clock's is; nothing of the clock's own time changes.
+  // P5 O3-D M6 (fix rounds 1, 2): the discovery wake's park of the engine host it woke (the header's terms)
   parkNow(): void {
-    if (this.stopped || this.attached || !this.interestEmpty || this.enginePid === null || this.armedPid === this.enginePid) return;
-    this.armedPid = this.enginePid;
-    this.actions.armEnginePark('discovery');
+    if (this.stopped || this.parked.engine || this.attached || !this.interestEmpty) return;
+    this.discoveryPark = true;
+    this.evaluate();
   }
 
   relaysBetween(between: boolean): void {
@@ -134,7 +137,8 @@ export class DaemonClocks {
   private parkConditionChanged(): void {
     const idle = !this.attached && this.interestEmpty;
     if (idle) this.parkSince = Date.now(); // the clock starts when the last of the two came true
-    else if (this.armedPid !== null) {
+    else this.discoveryPark = false; // the host is someone's now: its own clock decides once it is free again
+    if (!idle && this.armedPid !== null) {
       // taken back first: an app attached, or a session entered the union
       this.armedPid = null;
       this.actions.disarmEnginePark();
@@ -159,11 +163,11 @@ export class DaemonClocks {
     const now = Date.now();
     const waits: number[] = [];
     const park = this.parkDue();
-    if (park !== null && this.enginePid !== null && this.armedPid !== this.enginePid) {
-      if (now >= park) {
-        this.armedPid = this.enginePid;
-        this.actions.armEnginePark('idle');
-      } else waits.push(park);
+    if (this.enginePid !== null && this.armedPid !== this.enginePid) {
+      const discovery = this.discoveryPark && !this.attached && this.interestEmpty && !this.between;
+      if (discovery || (park !== null && now >= park)) {
+        if (this.actions.armEnginePark(discovery ? 'discovery' : 'idle')) [this.armedPid, this.discoveryPark] = [this.enginePid, false];
+      } else if (park !== null) waits.push(park);
     }
     const exit = this.exitDue();
     if (exit !== null && !this.exited) {

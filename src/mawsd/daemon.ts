@@ -99,6 +99,7 @@ import { runE2eSeam } from './e2e-seam'; // M5b fix round 2
 import { DEPARTURE_BOUND_MS, Relay, type RelayRequest } from './relay';
 import { createLazySpine, loadServicesEntry, type SpineEntry, type SpineTiming } from './spine-seam';
 import { SpineReaders } from './spine-readers';
+import { discoveryWake } from './discovery-wake';
 import { trashPath } from './trash';
 
 export const EXIT_RESTART = 75; // a requested restart: the units restart on it
@@ -113,22 +114,6 @@ export const SINGLETON_LOCK_SIGNAL_DEFAULT = true;
 export const SPINE_LOCK_FILE = 'spine.lock'; // src/services/settings/spine-lock.ts's SPINE_LOCK, which mawsd's eager graph cannot import
 export const SINGLETON_LOCK_FILE = 'SingletonLock'; // Electron's single-instance lock in the profile (src/main/files/profile-lock.ts)
 const STATUS_BOUND_MS = 5_000; // daemon.status waits this long for the engine host's own status
-// P5 O3-D M6 (fix round 1, the architect's ruling (a) on discovery): a read whose answer depends on the index's
-// discovery, from a client that is not the app (the CLI, another machine's link, the endpoint), on a parked engine host,
-// wakes it and waits for its first discovery pass (the scan, its discoveries applied) before answering; the host is
-// asked to park again once the pass is heard, with no app attached and no interest. Reads meanwhile join that wake.
-export const DISCOVERY_READS: ReadonlySet<string> = new Set(['session.list', 'session.get', 'session.search', 'session.projects.list', 'session.digests']);
-// How long a read waits for the wake's pass before answering with what the index holds (logged): a cold host's start
-// (its spawn and welcome, a few seconds on a loaded Mac, inside the supervisor's own start budget) and a stat-only scan
-// of a store the index already knows (well under a second for thousands of transcripts), with room; a first scan of a
-// large unindexed store may outlast it, and the pass then goes on for the next read.
-export const DISCOVERY_WAKE_BOUND_MS = 15_000;
-// A read within this long of a heard pass wakes nothing: a reader's burst (a listing, its projects, a session it opens)
-// costs one wake, and what it sees is at most this stale; a host start and scan each time would cost a process spawn per read.
-export const DISCOVERY_FRESH_MS = 30_000;
-// A wake whose pass is not heard within this long is dropped (logged), so the next read may wake again: the host did
-// not come up, or its scan failed; the reads meanwhile each answered at DISCOVERY_WAKE_BOUND_MS.
-const DISCOVERY_WAKE_GIVE_UP_MS = 60_000;
 const MAX_INTEREST = 10_000; // host.interest's bound
 
 export interface DaemonOptions {
@@ -407,8 +392,10 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const idle = idleCollector({ log, collect: options.collect, quiet: () => clocks.quiet() }); // P5 Decision Log 124's lever: a collection at each quiet entry, asked again as it collects
   const clocks = new DaemonClocks(kind, {
     armEnginePark: (why) => {
-      log(why === 'discovery' ? '[spine] discovery: the discovery pass is heard: asking the engine host to exit when idle' : 'no app and no interest for the idle time: asking the engine host to exit when idle');
-      hosts.exitSupervisor('idle', 'engine-host');
+      log(why === 'discovery' ? '[spine] discovery: the wake is over: asking the engine host to exit when idle' : 'no app and no interest for the idle time: asking the engine host to exit when idle');
+      const sent = hosts.exitSupervisor('idle', 'engine-host');
+      if (!sent) log('the engine host’s exit when idle was not sent (no link): asked again at its next ready');
+      return sent;
     },
     disarmEnginePark: () => {
       log('taking back the engine host’s exit when idle');
@@ -746,42 +733,14 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     }
   }
 
-  // --- the discovery wake (P5 O3-D M6 fix round 1; DISCOVERY_READS) ---------------------------------------------------
-  let discoveryWake: Promise<void> | null = null;
-  let discoveryHeardAt = Number.NEGATIVE_INFINITY;
-  const wakeForDiscovery = async (name: string, app: boolean): Promise<void> => {
-    if (app || !DISCOVERY_READS.has(name)) return;
-    const discovery = spine.root()?.discovery;
-    if (!discovery) return;
-    if (!discoveryWake) {
-      if (!hosts.parked('engine-host') || Date.now() - discoveryHeardAt < DISCOVERY_FRESH_MS) return;
-      log(`[spine] discovery: ${name} wakes the parked engine host for its discovery pass`);
-      const started = Date.now();
-      discoveryWake = new Promise<void>((resolve) => {
-        let off = () => {};
-        const done = (heard: boolean) => {
-          off();
-          clearTimeout(giveUp);
-          discoveryWake = null;
-          if (heard) {
-            discoveryHeardAt = Date.now();
-            log(`[spine] discovery: the pass is heard ${discoveryHeardAt - started} ms after the wake`);
-            clocks.parkNow();
-          } else log(`[spine] discovery: no pass heard within ${DISCOVERY_WAKE_GIVE_UP_MS / 1000} s of the wake; the next read may wake again`);
-          resolve();
-        };
-        const giveUp = setTimeout(() => done(false), DISCOVERY_WAKE_GIVE_UP_MS);
-        giveUp.unref();
-        off = discovery.onApplied(() => done(true));
-        hosts.wake('engine-host');
-      });
-    }
-    const wake = discoveryWake;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timedOut = await Promise.race([wake.then(() => false), new Promise<boolean>((resolve) => (timer = setTimeout(() => resolve(true), DISCOVERY_WAKE_BOUND_MS)))]);
-    clearTimeout(timer);
-    if (timedOut) log(`[spine] discovery: ${name} answers what the index holds: no pass within ${DISCOVERY_WAKE_BOUND_MS / 1000} s of its wake`);
-  };
+  // --- the discovery wake (P5 O3-D M6 fix rounds 1, 2; discovery-wake.ts) ---------------------------------------------
+  const wakeForDiscovery = discoveryWake({
+    discovery: () => spine.root()?.discovery,
+    parked: () => hosts.parked('engine-host'),
+    wake: () => hosts.wake('engine-host'),
+    parkNow: () => clocks.parkNow(),
+    log,
+  });
 
   // --- the services front (P5 O3-D M2, M4; front.ts): machine.sock's commands, events, streams and client port --------
   let engineAppPid: number | null = null; // the app welcomed on engine-host.sock: the port's requests with no client go to its machine.sock connection
