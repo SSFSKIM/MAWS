@@ -31,6 +31,7 @@ const TIMING_NODE_TESTS = [
   'src/engine-host/fs/watcher.test.ts',
   'src/engine-host/plugins/runner.test.ts', // E8: real /bin/sh children, process-group kills and a ~2 s SIGKILL escalation
   'src/services/git/watcher.test.ts',
+  'src/shared/fs/watch-tree.test.ts', // P5 O3-E M1: its Linux cases wait on real inotify, a 2,000-file burst among them
   'src/services/index/source.test.ts', // its wired cases follow real transcripts through the fs service
   'src/services/sessions/pause-take-over.pty.test.ts', // real bash and zsh job control in a PTY, read through real `ps` calls
   'src/main/usage/claude-usage-reader.test.ts',
