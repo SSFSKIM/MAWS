@@ -4,9 +4,11 @@
 // is a rewind, at `<userData>/sessions/rewinds/<appSessionId>.json` beside the setup intents:
 // - `attempted`, the rewind's input, written before the rewind is forwarded (an answer the kill took may have landed);
 // - `confirmed`, once the engine host answered `rewound: true`;
-// - gone on a definitive refusal (`rewound: false`, or the host's refusal before it wrote the request), on a later
-//   conversation act, and at the end of the note's launch through `end_session` (the engine exits once its writes are
-//   flushed).
+// - on a definitive refusal (`rewound: false`, or the host's refusal before it wrote the request), the note it replaced
+//   put back (none when there was none): the refusal proves only that this rewind did not run, not that the one before
+//   it is durable;
+// - gone on a later conversation act, and at the end of the note's launch through `end_session` (the engine exits once
+//   its writes are flushed).
 // The resume that `session.start` and `session.acquire` both reach (resume.ts) re-sends a note it finds once, between its
 // launch's ready and any input; an anchor that landed answers `target_not_found`, which changes nothing.
 //
@@ -14,7 +16,7 @@
 // its op ledger. One whose inner command is the rewind or a conversation act goes through the note as a local one does
 // (`claimed`): the rewind's `attempted` written before the op is forwarded, its outcome read from the op's answer
 // (`rewound: true` confirms; a refusal before it ran, `rewound: false` or the host's refusal before it wrote the request
-// deletes), an act's accepted answer clearing the note. An op the host's ledger already knows (a retried action, whose
+// puts back the note it replaced), an act's accepted answer clearing the note. An op the host's ledger already knows (a retried action, whose
 // answer the ledger replays and which runs nothing) touches no note.
 //
 // A note names the launch it was sent to (the live row's at the rewind; the resume's own once a re-send landed), so only
@@ -81,6 +83,9 @@ export class RewindNotes {
   // rewind was forwarded after the act was (the act's answer may come back after a later rewind's; and an act forwarded
   // while a rewind's note is still being written reaches the engine before that rewind does).
   private readonly forwarded = new Map<AppSessionId, number>();
+  // Each `attempted` note's predecessor, the note its write replaced (null for none), which its definitive refusal puts
+  // back (`refused`)
+  private readonly replaced = new WeakMap<RewindNote, RewindNote | null>();
   // P5 O3-D M5a (D47): lane B's claimed ops being admitted, by opId (the ledger's own key: another binding of a known id is
   // its `op-conflict`); one at a time per id
   private readonly admitting = new Map<string, Promise<unknown>>();
@@ -104,11 +109,11 @@ export class RewindNotes {
     const note = await this.attempt(input);
     const result = await this.forward(appSessionId, () => this.deps.dispatch('engine-host', 'session.rewind', input));
     if (!result.ok) {
-      if (result.error.code === 'internal' && UNSENT.test(result.error.message)) await this.settle(note, null);
+      if (result.error.code === 'internal' && UNSENT.test(result.error.message)) await this.refused(note);
       throw new HostCommandError(result.error);
     }
     const outcome = result.value as RewindOutcome;
-    await this.settle(note, outcome.rewound ? { ...note, state: 'confirmed' } : null);
+    await (outcome.rewound ? this.settle(note, { ...note, state: 'confirmed' }) : this.refused(note));
     return outcome;
   }
 
@@ -162,13 +167,13 @@ export class RewindNotes {
     const note = await this.attempt(inner as CommandInput<'session.rewind'>);
     const result = await this.forward(appSessionId, send);
     if (!result.ok) {
-      if (result.error.code === 'internal' && UNSENT.test(result.error.message)) await this.settle(note, null);
+      if (result.error.code === 'internal' && UNSENT.test(result.error.message)) await this.refused(note);
       throw new HostCommandError(result.error);
     }
     const op = result.value as Op;
-    if (op.state === 'refused') await this.settle(note, null); // the ledger ran nothing: its context, its input, a conflict
-    else if (op.state === 'done' && op.result.ok) await this.settle(note, (op.result.value as RewindOutcome | undefined)?.rewound ? { ...note, state: 'confirmed' } : null);
-    else if (op.state === 'done' && !op.result.ok && op.result.error.code === 'internal' && UNSENT.test(op.result.error.message)) await this.settle(note, null);
+    if (op.state === 'refused') await this.refused(note); // the ledger ran nothing: its context, its input, a conflict
+    else if (op.state === 'done' && op.result.ok) await ((op.result.value as RewindOutcome | undefined)?.rewound ? this.settle(note, { ...note, state: 'confirmed' }) : this.refused(note));
+    else if (op.state === 'done' && !op.result.ok && op.result.error.code === 'internal' && UNSENT.test(op.result.error.message)) await this.refused(note);
     return op; // `in-progress`, or a failure after the request may have been written: `attempted` kept
   }
 
@@ -203,8 +208,26 @@ export class RewindNotes {
       launchId: live?.launchId ?? null,
       at: this.deps.now(),
     };
-    await this.update(appSessionId, () => note);
+    await this.update(appSessionId, (prior) => {
+      this.replaced.set(note, prior);
+      return note;
+    });
     return note;
+  }
+
+  // A definitive refusal of the rewind `note` was written for: nothing of it reached the engine, so the note it replaced
+  // comes back. One a later rewind replaced meanwhile hands its predecessor on to that one, put back at its refusal.
+  private refused(note: RewindNote): Promise<void> {
+    return this.quietly(note.appSessionId, (current) => {
+      const prior = this.replaced.get(note) ?? null;
+      if (current === note) return prior;
+      for (let later = current; later !== null; later = this.replaced.get(later) ?? null) {
+        if (this.replaced.get(later) !== note) continue;
+        this.replaced.set(later, prior);
+        break;
+      }
+      return undefined;
+    });
   }
 
   // ---- what the service tells it -------------------------------------------------------------------------------------

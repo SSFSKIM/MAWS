@@ -140,6 +140,50 @@ describe('the rewind repair: a last-act note, re-sent at resume', () => {
     expect(noteOf(id)).toMatchObject({ state: 'attempted' });
   });
 
+  // Fix wave (scalpel-5#1): a refusal proves only that the refused rewind did not run, not that the one before it is
+  // durable; the note that rewind replaced is put back.
+  it('a definitive refusal of a later rewind restores the note it replaced', async () => {
+    const id = await liveSession();
+    expect(await rewind(id)).toMatchObject({ ok: true, value: { rewound: true } }); // A
+    const a = noteOf(id);
+    expect(a).toMatchObject({ state: 'confirmed', targetMessageUuid: TARGET });
+    const later = { ...rewindInput(id), targetMessageUuid: randomUUID() };
+    h.host.rewound = false;
+    expect(await invoke('session.rewind', later)).toMatchObject({ ok: true, value: { rewound: false } }); // B, refused
+    expect(noteOf(id), 'A’s note, as it was').toEqual(a);
+    answerRewind(h.host, async () => {
+      throw new Error(`session ${id} is not ready (exiting)`);
+    });
+    expect(await invoke('session.rewind', later)).toMatchObject({ ok: false }); // B, refused unsent
+    expect(noteOf(id)).toEqual(a);
+
+    h.host.exitNow(id);
+    await restart();
+    expect(await h.service.acquire(id, 'send')).toMatchObject({ status: 'ready', launched: true });
+    expect(h.host.calledWith('session.rewind'), 'A is repaired').toEqual([rewindInput(id)]);
+  });
+
+  it('a refusal of a rewind another one replaced meanwhile restores, at that one’s refusal, the note before both', async () => {
+    const id = await liveSession();
+    expect(await rewind(id)).toMatchObject({ ok: true }); // A
+    const a = noteOf(id);
+    const targetB = randomUUID();
+    const targetC = randomUUID();
+    const answers = new Map<string, (value: unknown) => void>();
+    answerRewind(h.host, (input) => new Promise((answer) => answers.set(input.targetMessageUuid as string, answer)));
+    const b = invoke('session.rewind', { ...rewindInput(id), targetMessageUuid: targetB });
+    await h.until(() => answers.has(targetB));
+    const c = invoke('session.rewind', { ...rewindInput(id), targetMessageUuid: targetC });
+    await h.until(() => answers.has(targetC));
+    expect(noteOf(id)).toMatchObject({ state: 'attempted', targetMessageUuid: targetC });
+    answers.get(targetB)!(outcome(false, 'not found'));
+    expect(await b).toMatchObject({ ok: true, value: { rewound: false } });
+    expect(noteOf(id), 'C’s, untouched by B’s refusal').toMatchObject({ state: 'attempted', targetMessageUuid: targetC });
+    answers.get(targetC)!(outcome(false, 'not found'));
+    expect(await c).toMatchObject({ ok: true, value: { rewound: false } });
+    expect(noteOf(id), 'A’s, not the refused B’s').toEqual(a);
+  });
+
   it('a later conversation act clears the note, and the next resume re-sends nothing', async () => {
     const id = await liveSession();
     expect(await rewind(id)).toMatchObject({ ok: true });
@@ -352,17 +396,33 @@ describe('the rewind repair on lane B’s claimed op (host.op)', () => {
     expect(h.host.calledWith('session.rewind')).toEqual([rewindArgs(id)]); // once, before any input
   });
 
-  it('the outcome is read from the op’s answer: `rewound: true` confirms, `rewound: false` and a ledger refusal delete', async () => {
+  it('the outcome is read from the op’s answer: `rewound: true` confirms, `rewound: false` and a ledger refusal leave no note where there was none', async () => {
     const id = await liveSession();
     const first = await op(opId(2), 'session.rewind', rewindArgs(id));
     expect(first, JSON.stringify(first)).toMatchObject({ ok: true, value: { state: 'done', result: { ok: true, value: { rewound: true } } } });
     expect(noteOf(id)).toMatchObject({ state: 'confirmed' });
+    const other = await liveSession();
     h.host.rewound = false;
-    expect(await op(opId(3), 'session.rewind', rewindArgs(id))).toMatchObject({ ok: true, value: { state: 'done', result: { ok: true, value: { rewound: false } } } });
-    expect(noteOf(id)).toBeNull();
+    expect(await op(opId(3), 'session.rewind', rewindArgs(other))).toMatchObject({ ok: true, value: { state: 'done', result: { ok: true, value: { rewound: false } } } });
+    expect(noteOf(other)).toBeNull();
     refuseOps = 'context';
-    expect(await op(opId(4), 'session.rewind', rewindArgs(id))).toMatchObject({ ok: true, value: { state: 'refused', reason: 'context' } });
-    expect(noteOf(id)).toBeNull();
+    expect(await op(opId(4), 'session.rewind', rewindArgs(other))).toMatchObject({ ok: true, value: { state: 'refused', reason: 'context' } });
+    expect(noteOf(other)).toBeNull();
+  });
+
+  // Fix wave (scalpel-5#1), on the claimed path
+  it('a claimed rewind refused definitively restores the note it replaced', async () => {
+    const id = await liveSession();
+    expect(await op(opId(12), 'session.rewind', rewindArgs(id))).toMatchObject({ ok: true }); // A
+    const a = noteOf(id);
+    expect(a).toMatchObject({ state: 'confirmed', targetMessageUuid: TARGET });
+    const later = { ...rewindArgs(id), targetMessageUuid: randomUUID() };
+    h.host.rewound = false;
+    expect(await op(opId(13), 'session.rewind', later)).toMatchObject({ ok: true, value: { state: 'done', result: { ok: true, value: { rewound: false } } } });
+    expect(noteOf(id)).toEqual(a);
+    refuseOps = 'context';
+    expect(await op(opId(14), 'session.rewind', later)).toMatchObject({ ok: true, value: { state: 'refused' } });
+    expect(noteOf(id)).toEqual(a);
   });
 
   it('a replayed op answer is not a new rewind: a retried rewind leaves a later note as it is, and a retried act clears nothing', async () => {
