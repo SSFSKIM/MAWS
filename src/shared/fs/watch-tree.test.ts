@@ -250,21 +250,143 @@ describe('the watch tree reconciles', () => {
 
   it('re-walks on a slow timer, watching what it finds unwatched, and ends each pass in one event with no filename', async () => {
     const fake = new FakeWatchFs();
+    fake.write('known/k.txt');
     const { handle, heard } = open(fake);
     await drain();
     heard.length = 0;
     fake.write('quiet/a.txt'); // its parent's event was lost
     await vi.advanceTimersByTimeAsync(RECONCILE_MS - 1);
     await drain();
-    expect(fake.watched()).toEqual(['']);
+    expect(fake.watched().sort()).toEqual(['', 'known']);
     expect(heard).toEqual([]);
     await vi.advanceTimersByTimeAsync(1);
     await drain();
-    expect(fake.watched()).toEqual(['', 'quiet']);
-    expect(heard).toEqual([['rename', null]]);
+    expect(fake.watched().sort()).toEqual(['', 'known', 'quiet']);
+    // What the pass found is named as a late directory is; what was watched already is not named again.
+    expect(heard).toEqual([['rename', 'quiet/a.txt'], ['rename', 'quiet'], ['rename', null]]);
+    heard.length = 0;
     await vi.advanceTimersByTimeAsync(RECONCILE_MS);
     await drain();
-    expect(heard).toEqual([['rename', null], ['rename', null]]); // every pass, whether or not it found anything
+    expect(heard).toEqual([['rename', null]]); // every pass, whether or not it found anything
+    handle.close();
+  });
+
+  // Review of M1 (finding 4): a directory first seen by a pass after the initial walk has its listing named entry by
+  // entry, nested directories included, before the pass's one null event.
+  it('names everything beneath a directory a later pass finds, then ends in its null event', async () => {
+    const fake = new FakeWatchFs();
+    const { handle, heard } = open(fake, (dir) => dir === 'found/ignored');
+    await drain();
+    heard.length = 0;
+    fake.write('found/a.txt');
+    fake.write('found/deep/b.txt');
+    fake.write('found/ignored/c.txt');
+    await vi.advanceTimersByTimeAsync(RECONCILE_MS);
+    await drain();
+    expect(fake.watched().sort()).toEqual(['', 'found', 'found/deep']);
+    expect(heard.slice(0, -1).map(([, name]) => name).sort()).toEqual(['found', 'found/a.txt', 'found/deep', 'found/deep/b.txt']);
+    expect(heard.at(-1)).toEqual(['rename', null]);
+    handle.close();
+  });
+
+  // Review of M1 (finding 1): the root's own watch follows the root.
+  it("rebinds the root's watch when the root is replaced under its name, naming what the new one holds", async () => {
+    const fake = new FakeWatchFs();
+    fake.write('old/x.txt');
+    const { handle, heard } = open(fake);
+    await drain();
+    const first = fake.watches.find((watch) => watch.path === fake.root)!;
+    heard.length = 0;
+    fake.rm('');
+    fake.mkdir('');
+    fake.write('new.txt');
+    fake.write('sub/b.txt');
+    fake.fire('', 'rename', 'r'); // the old root's own removal, named by its own name
+    await drain();
+    expect(first.closed).toBe(true);
+    expect(fake.watches.filter((watch) => watch.path === fake.root)).toHaveLength(2);
+    expect(fake.watched().sort()).toEqual(['', 'sub']);
+    expect(heard.slice(0, -1).map(([, name]) => name).sort()).toEqual(['new.txt', 'sub', 'sub/b.txt']);
+    expect(heard.at(-1)).toEqual(['rename', null]);
+    handle.close();
+  });
+
+  it('rebinds a root replaced while its events were lost at the next pass', async () => {
+    const fake = new FakeWatchFs();
+    fake.mkdir('old');
+    const { handle, heard } = open(fake);
+    await drain();
+    heard.length = 0;
+    fake.rm('');
+    fake.mkdir('');
+    fake.write('new.txt');
+    await vi.advanceTimersByTimeAsync(RECONCILE_MS);
+    await drain();
+    expect(fake.watches.filter((watch) => watch.path === fake.root && !watch.closed)).toHaveLength(1);
+    expect(fake.watches.filter((watch) => watch.path === fake.root)).toHaveLength(2);
+    expect(fake.watched()).toEqual(['']);
+    expect(heard).toEqual([['rename', 'new.txt'], ['rename', null]]);
+    handle.close();
+  });
+
+  it('closes every watch when the root goes, and watches it again once a pass finds it back', async () => {
+    const fake = new FakeWatchFs();
+    fake.mkdir('a');
+    const { handle, heard, errors } = open(fake);
+    await drain();
+    heard.length = 0;
+    fake.rm('');
+    fake.fire('', 'rename', 'r');
+    await drain();
+    expect(fake.watched()).toEqual([]);
+    expect(heard).toEqual([['rename', null]]);
+    heard.length = 0;
+    await vi.advanceTimersByTimeAsync(RECONCILE_MS); // still gone: nothing to watch, nothing to tell
+    await drain();
+    expect(fake.watched()).toEqual([]);
+    expect(heard).toEqual([]);
+    fake.mkdir(''); // the root made again
+    fake.write('back/c.txt');
+    await vi.advanceTimersByTimeAsync(RECONCILE_MS);
+    await drain();
+    expect(fake.watched().sort()).toEqual(['', 'back']);
+    expect(heard).toEqual([['rename', 'back/c.txt'], ['rename', 'back'], ['rename', null]]);
+    expect(errors).toEqual([]);
+    handle.close();
+  });
+
+  // Review of M1 (finding 3): a directory beneath the root that a watch error other than exhaustion left unwatched is
+  // tried again by the next whole-tree pass, the slow timer's or a burst's.
+  it('tries again, at the next pass, a directory whose watch call failed for a reason of its own', async () => {
+    const fake = new FakeWatchFs();
+    fake.write('locked/a.txt');
+    fake.failWatch = (path) => (path === fake.abs('locked') ? errno('EACCES', path) : null);
+    const { handle, heard, errors } = open(fake);
+    await drain();
+    expect(fake.watched()).toEqual(['']);
+    fake.failWatch = () => null;
+    heard.length = 0;
+    await vi.advanceTimersByTimeAsync(RECONCILE_MS);
+    await drain();
+    expect(fake.watched()).toEqual(['', 'locked']);
+    expect(heard).toEqual([['rename', 'locked/a.txt'], ['rename', 'locked'], ['rename', null]]);
+    expect(errors).toEqual([]);
+    handle.close();
+  });
+
+  it('tries again, at the pass a burst settles into, a directory whose watch erred later', async () => {
+    const fake = new FakeWatchFs();
+    fake.mkdir('sub');
+    const { handle, errors } = open(fake);
+    await drain();
+    const sub = fake.watches.find((watch) => watch.path === fake.abs('sub'))!;
+    sub.errors.forEach((listener) => listener(errno('EPERM', sub.path)));
+    expect(fake.watched()).toEqual(['']);
+    for (let i = 0; i < BURST_EVENTS; i++) fake.fire('', 'change', `f${i}`);
+    await vi.advanceTimersByTimeAsync(BURST_SETTLE_MS);
+    await drain();
+    expect(fake.watched()).toEqual(['', 'sub']);
+    expect(errors).toEqual([]);
     handle.close();
   });
 
@@ -400,6 +522,7 @@ describe('the watch tree at exhaustion', () => {
     expect(errors).toEqual([]);
     const root = fake.watches.find((watch) => watch.path === fake.root)!;
     root.errors.forEach((listener) => listener(errno('EPERM', root.path)));
+    expect(errors).toEqual([]); // on a later tick, never inside the watch's own callback
     await drain();
     expect(errors.map((error) => error.code)).toEqual(['EPERM']);
     expect(fake.watched()).toEqual([]);
