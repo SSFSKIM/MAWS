@@ -945,10 +945,10 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       if (endpoint) {
         await Promise.race([endpoint.stop().catch((error: unknown) => log(`the endpoint's stop failed: ${error instanceof Error ? error.message : String(error)}`)), sleep(ENDPOINT_STOP_MS)]);
       }
-      await spine.stop(); // its parts stopped once its work settled (bounded: the exit ends what is left)
+      await spine.stop(); // a loaded spine's work settled, the engine link drained into it (endLink), its parts stopped (bounded: the exit ends what is left)
       for (const clients of [engineClients, ptyClients, machineClients]) clients?.closeClient();
       front.close();
-      const drained = hosts.stop(); // both hosts keep running: mawsd never stops a session
+      const drained = hosts.stop(); // both hosts keep running: mawsd never stops a session (nothing left to drain once the spine ended the link)
       if (drained) await Promise.race([drained, sleep(CLOSE_GRACE_MS + 250)]);
       if (code !== 1 && lockNamesMe()) {
         for (const path of Object.values(paths.sockets)) unlinkQuietly(path);

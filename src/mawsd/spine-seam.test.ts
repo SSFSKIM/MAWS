@@ -456,7 +456,29 @@ describe('the release', () => {
     await spine.stop();
     expect(root.stop).toHaveBeenCalledOnce();
     expect(restarts).toEqual([]);
+  });
+
+  // P5 O3-D fix wave (sweep#1): the engine host advances its delivered cursor as it writes a batch, so a batch still on
+  // the link when the parts stop is in no successor's connect burst; the exit drains the link into them first
+  it('stop at the daemon’s exit drains the link into the loaded spine after its work settled, then stops the parts', async () => {
+    const spine = seam({
+      endLink: async () => {
+        ended += 1;
+        link.batch('s1', 51); // what the engine host wrote before it saw the end
+        await sleep(5);
+        link.batch('s1', 52);
+      },
+    });
+    const root = (await spine.ensure('command')) as FakeRoot;
+    root.stop.mockImplementation(() => void root.seen.push('stopped'));
+    const done = root.hold(); // work that needs the link: it settles before the link ends
+    const stopping = spine.stop();
+    await sleep(10);
     expect(ended).toBe(0);
+    done();
+    await stopping;
+    expect(ended).toBe(1);
+    expect(root.seen).toEqual(['live batch s1 51', 'live batch s1 52', 'stopped']);
   });
 });
 

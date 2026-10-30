@@ -9,7 +9,8 @@
 // (a request waits for `cold` and loads again), the engine host's events keep folding, and the parts stop only once the
 // root settled, with no deadline that hands anything over (a release never closes the index under a writer); → `cold`.
 // A unit daemon re-executes after a release: the link's terminal draining close first, its last batches folded into
-// the still-loaded spine, then the parts stop and the daemon exits 75 (its unit restarts it cold). Any state →
+// the still-loaded spine, then the parts stop and the daemon exits 75 (its unit restarts it cold); the daemon's exit
+// drains the link into a loaded spine the same way before its parts stop. Any state →
 // `yielded` while an older app's pid lives (§L): a loaded spine settles, stops and gives the lock up, or, when its
 // writers have not settled within a minute, the process ends instead, which ends every writer and frees the lock by the
 // exit path (D27); → `cold` once the pid is gone.
@@ -55,7 +56,7 @@ export interface LazySpineOptions {
   quietMs(): number; // the daemon's idle time, or MAWS_SPINE_QUIET_MS under a measured scene (D6)
   reexecute: boolean; // exit 75 after a release: a unit daemon with the switch on (D38, daemon.ts); otherwise the link stays open and the hold starts
   wakeOnEvents: boolean; // a session.eventBatch while cold loads the spine (M2: off in the product until main stops composing its own; daemon.ts)
-  endLink(): Promise<void>; // re-execution's first step: the engine host's link ended by its terminal draining close
+  endLink(): Promise<void>; // re-execution's and the exit's first step: the engine host's link ended by its terminal draining close
   restart(reason: string): void; // re-execution's last: the daemon's exit order with EXIT_RESTART
   exitForYield(): void; // a yield whose writers did not settle: the daemon's exit order (75 for a unit, 0 for a private one)
   collected(): void; // a release dropped the root: the idle collector's dropped()
@@ -287,10 +288,17 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
         log('[spine] the exit leaves the spine’s work in flight to the exit; nothing stopped under it');
         return;
       }
-      if (reexecute) {
-        log('[spine] ending the engine host’s link before the re-execution');
+      // The engine host counts a batch delivered once written: one still on the link when the parts stop is in no
+      // successor's connect burst. Re-execution and the exit end the link first (its work settled while the link was
+      // up), so its drain folds into the loaded spine; the work the drain brings is settled under the same bound.
+      if (reexecute || why === 'stop') {
+        log(`[spine] ending the engine host’s link before ${reexecute ? 'the re-execution' : 'the exit'}`);
         await options.endLink(); // the drain's batches fold into the loaded spine
-        await settle(current.root, null);
+        await settle(current.root, exitBy);
+        if (why === 'stop' && current.root.busy()) {
+          log('[spine] the exit leaves the drained batches’ work in flight to the exit; nothing stopped under it');
+          return;
+        }
       }
       await stopRoot(current.root, current.adapter, current.offs);
       loaded = null;
