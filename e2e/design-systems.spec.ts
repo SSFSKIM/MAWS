@@ -31,7 +31,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
+import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { artifactRefusalOf, type ArtifactRefusal } from '@shared/ipc/schema/artifacts';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -116,6 +116,13 @@ function recolourAccent(page: Page, artifactId: string, hex: string): Promise<{ 
   }, [artifactId, hex] as const);
 }
 
+// A canon frame's document, read through a frame locator's assertions rather than a Frame handle's evaluate. Every new
+// srcdoc navigates the frame (Decision Log 22): the edit sets the attribute at once, and the frame, out of process,
+// commits the new document tens to hundreds of milliseconds later. An evaluation still in flight in the old document at
+// that commit fails with "Execution context was destroyed", which expect.poll does not retry (runs 40683839806,
+// 40743240635, 40852606918); a locator assertion resolves the frame's current document again on each attempt.
+const canonDocument = (frame: Locator) => frame.contentFrame().locator(':root');
+
 // The document fixture (the renderer's e2e seam, standing for B's editor): a minimal page in a `DesignSystemScope`.
 type SystemRef = { id: string; versionSeq?: number } | { builtin: 'maws' } | null | { governedBy: { designSystemId?: string | null; spaceId?: string | null } };
 interface FixtureSeam {
@@ -166,16 +173,13 @@ test('a fresh store holds the built-in systems; one opens from the library as th
 
   // Acceptance 9: the accent edited on the page; the swatch and the page's --ds-color-accent follow within one frame
   const canon = tab.locator('[data-ds-section="canon"] iframe').first();
-  const canonAccent = async () => {
-    const frame = await (await canon.elementHandle())!.contentFrame();
-    return frame!.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--ds-color-accent').trim());
-  };
-  await expect.poll(canonAccent, { message: 'the canon preview is drawn in the system' }).toBe(bundledHex('maws', 'accent'));
+  const canonRoot = canonDocument(canon);
+  await expect(canonRoot, 'the canon preview is drawn in the system').toHaveCSS('--ds-color-accent', bundledHex('maws', 'accent'));
   const RECOLOURED = '#2f6b4f';
   expect(await recolourAccent(page, house.id, RECOLOURED)).toEqual({ swatch: rgbOf(RECOLOURED), property: RECOLOURED });
   // the canon preview at its frame's next load (Decision Log 22: the frames stay sandboxed and swap their source)
   await expect(canon).toHaveAttribute('srcdoc', new RegExp(`--ds-color-accent: ${RECOLOURED};`));
-  await expect.poll(canonAccent, { message: 'the canon preview follows at its next load' }).toBe(RECOLOURED);
+  await expect(canonRoot, 'the canon preview follows at its next load').toHaveCSS('--ds-color-accent', RECOLOURED);
 
   // the edit persists: after a reload the page opens with it
   await page.reload();
@@ -464,14 +468,9 @@ test('Official’s bundled face sets its Type section, a canon frame shows an im
   // the canon frame draws the image from the system's assets (its srcdoc's img-src and the app's CSP admit the scheme)
   const markFrame = tab.locator('[data-ds-section="canon"] iframe[title="components/mark.html"]');
   await expect(markFrame).toHaveAttribute('srcdoc', /maws-artifact:\/\/[^"]*assets\/mark\.png/);
-  const markImage = async () => {
-    const frame = await (await markFrame.elementHandle())!.contentFrame();
-    return frame!.evaluate(() => {
-      const image = document.querySelector('img');
-      return image ? { complete: image.complete, width: image.naturalWidth } : null;
-    });
-  };
-  await expect.poll(markImage, { timeout: 15_000, message: 'the canon frame shows the image asset' }).toEqual({ complete: true, width: 1 });
+  const mark = canonDocument(markFrame).locator('img');
+  await expect(mark, 'the canon frame shows the image asset').toHaveJSProperty('complete', true, { timeout: 15_000 });
+  await expect(mark).toHaveJSProperty('naturalWidth', 1);
 
   // Export for Claude (the header's export, A's export service, D's exporter): one zip of Claude's files under the store
   await page.getByRole('button', { name: 'Export', exact: true }).click();
