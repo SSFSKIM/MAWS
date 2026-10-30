@@ -4,7 +4,7 @@
 // wire. It opens no channel (O7's boundary.test.ts): every byte goes through the link's `subscribe`, `call` and `act`.
 //
 // The composition root wraps the router's `remote` option (`routeLaneA`): a `laneA.*` command whose target machine
-// `Machines.remote` answers comes here, with its link; every other command, and `laneA.*` for a socket-linked stand-in,
+// `Machines.remote` answers comes here, with its link; every other command, and `laneA.*` for a socket-linked profile,
 // takes the connection manager's path as before. A remote session's bare id is its engine session id (§G, R1).
 //
 // - The view. Each `laneA.watch` is its own `full` subscription; its snapshot (the envelope, joined and parsed by the

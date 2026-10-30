@@ -1,6 +1,6 @@
 // The link surface (P5 O6 M3, docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "The link surface"): what a
-// machine's services answer for another machine's app, as one derived `WireRegistry`. It is the same for the stand-in
-// (serve-standin.ts), for O3's `mawsd` and for O7's channels.
+// machine's services answer for another machine's app, as one derived `WireRegistry`. It is the same for a profile's
+// `mawsd` (P5 O3-D M6: its services front answers it; O6's stand-in is gone) and for O7's channels.
 //
 // - Commands: every command whose route class is not `client` (src/shared/ipc/routes.ts), and no `internal` one (main's
 //   own, which no caller holds), each presented with owner `machine` and its own schemas.

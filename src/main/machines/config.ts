@@ -1,8 +1,8 @@
 // Which other machines this app links to (P5 O6 M3, docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md,
-// "Configuration"). MAWS_LOCAL_MACHINES is a `:`-separated list of serve directories, each another profile's
-// `<userData>/machine-serve` on this Mac. Like the serve gate it is honoured only when the build is not packaged, and
-// otherwise ignored with one log line, so in production, until O10's sources (the org state, RL2 endpoints), the connection
-// manager holds only the local machine.
+// "Configuration"). MAWS_LOCAL_MACHINES is a `:`-separated list of profile directories, each another profile's
+// `<userData>` on this Mac, whose `mawsd` serves its machine (P5 O3-D M6; it named the stand-in's serve directory
+// before). It is honoured only when the build is not packaged, and otherwise ignored with one log line, so in
+// production, until O10's sources (the org state, RL2 endpoints), the connection manager holds only the local machine.
 import { isAbsolute, normalize } from 'node:path';
 
 export function configuredMachines({ packaged, env, log }: { packaged: boolean; env: NodeJS.ProcessEnv; log(line: string): void }): string[] {

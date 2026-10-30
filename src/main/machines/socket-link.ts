@@ -1,7 +1,10 @@
 // The socket link (P5 O6 M3, docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "The socket link"): main's
-// connect-only link to another profile's machine on this Mac, over the same-uid socket its serve directory holds
-// (`<dir>/machine.sock`, `<dir>/machine.token`), speaking O1's protocol 3 and C1's envelope through a SocketPort. The far
-// side today is the stand-in (serve-standin.ts); at O3 it is that profile's `mawsd`, and nothing here changes.
+// connect-only link to another profile's machine on this Mac: that profile's `mawsd` (P5 O3-D M6), reached on its
+// `machine.sock` with its `mawsd.token`, where @shared/daemon/files puts them for the profile (`<profile>/mawsd/`, the
+// socket in the temporary directory's fallback when the profile's path is too long for it), speaking O1's protocol 3
+// and C1's envelope through a SocketPort. The far side's services front answers the link surface (link-surface.ts): its
+// `machine`-owned commands from its own table, the hosts' commands forwarded raw, the spine's events; the link follows
+// no session stream (O7's link does, D22).
 //
 // It never starts, replaces, stops or kills the far side, and never sends `exit` (survey §4.2: a client must never stop a
 // shared daemon). At the welcome it asks `machine.identity`, then says `ready` and is `up`; the far side's events flow from
@@ -9,13 +12,15 @@
 // (src/shared/host/client-refs.ts). A close or a failed connect is `down`, retried every second for the first minute and
 // every two seconds after (a failed connect to a local socket costs microseconds, and a returning machine is wanted back
 // within 5 s); a request while it is not `up` answers `host_unavailable` at once rather than hang the page's action.
-// A far side that another client replaced is left alone: one client at a time until O3's RL3.
+// `machine.sock` serves many clients at once, so a far side's `replaced` refusal (a server of one client) leaves the
+// link down for good.
 //
 // Main-owned schemas cross unversioned (the O6 document's Constraints, "The wire"): the link joins two profiles of one
 // build, and says so in its log at connect.
 import * as fs from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
 import { join } from 'node:path';
+import { daemonHostFiles, daemonPaths } from '@shared/daemon/files';
 import { clientGoneRelay, type ClientGoneRelay } from '@shared/host/client-refs';
 import { assertPrivateSocket } from '@shared/host/private-path';
 import { SocketPort } from '@shared/host/socket-port';
@@ -32,10 +37,6 @@ import type { MachineRef } from '@shared/machine/ref';
 import { LINK_REGISTRY } from './link-surface';
 import type { LinkState, MachineLink } from './manager';
 
-// A serve directory's files (`<userData>/machine-serve/` of the far profile).
-export const MACHINE_SOCKET = 'machine.sock';
-export const MACHINE_TOKEN = 'machine.token';
-
 export interface LinkTiming {
   fastRetryMs: number;
   slowRetryMs: number;
@@ -50,7 +51,7 @@ export function retryDelay(downForMs: number, timing: LinkTiming): number {
 }
 
 export interface SocketLinkOptions {
-  dir: string; // the far profile's serve directory
+  profile: string; // the far profile's directory, whose `mawsd` serves its machine
   build: string; // this app's build, presented in the hello
   log(line: string): void;
   registry?: WireRegistry; // the link surface unless a test passes a fixture
@@ -73,8 +74,8 @@ interface Connection {
 type Answer = { kind: 'welcome'; welcome: ServerWelcome; leftover: Buffer } | { kind: 'failed'; why: string };
 
 export function createSocketLink(options: SocketLinkOptions): MachineLink {
-  const { dir, build } = options;
-  const log = (line: string) => options.log(`${dir}: ${line}`);
+  const { profile, build } = options;
+  const log = (line: string) => options.log(`${profile}: ${line}`);
   const registry = options.registry ?? LINK_REGISTRY;
   const codec = codecOf(registry);
   const timing: LinkTiming = { ...LINK_TIMING, ...options.timing };
@@ -94,7 +95,7 @@ export function createSocketLink(options: SocketLinkOptions): MachineLink {
   let closed = false;
   let replaced = false;
 
-  const label = () => identity?.ref ?? dir;
+  const label = () => identity?.ref ?? profile;
   const unavailable = (name: string, why: string): CommandResult<CommandName> => ({ ok: false, error: ipcError('host_unavailable', `${name}: machine ${label()} ${why}`) });
 
   function setState(next: LinkState): void {
@@ -120,11 +121,12 @@ export function createSocketLink(options: SocketLinkOptions): MachineLink {
   function attempt(): void {
     retry = null;
     if (closed) return;
-    const socketPath = join(dir, MACHINE_SOCKET);
+    const files = daemonHostFiles(daemonPaths(profile), 'machine'); // as a client's transport reaches mawsd's sockets
+    const socketPath = files.socket;
     let token: string;
     try {
       assertPrivateSocket(socketPath); // a symlink, another owner or a directory others can enter is never connected to
-      token = fs.readFileSync(join(dir, MACHINE_TOKEN), 'utf8').trim();
+      token = fs.readFileSync(join(files.dir, files.token), 'utf8').trim();
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       return failed(code === 'ENOENT' ? 'nothing serves there' : error instanceof Error ? error.message : String(error));

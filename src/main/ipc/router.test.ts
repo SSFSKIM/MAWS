@@ -150,7 +150,7 @@ describe('main ipc router', () => {
     });
   });
 
-  // P5 O6 M3: the stand-in's entry (src/main/machines/serve-standin.ts): the route minus the sender check
+  // P5 O6 M3: the local link's entry (src/main/machines/local-link.ts): the route minus the sender check
   describe('dispatchLocal', () => {
     const remoteClient = { id: 'remote:1/page:3.1', onGone: () => () => {} } as unknown as MainContext['client'];
 

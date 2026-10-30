@@ -17,8 +17,8 @@ import type { RemoteSource } from './remote/source';
 const LOCAL = 'LocalMachineRef0000000' as MachineRef;
 const B = 'StandinBMachineRef0000' as MachineRef;
 const C = 'StandinCMachineRef0000' as MachineRef;
-const DIR_B = '/profiles/b/machine-serve';
-const DIR_C = '/profiles/c/machine-serve';
+const DIR_B = '/profiles/b';
+const DIR_C = '/profiles/c';
 const ctx: MainContext = { client: endableClientRef('page:1.1'), target: LOCAL };
 
 // A link the test drives: `up(ref, name)` is a welcome whose identity answered, `down()` a close.

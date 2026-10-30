@@ -35,8 +35,6 @@
 // connection is a refused one: one exit honoured, within the hello's deadline), or `close` (nothing written). `onExit`
 // says whether its exit came from a refused connection.
 //
-// P5 O6 M3: an `admit` option checks each accepted connection's peer before any of the above.
-//
 // P5 O3-D M5 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §L): `admitHello` is told the hello's
 // `appPid` too, and may refuse on its own account (`own`: `mawsd`'s refusal of an app that runs a spine of its own)
 // rather than reflect the upstream's line; the one exit that connection may send says which (`onExit`'s `from.own`).
@@ -103,9 +101,6 @@ export interface SocketServerOptions {
   helloTimeoutMs?: number;
   lineCap?: number;
   docHighWater?: number; // P3-A M5: the document channels' reset mark (DOC_HIGH_WATER unless a test lowers it)
-  // P5 O6 M3: a peer check, consulted on each accepted connection before anything is read from it or the hello's deadline
-  // starts; false destroys the connection. The stand-in's (src/main/machines/serve-standin.ts); the supervisor passes none.
-  admit?(socket: Socket): boolean;
 }
 
 export interface SocketClients {
@@ -133,10 +128,6 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
   server.on('connection', (socket) => accept(socket));
 
   function accept(socket: Socket): void {
-    if (options.admit && !options.admit(socket)) {
-      socket.destroy(); // P5 O6 M3: refused before a byte is read
-      return;
-    }
     let phase: 'hello' | 'refused' | 'done' = 'hello';
     let refusedOwn = false; // P5 O3-D M5: the admission refused it on its own account
     let welcome: (() => void) | null = null;

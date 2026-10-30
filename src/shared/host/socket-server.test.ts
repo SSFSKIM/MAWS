@@ -37,7 +37,6 @@ interface StartOptions {
   many?: { runtimeFor(client: { appPid: number; capabilities: readonly string[] }): HostRuntime };
   halfOpen?: boolean;
   admitHello?: SocketServerOptions['admitHello']; // P5 O2 M5
-  admit?: (socket: Socket) => boolean; // P5 O6 M3
 }
 
 async function start(options: StartOptions = {}) {
@@ -72,7 +71,6 @@ async function start(options: StartOptions = {}) {
     log,
     helloTimeoutMs: options.helloTimeoutMs,
     docHighWater: options.docHighWater, // P3-A M5
-    admit: options.admit, // P5 O6 M3
   });
   temp = await listenTemp(server);
   const connect = async () => {
@@ -108,27 +106,6 @@ async function start(options: StartOptions = {}) {
 }
 
 describe('the socket layer handshake (server side)', () => {
-  // P5 O6 M3: the stand-in's peer check enters here (src/main/machines/serve-standin.ts)
-  it('closes a connection its admit refuses before reading a byte or starting the hello deadline, and serves one it admits', async () => {
-    let verdict = false;
-    const admit = vi.fn<(socket: Socket) => boolean>(() => verdict);
-    const host = await start({ admit, helloTimeoutMs: 60 });
-    const refused = await host.connect();
-    refused.send(hello());
-    await refused.closed;
-    expect(admit).toHaveBeenCalledOnce();
-    expect(refused.lines).toEqual([]);
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    expect(host.log).not.toHaveBeenCalled(); // no hello was read, and no deadline ran out
-    expect(host.changes).toEqual([]);
-
-    verdict = true;
-    const admitted = await host.connect();
-    admitted.send(hello());
-    expect(await admitted.next()).toEqual(WELCOME);
-    expect(admit).toHaveBeenCalledTimes(2);
-  });
-
   it('welcomes a valid hello with its identity and serves requests; events wait for ready, where the connect hooks run', async () => {
     const order: string[] = [];
     const host = await start({ hooks: [() => void order.push('hook')] });

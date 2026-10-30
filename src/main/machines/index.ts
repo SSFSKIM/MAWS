@@ -1,7 +1,8 @@
 // Main's machines (P5 O6 M3, docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "Machine links"): the
-// composition of the connection manager, its links, `machines.list` and `machines.changed`, and (in a build that is not
-// packaged, started with MAWS_MACHINE_SERVE=1) the stand-in that serves this profile's machine services to another
-// profile's app. The router reaches every other machine through `dispatch` (`RouterOptions.remote`).
+// composition of the connection manager, its links, `machines.list` and `machines.changed`. The router reaches every
+// other machine through `dispatch` (`RouterOptions.remote`). P5 O3-D M6: this profile's machine services reach another
+// profile's app from this profile's `mawsd` (its machine.sock), never from main; O6's stand-in that served them from
+// main is gone.
 //
 // P5 O7 M1 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Composition"): the RL2 links' source (one link per
 // machine the org session lists) joins the manager as its second source, `remote(ref)` is the one way main's consumers
@@ -11,15 +12,12 @@ import { app, powerMonitor } from 'electron';
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import type { OrgSession } from '../org/session';
-import { loadPeerAddon, peerAddonPath } from '../browser/cua/peer';
 import { emit, emitFrom } from '../ipc/events';
 import type { MainContext, MainHandler, RemoteDispatch } from '../ipc/router';
 import { configuredMachines } from './config';
 import { KNOWN_MACHINES_FILE } from './known-machines';
 import { createLocalLink } from './local-link';
 import { createConnectionManager } from './manager';
-import { machineServeAllowed } from './serve-gate';
-import { serveMachineStandIn, type StandIn } from './serve-standin';
 import { createSocketLink } from './socket-link';
 import type { RemoteLink } from './remote/link';
 import { createRemoteSource } from './remote/source';
@@ -30,9 +28,7 @@ export interface MachinesDeps {
   userData: string;
   packaged: boolean;
   env: NodeJS.ProcessEnv;
-  build: string; // this app's build, said in a link's hello and the stand-in's welcome
-  resourcesPath: string; // where a packaged build keeps the peer-auth addon
-  appRoot: string; // the development app root, where the addon's prebuild is
+  build: string; // this app's build, said in a link's hello
   session: OrgSession; // the org session the RL2 links read: signed out until O8's sign-in, or MAWS_DEV_ORG's in development
   register(name: 'machines.list', handler: MainHandler<'machines.list'>): void;
   dispatchLocal(name: CommandName, input: unknown, ctx: MainContext): Promise<CommandResult<CommandName>>;
@@ -42,7 +38,6 @@ export interface Machines {
   dispatch: RemoteDispatch;
   remote(machine: MachineRef): RemoteLink | null; // the one link to that machine, or null when the org lists none
   onRemote(listener: (machines: readonly MachineRef[]) => void): () => void; // the roster changed: links were created or closed
-  serve(): void; // the stand-in, behind its gate: once every handler is registered
   stop(): Promise<void>;
 }
 
@@ -57,7 +52,7 @@ export function startMachines(deps: MachinesDeps): Machines {
     knownMachinesFile: join(userData, KNOWN_MACHINES_FILE),
     configured: configuredMachines({ packaged, env, log }),
     emitFrom,
-    connect: (dir) => createSocketLink({ dir, build, log }),
+    connect: (profile) => createSocketLink({ profile, build, log }),
     remote,
     log,
   });
@@ -75,7 +70,6 @@ export function startMachines(deps: MachinesDeps): Machines {
   deps.register('machines.list', () => ({ machines: manager.list() }));
   manager.onChanged((machines) => void emit('machines.changed', { machines }));
 
-  let standIn: StandIn | null = null;
   return {
     dispatch: (machine, name, input, ctx) => manager.dispatch(machine, name, input, ctx),
     remote: (machine) => remote.link(machine),
@@ -83,22 +77,12 @@ export function startMachines(deps: MachinesDeps): Machines {
       remoteListeners.add(listener);
       return () => void remoteListeners.delete(listener);
     },
-    serve() {
-      if (standIn || !machineServeAllowed({ packaged, env })) return;
-      try {
-        const peer = loadPeerAddon(peerAddonPath({ packaged, resourcesPath: deps.resourcesPath, appRoot: deps.appRoot }));
-        standIn = serveMachineStandIn({ userData, router: { dispatchLocal }, localRef: local, peer, log, build });
-      } catch (error) {
-        log(`cannot serve this machine: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    },
     async stop() {
       powerMonitor.off('resume', onWake);
       powerMonitor.off('unlock-screen', onUnlock);
       app.off('browser-window-focus', onFocus);
       manager.close();
       remote.close();
-      await standIn?.close();
     },
   };
 }

@@ -29,7 +29,7 @@ import { appUrl, createWindow, installContentSecurityPolicy, prepareHarness } fr
 import { emit, emitFrom } from './ipc/events'; // P5 O9 M9: emitFrom, remote lane A's events
 import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P5 O6 M1: registerMachineHandler
 import { bindLocalMachine } from './machine/local'; // P5 O6 M2
-import { startMachines } from './machines'; // P5 O6 M3: the connection manager, and the stand-in behind its gate
+import { startMachines } from './machines'; // P5 O6 M3: the connection manager (P5 O3-D M6: the stand-in gone)
 import { createStateSigner, createStepUp } from './device/step-up'; // P5 O7 M1: the development org session's signer; P5 O8 M1: the production session's; M3: its state signer
 import { createDevOrgSession } from './org/dev-session'; // P5 O7 M1
 import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2
@@ -378,15 +378,13 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     packaged: app.isPackaged,
     env: process.env,
     build: `${MAIN_BUILD.version}+${MAIN_BUILD.commit}`,
-    resourcesPath: process.resourcesPath,
-    appRoot: process.cwd(), // the development app root, as the browser's peer check reads the addon's prebuild
     register: registerMainHandler,
     dispatchLocal,
     // P5 O7 M1: the org session the RL2 links read; P5 O8 M1: production's sign-in, or O7's development session
     session,
   });
   // P5 O9 M9: `laneA.*` for a machine O7's link reaches is remote lane A's (src/main/lane-a/remote.ts), over that link;
-  // every other command for another machine, and `laneA.*` for a socket-linked stand-in, goes to the manager. It writes
+  // every other command for another machine, and `laneA.*` for a socket-linked profile, goes to the manager. It writes
   // no file, so it runs in a run that doesn't hold spine.lock too.
   const remoteLaneA = createRemoteLaneA({ local, emit: (machine, name, payload) => void emitFrom(machine, name, payload), log: (line) => console.log(`[lane-a] ${line}`) });
   // P5 O3-D M5b: on the daemon shape a `machine` name goes to mawsd's services front (the `machine` host)
@@ -840,10 +838,8 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   });
   shutdown.add('voice', () => voice.dispose());
   // E9 end
-  // P5 O6 M3: with every handler registered, this profile's machine services for another profile's app (the stand-in,
-  // MAWS_MACHINE_SERVE=1 in a build that is not packaged; O3 replaces it with mawsd). The links stop at quit; no far side
-  // is ever stopped.
-  machines.serve();
+  // P5 O6 M3: the links stop at quit; no far side is ever stopped. P5 O3-D M6: this profile's machine services reach
+  // another profile's app from this profile's mawsd, so main serves nothing here (O6's stand-in is gone)
   shutdown.add('machines', () => machines.stop());
   // P5 O8 M1: the feed and the session stop (every org file is written whole and renamed); M2: the rows' last change is
   // written to their cache first, so a relaunch keeps every mark; M4a: the exit waits for the session's close, which

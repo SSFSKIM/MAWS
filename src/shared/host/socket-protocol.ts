@@ -198,7 +198,7 @@ export const PEER_CAPABILITIES = {
   app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY], // main's hellos, to `mawsd`'s sockets and to a direct engine host (P5 O3-D M5b: machine.spine)
   daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY], // `mawsd`'s hello to the engine host (P5 O3-D M3: under its permanent-client option)
   daemonToPtyHost: [PTY_FRAMES_CAPABILITY], // `mawsd`'s hello to the pty host
-  daemon: [PTY_FRAMES_CAPABILITY], // `mawsd`'s welcome on machine.sock (and the stand-in's, until O3-D M6), and what its relays add
+  daemon: [PTY_FRAMES_CAPABILITY], // `mawsd`'s welcome on machine.sock, and what its relays add
   link: [PTY_FRAMES_CAPABILITY], // O6's link's hello to another profile's machine.sock
 } as const satisfies Record<string, readonly string[]>;
 const PTY_FIXED = 9; // the id's length byte and the offset's two words, inside L
