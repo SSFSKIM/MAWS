@@ -1261,9 +1261,10 @@ describe('keeping sessions running at quit', () => {
   it('offers keep by host mode: the development build runs detached and offers it; a utility host offers none', async () => {
     const cases = [
       { env: {}, shape: 'embedded', mode: 'detached', buttons: ['Quit and keep sessions running', 'Quit', 'Quit when idle', 'Cancel'] }, // `pnpm dev`, the packaged app
-      { env: {}, shape: 'daemon', mode: 'daemon', buttons: ['Quit and keep sessions running', 'Quit', 'Quit when idle', 'Cancel'] }, // P5 O2 M7: the engine host behind mawsd's detached relay
+      // P5 O3-D (Q1, D12): the daemon shape asks nothing about sessions (they outlive the app); its question is below
+      { env: {}, shape: 'daemon', mode: 'daemon', buttons: null }, // P5 O2 M7: the engine host behind mawsd's detached relay
       // P5 O3-B: the harnesses take the setting's shape, as the owner's app does
-      { env: { MAWS_HARNESS: '1' }, shape: 'daemon', mode: 'daemon', buttons: ['Quit and keep sessions running', 'Quit', 'Quit when idle', 'Cancel'] }, // `pnpm dev:harness`
+      { env: { MAWS_HARNESS: '1' }, shape: 'daemon', mode: 'daemon', buttons: null }, // `pnpm dev:harness`
       { env: { MAWS_E2E: '1' }, shape: 'embedded', mode: 'detached', buttons: ['Quit and keep sessions running', 'Quit', 'Quit when idle', 'Cancel'] },
       { env: { MAWS_E2E: '1', MAWS_HOST_MODE: 'utility' }, shape: 'daemon', mode: 'utility', buttons: ['Quit', 'Quit when idle', 'Cancel'] }, // `pnpm e2e:c7-utility`
     ] as const;
@@ -1272,9 +1273,14 @@ describe('keeping sessions running at quit', () => {
       expect(hostModeFromEnv(env, shape)).toBe(mode);
       const hosts = { stopAllForQuit: vi.fn(async () => {}), facts: () => ({ transport: mode === 'utility' ? ('utility' as const) : ('detached' as const) }) };
       const ask = vi.fn(async (): Promise<'cancel'> => 'cancel');
-      guard(modelWith(midTurn(1)), { ask, ...engineQuitDeps(hosts, () => SETTINGS_DEFAULTS_V21) });
+      guard(modelWith(midTurn(1)), { ask, ...engineQuitDeps(hosts, () => SETTINGS_DEFAULTS_V21, () => mode === 'daemon') });
       electron.app.attempt();
       await settle();
+      if (buttons === null) {
+        expect(ask, mode).not.toHaveBeenCalled();
+        expect(hosts.stopAllForQuit, mode).not.toHaveBeenCalled();
+        continue;
+      }
       const keep = (ask.mock.calls[0] as unknown[])[2] as Parameters<typeof quitQuestion>[3];
       expect(quitQuestion({ ...NONE, midTurn: 1 }, 'Quit', new Map(), keep).buttons, mode).toEqual(buttons);
     }
@@ -1331,3 +1337,88 @@ describe('keeping sessions running at quit', () => {
   });
 });
 // E10 end
+
+// P5 O3-D (Q1, D12; docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md): on the daemon shape the sessions, like the
+// terminals, belong to `mawsd`, which outlives the app and frees them at its idle release. Quit asks only about unsaved
+// files; it offers no keep and no when-idle, and sends no stop-all. The embedded shape keeps today's question.
+describe('the daemon shape’s quit', () => {
+  const busyPty = { list: async () => [{ ptyId: 'p1', alive: true }] as never, foreground: async () => ({ busy: true }), hostGone: () => false };
+  function guard(model: ReturnType<typeof modelWith>, over: Partial<Parameters<typeof installQuitGuard>[1]> = {}) {
+    const deps = {
+      pty: busyPty,
+      ask: vi.fn(async (): Promise<'quit' | 'cancel' | 'when_idle' | 'save_all' | 'keep'> => 'cancel'),
+      shutdownEngine: vi.fn(async () => {}),
+      publish: vi.fn(),
+      engines: { hostPid: () => 500, ps: vi.fn(async () => ''), kill: vi.fn() },
+      unsavedFiles: (): readonly string[] => [],
+      onUnsavedFiles: () => () => {},
+      saveAll: vi.fn(async (): Promise<ReadonlyMap<string, string>> => new Map()),
+      keepOffered: () => false,
+      keepDefault: () => true,
+      terminalsOutlive: () => true,
+      sessionsOutlive: () => true,
+      ...over,
+    };
+    return { deps, control: installQuitGuard(model, deps) };
+  }
+  const working = () => modelWith([...midTurn(2), status('bg', { backgroundTasks: [TASK] })]);
+
+  it('asks nothing about sessions, background work or terminals, sends no stop-all and no SIGKILL, and logs what it did not ask', async () => {
+    const lines: string[] = [];
+    const { deps } = guard(working(), { log: (line: string) => void lines.push(line) });
+    expect(electron.app.attempt()).toBe(false);
+    await vi.waitFor(() => expect(electron.app.quits).toBe(1));
+    expect(deps.ask).not.toHaveBeenCalled();
+    expect(deps.shutdownEngine).not.toHaveBeenCalled();
+    expect(deps.engines.ps).not.toHaveBeenCalled();
+    expect(deps.engines.kill).not.toHaveBeenCalled();
+    expect(deps.publish).not.toHaveBeenCalled();
+    expect(lines).toEqual([expect.stringMatching(/^quit-report: \d+ ms · 2 mid-turn, 1 background work, 1 busy terminal$/), 'quit-guard: 2 mid-turn, 1 background work, 1 busy terminal, not asked: they outlive the app']);
+  });
+
+  it('an unbusy quit asks nothing and stops nothing', async () => {
+    const lines: string[] = [];
+    const { deps } = guard(modelWith([status('idle')]), { pty: noTerminals, log: (line: string) => void lines.push(line) });
+    electron.app.attempt();
+    await vi.waitFor(() => expect(electron.app.quits).toBe(1));
+    expect(deps.ask).not.toHaveBeenCalled();
+    expect(deps.shutdownEngine).not.toHaveBeenCalled();
+    expect(lines).toEqual([expect.stringMatching(/^quit-report: \d+ ms · nothing busy$/)]);
+  });
+
+  it('asks about unsaved files alone: the question names no session nor terminal, offers no keep, and Quit anyway stops nothing', async () => {
+    const ask = vi.fn(async (): Promise<'quit'> => 'quit');
+    const { deps } = guard(working(), { ask, unsavedFiles: () => ['/r/a.ts'] });
+    electron.app.attempt();
+    await vi.waitFor(() => expect(electron.app.quits).toBe(1));
+    expect(ask).toHaveBeenCalledExactlyOnceWith({ ...NONE, unsavedFiles: ['/r/a.ts'] }, FIRST, null);
+    expect(quitQuestion({ ...NONE, unsavedFiles: ['/r/a.ts'] }, 'Quit')).toMatchObject({ buttons: ['Save all', 'Quit anyway', 'Cancel'], message: '1 unsaved file', detail: 'Unsaved: a.ts' });
+    expect(deps.shutdownEngine).not.toHaveBeenCalled();
+  });
+
+  it('Save all that saves every file quits with no second question; Cancel keeps the app', async () => {
+    let files = ['/r/a.ts'];
+    const ask = vi.fn<() => Promise<'save_all' | 'cancel'>>().mockResolvedValueOnce('save_all');
+    const saveAll = vi.fn(async () => ((files = []), new Map<string, string>()));
+    const { deps } = guard(working(), { ask, saveAll, unsavedFiles: () => files });
+    electron.app.attempt();
+    await vi.waitFor(() => expect(electron.app.quits).toBe(1));
+    expect(ask).toHaveBeenCalledOnce();
+    expect(deps.shutdownEngine).not.toHaveBeenCalled();
+
+    electron.app.reset();
+    const cancelled = guard(working(), { ask: vi.fn(async () => 'cancel' as const), unsavedFiles: () => ['/r/a.ts'] });
+    expect(electron.app.attempt()).toBe(false);
+    await settle();
+    expect(cancelled.deps.ask).toHaveBeenCalledOnce();
+    expect(electron.app.quits).toBe(0);
+  });
+
+  it('engineQuitDeps on the daemon shape: sessions and terminals outlive the app and keep is not offered; the embedded shape as before', () => {
+    const hosts = { stopAllForQuit: vi.fn(async () => {}), facts: () => ({ transport: 'detached' as const }) };
+    const daemon = engineQuitDeps(hosts, () => SETTINGS_DEFAULTS_V21, () => true);
+    expect([daemon.sessionsOutlive?.(), daemon.terminalsOutlive?.(), daemon.keepOffered()]).toEqual([true, true, false]);
+    const embedded = engineQuitDeps(hosts, () => SETTINGS_DEFAULTS_V21, () => false);
+    expect([embedded.sessionsOutlive?.(), embedded.terminalsOutlive?.(), embedded.keepOffered()]).toEqual([false, false, true]);
+  });
+});
