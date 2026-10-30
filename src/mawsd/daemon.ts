@@ -853,6 +853,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       onClientEnd: () => engineRelay.ended(),
       onClient: (connected, peer, appPid) => {
         engineAppPid = connected ? (appPid ?? null) : null;
+        if (connected) front.appArrived(); // M5b fix round 2: the app is reachable once its machine.sock connection is served too
         announced(connected, peer, appPid);
       },
       identity: () => identity,

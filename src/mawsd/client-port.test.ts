@@ -72,6 +72,36 @@ describe('the client port', () => {
     expect(await confirm).toEqual({ noClient: true });
   });
 
+  // M5b fix round 2 (e2e:c7 requests.spec.ts:385, e2e:layout shell.spec.ts:693): the app's dock badge is a level, not an
+  // event. The spine's notifier sets it at its load, which main's first machine.sock request sets off before the app has
+  // attached on engine-host.sock; the app that attaches later (or a later app) is told the current count.
+  it('tells an app that becomes reachable the app badge set before it was, once, and every later count as it comes', () => {
+    const posted: { to: string; request: ClientPortRequest }[] = [];
+    const target = (name: string): PortTarget => ({ post: (request) => (posted.push({ to: name, request }), true) });
+    let app: PortTarget | null = null;
+    const port = createClientPort({ route: (ref) => (ref === null && app !== null ? { target: app, client: null } : null), log: () => {} });
+    ports.push(port);
+    expect(port.badge(null, 3)).toEqual({ noClient: true });
+    port.appArrived(); // nobody yet
+    expect(posted).toEqual([]);
+    app = target('first');
+    port.appArrived();
+    port.appArrived(); // the same app's second socket: told once
+    expect(posted.map(({ to, request }) => [to, request.kind, request.request])).toEqual([['first', 'badge', { count: 3 }]]);
+    port.badge(null, 2);
+    app = target('second'); // a relaunched app
+    port.appArrived();
+    expect(posted.map(({ to, request }) => [to, request.kind, request.request])).toEqual([['first', 'badge', { count: 3 }], ['first', 'badge', { count: 2 }], ['second', 'badge', { count: 2 }]]);
+  });
+
+  it('tells an arriving app nothing when no app badge was ever set', () => {
+    const posted: ClientPortRequest[] = [];
+    const port = createClientPort({ route: () => ({ target: { post: (request) => (posted.push(request), true) }, client: null }), log: () => {} });
+    ports.push(port);
+    port.appArrived();
+    expect(posted).toEqual([]);
+  });
+
   it('settles a waiting dialog noClient at its connection’s end', async () => {
     const { port, target } = lab();
     const confirm = port.confirm(endableClientRef('1/page'), CONFIRM);
