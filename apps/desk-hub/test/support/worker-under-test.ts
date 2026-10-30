@@ -125,7 +125,6 @@ const REGISTRY_RPCS = ['storeListing', 'storeEndpoint', 'notify', 'ownersOf', 'p
 
 /** The org's registry, which can also take a member (the hub has no endpoint for that before the org phase). */
 export class Registry extends DeployedRegistry {
-  private asPrevious = false;
   private leaveRelease: (() => void) | undefined;
 
   /** Armed, the org-state head a `Project` reads to check a v2 event fails, as an unreachable Registry's would. */
@@ -177,16 +176,15 @@ export class Registry extends DeployedRegistry {
     return super.machineBinds(name, ref);
   }
 
-  /** Armed, the next report is taken as the version before `live` took it, once: its counts stored without `live`, and
-   * nothing answered. */
+  /** Armed for the project, its next report is taken as the version before `live` took it, once: its counts stored
+   * without `live`, and nothing answered. Other projects' reports, an earlier case's among them, pass as they are. */
   summary(project: string, report: SummaryReport): true {
     const fault = this.ctx.storage.kv.get<Fault>(`summary-fault:${project}`);
     if (fault) {
       this.ctx.storage.kv.put(`summary-fault:${project}`, { remaining: Math.max(0, fault.remaining - 1), calls: fault.calls + 1 });
       if (fault.remaining > 0) throw new Error(`a failure the suite injected into a summary report of ${project}`);
     }
-    if (!this.asPrevious) return super.summary(project, report);
-    this.asPrevious = false;
+    if (!this.ctx.storage.kv.delete(`summary-as-previous:${project}`)) return super.summary(project, report);
     super.summary(project, { ...report, live: undefined });
     return undefined as unknown as true;
   }
@@ -247,7 +245,7 @@ export class Registry extends DeployedRegistry {
       return Response.json({ alarm: await this.ctx.storage.getAlarm() });
     }
     if (url.pathname === SUMMARY_AS_PREVIOUS_PATH) {
-      this.asPrevious = true;
+      this.ctx.storage.kv.put(`summary-as-previous:${((await request.json()) as { project: string }).project}`, true);
       return new Response('armed');
     }
     if (url.pathname === PROJECTS_PATH) {
