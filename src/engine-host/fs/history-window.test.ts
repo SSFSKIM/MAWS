@@ -10,7 +10,7 @@ import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { StoreFixture } from '../../../test/support/store-fixture';
 import { UNKNOWN_CURSOR } from './follow';
-import { FsService } from './service';
+import { FsService, type InterestSource } from './service';
 import { DEBOUNCE_MS, SETTLE_MS } from './watcher';
 
 const SESSION = '22222222-2222-4222-8222-222222222222' as SessionId;
@@ -75,7 +75,7 @@ describe('a long transcript is read in windows', () => {
   });
 
   const SMALL: WindowBudget = { soft: 6 * 1024, hard: 64 * 1024 }; // about four of the turns above
-  const start = async (options: { reconcileMs?: number } = {}) => {
+  const start = async (options: { reconcileMs?: number; releaseMs?: number } = {}) => {
     service = new FsService({
       paths: fixture.paths,
       emit: (name, payload) => {
@@ -175,6 +175,25 @@ describe('a long transcript is read in windows', () => {
     expect(emitted.filter((e) => (e.name === 'session.eventBatch' || e.name === 'fs.followState') && e.payload.appSessionId === APP)).toEqual([]);
     await fs.unfollow(APP, null); // the session's unfollow stops its quiet follow too
     expect(fs.state().followed).toEqual([]);
+  });
+
+  it('stops a follow once its session has been out of every client\'s interest for the release time', async () => {
+    await fixture.addTranscript(DIR, SESSION, transcript(4));
+    const fs = await start({ reconcileMs: 20, releaseMs: 150 });
+    let set: ReadonlySet<AppSessionId> = new Set([APP]);
+    const listeners = new Set<() => void>();
+    const interest: InterestSource = { set: () => set, onChange: (listener) => (listeners.add(listener), () => listeners.delete(listener)) };
+    fs.watchInterest(interest);
+    await fs.eventsSnapshot(APP, null);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(fs.state().followed).toEqual([{ appSessionId: APP, agentId: null }]); // held open: kept
+    set = new Set();
+    for (const listener of listeners) listener();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(fs.state().followed).toEqual([{ appSessionId: APP, agentId: null }]); // within the release time
+    await expect.poll(() => fs.state().followed, { timeout: 2000, interval: 20 }).toEqual([]);
+    // A later read follows it again from the start.
+    expect((await fs.eventsSnapshot(APP, null)).events.length).toBeGreaterThan(0);
   });
 
   it('never parses the silent request records, and parses a line that only mentions them later on', async () => {

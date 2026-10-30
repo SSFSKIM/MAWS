@@ -135,6 +135,9 @@ const register: HostRegister = (untimedOn, emit, client) => {
   });
   ({ table } = ipc);
   table.startSampling();
+  // A follow lives while some client holds its session open, and FOLLOW_RELEASE_MS after (fs/service.ts)
+  const interested = table;
+  fs.watchInterest({ set: () => interested.interest(), onChange: (listener) => interested.onHoldChanged(listener) });
   // C3 end
   // P3-H H3b: route E's engine leg and the grant store's commands, main's alone; ended when main's client goes
   connectors = registerConnectors(on, emit, client, { sessions: table, store, datasetRefresh, deliveryConfig: { userData, captureEnv: captureShellEnvironment } }); // WR 76/78: cold owner delivery; E3: its registry

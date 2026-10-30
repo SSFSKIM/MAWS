@@ -54,6 +54,17 @@ export const CONTEST_READ_BYTES = 16 * 1024 * 1024;
 // lifetime (debt wave 4). A list read longer ago than this misses only a rescan's announcement; reading it again
 // re-admits it, and a watched change to it is announced either way.
 export const READ_LISTS_CAP = 256;
+// How long a follow outlives its session's last interest (`host.interest`, the sessions some client holds open in a tab
+// or on screen) before it is stopped and its history let go: a followed transcript holds 0.25 to 1 MB of heap per MB of
+// JSONL (158 MB for 625 MB), and before this a follow lived as long as the host. Long enough that switching away and
+// back keeps it; reopening after it costs one read-through again (about 3.5 s for 600 MB, never blocking the host).
+export const FOLLOW_RELEASE_MS = 2 * 60_000;
+
+// The sessions some client holds open (process-table.ts `interest`), and a hook that fires when that may have changed.
+export interface InterestSource {
+  set(): ReadonlySet<AppSessionId>;
+  onChange(listener: () => void): () => void;
+}
 
 export interface FsServiceOptions {
   paths: StorePaths;
@@ -64,6 +75,7 @@ export interface FsServiceOptions {
   reconcileMs?: number;
   startScanFallbackMs?: number;
   window?: WindowBudget; // tests' smaller pages
+  releaseMs?: number; // FOLLOW_RELEASE_MS
 }
 
 // The replay runs' side of the snapshot seam (ReplayHost): null for an app id no run has.
@@ -85,6 +97,7 @@ interface FollowEntry {
   workflows: Map<string, string>; // per run: the progress key last delivered (session follows)
   workflowIds: Map<string, number>; // deliveries per workflow.progress id in this follow, for the occurrence suffix
   workflowWork: Promise<unknown>; // workflow deliveries run one at a time, in change order
+  usedAt: number; // its last read, or the last moment its session was in some client's interest
 }
 
 // W7: one contested session, watched for the foreign process's first write since the contest began.
@@ -126,6 +139,10 @@ export class FsService {
   private readonly reconcileMs: number;
   private reconcile: ReturnType<typeof setInterval> | null = null;
   private readonly window: WindowBudget | undefined;
+  private readonly releaseMs: number;
+  private interest: InterestSource | null = null; // absent (tests, diagnostics), follows are never released for it
+  private interested: ReadonlySet<AppSessionId> = new Set();
+  private offInterest: (() => void) | null = null;
   private readonly follows = new Map<string, FollowEntry>(); // by followKey(appSessionId, agentId)
   private readonly starting = new Map<string, Promise<FollowEntry>>();
   private readonly subagentReader = new SubagentReader();
@@ -150,6 +167,7 @@ export class FsService {
     this.openReader = options.openReader ?? ((locate) => new FsFileReader(locate));
     this.reconcileMs = options.reconcileMs ?? RECONCILE_MS;
     this.window = options.window;
+    this.releaseMs = options.releaseMs ?? FOLLOW_RELEASE_MS;
     this.startScanFallbackMs = options.startScanFallbackMs ?? START_SCAN_FALLBACK_MS;
     this.taskReader = new TaskReader(options.paths);
     this.discovery = new Discovery(options.paths);
@@ -174,6 +192,7 @@ export class FsService {
     this.reconcile = setInterval(() => {
       this.pokeFollows(() => true);
       void this.reconcileSidecars();
+      this.releaseUnwanted();
     }, this.reconcileMs);
     this.fallback = setTimeout(() => {
       this.fallback = null;
@@ -191,6 +210,7 @@ export class FsService {
     this.watcher.stop();
     this.holders.stop();
     if (this.reconcile) clearInterval(this.reconcile);
+    this.offInterest?.();
     for (const entry of this.follows.values()) entry.follow.stop();
     this.follows.clear();
     this.searchReader.stop();
@@ -325,7 +345,39 @@ export class FsService {
     const entry = followed ?? (quiet
       ? await this.ensureFollow(appSessionId, null, async () => this.newFollow(appSessionId, sessionId, this.listed.get(sessionId)?.path ?? null, null, true), historyKey(appSessionId))
       : await this.ensureFollow(appSessionId, null, () => this.followSession(appSessionId, sessionId)));
+    entry.usedAt = Date.now();
     return snapshotOf(entry.follow, request);
+  }
+
+  // Main's interest (process-table.ts): a follow whose session no client has held open for FOLLOW_RELEASE_MS is stopped
+  // at the next reconcile tick, its history let go; the next read follows it again from the start.
+  watchInterest(interest: InterestSource): void {
+    this.offInterest?.();
+    this.interest = interest;
+    this.offInterest = interest.onChange(() => this.noteInterest());
+    this.noteInterest();
+  }
+
+  private noteInterest(): void {
+    if (this.interest === null) return;
+    const now = Date.now();
+    const next = this.interest.set();
+    // A session in the union now, or leaving it now, was wanted until this moment.
+    for (const entry of this.follows.values()) if (next.has(entry.follow.appSessionId) || this.interested.has(entry.follow.appSessionId)) entry.usedAt = now;
+    this.interested = new Set(next);
+  }
+
+  private releaseUnwanted(now = Date.now()): void {
+    if (this.interest === null) return;
+    for (const [key, entry] of this.follows) {
+      if (this.interested.has(entry.follow.appSessionId)) {
+        entry.usedAt = now;
+        continue;
+      }
+      if (now - entry.usedAt < this.releaseMs) continue;
+      this.follows.delete(key);
+      entry.follow.stop();
+    }
   }
 
   // `fs.agentEvents`: the child's transcript as X1 events, following it from now on. The agent must be listed under the
@@ -343,6 +395,7 @@ export class FsService {
       const parentToolUseId = (agent.meta?.toolUseId ?? null) as ParentToolUseId | null;
       return this.newFollow(appSessionId, sessionId, agent.transcriptPath, { agentId, parentToolUseId });
     });
+    entry.usedAt = Date.now();
     return snapshotOf(entry.follow, { before: request.before ?? null });
   }
 
@@ -452,7 +505,7 @@ export class FsService {
       isOwnRecord: (record) => this.holders.ownsTranscriptRecord(sessionId, record),
       emit: this.send,
     });
-    return { follow, sessionId, agentId: agent?.agentId ?? null, location, workflows: new Map(), workflowIds: new Map(), workflowWork: Promise.resolve() };
+    return { follow, sessionId, agentId: agent?.agentId ?? null, location, workflows: new Map(), workflowIds: new Map(), workflowWork: Promise.resolve(), usedAt: Date.now() };
   }
 
   // Lists the session's agents (one listing at a time per session) and tells main when a bound session's agent set or
