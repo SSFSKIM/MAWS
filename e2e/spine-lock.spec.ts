@@ -19,31 +19,17 @@
 // SIGKILL would leave the lock behind, stale). A refused spine is `mawsd`'s on the daemon shape, said by host.status
 // from its daemon.status, and the client half still runs in main.
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { isAlive } from './support/processes';
+import { spineFiles } from './support/spine-files'; // P5 O3-D M6: shared with cross-build's (pre-O3 app, daemon) scene
 
 const HOLDER_BUILD = '9.9.9+e2e-holder';
-
-// Every file at or under the spine's paths (§1's table; P5 O9: and lane A's driver files), with its bytes.
-const SPINE_PATHS = ['index.sqlite', 'index.sqlite-wal', 'index.sqlite-shm', 'machine-settings.json', 'sessions', 'prompt-history.jsonl', 'attention.json', 'lane-a'];
-function spineFiles(userData: string): Map<string, string> {
-  const files = new Map<string, string>();
-  const visit = (path: string) => {
-    if (!existsSync(path)) return;
-    if (statSync(path).isDirectory()) {
-      files.set(`${relative(userData, path)}/`, '');
-      for (const name of readdirSync(path)) visit(join(path, name));
-    } else files.set(relative(userData, path), readFileSync(path).toString('base64'));
-  };
-  for (const name of SPINE_PATHS) visit(join(userData, name));
-  return files;
-}
 
 const procStartOf = (pid: number) => execFileSync('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], { env: { LC_ALL: 'C', TZ: 'UTC' }, encoding: 'utf8' }).trim();
 const hostStatus = async (page: Parameters<typeof invoke>[0]) => value(await invoke(page, 'host.status', undefined));

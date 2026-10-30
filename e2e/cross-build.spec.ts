@@ -15,9 +15,16 @@
 // Across the gap, OX1's negotiation (src/shared/ipc/wire.ts): a peer that lacks a command answers `unknown_command`,
 // and one that lacks an event or an object key drops it (the tolerant reader, logged once), refusing nothing else a
 // peer of its major sends. So in the update a command the newer build added that the engine host serves answers
-// `unknown_command` from the older supervisor and is served once the app has moved, and one another owner serves (main,
-// for `machine`) answers alike whichever supervisor is attached; in both directions neither end logs a refusal of what
-// the other sent. The older app cannot name a command it lacks: its preload bridges only its own registry.
+// `unknown_command` from the older supervisor and is served once the app has moved, and one main serves answers alike
+// whichever supervisor is attached; in both directions neither end logs a refusal of what the other sent. The older app
+// cannot name a command it lacks: its preload bridges only its own registry.
+// P5 O3-D M6, the probe's rule for `machine`-owned commands (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md,
+// Interfaces §J): since O3-D the spine's commands are `machine`'s, served under the `host` binding by the daemon on the
+// daemon shape and by main on the embedded one. In every scene here the attacher's own build serves them, its own
+// `mawsd` (this build's on the daemon shape: the keeper's never serves the attacher) or its own main, so their two
+// probes compare equal as main's do. A scene whose daemon were not the attacher's build (none today) would compare that
+// older daemon's `unknown_command` with the own daemon's answer, as the `engine-host` rule does (`servedByAttacher`).
+// The `(pre-O3 app, daemon)` scene asserts the refusal, not a probe.
 // P5 O2 M8 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M9's two-build check, "this branch's mawsd against that
 // build's engine host"): the same crossing with this build on the daemon shape (MAWS_HOST_MODE=daemon), whose private
 // `mawsd` is the engine host's client, the peer on the embedded shape's detached supervisor, which every build since
@@ -26,10 +33,29 @@
 //                       shape: its `mawsd` connects to the peer's engine host across the minor, which it serves until
 //                       idle (exit-when-idle armed, as E10's replace policy), relays it to the app, and then starts an
 //                       engine host of its own build, the same `mawsd` serving both;
-//   (downgrade, daemon) this build's app keeps a session under its `mawsd`; the peer's app, which knows no daemon,
-//                       attaches to that engine host directly, which replaces `mawsd` as its client (`mawsd` exits 0,
-//                       residue 38), is served as another build and moves to a supervisor of its own: the path back
-//                       from O2 to a build before it.
+//   (downgrade, daemon) this build's app keeps a session under its `mawsd`; the peer's app, launched on the embedded
+//                       shape, attaches to that engine host directly, is served as another build and moves to a
+//                       supervisor of its own. A peer at or past O2 (wire minor 5) ends `mawsd` as it leaves the daemon
+//                       shape, before its hosts start (O3 Decision Log 11 (14)); one before O2 would take the engine
+//                       host from `mawsd`, which would exit 0 (residue 38). P5 O3-D M6: the peer's app never says hello
+//                       to this build's `mawsd`, so the relay's refusal of an app without `machine.spine` (Interfaces
+//                       §L) is not met here; `mawsd`'s exit releases its spine and `spine.lock`, so the peer's own spine
+//                       runs alone: one writer, the lock the peer's main's (a peer from O3-A on) or none (a peer before
+//                       it, which knows no lock).
+// P5 O3-D M6 (acceptance 9; the M6 section's last decision): in `(update, daemon)` the kept engine host is the peer's, a
+// build before O3-D whose welcome lists no `host.attachment` while O3-D is not on master. To such a host `mawsd` keeps
+// O2's connection per app attachment, so the scene quits this build's app mid-turn and reattaches it while the kept
+// host serves: `mawsd`'s link to it is recycled at the departure and at the reattach and is never told the attachment,
+// the turn's end, journaled while no app ran, reaches the reattached app and the spine's digest, and its error item is
+// still one. Once the kept host is replaced at idle by one of this build, a quit and a reattach cross no new connection:
+// the permanent client. A peer whose host lists the capability gets the permanent connection from the start, and the
+// pre-O3 peer's run (`--peer <O2-era sha>`) keeps the recycle's checks. What acceptance 9 also names, a bridge request,
+// a hold and a remote subscription outstanding at the quit, is not driven here: see the M6 report's residue.
+//   (pre-O3 app, daemon) acceptance 11's second half: this build's app leaves its `mawsd` running the spine on a
+//                       post-D profile; an O2-era peer's app (before O3-A: no `spine.lock`, no `machine.spine`) is
+//                       launched on the daemon shape. It is refused at the relay, `mawsd` yields its spine to it, the
+//                       old app finds the index unavailable, and no spine file changes after the yield while it idles.
+//                       Run only with such a peer (`--peer <O2-era master sha>`); skipped otherwise.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
 import { randomUUID } from 'node:crypto';
@@ -41,10 +67,13 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { HostStatus } from '@shared/ipc/schema/host';
 import type { CommandInput } from '@shared/ipc/schema';
 import { classifyWireChange, type WireManifest } from '@shared/ipc/wire';
+import { daemonPaths } from '@shared/daemon/files';
+import { reachMachine } from '../src/mawsd/machine-client';
 import { invoke, replaySpec, turnsJournal, value } from './support/c7-replay';
 import { REPO_ROOT } from './support/launch';
 import { isAlive } from './support/processes';
-import { attentionOf, eventsOf, isRequestRow, isTaskFailureRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, tailFixture, TASK_FAILED, withScratch, type Scratch } from './support/supervisor-scratch';
+import { spineFiles } from './support/spine-files';
+import { attentionOf, eventsOf, isRequestRow, isTaskFailureRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, tailFixture, TASK_FAILED, withScratch, type Run, type Scratch } from './support/supervisor-scratch';
 
 const PEER = process.env.MAWS_E2E_PEER_ROOT || null;
 test.skip(process.env.MAWS_CROSS_BUILD_E2E !== '1', 'the two-build check runs under pnpm e2e:cross-build (MAWS_CROSS_BUILD_E2E=1)');
@@ -197,6 +226,25 @@ interface Shapes { keeper: Shape; attacher: Shape }
 const DAEMON_SHAPE_MINOR = 5; // P5 O2's wire minor: a build at or past it knows the daemon shape, and leaves it on purpose
 const EMBEDDED: Shapes = { keeper: 'detached', attacher: 'detached' };
 const onShape = (shape: Shape) => (st: HostStatus) => shape === 'detached' || st.daemon !== null; // the daemon shape's main also knows its mawsd
+// P5 O3-D M6: whether a build's engine host serves `host.attachment` (its manifest's capabilities, the union its peers
+// list), so a post-D `mawsd` keeps one permanent connection to it rather than O2's per attachment
+const hostsAttachment = (build: Build) => build.manifest.capabilities.includes('host.attachment');
+// P5 O3-D M6: whether a build's app takes `spine.lock` (O3-A on): one before it runs its spine with no lock at all
+const takesSpineLock = (build: Build) => ['src/main/settings/spine-lock.ts', 'src/services/settings/spine-lock.ts'].some((file) => existsSync(join(build.root ?? REPO_ROOT, file)));
+// The profile's spine.lock as takeLock writes it, or null when no process holds it
+function spineLockOf(userData: string): { pid: number; buildId: string } | null {
+  try {
+    return JSON.parse(readFileSync(join(userData, 'spine.lock'), 'utf8')) as { pid: number; buildId: string };
+  } catch {
+    return null;
+  }
+}
+// P5 O3-D M6 (Interfaces §J): who serves a command of `owner` to the attaching app in every scene here: the attacher's
+// own build for `main` and `machine` (its main, or its own mawsd on the daemon shape), the attached supervisor for
+// `engine-host`. A `machine` command served by a daemon of the other build would take the `engine-host` rule.
+const servedByAttacher = (owner: string) => owner !== 'engine-host';
+// The connections a supervisor's log shows from one client (a `mawsd`'s pid, as its hello's appPid), counted
+const connectsFrom = (log: string, appPid: number) => (log.match(new RegExp(`client connected: appPid ${appPid} `, 'g')) ?? []).length;
 
 async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer: Build; older: Build } | null, shapes: Shapes = EMBEDDED): Promise<string[]> {
   const shapeOf = (shape: Shape) => (shape === 'daemon' ? ' on the daemon shape' : '');
@@ -225,7 +273,9 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   await expect.poll(() => s.journal(id).some(isRequestRow), { timeout: 30_000, message: 'the request reaches the journal while no app runs' }).toBe(true);
 
   // the other build's app attaches, and is served as another build until the kept sessions are idle
-  const second = await s.launch({ MAWS_HOST_MODE: shapes.attacher, MAWS_E2E_SUPERVISOR_IDLE_MS: String(IDLE_MS) }, attacher.root);
+  const attach = () => s.launch({ MAWS_HOST_MODE: shapes.attacher, MAWS_E2E_SUPERVISOR_IDLE_MS: String(IDLE_MS) }, attacher.root);
+  let second = await attach();
+  const attacherRuns: Run[] = [second]; // P5 O3-D M6: the attacher's launches (acceptance 9 quits and reattaches it)
   const served = await s.ready(second.page, (st) => st.supervisor!.exitWhenIdle && onShape(shapes.attacher)(st));
   expect(served, `${attacher.label} served by ${keeper.label}'s supervisor`).toMatchObject({ matches: 'build', supervisor: { pid: kept.pid, buildId: kept.buildId, liveSessions: 1, exitWhenIdle: true } });
   const build = served.appBuildId;
@@ -251,6 +301,12 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
       expect(second.output(), `${attacher.label}'s main ends the profile's mawsd as it leaves the daemon shape`).toContain(`[hosts] ending mawsd, pid ${keeperDaemon}, as the profile leaves the daemon shape`);
       expect(s.daemonLog(), 'mawsd says why it left').toContain('exiting (signal)');
       said.push(`  mawsd pid ${keeperDaemon} exited: ${attacher.label}'s app ended it, leaving the daemon shape`);
+      // P5 O3-D M6 (§2's one writer across the downgrade): mawsd's exit gave up its spine and spine.lock, so the peer's
+      // own spine runs alone, the lock its main's (a peer from O3-A on) or no lock (a peer before O3-A, which knows none)
+      const lock = spineLockOf(s.userData);
+      if (takesSpineLock(attacher)) expect(lock?.pid, `${attacher.label}'s main holds spine.lock, mawsd having given it up`).toBe(second.child.pid);
+      else expect(lock, `no spine.lock: mawsd gave it up and ${attacher.label} knows none`).toBeNull();
+      said.push(`  spine.lock: ${lock === null ? 'none' : `pid ${lock.pid} (${attacher.label}'s main)`}`);
     } else {
       expect(s.daemonLog(), 'mawsd says why it left').toContain('the engine-host was taken by another client; exiting');
       said.push(`  mawsd pid ${keeperDaemon} exited: the engine host was taken by ${attacher.label}'s app`);
@@ -287,8 +343,11 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   value(await invoke(second.page, 'session.answer', { appSessionId: id, requestId: requested.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
   const arrived = () => second.page.evaluate((id) => (window as unknown as { __xb: string[] }).__xb.filter((k) => k.startsWith(`${id}|`)).length, id);
   await expect.poll(arrived, { message: 'rows arrive live after the answer' }).toBeGreaterThan(5);
+  const live = await arrived();
+  // P5 O3-D M6 (acceptance 9): this build's app quits mid-turn and reattaches while the kept, older engine host serves
+  if (attacherDaemon !== null) second = await quitAndReattach(s, second, attach, attacherRuns, { kept, daemon: attacherDaemon, id, capable: hostsAttachment(keeper), said });
   await turnEnded(second.page, id);
-  said.push(`  served: a launch played its turn on the kept supervisor; the kept turn played on after this app's answer, ${await arrived()} rows live`);
+  said.push(`  served: a launch played its turn on the kept supervisor; the kept turn played on after this app's answer, ${live} rows live`);
 
   // the move: once both sessions are idle they are released, the kept supervisor exits, and the app starts its own
   const moved = await s.ready(second.page, (st) => st.supervisor!.pid !== kept.pid && onShape(shapes.attacher)(st), IDLE_MS + 45_000);
@@ -299,8 +358,11 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   expect(s.log(), 'the kept supervisor exited by itself once idle').toContain('exiting (exitWhenIdle)');
   expect(second.output()).toContain(`connected to supervisor pid ${moved.supervisor!.pid} build ${build} wire ${wireOf(attacher)} capabilities [`);
   await expect(banner(second.page, 'MAWS was updated.')).toHaveCount(0);
-  await launchOn(attacher, second.page, `xb-after-${Date.now()}`, join(REPO_ROOT, PERMISSION), s);
+  const afterMove = `xb-after-${Date.now()}` as AppSessionId;
+  await launchOn(attacher, second.page, afterMove, join(REPO_ROOT, PERMISSION), s);
   said.push(`  moved: supervisor pid ${kept.pid} (build ${kept.buildId}) exited when idle; pid ${moved.supervisor!.pid} (build ${build}) serves a launch`);
+  // P5 O3-D M6 (acceptance 9): the engine host of this build, which lists host.attachment, has mawsd's permanent client
+  if (attacherDaemon !== null) second = await permanentAcrossReattach(s, second, attach, attacherRuns, { host: moved.supervisor!.pid, daemon: attacherDaemon, id: afterMove, said });
 
   // across the gap, against what the newer build's own supervisor answers
   if (gap && before) {
@@ -309,13 +371,13 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
       const onOwn = after.get(name)!;
       const { owner } = commandOf(gap.newer, name)!;
       expect(onOwn.ok || onOwn.code !== 'invalid_input', `${name}: its sample input is refused (${onOwn.ok ? '' : onOwn.message}); give it one in INPUTS (inputsOf for one naming a scratch file)`).toBe(true);
-      if (owner === 'engine-host') {
+      if (!servedByAttacher(owner)) {
         expect(onOwn, `${name} is served by its own build's supervisor`).not.toMatchObject({ ok: false, code: 'unknown_command' });
         expect(onOlder, `${name}, which the older supervisor lacks`).toMatchObject({ ok: false, code: 'unknown_command' });
-        said.push(`  gap: ${name} (engine-host) answers unknown_command from the older supervisor and ${onOwn.ok ? 'ok' : onOwn.code} from its own`);
+        said.push(`  gap: ${name} (${owner}) answers unknown_command from the older supervisor and ${onOwn.ok ? 'ok' : onOwn.code} from its own`);
       } else {
-        expect(onOlder, `${name} (owner ${owner}) answers alike whichever supervisor is attached`).toEqual(onOwn);
-        said.push(`  gap: ${name} (${owner}) answers ${onOwn.ok ? 'ok' : onOwn.code} on either supervisor`);
+        expect(onOlder, `${name} (owner ${owner}) answers alike whichever supervisor is attached: the attacher's own build serves it`).toEqual(onOwn);
+        said.push(`  gap: ${name} (${owner}) answers ${onOwn.ok ? 'ok' : onOwn.code} on either supervisor, served by ${attacher.label}'s own ${owner === 'machine' && shapes.attacher === 'daemon' ? 'mawsd' : 'main'}`);
       }
     }
     for (const name of addedCommands(gap.newer, gap.older).filter((name) => gap.newer.mainOnly.has(name))) said.push(`  gap: ${name} is main-only, out of a window's reach; the scenes' own traffic is its check`);
@@ -323,7 +385,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   }
 
   // neither end refused what the other build sent; what either dropped as unknown is named
-  const appLines = second.output().split('\n');
+  const appLines = attacherRuns.flatMap((run) => run.output().split('\n'));
   const hostLines = s.log().split('\n');
   expect(appLines.filter((l) => MAIN_REFUSES.test(l)), `${attacher.label}'s main refuses nothing ${keeper.label}'s supervisor sent`).toEqual([]);
   expect(hostLines.filter((l) => HOST_REFUSES.test(l)), 'neither supervisor refuses what the other build sent').toEqual([]);
@@ -333,8 +395,74 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   if (shapes.keeper === 'daemon' || shapes.attacher === 'daemon') said.push(`  mawsd's log: ${daemonLines.filter((l) => HOST_REFUSES.test(l)).length} lines of the refusal pattern${daemonLines.filter((l) => HOST_REFUSES.test(l)).map((l) => ` | ${l.trim()}`).join('')}`);
   const dropped = [...appLines, ...hostLines, ...daemonLines].filter((l) => DROPPED.test(l));
   said.push(dropped.length === 0 ? '  dropped: nothing, at either end' : `  dropped (the tolerant reader): ${dropped.map((l) => l.trim()).join(' | ')}`);
-  expect(second.maws.consoleErrors()).toEqual([]);
+  for (const run of attacherRuns) expect(run.maws.consoleErrors()).toEqual([]);
   return said;
+}
+
+// P5 O3-D M6 (acceptance 9; §8 of O3's design): this build's app, attached through its `mawsd` to the kept engine host,
+// quits mid-turn and reattaches while that host serves. To a host whose welcome lists no `host.attachment` (a build
+// before O3-D, kept across the update) `mawsd` keeps O2's connection per attachment: its link is recycled at the
+// departure and at the reattach (a new connection in the host's log each time) and the host is never sent the signal
+// (`mawsd` would log its refusal). To a host that lists it, neither: one permanent connection. Either way the turn plays
+// on while no app runs, and its end reaches the reattached app's status and the spine's digest (O2's burst on a recycled
+// link, or the front's follow from the app's cursor), and the session's background failure is still one Needs-you item.
+async function quitAndReattach(s: Scratch, run: Run, attach: () => Promise<Run>, runs: Run[], o: { kept: { pid: number }; daemon: number; id: AppSessionId; capable: boolean; said: string[] }): Promise<Run> {
+  const before = connectsFrom(s.log(), o.daemon);
+  const lastSeq = () => Math.max(0, ...s.journal(o.id).map((r) => r.seq));
+  await s.quit(run);
+  expect(run.quitLines().filter((line) => line.startsWith('quit-guard: ')), 'the daemon shape asks nothing at quit (Q1)').toEqual([expect.stringMatching(/not asked: they outlive the app$/)]);
+  const awayFrom = lastSeq();
+  await expect.poll(lastSeq, { timeout: 30_000, message: 'the turn journals rows while no app runs' }).toBeGreaterThan(awayFrom);
+  if (!o.capable) await expect.poll(() => connectsFrom(s.log(), o.daemon), { timeout: 15_000, message: 'mawsd’s link to the older host recycled at the departure' }).toBeGreaterThan(before);
+  const departed = connectsFrom(s.log(), o.daemon);
+  const atReattach = lastSeq();
+  const next = await attach();
+  runs.push(next);
+  await s.ready(next.page, (st) => st.supervisor!.pid === o.kept.pid && st.daemon?.pid === o.daemon);
+  if (o.capable) expect(connectsFrom(s.log(), o.daemon), 'the permanent client: no new connection across the quit and the reattach').toBe(before);
+  else await expect.poll(() => connectsFrom(s.log(), o.daemon), { timeout: 15_000, message: 'mawsd’s link to the older host recycled at the reattach' }).toBeGreaterThan(departed);
+  expect(s.daemonLog(), 'no host.attachment reached a host that serves none').not.toMatch(/host\.attachment \{attached: (true|false)\} failed/);
+  // the catch-up at the reattach: the turn's end reaches main's view (the engine status, through the front's follow
+  // from the app's cursor) and the spine's (the digest, folded from the recycled link's burst on an older host), and
+  // the refold adds no second item for the failure folded before the quit
+  await turnEnded(next.page, o.id);
+  await expect
+    .poll(async () => {
+      const digest = value(await invoke(next.page, 'session.digests', undefined)).digests.find((d) => d.appSessionId === o.id);
+      return digest !== undefined && digest.lastTurnEndedAt !== null && digest.phase !== 'working';
+    }, { message: 'the spine’s digest has the turn’s end' })
+    .toBe(true);
+  const journal = s.journal(o.id);
+  const away = journal.filter((r) => r.seq > awayFrom && r.seq <= atReattach).length;
+  const endedAway = journal.some((r) => r.seq <= atReattach && r.direction === 'in' && r.frame.type === 'result');
+  expect((await attentionOf(next.page, o.id, 'error')).map((i) => i.summary), 'the background failure is still one Needs-you item').toEqual([`Background task failed: ${TASK_FAILED}`]);
+  expect(await pendingPermissions(next.page, o.id), 'the request answered before the quit stays answered').toEqual([]);
+  expect((await eventsOf(next.page, o.id)).filter((e) => Number(suffix(e.id).split(':')[0]) > awayFrom).length, 'the rows journaled while no app ran are the session’s').toBeGreaterThan(0);
+  o.said.push(
+    `  reattach (acceptance 9, ${o.capable ? 'a host that serves host.attachment: one permanent connection' : 'an older host: O2’s link per attachment'}): connections from mawsd pid ${o.daemon} ${before} → ${departed} at the departure → ${connectsFrom(s.log(), o.daemon)} at the reattach; ${away} rows journaled while no app ran${endedAway ? ', the turn’s end among them' : ''}`,
+  );
+  return next;
+}
+
+// P5 O3-D M6 (acceptance 9): once the kept host was replaced at idle by an engine host of this build, which lists
+// host.attachment, `mawsd` is its permanent client: a session held mid-turn at its request (the unpaced replay holds there,
+// so neither the park nor the idle release ends the host while no app runs), the app's quit and reattach cross no new
+// connection, and the request is pending once after it.
+async function permanentAcrossReattach(s: Scratch, run: Run, attach: () => Promise<Run>, runs: Run[], o: { host: number; daemon: number; id: AppSessionId; said: string[] }): Promise<Run> {
+  value(await invoke(run.page, 'session.send', { appSessionId: o.id, content: PROMPT }));
+  await expect.poll(async () => (await pendingPermissions(run.page, o.id)).length, { timeout: 30_000, message: 'the request, held' }).toBe(1);
+  const connects = connectsFrom(s.log(), o.daemon);
+  const last = (s.log().match(new RegExp(`client connected: appPid ${o.daemon} .*`, 'g')) ?? []).at(-1) ?? '';
+  expect(last, 'mawsd’s connection to the host of this build declares the attachment').toContain('host.attachment');
+  await s.quit(run);
+  const next = await attach();
+  runs.push(next);
+  await s.ready(next.page, (st) => st.supervisor!.pid === o.host && st.daemon?.pid === o.daemon);
+  expect(connectsFrom(s.log(), o.daemon), 'the permanent client: no new connection across the quit and the reattach').toBe(connects);
+  expect(s.daemonLog(), 'the host of this build hears each attachment').not.toMatch(/host\.attachment \{attached: (true|false)\} failed/);
+  await expect.poll(async () => (await pendingPermissions(next.page, o.id)).length, { message: 'the request, pending once after the reattach' }).toBe(1);
+  o.said.push(`  permanent (acceptance 9): supervisor pid ${o.host} of this build kept mawsd pid ${o.daemon}’s one connection across a quit and a reattach (${connects} connections from it in the log)`);
+  return next;
 }
 
 const record = (lines: string[]) => {
@@ -355,13 +483,77 @@ test('(downgrade) the newer build’s app keeps a session; the older build’s a
 });
 
 test('(update, daemon) the peer’s app keeps a session on its own supervisor; this build’s app attaches on the daemon shape, its mawsd relays the peer’s engine host across the minor until idle, then starts its own', async () => {
+  test.setTimeout(360_000); // P5 O3-D M6: acceptance 9's two quits and reattaches
   const { here, peer, newer, older } = builds();
   const gap = here === newer ? { newer, older } : null;
   await withScratch('xb-daemon-update', async (s) => record(await crossing(s, peer, here, gap, { keeper: 'detached', attacher: 'daemon' })));
 });
 
-test('(downgrade, daemon) this build’s app keeps a session under its mawsd; the peer’s app takes that engine host from mawsd, which exits, is served as another build, and moves to its own supervisor', async () => {
+test('(downgrade, daemon) this build’s app keeps a session under its mawsd; the peer’s app ends mawsd (or, before O2, takes the engine host from it), attaches that engine host, is served as another build, and moves to its own supervisor', async () => {
   const { here, peer, newer, older } = builds();
   const gap = peer === newer ? { newer, older } : null;
   await withScratch('xb-daemon-downgrade', async (s) => record(await crossing(s, here, peer, gap, { keeper: 'daemon', attacher: 'detached' })));
+});
+
+// P5 O3-D M6, acceptance 11's second half (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §L; the
+// architect's rulings D29 and D32). This build's app on the daemon shape leaves its private `mawsd` running the spine
+// over a post-D profile (the index at 14, the settings split); an O2-era app (the peer, before O3-A: it takes no
+// spine.lock and lists no `machine.spine`) is then launched on the daemon shape over it. What the scene asserts, each
+// with the ruling it rests on:
+//   1. the relay's refusal (§L; D32): `mawsd` answers the old app's engine-host.sock hello `refuse wire` on its own
+//      account, with its own identity, and the old app's main reads the refusal;
+//   2. the yield (§L; D32): the old app holds no spine.lock, so `mawsd` yields its spine to that pid, releasing it;
+//   3. the old app's index unavailable (acceptance 11's wording; D32): its own main opens the index `mawsd` migrated to
+//      14 and finds it newer than it knows (13), so leaves it unopened for its run;
+//   4. no spine file changed after the yield (D32, by SPINE_PATHS, e2e/support/spine-files.ts) while the old app idles.
+// What follows is O2's downgrade, which D29 keeps: the old app's `watchDaemon` asks `daemon.restart` of a private daemon
+// of another build, so the post-D `mawsd` exits 75 and the old app's own build of `mawsd` (which runs no spine) serves
+// it, its main running its spine alone with the index unavailable to it. The scene records what it sees of that end
+// state and asserts none of it: the window between the refusal and the restart is a race of the old app's two sockets.
+test('(pre-O3 app, daemon) an O2-era app on a profile whose mawsd runs the spine is refused at the relay, the spine yields to it, its index is unavailable, and no spine file changes while it idles', async () => {
+  const { here, peer } = builds();
+  test.skip(takesSpineLock(peer) || peer.manifest.minor < DAEMON_SHAPE_MINOR, `the peer (wire ${wireOf(peer)}) is not an O2-era build: it takes spine.lock, or knows no daemon shape; this scene runs with --peer <O2-era master sha>`);
+  await withScratch('xb-pre-o3', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) on the daemon shape runs the spine in its mawsd; ${peer.label} (wire ${wireOf(peer)}), from before O3-A, launches on the daemon shape over it`];
+    // this build's app makes the profile post-D (its mawsd's spine loads: spine.lock, the split, the index at 14), then quits
+    const first = await s.launch({ MAWS_HOST_MODE: 'daemon' });
+    const own = await s.ready(first.page, onShape('daemon'));
+    await s.record(first.page); // the seeded session in the spine's index: the spine is loaded
+    const daemon = own.daemon!.pid;
+    await s.quit(first);
+    expect(isAlive(daemon), 'this build’s mawsd outlives its app').toBe(true);
+    expect(spineLockOf(s.userData)?.pid, 'mawsd holds spine.lock').toBe(daemon);
+    const reached = await reachMachine(daemonPaths(s.userData), { build: 'e2e-cross-build' });
+    if (!reached.ok) throw new Error(`machine.sock: ${reached.state}: ${reached.why}`);
+    const status = await reached.link.request('daemon.status', undefined);
+    reached.link.close();
+    expect(status, 'mawsd runs the spine, loaded').toMatchObject({ ok: true, value: { pid: daemon, spine: { state: 'loaded' } } });
+    const logFrom = s.daemonLog().length; // what this build's mawsd says from here
+
+    // the O2-era app, on the daemon shape over the same profile
+    const old = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+    const oldPid = old.child.pid!;
+    const daemonSaid = () => s.daemonLog().slice(logFrom);
+    // 1. the relay's refusal: mawsd's own `refuse wire`, and the old app's main reading it
+    await expect.poll(daemonSaid, { timeout: 30_000, message: 'mawsd refuses the old app’s hello at the relay' }).toContain(`engine-host.sock: refuse wire to appPid ${oldPid} (build `);
+    expect(daemonSaid(), 'its hello lists no machine.spine, and it holds no spine.lock').toMatch(new RegExp(`refuse wire to appPid ${oldPid} \\(build [^)]+\\): its hello lists no machine\\.spine, so it runs a spine of its own\n`));
+    await expect.poll(() => old.output(), { timeout: 30_000, message: 'the old app’s main reads the refusal of its wire' }).toMatch(/speaks wire \S+ with |is incompatible \(wire\)/);
+    // 2. the yield: to the old app's pid, the loaded spine released (or the process ending under the restart first)
+    expect(daemonSaid(), 'mawsd yields its spine to the old app').toContain(`[spine] yielding to pid ${oldPid}, an app that runs its own spine`);
+    await expect.poll(() => /\[spine\] released/.test(daemonSaid().slice(daemonSaid().indexOf('[spine] yielding to pid'))) || !isAlive(daemon), { timeout: 70_000, message: 'the yielded spine released, or mawsd gone' }).toBe(true);
+    // 3. the old app's index unavailable: the version mawsd migrated it to is newer than the old build knows
+    await expect.poll(() => old.output(), { timeout: 30_000, message: 'the old app finds the index unavailable' }).toMatch(/user_version 14 is newer than this app knows \(13\); the index is unavailable this run/);
+    // 4. no spine file changes after the yield while the old app idles
+    const afterYield = spineFiles(s.userData);
+    await old.page.waitForTimeout(10_000);
+    expect(spineFiles(s.userData), 'every spine file byte-identical after the yield, and none new, while the old app idles').toEqual(afterYield);
+    said.push(`  refused: ${daemonSaid().split('\n').find((line) => line.includes(`refuse wire to appPid ${oldPid}`))?.trim()}`);
+    said.push(`  yielded: ${daemonSaid().split('\n').filter((line) => line.includes('[spine] ')).map((line) => line.trim()).join(' | ')}`);
+    said.push(`  the old app's index: ${old.output().split('\n').find((line) => line.includes('is newer than this app knows'))?.trim()}`);
+    said.push(`  spine files unchanged over 10 s of the old app's idle: ${afterYield.size} entries`);
+    // O2's downgrade (D29), recorded, not asserted
+    const lock = s.daemonLock();
+    said.push(`  then (O2's downgrade, D29; recorded only): mawsd pid ${daemon} ${isAlive(daemon) ? 'still runs' : `exited${s.daemonLog().includes('exited (restart, code 75)') ? ' 75 at the old app’s daemon.restart' : ''}`}; the profile’s mawsd lock names ${lock === null ? 'nothing' : `pid ${lock.pid}`}; spine.lock ${spineLockOf(s.userData) === null ? 'absent' : `names pid ${spineLockOf(s.userData)!.pid}`}`);
+    record(said);
+  });
 });

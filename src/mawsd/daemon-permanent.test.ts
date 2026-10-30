@@ -250,6 +250,38 @@ describe('O2’s recycle per attachment stays', () => {
     expect(seam.availability).toEqual([true, false]);
   });
 
+  // P5 O3-D M6 (acceptance 9): an older host kept across the update exits at idle and parks, its app dropped with it; the
+  // app's transport attaches again, which starts a host of this build. The relay holds that hello until the new host has
+  // welcomed (relay.ts's admission), so the link's policy is already the new host's when the app attaches: the host is
+  // told the attachment (its connection's presence starts false, and app-bound requests would settle noClient), and the
+  // link is permanent from there
+  it('a host of this build that replaces an older one at idle hears the reattaching app’s attachment and keeps one connection', async () => {
+    scene.engineSpawn = { capabilities: INCAPABLE };
+    const daemon = await scene.start({ permanentClient: true });
+    const first = await scene.app();
+    first.ready();
+    await first.request('engine.ping');
+    expect(scene.lastEngine().named('host.attachment')).toEqual([]);
+    scene.engineSpawn = {}; // the next engine host is this build's: it lists host.attachment
+    first.exit('now'); // the older host exits and parks, as at its idle exit
+    await until(() => daemon.hosts.parked('engine-host'), 3_000, 'the park');
+    await until(() => first.closed, 3_000, 'the app dropped with its host');
+    const second = await scene.app(); // its transport attaches again; the attach starts the new host
+    second.ready();
+    await second.request('engine.ping');
+    const engine = scene.lastEngine();
+    expect(engine.supervisor.peer()?.capabilities).toContain(ATTACHMENT_CAPABILITY);
+    await until(() => engine.named('host.attachment').length > 0, 3_000, 'the attachment told to the new host');
+    expect(engine.named('host.attachment')).toEqual([{ attached: true }]);
+    expect(engine.shellRecaptured).toBe(1); // the owner back, once
+    const links = engine.supervisor.connections.length;
+    second.leave();
+    await until(() => engine.named('host.attachment').length === 2, 3_000, 'the departure');
+    expect(engine.named('host.attachment').at(-1)).toEqual({ attached: false });
+    await sleep(100);
+    expect(engine.supervisor.connections.length).toBe(links); // permanent from here: never recycled
+  });
+
   it('with the option off, to an engine host that lists it: no capability in its hello, no signal, the recycle as master', async () => {
     const seam = listening();
     await scene.start({ endpoint: seam.endpoint });
