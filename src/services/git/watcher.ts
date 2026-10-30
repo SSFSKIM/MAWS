@@ -13,16 +13,23 @@
 // beyond the cap is not kept and counts as a change. Watches are ref-counted per root by the
 // directories each owner (the requesting window) passed, and an owner's are released together when it goes; the first
 // watch of a root emits its status as `initial`.
-import { constants, watch as fsWatch } from 'node:fs';
+// P5 O3-E M1 (Interfaces §B): the recursive watch is the platform's (`recursiveWatch`): on Linux the watch tree, each
+// call given a prune (the root's: what git ignores, its git dir's object stores and the checkouts nested in it; a git
+// dir or common dir outside it: the object stores alone). A tree that runs out of inotify's watches or instances puts
+// its root in `polling`: its watches closed, `git status` read every POLL_MS (twice that after a timeout) until the
+// root is unwatched. An event with no filename (the tree's reconcile, a poll) also re-reads the cached facts of the
+// files beneath untracked directories, the one recovery for a content write whose event was lost.
+import { constants } from 'node:fs';
 import { access, readdir, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { isExhaustion, recursiveWatch } from '@shared/fs/watch-tree';
 import type { GitChangeReason, GitChanged, GitStatus } from '@shared/ipc/schema/git';
 import { ReleaseFences } from '../release-fences';
 import { GitTimeoutError } from './runner';
 
 export type WatchFn = (
   path: string,
-  options: { recursive: boolean },
+  options: { recursive: boolean; prune?: (dir: string) => boolean | Promise<boolean> }, // `dir` relative to `path`; true: never walk it
   listener: (event: string, filename: string | null) => void,
 ) => { close(): void; on(event: 'error', listener: (error: Error) => void): unknown };
 
@@ -38,12 +45,14 @@ export interface GitWatcherDeps {
   statFile?(path: string): Promise<FileFacts | null>;
   linkedWorktrees?(commonDir: string): Promise<string[]>; // absolute paths; the common dir's `worktrees/*/gitdir` by default
   isRepository?(directory: string): Promise<boolean>; // whether git reads the directory as a repository of its own; isNestedRepository by default
+  ignored?(root: string): Promise<(dir: string) => Promise<boolean>>; // what git ignores under the root (`gitIgnored`); nothing without it
 }
 
 const DEBOUNCE_MS = 250;
 export const INNER_CAP = 2_000; // files beneath untracked directories whose facts a root keeps (an unignored node_modules)
 const MAX_WAIT_MS = 1000; // the longest a debounce window runs from its first event
 const BACKOFF_MS = 5000; // after a status timeout, until a status succeeds
+export const POLL_MS = 5_000; // a polling root's status period, doubled after a timeout until a status succeeds
 // When several kinds of path changed in one window, the event names the weightiest; HEAD moving outranks them all.
 const WEIGHT: Record<Exclude<GitChangeReason, 'initial'>, number> = { worktree: 0, index: 1, refs: 2, head: 3 };
 
@@ -174,6 +183,11 @@ function under(path: string, dir: string): boolean {
   return path === dir || path.startsWith(`${dir}/`);
 }
 
+// A git dir's object stores, relative to it: git's and git-lfs's, whose every path classifies null.
+function objectStore(sub: string): boolean {
+  return sub === 'objects' || sub === 'lfs';
+}
+
 // Who holds a watch: main passes the requesting client's id (`ClientRef.id`); '' is a caller without a client.
 export type WatchOwner = string;
 
@@ -196,6 +210,9 @@ interface Root {
   nested: string[]; // the linked worktrees under the root, root-relative
   nestedRead: 'idle' | 'reading' | 'again';
   clones: string[]; // the repositories nested in the status's untracked directories that a pass found, root-relative
+  state: 'events' | 'polling'; // polling once a watch ran out of inotify's budget, until the root closes
+  pollTimer: NodeJS.Timeout | null;
+  rescan: boolean; // the pending pass re-reads every cached fact beneath untracked directories
 }
 
 export class GitWatcher {
@@ -208,7 +225,7 @@ export class GitWatcher {
   private readonly isRepository: (directory: string) => Promise<boolean>;
 
   constructor(private readonly deps: GitWatcherDeps) {
-    this.watchFn = deps.watch ?? (fsWatch as unknown as WatchFn);
+    this.watchFn = deps.watch ?? recursiveWatch();
     this.statFile = deps.statFile ?? ((path) => stat(path).then((s) => ({ size: s.size, mtimeMs: s.mtimeMs }), () => null));
     this.linkedWorktrees = deps.linkedWorktrees ?? readLinkedWorktrees;
     this.isRepository = deps.isRepository ?? isNestedRepository;
@@ -305,10 +322,16 @@ export class GitWatcher {
       nested,
       nestedRead: 'idle',
       clones: [],
+      state: 'events',
+      pollTimer: null,
+      rescan: false,
     };
     const inside = relative(root.root, status.gitDir);
     const gitDirRel = inside !== '' && !inside.startsWith('..') && !isAbsolute(inside) ? inside.split(sep).join('/') : null;
-    const onError = (error: Error) => console.warn(`[git] watch failed under ${root.root}: ${error.message}`);
+    const onError = (error: Error) => {
+      if (isExhaustion(error)) return this.poll(root, error.code);
+      console.warn(`[git] watch failed under ${root.root}: ${error.message}`);
+    };
     // A path in the git dir or the common dir, relative to it; `common`: the directory is the common dir, where the
     // linked worktrees are registered.
     const onGitPath = (sub: string, reason: Exclude<GitChangeReason, 'initial'> | null, common: boolean) => {
@@ -316,10 +339,19 @@ export class GitWatcher {
       this.changed(root, reason, null, sub);
     };
     const gitDirIsCommon = status.gitDir === status.commonDir;
+    const ignored = this.ignoredUnder(root.root);
+    // The root's prune: inside its git dir only the object stores (refs/, worktrees/ and logs/ are read), elsewhere the
+    // nested checkouts, whose every event is dropped below and which git lists as one untracked entry rather than as
+    // ignored, and then what git ignores.
+    const rootPrune = (rel: string): boolean | Promise<boolean> => {
+      if (gitDirRel !== null && under(rel, gitDirRel)) return rel !== gitDirRel && objectStore(rel.slice(gitDirRel.length + 1));
+      if (ENGINE_WORKTREE.test(`${rel}/`) || root.nested.includes(rel)) return true;
+      return ignored(rel);
+    };
     // A watch that cannot open (the directory vanished since its status was read) fails this call and leaves no root.
     try {
-      const rootWatch = this.watchFn(root.root, { recursive: true }, (_event, filename) => {
-        if (filename === null) return this.changed(root, 'worktree');
+      const rootWatch = this.watchFn(root.root, { recursive: true, prune: rootPrune }, (_event, filename) => {
+        if (filename === null) return this.rescan(root, 'worktree');
         const rel = filename.split(sep).join('/');
         if (gitDirRel !== null && rel.startsWith(`${gitDirRel}/`)) return onGitPath(rel.slice(gitDirRel.length + 1), classifyRootPath(rel, gitDirRel), gitDirIsCommon);
         // An event naming a found repository's directory, its `.git` or a directory above it (a rename names only what
@@ -332,8 +364,8 @@ export class GitWatcher {
       root.handles.push(rootWatch);
       rootWatch.on('error', onError);
       if (gitDirRel === null) {
-        const gitDirWatch = this.watchFn(status.gitDir, { recursive: true }, (_event, filename) => {
-          if (filename === null) return this.changed(root, 'index');
+        const gitDirWatch = this.watchFn(status.gitDir, { recursive: true, prune: objectStore }, (_event, filename) => {
+          if (filename === null) return this.rescan(root, 'index');
           const sub = filename.split(sep).join('/');
           onGitPath(sub, classifyGitPath(sub), gitDirIsCommon);
         });
@@ -345,8 +377,8 @@ export class GitWatcher {
       // those paths, rather than separate watches on `refs/` and `packed-refs`, since `packed-refs` may not exist yet
       // (a watch on a missing file cannot open) and `config` sits beside them.
       if (status.isWorktree) {
-        const commonWatch = this.watchFn(status.commonDir, { recursive: true }, (_event, filename) => {
-          if (filename === null) return this.changed(root, 'refs');
+        const commonWatch = this.watchFn(status.commonDir, { recursive: true, prune: objectStore }, (_event, filename) => {
+          if (filename === null) return this.rescan(root, 'refs');
           const sub = filename.split(sep).join('/');
           onGitPath(sub, classifyCommonPath(sub), true);
         });
@@ -364,9 +396,50 @@ export class GitWatcher {
     return root;
   }
 
+  // What git ignores under the root, read the first time the root's tree asks (never, where the watch takes no prune).
+  // A root whose listings fail is watched whole rather than missed.
+  private ignoredUnder(repoRoot: string): (dir: string) => Promise<boolean> {
+    let read: Promise<(dir: string) => Promise<boolean>> | null = null;
+    return async (dir) => {
+      if (!this.deps.ignored) return false;
+      read ??= this.deps.ignored(repoRoot).catch(() => async () => false);
+      return (await read)(dir);
+    };
+  }
+
+  // The root's tree ran out of inotify's budget: its watches closed, its status read on a timer from now on. Kept
+  // until the root closes (no re-attempt: a budget that was short stays short while the other trees hold it).
+  private poll(root: Root, code: string): void {
+    if (root.closed || root.state === 'polling') return;
+    root.state = 'polling';
+    for (const handle of root.handles) handle.close();
+    console.warn(`[git] watch exhausted under ${root.root} (${code}): polling`);
+    this.schedulePoll(root);
+  }
+
+  private schedulePoll(root: Root): void {
+    root.pollTimer = setTimeout(() => void this.pollOnce(root), root.backoff ? 2 * POLL_MS : POLL_MS);
+  }
+
+  private async pollOnce(root: Root): Promise<void> {
+    root.pollTimer = null;
+    if (root.closed) return;
+    root.rescan = true;
+    if (root.inFlight) root.again = true;
+    else await this.refresh(root);
+    if (!root.closed && root.pollTimer === null) this.schedulePoll(root); // after the pass, so a timeout backs it off
+  }
+
+  // An event with no filename: the tree reconciled, or the platform dropped what changed.
+  private rescan(root: Root, reason: Exclude<GitChangeReason, 'initial'>): void {
+    root.rescan = true;
+    this.changed(root, reason);
+  }
+
   private close(root: Root): void {
     root.closed = true;
     if (root.timer) clearTimeout(root.timer);
+    if (root.pollTimer) clearTimeout(root.pollTimer);
     for (const handle of root.handles) handle.close();
     this.roots.delete(root.root);
     for (const directories of this.owners.values()) {
@@ -440,6 +513,8 @@ export class GitWatcher {
     const touched = root.touched;
     root.pending = new Set();
     root.touched = new Set();
+    if (root.rescan) for (const rel of root.inner.keys()) touched.add(rel); // the re-stat pass
+    root.rescan = false;
     try {
       const status = await this.deps.status(root.root);
       const { inner, overflow } = await this.innerFacts(root, status, touched);
@@ -459,7 +534,7 @@ export class GitWatcher {
       if (timedOut) root.backoff = true;
       // The failed change may be the last one: retry once after the back-off rather than wait for the next event,
       // unless this pass was that retry, so a repository whose status always times out is not polled.
-      if (timedOut && !retrying && !root.again && !root.timer && !root.closed) {
+      if (timedOut && !retrying && !root.again && !root.timer && !root.closed && root.state === 'events') {
         root.retry = true;
         this.schedule(root);
       }

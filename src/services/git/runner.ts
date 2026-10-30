@@ -16,6 +16,7 @@ export interface GitExecOptions {
   detached: true;
   maxBuffer: number;
   encoding: 'utf8';
+  input?: string; // written to git's stdin, which is otherwise closed
 }
 // The shape of `child_process.execFile` the runner calls; tests pass a spy or a stand-in.
 export type ExecFileFn = (
@@ -29,6 +30,7 @@ export type GitMode = 'read' | 'checkout' | 'mutate';
 export interface GitRunOptions {
   timeoutMs?: number; // GIT_TIMEOUT_MS by default
   acceptExitCodes?: readonly number[]; // exit codes that resolve rather than throw (`diff --no-index` exits 1 for a difference)
+  input?: string; // stdin (`check-ignore --stdin`)
 }
 export type GitRun = (directory: string, args: string[], options?: GitRunOptions) => Promise<string>;
 
@@ -106,14 +108,15 @@ export interface SpawnGitInput {
   timeoutMs: number;
   acceptExitCodes: readonly number[];
   execFile: ExecFileFn;
+  input?: string;
 }
 
 // The spawn core every git call shares: `-C <directory>`, a new process group, the timeout (SIGTERM to the group, then
 // SIGKILL), and the exit code. Exit 0 and any accepted code resolve with both streams whole; any other end throws
 // (`GitTimeoutError`, a plain `Error` when git cannot start or overflows, else `GitCommandError` with both streams).
-export function spawnGit({ binary, directory, args, env, timeoutMs, acceptExitCodes, execFile }: SpawnGitInput): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+export function spawnGit({ binary, directory, args, env, timeoutMs, acceptExitCodes, execFile, input }: SpawnGitInput): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve, reject) => {
-    const execOptions: GitExecOptions = { env, detached: true, maxBuffer: MAX_BUFFER, encoding: 'utf8' };
+    const execOptions: GitExecOptions = { env, detached: true, maxBuffer: MAX_BUFFER, encoding: 'utf8', ...(input === undefined ? {} : { input }) };
     const timedOutError = () => new GitTimeoutError(`git ${args[0]} timed out after ${timeoutMs / 1000} s in ${directory}`);
     let timedOut = false;
     const timer = setTimeout(() => {
@@ -144,11 +147,11 @@ export function createGitRunner(options: { env?: NodeJS.ProcessEnv; execFile?: E
   const env = options.env ?? process.env;
   const binary = gitBinary(env);
   const execFile = options.execFile ?? execGit;
-  return async (directory, args, { timeoutMs = GIT_TIMEOUT_MS, acceptExitCodes = [] } = {}) => {
+  return async (directory, args, { timeoutMs = GIT_TIMEOUT_MS, acceptExitCodes = [], input } = {}) => {
     // Only trusted worktree creation runs checkout hooks/filters. Read callers never acquire that privilege.
     const mode = args[0] === 'worktree' && args[1] === 'add' ? 'checkout' : 'read';
     try {
-      return (await spawnGit({ binary, directory, args, env: gitEnv(env, mode), timeoutMs, acceptExitCodes, execFile })).stdout;
+      return (await spawnGit({ binary, directory, args, env: gitEnv(env, mode), timeoutMs, acceptExitCodes, execFile, input })).stdout;
     } catch (error) {
       if (error instanceof GitCommandError && /not a git repository/.test(error.stderr)) throw new NotARepositoryError();
       throw error;
@@ -158,7 +161,14 @@ export function createGitRunner(options: { env?: NodeJS.ProcessEnv; execFile?: E
 
 // execFile does not forward `detached` to spawn. Use spawn directly so Git really leads a new process group.
 export const execGit: ExecFileFn = (file, args, options, callback) => {
-  const child = spawn(file, args, { env: options.env, detached: options.detached, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child =
+    options.input === undefined
+      ? spawn(file, args, { env: options.env, detached: options.detached, stdio: ['ignore', 'pipe', 'pipe'] })
+      : spawn(file, args, { env: options.env, detached: options.detached, stdio: ['pipe', 'pipe', 'pipe'] });
+  if (options.input !== undefined) {
+    child.stdin?.on('error', () => {}); // git may exit before reading it all; its exit code tells
+    child.stdin?.end(options.input);
+  }
   const stdout: Buffer[] = [];
   const stderr: Buffer[] = [];
   let outBytes = 0;
