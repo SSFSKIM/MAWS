@@ -1014,7 +1014,7 @@ test('§10.6 in brief on the owner build: one release and its Send-to-resume; th
       expect(release.reply ?? '', 'the resumed session answered the message').toContain('X1 BACK');
     });
 
-    await step('the quit question names a turn in flight, background work and a busy terminal; cancel, then quit when idle', async () => {
+    await step('the quit question names a turn in flight, background work and a busy terminal; cancel, then quit when idle (on the daemon shape: not asked, and all three outlive the app)', async () => {
       await openRow(page, x2);
       await send(page, 'Use the Bash tool with run_in_background set to true to run exactly this command and nothing else: sleep 45. Do not wait for it; reply with exactly the word STARTED.');
       await expect.poll(async () => {
@@ -1026,6 +1026,25 @@ test('§10.6 in brief on the owner build: one release and its Send-to-resume; th
       await openRow(page, x1);
       await send(page, 'Use the Bash tool to run exactly this command in the foreground and nothing else: sleep 30. Then reply with exactly the word SLEPT.');
       await expect.poll(async () => (await statusOf(page, x1)).turn !== null, { timeout: 60_000 }).toBe(true);
+
+      // P5 O3-D (Q1, D12; docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md): on the daemon shape the sessions and the
+      // terminals belong to mawsd and outlive the app, so the quit asks nothing, says what it left, and stops nothing
+      if (value(await invoke(page, 'host.status', undefined)).transport === 'daemon') {
+        const engine = (await statusOf(page, x1)).pid;
+        const terminal = value(await invoke(page, 'pty.list', undefined)).ptys.find((p) => p.ptyId === ptyId)?.pid ?? null;
+        const gone = new Promise<number>((resolve) => app.process().once('exit', () => resolve(Date.now())));
+        const quitAt = Date.now();
+        await app.evaluate(({ app: a }) => a.quit());
+        const exitAt = await Promise.race([gone, new Promise<number>((r) => setTimeout(() => r(-1), 20_000))]);
+        exited = exitAt > 0;
+        const alive = (pid: number | null) => pid !== null && (() => { try { process.kill(pid, 0); return true; } catch { return false; } })();
+        out.quit = { notAsked: lines(), quitToExitMs: exited ? exitAt - quitAt : null, engineAlive: alive(engine), terminalAlive: alive(terminal) };
+        expect(exited, 'the quit is not held').toBe(true);
+        expect(lines().filter((l) => l.startsWith('quit-guard:'))).toEqual([expect.stringMatching(/^quit-guard: \d+ mid-turn, \d+ background work, (\d+ busy terminals?|terminals unknown), not asked: they outlive the app$/)]);
+        expect(alive(engine), 'the turn in flight outlives the app').toBe(true);
+        expect(alive(terminal), 'the busy terminal outlives the app').toBe(true);
+        return;
+      }
 
       await app.evaluate(({ app: a }) => a.quit());
       await expect.poll(() => lines().find((l) => l.includes('auto-answered cancel')) ?? '', { timeout: 20_000 }).toMatch(/mid-turn.*background work.*busy terminal/);
