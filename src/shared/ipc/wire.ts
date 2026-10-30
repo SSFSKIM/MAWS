@@ -35,7 +35,7 @@ import { HostClientGoneSchema, HostDocSchema, HostEventSchema, HostReadySchema, 
 import type { WireRegistry } from './registry';
 
 export const WIRE_MAJOR: number = SOCKET_PROTOCOL;
-export const WIRE_MINOR: number = 6; // P5 O10 M7: host.op, host.opQuery (1); M8: session.pendingItems (2); P5 O6 M1: machine.identity (3); P5 O10: engine.pendingItems (4); P5 O2: host.interest, session.setKeep, the status's work and kept, the supervisor status's release (M2), the pty host's commands and events, pty.attach's credit and socket.ptyFrames (M4) (5); P5 E312: the status's published (6)
+export const WIRE_MINOR: number = 7; // P5 O10 M7: host.op, host.opQuery (1); M8: session.pendingItems (2); P5 O6 M1: machine.identity (3); P5 O10: engine.pendingItems (4); P5 O2: host.interest, session.setKeep, the status's work and kept, the supervisor status's release (M2), the pty host's commands and events, pty.attach's credit and socket.ptyFrames (M4) (5); P5 E312: the status's published (6); the long-transcript window: session.events' before, agentId and earlier, fs.agentEvents' before and earlier (7)
 export const WIRE_CAPABILITIES: readonly string[] = [PTY_FRAMES_CAPABILITY]; // P5 O2 M4: `pty.data` as binary frames (socket-protocol.ts)
 
 // What a peer said of itself at the handshake.

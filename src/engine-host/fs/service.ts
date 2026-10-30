@@ -11,6 +11,7 @@ import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { SessionEvent } from '@shared/graph/events';
+import type { WindowBudget } from '@shared/graph/history-window';
 import type { AgentId, AppSessionId, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import type { ForeignHolder } from '@shared/graph/session';
 import type { HostEmit } from '@shared/host/runtime';
@@ -31,7 +32,7 @@ import { readSpill } from './artifacts';
 import { Bindings } from './bindings';
 import type { FileReader } from './chain-follower';
 import { Discovery, mapConcurrent, matchesKnown, SUMMARY_CONCURRENCY, type ListedTranscript } from './discovery';
-import { Follow, FsFileReader, SNAPSHOT_WAIT_MS } from './follow';
+import { Follow, FsFileReader, SNAPSHOT_WAIT_MS, type HistoryPage, type HistoryRequest } from './follow';
 import { HolderRegistry, type HolderDeps } from './holders';
 import { isMissing } from './sidecars';
 import type { StorePaths } from './paths';
@@ -62,6 +63,7 @@ export interface FsServiceOptions {
   openReader?: (locate: () => string | null) => FileReader; // tests record the reads; production is FsFileReader
   reconcileMs?: number;
   startScanFallbackMs?: number;
+  window?: WindowBudget; // tests' smaller pages
 }
 
 // The replay runs' side of the snapshot seam (ReplayHost): null for an app id no run has.
@@ -123,6 +125,7 @@ export class FsService {
   private readonly openReader: (locate: () => string | null) => FileReader;
   private readonly reconcileMs: number;
   private reconcile: ReturnType<typeof setInterval> | null = null;
+  private readonly window: WindowBudget | undefined;
   private readonly follows = new Map<string, FollowEntry>(); // by followKey(appSessionId, agentId)
   private readonly starting = new Map<string, Promise<FollowEntry>>();
   private readonly subagentReader = new SubagentReader();
@@ -146,6 +149,7 @@ export class FsService {
     this.emit = options.emit;
     this.openReader = options.openReader ?? ((locate) => new FsFileReader(locate));
     this.reconcileMs = options.reconcileMs ?? RECONCILE_MS;
+    this.window = options.window;
     this.startScanFallbackMs = options.startScanFallbackMs ?? START_SCAN_FALLBACK_MS;
     this.taskReader = new TaskReader(options.paths);
     this.discovery = new Discovery(options.paths);
@@ -306,16 +310,22 @@ export class FsService {
   }
 
   // The seam C3's `session.events` calls for an app session with no live process (and the temporary handler until C3
-  // lands): starts following the session's transcript if nothing follows it yet and answers the events delivered so
-  // far. A fresh follow is given up to SNAPSHOT_WAIT_MS to finish its backfill; whatever comes later arrives as
-  // `session.eventBatch`, and the deterministic ids make the overlap harmless. `complete` is true once backfilled.
-  async eventsSnapshot(appSessionId: AppSessionId, agentId: AgentId | null): Promise<{ events: SessionEvent[]; complete: boolean }> {
-    if (agentId !== null) return this.agentEvents(appSessionId, agentId);
+  // lands): starts following the session's transcript if nothing follows it yet and answers a window of its history
+  // (follow.ts `snapshot`: the newest by default, the page before `before`, the first `limit` events, or one agent's
+  // slice). A fresh follow is given up to SNAPSHOT_WAIT_MS to finish its backfill; one still reading answers an empty
+  // page and sends its newest window as `session.eventBatch` when done, and the deterministic ids make any overlap
+  // harmless. `complete` is true once backfilled. `quiet`: the session's live process writes the transcript, and only
+  // its older pages are asked of it, from a follow that emits nothing (`historyKey`) unless one already follows it.
+  async eventsSnapshot(appSessionId: AppSessionId, agentId: AgentId | null, request: HistoryRequest = {}, quiet = false): Promise<HistoryPage> {
+    if (agentId !== null) return this.agentEvents(appSessionId, agentId, request);
     const replay = this.replays?.snapshot(appSessionId);
     if (replay) return replay;
     const sessionId = this.sessionOf(appSessionId);
-    const entry = await this.ensureFollow(appSessionId, null, () => this.followSession(appSessionId, sessionId));
-    return snapshotOf(entry.follow);
+    const followed = this.follows.get(followKey(appSessionId, null));
+    const entry = followed ?? (quiet
+      ? await this.ensureFollow(appSessionId, null, async () => this.newFollow(appSessionId, sessionId, this.listed.get(sessionId)?.path ?? null, null, true), historyKey(appSessionId))
+      : await this.ensureFollow(appSessionId, null, () => this.followSession(appSessionId, sessionId)));
+    return snapshotOf(entry.follow, request);
   }
 
   // `fs.agentEvents`: the child's transcript as X1 events, following it from now on. The agent must be listed under the
@@ -323,7 +333,7 @@ export class FsService {
   // names, so until a meta naming it has been read the call is refused rather than following with a parent it cannot know for
   // the rest of the follow; the consumer retries on the `fs.subagentsChanged` the meta's arrival emits. A workflow
   // agent's meta names no tool use (nor does the wire), so it follows at once with `parentToolUseId: null`.
-  async agentEvents(appSessionId: AppSessionId, agentId: AgentId): Promise<{ events: SessionEvent[]; complete: boolean }> {
+  async agentEvents(appSessionId: AppSessionId, agentId: AgentId, request: Pick<HistoryRequest, 'before'> = {}): Promise<HistoryPage> {
     const sessionId = this.sessionOf(appSessionId);
     const entry = await this.ensureFollow(appSessionId, agentId, async () => {
       const agent = (await this.listAgents(sessionId)).find((candidate) => candidate.agentId === agentId);
@@ -333,7 +343,7 @@ export class FsService {
       const parentToolUseId = (agent.meta?.toolUseId ?? null) as ParentToolUseId | null;
       return this.newFollow(appSessionId, sessionId, agent.transcriptPath, { agentId, parentToolUseId });
     });
-    return snapshotOf(entry.follow);
+    return snapshotOf(entry.follow, { before: request.before ?? null });
   }
 
   // `fs.unfollow`: stops the follower, and with agentId null every follower of the session. Following no one is a no-op.
@@ -391,8 +401,7 @@ export class FsService {
   }
 
   // One follower per (app session, agent): a request while one is starting waits for it.
-  private ensureFollow(appSessionId: AppSessionId, agentId: AgentId | null, create: () => Promise<FollowEntry>): Promise<FollowEntry> {
-    const key = followKey(appSessionId, agentId);
+  private ensureFollow(appSessionId: AppSessionId, agentId: AgentId | null, create: () => Promise<FollowEntry>, key = followKey(appSessionId, agentId)): Promise<FollowEntry> {
     const existing = this.follows.get(key);
     if (existing) return Promise.resolve(existing);
     const pending = this.starting.get(key);
@@ -427,9 +436,12 @@ export class FsService {
     sessionId: SessionId,
     path: string | null,
     agent: { agentId: AgentId; parentToolUseId: ParentToolUseId | null } | null,
+    quiet = false,
   ): FollowEntry {
     const location = { path };
     const follow = new Follow({
+      quiet,
+      ...(this.window && { window: this.window }),
       appSessionId,
       sessionId,
       agent,
@@ -808,12 +820,20 @@ function followKey(appSessionId: AppSessionId, agentId: AgentId | null): string 
   return `${appSessionId}\0${agentId ?? ''}`;
 }
 
-// A fresh follow gets SNAPSHOT_WAIT_MS to finish its backfill before the snapshot answers with what it has.
-async function snapshotOf(follow: Follow): Promise<{ events: SessionEvent[]; complete: boolean }> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  await Promise.race([follow.started, new Promise((resolve) => (timer = setTimeout(resolve, SNAPSHOT_WAIT_MS)))]);
-  clearTimeout(timer);
-  return follow.snapshot();
+// The quiet follow of a session a live process writes (eventsSnapshot), under the session's prefix so `fs.unfollow` of
+// the session stops it too; an agent id is never empty, so no agent's key is this.
+function historyKey(appSessionId: AppSessionId): string {
+  return `${appSessionId}\0\0history`;
+}
+
+// A fresh follow gets SNAPSHOT_WAIT_MS to finish its backfill before the read answers (an empty page while it reads).
+async function snapshotOf(follow: Follow, request: HistoryRequest): Promise<HistoryPage> {
+  if (!follow.backfillDone) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([follow.started, new Promise((resolve) => (timer = setTimeout(resolve, SNAPSHOT_WAIT_MS)))]);
+    clearTimeout(timer);
+  }
+  return follow.snapshot(request);
 }
 
 function countSlugs(files: Iterable<ListedTranscript>): number {

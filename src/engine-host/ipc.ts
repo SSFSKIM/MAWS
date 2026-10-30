@@ -5,7 +5,7 @@
 // ControlTimeout answers the typed `timeout` HostCommandError), and operations (a receipt now, `session.operation`
 // later, through the OperationTable). Each live launch's events, statuses, queue and broker items leave through its
 // SessionStream. A command naming an `appSessionId` with no session answers the typed `internal` error.
-import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, EventId, MessageUuid, RequestId } from '@shared/graph/ids';
 import { AUTO_MODE_REFUSAL_CODES, type AutoModeRefusalCode } from '@shared/graph/enums';
 import { assertSafeAppSessionId } from '@shared/engine/app-session-id';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
@@ -45,7 +45,7 @@ import { queueTransaction } from './store/queue-transaction';
 import { MAX_LINE_CHARS, spawnEngine, type EngineTransport } from './transport';
 import { renderAnswerOf, rosterOf } from './surface-wire'; // R2
 // C4 start
-import type { SessionEvent } from '@shared/graph/events';
+import { agentSlice, type HistoryPage, type HistoryRequest } from './fs/follow';
 // C4 end
 // E1 start
 import type { commands as MawsCommands } from '@shared/ipc/schema/maws';
@@ -166,8 +166,9 @@ export interface EngineIpcDeps {
   spawn?: (plan: LaunchPlan) => EngineTransport;
   log?: (message: string) => void;
   // C4 start: the history of an app session with no stream in this host, from its transcript on disk (C4's
-  // FsService.eventsSnapshot, which starts following it); absent, such a session is unknown here as before.
-  diskEvents?: (appSessionId: AppSessionId) => Promise<{ events: SessionEvent[]; complete: boolean }>;
+  // FsService.eventsSnapshot, which starts following it); absent, such a session is unknown here as before. A window
+  // of it (follow.ts `snapshot`); `quiet`: the session's live process writes the transcript, read for older pages only.
+  diskEvents?: (appSessionId: AppSessionId, request: HistoryRequest, quiet: boolean) => Promise<HistoryPage>;
   // C4 end
   // W7: whether a foreign process holds the app session's engine session now, or held it at or after `since` (C4's
   // registry); absent, never
@@ -366,19 +367,28 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // -- lifecycle and state -------------------------------------------------------------------------------------------
   handle('session.launch', async ({ spec, artifactScope }) => launch(spec as Parameters<typeof launch>[0], artifactScope as Parameters<typeof launch>[1])); // P2-E1: artifactScope
   handle('session.status', async ({ appSessionId }) => sessionOf(appSessionId).status());
-  handle('session.events', async ({ appSessionId, afterSeq, limit }) => {
+  handle('session.events', async ({ appSessionId, afterSeq, limit, before, agentId }) => {
+    const id = appSessionId as AppSessionId;
     // C4 start: no stream here (not launched in this run, or archived and released): the transcript's history, whose
-    // events carry no seq, so `afterSeq` and `limit` select nothing and `lastSeq` is 0
-    if (deps.diskEvents && !streams.has(appSessionId as AppSessionId)) return { ...(await deps.diskEvents(appSessionId as AppSessionId)), lastSeq: 0 };
+    // events carry no seq, so `afterSeq` selects nothing and `lastSeq` is 0. Each answer is a window of it
+    // (docs/doperpowers/plans/2026-10-30-long-transcript-window.md): the newest, the page before `before`, the first
+    // `limit` events, or `agentId`'s slice. A page before a cursor is the transcript's history whatever runs now: a
+    // live session's older pages come from a quiet follow of its transcript.
+    const request: HistoryRequest = { before: (before ?? null) as EventId | null, limit, agentId: (agentId ?? null) as AgentId | null };
+    if (deps.diskEvents && request.before !== null) return { ...(await deps.diskEvents(id, request, streams.has(id))), lastSeq: 0 };
+    if (deps.diskEvents && !streams.has(id)) return { ...(await deps.diskEvents(id, request, false)), lastSeq: 0 };
     // C4 end
     // W7: a process that exited while a foreign one held the session, or before one took it (it yielded, or it stopped
     // beside a terminal that resumed the id), is not the session's history any more: the transcript is, as the other
     // process wrote it, also after that process exits. A new launch of the id makes its stream the history again.
-    const exited = table.get(appSessionId as AppSessionId);
-    if (deps.diskEvents && exited?.lifecycle === 'exited' && deps.heldElsewhere?.(appSessionId as AppSessionId, exited.status().exit?.at ?? null)) {
-      return { ...(await deps.diskEvents(appSessionId as AppSessionId)), lastSeq: 0 };
+    const exited = table.get(id);
+    if (deps.diskEvents && exited?.lifecycle === 'exited' && deps.heldElsewhere?.(id, exited.status().exit?.at ?? null)) {
+      return { ...(await deps.diskEvents(id, request, false)), lastSeq: 0 };
     }
-    return streamOf(appSessionId).snapshot(afterSeq, limit);
+    // A live stream's answer is bounded by its ring and journal; one agent's slice of it is the same filter as disk's.
+    const page = await streamOf(appSessionId).snapshot(afterSeq, limit);
+    const agent = request.agentId ?? null;
+    return agent === null ? page : { ...page, events: agentSlice(page.events, agent) };
   });
   handle('session.stop', async ({ appSessionId, reason, ifIdle }) => {
     if (reason === 'archive') assertSafeAppSessionId(appSessionId); // archive deletes a directory named after it (M5 review)
