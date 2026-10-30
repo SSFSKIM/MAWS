@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { EngineSessionStatus } from '@shared/engine/status';
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { contextOf } from '../../../test/support/fake-page';
@@ -97,7 +98,7 @@ vi.mock('electron', () => ({
 
 const { startBrowser } = await import('./index');
 const { fakeSpineView } = await import('../../../test/support/fake-spine-view');
-const { record } = await import('../../../test/support/builders');
+const { record, status: engineStatus } = await import('../../../test/support/builders');
 const { registerAppWindow } = await import('../windows');
 registerAppWindow(fakes.win as never);
 
@@ -436,6 +437,39 @@ describe("startBrowser: cua's primitive server (E13)", () => {
     browser.cua.socketPathFor(A);
     browser.stop();
     expect(readdirSync(dir)).toEqual([]);
+  });
+
+  // P5 O3-D M5b fix round 1: at a reattach the mirror's follow can deliver a kept session's status before its snapshot
+  // holds the record, and the snapshot fires no record event; the records' arrival sets the socket and the engine up from
+  // the statuses the view kept, with no further status
+  it('sets up a kept session\'s socket and engine from its retained status when the records become available', async () => {
+    userData = mkdtempSync('/tmp/mbs-');
+    const listeners = new Set<(payload: { appSessionId: AppSessionId; status: EngineSessionStatus }) => void>();
+    const hosts = {
+      onEvent: vi.fn((name: string, listener: never) => {
+        if (name !== 'session.status') return () => {};
+        listeners.add(listener);
+        return () => void listeners.delete(listener);
+      }),
+      dispatch: vi.fn(async () => ({ ok: true })),
+      onState: vi.fn(() => () => {}),
+    };
+    const view = fakeSpineView({ unavailable: 'the machine daemon’s spine is loading' });
+    const browser = start(view as never, { hosts: hosts as never });
+    const named = vi.spyOn(browser.cua, 'engineProcess');
+    const dir = join(userData, 'browser', 'cua');
+    const kept = { ...engineStatus(A), pid: 4242 };
+    view.setStatus(kept); // the mirror keeps every status it hears
+    listeners.forEach((l) => l({ appSessionId: A, status: kept }));
+    expect(readdirSync(dir)).toEqual([]);
+    expect(named).not.toHaveBeenCalled();
+
+    view.putRecord(record(A)); // the snapshot's records (the real one fires no record event; this one's changes nothing here)
+    view.setStatus({ ...engineStatus(GONE), pid: 4343 }); // a status whose session the spine does not know stays ignored
+    view.setUnavailable(null);
+    await vi.waitFor(() => expect(readdirSync(dir)).toEqual([`${A}.sock`]));
+    expect(named.mock.calls).toEqual([[A, 4242]]);
+    browser.stop();
   });
 
   // the socket peer authentication spec of 2026-10-09 (M2, Acceptance 4): every status of a known session names its engine
