@@ -27,7 +27,7 @@ import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor, listedGlyph } from '../attention/glyph';
 import { ipc } from '../ipc/client';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
-import { selectEndedWithErrorOf, selectPendingOf, useAttention } from '../stores/attention';
+import { selectPendingOf, useAttention } from '../stores/attention';
 import { useSessions } from '../stores/sessions';
 import { listedTitle, rowBranch, sessionAge } from './derive';
 import { ownerEntries, ownersLabel } from './owners'; // P5 O8 M5
@@ -160,7 +160,6 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
   const record = useSessions((s) => s.records.get(appSessionId));
   const digest = useSessions((s) => s.digests.get(appSessionId) ?? null);
   const pending = useAttention((s) => selectPendingOf(s, appSessionId));
-  const ended = useAttention((s) => selectEndedWithErrorOf(s, appSessionId)); // E11 F2b
   const parentTitle = useSessions((s) => { // E3
     const parentId = s.records.get(appSessionId)?.lineage?.parentAppSessionId;
     const parent = parentId === undefined ? undefined : s.records.get(parentId);
@@ -171,7 +170,7 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
   const controlled = useSessionControls(appSessionId) !== null; // P5 O9 M4: a session held elsewhere takes no reply
   const bridged = useLaneAState(appSessionId)?.bridge === 'live'; // P5 O9 M5
   if (!record) return null;
-  const glyph = glyphFor(record, digest, pending, ended, now);
+  const glyph = glyphFor(record, digest, pending);
   const waiting = waitingItem(pending);
   const place = placeOf(record);
   const working = digest?.phase === 'working' || digest?.phase === 'starting';

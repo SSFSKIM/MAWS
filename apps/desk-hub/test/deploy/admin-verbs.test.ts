@@ -28,7 +28,7 @@ import { anchorFile, runAdmin, type AdminIo } from '../../deploy/admin.ts';
 import { readAdminKeys, readText, volumeOf } from '../../deploy/admin-device.ts';
 import { restoreLegacyKey, successor } from '../../deploy/org-admin.ts';
 import { enrollDelegated, enrollV2, mintRef } from '../../fake-machine/org';
-import { importOrgKey, keyAuth, keyCheck } from '../../src/protocol/codes';
+import { importOrgKey, keyCheck } from '../../src/protocol/codes';
 import { decodeEnrollmentCodeV2, encodeEnrollmentCodeV2, encodeProvisioningCode, type MachineView, type ProvisioningKeyRecord } from '../../src/protocol/identity';
 import { enroll as enrollV1, provisioningKey } from '../support/clients';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from '../support/local';
@@ -775,15 +775,14 @@ describe('the legacy org key: keys retire and keys purge', () => {
 
   beforeAll(async () => {
     hub = await startLocalHub();
-    // Two wrapped copies of an org key at the hub, as DX1 left them.
+    // Two wrapped copies of an org key at the hub, as DX1 left them (kept by the suite's seam: `POST /api/org/keys`
+    // left the hub with O14 M5b).
     const key = await importOrgKey(crypto.getRandomValues(new Uint8Array(32)));
-    const [check, auth] = [await keyCheck(key), await keyAuth(key)];
-    secrets.add(auth);
+    const check = await keyCheck(key);
     for (let i = 0; i < 2; i++) {
       const wrapped = base64urlEncode(crypto.getRandomValues(new Uint8Array(48)));
       secrets.add(wrapped);
-      const body = { method: 'passphrase', label: `copy ${i}`, kdf: { name: 'argon2id', salt: base64urlEncode(crypto.getRandomValues(new Uint8Array(16))) }, iv: base64urlEncode(crypto.getRandomValues(new Uint8Array(12))), wrapped, check, auth };
-      expect((await hub.fetchAs(ADMIN, '/api/org/keys', { body })).status).toBe(201);
+      await hub.seedWrappedKey({ wrapped, check });
     }
     expect(await runAdmin(['init', '--keys', keys], fake().io)).toBe(0);
     expect(await runAdmin(['genesis', '--recovery', join(dir('volume'), 'recovery.json'), ...asLocal('--yes')], fake().io)).toBe(0);

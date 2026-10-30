@@ -182,8 +182,10 @@ function foldWithLedger(prev: SessionDigest, event: SessionEvent, ledger: CostLe
       if (event.isEchoReceipt) return d;
       messages.clear(); // P4-R7: a call its turn ended without answering sent nothing
       // An interrupt is the human's stop, not a failure: `aborted_streaming` mid-reply, `aborted_tools` mid-tool (debt
-      // wave 5), as C3's attention service and C6's divider (`isAbortedReason`) read every `aborted_*` reason.
-      const failed = event.isError && !event.terminalReason?.startsWith('aborted_');
+      // wave 5), as C3's attention service and C6's divider (`isAbortedReason`) read every `aborted_*` reason. Nor is an
+      // API error the session's end (the owner's ruling, 2026-10-30): the transcript shows it where it happened, and the
+      // session waits for the next prompt like any other.
+      const failed = event.isError && !event.terminalReason?.startsWith('aborted_') && event.terminalReason !== 'api_error';
       const ended: SessionDigest = { ...d, phase: failed ? 'failed' : 'idle', lastTurnEndedAt: event.at, activity: null };
       return event.seq === null ? ended : withCost(ended, costOf(ledger));
     }

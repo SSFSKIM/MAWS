@@ -30,7 +30,7 @@ import { useCommand } from '../ipc/query';
 import { useKeyChord } from '../keymap/useKeyChord';
 import { RequestCard } from '../request-card/RequestCard';
 import { nextMode } from '../statusline';
-import { useAttention, selectItemsOf } from '../stores/attention';
+import { useAttention, selectPendingOf } from '../stores/attention';
 import { inlineEditOf, isStarting, memoryTargetOf, registerFocusTarget, resubmitRecordOf, setStarting, useComposerStore } from '../stores/composer';
 import { toast } from '../stores/notices';
 import { useSessionQueue } from '../stores/queue';
@@ -208,7 +208,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
 
   // ---- the docked swap ---------------------------------------------------------------------------------------------
   const cards = useDockedCards(appSessionId);
-  const items = useAttention((s) => selectItemsOf(s, appSessionId)); // E11 F2b: swapOf picks the open ones, and an error seen here
+  const items = useAttention((s) => selectPendingOf(s, appSessionId));
   const requests = useAttention((s) => s.requests);
   const swap = useMemo(() => swapOf(items, requests), [items, requests]);
   useEffect(() => swap.unread.forEach((item) => void useAttention.getState().loadRequest(client, item)), [swap.unread, client]);

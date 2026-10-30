@@ -154,6 +154,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
         emit: bus.emit,
         register: bus.register,
         fallbackFile: join(profile, 'attention.json'),
+        seenNow: (id) => indexSource.seenNow(id), // the ruling (2026-10-30): an error a client shows as it arrives is seen, durably
       })
     : null;
   // Replay (C4 M5): run in the engine host; the fixtures table lists the checkout's probe journals (none packaged)

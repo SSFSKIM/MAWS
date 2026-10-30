@@ -6,8 +6,11 @@
 // result denied that way, `interrupted` from an exit that lost approvals (the summary string is the contract), and
 // `held_peer_message` from the status's held messages. Error-like items retire when the session's next human turn
 // starts (a prompt read back from disk included) or the session is stopped, each retiring what came before it; an archive (`session.forgotten`, or an
-// archive exit) retires everything. E11 F2b: an error seen in its opened session or dismissed stays as the session's
-// "ended with an error" fact, out of Needs you (`attention.acknowledge`). Each change
+// archive exit) retires everything. The owner's ruling (2026-10-30; it replaces E11 F2b's "ended with an error" fact):
+// an `error` is raised only when it is newer than the last time the session was seen (`seenAt`, the unread rule's
+// last-seen mark), and it retires for good once the session is seen after it (`seen`) or the item is acknowledged
+// (`attention.acknowledge`, seen in the composer or dismissed); a turn that failed on an API error reads in the engine's
+// own words, the API error's text. Each change
 // is persisted through the AttentionStore (a failed write is owed and retried, never taken as saved)
 // and emitted whole as `attention.changed`; `attention.list` and `attention.request` are answered here, the latter by
 // asking the engine host for the item's originating request event (`session.pendingRequest`).
@@ -23,7 +26,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, AttentionId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { CommandInput, CommandName, CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
-import { previewLine } from '@shared/owner/preview';
+import { messageLine, previewLine } from '@shared/owner/preview';
 import type { AttentionStore } from './store';
 import type { Settling } from '../work'; // P5 O3-D M2
 import type { HostSupervisor } from '@shared/host/host-supervisor';
@@ -59,6 +62,13 @@ export function failedTurnSummary(result: string, terminalReason: string | null,
   const detail = firstError ?? REASON_WORDS[terminalReason ?? ''];
   return `The turn ended with an error${detail ? ` (${detail})` : ''}`;
 }
+// The ruling (2026-10-30): a turn that ended on an API error says what the engine said, the text of its API error
+// envelope (`apiError`, the main conversation's last assistant message when it is one; on disk the only place the text
+// is), else the result's text the engine sends live with `terminal_reason: 'api_error'`; any other failure keeps its words.
+function turnErrorSummary(event: Extract<SessionEvent, { kind: 'turn.ended' }>, apiError: string | null): string {
+  const engineWords = apiError ?? (event.terminalReason === 'api_error' && event.resultText !== null ? messageLine(event.resultText, SUMMARY_MAX) : null);
+  return engineWords ?? failedTurnSummary(event.result, event.terminalReason, event.errors[0]);
+}
 // An item persisted before the words: "Turn failed: <code>[ (<first error>)]".
 const LEGACY_FAILED = /^Turn failed: (\S+)(?: \((.*)\))?$/;
 const inWords = (item: AttentionItem): AttentionItem => {
@@ -87,6 +97,10 @@ export interface AttentionServiceDeps {
   emit: <N extends EventName>(name: N, payload: EventPayload<N>) => unknown; // the services bus's validated emit to every client
   register: <N extends CommandName>(name: N, handler: (input: CommandInput<N>) => CommandOutput<N> | Promise<CommandOutput<N>>) => void; // the services bus's register
   log?: (message: string) => void;
+  // The ruling (2026-10-30): the last time the session was seen, in ms; Infinity while a client shows it, null when MAWS
+  // never has. An error raised at or before it was seen and is not raised. Absent: every error is unseen. A call may
+  // record the look (the index's), reaching `seen` before it returns.
+  seenAt?: (appSessionId: AppSessionId) => number | null;
 }
 
 export interface AttentionService {
@@ -99,6 +113,8 @@ export interface AttentionService {
   setOwnerItems(appSessionId: AppSessionId, items: AttentionItem[], silent: readonly AttentionId[]): void;
   // P5 O9 M6: the session's lane A items whole (replacing the last), each with its request view.
   setLaneAItems(appSessionId: AppSessionId, entries: readonly { item: AttentionItem; request: SessionEvent }[]): void;
+  // The session was seen up to `at` (ms; its last-seen mark moved): its errors raised at or before then retire for good.
+  seen(appSessionId: AppSessionId, at: number): void;
   settled(): Promise<void>; // every change so far has reached the store
   // P5 O3-D M2 (Interfaces §A, D27): a write pass is queued or running once the persisted items are read (what the root's
   // `settled` waits for before a release; a pass owed before the load writes nothing until it, and `stop` writes nothing
@@ -115,6 +131,7 @@ interface SessionState {
   signature: string;
   // retired live since this run started, per kind: the moment (ms) before which a persisted item of the kind stays retired
   retiredBefore: Map<AttentionItem['kind'], number>;
+  apiError: string | null; // the main conversation's last assistant message, when it is the engine's API error envelope: its text
 }
 
 export const PERSIST_RETRY_MS = 5_000;
@@ -129,7 +146,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
 
   const stateOf = (id: AppSessionId): SessionState => {
     let state = sessions.get(id);
-    if (!state) sessions.set(id, (state = { broker: [], derived: new Map(), owner: [], laneA: [], signature: '[]', retiredBefore: new Map() }));
+    if (!state) sessions.set(id, (state = { broker: [], derived: new Map(), owner: [], laneA: [], signature: '[]', retiredBefore: new Map(), apiError: null }));
     return state;
   };
   const merged = (state: SessionState): AttentionItem[] => [...state.broker, ...state.derived.values(), ...state.owner, ...state.laneA.map((e) => e.item)];
@@ -205,9 +222,23 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
     writeOwed();
   };
 
+  // The ruling (2026-10-30): an error at or before the session's last look was seen there.
+  const seenThere = (id: AppSessionId, item: Pick<AttentionItem, 'kind' | 'createdAt'>) => {
+    const at = item.kind === 'error' ? (deps.seenAt?.(id) ?? null) : null;
+    return at !== null && Date.parse(item.createdAt) <= at;
+  };
+  const retired = (item: AttentionItem): AttentionItem => ({ ...item, state: 'retired', stateChangedAt: new Date().toISOString() });
+
   const derive = (id: AppSessionId, state: SessionState, key: string, fields: Pick<AttentionItem, 'kind' | 'summary' | 'sessionId' | 'createdAt'> & Partial<AttentionItem>) => {
     const itemId = `${id}:${fields.kind}:${key}` as AttentionId;
-    if (state.derived.has(itemId)) return;
+    const existing = state.derived.get(itemId);
+    if (existing) {
+      // the same occurrence, still open, reads as derived now (the ruling, 2026-10-30: one an earlier build stored in the
+      // generic words takes the API error's when the transcript replays it); its state and moments stay
+      if ((existing.state === 'pending' || existing.state === 'delivered') && existing.summary !== fields.summary) state.derived.set(itemId, { ...existing, summary: fields.summary });
+      return;
+    }
+    if (seenThere(id, fields)) return;
     state.derived.set(itemId, { id: itemId, appSessionId: id, request: noRequest, state: 'pending', stateChangedAt: fields.createdAt, expiresAt: null, ...fields });
   };
   // F2b review 1: a turn or a stop read back from the transcript (`seq: null`, a fresh follower's backfill replaying every
@@ -230,13 +261,22 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
       const base = { sessionId: event.sessionId, createdAt: event.at };
       switch (event.kind) {
         case 'turn.started':
+          state.apiError = null;
           if (humanTurn(event.origin)) retireDerived(state, RETIRED_BY_NEXT_TURN, cutoffOf(event));
           break;
-        case 'turn.ended':
+        case 'assistant.block.complete': {
+          const text = event.isApiErrorMessage === true && typeof event.block.text === 'string' ? event.block.text : null;
+          state.apiError = text === null ? null : messageLine(text, SUMMARY_MAX);
+          break;
+        }
+        case 'turn.ended': {
+          const apiError = state.apiError;
+          if (!event.isEchoReceipt) state.apiError = null;
           // a user abort is not a failure: the wire marks every abort is_error: true (M6 review; pass3/plan-outcomes seq 510)
           if (event.isEchoReceipt || event.terminalReason?.startsWith('aborted_') || !(event.isError || HARD_FAILURE_REASONS.has(event.terminalReason ?? ''))) break;
-          derive(id, state, event.id, { ...base, kind: 'error', summary: failedTurnSummary(event.result, event.terminalReason, event.errors[0]) });
+          derive(id, state, event.id, { ...base, kind: 'error', summary: turnErrorSummary(event, apiError) });
           break;
+        }
         case 'task.notification':
           if (event.status === 'failed') derive(id, state, event.id, { ...base, kind: 'error', summary: `Background task failed: ${previewLine(event.summary, SUMMARY_MAX) ?? ''}`.trimEnd(), request: { ...noRequest, taskId: event.taskId as TaskId } });
           break;
@@ -299,17 +339,23 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
   const list = () => [...sessions.values()].flatMap(merged);
 
   deps.register('attention.list', () => list());
-  // E11 F2b (owner decision 1): seen in the opened session (confirmed: out of Needs you, its notice still shown there),
-  // or dismissed (retired). An error only, and never back: a dismissed item is not made seen again.
-  deps.register('attention.acknowledge', ({ appSessionId, attentionId, how }) => {
+  // An error seen in its opened session (the composer's dwell, E11 F2b) or dismissed: retired either way (the ruling of
+  // 2026-10-30: no "ended with an error" stays behind), and never back.
+  deps.register('attention.acknowledge', ({ appSessionId, attentionId }) => {
     const state = sessions.get(appSessionId as AppSessionId);
     const target = state?.derived.get(attentionId);
-    if (!state || target?.kind !== 'error') return;
-    const next = how === 'dismissed' ? 'retired' : 'confirmed';
-    if (target.state === next || target.state === 'retired') return;
-    state.derived.set(target.id, { ...target, state: next, stateChangedAt: new Date().toISOString() });
+    if (!state || target?.kind !== 'error' || target.state === 'retired') return;
+    state.derived.set(target.id, retired(target));
     changed(appSessionId as AppSessionId, state);
   });
+  // The session's last-seen mark moved to `at`: what it showed at or before then was seen.
+  const seen = (id: AppSessionId, at: number) => {
+    const state = sessions.get(id);
+    const covered = [...(state?.derived.values() ?? [])].filter((item) => item.kind === 'error' && item.state !== 'retired' && Date.parse(item.createdAt) <= at);
+    if (!state || covered.length === 0) return; // every index change of the record reaches here
+    for (const item of covered) state.derived.set(item.id, retired(item));
+    changed(id, state);
+  };
   deps.register('attention.request', async ({ appSessionId, requestId }) => {
     const laneA = sessions.get(appSessionId as AppSessionId)?.laneA.find((e) => e.item.request.requestId === (requestId as RequestId)); // P5 O9 M6
     if (laneA) return { event: laneA.request };
@@ -329,8 +375,10 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
       if (forgotten.has(id)) continue;
       const state = stateOf(id);
       for (const stored of items) {
-        const item = inWords(stored);
+        let item = inWords(stored);
         if (BROKER_KINDS.has(item.kind) || OWNER_KINDS.has(item.kind) || item.kind === 'held_peer_message' || retiredByThisRun(state, item)) continue;
+        // the ruling (2026-10-30): an error seen since (or confirmed, E11 F2b's seen, before the ruling) is retired
+        if (item.kind === 'error' && item.state !== 'retired' && (item.state === 'confirmed' || seenThere(id, item))) item = retired(item);
         // a failure the transcript replayed before the load is the same occurrence: the stored acknowledgement stands
         const live = state.derived.get(item.id);
         if (live && !(live.state === 'pending' && item.state !== 'pending')) continue;
@@ -400,6 +448,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
     list,
     setOwnerItems, // P2-C
     setLaneAItems, // P5 O9 M6
+    seen,
     settled: async () => {
       await attempt;
       if (!loadedOk) throw loadError;

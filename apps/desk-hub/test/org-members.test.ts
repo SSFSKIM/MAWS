@@ -6,9 +6,10 @@
 import { generateSigningKey, type OrgState, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { PendingDevice } from '../src/protocol/identity';
-import { enroll, MachineClient, waitFor } from './support/clients';
+import { waitFor } from './support/clients';
 import { ADMIN, ORG, startLocalHub, credentials, type LocalHub, type Who } from './support/local';
 import { endorsed, fakeMac, genesis, memberId, newDevice, next, signedBy, type TestDevice } from './support/org';
+import { Rl1Machine, TestOrg } from './support/rl1';
 
 let hub: LocalHub;
 let A: string;
@@ -112,18 +113,22 @@ describe('a member', () => {
   });
 
   it('removed before a project is first registered is refused there, though no state is accepted after it', async () => {
+    // The machine that registers the project is listed first, so no state is accepted after the removal.
+    const org = TestOrg.of(hub, A, a1, recovery, head);
+    const listed = await org.listed('registers');
+    head = org.head;
     const H = memberId();
     await accept(await next(head, (s) => s.members.push({ id: H, email: 'h@example.com', role: 'member', devices: [] })), a1);
     await accept(await next(head, without(H)), a1);
     // The project is registered after the removal was announced to every project then held.
     const fresh = '1c2d3e4f-0000-4000-8000-000000000000';
-    const machine = new MachineClient(hub, 'registers', await enroll(hub, ADMIN, 'registers'));
+    const machine = new Rl1Machine(hub, listed);
     await machine.connect();
     await machine.sync(fresh);
     await waitFor(async () => ((await hub.stateFault(fresh)).announced === head.state.version ? true : undefined));
     expect(await hub.socketUpgrade({ project: fresh }, H)).toBe(403);
     expect(await hub.socketUpgrade({ project: fresh }, A)).toBe(101);
-    await machine.close();
+    machine.close();
   });
 
   it('is projected with their devices by member and class, and machines by ref', async () => {
@@ -152,7 +157,8 @@ describe('a member', () => {
       { id: 'c-phone', member: C, class: 'web-cards', access_client_id: null },
       { id: 'c1', member: C, class: 'native-mac', access_client_id: null },
     ]);
-    expect(projection.machines).toEqual([{ ref: 'mref-mini-0000001', name: 'Mini', pub: mini.pub, owners: [C] }]);
+    // Beside the machine that registered a project above.
+    expect(projection.machines.filter((m) => m.name !== 'registers')).toEqual([{ ref: 'mref-mini-0000001', name: 'Mini', pub: mini.pub, owners: [C] }]);
   });
 });
 

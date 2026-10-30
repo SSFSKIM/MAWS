@@ -1,10 +1,11 @@
 // An attention item that is not a request (an error, an interrupted turn, auto mode unavailable, a held peer message):
 // its summary and its age, and for `auto_mode_unavailable` the remedy X1 names. Nothing to answer: these retire on the
 // next human turn or by C3's expiry. Never takes keys, never blocks the editor.
-// E11 F2b (plan 2.4; owner decision 1): an outcome says when it happened ("2 weeks ago"), not how long it waited; an
-// error offers Dismiss, and shown in its opened session (`seenHere`: the composer's notice) for two continuous seconds
-// while the window is in front it counts as seen (L102's dwell), which takes it out of Needs you while the session keeps
-// saying it ended with an error.
+// E11 F2b (plan 2.4): an outcome says when it happened ("2 weeks ago"), not how long it waited; an error offers Dismiss,
+// and shown in its opened session (`seenHere`: the composer's notice) for two continuous seconds while the window is in
+// front it counts as seen (L102's dwell). The owner's ruling (2026-10-30): an error is only ever an unseen one, its
+// summary the error itself (an API error in the engine's words); seen or dismissed, it retires, and the transcript alone
+// shows what happened (the session's own last-seen mark usually retires it first; the dwell remains for when it has not).
 import { useEffect } from 'react';
 import type { AttentionItem } from '@shared/graph/attention';
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';

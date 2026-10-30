@@ -6,9 +6,8 @@
 //   --port <n>      the proxy's port (default 8747; 8787, wrangler's own default, is often taken); wrangler dev listens on the next one, on 127.0.0.1 only
 //   --user <email>  who a request with no other identity is signed in as (default owner@example.com, the org's admin);
 //                   --user '' makes such a request refused, as Access refuses it
-//   --heartbeat-ms <n>  the machine stream's heartbeat (default 2000; the deployed hub's is 15000). wrangler dev's own
-//                   proxy closes its hop to the hub gracefully, so a machine's close reaches the hub at the next write to
-//                   its stream: this bounds how long a dropped machine stays online here (test/stream-close.test.ts)
+//   --heartbeat-ms <n>  a machine connection's heartbeat (default 2000; the deployed hub's is 15000): it bounds how long
+//                   a dropped machine stays online here
 //   --state <dir>   where state is kept (default apps/desk-hub/.wrangler); a suite passes a directory of its own
 //
 // State survives restarts: the Worker's objects in <state>/state (wrangler's), the stand-in's signing key and the
@@ -21,7 +20,6 @@ import { createRequire } from 'node:module';
 import { connect } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { codeHelpers } from './helpers.ts';
 import { startProxy } from './proxy.ts';
 import { AccessStandin, IDENTITY_HEADER, type StandinState } from './standin.ts';
 
@@ -107,9 +105,6 @@ const proxy = await startProxy({
   standin,
   upstream: () => `http://127.0.0.1:${hubPort}`,
   port,
-  // Conveniences for a machine-side developer with no web app: an enrollment code and a provisioning code as the browser
-  // would build them.
-  extra: codeHelpers({ origin: () => origin, org: ORG, standin, admin: ADMIN }),
 });
 
 const stop = async () => {
@@ -128,17 +123,9 @@ console.log(`
 The local hub, behind its stand-in for Access: ${proxy.url}
   (wrangler dev on http://127.0.0.1:${hubPort}; talk to ${proxy.url} only)
 
-  org ${ORG}; admin ${ADMIN}; a machine's stream beats every ${values['heartbeat-ms']} ms (deployed: 15000)
+  org ${ORG}; admin ${ADMIN}; a machine's connection beats every ${values['heartbeat-ms']} ms (deployed: 15000)
   a request with no identity is ${standin.defaultUser ? `signed in as ${standin.defaultUser}` : 'refused, as Access refuses it'}
   another person:  header ${IDENTITY_HEADER}: <email>, or a browser at ${proxy.url}/standin/login?email=<email>
-  a machine:       CF-Access-Client-Id / CF-Access-Client-Secret from its enrollment, as with Access
-
-  an enrollment code for machine <name> (a fresh org key unless you pass one):
-    curl -s -X POST ${proxy.url}/standin/enrollment-code -d '{"machine": "<name>"}'
-  then on the machine: sminos hub enroll, and paste the code at its hidden prompt (never an argument: it carries
-    the org key); it redeems at ${proxy.url}/machine/enroll
-
-  a provisioning code for machines named <prefix>… (a reusable key; also label, ttl_s, max_uses, offline_revoke_s, key):
-    curl -s -X POST ${proxy.url}/standin/provisioning-code -d '{"prefix": "dc-", "offline_revoke_s": 3600}'
-  then on each machine: printf %s "$CODE" | sminos hub enroll --name dc-<machine>
+  a machine:       CF-Access-Client-Id / CF-Access-Client-Secret from its enrollment, as with Access: a v2 code
+                   redeemed at ${proxy.url}/machine/enroll (\`mawsd enroll\`), its token from POST /api/enrollments
 `);

@@ -3,18 +3,10 @@
 // certificate endpoint and the service-token API the Worker calls.
 import { request as httpRequest } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AccessStandin, enrollmentCode, provisioningCode, REDEEM_PATH } from '../local/standin.ts';
-import { base64urlEncode } from '../src/protocol/base64url';
-import {
-  decodeEnrollmentCode,
-  decodeProvisioningCode,
-  encodeEnrollmentCode,
-  encodeProvisioningCode,
-  REDEEM_PATH as PROTOCOL_REDEEM_PATH,
-  type ProvisioningKeyRecord,
-} from '../src/protocol/identity';
+import { AccessStandin, REDEEM_PATH } from '../local/standin.ts';
+import { REDEEM_PATH as PROTOCOL_REDEEM_PATH } from '../src/protocol/identity';
 import { enroll, refusal } from './support/clients';
-import { ADMIN, ORG, startLocalHub, type LocalHub } from './support/local';
+import { ADMIN, startLocalHub, type LocalHub } from './support/local';
 
 let hub: LocalHub;
 beforeAll(async () => {
@@ -45,11 +37,11 @@ describe('the stand-in for Access', () => {
   });
 
   it("refuses a service token it does not hold, or one with the wrong secret, as production Access does: 401 and its own page (the deploy probe's A4)", async () => {
-    const bogus = await hub.fetchAs({ clientId: 'nobody.access', clientSecret: 'x' }, '/machine/stream');
+    const bogus = await hub.fetchAs({ clientId: 'nobody.access', clientSecret: 'x' }, '/machine/enrollment');
     expect(bogus.headers.get('content-type')).toMatch(/^text\/html/);
     expect(await refusal(bogus)).toBe('401 access');
     const held = await enroll(hub, ADMIN, 'standin-1');
-    expect(await refusal(await hub.fetchAs({ clientId: held.clientId, clientSecret: 'wrong' }, '/machine/stream'))).toBe('401 access');
+    expect(await refusal(await hub.fetchAs({ clientId: held.clientId, clientSecret: 'wrong' }, '/machine/enrollment'))).toBe('401 access');
     // A WebSocket's upgrade is refused the same.
     const url = new URL('/api/registry/socket', hub.url);
     const upgrade = await new Promise<{ status: number; type: string; body: string }>((resolve, reject) => {
@@ -96,40 +88,6 @@ describe('the stand-in for Access', () => {
     expect(listed.result[0].client_secret).toBeUndefined();
     expect((await fetch(`${base}/${created.result.id}`, { method: 'DELETE', headers: auth })).status).toBe(200);
     expect((await fetch(`${base}/${created.result.id}`, { method: 'DELETE', headers: auth })).status).toBe(404);
-  });
-
-  it("builds an enrollment code the protocol module's decoder reads (the local command's helper)", () => {
-    const code = { hub: 'http://127.0.0.1:8747', org: 'local', token: 'tok', machine: 'mini', key: base64urlEncode(new Uint8Array(32).fill(3)) };
-    expect(decodeEnrollmentCode(enrollmentCode(code))).toEqual(code);
-    expect(enrollmentCode(code)).toBe(encodeEnrollmentCode(code));
-  });
-
-  it("builds a provisioning code the protocol module's decoder reads", () => {
-    const code = { hub: 'http://127.0.0.1:8747', org: 'local', token: 'secret', prefix: 'dc-', key: base64urlEncode(new Uint8Array(32).fill(4)) };
-    expect(decodeProvisioningCode(provisioningCode(code))).toEqual(code);
-    expect(provisioningCode(code)).toBe(encodeProvisioningCode(code));
-  });
-
-  it('hands out an enrollment code and a provisioning code without a browser, the org key reused when given', async () => {
-    const one = await fetch(`${hub.url}/standin/enrollment-code`, { method: 'POST', body: JSON.stringify({ machine: 'helper-1' }) });
-    expect(one.status).toBe(200);
-    const enrollment = (await one.json()) as { code: string; key: string; token: string };
-    expect(decodeEnrollmentCode(enrollment.code)).toEqual({ hub: hub.url, org: ORG, token: enrollment.token, machine: 'helper-1', key: enrollment.key });
-
-    const response = await fetch(`${hub.url}/standin/provisioning-code`, { method: 'POST', body: JSON.stringify({ prefix: 'dc-', offline_revoke_s: 3600, key: enrollment.key }) });
-    expect(response.status).toBe(200);
-    const { code, key, id } = (await response.json()) as { code: string; key: string; id: string };
-    expect(key).toBe(enrollment.key);
-    const decoded = decodeProvisioningCode(code);
-    expect(decoded).toMatchObject({ hub: hub.url, org: ORG, prefix: 'dc-', key });
-    const listed = ((await (await hub.fetchAs(ADMIN, '/api/provisioning-keys')).json()) as { keys: ProvisioningKeyRecord[] }).keys.find((k) => k.id === id);
-    expect(listed).toMatchObject({ prefix: 'dc-', offline_revoke_s: 3600, max_uses: null, uses: 0 });
-    // The code's secret enrolls a machine under the prefix.
-    expect((await hub.fetchAs(null, REDEEM_PATH, { body: { token: decoded.token, machine: 'dc-helper-1' } })).status).toBe(200);
-    // A fresh org key when none is given; the hub's refusal passed on.
-    const fresh = (await (await fetch(`${hub.url}/standin/provisioning-code`, { method: 'POST', body: JSON.stringify({ prefix: 'dc-' }) })).json()) as { key: string };
-    expect(fresh.key).not.toBe(key);
-    expect(await refusal(await fetch(`${hub.url}/standin/provisioning-code`, { method: 'POST', body: JSON.stringify({ prefix: 'hub' }) }))).toBe('400 bad-shape');
   });
 
   it('keeps its key and tokens in a state it can resume from', async () => {

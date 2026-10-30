@@ -43,19 +43,19 @@ export type WrappedKeyRecord = {
 };
 
 /**
- * `GET /api/org/keys` (a member) answers `WrappedKeys`. `POST /api/org/keys` (an admin holding the key) takes a
- * `WrappedKeyRequest` and answers `201 {key}`; `DELETE /api/org/keys/<id>` (an admin holding the key) takes
- * `{auth}` and answers `{removed: <id>}`. Changing the wrapped keys takes the key, not only an Access session: `auth`
- * is HMAC-SHA256(org key, UTF-8 `smns-desk-key-auth-v1`), 32 bytes, base64url (`keyAuth`). The first wrapped key sets
- * the org's `key_check` and keeps SHA-256 of its `auth` (`key_auth`, never returned); every later change must carry the
- * `auth` whose digest that is, or is refused `not-key-holder` before anything else about the records is told.
+ * `GET /api/org/keys` (a member) answers `WrappedKeys`, the copies the hub still holds. Since O14 M5b the hub takes no
+ * change to them: `POST /api/org/keys` and `DELETE /api/org/keys/<id>` answer 404 from the Worker, and the copies go
+ * only by the purge below. Until then they were changed by an admin holding the key: `POST` took a `WrappedKeyRequest`
+ * and answered `201 {key}`, `DELETE` took `{auth}` and answered `{removed: <id>}`, `auth` being HMAC-SHA256(org key,
+ * UTF-8 `smns-desk-key-auth-v1`), 32 bytes, base64url (`keyAuth`), checked against the digest the first copy kept
+ * (`key_auth`). The request and answer types stay for desk-web's frozen build, which still imports them.
  */
 export const ORG_KEYS_PATH = '/api/org/keys';
 /**
  * `POST /api/org/keys/purge` (an admin; O14 M5a): once the org state's head carries `legacyRetired`, every wrapped copy
  * and the org's key check and auth are deleted, answering `{purged}` (the head's version it acted under, and when), the
- * same record again after; `409 not-retired` before. From then `GET /api/org/keys` and `DELETE /api/org/keys/<id>` answer
- * `410 retired`, `POST /api/org/keys` `409 retired`, and a successor that drops `legacyRetired` is refused `409 key-purged`.
+ * same record again after; `409 not-retired` before. From then `GET /api/org/keys` answers `410 retired`, and a
+ * successor that drops `legacyRetired` is refused `409 key-purged`.
  */
 export const ORG_KEYS_PURGE_PATH = '/api/org/keys/purge';
 export type OrgKeysPurged = { purged: { version: number; at: string } };
@@ -520,9 +520,9 @@ export type MachineKeyRequest = { pub: string; ref: string; mac: string };
 export type EnrollmentKey = { enrollment: string; machine: string; pub: string; ref: string; mac: string; posted: string };
 /** `GET /api/machines` answers each machine with its v2 key once it posted one, and whether the head lists it. */
 /**
- * A machine as `GET /api/machines` lists it: its record, its DX2 presence as the directory's `org` frame carries it
- * (`online`, `seen`: optional, a hub before O14 M5a sends neither; an RL1 machine's presence reaches the relay alone, P5
- * DL 37), and a v2 machine's posted key with whether the head lists it.
+ * A machine as `GET /api/machines` lists it: its record, its online state as the projects' leases report it, which
+ * DX2's `org` frame carried until O14 M5b (`online`, `seen`: optional, a hub before O14 M5a sends neither; an RL1
+ * machine's presence reaches the relay alone, P5 DL 37), and a v2 machine's posted key with whether the head lists it.
  */
 export type MachineView = MachineRecord & { online?: boolean; seen?: string | null; key?: { ref: string; pub: string; listed: boolean } };
 

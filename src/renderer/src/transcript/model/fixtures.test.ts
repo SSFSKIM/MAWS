@@ -403,6 +403,17 @@ it('S4 retains API-error envelopes as diagnostics and uses the last assistant ev
   ]);
 });
 
+// The owner's ruling (2026-10-30): an old turn whose work ended on an API error reads, from disk, as that error where it
+// happened, in its own words; the divider reads the work, never Failed.
+it('S4b draws a backfilled API error after work as its own row, and the turn as the work it did', async () => {
+  const { events, rows } = await d1Fixture('api-error-after-work');
+  expect(events.filter((e) => e.kind === 'turn.ended').map((e) => [e.result, e.isError])).toEqual([['error_during_execution', true]]);
+  expect(ofKind(rows, 'error').map((row) => [row.scope, row.severity, row.text])).toEqual([
+    ['api', 'error', 'API Error: 529 Overloaded. This is a server-side issue, usually temporary — try again in a moment.'],
+  ]);
+  expect(ofKind(rows, 'divider').map((row) => [row.state, row.toolCalls])).toEqual([['completed', 1]]);
+});
+
 it('S5 skips completed empty and whitespace native text rows', async () => {
   const { rows } = await d1Fixture('empty-text');
   expect(ofKind(rows, 'assistant_text').map((row) => row.markdown)).toEqual(['Visible answer.']);

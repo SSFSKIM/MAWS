@@ -16,5 +16,5 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*.ts", "test/support/worker-under-test.ts", "test/support/send-fault.ts", "test/machine-end.test.ts", "test/op-store.test.ts", "test/org-chain.test.ts"]
+  "include": ["src/**/*.ts", "test/support/worker-under-test.ts", "test/support/send-fault.ts", "test/op-store.test.ts", "test/org-chain.test.ts"]
 }

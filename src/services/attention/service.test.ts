@@ -46,7 +46,7 @@ function event(kind: string, payload: Record<string, unknown> = {}): SessionEven
   return { id: `${APP}:L:${seq}:0`, sessionId: SID, at: new Date(Date.parse(AT) + seq).toISOString(), seq, agentId: null, parentToolUseId: null, kind, ...payload } as unknown as SessionEvent;
 }
 
-function setup(opts: { store?: FakeStore; dispatch?: AttentionServiceDeps['dispatch']; log?: (message: string) => void } = {}) {
+function setup(opts: { store?: FakeStore; dispatch?: AttentionServiceDeps['dispatch']; log?: (message: string) => void; seenAt?: AttentionServiceDeps['seenAt'] } = {}) {
   const listeners = new Map<string, ((payload: unknown) => void)[]>();
   const handlers = new Map<string, (input: unknown) => unknown>();
   const states = new Set<(state: HostState) => void>();
@@ -68,6 +68,7 @@ function setup(opts: { store?: FakeStore; dispatch?: AttentionServiceDeps['dispa
     }) as AttentionServiceDeps['emit'],
     register: ((name: CommandName, handler: (input: unknown) => unknown) => void handlers.set(name, handler)) as AttentionServiceDeps['register'],
     log: opts.log ?? (() => {}),
+    ...(opts.seenAt && { seenAt: opts.seenAt }),
   });
   const fire = (name: EventName, payload: unknown) => listeners.get(name)?.forEach((l) => l(payload));
   const batch = (...events: SessionEvent[]) => fire('session.eventBatch', { appSessionId: APP, events });
@@ -209,21 +210,21 @@ describe('attention service merges broker items with the derived kinds', () => {
       expect(last()).toEqual([]);
     });
 
-    it('seen moves it out of Needs you (confirmed), Dismiss retires it; neither goes back, both persist, a later failure alerts anew', async () => {
+    it('seen (the composer\u2019s dwell) or Dismiss retires it; it never comes back, the retirement persists, a later failure alerts anew', async () => {
       const { service, store, handlers, batch, last } = setup();
       const acknowledge = handlers.get('attention.acknowledge')!;
-      batch(failedTurn());
-      const [error] = last();
-      await acknowledge({ appSessionId: APP, attentionId: error!.id, how: 'seen' });
-      expect(last()).toEqual([expect.objectContaining({ id: error!.id, state: 'confirmed' })]);
-      await acknowledge({ appSessionId: APP, attentionId: error!.id, how: 'dismissed' });
-      expect(last()).toEqual([expect.objectContaining({ id: error!.id, state: 'retired' })]);
-      await acknowledge({ appSessionId: APP, attentionId: error!.id, how: 'seen' }); // never back from dismissed
-      expect(last()[0]!.state).toBe('retired');
+      for (const how of ['seen', 'dismissed'] as const) {
+        batch(failedTurn());
+        const error = last().at(-1)!;
+        await acknowledge({ appSessionId: APP, attentionId: error.id, how });
+        expect(last().at(-1)).toEqual(expect.objectContaining({ id: error.id, state: 'retired' }));
+        await acknowledge({ appSessionId: APP, attentionId: error.id, how: how === 'seen' ? 'dismissed' : 'seen' }); // never back
+        expect(last().at(-1)!.state).toBe('retired');
+      }
       await service.settled();
-      expect(store.sessions.get(APP)).toEqual([expect.objectContaining({ id: error!.id, state: 'retired' })]);
+      expect(store.sessions.get(APP)?.map((i) => i.state)).toEqual(['retired', 'retired']);
       batch(failedTurn({ result: 'error_max_turns' }));
-      expect(last().map((i) => [i.summary, i.state])).toEqual([['The turn ended with an error', 'retired'], ['Stopped at the turn limit', 'pending']]);
+      expect(last().map((i) => [i.summary, i.state])).toEqual([['The turn ended with an error', 'retired'], ['The turn ended with an error', 'retired'], ['Stopped at the turn limit', 'pending']]);
     });
 
     it('acknowledges only error items: a request, an interruption and an unknown id are left as they are', async () => {
@@ -243,7 +244,7 @@ describe('attention service merges broker items with the derived kinds', () => {
       const after = setup({ store: new FakeStore([persisted]) });
       await after.service.ready;
       after.batch(failure);
-      expect(after.last().map((i) => [i.id, i.state])).toEqual([[id, 'confirmed']]);
+      expect(after.last().map((i) => [i.id, i.state])).toEqual([[id, 'retired']]); // a seen error persisted before the ruling loads retired
 
       let release!: () => void;
       const store = new FakeStore([persisted]);
@@ -256,7 +257,7 @@ describe('attention service merges broker items with the derived kinds', () => {
       before.batch(failure); // derived pending while the load is outstanding
       release();
       await before.service.ready;
-      expect(before.last().map((i) => [i.id, i.state])).toEqual([[id, 'confirmed']]);
+      expect(before.last().map((i) => [i.id, i.state])).toEqual([[id, 'retired']]);
     });
 
     // F2b review 1: a fresh follower's backfill replays every old prompt as a null-origin turn.started, each carrying its
@@ -273,7 +274,7 @@ describe('attention service merges broker items with the derived kinds', () => {
         const after = setup({ store: new FakeStore([persisted]) });
         await after.service.ready;
         after.batch(prompt, failure);
-        expect(after.last().map((i) => [i.id, i.state])).toEqual([[id, how]]);
+        expect(after.last().map((i) => [i.id, i.state])).toEqual([[id, 'retired']]); // a confirmed one (seen before the ruling) loads retired
 
         let release!: () => void;
         const store = new FakeStore([persisted]);
@@ -286,9 +287,9 @@ describe('attention service merges broker items with the derived kinds', () => {
         before.batch(prompt, failure); // replayed while the load is outstanding
         release();
         await before.service.ready;
-        expect(before.last().map((i) => [i.id, i.state])).toEqual([[id, how]]);
+        expect(before.last().map((i) => [i.id, i.state])).toEqual([[id, 'retired']]);
         await before.service.settled();
-        expect(store.sessions.get(APP)?.map((i) => [i.id, i.state])).toEqual([[id, how]]);
+        expect(store.sessions.get(APP)?.map((i) => [i.id, i.state])).toEqual([[id, 'retired']]);
 
         before.batch(event('turn.started', { userMessageUuid: 'u-new', origin: null, at: '2026-09-28T10:01:00.000Z', seq: null }));
         expect(before.last()).toEqual([]);
@@ -311,6 +312,142 @@ describe('attention service merges broker items with the derived kinds', () => {
       const { service, handlers } = setup({ store: new FakeStore([legacy('error_during_execution', 1), legacy('error_max_turns', 2), legacy('api_error (overloaded)', 3)]) });
       await service.ready;
       expect(((await handlers.get('attention.list')!(undefined)) as AttentionItem[]).map((i) => i.summary)).toEqual(['The turn ended with an error', 'Stopped at the turn limit', 'The turn ended with an error (overloaded)']);
+    });
+  });
+
+  // The owner's ruling (2026-10-30): an error is raised only when it is newer than the last time the session was seen in
+  // MAWS; seeing the session or dismissing the item retires it for good; an API error reads in the engine's own words.
+  describe('an error is raised only if unseen, and reads as what happened', () => {
+    const PROMPT_AT = '2026-10-01T08:59:58.000Z';
+    const FAILED_AT = '2026-10-01T09:00:00.000Z';
+    const SEEN_AT = Date.parse('2026-10-29T12:00:00.000Z');
+    const OVERLOADED = 'API Error: 529 Overloaded. This is a server-side issue, usually temporary — try again in a moment.';
+    const envelope = (text: string, over: Record<string, unknown> = {}) =>
+      event('assistant.block.complete', { messageUuid: 'm-err', apiMessageId: 'm-err', blockIndex: 0, block: { type: 'text', text }, model: '<synthetic>', supersedes: [], aborted: false, userMessageUuids: [], isApiErrorMessage: true, error: 'server_error', ...over });
+    // An old turn read back from the transcript on disk (backfill.ts): the prompt, the engine's API error envelope, and
+    // the turn_duration's turn.ended (no terminal reason, no errors on disk).
+    const diskTurn = () => [
+      event('turn.started', { userMessageUuid: 'u-old', origin: null, at: PROMPT_AT, seq: null }),
+      envelope(OVERLOADED, { at: FAILED_AT, seq: null }),
+      event('turn.ended', { isError: true, terminalReason: null, result: 'error_during_execution', resultText: null, isEchoReceipt: false, origin: null, errors: [], at: FAILED_AT, seq: null }),
+    ];
+    // The same failure live: the envelope, then the result naming it (pass2/auto-unrouted seq 11-12).
+    const liveTurn = (text: string, withEnvelope = true) => [
+      event('turn.started', { userMessageUuid: 'u-live', origin: 'human' }),
+      ...(withEnvelope ? [envelope(text)] : []),
+      event('turn.ended', { isError: true, terminalReason: 'api_error', result: 'success', resultText: text, isEchoReceipt: false, origin: 'human', errors: [] }),
+    ];
+
+    it('an old error the session was seen after raises nothing (a failed background task neither)', () => {
+      const { service, batch } = setup({ seenAt: () => SEEN_AT });
+      batch(...diskTurn(), event('task.notification', { taskId: 'task-1', toolUseId: null, status: 'failed', summary: 'npm test exited 1', outputFile: null, reason: null, at: FAILED_AT, seq: null }));
+      expect(service.list()).toEqual([]);
+    });
+
+    it('a session never seen in MAWS (or seen before the error) tells once, in the API error’s own words; a replay raises no second item', () => {
+      for (const seenAt of [() => null, () => Date.parse(PROMPT_AT)]) {
+        const { service, batch } = setup({ seenAt });
+        const turn = diskTurn();
+        batch(...turn);
+        batch(...turn);
+        expect(service.list().map((i) => [i.kind, i.state, i.summary, i.createdAt])).toEqual([['error', 'pending', OVERLOADED, FAILED_AT]]);
+      }
+    });
+
+    it('seeing the session retires it, and it never comes back: not on a replay, not after a restart, not from a store that lost it', async () => {
+      let seen: number | null = null;
+      const first = setup({ seenAt: () => seen });
+      const turn = diskTurn();
+      first.batch(...turn);
+      first.service.seen(APP, Date.parse(PROMPT_AT)); // a look before the failure leaves it
+      expect(first.service.list().map((i) => i.state)).toEqual(['pending']);
+      seen = SEEN_AT;
+      first.service.seen(APP, SEEN_AT);
+      expect(first.last().map((i) => i.state)).toEqual(['retired']);
+      first.batch(...turn);
+      expect(first.service.list().map((i) => i.state)).toEqual(['retired']);
+      await first.service.settled();
+
+      const restarted = setup({ store: new FakeStore(first.store.sessions.get(APP)), seenAt: () => seen });
+      await restarted.service.ready;
+      restarted.batch(...turn);
+      expect(restarted.service.list().map((i) => i.state)).toEqual(['retired']);
+
+      const lost = setup({ seenAt: () => seen });
+      await lost.service.ready;
+      lost.batch(...turn);
+      expect(lost.service.list()).toEqual([]);
+    });
+
+    it('dismissing retires it for good while the session stays unseen: a replay and a restart leave it retired', async () => {
+      const first = setup({ seenAt: () => null });
+      const turn = diskTurn();
+      first.batch(...turn);
+      await first.handlers.get('attention.acknowledge')!({ appSessionId: APP, attentionId: first.last()[0]!.id, how: 'dismissed' });
+      first.batch(...turn);
+      expect(first.service.list().map((i) => i.state)).toEqual(['retired']);
+      await first.service.settled();
+      const restarted = setup({ store: new FakeStore(first.store.sessions.get(APP)), seenAt: () => null });
+      await restarted.service.ready;
+      restarted.batch(...turn);
+      expect(restarted.service.list().map((i) => i.state)).toEqual(['retired']);
+    });
+
+    it('an unseen error persisted by an earlier run loads retired once the session has been seen since', async () => {
+      const id = `${APP}:error:old` as never;
+      const persisted = item({ kind: 'error', state: 'pending', id, createdAt: FAILED_AT, summary: 'The turn ended with an error', request: { requestId: null, toolUseId: null, taskId: null, agentId: null } });
+      const seen = setup({ store: new FakeStore([persisted]), seenAt: () => SEEN_AT });
+      await seen.service.ready;
+      expect(seen.service.list().map((i) => i.state)).toEqual(['retired']);
+      const unseen = setup({ store: new FakeStore([persisted]), seenAt: () => Date.parse(PROMPT_AT) });
+      await unseen.service.ready;
+      expect(unseen.service.list().map((i) => i.state)).toEqual(['pending']);
+    });
+
+    it('an unseen error an earlier build stored in the generic words takes the API error’s once the transcript replays it; a retired one keeps its words', async () => {
+      const turn = diskTurn();
+      const id = `${APP}:error:${turn[2]!.id}` as never;
+      for (const state of ['pending', 'retired'] as const) {
+        const persisted = item({ kind: 'error', state, id, createdAt: FAILED_AT, stateChangedAt: FAILED_AT, summary: 'The turn ended with an error', request: { requestId: null, toolUseId: null, taskId: null, agentId: null } });
+        const { service, store, batch } = setup({ store: new FakeStore([persisted]), seenAt: () => Date.parse(PROMPT_AT) });
+        await service.ready;
+        batch(...turn);
+        const words = state === 'pending' ? OVERLOADED : 'The turn ended with an error';
+        expect(service.list().map((i) => [i.id, i.state, i.summary, i.createdAt, i.stateChangedAt])).toEqual([[id, state, words, FAILED_AT, FAILED_AT]]);
+        await service.settled();
+        expect(store.sessions.get(APP)?.map((i) => [i.state, i.summary])).toEqual([[state, words]]);
+      }
+    });
+
+    it('a live API error raises the item while no client shows the session, and nothing while one does', () => {
+      let showing = false;
+      const { service, batch } = setup({ seenAt: () => (showing ? Infinity : Date.parse(AT) - 60_000) });
+      const limited = 'API Error: Request rejected (429) · This request would exceed your account’s rate limit. Please try again later.';
+      batch(...liveTurn(limited));
+      expect(service.list().map((i) => [i.state, i.summary])).toEqual([['pending', limited]]);
+      showing = true;
+      batch(...liveTurn(OVERLOADED)); // its human turn retires the first; the second arrives under the reader's eyes
+      expect(service.list()).toEqual([]);
+    });
+
+    it('names the API error from the result when no envelope was read, and only the main conversation’s envelope counts', () => {
+      const { service, batch } = setup();
+      batch(...liveTurn('Login expired · Please run /login', false));
+      expect(service.list().map((i) => i.summary)).toEqual(['Login expired · Please run /login']);
+      const child = setup();
+      child.batch(event('turn.started', { userMessageUuid: 'u-c', origin: 'human' }), envelope('API Error: child', { parentToolUseId: 'toolu_agent' }), event('turn.ended', { isError: true, terminalReason: 'max_turns', result: 'error_max_turns', resultText: null, isEchoReceipt: false, origin: 'human', errors: [] }));
+      expect(child.service.list().map((i) => i.summary)).toEqual(['Stopped at the turn limit']);
+    });
+
+    it('a reply after the envelope (the engine recovered within the turn) leaves the generic words to the turn’s own failure', () => {
+      const { service, batch } = setup();
+      batch(
+        event('turn.started', { userMessageUuid: 'u-r', origin: 'human' }),
+        envelope(OVERLOADED),
+        event('assistant.block.complete', { messageUuid: 'm-ok', apiMessageId: 'm-ok', blockIndex: 0, block: { type: 'text', text: 'Recovered.' }, model: 'claude', supersedes: [], aborted: false, userMessageUuids: [] }),
+        event('turn.ended', { isError: true, terminalReason: null, result: 'error_max_turns', resultText: null, isEchoReceipt: false, origin: 'human', errors: [] }),
+      );
+      expect(service.list().map((i) => i.summary)).toEqual(['Stopped at the turn limit']);
     });
   });
 

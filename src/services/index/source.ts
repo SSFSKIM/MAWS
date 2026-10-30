@@ -44,6 +44,7 @@ export type SourceHost = Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onState'
 export interface SourceOptions {
   emit: <N extends EventName>(name: N, payload: EventPayload<N>) => boolean; // to every client: the services bus's emit (P5 O3-C)
   tickMs?: number; // session.changed coalescing and fs.bind batching; 16 ms
+  searchDebounceMs?: number; // SEARCH_REINDEX_DEBOUNCE_MS
   now?: () => string;
   warmLinkedWorktrees?: (directories: string[]) => Promise<void>; // projects.ts's; a test holds the warm-up open
 }
@@ -56,10 +57,14 @@ const locatedDirectory = (s: TranscriptSummary) => s.relocatedCwd ?? s.directory
 // A record's change waiting for the tick: its latest committed state and that change's revision.
 type Pending = { t: 'changed'; record: SessionRecord; cause: Exclude<ChangeCause, 'removed'>; revision: number } | { t: 'removed'; revision: number };
 type SearchJob = { summary: TranscriptSummary; failures: number; retryAt: number };
+// A transcript that was indexed in this run and has changed since is indexed again no sooner than this after its last
+// pass finished, so a session still writing costs one incremental pass per window, however often it appends.
+export const SEARCH_REINDEX_DEBOUNCE_MS = 30_000;
 const SEARCH_RETRY_MS = [250, 1000]; // three attempts per transcript stamp, then an explicit incomplete state
 
 export class IndexSessionSource implements SessionSource {
   private readonly tickMs: number;
+  private readonly searchDebounceMs: number;
   private readonly now: () => string;
   private readonly visible = new Set<AppSessionId>();
   private readonly holders = new Map<SessionId, Holder>(); // the registry's live holders by engine id, as last reported
@@ -78,6 +83,7 @@ export class IndexSessionSource implements SessionSource {
   private discoveries: TranscriptSummary[] = []; // E11: fs.sessionChanged summaries not yet applied
   private draining = false; // E11: a warm-up for the queue is out
   private searchQueue = new Map<AppSessionId, SearchJob>();
+  private searchedAt = new Map<AppSessionId, number>(); // when each transcript's last text pass completed, this run
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
   private searchGeneration = 0;
   private indexingGeneration: number | null = null;
@@ -96,6 +102,7 @@ export class IndexSessionSource implements SessionSource {
     private readonly options: SourceOptions,
   ) {
     this.tickMs = options.tickMs ?? TICK_MS;
+    this.searchDebounceMs = options.searchDebounceMs ?? SEARCH_REINDEX_DEBOUNCE_MS;
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
@@ -225,6 +232,17 @@ export class IndexSessionSource implements SessionSource {
     for (const listener of [...this.appliedListeners]) listener();
   }
 
+  // Whether a client shows the session, so what reaches it now is seen (the attention service's unseen rule, the owner's
+  // ruling of 2026-10-30). The look is recorded as the record's last-seen mark, as a session becoming visible is: a
+  // reader who leaves before the transcript's next advance has still seen it, for a replay after they left.
+  seenNow(appSessionId: AppSessionId): boolean {
+    if (!this.visible.has(appSessionId)) return false;
+    if (this.index.unavailable !== null) return true;
+    const record = this.index.sessions.get(appSessionId);
+    if (record !== null) this.write('attention.seenNow', () => this.markSeen(record));
+    return true;
+  }
+
   // C5's visibility report. A session becoming visible is seen at once; the unread rule reads the set on every advance.
   onSetVisible(appSessionId: AppSessionId, visible: boolean): void {
     // E11: what the host sent before the report, read under the visibility it had
@@ -314,7 +332,8 @@ export class IndexSessionSource implements SessionSource {
         && !this.index.sessionSearch.failed(record.appId, summary.sessionId, summary.size, summary.mtimeMs)) {
         const queued = this.searchQueue.get(record.appId)?.summary;
         if (!queued || queued.sessionId !== summary.sessionId || queued.size !== summary.size || queued.mtimeMs !== summary.mtimeMs) {
-          this.searchQueue.set(record.appId, { summary, failures: 0, retryAt: 0 });
+          const last = this.searchedAt.get(record.appId);
+          this.searchQueue.set(record.appId, { summary, failures: 0, retryAt: last === undefined ? 0 : last + this.searchDebounceMs });
         }
         // Leave the discovery transaction before IPC or a text-index transaction.
         queueMicrotask(() => void this.indexText());
@@ -402,17 +421,24 @@ export class IndexSessionSource implements SessionSource {
         try {
           let cursor: string | undefined;
           do {
-            const result = await this.command('fs.sessionText', { sessionId: summary.sessionId, ...(cursor ? { cursor } : {}) });
+            // A pass starts from the stored checkpoint when there is one; the host says whether it could use it (`from`).
+            const resume = cursor ? null : this.index.sessionSearch.resume(appId, summary.sessionId);
+            const result = await this.command('fs.sessionText', { sessionId: summary.sessionId, ...(cursor ? { cursor } : resume ? { resume } : {}) });
             if (!current()) break;
             if (!result) throw new Error('Conversation text read failed');
             if (result.size !== summary.size || result.mtimeMs !== summary.mtimeMs) throw new Error('Transcript changed while indexing');
             this.applyBefore([summary.sessionId]);
             if (!current()) break;
             // Do not swallow a failed DB write and call the job successful.
-            if (!cursor) this.index.sessionSearch.replace(appId, summary.sessionId, result.size, result.mtimeMs, result.text, result.cursor === null);
-            else this.index.sessionSearch.append(appId, summary.sessionId, result.text, result.cursor === null);
+            const complete = result.cursor === null;
+            const checkpoint = complete ? result.checkpoint ?? null : null;
+            if (cursor) this.index.sessionSearch.append(appId, summary.sessionId, result.text, complete, checkpoint);
+            else if (result.from) {
+              if (!this.index.sessionSearch.extend(appId, summary.sessionId, result.size, result.mtimeMs, result.from, result.text, complete, checkpoint)) throw new Error('Stored conversation text moved on while indexing');
+            } else this.index.sessionSearch.replace(appId, summary.sessionId, result.size, result.mtimeMs, result.text, complete, checkpoint);
             cursor = result.cursor ?? undefined;
           } while (cursor && current());
+          if (current()) this.searchedAt.set(appId, Date.now());
           if (current()) this.searchQueue.delete(appId);
         } catch (error) {
           if (!current()) continue;

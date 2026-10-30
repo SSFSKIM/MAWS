@@ -1,5 +1,5 @@
-// The staging runner (deploy/staging-run.sh, O11 M8): what it hands the desk-web check, and how it hands curl the
-// owner's token. Offline: the refusals below come before any token is read or any request made.
+// The staging runner (deploy/staging-run.sh, O11 M8): its secret scan, and how it hands curl the owner's token.
+// Offline: the refusals below come before any token is read or any request made.
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -14,54 +14,42 @@ const runner = join(deploy, 'staging-run.sh');
 const scripts = ['staging-run.sh', 'staging-deploy.sh'].map((name) => ({ name, text: readFileSync(join(deploy, name), 'utf8') }));
 const zsh = spawnSync('zsh', ['-c', 'true']).status === 0;
 
-describe('the desk-web step', () => {
-  // A Playwright option (--trace=on, --debug, …) would turn recording back on while the browser holds the token.
-  // Should the refusal ever go, the step must still not reach the account: no token can be had here (a cloudflared that
-  // holds none first on the PATH, an empty secrets directory), so the step stops at its first credential.
-  it.skipIf(!zsh)('takes no option to pass on, refused before anything runs', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'staging-run-'));
-    const bin = mkdtempSync(join(tmpdir(), 'staging-run-bin-'));
-    writeFileSync(join(bin, 'cloudflared'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
-    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, DESK_STAGING_DIR: dir, DESK_STAGING_SECRETS: mkdtempSync(join(tmpdir(), 'staging-run-secrets-')) };
-    for (const extra of [['--trace=on'], ['--', '--trace', 'on'], ['-c', 'other.config.ts']]) {
-      const run = spawnSync('zsh', [runner, 'desk-web', 'x1', ...extra], { encoding: 'utf8', env });
-      expect(run.status, extra.join(' ')).toBe(2);
-      expect(run.stdout + run.stderr).toMatch(/desk-web takes no option/);
-    }
-    expect(readdirSync(dir)).toEqual([]);
-  });
-
-  // The check lists in DESK_STAGING_SCAN what it saw besides the token (the enrollment code, its token, the org key); the
-  // runner's search afterwards, run here on its own over a run's files, counts each file holding any of them.
-  it.skipIf(!zsh)('counts every file holding the token or anything the check listed, and nothing else', () => {
+describe('the secret scan', () => {
+  // A staging step whose run saw secrets (O13 M7's phone run, O10 M11's endpoint run) counts, afterwards, each file under
+  // the run's paths holding anything its list names (the owner's token, which the step puts first, an enrollment code,
+  // its token, a key): `secret_scan`, run here on its own over a run's files.
+  it.skipIf(!zsh)('counts every file holding anything the list names, the token among it, and nothing else', () => {
     const text = scripts[0].text;
-    expect(text.split('\n').find((l) => l.includes('playwright test'))).toMatch(/ DESK_STAGING_SCAN=\$SCAN /);
-    const search = text.split('\n').find((l) => l.trimStart().startsWith('holding='))!.trim();
-    // A run's files: its log, its screenshots directory holding a screenshot and `files`; and the check's list, `scan`.
+    const start = text.indexOf('\nsecret_scan() {\n');
+    expect(start).toBeGreaterThan(0);
+    const fn = text.slice(start + 1, text.indexOf('\n}\n', start) + 2);
+    // A run's files: its log, its output directory holding a screenshot and `files`; and the run's list, `scan`.
     const holding = (scan: string, files: Record<string, string>) => {
       const dir = mkdtempSync(join(tmpdir(), 'staging-scan-'));
-      const shots = join(dir, 'shots');
-      mkdirSync(join(shots, 'playwright'), { recursive: true });
-      writeFileSync(join(dir, 'run.log'), 'desk-web check exit 1\n');
-      writeFileSync(join(shots, '1-grid-project.png'), 'pixels');
+      const out = join(dir, 'out');
+      mkdirSync(join(out, 'nested'), { recursive: true });
+      writeFileSync(join(dir, 'run.log'), 'check exit 1\n');
+      writeFileSync(join(out, '1-grid-project.png'), 'pixels');
       writeFileSync(join(dir, 'run.scan'), scan);
-      for (const [name, body] of Object.entries(files)) writeFileSync(join(shots, name), body);
-      const run = spawnSync('zsh', ['-c', `T=eyJtoken.synthetic SCAN=${dir}/run.scan shots=${shots} LOG=${dir}/run.log; ${search}; print -r -- $holding`], { encoding: 'utf8' });
+      for (const [name, body] of Object.entries(files)) writeFileSync(join(out, name), body);
+      const run = spawnSync('zsh', ['-c', `${fn}\nsecret_scan ${dir}/run.scan ${out} ${dir}/run.log`], { encoding: 'utf8' });
       return run.stdout.trim();
     };
     const listed = 'smns-enroll-v1.code\nonce-token\norg-key\n';
     // An empty line in the list would match every file: none counted here.
     expect(holding(`${listed}\n`, {})).toBe('0');
-    expect(holding(listed, { 'playwright/error-context.md': '- text: smns-enroll-v1.code' })).toBe('1');
+    expect(holding(listed, { 'nested/error-context.md': '- text: smns-enroll-v1.code' })).toBe('1');
     expect(holding(listed, { 'a.txt': 'once-token', 'b.txt': 'key org-key', 'c.txt': 'nothing' })).toBe('2');
-    expect(holding('', { 'cookie.txt': 'eyJtoken.synthetic' })).toBe('1');
+    expect(holding('', { 'cookie.txt': 'eyJtoken.synthetic' })).toBe('0');
+    expect(holding(`eyJtoken.synthetic\n${listed}`, { 'cookie.txt': 'eyJtoken.synthetic' })).toBe('1');
   });
 
-  it('runs Playwright with an environment of its own choosing, no Playwright variable passed through', () => {
-    const text = scripts[0].text;
-    const line = text.split('\n').find((l) => l.includes('playwright test'))!;
-    expect(line).toMatch(/env -i /);
-    expect(line).not.toMatch(/"\$@"|\$\*/);
+  // Acceptance 8's desk-web check left with DX2 (O14 M5b): the step is gone, answered with the usage line.
+  it.skipIf(!zsh)('has no desk-web step', () => {
+    const run = spawnSync('zsh', [runner, 'desk-web', 'x1'], { encoding: 'utf8', env: { ...process.env, DESK_STAGING_DIR: mkdtempSync(join(tmpdir(), 'staging-run-')) } });
+    expect(run.status).toBe(2);
+    expect(run.stdout).toMatch(/\| throwaway <n> \| phone <n>/);
+    expect(run.stdout).not.toMatch(/desk-web <n>/);
   });
 });
 

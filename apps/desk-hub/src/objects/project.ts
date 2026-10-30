@@ -1,5 +1,5 @@
-// One project: its log (DX2's sync with machines, DX3's resume for browsers), its audit record, and its session plane
-// (DX4, DX6), held by a Durable Object on SQLite. Browsers hold WebSockets accepted with the Hibernation API, each
+// One project: its log (the log plane's sync with machines, DX3's resume for browsers), its audit record, and its
+// session plane (DX4), held by a Durable Object on SQLite. Browsers hold WebSockets accepted with the Hibernation API, each
 // tagged with its own id and carrying its member, visibility, log mark, and subscriptions' numbering in its attachment;
 // the routes from a subscription to its socket are in storage. So a woken object routes again before it handles
 // anything: hibernation is the common path (M1's probe). Machines reach it through their `Machine` objects
@@ -7,15 +7,18 @@
 // stream: the log plane's replies and the browsers' control frames.
 //
 // What the session plane keeps survives an eviction while sockets stay open (§2): machines' leases and presence,
-// sessions' presence, the pending set, delivery outcomes, RPC records, and subscription routes (session-store.ts).
+// sessions' presence, the pending set, delivery outcomes, and subscription routes (session-store.ts).
 // A machine is online while its lease is fresh; when its stream closes, or a newer stream replaces it, the stream's
-// subscriptions end at the browsers and its forwarded RPCs without a result become `uncertain`. A stream's close does
-// not put the machine offline at once: its lease holds for a grace (`graceMs`, one heartbeat), long enough for the
-// machine's next stream to take it over, so a reconnect (the daemon's, or one the hub's own object forced) never flaps
-// the machine's presence. A subscription or an RPC a browser sends in that grace waits for the next stream (`PARKED`)
-// and is carried to it at its `hello`. When the lease lapses (the grace or the lease ran out) or the machine is revoked,
-// the machine is offline, and what still waited ends too: a waiting subscription ends, a waiting RPC fails
-// `machine-offline` (it never reached the machine).
+// subscriptions end at the browsers. A stream's close does not put the machine offline at once: its lease holds for a
+// grace (`graceMs`, one heartbeat), long enough for the machine's next stream to take it over, so a reconnect never
+// flaps the machine's presence. A subscription a browser sends in that grace waits for the next stream (`PARKED`) and
+// is carried to it at its `hello`. When the lease lapses (the grace or the lease ran out) or the machine is revoked, the
+// machine is offline, and a subscription still waiting ends too.
+//
+// DX6 is retired (P5 O14 M5b): a browser's `rpc` frame is answered `refused {reason: 'retired'}` to its own socket,
+// recorded nowhere and sent to no machine, and nothing is acknowledged to a machine (`rpc-ack`). A machine reaches this
+// object over RL1 alone, which carries no session-plane frame (relay.ts), so what the session plane holds is read by the
+// frozen views and changes no more but by leases.
 //
 // The log takes v1 (DX1's `mac`), dual-coded and v2-only (RL8's `sig`) events alike (O11 M5). A v2 signature is checked
 // before its event is stored, by the protocol package against the org-state head this object caches from its Registry
@@ -24,21 +27,20 @@ import { DurableObject } from 'cloudflare:workers';
 import { HISTORY_PAGE_BYTES, isHistoryAttestation, isSigned, machineNameKey, verifyHistorySigner, type HistoryAttestation, type HistoryLogPage, type LogEventV2, type Signed } from 'org-protocol';
 import { MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from '../env';
 import { isBase64urlOf } from '../protocol/base64url';
-import { BROWSER_SET_LIMIT, BROWSER_SET_PARTS, isOutputTail, isTaskId, OUTPUT_TAIL_MAX, readShapeError, type AuditEntry, type PendingRequest, type ProjectDown, type PushNotice } from '../protocol/browser';
+import { BROWSER_SET_LIMIT, BROWSER_SET_PARTS, isOutputTail, isTaskId, OUTPUT_TAIL_MAX, readShapeError, type AuditEntry, type PendingRequest, type ProjectDown, type PushNotice, type RetiredRefusal } from '../protocol/browser';
 import { canonicalize } from '../protocol/canonical';
 import { isMemberId, type OrgStateView, type ProjectRecord } from '../protocol/identity';
 import type { JsonObject } from '../protocol/json';
 import { HUB_WRITER_PREFIX, hubWriter, isHubPosition, isIsoMillis, LEGACY_WRITER_PREFIX, questionEffect, withoutPosition, writerMachine, type LogEvent, type Vector } from '../protocol/log';
 import type { DownFrame, RefusedFrame, Refusal, Rejection, UpFrame } from '../protocol/machine';
 import { FRAME_LIMIT, PartAssembler, PartsBudgetError, toWire, type Part } from '../protocol/parts';
-import { RPC_FRESHNESS_MS, RPC_NAMES, type Rpc, type RpcError, type RpcErrorCode, type RpcOutcome } from '../protocol/rpc';
 import { SESSION_WIDE_KINDS, SUBSCRIPTION_KINDS, SUGGESTION_BYTES_MAX, SUGGESTIONS_MAX, type Delivery, type MachinePresence, type Raised, type SessionKind, type SessionMessage, type Settled } from '../protocol/session';
 import type { Sent } from './machine';
 import { HistoryStore } from './history-store';
 import { BATCH_BYTES, eventShapeError, LogStore, resendNonce, sameEvent, type AuditRow, type Stored } from './log-store';
 import type { Result, SummaryReport } from './registry';
 import { RETRY_ATTEMPTS, RETRY_BASE_MS, retryDelay } from './retry';
-import { pendingKey, SessionStore, type Lease, type Route, type RpcRecord } from './session-store';
+import { pendingKey, SessionStore, type Lease, type Route } from './session-store';
 import { SignedEvents, STATE_READ_TIMEOUT_MS, STATE_UNAVAILABLE, type SignatureCheck } from './signed-events';
 
 /** A `.smns` project id (a lowercase uuid). */
@@ -194,7 +196,7 @@ export class Project extends DurableObject<Env> {
       case 'human':
         return this.human(socket, frame.event);
       case 'rpc':
-        return this.rpc(socket, frame.rpc);
+        return this.retiredRpc(socket, frame.rpc);
       case 'subscribe':
         return this.subscribe(socket, frame);
       case 'unsubscribe':
@@ -288,7 +290,6 @@ export class Project extends DurableObject<Env> {
     if (frame.t === 'events') return this.upload(ctx, frame.events);
     let refused: Refusal | void = undefined;
     if (frame.t === 'rejected') refused = this.rejected(ctx, frame);
-    else if (frame.t === 'rpc-result') refused = this.rpcResult(ctx, frame);
     else if (frame.t === 'pending') refused = this.pendingSet(ctx, frame.raised);
     else if (frame.t === 'session') refused = this.session(ctx, frame.message);
     return refused ? { owed: [], refused } : { owed: [] };
@@ -758,102 +759,14 @@ export class Project extends DurableObject<Env> {
     this.attach(socket, (a) => (sub in a.subs ? { ...a, subs: { ...a.subs, [sub]: (n as number) + 1 } } : a));
   }
 
-  /** An RPC's result from the daemon's ledger: kept, shown to its member, and acknowledged so it is not sent again. */
-  private rpcResult(ctx: MachineContext, frame: Extract<UpFrame, { t: 'rpc-result' }>): Refusal | void {
-    const outcome = frame.outcome as unknown as Record<string, unknown>;
-    const error = isObject(outcome) ? (outcome.error as Record<string, unknown>) : undefined;
-    const valid =
-      isBase64urlOf(frame.nonce, 16) &&
-      isObject(outcome) &&
-      ((outcome.state === 'done' && isObject(outcome.result)) ||
-        (outcome.state === 'failed' &&
-          isObject(error) &&
-          typeof error.code === 'string' &&
-          typeof error.message === 'string' &&
-          // A late decision names the side that won (DX6): kept and relayed as sent, refused only of the wrong type.
-          (error.winner === undefined || SETTLED_WINNERS.has(error.winner as string)) &&
-          (error.by === undefined || typeof error.by === 'string') &&
-          (error.terminalOnly === undefined || error.terminalOnly === true)));
-    if (!valid) {
-      return this.refuseMachine(ctx, {
-        reason: 'bad-shape',
-        message: 'rpc-result is {project, nonce, outcome: {state: done, result} | {state: failed, error: {code, message, winner?, by?, terminalOnly?: true}}}',
-      });
-    }
-    const record = this.plane.rpc(frame.nonce);
-    if (record && record.machine === ctx.machine && (record.state === 'forwarded' || record.state === 'uncertain')) {
-      const done = frame.outcome as RpcOutcome;
-      this.updateRpc({ ...record, state: done.state, outcome: done });
-    }
-    this.toMachine(ctx.machine, ctx.generation, { t: 'rpc-ack', project: ctx.project, nonce: frame.nonce }, 'control');
-  }
-
   // ---- The session plane, from browsers ------------------------------------------------------------------------
 
-  /**
-   * A browser's RPC. Fails at once, never queued and never recorded, when it is malformed, not the signed-in member's,
-   * older than 60 seconds, or for a machine without a fresh lease; otherwise it is recorded by its nonce and forwarded
-   * to the machine's stream. A nonce the record holds is answered from it — or, when `uncertain` and its machine is
-   * back, forwarded again for the daemon's ledger to answer — and never forwarded beside its first.
-   */
-  private rpc(socket: WebSocket, value: unknown): void {
-    const { member } = this.attachment(socket);
-    const rpc = value as Rpc;
-    const nonce = isObject(rpc) && isBase64urlOf(rpc.nonce, 16) ? rpc.nonce : undefined;
-    if (!nonce) return this.refuseBrowser(socket, { reason: 'bad-shape', message: 'an RPC carries its nonce: 128 bits, canonical base64url' });
-    const fail = (code: RpcErrorCode, message: string) => this.toSocket(socket, { t: 'rpc-state', nonce, state: 'failed', outcome: { state: 'failed', error: { code, message } } });
-    const problem = rpcShapeError(rpc, this.projectId);
-    if (problem) return fail('bad-shape', problem);
-    if (rpc.member !== member) return fail('not-member', 'an RPC is issued by the member signed in');
-    // Leases first: a lapse this request is the first to find changes the record it is answered from.
-    this.sweepLeases();
-    const record = this.plane.rpc(nonce);
-    if (record) {
-      if (record.member !== member || canonicalize(record.rpc) !== canonicalize(rpc)) return fail('bad-shape', 'this nonce was sent with another RPC');
-      // A retry waits for no stream: in a closed stream's grace it is answered from the record, and sent again later.
-      if (record.state === 'uncertain' && this.reachable(record.machine)) return this.forward(record.rpc, member, true);
-      return this.toSocket(socket, rpcStateFrame(record));
-    }
-    if (!(Date.now() - Date.parse(rpc.created) <= RPC_FRESHNESS_MS)) return fail('stale', 'older than 60 seconds: issue it again');
-    if (!this.isOnline(rpc.machine)) return fail('machine-offline', `${rpc.machine} is offline`);
-    this.forward(rpc, member);
-  }
-
-  /** Records the RPC as forwarded and writes it to the machine's stream; in a closed stream's grace it is recorded as
-   * waiting for the next stream (`PARKED`), which takes it at its `hello`. */
-  private forward(rpc: Rpc, member: string, retry = false): void {
-    const lease = this.plane.lease(rpc.machine)!;
-    const record: RpcRecord = { nonce: rpc.nonce, machine: rpc.machine, member, rpc, state: 'forwarded', outcome: null, generation: lease.closed ? PARKED : lease.generation };
-    this.updateRpc(record);
-    if (record.generation !== PARKED) this.send(record, retry);
-  }
-
-  /** Writes a forwarded RPC to the stream its record names. A send that finds no stream fails it `machine-offline`; but a
-   * `retry` of an uncertain one stays uncertain, since a retry the hub could not deliver says nothing of what the first
-   * forward did, whatever the transport answers. An RL1 connection carries no RPC (O11 M6): a first forward to one fails
-   * `unsupported`, since it was never sent; a retry stays uncertain, since an earlier stream may have run it. */
-  private send(record: RpcRecord, retry = false): void {
-    const { rpc, generation } = record;
-    const unsent = (undelivered: 'failed' | 'uncertain', error: RpcError = { code: 'machine-offline', message: `${rpc.machine} is offline` }) => {
-      const state = retry ? 'uncertain' : undelivered;
-      const now = this.plane.rpc(rpc.nonce);
-      if (now?.state !== 'forwarded' || now.generation !== generation) return;
-      const outcome: RpcOutcome | null = state === 'failed' ? { state: 'failed', error } : null;
-      this.updateRpc({ ...now, state, outcome });
-    };
-    this.toMachine(rpc.machine, generation, { t: 'rpc', rpc }, 'control').then(
-      (sent) => {
-        if (sent === 'offline') unsent('failed');
-        else if (sent === 'not-on-rl1') unsent('failed', { code: 'unsupported', message: `${rpc.machine} takes RPCs in its own channel, not through the hub (RL1)` });
-      },
-      () => unsent('uncertain'),
-    );
-  }
-
-  private updateRpc(record: RpcRecord): void {
-    this.plane.putRpc(record, Date.now());
-    const frame = rpcStateFrame(record);
-    for (const socket of this.ctx.getWebSockets()) if (this.attachment(socket).member === record.member) this.toSocket(socket, frame);
+  /** A browser's RPC (DX6), retired: answered to its own socket alone, with the nonce it names when it names one, and
+   * nothing else done, so a frozen view learns DX6 is gone and a probe of a deployment writes nothing (O14 M5b). */
+  private retiredRpc(socket: WebSocket, rpc: unknown): void {
+    const nonce = isObject(rpc) && typeof rpc.nonce === 'string' && rpc.nonce.length <= 64 ? rpc.nonce : undefined;
+    const refusal: RetiredRefusal = { t: 'refused', refusal: { reason: 'retired', message: 'RPCs through the hub (DX6) are retired: send it in a channel to the machine', ...(nonce === undefined ? {} : { nonce }) } };
+    this.toSocket(socket, refusal);
   }
 
   /** A browser's subscription, routed to its socket and carried to the machine; one the hub cannot serve ends at once. */
@@ -951,7 +864,7 @@ export class Project extends DurableObject<Env> {
   private startLease(ctx: MachineContext, follow: boolean): void {
     const old = this.plane.lease(ctx.machine);
     if (old && old.generation > ctx.generation) return;
-    // The older stream's subscriptions and unanswered RPCs went with it; those waiting for a stream wait for this one.
+    // The older stream's subscriptions went with it; those waiting for a stream wait for this one.
     if (old && old.generation < ctx.generation) this.endStreamWork(ctx.machine, old.generation, false);
     const wasOnline = old !== undefined && this.isFresh(old);
     // A second `hello` on a stream that already closed (it was on its way) opens nothing.
@@ -968,11 +881,6 @@ export class Project extends DurableObject<Env> {
       this.routes.set(route.sub, route);
       this.carry(route);
     }
-    for (const parked of this.plane.forwarded(ctx.machine, PARKED)) {
-      const record = { ...parked, generation: ctx.generation };
-      this.plane.putRpc(record, Date.now());
-      this.send(record);
-    }
     void this.schedule();
   }
 
@@ -987,17 +895,12 @@ export class Project extends DurableObject<Env> {
     this.machinesChanged();
   }
 
-  /** What a machine's stream carried ends with it: its subscriptions end at their browsers, and its forwarded RPCs
-   * without a result become `uncertain`. What waits for its next stream ends too when `parked` (the machine is offline):
-   * a subscription ends, and an RPC, which never reached the machine, fails `machine-offline`; otherwise it waits on. */
+  /** What a machine's stream carried ends with it: its subscriptions end at their browsers. One waiting for its next
+   * stream ends too when `parked` (the machine is offline); otherwise it waits on. */
   private endStreamWork(machine: string, generation: number, parked: boolean): void {
     for (const route of [...this.routes.values()]) {
       if (route.machine !== machine || route.generation > generation || (route.generation === PARKED && !parked)) continue;
       this.endSub(route, 'machine-offline');
-    }
-    for (const record of this.plane.forwarded(machine, generation)) {
-      if (record.generation !== PARKED) this.updateRpc({ ...record, state: 'uncertain', outcome: null });
-      else if (parked) this.updateRpc({ ...record, state: 'failed', outcome: { state: 'failed', error: { code: 'machine-offline', message: `${machine} is offline` } } });
     }
   }
 
@@ -1032,13 +935,6 @@ export class Project extends DurableObject<Env> {
   private isOnline(machine: string): boolean {
     const lease = this.plane.lease(machine);
     return lease !== undefined && this.isFresh(lease);
-  }
-
-  /** Whether an RPC can be carried to the machine now: online on a stream that is open, not in a closed stream's grace
-   * (which holds its presence for the next stream, not its delivery). */
-  private reachable(machine: string): boolean {
-    const lease = this.plane.lease(machine);
-    return lease !== undefined && !lease.closed && this.isFresh(lease);
   }
 
   /** Whether the machine is online and holds the project: one that only follows it is none of its machines. */
@@ -1349,7 +1245,7 @@ export class Project extends DurableObject<Env> {
     for (const socket of this.ctx.getWebSockets()) this.toSocket(socket, frame);
   }
 
-  private toSocket(socket: WebSocket, frame: ProjectDown): void {
+  private toSocket(socket: WebSocket, frame: ProjectDown | RetiredRefusal): void {
     try {
       for (const line of toWire(frame)) socket.send(line);
     } catch {
@@ -1542,8 +1438,6 @@ function* mapped<T, U>(items: Iterable<T>, map: (item: T) => U): Generator<U> {
   for (const item of items) yield map(item);
 }
 
-const rpcStateFrame = (record: RpcRecord): ProjectDown => ({ t: 'rpc-state', nonce: record.nonce, state: record.state, ...(record.outcome ? { outcome: record.outcome } : {}) });
-
 /** A `mac` the hub can carry: `{nonce, value}`, 16 and 32 bytes, each in canonical base64url (DX1). */
 const isMac = (mac: unknown) => isObject(mac) && isBase64urlOf(mac.nonce, 16) && isBase64urlOf(mac.value, 32);
 
@@ -1612,24 +1506,6 @@ function suggestionsFit(suggestions: unknown): boolean {
       return false;
     }
   });
-}
-
-/** Why a browser's RPC is not one the hub can forward (DX6), or null. The daemon checks its code and its arguments. */
-function rpcShapeError(rpc: Record<string, unknown>, project: string): string | null {
-  if (!(RPC_NAMES as readonly string[]).includes(rpc.rpc as string)) return `no RPC ${JSON.stringify(rpc.rpc)}`;
-  if (rpc.project !== project) return 'an RPC names the project of the socket it is sent on';
-  if (!isName(rpc.machine, 63) || typeof rpc.member !== 'string' || !isIsoMillis(rpc.created)) return 'an RPC names its machine, member, and created time';
-  if (!isObject(rpc.args)) return "an RPC's args are an object";
-  if (!isBase64urlOf(rpc.mac, 32)) return "an RPC's mac is 32 bytes in canonical base64url";
-  let canonical: string;
-  try {
-    canonical = canonicalize(rpc);
-  } catch (error) {
-    return `not canonical JSON: ${(error as Error).message}`;
-  }
-  // As an event is (DX1): what a person sends, and a record the object's storage must hold.
-  if (encoder.encode(canonical).length > FRAME_LIMIT) return 'an RPC is at most 1 MiB';
-  return null;
 }
 
 /** Why a browser's `human` is not a sealed `HumanDraft` or a signed one, or null. It must not name a position: the hub

@@ -80,15 +80,6 @@ function fixtureOrder(events: readonly SessionEvent[]): string[] {
     return `${ranks.get(seq!)}:${i} ${e.kind}`;
   });
 }
-// L102's in-page dwell probe (the relaunch case): when the error's notice first showed (wall clock), and the error's
-// state as read a second later on the renderer's clock.
-interface DwellProbe {
-  presentAtInstall: boolean;
-  shownAt: number | null;
-  state: string | null;
-  readAfterMs: number | null;
-}
-
 // The session's sidebar row (its project expanded; a click landing while the tree re-renders at a connect can be lost,
 // so the expansion is retried), clicked to show the session in the main region.
 async function rowOf(page: Page, id: AppSessionId): Promise<Locator> {
@@ -293,7 +284,9 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     const requested = await untilRequested(run.page, id);
     value(await invoke(run.page, 'session.answer', { appSessionId: id, requestId: requested.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
     await finished(run.page, id);
-    expect((await attentionOf(run.page, id, 'error')).map((i) => i.summary), 'the fixture’s failure raises its item with the app open').toEqual([`Background task failed: ${TASK_FAILED}`]);
+    // the owner's ruling (2026-10-30): with its session shown in front, the fixture's failure is seen as it arrives (or
+    // retired once the session shows, had it arrived first): nothing of it waits in Needs you
+    expect((await attentionOf(run.page, id, 'error')).filter((i) => i.state !== 'retired'), 'the failure with its session shown leaves no open item').toEqual([]);
     const events = await eventsOf(run.page, id);
     control.order = fixtureOrder(events);
     control.suffixes = events.map((e) => suffix(e.id));
@@ -332,35 +325,6 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     }
 
     const second = await s.launch(pace);
-    // L102's dwell, anchored in the page (the review of S-dwell): from the moment the error's notice first shows in its
-    // session, a read a second later is issued on the renderer's own clock, so it always precedes the dwell's two-second
-    // acknowledgement, however loaded the machine; installed before the session's tab is restored
-    await second.page.evaluate((text) => {
-      const probe: DwellProbe = { presentAtInstall: false, shownAt: null, state: null, readAfterMs: null };
-      (window as unknown as { __dwell: DwellProbe }).__dwell = probe;
-      const shown = () => document.querySelector('[data-region="main"]')?.textContent?.includes(text) ?? false;
-      const start = () => {
-        probe.shownAt = Date.now();
-        const t0 = performance.now();
-        setTimeout(() => {
-          probe.readAfterMs = Math.round(performance.now() - t0);
-          void window.maws.invoke('attention.list', undefined).then((answer) => {
-            const items = answer.ok ? (answer.value as { kind: string; state: string; summary: string }[]) : [];
-            probe.state = items.find((i) => i.kind === 'error' && i.summary.includes(text))?.state ?? 'none';
-          });
-        }, 1_000);
-      };
-      if (shown()) {
-        probe.presentAtInstall = true;
-        return start();
-      }
-      const observer = new MutationObserver(() => {
-        if (!shown()) return;
-        observer.disconnect();
-        start();
-      });
-      observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true });
-    }, `Background task failed: ${TASK_FAILED}`);
     const status = await s.ready(second.page);
     expect(status.supervisor!.pid, 'the relaunch connects to the same supervisor').toBe(pid);
     // on the daemon shape `mawsd` is the engine host's one permanent client (O3-D M3): the supervisor logs its one connect,
@@ -397,26 +361,13 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     expect(errorItem!.summary).toBe(`Background task failed: ${TASK_FAILED}`);
     // the request's item comes from the burst's broker items (host-held state re-listed at the connect)
     await expect.poll(async () => (await pendingPermissions(second.page, id)).length, { message: 'the Needs-you item of the request raised while away' }).toBe(1);
-    // E11 F2b (plan 2.4): the relaunch restores this session's tab, so the error's notice shows in the opened session; seen
-    // there with the window in front it leaves Needs you (confirmed) and the glyph reads the pending request; while unseen
-    // it outranks the request. L102 (P2-F wave S, the owner's "2초 확인 후 해제"): seen only after two continuous seconds
-    // in front, so a second after its notice shows the error is still in Needs you, and it leaves after the dwell
-    await expect(second.page.locator('[data-region="main"]').getByText(`Background task failed: ${TASK_FAILED}`), 'the tail’s error, shown in its session').toBeVisible();
-    const dwellProbe = () => second.page.evaluate(() => ({ ...(window as unknown as { __dwell: DwellProbe }).__dwell }));
-    await expect.poll(async () => (await dwellProbe()).state, { message: 'the in-page read a second after the notice showed' }).not.toBeNull();
-    const probe = await dwellProbe();
-    expect(probe.presentAtInstall, 'the probe was in place before the notice showed').toBe(false);
-    expect(probe.state, `a second after its notice showed (read at ${probe.readAfterMs} ms), the error is still in Needs you`).toBe('pending');
-    await expect.poll(async () => (await attentionOf(second.page, id, 'error'))[0]?.state, { timeout: 10_000, message: 'seen after the two-second dwell' }).toBe('confirmed');
-    const dwellMs = Date.now() - probe.shownAt!;
+    // The owner's ruling (2026-10-30): the failure came while nobody was looking (journaled after the app had exited, so
+    // after the session's last-seen mark), so it was raised; the relaunch restores this session's tab, and shown there in
+    // front the session is seen, which retires the error for good, and the glyph reads the pending request, never an
+    // ended session
+    await expect.poll(async () => (await attentionOf(second.page, id, 'error'))[0]?.state, { timeout: 10_000, message: 'seen once its restored session shows' }).toBe('retired');
     const row = await rowOf(second.page, id);
-    await expect
-      .poll(async () => {
-        const [item] = await attentionOf(second.page, id, 'error');
-        const label = await glyphOf(row).getAttribute('aria-label');
-        return item?.state === 'pending' ? label === 'Needs you: error' : item?.state === 'confirmed' && label === 'Needs approval';
-      }, { message: 'the sidebar glyph agrees with the error item: Needs you: error while unseen, the request once seen' })
-      .toBe(true);
+    await expect(glyphOf(row), 'the glyph reads the request, not the seen error').toHaveAttribute('aria-label', 'Needs approval');
     await row.click();
     // E11 W-E: the liveness G2's glyph showed before the error item outranked it, read from main's digest after the
     // resync: the turn open with the one request pending. The phase is `working` (the fold's `turn.started`), never
@@ -434,7 +385,7 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     expect(items[0]!.request.requestId).toBe(requested.requestId);
     expect(await attentionOf(second.page, id, 'error'), 'still one error item after a settle').toHaveLength(1);
     log.push(
-      `the tail reached main's listeners: the error item "${errorItem!.summary}" (id …:error:${suffix(failure.id)}), from the failure event journaled at seq ${seqOf(failure)} after the app had exited, 1 item (${(await attentionOf(second.page, id, 'error'))[0]?.state}: shown in its restored session, seen ${dwellMs} ms after its notice showed); main's digest after the resync: phase ${digest.phase}, ${digest.pendingRequests} pending request`,
+      `the tail reached main's listeners: the error item "${errorItem!.summary}" (id …:error:${suffix(failure.id)}), from the failure event journaled at seq ${seqOf(failure)} after the app had exited, 1 item (${(await attentionOf(second.page, id, 'error'))[0]?.state}: retired once its restored session showed); main's digest after the resync: phase ${digest.phase}, ${digest.pendingRequests} pending request`,
       `the request's Needs-you item (from the host's re-listed broker items): ${items.length} (${items[0]!.state})`,
     );
 
