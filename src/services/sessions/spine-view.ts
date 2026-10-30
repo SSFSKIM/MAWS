@@ -16,14 +16,14 @@
 import type { AppSessionId, AttentionId } from '@shared/graph/ids';
 import type { ProjectRecord } from '@shared/ipc/schema';
 import type { ServicesBus } from '@shared/spine/bus';
-import type { SpineView, SpineViewEvents } from '@shared/spine/view';
+import { SCENARIO_UNAVAILABLE, type SpineView, type SpineViewEvents } from '@shared/spine/view';
 import type { LibraryStore } from '../library/store';
 import type { ProjectStore } from '../index/projects';
 import type { IntentStore } from './intents';
 import type { SessionReadModel } from './read-model';
 import type { LaunchMode } from '@shared/sessions/select-source';
 
-export const SCENARIO_UNAVAILABLE = 'launch mode scenario: the sessions shown are a scenario’s';
+export { SCENARIO_UNAVAILABLE }; // @shared/spine/view's, which main's mirror says too (P5 O3-D M5b)
 
 export interface SpineViewDeps {
   mode: LaunchMode;

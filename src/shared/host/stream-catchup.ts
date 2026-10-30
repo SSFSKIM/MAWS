@@ -657,21 +657,22 @@ export class SessionStreams {
 
   /** An event's place in its launch, from its id (`<appSessionId>:<launchId>:<seq>:<i>`); null for one not of a launch. */
   #cursor(stream: Stream, event: SessionEvent): At | null {
-    const parsed = parse(stream.app, event);
+    const parsed = eventPosition(stream.app, event);
     return parsed === null || parsed.launch !== stream.epoch ? null : { seq: parsed.seq, idx: parsed.idx };
   }
 
   /** An event of a launch other than the stream's: the session was launched again. */
   #otherLaunch(stream: Stream, event: SessionEvent): boolean {
-    const launch = parse(stream.app, event)?.launch;
+    const launch = eventPosition(stream.app, event)?.launch;
     return launch !== undefined && launch !== stream.epoch;
   }
 }
 
 const engineOf = (status: { engineSessionId?: unknown }): string | null => (typeof status.engineSessionId === 'string' ? status.engineSessionId : null);
 
-/** An event's launch, row and index within the row, read from its id; null for an event of no launch. */
-function parse(app: string, event: SessionEvent): { launch: string; seq: number; idx: number } | null {
+/** An event's launch, row and index within the row, read from its id; null for an event of no launch. P5 O3-D M5b:
+ * main's mirror keeps its cursors by it too (src/main/sessions/spine-mirror.ts). */
+export function eventPosition(app: string, event: SessionEvent): { launch: string; seq: number; idx: number } | null {
   const prefix = `${app}:`;
   if (typeof event?.id !== 'string' || typeof event.seq !== 'number' || !event.id.startsWith(prefix)) return null;
   const rest = event.id.slice(prefix.length);
