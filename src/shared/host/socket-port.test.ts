@@ -405,4 +405,27 @@ describe('SocketPort pty frames (P5 O2 M4)', () => {
     await closed;
     expect(log).toHaveBeenCalledWith('closed the connection: a pty frame whose id of 1 bytes runs past its length');
   });
+
+  // The long-transcript window: a line over the cap its reader takes would close the connection for everything on it.
+  it('never writes a line over the cap: an answer goes as its request\'s error, an event is dropped, both logged, and the connection stays', async () => {
+    const { server, client } = await pair();
+    const log = vi.fn();
+    const serverPort = new SocketPort(server, Buffer.alloc(0), { lineCap: 1024, log });
+    const clientPort = new SocketPort(client, Buffer.alloc(0), { lineCap: 1024 });
+    const atClient = receiving(clientPort);
+    serverPort.start();
+    clientPort.start();
+    expect(serverPort.postMessage({ t: 'res', id: '7', ok: true, value: 'x'.repeat(2048) })).toBe(true);
+    expect(serverPort.postMessage({ t: 'evt', name: 'session.eventBatch', payload: 'y'.repeat(2048) })).toBe(true);
+    serverPort.postMessage({ t: 'res', id: '8', ok: true, value: 'small' });
+    await until(() => atClient.length === 2);
+    expect(atClient[0]).toMatchObject({ t: 'res', id: '7', ok: false, error: { code: 'internal', issues: { tooLarge: { cap: 1024 } } } });
+    expect((atClient[0] as { error: { issues: { tooLarge: { bytes: number } } } }).error.issues.tooLarge.bytes).toBeGreaterThan(2048);
+    expect(atClient[1]).toEqual({ t: 'res', id: '8', ok: true, value: 'small' });
+    expect(log.mock.calls.map(([line]) => line)).toEqual([
+      expect.stringMatching(/^refused to write the answer to request 7: \d+ bytes, over the 1024-byte line cap$/),
+      expect.stringMatching(/^refused to write the event session\.eventBatch: \d+ bytes, over the 1024-byte line cap$/),
+    ]);
+    expect(client.destroyed || server.destroyed).toBe(false);
+  });
 });

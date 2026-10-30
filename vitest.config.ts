@@ -29,6 +29,7 @@ const TIMING_NODE_TESTS = [
   'src/engine-host/fs/follow.test.ts',
   'src/engine-host/fs/history-window.test.ts', // the long-transcript window: real follows over a real store, a release clock
   'src/engine-host/fs/history-window-transport.test.ts', // the same over a real Unix socket and C1's runtime
+  'src/mawsd/long-transcript.test.ts', // the same through mawsd's relay and its link to the engine host, real sockets
   'src/engine-host/fs/sidecars.test.ts', // its retry cases wait out the retry schedule against a real writer
   'src/engine-host/fs/watcher.test.ts',
   'src/engine-host/plugins/runner.test.ts', // E8: real /bin/sh children, process-group kills and a ~2 s SIGKILL escalation

@@ -113,6 +113,15 @@ changes what it delivers.
    by that prefix and never parsed (`src/engine-host/fs/chain-follower.ts`).
 6. **Follows are released** two minutes after their session leaves every client's interest (`host.interest`, which the
    idle release already keeps; `src/engine-host/fs/service.ts`).
+7. **No line over the cap is ever written** (`src/shared/host/socket-port.ts`, added after the owner hit the bug on
+   O3-D's daemon shape):
+   - There, one oversized answer closed mawsd's shared link to the engine host and the app's connection with it. Every
+     request in flight failed, and events were lost for every session.
+   - Every socket writer now checks a line's size against the cap its reader takes (both ends read by `LINE_CAP`).
+   - An answer over it goes as its request's error instead: `internal` with `issues.tooLarge {bytes, cap}`, since a new
+     error code would take a wire major.
+   - Any other message over it is dropped.
+   - Both are logged, and the connection stays. This holds for any command, present or future.
 
 ### Budgets
 
@@ -178,6 +187,13 @@ The renderer sees the same in both shapes.
   - The renderer equivalence across page edges (`transcript/source/older.test.tsx`: rewinds, a compaction, a background
     agent and main's notice straddling pages end in exactly the rows a whole load draws).
   - The transport regression over C1's runtime and a real socket with lowered caps (class 1a, facts only).
+  - The same on the daemon shape (`src/mawsd/long-transcript.test.ts`). It runs through mawsd's `[hosts]` link to the
+    engine host and the app's `engine-host.sock` relay, with every line cap lowered:
+    - the window crosses both hops under the cap;
+    - neither connection closes;
+    - a request for another session is answered beside it;
+    - an answer forced over the cap comes back as its request's error, with the next request answered.
+  - The writer guard at the socket (`socket-port.test.ts`).
 - [x] **One event past the hard cap** goes alone, so a page always moves the cursor back (4d83129a5).
 - [x] **Review fixes** (reviewer-high over the range; one commit each):
   - 5da6810ca: a child's lifecycle evidence is never cut from its slice; the live path's slice is uncapped.
