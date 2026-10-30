@@ -46,8 +46,9 @@ function openPaths(pid: number): string[] {
     return fds.flatMap((fd) => {
       try {
         return [readlinkSync(`/proc/${pid}/fd/${fd}`).replace(/ \(deleted\)$/, '')];
-      } catch {
-        return []; // closed between the listing and the read
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; // closed between the listing and the read
+        throw error; // a denied or failed read proves nothing about what the process holds
       }
     });
   }
