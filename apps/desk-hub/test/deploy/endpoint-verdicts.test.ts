@@ -180,10 +180,12 @@ describe('acceptance 2, lane B: a subscription followed across its resumes by th
     expect(laneBProblems([a, again], APP, L)).toEqual(['after the hub socket cut: answered snapshot, expected replay', 'after the hub socket cut: a snapshot of launch lnch0001, which an earlier answer streamed: its events come again']);
     const off = replayB(a, 'the hub socket cut', L.slice(4));
     off.subbed = { mode: 'replay', epoch: 'lnch0001', seq: 2, idx: 0 };
+    off.state = { ...off.subbed, parts: off.state!.parts };
     expect(laneBProblems([a, off], APP, L)[0]).toBe('after the hub socket cut: a replay from (lnch0001, 2, 0), not from the cursor (lnch0001, 2, 1)');
     const behind = replayB(a, 'the hub socket cut', L.slice(4));
     behind.cursor = { epoch: 'lnch0001', seq: 1, idx: 1 };
     behind.subbed = { mode: 'replay', epoch: 'lnch0001', seq: 1, idx: 1 };
+    behind.state = { ...behind.subbed, parts: behind.state!.parts };
     expect(laneBProblems([a, behind], APP, L)[0]).toBe('after the hub socket cut: the cursor named (lnch0001, 1, 1), but the device had last (lnch0001, 2, 1)');
   });
 
@@ -202,12 +204,25 @@ describe('acceptance 2, lane B: a subscription followed across its resumes by th
     late.subbed = { mode: 'snapshot', epoch: 'lnch0001', seq: 1, idx: 1 };
     late.state = null;
     expect(laneBProblems([late], APP, L)).toEqual([
-      "after first: a snapshot from (lnch0001, 1, 1), not from its launch's start",
       'after first: a snapshot answer with no state',
+      "after first: a snapshot from (lnch0001, 1, 1), not from its launch's start",
       'after first: (lnch0001, 2, 0) where (lnch0001, 1, 0) was next (2 lost)',
     ]);
     const a = firstB('lnch0001', L);
     expect(laneBProblems([a], APP, [...L, ...numbered('lnch0009', 1)])).toEqual(["the engine host's launch lnch0009 reached no answer of the subscription"]);
+  });
+
+  it('fails an opening, a replay’s too, that carries no state, or a state lacking a part, or one not at its answer', () => {
+    const a = firstB('lnch0001', L.slice(0, 4));
+    const bare = replayB(a, 'the hub socket cut', L.slice(4));
+    bare.state = null;
+    expect(laneBProblems([a, bare], APP, L)).toEqual(['after the hub socket cut: a replay answer with no state']);
+    const partial = replayB(a, 'the hub socket cut', L.slice(4));
+    partial.state = { ...partial.state!, parts: ['status', 'queue'] };
+    expect(laneBProblems([a, partial], APP, L)).toEqual(["after the hub socket cut: the replay's state lacks pendingItems, catalog"]);
+    const elsewhere = replayB(a, 'the hub socket cut', L.slice(4));
+    elsewhere.state = { ...elsewhere.state!, seq: 1, idx: 0 };
+    expect(laneBProblems([a, elsewhere], APP, L)).toEqual(['after the hub socket cut: the state at (lnch0001, 1, 0), the answer at (lnch0001, 2, 1)']);
   });
 
   it('fails a subscription left paused or ended, and passes one paused and resumed', () => {

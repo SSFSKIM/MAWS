@@ -163,6 +163,9 @@ export type LaneBSegment = {
   ended: string | null;
 };
 
+/** The replace-whole parts every lane B opening carries (M8; @shared/host/stream-catchup.ts's STREAM_PARTS). */
+export const LANE_B_STATE = ['status', 'queue', 'pendingItems', 'catalog'] as const;
+
 const at = (c: { epoch: string; seq: number; idx?: number }) => `(${c.epoch}, ${c.seq}${c.idx === undefined ? '' : `, ${c.idx}`})`;
 const cursorOf = (c: { epoch: string; seq: number; idx?: number }): LaneBCursor => ({ epoch: c.epoch, seq: c.seq, ...(c.idx === undefined ? {} : { idx: c.idx }) });
 
@@ -189,8 +192,9 @@ export function laneBEventOf(app: string, id: unknown): LaneBEvent | null {
  * What is wrong with one lane B subscription followed across its resumes, `produced` being every event the engine
  * host's journal numbers for the session, in order (its own record of what the session wrote): none is an acceptance-2
  * pass for this subscription.
- * - each answer is the one expected; a replay goes on from the cursor's own `(launchId, seq, idx)`, the last event the
- *   device had; a snapshot (lane B's goes on from its launch's start, M8) is of a launch no earlier answer streamed;
+ * - each answer is the one expected, and carries the session's whole replace-whole state at its own position; a replay
+ *   goes on from the cursor's own `(launchId, seq, idx)`, the last event the device had; a snapshot (lane B's goes on
+ *   from its launch's start, M8) is of a launch no earlier answer streamed;
  * - each event's cursor is its own id's (`launchId`, `seq`, `idx`) and `seq`'s, and is the next event the engine host
  *   numbered in that launch after the last one delivered: no gap, no repeat;
  * - every event of every launch the subscription answered reached it, and the engine host has no launch it never
@@ -223,6 +227,14 @@ export function laneBProblems(segments: LaneBSegment[], app: string, produced: L
       continue;
     }
     if (subbed.mode !== segment.expect) problems.push(`${where}: answered ${subbed.mode}, expected ${segment.expect}`);
+    // Every opening, a replay's too, carries the session's replace-whole state at its answer's position: it changes
+    // outside the journal's sequence, so events alone can leave a settled card or an edited queue stale (M8).
+    if (segment.state === null) problems.push(`${where}: a ${subbed.mode} answer with no state`);
+    else {
+      if (at(segment.state) !== at(subbed)) problems.push(`${where}: the state at ${at(segment.state)}, the answer at ${at(subbed)}`);
+      const lacks = LANE_B_STATE.filter((part) => !segment.state!.parts.includes(part));
+      if (lacks.length > 0) problems.push(`${where}: the ${subbed.mode}'s state lacks ${lacks.join(', ')}`);
+    }
     let state = streamed.get(subbed.epoch);
     if (subbed.mode === 'replay') {
       const cursor = segment.cursor;
@@ -233,8 +245,6 @@ export function laneBProblems(segments: LaneBSegment[], app: string, produced: L
     } else {
       if (state !== undefined) problems.push(`${where}: a ${subbed.mode} of launch ${subbed.epoch}, which an earlier answer streamed: its events come again`);
       if (subbed.seq !== 0 || subbed.idx !== undefined) problems.push(`${where}: a ${subbed.mode} from ${at(subbed)}, not from its launch's start`);
-      if (segment.state === null) problems.push(`${where}: a ${subbed.mode} answer with no state`);
-      else if (at(segment.state) !== at(subbed)) problems.push(`${where}: the state at ${at(segment.state)}, the answer at ${at(subbed)}`);
       state = { next: 0, last: cursorOf(subbed) };
       streamed.set(subbed.epoch, state);
     }
