@@ -241,6 +241,29 @@ describe('settings tab writes one field per row', () => {
     expect(direct().checked).toBe(true);
   });
 
+  // M5b fix round 3 (E): the option shown while the write is out goes back to the store's when the write is refused, and
+  // the refusal is shown
+  it('a segment whose write is refused puts the old option back and shows the refusal', async () => {
+    renderView();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const invoke = b.bridge.invoke as unknown as ReturnType<typeof vi.fn<(name: string, input: unknown) => Promise<unknown>>>;
+    const real = invoke.getMockImplementation()!;
+    let refuse!: () => void;
+    invoke.mockImplementation(async (name: string, input: unknown) => {
+      if (name !== 'settings.set') return real(name, input);
+      await new Promise<void>((resolve) => (refuse = resolve));
+      return { ok: false, error: { code: 'host_unavailable', message: 'the machine daemon is not reachable' } };
+    });
+    const radio = (name: string) => within(row('Default route')).getByRole('radio', { name }) as HTMLInputElement;
+    fireEvent.click(radio('Direct'));
+    expect(radio('Direct').checked).toBe(true); // shown while the write is out
+    await act(async () => refuse());
+    await vi.waitFor(() => expect(useNotices.getState().notices).toEqual([expect.objectContaining({ kind: 'toast', level: 'warning', text: 'The setting was not saved · the machine daemon is not reachable' })]));
+    expect(radio('ClaudeUsage relay').checked).toBe(true);
+    expect(radio('Direct').checked).toBe(false);
+    expect(error).toHaveBeenCalled();
+  });
+
   it('a refused write shows a toast and the row keeps the value the store holds', async () => {
     renderView();
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
