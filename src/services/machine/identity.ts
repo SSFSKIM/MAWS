@@ -6,13 +6,7 @@ import type { ServiceHandler } from '@shared/spine/bus';
 import { readOrMintMachineRef } from '@shared/machine/identity-file';
 import type { MachineIdentity } from '@shared/ipc/schema/machine';
 import type { CommandName } from '@shared/ipc/schema';
-import { machineEnrollment, machineProject, type Enrollment } from '../index/org-project';
-
-// A display attribute, never an identity: `MAWS_MACHINE_NAME` when set (the e2e names each profile, since two profiles
-// on one Mac share a hostname), else the short hostname. Once the machine is enrolled the org state names it (O8, O11).
-export function machineName(env: NodeJS.ProcessEnv, hostname: string): string {
-  return env.MAWS_MACHINE_NAME || hostname.split('.')[0];
-}
+import { machineEnrollment, machineName, machineProject, type Enrollment } from '@shared/machine/identity'; // P5 O3-D M2 (D16): shared, so mawsd's front answers cold
 
 export interface MachineIdentityDeps {
   userData: string;

@@ -3,12 +3,13 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostEmit } from '@shared/host/runtime';
-import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
-import { WIRE_CAPABILITIES, WIRE_MINOR } from '@shared/ipc/wire';
+import { ATTACHMENT_CAPABILITY, SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
+import { WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { connectLines, type LineClient } from '../../test/support/socket-lines';
 import { START_EXIT_ABORTED, START_EXIT_HELD, startSupervisor, type DetachedOptions, type RunningSupervisor, type SupervisorLife } from './detached';
 import { Supervision, type SupervisorExit } from './supervision';
+import { registerAttachment } from './attachment';
 import { readLive, writeLive } from './live-ledger';
 import { buildIdOf, isAlive, procStartOf, readLock } from './supervisor-files';
 import { invalidateShellEnvironment } from '@shared/host/shell-env';
@@ -87,11 +88,11 @@ function harness(over: Partial<DetachedOptions> = {}) {
   return { counts, lines, exit, shutdown, life, leave: (reason: SupervisorExit) => leave!(reason), start, emit: () => emit('session.brokerItems', { appSessionId: 'app-1', items: [] } as never) };
 }
 
-async function connect(): Promise<LineClient> {
+async function connect(capabilities: string[] = []): Promise<LineClient> {
   const lock = readLock(dir)!;
   const client = await connectLines(lock.socketPath);
   clients.push(client);
-  client.send({ t: 'hello', protocol: SOCKET_PROTOCOL, token: readFileSync(join(dir, 'host.token'), 'utf8'), minor: WIRE_MINOR, build: buildIdOf(modulePath), capabilities: [], appPid: 4321 });
+  client.send({ t: 'hello', protocol: SOCKET_PROTOCOL, token: readFileSync(join(dir, 'host.token'), 'utf8'), minor: WIRE_MINOR, build: buildIdOf(modulePath), capabilities, appPid: 4321 });
   return client;
 }
 
@@ -121,7 +122,7 @@ describe('the detached entry', () => {
     expect(statSync(lock.socketPath).mode & 0o777).toBe(0o600);
 
     const client = await connect();
-    expect(await client.next()).toEqual({ t: 'welcome', protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, build: lock.buildId, capabilities: [...WIRE_CAPABILITIES], pid: process.pid, startedAt: lock.startedAt, liveSessions: 1, rows: 2 });
+    expect(await client.next()).toEqual({ t: 'welcome', protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, build: lock.buildId, capabilities: ['socket.ptyFrames', 'host.attachment'] /* P5 O3-D: its own list, host.attachment served from M3 */, pid: process.pid, startedAt: lock.startedAt, liveSessions: 1, rows: 2 });
     client.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined });
     expect(await client.next((line) => (line as { t: string }).t === 'res')).toMatchObject({ id: '1', ok: true, value: { pid: process.pid } });
     client.send({ t: 'ready' });
@@ -409,6 +410,40 @@ describe('the detached entry', () => {
     client.socket.destroy();
     await until(() => host.life.clientChanged.mock.calls.length === 2);
     expect(invalidateShellEnvironment).toHaveBeenCalledOnce(); // a client leaving changes nothing
+  });
+
+  // P5 O3-D M3 (Interfaces §D): a client that declared host.attachment (`mawsd`, whose connection outlives every app)
+  // says the owner is back by {attached: true}, not by its welcome; the recapture follows the signal
+  it('drops the cached shell capture at a declaring client’s {attached: true}, not at its welcome', async () => {
+    const host = harness();
+    await host.start(undefined, (on, _emit, client) => {
+      on('engine.ping', async () => ({ pid: process.pid, uptimeMs: 1, hostVersion: 'test' }));
+      registerAttachment(on, client);
+    });
+    vi.mocked(invalidateShellEnvironment).mockClear();
+    const client = await connect([ATTACHMENT_CAPABILITY]);
+    expect(await client.next()).toMatchObject({ t: 'welcome', capabilities: expect.arrayContaining([ATTACHMENT_CAPABILITY]) });
+    await until(() => host.life.clientChanged.mock.calls.length === 1);
+    expect(invalidateShellEnvironment).not.toHaveBeenCalled();
+    client.send({ t: 'ready' });
+    client.send({ t: 'req', id: 'a1', name: 'host.attachment', input: { attached: true } });
+    expect(await client.next((line) => (line as { t: string }).t === 'res')).toMatchObject({ id: 'a1', ok: true });
+    expect(invalidateShellEnvironment).toHaveBeenCalledOnce();
+    client.send({ t: 'req', id: 'a2', name: 'host.attachment', input: { attached: false } });
+    expect(await client.next((line) => (line as { id?: string }).id === 'a2')).toMatchObject({ ok: true });
+    expect(invalidateShellEnvironment).toHaveBeenCalledOnce();
+  });
+
+  it('host.attachment from a client that did not declare it answers internal', async () => {
+    const host = harness();
+    await host.start(undefined, (on, _emit, client) => {
+      on('engine.ping', async () => ({ pid: process.pid, uptimeMs: 1, hostVersion: 'test' }));
+      registerAttachment(on, client);
+    });
+    const client = await connect();
+    await client.next();
+    client.send({ t: 'req', id: 'a1', name: 'host.attachment', input: { attached: true } });
+    expect(await client.next((line) => (line as { t: string }).t === 'res')).toMatchObject({ id: 'a1', ok: false, error: { code: 'internal' } });
   });
 
   // Task 2.5 (§Design 1 "The orphan ledger and sweep"): after listen, the engines a dead predecessor left are stopped,

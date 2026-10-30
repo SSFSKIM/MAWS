@@ -71,7 +71,7 @@ describe('attention persists through the index and retires on the archive path',
     index.sessions.update(appId, { archived: true });
     await service.settled();
     expect(service.list()).toEqual([]);
-    expect(changed.at(-1)).toEqual({ appSessionId: appId, items: [] });
+    expect(changed.at(-1)).toEqual({ appSessionId: appId, items: [], silent: [] });
     expect(await index.attention.list()).toEqual([]);
     expect(existsSync(join(dir.path, 'attention.json'))).toBe(false); // the index is the store, not C3's file
   });
@@ -85,7 +85,7 @@ describe('attention persists through the index and retires on the archive path',
     await service.settled();
     index.sessions.markTranscriptRemoved(s.sessionId);
     await service.settled();
-    expect(changed.at(-1)).toEqual({ appSessionId: appId, items: [] });
+    expect(changed.at(-1)).toEqual({ appSessionId: appId, items: [], silent: [] });
     expect(await index.attention.list()).toEqual([]);
 
     const retirements = () => changed.filter((c) => c.appSessionId === appId && c.items.length === 0).length;

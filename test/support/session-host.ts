@@ -59,7 +59,7 @@ export class FakeEngineHost {
   relay: RelayHealth = OK_RELAY;
   script: (spec: LaunchSpec) => LaunchScript = () => ({});
   stopExits = true; // false: session.stop answers { exited: false } and the process lingers until exitNow()
-  send: 'answer' | 'hang' | 'persist-then-hang' | 'refuse' = 'answer';
+  send: 'answer' | 'queue' | 'hang' | 'persist-then-hang' | 'refuse' = 'answer'; // 'queue': held in the app queue (paused), nothing written to the engine
   queueListError: string | null = null;
   registryError: string | null = null;
   relayError: string | null = null; // engine.relayHealth cannot answer at all
@@ -240,6 +240,10 @@ export class FakeEngineHost {
         this.disk.stores.add(id);
         this.disk.queues.set(id, [...(this.disk.queues.get(id) ?? []), entry]);
         if (this.send === 'persist-then-hang') return new Promise(() => {});
+        if (this.send === 'queue') {
+          Object.assign(entry, { state: 'queued', messageUuid: null, submittedAt: null });
+          return { messageUuid: null, disposition: 'queued', queueId: entry.queueId };
+        }
         return { messageUuid: entry.messageUuid, disposition: 'sent', queueId: entry.queueId };
       }
       case 'session.queue.list': {

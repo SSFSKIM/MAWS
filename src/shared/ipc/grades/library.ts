@@ -17,4 +17,5 @@ export const grades = {
   'library.snapshot': 'internal',
   'library.entry': 'internal',
   'library.text': 'internal',
+  'library.fileLinkedPaths': 'internal', // P5 O3-D: the mirror's admission read
 } as const satisfies CommandGrades<'library'>;

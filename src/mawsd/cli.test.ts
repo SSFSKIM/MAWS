@@ -71,6 +71,9 @@ class FakeEndpoint implements EndpointModule {
   status(): unknown {
     return { enrolled: false };
   }
+  enrollment(): null {
+    return null;
+  }
   async cli(command: string, args: readonly string[], secret?: string): Promise<{ code: number; out: string }> {
     this.calls.push([command, args, secret]);
     await this.held;

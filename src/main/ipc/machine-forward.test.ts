@@ -44,6 +44,7 @@ const PROBE = {
   events: {},
   hostEvents: [],
   ptyHostEvents: [],
+  machineEvents: [],
   mainOnly: new Set<string>(),
 } as const satisfies WireRegistry;
 
@@ -228,6 +229,7 @@ describe('the engine host’s envelope (P5 O1 M5)', () => {
     events: {},
     hostEvents: [],
     ptyHostEvents: [],
+    machineEvents: [],
     mainOnly: new Set<string>(),
   } as const satisfies WireRegistry;
 

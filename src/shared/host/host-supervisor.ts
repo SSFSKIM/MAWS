@@ -58,6 +58,9 @@ export interface HostSpec {
   onDemand?: boolean; // parked until woken (above)
   detached?: Partial<Omit<DetachedTransportOptions, 'modulePath'>>; // this host's own transport facts, over the supervisor's
   // P5 O2 M3 end
+  // A name's own completion budget in place of REQUEST_TIMEOUT_MS: main's `machine` host gives the daemon's commands that
+  // run longer (a take-over's stop and wait, an acquisition's launch) what they had in main (the panel's sweep#3)
+  requestBudgetsMs?: Readonly<Partial<Record<string, number>>>;
 }
 
 // P5 O2 M3: a utility host as main's launcher made it (utilityProcess.fork with a MessageChannelMain): the child,
@@ -803,11 +806,12 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       return Promise.resolve({ ok: false, error: ipcError('host_unavailable', `${owner} is ${host.state.state}; cannot answer ${name}`) });
     }
     const id = String(++nextRequestId);
+    const budgetMs = host.spec.requestBudgetsMs?.[name] ?? REQUEST_TIMEOUT_MS;
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         host.pending.delete(id);
-        resolve({ ok: false, error: ipcError('timeout', `${owner} did not answer ${name} within ${REQUEST_TIMEOUT_MS / 1000} s`) });
-      }, REQUEST_TIMEOUT_MS);
+        resolve({ ok: false, error: ipcError('timeout', `${owner} did not answer ${name} within ${budgetMs / 1000} s`) });
+      }, budgetMs);
       // P5 O1 M5: the client rides on a `machine` request only, so the engine host's envelope (which a pre-O1 supervisor
       // reads strictly) never carries it
       const asker = owner === 'machine' && client ? client : null;

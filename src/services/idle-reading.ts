@@ -7,13 +7,15 @@
 // profile's data, idle.
 //
 // It logs `spine idle: composed` with the records and projects the view reads once `startSpine` has returned, and when
-// released (SIGUSR2 by default; a test passes its own trigger) stops the root, drops every reference to it, runs
-// globalThis.gc twice when the runtime exposes it (`--expose-gc`), and logs `spine idle: released` with whether it
-// did. A timer keeps the process alive until `dispose`. `spine.lock` stays held, as `openSpineData` holds it, until the
-// process exits.
+// released (SIGUSR2 by default; a test passes its own trigger) stops the root, drops every reference to it, a turn later
+// runs V8's last-resort collection as `mawsd`'s idle collector does (P5 O3-D M2, O3 Decision Log 16: the reading
+// measures what `mawsd` does), and logs `spine idle: released` with the heap before and after it. A timer keeps the
+// process alive until `dispose`. `spine.lock` stays held, as `openSpineData` holds it, until the process exits.
 import { hostname } from 'node:os';
+import { getHeapStatistics } from 'node:v8';
 import { NO_CLIENT, type ClientPort } from '@shared/client/port';
 import type { AppSessionId } from '@shared/graph/ids';
+import { lastResortCollect, type Collect, type HeapSize } from '@shared/host/idle-collect';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandName, EventName } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
@@ -28,6 +30,9 @@ export interface IdleReadingOptions {
   build: string;
   log(line: string): void;
   onRelease?(release: () => void): void; // default: process.once('SIGUSR2', release)
+  // test seams
+  collect?: Collect; // lastResortCollect
+  heap?(): HeapSize; // v8's heap statistics
 }
 
 export interface IdleReading {
@@ -35,7 +40,7 @@ export interface IdleReading {
   dispose(): void; // ends the keep-alive (and the SIGUSR2 listener when it was never fired)
 }
 
-export async function idleReading({ profile, build, log, onRelease }: IdleReadingOptions): Promise<IdleReading> {
+export async function idleReading({ profile, build, log, onRelease, collect = lastResortCollect, heap = heapSize }: IdleReadingOptions): Promise<IdleReading> {
   const keepAlive = setInterval(() => {}, KEEP_ALIVE_MS);
   let bus: ServicesBus | null = clientlessBus();
   const machine = startMachineIdentity({ userData: profile, env: process.env, hostname: hostname(), register: bus.register }).ref;
@@ -67,8 +72,8 @@ export async function idleReading({ profile, build, log, onRelease }: IdleReadin
     root.stop();
     root = null;
     bus = null; // its handlers close over every part of the spine
-    void collected().then((gc) => {
-      log(`spine idle: released (gc: ${gc})`);
+    void collected(collect, heap).then((said) => {
+      log(`spine idle: released (${said})`);
       markReleased();
     });
   };
@@ -84,16 +89,23 @@ export async function idleReading({ profile, build, log, onRelease }: IdleReadin
   };
 }
 
-// Two full collections, a turn of the event loop before each so what the stop scheduled has run; false when the runtime
-// exposes no gc
-async function collected(): Promise<boolean> {
-  const gc = (globalThis as { gc?: () => void }).gc;
-  if (typeof gc !== 'function') return false;
-  for (let n = 0; n < 2; n += 1) {
-    await new Promise((resolve) => setImmediate(resolve));
-    gc();
+// The last-resort collection a turn after the stop (so what the stop scheduled has run), and what it gave back
+async function collected(collect: Collect, heap: () => HeapSize): Promise<string> {
+  await new Promise((resolve) => setImmediate(resolve));
+  const before = heap();
+  try {
+    collect();
+  } catch (error) {
+    return `the collection failed: ${error instanceof Error ? error.message : String(error)}`;
   }
-  return true;
+  const after = heap();
+  const mib = (bytes: number) => (bytes / 1_048_576).toFixed(1);
+  return `collected: heap ${mib(before.physical)} to ${mib(after.physical)} MiB, used ${mib(before.used)} to ${mib(after.used)} MiB`;
+}
+
+function heapSize(): HeapSize {
+  const { used_heap_size: used, total_physical_size: physical } = getHeapStatistics();
+  return { used, physical };
 }
 
 // The engine host before it ever connects: starting, never streaming, every dispatch unanswered
@@ -140,6 +152,7 @@ function clientlessBus(): ServicesBus {
       set.add(entry);
       return () => void set.delete(entry);
     },
+    invoke: async (name) => ({ ok: false, error: ipcError('internal', `the idle reading invokes nothing (${name})`) }), // P5 O3-D M2
   };
 }
 

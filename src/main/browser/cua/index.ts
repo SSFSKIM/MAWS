@@ -27,6 +27,7 @@ import type { MawsDownloadRecorded } from '@shared/ipc/schema/maws';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import type { LeaseHolds } from '../agent/visible';
 import type { RunDialogCallback, RunDialogInfo } from '../agent/dialogs';
+import { CUA_SOCKET_DIR, cuaSocketPath } from '@shared/browser/cua-socket';
 import { ActivityFeed } from './activity';
 import { TabClaims } from './claims';
 import { CuaConnection } from './connection';
@@ -34,9 +35,6 @@ import { HeldDialogs } from './dialogs';
 import { agentDownloads, type AgentDownloads } from './downloads';
 import { AgentPresence, type PresenceDeps } from './presence';
 import { authorizePeer, PEER_ROOT_WAIT_MS, rootOf, socketFd, type PeerAddon, type PeerRefusal, type ProcessRoot } from './peer';
-
-// sockaddr_un's sun_path on macOS is 104 bytes, the terminating NUL included.
-export const MAX_SOCKET_PATH_BYTES = 103;
 
 export interface CuaBackendDeps {
   store: Pick<TabStore, 'all' | 'entry' | 'list' | 'open' | 'close' | 'load' | 'update' | 'setControl' | 'onViewCreated' | 'onViewDestroying' | 'onUpdated'>;
@@ -97,7 +95,7 @@ const refusalLine = (appSessionId: AppSessionId, { reason, pid }: PeerRefusal) =
 
 export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
   const log = deps.log ?? ((line: string) => console.warn(`[browser] ${line}`));
-  const dir = join(deps.userData, 'browser', 'cua');
+  const dir = join(deps.userData, ...CUA_SOCKET_DIR);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   chmodSync(dir, 0o700); // a directory an older run made otherwise
   for (const name of readdirSync(dir)) if (name.endsWith('.sock')) rmSync(join(dir, name), { force: true }); // nothing listens at start
@@ -214,9 +212,9 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
     socketPathFor(appSessionId) {
       const existing = sessions.get(appSessionId);
       if (existing) return existing.path;
-      const path = join(dir, `${appSessionId}.sock`);
-      if (Buffer.byteLength(path) > MAX_SOCKET_PATH_BYTES) {
-        if (!tooLong.has(appSessionId)) log(`the cua socket path of ${appSessionId} is longer than a Unix socket allows (${Buffer.byteLength(path)} bytes): cua cannot reach this session's browser`);
+      const path = cuaSocketPath(dir, appSessionId);
+      if (path === null) {
+        if (!tooLong.has(appSessionId)) log(`the cua socket path of ${appSessionId} is longer than a Unix socket allows (${Buffer.byteLength(join(dir, `${appSessionId}.sock`))} bytes): cua cannot reach this session's browser`);
         tooLong.add(appSessionId);
         return null;
       }

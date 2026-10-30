@@ -141,6 +141,11 @@ export class OwnerChannelService {
     this.cancelRetries();
   }
 
+  // A read this service started (a recovery, transcript evidence, a rewind's chain) is still in flight.
+  busy(): boolean {
+    return this.pending.size > 0;
+  }
+
   // Resolves once every read this service started (recoveries, transcript evidence) has settled.
   async settled(): Promise<void> {
     while (this.pending.size > 0) await Promise.allSettled([...this.pending]);

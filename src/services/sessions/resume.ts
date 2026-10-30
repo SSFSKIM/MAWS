@@ -1,6 +1,7 @@
 // A record's resume (C10 execution document, Interfaces "Session service", Resume): the trust bootstrap under an id of
 // its own when the owner accepted trust for a key the engine has not recorded, the disk-to-live handoff, C3's launch
-// with `--resume`, and the message sent at `ready`. Nothing rolls back: the record is the conversation's. A failure
+// with `--resume`, a rewind the previous launch may have lost repeated at `ready` (P5 O3-D M4, rewind-note.ts), and the
+// message sent after it. Nothing rolls back: the record is the conversation's. A failure
 // hands the message back (`onFailed`; the renderer returns it to the editor), except C3's `relay_unreachable`, whose
 // card's continuation still sends it.
 import type { SessionId } from '@shared/graph/ids';
@@ -17,6 +18,8 @@ import { exitFailure, heldOutcome, HeldFailure, messageOf, RelayFailure, SetupFa
 import { trustStateOf } from './trust';
 import { ownerChannelLaunch, ownerChannelLaunched } from '../owner/launch'; // P2-C (2026-10-09)
 import { launchScopeOf } from './artifact-scope'; // P2-E1
+
+export const PAUSED_READY_MS = 15_000; // W14: a resume over a paused terminal CLI is ready within this, or rolled back
 
 // C3 corrective: the host's code for an engine that wrote nothing before its first-output bound, and what the retry says
 const NO_OUTPUT = 'no_output';
@@ -71,7 +74,7 @@ export async function runResume(
     let previousLaunchId: string | null = null;
     const scope = launchScopeOf(s.sessions, record.lineage); // P2-E1: a side thread's ancestors' artifacts, resolved at every resume
     for (;;) {
-      watch = new LaunchWatch(s, appSessionId, previousLaunchId, input.paused ? 15_000 : undefined);
+      watch = new LaunchWatch(s, appSessionId, previousLaunchId, input.paused ? PAUSED_READY_MS : undefined);
       const answer = await hostCall(s.dispatch, 'session.launch', { spec, ...scope });
       if (answer.status === 'relay_unreachable') throw new RelayFailure(answer.health);
       if (answer.status === 'refused') throw new SetupFailure('launching', `${answer.reason}: ${answer.message}`);
@@ -90,9 +93,11 @@ export async function runResume(
     }
     if (end.kind === 'timeout') throw new WatchdogFailure();
     if (end.kind === 'exited') throw exitFailure(end.errors);
+    await s.rewinds.replay(appSessionId, previousLaunchId!); // P5 O3-D M4 (D18): a rewind the last launch may have lost, before any input
     let firstTurn: 'sent' | 'queued' | 'none' = 'none';
     if (input.message !== null) {
-      const sent = await hostCall(s.dispatch, 'session.send', { appSessionId, content: input.message.content });
+      // P5 O3-D M4: a later act, through the note's act, so a queued answer or a rewind forwarded meanwhile keeps the note
+      const sent = await s.rewinds.act('session.send', { appSessionId, content: input.message.content });
       input.onSent();
       firstTurn = sent.disposition;
     }

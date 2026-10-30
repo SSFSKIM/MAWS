@@ -16,6 +16,7 @@ import type { CommandSpec } from './common';
 
 const host = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'engine-host' as const });
 const main = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'main' as const });
+const machine = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'machine' as const }); // P5 O3-D: the spine's, served by `mawsd` on the daemon shape
 
 const Id = z.uuid();
 const Time = z.number().int().nonnegative();
@@ -102,11 +103,14 @@ export type LibrarySaveSource = z.infer<typeof LibrarySaveSourceSchema>;
 
 export const commands = {
   // The rows the filter admits, by `updatedAt`, newest first, with the counts per kind.
-  'library.list': main(z.strictObject({ filter: LibraryFilterSchema.optional() }), z.strictObject({ rows: z.array(LibraryRowSchema), counts: LibraryCountsSchema })),
+  'library.list': machine(z.strictObject({ filter: LibraryFilterSchema.optional() }), z.strictObject({ rows: z.array(LibraryRowSchema), counts: LibraryCountsSchema })),
   // One row, null when the index has no live artifact by that id.
-  'library.get': main(z.strictObject({ artifactId: Id }), z.strictObject({ row: LibraryRowSchema.nullable() })),
+  'library.get': machine(z.strictObject({ artifactId: Id }), z.strictObject({ row: LibraryRowSchema.nullable() })),
   // Every Space, by name, with its count of live artifacts.
-  'library.spaces': main(z.void(), z.strictObject({ spaces: z.array(LibrarySpaceSchema) })),
+  'library.spaces': machine(z.void(), z.strictObject({ spaces: z.array(LibrarySpaceSchema) })),
+  // P5 O3-D (Interfaces §F, §I): files' admission read, the paths of the File artifacts linked to a session ([] while the
+  // index is unavailable), which main's mirror of the spine's view dispatches. Main-only.
+  'library.fileLinkedPaths': machine(z.strictObject({ appSessionId: AppSessionIdSchema }), z.strictObject({ paths: z.array(z.string()) })),
   // M5b (Decision Log 14): the export formats main's exporter registry serves for a kind, in ARTIFACT_EXPORT_FORMATS'
   // order (a format `artifacts.export` would refuse `exportUnavailable` is not listed).
   'library.exportFormats': main(z.strictObject({ kind: ArtifactKindSchema }), z.strictObject({ formats: z.array(z.enum(ARTIFACT_EXPORT_FORMATS)) })),

@@ -56,9 +56,12 @@ import type { AcquireReason } from '@shared/ipc/schema/session';
 import type { AcquireOutcome } from '@shared/sessions/setup';
 import type { AcquisitionMemory } from './availability';
 import { EXIT_WAIT_MS } from './context';
+import { Work } from '../work'; // P5 O3-D M2
 import { acquireOutcomeOf, acquireOutcomeOfGuard, canonicalOptions, capturingSetup, InflightRegistry, type Registration } from './inflight';
 import { LaunchWatch } from './launch-watch';
 // P2-A end
+import type { CommandInput, CommandOutput } from '@shared/ipc/schema'; // P5 O3-D M4
+import { RewindNotes, type ConversationAct } from './rewind-note'; // P5 O3-D M4
 
 // A refusal of an intent command, mapped to X2 by the registration: `invalid` is `invalid_input` naming the field;
 // `starting`, `retained_worktree` and the rest are `internal` with this message.
@@ -104,7 +107,15 @@ export class SessionService {
   // P2-A (X16): every run that can launch an engine for an id, registered before its first await; and what the last
   // acquisition of each id ended with when not ready (this app run only, D-16)
   private readonly inflight = new InflightRegistry((appSessionId) => this.publishAcquisition(appSessionId));
+  // P5 O3-D M2 (Interfaces §A, D27): what runs past a command's answer, or with none (a setup, a reconciliation, a
+  // recovery), so a release waits for it before the index closes. A wait for the host is not counted: nothing is written
+  // until it ends, and a released root's waits are dropped with its host adapter.
+  readonly work = new Work();
+  private disposed = false; // P5 O3-D M2: the root stopped; the startup and a deferred recovery end at their next boundary
   private readonly lastAttempt = new Map<AppSessionId, NonNullable<AcquisitionMemory['last']>>();
+  // P5 O3-D M4 (D18): each session's last act while it is a rewind, which a resume repeats (rewind-note.ts)
+  private readonly rewinds: RewindNotes;
+  private offStatus: (() => void) | null = null;
   private readonly now: () => string;
   private readonly log: (message: string) => void;
 
@@ -112,6 +123,7 @@ export class SessionService {
     this.manifests = new DeletionManifests(join(deps.userData, 'sessions', 'deletions'));
     this.now = deps.now ?? (() => new Date().toISOString());
     this.log = deps.log ?? ((message) => console.warn(`[sessions] ${message}`));
+    this.rewinds = new RewindNotes(join(deps.userData, 'sessions', 'rewinds'), { dispatch: deps.host.dispatch, now: this.now, log: this.log, track: (promise) => this.work.track(promise) });
   }
 
   // D-16 at start: every `self` holder is stale (C3 owns no process yet) and is reset before anything else, then the
@@ -131,14 +143,26 @@ export class SessionService {
     return this.readyPromise;
   }
 
-  // Stops listening and halts every watch in flight, leaving their setups where they are (the tests' app restart).
+  // Stops listening and halts every watch in flight, leaving their setups where they are (the tests' app restart; P5
+  // O3-D M2: the root's stop, after which a startup still waiting resumes into nothing, since the index may be closed and
+  // spine.lock another process's).
   dispose(): void {
+    this.disposed = true;
     this.offReady?.();
+    this.offReady = null;
+    this.offStatus?.(); // P5 O3-D M4
+    this.offStatus = null;
+    this.rewinds.close();
     for (const watch of [...(this.setup?.watches ?? [])]) watch.halt();
   }
 
+  // P5 O3-D M2: cancellable at each async boundary (a disposed service resumes into nothing), and each phase that can
+  // write counted in `work`; the waits for the environment and for the host are not (nothing is written across them,
+  // and a host that never streams would hold a release forever).
   private async boot(): Promise<void> {
+    this.offStatus = this.deps.host.onEvent('session.status', ({ status }) => this.rewinds.observe(status)); // P5 O3-D M4: a launch's end through end_session
     const env = await this.deps.env;
+    if (this.disposed) return;
     this.setup = {
       sessions: this.deps.index.sessions,
       sideThreads: this.deps.index.sideThreads ?? null, // E3
@@ -161,23 +185,28 @@ export class SessionService {
       watchdogMs: this.deps.timing?.watchdogMs ?? WATCHDOG_MS,
       stopWaitMs: this.deps.timing?.stopWaitMs ?? STOP_WAIT_MS,
       watches: new Set(),
+      rewinds: this.rewinds, // P5 O3-D M4
     };
-    await this.deps.intents.load();
+    await this.work.track(this.deps.intents.load());
+    if (this.disposed) return;
     await this.deps.host.ready?.();
-    for (const manifest of await this.manifests.list()) {
+    if (this.disposed) return;
+    const manifests = await this.work.track(this.manifests.list());
+    if (this.disposed) return;
+    for (const manifest of manifests) {
       this.log(`a deletion of ${manifest.appSessionId} was interrupted (${manifest.trashed.length} of ${manifest.paths.length} moved); session.delete finishes it`);
     }
     this.offReady = this.deps.host.onReady?.(() => {
       this.streamed = true;
       this.rerunDeferred();
     }) ?? null;
-    await this.recover();
+    await this.work.track(this.recover()); // P5 O3-D M2
   }
 
   // Runs the deferred recovery again (the host streamed), unless none is owed or one is already running.
   private rerunDeferred(): void {
-    if (this.unrecovered === null || this.recovering !== null) return;
-    this.recovering = this.recover()
+    if (this.disposed || this.unrecovered === null || this.recovering !== null) return;
+    this.recovering = this.work.track(this.recover()) // P5 O3-D M2
       .catch((error: unknown) => this.log(`the deferred recovery failed: ${error instanceof Error ? error.message : String(error)}`))
       .finally(() => (this.recovering = null));
   }
@@ -200,6 +229,7 @@ export class SessionService {
       try {
         live = await liveRows(this.deps.host.dispatch);
       } catch (error) {
+        if (this.disposed) return; // P5 O3-D M2
         if (this.streamed) continue; // the host streamed while the read was in flight: read again
         if (this.unrecovered === null) {
           const intents = this.deps.intents.list();
@@ -212,6 +242,7 @@ export class SessionService {
         return;
       }
     }
+    if (this.disposed) return; // P5 O3-D M2: the root stopped while the table was read
     const scope = this.unrecovered; // null: the boot's own run, before any command could act
     const idle = (id: string) => !this.starting.has(id) && (scope === null || !this.locks.has(id));
     // decided once, before the steps' own writes change an intent; each step re-reads it
@@ -256,7 +287,7 @@ export class SessionService {
     }
     this.unrecovered = null;
     this.startedSince.clear();
-    if (this.unreconciled.size > 0) void this.settleUnreconciled().catch((error: unknown) => this.log(`the owed reconciliations failed: ${error instanceof Error ? error.message : String(error)}`));
+    if (this.unreconciled.size > 0) void this.work.track(this.settleUnreconciled()).catch((error: unknown) => this.log(`the owed reconciliations failed: ${error instanceof Error ? error.message : String(error)}`));
   }
 
   // P4 W2-A: a reconciliation that waits for its live row's ready (the first message not yet C3's) runs beside the
@@ -266,7 +297,7 @@ export class SessionService {
   private reconcileWhenReady(appSessionId: AppSessionId): void {
     this.starting.add(appSessionId);
     const registration = this.inflight.open(appSessionId, 'setup');
-    void this.serial(appSessionId, async () => {
+    void this.work.track(this.serial(appSessionId, async () => {
       const intent = this.deps.intents.get(appSessionId);
       return intent === null ? null : this.reconcileOne(intent, null);
     })
@@ -277,7 +308,7 @@ export class SessionService {
       .then((result) => {
         this.starting.delete(appSessionId);
         registration.end(result);
-      });
+      })); // P5 O3-D M2: tracked to its end
   }
 
   // What a joiner of that reconciliation is answered: ready when the row is, else why it is not.
@@ -699,7 +730,7 @@ export class SessionService {
       if (run === null) return (answered = outcome);
       handedOff = true;
       const held = release;
-      void run().finally(() => {
+      void this.work.track(run().finally(() => { // P5 O3-D M2: the setup runs past the answer
         this.endStart(appSessionId, claim);
         held();
         const ended = acquireOutcomeOf(appSessionId, captured.outcome());
@@ -707,7 +738,7 @@ export class SessionService {
         // longer describes it once this process exits (published by the end below)
         if (ended.status === 'ready') this.lastAttempt.delete(appSessionId);
         registration.end({ outcome: ended }); // P2-A
-      });
+      }));
       return outcome;
     } catch (error) {
       registration.end({ error }); // P2-A: a guard that could not answer fails its joiners as it fails this start
@@ -977,7 +1008,11 @@ export class SessionService {
   }
 
   remove(appSessionId: AppSessionId, stopIfLive: boolean): Promise<DeleteOutcome> {
-    return this.serial(appSessionId, async () => deleteRecord(await this.ready(), { manifests: this.manifests, trash: this.deps.trash }, appSessionId, stopIfLive));
+    return this.serial(appSessionId, async () => {
+      const outcome = await deleteRecord(await this.ready(), { manifests: this.manifests, trash: this.deps.trash }, appSessionId, stopIfLive);
+      if (outcome.status === 'deleted') await this.rewinds.clear(appSessionId); // P5 O3-D M4: no conversation to repair
+      return outcome;
+    });
   }
 
   // What a delete would move, for its sheet; a delete interrupted half-way, for the session's tab ("Finish deleting"
@@ -993,6 +1028,24 @@ export class SessionService {
   async revealPath(path: string, client: ClientRef | null): Promise<void> {
     const answer = await this.deps.port.reveal(client, await revealablePath(await this.ready(), this.deps.index.projects, path));
     if (isNoClient(answer)) throw new Error(`not revealed: ${NO_CLIENT_REASON}`);
+  }
+
+  // ---- the rewind repair (P5 O3-D M4, D18; rewind-note.ts) --------------------------------------------------------
+
+  // `session.rewind` and the conversation acts that follow it, intercepted on their way to the engine host. Neither waits
+  // for the service's start: a rewind or a send goes to a live session, and the notes are read on their first use.
+  rewind(input: CommandInput<'session.rewind'>): Promise<CommandOutput<'session.rewind'>> {
+    return this.rewinds.rewind(input);
+  }
+
+  conversationAct<N extends ConversationAct>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> {
+    return this.rewinds.act(name, input);
+  }
+
+  // P5 O3-D M5a (D47): lane B's claimed op (`host.op`, the endpoint's), through the note when it runs the rewind or a
+  // conversation act (rewind-note.ts's `claimed`)
+  claimedOp(input: CommandInput<'host.op'>): Promise<CommandOutput<'host.op'>> {
+    return this.rewinds.claimed(input);
   }
 
   // `session.trust.check`, read with the environment the engine receives.

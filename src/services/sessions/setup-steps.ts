@@ -20,6 +20,7 @@ import type { C10Settings } from './launch-mapping';
 import type { LaunchWatch } from './launch-watch';
 import type { ReplaySeam } from './replay-seam';
 import type { OwnerChannelLaunches } from '../owner/launch'; // P2-C (2026-10-09)
+import type { RewindNotes } from './rewind-note'; // P5 O3-D M4
 
 // The service's dependencies, resolved (the engine's environment in hand).
 export interface Setup {
@@ -44,6 +45,7 @@ export interface Setup {
   watchdogMs: number;
   stopWaitMs: number;
   watches: Set<LaunchWatch>; // halted when the service is disposed
+  rewinds: RewindNotes; // P5 O3-D M4 (D18): the rewind a resume repeats before any input
 }
 
 // ---- failures ------------------------------------------------------------------------------------------------------

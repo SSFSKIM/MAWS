@@ -480,17 +480,50 @@ export function abaLine(run: { a: ShapeReading; b: ShapeReading; a2: ShapeReadin
 
 // P5 O3-C M5 (docs/doperpowers/plans/2026-10-28-p5-o3-c-spine-library.md, D18 and D19): the spine composed alone, the
 // services entry's idleReading under the Electron binary as Node over the profile-sized fixture, read in IDLE_RUN's
-// window while loaded, then, once its root has stopped and its data is released (two full collections when the runtime
-// exposes gc), after this settle in a window half as long. O3-D's starting point, recorded without a bound.
+// window while loaded, then, once its root has stopped and its data is released (V8's last-resort collection, P5 O3-D
+// M2), after this settle in a window half as long. O3-D's starting point, recorded without a bound.
 export const SPINE_RELEASED_RUN = { settleS: 120, windowS: 300, everyS: 30, samples: 11, maxLoad: IDLE_RUN.maxLoad, pairLoad: IDLE_RUN.pairLoad } as const;
 
 // The job log's line: the loaded and released medians and what the release gave back, each window's CPU, the fixture's
-// counts, whether a full collection ran, the validity (both windows' `reasons`) and both loads, each with its 30 s pair.
-export function spineLine(run: { loaded: ShapeReading; released: ShapeReading; counts: SpineFixtureCounts; gc: boolean; reasons: readonly string[] }): string {
+// counts, what the release's collection said (P5 O3-D M2: the last-resort collection, with the heap before and after),
+// the validity (both windows' `reasons`) and both loads, each with its 30 s pair.
+export function spineLine(run: { loaded: ShapeReading; released: ShapeReading; counts: SpineFixtureCounts; collection: string; reasons: readonly string[] }): string {
   const { loaded, released, counts } = run;
   const drop = Math.round(released.footprintKiB) - Math.round(loaded.footprintKiB);
   const fixture = `${counts.sessions} sessions in ${counts.projects} projects, ${counts.attention} attention items (${counts.pending} pending), ${counts.library} library rows, ${counts.drafts} drafts, ${counts.history} prompt-history lines`;
-  const gc = run.gc ? 'gc ran twice before the released window' : 'no gc (the runtime exposed none)';
   const validity = run.reasons.length === 0 ? 'valid' : `invalid: ${run.reasons.join('; ')}`;
-  return `[daemon-idle] spine loaded footprint ${Math.round(loaded.footprintKiB)} KiB (median of ${loaded.samples}) · released ${Math.round(released.footprintKiB)} KiB (median of ${released.samples}), ${signed(drop)} KiB · cpu ${loaded.cpuS.toFixed(2)} s over ${IDLE_RUN.windowS} s loaded, ${released.cpuS.toFixed(2)} s over ${SPINE_RELEASED_RUN.windowS} s released · fixture ${fixture} · ${gc} · ${validity} · load ${loadText(loaded.load, loaded.loadPair)} loaded, ${loadText(released.load, released.loadPair)} released`;
+  return `[daemon-idle] spine loaded footprint ${Math.round(loaded.footprintKiB)} KiB (median of ${loaded.samples}) · released ${Math.round(released.footprintKiB)} KiB (median of ${released.samples}), ${signed(drop)} KiB · cpu ${loaded.cpuS.toFixed(2)} s over ${IDLE_RUN.windowS} s loaded, ${released.cpuS.toFixed(2)} s over ${SPINE_RELEASED_RUN.windowS} s released · fixture ${fixture} · before the released window, ${run.collection} · ${validity} · load ${loadText(loaded.load, loaded.loadPair)} loaded, ${loadText(released.load, released.loadPair)} released`;
+}
+
+// P5 O3-D M2 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §K; D5): `mawsd` with the spine over the
+// profile-sized fixture, read in three windows of SPINE_RELEASED_RUN's form: loaded (a private daemon, a client holding
+// its connection), released (the same daemon once the quiet passed) and re-executed (a unit daemon after its exit 75
+// and restart). The line names, per window, mawsd's median and the engine host's (the host the spine's start wakes,
+// read beside it), the window's CPU, load and validity; then the peak load with its 30 s pair, and the verdict the
+// architect reads (§11's mechanism): the released mawsd against MAWSD_HEADROOM_KIB, then the re-executed one. It
+// asserts no bound.
+export type SpineWindow = 'loaded' | 'released' | 'reexecuted';
+const SPINE_WINDOWS: readonly [SpineWindow, string][] = [['loaded', 'loaded'], ['released', 'released'], ['reexecuted', 're-executed']];
+
+export function mawsdSpineLine(run: { windows: Record<SpineWindow, ShapeReading | null>; reasons: Record<SpineWindow, readonly string[]>; counts: SpineFixtureCounts }): string {
+  const own = (reading: ShapeReading, argv0: string) => reading.processes.find((p) => p.argv0 === argv0);
+  const window = ([key, name]: [SpineWindow, string]) => {
+    const reading = run.windows[key];
+    const validity = run.reasons[key].length === 0 ? 'valid' : `invalid: ${run.reasons[key].join('; ')}`;
+    if (reading === null) return `${name}: not read, ${validity}`;
+    const mawsd = own(reading, 'mawsd');
+    const engine = own(reading, 'maws-supervisor');
+    const kib = (p: ProcessReading | undefined, what: string) => (p === undefined ? `${what} not running` : `${what} ${Math.round(p.footprintKiB)} KiB`);
+    return `${name}: ${kib(mawsd, 'mawsd')}, ${kib(engine, 'engine host')} (medians of ${reading.samples}), cpu ${reading.cpuS.toFixed(2)} s, load ${loadText(reading.load, reading.loadPair)}, ${validity}`;
+  };
+  const read = SPINE_WINDOWS.flatMap(([key]) => (run.windows[key] === null ? [] : [run.windows[key]!]));
+  const peak = read.reduce<ShapeReading | null>((top, reading) => (top === null || reading.load > top.load ? reading : top), null);
+  const fits = (key: SpineWindow) => {
+    const mawsd = run.windows[key] === null ? undefined : own(run.windows[key]!, 'mawsd');
+    return mawsd === undefined ? 'not read' : mawsd.footprintKiB <= MAWSD_HEADROOM_KIB ? 'within' : 'over';
+  };
+  const released = fits('released');
+  const reexecuted = fits('reexecuted');
+  const verdict = `released mawsd ${released === 'not read' ? 'not read' : `${released} the ${MAWSD_HEADROOM_KIB} KiB headroom`}, re-executed mawsd ${reexecuted === 'not read' ? 'not read' : released === 'not read' ? `${reexecuted} the ${MAWSD_HEADROOM_KIB} KiB headroom` : `${reexecuted} it`}`;
+  return `[daemon-idle] mawsd with the spine · ${SPINE_WINDOWS.map(window).join(' · ')} · peak load ${peak === null ? 'not read' : loadText(peak.load, peak.loadPair)} · ${verdict} · fixture ${run.counts.sessions} sessions in ${run.counts.projects} projects`;
 }

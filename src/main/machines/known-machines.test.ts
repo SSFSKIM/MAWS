@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MachineRef } from '@shared/machine/ref';
 import { KNOWN_MACHINES_FILE, readKnownMachines, writeKnownMachines, type KnownMachine } from './known-machines';
 
-const B: KnownMachine = { ref: 'StandinBMachineRef0000' as MachineRef, name: 'standin-b', carrier: { kind: 'socket', dir: '/b/machine-serve' } };
+const B: KnownMachine = { ref: 'StandinBMachineRef0000' as MachineRef, name: 'standin-b', carrier: { kind: 'socket', dir: '/b' } };
 let dir: string | null = null;
 const fileIn = () => join((dir = mkdtempSync(join(tmpdir(), 'maws-known-'))), KNOWN_MACHINES_FILE);
 afterEach(() => {

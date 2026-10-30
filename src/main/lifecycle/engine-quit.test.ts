@@ -21,6 +21,12 @@ describe('the engine host at quit', () => {
     expect(engineQuitDeps(hostsIn('utility'), () => settingsWith({})).keepOffered()).toBe(false);
   });
 
+  // P5 O3-D (Q1, D12): on the daemon shape the sessions run under mawsd, past the app: nothing to keep
+  it('offers no keep on the daemon shape, where the sessions and the terminals outlive the app', () => {
+    const deps = engineQuitDeps(hostsIn('detached'), () => settingsWith({}), () => true);
+    expect([deps.keepOffered(), deps.sessionsOutlive?.(), deps.terminalsOutlive?.()]).toEqual([false, true, true]);
+  });
+
   it('reads the keep default from settings version 10 at each question, keep by default', () => {
     let settings = settingsWith({});
     const deps = engineQuitDeps(hostsIn('detached'), () => settings);

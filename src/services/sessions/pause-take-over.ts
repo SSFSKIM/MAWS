@@ -8,6 +8,7 @@ import { canForeground, type PaneProcess, type Processes } from './pane-holder';
 import { holderName } from './take-over';
 
 export const PAUSE_WAIT_MS = 3_000;
+export const CLEAR_WAIT_MS = 10_000; // the ended CLI's registry row clears
 export interface PauseDeps {
   processes(): Promise<Processes>;
   write(data: string): Promise<void>;
@@ -51,7 +52,7 @@ export async function pauseTakeOver(deps: PauseDeps, q: { appSessionId: AppSessi
     if (!(await isPaused())) throw new Error('The terminal CLI was continued while MAWS was starting.');
     ending = true;
     deps.signal(holder.pid, 'SIGKILL');
-    if (!(await until(deps.clear, deps.waitMs ?? 10_000, pollMs))) throw new Error('The old holder registry row has not cleared.');
+    if (!(await until(deps.clear, deps.waitMs ?? CLEAR_WAIT_MS, pollMs))) throw new Error('The old holder registry row has not cleared.');
     return { status: 'resumed', warning: null };
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error);

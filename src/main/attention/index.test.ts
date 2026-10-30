@@ -8,7 +8,9 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { digest, item, record } from '../../../test/support/builders';
+import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
 import { fakeSpineView } from '../../../test/support/fake-spine-view';
+import { emittedAttentionSource } from '../../services/sessions/index';
 import { SessionReadModel } from '../../services/sessions/read-model';
 import { createSpineView } from '../../services/sessions/spine-view';
 import { PERSIST_RETRY_MS, startAttentionService } from '../../services/attention/service';
@@ -34,11 +36,13 @@ vi.mock('../ipc/events', () => ({ emit: vi.fn() }));
 vi.mock('../windows', () => ({ appWindows: vi.fn(() => []), isAppWindow: vi.fn(() => true) }));
 
 // The silence of restored items end to end in process (P5 O3-C): the attention service marks them, the spine's view
-// carries the marks in band with the read model's change, and the notifier announces none of them.
-function inProcessView(model: SessionReadModel, restoredIds: ReadonlySet<AttentionItem['id']>) {
+// carries the marks in band with the read model's change, and the notifier announces none of them. P5 O3-D M1 (D13): the
+// marks travel on attention.changed, which the read model and the view both tap from the bus, the read model first.
+function inProcessView(model: SessionReadModel, bus: FakeBus) {
+  model.register(emittedAttentionSource(bus.onEmitted));
   return createSpineView({
-    mode: 'index', model, restoredIds, tap: () => () => {},
-    index: { unavailable: null, projects: { list: () => [], listWithRemoved: () => [], onChange: () => () => {} }, library: { fileLinkedPaths: () => [] } },
+    mode: 'index', model, tap: bus.onEmitted,
+    index: { unavailable: null, projects: { list: () => [], listWithRemoved: () => [] }, library: { fileLinkedPaths: () => [] } },
     intents: { get: () => null, list: () => [] },
     acquire: () => Promise.reject(new Error('no session service here')),
   }).view;
@@ -101,11 +105,10 @@ describe('attention startup', () => {
 
   it('seeds persisted attention after hydration without launch notifications, then announces new items', async () => {
     const model = new SessionReadModel('index');
+    const bus = fakeBus();
     const id = 'app' as AppSessionId;
-    let observe!: (items: AttentionItem[]) => void;
     model.register({ start: (writer) => {
       writer.observeRecord(record(id));
-      observe = (items) => writer.observeAttention(id, items);
       return () => {};
     } });
     let loaded!: (items: AttentionItem[]) => void;
@@ -113,30 +116,29 @@ describe('attention startup', () => {
       onEvent: () => () => {}, onState: () => () => {},
       dispatch: async () => ({ ok: true, value: { event: null } }),
       register: () => {},
-      emit: (name, payload) => { if (name === 'attention.changed') observe((payload as { items: AttentionItem[] }).items); },
+      emit: bus.emit,
       store: { list: () => new Promise((resolve) => { loaded = resolve; }), replaceForSession: async () => {}, retireForSession: async () => {} },
     });
-    const stop = startAttention(inProcessView(model, service.restoredIds), { settings: () => SETTINGS_DEFAULTS_V21, port: electronClientPort({ env: {}, openWindow: () => { throw new Error('not clicked'); } }) });
+    const stop = startAttention(inProcessView(model, bus), { settings: () => SETTINGS_DEFAULTS_V21, port: electronClientPort({ env: {}, openWindow: () => { throw new Error('not clicked'); } }) });
     const old = item(id, 'error', '2026-10-01T00:00:00Z');
     loaded([old]); // window still hidden/unfocused while the persisted table arrives
     await service.ready;
     expect(electron.shown).not.toHaveBeenCalled();
     expect(electron.bounce).not.toHaveBeenCalled();
     expect(electron.badge).toHaveBeenLastCalledWith('1');
-    observe([old, item(id, 'question', '2026-10-02T00:00:00Z')]);
+    bus.emit('attention.changed', { appSessionId: id, items: [old, item(id, 'question', '2026-10-02T00:00:00Z')], silent: [old.id] }); // as the service would say it
     expect(electron.shown).toHaveBeenCalledTimes(1);
     stop(); service.stop(); await service.settled();
   });
   it('notifies live approvals during load retries while restoring persisted items silently', async () => {
     vi.useFakeTimers();
     const model = new SessionReadModel('index');
+    const bus = fakeBus();
     const id = 'live' as AppSessionId;
     const restoredId = 'restored' as AppSessionId;
-    let observe!: (id: AppSessionId, items: AttentionItem[]) => void;
     model.register({ start: (writer) => {
       writer.observeRecord(record(id));
       writer.observeRecord(record(restoredId));
-      observe = (id, items) => writer.observeAttention(id, items);
       return () => {};
     } });
     const listeners = new Map<string, (payload: { appSessionId: AppSessionId; items: AttentionItem[] }) => void>();
@@ -145,10 +147,10 @@ describe('attention startup', () => {
     const service = startAttentionService({
       onEvent: (name, listener) => { listeners.set(name, listener as (payload: { appSessionId: AppSessionId; items: AttentionItem[] }) => void); return () => {}; },
       onState: () => () => {}, dispatch: async () => ({ ok: true, value: { event: null } }), register: () => {}, log: () => {},
-      emit: (name, payload) => { if (name === 'attention.changed') { const change = payload as { appSessionId: AppSessionId; items: AttentionItem[] }; observe(change.appSessionId, change.items); } },
+      emit: bus.emit,
       store: { list, replaceForSession: async () => {}, retireForSession: async () => {} },
     });
-    const stop = startAttention(inProcessView(model, service.restoredIds), { settings: () => SETTINGS_DEFAULTS_V21, port: electronClientPort({ env: {}, openWindow: () => { throw new Error('not clicked'); } }) });
+    const stop = startAttention(inProcessView(model, bus), { settings: () => SETTINGS_DEFAULTS_V21, port: electronClientPort({ env: {}, openWindow: () => { throw new Error('not clicked'); } }) });
     try {
       await vi.advanceTimersByTimeAsync(0);
       expect(list).toHaveBeenCalledTimes(2);

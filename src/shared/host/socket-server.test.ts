@@ -34,10 +34,9 @@ interface StartOptions {
   onDocPort?: DocPortHandler;
   docHighWater?: number;
   badToken?: 'refuse' | 'close';
-  many?: { runtimeFor(): HostRuntime };
+  many?: { runtimeFor(client: { appPid: number; capabilities: readonly string[] }): HostRuntime };
   halfOpen?: boolean;
   admitHello?: SocketServerOptions['admitHello']; // P5 O2 M5
-  admit?: (socket: Socket) => boolean; // P5 O6 M3
 }
 
 async function start(options: StartOptions = {}) {
@@ -50,6 +49,7 @@ async function start(options: StartOptions = {}) {
   for (const hook of options.hooks ?? []) runtime.onConnect(hook);
   const exits: string[] = [];
   const refusedExits: string[] = []; // P5 O2 M5: the exits a refused connection asked
+  const exitFroms: unknown[] = []; // P5 O3-D M5: what each exit said of its connection
   const changes: boolean[] = [];
   const ends: number[] = [];
   const log = vi.fn<(line: string) => void>();
@@ -63,6 +63,7 @@ async function start(options: StartOptions = {}) {
     token: () => TOKEN,
     onExit: (when, from) => {
       exits.push(when);
+      exitFroms.push(from);
       if (from?.refused) refusedExits.push(when);
     },
     onClient: (connected) => void changes.push(connected),
@@ -70,7 +71,6 @@ async function start(options: StartOptions = {}) {
     log,
     helloTimeoutMs: options.helloTimeoutMs,
     docHighWater: options.docHighWater, // P3-A M5
-    admit: options.admit, // P5 O6 M3
   });
   temp = await listenTemp(server);
   const connect = async () => {
@@ -102,31 +102,10 @@ async function start(options: StartOptions = {}) {
     port.start();
     return { socket, port, lines, frames };
   };
-  return { runtime, emit: () => emit('session.brokerItems', ITEMS as never), exits, refusedExits, changes, ends, log, served, connect, connectPort };
+  return { runtime, emit: () => emit('session.brokerItems', ITEMS as never), exits, refusedExits, exitFroms, changes, ends, log, served, connect, connectPort };
 }
 
 describe('the socket layer handshake (server side)', () => {
-  // P5 O6 M3: the stand-in's peer check enters here (src/main/machines/serve-standin.ts)
-  it('closes a connection its admit refuses before reading a byte or starting the hello deadline, and serves one it admits', async () => {
-    let verdict = false;
-    const admit = vi.fn<(socket: Socket) => boolean>(() => verdict);
-    const host = await start({ admit, helloTimeoutMs: 60 });
-    const refused = await host.connect();
-    refused.send(hello());
-    await refused.closed;
-    expect(admit).toHaveBeenCalledOnce();
-    expect(refused.lines).toEqual([]);
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    expect(host.log).not.toHaveBeenCalled(); // no hello was read, and no deadline ran out
-    expect(host.changes).toEqual([]);
-
-    verdict = true;
-    const admitted = await host.connect();
-    admitted.send(hello());
-    expect(await admitted.next()).toEqual(WELCOME);
-    expect(admit).toHaveBeenCalledTimes(2);
-  });
-
   it('welcomes a valid hello with its identity and serves requests; events wait for ready, where the connect hooks run', async () => {
     const order: string[] = [];
     const host = await start({ hooks: [() => void order.push('hook')] });
@@ -338,7 +317,9 @@ describe('the socket layer handshake (server side)', () => {
 
   it('many clients: each is welcomed and served by its own runtime at once, none replaced', async () => {
     const runtimes: HostRuntime[] = [];
-    const runtimeFor = () => {
+    const facts: { appPid: number; capabilities: readonly string[] }[] = [];
+    const runtimeFor = (client: { appPid: number; capabilities: readonly string[] }) => {
+      facts.push(client); // P5 O3-D M2: the welcomed hello's facts
       const pid = runtimes.length + 1; // which runtime answered
       const made = createHostRuntime((on) => on('engine.ping', async () => ({ pid, uptimeMs: 1, hostVersion: 'test' })));
       runtimes.push(made);
@@ -349,8 +330,9 @@ describe('the socket layer handshake (server side)', () => {
     first.send(hello());
     expect(await first.next()).toMatchObject({ t: 'welcome' });
     const second = await host.connect();
-    second.send(hello({ appPid: 8 }));
+    second.send(hello({ appPid: 8, capabilities: ['machine.spine'] }));
     expect(await second.next()).toMatchObject({ t: 'welcome' });
+    expect(facts).toEqual([{ appPid: 7, capabilities: [] }, { appPid: 8, capabilities: ['machine.spine'] }]);
     first.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined });
     second.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined });
     const answer = (id: string) => (line: unknown) => (line as { t: string; id?: string }).t === 'res' && (line as { id: string }).id === id;
@@ -437,7 +419,29 @@ describe('the socket layer’s admission (server side, P5 O2 M5)', () => {
     await until(() => host.refusedExits.length === 1);
     expect(host.refusedExits).toEqual(['now']);
     expect(host.exits).toEqual(['now']);
+    expect(host.exitFroms).toEqual([{ refused: true, own: false }]); // the upstream's line, reflected
     expect(host.changes).toEqual([]);
+  });
+
+  // P5 O3-D M5 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §L): admit is told the hello's appPid,
+  // and a refusal the admitting relay wrote itself (`own`) is told apart from the upstream's at its one exit
+  it('hands admit the hello’s appPid, and marks the exit after a refusal of the relay’s own as its own', async () => {
+    const line = { t: 'refuse', reason: 'wire', protocol: 3, buildId: 'relay-build', wire: 'w', liveSessions: 1 } as const;
+    const asked: unknown[] = [];
+    const host = await start({
+      admitHello: async (peer, appPid) => {
+        asked.push([peer.build, appPid]);
+        return { kind: 'refuse', line, own: true };
+      },
+    });
+    const client = await host.connect();
+    client.send(hello());
+    expect(await client.next()).toEqual(line);
+    expect(asked).toEqual([['build-1', 7]]);
+    expect(host.log).toHaveBeenCalledWith('refused a hello with its own refusal (wire)');
+    client.send({ t: 'exit', when: 'now' });
+    await until(() => host.exitFroms.length === 1);
+    expect(host.exitFroms).toEqual([{ refused: true, own: true }]);
   });
 
   it('closes the connection with nothing written when admit answers close', async () => {

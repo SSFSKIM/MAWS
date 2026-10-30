@@ -10,9 +10,9 @@ import { LaneOverrideSchema } from '../../owner/state';
 import type { CommandSpec } from './common';
 
 export const commands = {
-  'mods.list': { input: z.strictObject({ appSessionId: AppSessionIdSchema.optional() }), output: z.array(ModRowSchema), owner: 'main' },
+  'mods.list': { input: z.strictObject({ appSessionId: AppSessionIdSchema.optional() }), output: z.array(ModRowSchema), owner: 'machine' },
   // An unknown session (one the index has no record of) fails `internal`, naming it.
-  'mods.setSessionOverride': { input: z.strictObject({ appSessionId: AppSessionIdSchema, id: ModIdSchema, value: LaneOverrideSchema }), output: z.void(), owner: 'main' },
+  'mods.setSessionOverride': { input: z.strictObject({ appSessionId: AppSessionIdSchema, id: ModIdSchema, value: LaneOverrideSchema }), output: z.void(), owner: 'machine' },
 } as const satisfies Record<`mods.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {} as const satisfies Record<`mods.${string}`, z.ZodType>;

@@ -11,6 +11,7 @@
 // client of another build replaces one with nothing live and serves one whose terminals run.
 import type { HostRegister } from '@shared/host/runtime';
 import { runSocketHost, startSocketHost, type HostProcess, type SocketHost } from '@shared/host/socket-host';
+import { PEER_CAPABILITIES } from '@shared/host/socket-protocol'; // P5 O3-D
 import { PTY_HOST_FILES, ptyHostSocketPath } from './files';
 import type { PtyTable } from './table';
 
@@ -38,6 +39,7 @@ export function startPtyHost(hostVersion: string, register: HostRegister, opts: 
       modulePath: opts.modulePath,
       register,
       badToken: 'close', // nothing before the token (P5 O2 M3, RL §5.11)
+      capabilities: PEER_CAPABILITIES.ptyHost, // P5 O3-D
       counts: () => {
         const { ptys } = opts.table().list();
         return { liveSessions: ptys.filter((pty) => pty.alive).length, rows: ptys.length };

@@ -40,7 +40,7 @@ export function BrowserSection({ settings }: { settings: Settings }) {
         <SearchField searchUrl={searchUrl} />
       </Setting>
       <Setting label={BROWSER.links} note={linkTarget === 'in-app' ? BROWSER.linksNote : undefined}>
-        <Segment label={BROWSER.links} value={linkTarget} options={LINK_TARGETS} onChange={(next) => void writeSettings({ browser: { linkTarget: next } })} />
+        <Segment label={BROWSER.links} value={linkTarget} options={LINK_TARGETS} onChange={(next) => writeSettings({ browser: { linkTarget: next } })} />
       </Setting>
       {/* E4b start: the imported Chrome profiles, their extension toggles and removal */}
       <BrowserImport />

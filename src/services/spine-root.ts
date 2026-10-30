@@ -20,7 +20,9 @@ import type { ClientPort } from '@shared/client/port';
 import { claudeConfigDir } from '@shared/engine/config-dir';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
+import { OpLedger } from '@shared/host/op-ledger';
 import type { CommandResult } from '@shared/ipc/schema';
+import type { Enrollment } from '@shared/machine/identity';
 import type { MachineRef } from '@shared/machine/ref';
 import { settingsPaths } from '@shared/settings/paths';
 import type { ServicesBus } from '@shared/spine/bus';
@@ -41,6 +43,7 @@ import { laneAAttention } from './lane-a/attention';
 import { sminosHome } from './lane-a/discovery';
 import { createLaneADriver, registerLaneA } from './lane-a/driver';
 import { startLibrary } from './library';
+import { registerMachineOps } from './machine-ops';
 import { startOwnerChannel } from './owner/register';
 import { startEngineConfigure } from './settings/engine-configure';
 import { startHostConfigure } from './settings/host-configure';
@@ -50,7 +53,7 @@ import { takeSpineLock, type SpineLock } from './settings/spine-lock';
 import { splitSettingsFiles } from './settings/split';
 import { readUserEngineDefaults } from './settings/user-engine-defaults';
 import { sideThreadEvents, startSideThreads } from './side/side-threads';
-import { startSessions } from './sessions';
+import { startSessions, type HeldReplay } from './sessions';
 import { transcriptPathOf } from './sessions/context';
 import { trashFor } from './sessions/e2e-trash';
 import { InactiveArchive, scheduleInactiveArchive } from './sessions/inactive-archive';
@@ -63,6 +66,7 @@ import { SessionService } from './sessions/service';
 import { engineHostSettled, registerSessionServiceHandlers } from './sessions/service-register';
 import { createSpineView } from './sessions/spine-view';
 import { stopParts, type Part } from './stop-parts';
+import { allSettling, Work, type Settling } from './work';
 import { startYield } from './sessions/yield';
 
 export interface SpineData {
@@ -72,21 +76,25 @@ export interface SpineData {
   readonly paths: { client: string; machine: string };
 }
 
-// O3-A's data start, unchanged (O3 §2, §3; contracts O3X2, O3X3): `spine.lock` before either settings file is migrated
-// or written and before the index opens (startSpine); then, holding it, the split of a unified settings file, once, and
-// the machine half. Refused, nothing is migrated and the machine half is read, never written. The lock is held for the
-// process's life: released at its exit, never at a shutdown step, since the steps' promises settle after the last step
-// is called and a writer still finishing (an intent's rename) must not run beside a candidate that took the lock.
-export async function openSpineData(profile: string, { build }: { build: string }): Promise<SpineData> {
+// O3-A's data start (O3 §2, §3; contracts O3X2, O3X3): `spine.lock` before either settings file is migrated or written
+// and before the index opens (startSpine); then, holding it, the split of a unified settings file, once, and the machine
+// half. Refused, nothing is migrated and the machine half is read, never written. The lock is held for the process's
+// life: released at its exit, never at a shutdown step, since the steps' promises settle after the last step is called
+// and a writer still finishing (an intent's rename) must not run beside a candidate that took the lock.
+// P5 O3-D M2 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §A, D26): a process that loads the spine
+// more than once (`mawsd`) takes the lock once itself (`takeSpineLock`) and opens each load's data under it (`lock`),
+// since the lock refuses this very process's second take; with none given, the one-shot form above (main's).
+export async function openSpineData(profile: string, { build, lock: given }: { build: string; lock?: SpineLock }): Promise<SpineData> {
   const paths = settingsPaths(profile);
-  const lock = await takeSpineLock(profile, { build });
-  process.once('exit', lock.release);
+  const lock = given ?? (await takeSpineLock(profile, { build }));
+  if (!given) process.once('exit', lock.release);
   const split = lock.refused === null ? splitSettingsFiles(paths) : null;
   const machineSettings = startMachineSettings(paths.machine, { refused: lock.refused ?? split?.machineRefused ?? null, unsplit: split?.unsplit });
   return { lock, refused: lock.refused, machineSettings, paths };
 }
 
-export type SpineHosts = Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onState' | 'onStreaming' | 'streaming' | 'snapshot' | 'setResync'>;
+// P5 O3-D M2: `replay`, a host adapter that replays what it held while the spine loaded (mawsd's; sessions/index.ts)
+export type SpineHosts = Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onState' | 'onStreaming' | 'streaming' | 'snapshot' | 'setResync'> & { replay?: HeldReplay };
 
 export interface SpineDeps {
   profile: string; // <userData>, the daemon's profile (O3 §1)
@@ -104,24 +112,37 @@ export interface SpineDeps {
   appPath: string; // the app's code (Electron's app.getAppPath()): replay fixtures' checkout
   devRoot: string; // the development app root: a scenario's relative path
   home: string;
+  enrollment?: () => Enrollment | null; // the machine's (mawsd: its endpoint's in process, D38); main's root has none
 }
 
 export interface SpineRoot {
   readonly view: SpineView;
+  // P5 O3-D M2 (Interfaces §A, D27): no command or intercept of the spine's running, no session setup, recovery or
+  // reconciliation, sweep run, attention write pass or lane A probe in flight (each part reports its own); a release
+  // and a yield wait for it before `stop` closes the index. `busy` reads the same facts now.
+  settled(): Promise<void>;
+  busy(): boolean;
   stop(): void;
+  // P5 O3-D M6 (fix round 1; mawsd's discovery wake): whether the index holds the engine host's latest scan, its
+  // discoveries applied (IndexSessionSource.discoveryApplied), and each time it comes to. Optional for a stand-in root.
+  discovery?: { applied(): boolean; onApplied(listener: () => void): () => void };
 }
 
 export function startSpine(deps: SpineDeps): SpineRoot {
-  const { profile, data, hosts, bus, engineEnv } = deps;
+  const { profile, data, hosts, engineEnv } = deps;
   const machineSettings = data.machineSettings;
   const spineRuns = data.refused === null;
   const parts: Part[] = []; // in today's shutdown order (D21), each stopped whatever an earlier one threw
+  // P5 O3-D M2: every command and intercept the parts register counted while it runs, and what each part has in flight
+  const commands = new Work();
+  const bus = countingBus(deps.bus, commands);
+  const settling: Settling[] = [commands];
 
   // C4: the index (<profile>/index.sqlite) answers the record side of session.*, and its session source folds the
   // engine host's store events into it once the host is ready; the read model starts the source (refused unstarted in
   // launch mode scenario) and stops it. P5 O3-A: unavailable, its file never opened, in a run refused the spine.
   const index = new Index(join(profile, 'index.sqlite'), { refused: data.refused });
-  void index.refreshOrgProjects({ machine: deps.machine }); // P5 O6 M5: each project's org project, derived again at every start (OX3)
+  void index.refreshOrgProjects({ machine: deps.machine, enrollment: deps.enrollment }); // P5 O6 M5: each project's org project, derived again at every start (OX3)
   registerIndexHandlers(index, bus);
   const indexSource = new IndexSessionSource(index, hosts, { emit: bus.emit });
   // C3's attention service over the index (its fallback file only when the index cannot be read); none when refused
@@ -140,6 +161,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   if (index.unavailable === null) seedReplayFixtures(index.fixtures, appRoot(deps.appPath));
   if (replays) parts.push(['replays', () => replays.dispose()]);
   if (attention) parts.push(['attention', () => attention.stop()]);
+  if (attention) settling.push(attention.writing);
 
   // P5 O9 M2, M6 (O3 Decision Log 13): the local lane A driver, the spine's: it writes <profile>/lane-a/ and drives the
   // sessions the index holds, so a run refused the spine starts none and its laneA.* commands have no handler (the
@@ -160,6 +182,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       emit: (name, payload) => void bus.emit(name, payload),
     });
     registerLaneA(laneA, bus.register);
+    settling.push(laneA.probes);
     // M6: each bridged session's pending requests are attention items, and its digest reads its live phase from the
     // bridge while the bridge is live (today's `foreign` otherwise)
     const laneAItems = laneAAttention({ set: (appId, entries) => attention.setLaneAItems(appId, entries) });
@@ -214,10 +237,12 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     index,
     intents,
     tap: bus.onEmitted,
-    restoredIds: attention?.restoredIds ?? new Set(),
     acquire: (id, reason) => (sessionService ? sessionService.acquire(id, reason) : Promise.reject(new Error(`MAWS cannot reach its sessions this run: ${data.refused}`))),
   });
   parts.push(['sessions', () => sessions.stop()], ['view', () => spineView.stop()]);
+  // P5 O3-D M5b (Interfaces §F): files' admission read for main's mirror of the view on the daemon shape, as the view
+  // answers it in process ([] while the index is unavailable)
+  bus.register('library.fileLinkedPaths', async ({ appSessionId }) => ({ paths: await spineView.view.fileLinkedPaths(appSessionId as AppSessionId) }));
   // registered after the read model's stop, so the index source has stopped before the index it reads closes
   parts.push(['index', () => index.close()]);
 
@@ -271,6 +296,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       streaming: () => hosts.streaming('engine-host'), emit: (name, payload) => void bus.emit(name, payload), onSettings: (listener) => machineSettings.onChange(() => listener()),
     });
     parts.push(['owner channel', ownerChannel.stop]);
+    settling.push(ownerChannel.work);
     // The session service (M3): intents, start, fork, archive, delete, rename and the trust check, reading the global
     // config and the store with the environment the engine receives. Its start resets every stale `self` holder at once
     // (D-16), then forgets stale bootstrap ids and reconciles interrupted handoffs once the engine host answers.
@@ -299,8 +325,9 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       ownerChannel: ownerChannel.launches, // P2-C
       acquisitions: sessions.model, // P2-A (X16): the digest's availability follows each acquisition
     });
-    registerSessionServiceHandlers(service, bus);
+    const unintercept = registerSessionServiceHandlers(service, bus, sessions.mode); // P5 O3-D M4: the rewind repair's intercepts in launch mode index only
     sessionService = service;
+    settling.push(service.work);
     // The sweep keeps the machine's interest union (D11): on the embedded shape main's interest report's set
     const inactiveArchive = new InactiveArchive({
       index, git: createGitRunner(), status: (id) => sessions.model.engineStatus(id),
@@ -314,9 +341,14 @@ export function startSpine(deps: SpineDeps): SpineRoot {
         return times.length ? Math.max(...times) : null;
       },
     });
-    bus.register('session.archiveOlder', ({ days, projectId }) => inactiveArchive.run(days, projectId as ProjectId | null));
-    parts.push(['inactive archive', scheduleInactiveArchive(inactiveArchive, () => machineSettings.state().sessions.archiveInactiveDays, (changed) => machineSettings.onChange(() => changed()), (scanned) => indexSource.onScanned(scanned))]);
+    // P5 O3-D M2: a sweep's run counted to its end, whether a command or its schedule started it
+    const sweeping = new Work();
+    settling.push(sweeping);
+    const sweep: Pick<InactiveArchive, 'ready' | 'run'> = { ready: () => inactiveArchive.ready(), run: (...args) => sweeping.track(inactiveArchive.run(...args)) };
+    bus.register('session.archiveOlder', ({ days, projectId }) => sweep.run(days, projectId as ProjectId | null));
+    parts.push(['inactive archive', scheduleInactiveArchive(sweep, () => machineSettings.state().sessions.archiveInactiveDays, (changed) => machineSettings.onChange(() => changed()), (scanned) => indexSource.onScanned(scanned))]);
     service.start().catch((error: unknown) => console.error('[sessions] the session service failed to start:', error));
+    parts.push(['session service', () => (unintercept(), service.dispose())]); // P5 O3-D M2: a startup still waiting resumes into nothing
   }
   registerObservedFacts(hosts.dispatch, bus); // P2-A (X17): the engine host's observed facts, beside session.digests
   // W7: a live MAWS process yields when a terminal or job that resumed its session starts writing into it; E3: each
@@ -353,6 +385,17 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       env: deps.env,
     })]);
   }
+  // P5 O3-D M5b (Interfaces §G; contract O3X3): the machine half as main's settings mirror reads it on the daemon shape:
+  // the settings with their revision (bumped at each persisted change), a patch answered once it persisted and every
+  // listener was told (refused, with nothing changed, in a run that may not write the file), and each change emitted
+  let machineRevision = 0;
+  const offMachineChanged = machineSettings.onChange((settings) => {
+    machineRevision += 1;
+    bus.emit('machineSettings.changed', { settings });
+  });
+  parts.push(['machine settings', offMachineChanged]);
+  bus.register('machineSettings.get', () => ({ settings: machineSettings.state(), version: machineRevision }));
+  bus.register('machineSettings.set', async ({ patch }) => ({ settings: await machineSettings.update(patch) }));
   // C12: the Settings tab's read of the configuration the spine holds for it (P5 O3-A: rejects when refused); W3
   bus.register('settings.engineApplied', () => (engineConfigure ? engineConfigure.applied() : Promise.reject(new Error(`the engine settings are not applied this run: ${data.refused}`))));
   bus.register('settings.userEngineDefaults', userDefaults);
@@ -368,9 +411,27 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   // .spaces and library.changed answered from it. It stops in the same pass as the index's close, so no sync step runs
   // between them, and after it applies nothing.
   parts.push(['library', startLibrary({ index, hosts, register: bus.register, emit: bus.emit, e2e: deps.env.MAWS_E2E === '1' }).stop]);
+  // P5 O3-D M4 (Interfaces §H; O3X7): the services' operation ledger, a spine file under the lock, none in a refused run;
+  // a remote act on the spine is claimed and run once through it (machine-ops.ts)
+  if (spineRuns) registerMachineOps(bus, OpLedger.open(profile, 'spine-ops.jsonl', { log: (line) => console.warn(`[spine-ops] ${line}`) }));
 
+  const root = allSettling(settling);
   return {
     view: spineView.view,
+    settled: () => root.settled(),
+    busy: () => root.busy(),
     stop: () => stopParts('spine', parts),
+    discovery: { applied: () => indexSource.discoveryApplied(), onApplied: (listener) => indexSource.onDiscoveryApplied(listener) },
+  };
+}
+
+// The bus the parts register through: each command handler and intercept counted in `work` while it runs (P5 O3-D M2).
+function countingBus(bus: ServicesBus, work: Work): ServicesBus {
+  const counted = <H extends (input: never, context: never) => unknown>(handler: H): H =>
+    ((input: never, context: never) => work.track(Promise.resolve().then(() => handler(input, context)))) as unknown as H;
+  return {
+    ...bus,
+    register: (name, handler) => bus.register(name, counted(handler)),
+    intercept: (name, handler) => bus.intercept(name, counted(handler)),
   };
 }

@@ -48,8 +48,21 @@ export function Chip({ children }: { children: ReactNode }) {
   return <span className="inline-flex items-center rounded-sm border border-border px-2 py-0.5 text-ui-sm whitespace-nowrap text-fg-muted">{children}</span>;
 }
 
-export function Segment<V extends string>({ label, value, options, onChange }: { label: string; value: V; options: readonly { value: V; label: string }[]; onChange(value: V): void }) {
+// An `onChange` that answers its write's promise: the option chosen shows while the write is out (on the daemon shape a
+// machine field's crosses to `mawsd` and back before the store moves, M5b fix round 2), then whatever the store holds,
+// the old value again for a refused write.
+export function Segment<V extends string>({ label, value, options, onChange }: { label: string; value: V; options: readonly { value: V; label: string }[]; onChange(value: V): void | Promise<unknown> }) {
   const name = useId();
+  const [pending, setPending] = useState<{ chosen: V; over: V } | null>(null);
+  if (pending !== null && pending.over !== value) setPending(null); // the store moved: show its value
+  const shown = pending?.chosen ?? value;
+  const choose = (next: V) => {
+    const writing = onChange(next);
+    if (!(writing instanceof Promise)) return;
+    const mine = { chosen: next, over: value };
+    setPending(mine);
+    void writing.finally(() => setPending((current) => (current === mine ? null : current)));
+  };
   return (
     <span role="radiogroup" aria-label={label} className="flex max-w-[260px] flex-1 rounded-sm border border-border-strong bg-bg p-[3px]">
       {options.map((option) => (
@@ -57,7 +70,7 @@ export function Segment<V extends string>({ label, value, options, onChange }: {
           key={option.value}
           className="relative flex-1 cursor-default rounded-sm px-1.5 py-1 text-center text-ui-sm whitespace-nowrap text-fg-muted has-[:checked]:bg-bg-active has-[:checked]:text-fg has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent"
         >
-          <input type="radio" name={name} value={option.value} checked={value === option.value} onChange={() => onChange(option.value)} className="absolute opacity-0" />
+          <input type="radio" name={name} value={option.value} checked={shown === option.value} onChange={() => choose(option.value)} className="absolute opacity-0" />
           {option.label}
         </label>
       ))}

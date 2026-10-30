@@ -141,7 +141,15 @@ export function startNotifier(view: NotifierView, deps: NotifierDeps): () => voi
     for (const [id, items] of view.allAttention()) if (inNeedsYou(id) && items.some((i) => isOpen(i) && isActionable(i))) count++;
     deps.port.badge(null, count); // no client to badge: nothing to do
   };
-  const offs = [view.on('attention', onAttention), view.on('digest', onDigest), view.on('record', () => updateBadge())];
+  // P5 O3-D M5b fix round 5: a view that loads after the notifier starts (main's mirror of mawsd's spine) tells its first
+  // snapshot's records and digests by none of the events above, and its members answer in any order, so the badge
+  // counted at an attention change may have found no record yet; the readers start from its availability (spine-mirror.ts),
+  // which in launch mode scenario settles on the scenario's reason rather than null, so every change of it counts again
+  const onAvailability = () => {
+    for (const d of view.digests()) if (!previous.has(d.appSessionId)) previous.set(d.appSessionId, d);
+    updateBadge();
+  };
+  const offs = [view.on('attention', onAttention), view.on('digest', onDigest), view.on('record', () => updateBadge()), view.on('availability', onAvailability)];
   updateBadge();
   return () => { offs.forEach((off) => off()); for (const n of live.keys()) n.close(); live.clear(); };
 }

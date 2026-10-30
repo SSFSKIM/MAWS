@@ -87,7 +87,7 @@ export class InactiveArchive {
 // store (`scanned`), since none runs before the index is current; disabling or shutdown invalidates an in-flight sweep
 // before another record can be archived.
 export function scheduleInactiveArchive(
-  archiver: InactiveArchive,
+  archiver: Pick<InactiveArchive, 'ready' | 'run'>, // P5 O3-D M2: the spine's root passes one whose runs it counts
   days: () => 7 | 14 | 30 | null,
   subscribe: (changed: () => void) => () => void,
   scanned: (listener: () => void) => () => void,

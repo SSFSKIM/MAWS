@@ -4,9 +4,9 @@ import type { CommandGrades } from '../grades';
 export const grades = {
   'fs.sessionText': 'view',
   'fs.state': 'machine-admin', // the store's diagnostics: the config home and every holder
-  'fs.scan': 'machine-admin', // scan, bind and unbind: bridged, but only main's index sends them
-  'fs.bind': 'machine-admin',
-  'fs.unbind': 'machine-admin',
+  'fs.scan': 'internal', // P5 O3-D (P5 Decision Log 36): scan, bind and unbind are main-only, the index source's alone
+  'fs.bind': 'internal',
+  'fs.unbind': 'internal',
   'fs.holders': 'view',
   'fs.unfollow': 'view',
   'fs.subagents': 'view',

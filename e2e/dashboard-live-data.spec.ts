@@ -26,7 +26,8 @@
 //  10. a revoke during a slow call publishes nothing; the last rows stay and turn stale by expiry alone, uncalled
 //  11. Restore brings the first rows back, past the latest two snapshots of their query (the version pin kept them),
 //      and a closed and reopened tab keeps them
-//  12. allowed again, then a scheduled refresh; an ordinary quit stops the engine
+//  12. allowed again, then a scheduled refresh; the engine gone at the quit (on the daemon shape, P5 O3-D Q1 and D12,
+//      a quit stops nothing, so the owner stops the session first)
 //  13. relaunched: the grant held, the schedule on, the dashboard on screen in the active tab, no eligible engine; ten real
 //      minutes with no call, no new session and no new launch
 // E3c adds a separate direct scene: a verified source remains in the host after the owner stops its engine.
@@ -434,7 +435,7 @@ test('granted live dataset: the ownerâ€™s grant, Start and controls, the agentâ€
         expect(scene.toolCallsBetween(revokedAt, Date.now()), 'revoked, the restored query is not called').toEqual([]);
       });
 
-      await test.step('12. allowed again, the page reads at once, then on schedule; an ordinary quit stops the engine', async () => {
+      await test.step('12. allowed again, the page reads at once, then on schedule; the engine gone at the quit', async () => {
         scene.fixtureReply({ reply: 'rows', rows: rows(...AGAIN) });
         const sheet = await openSheet(views);
         const allowedAt = Date.now();
@@ -444,8 +445,13 @@ test('granted live dataset: the ownerâ€™s grant, Start and controls, the agentâ€
         await drawsRows(views, AGAIN, 'allowed again');
         const scheduled = await nextCall(scene, Date.now(), 40_000);
         await expect.poll(async () => (await readDataset(agent, AUTHOR, id)).at!, { timeout: 15_000, message: 'the scheduled refresh published' }).toBeGreaterThanOrEqual(Date.parse(scheduled.at) - 1_000);
+        // On the embedded shape an ordinary quit stops the idle engine with the app; on the daemon shape (P5 O3-D Q1, D12)
+        // a quit stops nothing and the session would outlive the app under its mawsd until the idle clock (D38: 10 min),
+        // which step 13's "no engine after the relaunch" would read, so the owner stops it first (connectors.spec.ts, M5b)
+        const daemon = value(await invoke(page, 'host.status', undefined)).transport === 'daemon';
+        if (daemon) await stopEngine(scene, run, engine);
         await scene.quit(run);
-        await expect.poll(() => scene.pidAlive(engine.pid), { timeout: 30_000, message: 'the engine stopped with the app' }).toBe(false);
+        await expect.poll(() => scene.pidAlive(engine.pid), { timeout: 30_000, message: daemon ? 'the engine stopped before the quit' : 'the engine stopped with the app' }).toBe(false);
       });
 
       await test.step('13. relaunched with the grant held, the schedule on and the dashboard on screen: ten real minutes with no route call nothing and acquire nothing', async () => {

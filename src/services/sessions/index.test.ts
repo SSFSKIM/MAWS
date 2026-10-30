@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
 import { endableClientRef } from '@shared/ipc/client';
@@ -116,6 +117,23 @@ describe('launch mode reaches the page', () => {
     const env = { MAWS_SESSION_SOURCE: 'stub:test/fixtures/shell/empty.json', MAWS_SCENARIO_CLOCK: 'manual', MAWS_E2E: '1' };
     const scenario = start({ env, hosts });
     expect(await bus.invoke('session.launchMode')).toEqual({ ok: true, value: { mode: 'scenario' } });
+    scenario.stop();
+    log.mockRestore();
+  });
+});
+
+// M5b fix round 6: a scenario's statuses are the spine's own (D11); its load emits none of them, so main's mirror on the
+// daemon shape reads them with session.engineStatuses
+describe('session.engineStatuses', () => {
+  it('answers the statuses the read model holds, a scenario’s load-time ones included', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const env = { MAWS_SESSION_SOURCE: 'stub:test/fixtures/shell/nine-sessions.json', MAWS_SCENARIO_CLOCK: 'manual', MAWS_E2E: '1' };
+    const scenario = start({ env, hosts });
+    const fixture = JSON.parse(readFileSync(join(process.cwd(), 'test/fixtures/shell/nine-sessions.json'), 'utf8')) as { engine: { appSessionId: string }[] };
+    const answer = await bus.main('session.engineStatuses', undefined);
+    expect(await bus.invoke('session.engineStatuses'), 'main-only').toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+    expect(answer.ok && (answer.value as { statuses: { appSessionId: string }[] }).statuses.map((s) => s.appSessionId).sort()).toEqual(fixture.engine.map((e) => e.appSessionId).sort());
+    expect(bus.emittedOf('session.status'), 'the load emitted none of them').toEqual([]);
     scenario.stop();
     log.mockRestore();
   });

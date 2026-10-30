@@ -30,7 +30,7 @@ vi.mock('electron', () => ({
 vi.mock('../ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: (name: string, fn: (input?: unknown) => unknown) => state.handlers.set(name, fn), registerMachineHandler: (name: string, fn: (input?: unknown) => unknown) => state.handlers.set(name, fn) /* P5 O6 M1 */, interceptCommand: vi.fn(), dispatchLocal: vi.fn() /* P5 O6 M3 */, CommandFailure: class extends Error {} }));
 vi.mock('../machines', () => ({ startMachines: vi.fn(() => ({ dispatch: vi.fn(), serve: vi.fn(), stop: vi.fn(), onRemote: vi.fn(() => () => {}) /* P5 O8 M2: the rows read the roster */ })) })); // P5 O6 M3: no links, no stand-in
 vi.mock('@shared/host/shell-env', () => ({ captureShellEnvironment: async () => ({ HOME: join(state.root, 'home'), CLAUDE_CONFIG_DIR: state.shellConfig }) }));
-vi.mock('../hosts', () => ({ createHosts: () => ({ start: vi.fn(), stop: vi.fn(), onState: vi.fn(() => () => {}) /* E3 (merge): the dataset holds follow the host's state */, onEvent: vi.fn(() => () => {}) /* P4-AGG M2: the catalog hears plugins.changed */ }), prepareLaunch: () => ({ mode: 'utility', daemon: null, unavailable: null }), refuseTestLaunchOnDefaultProfile: () => {} /* P5 O2 landing: a scratch-profile test launch */ /* P5 O2 M7: the launch's shape, settled at once */ }));
+vi.mock('../hosts', () => ({ createHosts: () => ({ daemon: null /* P5 O3-D M5b: the embedded shape */, hosts: { start: vi.fn(), stop: vi.fn(), onState: vi.fn(() => () => {}) /* E3 (merge): the dataset holds follow the host's state */, onEvent: vi.fn(() => () => {}) /* P4-AGG M2: the catalog hears plugins.changed */ } }), prepareLaunch: () => ({ mode: 'utility', daemon: null, unavailable: null }), refuseTestLaunchOnDefaultProfile: () => {} /* P5 O2 landing: a scratch-profile test launch */ /* P5 O2 M7: the launch's shape, settled at once */ }));
 vi.mock('../client/settings', () => ({ startSettings: () => ({ state: () => ({ settings: state.settings, resolvedTheme: 'light' }), onChange: vi.fn(() => vi.fn()) }) }));
 vi.mock('../window', () => ({ installContentSecurityPolicy: vi.fn(), appUrl: '', createWindow: vi.fn() }));
 vi.mock('../../services/index/index', () => ({ Index: class { unavailable = 'test'; sessions = { get: () => null, list: () => [] }; projects = { list: () => [] }; refreshOrgProjects = async () => {}; } }));
@@ -56,7 +56,7 @@ vi.mock('../../services/files/register', () => ({ registerFilesHandlers: () => (
 vi.mock('../usage/claude-usage-reader', () => ({ claudeUsageDir: () => '', ClaudeUsageReader: class { start() {} } }));
 vi.mock('../usage/claude-usage-control', () => ({ baseUrlFrom: () => null, ClaudeUsageControl: class {} }));
 vi.mock('../gateway/claude-usage-app', () => ({ createClaudeUsageApp: () => ({}), execRunner: vi.fn() }));
-vi.mock('../../services/settings/engine-configure', () => ({ startEngineConfigure: () => ({ stop: vi.fn() }) }));
+vi.mock('../../services/settings/engine-configure', async (original) => ({ ...(await original<object>()), startEngineConfigure: () => ({ stop: vi.fn() }) })); // the budgets (command-budgets.ts) read its CONFIGURE_WAIT_MS
 vi.mock('../../services/settings/host-configure', () => ({ startHostConfigure: () => vi.fn() })); // E10
 vi.mock('../sessions/interest', () => ({ startInterest: () => () => {}, appInterest: () => ({ set: () => new Set(), onChange: () => () => {}, stop: () => {} }) })); // P5 O2 M2: its sibling; P5 O3-C: the app's interest
 vi.mock('../widgets/fixture-backend', () => ({ installWidgetBackend: vi.fn() }));

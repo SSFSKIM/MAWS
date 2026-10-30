@@ -3,3 +3,6 @@
 export const commands = ['machine.identity'] as const;
 
 export const events = [] as const;
+
+// P5 O3-D: the services front's own, sent by main (the browser's socket) and by the endpoint (the services' ledger)
+export const mainOnlyCommands = ['machine.client', 'machine.op', 'machine.opQuery'] as const;

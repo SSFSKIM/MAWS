@@ -69,7 +69,7 @@ function register(docs: Documents | null = documents): void {
   };
   const control = scriptedClient();
   const session = { lifecycle: 'ready' as const, control, status: () => ({ launchId: 'L1', cwd: '/work/project' }) };
-  surface = registerConnectors(on, emit, { onClientGone: (hook) => (gone.push(hook), () => {}) }, { sessions: { get: (id) => (id === SESSION ? (session as never) : undefined) }, store: docs?.store ?? null });
+  surface = registerConnectors(on, emit, { onGone: (hook) => (gone.push(hook), () => {}) }, { sessions: { get: (id) => (id === SESSION ? (session as never) : undefined) }, store: docs?.store ?? null });
 }
 
 async function call<N extends CommandName>(name: N, input: unknown): Promise<CommandOutput<N>> {

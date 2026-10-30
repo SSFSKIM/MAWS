@@ -11,7 +11,8 @@ import { runGit } from '../../../test/support/git-fixture';
 import { tempDir } from '../../../test/support/index-fixture';
 import { Index } from './index';
 import { repoProjectId } from '@shared/machine/project-ids';
-import { deriveOrg, machineProject, remoteKey, remoteName, type Enrollment } from './org-project';
+import { machineProject, type Enrollment } from '@shared/machine/identity';
+import { deriveOrg, remoteKey, remoteName } from './org-project';
 import type { ProjectOrg } from '@shared/ipc/schema/session';
 
 const FIXTURES = join(__dirname, '../../../test/fixtures/sminos');

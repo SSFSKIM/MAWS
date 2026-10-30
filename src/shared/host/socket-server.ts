@@ -26,7 +26,7 @@
 //
 // P5 O2 M4: the capability gate. A client whose hello listed `socket.ptyFrames` gets `pty.data` as pty frames (its port
 // is made with `ptyFrames`); any other, a protocol-2 one included, gets the JSON line. The welcome lists what the
-// identity says, which is WIRE_CAPABILITIES for every host.
+// identity says: the serving host's own list (P5 O3-D: PEER_CAPABILITIES in socket-protocol.ts, never the wire's union).
 //
 // P5 O2 M5 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, "The handshake reflects the upstream"): a relay (`mawsd`'s
 // engine-host.sock and pty-host.sock) welcomes with its upstream's facts, not its own. With `admitHello`, a hello that passed
@@ -35,7 +35,9 @@
 // connection is a refused one: one exit honoured, within the hello's deadline), or `close` (nothing written). `onExit`
 // says whether its exit came from a refused connection.
 //
-// P5 O6 M3: an `admit` option checks each accepted connection's peer before any of the above.
+// P5 O3-D M5 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §L): `admitHello` is told the hello's
+// `appPid` too, and may refuse on its own account (`own`: `mawsd`'s refusal of an app that runs a spine of its own)
+// rather than reflect the upstream's line; the one exit that connection may send says which (`onExit`'s `from.own`).
 import { timingSafeEqual } from 'node:crypto';
 import type { Server, Socket } from 'node:net';
 import { HostClientGoneSchema, HostReadySchema, HostRequestSchema } from '../ipc/host-protocol';
@@ -78,7 +80,7 @@ export interface SupervisorIdentity {
 // P5 O2 M5: what a relay answers a hello with (above)
 export type Admission =
   | { kind: 'welcome'; identity: SupervisorIdentity; counts: { liveSessions: number; rows: number } }
-  | { kind: 'refuse'; line: ServerRefuse }
+  | { kind: 'refuse'; line: ServerRefuse; own?: boolean } // P5 O3-D M5: `own`, the admitting side's refusal, not a reflected one
   | { kind: 'close'; why: string };
 
 // The part of a runtime the socket layer drives (P5 O2 M5: a relay serves its own, which forwards raw).
@@ -86,22 +88,19 @@ export type ServedRuntime = Pick<HostRuntime, 'serve' | 'detach' | 'docPort'>;
 
 export interface SocketServerOptions {
   runtime?: ServedRuntime; // the one client's; with `many`, none
-  many?: { runtimeFor(): ServedRuntime }; // P5 O2 M3: a runtime per welcomed client, none replaced
+  many?: { runtimeFor(client: { appPid: number; capabilities: readonly string[] }): ServedRuntime }; // P5 O2 M3: a runtime per welcomed client, none replaced; P5 O3-D M2: given the hello's appPid and capabilities
   badToken?: 'refuse' | 'close'; // P5 O2 M3: 'refuse' (E10's line) unless said otherwise
   onClientEnd?(): void; // P5 O2 M3: a welcomed client's FIN (above)
   identity(): SupervisorIdentity;
   counts(): { liveSessions: number; rows: number };
   token(): string;
-  onExit(when: 'now' | 'idle', from?: { refused: boolean }): void; // an `exit` line on a connection whose token checked out (P5 O2 M5: `from` says which kind)
-  onClient?(connected: boolean): void; // a client was welcomed, or a client left (not called for a replaced one)
-  admitHello?(peer: WirePeer): Promise<Admission>; // P5 O2 M5: a relay's reflected handshake (above)
+  onExit(when: 'now' | 'idle', from?: { refused: boolean; own?: boolean }): void; // an `exit` line on a connection whose token checked out (P5 O2 M5: `from` says which kind; P5 O3-D M5: `own`, after an admission's own refusal)
+  onClient?(connected: boolean, peer?: WirePeer, appPid?: number): void; // a client was welcomed (P5 O3-D M3: with what its hello said of it; M4: and its appPid), or a client left (not called for a replaced one)
+  admitHello?(peer: WirePeer, appPid: number): Promise<Admission>; // P5 O2 M5: a relay's reflected handshake (above); P5 O3-D M5: with the hello's appPid
   log(line: string): void;
   helloTimeoutMs?: number;
   lineCap?: number;
   docHighWater?: number; // P3-A M5: the document channels' reset mark (DOC_HIGH_WATER unless a test lowers it)
-  // P5 O6 M3: a peer check, consulted on each accepted connection before anything is read from it or the hello's deadline
-  // starts; false destroys the connection. The stand-in's (src/main/machines/serve-standin.ts); the supervisor passes none.
-  admit?(socket: Socket): boolean;
 }
 
 export interface SocketClients {
@@ -129,11 +128,8 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
   server.on('connection', (socket) => accept(socket));
 
   function accept(socket: Socket): void {
-    if (options.admit && !options.admit(socket)) {
-      socket.destroy(); // P5 O6 M3: refused before a byte is read
-      return;
-    }
     let phase: 'hello' | 'refused' | 'done' = 'hello';
+    let refusedOwn = false; // P5 O3-D M5: the admission refused it on its own account
     let welcome: (() => void) | null = null;
     const deadlineMs = options.helloTimeoutMs ?? HELLO_TIMEOUT_MS;
     // the hello's deadline, then (E11) a refused connection's for its one exit
@@ -186,7 +182,7 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
         phase = 'done';
         socket.off('data', onData);
         log(`exit ${exit.value.when} asked by a refused connection`);
-        options.onExit(exit.value.when, { refused: true });
+        options.onExit(exit.value.when, { refused: true, own: refusedOwn });
         return 'stop';
       }
       return onHello(data);
@@ -274,7 +270,7 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
       }
       const admit = options.admitHello;
       welcome = () =>
-        void admit(peer).then(
+        void admit(peer, appPid).then(
           (admission) => admitted(admission, peer, appPid, line),
           (error: unknown) => admitted({ kind: 'close', why: `its admission failed: ${error instanceof Error ? error.message : String(error)}` }, peer, appPid, line),
         );
@@ -297,7 +293,8 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
         return;
       }
       if (admission.kind === 'refuse') {
-        log(`refused a hello with the upstream's refusal (${admission.line.reason})`);
+        refusedOwn = admission.own === true;
+        log(refusedOwn ? `refused a hello with its own refusal (${admission.line.reason})` : `refused a hello with the upstream's refusal (${admission.line.reason})`);
         socket.write(`${JSON.stringify(admission.line)}\n`);
         // a refused connection: one exit, read from what arrived meanwhile and after, within the hello's deadline
         phase = 'refused';
@@ -322,7 +319,7 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
       }
       socket.write(`${JSON.stringify(written)}\n`);
       const port = new SocketPort(socket, splitter.rest(), { lineCap, log, ptyFrames: peer.capabilities.includes(PTY_FRAMES_CAPABILITY) }); // P5 O2 M4
-      const runtime = many ? many.runtimeFor() : options.runtime!; // P5 O2 M3
+      const runtime = many ? many.runtimeFor({ appPid, capabilities: peer.capabilities }) : options.runtime!; // P5 O2 M3; P5 O3-D M2: the hello's facts
       const documents = new HostDocChannels(port, (message, end) => runtime.docPort(message, end), { highWater: options.docHighWater, log }); // P3-A M5
       const client: Client = { socket, port, runtime, documents, peer };
       clients.add(client);
@@ -339,9 +336,9 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
         log('client disconnected');
         options.onClient?.(false);
       });
-      runtime.serve(envelopeOnly(port, client));
+      runtime.serve(envelopeOnly(port, client), { capabilities: peer.capabilities }); // P5 O3-D M3: the app's presence reads them
       log(`client connected: appPid ${appPid} build ${peer.build} wire ${peer.major}.${peer.minor} capabilities [${peer.capabilities.join(', ')}]`);
-      options.onClient?.(true);
+      options.onClient?.(true, peer, appPid);
     }
   }
 

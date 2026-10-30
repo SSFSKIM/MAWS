@@ -4,7 +4,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AppSessionId, AttentionId, ProjectId } from '@shared/graph/ids';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SetupIntent } from '@shared/sessions/intent';
 import type { AcquireOutcome } from '@shared/sessions/setup';
 import { digest, item, project, record, status } from '../../../test/support/builders';
@@ -12,6 +12,7 @@ import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
 import { intentFor } from '../../../test/support/session-host';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from '../index/index';
+import { emittedAttentionSource } from './index';
 import { SessionReadModel, type ReadModelWriter } from './read-model';
 import { createSpineView, type SpineViewDeps } from './spine-view';
 
@@ -27,7 +28,6 @@ describe('the in-process view', () => {
   let writer: ReadModelWriter;
   let bus: FakeBus;
   let intents: Map<AppSessionId, SetupIntent>;
-  let restoredIds: Set<AttentionId>;
   let acquired: [AppSessionId, string][];
   beforeEach(() => {
     dir = tempDir();
@@ -36,7 +36,6 @@ describe('the in-process view', () => {
     model.register({ start: (w) => ((writer = w), () => {}) });
     bus = fakeBus();
     intents = new Map();
-    restoredIds = new Set();
     acquired = [];
   });
   afterEach(() => {
@@ -50,7 +49,6 @@ describe('the in-process view', () => {
     index,
     intents: { get: (id) => intents.get(id) ?? null, list: () => [...intents.values()] },
     tap: bus.onEmitted,
-    restoredIds,
     acquire: async (id, reason) => {
       acquired.push([id, reason]);
       return { status: 'ready' } as AcquireOutcome;
@@ -104,16 +102,19 @@ describe('the in-process view', () => {
     expect(digests).toHaveLength(fromModel.length - 1);
   });
 
-  it('marks silent exactly the restored ids among an attention change’s items', () => {
+  // P5 O3-D M1 (D13): `silent` travels on attention.changed, filled by the attention service from its restored ids, and
+  // the view reads it from the event, as the mirror does (Interfaces §F)
+  it('fires attention with the event’s items and its silent ids, after the read model holds them', () => {
+    model.register(emittedAttentionSource(bus.onEmitted)); // production's order: the read model's tap before the view's
     const view = createSpineView(deps()).view;
     writer.observeRecord(record(A));
     const restored = item(A, 'question', '2026-10-28T09:00:00Z');
     const live = item(A, 'permission', '2026-10-28T10:00:00Z');
-    restoredIds.add(restored.id).add('att-elsewhere' as AttentionId);
-    const heard: [AppSessionId, string[], string[]][] = [];
-    view.on('attention', (id, items, silent) => heard.push([id, items.map((i) => i.id), [...silent]]));
-    writer.observeAttention(A, [restored, live]);
-    expect(heard).toEqual([[A, [restored.id, live.id], [restored.id]]]);
+    const heard: [AppSessionId, string[], string[], number][] = [];
+    view.on('attention', (id, items, silent) => heard.push([id, items.map((i) => i.id), [...silent], view.attention(id).length]));
+    bus.emit('attention.changed', { appSessionId: A, items: [restored, live], silent: [restored.id] });
+    bus.emit('attention.changed', { appSessionId: A, items: [live] }); // an emitter that fills none (the scenario stub)
+    expect(heard).toEqual([[A, [restored.id, live.id], [restored.id], 2], [A, [live.id], [], 1]]);
   });
 
   it('reads intents from the store and hears each session.intent.changed; known is a record or an intent', async () => {
@@ -134,20 +135,26 @@ describe('the in-process view', () => {
     expect(heard).toEqual([[B, true], [B, false]]);
   });
 
-  it('keeps both project sets: the listing from session.projects.changed, every row from the index', () => {
+  // P5 O3-D M1 (D13): both sets from session.projects.changed (`rows` filled by the index source), the index read once at
+  // the start, as the mirror reads its snapshot (Interfaces §F)
+  it('keeps both project sets from session.projects.changed: the listing, and every row when the event carries them', () => {
     const work = join(dir.path, 'work');
     const added = index.projects.add(mkdirOf(join(work, 'added')));
     const view = createSpineView(deps()).view;
     let changes = 0;
     view.on('projects', () => (changes += 1));
-    expect(view.projectRows().map((p) => p.id)).toEqual([added.id]);
+    expect(view.projectRows().map((p) => p.id)).toEqual([added.id]); // read at the start
     index.projects.hide(added.id);
-    expect(changes).toBe(1); // the index's change
-    expect(view.project(added.id)).toMatchObject({ id: added.id, hidden: true }); // a hidden project, marked hidden
+    expect(changes).toBe(0); // the index's own change is the source's to tell, on the event
     const listed = [project('listed', 0)];
-    bus.emit('session.projects.changed', { projects: listed, revision: 7 });
-    expect(changes).toBe(2);
+    bus.emit('session.projects.changed', { projects: listed, revision: 7, rows: index.projects.list({ includeHidden: true }) });
+    expect(changes).toBe(1);
     expect(view.projects()).toEqual(listed);
+    expect(view.project(added.id)).toMatchObject({ id: added.id, hidden: true }); // a hidden project, marked hidden
+    bus.emit('session.projects.changed', { projects: [], revision: 8 }); // no rows: the rows stand
+    expect(changes).toBe(2);
+    expect(view.projects()).toEqual([]);
+    expect(view.projectRows().map((p) => p.id)).toEqual([added.id]);
     expect(view.project('nowhere' as ProjectId)).toBeNull();
   });
 
@@ -172,7 +179,7 @@ describe('the in-process view', () => {
 
   it('names the refusal in a refused run: no projects, no linked paths, and acquire rejects as main’s would', async () => {
     const refused = new Index(join(dir.path, 'refused.sqlite'), { refused: 'another MAWS holds spine.lock' });
-    const view = createSpineView(deps({ index: refused, restoredIds: new Set(), acquire: () => Promise.reject(new Error('MAWS cannot reach its sessions this run: another MAWS holds spine.lock')) })).view;
+    const view = createSpineView(deps({ index: refused, acquire: () => Promise.reject(new Error('MAWS cannot reach its sessions this run: another MAWS holds spine.lock')) })).view;
     expect(view.unavailable()).toBe(refused.unavailable);
     expect(view.unavailable()).toContain('another MAWS holds spine.lock');
     expect([view.projects(), view.projectRows()]).toEqual([[], []]);

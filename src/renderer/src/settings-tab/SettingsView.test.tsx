@@ -222,6 +222,48 @@ describe('settings tab writes one field per row', () => {
   });
   // P2-C end
 
+  // M5b fix round 2 (e2e:settings settings.spec.ts:121): on the daemon shape a machine field's write crosses to mawsd and
+  // back before the store moves, so a segment shows the option chosen while its write is out, then the store's value
+  it('a segment shows the chosen option while its write is out, then what the store holds', async () => {
+    renderView();
+    const invoke = b.bridge.invoke as unknown as ReturnType<typeof vi.fn<(name: string, input: unknown) => Promise<unknown>>>;
+    const real = invoke.getMockImplementation()!;
+    let release!: () => void;
+    invoke.mockImplementation(async (name: string, input: unknown) => {
+      if (name === 'settings.set') await new Promise<void>((resolve) => (release = resolve));
+      return real(name, input);
+    });
+    const direct = () => within(row('Default route')).getByRole('radio', { name: 'Direct' }) as HTMLInputElement;
+    fireEvent.click(direct());
+    expect(direct().checked).toBe(true);
+    await act(async () => release());
+    await vi.waitFor(() => expect(b.sets).toEqual([{ gateway: { defaultRoute: 'direct' } }]));
+    expect(direct().checked).toBe(true);
+  });
+
+  // M5b fix round 3 (E): the option shown while the write is out goes back to the store's when the write is refused, and
+  // the refusal is shown
+  it('a segment whose write is refused puts the old option back and shows the refusal', async () => {
+    renderView();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const invoke = b.bridge.invoke as unknown as ReturnType<typeof vi.fn<(name: string, input: unknown) => Promise<unknown>>>;
+    const real = invoke.getMockImplementation()!;
+    let refuse!: () => void;
+    invoke.mockImplementation(async (name: string, input: unknown) => {
+      if (name !== 'settings.set') return real(name, input);
+      await new Promise<void>((resolve) => (refuse = resolve));
+      return { ok: false, error: { code: 'host_unavailable', message: 'the machine daemon is not reachable' } };
+    });
+    const radio = (name: string) => within(row('Default route')).getByRole('radio', { name }) as HTMLInputElement;
+    fireEvent.click(radio('Direct'));
+    expect(radio('Direct').checked).toBe(true); // shown while the write is out
+    await act(async () => refuse());
+    await vi.waitFor(() => expect(useNotices.getState().notices).toEqual([expect.objectContaining({ kind: 'toast', level: 'warning', text: 'The setting was not saved · the machine daemon is not reachable' })]));
+    expect(radio('ClaudeUsage relay').checked).toBe(true);
+    expect(radio('Direct').checked).toBe(false);
+    expect(error).toHaveBeenCalled();
+  });
+
   it('a refused write shows a toast and the row keeps the value the store holds', async () => {
     renderView();
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});

@@ -10,11 +10,18 @@ import type { MachineRef } from '@shared/machine/ref';
 export interface EndpointServices {
   /** stateDir: <profile>/mawsd/endpoint, 0700; only `unit` binds the tailnet listener by default. */
   machine: { ref: MachineRef; profileDir: string; stateDir: string; kind: 'unit' | 'private' };
-  /** Raw; wakes a parked host; pty.attach goes with credit: false, pty.ack and pty.checkpoint are refused. */
+  /**
+   * Raw; wakes a parked host; pty.attach goes with credit: false, pty.ack and pty.checkpoint are refused. P5 O3-D M4:
+   * `machine` is `mawsd`'s services front (the daemon's own namespace and the spine's commands, which load the spine).
+   */
   dispatch(owner: 'engine-host' | 'pty-host' | 'machine', name: string, input: unknown, client?: ClientRef): Promise<HostResponse>;
-  /** Lane B events only while an app is attached, until O3. */
-  onEvent(listener: (owner: 'engine-host' | 'pty-host', message: { name: string; payload: unknown }) => void): () => void;
-  /** An app attached to, or left, engine-host.sock (a recycle: the endpoint's document channels ended). */
+  /** Lane B events whenever they are available (`onAttachment`); P5 O3-D M4: the spine's events (owner `machine`) whenever it emits them. */
+  onEvent(listener: (owner: 'engine-host' | 'pty-host' | 'machine', message: { name: string; payload: unknown }) => void): () => void;
+  /**
+   * Whether lane B events are available (P5 O3-D M3): with `mawsd`'s permanent client, true from its link's streaming on,
+   * app or none; with O2's recycle per attachment, an app attached to, or left, engine-host.sock (a recycle: the
+   * endpoint's document channels ended).
+   */
   onAttachment(listener: (attached: boolean) => void): () => void;
   /** pty.data frames, and document frames on the endpoint's channels only. */
   onFrame(
@@ -46,5 +53,7 @@ export interface EndpointModule {
   stop(): Promise<void>;
   /** daemon.status's endpoint.detail; no paths, addresses or key material. */
   status(): unknown;
+  /** The enrollment held (its name and org), null while unenrolled: `machine.identity`'s project id (P5 O3-D D38). */
+  enrollment(): { name: string; org: string } | null;
   cli(command: string, args: readonly string[], secret?: string): Promise<{ code: number; out: string }>;
 }

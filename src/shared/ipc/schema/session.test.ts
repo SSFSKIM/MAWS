@@ -47,8 +47,8 @@ describe('P2-A availability and session.acquire', () => {
     expect(SessionDigestSchema.safeParse({ ...digest, availability: 'running' }).success).toBe(false);
   });
 
-  it('owns session.acquire in main, with a reason from the seven and the start options', () => {
-    expect(commands['session.acquire'].owner).toBe('main');
+  it('owns session.acquire on the machine, with a reason from the seven and the start options', () => {
+    expect(commands['session.acquire'].owner).toBe('machine');
     expect(ACQUIRE_REASONS).toEqual(['send', 'chip', 'read', 'side', 'peer', 'resubmit', 'resume']);
     for (const reason of ACQUIRE_REASONS) expect(validateCommandInput('session.acquire', { appSessionId: ID, reason }).ok, reason).toBe(true);
     expect(validateCommandInput('session.acquire', { appSessionId: ID, reason: 'mount' }).ok).toBe(false);
@@ -80,12 +80,12 @@ describe('P2-A availability and session.acquire', () => {
 describe('C10 session lifecycle entries', () => {
   const ID = '0b6a2d3e-8f1c-4a57-9b2e-1d3c4e5f6a7b';
   it('registers every C10 name with its owner, and the two events', () => {
-    const main = [
+    const machine = [
       'session.archive', 'session.archiveOlder', 'session.create', 'session.delete', 'session.fork', 'session.intent.discard', 'session.intent.get', 'session.intent.list',
       'session.intent.patch', 'session.intent.release', 'session.intent.resolveWorktree', 'session.rename', 'session.revealPath', 'session.start', 'session.trust.check',
       'session.deletions.list', 'session.deletions.keep', 'session.deletions.preview',
     ] as const;
-    for (const name of main) expect(commands[name].owner, name).toBe('main');
+    for (const name of machine) expect(commands[name].owner, name).toBe('machine');
     expect(commands['session.forget'].owner).toBe('engine-host');
     expect(Object.hasOwn(events, 'session.setup')).toBe(true);
     expect(Object.hasOwn(events, 'session.intent.changed')).toBe(true);

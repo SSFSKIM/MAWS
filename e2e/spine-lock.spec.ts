@@ -5,34 +5,50 @@
 // adds, and a split the holder left in progress (its machine file written, settings.json still unified) is not finished
 // by the refused run; host.status names the holder. Once the holder is gone, the next launch breaks the stale lock, takes
 // it, finishes the split, and releases the lock when it quits.
+//
+// P5 O3-D M5a (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §L, D21): the `SingletonLock` probe. The
+// yield's second signal reads Electron's single-instance lock in the profile, which Chromium writes on Linux as a
+// symlink `<host>-<pid>`; what macOS Electron writes there was unknown until a launch on a scratch profile showed it. The
+// probe records it (one `[probe] SingletonLock …` line, an annotation and an attachment) and asserts nothing about its
+// form. Its line (hosted e2e:settings run 40978897272): a symlink `<host>-<pid>` naming the app's pid, removed at a
+// clean quit, so `mawsd` reads it (SINGLETON_LOCK_SIGNAL_DEFAULT on, under claimSpine).
+//
+// P5 O3-D M5b (acceptance 1's one writer, on the daemon shape): the lock's holder by shape. On the embedded shape it is
+// main; on the daemon shape it is the profile's `mawsd`, which outlives the app, so a launch's end there closes the app
+// and stops `mawsd` as its own clean stop does (SIGTERM), which releases the lock, before the profile's cleanup (whose
+// SIGKILL would leave the lock behind, stale). A refused spine is `mawsd`'s on the daemon shape, said by host.status
+// from its daemon.status, and the client half still runs in main.
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { hostname, tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { invoke, value } from './support/c7-replay';
-import { launchMaws } from './support/launch';
+import { launchMaws, type MawsLaunch } from './support/launch';
+import { isAlive } from './support/processes';
+import { spineFiles } from '../test/support/spine-files'; // P5 O3-D M6: shared with cross-build's (pre-O3 app, daemon) scene
 
 const HOLDER_BUILD = '9.9.9+e2e-holder';
 
-// Every file at or under the spine's paths (§1's table; P5 O9: and lane A's driver files), with its bytes.
-const SPINE_PATHS = ['index.sqlite', 'index.sqlite-wal', 'index.sqlite-shm', 'machine-settings.json', 'sessions', 'prompt-history.jsonl', 'attention.json', 'lane-a'];
-function spineFiles(userData: string): Map<string, string> {
-  const files = new Map<string, string>();
-  const visit = (path: string) => {
-    if (!existsSync(path)) return;
-    if (statSync(path).isDirectory()) {
-      files.set(`${relative(userData, path)}/`, '');
-      for (const name of readdirSync(path)) visit(join(path, name));
-    } else files.set(relative(userData, path), readFileSync(path).toString('base64'));
-  };
-  for (const name of SPINE_PATHS) visit(join(userData, name));
-  return files;
-}
-
 const procStartOf = (pid: number) => execFileSync('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], { env: { LC_ALL: 'C', TZ: 'UTC' }, encoding: 'utf8' }).trim();
 const hostStatus = async (page: Parameters<typeof invoke>[0]) => value(await invoke(page, 'host.status', undefined));
+// P5 O3-D M5b: the pid that holds the spine for this launch, main's or its mawsd's
+const spineHolder = async (maws: MawsLaunch) => {
+  const status = await hostStatus(maws.page);
+  return status.transport === 'daemon' ? status.daemon!.pid : maws.app.process().pid!;
+};
+// A launch's end with its spine's holder stopped cleanly: on the daemon shape the app closed, then its mawsd stopped
+async function endLaunch(maws: MawsLaunch): Promise<void> {
+  const status = await hostStatus(maws.page).catch(() => null);
+  const daemon = status?.transport === 'daemon' ? (status.daemon?.pid ?? null) : null;
+  if (daemon !== null) {
+    await maws.app.close();
+    process.kill(daemon, 'SIGTERM');
+    await expect.poll(() => isAlive(daemon), { timeout: 15_000, message: 'mawsd stops at SIGTERM' }).toBe(false);
+  }
+  await maws.cleanup();
+}
 
 test('beside a live holder of spine.lock a launch writes no spine file and finishes no split; once the holder is gone the next launch takes the lock', async () => {
   test.setTimeout(240_000);
@@ -45,7 +61,7 @@ test('beside a live holder of spine.lock a launch writes no spine file and finis
       value(await invoke(maws.page, 'settings.set', { theme: 'dark', gateway: { defaultRoute: 'direct' } }));
       expect(JSON.parse(readFileSync(join(userData, 'machine-settings.json'), 'utf8'))).toMatchObject({ version: 1, gateway: { defaultRoute: 'direct' } });
     } finally {
-      await maws.cleanup();
+      await endLaunch(maws);
     }
     expect(existsSync(join(userData, 'spine.lock')), 'the lock is released when its holder quits').toBe(false);
     // the machine's other files, as a holder's services would have left them
@@ -94,16 +110,59 @@ test('beside a live holder of spine.lock a launch writes no spine file and finis
     maws = await launchMaws({ userData });
     try {
       expect((await hostStatus(maws.page)).spineRefused ?? null).toBeNull();
-      expect(JSON.parse(readFileSync(join(userData, 'spine.lock'), 'utf8'))).toMatchObject({ pid: maws.app.process().pid });
+      const holds = await spineHolder(maws); // P5 O3-D M5b: main, or on the daemon shape its mawsd
+      await expect.poll(() => JSON.parse(readFileSync(join(userData, 'spine.lock'), 'utf8')).pid, { timeout: 30_000 }).toBe(holds);
       expect(value(await invoke(maws.page, 'settings.get', undefined)).settings).toMatchObject({ theme: 'dark', gateway: { defaultRoute: 'direct' } });
     } finally {
-      await maws.cleanup();
+      await endLaunch(maws);
     }
     expect(JSON.parse(readFileSync(join(userData, 'settings.json'), 'utf8'))).toMatchObject({ version: 21, theme: 'dark' });
     expect(JSON.parse(readFileSync(join(userData, 'settings.json'), 'utf8'))).not.toHaveProperty('gateway');
     expect(existsSync(join(userData, 'spine.lock'))).toBe(false);
   } finally {
     holder?.kill('SIGKILL');
+    rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+// What the profile's Singleton* entries are while the app runs: each one's kind, and for SingletonLock its link target
+// or content read as `<host>-<pid>` (the host reported only as whether it is this machine's name).
+function singletonEntries(userData: string, appPid: number): Record<string, unknown> {
+  const entries: Record<string, unknown> = {};
+  for (const name of readdirSync(userData).filter((entry) => entry.startsWith('Singleton')).sort()) {
+    const path = join(userData, name);
+    const stat = lstatSync(path);
+    const kind = stat.isSymbolicLink() ? 'symlink' : stat.isFile() ? 'file' : stat.isSocket() ? 'socket' : stat.isDirectory() ? 'directory' : 'other';
+    const entry: Record<string, unknown> = { kind };
+    if (name === 'SingletonLock') {
+      const raw = stat.isSymbolicLink() ? readlinkSync(path) : stat.isFile() ? readFileSync(path, 'utf8').trim() : null;
+      const named = raw === null ? null : /^(.+)-(\d+)$/.exec(raw);
+      entry.shape = raw === null ? 'unreadable' : named ? '<host>-<pid>' : `other (${raw.length} characters)`;
+      if (named) Object.assign(entry, { hostIsThisMachine: named[1] === hostname(), pid: Number(named[2]), pidIsTheApp: Number(named[2]) === appPid });
+    }
+    entries[name] = entry;
+  }
+  return entries;
+}
+
+test('the SingletonLock probe (D21): what macOS Electron writes as the profile’s single-instance lock, recorded', async () => {
+  test.setTimeout(120_000);
+  const userData = mkdtempSync(join(tmpdir(), 'maws-e2e-singleton-'));
+  try {
+    const maws = await launchMaws({ userData });
+    let reading: Record<string, unknown>;
+    try {
+      const appPid = maws.app.process().pid!;
+      reading = { platform: process.platform, entries: singletonEntries(userData, appPid) };
+    } finally {
+      await maws.cleanup();
+    }
+    reading.afterQuit = readdirSync(userData).filter((entry) => entry.startsWith('Singleton')).sort();
+    const line = `[probe] SingletonLock ${JSON.stringify(reading)}`;
+    console.log(line);
+    test.info().annotations.push({ type: 'SingletonLock probe', description: line });
+    await test.info().attach('singleton-lock-probe.json', { body: JSON.stringify(reading, null, 2), contentType: 'application/json' });
+  } finally {
     rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });

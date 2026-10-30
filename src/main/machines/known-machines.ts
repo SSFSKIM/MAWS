@@ -16,7 +16,7 @@ export const KNOWN_MACHINES_FILE = 'known-machines.json';
 const KnownMachineSchema = z.strictObject({
   ref: MachineRefSchema,
   name: z.string(),
-  carrier: z.strictObject({ kind: z.literal('socket'), dir: z.string().min(1) }), // another profile's serve directory
+  carrier: z.strictObject({ kind: z.literal('socket'), dir: z.string().min(1) }), // another profile's directory (its serve directory before P5 O3-D M6)
 });
 const KnownMachinesSchema = z.strictObject({ version: z.literal(1), machines: z.array(KnownMachineSchema) });
 

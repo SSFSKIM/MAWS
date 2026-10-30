@@ -24,6 +24,18 @@ export const DaemonHostSchema = z.strictObject({
 });
 export type DaemonHost = z.infer<typeof DaemonHostSchema>;
 
+// P5 O3-D (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §A, §I): the spine in `mawsd`. `state` is the
+// seam's (`cold`, `loading`, `loaded`, `refused`, `releasing`, `yielded`), a string as a host's is, so a new state is
+// additive; `refused`, the lock's holder while refused; `loadedAt`, the last load's time; `heldDropped`, the engine-host
+// events discarded with a hold no spine of this daemon would fold (a refused or yielded load).
+export const DaemonSpineSchema = z.strictObject({
+  state: z.string(),
+  refused: z.string().nullable(),
+  loadedAt: z.string().nullable(),
+  heldDropped: z.number().int().nonnegative(),
+});
+export type DaemonSpine = z.infer<typeof DaemonSpineSchema>;
+
 export const DaemonStatusSchema = z.strictObject({
   pid: z.number().int(),
   startedAt: z.string(),
@@ -40,6 +52,7 @@ export const DaemonStatusSchema = z.strictObject({
   idleExitAt: z.string().nullable(), // a private daemon's own exit clock, while it runs
   logPath: localOnly(z.string()),
   endpoint: z.strictObject({ present: z.boolean(), detail: z.unknown() }), // detail: the module's status() (O10), under the same rule
+  spine: DaemonSpineSchema.optional(), // P5 O3-D: absent from a daemon before O3-D
 });
 export type DaemonStatus = z.infer<typeof DaemonStatusSchema>;
 
@@ -73,6 +86,12 @@ export const commands = {
   'daemon.endpoint': machine(
     z.strictObject({ command: z.string(), args: z.array(z.string()), secret: z.string().optional() }),
     z.strictObject({ code: z.number().int(), out: z.string() }),
+  ),
+  // M5b fix round 2 (D11): the e2e's seams that live with the spine, run in `mawsd` on the daemon shape (src/mawsd/e2e-seam.ts):
+  // the scenario's manual clock played to `ms`, the library's refreshes held; refused unless `mawsd` runs under MAWS_E2E=1
+  'daemon.e2eSeam': machine(
+    z.discriminatedUnion('seam', [z.strictObject({ seam: z.literal('scenario.advanceTo'), ms: z.number().int().nonnegative() }), z.strictObject({ seam: z.literal('library.holdRefreshes') })]),
+    z.void(),
   ),
 } as const satisfies Record<`daemon.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 

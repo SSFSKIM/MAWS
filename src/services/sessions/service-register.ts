@@ -13,10 +13,16 @@ import type { ServicesBus } from '@shared/spine/bus';
 import { IntentRefused, type SessionService } from './service';
 import { HostError } from './context'; // P2-A
 import { InvalidSideInput } from '../side/invalid'; // E3
+import type { LaunchMode } from '@shared/sessions/select-source'; // P5 O3-D M4
+import { CONVERSATION_ACTS } from './rewind-note'; // P5 O3-D M4
 
 // The runtime hands a handler the schema's parsed value; the ids in it passed the branded id schemas, which is what the
 // brands stand for (as C4's handlers read them).
-export function registerSessionServiceHandlers(service: SessionService, { register }: Pick<ServicesBus, 'register'>): void {
+// P5 O3-D M4 (D18): in launch mode `index` the rewind's last-act note and the conversation acts that clear it are
+// intercepted on their way to the engine host (rewind-note.ts), and from M5a (D47) lane B's claimed `host.op` that runs
+// one of them; in mode `scenario` no engine runs, and the e2e fixture
+// seams intercept some of those names themselves. Answers the intercepts' removal, for the root's stop.
+export function registerSessionServiceHandlers(service: SessionService, { register, intercept }: Pick<ServicesBus, 'register' | 'intercept'>, mode: LaunchMode): () => void {
   const id = (appSessionId: string) => appSessionId as AppSessionId;
   register('session.trust.check', ({ directory }) => service.trustCheck(directory));
   register('session.create', ({ projectId, location }) => relay(() => service.create({ projectId: projectId as ProjectId | null, location })));
@@ -47,6 +53,17 @@ export function registerSessionServiceHandlers(service: SessionService, { regist
   register('side.sendToMain', (input) => relaySide([], () => service.sendToMain(input)));
   register('side.screenshot.preview', ({ appSessionId, screenshot }) => relaySide([], () => service.screenshotPreview(id(appSessionId), screenshot.path))); // E11 F2b (Q4)
   // E3 end
+  // P5 O3-D M4 start
+  if (mode !== 'index') return () => {};
+  const removals = [
+    intercept('session.rewind', (input) => service.rewind(input)),
+    ...CONVERSATION_ACTS.map((name) => intercept(name, (input) => service.conversationAct(name, input))),
+    intercept('host.op', (input) => service.claimedOp(input)), // P5 O3-D M5a (D47): a phone's act, claimed in the engine host's op ledger
+  ];
+  return () => {
+    for (const remove of removals) remove();
+  };
+  // P5 O3-D M4 end
 }
 
 // The engine host answers: its first launch is ready, or it has given up (a crashed host answers `host_unavailable`,

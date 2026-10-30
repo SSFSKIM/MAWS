@@ -123,7 +123,9 @@ describe('x2 deadlines fit the bridge', () => {
   it('every host.* command the engine host owns has one deadline shape and a Supervision handler; stopAll alone is bounded', () => {
     const hostOwned = Object.entries(hostSchema.commands).filter(([, spec]) => spec.owner === 'engine-host').map(([name]) => name);
     expect(Object.keys(HOST_DEADLINE_SHAPES).sort()).toEqual(hostOwned.sort());
-    expect(HOST_DEADLINE_SHAPES).toEqual({ 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.interest': 'immediate' /* P5 O2 M2 */, 'host.op': 'bounded', 'host.opQuery': 'immediate' });
+    expect(HOST_DEADLINE_SHAPES).toEqual({ 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.interest': 'immediate' /* P5 O2 M2 */, 'host.op': 'bounded', 'host.opQuery': 'immediate', 'host.attachment': 'immediate' /* P5 O3-D */ });
+    // P5 O3-D M3: `host.attachment` sets the runtime's presence, registered beside it (attachment.ts)
+    const attachmentCommands = ['host.attachment'];
     // P5 O10 M7: lane B's operation ledger is the engine ipc's (ops.ts), not the supervisor's
     const ledgerCommands = ['host.op', 'host.opQuery'];
     expect([...engineHost().handlers.keys()].filter((name) => name.startsWith('host.')).sort()).toEqual(ledgerCommands);
@@ -133,7 +135,7 @@ describe('x2 deadlines fit the bridge', () => {
       table: { onChange: () => () => {}, onRowsChanged: () => () => {}, setIdleRelease: () => {}, setInterest: () => {}, list: () => [] } as never,
       plugins: { busy: () => false, onIdle: () => () => {}, onBusy: () => () => {} }, shutdown: async () => ({ stopped: 0, forced: 0 }), emit: () => true, log: () => {},
     }).register((name) => void registered.push(name), { onConnect: () => {} });
-    expect(registered.sort()).toEqual(hostOwned.filter((name) => !ledgerCommands.includes(name)).sort());
+    expect(registered.sort()).toEqual(hostOwned.filter((name) => !ledgerCommands.includes(name) && !attachmentCommands.includes(name)).sort());
   });
 
   it('every bounded wait fits under the router\'s 10 s with the two IPC hops to spare', () => {
@@ -982,11 +984,12 @@ describe('maws.* commands (E1 M1)', () => {
     await host.ipc.table.get(id)!.exited;
   });
 
-  // E10 (X13, §Design 4): the runtime's hasClient reaches each session's bridges through the launcher, so with no app
-  // connected a show_pane fails at once with appNotOpen and no maws.pane.show is emitted
-  it('answers show_pane with appNotOpen at once and emits nothing when no client is connected', async () => {
+  // E10 (X13, §Design 4): the app's presence reaches each session's bridges through the launcher, so with no app
+  // attached a show_pane fails at once with appNotOpen and no maws.pane.show is emitted; P5 O3-D M3: the presence, not the
+  // connection, which stays (`mawsd`'s permanent link with no app attached)
+  it('answers show_pane with appNotOpen at once and emits nothing when no app is attached, its client connected', async () => {
     const transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder()) });
-    const host = engineHost({ spawn: () => transport, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }), hasClient: () => false });
+    const host = engineHost({ spawn: () => transport, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }), hasClient: () => true, appAttached: () => false });
     const id = 'app-ipc' as AppSessionId;
     await host.call('session.launch', { spec: spec() });
     await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');

@@ -5,9 +5,9 @@ export const grades = {
   'maws.asks.list': 'view',
   'maws.ask.answer': 'converse', // an agent's question to the human
   'maws.pane.answer': 'converse',
-  'maws.artifact.captured': 'machine-admin', // captured and recorded: bridged, but only main's capture and browser send them
-  'maws.download.recorded': 'machine-admin',
   // main-only
   'maws.artifact.datasetRefreshed': 'internal',
   'maws.artifact.exported': 'internal',
+  'maws.artifact.captured': 'internal', // P5 O3-D (P5 Decision Log 36): main's capture and browser alone send these two
+  'maws.download.recorded': 'internal',
 } as const satisfies CommandGrades<'maws'>;

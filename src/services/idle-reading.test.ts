@@ -1,7 +1,7 @@
 // The spine's idle reading (P5 O3-C, docs/doperpowers/plans/2026-10-28-p5-o3-c-spine-library.md, Interfaces §F; D18):
 // e2e:daemon-idle-spine's subject, composed here under plain Node over a small fixture. It composes the spine alone with
-// stand-in ports, says so, and on its trigger stops the root, collects when the runtime lets it, and says so; a timer
-// keeps its process alive until `dispose`.
+// stand-in ports, says so, and on its trigger stops the root, runs the last-resort collection (P5 O3-D M2) and says so
+// with the heap before and after; a timer keeps its process alive until `dispose`.
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -72,30 +72,30 @@ describe('the spine idle reading', () => {
     vi.useRealTimers();
   });
 
-  it('on its trigger stops the root, collects twice when the runtime exposes gc, and says it released', async () => {
-    const gc = vi.fn();
-    vi.stubGlobal('gc', gc);
+  // P5 O3-D M2 (O3 Decision Log 16; the tracker's idleReading row): the release collects as mawsd's idle collector does
+  it('on its trigger stops the root, runs the last-resort collection once, and says it released with the heap before and after', async () => {
+    const collect = vi.fn();
+    const heaps = [{ used: 40 * 1_048_576, physical: 52 * 1_048_576 }, { used: 28 * 1_048_576, physical: 31 * 1_048_576 }];
     const close = vi.spyOn(Index.prototype, 'close');
     let release: (() => void) | undefined;
-    const reading = await idleReading({ profile, build: BUILD, log, onRelease: (trigger) => (release = trigger) });
+    const reading = await idleReading({ profile, build: BUILD, log, onRelease: (trigger) => (release = trigger), collect, heap: () => heaps.shift()! });
     expect(close).not.toHaveBeenCalled();
     release!();
     await reading.released;
     expect(close).toHaveBeenCalledOnce(); // the root's stop closed the index
-    expect(gc).toHaveBeenCalledTimes(2);
-    expect(lines.slice(1)).toEqual(['spine idle: released (gc: true)']);
+    expect(collect).toHaveBeenCalledOnce();
+    expect(lines.slice(1)).toEqual(['spine idle: released (collected: heap 52.0 to 31.0 MiB, used 40.0 to 28.0 MiB)']);
     release!(); // a second trigger does nothing
     expect(close).toHaveBeenCalledOnce();
     reading.dispose();
   });
 
-  it('says no collection ran when the runtime exposes none', async () => {
-    vi.stubGlobal('gc', undefined);
+  it('says the collection failed, and still releases, when it throws', async () => {
     let release: (() => void) | undefined;
-    const reading = await idleReading({ profile, build: BUILD, log, onRelease: (trigger) => (release = trigger) });
+    const reading = await idleReading({ profile, build: BUILD, log, onRelease: (trigger) => (release = trigger), collect: () => { throw new Error('no gc here'); } });
     release!();
     await reading.released;
-    expect(lines.slice(1)).toEqual(['spine idle: released (gc: false)']);
+    expect(lines.slice(1)).toEqual(['spine idle: released (the collection failed: no gc here)']);
     reading.dispose();
   });
 
@@ -119,7 +119,7 @@ describe('the spine idle reading', () => {
     expect(process.listenerCount('SIGUSR2')).toBe(listening + 1);
     process.emit('SIGUSR2', 'SIGUSR2');
     await reading.released;
-    expect(lines.at(-1)).toMatch(/^spine idle: released \(gc: (true|false)\)$/);
+    expect(lines.at(-1)).toMatch(/^spine idle: released \(collected: heap \d+\.\d to \d+\.\d MiB, used \d+\.\d to \d+\.\d MiB\)$/);
     reading.dispose();
     expect(process.listenerCount('SIGUSR2')).toBe(listening);
   });

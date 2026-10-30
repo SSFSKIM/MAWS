@@ -1,7 +1,8 @@
 // P5 O3-C (docs/doperpowers/plans/2026-10-28-p5-o3-c-spine-library.md): the library's one door, its two roots
-import { openSpineData, startCheckouts, startMachineIdentity, startSpine, type SpineData } from '../services/entry';
+import { COMMAND_BUDGETS_MS, openSpineData, startCheckouts, startMachineIdentity, startSpine, type SpineData } from '../services/entry';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandResult } from '@shared/ipc/schema';
+import { REGISTRY } from '@shared/ipc/registry'; // P5 O3-D M1: the bus's register reads each name's owner
 import { guardStdio } from './stdio-guard'; // cua board #97
 import { disableChromiumFeatures, STARTUP_DISABLED_FEATURES } from './chromium-features'; // P3-F1 fix 3
 import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
@@ -14,6 +15,10 @@ import { createHosts, prepareLaunch, refuseTestLaunchOnDefaultProfile, type Laun
 import { dispatchLocal, installRouter } from './ipc/router'; // P5 O6 M3: dispatchLocal, the local link's and the stand-in's
 import { startSettings, type SettingsService } from './client/settings'; // P5 O3-A: the client half, composed with the machine's
 import { readLaunchShape } from './client/settings-store'; // P5 O3-A
+import { createMachineSettingsMirror } from './client/machine-settings-mirror'; // P5 O3-D M5b: the daemon shape's machine half
+import { startDaemonSpine } from './sessions/daemon-spine'; // P5 O3-D M5b: the daemon shape's spine
+import { CUA_SOCKET_DIR } from '@shared/browser/cua-socket'; // P5 O3-D M5b
+import { launchMode, scenarioPath } from '@shared/sessions/select-source'; // P5 O3-D M5b (D11)
 import { settingsPaths } from '@shared/settings/paths';
 import { startWithProfileLock } from './files/profile-lock';
 import { describeMainBuild, loadedBundlePath, olderInstanceNotice, staleBuildCheck, type MainBuild } from './build-identity'; // E11 §2.7; F2b 2.7b
@@ -24,7 +29,7 @@ import { appUrl, createWindow, installContentSecurityPolicy, prepareHarness } fr
 import { emit, emitFrom } from './ipc/events'; // P5 O9 M9: emitFrom, remote lane A's events
 import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P5 O6 M1: registerMachineHandler
 import { bindLocalMachine } from './machine/local'; // P5 O6 M2
-import { startMachines } from './machines'; // P5 O6 M3: the connection manager, and the stand-in behind its gate
+import { startMachines } from './machines'; // P5 O6 M3: the connection manager (P5 O3-D M6: the stand-in gone)
 import { createStateSigner, createStepUp } from './device/step-up'; // P5 O7 M1: the development org session's signer; P5 O8 M1: the production session's; M3: its state signer
 import { createDevOrgSession } from './org/dev-session'; // P5 O7 M1
 import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2
@@ -235,8 +240,10 @@ void startWithProfileLock(app, () => {
   const paths = settingsPaths(profile);
   const machine = { local, localName };
   return Promise.resolve(prepareLaunch(readLaunchShape(paths.client))).then(
-    // P5 O3-A, O3-C: the spine's data (spine.lock, then the split and the machine half) once the shape has settled
-    async (settled) => startMain(await openSpineData(profile, { build: `${MAIN_BUILD.version}+${MAIN_BUILD.commit}` }), settled, machine),
+    // P5 O3-A, O3-C: the spine's data (spine.lock, then the split and the machine half) once the shape has settled. P5 O3-D
+    // M5b: on the daemon shape the spine is `mawsd`'s, which takes spine.lock and alone writes the machine's files; main
+    // opens none of them
+    async (settled) => startMain(settled.mode === 'daemon' ? null : await openSpineData(profile, { build: `${MAIN_BUILD.version}+${MAIN_BUILD.commit}` }), settled, machine),
     (error: unknown) => {
       console.error('[hosts] the launch could not settle its shape; quitting', error);
       app.exit(1);
@@ -252,17 +259,39 @@ void startWithProfileLock(app, () => {
 // and started the machine half; the client half composes with it here. Refused, nothing is migrated, the machine half is
 // read and never written, and the client file is written only once it is a client file. The lock is held for the
 // process's life.
-function startMain(data: SpineData, launch: LaunchShape, { local, localName }: { local: MachineRef; localName: string }): void {
-  const settings: SettingsService = startSettings({ clientFile: data.paths.client, machine: data.machineSettings });
+// P5 O3-D M5b (D11): a scenario launch on the daemon shape plays its scenario in mawsd, which inherits this environment;
+// the scenario's path is resolved here, against main's root, before mawsd is started with it.
+function absoluteScenarioPath(): void {
+  if (launchMode(process.env, app.isPackaged) !== 'scenario') return;
+  try {
+    process.env.MAWS_SESSION_SOURCE = `stub:${scenarioPath(process.env, { packaged: app.isPackaged, appRoot: process.cwd() })}`;
+  } catch (error) {
+    console.error('[sessions] the scenario path could not be resolved; mawsd reads it as given', error);
+  }
+}
+
+// P5 O3-D M5b (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §F, §G, §E; D11, D19, D20, D25): two
+// roots by shape. The embedded one (`data`, this run's spine.lock and machine half) composes the spine here, as above. On
+// the daemon shape (`data` null) the spine runs in `mawsd`: main binds `machine` as `host`, reads the spine through its
+// mirror (src/main/sessions/spine-mirror.ts), the machine half through its settings mirror, answers the client port's
+// requests and holds neither spine.lock nor any of the machine's files.
+function startMain(data: SpineData | null, launch: LaunchShape, { local, localName }: { local: MachineRef; localName: string }): void {
+  const profile = app.getPath('userData');
+  // D11: a scenario's path made absolute before mawsd is started with this environment, so its own root is never consulted
+  if (data === null) absoluteScenarioPath();
+  // P5 O3-A (the O3 document §2): whether this run holds `spine.lock`. Refused, none of the spine's services that write
+  // the machine's files or launch a session starts (startSpine says which), the index is opened unavailable, and the
+  // client half runs.
+  const { hosts, daemon } = createHosts(MAIN_BUILD, launch, { spineRefused: data?.refused ?? null, machineBudgetsMs: COMMAND_BUDGETS_MS }); // E11 §2.7: main's build for host.status; P5 O2 M7: the launch's shape; P5 O3-A: why the spine does not run
+  // P5 O3-D M5b (§G, D20): the daemon shape's machine half mirrors mawsd's, from machine-settings.json read and never written;
+  // a client change waits for mawsd's settings split at the first launch on a profile before it (composeSettings)
+  const mirror = data === null ? createMachineSettingsMirror({ file: settingsPaths(profile).machine, hosts, log: (line) => console.log(line) }) : null;
+  const settings: SettingsService = startSettings({ clientFile: settingsPaths(profile).client, machine: data?.machineSettings ?? mirror!, ...(mirror && { split: mirror.answered }) });
   installContentSecurityPolicy();
   // C9 block begin: the harness's fake session directories; a terminal's links open through pty.openLink
   if (process.env.MAWS_HARNESS === '1') prepareHarness();
   registerPtyOpenLink();
   // C9 block end
-  // P5 O3-A (the O3 document §2): whether this run holds `spine.lock`. Refused, none of the spine's services that write
-  // the machine's files or launch a session starts (startSpine says which), the index is opened unavailable, and the
-  // client half runs.
-  const hosts = createHosts(MAIN_BUILD, launch, { spineRefused: data.refused }); // E11 §2.7: main's build for host.status; P5 O2 M7: the launch's shape; P5 O3-A: why the spine does not run
   // P5 O1 M3 (OX4): the client port, the one way a machine-bound service reaches the person's screen: dialogs, the
   // Replace question, Finder, the browser, notifications, the badge and focus. `openWindow` is read when a focus needs it.
   // (Made before the org session, whose weekly successor notifies through it: P5 O8 M3.)
@@ -349,22 +378,37 @@ function startMain(data: SpineData, launch: LaunchShape, { local, localName }: {
     packaged: app.isPackaged,
     env: process.env,
     build: `${MAIN_BUILD.version}+${MAIN_BUILD.commit}`,
-    resourcesPath: process.resourcesPath,
-    appRoot: process.cwd(), // the development app root, as the browser's peer check reads the addon's prebuild
     register: registerMainHandler,
     dispatchLocal,
     // P5 O7 M1: the org session the RL2 links read; P5 O8 M1: production's sign-in, or O7's development session
     session,
   });
   // P5 O9 M9: `laneA.*` for a machine O7's link reaches is remote lane A's (src/main/lane-a/remote.ts), over that link;
-  // every other command for another machine, and `laneA.*` for a socket-linked stand-in, goes to the manager. It writes
+  // every other command for another machine, and `laneA.*` for a socket-linked profile, goes to the manager. It writes
   // no file, so it runs in a run that doesn't hold spine.lock too.
   const remoteLaneA = createRemoteLaneA({ local, emit: (machine, name, payload) => void emitFrom(machine, name, payload), log: (line) => console.log(`[lane-a] ${line}`) });
-  installRouter({ appUrl, local, dispatchToHost: hosts.dispatch, remote: routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA) });
+  // P5 O3-D M5b: on the daemon shape a `machine` name goes to mawsd's services front (the `machine` host); the spine's
+  // mirror, once it runs, is told each forward, to replay the pages' visibility claims at each streaming of mawsd
+  let forwardedToMachine: ((name: string, input: unknown, client: ClientRef | undefined) => void) | null = null;
+  const dispatchToHost: typeof hosts.dispatch = (owner, name, input, client) => {
+    if (owner === 'machine') forwardedToMachine?.(name, input, client);
+    return hosts.dispatch(owner, name, input, client);
+  };
+  installRouter({ appUrl, local, dispatchToHost, remote: routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), machine: { kind: data === null ? 'host' : 'embedded' } });
   // P5 O3-C (Interfaces §A): the services bus, how the library (the spine and the checkouts) registers its commands,
   // installs its intercepts, emits its events and taps them, bound here to the router and `emit`, so every tap main's
   // own code holds (the menu's, the stand-in's) still hears the library's events. O3-D's mawsd binds its services front.
-  const bus: ServicesBus = { register: registerMainHandler, intercept: interceptCommand, emit, onEmitted };
+  // P5 O3-D M1: the spine's commands are `machine`-owned, so a `machine` name goes to the router's embedded machine
+  // binding (its output checked as a host runtime checks it) and a `main` one, the checkouts' until O3-E, to its main
+  // handlers.
+  const bus: ServicesBus = {
+    register: (name, handler) => (REGISTRY.commands[name].owner === 'machine' ? registerMachineHandler(name, handler) : registerMainHandler(name, handler)),
+    intercept: interceptCommand,
+    emit,
+    onEmitted,
+    // P5 O3-D M2 (Interfaces §H): the router's local route, which answers a `machine` name through the embedded binding
+    invoke: (name, input, context) => dispatchLocal(name, input, { ...context, target: local }) as never,
+  };
   remoteLink = (ref) => machines.remote(ref);
   // E11: every will-quit step below joins one ordered list behind one listener (tracker row E10 "14 will-quit listeners");
   // a step's promise (the hosts' draining close of a kept supervisor's socket) holds the exit, bounded by the port's grace;
@@ -398,27 +442,31 @@ function startMain(data: SpineData, launch: LaunchShape, { local, localName }: {
   // launch is told the browser's cua socket (E13; the browser starts below, and a launch asked before it carries none).
   let boundInterest: ReturnType<typeof appInterest> | null = null;
   let cuaSockets: Browser['cua'] | null = null;
-  const spine = startSpine({
-    profile: app.getPath('userData'),
-    machine: local,
-    data,
-    hosts,
-    bus,
-    clientPort,
-    interest: () => {
-      if (boundInterest === null) throw new Error('the interest set was read before main bound it');
-      return boundInterest.set();
-    },
-    browserSocket: (appSessionId) => cuaSockets?.socketPathFor(appSessionId) ?? null,
-    trash: (path) => shell.trashItem(path),
-    engineEnv,
-    env: process.env,
-    packaged: app.isPackaged,
-    appPath: app.getAppPath(), // the replay fixtures' checkout
-    devRoot: process.cwd(), // a relative scenario path is the repository's: `pnpm dev`, `pnpm dev:stub` and the smoke's launch alike
-    home,
-  });
+  const spine = data === null
+    ? // P5 O3-D M5b: the daemon shape's, mawsd's spine through main's mirror and the client port's answers
+      startDaemonSpine({ hosts, daemon: daemon!, port: clientPort, browserSocket: () => (cuaSockets ? join(profile, ...CUA_SOCKET_DIR) : null) })
+    : startSpine({
+        profile: app.getPath('userData'),
+        machine: local,
+        data,
+        hosts,
+        bus,
+        clientPort,
+        interest: () => {
+          if (boundInterest === null) throw new Error('the interest set was read before main bound it');
+          return boundInterest.set();
+        },
+        browserSocket: (appSessionId) => cuaSockets?.socketPathFor(appSessionId) ?? null,
+        trash: (path) => shell.trashItem(path),
+        engineEnv,
+        env: process.env,
+        packaged: app.isPackaged,
+        appPath: app.getAppPath(), // the replay fixtures' checkout
+        devRoot: process.cwd(), // a relative scenario path is the repository's: `pnpm dev`, `pnpm dev:stub` and the smoke's launch alike
+        home,
+      });
   shutdown.add('spine', spine.stop);
+  if ('forwarded' in spine) forwardedToMachine = spine.forwarded; // the daemon shape's mirror (the router's forwards above)
   const view = spine.view;
   // P5 O3-C: the checkouts (git, `git.lsFiles`, files and scm), which O3-E moves, over the spine's view
   const checkouts = startCheckouts({ view, bus, clientPort, engineEnv, env: process.env });
@@ -747,7 +795,7 @@ function startMain(data: SpineData, launch: LaunchShape, { local, localName }: {
     // C3's engine host stops its sessions within the grace; a host that cannot answer (not started, or a build without
     // C3's command) has nothing to stop. E10: through the quit's stop-all (`host.stopAll` to a detached supervisor, which
     // then exits; `engine.shutdown` to a utility host), and keep offered in detached mode with the setting's default.
-    ...engineQuitDeps(hosts, () => settings.state().settings, () => launch.mode === 'daemon'), // P5 O2 M7: terminals outlive the app on the daemon shape
+    ...engineQuitDeps(hosts, () => settings.state().settings, () => launch.mode === 'daemon'), // P5 O2 M7, P5 O3-D (Q1): terminals and sessions outlive the app on the daemon shape
     // debt wave 6: past the bound, the ladder's SIGKILL rung for the engines still the engine host's children
     engines: { hostPid: () => hosts.snapshot('engine-host').pid, ps: listProcesses, kill: (pid) => process.kill(pid, 'SIGKILL') },
     // E5 start: the unsaved files the windows pushed, and Save all's round trip
@@ -797,10 +845,8 @@ function startMain(data: SpineData, launch: LaunchShape, { local, localName }: {
   });
   shutdown.add('voice', () => voice.dispose());
   // E9 end
-  // P5 O6 M3: with every handler registered, this profile's machine services for another profile's app (the stand-in,
-  // MAWS_MACHINE_SERVE=1 in a build that is not packaged; O3 replaces it with mawsd). The links stop at quit; no far side
-  // is ever stopped.
-  machines.serve();
+  // P5 O6 M3: the links stop at quit; no far side is ever stopped. P5 O3-D M6: this profile's machine services reach
+  // another profile's app from this profile's mawsd, so main serves nothing here (O6's stand-in is gone)
   shutdown.add('machines', () => machines.stop());
   // P5 O8 M1: the feed and the session stop (every org file is written whole and renamed); M2: the rows' last change is
   // written to their cache first, so a relaunch keeps every mark; M4a: the exit waits for the session's close, which

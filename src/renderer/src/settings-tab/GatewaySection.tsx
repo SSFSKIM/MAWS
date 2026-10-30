@@ -18,7 +18,7 @@ export function GatewaySection({ settings }: { settings: Settings }) {
   return (
     <>
       <Setting label={GATEWAY.defaultRoute} note={GATEWAY.defaultRouteNote}>
-        <Segment label={GATEWAY.defaultRoute} value={defaultRoute} options={ROUTES} onChange={(next) => void writeSettings({ gateway: { defaultRoute: next } })} />
+        <Segment label={GATEWAY.defaultRoute} value={defaultRoute} options={ROUTES} onChange={(next) => writeSettings({ gateway: { defaultRoute: next } })} />
         <span className="text-ui-sm text-fg-muted">127.0.0.1:8641</span>
       </Setting>
       <Setting label={GATEWAY.policy} note={relayUnreachable === 'direct' ? GATEWAY.policyDirectNote : undefined}>

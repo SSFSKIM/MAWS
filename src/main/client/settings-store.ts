@@ -23,26 +23,55 @@ export const clientSettingsRules: SettingsFileRules<ClientSettings> = {
 
 // The renderer's one `Settings` over the two halves: the client file, read and written here, and the machine half's
 // service. A patch is cut by owner, field by field, so a machine field changes only `machine-settings.json` and a client
-// field only `settings.json`; the machine half is written first, and a half that refuses its write throws (what the
-// other half wrote stays written).
+// field only `settings.json`; the machine half is written first and awaited (P5 O3-D M5b: on the daemon shape it
+// crosses a socket to `mawsd`, Interfaces §G), and a half that refuses its write rejects (what the other half wrote
+// stays written; a machine refusal leaves the client file untouched).
 export interface ComposedSettings {
   readonly settings: Settings;
-  update(patch: SettingsPatch): Settings; // persists before returning
+  update(patch: SettingsPatch): Promise<Settings>; // resolves once both halves persisted
 }
 
-export function composeSettings({ clientFile, machine }: { clientFile: string; machine: MachineSettingsService }): ComposedSettings {
+// P5 O3-D M5b follow-up (D24, D26): on the daemon shape the split is `mawsd`'s, at its spine's first load, which main's
+// first read of the machine half sets off; at the first launch on a profile before the split, main opens a unified
+// client file that is converted moments later in the same run (the cold start: a few seconds at most). `split` resolves
+// once the process that splits has done it; a client change made before then waits for it, at most the cold start's
+// bound, rather than failing, and past the bound fails saying why with nothing written.
+export const SPLIT_WAIT_MS = 30_000;
+
+export function composeSettings({ clientFile, machine, split }: { clientFile: string; machine: MachineSettingsService; split?: () => Promise<void> }): ComposedSettings {
   const store = openSettingsFile(clientFile, clientSettingsRules);
+  let awaitingSplit = split !== undefined && unifiedOnDisk(clientFile);
   return {
     get settings() {
       return mergeSettings(store.value, machine.state());
     },
-    update(patch) {
+    async update(patch) {
       const routed = splitSettingsPatch(patch);
-      if (routed.machine) machine.update(routed.machine);
-      if (routed.client) store.update((current) => applyClientPatch(current, routed.client!));
+      if (routed.machine) await machine.update(routed.machine);
+      if (routed.client) {
+        if (awaitingSplit) {
+          await within(split!(), SPLIT_WAIT_MS, `the machine daemon has not converted settings.json to this version's format within ${SPLIT_WAIT_MS / 1000} s`);
+          awaitingSplit = false; // converted, or the split could not write it: the store's own read says which
+        }
+        store.update((current) => applyClientPatch(current, routed.client!));
+      }
       return mergeSettings(store.value, machine.state());
     },
   };
+}
+
+function unifiedOnDisk(file: string): boolean {
+  try {
+    return isUnifiedSettings(JSON.parse(readFileSync(file, 'utf8')));
+  } catch {
+    return false; // absent or unreadable: the store's own read and write say what it is
+  }
+}
+
+function within(promise: Promise<void>, ms: number, why: string): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_resolve, reject) => (timer = setTimeout(() => reject(new Error(why)), ms)));
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
 }
 
 // P5 O2 M7's read of the launch's shape, before any daemon and before `spine.lock` (§2): the client file's own field,
