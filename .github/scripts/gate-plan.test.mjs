@@ -988,8 +988,8 @@ const LIVENESS_BOUNDS = {
     "expect(Date.now() - composingAt, 'the batch landed inside the hold’s cap').toBeLessThan(4_500);": 'the hold\'s own cap, a timer of the product\'s',
   },
   'e2e/machines.spec.ts': {
-    "expect(Date.parse(down.since) - exitedAt, 'B down within 2 s of its exit').toBeLessThanOrEqual(2_000);": 'the link\'s close when the far app\'s process ends: a signal, against acceptance 6\'s 2 s (P5 O6)',
-    "expect(liveAt - loadedAt, 'B’s rows live within 5 s of its window loading').toBeLessThanOrEqual(5_000);": 'the socket link\'s own 1 s retry, then one snapshot, against acceptance 6\'s 5 s (P5 O6)',
+    "expect(Date.parse(down.since) - exitedAt, 'B down within 2 s of its exit').toBeLessThanOrEqual(2_000);": 'the link\'s close when the far daemon stops (its clients closed before it exits): a signal, against acceptance 6\'s 2 s (P5 O6; P5 O3-D M6, B a daemon alone)',
+    "expect(liveAt - servingAt, 'B’s rows live within 5 s of its services answering').toBeLessThanOrEqual(5_000);": 'the socket link\'s own 1 s retry, then one snapshot from the far daemon\'s loaded spine, against acceptance 6\'s 5 s (P5 O6; P5 O3-D M6, B a daemon alone)',
   },
   'e2e/engine-replay.spec.ts': {
     'expect(ms).toBeLessThan(10_000);': 'the host\'s own 8 s deadline, read before the router\'s 10 s',
