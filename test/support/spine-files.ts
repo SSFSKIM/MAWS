@@ -3,10 +3,11 @@
 // compare equal only when no spine file changed and none appeared. e2e/spine-lock.spec.ts compares them across a run
 // refused the spine (O3-A acceptance 5); e2e/cross-build.spec.ts's `(pre-O3 app, daemon)` scene across an O2-era app's
 // idle after `mawsd` yielded to it (P5 O3-D acceptance 11), and src/mawsd/process-yield.test.ts across the yield itself.
-// spineFilesOpen: the spine files a process holds open, by lsof (P5 O3-D M6 fix round 1: the yield's per-process proof).
+// spineFilesOpen: the spine files a process holds open, by lsof on macOS and /proc/<pid>/fd on Linux, whose images
+// carry no lsof (P5 O3-D M6 fix rounds 1, 2: the yield's per-process proof).
 // indexContents: the index's logical contents, schema and rows, read from a copy (fix round 2: what a checkpoint keeps).
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -26,12 +27,33 @@ export function spineFiles(userData: string): Map<string, string> {
   return files;
 }
 
-// Every path under the profile's SPINE_PATHS that `pid` holds open, by lsof's name field (empty for a process gone)
+// Every path under the profile's SPINE_PATHS that `pid` holds open (empty for a process gone): lsof's name field on
+// macOS; on Linux each of /proc/<pid>/fd's links, a file unlinked while open still counted (its " (deleted)" mark cut)
 export function spineFilesOpen(pid: number, userData: string): string[] {
+  const roots = SPINE_PATHS.map((name) => join(userData, name));
+  return openPaths(pid).filter((path) => roots.some((root) => path === root || path.startsWith(`${root}/`)));
+}
+
+function openPaths(pid: number): string[] {
+  if (process.platform === 'linux') {
+    let fds: string[];
+    try {
+      fds = readdirSync(`/proc/${pid}/fd`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; // the process is gone
+      throw error;
+    }
+    return fds.flatMap((fd) => {
+      try {
+        return [readlinkSync(`/proc/${pid}/fd/${fd}`).replace(/ \(deleted\)$/, '')];
+      } catch {
+        return []; // closed between the listing and the read
+      }
+    });
+  }
   const listed = spawnSync('lsof', ['-n', '-P', '-p', String(pid), '-Fn'], { encoding: 'utf8' });
   if (listed.error) throw listed.error;
-  const roots = SPINE_PATHS.map((name) => join(userData, name));
-  return listed.stdout.split('\n').filter((line) => line.startsWith('n')).map((line) => line.slice(1)).filter((path) => roots.some((root) => path === root || path.startsWith(`${root}/`)));
+  return listed.stdout.split('\n').filter((line) => line.startsWith('n')).map((line) => line.slice(1));
 }
 
 // The index's schema (sqlite_master, user_version) and every row of every stored table (an FTS table's content through its
