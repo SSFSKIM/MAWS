@@ -245,6 +245,19 @@ function spineLockOf(userData: string): { pid: number; buildId: string } | null 
 const servedByAttacher = (owner: string) => owner !== 'engine-host';
 // The connections a supervisor's log shows from one client (a `mawsd`'s pid, as its hello's appPid), counted
 const connectsFrom = (log: string, appPid: number) => (log.match(new RegExp(`client connected: appPid ${appPid} `, 'g')) ?? []).length;
+// The departures a supervisor's log shows: `client disconnected`, which the socket server of every build from E10 on
+// prints when a welcomed client's connection closes (src/shared/host/socket-server.ts, at the O2-era peer 0c94ece9b, the
+// merge-base peer and this tree alike), so an older host's own word that its client left
+const departuresIn = (log: string) => (log.match(/client disconnected/g) ?? []).length;
+// What `mawsd`'s own log says of its link to an engine host (P5 O3-D M6 fix round 1): the capabilities the host's
+// latest welcome listed (the transport's `connected to supervisor pid … capabilities […]`, from which `mawsd` chooses
+// its permanent link or O2's recycle at each welcome), and the recycles it made (`recycling the connection to pid …`)
+function welcomedWith(daemonLog: string, hostPid: number): string[] | null {
+  const line = daemonLog.split('\n').filter((l) => l.includes(`connected to supervisor pid ${hostPid} build `)).at(-1);
+  const listed = line === undefined ? null : /capabilities \[([^\]]*)\]/.exec(line);
+  return listed ? listed[1]!.split(', ').filter(Boolean) : null;
+}
+const recyclesTo = (daemonLog: string, hostPid: number) => daemonLog.split('\n').filter((l) => l.includes(`recycling the connection to pid ${hostPid}`)).length;
 
 async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer: Build; older: Build } | null, shapes: Shapes = EMBEDDED): Promise<string[]> {
   const shapeOf = (shape: Shape) => (shape === 'daemon' ? ' on the daemon shape' : '');
@@ -403,25 +416,49 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
 // quits mid-turn and reattaches while that host serves. To a host whose welcome lists no `host.attachment` (a build
 // before O3-D, kept across the update) `mawsd` keeps O2's connection per attachment: its link is recycled at the
 // departure and at the reattach (a new connection in the host's log each time) and the host is never sent the signal
-// (`mawsd` would log its refusal). To a host that lists it, neither: one permanent connection. Either way the turn plays
-// on while no app runs, and its end reaches the reattached app's status and the spine's digest (O2's burst on a recycled
-// link, or the front's follow from the app's cursor), and the session's background failure is still one Needs-you item.
+// (it knows no such command and would answer `unknown_command`, which `mawsd` logs as `failed`). To a host that lists
+// it, neither: one permanent connection. Either way the turn plays on while no app runs, and its end reaches the
+// reattached app's status and the spine's digest (O2's burst on a recycled link, or the front's follow from the app's
+// cursor), and the session's background failure is still one Needs-you item.
+// Fix round 1 (the architect's ruling): M3's unit tests prove the outstanding-at-quit items (a bridge request, a hold, a
+// remote subscription) against a fake older host; this scene ties that fake to the real one, each end in its own words.
+// `mawsd`'s log: the kept host's welcome it chose its path from (no host.attachment listed), its recycles at the
+// departure and at the reattach, and no host.attachment sent. The older host's log: its client leaving at the quit
+// (`client disconnected`, which O2-era and current hosts both print) and a fresh one coming.
 async function quitAndReattach(s: Scratch, run: Run, attach: () => Promise<Run>, runs: Run[], o: { kept: { pid: number }; daemon: number; id: AppSessionId; capable: boolean; said: string[] }): Promise<Run> {
   const before = connectsFrom(s.log(), o.daemon);
+  const leftBefore = departuresIn(s.log());
+  const recycledBefore = recyclesTo(s.daemonLog(), o.kept.pid);
+  const listed = welcomedWith(s.daemonLog(), o.kept.pid);
+  expect(listed, `mawsd’s log: the kept host’s welcome (pid ${o.kept.pid})`).not.toBeNull();
+  expect(listed!.includes('host.attachment'), `mawsd’s log: the kept host’s welcome ${o.capable ? 'lists' : 'lists no'} host.attachment, so mawsd ${o.capable ? 'keeps a permanent link' : 'takes O2’s recycle'}`).toBe(o.capable);
   const lastSeq = () => Math.max(0, ...s.journal(o.id).map((r) => r.seq));
   await s.quit(run);
   expect(run.quitLines().filter((line) => line.startsWith('quit-guard: ')), 'the daemon shape asks nothing at quit (Q1)').toEqual([expect.stringMatching(/not asked: they outlive the app$/)]);
   const awayFrom = lastSeq();
   await expect.poll(lastSeq, { timeout: 30_000, message: 'the turn journals rows while no app runs' }).toBeGreaterThan(awayFrom);
-  if (!o.capable) await expect.poll(() => connectsFrom(s.log(), o.daemon), { timeout: 15_000, message: 'mawsd’s link to the older host recycled at the departure' }).toBeGreaterThan(before);
+  if (!o.capable) {
+    await expect.poll(() => recyclesTo(s.daemonLog(), o.kept.pid), { timeout: 15_000, message: 'mawsd’s log: it recycles its link to the older host at the departure' }).toBeGreaterThan(recycledBefore);
+    await expect.poll(() => departuresIn(s.log()), { timeout: 15_000, message: 'the older host’s log: its client left at the quit (client disconnected)' }).toBeGreaterThan(leftBefore);
+    await expect.poll(() => connectsFrom(s.log(), o.daemon), { timeout: 15_000, message: 'the older host’s log: mawsd connects afresh after the departure' }).toBeGreaterThan(before);
+  }
   const departed = connectsFrom(s.log(), o.daemon);
+  const leftAway = departuresIn(s.log());
+  const recycledAway = recyclesTo(s.daemonLog(), o.kept.pid);
   const atReattach = lastSeq();
   const next = await attach();
   runs.push(next);
   await s.ready(next.page, (st) => st.supervisor!.pid === o.kept.pid && st.daemon?.pid === o.daemon);
-  if (o.capable) expect(connectsFrom(s.log(), o.daemon), 'the permanent client: no new connection across the quit and the reattach').toBe(before);
-  else await expect.poll(() => connectsFrom(s.log(), o.daemon), { timeout: 15_000, message: 'mawsd’s link to the older host recycled at the reattach' }).toBeGreaterThan(departed);
-  expect(s.daemonLog(), 'no host.attachment reached a host that serves none').not.toMatch(/host\.attachment \{attached: (true|false)\} failed/);
+  if (o.capable) {
+    expect(connectsFrom(s.log(), o.daemon), 'the permanent client: no new connection across the quit and the reattach').toBe(before);
+    expect(departuresIn(s.log()), 'the permanent client: the host saw no client leave').toBe(leftBefore);
+    expect(recyclesTo(s.daemonLog(), o.kept.pid), 'mawsd’s log: a permanent link is not recycled').toBe(recycledBefore);
+  } else {
+    await expect.poll(() => recyclesTo(s.daemonLog(), o.kept.pid), { timeout: 15_000, message: 'mawsd’s log: it recycles its link to the older host at the reattach' }).toBeGreaterThan(recycledAway);
+    await expect.poll(() => departuresIn(s.log()), { timeout: 15_000, message: 'the older host’s log: the link it served while no app ran left at the reattach' }).toBeGreaterThan(leftAway);
+    await expect.poll(() => connectsFrom(s.log(), o.daemon), { timeout: 15_000, message: 'the older host’s log: mawsd connects afresh at the reattach' }).toBeGreaterThan(departed);
+  }
+  expect(s.daemonLog(), o.capable ? 'the host of this build hears each attachment' : 'mawsd sent no host.attachment to the older host, which would answer unknown_command, logged as failed').not.toMatch(/host\.attachment \{attached: (true|false)\} failed/);
   // the catch-up at the reattach: the turn's end reaches main's view (the engine status, through the front's follow
   // from the app's cursor) and the spine's (the digest, folded from the recycled link's burst on an older host), and
   // the refold adds no second item for the failure folded before the quit

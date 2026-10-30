@@ -122,14 +122,22 @@ describe('host.attachment (P5 O3-D M3)', () => {
     expect(connectorsEnded).toBe(1);
   });
 
+  // P5 O3-D M6 fix round 1: what an older host does for `mawsd`'s recycled link (O2's path, acceptance 9's incapable
+  // half): each outstanding item settles at the connection's going, as before O3-D
   it('a client keyed on its connection: its going ends them, as E10 did', async () => {
     const fake = fakePort();
     runtime.serve(fake.port, MAIN);
     runtime.setReady();
     const asked = requests.ask(ASK, never());
+    const bridged = bridge.request({ requestId: 'req-3' as RequestId }, never());
     expect(announced).toHaveLength(1);
     runtime.detach();
     expect(await asked).toEqual({ kind: 'noClient' });
     expect(holdsReleased).toBe(1);
+    expect(connectorsEnded).toBe(1);
+    expect(bridge.pending).toBe(1); // a bridge request in flight waits for its own deadline, as with a client gone
+    expect(await bridge.request({ requestId: 'req-4' as RequestId }, never())).toEqual({ kind: 'noClient' }); // a later one settles at once
+    bridge.processExited();
+    expect(await bridged).toEqual({ kind: 'ended' });
   });
 });
