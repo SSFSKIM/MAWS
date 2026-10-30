@@ -13,7 +13,7 @@
 # specs this run's `default` ran, not also those of every group the relaunch leaves out (Decision Log 66).
 # The invocation's own names go through verbatim, its --gates (`all` included; ci-gate.sh refuses a call without one)
 # among them: the relaunch's plan normalises them exactly as this run's plan did.
-# A job's name is its gate's, but for unit's shards on the pool, `unit <k>/<n>`, each a job of the gate `unit`: the
+# A job's name is its gate's, but for unit's pool shards and packaged's hosted shards, `<gate> <k>/<n>`: the
 # relaunch names that gate once, the plan sharding it again. Names are whole, spaces included: the refused, one a line.
 refusals() { # <the jobs, "conclusion<TAB>name" lines> <the failed jobs' logs>
   local refused beside relaunch="scripts/ci-gate.sh $sha"
@@ -40,7 +40,7 @@ refusals() { # <the jobs, "conclusion<TAB>name" lines> <the failed jobs' logs>
     function relaunched(job) {
       sub(/ \(EC2 overflow\)$/, "", job)
       if (job ~ /^e2e-build \([^)]+\)$/) { build = 1; return }
-      if (job ~ /^unit [0-9]+\/[0-9]+$/) job = "unit"
+      if (job ~ /^(unit|packaged) [0-9]+\/[0-9]+$/) sub(/ [0-9]+\/[0-9]+$/, "", job)
       if (!(job in named)) { named[job] = 1; gates = gates "," job }
     }
     BEGIN { n = split(ENVIRON["refused"], names, "\n"); for (i = 1; i <= n; i++) isrefused[names[i]] = 1 }

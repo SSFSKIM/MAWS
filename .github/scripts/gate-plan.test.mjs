@@ -1362,6 +1362,7 @@ test('a run without the Selection: trailer writes the outputs and the summary it
     'e2e_host=[]', 'e2e_vm=[]', 'e2e_build=[]', `e2e_build_runner=${JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-4'])}`,
     // The hosted Macs' (ci-kit's hosted-Mac spec, Placement): no e2e job, so none hosted.
     'e2e_hosted=[]', 'peer_wait=[]',
+    'packaged_shards=[{"shard":"","slug":"","checks":true}]',
   ];
   assert.equal(pushed.raw, `${outputs.join('\n')}\n`);
   assert.equal(pushed.summary, '### Gates\n\n- `static`\n- `unit`\n- `probes`\n\nFrom: the `Gates:` trailer. Class 1a: pool. E2e lane: linux.\n');
@@ -1705,7 +1706,10 @@ test('mirror keeps the pre-direct planner byte-identical with the captured admis
   const fixtures = JSON.parse(readFileSync(join(root, '.github/scripts/gate-plan-mirror.fixture.json'), 'utf8'));
   for (const { env, sha256 } of fixtures) {
     for (const route of ['', 'mirror']) {
-      const { outputs, summary, stdout } = planOf({ ...env, HOSTED_MAC_ROUTE: route }, scripts);
+      const { outputs: current, summary, stdout } = planOf({ ...env, HOSTED_MAC_ROUTE: route }, scripts);
+      // Added after this capture: mirror's single unsharded job. All older outputs remain byte-identical.
+      const { packaged_shards, ...outputs } = current;
+      assert.deepEqual(JSON.parse(packaged_shards), [{ shard: '', slug: '', checks: true }]);
       assert.equal(createHash('sha256').update(JSON.stringify({ outputs, summary, stdout })).digest('hex'), sha256, `${env.HEAD_MESSAGE}, ${route}`);
     }
   }
@@ -1819,6 +1823,50 @@ test('unsigned packaged needs explicit admission regardless of Lane, and stays s
     { HEAD_MESSAGE: 'Gates: packaged\nRunner: linux' },
     ...FINAL_LABELS.map((label) => ({ GITHUB_REF_NAME: `ci/${label}-test` })),
   ]) assert.equal(plan({ ...base, ...env }).outputs.packaged_runner, undefined);
+});
+
+test('packaged shards only on direct hosted Macs; every self-hosted route builds once', () => {
+  const base = { HEAD_MESSAGE: 'Gates: packaged\nRunner: macos', HOSTED_MAC_ROUTE: 'direct', HOSTED_MAC_JOBS: 'packaged' };
+  assert.deepEqual(JSON.parse(plan(base).outputs.packaged_shards), [
+    { shard: '1/2', slug: '-1of2', checks: true },
+    { shard: '2/2', slug: '-2of2', checks: false },
+  ]);
+  for (const override of [
+    { HOSTED_MAC_ROUTE: 'mirror' },
+    { HOSTED_MAC_JOBS: '' },
+    { HEAD_MESSAGE: 'Gates: packaged\nRunner: linux' },
+    ...FINAL_LABELS.map((label) => ({ GITHUB_REF_NAME: `ci/${label}-test` })),
+  ]) assert.deepEqual(JSON.parse(plan({ ...base, ...override }).outputs.packaged_shards), [{ shard: '', slug: '', checks: true }], JSON.stringify(override));
+});
+
+test('packaged workflow gives each shard its own bare command and report, and runs small checks once', () => {
+  const workflow = readWorkflow();
+  assert.match(workflow, /packaged_shards: \$\{\{ steps\.plan\.outputs\.packaged_shards \}\}/);
+  const job = jobBody(workflow, 'packaged');
+  assert.match(job, /include: \$\{\{ fromJSON\(needs\.plan\.outputs\.packaged_shards\) \}\}/);
+  assert.match(job, /fail-fast: false/);
+  const name = /^ {4}name: \$\{\{ (.*?) \}\}$/m.exec(job)[1];
+  const artifact = /^ {10}name: (e2e-packaged.*)$/m.exec(job)[1];
+  const bare = job.split(/\n {6}- /).find((step) => step.includes('pnpm e2e:packaged'));
+  assert.match(bare, /SHARD: \$\{\{ matrix\.shard \}\}/);
+  const command = /pnpm e2e:packaged(.*)/.exec(bare)[0];
+  for (const [matrix, expectedName, expectedArtifact, expectedCommand] of [
+    [{ shard: '1/2', slug: '-1of2', checks: true }, 'packaged 1/2', 'e2e-packaged-1of2', 'pnpm e2e:packaged --shard=1/2'],
+    [{ shard: '2/2', slug: '-2of2', checks: false }, 'packaged 2/2', 'e2e-packaged-2of2', 'pnpm e2e:packaged --shard=2/2'],
+    [{ shard: '', slug: '', checks: true }, 'packaged', 'e2e-packaged', 'pnpm e2e:packaged'],
+  ]) {
+    assert.equal(Function('matrix', 'format', `return (${name})`)(matrix, (template, value) => template.replace('{0}', value)), expectedName);
+    assert.equal(artifact.replace(/\$\{\{ matrix\.slug \}\}/, matrix.slug), expectedArtifact);
+    assert.equal(execFileSync('bash', ['-c', `pnpm() { printf '%s' "pnpm $*"; }; ${command}`], { env: { ...process.env, SHARD: matrix.shard }, encoding: 'utf8' }), expectedCommand);
+    for (const script of ['supervisor:packaged', 'supervisor-daemon:packaged', 'voice:packaged']) {
+      const step = job.split(/\n {6}- /).find((chunk) => chunk.includes(`pnpm e2e:${script}`));
+      const condition = /^if: \$\{\{ (.*?) \}\}/.exec(step)[1];
+      const enabled = (built, cancelled) => Function('matrix', 'steps', 'cancelled', `return (${condition})`)(matrix, { build: { outcome: built } }, () => cancelled);
+      assert.equal(enabled('success', false), matrix.checks, script);
+      assert.equal(enabled('failure', false), false, script);
+      assert.equal(enabled('success', true), false, script);
+    }
+  }
 });
 
 test('direct hosting preserves peer deduplication while explicit admission still runs', () => {
