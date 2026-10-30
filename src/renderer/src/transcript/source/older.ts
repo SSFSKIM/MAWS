@@ -82,8 +82,12 @@ export class HistoryPager implements OlderPages {
 
   // The history is to be read from the host again (the source's follow was released, and the transcript may have
   // grown since): the store rebuilds the key, staged under what the reader opened as for an older page, and the
-  // source's snapshot, finding no history prepared, asks the host.
+  // source's snapshot, finding no history prepared, asks the host. An older page in flight read the history being
+  // replaced, and one asked before the host's answer starts the pager over would too; either, finishing first, would
+  // rebuild the key from it and detach the fresh snapshot. So the pager starts over empty at once: the page in flight
+  // is stale, and none is asked until the answer.
   refresh(): void {
+    this.started([], null);
     this.rebuilt = null;
     for (const listener of [...this.rebuilds]) listener();
   }

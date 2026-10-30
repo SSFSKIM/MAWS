@@ -1300,6 +1300,27 @@ describe('ipcSource over a long transcript\'s window', () => {
     store.detach(APP);
   });
 
+  it('a released session read again lets go of an older page still on its way, which would rebuild the old history over it', async () => {
+    const fake = fakeClient();
+    const store = useTranscriptStore.getState();
+    const source = ipcSourceOver(fake.client, APP);
+    const hydrated = store.attach(APP, source);
+    fake.calls[0].answer(page(turns(2, 3), true));
+    await hydrated;
+    source.older!.loadOlder(); // the reader reached the top: the page before turn 2 is on its way
+    expect(fake.calls[1].input).toMatchObject({ before: turns(2, 2)[0]!.id });
+    fake.emit('fs.followState', { appSessionId: APP, agentId: null, state: 'stopped', chainLength: 0, leafUuid: null, gap: null, skippedLines: 0, message: FOLLOW_RELEASED });
+    fake.emit('session.changed', { record: { appId: APP, holder: { kind: 'terminal', pid: 7 } }, cause: 'live', revision: 1 } as never);
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(3)); // the session read again
+    expect(source.older!.state.getState()).toMatchObject({ loadingOlder: false, more: false });
+    fake.calls[1].answer(page(turns(1, 1))); // the stale page finishes first
+    await flush();
+    fake.calls[2].answer(page(turns(2, 4), true)); // the terminal wrote turn 4
+    await vi.waitFor(() => expect(seen()).toEqual(ids(turns(2, 4))));
+    expect(source.older!.state.getState().more).toBe(true);
+    store.detach(APP);
+  });
+
   it('a snapshot whose subscription was superseded leaves the pager to the current one, so an older page keeps what is shown', async () => {
     const fake = fakeClient();
     const store = useTranscriptStore.getState();
