@@ -1,9 +1,9 @@
 // A part's work in flight (P5 O3-D M2, docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §A and D27): what
 // `SpineRoot.settled()` waits for before a release or a yield stops the parts and closes the index. Each part that
 // writes the machine's files after a command has answered, or on its own schedule, reports what it has in flight (the
-// session service's setups and recoveries, the sweep's run, attention's writes, lane A's probes), and the root counts
-// every command and intercept its parts registered while one runs. `busy()` reads it now; `settled()` resolves once
-// nothing is in flight.
+// session service's setups and recoveries, the sweep's run, attention's writes, lane A's probes, the owner channel's
+// transcript reads), and the root counts every command and intercept its parts registered while one runs. `busy()` reads
+// it now; `settled()` resolves once nothing is in flight.
 export interface Settling {
   busy(): boolean;
   settled(): Promise<void>;

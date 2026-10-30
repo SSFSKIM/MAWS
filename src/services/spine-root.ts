@@ -296,6 +296,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       streaming: () => hosts.streaming('engine-host'), emit: (name, payload) => void bus.emit(name, payload), onSettings: (listener) => machineSettings.onChange(() => listener()),
     });
     parts.push(['owner channel', ownerChannel.stop]);
+    settling.push(ownerChannel.work);
     // The session service (M3): intents, start, fork, archive, delete, rename and the trust check, reading the global
     // config and the store with the environment the engine receives. Its start resets every stale `self` holder at once
     // (D-16), then forgets stale bootstrap ids and reconciles interrupted handoffs once the engine host answers.

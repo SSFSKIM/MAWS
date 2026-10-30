@@ -242,6 +242,36 @@ describe('the spine and the checkouts composed under plain Node', () => {
     candidate.release();
   });
 
+  // P5 O3-D fix wave (D27): the owner channel's transcript-chain read for a rewind this run cannot place continues into
+  // the index (the marks it retires), so the root is busy until it settled and a release never closes the index under it
+  it('is busy while the owner channel’s read for a rewind is in flight, and settles once it folded', async () => {
+    const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000b2';
+    const seeded = new Index(join(profile, 'index.sqlite'));
+    const appSessionId = seeded.sessions.upsertFromSummary(summary({ sessionId: engineSessionId as SessionId })).record.appId;
+    seeded.close();
+    const data = await openSpineData(profile, { build: BUILD });
+    const host = new FakeSpineHost();
+    await host.ready();
+    let capture!: (env: Record<string, string>) => void;
+    const engineEnv = new Promise<Record<string, string>>((resolve) => (capture = resolve)); // holds the transcript's path
+    const { spine } = compose(data, host, fakeBus(), { checkouts: false, engineEnv });
+    await spine.settled();
+    expect(spine.busy()).toBe(false);
+    const rewind = {
+      id: 'ev-rewind-1', sessionId: engineSessionId, at: '2026-10-30T10:00:00.000Z', seq: 1, agentId: null, parentToolUseId: null,
+      kind: 'boundary.rewind', targetMessageUuid: '6f1d2c3b-0000-4000-8000-0000000000c3', precedingAssistantUuid: null, prefillText: null,
+    } as const;
+    host.emit('session.eventBatch', { appSessionId, events: [rewind] } as never);
+    expect(spine.busy()).toBe(true);
+    let settled = false;
+    const settling = spine.settled().then(() => void (settled = true));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(settled).toBe(false);
+    capture({ HOME: join(dir.path, 'home'), CLAUDE_CONFIG_DIR: join(dir.path, 'claude') });
+    await settling;
+    expect(spine.busy()).toBe(false);
+  });
+
   // P5 O9 (O3 Decision Log 13): lane A drives, from the spine, a terminal session the index held at start, and its
   // bridge's request reaches attention and the session's digest
   it('drives a terminal session the index holds through its bridge: laneA.state, its request in attention, its digest', async () => {
