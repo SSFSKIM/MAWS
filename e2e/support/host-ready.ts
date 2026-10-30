@@ -40,13 +40,16 @@ export async function untilHostReady(io: HostReadyIo, launchedAt: number): Promi
   }
 }
 
-// P5 O3-D M5b (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, D24): the cold-start budget's reading. On the daemon
-// shape the spine runs in `mawsd` and loads at the first command that needs it, so once the engine host is ready the
-// launch asks `session.list` until it answers (the front answers it once the spine has loaded; an unavailable answer, a
-// refusal or a load under way, is asked again 100 ms later), for 30 s at most whatever the page does, and returns the
-// line the launch prints (`[e2e] spine ready:`, beside the host's line and `mawsd`'s own `[spine] loaded in N ms`).
+// P5 O3-D M5b (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, D24): the cold-start budget's reading, measured and
+// never waited for. On the daemon shape the spine runs in `mawsd` and loads at the first command that needs it; beside the
+// launch, which has returned at the engine host's ready, it asks `session.list` until it answers (the front answers it
+// once the spine has loaded; an unavailable answer, a refusal or a load under way, is asked again 100 ms later), for 30 s
+// at most whatever the page does, and returns the line the launch prints when it lands (`[e2e] spine ready:`, beside the
+// host's line and `mawsd`'s own `[spine] loaded in N ms`). An app closed first (a test that ended) stops it, with a line
+// that is not a reading.
 export interface SpineReadyIo {
   list(): Promise<{ ok: true } | { ok: false; error: string }>; // `session.list`, its error as `<code>: <message>`
+  closed(): boolean; // the app has closed
   now(): number;
   sleep(ms: number): Promise<void>;
 }
@@ -56,10 +59,11 @@ export async function untilSpineReady(io: SpineReadyIo, launchedAt: number): Pro
   const bound: Promise<typeof BOUND> = io.sleep(HOST_READY_MS).then(() => BOUND);
   const line = (atBound: string | null) => {
     const now = io.now();
-    return `[e2e] spine ready: waited ${now - started} ms after the host, ${now - launchedAt} ms after the launch${atBound === null ? '' : ` (the ${HOST_READY_MS / 1000} s bound: ${atBound}; the launch goes on)`}`;
+    return `[e2e] spine ready: waited ${now - started} ms after the host, ${now - launchedAt} ms after the launch${atBound === null ? '' : ` (the ${HOST_READY_MS / 1000} s bound: ${atBound})`}`;
   };
   let last = 'session.list unanswered';
   for (;;) {
+    if (io.closed()) return `[e2e] spine not ready before the app closed: ${io.now() - launchedAt} ms after the launch (last: ${last})`;
     const answer = await Promise.race([io.list().catch((error: unknown) => ({ ok: false as const, error: error instanceof Error ? error.message : String(error) })), bound]);
     if (answer === BOUND) return line(last);
     if (answer.ok) return line(null);

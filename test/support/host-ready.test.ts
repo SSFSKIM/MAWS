@@ -71,10 +71,10 @@ describe('untilHostReady', () => {
 
 // P5 O3-D M5b (D24): the cold-start line, the first available `session.list` answer after the host's ready
 describe('untilSpineReady', () => {
-  function spineWait(list: () => Promise<{ ok: true } | { ok: false; error: string }>) {
+  function spineWait(list: () => Promise<{ ok: true } | { ok: false; error: string }>, closed = () => false) {
     const lists = vi.fn(list);
     let line: string | undefined;
-    void untilSpineReady({ list: lists, now: () => Date.now(), sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }, LAUNCHED_AT).then((result) => (line = result));
+    void untilSpineReady({ list: lists, closed, now: () => Date.now(), sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }, LAUNCHED_AT).then((result) => (line = result));
     return { lists, line: () => line };
   }
 
@@ -92,9 +92,20 @@ describe('untilSpineReady', () => {
     const refused = spineWait(async () => ({ ok: false, error: 'host_unavailable: spine.lock is held by pid 4242' }));
     const pending = spineWait(() => new Promise(() => {}));
     await vi.advanceTimersByTimeAsync(30_000);
-    expect(refused.line()).toBe('[e2e] spine ready: waited 30000 ms after the host, 30500 ms after the launch (the 30 s bound: host_unavailable: spine.lock is held by pid 4242; the launch goes on)');
-    expect(pending.line()).toBe('[e2e] spine ready: waited 30000 ms after the host, 30500 ms after the launch (the 30 s bound: session.list unanswered; the launch goes on)');
+    expect(refused.line()).toBe('[e2e] spine ready: waited 30000 ms after the host, 30500 ms after the launch (the 30 s bound: host_unavailable: spine.lock is held by pid 4242)');
+    expect(pending.line()).toBe('[e2e] spine ready: waited 30000 ms after the host, 30500 ms after the launch (the 30 s bound: session.list unanswered)');
     expect(pending.lists).toHaveBeenCalledTimes(1);
+  });
+
+  // M5b fix round 1: the reading runs beside the launch, which has returned; a test that ends first closes the app
+  it('stops asking once the app has closed, with a line that is not a reading', async () => {
+    let closed = false;
+    const run = spineWait(async () => ({ ok: false, error: 'host_unavailable: the spine is loading' }), () => closed);
+    await vi.advanceTimersByTimeAsync(250);
+    closed = true;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(run.line()).toBe('[e2e] spine not ready before the app closed: 800 ms after the launch (last: host_unavailable: the spine is loading)');
+    expect(run.lists).toHaveBeenCalledTimes(3);
   });
 
   it('counts a read that rejects as unavailable', async () => {

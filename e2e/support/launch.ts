@@ -339,8 +339,9 @@ async function appWindow(app: ElectronApplication): Promise<Page> {
 // never failing, so a spec about a host that does not come up still reads its state itself (host-ready.ts). Any other
 // shape, or a page without the bridge, returns at once. Each daemon-shape launch prints one line with the wait and the
 // time from the launch to the host's ready (`[e2e] daemon host ready:`), so a slower cold start shows in the job logs
-// rather than hiding behind the wait. P5 O3-D M5b (D24): then it waits for the spine in `mawsd` the same way and prints
-// `[e2e] spine ready:`, the cold-start budget's reading.
+// rather than hiding behind the wait. P5 O3-D M5b (D24): the spine in `mawsd` is then measured, not waited for: its line,
+// `[e2e] spine ready:`, the cold-start budget's reading, is printed when it lands, the launch having returned at the host's
+// ready; a spec's first read polls within its own bound, as it did before the cutover.
 async function untilDaemonHostReady(page: Page, launchedAt: number): Promise<void> {
   const line = await untilHostReady({
     read: () => page.evaluate(() => window.maws.invoke('host.status', undefined)).then((status) => (status.ok ? status.value : null)),
@@ -349,12 +350,13 @@ async function untilDaemonHostReady(page: Page, launchedAt: number): Promise<voi
   }, launchedAt);
   if (line === null) return;
   console.log(line);
-  // P5 O3-D M5b (D24): then the spine's cold start, the first available session.list (host-ready.ts)
-  console.log(await untilSpineReady({
+  // P5 O3-D M5b (D24): the spine's cold start, the first available session.list (host-ready.ts), beside the test
+  void untilSpineReady({
     list: () => page.evaluate(() => window.maws.invoke('session.list', {})).then((answer) => (answer.ok ? { ok: true as const } : { ok: false as const, error: `${answer.error.code}: ${answer.error.message}` })),
+    closed: () => page.isClosed(),
     now: () => Date.now(),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms).unref()),
-  }, launchedAt));
+  }, launchedAt).then((spineLine) => console.log(spineLine));
 }
 
 // Under MAWS_E2E_FOREGROUND=1 (src/main/window-show.ts) the app activates and its window
