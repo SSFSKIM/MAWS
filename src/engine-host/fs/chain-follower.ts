@@ -680,14 +680,14 @@ export class ChainFollower {
   }
 
   // Effective across awaits: work in flight finds `stopped` when its read resolves and delivers nothing; the skeleton
-  // and the materialised list are discarded.
-  stop(): void {
+  // and the materialised list are discarded. `message` says why, when a reader must know (FOLLOW_RELEASED).
+  stop(message: string | null = null): void {
     this.stopped = true;
     this.core = this.freshCore();
     this.delivered.length = 0;
     this.deliveries.clear();
     this.startedDelivered = false;
-    this.report('stopped');
+    this.report('stopped', message);
   }
 
   // After the backfill's last record, once per follow: a session's own transcript that no live process holds and whose

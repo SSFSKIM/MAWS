@@ -2,6 +2,7 @@
 // from `session.eventBatch`, the snapshot from `session.events`, or `fs.agentEvents` for a child), the default
 // `loadSpill` over `fs.readSpill`, and the receipt's rewind interface over `session.rewindFiles`.
 import type { SessionEvent } from '@shared/graph/events';
+import { FOLLOW_RELEASED } from '@shared/graph/history-window';
 import type { AgentId, AppSessionId, EventId, ParentToolUseId, TaskId } from '@shared/graph/ids';
 import type { CommandName, CommandResult, EventName, EventPayload, EventSource, MawsBridge } from '@shared/ipc/schema';
 import { act, render } from '@testing-library/react';
@@ -589,6 +590,29 @@ describe('child source provenance', () => {
     source.older!.loadOlder();
     answer(fake, 'fs.agentEvents', { events: disk.slice(0, 1), complete: true });
     await vi.waitFor(() => expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual(disk.map((e) => e.id)));
+    useTranscriptStore.getState().detach(CHILD_KEY);
+  });
+
+  it('a released follow is no reset: the child is read again at the next change of its session\'s record', async () => {
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const fake = fakeClient();
+    const history = { events: parent.map((e) => ({ ...e, seq: null })), lastSeq: 0, complete: true };
+    const hydrated = useTranscriptStore.getState().attach(CHILD_KEY, childSource(fake), { agentId: AGENT });
+    answer(fake, 'session.events', history);
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: disk.slice(0, 2), complete: true });
+    await hydrated;
+    fake.emit('fs.followState', { ...followState('stopped'), message: FOLLOW_RELEASED });
+    await flush();
+    expect(fake.calls).toHaveLength(2); // following again at once would only be released again
+    fake.emit('session.changed', { record: { appId: APP, holder: { kind: 'terminal', pid: 7 } }, cause: 'live', revision: 1 } as never);
+    await flush();
+    answer(fake, 'session.events', history);
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+    await vi.waitFor(() => expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual(disk.map((e) => e.id)));
+    expect(useTranscriptStore.getState().entries[CHILD_KEY].phase).toBe('live');
     useTranscriptStore.getState().detach(CHILD_KEY);
   });
 
@@ -1207,6 +1231,7 @@ describe('ipcSource over a long transcript\'s window', () => {
   const page = (events: SessionEvent[], older = false) => ({ ok: true, value: { events, lastSeq: 0, complete: true, ...(older && { earlier: events[0]!.id }) } }) as never;
   const ids = (events: SessionEvent[]) => events.map((event) => event.id);
   const seen = () => [...useTranscriptStore.getState().entries[APP]!.state.seen];
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
   it('drops what a held batch carries from before the window the snapshot answered, and the older page brings it back in order', async () => {
     const fake = fakeClient();
@@ -1224,6 +1249,36 @@ describe('ipcSource over a long transcript\'s window', () => {
     expect(fake.calls[2].input).toMatchObject({ before: turns(2, 2)[0]!.id });
     fake.calls[2].answer(page(turns(1, 1)));
     await vi.waitFor(() => expect(seen()).toEqual(ids(turns(1, 3))));
+    store.detach(APP);
+  });
+
+  it('reads a session whose follow was released again at the next change of its record, keeping what the reader opened', async () => {
+    const fake = fakeClient();
+    const store = useTranscriptStore.getState();
+    const source = ipcSourceOver(fake.client, APP);
+    const hydrated = store.attach(APP, source);
+    fake.calls[0].answer(page(turns(1, 2)));
+    await hydrated;
+    const opened = turnId.ofMessage(uuid('u1'));
+    store.toggleTurn(APP, opened); // the reader opens a closed turn
+    const stopped = (message: string | null): EventPayload<'fs.followState'> => ({ appSessionId: APP, agentId: null, state: 'stopped', chainLength: 0, leafUuid: null, gap: null, skippedLines: 0, message });
+    const changed = { record: { appId: APP, holder: { kind: 'terminal', pid: 7 } }, cause: 'live', revision: 1 } as never;
+    fake.emit('fs.followState', stopped(null)); // a plain stop (a resume's handoff to the live stream) is no release
+    fake.emit('session.changed', changed);
+    await flush();
+    expect(fake.calls).toHaveLength(1);
+    fake.emit('fs.followState', stopped(FOLLOW_RELEASED)); // out of every client's interest while still mounted
+    await flush();
+    expect(fake.calls).toHaveLength(1);
+    fake.emit('session.changed', changed); // a terminal wrote to it
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(2));
+    expect(fake.calls[1].input).toEqual({ appSessionId: APP, afterSeq: null, limit: null });
+    fake.calls[1].answer(page(turns(1, 3)));
+    await vi.waitFor(() => expect(seen()).toEqual(ids(turns(1, 3))));
+    expect(useTranscriptStore.getState().entries[APP]!.state.ui.expandedTurns.has(opened)).toBe(true);
+    fake.emit('session.changed', changed); // once: following again, the source reads nothing more
+    await flush();
+    expect(fake.calls).toHaveLength(2);
     store.detach(APP);
   });
 

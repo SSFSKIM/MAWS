@@ -3,6 +3,7 @@
 // reads a spilled result, `ipcRewind` backs the receipt's Undo, `ipcOpenExternal` opens a markdown link. Each has an
 // `…Over(client)` form so tests drive it with a fake X2 client; the plain forms use the app's validated client.
 import type { SessionEvent } from '@shared/graph/events';
+import { FOLLOW_RELEASED } from '@shared/graph/history-window';
 import type { AgentId, AppSessionId, EventId, MessageUuid } from '@shared/graph/ids';
 import type { CommandName, CommandOutput, CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { bareOf, machineOf } from '@shared/machine/address';
@@ -190,6 +191,10 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
   // The long-transcript window: the history's older pages (older.ts). Main's app events older than the newest window
   // wait aside for the page that holds their time.
   let appAside: SessionEvent[] = [];
+  // The long-transcript window: the engine host released the disk follow this source reads (the session left every
+  // client's interest while the source stayed mounted, as a side thread off screen), so the transcript's later writes
+  // no longer reach it. At the next sign of new history, the record's change, the source reads the host again.
+  let stale = false;
   const atOf = (event: SessionEvent) => Date.parse(event.at);
   const pager = new HistoryPager(
     async (before) => valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null, before })),
@@ -245,6 +250,15 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         if (record.appId !== appSessionId) return;
         subscription.foreign = record.holder.kind === 'terminal' || record.holder.kind === 'background_job';
         resetIfOverturned(subscription);
+        // stale: a staged rebuild whose snapshot asks the host, once this subscription's own snapshot is in
+        if (stale && latest === subscription && subscription.held === null) {
+          stale = false;
+          pager.refresh();
+        }
+      });
+      // A release, not any stop: a resume's handoff to the live stream stops the follow with no message.
+      const offReleased = client.on('fs.followState', (state) => {
+        if (state.appSessionId === appSessionId && state.agentId === null && state.state === 'stopped' && state.message === FOLLOW_RELEASED && !subscription.live) stale = true;
       });
       const offLoss = onHostLoss(client, appSessionId, () => subscription.running, (exit) => { // E10
         if (subscription.held) subscription.held.push([exit]);
@@ -253,6 +267,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
       return () => {
         off();
         offChanged();
+        offReleased();
         offLoss();
         subscription.held = null;
         subscription.pass = () => {};
@@ -267,6 +282,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
       // A rebuild (an older page joined the history) answers the pager's history; any other snapshot asks the host.
       let events = pager.takeRebuilt();
       if (events === null) {
+        stale = false; // this read follows the transcript again
         const answer = valueOf(await eventsOnceKnown(client, appSessionId, subscription));
         const app = valueOf(await client.invoke('session.appEvents', { appSessionId })).events;
         const earlier = answer.earlier ?? null;
@@ -332,6 +348,9 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
   const lifecycleSeen = new Set<EventId>();
   let lifecycleRevision = 0;
   let resetPending = false;
+  // The long-transcript window: the engine host released this child's disk follow (as the session source's `stale`);
+  // the next record change of its session reads the child again.
+  let stale = false;
   // For local agents the engine's task id and the sidecar's agent id carry the same string (C1 Interfaces, observed in
   // the fixtures); X1 keeps them as two types, so the comparison is on the strings.
   const names = (taskId: string) => taskId === (agentId as string);
@@ -466,7 +485,15 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
       const offFollow = client.on('fs.followState', (state) => {
         // Both resume and the index's live-status handling stop all session followers. The child's stopped event
         // comes after its entry was removed, unlike parent status (which can precede the index's queued unfollow).
-        if (state.appSessionId === appSessionId && state.agentId === agentId && state.state === 'stopped' && provenance === 'disk') toDisk();
+        if (state.appSessionId !== appSessionId || state.agentId !== agentId || state.state !== 'stopped' || provenance !== 'disk') return;
+        // A release is no reason to follow again at once, which would only be released again two minutes later.
+        if (state.message === FOLLOW_RELEASED) stale = true;
+        else toDisk();
+      });
+      const offChanged = client.on('session.changed', ({ record }) => {
+        if (record.appId !== appSessionId || !stale) return;
+        stale = false;
+        pager.refresh();
       });
       // E11 (W-C): the session source's host-loss rule, for the parent's process as the live child sees it; the exit
       // ends the child as any parent exit does (closed as stopped, then the switch to disk)
@@ -479,6 +506,7 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
         subscriber.ended.abort();
         off();
         offFollow();
+        offChanged();
         offLoss();
       };
     },
@@ -541,6 +569,7 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
       try {
         for (;;) {
           changed = false;
+          stale = false; // this read follows the child's transcript again
           const disk = valueOf(await client.invoke('fs.agentEvents', { appSessionId, agentId }));
           if (detached()) return [];
           if (disk.complete) {

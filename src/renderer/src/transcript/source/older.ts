@@ -78,6 +78,14 @@ export class HistoryPager implements OlderPages {
     return () => this.rebuilds.delete(listener);
   }
 
+  // The history is to be read from the host again (the source's follow was released, and the transcript may have
+  // grown since): the store rebuilds the key, staged under what the reader opened as for an older page, and the
+  // source's snapshot, finding no history prepared, asks the host.
+  refresh(): void {
+    this.rebuilt = null;
+    for (const listener of [...this.rebuilds]) listener();
+  }
+
   loadOlder(): void {
     const { more, loadingOlder } = this.state.getState();
     if (!more || loadingOlder || this.earlier === null) return;

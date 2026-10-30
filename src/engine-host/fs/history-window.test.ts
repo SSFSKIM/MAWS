@@ -4,7 +4,7 @@
 // a follow outlives its session's interest by the release time only; and the silent request records are never parsed.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
-import { eventBytes, type WindowBudget } from '@shared/graph/history-window';
+import { eventBytes, FOLLOW_RELEASED, type WindowBudget } from '@shared/graph/history-window';
 import type { AgentId, AppSessionId, EventId, SessionId, TaskId } from '@shared/graph/ids';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
@@ -149,8 +149,14 @@ describe('a long transcript is read in windows', () => {
     await new Promise((resolve) => setTimeout(resolve, 60));
     expect(fs.state().followed).toEqual([{ appSessionId: APP, agentId: null }]); // within the release time
     await expect.poll(() => fs.state().followed, { timeout: 2000, interval: 20 }).toEqual([]);
+    // Its stop says it was released, so a source still attached knows to read the history again.
+    const lastState = () => emitted.flatMap((e) => (e.name === 'fs.followState' && e.payload.appSessionId === APP ? [e.payload] : [])).at(-1);
+    expect(lastState()).toMatchObject({ state: 'stopped', message: FOLLOW_RELEASED });
     // A later read follows it again from the start.
     expect((await fs.eventsSnapshot(APP, null)).events.length).toBeGreaterThan(0);
+    // Any other stop (a resume's unfollow) says nothing of a release.
+    await fs.unfollow(APP, null);
+    expect(lastState()).toMatchObject({ state: 'stopped', message: null });
   });
 
   it('never parses the silent request records, and parses a line that only mentions them later on', async () => {

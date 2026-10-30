@@ -230,9 +230,10 @@ export class Follow {
     return this.phase;
   }
 
-  stop(): void {
+  // `message` goes out with the `stopped` state (FOLLOW_RELEASED for a release).
+  stop(message: string | null = null): void {
     if (this.stopped) return;
-    this.follower.stop(); // reports `stopped` through the sink before the gate closes
+    this.follower.stop(message); // reports `stopped` through the sink before the gate closes
     this.stopped = true;
     this.delivered.length = 0;
     this.positions.clear();

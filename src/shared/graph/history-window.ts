@@ -23,6 +23,12 @@ export interface WindowBudget {
 
 export const HISTORY_WINDOW_BUDGET: WindowBudget = { soft: HISTORY_WINDOW_BYTES, hard: HISTORY_WINDOW_MAX_BYTES };
 
+// The message of the `fs.followState` `stopped` a follow reports when the engine host released it, its session having
+// left every client's interest (FOLLOW_RELEASE_MS, src/engine-host/fs/service.ts). A source still attached then reads
+// the history from the host again at the next sign of new history, which a released follow no longer sends; any other
+// stop (a resume handing the session to its live stream, an unbind) carries no message.
+export const FOLLOW_RELEASED = 'released: the session left every client\'s interest';
+
 // One event's share of a window: its JSON's length.
 export const eventBytes = (event: SessionEvent): number => JSON.stringify(event).length;
 

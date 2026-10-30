@@ -11,7 +11,7 @@ import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { SessionEvent } from '@shared/graph/events';
-import type { WindowBudget } from '@shared/graph/history-window';
+import { FOLLOW_RELEASED, type WindowBudget } from '@shared/graph/history-window';
 import type { AgentId, AppSessionId, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import type { ForeignHolder } from '@shared/graph/session';
 import type { HostEmit } from '@shared/host/runtime';
@@ -376,7 +376,7 @@ export class FsService {
       }
       if (now - entry.usedAt < this.releaseMs) continue;
       this.follows.delete(key);
-      entry.follow.stop();
+      entry.follow.stop(FOLLOW_RELEASED); // a source still attached knows to read the history again
     }
   }
 
