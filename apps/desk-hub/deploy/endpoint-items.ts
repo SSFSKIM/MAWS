@@ -14,7 +14,7 @@ import { ProjectSocket, type DeviceHuman } from 'org-protocol/test-support';
 import type { Person } from './hub';
 import type { EndpointMachine } from './endpoint-machine';
 import { DirectPacer, dialDirect, FrameRelay, openRemote, Remote, testDevice, throughTamper, upgradeStatus, type Msg, type RelayDialer, type RunDevice } from './endpoint-remote';
-import { laneAProblems, laneBProblems, laneBResume, resumeCursor, type ItemReport, type LaneBCursor, type LaneBEvent, type LaneBSegment, type Segment } from './endpoint-verdicts';
+import { LANE_B_STATE, laneAProblems, laneBProblems, laneBResume, resumeCursor, rowUuid, snapshotRows, type ItemReport, type LaneBCursor, type LaneBEvent, type LaneBSegment, type Segment } from './endpoint-verdicts';
 import type { Cleanup } from './proof';
 
 export const ITEMS = ['2', '3', '4', '5', '8', '9'] as const;
@@ -992,13 +992,28 @@ export function watchDuring<T>(watch: () => Promise<T>): { join(): Promise<T> } 
 /**
  * Runs `wait` while every track whose channel closes under it (a close the run did not make: the hub ending RL1 late
  * after a deploy, the endpoint ending a carrier) is resumed by its cursor at once, as a device resumes after any drop;
- * each resume is a segment its verdict judges like any other. A failed resume is the wait's failure.
+ * each resume is a segment its verdict judges like any other. Each track's resume runs on its own, so a slow one never
+ * holds another's (a lane A cursor keeps for 120 s); once `wait` ends, a track found closed then is resumed too, and
+ * every resume begun is joined. A failed resume is the wait's failure.
  */
 export async function keepLive<T>(tracks: ReadonlyArray<{ readonly dropped: boolean; recover(): Promise<void> }>, wait: () => Promise<T>, everyMs = 2000): Promise<T> {
+  type Kept = (typeof tracks)[number];
+  const running = new Map<Kept, Promise<void>>();
+  let failed: { error: unknown } | null = null;
+  const sweep = () => {
+    for (const track of tracks) {
+      if (!track.dropped || running.has(track)) continue;
+      const resuming = track.recover().then(
+        () => void running.delete(track),
+        (error: unknown) => void ((failed ??= { error }), running.delete(track)),
+      );
+      running.set(track, resuming);
+    }
+  };
   let on = true;
   const keeping = watchDuring(async () => {
     while (on) {
-      for (const track of tracks) if (on && track.dropped) await track.recover();
+      sweep();
       await sleep(everyMs);
     }
   });
@@ -1008,9 +1023,21 @@ export async function keepLive<T>(tracks: ReadonlyArray<{ readonly dropped: bool
   } finally {
     on = false;
     await keeping.join();
+    sweep();
+    await Promise.all([...running.values()]);
   }
+  if (failed !== null) throw (failed as { error: unknown }).error;
   return value;
 }
+
+/** Whether a lane A track's latest epoch holds `row` (the transcript's last), in an event or its snapshot. */
+const holdsRow = (track: Track, row: string | undefined) => {
+  const latest = track.segments.at(-1)?.subbed?.epoch;
+  return row !== undefined && track.segments.some((s) => s.subbed?.epoch === latest && (s.events.some((e) => rowUuid(e.message) === row) || (s.snapshot !== null && snapshotRows(s.snapshot.message).includes(row))));
+};
+
+/** Whether a lane B track's latest answer brought its whole opening state. */
+const opened = (track: LaneBTrack) => track.segments.at(-1)?.states.some((state) => LANE_B_STATE.every((part) => state.parts.includes(part))) === true;
 
 /** The endpoint's own lines of a run about its hub connection and its channels, the last `max` of them. */
 export function channelLines(lines: readonly string[], max = 40): string[] {
@@ -1424,8 +1451,12 @@ async function resumeWithoutLoss(scene: Scene, report: ItemReport): Promise<void
     }, 'the transcript at rest', 180_000, 5000);
     await sleep(3000);
   };
-  if (scene.target === 'staging') await keepLive([relayed, direct, ...(laneB === null ? [] : [laneB.relayed, laneB.direct])], atRest);
-  else await atRest();
+  if (scene.target === 'staging') {
+    await keepLive([relayed, direct, ...(laneB === null ? [] : [laneB.relayed, laneB.direct])], atRest);
+    // A resume made near the end: its replay given time to bring the transcript's last row (a track an earlier check
+    // left closed is not waited for).
+    await until(() => [relayed, direct].every((track) => track.remote === null || holdsRow(track, produced.at(-1))), 'lane A’s subscriptions holding the last row', 30_000, 1000).catch(() => {});
+  } else await atRest();
   for (const track of [relayed, direct]) {
     await report.check('2', `lane A over the ${track.carrier} carrier: every event once, by the endpoint’s cursor, sminos’s numbering and the transcript`, async () => {
       track.finish();
@@ -1445,17 +1476,22 @@ async function resumeWithoutLoss(scene: Scene, report: ItemReport): Promise<void
   // lacks), a channel a close the run did not make ends meanwhile resumed by its cursor.
   const { app } = laneB;
   const lanes = [laneB.relayed, laneB.direct];
-  const producedB = keepLive(lanes, async () => {
-    let events: LaneBEvent[] = [];
-    await until(async () => {
-      const now = await sourceB.events(app);
-      const settled = now.length === events.length && now.length > 0;
-      events = now;
-      return settled;
-    }, 'the lane B session at rest', 180_000, 5000);
-    await until(() => lanes.every((track) => caughtUp(track, events)), 'both lane B subscriptions caught up', 60_000, 1000).catch(() => {});
+  const producedB = (async () => {
+    const events = await keepLive(lanes, async () => {
+      let now: LaneBEvent[] = [];
+      await until(async () => {
+        const read = await sourceB.events(app);
+        const settled = read.length === now.length && read.length > 0;
+        now = read;
+        return settled;
+      }, 'the lane B session at rest', 180_000, 5000);
+      await until(() => lanes.every((track) => caughtUp(track, now)), 'both lane B subscriptions caught up', 60_000, 1000).catch(() => {});
+      return now;
+    });
+    // A resume made near the end: its opening state and the rest of the stream given time to arrive.
+    await until(() => lanes.every((track) => caughtUp(track, events) && opened(track)), 'both lane B subscriptions caught up after their last resume', 30_000, 1000).catch(() => {});
     return events;
-  }).then(
+  })().then(
     (events) => ({ ok: true as const, events }),
     (error: unknown) => ({ ok: false as const, error }),
   );

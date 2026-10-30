@@ -556,6 +556,24 @@ describe('item 2’s channels kept live at the end', () => {
     expect([late.recovered, quiet.recovered, after.recovered]).toEqual([1, 0, 0]);
   });
 
+  it('resumes each closed channel on its own: a slow one holds no other, and one still resuming when the wait ends is joined', async () => {
+    const { keepLive } = await import('../../deploy/endpoint-items.ts');
+    const done: string[] = [];
+    const slow = { dropped: true, recover: async () => ((slow.dropped = false), await new Promise((r) => setTimeout(r, 300)), void done.push('slow')) };
+    const quick = { dropped: true, recover: async () => ((quick.dropped = false), void done.push('quick')) };
+    const started = Date.now();
+    await keepLive([slow, quick], () => new Promise((r) => setTimeout(r, 50)), 10);
+    expect(done).toEqual(['quick', 'slow']);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(290);
+  });
+
+  it('resumes a channel found closed just as the wait ends', async () => {
+    const { keepLive } = await import('../../deploy/endpoint-items.ts');
+    const t = { dropped: false, recovered: 0, recover: async () => void ((t.dropped = false), t.recovered++) };
+    await keepLive([t], async () => void (t.dropped = true), 1000);
+    expect(t.recovered).toBe(1);
+  });
+
   it('fails the wait when a resume fails', async () => {
     const { keepLive } = await import('../../deploy/endpoint-items.ts');
     const broken = { dropped: true, recover: async () => Promise.reject(new Error('the relayed channel never opened')) };
