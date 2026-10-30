@@ -1032,6 +1032,7 @@ export async function keepLive<T>(tracks: ReadonlyArray<{ readonly dropped: bool
 
 /** Whether a lane A track's latest epoch holds `row` (the transcript's last), in an event or its snapshot. */
 const holdsRow = (track: Track, row: string | undefined) => {
+  track.total(); // its segments read again from the channel's inbox
   const latest = track.segments.at(-1)?.subbed?.epoch;
   return row !== undefined && track.segments.some((s) => s.subbed?.epoch === latest && (s.events.some((e) => rowUuid(e.message) === row) || (s.snapshot !== null && snapshotRows(s.snapshot.message).includes(row))));
 };
