@@ -698,6 +698,24 @@ describe('child source provenance', () => {
     off();
   });
 
+  it.each(['parent', 'disk'] as const)('a same-agent start heard during the %s read clears an old completion before the disk answer is joined with it', async (during) => {
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const done = finish(AGENT, '2026-09-28T10:00:09.000Z', 'completed');
+    const resumed = { ...parent.find((e) => e.kind === 'subagent.started')!, id: 'resumed' as EventId, seq: 548 };
+    const fake = fakeClient();
+    const hydrated = useTranscriptStore.getState().attach(CHILD_KEY, childSource(fake), { agentId: AGENT });
+    if (during === 'parent') fake.emit('session.eventBatch', batch([resumed]));
+    answer(fake, 'session.events', { events: [...parent, done], lastSeq: 517, complete: true });
+    await flush();
+    if (during === 'disk') fake.emit('session.eventBatch', batch([resumed])); // the agent resumes while fs.agentEvents is on its way
+    answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+    await hydrated;
+    expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual(disk.map((e) => e.id));
+    expect(dividerOf(CHILD_KEY).state).toBe('working');
+    useTranscriptStore.getState().detach(CHILD_KEY);
+  });
+
   it('stops requesting incomplete backfill when its attachment is detached', async () => {
     const fake = fakeClient();
     const source = childSource(fake);

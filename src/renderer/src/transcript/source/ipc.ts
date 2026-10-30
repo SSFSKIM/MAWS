@@ -333,14 +333,16 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
 // and passed through that filter once it is.
 interface Subscriber {
   listener: (events: SessionEvent[]) => void;
-  held: SessionEvent[][]; // batches that arrived before the provenance was decided
+  held: SessionEvent[][]; // batches that arrived before the provenance was decided, then the events a disk read holds back
   ended: AbortController;
 }
 
 function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: AgentId): TranscriptSource {
   let provenance: 'undecided' | 'live' | 'disk' = 'undecided';
-  // The long-transcript window: the disk snapshot whose `fs.agentEvents` answer is on its way. Batches are held until it
-  // completes, then those older than the window it answered are dropped before they are passed on.
+  // The long-transcript window: the disk snapshot whose `fs.agentEvents` answer is on its way. The child's events that
+  // batches carry meanwhile are held until it completes, then those older than the window it answered are dropped
+  // before they are passed on. What the batches say of the child's lifecycle is taken at once, as at any other time:
+  // a start heard meanwhile decides whether the answer is joined with an end.
   let reading: object | null = null;
   let ended: SessionEvent | null = null; // the parent's report that the child ended, for the disk slice
   const resets = new Set<() => void>();
@@ -381,7 +383,7 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
   // One batch under the current provenance: its own events in that form, the parent's finish for the child, and while
   // live an exit that ends it, pass into the child's state; an end seen while live switches to disk.
   const receive = (subscriber: Subscriber, events: SessionEvent[]) => {
-    if (provenance === 'undecided' || reading !== null) {
+    if (provenance === 'undecided') {
       subscriber.held.push(events);
       return;
     }
@@ -404,7 +406,8 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
       if ((own(event) && liveForm(event) === (provenance === 'live')) || (provenance === 'live' && ends)) passed.push(event);
       if (provenance === 'live' && liveForm(event)) lastLive = event;
     }
-    if (passed.length > 0) {
+    if (passed.length > 0 && reading !== null) subscriber.held.push(passed); // the long-transcript window
+    else if (passed.length > 0) {
       pager.delivered(passed);
       subscriber.listener(passed);
     }
@@ -416,7 +419,7 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
   };
   const decide = (chosen: 'live' | 'disk') => {
     provenance = chosen;
-    if (reading === null) flush();
+    flush();
   };
   // The reset is signalled once the batch that carried the end has been delivered, so the store's new subscription can
   // never receive that batch a second time.
@@ -544,10 +547,10 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
         pager.started(live, null);
         return live;
       }
-      // Held, not passed, until the disk answer is in (the long-transcript window: `reading`).
-      provenance = 'disk';
+      // The child's events are held, not passed, until the disk answer is in (the long-transcript window: `reading`).
       const token = {};
       reading = token;
+      if (!onDisk()) decide('disk');
       // An incomplete snapshot is not terminal history. Listen before reading so a completed backfill during the
       // round trip is not missed; re-read on its following state, never spin on a reloading/error follower.
       let changed: boolean;
