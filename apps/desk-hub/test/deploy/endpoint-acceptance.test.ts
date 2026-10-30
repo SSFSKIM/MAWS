@@ -538,6 +538,44 @@ describe('item 2’s deploy watcher', () => {
   });
 });
 
+describe('item 2’s channels kept live at the end', () => {
+  /** A track whose channel the hub closes once, `after` ms in. */
+  const track = (after: number | null) => {
+    const t = { dropped: false, recovered: 0, recover: async () => void ((t.dropped = false), t.recovered++) };
+    if (after !== null) setTimeout(() => (t.dropped = true), after);
+    return t;
+  };
+
+  it('resumes a channel a close the run did not make ended while the run waits, once, and none after the wait', async () => {
+    const { keepLive } = await import('../../deploy/endpoint-items.ts');
+    const late = track(30);
+    const quiet = track(null);
+    const after = track(400); // closes after the wait has ended: not the keeper's
+    expect(await keepLive([late, quiet, after], () => new Promise((done) => setTimeout(() => done('at rest'), 150)), 10)).toBe('at rest');
+    await new Promise((r) => setTimeout(r, 450));
+    expect([late.recovered, quiet.recovered, after.recovered]).toEqual([1, 0, 0]);
+  });
+
+  it('fails the wait when a resume fails', async () => {
+    const { keepLive } = await import('../../deploy/endpoint-items.ts');
+    const broken = { dropped: true, recover: async () => Promise.reject(new Error('the relayed channel never opened')) };
+    await expect(keepLive([broken], () => new Promise((done) => setTimeout(done, 100)), 10)).rejects.toThrow(/never opened/);
+  });
+
+  it('prints the endpoint’s own lines about its hub connection and its channels, the last of them', async () => {
+    const { channelLines } = await import('../../deploy/endpoint-items.ts');
+    const log = [
+      '2026-10-30T22:25:01Z endpoint: connected to the hub (generation 2)',
+      '2026-10-30T22:25:02Z [spine] loaded in 900 ms',
+      "2026-10-30T22:26:40Z endpoint: the hub connection closed 1006; connecting again at once",
+      '2026-10-30T22:26:41Z endpoint: channel r7 sealed no stream message in 30000 ms; its carrier is ended',
+      '2026-10-30T22:26:42Z serving; 3 clients',
+    ];
+    expect(channelLines(log)).toEqual([log[0], log[2], log[3]]);
+    expect(channelLines(log, 1)).toEqual([log[3]]);
+  });
+});
+
 describe('production’s spawn probes', () => {
   it('runs no spawn the real daemon could launch if its refusal broke: staging and the suite show those refusals', async () => {
     const { productionAdmit } = await import('../../deploy/endpoint-items.ts');

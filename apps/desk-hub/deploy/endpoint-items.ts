@@ -937,6 +937,26 @@ class Track {
     return this.segments.at(-1)?.events.length ?? 0;
   }
 
+  /** The events received so far over every segment: a resume adds to it, never starts it again. */
+  total(): number {
+    this.#collect();
+    return this.segments.reduce((n, s) => n + s.events.length, 0);
+  }
+
+  /** Whether its channel closed under it, a close the run did not make (and has not taken by `closed`). */
+  get dropped(): boolean {
+    return this.remote !== null && this.remote.closeReason !== null;
+  }
+
+  /** Each close the run did not make, and its resume. */
+  readonly recovered: string[] = [];
+
+  /** Resumes after a close the run did not make, by its cursor, as a device resumes after any drop. */
+  async recover(): Promise<void> {
+    const reason = await this.closed(1000);
+    this.recovered.push(`closed ${reason}, resumed ${await this.subscribe(`a close the run did not make (${reason})`, 'replay')}`);
+  }
+
   finish(): void {
     this.#collect();
     this.remote?.close();
@@ -967,6 +987,34 @@ export function watchDuring<T>(watch: () => Promise<T>): { join(): Promise<T> } 
       return answer.value;
     },
   };
+}
+
+/**
+ * Runs `wait` while every track whose channel closes under it (a close the run did not make: the hub ending RL1 late
+ * after a deploy, the endpoint ending a carrier) is resumed by its cursor at once, as a device resumes after any drop;
+ * each resume is a segment its verdict judges like any other. A failed resume is the wait's failure.
+ */
+export async function keepLive<T>(tracks: ReadonlyArray<{ readonly dropped: boolean; recover(): Promise<void> }>, wait: () => Promise<T>, everyMs = 2000): Promise<T> {
+  let on = true;
+  const keeping = watchDuring(async () => {
+    while (on) {
+      for (const track of tracks) if (on && track.dropped) await track.recover();
+      await sleep(everyMs);
+    }
+  });
+  let value: T;
+  try {
+    value = await wait();
+  } finally {
+    on = false;
+    await keeping.join();
+  }
+  return value;
+}
+
+/** The endpoint's own lines of a run about its hub connection and its channels, the last `max` of them. */
+export function channelLines(lines: readonly string[], max = 40): string[] {
+  return lines.filter((line) => /connected to the hub|the hub connection|the hub's socket|channel|stream message|carrier/i.test(line)).slice(-max);
 }
 
 /** The credit a lane B device grants back once it has taken this much of the stream (a client tops its credit up as it
@@ -1069,6 +1117,20 @@ class LaneBTrack {
     return this.remote !== null && this.remote.closeReason === null;
   }
 
+  /** Whether its channel closed under it, a close the run did not make (and has not taken by `closed`). */
+  get dropped(): boolean {
+    return this.remote !== null && this.remote.closeReason !== null;
+  }
+
+  /** Each close the run did not make, and its resume. */
+  readonly recovered: string[] = [];
+
+  /** Resumes after a close the run did not make, by its cursor, as a device resumes after any drop. */
+  async recover(): Promise<void> {
+    const reason = await this.closed(1000);
+    this.recovered.push(`closed ${reason}, resumed ${await this.subscribe(`a close the run did not make (${reason})`, 'replay')}`);
+  }
+
   /** The events received so far on this channel. */
   count(): number {
     this.#collect();
@@ -1147,6 +1209,20 @@ const caughtUp = (track: LaneBTrack, produced: readonly LaneBEvent[]) => {
 };
 
 export async function item2(scene: Scene, report: ItemReport): Promise<void> {
+  // On staging the endpoint's own lines about its hub connection and channels during the item are printed after it:
+  // a close the run did not make (the hub's, the endpoint's) is named there by whoever made it.
+  const mark = scene.target === 'staging' ? await scene.machine.logMark().catch(() => null) : null;
+  try {
+    await resumeWithoutLoss(scene, report);
+  } finally {
+    if (mark !== null && !scene.cleanup.signal.aborted) {
+      const lines = await scene.machine.logSince(mark).catch((error: unknown) => [`(mawsd.log unread: ${error instanceof Error ? error.message : String(error)})`]);
+      for (const line of channelLines(lines)) scene.log(`  mawsd.log: ${line}`);
+    }
+  }
+}
+
+async function resumeWithoutLoss(scene: Scene, report: ItemReport): Promise<void> {
   const relayed = new Track(scene, `r-${scene.tag}`, 'relayed');
   const direct = new Track(scene, `d-${scene.tag}`, 'direct');
   scene.cleanup.add('close item 2’s channels', async () => {
@@ -1263,20 +1339,22 @@ export async function item2(scene: Scene, report: ItemReport): Promise<void> {
         if (reason === null) continue;
         relayed.finish();
         relayed.remote = null;
-        said.push(`cut by the deploy (${reason}), resumed ${await relayed.subscribe('a cut during the hub deploy', 'replay')}`);
+        said.push(`cut by the deploy (${reason}), resumed ${await relayed.subscribe('a cut by the hub deploy', 'replay')}`);
       }
       return said;
     });
     let during: string[];
     try {
       await scene.hubDeploy!();
+      // A long deploy outlasts the stretch it started with: a new one, so the forced cut falls among rows being written.
+      // The deploy's cut can land after its command returns (the new version takes the sockets a moment later), so the
+      // watcher stays on through this stretch, and its rows are counted over every resume the watcher makes.
+      await flowingAfter(() => ticks(30), [{ carrier: relayed.carrier, count: () => relayed.total() }], 'after the deploy, before the forced cut');
     } finally {
       // The watcher stops at its next turn (2 s at most, or the resume it is in), and is joined before anything else.
       deploying = false;
       during = await watching.join();
     }
-    // A long deploy outlasts the stretch it started with: a new one, so the forced cut falls among rows being written.
-    await fresh('after the deploy, before the forced cut', [relayed], 30);
     const cut = await scene.machine.cutHubSocket();
     const reason = await relayed.closed(60_000);
     const resumed = await relayed.subscribe('the hub deploy and its forced cut', 'replay');
@@ -1333,22 +1411,28 @@ export async function item2(scene: Scene, report: ItemReport): Promise<void> {
     });
   }
 
-  // The verdict: the session's own transcript, once it stops growing, against each subscription.
+  // The verdict: the session's own transcript, once it stops growing, against each subscription. On staging every
+  // channel a close the run did not make ends meanwhile is resumed by its cursor, as a device resumes after any drop:
+  // the hub can end RL1 well after a deploy, and nothing else of the run would resume it.
   let produced: string[] = [];
-  await until(async () => {
-    const rows = await scene.machine.laneA.rows(scene.laneA.session);
-    const settled = rows.length === produced.length;
-    produced = rows;
-    return settled && rows.length > 0;
-  }, 'the transcript at rest', 180_000, 5000);
-  await sleep(3000);
+  const atRest = async () => {
+    await until(async () => {
+      const rows = await scene.machine.laneA.rows(scene.laneA.session);
+      const settled = rows.length === produced.length;
+      produced = rows;
+      return settled && rows.length > 0;
+    }, 'the transcript at rest', 180_000, 5000);
+    await sleep(3000);
+  };
+  if (scene.target === 'staging') await keepLive([relayed, direct, ...(laneB === null ? [] : [laneB.relayed, laneB.direct])], atRest);
+  else await atRest();
   for (const track of [relayed, direct]) {
     await report.check('2', `lane A over the ${track.carrier} carrier: every event once, by the endpoint’s cursor, sminos’s numbering and the transcript`, async () => {
       track.finish();
       const problems = laneAProblems(track.segments, produced);
       if (problems.length) throw new Error(problems.slice(0, 5).join('; '));
       const events = track.segments.reduce((n, s) => n + s.events.length, 0);
-      return `${track.segments.length} answers (${track.segments.map((s) => s.subbed?.mode).join(', ')}), ${events} events, ${produced.length} transcript rows all held`;
+      return `${track.segments.length} answers (${track.segments.map((s) => s.subbed?.mode).join(', ')}), ${events} events, ${produced.length} transcript rows all held${track.recovered.length ? `; after a close the run did not make: ${track.recovered.join('; ')}` : ''}`;
     });
   }
   if (sourceB === null) {
@@ -1357,32 +1441,37 @@ export async function item2(scene: Scene, report: ItemReport): Promise<void> {
   }
   if (laneB === null) return; // its first check failed, and said why
   // Lane B's: the engine host's own numbering of the session's events, read over machine.sock once it stops growing,
-  // against each subscription once it caught up with it (or a minute passed: the verdict then names what it lacks).
+  // against each subscription once both caught up with it (or a minute passed: the verdict then names what each
+  // lacks), a channel a close the run did not make ends meanwhile resumed by its cursor.
   const { app } = laneB;
-  let atRest: Promise<LaneBEvent[]> | null = null;
-  const producedB = () =>
-    (atRest ??= (async () => {
-      let events: LaneBEvent[] = [];
-      await until(async () => {
-        const now = await sourceB!.events(app);
-        const settled = now.length === events.length && now.length > 0;
-        events = now;
-        return settled;
-      }, 'the lane B session at rest', 180_000, 5000);
-      return events;
-    })());
-  for (const track of [laneB.relayed, laneB.direct]) {
+  const lanes = [laneB.relayed, laneB.direct];
+  const producedB = keepLive(lanes, async () => {
+    let events: LaneBEvent[] = [];
+    await until(async () => {
+      const now = await sourceB.events(app);
+      const settled = now.length === events.length && now.length > 0;
+      events = now;
+      return settled;
+    }, 'the lane B session at rest', 180_000, 5000);
+    await until(() => lanes.every((track) => caughtUp(track, events)), 'both lane B subscriptions caught up', 60_000, 1000).catch(() => {});
+    return events;
+  }).then(
+    (events) => ({ ok: true as const, events }),
+    (error: unknown) => ({ ok: false as const, error }),
+  );
+  for (const track of lanes) {
     await report.check('2', `lane B over the ${track.carrier} carrier: every event once, by the endpoint’s cursor and the engine host’s journal`, async () => {
       takeBeside();
-      const events = await producedB();
-      await until(() => caughtUp(track, events), `the ${track.carrier} subscription caught up`, 60_000, 1000).catch(() => {});
+      const read = await producedB;
+      if (!read.ok) throw read.error;
+      const { events } = read;
       track.finish();
       const problems = laneBProblems(track.segments, app, events);
       if (problems.length) throw new Error(problems.slice(0, 5).join('; '));
       const delivered = track.segments.reduce((n, s) => n + s.events.length, 0);
       const pauses = track.segments.reduce((n, s) => n + s.controls.filter((c) => c.startsWith('paused')).length, 0);
       const launches = [...new Set(events.map((e) => e.epoch))];
-      return `${track.segments.length} answers (${track.segments.map((s) => s.subbed?.mode).join(', ')}), ${delivered} events, the ${events.length} the engine host numbered in launch ${launches.join(', ')} each once${pauses ? `; paused ${pauses} time(s), each resumed` : ''}`;
+      return `${track.segments.length} answers (${track.segments.map((s) => s.subbed?.mode).join(', ')}), ${delivered} events, the ${events.length} the engine host numbered in launch ${launches.join(', ')} each once${pauses ? `; paused ${pauses} time(s), each resumed` : ''}${track.recovered.length ? `; after a close the run did not make: ${track.recovered.join('; ')}` : ''}`;
     });
   }
 }
