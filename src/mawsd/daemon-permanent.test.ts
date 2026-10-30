@@ -5,7 +5,7 @@
 // O2's recycle per attachment stays, as master's daemon.test.ts pins it. The endpoint seam's `onAttachment` says whether
 // events are available. Over the daemon in this process and stand-in hosts on real sockets (test/support/mawsd-scene.ts).
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
-import { ATTACHMENT_CAPABILITY, PTY_FRAMES_CAPABILITY } from '@shared/host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, MACHINE_SPINE_CAPABILITY, PTY_FRAMES_CAPABILITY } from '@shared/host/socket-protocol';
 import type { HostResync } from '@shared/host/host-supervisor';
 import { takeSpineLock } from '../services/settings/spine-lock';
 import type { SpineDeps } from '../services/spine-root';
@@ -96,6 +96,38 @@ describe('the permanent client, on, to an engine host that lists host.attachment
 
   // M3's task review: a second app replacing a still-attached one is the first one's departure; the old app's route E,
   // direct operations, status cache and holds end, and the new one is the owner back, on the same connection
+  // M5b fix round 4 (C's residue, D-ab): what reaches main on machine.sock beside the streams (a disk follow's batches
+  // among it) crosses no restream at an app's attach, its replacement or its departure: the permanent link stays the one
+  // ready connection, and every event the engine host emits around each reaches a machine.spine client that stays
+  it('a machine.spine client that stays hears every engine-host event emitted around an attach, a replacement and a departure', async () => {
+    await scene.start({ permanentClient: true });
+    const pane = await scene.app('machine', { capabilities: [MACHINE_SPINE_CAPABILITY] });
+    pane.ready();
+    const first = await scene.app();
+    first.ready();
+    await first.request('engine.ping'); // wakes the engine host, attached
+    await until(() => attachments().length === 1, 3_000, 'the attachment');
+    const engine = scene.lastEngine();
+    const links = engine.supervisor.connections.length;
+    const emitted: number[] = [];
+    const emit = (n: number) => {
+      expect(engine.emitRaw('probe.event', { n }), `event ${n}: the link is ready`).toBe(true);
+      emitted.push(n);
+    };
+    emit(1);
+    const second = await scene.app(); // replaces the first: {attached: false} then true
+    second.ready();
+    await second.request('engine.ping');
+    await until(() => attachments().length === 3, 3_000, 'the replacement');
+    emit(2);
+    second.leave();
+    await until(() => attachments().length === 4, 3_000, 'the departure');
+    emit(3);
+    await until(() => pane.events().length === emitted.length, 3_000, 'every event at the pane');
+    expect(pane.events()).toEqual(emitted.map((n) => ({ n })));
+    expect(engine.supervisor.connections.length).toBe(links); // never restreamed
+  });
+
   it('a replaced app departs before its replacement attaches: {attached: false} then true, ahead of the replacement’s requests, no recycle', async () => {
     await scene.start({ permanentClient: true });
     const first = await scene.app();
