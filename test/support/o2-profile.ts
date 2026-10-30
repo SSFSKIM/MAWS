@@ -80,6 +80,7 @@ export async function writeO2Profile(profile: string): Promise<O2Profile> {
   raw.prepare("INSERT INTO browser_history (partition, url, title, visit_count, typed_count, last_visit_ms, source) VALUES (?, 'https://pricing.example/', 'Pricing', 4, 2, 1760000000123, 'maws'), (?, 'https://imported.example/', NULL, 9, 0, 1750000000000, 'imported')").run(O2_PARTITION, O2_PARTITION);
   raw.prepare("INSERT INTO browser_bookmarks (id, partition, parent_id, root, position, kind, name, url, added_at_ms) VALUES (7, 'persist:profile-1', NULL, 'bar', 0, 'folder', 'Bookmarks bar', NULL, NULL), (8, 'persist:profile-1', 7, 'bar', 0, 'url', 'Docs', 'https://docs.example/', 1700000000000), (9, 'persist:profile-1', NULL, 'other', 1, 'folder', 'Other', NULL, NULL), (10, 'persist:profile-1', NULL, 'mobile', 2, 'folder', 'Mobile', NULL, NULL)").run();
   raw.prepare("INSERT INTO browser_activity (id, app_session_id, tab_id, at, activity) VALUES (41, ?, 'b_000000000001', '2026-10-27T09:02:00.000Z', ?), (42, ?, 'b_000000000002', '2026-10-27T09:03:00.000Z', ?)").run(one.appId, JSON.stringify({ kind: 'navigated', url: 'https://pricing.example/', title: 'Pricing' }), two.appId, JSON.stringify({ kind: 'screenshot' }));
+  raw.exec('ALTER TABLE session_text_state DROP COLUMN resume'); // version 15's column, which a version-13 file lacks
   raw.exec('PRAGMA user_version = 13');
   const browserRows = Object.fromEntries(O2_BROWSER_TABLES.map((t) => [t, raw.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()])) as O2Profile['browserRows'];
   raw.close();

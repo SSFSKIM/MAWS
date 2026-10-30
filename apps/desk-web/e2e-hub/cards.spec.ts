@@ -10,19 +10,15 @@
 // answered, a permission's with Allow and Deny and denied, on each lane, each through one passkey gesture, each card
 // settling within 5 s and the machine recording one answer; a lane B card whose session has no engine session is not
 // answerable, with its reason; an answer whose `ack` is withheld is uncertain, and Retry settles it; the channel dropped
-// reads disconnected, then current again; at 390 and 320 px nothing overflows. Then side by side, from the one browser
-// signed in once: a DX6 permission from desk-hub's fake machine answered in the project view with the org key, and a
-// channel permission answered in the cards view with the passkey.
+// reads disconnected, then current again; at 390 and 320 px nothing overflows. (Its side-by-side case, a DX6 permission
+// from desk-hub's fake machine answered beside a channel one, left with DX2 and DX6 in P5 O14 M5b.)
 //
 // The harness is MAWS's own TypeScript (the endpoint, its shared modules under `@shared`), which Playwright's loader does
 // not run; it is loaded through Vite's module runner with the aliases desk-web's vitest gives it.
 import { resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { expect, test, type BrowserContext, type Page, type WebSocketRoute } from '@playwright/test';
 import { runnerImport } from 'vite';
-import { FakeMachine, loadRecording, TWO_SUBAGENTS } from 'desk-hub/fake-machine';
 import type { World } from '../test/local/endpoint';
-import { enrollInBrowser, holdOrgKey } from './org';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -36,7 +32,6 @@ let harness: typeof import('../test/local/endpoint');
 let world: World;
 let context: BrowserContext;
 let page: Page;
-const fakeMachines: FakeMachine[] = [];
 
 /** The Machine sockets the page opened, through a relay this suite holds: frames to the page can be held, the socket cut. */
 const relay = { routes: [] as WebSocketRoute[], holding: false, held: [] as Array<() => void> };
@@ -120,7 +115,6 @@ test.beforeAll(async ({ browser }) => {
 
 test.afterAll(async () => {
   release();
-  for (const fm of fakeMachines) await fm.close();
   await context?.close();
   await world?.stop();
 });
@@ -295,36 +289,4 @@ test('at 390 and 320 px wide nothing overflows, and the phone menu reaches the c
     await fitsTheWidth(page);
   }
   await page.setViewportSize({ width: 1280, height: 800 });
-});
-
-test('side by side: a DX6 permission answered in the project view with the org key, and a channel one in the cards view with the passkey', async () => {
-  test.setTimeout(240_000);
-  const hub = { url: world.hub.url, localhost: world.url } as Parameters<typeof holdOrgKey>[1];
-  await holdOrgKey(page, hub);
-  const enrolled = await FakeMachine.redeem(await enrollInBrowser(page, `fm-${randomUUID().slice(0, 8)}`));
-  const me = (await (await fetch(`${world.hub.url}/api/me`)).json()) as { member: { id: string } };
-  const rec = loadRecording(TWO_SUBAGENTS, { session: randomUUID() });
-  const project = randomUUID();
-  const fm = new FakeMachine({ ...enrolled, member: me.member.id, projectName: `cards ${project.slice(0, 4)}`, recordings: [rec], decisions: 'wait', project });
-  fakeMachines.push(fm);
-  await fm.connect();
-  await fm.play({ speed: 0, until: (step) => step.k === 'log' && step.event.kind === 'joined' && step.event.session === rec.session });
-  await page.goto(`${world.url}/p/${project}/s/${rec.session}`);
-  const view = page.getByRole('region', { name: 'Channel' }).getByTestId('session-view');
-  await expect(view).toHaveAttribute('data-session', rec.session, { timeout: 20_000 });
-  await fm.play({ speed: 0, until: (step) => step.k === 'raised' });
-  const [bash] = fm.pendingRequests();
-  const dx6 = view.locator(`[data-tail-request="${bash.request}"]`);
-  await expect(dx6).toContainText(/wants to run a command/i);
-  await dx6.getByRole('button', { name: 'Allow' }).click();
-  await expect(dx6).toHaveCount(0, { timeout: 15_000 });
-  expect(fm.rpcs).toMatchObject([{ rpc: 'decide', executed: true, outcome: { state: 'done' } }]);
-
-  world.sminos.raise(permission('toolu_side', 'pnpm build'));
-  await openSession(page, 'la-1');
-  const channel = cardOf(page, 'toolu_side');
-  await expect(channel).toContainText('pnpm build');
-  await channel.getByRole('button', { name: 'Allow' }).click();
-  await settles(page, 'toolu_side');
-  expect(world.sminos.effects.filter((e) => e === 'decide la-1 toolu_side')).toHaveLength(1);
 });

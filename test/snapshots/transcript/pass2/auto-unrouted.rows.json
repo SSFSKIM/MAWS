@@ -22,14 +22,13 @@
   },
   {
     "at": "2026-09-28T09:56:27.168Z",
-    "blockIndex": 0,
+    "attempt": null,
     "id": "text:d2fde9de-3655-4fc1-84fd-dadb61ee70d3:0",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "Failed to authenticate: OAuth session expired and could not be refreshed",
-    "messageUuid": "9634b6ac-6ee9-40fe-9787-2950d628e8b5",
-    "model": "<synthetic>",
-    "phase": "answer",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "api",
+    "severity": "error",
+    "text": "Failed to authenticate: OAuth session expired and could not be refreshed",
     "turnId": "turn:2278b624-b86d-4b59-a93f-a2ce23eaee2a"
   },
   {
@@ -48,14 +47,13 @@
   },
   {
     "at": "2026-09-28T09:56:27.251Z",
-    "blockIndex": 0,
+    "attempt": null,
     "id": "text:4169143f-1de8-48d9-bfcb-7b10bb468268:0",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "Failed to authenticate: OAuth session expired and could not be refreshed",
-    "messageUuid": "96fbc41f-655d-4e6c-b041-71806204fad2",
-    "model": "<synthetic>",
-    "phase": "answer",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "api",
+    "severity": "error",
+    "text": "Failed to authenticate: OAuth session expired and could not be refreshed",
     "turnId": "turn:dcfc8574-52fa-4d58-a448-43000c743eec"
   },
   {
@@ -74,14 +72,13 @@
   },
   {
     "at": "2026-09-28T09:56:27.281Z",
-    "blockIndex": 0,
+    "attempt": null,
     "id": "text:6141e3f1-d72e-48d4-847d-1f44d544898f:0",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "Failed to authenticate: OAuth session expired and could not be refreshed",
-    "messageUuid": "9bc0def7-2517-46e1-bd64-6adfe7bdc5d6",
-    "model": "<synthetic>",
-    "phase": "answer",
+    "kind": "error",
+    "lostAttentionCount": null,
+    "scope": "api",
+    "severity": "error",
+    "text": "Failed to authenticate: OAuth session expired and could not be refreshed",
     "turnId": "turn:7f94e6e0-bdb4-463d-9bba-1a070f8dc25e"
   },
   {

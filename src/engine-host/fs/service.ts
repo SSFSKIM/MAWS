@@ -23,6 +23,7 @@ import type {
   FsScanKnown,
   FsScanResult,
   FsState,
+  SearchCheckpoint,
   SubagentEntry,
   WorkflowRun,
 } from '@shared/ipc/schema/fs';
@@ -436,10 +437,10 @@ export class FsService {
     return readSpill(this.paths, input);
   }
 
-  async searchText(sessionId: SessionId, cursor?: string) {
+  async searchText(sessionId: SessionId, cursor?: string, resume?: SearchCheckpoint) {
     const path = this.listed.get(sessionId)?.path;
     if (!path) throw new Error(`Unknown transcript: ${sessionId}`);
-    return this.searchReader.read(path, cursor);
+    return this.searchReader.read(path, cursor, resume);
   }
 
   private sessionOf(appSessionId: AppSessionId): SessionId {

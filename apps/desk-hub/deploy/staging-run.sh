@@ -22,8 +22,6 @@
 #                            delegation create posts no state; admin delegation publish alone posts its proposal
 #   throwaway <n>            staging deployed under the throwaway org staging-probe-<n>, fake-check and redeploy-check
 #                            there, the account swept (staging-sweep.py), staging restored under staging-ssfskim
-#   desk-web <n>             the same around acceptance 8's desk-web check (apps/desk-web/e2e-staging) in place of
-#                            the two commands: screenshots into desk-web-<n>/
 #   phone <n> [--rehearse] [--lane-b] [--device <id>]
 #                            P5 O13 M7: test/endpoint/staging-phone.live.test.ts, MAWS's endpoint module enrolled as
 #                            o13-phone-<n>, the owner's cards answered from the phone (--rehearse: by the run's second
@@ -389,17 +387,11 @@ case $step in
     SUITE=; rm -f $PGF
     say "phone run exit $ran"
     exit $ran ;;
-  throwaway|desk-web)
+  throwaway)
     n=${1:?a run id}; shift
     [[ $n =~ '^[a-z0-9-]{1,20}$' ]] || { print -r -- "bad run id $n"; exit 2; }
-    # The desk-web check passes nothing on: a Playwright option (--trace=on, --debug, …) would record the browser that
-    # holds the owner's token.
-    [[ $step == desk-web && $# -gt 0 ]] && { print -r -- "desk-web takes no option (given: $*): stop. Nothing was changed."; exit 2; }
     org=staging-probe-$n
     LOG=$O/$step-$n.log; : > $LOG
-    # What the desk-web check saw besides the token (the enrollment code, its token, the org key), one a line, for the
-    # scan below; removed with the run.
-    SCAN=$O/$step-$n.scan; : > $SCAN
     say() { print -r -- "$*" | tee -a $LOG; }
     owner_token
     cat $S/CF_ACCESS_SETUP_TOKEN | python3 -B -I $HERE/staging-sweep.py snapshot $ACCOUNT $O/$step-$n-before.json | tee -a $LOG
@@ -410,7 +402,6 @@ case $step in
     finalize() {
       local first=$?
       (( finalized )) && return; finalized=1
-      rm -f $SCAN
       cat $S/CF_ACCESS_SETUP_TOKEN | python3 -B -I $HERE/staging-sweep.py sweep $ACCOUNT $O/$step-$n-before.json $org $O/$step-$n-sweep.json | tee -a $LOG
       swept=${pipestatus[2]}; say "sweep exit $swept"
       zsh $HERE/staging-deploy.sh --checkout $W 2>&1 | filter | tail -6 | tee -a $LOG
@@ -430,26 +421,14 @@ case $step in
     deployed=${pipestatus[1]}
     if (( deployed != 0 )); then
       say "the throwaway deploy failed (exit $deployed): no checks; sweeping and restoring"
-    elif [[ $step == throwaway ]]; then
+    else
       printf 'DESK_ACCESS_TOKEN=%s\n' "$T" | deployment fake-check --test-org $org 2>&1 | filter | tee -a $LOG
       checks+=(${pipestatus[2]}); say "fake-check exit ${checks[-1]}"
       { printf 'DESK_ACCESS_TOKEN=%s\n' "$T"; printf 'CF_ACCESS_SETUP_TOKEN=%s\n' "$(cat $S/CF_ACCESS_SETUP_TOKEN)"; printf 'CF_DESK_HUB_SERVICE_TOKENS=%s\n' "$(cat $S/CF_DESK_HUB_SERVICE_TOKENS)"; } \
         | deployment redeploy-check --test-org $org --org-name "throwaway $n" \
             --assets $W/apps/desk-web/dist --web "$(git -C $W rev-parse --abbrev-ref HEAD).$(git -C $W rev-parse --short=8 HEAD)" "$@" 2>&1 | filter | tee -a $LOG
       checks+=(${pipestatus[2]}); say "redeploy-check exit ${checks[-1]}"
-    else
-      # Acceptance 8's desk-web check (apps/desk-web/e2e-staging): Playwright's headless Chromium, the token its
-      # cookie; no trace, video, HAR or failure context. It runs in an environment of this script's choosing (no
-      # PWDEBUG, PW_* or PLAYWRIGHT_* passes through), and its configuration refuses any option or such variable as
-      # well. Afterwards every file it wrote is searched for the token and for what the check listed in $SCAN (the
-      # enrollment code, its token, the org key), the patterns read from a pipe, never an argument: none may hold one.
-      shots=$O/desk-web-$n; mkdir -p $shots
-      ( cd $W/apps/desk-web && env -i HOME=$HOME PATH=$PATH USER=$USER TMPDIR=${TMPDIR:-/tmp} LANG=${LANG:-C} DESK_STAGING_TEST_ORG=$org DESK_STAGING_SHOTS=$shots DESK_STAGING_SCAN=$SCAN npx playwright test -c playwright.staging.config.ts ) 2>&1 | filter | tee -a $LOG
-      checks+=(${pipestatus[1]}); say "desk-web check exit ${checks[-1]}; screenshots: $(cd $shots && print -r -- *.png(N))"
-      holding=$(/usr/bin/grep -rlF -f <(print -r -- "$T"; /usr/bin/grep -v '^$' $SCAN) $shots $LOG 2>/dev/null | wc -l | tr -d ' ')
-      say "files holding the Access token or the enrollment code: $holding"
-      (( holding == 0 )) || checks+=(1)
     fi
     exit 0 ;;
-  *) print -r -- "prod <label> | deploy | build | acceptance [--no-push] | relay-measure | access-sync | admin [--pipe] <args…> | throwaway <n> | desk-web <n> | phone <n> [--rehearse] [--lane-b] [--device <id>] | endpoint [args…] | endpoint-vm setup <base> | teardown"; exit 2 ;;
+  *) print -r -- "prod <label> | deploy | build | acceptance [--no-push] | relay-measure | access-sync | admin [--pipe] <args…> | throwaway <n> | phone <n> [--rehearse] [--lane-b] [--device <id>] | endpoint [args…] | endpoint-vm setup <base> | teardown"; exit 2 ;;
 esac

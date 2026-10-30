@@ -1,39 +1,35 @@
-// A push's landing on the cards, and the freeze's one seam (P5 O13 M6; acceptance 2's push half, acceptance 5), in
-// Chromium against M4's harness (test/local/endpoint.ts) as M5's cards.spec.ts assembles it: desk-hub's local runner
-// rooted by `OrgAdmin`, MAWS's endpoint module enrolled on it in this process as the owner's machine `mini`, and this
-// browser paired as a `web-cards` device through the Device panel.
+// A push's landing on the cards (P5 O13 M6; acceptance 2's push half), in Chromium against M4's harness
+// (test/local/endpoint.ts) as M5's cards.spec.ts assembles it: desk-hub's local runner rooted by `OrgAdmin`, MAWS's
+// endpoint module enrolled on it in this process as the owner's machine `mini`, and this browser paired as a
+// `web-cards` device through the Device panel.
 //
 // A `waiting` notice for the owner's lane A session, as the hub's `Registry.notify` builds it (`OwnerNotice`, its shape
 // pinned by desk-hub's push-owners.test.ts; a lane B session's, since O10's lane B notifier feed, is the same shape), is
 // delivered to the service worker through Chromium's DevTools protocol: the notification draws from it alone, and its
 // URL opens the session's cards over the machine's channel, cold and in a window already open. A landing on a delegated
 // VM certified since the phone last read the org state (a certificate moves no version and raises no notice) re-reads
-// the state, and the view names the VM. And a DX session whose machine the org state lists, by its name in another
-// case, reads *moved to MAWS* in its frozen session view: composer and controls disabled, its request not answerable,
-// nothing sent to the machine.
+// the state, and the view names the VM. (Its seam case, a DX session on a machine the org state lists reading *moved to
+// MAWS*, played its session in through desk-hub's fake machine over DX2, and left with DX2 in P5 O14 M5b; the seam's
+// unit suites stay: project-client.test.ts, capabilities.test.ts, Composer.test.tsx, RequestCard.test.tsx.)
 //
 // The hub's own push to a real subscription is M7's (the hub refuses an `http:` endpoint, so no local sink takes one).
 import { resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { runnerImport } from 'vite';
-import { enrollDelegated, FakeMachine, loadRecording, mintRef, TWO_SUBAGENTS, type DelegationKey } from 'desk-hub/fake-machine';
+import { enrollDelegated, type DelegationKey } from 'desk-hub/fake-machine';
 import { delegationFor, type OwnerNotice, type ProvisioningKeyIssued } from 'desk-hub/protocol';
 import { generateSigningKey } from 'org-protocol';
 import type { World } from '../test/local/endpoint';
-import { enrollInBrowser, holdOrgKey } from './org';
 
 test.describe.configure({ mode: 'serial' });
 
 const ROOT = resolve(import.meta.dirname, '../../..');
 const PROJECT = 'proj-m8'; // the harness's sminos project (test/endpoint/sub-harness.ts)
-const MOVED = "moved to MAWS: its cards are on this phone's channel";
 
 let harness: typeof import('../test/local/endpoint');
 let world: World;
 let context: BrowserContext;
 let page: Page;
-const fakeMachines: FakeMachine[] = [];
 
 const question = (request: string, session = 'la-1') => ({ request, session, tool: 'AskUserQuestion', input: { questions: [{ question: 'Which way?', options: [{ label: 'left' }, { label: 'right' }] }] } });
 const cardOf = (target: Page, id: string) => target.locator(`[data-card="${id}"]`);
@@ -103,7 +99,6 @@ test.beforeAll(async ({ browser }) => {
 });
 
 test.afterAll(async () => {
-  for (const fm of fakeMachines) await fm.close();
   await context?.close();
   await world?.stop();
 });
@@ -169,46 +164,4 @@ test('a landing on a delegated VM certified since the last read: the org state i
   await expect(page.getByTestId('channel-cards-machine')).toHaveText('on vm-one', { timeout: 5000 });
   expect(Date.now() - tapped).toBeLessThan(5000);
   expect(await deviceVersion(page)).toBe(withDelegation!.state.version);
-});
-
-test("the seam: a DX session on a machine the org state lists, by its name in another case, reads moved to MAWS — composer and controls disabled, its request not answerable, nothing sent", async () => {
-  test.setTimeout(240_000);
-  const hub = { url: world.hub.url, localhost: world.url } as Parameters<typeof holdOrgKey>[1];
-  await holdOrgKey(page, hub);
-  const name = `fm-${randomUUID().slice(0, 8)}`;
-  const enrolled = await FakeMachine.redeem(await enrollInBrowser(page, name));
-  const me = (await (await fetch(`${world.hub.url}/api/me`)).json()) as { member: { id: string } };
-  const rec = loadRecording(TWO_SUBAGENTS, { session: randomUUID() });
-  const project = randomUUID();
-  const fm = new FakeMachine({ ...enrolled, member: me.member.id, projectName: `seam ${project.slice(0, 4)}`, recordings: [rec], decisions: 'wait', project });
-  fakeMachines.push(fm);
-  await fm.connect();
-  await fm.play({ speed: 0, until: (step) => step.k === 'log' && step.event.kind === 'joined' && step.event.session === rec.session });
-
-  // The machine moves to MAWS: the org state lists it, under its name upper-cased.
-  const ref = mintRef();
-  const key = await generateSigningKey();
-  const moved = await world.admin.amend('the DX machine moved', (s) => {
-    s.machines.push({ name: name.toUpperCase(), ref, pub: key.pub, owners: [world.admin.id] });
-    s.machineNames.push({ name: name.toUpperCase(), ref });
-  });
-  await expect.poll(() => deviceVersion(page), { timeout: 10_000 }).toBe(moved!.state.version);
-
-  await page.goto(`${world.url}/p/${project}/s/${rec.session}`);
-  const center = page.getByRole('region', { name: 'Channel' });
-  await expect(center.getByTestId('session-view')).toHaveAttribute('data-session', rec.session, { timeout: 20_000 });
-  const composer = center.getByTestId('composer');
-  await expect(composer.getByTestId('composer-note')).toHaveText(MOVED, { timeout: 15_000 });
-  await expect(composer.getByRole('textbox')).toBeDisabled();
-  for (const verb of ['send', 'model', 'compact']) await expect(composer.locator(`[data-verb="${verb}"]`)).toBeDisabled();
-
-  await fm.play({ speed: 0, until: (step) => step.k === 'raised' });
-  const [bash] = fm.pendingRequests();
-  const card = center.getByTestId('session-view').locator(`[data-tail-request="${bash.request}"]`);
-  await expect(card).toContainText(/wants to run a command/i, { timeout: 15_000 });
-  await expect(card.getByTestId('terminal-only')).toContainText(MOVED);
-  await expect(card.getByRole('button', { name: 'Allow' })).toHaveCount(0);
-  await expect(card.getByRole('button', { name: 'Deny' })).toHaveCount(0);
-  await page.waitForTimeout(1000);
-  expect(fm.rpcs).toEqual([]);
 });

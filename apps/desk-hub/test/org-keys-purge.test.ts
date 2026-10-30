@@ -1,9 +1,9 @@
 // The wrapped copies of the org key purged on the head's word (O14 M5a, Interfaces §E): `POST /api/org/keys/purge`,
 // an admin's, is refused until the head carries `legacyRetired`; it then deletes every copy and the org's key check and
-// auth, after which the copies' routes answer that the key is retired, and no successor may drop the retirement.
+// auth, after which the copies' list answers that the key is retired, and no successor may drop the retirement. No copy
+// is posted any more (O14 M5b took the route out): the suite seeds the copies a hub of the phase-1 era holds.
 import { generateSigningKey, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { importOrgKey, keyAuth, keyCheck } from '../src/protocol/codes';
 import type { WrappedKeys } from '../src/protocol/identity';
 import { refusal } from './support/clients';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from './support/local';
@@ -14,17 +14,12 @@ let a1: TestDevice;
 let recovery: SigningKey;
 let head: SignedOrgState;
 const MEMBER = 'colleague@example.com';
-const random = (n: number) => Buffer.from(crypto.getRandomValues(new Uint8Array(n))).toString('base64url');
-let wrapped: () => Record<string, unknown>;
 
 beforeAll(async () => {
   hub = await startLocalHub();
   await hub.addMember(MEMBER, 'member');
   a1 = await newDevice('a1');
   recovery = await generateSigningKey();
-  const key = await importOrgKey(crypto.getRandomValues(new Uint8Array(32)));
-  const [check, auth] = [await keyCheck(key), await keyAuth(key)];
-  wrapped = () => ({ method: 'passphrase', label: 'a passphrase', kdf: { name: 'argon2id', salt: random(16) }, iv: random(12), wrapped: random(48), check, auth });
 });
 afterAll(() => hub?.close());
 
@@ -40,7 +35,7 @@ const retire = (s: { version: number; issued: string; legacyRetired?: unknown })
 
 describe('purging the wrapped org keys', () => {
   it('is refused before the head retires the key, and to a member who is not an admin', async () => {
-    for (let i = 0; i < 2; i++) expect((await hub.fetchAs(ADMIN, '/api/org/keys', { body: wrapped() })).status).toBe(201);
+    for (let i = 0; i < 2; i++) await hub.seedWrappedKey();
     expect(await refusal(await purge())).toBe('409 not-retired');
     const me = ((await (await hub.fetchAs(ADMIN, '/api/me')).json()) as { member: { id: string } }).member.id;
     head = await signedBy(await genesis(ORG, me, ADMIN, a1, recovery), a1);
@@ -65,14 +60,12 @@ describe('purging the wrapped org keys', () => {
     expect((await post(retire)).status).toBe(201);
   });
 
-  it('deletes every copy and the key check on the head’s word; the copies’ routes then say the key is retired', async () => {
+  it('deletes every copy and the key check on the head’s word; the copies’ list then says the key is retired', async () => {
     const response = await purge();
     expect(response.status).toBe(200);
     const { purged } = (await response.json()) as { purged: { version: number; at: string } };
     expect(purged).toEqual({ version: head.state.version, at: expect.any(String) as string });
     expect(await refusal(await keys())).toBe('410 retired');
-    expect(await refusal(await hub.fetchAs(ADMIN, '/api/org/keys', { body: wrapped() }))).toBe('409 retired');
-    expect(await refusal(await hub.fetchAs(ADMIN, `/api/org/keys/${random(8)}`, { method: 'DELETE', body: {} }))).toBe('410 retired');
     const me = (await (await hub.fetchAs(ADMIN, '/api/me')).json()) as { org: { key_check: string | null } };
     expect(me.org.key_check).toBeNull();
     // Purged once, it answers the same record again.

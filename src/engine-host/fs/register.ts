@@ -16,7 +16,7 @@ export function registerFs(on: HostOn, emit: HostEmit, env: NodeJS.ProcessEnv = 
   const service = new FsService({ paths: resolveStorePaths(env), emit, holders: { ownPids: options.ownPids } });
   // The runtime hands a handler the schema's parsed value, typed as its input; the ids in it passed the branded
   // id schemas, which is what the brands stand for.
-  on('fs.sessionText', async ({ sessionId, cursor }) => service.searchText(sessionId as SessionId, cursor));
+  on('fs.sessionText', async ({ sessionId, cursor, resume }) => service.searchText(sessionId as SessionId, cursor, resume));
   on('fs.state', async () => service.state());
   on('fs.scan', async ({ known }) => service.scan((known ?? []) as FsScanKnown[]));
   on('fs.bind', async ({ bindings }) => service.bind(bindings as Pick<FsScanKnown, 'sessionId' | 'appSessionId'>[]));

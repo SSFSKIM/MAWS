@@ -20,7 +20,7 @@ export const LOCAL_ADMIN = 'owner@example.com';
 const IDENTITY_HEADER = 'x-desk-standin-user'; // local/standin.ts
 
 /** A person signed in through the stand-in's test identity, in place of an Access token. */
-class StandinPerson extends Person {
+export class StandinPerson extends Person {
   readonly #email: string;
   constructor(hub: string, email: string) {
     super(hub, 'unused');
@@ -127,9 +127,10 @@ export class Member {
     readonly device: AdminDevice,
   ) {}
 
-  static async open(person: Person): Promise<Member> {
+  /** The admin's side in `org`: the local runner's, or another stand-in hub's (miniflare-hub.ts). */
+  static async open(person: Person, org = LOCAL_ORG): Promise<Member> {
     const device = await newAdminDevice('a1');
-    return new Member(person, await OrgAdmin.open(person, { org: LOCAL_ORG, throwaway: true }, device, () => {}), device);
+    return new Member(person, await OrgAdmin.open(person, { org, throwaway: true }, device, () => {}), device);
   }
 
   get id(): string {

@@ -272,6 +272,9 @@ ALTER TABLE projects ADD COLUMN org_smns_id TEXT;
     sql: 'DROP TABLE IF EXISTS browser_history; DROP TABLE IF EXISTS browser_activity; DROP TABLE IF EXISTS browser_bookmarks;',
     before: stageBrowserTables,
   },
+  // The conversation-search index resumes a transcript where it last stopped (src/services/index/session-search.ts): a
+  // ready text's checkpoint, JSON, null until its next full pass.
+  { version: 15, sql: 'ALTER TABLE session_text_state ADD COLUMN resume TEXT;' },
 ];
 
 export const REPAIRS: readonly Repair[] = [{ version: 1, table: 'sessions', column: 'removed_at', definition: 'TEXT' }];

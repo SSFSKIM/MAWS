@@ -7,7 +7,6 @@ import { ATTENTION_HEADINGS } from '@shared/attention/headings';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionRecord } from '@shared/graph/session';
 import type { SessionDigest } from '@shared/ipc/schema';
-import { formatAgo } from '@shared/app/date-format';
 import { isActionable, isOpen } from './derive';
 
 export type Glyph = { char: string; tone: 'accent' | 'warning' | 'info' | 'danger' | 'faint'; label: string; pulse: boolean };
@@ -20,9 +19,9 @@ const TROUBLE: Partial<Record<AttentionItem['kind'], string>> = {
   auto_mode_unavailable: 'Needs you: auto mode unavailable',
 };
 
-// `ended` (E11 F2b, plan 2.4; owner decision 1): the session's error seen or dismissed (`selectEndedWithErrorOf`), which
-// it keeps saying, with its time, until its next turn retires it; `now` dates it.
-export function glyphFor(record: SessionRecord, digest: SessionDigest | null, pending: AttentionItem[], ended: AttentionItem | null = null, now = Date.now()): Glyph {
+// The owner's ruling (2026-10-30; it withdraws E11 F2b's "Ended with an error"): an error seen or dismissed leaves no
+// glyph of its own; the transcript shows what happened, and the session reads as what it is now.
+export function glyphFor(record: SessionRecord, digest: SessionDigest | null, pending: AttentionItem[]): Glyph {
   const { holder } = record;
   const open = pending.filter((i) => isOpen(i) && isActionable(i));
   const unbridged = open.length === 0 && (digest === null || digest.phase === 'foreign'); // P5 O9 M6
@@ -48,11 +47,7 @@ export function glyphFor(record: SessionRecord, digest: SessionDigest | null, pe
     case 'failed':
       return glyph('✕', 'danger', 'Failed');
   }
-  if (ended !== null) return glyph('✕', 'danger', `Ended with an error ${formatAgo(Math.max(0, now - Date.parse(ended.createdAt)))}`);
-  switch (digest?.phase) {
-    case 'exited':
-      return glyph('✓', 'faint', 'Done');
-  }
+  if (digest?.phase === 'exited') return glyph('✓', 'faint', 'Done');
   return record.unread ? glyph('●', 'faint', 'Idle, unread') : glyph('○', 'faint', 'Idle');
 }
 

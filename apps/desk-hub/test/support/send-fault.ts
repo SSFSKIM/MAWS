@@ -2,16 +2,10 @@
 /** Where the suites' `Machine` takes an armed send fault. */
 export const SEND_FAULT_PATH = '/__test/send-fault';
 /** Where the suites' `Machine` takes a shortened heartbeat and lease (`?heartbeatMs=&leaseMs=`, and optionally
- * `&graceMs=&probeMs=&writeTimeoutMs=`), before its stream opens. */
+ * `&graceMs=`), before its connection opens. */
 export const TIMING_PATH = '/__test/timing';
-/** Where the suites' `Machine` is armed to find itself replaced at its next probe, as an instance Cloudflare replaced
- * under its stream would. */
-export const MACHINE_REPLACE_PATH = '/__test/replace';
-/** Where the suites' `Machine` probes once and says its own instance and the one the probe reached. */
+/** Where the suites' `Machine` says which instance it is. */
 export const MACHINE_PROBE_PATH = '/__test/probe';
-/** Where the suites' `Machine` is armed to throw from its next request to a path (`?path=`), as a reset object's call
- * fails at the Worker. */
-export const MACHINE_FETCH_FAULT_PATH = '/__test/fetch-fault';
 /** Where the suites' `Machine` is terminated: `ctx.abort()`, which ends the instance and its stream unannounced. */
 export const MACHINE_ABORT_PATH = '/__test/abort';
 /** The reason the suites' `Machine` aborts with. */
@@ -37,9 +31,6 @@ export const PROJECT_CALLS_PATH = '/__test/calls';
 export const ORG_ROW_PATH = '/__test/org-row';
 /** Where the suites' `Machine` holds its next send of one frame kind (`?kind=`) until it is released. */
 export const SEND_HOLD_PATH = '/__test/send-hold';
-/** Where the suites' `Machine` stalls its next write of one frame kind (`?kind=`): the stream never takes it, as one whose
- * client stopped reading would not, so the write bound ends the stream. */
-export const WRITE_STALL_PATH = '/__test/write-stall';
 /** Where the suites' `Project` lists its `machines` rows (`[{name, generation}]`): the streams it fans out to. */
 export const PROJECT_MACHINES_PATH = '/__test/machines';
 /** Where the suites' `Machine` releases a held send: answers `released`, or `none` while no send is held. */
@@ -87,10 +78,6 @@ export const LEAVE_HOLD_PATH = '/__test/leave-hold';
 /** Where the suites' `Registry` takes how long an unfinished offline revocation waits before it is tried again
  * (`{ms}`, or `{ms: null}` for the deployed minute), and wakes its alarm. */
 export const OFFLINE_RETRY_PATH = '/__test/offline-retry';
-/** Where the suites' `Machine` is armed (`{times}`) to throw from its next `times` calls of `directory`, as the
- * Registry's push to an object a code update reset fails (0 disarms); every request there (`{}` arms nothing) answers
- * `{remaining, calls}`: the throws still armed, and the calls taken since it was last armed. */
-export const DIRECTORY_FAULT_PATH = '/__test/directory-fault';
 /** Where the suites' `Registry` is armed (`{project, times}`) to throw from its next `times` summary reports of the
  * project, as a project's report to a Registry a code update reset fails (0 disarms); every request there answers
  * `{remaining, calls}` for the project. */
@@ -151,3 +138,10 @@ export const RELAY_FAULT_PATH = '/__test/relay-fault';
 /** Where the suites' `Machine` (a name's) grants an RL1 generation claim (`{org, name, ref, client}`) no socket follows: a
  * claim of another credential that never installs. */
 export const CLAIM_PATH = '/__test/claim';
+/** Where the suites' `Registry` keeps one wrapped copy of the org key as a browser once posted one (`POST /api/org/keys`,
+ * gone since O14 M5b), setting the org's key check: what a deployed hub still holds until its purge. */
+export const WRAPPED_KEY_SEED_PATH = '/__test/wrapped-key-seed';
+/** Where the suites' `Project` answers how many RPC records it keeps (`{rpcs}`; none once DX6 is retired). */
+export const PROJECT_RPCS_PATH = '/__test/project-rpcs';
+/** Makes a machine's object take every frame no connection holds, as phase 1's stream took them (`phaseOneFrames`). */
+export const PHASE_ONE_SINK_PATH = '/__test/phase-one-sink';

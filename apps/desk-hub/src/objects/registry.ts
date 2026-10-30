@@ -1,9 +1,9 @@
 // The org's registry (DX7): one per org. It holds the org, its members, its machines, its projects, and the
 // enrollments that create machines, and answers who an Access identity is to the hub; its members' push subscriptions,
 // which it sends Web Push to; and the grid, each project's summary as its `Project` reports it, streamed to members'
-// grid sockets; and the org's directory, sent down every machine's stream as the `org` frame: every project with its kind,
-// and every enrolled machine with whether it is online, as the projects' leases report it. Each enrolled machine has a
-// project of its own (`kind` `machine`), registered when its enrollment is confirmed and retired when it is revoked.
+// grid sockets; and every enrolled machine with whether it is online, as the projects' leases report it. Each enrolled
+// machine has a project of its own (`kind` `machine`), registered when its enrollment is confirmed and retired when it
+// is revoked.
 //
 // Enrollment is a durable state machine. Redeeming a token reserves the machine's name and records the intent to mint
 // (a machine row without a client id) before Cloudflare's API is called; the service token is named
@@ -41,10 +41,9 @@ import { hubConfig, MEMBER_HEADER, type Env, type HubConfig } from '../env';
 import type { AccessIdentity } from '../identity/access';
 import { ServiceTokenApiError, serviceTokens } from '../identity/service-tokens';
 import { importVapidKey, pushRequest, type VapidKey } from '../push/web-push';
-import { base64urlDecode, base64urlEncode, isBase64urlOf } from '../protocol/base64url';
+import { base64urlEncode, isBase64urlOf } from '../protocol/base64url';
 import { isListingGone, LISTINGS_PAGE_BYTES, REGISTRY_APP_PARAM, type Delegation, type HistoryInventory, type Listing, type RegistryAppFrame, type Signed } from 'org-protocol';
-import type { GridDown, MachineSummary, ProjectSummary, PushNotice, RegistryDown } from '../protocol/browser';
-import type { OrgFrame } from '../protocol/machine';
+import type { GridDown, ProjectSummary, PushNotice, RegistryDown } from '../protocol/browser';
 import { toWire } from '../protocol/parts';
 import {
   ENROLLMENT_TTL_S,
@@ -65,7 +64,6 @@ import {
   type MachineState,
   type MemberRecord,
   type OrgRecord,
-  type ProjectKind,
   type ProjectRecord,
   type ProvisioningKeyIssued,
   type ProvisioningKeyRecord,
@@ -73,7 +71,6 @@ import {
   type PushSubscriptionRecord,
   type OrgKeysPurged,
   type Redeemed,
-  type WrappedKeyRemoved,
   type CertConflict,
   type EnrollmentKey,
   type Listings,
@@ -89,11 +86,9 @@ import { relayObjectName } from './relay';
 import { checkRequest, ProvisioningKeys, type KeyRow } from './provisioning-keys';
 import { lacksMethod, RETRY_ATTEMPTS, RETRY_BASE_MS, RETRY_CAP_MS, retryDelay } from './retry';
 
-/**
- * Who a request is. A machine's `v2` is set when its enrollment posted a machine key (`POST /machine/key`, which
- * `mawsd enroll` sends in the run that redeems): its credential is v2's, and never opens DX2 (O14 M5a).
- */
-export type Principal = { kind: 'member'; org: OrgRecord; member: MemberRecord } | { kind: 'machine'; org: OrgRecord; machine: MachineRecord; v2?: true };
+/** Who a request is. (O14 M5a marked a machine `v2` once its enrollment posted a machine key, to keep it off DX2; with
+ * DX2 gone from the hub since M5b, nothing reads the mark.) */
+export type Principal = { kind: 'member'; org: OrgRecord; member: MemberRecord } | { kind: 'machine'; org: OrgRecord; machine: MachineRecord };
 
 /** An answer for the Worker to send: a value, or an HTTP status with DX7's `{error, message?}`. */
 export type Result<T> = { ok: true; value: T } | { ok: false; status: number; error: string; message?: string; conflicts?: CertConflict[] };
@@ -101,7 +96,7 @@ export type Result<T> = { ok: true; value: T } | { ok: false; status: number; er
 const ok = <T>(value: T): Result<T> => ({ ok: true, value });
 const fail = (status: number, error: string, message?: string): Result<never> => ({ ok: false, status, error, ...(message ? { message } : {}) });
 /** The org key's copies after their purge (O14 M5a): the key is retired, and the hub holds none. */
-const retiredKey = (status: 409 | 410) => fail(status, 'retired', 'the org key is retired and its wrapped copies are purged: the hub holds none');
+const retiredKey = () => fail(410, 'retired', 'the org key is retired and its wrapped copies are purged: the hub holds none');
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS org (id TEXT PRIMARY KEY, name TEXT NOT NULL, created TEXT NOT NULL, key_check TEXT, key_auth TEXT, key_purged TEXT);
@@ -172,8 +167,6 @@ const ENROLLMENT_COLUMNS = 'id, created_by, created, expires, state, machine, tt
 const PROJECT_COLUMNS = 'id, name, registered_by, created, archive_machine, kind, retired';
 type ProjectRow = Omit<ProjectRecord, 'retired'> & { retired: number };
 const projectOf = (row: ProjectRow): ProjectRecord => ({ ...row, retired: row.retired === 1 });
-/** The `kv` key of the directory's version, raised by every change it carries (`directoryChanged`). */
-const DIRECTORY_VERSION = 'directory-version';
 /** How soon a failed orphan deletion, or a revocation a project has not taken, is tried again. */
 const RETRY_MS = 60_000;
 /** An announcement owed to a relay's object (O11 M6) is kept under `ref:<ref>` in `announcements` beside the projects'
@@ -204,10 +197,6 @@ export class Registry extends DurableObject<Env> {
    * may be placed, so it is tried again until it completes, whatever the machine's online state or offline deadline
    * reads since (an object restart forgets it). */
   private readonly unfinished = new Map<string, { name: string; began: number }>();
-  /** The version of the latest change of the directory this instance pushed (`directoryChanged`). */
-  private pushed = 0;
-  /** Per machine, a failed push of that version waiting to be sent again (an object restart forgets it). */
-  private readonly pushRetries = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -264,7 +253,7 @@ export class Registry extends DurableObject<Env> {
         this.sql.exec('UPDATE machines SET confirmed = ? WHERE name = ?', confirmed, machine.name);
         this.sql.exec("UPDATE enrollments SET state = 'confirmed' WHERE id = ? AND state = 'pending'", machine.enrollment);
       });
-      return this.machinePrincipal(org, { ...machine, confirmed });
+      return { kind: 'machine', org, machine: { ...machine, confirmed } };
     }
     if (machine.state === 'pending') {
       const enrollment = this.enrollmentById(machine.enrollment);
@@ -280,15 +269,9 @@ export class Registry extends DurableObject<Env> {
         this.seedProject(project);
         this.toGrid({ t: 'summary', project: this.summaryOf(this.project(project)!) });
       }
-      this.directoryChanged();
-      return this.machinePrincipal(org, { ...machine, state: 'active', confirmed });
+      return { kind: 'machine', org, machine: { ...machine, state: 'active', confirmed } };
     }
-    return this.machinePrincipal(org, machine);
-  }
-
-  /** A machine principal, marked `v2` when its enrollment holds a posted machine key (`Principal`). */
-  private machinePrincipal(org: OrgRecord, machine: MachineRecord): Principal {
-    return { kind: 'machine', org, machine, ...(this.records.machineKey(machine.enrollment) === null ? {} : { v2: true as const }) };
+    return { kind: 'machine', org, machine };
   }
 
   /** A one-time token for an admin to build an enrollment code from; the hub keeps only its hash. With `machine`, an
@@ -612,7 +595,6 @@ export class Registry extends DurableObject<Env> {
     });
     // A summary cannot take a row off the grid: the grid goes again whole.
     if (retired) this.toGrid(this.gridFrame());
-    this.directoryChanged();
     await this.sweepRevocations();
     await this.sweepOrphans();
     await this.scheduleAlarm();
@@ -625,7 +607,7 @@ export class Registry extends DurableObject<Env> {
       .exec<MachineRecord & { online: number; seen: string | null }>(`SELECT ${MACHINE_COLUMNS}, online, seen FROM machines ORDER BY name`)
       .toArray()
       .map(({ online, seen, ...record }) => {
-        // DX2 presence, as the directory's `org` frame carries it (O14 M5a: a cutover's check reads it here).
+        // Presence as the projects' leases report it (O14 M5a: a cutover's check reads it here).
         const machine: MachineView = { ...record, online: online === 1, seen };
         const key = this.records.machineKey(machine.enrollment);
         if (!key) return machine;
@@ -678,7 +660,6 @@ export class Registry extends DurableObject<Env> {
     if (listed) {
       this.seedProject(id);
       this.toGrid({ t: 'summary', project: this.summaryOf(project) });
-      this.directoryChanged();
     }
     return project;
   }
@@ -712,84 +693,23 @@ export class Registry extends DurableObject<Env> {
     return true;
   }
 
-  // ---- The org's directory (the `org` frame down every machine's stream) -----------------------------------------
-
-  /** The org's directory as it stands, and the version of the latest change it carries. */
-  orgFrame(): { frame: OrgFrame; version: number } {
-    const projects = this.sql
-      .exec<{ id: string; name: string; kind: ProjectKind; machine: string | null; retired: number }>('SELECT id, name, kind, machine, retired FROM projects ORDER BY created, id')
-      .toArray()
-      .map((p) => ({ id: p.id, name: p.name, kind: p.kind, ...(p.kind === 'machine' && p.machine !== null ? { machine: p.machine } : {}), retired: p.retired === 1 }));
-    const machines = this.sql
-      .exec<{ name: string; online: number; seen: string | null }>("SELECT name, online, seen FROM machines WHERE state = 'active' ORDER BY name")
-      .toArray()
-      .map((m): MachineSummary => ({ name: m.name, online: m.online === 1, seen: m.seen }));
-    return { frame: { t: 'org', projects, machines }, version: this.ctx.storage.kv.get<number>(DIRECTORY_VERSION) ?? 0 };
-  }
-
-  /**
-   * The directory changed: every enrolled machine with a stream is sent it whole, through its `Machine` object (one
-   * with no stream is not sent it: its next `welcome` brings the directory). Each carries the version of its change, so
-   * a `Machine` that wrote a later one, or the snapshot its stream opened with, passes an older one by. A push still
-   * waiting to be sent again is superseded: this change carries everything it did.
-   */
-  private directoryChanged(): void {
-    const version = (this.ctx.storage.kv.get<number>(DIRECTORY_VERSION) ?? 0) + 1;
-    this.ctx.storage.kv.put(DIRECTORY_VERSION, version);
-    const { frame } = this.orgFrame();
-    const org = this.ensureOrg().id;
-    this.pushed = version;
-    for (const timer of this.pushRetries.values()) clearTimeout(timer);
-    this.pushRetries.clear();
-    for (const { name } of frame.machines) this.pushDirectory(org, name, frame, version, 1);
-  }
-
-  /**
-   * Sends one machine's object the directory of `version`, `attempt` being how many times it was sent (retry.ts). A call
-   * that fails is sent again, the same frame and version, until the object answers, a later change supersedes it, or it
-   * went RETRY_ATTEMPTS times; an answer of "offline" is an answer (the machine's next stream opens with the directory).
-   * Sent again, an older directory still never follows a newer one onto a stream: the `Machine` writes a version only
-   * above the last its stream wrote. A retry reads no storage, which an instance replaced meanwhile could not.
-   */
-  private pushDirectory(org: string, name: string, frame: OrgFrame, version: number, attempt: number): void {
-    void this.env.MACHINE.get(this.env.MACHINE.idFromName(`${org}:${name}`))
-      .directory(frame, version)
-      .catch((error: unknown) => {
-        // A later change was pushed meanwhile, to this machine too.
-        if (version !== this.pushed) return;
-        const wait = attempt < RETRY_ATTEMPTS ? retryDelay(attempt, this.retryBaseMs(), error) : null;
-        console.log(JSON.stringify({ desk: 'registry', event: 'push-failed', machine: name, version, attempt, error: described(error), retry_ms: wait === null ? null : Math.round(wait) }));
-        if (wait === null) return;
-        this.pushRetries.set(
-          name,
-          setTimeout(() => {
-            this.pushRetries.delete(name);
-            this.pushDirectory(org, name, frame, version, attempt + 1);
-          }, wait),
-        );
-      });
-  }
-
-  /** How long the first retry of a failed push waits at most (retry.ts; the suites' Worker shortens it). */
+  /** How long the first retry of a failed call waits at most (retry.ts; the suites' Worker shortens it). */
   protected retryBaseMs(): number {
     return RETRY_BASE_MS;
   }
 
   /** Each enrolled machine is online while any project reports a fresh lease of it, opened with its own credential,
-   * and `seen` is when that last changed; the directory goes out when it did. A machine put offline may start a key's
+   * and `seen` is when that last changed. A machine put offline may start a key's
    * offline time, so the alarm is scheduled then (detached: this runs in `summary`'s synchronous step). */
   private refreshOnline(): void {
     const now = iso(Date.now());
-    let changed = false;
     let offline = false;
     for (const m of this.sql.exec<{ name: string; name_key: string; client_id: string | null; online: number }>("SELECT name, name_key, client_id, online FROM machines WHERE state = 'active'").toArray()) {
       const online = this.sql.exec('SELECT 1 FROM machine_states WHERE name_key = ? AND client = ? AND online = 1 LIMIT 1', m.name_key, m.client_id ?? '').toArray().length > 0;
       if (online === (m.online === 1)) continue;
       this.sql.exec('UPDATE machines SET online = ?, seen = ? WHERE name = ?', online ? 1 : 0, now, m.name);
-      changed = true;
       offline ||= !online;
     }
-    if (changed) this.directoryChanged();
     if (offline) void this.scheduleAlarm().catch(() => {});
   }
 
@@ -1559,7 +1479,7 @@ export class Registry extends DurableObject<Env> {
     return record ? ok({ record }) : fail(404, 'no-endpoint', `no endpoint record is kept for "${machine}"`);
   }
 
-  // ---- The org key's wrapped copies (DX7) ----------------------------------------------------------------------
+  // ---- The org key's wrapped copies (DX7): read, then purged; none is added or removed since O14 M5b ------------
 
   orgKeys(): { key_check: string | null; keys: StoredKey[] } {
     return { key_check: this.ensureOrg().key_check, keys: this.keys.list() };
@@ -1567,7 +1487,7 @@ export class Registry extends DurableObject<Env> {
 
   /** `orgKeys`, or `410 retired` once the copies are purged (O14 M5a). */
   wrappedOrgKeys(): Result<{ key_check: string | null; keys: StoredKey[] }> {
-    return this.keyPurged() === null ? ok(this.orgKeys()) : retiredKey(410);
+    return this.keyPurged() === null ? ok(this.orgKeys()) : retiredKey();
   }
 
   /**
@@ -1594,42 +1514,5 @@ export class Registry extends DurableObject<Env> {
   private keyPurged(): OrgKeysPurged['purged'] | null {
     const row = this.sql.exec<{ key_purged: string | null }>('SELECT key_purged FROM org').toArray()[0];
     return row?.key_purged ? (JSON.parse(row.key_purged) as OrgKeysPurged['purged']) : null;
-  }
-
-  /** Adds a wrapped key; the first sets the org's `key_check` and `key_auth` in the same step as its insert. */
-  async addOrgKey(member: MemberRecord, body: unknown): Promise<Result<{ key: StoredKey }>> {
-    const authHash = await this.authHash(body);
-    // From here to the insert, nothing else runs in this object: two first posts cannot both set the check, and no
-    // state can demote the admin between the check and the insert.
-    const admin = this.current(member, 'admin');
-    if (!admin.ok) return admin;
-    if (this.keyPurged() !== null) return retiredKey(409);
-    const org = this.ensureOrg();
-    const keyAuth = this.keyAuth();
-    const setOrg = (check: string, auth: string) => this.sql.exec('UPDATE org SET key_check = ?, key_auth = ?', check, auth);
-    const added = this.keys.add(admin.value, body, { keyCheck: org.key_check, keyAuth }, authHash, setOrg, newId(), iso(Date.now()));
-    return added.ok ? ok({ key: added.value }) : fail(added.status, added.error, added.message);
-  }
-
-  async removeOrgKey(member: MemberRecord, id: string, body: unknown): Promise<Result<WrappedKeyRemoved>> {
-    const authHash = await this.authHash(body);
-    const admin = this.current(member, 'admin');
-    if (!admin.ok) return admin;
-    if (this.keyPurged() !== null) return retiredKey(410);
-    const removed = this.keys.remove(id, this.keyAuth(), authHash);
-    return removed.ok ? ok({ removed: removed.value }) : fail(removed.status, removed.error, removed.message);
-  }
-
-  /** SHA-256 of a body's `auth` (32 bytes, canonical base64url), base64url; null when it carries none. The org keeps only
-   * this digest (`key_auth`), and compares digests, never the `auth` itself. */
-  private async authHash(body: unknown): Promise<string | null> {
-    const auth = typeof body === 'object' && body !== null ? (body as { auth?: unknown }).auth : undefined;
-    if (!isBase64urlOf(auth, 32)) return null;
-    return base64urlEncode(new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.from(base64urlDecode(auth as string)))));
-  }
-
-  /** The org's `key_auth`, never returned by any endpoint. */
-  private keyAuth(): string | null {
-    return this.sql.exec<{ key_auth: string | null }>('SELECT key_auth FROM org').toArray()[0]?.key_auth ?? null;
   }
 }

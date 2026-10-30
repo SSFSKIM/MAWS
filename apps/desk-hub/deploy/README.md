@@ -97,8 +97,8 @@ OAuth token carries no Access scopes, which is why the setup token exists.
    - `CF_API_TOKEN`, from `CF_DESK_HUB_SERVICE_TOKENS` (`--put-api-token` rotates it);
    - `VAPID_KEY`, generated once. Browsers' push subscriptions are bound to it, so it is never regenerated, and it exists nowhere but the Worker.
 
-Every answer the Worker makes, except a WebSocket upgrade and a machine's
-stream, carries `X-Desk-Build`. The value names the build:
+Every answer the Worker makes, except a WebSocket upgrade, carries
+`X-Desk-Build`. The value names the build:
 - `hub@<commit>`, where the commit is the hub's, with `+dirty` when its tree differed;
 - `web@<label>` when `--web <label>` named the web build (`--web smns-erb-web.0fa05392`, say).
 
@@ -478,8 +478,9 @@ and closes. Both are meant to be refused: the hub holds no key, so it stores the
 audit banner), while the `steer` is forwarded and the machine refuses it
 `bad-code`, relayed back as `rpc-state` failed. It sends nothing else and never
 touches the org key, and it refuses to run against any project but the one in
-`DESK_WALK` (it checks the socket's `welcome`). Proven against the local hub in
-`test/deploy/walk-console.test.ts`.
+`DESK_WALK` (it checks the socket's `welcome`). Since O14 M5b the hub forwards no
+RPC: the `steer` is answered `refused retired` at the hub, so the walk's G3 half no
+longer runs as written, and its local-hub suite left with DX6.
 
 ## The checks (DC3.G2, G4, G6)
 
@@ -493,12 +494,32 @@ revocation, and their events are sealed with a throwaway org key.
 Each revokes what it enrolled, which deletes the machines' service tokens, and
 deletes what it minted, however it ends. It fails if any of that fails.
 
-- `probe`: the admission probe's five cases, plus enrollment's name refusal and the archive designation. Needs `DESK_ACCESS_TOKEN` and `CF_DESK_HUB_SERVICE_TOKENS`, the latter for minting the one never-enrolled token, which it deletes.
+- `probe`: the admission probe's five cases, plus enrollment's name refusal. Needs `DESK_ACCESS_TOKEN` and `CF_DESK_HUB_SERVICE_TOKENS`, the latter for minting the one never-enrolled token, which it deletes. The machine's admission is its own request (`GET /machine/enrollment`), which confirms it and registers its machine project, the project the browser case opens; the archive designation it once told at a DX2 hello left with that stream (O14 M5b).
+
+  `probe --rpc` runs one case alone, the one O14's B4 step 3 asks for: an `rpc` frame on a project socket opened with the owner's token is answered `refused retired`. The frame carries a nonce and nothing else, so it writes nothing on any build (one before M5b answers it a bad shape and keeps nothing, and the case fails there); it therefore runs in the deployment's own org, without `--test-org`, and needs `DESK_ACCESS_TOKEN` alone:
+
+      printf 'DESK_ACCESS_TOKEN=%s\n' "$(cloudflared access token -app=$HUB)" \
+        | pnpm --filter desk-hub deployment probe --rpc --config deploy/config.json
+
+  `probe --retired` is the same step's owner-token half of the removed routes: `POST /api/org/keys` and `DELETE /api/org/keys/x` answer the Worker's own 404 (`{"error":"not-found"}`) under the deployed build, and `GET /api/org/keys` answers `410 retired` (after B4 step 4's purge) or the list (before it), each under that build too (K1 to K3). The build it expects is the one the credential-free `POST /machine/enroll` names, as step 3's `curl` reads it; `--build <name>` pins it instead. Each request carries no body, so a hub before M5b refuses the POST a bad shape and the DELETE `not-key-holder` and keeps nothing (and the case fails there); it runs in the deployment's own org on `DESK_ACCESS_TOKEN` alone:
+
+      printf 'DESK_ACCESS_TOKEN=%s\n' "$(cloudflared access token -app=$HUB)" \
+        | pnpm --filter desk-hub deployment probe --retired --config deploy/config.json
+
+  The machine-token half (DX2's two routes) runs on the VM, whose endpoint holds a service token: `deploy/vm-dx2-retired.mjs`, fed to the VM's node on stdin (it imports nothing but node's own modules), reads the token by path from the endpoint's `enrollment.json` (`credentials.clientId`, `credentials.clientSecret`; `${XDG_CONFIG_HOME:-$HOME/.config}/MAWS/mawsd/endpoint/` on Linux) and never prints it. It asks `GET /machine/stream` and `POST /machine/frames` with no body, and passes only when both answer the Worker's `404 {"error":"not-found"}` under `BUILD`, the build step 3's `curl` named; anything else fails it, exit 1: a hub before M5b answering the VM's v2 credential `403 v2-credential` (M5a), another build's answer, or Access's redirect with no build header. `HUB` and `BUILD` reach it as arguments of their own, never spliced into the remote command:
+
+      BUILD=$(curl -sI -X POST $HUB/machine/enroll | awk 'tolower($1) == "x-desk-build:" { sub(/^[^:]*:[ \t]*/, ""); sub(/[ \t\r]*$/, ""); print }')
+      devcloud vm ssh <vm> -- env "HUB=$HUB" "BUILD=$BUILD" node --input-type=module - < apps/desk-hub/deploy/vm-dx2-retired.mjs
+
 - `fake-check`: M4's fake machine, enrolled from a code, replays its recording, and a browser sees every row, request, decision, log event, and outcome, plus one RPC answered.
 - `redeploy-check`: two fake machines and a browser write while the hub is redeployed mid-run, under the same throwaway org. The writing lasts 420 s by default (`--seconds`), because the cut came +314 to +329 s after the deploy. The redeploy is new code, since its build's name is new: Cloudflare restarts objects for new code only. Nothing may be lost or duplicated, and the check fails as "not exercised" when the redeploy cut no machine's stream. See M5's findings in DC3's plan: on 2026-10-15, Cloudflare kept the old version's connections open after a deploy.
   Beside them runs RL1's leg (O11): a v2 machine listed in the throwaway org's state holds RL1 through its endpoint, and an app holds a channel to it. A socket the redeploy drops must come back: the endpoint under a higher generation, the app through a new channel. It prints when each socket dropped (from the redeploy's start) and how long each took to come back. Cloudflare cuts the sockets when it chooses, and within the window it may not (O11 M8's phase B saw a cut in one run of three), so once the writing stops the leg cuts both sockets itself, from the client's end, twice in a row: each time the endpoint must be welcomed again under a higher generation and a new channel echo within 60 s (`rl1: forced cut <n>: …`). Those prove the reconnect, not the deploy's cut, which is what acceptance 3 asks for: only a run whose redeploy cut both RL1 sockets, both came back, and whose forced cuts came back is a PASS. A run that lost nothing and whose forced cuts came back but whose redeploy left an RL1 socket uncut (`rl1: neither socket was cut`) ends `INCONCLUSIVE: deploy cut: not exercised (…)` with status 3, neither PASS nor FAIL. The state is signed by an admin device: `--device-keys <file>` (below), or without it a device made for the run, which posts the throwaway org's genesis and so needs an org with no state yet.
 - `measure`: machines streaming chunks into one project, with browsers subscribed. It runs three series: the phase-1 budget (one session at 150 chunks/s watched by 1 to 3 browsers, with another machine's presence and log events crossing it), fan-out, and a ramp. It reports throughput, latency, and the load average per step, as DC3's plan records them (G6).
 - `frame-cost`: what a POST and each frame in it cost on the path from a machine to its project.
+
+`fake-check`, `redeploy-check`'s two fake machines, `measure` and `frame-cost` drive DX2's stream (the fake machine,
+`fake-machine/`), which a hub from O14 M5b on answers 404: they prove a build before it, and go once the cutover is
+done.
 
 
 ## Staging runs: `staging-deploy.sh`, `staging-run.sh`, `staging-sweep.py`
@@ -542,19 +563,8 @@ production's Worker or host, or a preview alias of it (`<alias>-desk-hub.…`), 
     fails unless both checks, the sweep and the restore passed and `/api/me` names `staging-ssfskim` again (read
     within 30 s; a read that fails or times out is `restore check failed: …`). An `INCONCLUSIVE` redeploy-check
     (status 3) fails the step too.
-  - `desk-web <n>`: the same around acceptance 8's desk-web check (`apps/desk-web/e2e-staging`, its own
-    `playwright.staging.config.ts`): Playwright's headless Chromium loads staging's desk-web, sets the throwaway org's
-    key up, enrolls M4's fake machine from the Machines dialog, and screenshots the grid, the session listed, its
-    permission card, the card answered from the page and the decision in the group chat, into `desk-web-<n>/`. The
-    browser holds the owner's Access token as its `CF_Authorization` cookie for the staging host; nothing records a
-    trace, video or HAR, nor the failure context (`error-context.md`, with a snapshot of the page) Playwright writes
-    for a failed test whatever its options say (`e2e-staging/unrecorded.ts`). Afterwards every file the step wrote is
-    searched for the token and for what the check lists in `desk-web-<n>.scan` (the enrollment code it read from the
-    Machines dialog, its one-time token and the org key), which must be in none; the list is removed with the run.
-    The step takes no option to pass on, and Playwright runs in an environment the script builds (`env -i`, no
-    `PWDEBUG`, `PW_*` or `PLAYWRIGHT_*`); `playwright.staging.config.ts` itself refuses any option but naming it and any
-    such variable (`e2e-staging/recording.ts`), so nothing can turn recording back on.
-    Playwright's Chromium must be installed once (`pnpm --filter desk-web exec playwright install chromium`).
+  - Acceptance 8's `desk-web <n>` check, Playwright against the paused desk-web over DX2 and the org key, left with
+    DX2's routes (P5 O14 M5b); O13 M7's `phone <n>` below supersedes it.
   - `phone <n> [--rehearse] [--lane-b] [--device <id>]` (P5 O13 M7): `test/endpoint/staging-phone.live.test.ts`, the
     owner's phone against a real endpoint module. MAWS's endpoint runs in the suite's process over the suites' fake
     engine host and fake sminos, enrolled the v2 way on `staging-ssfskim` as the scratch machine `o13-phone-<n>` and
@@ -593,7 +603,7 @@ production's Worker or host, or a preview alias of it (`<alias>-desk-hub.…`), 
       notices) in memory alone. The endpoint's scratch profile, `phone-<n>.profile`, holds the machine's keys and
       ledgers; it and the list are removed however the step ends. Production's `X-Desk-Build` is compared before and
       after (`production untouched: …`).
-- `staging-sweep.py snapshot|sweep` is the throwaway steps' account sweep: the service tokens and the `desk-hub*`
+- `staging-sweep.py snapshot|sweep` is the throwaway step's account sweep: the service tokens and the `desk-hub*`
   Access apps and policies before the run, and after it the deletion of what appeared and is the throwaway org's
   (service tokens `desk-<org>-*`, and the apps and policies the deploy tool makes on staging, by exact name:
   `desk-hub-staging`, `desk-hub-staging public paths`, `desk-hub-staging owner`, `desk-hub-staging machines`). Anything
@@ -615,7 +625,7 @@ What they read, at run time, never printed or passed as an argument:
   `access-sync`.
 
 Where they write: `DESK_STAGING_DIR` (default `~/.local/state/desk-hub-staging`, created 0700): one log per step and
-deploy, `prod/`, the throwaway steps' snapshots and sweeps, `access-sync/` (its checkpoint) and `desk-web-<n>/`.
+deploy, `prod/`, the throwaway step's snapshots and sweeps, and `access-sync/` (its checkpoint).
 `DESK_HEAVY_WRAPPER`, when set, prefixes the web build (a slot limiter on a shared machine).
 
 Production's Access read-back (its apps and policies, GETs only, compared before and after a run) is not among them:

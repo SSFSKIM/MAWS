@@ -60,7 +60,6 @@
     "apps/desk-hub/test/support/local.ts",
     "apps/desk-hub/test/support/send-fault.ts",
     "apps/desk-hub/test/support/push.ts",
-    "apps/desk-hub/local/helpers.ts",
     "apps/desk-hub/local/proxy.ts",
     "apps/desk-hub/local/standin.ts",
     "apps/desk-hub/src/push/web-push.ts",

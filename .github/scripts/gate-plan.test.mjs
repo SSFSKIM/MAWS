@@ -1465,7 +1465,7 @@ test('a change under a tree a suite reads without importing adds that suite to t
     'src/engine-host/documents/sigkill.test.ts', 'src/engine-host/documents/retention-crash.test.ts',
   ]);
   assert.deepEqual(decide(['M\tapps/desk-hub/src/objects/machine.ts']).related, [
-    'apps/desk-hub/src/objects/machine.ts', 'apps/desk-hub/test/support/local.ts', 'apps/desk-hub/test/support/hub.ts', 'apps/desk-hub/test/fake-machine/command.test.ts', 'apps/desk-hub/test/stream-close.test.ts',
+    'apps/desk-hub/src/objects/machine.ts', 'apps/desk-hub/test/support/local.ts', 'apps/desk-hub/test/support/hub.ts', 'test/endpoint/local-hub.ts',
   ]);
   assert.ok(decide(['M\tsrc/artifacts/design/editor/BoardList.tsx']).related.includes('test/react-compiler.test.ts'));
   assert.ok(!decide(['M\tsrc/artifacts/design/editor/Board.tsx']).related.includes('test/react-compiler.test.ts'));

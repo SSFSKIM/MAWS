@@ -127,6 +127,13 @@ export type Decision = { machine: string; session: string; settled: Settled; rai
  */
 export type AuditEntry = { id: number; at: string };
 
+/**
+ * The hub's answer to a browser's `rpc` since O14 M5b retired DX6: `refused` with reason `retired` and the RPC's nonce
+ * when it named one, to the sending socket alone. It is no audit entry (it carries no `id` or `at`: nothing is
+ * recorded), so it is not among `ProjectDown`'s refusals, which a reader keeps as the project's audit record.
+ */
+export type RetiredRefusal = { t: 'refused'; refusal: { reason: 'retired'; message: string; nonce?: string } };
+
 export type PendingRequest = { machine: string; raised: Raised; terminal_only: boolean };
 
 /** The grid's row for one project. `machines` and `machines_online` count the machines that hold it (a checkout or a
