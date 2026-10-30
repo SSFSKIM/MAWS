@@ -52,6 +52,28 @@ describe('the discovery wake', () => {
     expect(wakes).toBe(2);
   });
 
+  it('a read answers at the pass without waiting for the host it asked to park, which here never exits', async () => {
+    // The park is an ask the clocks send: a read that waited on it would hold every cold read for the host's exit
+    let asked = 0;
+    const read = discoveryWake({
+      discovery: () => ({ onApplied: (listener) => (listeners.add(listener), () => void listeners.delete(listener)) }),
+      parked: () => parked,
+      wake: () => void (parked = false),
+      waking: () => {},
+      parkNow: () => {
+        asked += 1;
+        return new Promise<void>(() => {}); // the host never exits: a read that awaited this would never settle
+      },
+      log: () => {},
+    })('session.list', false);
+    let settled = false;
+    void read.then(() => (settled = true));
+    await vi.advanceTimersByTimeAsync(100);
+    pass();
+    await vi.advanceTimersByTimeAsync(0); // microtasks only: far inside DISCOVERY_WAKE_BOUND_MS
+    expect([asked, settled], 'the park asked, and the read answered at the pass').toEqual([1, true]);
+  });
+
   it('the app, and reads that need no discovery, never wait', async () => {
     await before('session.list', true);
     await before('session.rename', false);
