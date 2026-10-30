@@ -146,7 +146,8 @@ export function createMirrorSpineView(options: SpineMirrorOptions): SpineMirror 
     for (const [id, row] of changed) tell(id, row);
   }
 
-  const snapshotReads: { member: Member; take(gen: number, race: Raced): Promise<void> }[] = [
+  // Each member's take is handed the takes of its streaming begun before it (`taken`), for one that must settle after another
+  const snapshotReads: { member: Member; take(gen: number, race: Raced, taken: Partial<Record<Member, Promise<void>>>): Promise<void> }[] = [
     {
       member: 'records',
       take: async (gen, race) => {
@@ -192,8 +193,11 @@ export function createMirrorSpineView(options: SpineMirrorOptions): SpineMirror 
     },
     {
       member: 'intents',
-      take: async (gen, race) => {
+      // settled after the records: an intent that became a record while disconnected is removed only once its record is
+      // in, so `known` never drops for it (panel-lifetime.ts forgets the panels of a session unknown for long)
+      take: async (gen, race, taken) => {
         const answer = await read('session.intent.list', undefined);
+        await taken.records;
         if (gen === generation) settle(intents, answer.intents, (i) => i.appSessionId as AppSessionId, race, false, (id, i) => fire('intent', id, i));
       },
     },
@@ -244,7 +248,9 @@ export function createMirrorSpineView(options: SpineMirrorOptions): SpineMirror 
     const gen = generation;
     loading = gen;
     const races = snapshotReads.map(({ member }) => (raced[member] = { ids: new Set(), whole: false }));
-    void Promise.allSettled(snapshotReads.map(({ take }, i) => take(gen, races[i]!))).then((results) => {
+    const taken: Partial<Record<Member, Promise<void>>> = {};
+    for (const [i, { member, take }] of snapshotReads.entries()) taken[member] = take(gen, races[i]!, taken);
+    void Promise.allSettled(snapshotReads.map(({ member }) => taken[member]!)).then((results) => {
       if (loading === gen) loading = null;
       if (gen !== generation || stopped) return;
       for (const { member } of snapshotReads) delete raced[member];

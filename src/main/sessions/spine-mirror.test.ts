@@ -231,6 +231,32 @@ describe('the spine mirror (Interfaces §F)', () => {
     expect(view.projectRows().map((p) => p.id)).toEqual(['new']);
   });
 
+  it('removes no intent before the same streaming’s records settled, so a session whose intent became a record while disconnected stays known', async () => {
+    const host = new FakeMachine({ intents: [intentOfId({ appSessionId: B })] });
+    const { view } = mirrorOver(host);
+    host.stream();
+    await loaded(view);
+    expect(view.known(B)).toBe(true);
+    host.lose();
+    // meanwhile B's intent became its record; its records' snapshot is slow to answer
+    host.answers.set('session.intent.list', () => ({ ok: true, value: { intents: [] } }));
+    host.answers.set('session.list', () => ({ ok: true, value: { sessions: [record({ appId: B })], revision: 2 } }));
+    host.held.add('session.list');
+    const heard: string[] = [];
+    view.on('record', (id, r) => void heard.push(`record ${id} ${r ? 'put' : 'removed'}`));
+    view.on('intent', (id, i) => void heard.push(`intent ${id} ${i ? 'put' : 'removed'}`));
+    host.stream();
+    await vi.waitFor(() => expect(host.asked.filter((a) => a.name === 'session.intent.list')).toHaveLength(2));
+    await new Promise((resolve) => setTimeout(resolve, 10)); // the intents answered; the records are still out
+    expect(view.known(B)).toBe(true);
+    expect(heard).toEqual([]);
+    host.release('session.list');
+    await loaded(view);
+    expect(view.known(B)).toBe(true);
+    expect(view.intent(B)).toBeNull();
+    expect(heard).toEqual([`record ${B} put`, `intent ${B} removed`]);
+  });
+
   it('says the daemon’s refusal while the snapshot cannot load, tries again, and is available once it does; availability fires at each change', async () => {
     let refused: string | null = 'spine.lock is held by pid 4242 (build 0.0.0+old)';
     const host = new FakeMachine();
