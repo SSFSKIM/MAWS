@@ -101,7 +101,6 @@ export interface ServicesFront {
   intercepts(): CommandName[]; // the names the loaded spine intercepts now
   events(listener: (name: string, payload: unknown) => void): () => void; // every event `bus.emit` sent (the endpoint's owner `machine`)
   browserSocket(): string | null; // the attached app's cua socket directory, from its machine.client; null with no app
-  appArrived(): void; // an app's engine-host.sock connection was welcomed: the port tells it what an app is kept told (the dock badge)
   clients(): number;
   commands(): CommandName[]; // what the front answers now: its own names and what the loaded spine registered
   unbind(): void; // the spine's parts stopped: its registrations, intercepts and taps go
@@ -315,7 +314,6 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       const refs = (this.refs = remoteClients(++connections));
       this.port = port;
       clients.add(this);
-      clientPort.appArrived(); // M5b fix round 2: an app whose engine-host.sock attached first is reachable from here
       port.on('message', ({ data }) => {
         if (this.port !== port) return;
         if (readTolerant(HostReadySchema, data).ok) return void (this.ready = true);
@@ -385,7 +383,6 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       return () => void emitted.delete(listener);
     },
     browserSocket: () => [...clients].find((client) => options.isApp(client.facts.appPid))?.browserSocket ?? null,
-    appArrived: () => clientPort.appArrived(),
     clients: () => clients.size,
     commands: () => [...FRONT_COMMANDS, ...table.keys()].sort() as CommandName[],
     unbind() {

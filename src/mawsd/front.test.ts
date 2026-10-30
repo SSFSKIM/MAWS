@@ -189,29 +189,6 @@ describe('the services front', () => {
     expect(spineTakes('engine.sessions', { name: 'session.rewind' })).toBe(false);
   });
 
-  // M5b fix round 2: the spine's notifier sets the app's dock badge at its load, which the app's first machine.sock request
-  // sets off before its engine-host.sock attach; the app is told the count once it is reachable, by either arrival order
-  it('tells the app the dock badge set before it was reachable, when its machine.sock connection is served or its engine-host.sock attach makes it the app', () => {
-    const badges = (end: ReturnType<typeof connection>) => end.posted.filter((m) => m.t === 'evt' && m.name === 'clientPort.request').map((m) => (m.payload as { kind: string; request: unknown }).request);
-    let attached = false;
-    const engineFirst = front({ isApp: () => attached });
-    engineFirst.served.port.badge(null, 3);
-    attached = true; // the engine-host.sock attach came first
-    const a = engineFirst.client();
-    expect(badges(a)).toEqual([{ count: 3 }]);
-    engineFirst.served.close();
-
-    attached = false;
-    const machineFirst = front({ isApp: () => attached });
-    machineFirst.served.port.badge(null, 3);
-    const b = machineFirst.client();
-    expect(badges(b)).toEqual([]);
-    attached = true;
-    machineFirst.served.appArrived(); // the daemon's engine-host.sock onClient
-    expect(badges(b)).toEqual([{ count: 3 }]);
-    machineFirst.served.close();
-  });
-
   it('SPINE_ENGINE_INTERCEPTS names engine-host commands only', () => {
     for (const name of SPINE_ENGINE_INTERCEPTS) expect(REGISTRY.commands[name as CommandName].owner, name).toBe('engine-host');
   });

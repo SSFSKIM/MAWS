@@ -40,9 +40,6 @@ export interface FrontClientPort extends ClientPort {
   gone(target: PortTarget): void;
   /** Every outstanding request settles `noClient` (the front closes). */
   close(): void;
-  /** The app may have become reachable (its machine.sock or engine-host.sock connection was welcomed): it is told the app
-   * badge's current count once, if a count was set and this app was not told it. */
-  appArrived(): void;
 }
 
 export interface ClientPortOptions {
@@ -97,17 +94,6 @@ export function createClientPort(options: ClientPortOptions): FrontClientPort {
     });
   }
 
-  // The app's dock badge is a level (M5b fix round 2): the spine's notifier sets it when its count changes, which may be
-  // before any app is reachable (the spine loads at the app's first machine.sock request, before its engine-host.sock
-  // attach) or for an app since replaced, so the count is kept and told to each app as it arrives.
-  let appBadge: number | null = null;
-  let appBadgeTold: PortTarget | null = null;
-  function tellAppBadge(): void | NoClient {
-    const to = options.route(null);
-    appBadgeTold = to !== null && to.target.post({ id: `cp-${++next}`, client: to.client, kind: 'badge', request: { count: appBadge } }) ? to.target : null;
-    if (appBadgeTold === null) return NO_CLIENT;
-  }
-
   // An effect asked with no answer awaited: whether a connection could be asked.
   function tell(kind: Kind, client: ClientRef | null, request: unknown): void | NoClient {
     const to = routeOf(client);
@@ -120,14 +106,7 @@ export function createClientPort(options: ClientPortOptions): FrontClientPort {
     confirm: (client, request) => ask('confirm', client, request),
     reveal: (client, path) => ask('reveal', client, { path }),
     openExternal: (client, target) => ask('openExternal', client, target),
-    badge(client, count) {
-      if (client !== null) return tell('badge', client, { count });
-      appBadge = count;
-      return tellAppBadge();
-    },
-    appArrived() {
-      if (appBadge !== null && options.route(null)?.target !== appBadgeTold) void tellAppBadge();
-    },
+    badge: (client, count) => tell('badge', client, { count }),
     focus: (client, mode) => tell('focus', client, { mode }),
     notify(client, request, onEvent) {
       const to = routeOf(client);

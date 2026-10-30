@@ -321,9 +321,8 @@ describe('the client port over the front', () => {
     expect(front.port.badge(null, 3)).toEqual({ noClient: true });
     expect(await front.port.confirm(null, { kind: 'info', message: 'm', confirm: 'OK', cancel: 'No' })).toEqual({ noClient: true });
     const app = client(100);
-    expect(requests(app)).toMatchObject([{ client: null, kind: 'badge', request: { count: 3 } }]); // M5b fix round 2: the badge is a level, told to the app as it arrives
-    expect(front.port.badge(null, 4)).toBeUndefined(); // returns at once
-    expect(requests(app)).toMatchObject([{ client: null, kind: 'badge', request: { count: 3 } }, { client: null, kind: 'badge', request: { count: 4 } }]);
+    expect(front.port.badge(null, 3)).toBeUndefined(); // returns at once
+    expect(requests(app)).toMatchObject([{ client: null, kind: 'badge', request: { count: 3 } }]);
     expect(requests(other)).toEqual([]);
   });
 
