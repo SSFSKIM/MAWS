@@ -163,6 +163,14 @@ describe('fixture gates through the model', () => {
     }
   });
 
+  // The owner's ruling (2026-10-30): the engine's live API error (its envelope flagged `is_api_error_message` on the wire,
+  // seq 11) is the error row where it happened, in the engine's words, never an answer.
+  it('pass2/auto-unrouted: the live API error reads as its own row, not as assistant text', () => {
+    const rows = rowsOf(withAllExpanded(journalState('pass2', 'auto-unrouted', 12)));
+    expect(ofKind(rows, 'error').map((row) => [row.scope, row.severity, row.text])).toEqual([['api', 'error', 'Failed to authenticate: OAuth session expired and could not be refreshed']]);
+    expect(ofKind(rows, 'assistant_text')).toEqual([]);
+  });
+
   it('pass1/init: a thinking disclosure then the answer', () => {
     const rows = rowsFor('pass1', 'init');
     expect(rows.map((row) => row.kind)).toEqual(['time', 'user', 'divider', 'thinking', 'assistant_text', 'error']);

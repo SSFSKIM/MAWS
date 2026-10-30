@@ -24,12 +24,9 @@ const REQUEST_KINDS: ReadonlySet<AttentionItem['kind']> = new Set(['permission',
 const at = (item: AttentionItem) => Date.parse(item.createdAt);
 const byAge = (a: AttentionItem, b: AttentionItem) => at(a) - at(b);
 
-// E11 F2b (plan 2.4): an error seen here (confirmed) is out of Needs you but keeps its notice in its session until it is
-// dismissed or the next turn retires it; an open item's notice comes before it.
-const seenError = (item: AttentionItem) => item.kind === 'error' && item.state === 'confirmed';
-
 export function swapOf(items: readonly AttentionItem[], requests: ReadonlyMap<AttentionId, SessionEvent | null>): Swap {
-  const open = items.filter((item) => isOpen(item) || seenError(item)).sort((a, b) => Number(seenError(a)) - Number(seenError(b)) || byAge(a, b));
+  // the owner's ruling (2026-10-30): an error seen or dismissed is retired, so only an unseen one is a notice here
+  const open = items.filter(isOpen).sort(byAge);
   const unread: AttentionItem[] = [];
   const answerable: AttentionItem[] = [];
   const notices: AttentionItem[] = [];

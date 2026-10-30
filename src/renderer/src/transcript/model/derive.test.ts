@@ -418,9 +418,23 @@ describe('API diagnostics outside the work fold', () => {
     expect(folded.filter((row) => row.kind === 'error')).toEqual([
       expect.objectContaining({ turnId: state.order[0], scope: 'api', severity: 'error', text: 'Authentication unavailable.' }),
     ]);
-    expect(find(folded, 'divider')).toMatchObject({ state: 'failed', expanded: false });
+    // the owner's ruling (2026-10-30): the API error row says what happened; the divider reads the turn's work, not Failed
+    expect(find(folded, 'divider')).toMatchObject({ state: 'completed', expanded: false });
     expect(folded.some((row) => row.kind === 'assistant_text')).toBe(false);
     expect(rowsOf(withAllExpanded(state)).filter((row) => row.kind === 'error').map((row) => row.severity)).toEqual(['transient', 'error']);
+  });
+
+  it('a turn that failed on anything else, or recovered from an API error before failing, still reads Failed', () => {
+    for (const recovered of [false, true]) {
+      const b = builder();
+      b.turn('u1');
+      b.toolUse('t1', 'Bash', { command: 'a' });
+      b.result('t1', 'ok');
+      if (recovered) b.text('failure', 0, 'API Error: 529 Overloaded.', { isApiErrorMessage: true, error: 'server_error', model: '<synthetic>' });
+      if (recovered) b.text('after', 0, 'Retrying the work.');
+      b.end(['u1'], { result: 'error_max_turns', isError: true });
+      expect(find(rowsOf(reduce(b.events)), 'divider')).toMatchObject({ state: 'failed' });
+    }
   });
 });
 

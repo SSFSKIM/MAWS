@@ -62,6 +62,16 @@ describe('digest fold', () => {
     expect(run([ev('turn.started', {}), ev('turn.ended', { isError: true, terminalReason: 'aborted_streaming' })]).phase).toBe('idle');
   });
 
+  // The owner's ruling (2026-10-30): an API error is what happened in a turn (its transcript row says so), not the end of
+  // the session; the engine says a turn ended on one with `terminal_reason: 'api_error'` (pass2/auto-unrouted seq 12).
+  it('a turn that ended on an API error (the recorded api_error result) reads idle, not failed', () => {
+    const normalizer = new Normalizer({ appSessionId: APP, launchId: 'LAUNCH01', sessionId: null });
+    const events = loadJournal('pass2', 'auto-unrouted').filter((row) => row.seq <= 12).flatMap((row) => normalizer.push(row));
+    expect(events.findLast((e) => e.kind === 'turn.ended')).toMatchObject({ isError: true, terminalReason: 'api_error' });
+    expect(run(events).phase).toBe('idle');
+    expect(run([ev('turn.started', {}), ev('turn.ended', { isError: true, terminalReason: 'api_error' }), ev('session.state', { state: 'idle' })]).phase).toBe('idle');
+  });
+
   // Debt wave 5 (C5 · C6): an interrupt while a tool runs ends the turn `error_during_execution` with `aborted_tools`
   // (pass2/per-task-stop-off.jsonl: the foreground `sleep 20` interrupted at seq 67, its result at seq 72), which is the
   // human's stop, not a failure: the row and tab read idle, as the transcript's divider reads Stopped.
