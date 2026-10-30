@@ -50,6 +50,7 @@ async function start(options: StartOptions = {}) {
   for (const hook of options.hooks ?? []) runtime.onConnect(hook);
   const exits: string[] = [];
   const refusedExits: string[] = []; // P5 O2 M5: the exits a refused connection asked
+  const exitFroms: unknown[] = []; // P5 O3-D M5: what each exit said of its connection
   const changes: boolean[] = [];
   const ends: number[] = [];
   const log = vi.fn<(line: string) => void>();
@@ -63,6 +64,7 @@ async function start(options: StartOptions = {}) {
     token: () => TOKEN,
     onExit: (when, from) => {
       exits.push(when);
+      exitFroms.push(from);
       if (from?.refused) refusedExits.push(when);
     },
     onClient: (connected) => void changes.push(connected),
@@ -102,7 +104,7 @@ async function start(options: StartOptions = {}) {
     port.start();
     return { socket, port, lines, frames };
   };
-  return { runtime, emit: () => emit('session.brokerItems', ITEMS as never), exits, refusedExits, changes, ends, log, served, connect, connectPort };
+  return { runtime, emit: () => emit('session.brokerItems', ITEMS as never), exits, refusedExits, exitFroms, changes, ends, log, served, connect, connectPort };
 }
 
 describe('the socket layer handshake (server side)', () => {
@@ -440,7 +442,29 @@ describe('the socket layer’s admission (server side, P5 O2 M5)', () => {
     await until(() => host.refusedExits.length === 1);
     expect(host.refusedExits).toEqual(['now']);
     expect(host.exits).toEqual(['now']);
+    expect(host.exitFroms).toEqual([{ refused: true, own: false }]); // the upstream's line, reflected
     expect(host.changes).toEqual([]);
+  });
+
+  // P5 O3-D M5 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §L): admit is told the hello's appPid,
+  // and a refusal the admitting relay wrote itself (`own`) is told apart from the upstream's at its one exit
+  it('hands admit the hello’s appPid, and marks the exit after a refusal of the relay’s own as its own', async () => {
+    const line = { t: 'refuse', reason: 'wire', protocol: 3, buildId: 'relay-build', wire: 'w', liveSessions: 1 } as const;
+    const asked: unknown[] = [];
+    const host = await start({
+      admitHello: async (peer, appPid) => {
+        asked.push([peer.build, appPid]);
+        return { kind: 'refuse', line, own: true };
+      },
+    });
+    const client = await host.connect();
+    client.send(hello());
+    expect(await client.next()).toEqual(line);
+    expect(asked).toEqual([['build-1', 7]]);
+    expect(host.log).toHaveBeenCalledWith('refused a hello with its own refusal (wire)');
+    client.send({ t: 'exit', when: 'now' });
+    await until(() => host.exitFroms.length === 1);
+    expect(host.exitFroms).toEqual([{ refused: true, own: true }]);
   });
 
   it('closes the connection with nothing written when admit answers close', async () => {

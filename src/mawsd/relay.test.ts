@@ -60,3 +60,70 @@ describe('a relay’s app between its socket and the count', () => {
     expect(r.told).toEqual([true, false]);
   });
 });
+
+// P5 O3-D M5 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §L): the relay's own refusal of a hello,
+// before any upstream is woken, and the exit that follows it asking nothing; an app the relay gives no events to; and the
+// app's capabilities handed to the daemon's intercepts
+describe('a relay’s own refusal and its app’s capabilities (P5 O3-D M5)', () => {
+  const PEER = { major: 3, minor: 7, build: 'old-app', capabilities: ['socket.ptyFrames'] };
+  const LINE = { t: 'refuse', reason: 'wire', protocol: 3, buildId: 'mawsd-build', wire: 'w', liveSessions: 2 } as const;
+
+  it('refuses a hello its check names with the relay’s own line, waking no upstream, and is told the hello’s appPid', async () => {
+    const asked: unknown[] = [];
+    const r = relay({ refuseHello: (peer, appPid) => (asked.push([peer.build, appPid]), LINE) });
+    const admission = await r.relay.admit(PEER, 4321);
+    expect(admission).toEqual({ kind: 'refuse', line: LINE, own: true });
+    expect(asked).toEqual([['old-app', 4321]]);
+    expect(r.told).toEqual([]); // never between: no upstream was woken for it
+  });
+
+  it('admits as before a hello its check passes (null)', async () => {
+    const r = relay({ refuseHello: () => null });
+    const admitted = r.relay.admit(PEER, 4321);
+    r.ready();
+    expect((await admitted).kind).toBe('welcome');
+  });
+
+  it('an exit after its own refusal asks nothing; after the upstream’s reflected one it is the app’s, as before', () => {
+    const exits: [string, boolean][] = [];
+    const lines: string[] = [];
+    const r = relay({ onExit: (when, refused) => void exits.push([when, refused]), log: (line) => void lines.push(line) });
+    r.relay.exit('now', { refused: true, own: true });
+    expect(exits).toEqual([]);
+    expect(lines).toEqual(['exit now on a connection the relay refused itself: nothing asked of the engine-host']);
+    r.relay.exit('now', { refused: true, own: false });
+    r.relay.exit('now', { refused: false });
+    expect(exits).toEqual([['now', true], ['now', false]]);
+  });
+
+  it('gives no event to an app `deliverTo` declines, by the capabilities its hello listed; another app hears them from its ready', () => {
+    const posted: unknown[][] = [[], []];
+    const portOf = (n: number): HostPort & { deliver(data: unknown): void } => {
+      let listener: ((event: { data: unknown }) => void) | null = null;
+      return { start: () => {}, postMessage: (message: unknown) => (posted[n]!.push(message), true), on: (_e: string, l: (event: { data: unknown }) => void) => void (listener = l), deliver: (data: unknown) => listener!({ data }) } as never;
+    };
+    const r = relay({ deliverTo: (capabilities) => !capabilities.includes('machine.spine') });
+    const spineApp = portOf(0);
+    r.relay.serve(spineApp, { capabilities: ['socket.ptyFrames', 'machine.spine'] });
+    spineApp.deliver({ t: 'ready' });
+    r.relay.deliver({ name: 'session.eventBatch', payload: 1 });
+    expect(posted[0]).toEqual([]);
+    const oldApp = portOf(1);
+    r.relay.serve(oldApp, { capabilities: ['socket.ptyFrames'] });
+    oldApp.deliver({ t: 'ready' });
+    r.relay.deliver({ name: 'session.eventBatch', payload: 2 });
+    expect(posted[1]).toEqual([{ t: 'evt', name: 'session.eventBatch', payload: 2 }]);
+  });
+
+  it('hands each request’s intercept the app’s capabilities', async () => {
+    const seen: unknown[] = [];
+    const r = relay({ intercept: (request, app) => (seen.push([request.name, app.capabilities]), Promise.resolve({ t: 'res', id: request.id, ok: true, value: 'mine' })) });
+    let listener: ((event: { data: unknown }) => void) | null = null;
+    const answers: unknown[] = [];
+    r.relay.serve({ start: () => {}, postMessage: (message: unknown) => (answers.push(message), true), on: (_e: string, l: (event: { data: unknown }) => void) => void (listener = l) } as never, { capabilities: ['machine.spine'] });
+    listener!({ data: { t: 'req', id: 'r1', name: 'session.rewind', input: {} } });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(seen).toEqual([['session.rewind', ['machine.spine']]]);
+    expect(answers).toEqual([{ t: 'res', id: 'r1', ok: true, value: 'mine' }]);
+  });
+});
