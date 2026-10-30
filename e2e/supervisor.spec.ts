@@ -196,10 +196,12 @@ test('(a) the supervisor starts in its own group with its files; an unbusy quit 
 });
 
 // (a) on the daemon shape: the private `mawsd` in its own group with its files and modes, the engine host in another with
-// the supervisor's; an unbusy quit parks the engine host and `mawsd` exits once idle; a killed app leaves both serving;
-// a kill -9 of `mawsd` leaves a stale lock the next start replaces, the engine host's pid unchanged.
+// the supervisor's; after an unbusy quit `mawsd` parks the engine host once idle and exits once idle; a killed app leaves
+// both serving; a kill -9 of `mawsd` leaves a stale lock the next start replaces, the engine host's pid unchanged.
+// P5 O3-D M5b fix round 5: Quit sends no stop-all on the daemon shape (Q1, the cutover's D12), so what parks the engine
+// host is `mawsd`'s idle clock (no app and no interest for the idle time, D6), the idle time this scene's spine pushes
 async function startOnTheDaemon(): Promise<void> {
-  const IDLE_MS = 4_000; // `mawsd`'s idle exit, the first launch's host.configure
+  const IDLE_MS = 4_000; // `mawsd`'s idle exit, each idle-reading launch's host.configure (its spine's, MAWS_E2E_SUPERVISOR_IDLE_MS)
   await withScratch('start', async (s) => {
     const first = await s.launch({ MAWS_E2E_SUPERVISOR_IDLE_MS: String(IDLE_MS) });
     const status = await s.ready(first.page);
@@ -222,9 +224,10 @@ async function startOnTheDaemon(): Promise<void> {
     expect(statSync(s.dir).mode & 0o777).toBe(0o700);
     for (const name of ['host.lock', 'host.token', 'host.sock']) expect(statSync(s.file(name)).mode & 0o777, name).toBe(0o600);
 
-    // an unbusy quit stops the sessions and parks the engine host; `mawsd` exits once idle
+    // an unbusy quit leaves the engine host to `mawsd`'s idle clock, which parks it; `mawsd` exits once idle
     await s.quit(first);
-    await expect.poll(() => isAlive(engine.pid), { timeout: 10_000, message: 'the engine host is parked' }).toBe(false);
+    await expect.poll(() => isAlive(engine.pid), { timeout: IDLE_MS + 6_000, message: 'the engine host is parked' }).toBe(false);
+    expect(s.daemonLog()).toContain('no app and no interest for the idle time: asking the engine host to exit when idle');
     expect(existsSync(s.file('host.lock')), 'the engine host’s lock is unlinked').toBe(false);
     await expect.poll(() => isAlive(daemon.pid), { timeout: IDLE_MS + 15_000, message: 'mawsd exits once idle' }).toBe(false);
     expect(existsSync(s.daemonFile('mawsd.lock')), 'mawsd’s lock is unlinked').toBe(false);
@@ -247,13 +250,13 @@ async function startOnTheDaemon(): Promise<void> {
     await expect.poll(() => isAlive(d2)).toBe(false);
     expect(s.daemonLock()?.pid, 'the stale lock is still there').toBe(d2);
     expect(isAlive(e2), 'the engine host outlives mawsd').toBe(true);
-    const third = await s.launch();
+    const third = await s.launch({ MAWS_E2E_SUPERVISOR_IDLE_MS: String(IDLE_MS) }); // the new `mawsd`'s spine pushes the idle time
     const replaced = await s.ready(third.page, (st) => st.daemon!.pid !== d2);
     expect(s.daemonLock()?.pid, 'the stale lock was replaced').toBe(replaced.daemon!.pid);
     expect(replaced.supervisor!.pid, 'the new mawsd adopted the running engine host').toBe(e2);
     expect(third.maws.consoleErrors()).toEqual([]);
     await s.quit(third);
-    await expect.poll(() => isAlive(e2), { timeout: 10_000, message: 'the unbusy quit parks the engine host' }).toBe(false);
+    await expect.poll(() => isAlive(e2), { timeout: IDLE_MS + 6_000, message: 'after the unbusy quit the new mawsd parks the adopted engine host once idle' }).toBe(false);
   });
 }
 
@@ -360,10 +363,16 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     }, `Background task failed: ${TASK_FAILED}`);
     const status = await s.ready(second.page);
     expect(status.supervisor!.pid, 'the relaunch connects to the same supervisor').toBe(pid);
-    // on the daemon shape `mawsd` is the engine host's client, with a fresh connection at each attachment and departure
-    if (DAEMON) expect(status.daemon!.pid, 'through the same mawsd').toBe(firstStatus.daemon!.pid);
-    if (DAEMON) expect(s.log().match(/client connected: appPid/g)?.length ?? 0, 'the supervisor logs mawsd’s connects for both apps').toBeGreaterThanOrEqual(2);
-    else expect(s.log().match(/client connected: appPid/g), 'the supervisor logs both apps’ connects').toHaveLength(2);
+    // on the daemon shape `mawsd` is the engine host's one permanent client (O3-D M3): the supervisor logs its one connect,
+    // and each app's attachment is `mawsd`'s own engine-host.sock connect, logged with that app's pid
+    if (DAEMON) {
+      expect(status.daemon!.pid, 'through the same mawsd').toBe(firstStatus.daemon!.pid);
+      const connects = s.log().match(/client connected: appPid \d+ .*/g) ?? [];
+      expect(connects, 'the supervisor logs mawsd’s one connect, across both apps').toHaveLength(1);
+      expect(connects[0], 'which declares the attachment').toContain('host.attachment');
+      const attached = [...s.daemonLog().matchAll(/engine-host\.sock: client connected: appPid (\d+)/g)].map((m) => Number(m[1]));
+      expect([...new Set(attached)], 'mawsd logs each app’s attachment on engine-host.sock').toEqual([first.child.pid, second.child.pid]);
+    } else expect(s.log().match(/client connected: appPid/g), 'the supervisor logs both apps’ connects').toHaveLength(2);
     expect(s.log().match(/ starting in /g), 'and started once').toHaveLength(1);
     await second.page.evaluate(() => {
       const seen: string[] = [];
