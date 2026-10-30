@@ -15,12 +15,14 @@ const scripts = ['staging-run.sh', 'staging-deploy.sh'].map((name) => ({ name, t
 const zsh = spawnSync('zsh', ['-c', 'true']).status === 0;
 
 describe('the secret scan', () => {
-  // A staging step whose run saw secrets (O13 M7's phone run) counts, afterwards, each file under the run's paths holding
-  // the owner's token or anything its list names (an enrollment code, its token, a key): `secret_scan`, run here on its
-  // own over a run's files.
-  it.skipIf(!zsh)('counts every file holding the token or anything the list names, and nothing else', () => {
-    const fn = scripts[0].text.split('\n').find((l) => l.startsWith('secret_scan() {'))!;
-    expect(fn).toBeDefined();
+  // A staging step whose run saw secrets (O13 M7's phone run, O10 M11's endpoint run) counts, afterwards, each file under
+  // the run's paths holding anything its list names (the owner's token, which the step puts first, an enrollment code,
+  // its token, a key): `secret_scan`, run here on its own over a run's files.
+  it.skipIf(!zsh)('counts every file holding anything the list names, the token among it, and nothing else', () => {
+    const text = scripts[0].text;
+    const start = text.indexOf('\nsecret_scan() {\n');
+    expect(start).toBeGreaterThan(0);
+    const fn = text.slice(start + 1, text.indexOf('\n}\n', start) + 2);
     // A run's files: its log, its output directory holding a screenshot and `files`; and the run's list, `scan`.
     const holding = (scan: string, files: Record<string, string>) => {
       const dir = mkdtempSync(join(tmpdir(), 'staging-scan-'));
@@ -30,7 +32,7 @@ describe('the secret scan', () => {
       writeFileSync(join(out, '1-grid-project.png'), 'pixels');
       writeFileSync(join(dir, 'run.scan'), scan);
       for (const [name, body] of Object.entries(files)) writeFileSync(join(out, name), body);
-      const run = spawnSync('zsh', ['-c', `T=eyJtoken.synthetic; ${fn}; secret_scan ${dir}/run.scan ${out} ${dir}/run.log`], { encoding: 'utf8' });
+      const run = spawnSync('zsh', ['-c', `${fn}\nsecret_scan ${dir}/run.scan ${out} ${dir}/run.log`], { encoding: 'utf8' });
       return run.stdout.trim();
     };
     const listed = 'smns-enroll-v1.code\nonce-token\norg-key\n';
@@ -38,14 +40,15 @@ describe('the secret scan', () => {
     expect(holding(`${listed}\n`, {})).toBe('0');
     expect(holding(listed, { 'nested/error-context.md': '- text: smns-enroll-v1.code' })).toBe('1');
     expect(holding(listed, { 'a.txt': 'once-token', 'b.txt': 'key org-key', 'c.txt': 'nothing' })).toBe('2');
-    expect(holding('', { 'cookie.txt': 'eyJtoken.synthetic' })).toBe('1');
+    expect(holding('', { 'cookie.txt': 'eyJtoken.synthetic' })).toBe('0');
+    expect(holding(`eyJtoken.synthetic\n${listed}`, { 'cookie.txt': 'eyJtoken.synthetic' })).toBe('1');
   });
 
   // Acceptance 8's desk-web check left with DX2 (O14 M5b): the step is gone, answered with the usage line.
   it.skipIf(!zsh)('has no desk-web step', () => {
     const run = spawnSync('zsh', [runner, 'desk-web', 'x1'], { encoding: 'utf8', env: { ...process.env, DESK_STAGING_DIR: mkdtempSync(join(tmpdir(), 'staging-run-')) } });
     expect(run.status).toBe(2);
-    expect(run.stdout).toMatch(/\| throwaway <n>$/m);
+    expect(run.stdout).toMatch(/\| throwaway <n> \| phone <n>/);
     expect(run.stdout).not.toMatch(/desk-web <n>/);
   });
 });
