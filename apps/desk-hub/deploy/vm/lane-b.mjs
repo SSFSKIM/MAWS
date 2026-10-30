@@ -150,7 +150,7 @@ async function until(read, done, what, ms, everyMs = 1000) {
 /** The session started and its first turn ended; its ids. */
 export async function up(link, directory, tag, { readyMs = 180_000 } = {}) {
   // A status read wakes the engine host, parked until something asks it (the session service's boot waits on it).
-  await link.request('daemon.status', null);
+  await link.request('daemon.status', undefined);
   const { appSessionId: app } = await link.request('session.create', { projectId: null, location: { kind: 'directory', path: directory } });
   const text = `o10-m11 lane B up ${tag}`;
   const outcome = await link.request('session.start', { appSessionId: app, message: { content: text, display: text }, options: { gateway: 'gateway', trust: 'accepted' } }, 120_000);
