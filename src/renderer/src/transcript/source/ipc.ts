@@ -272,9 +272,15 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         const earlier = answer.earlier ?? null;
         const first = answer.events[0];
         const placed = earlier === null || first === undefined ? app : app.filter((event) => atOf(event) >= atOf(first));
-        appAside = app.filter((event) => !placed.includes(event));
         events = withAppEvents(placed, answer.events);
-        pager.started(events, earlier);
+        // The pager and the app events set aside are the source's, not the subscription's: a snapshot whose
+        // subscription has ended or been superseded (a close and reopen with two reads in flight) answers only its own
+        // hydration, which discards it. Were it to finish last and start the pager over, the pager's log and cursor
+        // would be its older window, and the next older page's rebuild would drop what the current one has shown.
+        if (latest === subscription && !subscription?.ended.signal.aborted) {
+          appAside = app.filter((event) => !placed.includes(event));
+          pager.started(events, earlier);
+        }
       }
       if (subscription) {
         if (events.some(liveForm)) subscription.live = true;

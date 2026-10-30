@@ -1139,6 +1139,45 @@ describe('ipcSource after MAWS yields to a foreign holder (W7)', () => {
   });
 });
 
+// The long-transcript window (docs/doperpowers/plans/2026-10-30-long-transcript-window.md): a disk-backed session's
+// snapshot is one window of its history with an `earlier` cursor, and older pages rebuild the key from the pager's log.
+describe('ipcSource over a long transcript\'s window', () => {
+  // Five turns as a disk follow delivers them (`seq: null`): turn n is events 4(n-1) to 4n-1.
+  const disk = (() => {
+    const b = builder();
+    for (const n of [1, 2, 3, 4, 5]) {
+      b.turn(`u${n}`);
+      b.text(`m${n}`, 0, `Answer ${n}`);
+      b.end([`u${n}`]);
+    }
+    return b.events.map((event) => ({ ...event, seq: null }) as SessionEvent);
+  })();
+  const turns = (from: number, to: number) => disk.slice(4 * (from - 1), 4 * to);
+  const page = (events: SessionEvent[], older = false) => ({ ok: true, value: { events, lastSeq: 0, complete: true, ...(older && { earlier: events[0]!.id }) } }) as never;
+  const ids = (events: SessionEvent[]) => events.map((event) => event.id);
+  const seen = () => [...useTranscriptStore.getState().entries[APP]!.state.seen];
+
+  it('a snapshot whose subscription was superseded leaves the pager to the current one, so an older page keeps what is shown', async () => {
+    const fake = fakeClient();
+    const store = useTranscriptStore.getState();
+    const source = ipcSourceOver(fake.client, APP);
+    const first = store.attach(APP, source);
+    store.detach(APP); // closed and opened again while the first read is on its way
+    const second = store.attach(APP, source);
+    fake.calls[1].answer(page(turns(3, 4), true));
+    await second;
+    fake.emit('session.eventBatch', batch(turns(5, 5))); // appended after the current window
+    fake.calls[0].answer(page(turns(2, 3), true)); // the obsolete read, an older window, finishes last
+    await first;
+    expect(seen()).toEqual(ids(turns(3, 5)));
+    source.older!.loadOlder();
+    expect(fake.calls[2].input).toMatchObject({ before: turns(3, 3)[0]!.id }); // the current window's cursor
+    fake.calls[2].answer(page(turns(1, 2)));
+    await vi.waitFor(() => expect(seen()).toEqual(ids(disk)));
+    store.detach(APP);
+  });
+});
+
 // E10 (Task 4.1's crash screenshot): a host that dies takes its engine processes along and sends no exit for them, and
 // a successor that never ran the session never will. The session's source closes what its live stream left running.
 describe('ipcSource after the engine host is lost (E10)', () => {
