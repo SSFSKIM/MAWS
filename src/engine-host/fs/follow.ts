@@ -116,17 +116,23 @@ export interface HistoryPage {
 export const UNKNOWN_CURSOR = 'unknown history cursor';
 
 // The events of one agent and its parent's reports on it (its start, finish and notifications, by task id) with the
-// parent's own exits: what a child's view reads of its parent, whatever the parent's history holds besides. The newest
-// such events within the hard cap.
-export function agentSlice(events: readonly SessionEvent[], agentId: AgentId, hard: number = HISTORY_WINDOW_BUDGET.hard): SessionEvent[] {
+// parent's own exits: what a child's view reads of its parent, whatever the parent's history holds besides. The
+// reports and the exits are the child's lifecycle, from which its view decides whether it runs, so they are never cut:
+// a cap that dropped the start would make a running child read as disk-backed. Only the agent's own other events are
+// capped, the newest within `hard` (null: none, for a live stream's page, which its ring and journal already bound).
+export function agentSlice(events: readonly SessionEvent[], agentId: AgentId, hard: number | null = HISTORY_WINDOW_BUDGET.hard): SessionEvent[] {
   const slice: SessionEvent[] = [];
   let bytes = 0;
+  let full = false;
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i]!;
-    const concerns = event.agentId === agentId || ('taskId' in event && (event.taskId as string | null) === (agentId as string)) || (event.kind === 'process.exited' && event.agentId === null);
-    if (!concerns) continue;
-    bytes += eventBytes(event);
-    if (bytes > hard) break;
+    const lifecycle = ('taskId' in event && (event.taskId as string | null) === (agentId as string)) || (event.kind === 'process.exited' && event.agentId === null);
+    if (!lifecycle) {
+      if (full || event.agentId !== agentId) continue;
+      bytes += eventBytes(event);
+      full = hard !== null && bytes > hard;
+      if (full) continue;
+    }
     slice.push(event);
   }
   return slice.reverse();

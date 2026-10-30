@@ -385,10 +385,11 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     if (deps.diskEvents && exited?.lifecycle === 'exited' && deps.heldElsewhere?.(id, exited.status().exit?.at ?? null)) {
       return { ...(await deps.diskEvents(id, request, false)), lastSeq: 0 };
     }
-    // A live stream's answer is bounded by its ring and journal; one agent's slice of it is the same filter as disk's.
+    // A live stream's answer is bounded by its ring and journal; one agent's slice of it is the same filter as disk's,
+    // uncapped: the page is bounded already, and a cap would cut the child's own events once they pass it.
     const page = await streamOf(appSessionId).snapshot(afterSeq, limit);
     const agent = request.agentId ?? null;
-    return agent === null ? page : { ...page, events: agentSlice(page.events, agent) };
+    return agent === null ? page : { ...page, events: agentSlice(page.events, agent, null) };
   });
   handle('session.stop', async ({ appSessionId, reason, ifIdle }) => {
     if (reason === 'archive') assertSafeAppSessionId(appSessionId); // archive deletes a directory named after it (M5 review)

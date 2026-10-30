@@ -5,12 +5,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import { eventBytes, type WindowBudget } from '@shared/graph/history-window';
-import type { AgentId, AppSessionId, EventId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, EventId, SessionId, TaskId } from '@shared/graph/ids';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { longTranscript as transcript, LONG_SESSION as SESSION, LONG_DIR as DIR } from '../../../test/support/long-transcript';
 import { StoreFixture } from '../../../test/support/store-fixture';
-import { UNKNOWN_CURSOR } from './follow';
+import { agentSlice, UNKNOWN_CURSOR } from './follow';
 import { FsService, type InterestSource } from './service';
 import { DEBOUNCE_MS, SETTLE_MS } from './watcher';
 
@@ -163,4 +163,22 @@ describe('a long transcript is read in windows', () => {
     const page = await fs.eventsSnapshot(APP, null);
     expect(userTexts(page.events).at(-1)).toBe('the line');
     expect(emitted.flatMap((e) => (e.name === 'fs.followState' && e.payload.appSessionId === APP ? [e.payload.skippedLines] : [])).at(-1)).toBe(1);
-  });});
+  });
+});
+
+describe('one agent\'s slice of its parent\'s history', () => {
+  const AGENT = 'agent-1' as AgentId;
+  const base = (n: number, agentId: AgentId | null) => ({ id: `e${n}` as EventId, sessionId: SESSION as SessionId, at: new Date(Date.UTC(2026, 9, 30, 10, 0, n)).toISOString(), seq: null, agentId, parentToolUseId: null });
+  const started = { ...base(0, AGENT), kind: 'subagent.started', taskId: AGENT as string as TaskId, toolUseId: null, description: 'Survey', subagentType: null, isBackground: true, spawnDepth: 1, prompt: null } as SessionEvent;
+  const own = (n: number) => ({ ...base(n, AGENT), kind: 'notice.posted', level: 'info', text: 'x'.repeat(200), key: null }) as SessionEvent;
+  const parentsOwn = { ...base(11, null), kind: 'notice.posted', level: 'info', text: 'the parent', key: null } as SessionEvent;
+  const exit = { ...base(12, null), kind: 'process.exited', code: 0, signal: null, reason: 'quit', lostAttentionCount: 0, budget: null } as SessionEvent;
+  const events = [started, ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(own), parentsOwn, exit];
+  const ids = (slice: readonly SessionEvent[]) => slice.map((event) => event.id);
+
+  it('keeps the child\'s start and the parent\'s exits past the cap, which cuts only the agent\'s own events, newest first', () => {
+    const hard = [8, 9, 10].reduce((bytes, n) => bytes + eventBytes(own(n)), 0); // the agent's newest three
+    expect(ids(agentSlice(events, AGENT, hard))).toEqual(['e0', 'e8', 'e9', 'e10', 'e12']);
+    expect(ids(agentSlice(events, AGENT, null))).toEqual(['e0', 'e1', 'e2', 'e3', 'e4', 'e5', 'e6', 'e7', 'e8', 'e9', 'e10', 'e12']); // a live page: uncapped
+  });
+});
