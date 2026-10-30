@@ -580,11 +580,21 @@ class FollowerCore {
 export const HELD_NOTICE = 'Another process is writing a sibling branch into this transcript; MAWS keeps its own branch in view until that process exits';
 export const REFOLD_NOTICE = 'The other process exited; this transcript now shows the branch a resume continues from';
 
+// The two record types the engine writes most of a long transcript's bytes in (2.1.312: `api-request` carries each
+// model request, `file-history-snapshot` the tracked files' backups; 66% of a 625 MB transcript measured), neither
+// carrying a uuid or anything for the graph: a line that opens with one is known by its first key without parsing it
+// (2026-10-30, the long-transcript window). The engine writes `type` first in both; a line that opens otherwise, or
+// holds these words anywhere later, is parsed as any other.
+const SILENT_PREFIXES: readonly (readonly [Buffer, TranscriptRecord])[] = ['api-request', 'file-history-snapshot'].map((type) => [Buffer.from(`{"type":"${type}"`), { type }] as const);
+
 // One line's bytes to a record: leading NULs stripped, unparseable lines are null (the engine's own reader rule).
 function parseLine(lineBytes: Buffer): TranscriptRecord | null {
   let start = 0;
   while (start < lineBytes.length && lineBytes[start] === 0) start++;
   if (start === lineBytes.length) return null;
+  for (const [prefix, record] of SILENT_PREFIXES) {
+    if (lineBytes.length - start > prefix.length && lineBytes.compare(prefix, 0, prefix.length, start, start + prefix.length) === 0) return record;
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(lineBytes.subarray(start).toString('utf8'));

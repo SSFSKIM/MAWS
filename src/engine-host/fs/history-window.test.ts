@@ -176,4 +176,15 @@ describe('a long transcript is read in windows', () => {
     await fs.unfollow(APP, null); // the session's unfollow stops its quiet follow too
     expect(fs.state().followed).toEqual([]);
   });
-});
+
+  it('never parses the silent request records, and parses a line that only mentions them later on', async () => {
+    const lines = transcript(3);
+    const mention = JSON.stringify({ type: 'user', uuid: 'm1', parentUuid: 'd3', sessionId: SESSION, cwd: DIR, message: { role: 'user', content: 'the line {"type":"api-request" and {"type":"file-history-snapshot" in a prompt' } });
+    // Torn lines: one opening as a silent record is known by its first key and never parsed (so never counted as
+    // skipped); one of another type that merely starts alike (`api-request-blob`) is parsed, fails and is counted.
+    await fixture.addTranscript(DIR, SESSION, [...lines, mention, '{"type":"api-request","torn', '{"type":"file-history-snapshot","torn', '{"type":"api-request-blob","torn']);
+    const fs = await start();
+    const page = await fs.eventsSnapshot(APP, null);
+    expect(userTexts(page.events).at(-1)).toBe('the line');
+    expect(emitted.flatMap((e) => (e.name === 'fs.followState' && e.payload.appSessionId === APP ? [e.payload.skippedLines] : [])).at(-1)).toBe(1);
+  });});
