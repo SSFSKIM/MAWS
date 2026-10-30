@@ -25,15 +25,17 @@ export const PAGE_RETRIES = 30;
 // Batches a source held while its snapshot was on its way can carry history older than the window the snapshot
 // answered: the host sends its window as a batch once it has read the transcript through, and when appends then move
 // the window on, a read after that batch answers a newer window. Drained after that snapshot, the batch's oldest
-// events would land after the snapshot's newest. A held event the snapshot also holds shows how far the snapshot
-// reaches, so a disk-form event before the last such one that the snapshot lacks is older than its window and is
-// dropped; the older page that holds it brings it back. Whatever follows that last event is newer than the snapshot,
-// and an event of another form (live, or the app's own) belongs to no window.
+// events would land after the snapshot's newest. A held disk-form event the snapshot also holds shows how far the
+// snapshot reaches, so a disk-form event before the last such one that the snapshot lacks is older than its window and
+// is dropped; the older page that holds it brings it back. Whatever follows that last event is newer than the
+// snapshot, and an event of another form (live, or the app's own) belongs to no window. Nor does such an event show
+// the window's reach: the snapshot can hold one from elsewhere (main's app events, read after the host's answer) that
+// a batch carried after disk events newer than the window.
 export function withoutOlderThanWindow(held: readonly SessionEvent[][], snapshot: readonly SessionEvent[], diskForm: (event: SessionEvent) => boolean): SessionEvent[][] {
   const ids = new Set(snapshot.map((event) => event.id));
   let batch = held.length - 1;
-  let reach = -1; // the last held event the snapshot holds: `held[batch][reach]`
-  while (batch >= 0 && (reach = held[batch]!.findLastIndex((event) => ids.has(event.id))) < 0) batch--;
+  let reach = -1; // the last held disk-form event the snapshot holds: `held[batch][reach]`
+  while (batch >= 0 && (reach = held[batch]!.findLastIndex((event) => ids.has(event.id) && diskForm(event))) < 0) batch--;
   if (batch < 0) return [...held];
   return held.map((events, b) => (b > batch ? events : events.filter((event, i) => (b === batch && i >= reach) || ids.has(event.id) || !diskForm(event))));
 }

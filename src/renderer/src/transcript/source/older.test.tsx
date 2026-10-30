@@ -170,8 +170,12 @@ describe('batches held while a snapshot was on its way', () => {
     expect(ids(withoutOlderThanWindow(held(['d0', 'l0', 's1'], ['d1', 's2', 'd2', 'l1'], ['d3']), snapshot, diskForm))).toEqual([['l0', 's1'], ['s2', 'd2', 'l1'], ['d3']]);
   });
 
-  it('keeps every batch whole when none holds an event the snapshot holds (nothing shows how far it reaches)', () => {
+  it('keeps every batch whole when none holds a disk-form event the snapshot holds (nothing shows how far it reaches)', () => {
     expect(ids(withoutOlderThanWindow(held(['d0', 'l0'], ['d1']), snapshot, diskForm))).toEqual([['d0', 'l0'], ['d1']]);
     expect(withoutOlderThanWindow([], snapshot, diskForm)).toEqual([]);
+    // The app's own event the snapshot read from main after the host's answer (a side thread's summary, batched after
+    // the next turn) shows nothing of the window's reach: the turn before it stays.
+    const withAppEvent = [...snapshot, event('l2')];
+    expect(ids(withoutOlderThanWindow(held(['d4', 'l2']), withAppEvent, diskForm))).toEqual([['d4', 'l2']]);
   });
 });
