@@ -1,4 +1,4 @@
-/* Interim treatment for #332. A message to the person keeps the text colour; one thin accent bar runs down the left
+/* Interim treatment for issue 332. A message to the person keeps the text colour; one thin accent bar runs down the left
    edge of the message and a small accent "To you" label sits at its top. `owner-message-ink` is on one wrapper per
    message: the div that groups its blocks (message-ink.ts) or the message tool's row (Presenter.tsx), never on each
    text span. */
