@@ -575,12 +575,13 @@ test('daemon idle mawsd with the spine: loaded, released, re-executed', async ()
       db.close();
     }
   };
-  const hostPid = () => {
-    try {
-      return (JSON.parse(readFileSync(join(profile, 'supervisor', 'host.lock'), 'utf8')) as { pid: number }).pid;
-    } catch {
-      return null;
-    }
+  // The engine host the latest wake woke: mawsd's `[hosts] connected to supervisor pid N` after its wake line (logged
+  // before the pass can be heard). Not host.lock: the host drops it as it parks, which can come before the answer does.
+  const wokenPid = () => {
+    const text = log();
+    const at = text.lastIndexOf('[spine] discovery: session.list wakes the parked engine host');
+    const connected = at < 0 ? null : /\[hosts\] connected to supervisor pid (\d+) /.exec(text.slice(at));
+    return connected ? Number(connected[1]) : null;
   };
   const wakeNotes: string[] = [];
   let factsBefore: ReturnType<typeof indexFacts> | null = null;
@@ -596,12 +597,13 @@ test('daemon idle mawsd with the spine: loaded, released, re-executed', async ()
     const answeredAt = Date.now();
     expect(lines('[spine] discovery: session.list wakes the parked engine host'), `${which}: the read woke the parked engine host for its discovery pass:\n${log()}`).toBe(wakesBefore + 1);
     const heard = log().split('\n').filter((l) => l.includes('[spine] discovery: the pass is heard ')).at(-1) ?? 'no pass heard';
-    const woken = hostPid();
-    await expect.poll(() => woken === null || !isAlive(woken), { timeout: 60_000, message: `${which}: the woken engine host parks again:\n${log()}` }).toBe(true);
+    const woken = wokenPid();
+    expect(woken, `${which}: mawsd names the engine host its wake woke:\n${log()}`).not.toBeNull();
+    await expect.poll(() => !isAlive(woken!) && log().includes(`[hosts] supervisor pid ${woken} exited (code 0)`), { timeout: 60_000, message: `${which}: the woken engine host (pid ${woken}) parks again:\n${log()}` }).toBe(true);
     const parkedAt = Date.now();
     const facts = indexFacts();
     const noOp = JSON.stringify(facts) === JSON.stringify(factsBefore);
-    wakeNotes.push(`${which}: the read answered ${answeredAt - startedAt} ms after it was sent (${heard.trim()}); the woken engine host (pid ${woken ?? 'none'}) parked again ${parkedAt - answeredAt} ms after the answer, before the LOADED settle (${SPINE_RELEASED_RUN.settleS} s) ends; the scan was ${noOp ? 'a no-op: the index unchanged' : 'NOT a no-op: the index changed'}`);
+    wakeNotes.push(`${which}: the read answered ${answeredAt - startedAt} ms after it was sent (${heard.trim()}); the woken engine host (pid ${woken}) parked again ${parkedAt - answeredAt} ms after the answer, before the LOADED settle (${SPINE_RELEASED_RUN.settleS} s) ends; the scan was ${noOp ? 'a no-op: the index unchanged' : 'NOT a no-op: the index changed'}`);
     test.info().annotations.push({ type: 'discovery wake', description: wakeNotes.at(-1)! });
     expect(facts, `${which}: the wake's scan changed nothing in the index (no removal, addition or re-index)`).toEqual(factsBefore);
     return { link: reached.link, sessions: (listed.value as { sessions: unknown[] }).sessions.length };
