@@ -370,3 +370,11 @@ esac
     if (transcript) rmSync(dirname(transcript), { recursive: true, force: true });
   }
 });
+
+test('hosted packaged shards are reported separately and never retried as pool preemptions', () => {
+  const result = settle({ jobs: [plan, green('packaged 1/2', 'GitHub Actions 1'), preempted('packaged 2/2', 'GitHub Actions 2')] });
+  assert.deepEqual(result.reruns, []);
+  assert.equal(result.attempt, '1 failure');
+  assert.deepEqual(result.jobs, ['success\tpackaged 1/2', 'failure\tpackaged 2/2', 'success\tplan']);
+  assert.equal(result.summary, '');
+});

@@ -204,3 +204,11 @@ test('overflow placement stays visible but relaunch gates and default-beside use
   assert.match(out, /red \(1\): e2e:tools \(EC2 overflow\)/);
   assert.match(out, / --gates e2e:default,e2e:tools --default-beside tools,side --label /);
 });
+
+// A mixed run can have a refused mini job beside failed hosted packaged shards.
+test('packaged shard failures retain their names but relaunch the packaged gate once', () => {
+  const jobs = ['failure\te2e:library', 'failure\tpackaged 1/2', 'failure\tpackaged 2/2', 'success\tplan'];
+  const line = refusals(jobs, [refusal('e2e:library'), red('packaged 1/2'), red('packaged 2/2')], { hosted_route: 'direct' });
+  assert.match(line, /red \(2\): packaged 1\/2 packaged 2\/2;/);
+  assert.match(line, / --hosted-route direct --gates e2e:library,packaged --label /);
+});
