@@ -225,9 +225,15 @@ export class IndexSessionSource implements SessionSource {
     for (const listener of [...this.appliedListeners]) listener();
   }
 
-  // Whether a client shows the session: it is being seen now (the attention service's unseen rule, 2026-10-30).
-  isVisible(appSessionId: AppSessionId): boolean {
-    return this.visible.has(appSessionId);
+  // Whether a client shows the session, so what reaches it now is seen (the attention service's unseen rule, the owner's
+  // ruling of 2026-10-30). The look is recorded as the record's last-seen mark, as a session becoming visible is: a
+  // reader who leaves before the transcript's next advance has still seen it, for a replay after they left.
+  seenNow(appSessionId: AppSessionId): boolean {
+    if (!this.visible.has(appSessionId)) return false;
+    if (this.index.unavailable !== null) return true;
+    const record = this.index.sessions.get(appSessionId);
+    if (record !== null) this.write('attention.seenNow', () => this.markSeen(record));
+    return true;
   }
 
   // C5's visibility report. A session becoming visible is seen at once; the unread rule reads the set on every advance.

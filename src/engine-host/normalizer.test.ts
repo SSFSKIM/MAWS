@@ -807,6 +807,16 @@ it('preserves API-error envelope identity and code on completed blocks', () => {
   ]);
 });
 
+// The live wire spells the flag `is_api_error_message` (SPEC 45's SDKAssistantMessage; pass2/auto-unrouted seq 11), the
+// transcript on disk `isApiErrorMessage` (above): either marks the envelope, or a live API error reads as an answer.
+it('flags the live API-error envelope as the engine sends it (pass2/auto-unrouted seq 11)', () => {
+  const normalizer = make({ sessionId: null });
+  const events = loadJournal('pass2', 'auto-unrouted').filter((row) => row.seq <= 12).flatMap((row) => normalizer.push(row));
+  expect(only(events, 'assistant.block.complete')).toEqual([
+    expect.objectContaining({ isApiErrorMessage: true, error: 'authentication_failed', model: '<synthetic>', block: { type: 'text', text: 'Failed to authenticate: OAuth session expired and could not be refreshed' } }),
+  ]);
+});
+
 // E1 (residue 1's admission rule, M2 fix wave): a `maws` tools/call is mapped only when the server would serve it, on
 // the same reading of the envelope (src/shared/maws/rpc.ts): a message that is not JSON-RPC 2.0 is answered -32600 and
 // one whose id is neither a string nor a number is taken as a notification, so neither opens an ask nor records a

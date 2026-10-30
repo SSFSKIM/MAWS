@@ -9,6 +9,7 @@ import { summary, tempDir } from '../../../test/support/index-fixture';
 import type { AttentionServiceDeps } from '../attention/service';
 import { startIndexAttention } from './attention-service';
 import { Index } from './index';
+import { IndexSessionSource, type SourceHost } from './source';
 
 const AT = '2026-09-28T10:00:00.000Z';
 const errorItem = (appSessionId: AppSessionId): AttentionItem =>
@@ -40,9 +41,9 @@ describe('attention persists through the index and retires on the archive path',
     dir.dispose();
   });
 
-  const start = (target: Index = index, showing?: (appSessionId: AppSessionId) => boolean) => {
+  const start = (target: Index = index, seenNow?: (appSessionId: AppSessionId) => boolean) => {
     const service = startIndexAttention(target, {
-      ...(showing && { showing }),
+      ...(seenNow && { seenNow }),
       onEvent: ((name: EventName, listener: (payload: unknown) => void) => {
         listeners.set(name, [...(listeners.get(name) ?? []), listener]);
         return () => listeners.set(name, (listeners.get(name) ?? []).filter((l) => l !== listener));
@@ -150,6 +151,49 @@ describe('attention persists through the index and retires on the archive path',
       showing = false;
       failure(appId, '2026-10-30T08:00:01.000Z');
       expect(errors(service, appId)).toEqual(['pending']);
+    });
+
+    // Seen as it arrived is durable: the look is the record's last-seen mark, so the reader leaving before the transcript
+    // advances, then a replay while no client shows the session (a restored tab hydrating, a restart), raises nothing.
+    it('an error seen as it arrived stays seen once the reader leaves: a replay, and a restart\'s, raise nothing', async () => {
+      const appId = index.sessions.upsertFromSummary(summary()).record.appId;
+      let clock = '2026-10-30T07:59:00.000Z';
+      const source = new IndexSessionSource(index, {} as SourceHost, { emit: () => true, now: () => clock });
+      source.onSetVisible(appId, true);
+      const service = start(index, (id) => source.seenNow(id));
+      await service.ready;
+      clock = '2026-10-30T08:00:00.500Z';
+      failure(appId, '2026-10-30T08:00:00.000Z');
+      expect(errors(service, appId)).toEqual([]);
+      expect(index.sessions.get(appId)?.lastSeen.at).toBe(clock);
+      source.onSetVisible(appId, false);
+      failure(appId, '2026-10-30T08:00:00.000Z');
+      expect(errors(service, appId)).toEqual([]);
+      service.stop();
+      const restarted = start(index, (id) => source.seenNow(id));
+      await restarted.ready;
+      failure(appId, '2026-10-30T08:00:00.000Z');
+      expect(errors(restarted, appId)).toEqual([]);
+      failure(appId, '2026-10-30T08:00:01.000Z');
+      expect(errors(restarted, appId)).toEqual(['pending']);
+    });
+
+    // The mark `seenNow` writes reaches the service's `seen` while it is still deriving the batch: an open error that mark
+    // covers (one the look at showing did not, its stamp ahead of the clock then) retires there, and the batch goes on.
+    it('the mark written mid-batch retires the open errors it covers, in the service and the store', async () => {
+      const appId = index.sessions.upsertFromSummary(summary()).record.appId;
+      let clock = '2026-10-30T07:59:00.000Z';
+      const source = new IndexSessionSource(index, {} as SourceHost, { emit: () => true, now: () => clock });
+      const service = start(index, (id) => source.seenNow(id));
+      await service.ready;
+      failure(appId, '2026-10-30T08:00:00.000Z');
+      source.onSetVisible(appId, true);
+      expect(errors(service, appId)).toEqual(['pending']);
+      clock = '2026-10-30T08:00:02.000Z';
+      failure(appId, '2026-10-30T08:00:01.000Z');
+      expect(errors(service, appId)).toEqual(['retired']);
+      await service.settled();
+      expect((await index.attention.list()).map((item) => item.state)).toEqual(['retired']);
     });
   });
 

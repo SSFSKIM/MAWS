@@ -404,6 +404,21 @@ describe('attention service merges broker items with the derived kinds', () => {
       expect(unseen.service.list().map((i) => i.state)).toEqual(['pending']);
     });
 
+    it('an unseen error an earlier build stored in the generic words takes the API error’s once the transcript replays it; a retired one keeps its words', async () => {
+      const turn = diskTurn();
+      const id = `${APP}:error:${turn[2]!.id}` as never;
+      for (const state of ['pending', 'retired'] as const) {
+        const persisted = item({ kind: 'error', state, id, createdAt: FAILED_AT, stateChangedAt: FAILED_AT, summary: 'The turn ended with an error', request: { requestId: null, toolUseId: null, taskId: null, agentId: null } });
+        const { service, store, batch } = setup({ store: new FakeStore([persisted]), seenAt: () => Date.parse(PROMPT_AT) });
+        await service.ready;
+        batch(...turn);
+        const words = state === 'pending' ? OVERLOADED : 'The turn ended with an error';
+        expect(service.list().map((i) => [i.id, i.state, i.summary, i.createdAt, i.stateChangedAt])).toEqual([[id, state, words, FAILED_AT, FAILED_AT]]);
+        await service.settled();
+        expect(store.sessions.get(APP)?.map((i) => [i.state, i.summary])).toEqual([[state, words]]);
+      }
+    });
+
     it('a live API error raises the item while no client shows the session, and nothing while one does', () => {
       let showing = false;
       const { service, batch } = setup({ seenAt: () => (showing ? Infinity : Date.parse(AT) - 60_000) });

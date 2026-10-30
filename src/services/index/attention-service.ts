@@ -5,9 +5,11 @@
 // archives a live session, so the service retires the session in memory, in the renderer and in the store at once. An
 // index this app cannot read (a newer version's) leaves the items to C3's file store, as before the index existed.
 // The owner's ruling (2026-10-30): the service reads "seen" from the index's unread rule (IndexSessionSource): a
-// session a client shows is being seen now (`showing`), else it was last seen at its record's `lastSeen.at` (set when
-// a client starts showing it, at each transcript advance while one does, and by Mark all read); each move of that mark
-// reaches the service as `seen`, which retires the errors it covers.
+// session a client shows is being seen now (`seenNow`, which records that look as the record's last-seen mark, so it
+// outlasts the reader), else it was last seen at its record's `lastSeen.at` (set when a client starts showing it, at
+// each transcript advance while one does, by `seenNow`, and by Mark all read); each move of that mark reaches the
+// service as `seen`, which retires the errors it covers. `seenNow`'s write reaches `seen` synchronously, inside the
+// service's derive or load: `seen` retires only the open errors at or before the mark, from a copy of the session's items.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { EventPayload } from '@shared/ipc/schema';
@@ -19,8 +21,8 @@ type Forgotten = (payload: EventPayload<'session.forgotten'>) => void;
 
 const lastSeenOf = (record: SessionRecord | null): number | null => (record?.lastSeen.at ? Date.parse(record.lastSeen.at) : null);
 
-export function startIndexAttention(index: Index, deps: Omit<AttentionServiceDeps, 'store' | 'seenAt'> & { fallbackFile: string; showing?: (appSessionId: AppSessionId) => boolean }): AttentionService {
-  const { fallbackFile, showing, ...serviceDeps } = deps;
+export function startIndexAttention(index: Index, deps: Omit<AttentionServiceDeps, 'store' | 'seenAt'> & { fallbackFile: string; seenNow?: (appSessionId: AppSessionId) => boolean }): AttentionService {
+  const { fallbackFile, seenNow, ...serviceDeps } = deps;
   const forgotten = new Set<Forgotten>();
   const onEvent: AttentionServiceDeps['onEvent'] = (name, listener) => {
     const off = deps.onEvent(name, listener);
@@ -32,7 +34,7 @@ export function startIndexAttention(index: Index, deps: Omit<AttentionServiceDep
     };
   };
   const usable = index.unavailable === null;
-  const seenAt = (id: AppSessionId) => (showing?.(id) ? Infinity : usable ? lastSeenOf(index.sessions.get(id)) : null);
+  const seenAt = (id: AppSessionId) => (seenNow?.(id) ? Infinity : usable ? lastSeenOf(index.sessions.get(id)) : null);
   const service = startAttentionService({ ...serviceDeps, onEvent, seenAt, store: usable ? index.attention : new FileAttentionStore(fallbackFile) });
   if (!usable) return service;
 

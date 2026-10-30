@@ -98,7 +98,8 @@ export interface AttentionServiceDeps {
   register: <N extends CommandName>(name: N, handler: (input: CommandInput<N>) => CommandOutput<N> | Promise<CommandOutput<N>>) => void; // the services bus's register
   log?: (message: string) => void;
   // The ruling (2026-10-30): the last time the session was seen, in ms; Infinity while a client shows it, null when MAWS
-  // never has. An error raised at or before it was seen and is not raised. Absent: every error is unseen.
+  // never has. An error raised at or before it was seen and is not raised. Absent: every error is unseen. A call may
+  // record the look (the index's), reaching `seen` before it returns.
   seenAt?: (appSessionId: AppSessionId) => number | null;
 }
 
@@ -230,7 +231,14 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
 
   const derive = (id: AppSessionId, state: SessionState, key: string, fields: Pick<AttentionItem, 'kind' | 'summary' | 'sessionId' | 'createdAt'> & Partial<AttentionItem>) => {
     const itemId = `${id}:${fields.kind}:${key}` as AttentionId;
-    if (state.derived.has(itemId) || seenThere(id, fields)) return;
+    const existing = state.derived.get(itemId);
+    if (existing) {
+      // the same occurrence, still open, reads as derived now (the ruling, 2026-10-30: one an earlier build stored in the
+      // generic words takes the API error's when the transcript replays it); its state and moments stay
+      if ((existing.state === 'pending' || existing.state === 'delivered') && existing.summary !== fields.summary) state.derived.set(itemId, { ...existing, summary: fields.summary });
+      return;
+    }
+    if (seenThere(id, fields)) return;
     state.derived.set(itemId, { id: itemId, appSessionId: id, request: noRequest, state: 'pending', stateChangedAt: fields.createdAt, expiresAt: null, ...fields });
   };
   // F2b review 1: a turn or a stop read back from the transcript (`seq: null`, a fresh follower's backfill replaying every
