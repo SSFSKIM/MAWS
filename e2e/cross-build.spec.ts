@@ -84,13 +84,13 @@ const IDLE_MS = 10_000; // the attaching app's idle time: its sessions on the ke
 // P5 O3-D M6 fix round 1 (item 6): on the daemon shape the kept turn ends while no app runs and the app reattaches after
 // it, so the kept supervisor must stay that long: its released session would let it exit before the reattach
 const REATTACH_IDLE_MS = 30_000;
-// P5 O3-D M6 fix round 1 (item 5): the ceiling on the yield's refusal-to-release, provisional until the mini's --peer run
-// measures it. Its basis is what the code bounds: the refusal and the yield are the hello's own synchronous check
-// (spine.lock read, the pid's liveness and start; the SingletonLock is read only at a load attempt, not here); the release
-// waits for the spine's work in flight at most SPINE_TIMING.yieldSettleMs (60 s), after which `mawsd` ends itself
-// instead of releasing; then its stores close (milliseconds). Margin: 5 s for the close, the log's writes and a loaded Mac
-const YIELD_SETTLE_MS = 60_000; // src/mawsd/spine-seam.ts's SPINE_TIMING.yieldSettleMs (its module pulls the services into this project)
-const REFUSAL_TO_RELEASE_MS = YIELD_SETTLE_MS + 5_000;
+// P5 O3-D M6: the ceiling on the yield's refusal-to-release, set from its first measured run (cross-build --peer 0c94ece9b,
+// run 41036338153, a hosted macos-26: refusal → released 10 ms, the old app's launch → released 967 ms). The refusal and
+// the yield are the hello's own synchronous check (spine.lock read, the pid's liveness and start), and an idle spine's
+// release is its stores' close (the index's WAL checkpoint, milliseconds); the scene's spine is idle, so a release that
+// waited on work in flight (the product's own bound, SPINE_TIMING.yieldSettleMs, 60 s) would itself be the finding.
+// 5 s is 500 times the reading, a margin for a loaded Mac's checkpoint and log writes.
+const REFUSAL_TO_RELEASE_MS = 5_000;
 
 // ---- the two builds ---------------------------------------------------------------------------------------------------
 
@@ -548,6 +548,14 @@ test('(update, daemon) the peer’s app keeps a session on its own supervisor; t
 
 test('(downgrade, daemon) this build’s app keeps a session under its mawsd; the peer’s app ends mawsd (or, before O2, takes the engine host from it), attaches that engine host, is served as another build, and moves to its own supervisor', async () => {
   const { here, peer, newer, older } = builds();
+  // P5 O3-D M6 (the architect's ruling; O3 Decision Log 5(1)): a peer from before O3-A cannot read this build's index
+  // (user_version 14 against its 13), and on this shape the tail it would derive the failure's item from is not sent to
+  // it again: this build's `mawsd`, the engine host's permanent client while no app ran, took the tail (the host's connect
+  // burst sends only what no client has received, src/engine-host/session-stream.ts `republish`) and its spine derived
+  // the item into that index. The pre-A app neither reads the item nor hears the events again, so the scene's tail check
+  // has no product meaning there; the pre-O3 scene covers a pre-A peer on this shape. (downgrade) without the daemon
+  // passes on the same peer because no client took the tail while away, so the burst brings it to the old app.
+  test.skip(!takesSpineLock(peer), `the peer (wire ${wireOf(peer)}) is from before O3-A: it cannot read this build's index, where this build's mawsd derived the tail while away (O3 DL 5(1)); the (pre-O3 app, daemon) scene covers it`);
   const gap = peer === newer ? { newer, older } : null;
   await withScratch('xb-daemon-downgrade', async (s) => record(await crossing(s, here, peer, gap, { keeper: 'daemon', attacher: 'detached' })));
 });

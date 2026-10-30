@@ -979,7 +979,7 @@ const LIVENESS_BOUNDS = {
     'expect(exitAt - started).toBeLessThan(PROBE_BOUND_MS + 8_000); // the report, then the existing quit path (the hosts stop)': 'that probe and the existing quit path, with 8 s of margin',
   },
   'e2e/cross-build.spec.ts': {
-    "expect(refusalToReleaseMs, '§L ordering: the yielded spine released within the yield’s own bound of the refusal').toBeLessThanOrEqual(REFUSAL_TO_RELEASE_MS);": 'PROVISIONAL until the mini measures it (P5 O3-D M6 fix round 2): the yield\'s own settle (src/mawsd/spine-seam.ts SPINE_TIMING.yieldSettleMs, 60 s, a timer of the product\'s) and the stores\' close, against 65 s',
+    "expect(refusalToReleaseMs, '§L ordering: the yielded spine released within the yield’s own bound of the refusal').toBeLessThanOrEqual(REFUSAL_TO_RELEASE_MS);": 'the yield of an idle spine (P5 O3-D M6): the hello\'s synchronous check and the stores\' close, measured at 10 ms (run 41036338153), against 5 s; a release that waits on work in flight (the product\'s 60 s settle) is itself the finding',
   },
   'e2e/connectors-direct.spec.ts': {
     'expect(closedMs).toBeLessThan(5_000);': 'the transport\'s close of its process group: a signal, against 5 s',
