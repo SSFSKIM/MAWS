@@ -9,6 +9,7 @@
   },
   "include": [
     "electron.vite.config.ts",
+    "scripts/latin1-bundles.ts", // the config's output plugin (main-process bundles as Latin-1 text)
     "vitest.config.ts",
     "src/main/**/*",
     "src/services/**/*", // P5 O3-C: the machine services library (the spine and the checkouts)
