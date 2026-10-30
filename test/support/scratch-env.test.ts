@@ -22,7 +22,15 @@ describe('launchEnvironment', () => {
     expect(env).toEqual({
       PATH: '/usr/bin', HOME: '/Users/owner', LANG: 'en_GB.UTF-8', ANTHROPIC_DEFAULT_HAIKU_MODEL: 'claude-haiku',
       MAWS_E2E: '1', MAWS_USER_DATA: '/tmp/maws-e2e-x', CLAUDE_CONFIG_DIR: '/tmp/maws-e2e-x/claude-config', MAWS_CLAUDE_USAGE_DIR: '/tmp/maws-e2e-x/claude-usage',
+      MAWS_MACHINE_ROLE: 'laptop', // P5 O2 M2: the idle release keeps main's idle time on every runner
     });
+  });
+
+  it('names a scratch sminos home in place of the runner’s (P5 O9 M5)', () => {
+    const env = launchEnvironment({ ...RUNNER, SMINOS_HOME: '/Users/owner/.claude/sminos', DAEMON_HOME: '/Users/owner/.claude/sminos' }, '/tmp/maws-e2e-x', '/tmp/mws-x');
+    expect(env.SMINOS_HOME).toBe('/tmp/mws-x');
+    expect(env.DAEMON_HOME).toBeUndefined();
+    expect(launchEnvironment({ ...RUNNER, SMINOS_HOME: '/Users/owner/.claude/sminos' }, '/tmp/maws-e2e-x').SMINOS_HOME).toBeUndefined();
   });
 });
 

@@ -5,8 +5,9 @@
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import type { ArtifactRow } from '@shared/ipc/schema/artifacts';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { registerShellActions } from '../app/shell-actions';
@@ -28,6 +29,7 @@ vi.mock('../app/Diagnostics', () => ({ Diagnostics: () => <section aria-label="D
 const A = '00000000-0000-4000-8000-000000000001';
 const S1 = 'app-s1' as AppSessionId;
 const NOW = Date.now();
+const TAB = `artifact:${TEST_MACHINE}:${A}`; // P5 O6 M2: an artifact tab names its machine
 
 function row(over: Partial<LibraryRow> = {}): LibraryRow {
   return {
@@ -63,7 +65,7 @@ const mainRegion = () => document.querySelector<HTMLElement>('[data-region="main
 const chromeTabs = () => document.querySelector<HTMLElement>('[data-chrome-tabs]')!;
 const headerTitle = () => mainRegion().querySelector('[data-editor-header] [data-header-title]')?.textContent ?? null;
 const LIBRARY_GONE = 'This artifact was deleted, or it is not in the library.';
-const tabOpen = () => allTabs(useLayout.getState().main).some((t) => t.id === `artifact:${A}`);
+const tabOpen = () => allTabs(useLayout.getState().main).some((t) => t.id === TAB);
 const changed = async () => {
   await act(async () => main.emit('library.changed', { revision: 9 }));
 };
@@ -88,7 +90,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
   resetSlots();
   offs.splice(0).forEach((off) => off());
 });
@@ -113,7 +115,7 @@ describe('an artifact in a main tab', () => {
     registerArtifactEditor('document', editor);
     render(<Shell />);
     act(() => openArtifactTab(A));
-    await screen.findByText(`main editor for ${A} in main:artifact:${A}`);
+    await screen.findByText(`main editor for ${A} in main:${TAB}`);
     expect(editor.createState).toHaveBeenCalledTimes(1);
     expect(editor.createState).toHaveBeenCalledWith({ artifactId: A, kind: 'document', surface: 'main' });
     expect(headerTitle()).toBe('Editing 1');
@@ -129,15 +131,15 @@ describe('an artifact in a main tab', () => {
     expect(editor.createState).toHaveBeenCalledTimes(1);
     expect(main.callsOf('artifacts.markViewed'), 'once per open').toHaveLength(1);
 
-    await act(() => requestCloseTab(`artifact:${A}`));
+    await act(() => requestCloseTab(TAB));
     expect(tabOpen(), 'the editor’s guard keeps the tab').toBe(true);
     expect(editor.dispose).not.toHaveBeenCalled();
     const state = editor.createState.mock.results[0].value as TestState;
     state.allowClose = true;
-    await act(() => requestCloseTab(`artifact:${A}`));
+    await act(() => requestCloseTab(TAB));
     expect(tabOpen()).toBe(false);
     expect(editor.dispose).toHaveBeenCalledWith(state);
-    expect(editorHostOf({ surface: 'main', tabId: `artifact:${A}` })).toBeNull();
+    expect(editorHostOf({ surface: 'main', tabId: TAB })).toBeNull();
 
     // opened again: a new open, a new state
     act(() => openArtifactTab(A));
@@ -157,15 +159,15 @@ describe('an artifact in a main tab', () => {
     render(<Shell />);
     act(() => openArtifactTab(A));
     await screen.findByText('editing');
-    act(() => useLayout.getState().openSession('app-x' as AppSessionId));
+    act(() => useLayout.getState().openSession(at('app-x' as AppSessionId)));
     expect(tabOpen(), 'kept: the session opened beside it').toBe(true);
-    expect(allTabs(useLayout.getState().main).map((t) => t.id)).toContain('session:app-x');
+    expect(allTabs(useLayout.getState().main).map((t) => t.id)).toContain(`session:${at('app-x')}`);
     expect(await screen.findByText('Launch notes has unsaved changes, so it stays open')).toBeTruthy();
 
     saved = 'saved';
     act(() => openArtifactTab(A));
     await screen.findByText('editing');
-    act(() => useLayout.getState().openSession('app-y' as AppSessionId));
+    act(() => useLayout.getState().openSession(at('app-y' as AppSessionId)));
     expect(tabOpen(), 'saved: it gives its place').toBe(false);
   });
 
@@ -220,8 +222,8 @@ describe('an artifact in a main tab', () => {
     expect(main.callsOf('artifacts.get'), 'the host confirms it is gone').toEqual([{ artifactId: A }]);
     expect(editor.dispose).toHaveBeenCalledTimes(1);
     expect(headerTitle(), 'the stale editor header is replaced').toBe('Artifact not found');
-    expect(editorHostOf({ surface: 'main', tabId: `artifact:${A}` })?.closeGuard ?? null, 'no editor guard holds the tab now').toBeNull();
-    await act(() => requestCloseTab(`artifact:${A}`));
+    expect(editorHostOf({ surface: 'main', tabId: TAB })?.closeGuard ?? null, 'no editor guard holds the tab now').toBeNull();
+    await act(() => requestCloseTab(TAB));
     expect(tabOpen()).toBe(false);
     expect(editor.dispose).toHaveBeenCalledTimes(1);
   });
@@ -283,7 +285,7 @@ describe('an artifact in a main tab', () => {
     expect(screen.getByText(/main editor for/), 'still mounted').toBeTruthy();
     expect(editor.dispose).not.toHaveBeenCalled();
     expect(headerTitle()).toBe('Editing 1');
-    await act(() => requestCloseTab(`artifact:${A}`));
+    await act(() => requestCloseTab(TAB));
     expect(tabOpen(), 'its closeGuard still holds the tab').toBe(true);
 
     onHost = null;

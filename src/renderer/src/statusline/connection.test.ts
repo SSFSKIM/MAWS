@@ -4,6 +4,7 @@ import { fakeClient } from '../../../../test/support/fake-client';
 import { useNotices } from '../stores/notices';
 import { useUsage } from '../stores/usage';
 import { connectStatusLine } from './index';
+import { preloadOf } from '../test-support/preload-of';
 
 const NOW = Date.now();
 const at = (ms: number) => new Date(NOW + ms).toISOString();
@@ -30,7 +31,7 @@ const MIXED = snapshot([
 ]);
 
 it('keeps shared usage live without posting banners or reading/writing their retired layout key', async () => {
-  const fake = fakeClient({ 'layout.get': { value: [] } }); window.maws = fake.client;
+  const fake = fakeClient({ 'layout.get': { value: [] } }); window.maws = preloadOf(fake); // P5 O6 M2: installed as main's side
   useNotices.setState({ notices: [] });
   const off = connectStatusLine();
   try {

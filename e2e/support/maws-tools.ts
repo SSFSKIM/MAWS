@@ -17,6 +17,7 @@ import type { CommandResult } from '@shared/ipc/schema';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
 import type { DeliverableRecord } from '../../src/shared/maws/deliverable';
+import { addressed } from './address';
 import { invoke, launchReady, value } from './c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './launch';
 import { sidebarRow } from './sidebar';
@@ -268,7 +269,7 @@ export async function scene(opts: { titles: string[]; repo?: string; folders?: s
 export async function show(s: Scene, id: string): Promise<void> {
   await (await sidebarRow(s.page, { appSessionId: id })).click();
   await s.page.mouse.move(700, 20);
-  await expect(s.pane.locator(`[data-composer="${id}"]`)).toBeVisible();
+  await expect(s.pane.locator(`[data-composer="${await addressed(s.page, id)}"]`)).toBeVisible();
 }
 
 // The fixture launched under the session's id (with the scratch directory as its cwd) and its prompt sent as recorded.
@@ -413,6 +414,25 @@ export async function frameAt(page: Page, url: string) {
   let found: ReturnType<Page['frames']>[number] | undefined;
   await expect.poll(() => (found = page.frames().find((f) => f.url() === url)) !== undefined, { message: `a frame at ${url}` }).toBe(true);
   return found!;
+}
+
+// A pick's pointer in an artifact frame while picking: moved to (x, y), then again a pixel back and forth until the
+// frame's pick overlay is up, as the owner sees the highlight before they click, so the click that follows picks.
+// Chromium routes input into a frame of another process only once the window's compositor has placed it, so in the
+// first moments after a frame loads (or moves to a main tab) a move or a click can still go to the app's document,
+// where it reaches the iframe element and nothing in the frame (run 39353273976: 16 of 63 first moves); and the pick-on
+// message is a task in the frame a move can overtake (L64). An overlay a real move placed is both settled.
+export async function pointInFrame(page: Page, frame: { locator(selector: string): Locator }, x: number, y: number): Promise<void> {
+  let nudge = 0;
+  await expect
+    .poll(
+      async () => {
+        await page.mouse.move(x + (nudge++ % 2), y);
+        return frame.locator('[data-maws-pick-overlay]').count();
+      },
+      { message: `the pick overlay under the pointer at ${x}, ${y}` },
+    )
+    .toBe(1);
 }
 
 // ---- evidence -------------------------------------------------------------------------------------------------------

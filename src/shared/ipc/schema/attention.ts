@@ -12,11 +12,14 @@ import type { CommandSpec } from './common';
 // C3 start: the Needs-you surface (C3 execution document, Interfaces "Broker" and "X2"): every session's merged items,
 // one session's whole list on each change, and the originating request event of a broker item.
 const c3Commands = {
-  'attention.list': { input: z.void(), output: z.array(AttentionItemSchema), owner: 'main' }, // every session's pending and delivered items
-  'attention.request': { input: z.strictObject({ appSessionId: AppSessionIdSchema, requestId: RequestIdSchema }), output: z.strictObject({ event: SessionEventSchema.nullable() }), owner: 'main' }, // answered through session.pendingRequest
+  'attention.list': { input: z.void(), output: z.array(AttentionItemSchema), owner: 'machine' }, // every session's pending and delivered items
+  'attention.request': { input: z.strictObject({ appSessionId: AppSessionIdSchema, requestId: RequestIdSchema }), output: z.strictObject({ event: SessionEventSchema.nullable() }), owner: 'machine' }, // answered through session.pendingRequest
 } as const;
 const c3Events = {
-  'attention.changed': z.strictObject({ appSessionId: AppSessionIdSchema, items: z.array(AttentionItemSchema) }), // the session's whole merged list: replace
+  // the session's whole merged list: replace. P5 O3-D (D13): `silent`, the ids among `items` the notifier must not announce
+  // (persisted items the attention service restored at its start, and owner-channel items it was told are silent), so a
+  // reader in another process (main's mirror) hears the restored marks in band; an emitter that restores nothing omits it.
+  'attention.changed': z.strictObject({ appSessionId: AppSessionIdSchema, items: z.array(AttentionItemSchema), silent: z.array(AttentionIdSchema).optional() }),
 } as const;
 
 export const C3_ATTENTION_COMMANDS = Object.keys(c3Commands) as (keyof typeof c3Commands)[];
@@ -45,7 +48,7 @@ const c5Events = {
 // its notice still shown in the session) and Dismiss retires it (`dismissed`); either way the session keeps the fact
 // ("Ended with an error") until its next human turn. Only error items are acknowledged; anything else is left as is.
 const e11Commands = {
-  'attention.acknowledge': { input: z.strictObject({ appSessionId: AppSessionIdSchema, attentionId: AttentionIdSchema, how: z.enum(['seen', 'dismissed']) }), output: z.void(), owner: 'main' },
+  'attention.acknowledge': { input: z.strictObject({ appSessionId: AppSessionIdSchema, attentionId: AttentionIdSchema, how: z.enum(['seen', 'dismissed']) }), output: z.void(), owner: 'machine' },
 } as const satisfies Record<`attention.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const commands = {

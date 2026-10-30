@@ -8,7 +8,7 @@ import { useTranscriptStore } from '../../../stores/transcript';
 import { SPILL } from '../../model/copy';
 import type { Cell, Spill } from '../../model/rows';
 import { SPILL_READ_BYTES, spillWasTruncated } from '../../source/ipc';
-import { useTranscriptContext } from '../context';
+import { useTranscriptContext, useRowSession } from '../context';
 import { Omitted } from './Truncated';
 
 // Whether the reader loaded the spill, all of it or its head.
@@ -23,11 +23,12 @@ const fillsTheRead = (content: string) =>
 
 export function SpillLoader({ cell, spill }: { cell: Cell; spill: Spill }) {
   const { storeKey, actions } = useTranscriptContext();
+  const session = useRowSession();
   const error = useTranscriptStore((state) => state.entries[storeKey]?.state.ui.spills.get(spill.path)?.error ?? null);
   const load = () => {
     const set = useTranscriptStore.getState().setSpill;
     set(storeKey, spill.path, { state: 'loading', error: null });
-    actions.loadSpill(spill).then(
+    actions.loadSpill(spill, session).then(
       (content) => set(storeKey, spill.path, { state: spillWasTruncated(spill.path) || fillsTheRead(content) ? 'partial' : 'loaded', content }),
       (reason: unknown) => set(storeKey, spill.path, { state: 'failed', content: null, error: reason instanceof Error ? reason.message : String(reason) }),
     );

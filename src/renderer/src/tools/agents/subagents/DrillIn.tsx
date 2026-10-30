@@ -4,20 +4,22 @@
 // mounts and never builds (the store's one attachment is shared with C5's agent tab), with the registered actions and
 // C7's inline request card, so a child's permission is answered in place; then the relay composer.
 import { Popover } from 'radix-ui';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentId, AppSessionId, ToolUseId } from '@shared/graph/ids';
 import type { SessionPhase } from '@shared/ipc/schema/session';
 import type { PanelToolContext } from '../../../panel/tool';
 import { renderInlineRequest } from '../../../composer';
 import { useSessions } from '../../../stores/sessions';
+import { useSessionControls } from '../../../session/controls/controls-for'; // P5 O9 M5
+import type { SessionControls } from '../../../session/controls/types'; // P5 O9 M5
 import { ipcSource, SubagentGlyph, Transcript, useRegisteredActions, useTranscriptStore, type TranscriptSource } from '../../../transcript';
 import { agentTranscriptActions } from '../actions';
 import { SUBAGENTS_COPY } from '../copy';
 import { elapsedOf, formatElapsed, formatTokens } from '../model/elapsed';
-import { rowTitle, type TaskNode } from '../model/task-graph';
+import { isEnded, rowTitle, type TaskNode } from '../model/task-graph';
 import { useTaskGraph } from '../store';
 import { RelayComposer } from './RelayComposer';
-import { agentOfToolUse, refOf, taskOf, useTicker } from './shared';
+import { agentOfToolUse, refOf, STOP_DOUBT_MS, taskOf, useTicker } from './shared';
 import type { SubagentsHandle } from './SubagentsTool';
 import { displayTitle } from '../../../sessions/title';
 
@@ -53,9 +55,15 @@ interface Props {
 export function DrillIn({ appSessionId, agentId, handle, draft, ctx }: Props) {
   const node = useTaskGraph((s) => s.entries.get(appSessionId)?.graph.tasks.get(taskOf(agentId)));
   const sessionTitle = displayTitle(ctx.session);
+  const controls = useSessionControls(appSessionId); // P5 O9 M5
+  const driven = controls && controls.turn() !== null ? controls : null;
   const title = node ? rowTitle(node) : agentId;
 
-  const source = useMemo(() => childSourceFor(appSessionId, agentId), [appSessionId, agentId]);
+  // P5 O9 M9: a session whose port withholds a subagent's own rows (another machine's) shows why in their place, and no
+  // child source is built for it (this machine's reads know nothing of that session); Stop and Tell stay.
+  const rowsGap = controls?.capability('subagent-rows') ?? null;
+  const gap = rowsGap !== null && !rowsGap.available ? rowsGap.reason : null;
+  const source = useMemo(() => (gap === null ? childSourceFor(appSessionId, agentId) : null), [appSessionId, agentId, gap]);
   const registered = useRegisteredActions();
   const actions = useMemo(() => ({ ...registered, ...agentTranscriptActions }), [registered]);
   const renderRequest = useMemo(() => renderInlineRequest(appSessionId), [appSessionId]);
@@ -63,7 +71,7 @@ export function DrillIn({ appSessionId, agentId, handle, draft, ctx }: Props) {
   // The key's liveness, as C6's shell transcript tells it for C5's agent tab: an unset key ticks from the wall clock.
   const live = useSessions((s) => LIVE_PHASES.has(s.digests.get(appSessionId)?.phase as SessionPhase));
   useEffect(() => {
-    const key = source.key;
+    const key = source?.key;
     if (!key) return;
     useTranscriptStore.getState().setLive(key, live);
     return () => useTranscriptStore.getState().setLive(key, null);
@@ -93,10 +101,19 @@ export function DrillIn({ appSessionId, agentId, handle, draft, ctx }: Props) {
               {SUBAGENTS_COPY.dispatchedBy(sessionTitle)}
             </p>
           </div>
-          {node?.status === 'running' && ctx.status !== null && <StopAgent key={node.taskId} appSessionId={appSessionId} node={node} title={title} />}
+          {!driven && node?.status === 'running' && ctx.status !== null && <StopAgent key={node.taskId} appSessionId={appSessionId} node={node} title={title} />}
+          {/* P5 O9 M5: a session driven through its bridge stops the agent by its id, while the agent has not ended, whatever
+              engine status MAWS kept from an earlier run of the session */}
+          {driven && !(node && isEnded(node.status)) && <StopAgent key={agentId} appSessionId={appSessionId} node={node} title={title} driven={{ controls: driven, agentId }} />}
         </div>
       </header>
-      <Transcript key={source.key ?? agentId} source={source} variant="child" actions={actions} renderRequest={renderRequest} className="min-h-0 flex-1" />
+      {source === null ? (
+        <p role="status" data-testid="subagent-rows-gap" className="m-0 min-h-0 flex-1 px-4 py-3 text-ui-sm text-fg-muted">
+          {gap}
+        </p>
+      ) : (
+        <Transcript key={source.key ?? agentId} source={source} variant="child" actions={actions} renderRequest={renderRequest} className="min-h-0 flex-1" />
+      )}
       <RelayComposer appSessionId={appSessionId} agentId={agentId} node={node} status={ctx.status} sessionTitle={sessionTitle} visible={ctx.visible} draft={draft} onDraft={handle.setDraft} onSent={() => handle.clearDraftFor(agentId)} />
     </div>
   );
@@ -106,12 +123,38 @@ const ACTION = 'shrink-0 rounded-sm border border-border-strong px-2 py-0.5 text
 
 // A running agent's stop is irreversible, so it asks first (Codex confirms it); the node reads stopping until the
 // engine's terminal frame, and a refused call says why.
-function StopAgent({ appSessionId, node, title }: { appSessionId: AppSessionId; node: TaskNode; title: string }) {
+// P5 O9 M5: `driven`, the session's bridge stops it (`stop-agent`), the button closed with the control's reason. P5 O9: a
+// stop whose outcome is unknown says it may not have stopped, and is offered again after STOP_DOUBT_MS.
+function StopAgent({ appSessionId, node, title, driven }: { appSessionId: AppSessionId; node: TaskNode | undefined; title: string; driven?: { controls: SessionControls; agentId: AgentId } }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [asked, setAsked] = useState(false);
+  const [doubted, setDoubted] = useState(false);
+  const doubt = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => void (doubt.current !== null && clearTimeout(doubt.current)), []);
+  const closed = driven ? driven.controls.capability('stop-agent') : null;
   const stop = () => {
     setOpen(false);
     setError(null);
+    if (driven) {
+      setAsked(true);
+      setDoubted(false);
+      if (doubt.current !== null) clearTimeout(doubt.current);
+      void driven.controls.stopAgent(driven.agentId).then((result) => {
+        if (result.state === 'refused') {
+          setAsked(false);
+          setError(result.message);
+        } else if (result.state === 'unknown') {
+          setDoubted(true);
+          doubt.current = setTimeout(() => {
+            doubt.current = null;
+            setAsked(false);
+          }, STOP_DOUBT_MS);
+        }
+      });
+      return;
+    }
+    if (!node) return;
     void useTaskGraph
       .getState()
       .stop(appSessionId, node.taskId)
@@ -121,9 +164,13 @@ function StopAgent({ appSessionId, node, title }: { appSessionId: AppSessionId; 
   };
   return (
     <div className="flex shrink-0 flex-col items-end gap-1">
-      {node.stopping ? (
+      {node?.stopping || asked ? (
         <button type="button" disabled className={ACTION}>
           {SUBAGENTS_COPY.stopping}
+        </button>
+      ) : closed && !closed.available ? (
+        <button type="button" disabled title={closed.reason} className={ACTION}>
+          {SUBAGENTS_COPY.stopAgent}
         </button>
       ) : (
         <Popover.Root open={open} onOpenChange={setOpen}>
@@ -148,6 +195,7 @@ function StopAgent({ appSessionId, node, title }: { appSessionId: AppSessionId; 
         </Popover.Root>
       )}
       {error !== null && <p className="max-w-48 text-right text-ui-sm text-danger">{SUBAGENTS_COPY.stopFailed(error)}</p>}
+      {doubted && <p className="max-w-48 text-right text-ui-sm text-warning">{SUBAGENTS_COPY.stopUncertain}</p>}
     </div>
   );
 }

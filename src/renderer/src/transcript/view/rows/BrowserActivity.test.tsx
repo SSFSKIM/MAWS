@@ -7,8 +7,9 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { BrowserActivity } from '@shared/browser/activity';
 import type { SessionEvent } from '@shared/graph/events';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeClient, type FakeClient } from '../../../../../../test/support/fake-client';
+import { at } from '../../../../../../test/support/machine';
 import { useTranscriptStore } from '../../../stores/transcript';
 import { installFakeMain, ok } from '../../../test-support/code';
 import { browserActivityOf, connectBrowserActivity, resetBrowserActivity } from '../../../tools/browser/agent/activity';
@@ -20,6 +21,12 @@ import { renderRow } from './test-support';
 
 const TAB = 'b_000000000001';
 const JS = 'mcp__plugin_cua_cua_repl__js';
+// the page's session ids, addresses (P5 O6 M2); main's list answers and is asked with the bare 'App-listed'
+const ATTACHED = at('App-attached' as AppSessionId);
+const OTHER = at('App-other' as AppSessionId);
+const LISTED = at('App-listed' as AppSessionId);
+const APP_A = at('App-A' as AppSessionId);
+const STANDALONE = at('App-standalone' as AppSessionId);
 
 let fake: FakeClient;
 let disconnect: () => void;
@@ -73,7 +80,7 @@ function runningTurn() {
 }
 
 // A session transcript over a source the test pushes later batches to.
-async function mount(key: string, events: SessionEvent[]) {
+async function mount(key: string, events: SessionEvent[], props: { browserActivity?: boolean } = {}) {
   let push: (batch: SessionEvent[]) => void = () => {};
   const source: TranscriptSource = {
     key,
@@ -83,7 +90,7 @@ async function mount(key: string, events: SessionEvent[]) {
     },
     snapshot: () => Promise.resolve([...events]),
   };
-  const view = render(<Transcript source={source} variant="session" />);
+  const view = render(<Transcript source={source} variant="session" {...props} />);
   await waitFor(() => expect(useTranscriptStore.getState().entries[key]?.phase).toBe('live'));
   return { view, push: (batch: SessionEvent[]) => act(() => push(batch)) };
 }
@@ -100,12 +107,12 @@ const ACTION_ROWS = ['act:Navigated to 127.0.0.1:17391', 'act:Clicked button Sub
 describe('the rows of a js call', () => {
   it('sit directly under the running call, live, and stay in view at its place when the turn folds', async () => {
     const { b, started } = runningTurn();
-    const { view, push } = await mount('App-attached', b.events);
-    send('App-attached', later(started, 10), ACTIONS[0]);
-    send('App-attached', later(started, 20), ACTIONS[1]);
-    send('App-other', later(started, 25), { kind: 'screenshot' }); // another session's: not here
+    const { view, push } = await mount(ATTACHED, b.events);
+    send(ATTACHED, later(started, 10), ACTIONS[0]);
+    send(ATTACHED, later(started, 20), ACTIONS[1]);
+    send(OTHER, later(started, 25), { kind: 'screenshot' }); // another session's: not here
     await waitFor(() => expect(activityRows(view.container)).toEqual(ACTION_ROWS.slice(0, 2)));
-    ACTIONS.slice(2).forEach((activity, i) => send('App-attached', later(started, 30 + i * 10), activity));
+    ACTIONS.slice(2).forEach((activity, i) => send(ATTACHED, later(started, 30 + i * 10), activity));
     await waitFor(() => expect(activityRows(view.container)).toEqual(ACTION_ROWS));
     const open = shape(view.container);
     const cell = open.indexOf('cell:j1');
@@ -130,22 +137,50 @@ describe('the rows of a js call', () => {
     const { b, started } = runningTurn();
     const kept = ACTIONS.map((activity, i) => ({ appSessionId: 'App-listed', tabId: TAB, at: later(started, 10 + i * 10), activity }));
     const main = installFakeMain((name) => (name === 'browser.agent.activities.list' ? ok({ activities: kept }) : ok()));
-    const first = await mount('App-listed', b.events);
+    const first = await mount(LISTED, b.events);
     await waitFor(() => expect(activityRows(first.view.container)).toEqual(ACTION_ROWS));
     expect(main.callsOf('browser.agent.activities.list')).toEqual([{ appSessionId: 'App-listed' }]);
     // a reload: the window's stores are empty and the transcript mounts afresh
     cleanup();
     resetBrowserActivity();
-    useTranscriptStore.getState().drop('App-listed');
-    expect(browserActivityOf('App-listed' as AppSessionId)).toEqual([]);
-    const second = await mount('App-listed', b.events);
+    useTranscriptStore.getState().drop(LISTED);
+    expect(browserActivityOf(LISTED)).toEqual([]);
+    const second = await mount(LISTED, b.events);
     await waitFor(() => expect(activityRows(second.view.container)).toEqual(ACTION_ROWS));
     expect(main.callsOf('browser.agent.activities.list')).toHaveLength(2);
   });
 
+  // P5 O6 M6 (e2e:desk-web): the desk mounts this transcript over its own `desk:<project>:<session>` keys and has no
+  // MAWS bridge. It turns the activity off at its mount, so its keys never reach the addressing; MAWS's own mounts still
+  // refuse a bare id there.
+  it('are not asked for where the host has no MAWS browser (the desk): its keys never reach the addressing', async () => {
+    const main = installFakeMain(() => ok({ activities: [] }));
+    const errors = vi.spyOn(console, 'error');
+    try {
+      await mount('desk:6f1c0a8e:ac0d9312', runningTurn().b.events, { browserActivity: false });
+      await act(async () => {});
+      expect(main.callsOf('browser.agent.activities.list')).toEqual([]);
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
+  it('are still refused on MAWS’s path for a key that is no address', async () => {
+    const main = installFakeMain(() => ok({ activities: [] }));
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await mount('App-bare', runningTurn().b.events);
+      await waitFor(() => expect(errors).toHaveBeenCalledWith(expect.stringMatching(/^\[ipc\] browser\.agent\.activities\.list: lower: .* holds a bare id where an address belongs/)));
+      expect(main.callsOf('browser.agent.activities.list')).toEqual([]);
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
   it('render page text as plain text', () => {
-    const row = browserActivityRow({ seq: 1, appSessionId: 'App-A' as AppSessionId, tabId: TAB, at: '2026-10-08T10:00:00.000Z', activity: { kind: 'clicked', x: 1, y: 2, label: 'a <img src=x onerror=1>' } });
-    const view = renderRow(row, { storeKey: 'App-A' });
+    const row = browserActivityRow({ seq: 1, appSessionId: APP_A, tabId: TAB, at: '2026-10-08T10:00:00.000Z', activity: { kind: 'clicked', x: 1, y: 2, label: 'a <img src=x onerror=1>' } });
+    const view = renderRow(row, { storeKey: APP_A });
     expect(lines(view.container)).toEqual(['Clicked a <img src=x onerror=1>']);
     expect(view.container.querySelector('img')).toBeNull();
   });
@@ -153,8 +188,8 @@ describe('the rows of a js call', () => {
 
 describe('an activity with no js call', () => {
   it('is a row of its own: the browser glyph and its line', () => {
-    const row = browserActivityRow({ seq: 1, appSessionId: 'App-A' as AppSessionId, tabId: TAB, at: '2026-10-08T10:00:00.000Z', activity: { kind: 'dialog', type: 'confirm', excerpt: 'Delete it?', answered: 'default' } });
-    const view = renderRow(row, { storeKey: 'App-A' });
+    const row = browserActivityRow({ seq: 1, appSessionId: APP_A, tabId: TAB, at: '2026-10-08T10:00:00.000Z', activity: { kind: 'dialog', type: 'confirm', excerpt: 'Delete it?', answered: 'default' } });
+    const view = renderRow(row, { storeKey: APP_A });
     const section = view.container.querySelector('[data-kind="browser_activity"] section')!;
     expect(lines(section)).toEqual(['Confirm "Delete it?" answered by default after 30 s']);
     expect(section.querySelectorAll('svg')).toHaveLength(1);
@@ -172,8 +207,8 @@ describe('an activity with no js call', () => {
     b.text('m2', 0, 'Second answer.');
     b.end(['u2']);
     const turnEnded = b.events.find((event) => event.kind === 'turn.ended')!.at;
-    const { view } = await mount('App-standalone', b.events);
-    send('App-standalone', later(turnEnded, 5_000), { kind: 'download', filename: 'cua-report.pdf', state: 'complete' });
+    const { view } = await mount(STANDALONE, b.events);
+    send(STANDALONE, later(turnEnded, 5_000), { kind: 'download', filename: 'cua-report.pdf', state: 'complete' });
     const kinds = () => [...view.container.querySelectorAll('[data-kind]')].map((row) => row.getAttribute('data-kind'));
     await waitFor(() => expect(kinds()).toContain('browser_activity'));
     const order = kinds();

@@ -6,7 +6,7 @@
 import { useShallow } from 'zustand/react/shallow';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { routingFacts } from '../../gateway/routing-facts';
 import { useGateway } from '../../gateway/store';
 import type { PanelToolContext } from '../../panel/tool';
@@ -26,8 +26,10 @@ import { DormantGesture } from '../../widgets/DormantGesture'; // P2-A M3
 import { FRAME } from '../../widgets/copy'; // P2-A M3
 import { INFO } from './copy';
 import { autoModeLane, reviewsOf } from './lane';
-import { sessionInfoSections, type InfoRow } from './model';
+import { drivenModeRow, drivenSection, sessionInfoSections, type InfoRow } from './model';
 import { RouteSwitch } from './RouteSwitch';
+import { useSessionControls } from '../../session/controls/controls-for'; // P5 O9 M5
+import { useRemoteLaneA } from '../../lane-a/remote-session'; // P5 O9 M9
 import { useBudget } from '../../budget/store'; // C12
 import { loadedTabs, useBrowser } from '../browser/store'; // E4a
 
@@ -48,8 +50,34 @@ const serverRow = (sections: { title: string; rows: { label?: string | null; val
 
 function SessionInfo({ appSessionId, visible, fallback }: { appSessionId: AppSessionId; visible: boolean; fallback: PanelToolContext['session'] }) {
   const record = useSessions((s) => s.records.get(appSessionId)) ?? fallback;
+  const remote = useRemoteLaneA(appSessionId); // P5 O9 M9
+  if (!record && remote) return <RemoteSessionInfo appSessionId={appSessionId} />;
   if (!record) return <p className="p-3 text-ui text-fg-muted">{INFO.noSession}</p>;
   return <SessionInfoBody appSessionId={appSessionId} visible={visible} record={record} />;
+}
+
+// P5 O9 M9: another machine's terminal session has its listed row alone here, and no engine this machine reads: the mode
+// it reported (sminos 1.27.14), and what this device can't do to it, each control with the reason its port gives (Q2: in
+// place, never missing).
+function RemoteSessionInfo({ appSessionId }: { appSessionId: AppSessionId }) {
+  const controls = useSessionControls(appSessionId);
+  const now = useNow(POPOVER_TICK_MS);
+  const unavailable = controls === null ? null : drivenSection((key) => controls.capability(key));
+  const mode = controls === null ? null : drivenModeRow(controls, now);
+  return (
+    <div data-session-info={appSessionId} className="h-full overflow-auto p-3 text-ui text-fg">
+      {mode && (
+        <Group label={INFO.sections.permissions}>
+          <KeyValues label={INFO.sections.permissions} rows={[{ label: mode.label, value: <Value appSessionId={appSessionId} row={mode} /> }]} />
+        </Group>
+      )}
+      {unavailable && (
+        <Group label={unavailable.title}>
+          <KeyValues label={unavailable.title} rows={unavailable.rows.map((row) => ({ label: row.label, value: <Value appSessionId={appSessionId} row={row} /> }))} />
+        </Group>
+      )}
+    </div>
+  );
 }
 
 function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppSessionId; visible: boolean; record: SessionRecord }) {
@@ -63,7 +91,7 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
   // C3 samples the context at ready and after every turn into the digest (debt wave 3); the engine's summary is read
   // only while no sample has arrived (a session C3 has not sampled yet, or one whose digest predates the sampling).
   const context = useEngineRead('session.getContextUsage', { appSessionId, detail: 'summary' }, { ...read, enabled: visible && !digest?.context });
-  const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V19;
+  const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V21;
   const snapshot = useUsage((s) => s.snapshot);
   const directLogin = useGateway((s) => s.directLogin.get(appSessionId) ?? null);
   // the model's catalogue entry, when C7 listed the session's models (the lane reads only its value, which the status
@@ -80,6 +108,8 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
   // P2-A (X17): with no live process the sections show what the engine last reported, labelled with when; a read, never
   // a start (the 30 s reads above stay enabled only while the process is ready)
   const live = status?.process === 'ready';
+  const controls = useSessionControls(appSessionId); // P5 O9 M5
+  const driven = controls !== null && controls.turn() !== null ? controls : null;
   const observed = useObservedFacts(appSessionId, { enabled: visible && !live });
 
   // W2: a session whose first launch C10 still runs (its intent, no status) chooses its route on the intent (the model
@@ -109,13 +139,14 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
     browserTabs, // E4a
     now,
     ...(live ? {} : { observed }), // P2-A
+    driven, // P5 O9 M5
     reads: { status: statusRead.data ?? null, rules: rules.data ?? null, hooks: hooks.data ?? null, mcp: mcp.data ?? null, context: context.data ?? null },
   });
 
   return (
     <div data-session-info={appSessionId} className="h-full overflow-auto p-3 text-ui text-fg">
       {/* P2-A M3: not live, the owner's Refresh starts the session; the 30 s reads follow at ready */}
-      {!live && !firstLaunch && (
+      {!live && !firstLaunch && !driven && (
         <div className="mb-2">
           <DormantGesture appSessionId={appSessionId} label={FRAME.refresh} />
         </div>

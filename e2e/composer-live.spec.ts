@@ -15,6 +15,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { SessionRecord } from '@shared/graph/session';
 import type { JournalRow } from '@shared/wire/journal';
 import { LiveLedger } from '../test/live/support/live';
+import { addressed } from './support/address';
 import { framesOf, journal, liveScratch, liveSkipReason, mainResults, printSession, recordOf, resumeLive, statusOf, terminalSession, userWrites, type LiveScratch } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';
 import { ENGINE_BIN } from '../test/support/engine-pin';
@@ -88,7 +89,7 @@ const editorText = (pane: Locator) => pane.locator('[contenteditable="true"]').i
 
 async function open(page: Page, record: SessionRecord, pane: Locator): Promise<void> {
   await (await sidebarRow(page, { appSessionId: record.appId })).click(); // W11: its project expanded first
-  await expect(pane.locator(`[data-composer="${record.appId}"]`)).toBeVisible();
+  await expect(pane.locator(`[data-composer="${await addressed(page, record.appId)}"]`)).toBeVisible();
 }
 
 // A scratch session resumed live, as the launcher would, and opened in the pane.
@@ -243,7 +244,7 @@ test('auto mode with an ask rule: the card replaces the composer, offers Allow o
     await maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('pane.split')?.click());
     const left = paneAt(page, 0);
     const right = paneAt(page, 1);
-    await expect(right.locator(`[data-composer="${other.id}"]`)).toBeVisible();
+    await expect(right.locator(`[data-composer="${await addressed(page, other.id)}"]`)).toBeVisible();
     await open(page, ask.record, left);
 
     await send(page, left, 'Use the Bash tool to run exactly `git log --oneline` and tell me what it printed.');

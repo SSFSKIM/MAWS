@@ -15,7 +15,7 @@ import 'streamdown/styles.css';
 import type { AgentId } from '@shared/graph/ids';
 import { useTranscriptStore } from '../../stores/transcript';
 import { HYDRATION } from '../model/copy';
-import { restingRows, withQueueTail } from '../model/derive';
+import { restingRows, withPlacedRows, withQueueTail } from '../model/derive';
 import type { Row, RowKind } from '../model/rows';
 import type { TranscriptSource } from '../source/types';
 import { DEFAULT_ACTIONS } from './default-actions';
@@ -468,6 +468,13 @@ export interface TranscriptProps {
   // DC9, additive (the desk): the host's word that the session runs no turn (its machine reports it idle, or no
   // process) though no row ended its turn: the turn draws closed (`restingRows`), and the jump control its arrow
   atRest?: boolean;
+  // P5 O6 M6, additive (the desk): false where the host has no MAWS browser and no MAWS bridge, so the session's browser
+  // activity is neither listed nor drawn. The desk's keys (`desk:<project>:<session>`) are no addresses, and the client
+  // refuses a non-address in that slot; the desk is frozen at O13 and retired at cutover (P5 Decision Log 1).
+  browserActivity?: boolean;
+  // P5 O9, additive: rows kept outside the store, each placed after the last row of its turn (`withPlacedRows`): a
+  // terminal session's reply its interrupt cut before the engine wrote it
+  placed?: readonly Row[];
 }
 
 const NO_ROWS: Row[] = [];
@@ -497,16 +504,16 @@ const focusIsHereOrNowhere = (root: HTMLElement | null) => {
 const NO_TAIL: readonly Row[] = [];
 const NOTHING_WITHDRAWN: ReadonlySet<string> = new Set();
 
-export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation, ownerLane, atRest = false }: TranscriptProps) {
+export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation, ownerLane, atRest = false, browserActivity = true, placed = NO_TAIL }: TranscriptProps) {
   const storeKey = storeKeyOf(source);
   const stored = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
   const derived = useMemo(() => {
     const state = atRest ? useTranscriptStore.getState().entries[storeKey]?.state : undefined; // read when the rows change, as the rows are
-    return state ? restingRows(state, stored) : stored;
-  }, [stored, atRest, storeKey]);
+    return withPlacedRows(state ? restingRows(state, stored) : stored, placed);
+  }, [stored, atRest, storeKey, placed]);
   // E13: a session's browser activity as rows, under the `js` call each happened in or at its time (a child's transcript
   // shows none: the session's rows carry them); what main kept is listed on mount, so a reload shows them again
-  const activitySession = variant === 'session' && source.key ? (source.key as AppSessionId) : null;
+  const activitySession = browserActivity && variant === 'session' && source.key ? (source.key as AppSessionId) : null;
   const activity = useBrowserActivityAttachment(storeKey, activitySession);
   useEffect(() => {
     if (activitySession !== null) void listBrowserActivity(activitySession);

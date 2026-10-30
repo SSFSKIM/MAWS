@@ -68,6 +68,17 @@ describe('words and slash commands', () => {
     expect(await grade('sminos.command', { session: 's', name: '/clear' })).toBe('manage');
     expect(await grade('sminos.command', { session: 's', name: 'compact', args: 'keep the plan' })).toBe('manage');
   });
+
+  it('grades lane A’s `send` by its text, as `session.send`’s: plain text converse, a slash command by its own grade', async () => {
+    expect(await grade('sminos.send', { session: 's', text: 'please look at the tests' })).toBe('converse');
+    expect(await grade('sminos.send', { session: 's', text: '/model sonnet' })).toBe('converse');
+    expect(await grade('sminos.send', { session: 's', text: '/clear' })).toBe('manage');
+    expect(await grade('sminos.send', { session: 's', text: ' /clear' })).toBe('manage');
+    expect(await grade('sminos.send', { session: 's', text: '\n/compact keep the plan' })).toBe('manage');
+    // A text that is no string is no message sminos takes: it is graded as the most it could be.
+    expect(await grade('sminos.send', { session: 's' })).toBe('manage');
+    expect(await grade('sminos.send', { session: 's', text: [{ type: 'text', text: 'hi' }] })).toBe('manage');
+  });
 });
 
 describe('the other rows', () => {
@@ -88,6 +99,27 @@ describe('the other rows', () => {
     // Nothing pending: the answer's own kind (the host will answer `not_pending`).
     expect(await grade('session.answer', { requestId: 'gone', answer: question }, reads)).toBe('converse');
     expect(await grade('session.answer', { requestId: 'gone', answer: { kind: 'dialog', behavior: 'completed' } }, reads)).toBe('approve');
+  });
+
+  // P5 O9 M2: main's local lane A rows (the driver refuses an answer that does not fit its request's kind).
+  it('grades lane A’s answer by its kind, agreeing with lane B on a decline, and its command as its slash command', async () => {
+    const answers = { kind: 'question', answers: { 'Which?': 'A' } };
+    const skipped = { kind: 'question', answers: {} }; // every question skipped: a native question's decline (§D)
+    const deny = { kind: 'permission', decision: 'deny' }; // a question's decline, and lane B's
+    expect(await grade('laneA.answer', { appSessionId: 'a', request: 'q', answer: answers })).toBe('converse');
+    expect(await grade('laneA.answer', { appSessionId: 'a', request: 'q', answer: skipped })).toBe('converse');
+    expect(await grade('laneA.answer', { appSessionId: 'a', request: 'q', answer: deny })).toBe('approve');
+    expect(await grade('laneA.answer', { appSessionId: 'a', request: 'p', answer: { kind: 'permission', decision: 'allow', scope: 'once' } })).toBe('approve');
+    expect(await grade('laneA.answer', { appSessionId: 'a', request: 'plan', answer: { kind: 'plan', outcome: 'implement', feedback: null } })).toBe('approve');
+    // lane B gives the same answers the same grades on a pending question
+    const reads = pending({ q: 'question.requested' });
+    expect(await grade('session.answer', { requestId: 'q', answer: skipped }, reads)).toBe('converse');
+    expect(await grade('session.answer', { requestId: 'q', answer: deny }, reads)).toBe('approve');
+
+    expect(await grade('laneA.command', { appSessionId: 'a', name: 'model', args: 'opus' })).toBe(slashGrade('model'));
+    expect(await grade('laneA.command', { appSessionId: 'a', name: 'model', args: 'opus' })).toBe('converse');
+    expect(await grade('laneA.command', { appSessionId: 'a', name: '/clear', args: '' })).toBe('manage');
+    expect(await grade('laneA.command', { appSessionId: 'a', args: '' })).toBe('manage');
   });
 
   it('grades an acquire by what its options change: the model or effort converse, anything else manage', async () => {

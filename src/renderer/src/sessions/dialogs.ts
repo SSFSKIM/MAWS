@@ -3,11 +3,13 @@
 // `SessionDialogs`; opening another replaces the one shown (an unanswered confirmation answers no).
 import { create } from 'zustand';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { MachineRef } from '@shared/machine/ref';
 
 // The worktree a cleanup is about, as the session's record names it: the repository (whose root outlives the
 // checkout), the checkout's path, and its branch, which stays reachable after the checkout was removed in an earlier
 // sitting. The dialog reads git's identity at open and every step revalidates it.
 export interface CleanupTarget {
+  machine: MachineRef; // P5 O6 M4: the checkout's, its session's machine
   repoRoot: string;
   path: string;
   branch: string | null;
@@ -18,9 +20,9 @@ const MANAGED = '/.claude/worktrees/';
 // The cleanup target of a worktree: a managed worktree's repository root is the part of its path before
 // `.claude/worktrees/`, so it stays valid after the checkout is gone; a hand-made one is asked through `directory`, any
 // path inside its repository (main normalises it to the main root).
-export function cleanupTargetAt(worktree: { path: string; branch: string | null }, directory: string): CleanupTarget {
+export function cleanupTargetAt(machine: MachineRef, worktree: { path: string; branch: string | null }, directory: string): CleanupTarget {
   const at = worktree.path.indexOf(MANAGED);
-  return { repoRoot: at > 0 ? worktree.path.slice(0, at) : directory, path: worktree.path, branch: worktree.branch };
+  return { machine, repoRoot: at > 0 ? worktree.path.slice(0, at) : directory, path: worktree.path, branch: worktree.branch };
 }
 
 // "Remove worktree…" on a notice about a worktree no session record names yet (a failed attempt's checkout).
@@ -49,7 +51,7 @@ export type OpenDialog =
   | { kind: 'archive'; appSessionId: AppSessionId }
   | { kind: 'delete'; appSessionId: AppSessionId }
   | { kind: 'cleanup'; target: CleanupTarget; returnTo?: WorktreesDialogRef } // C12: returnTo, the dialog a close goes back to
-  | { kind: 'archived'; projectId: ProjectId | null }
+  | { kind: 'archived'; projectId: ProjectId | null; machine?: MachineRef } // projectId null: the sessions of no project, on `machine` (this one by default)
   | { kind: 'hiddenProjects' } // W11 (I5)
   | WorktreesDialogRef // C12
   | ({ kind: 'confirm'; answer(yes: boolean): void } & ConfirmRequest);

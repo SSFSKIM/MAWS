@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
+import { addressed } from './support/address';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws, type MawsLaunch } from './support/launch';
 
@@ -31,7 +32,7 @@ test.afterEach(async () => {
 });
 
 async function openWorktrees(page: Page, projectId: string, name: string): Promise<Locator> {
-  await page.locator(`[data-menu="project:${projectId}"]`).first().click({ button: 'right' }); // W5: the project list's row is the menu target itself
+  await page.locator(`[data-menu="project:${await addressed(page, projectId)}"]`).first().click({ button: 'right' }); // W5: the project list's row is the menu target itself
   await page.getByRole('menuitem', { name: 'Worktrees…', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: `Worktrees · ${name}` });
   await expect(dialog.getByRole('list', { name: 'Worktrees' })).toBeVisible();

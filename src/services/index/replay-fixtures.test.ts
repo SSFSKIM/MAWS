@@ -1,0 +1,86 @@
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { ReplayFixtureSchema } from '@shared/ipc/schema/session';
+import { FIXTURE_DIR, listJournals } from '../../../test/support/fixtures';
+import { tempDir } from '../../../test/support/index-fixture';
+import { Index } from './index';
+import { appRoot, seedReplayFixtures } from './replay-fixtures';
+
+const REPO_ROOT = join(__dirname, '../../..');
+
+describe('replay fixtures in the index', () => {
+  let dir: ReturnType<typeof tempDir>;
+  let index: Index;
+  beforeEach(() => {
+    dir = tempDir();
+    index = new Index(join(dir.path, 'index.sqlite'));
+  });
+  afterEach(() => {
+    index.close();
+    dir.dispose();
+  });
+
+  it('adds one row per path, lists them, and records the last play', () => {
+    const journal = index.fixtures.add({ name: 'workflow', kind: 'journal', path: '/fixtures/pass2/workflow.jsonl', sessionId: null });
+    expect(ReplayFixtureSchema.parse(journal)).toEqual(journal);
+    expect(index.fixtures.add({ name: 'again', kind: 'journal', path: '/fixtures/pass2/workflow.jsonl', sessionId: null })).toEqual(journal);
+    const transcript = index.fixtures.add({ name: 'subagent-parent', kind: 'transcript', path: '/fixtures/subagent-parent.jsonl', sessionId: '9a1d4262' });
+    expect(index.fixtures.list()).toEqual([journal, transcript]);
+    index.fixtures.markPlayed(journal.id, '2026-09-28T12:00:00.000Z');
+    expect(index.fixtures.list()[0].lastPlayedAt).toBe('2026-09-28T12:00:00.000Z');
+  });
+
+  it('seeds the probe journals and C4\'s transcripts that exist under a checkout, once each', () => {
+    seedReplayFixtures(index.fixtures, REPO_ROOT);
+    const fixtures = index.fixtures.list();
+    const journals = fixtures.filter((f) => f.kind === 'journal');
+    const transcripts = fixtures.filter((f) => f.kind === 'transcript');
+    // Every probe journal of every pass (C3 recorded pass 3), and nothing under the fixtures tree that is not a journal
+    // (the sidecar transcripts, the workflow's own on-disk journal).
+    const expected = [
+      ...listJournals('pass1').map((name) => join(FIXTURE_DIR, `${name}.jsonl`)),
+      ...(['pass2', 'pass3'] as const).flatMap((pass) => listJournals(pass).map((name) => join(FIXTURE_DIR, pass, `${name}.jsonl`))),
+      // P4-B4's probe journals (the engine against the scripted API stand-in; not a conformance pass)
+      // and P5's: O2's Stop-hook probe (the pinned engine against the stand-in, as P4-B4's) and O3-F's (its arms' final
+      // transcripts, under p5/p5-o3-rewind-resume-transcripts/, are not journals)
+      ...(['p4', 'p5'] as const).flatMap((dir) => readdirSync(join(FIXTURE_DIR, dir)).filter((name) => name.endsWith('.jsonl')).map((name) => join(FIXTURE_DIR, dir, name))),
+    ];
+    expect(listJournals('pass3').length).toBeGreaterThan(0);
+    expect(journals.map((f) => f.path).sort()).toEqual(expected.sort());
+    expect(journals.find((f) => f.path.endsWith('pass2/workflow.jsonl'))).toMatchObject({ name: 'workflow', lastPlayedAt: null });
+    expect(journals.find((f) => f.name === 'subagent')?.sessionId).toBe('9a1d4262-0b43-46ad-acb9-5982f31d209c');
+    const w1 = ['w1-compact', 'w1-hooks-blocking', 'w1-steer-next-cancelled', 'w1-steer-next-disk', 'w1-steer-next-interrupted', 'w1-steer-next-then-now', 'w1-terminal-queued']; // W1's disk records under a scratch config home
+    const wave7 = ['dw7-hooks-flipped']; // debt wave 7: blocking hooks with W1's forms flipped
+    const e1 = ['p1-maws-ask-async']; // E1 M2: an async maws ask answered by its steer, the disk path's record
+    const e11 = ['p1-maws-ask-interrupt']; // E11 S1: a blocking maws ask withdrawn by the interrupt, the disk path's record
+    const e2 = ['p1-maws-artifacts']; // E2 M2: the artifact tools' session, the disk path's record
+    const e4c = ['p1-maws-browser']; // E4c M4: the browser tools' session, the disk path's record
+    expect(transcripts.map((f) => f.name).sort()).toEqual(['interrupt-marker', 'rewind-real', 'rewind-terminal', 'sdk-unended', 'subagent-parent', 'torn-tail', ...w1, ...wave7, ...e1, ...e2, ...e4c, ...e11].sort());
+    expect(transcripts.find((f) => f.name === 'p1-maws-ask-async')?.sessionId).toBe('ccd2c390-f412-47ce-a480-87c2524d643e'); // its first record's
+    expect(transcripts.find((f) => f.name === 'subagent-parent')?.sessionId).toBe('9a1d4262-0b43-46ad-acb9-5982f31d209c');
+    for (const fixture of fixtures) expect(existsSync(fixture.path), fixture.path).toBe(true);
+
+    // Idempotent; a checkout without the fixture trees (a packaged app) seeds nothing.
+    seedReplayFixtures(index.fixtures, REPO_ROOT);
+    expect(index.fixtures.list()).toEqual(fixtures);
+    seedReplayFixtures(index.fixtures, join(dir.path, 'no-checkout'));
+    expect(index.fixtures.list()).toEqual(fixtures);
+  });
+
+  it('classifies a probe-tree file by its physical first line: a corrupt line 1 is not a journal, whatever follows', () => {
+    const probe = join(dir.path, 'checkout/spikes/protocol-probe/fixtures');
+    mkdirSync(probe, { recursive: true });
+    const row = (seq: number) => JSON.stringify({ seq, direction: 'in', at: '2026-09-28T10:00:00.000Z', frame: { type: 'system', session_id: 'S' } });
+    writeFileSync(join(probe, 'corrupt-first.jsonl'), `{"seq":1,"direction":"in","at":\n${row(2)}\n${row(3)}\n`);
+    writeFileSync(join(probe, 'blank-first.jsonl'), `\n${row(1)}\n`); // launch skips blank lines, so this one plays
+    seedReplayFixtures(index.fixtures, join(dir.path, 'checkout'));
+    expect(index.fixtures.list().map((f) => f.name)).toEqual(['blank-first']);
+  });
+
+  it('finds the checkout above the app path the app was started with', () => {
+    expect(appRoot(join(REPO_ROOT, 'out/main'))).toBe(REPO_ROOT);
+    expect(appRoot(REPO_ROOT)).toBe(REPO_ROOT);
+    expect(appRoot('/')).toBe('/');
+  });
+});

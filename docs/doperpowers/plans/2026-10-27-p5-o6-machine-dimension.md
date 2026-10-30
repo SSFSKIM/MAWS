@@ -1,13 +1,13 @@
 # P5 O6: the renderer's machine dimension and org projects (2026-10-27)
 
-> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O6**, parent pin blob `7adc58e71` (master `84dd399cd`).
+> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O6**, parent pin blob `063f83c39` (master `957658290`; re-pinned at execution, Decision Log 2026-10-27 "the refresh pass").
 >
 > **What binds.**
 > - O6's section in P5 is this document's design, and its contracts bind: **OX2** (machine-scoped addresses) and **OX3** (org projects), as P5 Decision Logs 21 and 22 restate them.
 > - So do P5 §3 (the app: the connection manager, addresses, org projects) and §8 (the interface: the sidebar by org project, machine chips, an offline machine's rows greyed, sessions with no project under their machine).
 > - So do RL5's machine `ref` (`docs/doperpowers/specs/2026-10-26-remote-layer-design.md` §2.3 and Decision Log 19) and **OX7** (every landing step stays within the local latency budget).
 >
-> **Inherited from other children.** O6 builds on O1's execution document, `docs/doperpowers/plans/2026-10-27-p5-o1-seams.md`, which is executing and has not landed. Its names are cited as that document defines them, and every step that needs O1's code is marked **(needs O1)**. If O1 lands a name differently, follow O1 and record the difference in Surprises.
+> **Inherited from other children.** O6 builds on O1's execution document, `docs/doperpowers/plans/2026-10-27-p5-o1-seams.md`. O1 landed at `368ede2cf` (PR #213; report `docs/doperpowers/plans/2026-10-27-p5-o1-report.md`), and the names this document cites were reconciled against master at execution (Surprises, "O1 as landed"). Steps that need O1's code are still marked **(needs O1)**, as a pointer to where O1's code is consumed. If O1's code differs from a name here, follow O1 and record the difference in Surprises.
 >
 > **Advisory.** The survey behind O6 is `research/org/headless-cut-survey.md` §4.3–§4.4, with its scan in `research/org/scripts/`.
 >
@@ -29,12 +29,12 @@ After O6:
 
 ## Progress
 
-- [ ] M1: machine identity and the address codec
-- [ ] M2: addresses across the boundary, one machine
-- [ ] M3: machine links and the second-profile stand-in
-- [ ] M4: per-machine stores, the shell per machine, explicit machines for paths
-- [ ] M5: org projects and the sidebar
-- [ ] M6: acceptance
+- [x] M1: machine identity and the address codec (2026-10-27T10:11Z; commits `ece0eb80a`..`ae671bfd0`, task review clean after two fix rounds; class 1a GREEN, run 40486094807)
+- [x] M2: addresses across the boundary, one machine (2026-10-27; commits `8362f2d74`..`849b08ae5`, task review clean after one fix round; class 1a GREEN 40520987967; hosted e2e GREEN 40501648644, 40503154665, 40506863633; mini e2e:default GREEN 40518812172; OX7 bench within budget 40507512064)
+- [x] M3: machine links and the second-profile stand-in (2026-10-27; commits `98d55f9cf`..`4cc3aa1fc`, task review clean after two fix rounds; class 1a with e2e:cross-build GREEN 40537654843; hosted e2e:supervisor GREEN 40527949745 and self-hosted e2e:machines GREEN 40527965726, both at `f7672566b`, before the manager-only fixes)
+- [x] M4: per-machine stores, the shell per machine, explicit machines for paths (2026-10-27; commits `6370e06ec`..`3d385c4cb`, task review clean after one fix round; class 1a GREEN 40573698654; at `4b59cd5f5`, before the fix wave: hosted GREEN 40559770099, mini e2e:machines with M4's scene and e2e:default GREEN 40559769024, OX7 bench within budget 40563723819. At the fix head, once the mini's loginwindow alert (ci-kit-sandbox#59) closed: e2e:machines, e2e:default and e2e:cross-build GREEN, run 40585344264. Hosted e2e:layout's `shell.spec.ts:367`, red at the pre-fix head too (40577605822), was a race in the test, fixed in `18c452b74`)
+- [x] M5: org projects and the sidebar (2026-10-27; commits `18c452b74`..`de5d12a5b`; task review converged after one fix round, with two findings logged as debt; class 1a GREEN 40607054840; mini e2e:machines and e2e:default GREEN 40607045251; hosted at `361f4c0c0` GREEN 40591232003 and e2e:layout GREEN 40597601420; at `de5d12a5b` the hosted maws-app runs were green but four MAWS waiter jobs died with no log (40607043033), so M6's whole set stands in for them)
+- [x] M6: acceptance (2026-10-28T08:40Z; commits `d7e7b66f6`..`1941e8632`, the branch review at the high rung clean after its fix wave; acceptance 1 to 10 at `38e04607f`, tree `a52a8c8dcf37`: class 1a 40631062709, `--gates all` 40631062270, e2e:machines admitted 3 of 3 hosted (40631062922, 40631063249, 40631063380) against the no-hosted baseline 40632939975, bench 40632939812; at the final code head `1941e8632`, after two master merges and the e2e:panel test fix, `--gates all` 40650537683 green)
 
 ## Acceptance
 
@@ -46,8 +46,8 @@ Each item is checked by the command Concrete Steps names. Paths are repository-r
    - The OX7 bench (`e2e:local-latency`) is within budget at M2's commit and at the head. Budget: p50 at most the baseline's plus 2 ms, p95 at most its plus 5 ms (O1 acceptance 1).
 2. **Machine identity.**
    - The first launch of a profile writes `<userData>/machine.json` holding one `MachineRef`. A relaunch reads the same ref, and a second profile gets a different one.
-   - `machine.identity` answers `{ ref, name, project }`.
-   - `src/main/machine/identity.test.ts` pins:
+   - `machine.identity` answers `{ ref, name, project }`, pinned with main's startup mint in `src/main/machine/identity.test.ts`.
+   - `src/shared/machine/identity-file.test.ts` pins (it travels with the module O2 shares; Decision Log, "the seam PR"):
      - atomic publication. A first run paused after writing its temporary file and before linking it, with a second run starting meanwhile, leaves both reading one complete ref. A stray temporary file is removed at the next start;
      - a malformed file is refused loudly, never re-minted;
      - the format is RL5's: `[A-Za-z0-9_-]{16,64}`, from at least 128 random bits.
@@ -929,7 +929,7 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
 
       { "version": 1, "ref": "<MachineRef>", "mintedAt": "<ISO-8601>" }
 
-  It is created exclusively (`wx`, 0600), never rewritten, and a malformed file stops startup.
+  It is published once by linking a complete 0600 temporary file (M1's decision; `wx` then write was rejected there), never rewritten, and a malformed file stops startup.
 - `<userData>/known-machines.json` is the client's (M3):
 
       { "version": 1, "machines": [{ "ref": "<MachineRef>", "name": "<string>", "carrier": { "kind": "socket", "dir": "<absolute path>" } }] }
@@ -955,7 +955,175 @@ No new dependency. zod 4, Node's `crypto`, the peer-auth addon already in the tr
 - Observation: two pieces of main's machine-side code read the client's layout content: the inactive sweep's open tabs and the panel-key lifetime. Both must understand addresses until OX5 replaces the first.
   Evidence: `src/main/layout/open-session-tabs.ts`, and `src/main/layout/store.ts`'s `SESSION_PANEL_KEY` check and `dropPanelKeysOfRemovedSessions`.
 
+- Observation: O1 as landed, against the names this document cites (reconciled at master `957658290`). Every cited name exists: `registerMainHandler`, `registerMachineHandler`, `createRouter`, `Router<R>`, `HandlerContext` and `ClientRef` (`src/shared/ipc/client.ts`), `gradeOf` and `ROUTING_CLASSES = ['client', 'internal']` (`src/shared/ipc/grades.ts`), `WireRegistry`, `createHostRuntime`, `HostOn`, `HostRegister` (`on`, `emit`, `client` hooks), `HostCommandError`, `codecOf`, `SocketPort`, `ClientHelloSchema`, `ServerWelcomeSchema`, `src/shared/host/client-refs.ts`, `wireFingerprint()`, `pnpm wire:manifest`. What O6 adds is absent, as expected: `MainContext` is `HandlerContext` with no `target`; `Router<R>` has `install`, `registerMain`, `registerMachine` and `intercept`, with no `dispatchLocal`; `SocketServerOptions` has no `admit`.
+  Evidence: `src/main/ipc/router.ts:25-41`, `src/shared/host/socket-server.ts:58-69`, `src/shared/host/runtime.ts:25-80`.
+- Observation: `WIRE_MINOR` is 0 on master, and the only commit that touched it is O1's M6. O6's bump is master's first unless O2 lands its own first.
+  Evidence: `git log -S WIRE_MINOR origin/master -- src/shared/ipc/wire.ts` lists `dbd9ee9b7` alone.
+- Observation: the peer-auth helpers are where M3 cites them: `peerAddonPath`, `loadPeerAddon` and `socketFd` in `src/main/browser/cua/peer.ts`.
+- Observation: no plain union in the registry carries an id. All 28 unions that carry one are discriminated (by `kind` or `status`), so the plain-union rule is exercised only by fixtures today.
+  Evidence: M1's scratch survey over `REGISTRY`.
+- Observation: only two id-named fields were unbranded at the base: `session.takeOverPane`'s output `ptyId` and `plugins.operation`'s `reload.sessions[].appSessionId`. The registry has 47 plain-string-keyed records, none keyed by a machine-bound id; `browser.tabs.list`'s `selected` was already `z.record(AppSessionIdSchema, …)`, so Concrete Steps 9's first mutation re-types it back.
+  Evidence: `coverage.test.ts`'s first RED run (M1).
+- Observation: the registry's only pipes are in `src/shared/engine/answers.ts`, and neither carries an id. The layout's preprocessed schemas (`StoredMainSchema` and friends) are outside the registry, so M2's migration happens in their readers, not through the codec.
+- Observation: `test/support/builders.ts`'s attention `item()` writes `att-<appSessionId>-…`, unlike the broker's `<appSessionId>:<requestId>`. Tests that rely on the prefix pass the broker's form.
+- Observation: the lowerer's bare-id refusal finds wrong sends, but not an id-shaped field typed `z.string()`, and the coverage snapshot cannot flag a field the schema does not type as one of the four. M2's adaptation found four such crossings, each silent with one machine: `session.takeOver.paneId` (a plain string carrying the address `session.takeOverPane` answered, so the pause-first takeover never suspended the CLI); mark ids and engine event ids, which embed main's bare session id but were built or compared on the page's address (Mark read matched nothing; a side thread's later summaries were dropped); and session ids written inside an artifact's content (a dashboard label read "by Claude"). Expect more of this class in M3 and M4: string fields carrying an id a lifted output produced, and compound ids embedding one.
+  Evidence: e2e:terminal, e2e:side test 2 and e2e:default's dashboard cases, each red before M2's fixes (`task-2-report.md`, M2's workspace).
+- Observation: a transcript path chip opens its file tab with `appSessionId: null` (pre-O6), so `machineFor(null)` gives the local machine even for another machine's transcript; and `shell/transfer.ts`'s `panelRecordOf` compares artifact ids only. Both hold with one machine and are M4's to carry the machine through.
+- Observation: OX7's bench at M2's head (`f9e802d2a`, run 40507512064, load 5.5) read delta to frame p50 25.8 / p95 37.7 ms and round trip 1.0 / 1.3 ms, against ceilings of 26.45 / 42.56 and 2.9 / 6.3 ms. The p50 margin is 0.65 ms at that load; an earlier M2 run at load 2.3 (`c76459b4b`, 40501668478) read 24.3 ms. Later milestones add work on the delta path only through the stores, so the head's bench is the one to watch.
+- Observation: every `internal`-graded command is also main-only at this base, so the link surface's "no `internal` one" and "no main-only one" pick the same commands: 291 of the registry's 399 cross a link.
+- Observation: the host runtime's `emit` refuses events outside `HOST_EVENTS` only when it serves `engine-host`, so a `machine`-owner runtime over the link registry can emit every link event, as the stand-in needs.
+- Observation: a new class-1 e2e group off `HOSTED_MAC_E2E` moves three gate-script pins: `ci-gate-pool-demand.test.mjs`'s hosted-lane waiter count, `e2e-default-specs.test.mjs`'s bare spec count (twice), and `gate-plan.test.mjs`'s raw time-bound walker, which reads `git ls-files` and so sees a new spec's bound only once it is staged.
+- Observation: more of M2's string-id class surfaced in M4, found by reading every `machine-wide` command a session surface calls. `fs.tasks` (graded `machine-wide`, so a B session's checklist silently read A's list of the same id) and `session.takeOverPane` (the holder's pid is a process on the session's machine) now go to the session's machine. Left as this machine's, with their owners: `session.deletions.list` (the whole trash set is replaced on read), `pty.list` (the terminal registry's restore), `session.search` (the palette's server-side search) and `session.archiveOlder` with `projectId: null` (M5, O7). `artifacts/registry.ts` keys editor holds and staged hand-offs by artifact id alone, harmless while artifacts are local (O7).
+- Observation: the stores' per-machine partitions live in each factory's closure, out of `setState`'s reach, so a test that resets a store must also call `resetMachine`.
+- Observation: both stand-in profiles share one disk, so in M4's scene the panel's branch alone cannot tell which machine ran git; the transcript, read from B's `CLAUDE_CONFIG_DIR`, can. M6's scene gives the two checkouts different branches for that reason.
+- Observation: `pnpm wire:manifest` doesn't move for `ProjectRecord.org`. `session.*` and `layout.*` are main-owned and outside the manifest, so O6's one `WIRE_MINOR` bump stays `machine.identity`'s.
+- Observation: sminos's `os.path.join` lets an absolute part win, and a linked worktree's `.git` file holds an absolute `gitdir:`, so the port follows it with `path.resolve`. A plain join derived `repo:` for a linked worktree of a remote repository.
+- Observation: `e2e/shell.spec.ts:367` and `:50` failed on hosted Macs at O6's heads and at the pre-fix control (runs 40577605822, 40580909588, 40580909622). Each test left Playwright's pointer, or keyboard focus, on a sidebar row, whose hover card opens after 300 ms. On a slow runner the card was open before the next click's hit-test (`:367`) or took the palette's Escape (`:50`). CI-opt diagnosed `:367`; `:50`'s focus cause is inferred, since the artifact had no page snapshot. Test-only fix `18c452b74` (then `5260d0060`): the pointer moves to the composer, and the dragged tab takes focus. No timing changed and no assertion was dropped. Hosted e2e:layout GREEN, runs 40583048072 and 40597601420.
+- Observation: the branch review found the class M2 named in a new shape. Lifecycle events now cross links (`engine.hostState`, `pty.hostState`), and consumers that had only ever seen one machine ignored the event's machine:
+  - the terminal registry marked every terminal lost on any machine's pty host crash;
+  - transcript host-loss recovery read A's process table for B's session;
+  - the page's artifact host dropped local document ports when B's engine host left;
+  - the memory budget blanked, and question sheets re-read, on another machine's host events.
+  Also, Attach built its command from A's engine binary for B's job. A sweep of every renderer listener of the link events followed (task-6-report.md).
+  Evidence: the branch reviewer's reproductions against production handlers, `72041439b..15f17ef1f`.
+- Observation: a restored org-keyed tab set lost its panes when B's `session.list` landed before its `session.projects.list`. A record whose project wasn't yet known was filed to the machine row, and `refile`'s M5 hold covered only address keys, not migrated org keys.
+- Observation: on hosted Macs, B's (the first app's) org derivation sometimes got no answer from git across all four attempts (runs 40615155676, 40619534895). The unconfirmed hypothesis is a cold `/usr/bin/git` xcrun shim slower than the 2 s timeout on a 2-CPU VM, killed before it caches. Main's stderr isn't kept in hosted jobs, so the cause is unconfirmed; `git()` now logs why it got no answer.
+- Observation: when A relaunched with B down, B's kept tab was titled "New chat", because A holds no record for a machine not loaded in the run. Acceptance 7 held, since nothing was dropped, but the title misled. T5 says the tab's title greys, which a tab can only show if it keeps one.
+- Observation: the first `--gates all` at the final head (run 40621861961, `038a66dbc`) failed e2e:desk-web, about 70 tests, each on its page-error check: "[ipc] browser.agent.activities.list: lower: .appSessionId holds a bare id where an address belongs, "desk:…"". desk-web mounts MAWS's `Transcript` over keys of the form `desk:<project>:<session>`. Before O6 its activity listing failed silently, because desk-web has no `window.maws` and `.catch` swallowed it; O6's lowering refuses it loudly. No earlier gate caught it: e2e:desk-web runs only in the Mac `--gates all` set, class 1a's desk-web unit suites never mounted TranscriptPane with an error spy, and no milestone before M6 ran `--gates all`.
+
 ## Decision Log
+
+- Decision: the refresh pass, at execution.
+  - The parent is re-pinned from blob `7adc58e71` (master `84dd399cd`) to blob `063f83c39` (master `957658290`). P5 has since gained Decision Logs 28 (the taste answers, already folded into M5), 33 and 43 (OX7's baseline and O1's head numbers), 36 (O1's grading calls), 42 (protocol 2's frozen lines) and 44 (O2 and O6's shared seams). None changes a milestone's design. Decision Log 42 bears on M3 only in that the stand-in's link speaks protocol 3 and adds no field to a frozen line.
+  - O1's names are reconciled (Surprises, "O1 as landed").
+  - Interfaces' "Files on disk" said `machine.json` is created with `wx`, contradicting M1's decision, which rejected `wx` for a link from a complete temporary file. M1's decision governs; the line is corrected.
+  Date/Author: 2026-10-27, O6's executor (controller).
+
+- Decision: the seam PR (P5 Decision Log 44).
+  - `src/shared/machine/ref.ts` and `src/shared/machine/identity-file.ts` land on master first, as their own small PR, once M1's task review is clean, so O2 imports them from master.
+  - So M1 commits those two modules and their tests in a commit of their own, touching no other file. The file-level tests live beside the module in `src/shared/machine/identity-file.test.ts` (and `ref.test.ts`), not in `src/main/machine/identity.test.ts`, and acceptance 2 is reworded to say so. `src/main/machine/identity.test.ts` pins main's part: the startup mint into `<userData>`, the name, and `machine.identity`.
+  - Rejected: keeping the race and format tests in main's test file, which would ship the shared module to O2 without its tests.
+  Date/Author: 2026-10-27, O6's executor (controller).
+
+- Decision: M1's executor's calls, folded at M1.
+  - The identity file:
+    - `readMachineRef` reads the `ref` of a file of any positive integer `version`, so an older build keeps a newer build's identity; a bad or missing `ref` stays fatal. The minter writes version 1.
+    - The stray sweep removes only files of the minter's own shape, `machine.json.<digits>.<base64url>`, older than 60 s, so an owner's `machine.json.bak` is never touched. It runs in `readOrMintMachineRef` only.
+    - `readOrMintMachineRef` creates the profile directory, since O2's `mawsd` may run first in a fresh profile.
+    - The temporary file is written whole by a loop over short writes, and it is removed on any failure of the write, close or link (task review).
+    - The race test pauses the first minter inside a mocked `linkSync` and runs the second minter there. Rejected: a real multi-process race, which is nondeterministic.
+    - A malformed file stops startup with a `[machine]` log line, `dialog.showErrorBox` and `app.exit(1)`. The mint is the first step inside `startWithProfileLock`, before any host or window.
+  - The codec:
+    - The plain-union rule is made concrete by run-time shape: an id beside a plain string, enum or literal throws; objects merge by key; an object and a record both carrying ids, or an array and a tuple both carrying ids, throw; null, number and boolean members are ignored, so `union([dunion, null])` stays dispatched.
+    - Constructs the walker cannot see through throw at compile when they would hide an id: an intersection, a map, a set, a promise, or a transform on the chosen side of a pipe.
+    - The plain-union rule compares every option that applies at a path (task review): objects merge with records, catchalls and record values included, and tuples with arrays, rests included; an id-keyed record beside an object throws. Beside an id, only another id, a string-like, an object, a record, an array, a tuple, a union, or a primitive that is never a string may stand; any other member (intersection, map, set, promise, transform, date, file, `unknown`, `any`, `custom`, or a lazy resolving to one) refuses compilation, naming the path.
+    - Lifted ids are built through `addressOf`, so an empty loose id throws at lift.
+    - `addressOf` refuses an empty bare id.
+    - It exports `addressedKindOf` and `addressedPaths(schema, direction)` beyond the Interfaces block, so the coverage test reads the compile step's own findings.
+    - The snapshot records command inputs as lowered and outputs and events as lifted, one `<path> <Kind>` line each.
+  - Coverage: one loose alias, `LooseAppSessionIdSchema`, was needed; the `ptyId` fix reuses `PtyIdSchema`, which is already loose. `REVIEWED_STRING_RECORDS` lists all 47 plain-string records, and a stale entry fails the test.
+  - `machine.identity`'s grade, as the O1 rubric line for the architect: "`list`: a listing read of the machine's ref, display name and own project, none of a session's content, like `session.list`" (`src/shared/ipc/grades/machine.ts`).
+  - `eslint.config.js`'s `MACHINE_BOUND` glob gains `machine`, so `src/main/machine/**` stays Electron-free like the other services that move to `mawsd` (a file outside M1's Touches).
+  Date/Author: 2026-10-27, O6's executor (controller), from M1's executor.
+
+- Decision: M2's executor's calls, folded at M2.
+  - The bridge types:
+    - `PreloadBridge` is typed by command name (`invoke<N>(name, input, machine?)`, `on<N>(name, (payload, machine) => …)`), not `(string, unknown)`, so e2e specs and harness pages stay type-checked.
+    - `PathMachineRequired = false` in `src/shared/ipc/schema.ts` is the one switch M4 flips; the required form (`MachineOptions<N>`) is already defined and pinned by `routes.test-d.ts`.
+  - The route classes: engine-`SessionId`-only commands are `path`, by `ENGINE_SESSION_KEYS` (`sessionId`, `sessionIds`, `engineSessionId`, `engineSessionIds`). The computed classes are committed as `src/shared/ipc/routes.json`, pinned against the registry.
+  - The router: `RouterOptions.local` is required. A `main` handler and an interceptor receive `MainContext` (with `target`); a `machine` handler keeps `HandlerContext`, since a host runtime runs the same code. `emit` sends no machine while none is bound (unit tests, very early startup), which the client reads as local.
+  - The client: every refusal answers `invalid_input` with one `console.error`, and nothing is sent; a lift failure on an output is `invalid_output`. Ids the renderer mints use `ipc.localMachine`.
+  - Query keys gain `{ machine }` only for a non-local machine, so local reads keep their pre-O6 keys and exact-key invalidations. `useEngineRead` and `useOperation` take no machine option, since their inputs are addressed and their keys already name the machine. This departs from M2's "the wrappers forward `opts`" for those two; M4 adds the option to any of them a `path` command uses.
+  - The layout: lifting is total and idempotent (an address in place is kept). A bare `panel.<id>` read at hydrate moves to `panel.<address>` and the bare key is deleted; one whose state is invalid or whose session is unknown is left, and main's removed-session drop deletes both forms. `layout.set(key, null)` deletes the key. `regions` and `panelTools.surfaces` are written back when their read migrated. Main's layout readers take the local ref as an argument.
+  - Tab machines: file and artifact tabs take `machineFor(appSessionId)`, the session's machine, else local. Artifact tabs, and the Artifacts tool's record (`{ target, machine }`), are local while the library is machine-wide.
+  - Compound ids: mark ids and engine event ids stay main's, built on the bare session id, and the page compares them through `bareOf`. A session id inside a local artifact's content reads as the local machine's (`storedSessionOnPage`, `src/renderer/src/ipc/machine.ts`) until O7 gives artifacts a machine. Rejected: lifting them as a fifth kind, since they are compounds like tab ids.
+  - Tests: a fake installed as `window.maws` stands for main (bare ids, `localMachine: TEST_MACHINE`); store fixtures hold `at(id)` (`test/support/machine.ts`); `fillStores` lifts its scenario once. The upgrade scene runs over indexed sessions, because the stub scenario keeps drafts in memory.
+  - The task review's round: a unit test per synthetic pty owner follows it from its producer, through the real Terminal tool and registry where it goes through them, to the bare owner and local machine `pty.spawn` reaches (`src/renderer/src/terminal/synthetic-owners.test.ts`).
+  - Side case 11 ("pinned under the heading after the Reload") failed in the mini's e2e:default at M2's head and passed at the base (run 40514243088). The trace showed the document bridge measuring the anchor before the reloaded page's viewport had a width. The bridge (`src/main/artifacts/bridge-script.ts`) now waits for a sized viewport and measures again on resize. It is a latent race outside M2's area; why M2's head exposed it under load was not shown.
+  Date/Author: 2026-10-27, O6's executor (controller), from M2's executor.
+
+- Decision: M3's executor's calls, folded at M3.
+  - Interfaces beyond the block: `MachineLink` gains `name` and `onState(listener)`, and `ConnectionManager` gains `close()`. `createConnectionManager`'s deps gain `connect(dir)` and `log`. `serveMachineStandIn` takes `router: Pick<Router, 'dispatchLocal'>`, `build` and an optional `registry`, and returns `{ ready, close }`; a bad serve directory throws synchronously, naming the path.
+  - Composition: `src/main/machines/index.ts` (`startMachines`), outside M3's Touches, keeps `src/main/index.ts`'s addition to one call. The links start before `installRouter`. The stand-in starts last, after every handler is registered. The router's non-local branch is `RouterOptions.remote`; a `client` command for another machine is still refused before it.
+  - Link states: `connecting` lasts only until the first attempt settles, and retries stay `down`, so `machines.changed` doesn't flap every second. A `refuse replaced` leaves the link down with no retry, so two apps don't keep replacing each other on a one-client server. A command off the link surface answers `host_unavailable` without being sent.
+  - Generations: a non-local link's generation goes up when it turns `up` (after its welcome's `machine.identity`), and the link posts `ready` only after the manager has sent `machines.changed`, so no event of a new connection precedes its generation. The counter is kept per machine ref for the app's whole run, whichever directory carries the machine, and is never reset; a known machine not yet up this run reports 0 (task review).
+  - A remembered ref is a hint (task review): a live directory takes a ref over from an entry that isn't `up`, and the roster and `known-machines.json` move to it. The old entry stays configured with no ref and keeps retrying, then is listed as whatever machine it next identifies as. Only a link that reaches this machine, or a machine another directory reaches while `up`, is refused.
+  - Safety at the edges: the socket link checks the socket with O2's `assertPrivateSocket` (`src/shared/host/private-path.ts`) before it reads the token or connects. The stand-in refuses a serve directory owned by another uid, as well as a symlink, and a socket path over 103 bytes, rather than falling back to a temporary path.
+  - Known machines: a malformed `known-machines.json` is logged and read as empty, since it is a cache. An entry naming the local ref is dropped. A link whose far ref is the local machine's, or a machine another directory already reaches, is logged and closed. `MAWS_LOCAL_MACHINES` skips a relative entry with a log line, normalises trailing slashes, and drops duplicates.
+  - The stand-in's welcome counts come from tapping `host.supervisorStatus`; they are 0 until one is emitted, which never happens in utility mode. The build string on both sides is `<version>+<commit>` from `MAIN_BUILD`.
+  - `ownerChannel.changed` is a link event (its payload is `{ appSessionId, state }`); `machines.changed` is an app event.
+  - `e2e:machines` joins `CLASS1_E2E` only. Its 2 s departure bound is asserted on `MachineState.since` against B's process exit and listed in `gate-plan.test.mjs`'s `LIVENESS_BOUNDS`.
+  Date/Author: 2026-10-27, O6's executor (controller), from M3's executor.
+
+- Decision: M4's executor's calls, folded at M4.
+  - Path-keyed stores: `useGit` and `useGitDiagnostics` key by `checkoutKey(machine, path)`. `useFiles` and `useViewer` keep their keys, which are the session's address (or a tab id naming it) and so already name the machine; `files.*` is `addressed` and `files.changed` carries a lifted `appSessionId`. That narrows M4's list of `checkoutKey` stores to two with no change in behaviour.
+  - Local surfaces, each site commented with its owning child: plugin and marketplace widgets inside a session as well as outside (a plugin operation's progress and `plugins.changed` are app events no link carries; O4), Customize and Discover (O4), `settings.*` writes (O3), and `settings.usage`, which asks only for this machine's sessions. Hidden projects and Add project use the project's machine when one is in scope, by M4's first rule, where M4's list had named them local.
+  - Reconciliation:
+    - `useMachines.loaded` is a set apart from the roster, since a snapshot may land before the roster answers.
+    - A failed `attention.list` calls `attention.cancelSnapshot(machine)`, which replays that machine's buffer and removes nothing.
+    - Another machine is settled (`setLoaded`, `settleMachine`) only once all three record snapshots applied, so a partial read never judges its tabs.
+    - A non-local `engine.hostState` starts unknown at each generation.
+    - `useHosts` forgets another machine's hosts only on a generation change it has itself seen.
+  - Typing: the two generic wrappers over addressed commands (`widgets/read.ts`, `widgets/operation.ts`) use an `AddressedInvoke` cast, because TypeScript defers `InvokeRest<N>` over a generic `N`. Every other generic wrapper forwards `...opts: InvokeRest<N>`.
+  - M2's two M4 items: transcript chips pass the row's session to `openFile` and `loadSpill`, so a file tab takes its session's machine. `shell/transfer.ts` compares the record's machine through `panelShows`; `panelRecordOf`, the strip's drag payload, is unchanged.
+  - The task review's round:
+    - The first roster the page learns reconciles every machine: a machine first seen not `up` forgets its statuses, and the first generation learned counts as new, so it resets that partition's counters and drops its queue.
+    - Reveal (`widgets/parts.tsx`'s `RevealButton`) takes a required machine, the one whose path it shows.
+    - Customize and the plugin widgets list only this machine's projects and live sessions. `/plugins` shows a one-line notice for another machine's session, and `/skills` lists no plugins for it (O4).
+    - A non-local session's or project's artifact list is never read (`library/store.ts`'s `watchLibraryList`; O7), so an artifact listed on B can't open as A's artifact of the same id. Rejected: carrying the machine into the artifact tab, whose reads are machine-wide and would all need routing.
+    - SCM's mutation guard and re-read key by machine, checkout and path, and stage and discard take the checkout from their callers.
+  - Tests and e2e: `resetShellStores` calls `resetMachine(TEST_MACHINE)`. `sidebarRow(page, match, machine?)` builds the row's address on that machine. M4's scene sits inside M3's two-profile test, before B quits.
+  Date/Author: 2026-10-27, O6's executor (controller), from M4's executor.
+
+- Decision: M5's executor's calls, folded at M5.
+  - The derivation:
+    - Remotes are read as every key of each remote's section (`git config --file <common>/config --no-includes -z --get-regexp '^remote\.'`), taking each remote's first `url`. So "origin, else the only one" counts remotes the way sminos's `derivation` does, where a section with only `fetch` is still a remote. M5's `\.url$` form would have counted only remotes with a URL.
+    - When git doesn't answer (a timeout, or a spawn failure), the stored derivation is kept, so a slow disk never flips a key to `folder:` and back. An error answer, such as "not a repository", counts as an answer.
+    - `.smns` fields count only as strings; any other value marks the file invalid, and the walk goes on.
+    - The stub session source stays underived, so stub-driven e2e runs exercise the "not derived yet" path.
+  - Hiding uses `session.projects.remove`, for each listed checkout on an `up` machine. M5's text named `session.projects.update { hidden: true }`, which doesn't exist, because removal is what hides. The Projects view's "Hide from sidebar" hides the whole row the same way, since hiding one checkout would leave the row listed through another.
+  - Tab sets key by the row their sessions show under: the org key when that org project is listed (or the project is hidden), else `machine:<ref>`. `rekeySets` maps an address key the same way. Keying by raw `org.key` would strand a discovered folder's tabs in a set no row shows.
+  - The sidebar no longer lists a discovered folder that has pinned, running or waiting work as a row of its own. By the checkout rule, those sessions sit under the machine's row.
+  - New chat is this machine's only (O7's picker spans machines). An org row's "+" and "New chat" are disabled, titled "Not available here", when the row's checkout is another machine's. The title bar's chip, ⌘N's preselection and Customize act on the set's local checkout.
+  - A row's checkout (`primaryCheckout`) is this machine's listed checkout, else the first listed one in ref order. Project actions keep their one-id signature and widen to the row in their handlers.
+  - Archive actions span the row's sessions on every machine, skipping offline ones. A machine row's menu offers "Archived sessions…" for that machine, titled by its name.
+  - Greying (T2): an org row greys only when every checkout's machine is offline; a machine row greys with its machine. A greyed row's accessible name gains ", machine offline", and the chip reads "offline", titled "machine offline". The project hover card is unchanged (T4).
+  - Names: before the roster answers, a machine is named "This Mac" if local, else by its ref. The Environment card names another machine, with "· offline" when it is down.
+  - Test support: `renderer-machine-setup.ts` reinstalls the bare `{ localMachine }` bridge before each test, because the page now reads its machine while rendering.
+  - The task review's round:
+    - A legacy address-keyed set that `rekeySets` leaves waiting is held whole: `refile` moves nothing out of a set whose old key still answers 'wait', so a later arrival merges it with its panes and ratio. `rekeyOf` answers a not-yet-derived listed project's own address, so the ordinary refile still runs for it.
+    - The chosen merge base's panel context wins over an entry already at the destination key. The merge base among non-current sets is the first source key in string order.
+    - Re-homed tabs keep their order.
+    - For two projects on one machine, the opened checkout's name wins over a discovered clone's.
+    - Resume, `/resume` and "Archived sessions…" follow the row's membership (`rowOfSession`), reading archived records from each of the row's machines that is up.
+    - Needs-you rows carry the machine mark and grey their titles.
+    - The Overview gives each machine its own group for sessions of no project, named after the machine and placed after the projects, this machine first. No surface says "Other sessions" (P5 Decision Log 28).
+    - `.smns` `project` and `name` are coerced as sminos's `str()` does before validation.
+  - Converged with two findings logged as debt (the report's debt list), not fixed:
+    - Numeric `.smns` values whose JSON spelling Python's `str()` keeps and JavaScript's doesn't (`42.0`, `1e3`, `0.000001`, integers above 2^53) derive a different key from sminos's. sminos writes string ids, and an integer or a string id matches.
+    - A context-only merge with no open set to supply a base keeps insertion order.
+  Date/Author: 2026-10-27, O6's executor (controller), from M5's executor and its task review.
+
+- Decision: M6's fixes, from the branch review and the acceptance runs.
+  - Every consumer of a link's lifecycle events keys by the event's machine:
+    - the terminal registry keeps each machine's pty host apart;
+    - transcript host-loss recovery hears only its session's machine and reads that machine's table;
+    - the page's artifact host, the memory budget and question-sheet re-reads hear only this machine's engine host.
+    - Attach builds its command from the session's machine's binary.
+  - No session of a machine files into a tab set until that machine's snapshot is whole (records and projects), so a restored org set keeps its panes whatever order the reads land in.
+  - An org derivation that git doesn't answer is asked again within the run, at 1, 4 and 15 s. Every derivation (start, new project, retry) shares the four `ORG_CONCURRENCY` slots, and a closed index asks nothing more. The first try keeps 2 s, so a slow git never holds up a start; retries use the git runner's 10 s. `git()` logs why it got no answer.
+  - A session tab in `main.tabs` v3 keeps its session's last-known `title`, an optional field with no version bump (v3 exists only on this branch). It is set at open and at hydrate, and refreshed only when it differs, so a second launch still rewrites nothing. The tab label falls back to it before "New chat", which is the closest reading of T5; the architect approved. Rejected: labelling the tab by its machine, a taste form the owner hasn't answered.
+  - `e2e:machines` joins `HOSTED_MAC_E2E` by gate-offload's admission rule, with the three hosted runs and the no-hosted baseline on the PR head's tree (Outcomes).
+  - desk-web's ids are left as they are, not turned into addresses: `Transcript` gains an additive `browserActivity` prop (default true), and desk-web's TranscriptPane, the desk's only mount, passes false. No `desk:` key reaches the client's addressing, and a bare id in an address slot inside MAWS still throws. A test pins each side.
+    - Why: P5 freezes desk-web's views at O13 and retires them at cutover (P5 Decision Log 1, §9, O13 acceptance 5). Until then O13's "the phone never breaks" needs its current routes. Making desk ids into addresses would carry O6's model into a frozen client.
+    - The architect ruled, scoping the bypass to desk-web's boundary (`38e04607f`).
+  - The last merge of master (`edc0792a7`, 144 commits) takes WIRE_MINOR to 3 under P5's "lands second" rule: O10 had taken it to 2 with `host.op`, `host.opQuery` and `session.pendingItems`. O6's two snapshots are extended to O10's three commands:
+    - `session.pendingItems` is addressed;
+    - `host.opQuery` is machine-wide;
+    - `host.op` is in `PATH_COMMANDS`; it is main-only and never bridged, and it is path because of its `context.engineSessionId`.
+    The fingerprint at the merge is master's (`9592541cad88d7df`), and O6 still moves no engine-host shape. Master's settings version 19 needed no O6 bump.
+  - Test-only: `e2e/shell.spec.ts`'s pointer and focus leave the sidebar row before the next click (`18c452b74`, `5260d0060`).
+  Date/Author: 2026-10-27, O6's executor (controller), from M6's executor and the branch review.
 
 - Decision: the verification.
   - This document gets one `doperpowers:adversarial-reviewer` buildability review before execution (P5 Decision Log 12).
@@ -1035,4 +1203,37 @@ Residue decisions O6's section leaves open, made above, for the architect to rec
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**What landed (2026-10-28).**
+- O6 gives MAWS its machine dimension. Every machine has a ref. Every session, project, pty and attention id is an address, `<ref>/<bare>`, across the renderer boundary. Every command names its machine.
+- One connection manager reaches the local machine in-process, and a second profile through the same-uid stand-in.
+- The stores are partitioned per machine. The sidebar groups sessions by org project, under sminos's derivation rule, with a machine row for each machine's sessions of no project.
+- A machine that leaves greys its rows and keeps its tabs. When it returns, its rows are live again within 5 s.
+- One machine's behaviour is unchanged but for its ids. The OX7 bench stays within budget, and the engine-host fingerprint is unmoved.
+
+**Acceptance.** Acceptance 1 to 10 hold at the reviewed code head `38e04607f` (tree `a52a8c8dcf37`):
+- class 1a 40631062709;
+- `--gates all` hosted 40631062270, green after one `--failed` rerun of a hosted e2e:code flake;
+- e2e:machines' admission: hosted 40631062922, 40631063249 and 40631063380 against the no-hosted baseline 40632939975, each `1 passed`;
+- the bench 40632939812 at 25.0 / 38.1 ms;
+- the fingerprint `ff99b1c0711cd795` at the base and the head;
+- all six Concrete Steps 9 mutations fail as specified.
+
+At the final code head `1941e8632`, after two master merges (WIRE_MINOR 3) and the test-only e2e:panel fix `04a56ab2d`, `--gates all` is 40650537683, green (47 jobs). Its e2e:to-human was a hosted flake, green on a `--failed` rerun: attempt 2, job 122712528295, maws-app 40657766939, `2 passed`. Before that, at the first merge `edc0792a7`, class 1a with cross-build was 40640099058. The item-by-item evidence is in `2026-10-27-p5-o6-report.md`.
+
+**What went well.**
+- Landing the seam early as its own PR (#216) let O2 build on the identity file while O6 continued.
+- The codec's compile rules and the coverage snapshot made the "every id is an address" claim checkable: Concrete Steps 9's five schema mutations each fail by naming the field.
+- Per-milestone task reviews caught each milestone's machine-blind spots before they compounded.
+
+**What it cost, and what to carry forward.**
+- **Lifecycle events.** The branch review found a class the milestone reviews could not see: events that cross links (`engine.hostState`, `pty.hostState`) consumed by listeners that had only ever seen one machine.
+  - The lesson for O7 to O9: when a new dimension is added, sweep every listener of every event that crosses it, not only the commands.
+- **desk-web.** The desk's ids (`desk:<project>:<session>`) reached the renderer's address lowering through a shared component. Only `--gates all` runs e2e:desk-web, and no milestone ran it before M6.
+  - The lesson: a boundary change should run the whole Mac set once at its first reviewed milestone, not only at acceptance.
+- **The hosted git no-answer.** B's org derivation sometimes got no answer from git on hosted Macs at startup. It cost two acceptance rounds.
+  - The fix, in-run retries and a 10 s retry timeout inside the shared limiter, holds: eight hosted passes since.
+  - The cause is unconfirmed, because main's stderr isn't kept in hosted jobs.
+- **Hosted flakes need a diagnosis, not a rerun.** e2e:panel's corner drag failed 2 of 4 hosted runs. Twelve instrumented runs showed a press read before the just-floated card settled; the test now waits for a stable press point (`04a56ab2d`).
+- **The final set and the mini.** Running the final set as six parallel runs each repeated the cross-build peer check on the one Mac. Since `38e04607f` the coordinator's rule applies: one run per tree keeps the peer check.
+
+**Left for others.** These are in the report's Debt and Residue: numeric `.smns` spellings, context-only merge order, `panel.<address>` keys of a machine dropped from the roster, three machine-blind residuals of the listener sweep, and the surfaces left local until O7.

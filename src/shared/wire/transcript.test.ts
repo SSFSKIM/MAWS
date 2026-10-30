@@ -6,7 +6,7 @@ import type { SessionId } from '@shared/graph/ids';
 import { listTranscripts, loadJournal, loadSyntheticTranscript, loadTranscript, snapshotRecords, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../test/support/memory-reader';
 import { ChainFollower } from '../../engine-host/fs/chain-follower';
-import { deliveryOf } from '../../main/sessions/recent-turns';
+import { deliveryOf } from '../../services/sessions/recent-turns';
 import { AgentMetaSchema, currentChain, LastPromptAnchorSchema, parseTranscriptRecord, withResponseGroups, type TranscriptRecord } from './transcript';
 
 const uuids = (records: TranscriptRecord[]) => records.map((r) => r.uuid);
@@ -100,7 +100,9 @@ describe('transcript records chain from the leaf', () => {
     expect(() => parseTranscriptRecord({ uuid: 'u1' })).toThrow(z.ZodError);
     expect(() => parseTranscriptRecord({ type: 'user', uuid: 5 })).toThrow(z.ZodError);
     expect(() => parseTranscriptRecord('user')).toThrow(z.ZodError);
-    expect(LastPromptAnchorSchema.safeParse({ type: 'last-prompt' }).success).toBe(false);
+    // a "Load now" rewind's anchor has no `lastPrompt` (P5 O3-F's pre-release fixture, line 61)
+    expect(LastPromptAnchorSchema.safeParse({ type: 'last-prompt', leafUuid: 'a1', explicit: true, rewound: true, sessionId: 'S' }).success).toBe(true);
+    expect(LastPromptAnchorSchema.safeParse({ type: 'last-prompt', lastPrompt: 5 }).success).toBe(false);
     expect(LastPromptAnchorSchema.safeParse({ type: 'user', lastPrompt: 'x' }).success).toBe(false);
   });
 
@@ -128,6 +130,19 @@ describe('a parallel response regains its siblings', () => {
     expect(uuids(chain)).toEqual(['u1', 'a1', 'a2', 'rB', 'h2', 'h3', 'a3', 'a4', 'a5', 'rB2', 'a7', 's1']);
     expect(recovered(records)).toEqual(FOLLOWER_CHAIN);
     expect(await followerChain(records)).toEqual(FOLLOWER_CHAIN);
+  });
+
+  it('a rewind back to after the response, its anchor without lastPrompt ("Load now"), recovers it as the follower keeps it', async () => {
+    const window = [
+      ...records,
+      parseTranscriptRecord({ type: 'user', uuid: 'u2', parentUuid: 's1', message: { role: 'user', content: 'Rewound away.' } }),
+      parseTranscriptRecord({ type: 'assistant', uuid: 'b1', parentUuid: 'u2', message: { role: 'assistant', id: 'm9', content: [{ type: 'text', text: 'Gone.' }] } }),
+      parseTranscriptRecord({ type: 'last-prompt', leafUuid: 's1', explicit: true, rewound: true, sessionId: 'S' }),
+    ];
+    // the walk from the anchor's target, as recentTurnsOf takes it
+    const { chain } = currentChain([...window, records.at(-1)!]);
+    expect(uuids(withResponseGroups(chain, window, deliveryOf))).toEqual(FOLLOWER_CHAIN);
+    expect(await followerChain(window)).toEqual(FOLLOWER_CHAIN);
   });
 
   it('a chain that leaves a response before its last record (a fork) recovers nothing of it', async () => {

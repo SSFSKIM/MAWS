@@ -22,13 +22,14 @@ import { ARTIFACTS_TOOL_ID, artifactsTool, type ArtifactsHandle } from '../tools
 import { TRANSFER_COPY } from '../tools/artifacts/copy';
 import { requestArtifactOpen, resetOpenRequests, useOpenRequest } from '../tools/artifacts/viewers/requests'; // P4-B4 renamed the version request the open request
 import { recordTranscriptScroll, takeTranscriptCarry } from '../transcript/view/scroll-carry'; // P4-B3 M5
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { dragAccepted, moveArtifactToPanel, moveArtifactToTab, transferRefusal, useTransferRefusal } from './transfer';
 
 const DOC = 'doc-1';
 const OTHER = 'doc-2';
-const artifactTab = (artifactId: string, pinned = false): TabRef => ({ id: tabId({ kind: 'artifact', artifactId }), kind: 'artifact', artifactId, pinned });
+const artifactTab = (artifactId: string, pinned = false): TabRef => ({ id: tabId({ kind: 'artifact', artifactId, machine: TEST_MACHINE }), kind: 'artifact', artifactId, machine: TEST_MACHINE, pinned });
 const DOC_TAB = artifactTab(DOC);
-const mainScope = (artifactId = DOC): EditorHostScope => ({ surface: 'main', tabId: tabId({ kind: 'artifact', artifactId }) });
+const mainScope = (artifactId = DOC): EditorHostScope => ({ surface: 'main', tabId: tabId({ kind: 'artifact', artifactId, machine: TEST_MACHINE }) });
 const panelScope = (panelTabId: string): EditorHostScope => ({ surface: 'panel', tabId: panelTabId });
 
 function metadata(artifactId: string, projectId?: ProjectId): void {
@@ -105,14 +106,14 @@ async function move(run: () => Promise<boolean>): Promise<boolean> {
 
 describe('main → panel', () => {
   it.each([true, false])('uses the artifact metadata project rather than the containing set (target chat open: %s)', async (open) => {
-    const containing = 'project-x' as ProjectId;
-    const actual = 'project-y' as ProjectId;
+    const containing = at('project-x' as ProjectId);
+    const actual = at('project-y' as ProjectId);
     useLayout.setState({ main: LAYOUT_DEFAULTS.main, projectOf: (id) => id === A ? containing : actual });
     useLayout.getState().openSession(A, { how: 'tab' });
     if (open) useLayout.getState().openSession(B, { how: 'tab' });
     useLayout.getState().setCurrentProject(containing);
     useLayout.getState().openTab({ kind: 'artifacts' });
-    useLayout.getState().openTab({ kind: 'artifact', artifactId: DOC });
+    useLayout.getState().openTab({ kind: 'artifact', artifactId: DOC, machine: TEST_MACHINE });
     metadata(DOC, actual);
     const before = surfaces();
 
@@ -121,7 +122,7 @@ describe('main → panel', () => {
     if (open) {
       expect(useLayout.getState().main.current).toBe(actual);
       expect(activeTab(useLayout.getState().main)?.id).toBe(sessionTab(B).id);
-      expect(recordOf(artifactsTab(B))).toEqual({ kind: 'record', artifactId: DOC });
+      expect(recordOf(artifactsTab(B))).toEqual({ kind: 'record', artifactId: DOC, machine: TEST_MACHINE });
       expect(panelOf(A)).toBeUndefined();
     } else expect(surfaces()).toEqual(before);
   });
@@ -136,19 +137,19 @@ describe('main → panel', () => {
     expect(surfaces()).toEqual(before);
     act(() => metadata(DOC)); // loaded unprojected: the containing set supplies its chat
     expect(refusal.result.current).toBeNull();
-    act(() => metadata(DOC, 'other-project' as ProjectId));
+    act(() => metadata(DOC, at('other-project' as ProjectId)));
     expect(refusal.result.current).toBe(TRANSFER_COPY.noProjectSession);
     refusal.unmount();
   });
 
   it.each([false, true])('Library → artifact → Show in panel targets and activates the remembered session (existing record: %s)', async (existing) => {
-    const project = 'project-x' as ProjectId;
+    const project = at('project-x' as ProjectId);
     useLayout.setState({ main: LAYOUT_DEFAULTS.main, projectOf: () => project });
     useLayout.getState().openSession(A, { how: 'tab' });
     useLayout.getState().openSession(B, { how: 'tab' });
     useLayout.getState().activateTab(sessionTab(A).id); // most recently active, not the neighbour of Library
     useLayout.getState().openTab({ kind: 'artifacts' });
-    useLayout.getState().openTab({ kind: 'artifact', artifactId: DOC });
+    useLayout.getState().openTab({ kind: 'artifact', artifactId: DOC, machine: TEST_MACHINE });
     const dest = existing ? addArtifacts(A, DOC) : undefined;
     const held = mounted(mainScope());
     if (dest) mounted(panelScope(dest));
@@ -158,20 +159,20 @@ describe('main → panel', () => {
     expect(useLayout.getState().main.current).toBe(project);
     expect(activeTab(useLayout.getState().main)?.id).toBe(sessionTab(A).id);
     expect(allTabs(useLayout.getState().main).some((tab) => tab.kind === 'artifacts')).toBe(true);
-    expect(recordOf(artifactsTab(A))).toEqual({ kind: 'record', artifactId: DOC });
+    expect(recordOf(artifactsTab(A))).toEqual({ kind: 'record', artifactId: DOC, machine: TEST_MACHINE });
     expect(panelOf(B)).toBeUndefined();
     expect(viewsOf(DOC)).toBe(1);
     if (!existing) expect(heldArtifactEditorState(panelScope(artifactsTab(A)!))).toBe(held);
   });
 
   it('refuses Show in panel with the project-specific reason when only another project has a session, even with a pin', async () => {
-    const otherProject = 'project-y' as ProjectId;
-    const project = 'project-x' as ProjectId;
+    const otherProject = at('project-y' as ProjectId);
+    const project = at('project-x' as ProjectId);
     useLayout.setState({ main: LAYOUT_DEFAULTS.main, projectOf: () => otherProject });
     useLayout.getState().openSession(A, { how: 'tab' });
     useLayout.getState().setCurrentProject(project);
     useLayout.getState().openTab({ kind: 'artifacts' });
-    useLayout.getState().openTab({ kind: 'artifact', artifactId: DOC });
+    useLayout.getState().openTab({ kind: 'artifact', artifactId: DOC, machine: TEST_MACHINE });
     addArtifacts(null);
     mounted(mainScope());
     const before = surfaces();
@@ -188,7 +189,7 @@ describe('main → panel', () => {
     expect(allTabs(useLayout.getState().main).map((t) => t.id)).toEqual([sessionTab(A).id]);
     expect(activeTab(useLayout.getState().main)?.id).toBe(sessionTab(A).id);
     expect(panelOf(A)?.activeTabId).toBe(list);
-    expect(recordOf(list)).toEqual({ kind: 'record', artifactId: DOC });
+    expect(recordOf(list)).toEqual({ kind: 'record', artifactId: DOC, machine: TEST_MACHINE });
     expect(heldArtifactEditorState(panelScope(list)), 'the same state, its edits with it').toBe(held);
     await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(editor.dispose).not.toHaveBeenCalled();
@@ -202,7 +203,7 @@ describe('main → panel', () => {
     const tabs = useLayout.getState().effectivePanelTabs(A);
     expect(tabs.map((t) => t.toolId)).toEqual(['notes', ARTIFACTS_TOOL_ID]);
     expect(panelOf(A)!.activeTabId).toBe(tabs[1].id);
-    expect(recordOf(tabs[1].id)).toEqual({ kind: 'record', artifactId: DOC });
+    expect(recordOf(tabs[1].id)).toEqual({ kind: 'record', artifactId: DOC, machine: TEST_MACHINE });
     expect(await move(() => moveArtifactToTab(tabs[1].id))).toBe(true);
     expect(await move(() => moveArtifactToPanel(DOC_TAB.id))).toBe(true);
     expect(useLayout.getState().effectivePanelTabs(A).filter((t) => t.toolId === ARTIFACTS_TOOL_ID)).toHaveLength(1);
@@ -216,7 +217,7 @@ describe('main → panel', () => {
     const asked = guard(panelScope(dest), () => true);
     expect(await move(() => moveArtifactToPanel(DOC_TAB.id))).toBe(true);
     expect(asked).toHaveBeenCalledTimes(1);
-    expect(recordOf(dest)).toEqual({ kind: 'record', artifactId: DOC });
+    expect(recordOf(dest)).toEqual({ kind: 'record', artifactId: DOC, machine: TEST_MACHINE });
     expect(editor.dispose).toHaveBeenCalledExactlyOnceWith(other.state);
     expect(viewsOf(OTHER)).toBe(0); // the owner let it go
     expect(viewsOf(DOC)).toBe(1);
@@ -249,6 +250,19 @@ describe('main → panel', () => {
     expect(heldArtifactEditorState(panelScope(dest)), 'no remount').toBe(panelHold);
     expect(editor.dispose).toHaveBeenCalledExactlyOnceWith(mainHold.state);
     expect(viewsOf(DOC), 'one view fewer').toBe(1);
+  });
+
+  // P5 O6 M4: an artifact id names no machine, so the panel shows the moved artifact only when the machines agree too.
+  it('a panel showing another machine’s artifact of the same id is not T5: its record goes Back and the moved one shows', async () => {
+    const onOther: TabRef = { id: tabId({ kind: 'artifact', artifactId: DOC, machine: OTHER_MACHINE }), kind: 'artifact', artifactId: DOC, machine: OTHER_MACHINE, pinned: false };
+    useLayout.setState({ main: panes([sessionTab(A), onOther]) });
+    const dest = addArtifacts(A, DOC);
+    expect(recordOf(dest)).toEqual({ kind: 'record', artifactId: DOC, machine: TEST_MACHINE });
+    const asked = guard(panelScope(dest), () => true);
+    expect(await move(() => moveArtifactToPanel(onOther.id))).toBe(true);
+    expect(asked).toHaveBeenCalledTimes(1);
+    expect(recordOf(dest)).toEqual({ kind: 'record', artifactId: DOC, machine: OTHER_MACHINE });
+    expect(allTabs(useLayout.getState().main).some((t) => t.id === onOther.id)).toBe(false);
   });
 
   it('T5 with the tab’s guard refusing (C4) changes nothing', async () => {
@@ -321,15 +335,15 @@ describe('main → panel', () => {
     useLayout.setState({ main: panes([sessionTab(A)], [DOC_TAB]) });
     expect(await move(() => moveArtifactToPanel(DOC_TAB.id))).toBe(true);
     expect(currentSet(useLayout.getState().main).panes).toHaveLength(1);
-    expect(recordOf(artifactsTab(A))).toEqual({ kind: 'record', artifactId: DOC });
+    expect(recordOf(artifactsTab(A))).toEqual({ kind: 'record', artifactId: DOC, machine: TEST_MACHINE });
   });
 
   it('lands beside the most recently active chat, activating that chat when the artifact leaves', async () => {
     useLayout.setState({ main: panes([sessionTab(A), sessionTab(B)]) });
     useLayout.getState().activateTab(sessionTab(B).id);
-    useLayout.getState().openTab({ kind: 'artifact', artifactId: DOC });
+    useLayout.getState().openTab({ kind: 'artifact', artifactId: DOC, machine: TEST_MACHINE });
     expect(await move(() => moveArtifactToPanel(DOC_TAB.id))).toBe(true);
-    expect(recordOf(artifactsTab(B))).toEqual({ kind: 'record', artifactId: DOC });
+    expect(recordOf(artifactsTab(B))).toEqual({ kind: 'record', artifactId: DOC, machine: TEST_MACHINE });
     expect(panelOf(A)).toBeUndefined();
   });
 
@@ -364,7 +378,7 @@ describe('main → panel', () => {
     await act(async () => answer(true));
     expect(await moved).toBe(false);
     expect(viewsOf(DOC)).toBe(1);
-    expect(recordOf(third)).toEqual({ kind: 'record', artifactId: 'doc-3' });
+    expect(recordOf(third)).toEqual({ kind: 'record', artifactId: 'doc-3', machine: TEST_MACHINE });
   });
 });
 
@@ -406,7 +420,7 @@ describe('the version a moved viewer shows', () => {
     mounted(mainScope());
     const asked = renderHook(() => useOpenRequest(DOC, 'panel'));
     expect(await move(() => moveArtifactToPanel(DOC_TAB.id))).toBe(true);
-    expect(recordOf(artifactsTab(A))).toEqual({ kind: 'record', artifactId: DOC });
+    expect(recordOf(artifactsTab(A))).toEqual({ kind: 'record', artifactId: DOC, machine: TEST_MACHINE });
     expect(asked.result.current).toBeNull();
   });
 
@@ -564,7 +578,7 @@ describe('panel → main', () => {
     expect(await move(() => moving)).toBe(false);
     expect(handOver).not.toHaveBeenCalled();
     expect(heldArtifactEditorState(panelScope(src))).toBe(remade);
-    expect(recordOf(src)).toEqual({ kind: 'record', artifactId: DOC });
+    expect(recordOf(src)).toEqual({ kind: 'record', artifactId: DOC, machine: TEST_MACHINE });
   });
 
   it('T8 from a menu activates the open tab where it is', async () => {
@@ -635,7 +649,7 @@ describe('panel → main', () => {
     act(() => usePanelHost.setState({ closing: new Set([src]) }));
     expect(transferRefusal({ to: 'tab', panelTabId: src })).toBe(TRANSFER_COPY.closing);
     expect(await move(() => moveArtifactToTab(src))).toBe(false);
-    expect(recordOf(src)).toEqual({ kind: 'record', artifactId: DOC });
+    expect(recordOf(src)).toEqual({ kind: 'record', artifactId: DOC, machine: TEST_MACHINE });
   });
 });
 

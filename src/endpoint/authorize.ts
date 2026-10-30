@@ -288,8 +288,10 @@ export class Authorizer {
   }
 
   /**
-   * A web-cards answer that only takes or refuses what is pending (RL §5.10): a question's answer, or a permission
-   * allowed once or denied, with no changed input, no lasting rule and no words of its own; lane A's `decide` likewise.
+   * A web-cards answer that only takes or refuses what is pending (RL §5.10): a question's answer, a permission allowed
+   * once or denied, or a native question declined with the plain deny the terminal's Escape writes (the broker reads it
+   * as the question skipped, `isQuestionSkip`; the async ask, `maws.ask.opened`, is answered, never declined), with no
+   * changed input, no lasting rule, no stop and no words of its own; lane A's `decide` likewise.
    */
   async #asPending(name: string, input: Readonly<Record<string, unknown>>, reads: Reads): Promise<boolean> {
     if (name === 'sminos.answer') return true;
@@ -297,8 +299,10 @@ export class Authorizer {
     const answer = input.answer as Readonly<Record<string, unknown>>;
     const pending = await reads.pendingKind(input.appSessionId as string, input.requestId as string);
     if (answer.kind === 'question') return pending === null || QUESTION_REQUESTS.has(pending);
-    if (answer.kind !== 'permission' || (pending !== null && pending !== 'permission.requested')) return false;
+    if (answer.kind !== 'permission') return false;
     if (answer.updatedInput !== undefined || answer.message !== undefined) return false;
+    if (pending === 'question.requested') return answer.decision === 'deny';
+    if (pending !== null && pending !== 'permission.requested') return false;
     return answer.decision === 'deny' || (answer.decision === 'allow' && answer.scope === 'once');
   }
 

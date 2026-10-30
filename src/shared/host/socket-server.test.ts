@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { connectLines, listenTemp, type LineClient, type TempSocket } from '../../../test/support/socket-lines';
 import { createHostRuntime, type DocPortEnd, type DocPortHandler, type HostEmit, type HostRuntime } from './runtime';
 import { SocketPort } from './socket-port';
-import { splitLines } from './socket-protocol';
-import { serveSocketClients, type SocketClients } from './socket-server';
+import { encodePtyFrame, PTY_FRAMES_CAPABILITY, PTY_MARK, splitLines } from './socket-protocol';
+import { serveSocketClients, type SocketClients, type SocketServerOptions } from './socket-server';
 
 const TOKEN = 'a'.repeat(64);
 const IDENTITY = { protocol: 3, minor: 2, buildId: 'build-1', capabilities: ['area.feature'], wire: 'wire-1', pid: 4242, startedAt: '2026-10-06T10:00:00.000Z' };
@@ -27,7 +27,19 @@ afterEach(async () => {
   temp = null;
 });
 
-async function start(options: { helloTimeoutMs?: number; hooks?: (() => void)[]; onDocPort?: DocPortHandler; docHighWater?: number } = {}) {
+// P5 O2 M3: `badToken`, the many-clients mode (a runtime per connection, from `runtimeFor`) and a half-open server
+interface StartOptions {
+  helloTimeoutMs?: number;
+  hooks?: (() => void)[];
+  onDocPort?: DocPortHandler;
+  docHighWater?: number;
+  badToken?: 'refuse' | 'close';
+  many?: { runtimeFor(client: { appPid: number; capabilities: readonly string[] }): HostRuntime };
+  halfOpen?: boolean;
+  admitHello?: SocketServerOptions['admitHello']; // P5 O2 M5
+}
+
+async function start(options: StartOptions = {}) {
   let emit!: HostEmit;
   const runtime: HostRuntime = createHostRuntime((on, e, client) => {
     on('engine.ping', async () => ({ pid: 4242, uptimeMs: 1, hostVersion: 'test' }));
@@ -36,16 +48,26 @@ async function start(options: { helloTimeoutMs?: number; hooks?: (() => void)[];
   });
   for (const hook of options.hooks ?? []) runtime.onConnect(hook);
   const exits: string[] = [];
+  const refusedExits: string[] = []; // P5 O2 M5: the exits a refused connection asked
+  const exitFroms: unknown[] = []; // P5 O3-D M5: what each exit said of its connection
   const changes: boolean[] = [];
+  const ends: number[] = [];
   const log = vi.fn<(line: string) => void>();
-  const server = createServer();
+  const server = createServer({ allowHalfOpen: options.halfOpen ?? false });
   const served: SocketClients = serveSocketClients(server, {
-    runtime,
+    ...(options.many ? { many: options.many } : { runtime }),
+    badToken: options.badToken,
+    onClientEnd: () => void ends.push(Date.now()),
     identity: () => IDENTITY,
     counts: () => ({ liveSessions: 2, rows: 3 }),
     token: () => TOKEN,
-    onExit: (when) => void exits.push(when),
+    onExit: (when, from) => {
+      exits.push(when);
+      exitFroms.push(from);
+      if (from?.refused) refusedExits.push(when);
+    },
     onClient: (connected) => void changes.push(connected),
+    admitHello: options.admitHello, // P5 O2 M5
     log,
     helloTimeoutMs: options.helloTimeoutMs,
     docHighWater: options.docHighWater, // P3-A M5
@@ -80,7 +102,7 @@ async function start(options: { helloTimeoutMs?: number; hooks?: (() => void)[];
     port.start();
     return { socket, port, lines, frames };
   };
-  return { runtime, emit: () => emit('session.brokerItems', ITEMS as never), exits, changes, log, served, connect, connectPort };
+  return { runtime, emit: () => emit('session.brokerItems', ITEMS as never), exits, refusedExits, exitFroms, changes, ends, log, served, connect, connectPort };
 }
 
 describe('the socket layer handshake (server side)', () => {
@@ -269,6 +291,86 @@ describe('the socket layer handshake (server side)', () => {
     expect([...silent.lines, ...wrong.lines, ...garbage.lines]).toEqual([]);
   });
 
+  // P5 O2 M3 (acceptance 9): `mawsd`'s sockets and the pty host's write nothing before a token checks out
+  it('with badToken close, ends a wrong or missing token’s connection with no byte written', async () => {
+    const host = await start({ badToken: 'close' });
+    const wrong = await host.connect();
+    const bytes: Buffer[] = [];
+    wrong.socket.on('data', (chunk: Buffer) => void bytes.push(chunk));
+    wrong.sendRaw(`${JSON.stringify(hello({ token: 'b'.repeat(64) }))}\n${JSON.stringify({ t: 'exit', when: 'now' })}\n`);
+    await wrong.closed;
+    const missing = await host.connect();
+    missing.socket.on('data', (chunk: Buffer) => void bytes.push(chunk));
+    const noToken: Record<string, unknown> = hello();
+    delete noToken.token;
+    missing.send(noToken);
+    await missing.closed;
+    await settle();
+    expect(bytes).toEqual([]);
+    expect(host.exits).toEqual([]);
+    expect(host.served.connected()).toBe(false);
+    expect(host.log).toHaveBeenCalledWith('closed a hello with a wrong or missing token, writing nothing');
+    const right = await host.connect(); // the right token is still welcomed
+    right.send(hello());
+    expect(await right.next()).toMatchObject({ t: 'welcome' });
+  });
+
+  it('many clients: each is welcomed and served by its own runtime at once, none replaced', async () => {
+    const runtimes: HostRuntime[] = [];
+    const facts: { appPid: number; capabilities: readonly string[] }[] = [];
+    const runtimeFor = (client: { appPid: number; capabilities: readonly string[] }) => {
+      facts.push(client); // P5 O3-D M2: the welcomed hello's facts
+      const pid = runtimes.length + 1; // which runtime answered
+      const made = createHostRuntime((on) => on('engine.ping', async () => ({ pid, uptimeMs: 1, hostVersion: 'test' })));
+      runtimes.push(made);
+      return made;
+    };
+    const host = await start({ many: { runtimeFor } });
+    const first = await host.connect();
+    first.send(hello());
+    expect(await first.next()).toMatchObject({ t: 'welcome' });
+    const second = await host.connect();
+    second.send(hello({ appPid: 8, capabilities: ['machine.spine'] }));
+    expect(await second.next()).toMatchObject({ t: 'welcome' });
+    expect(facts).toEqual([{ appPid: 7, capabilities: [] }, { appPid: 8, capabilities: ['machine.spine'] }]);
+    first.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined });
+    second.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined });
+    const answer = (id: string) => (line: unknown) => (line as { t: string; id?: string }).t === 'res' && (line as { id: string }).id === id;
+    expect(await first.next(answer('1'))).toMatchObject({ ok: true, value: { pid: 1 } });
+    expect(await second.next(answer('1'))).toMatchObject({ ok: true, value: { pid: 2 } });
+    expect(runtimes).toHaveLength(2);
+    expect(first.lines.some((line) => (line as { reason?: string }).reason === 'replaced')).toBe(false);
+    expect(host.served.count()).toBe(2);
+    expect(host.changes).toEqual([true, true]);
+    first.socket.end();
+    await first.closed;
+    await until(() => host.served.count() === 1);
+    expect(host.changes).toEqual([true, true, false]);
+    second.send({ t: 'req', id: '2', name: 'engine.ping', input: undefined });
+    expect(await second.next(answer('2'))).toMatchObject({ ok: true }); // the other client is still served
+    host.served.closeClient(); // every client
+    await second.closed;
+    await until(() => host.served.count() === 0);
+  });
+
+  it('onClientEnd: a welcomed client’s FIN on a half-open server, before its close; not for an unwelcomed one', async () => {
+    const host = await start({ halfOpen: true });
+    const stranger = await host.connect();
+    stranger.socket.end();
+    await settle();
+    expect(host.ends).toHaveLength(0);
+    stranger.socket.destroy();
+    const client = await host.connect();
+    client.send(hello());
+    await client.next();
+    client.socket.end(); // the draining close's FIN: it keeps reading
+    await until(() => host.ends.length === 1);
+    expect(host.served.connected()).toBe(true); // half-open: the server's side is still up
+    expect(client.isClosed()).toBe(false);
+    host.served.closeClient();
+    await client.closed;
+  });
+
   it('closeClient closes the connected client', async () => {
     const host = await start();
     const client = await host.connect();
@@ -277,6 +379,120 @@ describe('the socket layer handshake (server side)', () => {
     host.served.closeClient();
     await client.closed;
     await until(() => !host.served.connected());
+  });
+});
+
+// P5 O2 M5 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, "The handshake reflects the upstream"): a relay's welcome
+// waits for `admitHello`, which answers the facts it reflects, a refusal line to write as received, or a close.
+describe('the socket layer’s admission (server side, P5 O2 M5)', () => {
+  const UPSTREAM = { protocol: 3, minor: 1, buildId: 'upstream-build', capabilities: ['up.cap'], wire: 'wire-1', pid: 5151, startedAt: '2026-10-27T09:00:00.000Z' };
+
+  it('holds the welcome until admit answers, then welcomes with its facts and serves what the client sent meanwhile', async () => {
+    let admitNow!: () => void;
+    const peers: unknown[] = [];
+    const host = await start({
+      admitHello: (peer) => {
+        peers.push(peer);
+        return new Promise((resolve) => (admitNow = () => resolve({ kind: 'welcome', identity: UPSTREAM, counts: { liveSessions: 4, rows: 6 } })));
+      },
+    });
+    const client = await host.connect();
+    client.send(hello());
+    client.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined }); // sent before the welcome, kept for the port
+    await settle();
+    expect(client.lines).toEqual([]);
+    expect(host.changes).toEqual([]);
+    expect(peers).toEqual([{ major: 3, minor: 2, build: 'build-1', capabilities: [] }]);
+    admitNow();
+    expect(await client.next()).toEqual({ t: 'welcome', protocol: 3, minor: 1, build: 'upstream-build', capabilities: ['up.cap'], pid: 5151, startedAt: UPSTREAM.startedAt, liveSessions: 4, rows: 6 });
+    expect(await client.next((line) => (line as { t: string }).t === 'res')).toMatchObject({ t: 'res', id: '1', ok: true });
+    expect(host.changes).toEqual([true]);
+  });
+
+  it('writes a refusal admit answers as it is, then honours one exit from that connection, marked refused', async () => {
+    const line = { t: 'refuse', reason: 'protocol', protocol: 4, buildId: 'newer', wire: 'w', liveSessions: 2 } as const;
+    const host = await start({ admitHello: async () => ({ kind: 'refuse', line }) });
+    const client = await host.connect();
+    client.send(hello());
+    expect(await client.next()).toEqual(line);
+    client.send({ t: 'exit', when: 'now' });
+    await until(() => host.refusedExits.length === 1);
+    expect(host.refusedExits).toEqual(['now']);
+    expect(host.exits).toEqual(['now']);
+    expect(host.exitFroms).toEqual([{ refused: true, own: false }]); // the upstream's line, reflected
+    expect(host.changes).toEqual([]);
+  });
+
+  // P5 O3-D M5 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §L): admit is told the hello's appPid,
+  // and a refusal the admitting relay wrote itself (`own`) is told apart from the upstream's at its one exit
+  it('hands admit the hello’s appPid, and marks the exit after a refusal of the relay’s own as its own', async () => {
+    const line = { t: 'refuse', reason: 'wire', protocol: 3, buildId: 'relay-build', wire: 'w', liveSessions: 1 } as const;
+    const asked: unknown[] = [];
+    const host = await start({
+      admitHello: async (peer, appPid) => {
+        asked.push([peer.build, appPid]);
+        return { kind: 'refuse', line, own: true };
+      },
+    });
+    const client = await host.connect();
+    client.send(hello());
+    expect(await client.next()).toEqual(line);
+    expect(asked).toEqual([['build-1', 7]]);
+    expect(host.log).toHaveBeenCalledWith('refused a hello with its own refusal (wire)');
+    client.send({ t: 'exit', when: 'now' });
+    await until(() => host.exitFroms.length === 1);
+    expect(host.exitFroms).toEqual([{ refused: true, own: true }]);
+  });
+
+  it('closes the connection with nothing written when admit answers close', async () => {
+    const host = await start({ admitHello: async () => ({ kind: 'close', why: 'the upstream did not start within 15 s' }) });
+    const client = await host.connect();
+    client.send(hello());
+    await client.closed;
+    expect(client.lines).toEqual([]);
+    expect(host.log).toHaveBeenCalledWith('closed a connection: the upstream did not start within 15 s');
+  });
+
+  it('never asks admit for a wrong token', async () => {
+    const admit = vi.fn(async () => ({ kind: 'close' as const, why: 'unused' }));
+    const host = await start({ admitHello: admit, badToken: 'close' });
+    const client = await host.connect();
+    client.send(hello({ token: 'b'.repeat(64) }));
+    await client.closed;
+    expect(admit).not.toHaveBeenCalled();
+  });
+
+  // M5 review: on a half-open server a FIN during admission ends the socket without destroying it
+  it('welcomes nobody whose peer left while its admission was pending (a half-open server included)', async () => {
+    for (const halfOpen of [true, false]) {
+      let admitNow!: () => void;
+      const host = await start({
+        halfOpen,
+        admitHello: () => new Promise((resolve) => (admitNow = () => resolve({ kind: 'welcome', identity: UPSTREAM, counts: { liveSessions: 0, rows: 0 } }))),
+      });
+      const client = await host.connect();
+      client.send(hello());
+      await settle();
+      client.socket.end(); // its FIN, before the answer
+      await settle();
+      admitNow();
+      await settle();
+      expect(host.changes).toEqual([]);
+      expect(host.served.connected()).toBe(false);
+      expect(host.served.count()).toBe(0);
+      await client.closed;
+      expect(client.lines).toEqual([]);
+    }
+  });
+
+  it('marks an exit on a served connection as not refused', async () => {
+    const host = await start({ admitHello: async () => ({ kind: 'welcome', identity: UPSTREAM, counts: { liveSessions: 0, rows: 0 } }) });
+    const client = await host.connect();
+    client.send(hello());
+    await client.next();
+    client.send({ t: 'exit', when: 'idle' });
+    await until(() => host.exits.length === 1);
+    expect(host.refusedExits).toEqual([]);
   });
 });
 
@@ -423,5 +639,51 @@ describe('the socket layer’s document channels (server side, P3-A M5)', () => 
     client.port.postMessage(open(4));
     await until(() => client.lines.length === 1);
     expect(client.lines).toEqual([{ t: 'documents.closed', channel: 4, reason: 'host' }]);
+  });
+});
+
+// P5 O2 M4: the server writes pty frames only to a client whose hello listed `socket.ptyFrames`; any other gets the line
+describe('the pty frames capability gate (P5 O2 M4)', () => {
+  const DATA = { ptyId: 'pty-1', offset: 0, data: new Uint8Array([0x68, 0x69]) };
+  async function ptyServer() {
+    let emit!: HostEmit;
+    const runtime = createHostRuntime((on, e) => {
+      on('pty.ping', async () => ({ pid: 4242, uptimeMs: 1, hostVersion: 'test' }));
+      emit = e;
+    });
+    const server = createServer();
+    serveSocketClients(server, { runtime, identity: () => ({ ...IDENTITY, capabilities: [PTY_FRAMES_CAPABILITY] }), counts: () => ({ liveSessions: 0, rows: 0 }), token: () => TOKEN, onExit: () => {}, log: () => {} });
+    temp = await listenTemp(server);
+    return { runtime, emit: () => emit('pty.data', DATA as never) };
+  }
+  // the welcome a raw client reads, and the bytes after it once the server has emitted one pty.data
+  async function afterWelcome(capabilities: string[]): Promise<{ welcome: unknown; rest: Buffer }> {
+    const host = await ptyServer();
+    const socket = createConnection(temp!.path);
+    sockets.push(socket);
+    await new Promise((resolve) => socket.once('connect', resolve));
+    const chunks: Buffer[] = [];
+    socket.on('data', (chunk: Buffer) => void chunks.push(chunk));
+    socket.write(`${JSON.stringify(hello({ capabilities }))}\n{"t":"ready"}\n`);
+    await until(() => host.runtime.hasClient());
+    expect(host.emit()).toBe(true);
+    const all = () => Buffer.concat(chunks);
+    await until(() => all().length > all().indexOf(0x0a) + 1);
+    await settle();
+    const bytes = all();
+    const newline = bytes.indexOf(0x0a);
+    return { welcome: JSON.parse(bytes.subarray(0, newline).toString('utf8')), rest: bytes.subarray(newline + 1) };
+  }
+
+  it('lists the capability in its welcome and frames pty.data for a client that listed it', async () => {
+    const { welcome, rest } = await afterWelcome([PTY_FRAMES_CAPABILITY]);
+    expect(welcome).toMatchObject({ t: 'welcome', capabilities: [PTY_FRAMES_CAPABILITY] });
+    expect([...rest]).toEqual([...encodePtyFrame(DATA)!]);
+  });
+
+  it('writes the JSON line to a client that did not list it', async () => {
+    const { rest } = await afterWelcome(['area.feature']);
+    expect(rest[0]).not.toBe(PTY_MARK);
+    expect(JSON.parse(rest.toString('utf8'))).toEqual({ t: 'evt', name: 'pty.data', payload: { ptyId: 'pty-1', offset: 0, data: { $bytes: Buffer.from(DATA.data).toString('base64') } } });
   });
 });

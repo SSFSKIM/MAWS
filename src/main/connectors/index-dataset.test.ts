@@ -9,9 +9,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandName, EventName } from '@shared/ipc/schema';
 import { validateCommandInput, validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
 import { clientOf } from '../ipc/clients';
+import { TEST_MACHINE } from '../../../test/support/machine'; // P5 O6 M2: a main handler's ctx names its target
 import type { MainContext } from '../ipc/router';
 import { startConnectors } from '.';
 import { electronWindowShown } from '../client/window-shown';
+import { project, record } from '../../../test/support/builders';
+import { fakeSpineView } from '../../../test/support/fake-spine-view';
+
+// P5 O3-C (reader R8): the spine's view, holding the artifact's creator and its project
+const ownView = () => fakeSpineView({ records: [record('app-own', { projectId: 'proj' as never, directory: '/repo' })], projects: [project('proj', 0, { directory: '/repo' })] });
 
 const ART = '11111111-1111-4111-8111-111111111111';
 const REQUEST = '22222222-2222-4222-8222-222222222222';
@@ -114,7 +120,7 @@ beforeEach(() => {
   service = startConnectors({
     hosts: { dispatch: fake.dispatch as never, onEvent: fake.onEvent as never, onState: fake.onState as never, onStreaming: fake.onStreaming as never, streaming: fake.streaming as never },
     register: ((name: string, handler: (input: unknown, context: MainContext) => unknown) => void handlers.set(name, handler)) as never,
-    index: { sessions: { get: () => ({ projectId: 'proj', directory: '/repo' }) }, projects: { list: () => [{ id: 'proj', directory: '/repo' }] } },
+    view: ownView(),
     realpath: (path) => path,
     windowShown: () => electronWindowShown(new FakeWindow() as never),
     port: { openExternal: vi.fn() },
@@ -128,7 +134,7 @@ afterEach(() => {
 async function invoke(name: CommandName, input: unknown): Promise<unknown> {
   const checked = validateCommandInput(name, input);
   if (!checked.ok) throw new Error(`invalid input for ${name}`);
-  const value = await handlers.get(name)!(checked.value, { client: clientOf(sender as never) });
+  const value = await handlers.get(name)!(checked.value, { client: clientOf(sender as never), target: TEST_MACHINE });
   expect(validateCommandOutput(name, value).ok, `${name} output: ${JSON.stringify(value)}`).toBe(true);
   return value;
 }

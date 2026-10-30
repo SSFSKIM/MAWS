@@ -1,6 +1,6 @@
 // The widgets harness's automation surface, `window.__maws_widgets` (C11 execution document, M2 decisions): Playwright
 // drives the `#widgets` page through it, since main blocks navigation within a launch. Types only, so the e2e project
-// can import them.
+// can import them. P5 O6 M2: every session id it takes is bare, as the raw bridge speaks; the page addresses it.
 
 // What the page shows for a session: `interactive`, C7's composer over the session with a widget picker, the reads
 // answered by whatever is behind X2 (the fixture-backed widget backend under MAWS_WIDGET_BACKEND=fixtures); `passive`,

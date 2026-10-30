@@ -26,6 +26,9 @@ export const SESSION_ACTIONS = {
   // C10 start: a background job's session, opened in a terminal tab running the engine's `claude attach` (job holders only)
   attach: 'Attach in a terminal tab',
   // C10 end
+  // P5 O9 M5 (the owner's Q4, as recommended): a terminal session MAWS drives through its bridge has no holder notice, so
+  // its menu carries Take over, with today's confirm (it ends the terminal process; a turn in progress there is lost)
+  takeOver: 'Take over in MAWS',
 } as const;
 export type SessionActionId = keyof typeof SESSION_ACTIONS;
 export const SESSION_ACTION_IDS = Object.keys(SESSION_ACTIONS) as SessionActionId[];
@@ -35,17 +38,24 @@ function isForeign(record: SessionRecord): boolean {
   return record.holder.kind === 'terminal' || record.holder.kind === 'background_job';
 }
 
+// Today's rule for "Take over here" (`sessions/record-ops.ts` `canTakeOver`): an interactive terminal, or a job with an id.
+const canTakeOver = (record: SessionRecord): boolean => record.holder.kind === 'terminal' || (record.holder.kind === 'background_job' && record.holder.jobId !== null);
+
 // The actions a session's menus offer, whoever renders them (the sidebar's context menu and hover actions, the
 // toolbar's session menu): a foreign-live session only the two opens, and "Remove worktree…" only with a worktree.
-export function sessionActionsFor(record: SessionRecord): SessionActionId[] {
+// P5 O9 M5: a foreign-live session MAWS drives through its bridge (`bridged`) shows no holder notice, so its menu adds
+// what the notice carried: Take over in MAWS (where today's Take over applies) and Fork.
+export function sessionActionsFor(record: SessionRecord, { bridged = false }: { bridged?: boolean } = {}): SessionActionId[] {
+  const notice: SessionActionId[] = bridged && isForeign(record) ? [...(canTakeOver(record) ? (['takeOver'] as const) : []), 'fork'] : [];
   // C10 start: a background job with a known id is attached beside the opens; nothing else holds a job to attach to
-  if (record.holder.kind === 'background_job' && record.holder.jobId !== null) return ['open', 'openInNewTab', 'attach'];
+  if (record.holder.kind === 'background_job' && record.holder.jobId !== null) return ['open', 'openInNewTab', 'attach', ...notice];
   // C10 end
-  if (isForeign(record)) return ['open', 'openInNewTab'];
+  if (isForeign(record)) return ['open', 'openInNewTab', ...notice];
   const offered = SESSION_ACTION_IDS.filter((id) => id !== 'removeWorktree' || record.worktree !== null);
   // C10 start: Attach is a job holder's alone (above); Resume only for a session no process holds (a MAWS-live one has
   // nothing to resume)
   offered.splice(offered.indexOf('attach'), 1);
+  offered.splice(offered.indexOf('takeOver'), 1); // P5 O9 M5: a bridged foreign session's alone
   if (record.holder.kind === 'self') return offered.filter((id) => id !== 'resume');
   // C10 end
   return offered;

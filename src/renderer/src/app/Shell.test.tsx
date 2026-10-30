@@ -4,9 +4,13 @@ import { queryClient } from '../ipc/query';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMain, type TabRef } from '@shared/ipc/schema/layout';
-import { record } from '../../../../test/support/builders';
+import { record, remoteRow } from '../../../../test/support/builders';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { addressOf } from '@shared/machine/address';
+import { LANE_A_WORDS } from '../session/controls/lane-a';
+import { resetLaneAStore } from '../stores/lane-a';
 import { registerCloseGuard, registerAction, runAction } from '../keymap/actions-runtime';
 import type { PanelHostProps } from '../panel/host-slot';
 import { useLayout } from '../stores/layout';
@@ -29,15 +33,16 @@ import { resetLibrary } from '../library/store';
 import { Shell } from './Shell';
 import { registerSlot, resetSlots } from './slots';
 import { toolbarTitle } from './Toolbar';
-import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { probeTool, ref, resetPanelStores } from '../test-support/panel';
 import { registerPanelTool } from '../panel/host';
 import { PanelHost } from '../panel/PanelHost';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
+import { preloadOf } from '../test-support/preload-of';
 
 vi.mock('./Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
-const A = 'app-a' as AppSessionId;
+const A = at('app-a' as AppSessionId); // P5 O6 M2: the page's id
 const sessionTab = (id: string): TabRef => ({ id: `session:${id}`, kind: 'session', appSessionId: id as AppSessionId, pinned: false });
 const withActive = (tab: TabRef): LayoutMain => ({ ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [tab], activeTabId: tab.id }] } } });
 
@@ -50,7 +55,7 @@ const renderShell = () => render(<QueryClientProvider client={queryClient}><Shel
 function openSurface(toolId = 'terminal') {
   offs.push(registerPanelTool(probeTool(toolId).tool));
   registerSlot('panelHost', PanelHost);
-  useSessions.setState({ records: new Map([[A, record('app-a')]]) });
+  useSessions.setState({ records: new Map([[A, record(A)]]) });
   useLayout.setState({ main: withActive(sessionTab(A)), panelBySession: new Map([[A, { tabs: [ref(`${toolId}:aaaaaaaa`)], activeTabId: `${toolId}:aaaaaaaa` }]]) });
 }
 
@@ -246,24 +251,24 @@ describe('shell frame', () => {
 
 describe('toolbar', () => {
   it('titles the active tab: nothing for an empty pane, a session with its branch, a file by basename', () => {
-    const records = new Map([[A, record('app-a', { title: { text: 'Fix sidebar drag', source: 'user' }, branch: 'feat/sidebar' })]]);
+    const records = new Map([[A, record(A, { title: { text: 'Fix sidebar drag', source: 'user' }, branch: 'feat/sidebar' })]]);
     expect(toolbarTitle(null, records)).toEqual({ title: '', branch: null });
-    expect(toolbarTitle(sessionTab('app-a'), records)).toEqual({ title: 'Fix sidebar drag', branch: 'feat/sidebar' });
-    expect(toolbarTitle({ id: 'file:/r/src/app.ts', kind: 'file', path: '/r/src/app.ts', line: null, appSessionId: null, pinned: false }, records)).toEqual({ title: 'app.ts', branch: null });
+    expect(toolbarTitle(sessionTab(A), records)).toEqual({ title: 'Fix sidebar drag', branch: 'feat/sidebar' });
+    expect(toolbarTitle({ id: `file:${TEST_MACHINE}:/r/src/app.ts`, kind: 'file', path: '/r/src/app.ts', line: null, appSessionId: null, machine: TEST_MACHINE, pinned: false }, records)).toEqual({ title: 'app.ts', branch: null });
     expect(toolbarTitle({ id: 'diagnostics', kind: 'diagnostics', pinned: false }, records).title).toBe('Diagnostics');
     // E4a: a browser tab by its page's title (else host), else "Browser" until the browser store lists the tab
-    const browser = { id: 'browser:app-a:b_000000000001', kind: 'browser', appSessionId: A, browserTabId: 'b_000000000001', pinned: false } as const;
+    const browser = { id: `browser:${A}:b_000000000001`, kind: 'browser', appSessionId: A, browserTabId: 'b_000000000001', pinned: false } as const;
     expect(toolbarTitle(browser, records, 'Page A')).toEqual({ title: 'Page A', branch: null });
     expect(toolbarTitle(browser, records)).toEqual({ title: 'Browser', branch: null });
     // W9 (H2): the engine's HEAD (a folder that is no repository) is no branch, so no chip
-    expect(toolbarTitle(sessionTab('app-a'), new Map([[A, record('app-a', { branch: 'HEAD' })]])).branch).toBeNull();
+    expect(toolbarTitle(sessionTab(A), new Map([[A, record(A, { branch: 'HEAD' })]])).branch).toBeNull();
   });
 
   it('shows the focused pane’s tabs in the chrome without duplicating a title row', () => {
-    useSessions.setState({ records: new Map([[A, record('app-a', { title: { text: 'Fix sidebar drag', source: 'user' }, branch: 'feat/sidebar' })]]) });
+    useSessions.setState({ records: new Map([[A, record(A, { title: { text: 'Fix sidebar drag', source: 'user' }, branch: 'feat/sidebar' })]]) });
     renderShell();
     expect(within(chromeTabs()).queryByRole('tab')).toBeNull();
-    act(() => useLayout.setState({ main: withActive(sessionTab('app-a')) }));
+    act(() => useLayout.setState({ main: withActive(sessionTab(A)) }));
     expect(within(chromeTabs()).getByRole('tab', { name: 'Fix sidebar drag' }).getAttribute('aria-selected')).toBe('true');
     expect(within(screen.getByRole('banner')).getAllByText('Fix sidebar drag')).toHaveLength(1);
     expect(within(region('main')).queryByRole('tablist')).toBeNull();
@@ -273,7 +278,7 @@ describe('toolbar', () => {
     const user = userEvent.setup();
     const sidebar = vi.fn();
     offs.push(registerAction('sidebar.toggle', sidebar));
-    useSessions.setState({ records: new Map([[A, record('app-a')]]) });
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
     useLayout.setState({ main: withActive(sessionTab(A)) });
     renderShell();
     const cards = within(screen.getByRole('banner')).getByRole('button', { name: 'Session cards' });
@@ -295,7 +300,7 @@ describe('toolbar', () => {
   });
 
   it('shows a rebound chord in the tooltip', () => {
-    useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V19, keymap: { 'sidebar.toggle': 'Cmd+Alt+S' } }, resolvedTheme: 'light' } });
+    useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, keymap: { 'sidebar.toggle': 'Cmd+Alt+S' } }, resolvedTheme: 'light' } });
     renderShell();
     expect(screen.getByRole('button', { name: 'Toggle sidebar' }).getAttribute('title')).toBe('Toggle sidebar · ⌘⌥S');
     useSettings.setState({ state: null });
@@ -303,14 +308,14 @@ describe('toolbar', () => {
 
   it('More omits session actions with no tab open and lists the §5.1 submenu for a session, unregistered ones disabled', async () => {
     const user = userEvent.setup();
-    useSessions.setState({ records: new Map([[A, record('app-a')]]) });
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
     renderShell();
     await user.click(screen.getByRole('button', { name: 'More surfaces' }));
     expect(screen.queryByRole('menuitem', { name: 'Session actions' })).toBeNull();
     await user.keyboard('{Escape}');
     const split = vi.fn();
     offs.push(registerShellActions(fakeBridge()), (await import('./session-actions')).registerSessionAction('openInSplit', split));
-    act(() => useLayout.setState({ main: withActive(sessionTab('app-a')) }));
+    act(() => useLayout.setState({ main: withActive(sessionTab(A)) }));
     await user.click(screen.getByRole('button', { name: 'More surfaces' }));
     const actions = await screen.findByRole('menuitem', { name: 'Session actions' });
     act(() => actions.focus());
@@ -332,7 +337,7 @@ describe('toolbar', () => {
 
   it('offers a foreign-live session no actions, as the sidebar does (D-12): the scenario’s terminal-held session', async () => {
     const user = userEvent.setup();
-    const nine = scenarioFile('nine-sessions');
+    const nine = pageScenario(scenarioFile('nine-sessions')); // P5 O6 M2: the store holds the page's records
     const held = nine.sessions.find((r) => r.holder.kind === 'terminal')!;
     useSessions.setState({ records: new Map(nine.sessions.map((r) => [r.appId, r])) });
     offs.push(registerShellActions(fakeBridge()));
@@ -341,6 +346,36 @@ describe('toolbar', () => {
     expect(within(chromeTabs()).getByRole('tab', { name: held.title.text })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'More surfaces' }));
     expect((await screen.findByRole('menuitem', { name: 'Session actions' })).getAttribute('aria-disabled')).toBe('true');
+  });
+});
+
+// P5 O9 M9 (fix wave 1): another machine's terminal session (a listed lane A row, no record here) offers Take over in its
+// menu, disabled in place with the reason its port gives, and is titled by its row, not "New chat".
+describe('another machine’s terminal session in the toolbar', () => {
+  const REMOTE = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
+  beforeEach(() => {
+    useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', availability: 'foreign_held', title: 'Ship the relay' }), appId: REMOTE }]]) });
+  });
+  afterEach(() => resetLaneAStore());
+
+  it('its session actions hold Take over in MAWS, disabled with the remote reason', async () => {
+    const user = userEvent.setup();
+    offs.push(registerShellActions(fakeBridge()));
+    renderShell();
+    act(() => useLayout.setState({ main: withActive(sessionTab(REMOTE)) }));
+    await user.click(screen.getByRole('button', { name: 'More surfaces' }));
+    const actions = await screen.findByRole('menuitem', { name: 'Session actions' });
+    expect(actions.getAttribute('aria-disabled')).toBeNull();
+    act(() => actions.focus());
+    await user.keyboard('{ArrowRight}');
+    const takeOver = await screen.findByRole('menuitem', { name: 'Take over in MAWS' });
+    expect(takeOver.getAttribute('aria-disabled')).toBe('true');
+    expect(takeOver.getAttribute('title')).toBe(LANE_A_WORDS.remoteTakeOver);
+  });
+
+  it('is titled by its listed row', () => {
+    expect(toolbarTitle(sessionTab(REMOTE), new Map(), null, null, useSessions.getState().listed)).toEqual({ title: 'Ship the relay', branch: null });
+    expect(toolbarTitle(sessionTab(A), new Map(), null, null, useSessions.getState().listed).title).toBe('New chat'); // no record, no row
   });
 });
 
@@ -400,7 +435,7 @@ describe('shell actions', () => {
 
   it('pin flips the record’s pinned flag through session.update', async () => {
     const bridge = fakeBridge();
-    useSessions.setState({ records: new Map([[A, record('app-a', { pinned: false })]]) });
+    useSessions.setState({ records: new Map([[A, record(A, { pinned: false })]]) });
     offs.push(registerShellActions(bridge));
     (await import('./session-actions')).runSessionAction('pin', A);
     await vi.waitFor(() => expect(bridge.invoke).toHaveBeenCalledWith('session.update', { appSessionId: A, patch: { pinned: true } }));
@@ -424,9 +459,9 @@ describe('right panel', () => {
       props = p;
       return <div>host</div>;
     });
-    useSessions.setState({ records: new Map([[A, record('app-a')]]) });
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
     useLayout.setState({
-      main: withActive(sessionTab('app-a')),
+      main: withActive(sessionTab(A)),
       panelPinned: [{ id: 'p', toolId: 'terminal', pinned: true }],
       panelBySession: new Map([[A, { tabs: [{ id: 'o', toolId: 'files', pinned: false }], activeTabId: 'o' }]]),
     });
@@ -489,7 +524,7 @@ describe('the Artifacts entry', () => {
     const user = userEvent.setup();
     const previousBridge = window.maws;
     const counts = { document: 0, presentation: 0, design: 0, design_system: 0, dashboard: 0, html: 0, file: 0 };
-    window.maws = fakeClient({ 'library.list': { rows: [], counts }, 'library.spaces': { spaces: [] } }).client;
+    window.maws = fakeClient({ 'library.list': { rows: [], counts }, 'library.spaces': { spaces: [] } }).client as unknown as PreloadBridge; // P5 O6 M2: main's side
     offs.push(() => {
       window.maws = previousBridge;
       resetLibrary();
@@ -595,7 +630,7 @@ it('keeps fallback notifications and quit-wait actions outside the hidden main r
   renderShell();
   act(() => {
     fake.event('layout.quitWait', { waiting: { midTurn: 1, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: [] /* E5 */ } });
-    fake.event('attention.notified', { appSessionId: A, attentionId: 'att-a', delivery: 'fallback', at: '2026-10-02T10:00:00Z' });
+    fake.event('attention.notified', { appSessionId: A, attentionId: at('att-a'), delivery: 'fallback', at: '2026-10-02T10:00:00Z' });
   });
   const quit = screen.getByRole('button', { name: 'Quit now' });
   const cancel = screen.getByRole('button', { name: 'Cancel' });
@@ -614,9 +649,9 @@ it.each(['tab', 'content'] as const)('Cmd+W from focused %s restores the active 
   const user = userEvent.setup();
   offs.push(registerShellActions(fakeBridge()), connectKeys());
   registerSlot('fileTab', () => <input aria-label="File content" />);
-  useLayout.getState().openTab({ kind: 'file', path: '/one.ts', line: null, appSessionId: null });
-  useLayout.getState().openTab({ kind: 'file', path: '/two.ts', line: null, appSessionId: null });
-  useLayout.getState().openTab({ kind: 'file', path: '/three.ts', line: null, appSessionId: null });
+  useLayout.getState().openTab({ kind: 'file', path: '/one.ts', line: null, appSessionId: null, machine: TEST_MACHINE });
+  useLayout.getState().openTab({ kind: 'file', path: '/two.ts', line: null, appSessionId: null, machine: TEST_MACHINE });
+  useLayout.getState().openTab({ kind: 'file', path: '/three.ts', line: null, appSessionId: null, machine: TEST_MACHINE });
   renderShell();
   act(() => (from === 'tab' ? screen.getByRole('tab', { name: /three.ts/ }) : screen.getByRole('textbox', { name: 'File content' })).focus());
   act(() => runAction('tab.close'));
@@ -627,8 +662,8 @@ it.each(['tab', 'content'] as const)('Cmd+W from focused %s restores the active 
 
 it('closing the last split tab restores focus in the surviving pane; closing its last tab focuses empty-pane controls', async () => {
   offs.push(registerShellActions(fakeBridge()));
-  useLayout.getState().openTab({ kind: 'file', path: '/left.ts', line: null, appSessionId: null });
-  useLayout.getState().openTab({ kind: 'file', path: '/right.ts', line: null, appSessionId: null }, { pane: 'other' });
+  useLayout.getState().openTab({ kind: 'file', path: '/left.ts', line: null, appSessionId: null, machine: TEST_MACHINE });
+  useLayout.getState().openTab({ kind: 'file', path: '/right.ts', line: null, appSessionId: null, machine: TEST_MACHINE }, { pane: 'other' });
   renderShell();
   act(() => screen.getByRole('tab', { name: /right.ts/ }).focus());
   act(() => runAction('tab.close'));
@@ -639,7 +674,7 @@ it('closing the last split tab restores focus in the surviving pane; closing its
 
 it('a refused Cmd+W keeps the tab and its focus', async () => {
   offs.push(registerShellActions(fakeBridge()), registerCloseGuard('file', async () => false));
-  useLayout.getState().openTab({ kind: 'file', path: '/keep.ts', line: null, appSessionId: null });
+  useLayout.getState().openTab({ kind: 'file', path: '/keep.ts', line: null, appSessionId: null, machine: TEST_MACHINE });
   renderShell();
   const tab = screen.getByRole('tab', { name: /keep.ts/ });
   act(() => tab.focus());
@@ -666,12 +701,12 @@ it('Delete on an arrow-focused inactive draft tab restores focus after the real 
   resetSetupStore();
   const previousBridge = window.maws;
   const fake = fakeClient({ 'session.intent.discard': { leftover: null } });
-  window.maws = fake.client;
+  window.maws = preloadOf(fake); // P5 O6 M2: main's side, asked with the bare id
   offs.push(() => { window.maws = previousBridge; closeDialog(); resetSetupStore(); });
   offs.push(registerCloseGuard('session', async (ref) => ref.kind === 'session' && await beforeCloseUnstarted(ref.appSessionId) === 'closed'));
-  putIntent(intent({ draft: { doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'keep my draft' }] }] }, attachments: [], updatedAt: '2026-09-29T10:00:00.000Z' } }));
-  useLayout.getState().openTab({ kind: 'session', appSessionId: ID });
-  useLayout.getState().openTab({ kind: 'file', path: '/survivor.ts', line: null, appSessionId: null });
+  putIntent(intent({ appSessionId: at(ID), draft: { doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'keep my draft' }] }] }, attachments: [], updatedAt: '2026-09-29T10:00:00.000Z' } }));
+  useLayout.getState().openTab({ kind: 'session', appSessionId: at(ID) });
+  useLayout.getState().openTab({ kind: 'file', path: '/survivor.ts', line: null, appSessionId: null, machine: TEST_MACHINE });
   render(<QueryClientProvider client={queryClient}><Shell /><SessionDialogs /></QueryClientProvider>);
   const survivor = screen.getByRole('tab', { name: /survivor.ts/ });
   act(() => survivor.focus());
@@ -688,9 +723,9 @@ it('Delete on an arrow-focused inactive draft tab restores focus after the real 
 
 it('middle-closing the active left tab preserves the surviving right editor focus', async () => {
   registerSlot('fileTab', () => <input aria-label="File content" />);
-  useLayout.getState().openTab({ kind: 'file', path: '/left-survivor.ts', line: null, appSessionId: null });
-  useLayout.getState().openTab({ kind: 'file', path: '/left-close.ts', line: null, appSessionId: null });
-  useLayout.getState().openTab({ kind: 'file', path: '/right.ts', line: null, appSessionId: null }, { pane: 'other' });
+  useLayout.getState().openTab({ kind: 'file', path: '/left-survivor.ts', line: null, appSessionId: null, machine: TEST_MACHINE });
+  useLayout.getState().openTab({ kind: 'file', path: '/left-close.ts', line: null, appSessionId: null, machine: TEST_MACHINE });
+  useLayout.getState().openTab({ kind: 'file', path: '/right.ts', line: null, appSessionId: null, machine: TEST_MACHINE }, { pane: 'other' });
   renderShell();
   const editor = within(screen.getByRole('region', { name: 'Right pane' })).getByRole('textbox');
   act(() => editor.focus());
@@ -703,9 +738,9 @@ it('middle-closing the active left tab preserves the surviving right editor focu
 });
 
 it.each([true, false])('context-menu Close restores pane focus when the closing tab is active=%s', async (active) => {
-  useLayout.getState().openTab({ kind: 'file', path: '/menu-close.ts', line: null, appSessionId: null });
-  useLayout.getState().openTab({ kind: 'file', path: '/menu-survivor.ts', line: null, appSessionId: null });
-  if (active) useLayout.getState().activateTab('file:/menu-close.ts');
+  useLayout.getState().openTab({ kind: 'file', path: '/menu-close.ts', line: null, appSessionId: null, machine: TEST_MACHINE });
+  useLayout.getState().openTab({ kind: 'file', path: '/menu-survivor.ts', line: null, appSessionId: null, machine: TEST_MACHINE });
+  if (active) useLayout.getState().activateTab(`file:${TEST_MACHINE}:/menu-close.ts`);
   renderShell();
   const tab = screen.getByRole('tab', { name: 'menu-close.ts' });
   act(() => tab.focus());

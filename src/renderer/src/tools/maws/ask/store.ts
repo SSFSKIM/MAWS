@@ -13,6 +13,8 @@ import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
+import { machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 import type { AskCancelReason, PendingAsk } from '@shared/maws/ask';
 import type { AskRowData } from '../../../transcript';
 import { SHEET } from './copy';
@@ -127,9 +129,10 @@ export function ensureLoaded(appSessionId: AppSessionId, client: MawsBridge): vo
   void loadAsks(appSessionId, client);
 }
 
-// The engine host is back at `ready`: every session read before is read again.
-export function reloadAsks(client: MawsBridge): void {
-  for (const appSessionId of requested) void loadAsks(appSessionId, client);
+// A machine's engine host is back at `ready`: every session of that machine read before is read again (P5 O6: each
+// machine's asks are its own host's table).
+export function reloadAsks(client: MawsBridge, machine: MachineRef): void {
+  for (const appSessionId of requested) if (machineOf(appSessionId) === machine) void loadAsks(appSessionId, client);
 }
 
 // ---- live events ---------------------------------------------------------------------------------------------------------

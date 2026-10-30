@@ -6,6 +6,7 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'electron-vite';
 import type { Rollup } from 'vite';
+import { latin1Bundles } from './scripts/latin1-bundles';
 // C8c start
 import { createRequire } from 'node:module';
 // C8c end
@@ -65,7 +66,31 @@ export default defineConfig(({ command }) => {
     // its aliases, defines and externals: node-pty stays a real file under node_modules, for `asarUnpack`.
     main: {
       resolve: { alias },
-      define: { __MAWS_DEV_CSP_NONCE__: JSON.stringify(devNonce), __MAWS_VERSION__: JSON.stringify(version), __MAWS_BUILD__: JSON.stringify(build) },
+      // P5 O10 M10: `ws` is bundled (main's remote links, mawsd's endpoint) and its optional native helpers, `bufferutil`
+      // and `utf-8-validate`, are installed nowhere. The bundler stands an empty object in for each, which `ws`'s
+      // `try { require(...) }` takes as present, so its first masked frame of 48 bytes or more calls a `mask` that isn't
+      // there. `ws`'s own switches, defined here, keep it on its JavaScript paths (bundle-guard.test.ts holds the graph to it).
+      define: {
+        __MAWS_DEV_CSP_NONCE__: JSON.stringify(devNonce),
+        __MAWS_VERSION__: JSON.stringify(version),
+        __MAWS_BUILD__: JSON.stringify(build),
+        __MAWS_HARNESS_BUILD__: JSON.stringify(harnessInput !== null), // P5 O8 M4a Task 8: what only a harness build's main contains (index.ts)
+        'process.env.WS_NO_BUFFER_UTIL': JSON.stringify('1'),
+        'process.env.WS_NO_UTF_8_VALIDATE': JSON.stringify('1'),
+      },
+      // P5 O2 M5: `mawsd` (out/main/mawsd.js) is main's second input, so its `?modulePath` imports of the hosts emit the
+      // files main's do and one build has one build id; src/engine-host/bundle-guard.test.ts holds its graph to Node's
+      // builtins and the hosts' externals (no `electron`). P5 O3-C (D13): the services entry (out/main/services.js), the
+      // library's one door, is the third, held by the same guard to mawsd's rule; O3-D's mawsd composes the spine from it.
+      build: {
+        rollupOptions: {
+          input: { index: resolve(__dirname, 'src/main/index.ts'), mawsd: resolve(__dirname, 'src/mawsd/index.ts'), services: resolve(__dirname, 'src/services/entry.ts') },
+          // Every main-process file as Latin-1 text, so V8 holds its source at a byte a character (scripts/latin1-bundles.ts).
+          // The `?modulePath` hosts' builds take this config's output options too, so their files are re-printed there;
+          // here they arrive as assets, which the plugin's check reads with the rest.
+          output: { plugins: [latin1Bundles()] },
+        },
+      },
     },
     preload: {
       resolve: { alias },
@@ -79,6 +104,7 @@ export default defineConfig(({ command }) => {
         rollupOptions: {
           ...rollupOptions,
           input: { index: resolve(__dirname, 'src/preload/index.ts'), browser: resolve(__dirname, 'src/preload/browser.ts') },
+          output: { plugins: [latin1Bundles()] }, // as main's: each renderer process holds its preload's source too
         },
       },
       // E4a end

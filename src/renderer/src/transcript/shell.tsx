@@ -7,6 +7,7 @@ import { useEffect } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionPhase } from '@shared/ipc/schema/session';
 import type { Slots } from '../app/slots';
+import { machineFor } from '../ipc/machine';
 import { registerSlot } from '../app/slots';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
@@ -24,7 +25,7 @@ import { toggleReportView } from '../owner/report/ReportBar';
 // the session is live, and `exited`, `failed`, `foreign` or no digest at all say it is not. A disk-backed session with
 // no live process then shows no working divider ticking from the wall clock (the store's `setLive`).
 // Edge (2026-09-28, final-pass review): C5 also sets `failed` on a failed `turn.ended` while the process lives
-// (`src/main/sessions/digest.ts`, the `turn.ended` case), so a background subagent's detail line still running after a
+// (`src/services/sessions/digest.ts`, the `turn.ended` case), so a background subagent's detail line still running after a
 // failed turn stops ticking until the next phase change; kept, since the turn itself has closed.
 const LIVE_PHASES: ReadonlySet<SessionPhase> = new Set(['starting', 'working', 'waiting', 'idle']);
 const useLive = (appSessionId: AppSessionId) => useSessions((state) => LIVE_PHASES.has(state.digests.get(appSessionId)?.phase as SessionPhase));
@@ -41,9 +42,10 @@ export const ShellTranscript: Slots['transcript'] = ({ appSessionId, agentId }) 
   return <TranscriptSlot appSessionId={appSessionId} agentId={agentId ?? undefined} className="h-full" />;
 };
 
-// A path chip: C5's file tab at that line. The chip's session is not known to a registered action, and a file tab's
-// identity is its path alone (C5's `tabId`), so the tab carries none.
-export const openFileInTab = (path: string, line?: number) => useLayout.getState().openTab({ kind: 'file', path, line: line ?? null, appSessionId: null });
+// A path chip: C5's file tab at that line. A file tab's identity is its path and machine (C5's `tabId`; P5 O6 M2), so the
+// tab carries no session; its machine is the chip's row's session's (P5 O6 M4), else the local one.
+export const openFileInTab = (path: string, line?: number, appSessionId: AppSessionId | null = null) =>
+  useLayout.getState().openTab({ kind: 'file', path, line: line ?? null, appSessionId: null, machine: machineFor(appSessionId) });
 
 export function connectTranscript(): () => void {
   registerSlot('transcript', ShellTranscript);

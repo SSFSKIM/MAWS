@@ -7,9 +7,12 @@ import { act } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { OperationEvent } from '@shared/engine/operations';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import { bareOf } from '@shared/machine/address';
 import type { SideExchange } from '@shared/side/question';
 import { digest, record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { at } from '../../../../test/support/machine';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { A, B, panelOf, resetPanelStores } from '../test-support/panel';
@@ -18,6 +21,9 @@ import { applyBtw } from './btw';
 import { registerSidePane } from './register';
 import { askSide, clearSide, onSideOperation, refreshSide, resetSideQuestions, retrySide, showSideChild, sidePaneOf, useSidePane } from './store';
 
+// P5 O6 M2: the fake is main: asked and answering with bare ids
+const A_ID = bareOf(A);
+const B_ID = bareOf(B);
 let fake: FakeClient;
 
 const exchanges = (parent: AppSessionId = A) => sidePaneOf(useSidePane.getState(), parent).exchanges;
@@ -37,7 +43,7 @@ beforeEach(() => {
   useNotices.setState({ notices: [] });
   registerSidePane();
   fake = fakeClient();
-  window.maws = fake.client;
+  window.maws = fake.client as unknown as PreloadBridge;
 });
 afterEach(() => {
   delete (window as { maws?: unknown }).maws;
@@ -50,18 +56,18 @@ describe('the btw widget’s typed apply', () => {
     let answer: boolean | undefined;
     await act(async () => void applyBtw(A, ' why? ').then((a) => (answer = a)));
     expect(answer).toBe(true);
-    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'side' }]);
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A_ID, reason: 'side' }]);
     expect(fake.invoked('session.sideQuestion')).toEqual([]); // not before the engine is ready
     expect(sidePaneOf(useSidePane.getState(), A).view).toEqual({ kind: 'btw' });
-    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false }));
-    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A, question: 'why?' }]);
+    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A_ID, launched: true, joined: false }));
+    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A_ID, question: 'why?' }]);
     expect(fake.invoked('session.acquire')).toHaveLength(1);
   });
 
   it('an acquisition refused asks nothing and says why in a toast', async () => {
     withProcess(A, 'exited');
     await act(async () => void applyBtw(A, 'why?'));
-    await act(() => fake.reply('session.acquire', { status: 'missing_directory', appSessionId: A, directory: '/gone' }));
+    await act(() => fake.reply('session.acquire', { status: 'missing_directory', appSessionId: A_ID, directory: '/gone' }));
     expect(fake.invoked('session.sideQuestion')).toEqual([]);
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['Directory not found: /gone']);
   });
@@ -82,7 +88,7 @@ describe('the btw widget’s typed apply', () => {
     await act(async () => void applyBtw(A, '  What word did I ask you to remember?  ').then((a) => (answer = a)));
     expect(answer).toBe(true); // before any receipt: the host has not answered `session.sideQuestion`
     expect(fake.pending('session.sideQuestion')).toBe(1);
-    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A, question: 'What word did I ask you to remember?' }]);
+    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A_ID, question: 'What word did I ask you to remember?' }]);
     expect(sidePaneOf(useSidePane.getState(), A).view).toEqual({ kind: 'btw' });
     const side = panelOf(A)!.tabs.find((t) => t.toolId === SIDE_TOOL_ID)!;
     expect(panelOf(A)!.activeTabId).toBe(side.id);
@@ -104,7 +110,7 @@ describe('a `/btw` typed in a side thread drawn in its parent’s pane', () => {
     withProcess(B, 'ready');
     showSideChild(A, B);
     await act(async () => void applyBtw(B, 'why?'));
-    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: B, question: 'why?' }]);
+    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: B_ID, question: 'why?' }]);
     expect(sidePaneOf(useSidePane.getState(), B).inlineQuestions).toBe(true);
     expect(sidePaneOf(useSidePane.getState(), B).view).toBeNull();
     expect(panelOf(B)?.tabs.some((t) => t.toolId === SIDE_TOOL_ID) ?? false).toBe(false);
@@ -118,7 +124,7 @@ describe('the side-question store', () => {
     const asked = askSide(A, 'Q?');
     expect(exchanges()).toEqual([expect.objectContaining({ id: 'local:1', state: 'pending' })]);
     await fake.reply('session.sideQuestion', { opId: 'op-1' });
-    expect(fake.invoked('side.question.list')).toEqual([{ appSessionId: A }]);
+    expect(fake.invoked('side.question.list')).toEqual([{ appSessionId: A_ID }]);
     await fake.reply('side.question.list', { exchanges: [entry({})] });
     await asked;
     expect(exchanges()).toEqual([entry({})]);
@@ -151,7 +157,7 @@ describe('the side-question store', () => {
     onSideOperation({ ...completion('op-9', answered('x')), command: 'session.generateTitle' });
     expect(fake.invoked('side.question.list')).toEqual([]);
     onSideOperation(completion('op-9', answered('x')));
-    expect(fake.invoked('side.question.list')).toEqual([{ appSessionId: A }]);
+    expect(fake.invoked('side.question.list')).toEqual([{ appSessionId: A_ID }]);
     await fake.reply('side.question.list', { exchanges: [entry({ id: 'op-9', state: 'answered', response: 'x' })] });
     expect(exchanges()).toEqual([entry({ id: 'op-9', state: 'answered', response: 'x' })]);
   });
@@ -170,7 +176,7 @@ describe('the side-question store', () => {
   it('Retry on a host entry that failed asks again naming it, draws the new question in its place, and lists what the host keeps', async () => {
     useSidePane.setState({ panes: new Map([[A, { view: null, shownChild: null, inlineQuestions: false, exchanges: [entry({ state: 'failed', error: 'boom' })] }]]) });
     const retry = retrySide(A, exchanges()![0]);
-    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A, question: 'Q?', retryOf: 'op-1' }]);
+    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A_ID, question: 'Q?', retryOf: 'op-1' }]);
     expect(exchanges()!.map((e) => e.id)).toEqual(['local:1']); // the new question stands in for the failed one at once
     await fake.reply('session.sideQuestion', { opId: 'op-2' });
     await fake.reply('side.question.list', { exchanges: [entry({ id: 'op-2', askedAt: '2026-10-06T10:01:00.000Z' })] });
@@ -192,7 +198,7 @@ describe('the side-question store', () => {
     await retry;
     expect(exchanges()).toEqual([expect.objectContaining({ id: 'local:1', state: 'failed', error: 'Session app-a is not ready (exited)' })]);
     void retrySide(A, exchanges()![0]);
-    expect(fake.invoked('session.sideQuestion').at(-1)).toEqual({ appSessionId: A, question: 'Q?', retryOf: 'op-1' });
+    expect(fake.invoked('session.sideQuestion').at(-1)).toEqual({ appSessionId: A_ID, question: 'Q?', retryOf: 'op-1' });
     expect(exchanges()!.map((e) => [e.id, e.state])).toEqual([['local:2', 'pending']]);
     resetSideQuestions(); // a renderer reload: the window's own bookkeeping is gone, the host's log is what lists
     await act(async () => {
@@ -217,7 +223,7 @@ describe('the side-question store', () => {
     await fake.reply('side.question.clear', {});
     await fake.reply('side.question.list', { exchanges: [] });
     await cleared;
-    expect(fake.invoked('side.question.clear')).toEqual([{ appSessionId: A }]);
+    expect(fake.invoked('side.question.clear')).toEqual([{ appSessionId: A_ID }]);
     expect(exchanges()).toEqual([]);
   });
 
@@ -227,9 +233,9 @@ describe('the side-question store', () => {
       panes: new Map([[A, { view: { kind: 'btw' }, shownChild: null, inlineQuestions: false, exchanges: [entry({ state: 'answered', response: 'ZEBRA', question: 'Word?' }), entry({ id: 'op-2', state: 'failed', error: 'x' }), entry({ id: 'op-3', state: 'pending' }), entry({ id: 'op-4', state: 'answered', response: null })] }]]),
     });
     fake = fakeClient({ 'side.thread.open': { status: 'starting', appSessionId: CHILD }, 'session.intent.get': null });
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     await expect(promoteSide(A, 'Now fix it.')).resolves.toEqual({ ok: true });
-    expect(fake.invoked('side.thread.open')).toEqual([{ appSessionId: A, from: { kind: 'btw', exchanges: [{ question: 'Word?', response: 'ZEBRA' }], text: 'Now fix it.' } }]);
-    expect(sidePaneOf(useSidePane.getState(), A).view).toEqual({ kind: 'thread', childAppSessionId: CHILD });
+    expect(fake.invoked('side.thread.open')).toEqual([{ appSessionId: A_ID, from: { kind: 'btw', exchanges: [{ question: 'Word?', response: 'ZEBRA' }], text: 'Now fix it.' } }]);
+    expect(sidePaneOf(useSidePane.getState(), A).view).toEqual({ kind: 'thread', childAppSessionId: at(CHILD) });
   });
 });

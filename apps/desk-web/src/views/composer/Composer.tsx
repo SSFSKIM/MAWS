@@ -15,12 +15,12 @@ import { formatCount, formatClock } from '@shared/app/date-format';
 import { address } from '../../conversation/address';
 import { complete, completionAt, insertTag, type Completion } from '../../conversation/completion';
 import { turnRunning, type Capability } from '../../conversation/capabilities';
-import { commandRoute, slashItems, type SlashItem } from '../../conversation/catalog';
+import { commandRoute, slashItems, type SlashItem } from '../../../../../src/renderer/src/lane-a/conversation/catalog';
 import { catalogKey, useCatalog } from '../../state/catalog';
 import { pendingCommands } from '../../state/pending-commands';
 import { SlashPalette, groupedItems } from './SlashPalette';
 import { rankItems, rememberChosen } from './rank';
-import { parseCommand } from '../../conversation/command';
+import { parseCommand } from '../../../../../src/renderer/src/lane-a/conversation/command';
 import { sessionName } from '../../log/projection';
 import { useNarrow } from '../../shell/viewport';
 import type { DeskSession } from '../../shell/sessions';
@@ -230,7 +230,8 @@ export function SessionComposer({ session }: { session: DeskSession }) {
     else void issue(connection.rpc(member, session.machine, 'steer', { session: session.session, text }));
     setText('');
   };
-  const reasons = [can.send.note, !running ? null : can.steer.can ? (can.steer.path === 'send' ? `Steer is ${can.steer.note}` : null) : can.steer.reason, typed && can.command.can && can.command.note ? `a command is ${can.command.note}` : null].filter(Boolean);
+  // A session that takes no send at all (its machine moved to MAWS) says why, once, under a composer drawn disabled.
+  const reasons = [...new Set([can.send.can ? can.send.note : can.send.reason, !running ? null : can.steer.can ? (can.steer.path === 'send' ? `Steer is ${can.steer.note}` : null) : can.steer.reason, typed && can.command.can && can.command.note ? `a command is ${can.command.note}` : null].filter(Boolean))];
   return (
     <div className="relative shrink-0 border-t border-border px-4 py-3" data-testid="composer">
       {paletteOpen && <SlashPalette id={paletteId} rows={rows} active={bounded} setActive={setActive} pick={choose} opened={opened}
@@ -244,6 +245,7 @@ export function SessionComposer({ session }: { session: DeskSession }) {
         aria-label={`Message ${sessionName(session)}`}
         rows={2}
         value={text}
+        disabled={!can.send.can}
         onChange={(e) => edit(e.target.value)}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing) return;

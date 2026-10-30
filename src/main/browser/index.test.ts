@@ -3,8 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { EngineSessionStatus } from '@shared/engine/status';
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { contextOf } from '../../../test/support/fake-page';
 
 const prepared = vi.hoisted(() => [] as string[]); // what each opened partition was given, in order
@@ -96,6 +97,8 @@ vi.mock('electron', () => ({
 }));
 
 const { startBrowser } = await import('./index');
+const { fakeSpineView } = await import('../../../test/support/fake-spine-view');
+const { record, status: engineStatus } = await import('../../../test/support/builders');
 const { registerAppWindow } = await import('../windows');
 registerAppWindow(fakes.win as never);
 
@@ -109,29 +112,31 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(userData, { recursive: true, force: true }));
 
+// P5 O3-C (readers R6, R7): the spine's view the browser reads, holding records for `known`; `change` is a record's change
+// as the view reports it (a removal fires null)
 function fakeIndex(known: string[], unavailable: string | null = null) {
-  const listeners = new Set<(record: { appId: AppSessionId }, cause: string) => void>();
-  const index = {
-    unavailable,
-    browserHistory: { visit: () => {}, setTitle: () => {}, suggest: () => [] },
-    sessions: {
-      get: (id: AppSessionId) => (known.includes(id) ? { appId: id } : null),
-      onChange: (listener: (record: { appId: AppSessionId }, cause: string) => void) => {
-        listeners.add(listener);
-        return () => void listeners.delete(listener);
-      },
-    },
-  };
-  const change = (appId: AppSessionId, cause: string) => listeners.forEach((l) => l({ appId }, cause));
-  return { index: index as never, change, listeners };
+  const view = fakeSpineView({ records: known.map((id) => record(id)), unavailable });
+  const change = (appId: AppSessionId, cause: string) => (cause === 'removed' ? view.removeRecord(appId) : view.putRecord(record(appId)));
+  return { index: view as never, view, change };
 }
 
-function start(index: never, more: Partial<Parameters<typeof startBrowser>[0]> = {}) {
-  return startBrowser({ userData, settings: () => SETTINGS_DEFAULTS_V19.browser, index, register: () => {}, emit: () => {}, env: {}, ...more });
+// P5 O3-A: the browser's data as startBrowser tells it the spine's sessions (its stores unused here)
+function fakeData() {
+  const told: unknown[][] = [];
+  const data = {
+    history: { visit: () => {}, setTitle: () => {}, suggest: () => [] },
+    reattach: (sessions: Iterable<string> | null) => void told.push(['reattach', sessions === null ? null : [...sessions]]),
+    sessionChanged: (appSessionId: string, removed: boolean) => void told.push(['changed', appSessionId, removed]),
+  };
+  return { data: data as never, told };
+}
+
+function start(view: never, more: Partial<Parameters<typeof startBrowser>[0]> = {}) {
+  return startBrowser({ userData, settings: () => SETTINGS_DEFAULTS_V21.browser, view, data: fakeData().data, register: () => {}, emit: () => {}, env: {}, ...more });
 }
 
 describe('startBrowser (E4a Design §2, G4)', () => {
-  it('drops at boot the tabs of a session the index does not know, and rewrites the file at stop', () => {
+  it('drops at boot the tabs of a session the spine does not know, and rewrites the file at stop', () => {
     mkdirSync(join(userData, 'browser'));
     const file = join(userData, 'browser', 'tabs.json');
     writeFileSync(file, JSON.stringify({ version: 1, tabs: [tab('b_aaaaaaaaaaaa', A), tab('b_bbbbbbbbbbbb', GONE)], selected: { [A]: 'b_aaaaaaaaaaaa', [GONE]: 'b_bbbbbbbbbbbb' } }));
@@ -185,7 +190,7 @@ describe('startBrowser (E4a Design §2, G4)', () => {
     expect(fakes.app.listenerCount('select-client-certificate')).toBe(0);
   });
 
-  it('keeps every tab when the index is unavailable', () => {
+  it('keeps every tab while the view is unavailable', () => {
     mkdirSync(join(userData, 'browser'));
     writeFileSync(join(userData, 'browser', 'tabs.json'), JSON.stringify({ version: 1, tabs: [tab('b_bbbbbbbbbbbb', GONE)], selected: {} }));
     const browser = start(fakeIndex([], 'newer').index);
@@ -193,8 +198,37 @@ describe('startBrowser (E4a Design §2, G4)', () => {
     browser.stop();
   });
 
+  // P5 O3-A (the O3 document §4): the snapshot at start, taken with the change listener in place, then every change
+  it('tells the browser\'s data the spine\'s sessions at start and each change to them; an unavailable view, none', () => {
+    const { index, change } = fakeIndex([A]);
+    const { data, told } = fakeData();
+    const browser = start(index, { data });
+    change(GONE, 'discovered');
+    change(A, 'removed');
+    expect(told).toEqual([['reattach', [A]], ['changed', GONE, false], ['changed', A, true]]);
+    browser.stop();
+    const unavailable = fakeData();
+    start(fakeIndex([A], 'newer').index, { data: unavailable.data }).stop();
+    expect(unavailable.told).toEqual([['reattach', null]]);
+  });
+
+  // P5 O3-C (the O3 document §4; O3 Decision Log 11's flow-back): the data is reconciled again at each change of the view's
+  // availability, which in process never comes after start, and at O3-D comes at each reattach
+  it('reconciles the browser\'s data again when the view becomes available, and with nothing when it becomes unavailable', () => {
+    const { index, view } = fakeIndex([A], 'mawsd is not reachable');
+    const { data, told } = fakeData();
+    const browser = start(index, { data });
+    view.setUnavailable(null);
+    view.putRecord(record(GONE));
+    view.setUnavailable('mawsd is not reachable');
+    expect(told).toEqual([['reattach', null], ['reattach', [A]], ['changed', GONE, false], ['reattach', null]]);
+    browser.stop();
+    view.setUnavailable(null);
+    expect(told).toHaveLength(4);
+  });
+
   it('closes a session\'s tabs when its record is removed, and only then', () => {
-    const { index, change, listeners } = fakeIndex([A]);
+    const { index, change, view } = fakeIndex([A]);
     const browser = start(index);
     browser.store.open({ appSessionId: A, url: null, select: true });
     change(A, 'update');
@@ -202,7 +236,7 @@ describe('startBrowser (E4a Design §2, G4)', () => {
     change(A, 'removed');
     expect(browser.store.list(A).tabs).toEqual([]);
     browser.stop();
-    expect(listeners.size).toBe(0);
+    expect(view.listeners()).toBe(0);
   });
 
   it('E13: registers browser.agent.activities.list, answering the session\'s kept agent activity (none yet)', () => {
@@ -217,7 +251,7 @@ describe('startBrowser (E4a Design §2, G4)', () => {
     const handlers = new Map<string, (input: unknown) => unknown>();
     const browser = start(fakeIndex([A]).index, {
       profiles,
-      settings: () => ({ ...SETTINGS_DEFAULTS_V19.browser, profile: 'Profile 1' }),
+      settings: () => ({ ...SETTINGS_DEFAULTS_V21.browser, profile: 'Profile 1' }),
       register: ((name: string, handler: (input: unknown) => unknown) => void handlers.set(name, handler)) as never,
     });
     expect(handlers.get('browser.profiles.list')!(undefined)).toEqual({ profiles: [{ profileDir: 'Profile 1', name: 'Work', gaiaName: null, userName: null, avatar: { kind: 'initials', letter: 'W' } }] }); // cua #90
@@ -227,7 +261,7 @@ describe('startBrowser (E4a Design §2, G4)', () => {
   });
 
   it('reads the profile when a tab opens, so a change applies to tabs opened afterwards (Design §9)', () => {
-    let settings = SETTINGS_DEFAULTS_V19.browser;
+    let settings = SETTINGS_DEFAULTS_V21.browser;
     const profiles = () => [{ profileDir: 'Profile 1', name: 'Work', partition: 'persist:maws-chrome-Profile 1', importedAt: 't', storageDirName: 'x' }];
     const browser = start(fakeIndex([A]).index, { profiles, settings: () => settings });
     const before = browser.store.open({ appSessionId: A, url: null, select: true }).tab;
@@ -403,6 +437,39 @@ describe("startBrowser: cua's primitive server (E13)", () => {
     browser.cua.socketPathFor(A);
     browser.stop();
     expect(readdirSync(dir)).toEqual([]);
+  });
+
+  // P5 O3-D M5b fix round 1: at a reattach the mirror's follow can deliver a kept session's status before its snapshot
+  // holds the record, and the snapshot fires no record event; the records' arrival sets the socket and the engine up from
+  // the statuses the view kept, with no further status
+  it('sets up a kept session\'s socket and engine from its retained status when the records become available', async () => {
+    userData = mkdtempSync('/tmp/mbs-');
+    const listeners = new Set<(payload: { appSessionId: AppSessionId; status: EngineSessionStatus }) => void>();
+    const hosts = {
+      onEvent: vi.fn((name: string, listener: never) => {
+        if (name !== 'session.status') return () => {};
+        listeners.add(listener);
+        return () => void listeners.delete(listener);
+      }),
+      dispatch: vi.fn(async () => ({ ok: true })),
+      onState: vi.fn(() => () => {}),
+    };
+    const view = fakeSpineView({ unavailable: 'the machine daemon’s spine is loading' });
+    const browser = start(view as never, { hosts: hosts as never });
+    const named = vi.spyOn(browser.cua, 'engineProcess');
+    const dir = join(userData, 'browser', 'cua');
+    const kept = { ...engineStatus(A), pid: 4242 };
+    view.setStatus(kept); // the mirror keeps every status it hears
+    listeners.forEach((l) => l({ appSessionId: A, status: kept }));
+    expect(readdirSync(dir)).toEqual([]);
+    expect(named).not.toHaveBeenCalled();
+
+    view.putRecord(record(A)); // the snapshot's records (the real one fires no record event; this one's changes nothing here)
+    view.setStatus({ ...engineStatus(GONE), pid: 4343 }); // a status whose session the spine does not know stays ignored
+    view.setUnavailable(null);
+    await vi.waitFor(() => expect(readdirSync(dir)).toEqual([`${A}.sock`]));
+    expect(named.mock.calls).toEqual([[A, 4242]]);
+    browser.stop();
   });
 
   // the socket peer authentication spec of 2026-10-09 (M2, Acceptance 4): every status of a known session names its engine

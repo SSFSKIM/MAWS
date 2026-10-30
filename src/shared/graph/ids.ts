@@ -17,6 +17,11 @@ export const RequestIdSchema = brandedId<'RequestId'>(); // `request_id` on cont
 export const ProjectIdSchema = brandedId<'ProjectId'>();
 export const AttentionIdSchema = brandedId<'AttentionId'>();
 export const EventIdSchema = brandedId<'EventId'>(); // app-assigned, unique within a session
+// P5 O6 M1 (docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md): a field that held an AppSessionId as a plain
+// `z.string()` is re-typed with this loose alias, not the canonical schema, whose `minLength` would change the field's JSON
+// Schema (O1's wire rule: breaking on an engine-host field). A brand is type-only, so the alias renders as the plain string
+// did; it is its own instance, which the address codec (src/shared/machine/address.ts) knows as an AppSessionId.
+export const LooseAppSessionIdSchema = z.string().brand<'AppSessionId'>();
 
 export type SessionId = z.infer<typeof SessionIdSchema>;
 export type AppSessionId = z.infer<typeof AppSessionIdSchema>;

@@ -345,6 +345,8 @@ export const SELECTOR = {
   setting: 'setting…',
   reading: 'Reading the models…',
   sessionOnly: 'For this session only',
+  // P5 O9 M5 (the owner's Q1, as recommended): what a model or effort set on a terminal session through its bridge does
+  terminalOnly: "For this session's own requests from now on; the terminal's status line keeps showing its own",
   unknownEffort: (word: string) => `No effort level named ${word}`,
 };
 
@@ -372,6 +374,7 @@ export const RELOAD = {
 // operation line. The engine's own `message` and `failureCode` are shown as it printed them, never paraphrased.
 const sessionCount = (n: number) => `${n} session${n === 1 ? '' : 's'}`;
 export const PLUGIN_MANAGEMENT = {
+  otherMachine: 'This session runs on another machine; its plugins can’t be managed here yet.', // P5 O6 M4: until O4 spans machines
   reloadMods: 'Reload plugins', // E11 §2.2: one name for `reload_plugins` here, in the panel and as `/reload-plugins`
   reloadSkills: 'Reload skills',
   // Installed, Available and Marketplaces: P2-B's library (`LIBRARY`) draws them; Add marketplace keeps E8's field words

@@ -8,17 +8,38 @@
 //   resets whenever one stops holding; it is checked again when it fires.
 // - Exit-when-idle (the socket layer's `exit {when: 'idle'}` or `host.exitWhenIdle`): once armed the supervisor exits
 //   as soon as no row is live and the runner holds nothing, client or not.
-// - The idle-row release (the process table's): active while no client is connected or exit-when-idle is armed, with
-//   the same idle time, so kept idle sessions end and with them the supervisor.
+// - The idle release (the process table's, idle-release.ts; P5 O2 M2): keyed on interest, which each client reports
+//   (`host.interest`), with a keep mark, and strict; in every mode, client connected or not (RELEASE_WHILE_CONNECTED).
+//   Its idle time is the machine role's (role.ts): a laptop's is the idle exit's, a server's 24 hours. Under an armed
+//   exit-when-idle interest is ignored, so an old supervisor still serving empties unless the owner kept a session.
 // - `host.stopAll`: engine.shutdown's body, answered, then the exit (a host that ran it can never launch again).
+// - Quiet (P5 Decision Log 124's idle collection, @shared/host/idle-collect.ts): once the host serves and its startup
+//   gate has settled, no client holds interest in any session, no launch is preparing its row, every live row is idle by
+//   E10's rule (budget.ts `isIdleRow`, no stateful server counted: ready, no turn, nothing working, waiting or queued)
+//   and the plugin runner holds nothing. It is told at every refresh, so the engine host collects at every entry: a
+//   kept session's turn ending after the app left is one. The collector asks `quiet()` again at the moment of
+//   collecting, over the rows' live status, so work a row has begun and not yet told (a send whose queue tells only once
+//   its save settles) holds it off. A live row that ends with the host quiet (an idle release, an engine's exit) is told
+//   as a dropped holding, whose transcript is garbage the collection's guard cannot see. From a stop-all or an exit on it
+//   is never quiet again.
 import type { HostClientHooks, HostOn } from '@shared/host/runtime';
 import { HostCommandError } from '@shared/host/runtime';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { SupervisorStatus } from '@shared/ipc/schema/host';
+import type { IdleCollector } from '@shared/host/idle-collect';
+import { isIdleRow } from './budget';
 import type { PluginsRunner } from './plugins/runner';
 import type { ProcessTable } from './process-table';
+import type { MachineRole } from './role';
 import type { EngineSession } from './session';
 
 export const DEFAULT_IDLE_EXIT_MS = 10 * 60_000; // until main's first host.configure
+export const SERVER_RELEASE_MS = 24 * 60 * 60_000; // P5 O2 M2: a server's idle release, by wall clock
+
+// P5 O2 M2 (P5 §2, Decision Logs 29 and 44): the idle release runs while a client is connected too, so a session with
+// no tab is released after the idle time while MAWS is open. The owner's answer on keeping E10's rule (released only
+// once no client is connected, or under an armed exit-when-idle) is open; that reversal is this one constant, `false`.
+export const RELEASE_WHILE_CONNECTED = true;
 
 export type SupervisorExit = 'idle' | 'stopAll' | 'exitWhenIdle';
 
@@ -28,12 +49,18 @@ export type SupervisorIdentity = Pick<SupervisorStatus, 'pid' | 'startedAt' | 'b
 export interface SupervisionDeps {
   mode: 'utility' | 'detached';
   identity: SupervisorIdentity;
-  table: Pick<ProcessTable, 'onChange' | 'onRowsChanged' | 'setIdleRelease'> & { list(): readonly Pick<EngineSession, 'lifecycle'>[] };
-  plugins: Pick<PluginsRunner, 'busy' | 'onIdle'>;
+  table: Pick<ProcessTable, 'onChange' | 'onRowsChanged' | 'setIdleRelease' | 'setInterest' | 'interested' | 'launching' | 'onHoldChanged'> & { list(): readonly Pick<EngineSession, 'lifecycle' | 'status'>[] };
+  role: MachineRole; // P5 O2 M2: read once at the engine host's start (role.ts)
+  plugins: Pick<PluginsRunner, 'busy' | 'onIdle' | 'onBusy'>;
   shutdown(graceMs: number): Promise<{ stopped: number; forced: number }>; // engine.shutdown's body
   emit(status: SupervisorStatus): boolean; // host.supervisorStatus
   log(line: string): void;
+  // The idle collection (index.ts), told the quiet; a harness that does not read it leaves it out
+  collector?: Pick<IdleCollector, 'set' | 'dropped'>;
+  startup?: Promise<unknown>; // the register's startup gate (index.ts's designSystems.ready): quiet waits for it to settle
 }
+
+const NO_STATEFUL: ReadonlySet<string> = new Set(); // a stateful server holds a row's release, not its quiet
 
 export class Supervision {
   private identity: SupervisorIdentity;
@@ -42,19 +69,32 @@ export class Supervision {
   private connected: boolean; // a client was welcomed and has not left; a utility host's client is main, for its life
   private exit: ((reason: SupervisorExit) => void) | null = null; // a detached host, once it serves
   private leaving: SupervisorExit | null = null;
+  private stopping = false; // host.stopAll ran: in either mode the host never launches again
   private idleSince: number | null = null; // when the idle exit's conditions last came true
   private idleDue: number | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
-  private release: { idleMs: number | null; active: boolean } | null = null; // the idle-row release's policy as last set
+  private release: { idleMs: number | null; active: boolean; ignoreInterest: boolean } | null = null; // the idle release's policy as last set
   private published = '';
   private orphansKilled = 0; // the engines of a dead predecessor the start-up sweep stopped (Task 2.5)
+  private serving: boolean; // a utility host serves from its register, a detached one from `started`
+  private settled: boolean; // the startup gate resolved or rejected
+  private live = 0; // the live rows as last counted
 
   constructor(private readonly deps: SupervisionDeps) {
     this.identity = deps.identity;
     this.connected = deps.mode === 'utility';
+    this.serving = deps.mode === 'utility';
+    this.settled = deps.startup === undefined;
     deps.table.onChange(() => this.refresh());
+    if (deps.collector) deps.table.onHoldChanged(() => this.refresh());
     deps.table.onRowsChanged(() => this.refresh());
     deps.plugins.onIdle(() => this.refresh());
+    deps.plugins.onBusy(() => this.refresh());
+    const settle = () => {
+      this.settled = true;
+      this.refresh();
+    };
+    void deps.startup?.then(settle, settle);
     this.refresh();
   }
 
@@ -70,9 +110,16 @@ export class Supervision {
       if (this.deps.mode !== 'detached') throw new HostCommandError({ code: 'internal', message: 'exit-when-idle is the detached supervisor’s; a utility host ends with the app' });
       this.armExitWhenIdle(armed);
     });
+    // P5 O2 M2: the asking connection's full set (main-only; `mawsd` will send the union of its clients'); it ends with
+    // the connection, ready or not (the connection's own ClientRef, which the runtime ends at a detach or a new serve)
+    on('host.interest', async ({ sessions }, { client: holder }) => {
+      this.deps.table.setInterest(holder, sessions as AppSessionId[]);
+    });
     on('host.stopAll', async ({ graceMs }) => {
       const exits = this.exit !== null && this.leaving === null;
       if (exits) this.leaving = 'stopAll'; // no other exit may close the client before the answer is written
+      this.stopping = true;
+      this.tellQuiet();
       this.deps.log(`stop all asked (grace ${graceMs} ms)${exits ? '; the supervisor exits after answering' : ''}`);
       try {
         return await this.deps.shutdown(graceMs);
@@ -92,6 +139,7 @@ export class Supervision {
   started(identity: SupervisorIdentity, exit: (reason: SupervisorExit) => void): void {
     this.identity = identity;
     this.exit = exit;
+    this.serving = true;
     this.refresh();
   }
 
@@ -119,16 +167,20 @@ export class Supervision {
       liveSessions: rows.filter((row) => row.lifecycle !== 'exited').length, rows: rows.length,
       idleExitMs: this.idleExitMs, idleExitAt: this.idleDue === null ? null : new Date(this.idleDue).toISOString(),
       exitWhenIdle: this.exitWhenIdle, orphansKilled: this.orphansKilled,
+      release: { role: this.deps.role, idleMs: this.releaseIdleMs() }, // P5 O2 M2
     };
   }
 
-  // Every change that could move a clock or the status: a row's status, the row set, the runner going idle, a client,
-  // a configuration. Cheap: it reads the table's rows and compares.
+  // Every change that could move a clock or the status: a row's status, the row set, the runner going busy or idle, a
+  // client, a configuration, the startup gate settling, the table's holds (interest, a launch preparing). Cheap: it reads
+  // the table's rows and compares.
   private refresh(): void {
     const live = this.deps.table.list().some((row) => row.lifecycle !== 'exited');
-    const active = this.deps.mode === 'detached' && (!this.connected || this.exitWhenIdle);
-    if (this.release === null || this.release.idleMs !== this.idleExitMs || this.release.active !== active) {
-      this.release = { idleMs: this.idleExitMs, active };
+    this.tellQuiet();
+    const active = RELEASE_WHILE_CONNECTED || (this.deps.mode === 'detached' && (!this.connected || this.exitWhenIdle));
+    const idleMs = this.releaseIdleMs();
+    if (this.release === null || this.release.idleMs !== idleMs || this.release.active !== active || this.release.ignoreInterest !== this.exitWhenIdle) {
+      this.release = { idleMs, active, ignoreInterest: this.exitWhenIdle };
       this.deps.table.setIdleRelease(this.release);
     }
     if (this.exit !== null && this.leaving === null) {
@@ -138,6 +190,31 @@ export class Supervision {
       else this.clearIdle();
     }
     this.publish(false);
+  }
+
+  // The host's quiet (the header's) as its live state reads now: told at each refresh, and asked again by the collector at
+  // the moment of collecting.
+  quiet(): boolean {
+    return this.serving && this.settled && this.leaving === null && !this.stopping && !this.deps.plugins.busy()
+      && !this.deps.table.interested() && !this.deps.table.launching()
+      && this.deps.table.list().every((row) => row.lifecycle === 'exited' || isIdleRow(row.status(), NO_STATEFUL));
+  }
+
+  private tellQuiet(): void {
+    const collector = this.deps.collector;
+    if (!collector) return;
+    const live = this.deps.table.list().filter((row) => row.lifecycle !== 'exited').length;
+    const ended = live < this.live;
+    this.live = live;
+    if (!this.serving || !this.settled) return;
+    const quiet = this.quiet();
+    collector.set(quiet);
+    if (quiet && ended) collector.dropped();
+  }
+
+  // P5 O2 M2: a laptop releases after the idle exit's time (the app's setting, null for never), a server after 24 hours
+  private releaseIdleMs(): number | null {
+    return this.deps.role === 'server' ? SERVER_RELEASE_MS : this.idleExitMs;
   }
 
   private armIdle(idleExitMs: number): void {
@@ -172,6 +249,7 @@ export class Supervision {
   private leave(reason: SupervisorExit): void {
     this.clearIdle();
     this.leaving = reason;
+    this.tellQuiet();
     this.publish(false);
     this.exit?.(reason);
   }

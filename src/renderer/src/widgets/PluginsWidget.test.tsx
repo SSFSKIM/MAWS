@@ -8,14 +8,17 @@ import { join } from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import type { EventName, MawsBridge } from '@shared/ipc/schema';
+import type { EventName, PreloadBridge } from '@shared/ipc/schema';
 import type { Availability } from '@shared/ipc/schema/session';
 import type { InstalledPlugin, ManifestItemRef, PluginManifestView, PluginsOperationEvent } from '@shared/ipc/schema/plugins';
 import { commandLine } from '@shared/plugins/cli';
 import { digest, project as projectRecord, record } from '../../../../test/support/builders';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { ipc } from '../ipc/client';
 import { registerFocusTarget } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
 import { useBuiltInMods, type BuiltInModsState } from './plugins/builtin-mods';
@@ -36,7 +39,10 @@ const mods = vi.hoisted(() => ({ hook: null as unknown as BuiltInModsState }));
 vi.mock('./plugins/builtin-mods', () => ({ useBuiltInMods: vi.fn() }));
 
 const ROOT = join(__dirname, '../../../..');
-const ID = 'app-7412a115' as AppSessionId;
+// P5 O6 M2: the backend is main (bare ids); the page holds the address
+const BARE = 'app-7412a115' as AppSessionId;
+const ID = at(BARE);
+const lifted = (status: EngineSessionStatus): EngineSessionStatus => ({ ...status, appSessionId: at(status.appSessionId) });
 const HOME = '/tmp/e8-scratch/claude-config';
 const BINARY = '/Users/me/.local/share/claude/versions/2.1.290';
 const GLOBAL = '/Users/me/.claude.json'; // beside ~/.claude when no CLAUDE_CONFIG_DIR: used verbatim, never derived from HOME
@@ -104,7 +110,7 @@ function standIn() {
   backend.script('plugins.manifest', (input) => ({ manifests: (input as { items: ManifestItemRef[] }).items.map((key) => manifestOf(key)) }));
   const base = backend.bridge();
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
-  const bridge: MawsBridge = {
+  const bridge: PreloadBridge = {
     ...base,
     on(name, listener) {
       if (!name.startsWith('plugins.') && !name.startsWith('catalog.')) return base.on(name, listener);
@@ -121,7 +127,7 @@ function standIn() {
 
 beforeEach(() => {
   backend = createWidgetBackend({ root: ROOT, statuses: loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json')).engine });
-  cwd = backend.status(ID).cwd;
+  cwd = backend.status(BARE).cwd;
   standIn();
   mods.hook = NO_MODS();
   vi.mocked(useBuiltInMods).mockImplementation(() => mods.hook);
@@ -137,7 +143,7 @@ afterEach(() => {
   useDiscoverRequest.setState({}, true);
   useReadLoads.setState({ loads: new Map() });
   useLibraryStore.setState(useLibraryStore.getInitialState());
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: unknown }).maws;
 });
 
 const mount = () =>
@@ -177,7 +183,7 @@ const argvShown = () => {
 const resolved = () => waitFor(() => expect(sheet().querySelector('[data-plugins-argv], [data-plugins-details]')).toBeTruthy());
 const event = (over: Partial<PluginsOperationEvent> & Pick<PluginsOperationEvent, 'opId' | 'phase'>): PluginsOperationEvent => ({ action: 'install', target: 'e8-probe@e8-scratch', ...over });
 const ready = async () => {
-  useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+  useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
   mount();
   await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
   await waitFor(() => expect(invoked('marketplaces.list').length).toBeGreaterThan(0));
@@ -193,7 +199,7 @@ const addOn = (name: string) => fireEvent.click(within(card(name)).getByRole('bu
 // Customize's library for the stand-in's cwd, Discover beside My items, with the window's catalog.changed listener.
 const discoverLibrary = (client: QueryClient, appSessionId: AppSessionId | null = null) => {
   connected?.();
-  connected = connectCatalogEvents(window.maws, client);
+  connected = connectCatalogEvents(ipc, client);
   return (
     <QueryClientProvider client={client}>
       <PluginsLibrary cwd={cwd} appSessionId={appSessionId} discover={{ cwd }} />
@@ -290,7 +296,7 @@ describe('plugins library: embedded and offline', () => {
     const launcher = document.createElement('button');
     document.body.append(launcher);
     launcher.focus();
-    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+    useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
     render(library(cwd, ID));
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
     expect(document.activeElement).toBe(launcher);
@@ -307,7 +313,7 @@ describe('plugins library: embedded and offline', () => {
     expect(focusEditor).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Reload plugins' }));
     await waitFor(() => expect(invoked('session.reloadPlugins')).toHaveLength(1));
-    act(() => useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]) }));
+    act(() => useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), process: 'exited' }]]) }));
     await waitFor(() => expect(screen.getByText(/unavailable without a running session/)).toBeTruthy());
     expect(document.querySelector('[data-dormant-gesture]')).toBeNull();
     expect(screen.queryByRole('button', { name: /Load now|Refresh|Reload plugins/ })).toBeNull();
@@ -317,10 +323,11 @@ describe('plugins library: embedded and offline', () => {
   });
 
   it('keeps a cwd operation, Stop and its follow-up confirmation through exit and a new attachment', async () => {
-    const nextId = 'app-9a1d4262' as AppSessionId;
+    const nextBare = 'app-9a1d4262' as AppSessionId;
+    const nextId = at(nextBare);
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const content = (appSessionId: AppSessionId | null) => <QueryClientProvider client={client}><PluginsLibrary cwd={cwd} appSessionId={appSessionId} /></QueryClientProvider>;
-    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+    useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
     const view = render(content(ID));
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
     menu('e8-probe@e8-scratch', 'Update');
@@ -328,7 +335,7 @@ describe('plugins library: embedded and offline', () => {
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Update' }));
     await waitFor(() => expect(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Stop' })).toBeTruthy());
 
-    act(() => useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]) }));
+    act(() => useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), process: 'exited' }]]) }));
     expect(screen.getByText(/unavailable without a running session/)).toBeTruthy();
     expect(within(row('e8-probe@e8-scratch')).getByRole('status').textContent).toBe('Working…');
     act(() => emit('plugins.operation', event({ opId: 'pop-1', action: 'update', phase: 'output', line: 'Updating the plugin…' })));
@@ -336,7 +343,7 @@ describe('plugins library: embedded and offline', () => {
     fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Stop' }));
     await waitFor(() => expect(invoked('plugins.cancel')).toEqual([{ opId: 'pop-1' }]));
     view.rerender(content(null));
-    act(() => useSessions.setState({ engine: new Map([[nextId, backend.status(nextId)]]) }));
+    act(() => useSessions.setState({ engine: new Map([[nextId, lifted(backend.status(nextBare))]]) }));
     view.rerender(content(nextId));
     expect(loadedLine()).toBeTruthy();
     expect(within(row('e8-probe@e8-scratch')).getByRole('status').textContent).toBe('Updating the plugin…');
@@ -356,10 +363,11 @@ describe('plugins library: embedded and offline', () => {
   });
 
   it('keeps Discover’s detail and a pending sheet at its chosen scope when the ready attachment changes', async () => {
-    const nextId = 'app-9a1d4262' as AppSessionId;
+    const nextBare = 'app-9a1d4262' as AppSessionId;
+    const nextId = at(nextBare);
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const content = (appSessionId: AppSessionId | null) => discoverLibrary(client, appSessionId);
-    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+    useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
     const view = render(content(ID));
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
     await toDiscover();
@@ -370,12 +378,12 @@ describe('plugins library: embedded and offline', () => {
     await resolved();
     fireEvent.click(within(sheet()).getByRole('radio', { name: 'Project' }));
 
-    act(() => useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]) }));
+    act(() => useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), process: 'exited' }]]) }));
     expect(sheet()).toBeTruthy();
     expect(within(sheet()).getByText('No running session to reload')).toBeTruthy();
     expect(within(sheet()).getByRole('radio', { name: 'Project' })).toHaveProperty('checked', true);
     view.rerender(content(null));
-    act(() => useSessions.setState({ engine: new Map([[nextId, backend.status(nextId)]]) }));
+    act(() => useSessions.setState({ engine: new Map([[nextId, lifted(backend.status(nextBare))]]) }));
     view.rerender(content(nextId));
     expect(detail()?.getAttribute('data-catalog-detail')).toBe(offers[0].id);
     expect(within(sheet()).getByRole('radio', { name: 'Project' })).toHaveProperty('checked', true);
@@ -435,7 +443,7 @@ describe('plugins widget: loaded in this session and the reloads', () => {
 
   it('Reload skills runs reload_skills and says how many skills the engine now offers', async () => {
     backend.script('session.reloadSkills', () => {
-      setTimeout(() => backend.emitOperation({ appSessionId: ID, opId: 'op-skills', command: 'session.reloadSkills', late: false, outcome: { ok: true, value: { skills: [{ name: 'e8-probe:e8-hello' }, { name: 'review' }] } } }), 0);
+      setTimeout(() => backend.emitOperation({ appSessionId: BARE, opId: 'op-skills', command: 'session.reloadSkills', late: false, outcome: { ok: true, value: { skills: [{ name: 'e8-probe:e8-hello' }, { name: 'review' }] } } }), 0);
       return { opId: 'op-skills' };
     });
     await ready();
@@ -449,7 +457,7 @@ describe('plugins widget: loaded in this session and the reloads', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reload plugins' }));
     await waitFor(() => expect(screen.getByText('reload_plugins unanswered after 60 s · timeout').className).toContain('text-danger'));
     expect(loadedLine().textContent).toContain('11 plugins loaded in this session');
-    act(() => backend.emitOperation({ appSessionId: ID, opId: 'op-1', command: 'session.reloadPlugins', late: true, outcome: { ok: true, value: { commands: [], agents: [], plugins: [], mcpServers: [], error_count: 0 } } }));
+    act(() => backend.emitOperation({ appSessionId: BARE, opId: 'op-1', command: 'session.reloadPlugins', late: true, outcome: { ok: true, value: { commands: [], agents: [], plugins: [], mcpServers: [], error_count: 0 } } }));
     await waitFor(() => expect(screen.getByText('Applied after all')).toBeTruthy());
   });
 
@@ -464,7 +472,7 @@ describe('plugins widget: loaded in this session and the reloads', () => {
 
   // P2-A (its §5.5 to §5.7): the line reads A's observed facts and availability; Refresh is A's
   const exited = (over: Parameters<typeof record>[1] = {}, availability: Availability = 'resumable') =>
-    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]), records: new Map([[ID, record(ID, { directory: cwd, ...over })]]), digests: new Map([[ID, digest(ID, { availability })]]) });
+    useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), process: 'exited' }]]), records: new Map([[ID, record(ID, { directory: cwd, ...over })]]), digests: new Map([[ID, digest(ID, { availability })]]) });
   const starts = () => backend.calls.map((c) => c.command).filter((command) => /^session\.(acquire|start|resume|launch)/.test(command));
 
   it('on an exited session starts nothing, offers no reload, lists the plugins it last reported as loaded last time, with Refresh, and still manages plugins through the CLI', async () => {
@@ -485,15 +493,15 @@ describe('plugins widget: loaded in this session and the reloads', () => {
   it('Refresh on an exited session acquires it for a read, then reloads its plugins: the line reads Loaded now', async () => {
     exited();
     backend.script('session.acquire', () => {
-      setTimeout(() => act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: backend.status(ID) })), 0);
-      return new Promise((resolve) => setTimeout(() => resolve({ status: 'ready', appSessionId: ID, launched: true, joined: false }), 5));
+      setTimeout(() => act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.status(BARE)) }, TEST_MACHINE)), 0);
+      return new Promise((resolve) => setTimeout(() => resolve({ status: 'ready', appSessionId: BARE, launched: true, joined: false }), 5));
     });
     mount();
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
     fireEvent.click(within(loadedLine()).getByRole('button', { name: 'Refresh' }));
     expect(loadedLine().textContent).toContain('Starting…');
     await waitFor(() => expect(backend.calls.filter((c) => c.subtype === 'reload_plugins')).toHaveLength(1));
-    expect(invoked('session.acquire')).toEqual([{ appSessionId: ID, reason: 'read' }]);
+    expect(invoked('session.acquire')).toEqual([{ appSessionId: BARE, reason: 'read' }]);
     await waitFor(() => expect(loadedLine().textContent).toContain('Loaded now'));
     expect(screen.getByRole('button', { name: 'Reload plugins' })).toBeTruthy();
   });
@@ -501,8 +509,8 @@ describe('plugins widget: loaded in this session and the reloads', () => {
   it('Refresh says a reload the host refused, and a reload that failed after the start, on the line', async () => {
     const acquireReady = () =>
       backend.script('session.acquire', () => {
-        act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: backend.status(ID) }));
-        return { status: 'ready', appSessionId: ID, launched: true, joined: false };
+        act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.status(BARE)) }, TEST_MACHINE));
+        return { status: 'ready', appSessionId: BARE, launched: true, joined: false };
       });
     exited();
     acquireReady();
@@ -551,10 +559,10 @@ describe('plugins widget: loaded in this session and the reloads', () => {
   it('a ready process that has not reported its plugins yet (a start with no turn), with nothing observed before, says Not observed yet in the line and the detail', async () => {
     // the engine reports no plugins until its first system/init: nothing was observed, so nothing reads as loaded now
     backend.script('session.observedFacts', () => null);
-    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'ready', plugins: [], pluginErrors: [], pluginWarnings: [], pluginsObservedAt: null }]]) });
+    useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), process: 'ready', plugins: [], pluginErrors: [], pluginWarnings: [], pluginsObservedAt: null }]]) });
     mount();
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
-    await waitFor(() => expect(invoked('session.observedFacts')).toEqual([{ appSessionId: ID }]));
+    await waitFor(() => expect(invoked('session.observedFacts')).toEqual([{ appSessionId: BARE }]));
     expect(loadedLine().textContent).toContain('Not observed yet');
     expect(loadedLine().textContent).not.toContain('loaded in this session');
     expect(loadedLine().textContent).not.toContain('Loaded now');
@@ -566,9 +574,9 @@ describe('plugins widget: loaded in this session and the reloads', () => {
   it('Show › Loaded in this session with nothing observed says it is unknown, never that nothing matches (scale review D scalpel-2#1)', async () => {
     backend.script('session.observedFacts', () => null);
     useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, filter: 'loaded' } }));
-    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'ready', plugins: [], pluginErrors: [], pluginWarnings: [], pluginsObservedAt: null }]]) });
+    useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), process: 'ready', plugins: [], pluginErrors: [], pluginWarnings: [], pluginsObservedAt: null }]]) });
     mount();
-    await waitFor(() => expect(invoked('session.observedFacts')).toEqual([{ appSessionId: ID }]));
+    await waitFor(() => expect(invoked('session.observedFacts')).toEqual([{ appSessionId: BARE }]));
     const unknown = await waitFor(() => within(section('my-items')).getByText('What this session loaded is not observed yet.'));
     expect(within(section('my-items')).queryByText('Nothing matches these filters.')).toBeNull();
     fireEvent.click(within(unknown.closest<HTMLElement>('[role="status"]')!).getByRole('button', { name: 'Show all plugins' }));
@@ -577,7 +585,7 @@ describe('plugins widget: loaded in this session and the reloads', () => {
   });
 
   it('a ready process whose report lists only a problem still counts it, loaded now', async () => {
-    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'ready', plugins: [], pluginErrors: [{ plugin: 'd', type: 'load', message: 'bad manifest', path: null }], pluginWarnings: [] }]]) });
+    useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), process: 'ready', plugins: [], pluginErrors: [{ plugin: 'd', type: 'load', message: 'bad manifest', path: null }], pluginWarnings: [] }]]) });
     mount();
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
     expect(loadedLine().textContent).toContain('0 plugins loaded in this session');
@@ -590,7 +598,7 @@ describe('plugins widget: loaded in this session and the reloads', () => {
     useSessions.setState({ records: new Map([[ID, record(ID, { directory: cwd })]]), digests: new Map([[ID, digest(ID, { availability: 'resumable' })]]) });
     mount();
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
-    await waitFor(() => expect(invoked('session.observedFacts')).toEqual([{ appSessionId: ID }]));
+    await waitFor(() => expect(invoked('session.observedFacts')).toEqual([{ appSessionId: BARE }]));
     expect(loadedLine().textContent).toBe('Not observed yetRefresh');
     expect(screen.queryByText(/not running|loaded no plugins/)).toBeNull();
     expect(starts()).toEqual([]);
@@ -602,7 +610,7 @@ describe('plugins widget: loaded in this session and the reloads', () => {
       if (refuse) throw new WidgetBackendError({ code: 'internal', message: 'Path does not exist: /nope' });
       return { plugins: installed };
     });
-    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+    useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
     mount();
     const alert = await waitFor(() => screen.getByRole('alert'));
     expect(alert.textContent).toContain("Couldn't load your plugins.");
@@ -617,8 +625,8 @@ describe('plugins widget: loaded in this session and the reloads', () => {
 describe('plugins widget: management', () => {
   it('lists installed plugins and reads no catalogue; Open Discover opens Customize › Plugins › Discover for the session’s directory, its project’s page here, and closes', async () => {
     const close = vi.fn();
-    const project = 'project-e8' as ProjectId;
-    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]), projects: new Map([[project, projectRecord(project, 0, { directory: cwd })]]) });
+    const project = at('project-e8' as ProjectId);
+    useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]), projects: new Map([[project, projectRecord(project, 0, { directory: cwd })]]) });
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <PluginsWidget appSessionId={ID} args="" close={close} />
@@ -652,10 +660,10 @@ describe('plugins widget: management', () => {
     ['a directory no project owns', (base: string) => join(base, 'loose'), false],
   ] as const) {
     it(`Open Discover from a session in ${where} opens Customize for that directory itself`, () => {
-      const project = 'project-e8' as ProjectId;
+      const project = at('project-e8' as ProjectId);
       const here = directoryOf(cwd);
       useSessions.setState({
-        engine: new Map([[ID, { ...backend.status(ID), cwd: here }]]),
+        engine: new Map([[ID, { ...lifted(backend.status(BARE)), cwd: here }]]),
         records: new Map([[ID, record(ID, { projectId: owned ? project : null, directory: here })]]),
         projects: new Map([[project, projectRecord(project, 0, { directory: cwd })]]),
       });
@@ -670,7 +678,7 @@ describe('plugins widget: management', () => {
     });
   }
   it('Cancel on the confirm sheet runs nothing; a card’s + runs the argument list the sheet showed, at the scope chosen', async () => {
-    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+    useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
     render(discoverLibrary(new QueryClient({ defaultOptions: { queries: { retry: false } } }), ID));
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
     await toDiscover();
@@ -706,7 +714,7 @@ describe('plugins widget: management', () => {
     act(() => emit('plugins.operation', event({ opId: 'pop-1', target: 'e8-other@e8-scratch', phase: 'reloading' })));
     expect(within(other()).getByRole('status').textContent).toBe('Reloading running sessions…');
     act(() =>
-      emit('plugins.operation', event({ opId: 'pop-1', target: 'e8-other@e8-scratch', phase: 'done', outcome: { ok: true, result: { message: 'Successfully installed plugin: e8-other@e8-scratch (scope: project)' } }, reload: { sessions: [{ appSessionId: ID, outcome: 'reflected', error: null }] } })),
+      emit('plugins.operation', event({ opId: 'pop-1', target: 'e8-other@e8-scratch', phase: 'done', outcome: { ok: true, result: { message: 'Successfully installed plugin: e8-other@e8-scratch (scope: project)' } }, reload: { sessions: [{ appSessionId: BARE, outcome: 'reflected', error: null }] } })),
     );
     expect(within(other()).getByRole('status').textContent).toBe('Successfully installed plugin: e8-other@e8-scratch (scope: project) · Reloaded in 1 session · reflected');
     // the catalog reads it installed here; the card keeps the result
@@ -776,7 +784,7 @@ describe('plugins widget: management', () => {
     await waitFor(() => expect(section('my-items').querySelector('[data-plugin-row]')).toBeNull());
     expect(within(section('my-items')).getByText('Add your first plugins')).toBeTruthy();
     act(() =>
-      emit('plugins.operation', event({ opId: 'pop-1', action: 'uninstall', phase: 'done', outcome: { ok: true, result: { message: 'Successfully uninstalled plugin: e8-probe (scope: user)' } }, reload: { sessions: [{ appSessionId: ID, outcome: 'not_reflected', error: null }] } })),
+      emit('plugins.operation', event({ opId: 'pop-1', action: 'uninstall', phase: 'done', outcome: { ok: true, result: { message: 'Successfully uninstalled plugin: e8-probe (scope: user)' } }, reload: { sessions: [{ appSessionId: BARE, outcome: 'not_reflected', error: null }] } })),
     );
     const gone = section('my-items').querySelector<HTMLElement>('[data-plugin-result="e8-probe@e8-scratch"]')!;
     expect(within(gone).getByRole('status').textContent).toBe(
@@ -1024,7 +1032,7 @@ describe('plugins widget: whole-branch review fixes', () => {
     // `plugin list` from this project reports another project's installation with this project's enabled state, so no
     // action is offered for it (E8 whole-branch review, round two; P2-B §5.4)
     installed = [plugin('e8-probe@e8-scratch', { scope: 'project', projectPath: '/work/other', enabled: false }), plugin('e8-tools@e8-scratch', { scope: 'project', projectPath: cwd, here: true, coversHere: true })];
-    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+    useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
     mount();
     await waitFor(() => expect(row('e8-tools@e8-scratch')).toBeTruthy());
     expect(row('e8-probe@e8-scratch')).toBeNull();
@@ -1132,7 +1140,7 @@ describe('plugins widget: the library', () => {
     const close = vi.fn();
     const focusEditor = vi.fn();
     const off = registerFocusTarget(ID, { focusEditor, focusFrame: () => {}, insertText: () => {} });
-    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+    useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
     const view = render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <PluginsWidget appSessionId={ID} args="" close={close} />
@@ -1183,7 +1191,7 @@ describe('plugins widget: the library', () => {
       throw new WidgetBackendError({ code: 'internal', message: 'Path does not exist: /nope' });
     });
     mods.hook = { ...NO_MODS(), read: { state: 'ready', rows: [{ id: 'maws.to-human', name: 'To-human', description: 'Agents mark what is for you', version: 1, enabled: true, source: 'maws-contract', perSession: 'inherit' }] } };
-    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+    useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
     mount();
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain("Couldn't load your plugins."));
     expect(screen.getByRole('region', { name: 'MAWS mods · Built in' }).querySelector('[data-mod-row="maws.to-human"]')).toBeTruthy();
@@ -1198,7 +1206,7 @@ describe('plugins widget: the library', () => {
 
   it('a plugin managed from several other projects names them by count, its tooltip by basenames, never a path', async () => {
     installed = [plugin('e8-probe@e8-scratch', { scope: 'project', projectPath: '/work/alpha', enabled: false }), plugin('e8-probe@e8-scratch', { scope: 'project', projectPath: '/srv/beta/', enabled: false })];
-    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+    useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
     mount();
     await waitFor(() => expect(within(section('my-items')).getByText('In this project')).toBeTruthy());
     act(() => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, filter: 'otherProjects' } })));
@@ -1210,7 +1218,7 @@ describe('plugins widget: the library', () => {
 
   it('with every installation in another project, the default view keeps In this project and says it has none', async () => {
     installed = [plugin('e8-probe@e8-scratch', { scope: 'project', projectPath: '/work/other', enabled: false })];
-    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+    useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
     mount();
     await waitFor(() => expect(within(section('my-items')).getByText('No plugins installed for this project yet.')).toBeTruthy());
     expect(within(section('my-items')).getByText('In this project')).toBeTruthy();
@@ -1227,7 +1235,7 @@ describe('plugins widget: the library', () => {
         [
           ID,
           {
-            ...backend.status(ID),
+            ...lifted(backend.status(BARE)),
             plugins: [
               { name: 'zeta-tools', path: 'builtin', source: 'zeta-tools@builtin', version: null },
               { name: 'mid-thing', path: '/cfg/plugins/cache/far/mid-thing/1.0.0', source: 'mid-thing@far', version: '1.0.0' },
@@ -1317,7 +1325,7 @@ describe('plugins widget: the detail', () => {
   });
 
   it('the switch (Customize’s), clicked on My items while its detail shows, returns to the list', async () => {
-    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+    useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
     render(discoverLibrary(new QueryClient({ defaultOptions: { queries: { retry: false } } }), ID));
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
     fireEvent.click(view('e8-probe@e8-scratch'));
@@ -1330,7 +1338,7 @@ describe('plugins widget: the detail', () => {
   });
 
   it('loaded now when the session’s list has it', async () => {
-    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), plugins: [{ name: 'e8-probe', path: '/cfg/e8-probe', source: 'e8-probe@e8-scratch', version: '0.1.0' }] }]]) });
+    useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), plugins: [{ name: 'e8-probe', path: '/cfg/e8-probe', source: 'e8-probe@e8-scratch', version: '0.1.0' }] }]]) });
     mount();
     fireEvent.click(await waitFor(() => view('e8-probe@e8-scratch')));
     expect(document.querySelector('[data-plugin-fact="loaded"]')!.textContent).toBe('Loaded in this session · Loaded now');

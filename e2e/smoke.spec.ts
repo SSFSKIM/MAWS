@@ -1,15 +1,19 @@
 // C1's end-to-end smoke (acceptance items 1 to 3 and 5; item 6 is this file run against the packaged app through
 // MAWS_E2E_EXECUTABLE). Processes are identified by pid, never by name: the host pids come from `window.maws`, the
 // shell pid from the echo test, and `app.getAppMetrics()` (evaluated in main by Playwright) ties each host pid to the
-// `serviceName` it was forked with.
+// `serviceName` it was forked with on the utility shape (P5 O3-B: on the daemon shape the hosts are `mawsd`'s).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type ElectronApplication, type Page } from '@playwright/test';
 import { collectConsoleErrors, REPO_ROOT, test } from './support/launch';
-import { SETTINGS_DEFAULTS_V19 } from '../src/shared/settings/defaults';
+import { clientSettingsDefaults } from '../src/shared/settings/defaults';
 
 const LIGHT_BG = 'rgb(250, 249, 246)'; // #faf9f6, light `--bg`
 const DARK_BG = 'rgb(19, 19, 19)'; // #131313, dark `--bg`
+
+// P5 O3-B: item 1 times the window's own start from `launchedAt`, which the launch's wait for the daemon shape's engine
+// host would count.
+test.use({ mawsHostReady: false });
 
 test('preload bundle has no external runtime imports', () => {
   // A sandboxed preload's `require` loads only a few Electron built-ins, so anything but `electron` would leave
@@ -61,9 +65,18 @@ test('MAWS opens light, hosts answer, pty echoes, survives reload and window clo
   const mainPid = await app.evaluate(() => process.pid);
   expect(new Set([mainPid, enginePid, ptyPid]).size, 'main, engine host and pty host are three processes').toBe(3);
 
+  // P5 O3-B: on the daemon shape (`host.status`, the shape the owner's app runs) both hosts are the profile's `mawsd`'s,
+  // which main reaches through its relay: outside the app's metrics, and outliving the app (below). The utility shape
+  // forks them as the app's own Utility processes, each under its serviceName.
+  const status = await page.evaluate(() => window.maws.invoke('host.status', undefined));
+  const daemon = status.ok && status.value.transport === 'daemon';
   const metrics = await app.evaluate(({ app }) => app.getAppMetrics().map(({ pid, type, name }) => ({ pid, type, name })));
-  expect(metrics.find((metric) => metric.pid === enginePid)).toEqual({ pid: enginePid, type: 'Utility', name: 'maws-engine-host' });
-  expect(metrics.find((metric) => metric.pid === ptyPid)).toEqual({ pid: ptyPid, type: 'Utility', name: 'maws-pty-host' });
+  if (daemon) {
+    expect(metrics.filter((metric) => metric.pid === enginePid || metric.pid === ptyPid), 'the hosts are the daemon’s, not the app’s').toEqual([]);
+  } else {
+    expect(metrics.find((metric) => metric.pid === enginePid)).toEqual({ pid: enginePid, type: 'Utility', name: 'maws-engine-host' });
+    expect(metrics.find((metric) => metric.pid === ptyPid)).toEqual({ pid: ptyPid, type: 'Utility', name: 'maws-pty-host' });
+  }
 
   // The utility entries resolve and answer (inside app.asar when packaged).
   const pings = await page.evaluate(async () => ({ engine: await window.maws.invoke('engine.ping', undefined), pty: await window.maws.invoke('pty.ping', undefined) }));
@@ -117,13 +130,20 @@ test('MAWS opens light, hosts answer, pty echoes, survives reload and window clo
   expect(dark).toMatchObject({ ok: true, value: { settings: { theme: 'dark' }, resolvedTheme: 'dark' } });
   await expect(reopened.locator('html')).toHaveAttribute('data-theme', 'dark');
   await expect.poll(() => reopened.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(DARK_BG);
-  expect(JSON.parse(readFileSync(join(maws.userData, 'settings.json'), 'utf8'))).toEqual({ ...SETTINGS_DEFAULTS_V19, theme: 'dark' });
+  expect(JSON.parse(readFileSync(join(maws.userData, 'settings.json'), 'utf8'))).toEqual({ ...clientSettingsDefaults(), theme: 'dark' }); // P5 O3-A: the client file
 
   expect(maws.consoleErrors(), 'the console stays free of errors, first load included').toEqual([]);
   expect(reopenedConsoleErrors(), 'the re-created window\'s console stays free of errors').toEqual([]);
 
-  // Clean exit: within five seconds of close, both hosts and the shell are gone.
+  // Clean exit: within five seconds of close, both hosts and the shell are gone. On the daemon shape the quit stops
+  // nothing (P5 O3-D Q1, D12: no stop-all, no question): the engine host, the pty host and its shell keep running under
+  // `mawsd`, the sessions and terminals outliving the app; `mawsd`'s idle clock parks the engine host only after the idle
+  // time (D38: 10 min; e2e:supervisor-daemon (a) proves the park with its idle seam set). The launch's cleanup ends them.
   await app.close();
+  if (daemon) {
+    expect([enginePid, ptyPid, shellPid].filter((pid) => !isAlive(pid)), 'the engine host, the pty host and its shell outlive the app').toEqual([]);
+    return;
+  }
   await expect
     .poll(() => [enginePid, ptyPid, shellPid].filter(isAlive), { timeout: 5_000, message: 'host and shell pids still alive after close' })
     .toEqual([]);

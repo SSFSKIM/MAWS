@@ -13,8 +13,9 @@ import { createDocument } from '@artifacts/document/tabs';
 import { addThread } from '@artifacts/document/threads';
 import type { ArtifactHost } from '@artifacts/host';
 import { yUndoPluginKey } from '@artifacts/yjs/prosemirror';
-import type { CommandName, MawsBridge } from '@shared/ipc/schema';
+import type { CommandName, MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../../test/support/fake-client';
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { adoptStagedArtifactEditorState, artifactEditorFor, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors, stageArtifactEditorState } from '../../artifacts/registry';
 import { resetMarkupSurfaces } from '../../markup/surface';
 import { EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
@@ -28,7 +29,7 @@ import { installResizeObserver } from '../../test-support/resize';
 
 const A = '0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e';
 const panel: EditorHostScope = { surface: 'panel', tabId: 'panel-tab-1' };
-const main: EditorHostScope = { surface: 'main', tabId: `artifact:${A}` };
+const main: EditorHostScope = { surface: 'main', tabId: `artifact:${TEST_MACHINE}:${A}` };
 
 let memory: MemoryDocumentHost;
 let off = () => {};
@@ -40,7 +41,7 @@ beforeEach(() => {
   resetEditorHosts();
   resetMarkupSurfaces();
   resetArtifactEditors();
-  window.maws = fakeClient({ 'session.intent.get': null }).client;
+  window.maws = fakeClient({ 'session.intent.get': null }).client as unknown as PreloadBridge;
   memory = new MemoryDocumentHost();
   memory.write((doc) => createDocument(doc, { title: 'Launch plan' }));
   off = registerDocumentEditor(deps);
@@ -80,7 +81,7 @@ const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 40))
 
 function deps(): DocumentTabDeps {
   const ipc: Pick<MawsBridge, 'invoke' | 'on'> = {
-    invoke: (async (name: CommandName) => ({ ok: true, value: name === 'artifacts.get' ? { artifact: { id: A, kind: 'document', title: 'Launch plan', lastViewedAt: null, revision: 1 } } : name === 'artifacts.versions' ? { versions: [] } : undefined })) as MawsBridge['invoke'],
+    invoke: (async (name: CommandName) => ({ ok: true, value: name === 'artifacts.get' ? { artifact: { id: A, kind: 'document', title: 'Launch plan', lastViewedAt: null, revision: 1 } } : name === 'artifacts.versions' ? { versions: [] } : undefined })) as unknown as MawsBridge['invoke'],
     on: (() => () => {}) as MawsBridge['on'],
   };
   const host = {

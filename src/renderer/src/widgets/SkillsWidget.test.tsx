@@ -7,11 +7,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { EngineSessionStatus } from '@shared/engine/status';
 import type { InstalledPlugin } from '@shared/ipc/schema/plugins';
 import { digest, record } from '../../../../test/support/builders';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { registerFocusTarget, resetComposerStore } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
 import { useLibraryStore } from './plugins/library-store';
@@ -19,7 +20,10 @@ import { useReadLoads } from './read';
 import { SkillsWidget } from './SkillsWidget';
 
 const ROOT = join(__dirname, '../../../..');
-const ID = 'app-7412a115' as AppSessionId;
+// P5 O6 M2: the backend is main (bare ids); the page holds the address
+const BARE = 'app-7412a115' as AppSessionId;
+const ID = at(BARE);
+const lifted = (status: EngineSessionStatus): EngineSessionStatus => ({ ...status, appSessionId: at(status.appSessionId) });
 let backend: WidgetBackend;
 let cwd: string;
 
@@ -54,12 +58,12 @@ const installed = (): InstalledPlugin => ({
 
 beforeEach(() => {
   backend = createWidgetBackend({ root: ROOT, statuses: loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json')).engine });
-  cwd = backend.status(ID).cwd;
+  cwd = lifted(backend.status(BARE)).cwd;
   backend.script('plugins.list', () => ({ plugins: [installed()] }));
   backend.script('marketplaces.list', () => ({ marketplaces: [{ name: 'claude-plugins-official', source: 'github', locator: 'anthropics/claude-plugins-official', installLocation: '/cfg/plugins/marketplaces/claude-plugins-official' }] }));
   backend.script('plugins.manifest', () => ({ manifests: [] }));
   window.maws = backend.bridge();
-  useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+  useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
 });
 afterEach(() => {
   cleanup();
@@ -67,7 +71,7 @@ afterEach(() => {
   useReadLoads.setState({ loads: new Map() });
   useLibraryStore.setState(useLibraryStore.getInitialState());
   resetComposerStore();
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: unknown }).maws;
 });
 
 const mount = (close: () => void = () => {}) =>
@@ -86,7 +90,7 @@ const opened = async () => {
 describe('skills widget: Reload', () => {
   it('runs reload_skills, says how many skills the engine offers, and reads the dialog again', async () => {
     backend.script('session.reloadSkills', () => {
-      setTimeout(() => backend.emitOperation({ appSessionId: ID, opId: 'op-skills', command: 'session.reloadSkills', late: false, outcome: { ok: true, value: { skills: [{ name: 'e8-probe:e8-hello', description: 'Say hello' }] } } }), 0);
+      setTimeout(() => backend.emitOperation({ appSessionId: BARE, opId: 'op-skills', command: 'session.reloadSkills', late: false, outcome: { ok: true, value: { skills: [{ name: 'e8-probe:e8-hello', description: 'Say hello' }] } } }), 0);
       return { opId: 'op-skills' };
     });
     mount();
@@ -95,13 +99,13 @@ describe('skills widget: Reload', () => {
     const before = reads();
     fireEvent.click(screen.getByRole('button', { name: 'Reload skills' }));
     await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Reloaded · 1 skill'));
-    expect(backend.calls.filter((c) => c.command === 'session.reloadSkills').map((c) => c.input)).toEqual([{ appSessionId: ID }]);
+    expect(backend.calls.filter((c) => c.command === 'session.reloadSkills').map((c) => c.input)).toEqual([{ appSessionId: BARE }]);
     await waitFor(() => expect(reads()).toBe(before + 1));
   });
 
   it('shows a failed reload in red in the operation’s words', async () => {
     backend.script('session.reloadSkills', () => {
-      setTimeout(() => backend.emitOperation({ appSessionId: ID, opId: 'op-skills', command: 'session.reloadSkills', late: false, outcome: { ok: false, error: { code: 'engine_error', message: 'reload_skills failed', engineCode: null } } }), 0);
+      setTimeout(() => backend.emitOperation({ appSessionId: BARE, opId: 'op-skills', command: 'session.reloadSkills', late: false, outcome: { ok: false, error: { code: 'engine_error', message: 'reload_skills failed', engineCode: null } } }), 0);
       return { opId: 'op-skills' };
     });
     mount();
@@ -236,11 +240,11 @@ describe('skills widget: states', () => {
 
   // P2-A's dormant state (§5.10; A §5.6) through the frame: opening reads and starts nothing; Load now acquires for a read
   it('an exited session shows Not read yet with Load now and starts nothing until it is clicked; then the skills are read', async () => {
-    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]), records: new Map([[ID, record(ID, { directory: cwd })]]), digests: new Map([[ID, digest(ID, { availability: 'resumable' })]]) });
+    useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), process: 'exited' }]]), records: new Map([[ID, record(ID, { directory: cwd })]]), digests: new Map([[ID, digest(ID, { availability: 'resumable' })]]) });
     backend.script('session.getSkillsDialog', () => DIALOG);
     backend.script('session.acquire', () => {
-      act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: backend.status(ID) }));
-      return { status: 'ready', appSessionId: ID, launched: true, joined: false };
+      act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.status(BARE)) }, TEST_MACHINE));
+      return { status: 'ready', appSessionId: BARE, launched: true, joined: false };
     });
     mount();
     await waitFor(() => expect(screen.getByText('Not read yet.')).toBeTruthy());
@@ -250,7 +254,7 @@ describe('skills widget: states', () => {
     expect(screen.getByRole('button', { name: 'Reload skills' })).toHaveProperty('disabled', true);
     fireEvent.click(screen.getByRole('button', { name: 'Load now' }));
     await waitFor(() => expect(screen.getByRole('region', { name: 'In this project' })).toBeTruthy());
-    expect(backend.calls.filter((c) => c.command === 'session.acquire').map((c) => c.input)).toEqual([{ appSessionId: ID, reason: 'read' }]);
+    expect(backend.calls.filter((c) => c.command === 'session.acquire').map((c) => c.input)).toEqual([{ appSessionId: BARE, reason: 'read' }]);
     expect(screen.queryByText('Not read yet.')).toBeNull();
   });
 

@@ -24,6 +24,8 @@ import { ynodeToPmnode } from '@artifacts/yjs/prosemirror';
 import { listThreads, reply } from '@artifacts/document/threads'; // P4-B1: reply
 import { nanoid8 } from '@artifacts/document/schema'; // P4-B1
 import type { AppSessionId } from '@shared/graph/ids';
+import { addressOf } from '@shared/machine/address';
+import { ipc } from '../../ipc/client';
 import { openComment } from '../../side/register';
 import { registerCommentComposer } from '../../tools/code/anchor/anchor';
 import { useDocumentComments } from '../../tools/document/comments';
@@ -31,10 +33,10 @@ import type { DocumentHarnessApi, Replica } from './api';
 import { placeCaret } from './caret';
 
 // The session a comment would go to; none exists on this page, so a card opens and composes but never sends.
-const COMMENT_SESSION = 'e0000000-0000-4000-8000-00000000d0c5' as AppSessionId;
+const COMMENT_SESSION = addressOf(ipc.localMachine, 'e0000000-0000-4000-8000-00000000d0c5' as AppSessionId); // P5 O6 M2: the local machine's
 const TITLE = 'Field notes';
 // The agent session the page writes as, and its title on author chips.
-const AGENT_SESSION = 'e0000000-0000-4000-8000-00000000a6e7' as AppSessionId;
+const AGENT_SESSION = addressOf(ipc.localMachine, 'e0000000-0000-4000-8000-00000000a6e7' as AppSessionId); // P5 O6 M2
 const AGENT: Actor = { kind: 'session', appSessionId: AGENT_SESSION };
 const OWNER: Actor = { kind: 'human' };
 

@@ -3,7 +3,6 @@
 // an `artifact` main tab `DesignMain`, each with the state `createState` made for that tab (its replica, deck session
 // and workbench view, kept until `dispose`), so the X32 header's close guard and Zoom to fit read the tab's state while
 // its body is unmounted. In a window main loaded for the e2e harness the design's seam is installed with it.
-import type { AppSessionId } from '@shared/graph/ids';
 import { artifactHost } from '../../artifacts';
 import { e2eRequested } from '../../artifacts/e2e-seam';
 import { ipc } from '../../ipc/client';
@@ -15,13 +14,14 @@ import { handCommentCardOver } from '../document/comments'; // P4-B2
 import { DesignMain, DesignPanel } from './DesignBody';
 import { installDesignSeam } from './e2e-seam';
 import { DesignTabState, type DesignTabDeps } from './tab-state';
+import { storedSessionOnPage } from '../../ipc/machine';
 
 const windowDeps = (): DesignTabDeps => ({
   host: artifactHost(),
   log: (line) => console.warn(`[design] ${line}`),
   ipc,
   sessionTitle: (appSessionId) => {
-    const record = useSessions.getState().records.get(appSessionId as AppSessionId);
+    const record = useSessions.getState().records.get(storedSessionOnPage(appSessionId)); // P5 O6 M2: the artifact holds main's bare id
     return record ? displayTitle(record) : undefined;
   },
   confirmDiscard: (title, about) =>

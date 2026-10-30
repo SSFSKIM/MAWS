@@ -12,10 +12,10 @@ import { BrowserWindow, dialog, nativeImage } from 'electron';
 import type { ImportedProfile } from '@shared/browser/profiles';
 import type { BrowserSettings } from '@shared/ipc/schema/settings';
 import { openDialogFor } from '../../client/e2e-pick';
-import type { Index } from '../../index/index';
 import type { registerMainHandler } from '../../ipc/router';
 import { registerBookmarkHandlers } from '../bookmarks/register';
 import { BookmarkSync } from '../bookmarks/sync';
+import type { BrowserData } from '../data';
 import type { ExtensionUi } from '../extensions';
 import type { Partitions } from '../partition';
 import type { BrowserEmit, TabStore } from '../tabs';
@@ -45,7 +45,7 @@ declare global {
 export interface BrowserImportDeps {
   userData: string;
   settings(): Pick<BrowserSettings, 'profile'>; // the active profile, whose extensions load at boot
-  index: Pick<Index, 'browserHistory' | 'browserBookmarks' /* cua #90 */>;
+  data: Pick<BrowserData, 'history' | 'bookmarks' /* cua #90 */>; // P5 O3-A: the browser's own database (../data/)
   register: typeof registerMainHandler;
   emit: BrowserEmit;
   env: NodeJS.ProcessEnv;
@@ -64,7 +64,7 @@ export interface BrowserImport {
   onPartitionPrepared(ses: Electron.Session, partition: string): void;
 }
 
-export function startBrowserImport({ userData, settings, index, register, emit, env, browser, profiles, chooseDirectory = nativeChooser(env) }: BrowserImportDeps): BrowserImport {
+export function startBrowserImport({ userData, settings, data, register, emit, env, browser, profiles, chooseDirectory = nativeChooser(env) }: BrowserImportDeps): BrowserImport {
   const announce = () => {
     try {
       emit('browser.import.changed', { profiles: profiles.list() });
@@ -77,20 +77,20 @@ export function startBrowserImport({ userData, settings, index, register, emit, 
     userData,
     env,
     partitions: browser.partitions,
-    history: index.browserHistory,
+    history: data.history,
     profiles,
     emit,
     keychain: (signal) => readSafeStorageKey({ env, signal }),
     createImportView,
     extensions: extensions.importExtensions,
-    bookmarks: index.browserBookmarks, // cua #90
+    bookmarks: data.bookmarks, // cua #90
     decodeImage: (bytes) => nativeImage.createFromBuffer(bytes), // cua #90: the avatar's picture
   });
   // cua #90: a removal under way refuses a bookmarks sync, as an import does
   let removals = 0;
   const bookmarks = new BookmarkSync({
     profiles,
-    store: index.browserBookmarks,
+    store: data.bookmarks,
     busy: () => (service.running() !== null ? 'importing' : removals > 0 ? 'removing' : null),
     emit,
     env,
@@ -104,8 +104,8 @@ export function startBrowserImport({ userData, settings, index, register, emit, 
       try {
         return await removeImportedProfile(
           {
-            userData, env, importing: () => service.running(), store: browser.store, partitions: browser.partitions, extensions, history: index.browserHistory,
-            bookmarks: index.browserBookmarks, // cua #90
+            userData, env, importing: () => service.running(), store: browser.store, partitions: browser.partitions, extensions, history: data.history,
+            bookmarks: data.bookmarks, // cua #90
             closingExtensionPages: browser.extensions && ((partition) => browser.extensions!.removing(partition)), // cua #90
             profiles,
           },
@@ -129,7 +129,7 @@ export function startBrowserImport({ userData, settings, index, register, emit, 
   // cua #90: the bookmarks mirror re-reads a profile's `Bookmarks` when its partition is prepared (the active profile's
   // just below, at boot), registered before that so the boot preparation runs it
   const unregisterBookmarks = browser.partitions.registerPreparer((ses, partition) => bookmarks.onPartitionPrepared(ses, partition));
-  registerBookmarkHandlers({ store: index.browserBookmarks, sync: bookmarks, env, register });
+  registerBookmarkHandlers({ store: data.bookmarks, sync: bookmarks, env, register });
   const stopHold = browser.store.onViewCreated((entry) => extensions.holdNewView(entry));
   // The active profile's partition is prepared now, so its extensions are loaded and their content scripts settled well
   // before the first tab opens; any other imported profile loads when a tab first needs its partition.

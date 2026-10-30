@@ -8,10 +8,16 @@ import type { ConnectorCallOutcome } from '@shared/artifacts/connectors';
 import { eventChannel, type CommandName, type EventName, type HostState } from '@shared/ipc/schema';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 import { clientOf, pageOf } from '../ipc/clients';
+import { TEST_MACHINE } from '../../../test/support/machine'; // P5 O6 M2: a main handler's ctx names its target
 import type { MainContext } from '../ipc/router';
 import { startConnectors, WINDOW_RECHECK_MS } from '.';
 import { electronWindowShown } from '../client/window-shown';
 import { CONNECTOR_OPERATION_DEADLINE_MS } from './engine-route';
+import { project, record } from '../../../test/support/builders';
+import { fakeSpineView } from '../../../test/support/fake-spine-view';
+
+// P5 O3-C (reader R8): the spine's view, holding the artifact's creator and its project
+const ownView = () => fakeSpineView({ records: [record('app-own', { projectId: 'proj' as never, directory: '/repo' })], projects: [project('proj', 0, { directory: '/repo' })] });
 
 const ART = '11111111-1111-4111-8111-111111111111';
 const FP = 'f'.repeat(64);
@@ -177,7 +183,7 @@ let handlers: Map<string, (input: unknown, context: MainContext) => unknown>;
 let service: { stop(): void };
 let me: FakeSender;
 let them: FakeSender;
-let records: Map<string, { projectId: string | null; directory: string }>;
+let view: ReturnType<typeof ownView>;
 let windows: Map<number, FakeWindow>; // by its webContents' id: the window that owns it
 let logged: string[];
 
@@ -187,13 +193,13 @@ beforeEach(() => {
   handlers = new Map();
   me = new FakeSender(7);
   them = new FakeSender(8);
-  records = new Map([['app-own', { projectId: 'proj', directory: '/repo' }]]);
+  view = ownView();
   windows = new Map([[7, new FakeWindow()], [8, new FakeWindow()]]);
   logged = [];
   service = startConnectors({
     hosts: { dispatch: fake.dispatch as never, onEvent: fake.onEvent as never, onState: fake.onState as never, onStreaming: fake.onStreaming as never, streaming: fake.streaming as never },
     register: ((name: string, handler: (input: unknown, context: MainContext) => unknown) => void handlers.set(name, handler)) as never,
-    index: { sessions: { get: (id) => records.get(id) ?? null }, projects: { list: () => [{ id: 'proj', directory: '/repo' }] } },
+    view,
     realpath: (path) => path,
     windowShown: (client) => {
       const win = windows.get(pageOf(client)?.id ?? -1);
@@ -213,7 +219,7 @@ afterEach(() => {
 async function invoke(name: CommandName, input: unknown, sender: FakeSender = me): Promise<unknown> {
   const checked = validateCommandInput(name, input);
   if (!checked.ok) throw new Error(`invalid input for ${name}`);
-  const value = await handlers.get(name)!(checked.value, { client: clientOf(sender as never) });
+  const value = await handlers.get(name)!(checked.value, { client: clientOf(sender as never), target: TEST_MACHINE });
   expect(validateCommandOutput(name, value).ok, `${name} output: ${JSON.stringify(value)}`).toBe(true);
   return value;
 }
@@ -251,7 +257,7 @@ describe('main’s connector service (P3-H H3b)', () => {
 
   it('pauses with no route, asking the host nothing about any session, when nothing names the artifact’s directory', async () => {
     fake.grants.set(JSON.stringify(['fixture', 'rows']), 'read');
-    records.clear(); // the creator's record gone
+    view.removeRecord('app-own' as never); // the creator's record gone
     fake.artifact = { ...fake.artifact, projectId: undefined };
     delete fake.artifact.projectId;
     const leaseId = await visiblePage();
@@ -503,7 +509,7 @@ describe('main’s connector service (P3-H H3b)', () => {
     expect(await answering).toEqual({ ok: false, state: 'paused', reason: 'closed' });
     await settle();
     expect(fake.dispatched.filter((entry) => entry.name === 'connectors.cancel').map((entry) => entry.input)).toEqual([{ operationId }]);
-    expect(() => handlers.get('connectors.open')!({ artifactId: ART }, { client: clientOf(me as never) })).toThrow();
+    expect(() => handlers.get('connectors.open')!({ artifactId: ART }, { client: clientOf(me as never), target: TEST_MACHINE })).toThrow();
   });
 });
 
@@ -669,7 +675,7 @@ describe('the owner window’s native visibility (P3-H H4)', () => {
     expect([win().listeners_(), windows.get(8)!.listeners_(), vi.getTimerCount()]).toEqual([0, 0, 0]);
     const late = new FakeSender(9); // a window first heard from after the stop is never followed
     windows.set(9, new FakeWindow());
-    expect(() => handlers.get('connectors.open')!({ artifactId: ART }, { client: clientOf(late as never) })).toThrow();
+    expect(() => handlers.get('connectors.open')!({ artifactId: ART }, { client: clientOf(late as never), target: TEST_MACHINE })).toThrow();
     expect(windows.get(9)!.listeners_()).toBe(0);
   });
 });

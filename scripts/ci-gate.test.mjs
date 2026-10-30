@@ -3,6 +3,7 @@
 // list goes through as it was given. The script runs whole, against a local origin and a fake `gh` that finds no run, so
 // a call that pushes ends at "no run" with its commit left on the ci/ ref (--keep) to read the trailers from.
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -10,6 +11,7 @@ import { dirname, join } from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
 import { URL, fileURLToPath } from 'node:url';
+import { planOf } from '../.github/scripts/gate-plan.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
@@ -19,6 +21,9 @@ const fakeGh = String.raw`#!/usr/bin/env bash
 printf '%s\n' "$*" >> "$(dirname "$0")/gh-calls"
 case "$*" in
   *" run list "*) ;;
+  'variable get GATE_RUNNER '*) echo pool ;;
+  'variable get GATE_E2E_RUNNER '*) echo macos ;;
+  'variable list '*) ;;
   *"repos/SSFSKIM/MAWS/actions/variables"*) echo '["GATE_RUNNER","pool"]'; echo '["GATE_E2E_RUNNER","macos"]' ;;
   *"repos/SSFSKIM/ci-kit-sandbox/issues"*) echo '{"number":18,"title":"ci-kit alert: mini: UserNotificationCenter since 2026-10-19T21:08Z"}' ;;
   *"repos/SSFSKIM/MAWS/actions/runners"*) echo '{"name":"ci-kit-mac-mini","status":"online","labels":["self-hosted","macOS","ARM64","ci-kit-mac","ci-kit-mac-solo","ci-kit-mac-home"]}' ;;
@@ -29,12 +34,12 @@ esac
 // ci-gate.sh on a one-commit tree with `args` after the tree. Returns its status and output, the gh calls, the refs the
 // origin holds and the pushed commit's message (empty when nothing was pushed). With `change`, the origin's master holds
 // a first commit of `base` (path → content) and the tested commit is `change(tree, git)` on top of it.
-function gate(args, { alerts = false, base = {}, change } = {}) {
+function gate(args, { alerts = false, base = {}, change, backlog } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'ci-gate-'));
-  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, MAWS_GATE_RUNNER: '', MAWS_GATE_IGNORE_ALERTS: alerts ? '' : '1' };
+  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, XDG_CACHE_HOME: join(dir, 'cache'), MAWS_GATE_RUNNER: '', MAWS_GATE_IGNORE_ALERTS: alerts ? '' : '1' };
   for (const role of ['AUTHOR', 'COMMITTER']) Object.assign(env, { [`GIT_${role}_NAME`]: 'ci-gate test', [`GIT_${role}_EMAIL`]: 'ci-gate@test.invalid' });
   const git = (...gitArgs) => execFileSync('git', gitArgs, { encoding: 'utf8', env }).trim();
-  let short = '';
+  let transcript = '';
   try {
     const origin = join(dir, 'origin.git');
     const tree = join(dir, 'tree');
@@ -53,12 +58,19 @@ function gate(args, { alerts = false, base = {}, change } = {}) {
       git('-C', tree, 'add', '-A');
     }
     git('-C', tree, 'commit', '--quiet', '--allow-empty', '-m', 'tested tree');
-    short = git('-C', tree, 'rev-parse', '--short=8', 'HEAD');
-    writeFileSync(join(dir, 'gh'), fakeGh);
+    let gh = fakeGh;
+    if (backlog) {
+      gh = gh.replace("'variable list '*) ;;", "'variable list '*) echo direct ;;");
+      gh = gh.replace('case "$*" in', `case "$*" in
+  'api repos/SSFSKIM/MAWS/actions/runners?'*) ${backlog === 'failed' ? 'exit 1' : `echo '${JSON.stringify({ total_count: 1, runners: [{ name: 'ci-kit-mac-ec2', status: 'online', busy: false, labels: ['self-hosted', 'macOS', 'ARM64', 'ci-kit-mac-ec2'].map((name) => ({ name })) }] })}'`} ;;
+  'api repos/'*'/actions/runs?'*) echo '{"total_count":0,"workflow_runs":[]}' ;;`);
+    }
+    writeFileSync(join(dir, 'gh'), gh);
     writeFileSync(join(dir, 'sleep'), '#!/bin/sh\n'); // the 30 polls for the run, at once
     chmodSync(join(dir, 'gh'), 0o755);
     chmodSync(join(dir, 'sleep'), 0o755);
-    const run = spawnSync('bash', [join(root, 'scripts/ci-gate.sh'), tree, ...args, '--keep'], { encoding: 'utf8', env });
+    const run = spawnSync('bash', [join(root, 'scripts/ci-gate.sh'), tree, ...args, '--keep'], { encoding: 'utf8', env, maxBuffer: 8 << 20 });
+    transcript = /^ci-gate: transcript in (.+)$/m.exec(run.stdout)?.[1] ?? '';
     const refs = git('--git-dir', origin, 'for-each-ref', '--format=%(refname)').split('\n').filter((ref) => ref && ref !== 'refs/heads/master');
     const calls = join(dir, 'gh-calls');
     return {
@@ -71,16 +83,103 @@ function gate(args, { alerts = false, base = {}, change } = {}) {
     };
   } finally {
     rmSync(dir, { recursive: true, force: true });
-    if (short) rmSync(`/tmp/maws-review/gates/ci-${short}.log`, { force: true });
+    if (transcript) rmSync(dirname(transcript), { recursive: true, force: true });
   }
 }
 
-// The trailers after the nonce, which is unique to each push.
+// Selection trailers after the unique nonce. Coverage advice (including timing) is checked separately below.
 const trailers = (message) => {
   const lines = message.trimEnd().split('\n\n').at(-1).split('\n');
   assert.match(lines[0], /^Nonce: \d+-\d+$/);
-  return lines.slice(1);
+  return lines.slice(1).filter((line) => !/^(E2E|Unit)-Coverage:/.test(line));
 };
+
+test('omitting unit warns for non-doc changes, including fixture additions, deletes and moves into docs, without refusing the push', () => {
+  const base = { 'fixtures/recording.json': '{}', 'docs/note.md': 'note' };
+  for (const [gates, change] of [
+    ['probes', (tree) => writeFileSync(join(tree, 'fixtures/new.json'), '{}')],
+    ['static,unit:darwin', (tree) => rmSync(join(tree, 'fixtures/recording.json'))],
+    ['probes', (_tree, git) => git('mv', 'fixtures/recording.json', 'docs/recording.json')],
+    ['static', (tree) => writeFileSync(join(tree, 'README.md'), 'changed')],
+  ]) {
+    const result = gate(['--gates', gates, '--peer', 'none'], { base, change });
+    assert.equal(result.refs.length, 1, result.stdout + result.stderr);
+    assert.match(result.stdout, /ci-gate: warning: unit omitted;.*outside docs\//);
+    assert.match(result.message, /^Unit-Coverage: unit omitted;.*outside docs\//m);
+    assert.deepEqual(trailers(result.message), [`Gates: ${gates}`]);
+    const planned = planOf({ HEAD_MESSAGE: result.message }, { e2e: 'playwright test' });
+    assert.match(planned.summary, /Unit-Coverage: unit omitted;/);
+    assert.equal(planned.outputs.unit, 'false');
+  }
+});
+
+test('unit coverage is quiet for docs-only or empty diffs and for unit or all selections', () => {
+  const base = { 'fixtures/recording.json': '{}', 'docs/note.md': 'note' };
+  for (const [gates, change] of [
+    ['probes', (tree) => writeFileSync(join(tree, 'docs/note.md'), 'changed')],
+    ['probes', () => {}],
+    ['static, unit, probes', (tree) => writeFileSync(join(tree, 'fixtures/new.json'), '{}')],
+    ['all', (tree) => writeFileSync(join(tree, 'fixtures/new.json'), '{}')],
+  ]) {
+    const result = gate(['--gates', gates, '--peer', 'none'], { base, change });
+    assert.equal(result.refs.length, 1, result.stdout + result.stderr);
+    assert.doesNotMatch(result.stdout + result.stderr + result.message, /unit omitted|Unit-Coverage:/);
+  }
+});
+
+test('an unreadable unit diff warns but still pushes', () => {
+  const result = gate(['--gates', 'probes', '--peer', 'none']); // no origin/master
+  assert.equal(result.refs.length, 1);
+  assert.match(result.stdout, /warning: unit coverage failed; going ahead/);
+  assert.match(result.message, /^Unit-Coverage: note: unit coverage failed; no advice available$/m);
+});
+
+test('omitted spec-import coverage warns before push and travels in the pushed commit without adding gates', () => {
+  const result = gate(['--gates', 'static', '--peer', 'none'], {
+    base: {
+      'package.json': JSON.stringify({ scripts: { e2e: 'playwright test', 'e2e:one': 'playwright test e2e/one.spec.ts' } }),
+      'playwright.config.ts': "export default { testDir: 'e2e' };",
+      'e2e/one.spec.ts': "import '../src/endpoint';",
+      'src/endpoint.ts': 'export const endpoint = 1;',
+    },
+    change(tree) { writeFileSync(join(tree, 'src/endpoint.ts'), 'export const endpoint = 2;'); },
+  });
+  assert.equal(result.status, 1); // the fake gh finds no run, but the advisory did not prevent the push
+  assert.equal(result.refs.length, 1);
+  assert.match(result.stdout, /ci-gate: warning: missing e2e:one; specs reach src\/endpoint.ts/);
+  assert.match(result.message, /^E2E-Coverage: missing e2e:one; specs reach src\/endpoint.ts$/m);
+  assert.deepEqual(trailers(result.message), ['Gates: static']);
+});
+
+test('an oversized advisory still produces a commit with bounded trailers and a truncation note', () => {
+  const scripts = { e2e: 'playwright test' };
+  for (let i = 0; i < 320; i++) scripts[`e2e:g${i}-${'x'.repeat(4000)}`] = 'playwright test e2e/one.spec.ts';
+  const result = gate(['--gates', 'static', '--peer', 'none'], {
+    base: {
+      'package.json': JSON.stringify({ scripts }),
+      'playwright.config.ts': "export default { testDir: 'e2e' };",
+      'e2e/one.spec.ts': "import '../src/endpoint';",
+      'src/endpoint.ts': 'export const endpoint = 1;',
+    },
+    change(tree) { writeFileSync(join(tree, 'src/endpoint.ts'), 'export const endpoint = 2;'); },
+  });
+  assert.equal(result.refs.length, 1, 'the advisory must not hit the OS argument limit before pushing');
+  const advice = result.message.split('\n').filter((line) => line.startsWith('E2E-Coverage:')).join('\n');
+  assert.ok(Buffer.byteLength(advice) <= 4096);
+  assert.match(advice, /truncated.*stderr/);
+  assert.equal((result.stdout.match(/ci-gate: warning: missing e2e:/g) ?? []).length, 320, 'stderr keeps the full group list');
+  assert.deepEqual(trailers(result.message), ['Gates: static']);
+});
+
+test('a failed advisory does not stop a push, and all skips coverage entirely', () => {
+  // No origin/master: the advisory cannot form its diff on this one-commit fixture.
+  const failed = gate(['--gates', 'static', '--peer', 'none']);
+  assert.equal(failed.refs.length, 1);
+  assert.match(failed.message, /^E2E-Coverage: note: spec-import coverage unavailable/m);
+  const all = gate(['--gates', 'all', '--peer', 'none']);
+  assert.equal(all.refs.length, 1);
+  assert.doesNotMatch(all.message, /^E2E-Coverage:/m);
+});
 
 test('a call that names no gates is refused with exit 2 and the two forms, before the alert check and the push', () => {
   // The landing set that meant the whole set before, and the class 1a call that queued it by accident (runs 39342833882,
@@ -89,7 +188,7 @@ test('a call that names no gates is refused with exit 2 and the two forms, befor
     const result = gate(args, { alerts: true });
     assert.equal(result.status, 2, args.join(' '));
     assert.equal(result.stderr, 'ci-gate: name the gates: --gates static,unit,probes for class 1a only, --gates all for the whole set\n');
-    assert.equal(result.stdout, '');
+    assert.equal(result.stdout, 'ci-gate: transcript: none (stopped before a run)\nci-gate: reports: none (stopped before a run)\n');
     assert.deepEqual(result.calls, []);
     assert.deepEqual(result.refs, []);
   }
@@ -114,14 +213,14 @@ test('a live call that names no gates is refused with the live form, since a liv
 test('--gates all pushes the whole set as the plan reads it: no Gates: trailer, the other flags as given', () => {
   const result = gate(['--gates', 'all', '--class1a', 'pool', '--runner', 'macos', '--evidence']);
   assert.equal(result.status, 1, result.stdout + result.stderr); // the fake gh finds no run
-  assert.match(result.stdout, /^ci-gate: [0-9a-f]{40} as ci\/gates-[0-9a-f]{8} \(Gates: all\) \(Runner: macos\) \(Class1a: pool\) \(Evidence: yes\)$/m);
+  assert.match(result.stdout, /^ci-gate: [0-9a-f]{40} as ci\/auto-gates-[A-Za-z0-9._-]+-[0-9a-f]{8} \(Gates: all\) \(Runner: macos\) \(Class1a: pool\) \(Evidence: yes\)$/m);
   assert.deepEqual(trailers(result.message), ['Runner: macos', 'Class1a: pool', 'Evidence: yes']);
 });
 
 test('--gates all reaches the alert check as the whole set, unit:darwin and the class-1 e2e groups on the Mac', () => {
   const result = gate(['--gates', 'all', '--class1a', 'pool', '--runner', 'macos'], { alerts: true });
   assert.equal(result.status, 2);
-  assert.match(result.stderr, /^ci-gate: not pushing: this run puts jobs on a Mac \(unit:darwin, the class-1 e2e groups\) /);
+  assert.match(result.stderr, /^ci-gate: not pushing: this run puts jobs on a Mac \(unit:darwin, the class-1 e2e groups\) /m);
   assert.deepEqual(result.refs, []);
 });
 
@@ -140,7 +239,7 @@ test('a list of gates goes through as given, live groups with --live too', () =>
 // ci-kit's hosted-Mac spec: `hosted` sends every eligible e2e group to GitHub's hosted Macs, `no-hosted` none.
 test('--lane vm, vm-trial, hosted or no-hosted goes through as a Lane: trailer; any other value is refused before anything is pushed', () => {
   const vm = gate(['--gates', 'e2e:document-app', '--runner', 'macos', '--lane', 'vm']);
-  assert.match(vm.stdout, /^ci-gate: [0-9a-f]{40} as ci\/gates-[0-9a-f]{8} \(Gates: e2e:document-app\) \(Runner: macos\) \(Lane: vm\)$/m);
+  assert.match(vm.stdout, /^ci-gate: [0-9a-f]{40} as ci\/auto-gates-[A-Za-z0-9._-]+-[0-9a-f]{8} \(Gates: e2e:document-app\) \(Runner: macos\) \(Lane: vm\)$/m);
   assert.deepEqual(trailers(vm.message), ['Gates: e2e:document-app', 'Runner: macos', 'Lane: vm']);
   for (const lane of ['vm-trial', 'hosted', 'no-hosted']) assert.deepEqual(trailers(gate(['--gates', 'e2e:document-app', '--lane', lane]).message), ['Gates: e2e:document-app', `Lane: ${lane}`], lane);
   for (const value of ['host', 'VM', 'vm,vm-trial', 'Hosted', 'nohosted']) {
@@ -186,10 +285,10 @@ test('--affected names the change in the subject and lists its paths, a rename w
       rmSync(dir, { recursive: true, force: true });
     }
   };
-  assert.match(plan(result.message).summary, /\nSelection: affected — full suite: a deleted non-test file \(src\/shared\/d.ts\)\n$/);
+  assert.match(plan(result.message).summary, /^Selection: affected — full suite: a deleted non-test file \(src\/shared\/d.ts\)$/m);
   const kept = plan(result.message.replace('\nAffected: D\tsrc/shared/d.ts', '').replace('Affected-Count: 4', 'Affected-Count: 3'));
   assert.match(kept.outputs, /\nrelated=\["src\/shared\/a.ts","src\/shared\/e.ts","src\/shared\/f.test.ts",/);
-  assert.match(kept.summary, /\nSelection: affected — 3 paths, unit runs vitest related\n$/);
+  assert.match(kept.summary, /^Selection: affected — 3 paths, unit runs vitest related$/m);
 });
 
 test('--affected on master\'s own tree pushes an affected subject and a zero count, with no path trailers', () => {
@@ -243,10 +342,10 @@ test('a --peer that names no commit is refused with exit 2 before the alert chec
 // will: a bump tree's class 1a gains a Mac job the mini's alert holds, its --affected iteration does not.
 test('the alert check sees the peer group a bump adds, and none for an --affected run, which goes ahead past an alert', () => {
   const own = (path) => readFileSync(join(root, path), 'utf8');
-  const planned = { ...bump, base: { ...bump.base, '.github/scripts/gate-plan.mjs': own('.github/scripts/gate-plan.mjs'), '.github/scripts/gate-affected.mjs': own('.github/scripts/gate-affected.mjs'), '.github/workflows/gate.yml': own('.github/workflows/gate.yml'), 'package.json': own('package.json') }, alerts: true };
+  const planned = { ...bump, base: { ...bump.base, '.github/scripts/gate-plan.mjs': own('.github/scripts/gate-plan.mjs'), '.github/scripts/gate-affected.mjs': own('.github/scripts/gate-affected.mjs'), '.github/scripts/gate-backlog.mjs': own('.github/scripts/gate-backlog.mjs'), '.github/workflows/gate.yml': own('.github/workflows/gate.yml'), 'package.json': own('package.json') }, alerts: true };
   const held = gate(['--gates', 'static,unit,probes', '--class1a', 'pool'], planned);
   assert.equal(held.status, 2, held.stdout + held.stderr);
-  assert.match(held.stderr, /^ci-gate: not pushing: this run puts jobs on a Mac \(e2e:cross-build\) /);
+  assert.match(held.stderr, /^ci-gate: not pushing: this run puts jobs on a Mac \(e2e:cross-build\) /m);
   assert.deepEqual(held.refs, []);
   const iteration = gate(['--gates', 'unit', '--class1a', 'pool', '--affected'], planned);
   assert.equal(iteration.status, 1, iteration.stdout + iteration.stderr); // pushed; the fake gh finds no run
@@ -268,7 +367,7 @@ test('--hosted-route writes a validated override, with no trailer when omitted',
 
 test('a direct packaged/peer admission push is not held by the mini alert', () => {
   const own = (path) => readFileSync(join(root, path), 'utf8');
-  const base = Object.fromEntries(['.github/scripts/gate-plan.mjs', '.github/scripts/gate-affected.mjs', '.github/workflows/gate.yml', 'package.json'].map((path) => [path, own(path)]));
+  const base = Object.fromEntries(['.github/scripts/gate-plan.mjs', '.github/scripts/gate-affected.mjs', '.github/scripts/gate-backlog.mjs', '.github/workflows/gate.yml', 'package.json'].map((path) => [path, own(path)]));
   base['.github/workflows/gate.yml'] = base['.github/workflows/gate.yml'].replace("HOSTED_MAC_JOBS: ''", 'HOSTED_MAC_JOBS: packaged');
   const result = gate(['--gates', 'packaged,e2e:cross-build', '--runner', 'macos', '--lane', 'hosted', '--hosted-route', 'direct', '--peer', 'none'], { alerts: true, base, change: () => {} });
   assert.equal(result.status, 1, result.stdout + result.stderr);
@@ -278,10 +377,31 @@ test('a direct packaged/peer admission push is not held by the mini alert', () =
 
 test('the reserved final push ref keeps direct packaged on the Mac in the alert preflight', () => {
   const own = (path) => readFileSync(join(root, path), 'utf8');
-  const base = Object.fromEntries(['.github/scripts/gate-plan.mjs', '.github/scripts/gate-affected.mjs', '.github/workflows/gate.yml', 'package.json'].map((path) => [path, own(path)]));
+  const base = Object.fromEntries(['.github/scripts/gate-plan.mjs', '.github/scripts/gate-affected.mjs', '.github/scripts/gate-backlog.mjs', '.github/workflows/gate.yml', 'package.json'].map((path) => [path, own(path)]));
   base['.github/workflows/gate.yml'] = base['.github/workflows/gate.yml'].replace("HOSTED_MAC_JOBS: ''", 'HOSTED_MAC_JOBS: packaged');
   const result = gate(['--gates', 'packaged', '--runner', 'macos', '--hosted-route', 'direct', '--lane', 'hosted', '--peer', 'none', '--label', 'e1-final'], { alerts: true, base, change: () => {} });
   assert.equal(result.status, 2, result.stdout + result.stderr);
   assert.match(result.stderr, /this run puts jobs on a Mac \(packaged\)/);
   assert.deepEqual(result.refs, []);
+});
+
+
+test('direct calls put the cached backlog into the pushed commit, and failed counts still push without it', () => {
+  const good = gate(['--gates', 'e2e:document', '--peer', 'none'], { backlog: 'good' });
+  assert.equal(good.refs.length, 1, good.stdout + good.stderr);
+  const sample = JSON.parse(/^Mac-Backlog: (.+)$/m.exec(good.message)?.[1] || 'null');
+  assert.equal(sample?.ec2, 'idle');
+  assert.equal(sample.hostedQueued, 0);
+  assert.equal(good.calls.filter((call) => /actions\/runs\?status=/.test(call)).length, 10);
+  const failed = gate(['--gates', 'e2e:document', '--peer', 'none'], { backlog: 'failed' });
+  assert.equal(failed.refs.length, 1, failed.stdout + failed.stderr);
+  assert.doesNotMatch(failed.message, /^Mac-Backlog:/m);
+  assert.match(failed.stdout + failed.stderr, /backlog unavailable/);
+  // A hosted-lane call (a trial or an admission) and a no-hosted one never sample: nothing of them may move to EC2.
+  for (const lane of ['hosted', 'no-hosted']) {
+    const asked = gate(['--gates', 'e2e:document', '--peer', 'none', '--lane', lane], { backlog: 'good' });
+    assert.equal(asked.refs.length, 1, asked.stdout + asked.stderr);
+    assert.doesNotMatch(asked.message, /^Mac-Backlog:/m, lane);
+    assert.equal(asked.calls.filter((call) => /actions\/runs\?status=/.test(call)).length, 0, lane);
+  }
 });

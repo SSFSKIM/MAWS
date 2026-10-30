@@ -7,11 +7,13 @@ import type { SessionEvent } from '@shared/graph/events';
 
 export { ENGINE_COMPAT_NOTICE_KEY };
 
-// P2-F's live re-runs R1 to R4 passed on the installed 2.1.296 (docs/doperpowers/evidence/p2-finish/live-r1.txt to
-// live-r4.txt) and the owner moved the tested version to it (P2-F D12, 2026-10-11); E11's sittings had run every P1 live
-// path on 2.1.293 (docs/doperpowers/evidence/p1-e11/live-s1.txt to live-s8.txt). The fixtures (2.1.283 to 2.1.295) are
-// older and still replay clean; their pin (test/support/engine-pin) stays where it is.
-export const TESTED_ENGINE_VERSION = '2.1.296';
+// P5-E312 (2026-10-29) moved it to 2.1.312, the engine the owner runs: the frames 2.1.312 sends in normal use that MAWS had
+// no mapping for are typed and mapped (spikes/protocol-probe/findings-p5-e312-engine.txt); its probes on a devcloud VM
+// replayed through the normaliser with no unknown or invalid frame, and five are fixtures (pass3/p5-e312-*); the core
+// live paths P2-F's R1 to R4 and E11's sittings ran (2.1.296 and 2.1.293 then, docs/doperpowers/evidence/p2-finish/,
+// p1-e11/) re-ran on the mini as LIVE_E2E groups (docs/doperpowers/evidence/p5-e312/). The older fixtures (2.1.283 to
+// 2.1.299) still replay clean; their pin (test/support/engine-pin) stays where it is.
+export const TESTED_ENGINE_VERSION = '2.1.312';
 
 // The numeric parts of a version (`2.1.287`, `2.1.290-dev`); null when it does not start with one.
 function partsOf(version: string): number[] | null {

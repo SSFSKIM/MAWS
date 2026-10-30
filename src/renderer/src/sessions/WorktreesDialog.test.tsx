@@ -2,10 +2,11 @@ import { act, cleanup, render, screen, waitFor, within } from '@testing-library/
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import type { WorktreeInfo, WorktreeStatus } from '@shared/sessions/worktree';
 import { project, record } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { at as addressed, TEST_MACHINE } from '../../../../test/support/machine';
 import { registerSessionCreator } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
@@ -17,11 +18,15 @@ import { runProjectAction } from '../sidebar/project-actions';
 import { registerSessionActions } from './actions';
 import { currentSet } from '../stores/layout-model';
 
-const P = 'p1' as ProjectId;
+// P5 O6 M2: the page holds addresses; the fake `window.maws` (main) is asked and answers with the bare ids
+const BARE_P = 'p1' as ProjectId;
+const P = addressed(BARE_P);
 const HEAD = 'a'.repeat(40);
 const at = (name: string) => `${REPO}/.claude/worktrees/${name}`;
-const BOUND = 'b1111111-1111-4111-8111-111111111111' as AppSessionId;
-const NEW = 'c1111111-1111-4111-8111-111111111111' as AppSessionId;
+const BARE_BOUND = 'b1111111-1111-4111-8111-111111111111' as AppSessionId;
+const BOUND = addressed(BARE_BOUND);
+const BARE_NEW = 'c1111111-1111-4111-8111-111111111111' as AppSessionId;
+const NEW = addressed(BARE_NEW);
 const EMPTY = { self: 0, foreign: 0, unbound: 0, idle: 0, archived: 0, idleAppSessionIds: [], liveAppSessionIds: [] };
 
 const wt = (path: string, over: Partial<WorktreeInfo> = {}): WorktreeInfo => ({ repoRoot: REPO, path, branch: `worktree-${path.split('/').at(-1)}`, head: HEAD, isMain: false, locked: false, prunable: false, managed: true, ...over });
@@ -29,7 +34,7 @@ const MAIN = wt(REPO, { isMain: true, branch: 'main', managed: false });
 const WORKTREES = [MAIN, wt(at('bound')), wt(at('orphan')), wt(at('gone'), { prunable: true })];
 const statusOf = (path: string): WorktreeStatus => {
   const info = WORKTREES.find((w) => w.path === path)!;
-  if (path === at('bound')) return { ...info, dirty: { tracked: 0, untracked: 0 }, occupancy: { ...EMPTY, idle: 1, idleAppSessionIds: [BOUND] }, state: 'clean' };
+  if (path === at('bound')) return { ...info, dirty: { tracked: 0, untracked: 0 }, occupancy: { ...EMPTY, idle: 1, idleAppSessionIds: [BARE_BOUND] }, state: 'clean' };
   if (path === at('orphan')) return { ...info, dirty: { tracked: 2, untracked: 1 }, occupancy: EMPTY, state: 'dirty' };
   return { ...info, dirty: { tracked: 0, untracked: 0 }, occupancy: EMPTY, state: 'clean' };
 };
@@ -40,23 +45,23 @@ beforeEach(() => {
   resetShellStores();
   resetSetupStore();
   useSessions.setState({
-    projects: new Map([[P, project('p1', 0, { name: 'repo', directory: REPO })]]),
+    projects: new Map([[P, project(P, 0, { name: 'repo', directory: REPO })]]),
     records: new Map([[BOUND, record(BOUND, { projectId: P, title: { text: 'Bound work', source: 'user' }, directory: at('bound') })]]),
   });
   fake = fakeClient({
     'git.worktree.list': () => ({ repoRoot: REPO, commonDir: `${REPO}/.git`, worktrees: WORKTREES }),
     'git.worktree.status': ({ path }: { path: string }) => statusOf(path),
     'git.worktree.branch': () => null,
-    'session.intent.patch': ({ appSessionId, patch }: { appSessionId: AppSessionId; patch: object }) => ({ ...intent({ appSessionId, projectId: P }), ...patch }),
+    'session.intent.patch': ({ appSessionId, patch }: { appSessionId: AppSessionId; patch: object }) => ({ ...intent({ appSessionId, projectId: BARE_P }), ...patch }),
   });
-  window.maws = fake.client;
+  window.maws = fake.client as unknown as PreloadBridge;
   offActions = registerSessionActions();
 });
 afterEach(() => {
   act(() => closeDialog());
   offActions();
   cleanup();
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 const open = async () => {
@@ -97,7 +102,7 @@ describe('Worktrees… dialog', () => {
     try {
       const row = await rowNamed(await open(), 'orphan');
       await userEvent.click(within(row).getByRole('button', { name: 'New chat here' }));
-      await waitFor(() => expect(fake.invoked('session.intent.patch')).toEqual([{ appSessionId: NEW, patch: { location: { kind: 'existingWorktree', repoRoot: REPO, path: at('orphan') } } }]));
+      await waitFor(() => expect(fake.invoked('session.intent.patch')).toEqual([{ appSessionId: BARE_NEW, patch: { location: { kind: 'existingWorktree', repoRoot: REPO, path: at('orphan') } } }]));
       await waitFor(() => expect(useDialogs.getState().open).toBeNull());
       expect(currentSet(useLayout.getState().main).panes.flatMap((p) => p.tabs).some((t) => t.kind === 'session' && t.appSessionId === NEW)).toBe(true);
     } finally {
@@ -109,7 +114,7 @@ describe('Worktrees… dialog', () => {
     const row = await rowNamed(await open(), 'orphan');
     await userEvent.click(within(row).getByRole('button', { name: 'Remove…' }));
     const cleanupSheet = await screen.findByRole('dialog', { name: 'Clean up worktree orphan' });
-    expect(useDialogs.getState().open).toMatchObject({ kind: 'cleanup', target: { repoRoot: REPO, path: at('orphan'), branch: 'worktree-orphan' }, returnTo: { kind: 'worktrees', projectId: P } });
+    expect(useDialogs.getState().open).toMatchObject({ kind: 'cleanup', target: { machine: TEST_MACHINE, repoRoot: REPO, path: at('orphan'), branch: 'worktree-orphan' }, returnTo: { kind: 'worktrees', projectId: P } });
     await userEvent.click(within(cleanupSheet).getByRole('button', { name: 'Cancel' }));
     await screen.findByRole('dialog', { name: 'Worktrees · repo' });
     await waitFor(() => expect(fake.invoked('git.worktree.list').length).toBe(3)); // the list, the cleanup's identity read, the list again
@@ -117,7 +122,7 @@ describe('Worktrees… dialog', () => {
 
   it('says Not a git repository for a project outside one', async () => {
     fake = fakeClient({});
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     render(<SessionDialogs />);
     act(() => openDialog({ kind: 'worktrees', projectId: P }));
     await fake.fail('git.worktree.list', 'not a git repository');
@@ -125,7 +130,7 @@ describe('Worktrees… dialog', () => {
   });
 
   it('a cleanup opened elsewhere closes to nothing', () => {
-    act(() => openDialog({ kind: 'cleanup', target: { repoRoot: REPO, path: at('orphan'), branch: null } }));
+    act(() => openDialog({ kind: 'cleanup', target: { machine: TEST_MACHINE, repoRoot: REPO, path: at('orphan'), branch: null } }));
     act(() => closeDialog());
     expect(useDialogs.getState().open).toBeNull();
   });

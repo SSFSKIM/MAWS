@@ -4,9 +4,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import { REGISTRY } from '@shared/ipc/registry';
+import { addressingOf } from '@shared/machine/address';
 import { digest, record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { resetComposerStore, resubmitRecordOf, setResubmit, useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
@@ -22,7 +25,13 @@ import { resetDockedCards } from './docked/registry';
 import { BubbleEdit, BUSY_REASON } from './InlineEdit';
 import { editAndResubmitRow, editPromptRow, registerResubmitProvider } from './resubmit-seam';
 
-const A = 'app-a' as AppSessionId;
+// P5 O6 M2: the stores and the page's seams hold `A`, an address, and the builders' values lifted; `fake`, installed as
+// `window.maws`, stands for main, asked and answering with the bare `A_ID`.
+const A_ID = 'app-a' as AppSessionId;
+const A = at(A_ID);
+const addressing = addressingOf(REGISTRY);
+const pageRecord = () => addressing.output('session.get').lift(record(A_ID), TEST_MACHINE)!;
+const pageStatus = (compact?: Parameters<typeof status>[1]) => addressing.output('engine.sessions').lift([status(A_ID, compact)], TEST_MACHINE)[0]!;
 let fake: FakeClient;
 let offEditor: () => void;
 
@@ -47,8 +56,8 @@ beforeEach(async () => {
     'session.history.append': undefined,
     'session.events': () => ({ events: b.events, lastSeq: b.events.length, complete: true }),
   });
-  window.maws = fake.client;
-  useSessions.setState({ records: new Map([[A, record(A)]]), engine: new Map([[A, status(A)]]), recordsVersion: 1 });
+  window.maws = fake.client as unknown as PreloadBridge;
+  useSessions.setState({ records: new Map([[A, pageRecord()]]), engine: new Map([[A, pageStatus()]]), recordsVersion: 1 });
   await act(() => useTranscriptStore.getState().attach(A, ipcSource(A))); // the session pane's transcript
   offEditor = registerBubbleEditor((props) => <BubbleEdit {...props} />);
   // the shell's pane 0 shows A's tab, focused: where a bubble's Edit is clicked
@@ -60,7 +69,7 @@ afterEach(() => {
   offEditor();
   cleanup();
   for (const key of Object.keys(useTranscriptStore.getState().entries)) useTranscriptStore.getState().drop(key);
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 const rowOf = (uuid: string) => useTranscriptStore.getState().rows(A).find((r): r is Extract<Row, { kind: 'user' }> => r.kind === 'user' && r.messageUuid === uuid)!;
@@ -101,19 +110,19 @@ describe('Edit turns the bubble into an editor in its place', () => {
     fireEvent.change(field(), { target: { value: 'first prompt, edited' } });
     fireEvent.keyDown(field(), { key: 'Enter', metaKey: true });
     await waitFor(() => expect(fake.pending('session.rewind')).toBe(1));
-    expect(fake.invoked('session.rewind')).toEqual([{ appSessionId: A, targetMessageUuid: 'u-1', lastSeenMessageUuid: 'u-2', files: false }]);
+    expect(fake.invoked('session.rewind')).toEqual([{ appSessionId: A_ID, targetMessageUuid: 'u-1', lastSeenMessageUuid: 'u-2', files: false }]);
     expect(within(editor()).getByRole('status').textContent).toBe('Rewinding this session to that message…');
     expect(field().readOnly).toBe(true);
     await act(() => fake.reply('session.rewind', rewound));
     await waitFor(() => expect(fake.pending('session.send')).toBe(1));
-    expect(fake.invoked('session.send')).toEqual([{ appSessionId: A, content: 'first prompt, edited' }]);
+    expect(fake.invoked('session.send')).toEqual([{ appSessionId: A_ID, content: 'first prompt, edited' }]);
     await act(() => fake.reply('session.send', sent));
     await waitFor(() => expect(state()).toBe('idle'));
     expect(useComposerStore.getState().inlineEdits.size).toBe(0);
   });
 
   it('while the resend is with the host, Cancel, Fork and Send are locked and neither Esc nor ⌘Enter acts', async () => {
-    const off = registerResubmitProvider({ forkFrom: vi.fn(async () => ({ appSessionId: 'app-fork' as AppSessionId })) });
+    const off = registerResubmitProvider({ forkFrom: vi.fn(async () => ({ appSessionId: at('app-fork' as AppSessionId) })) });
     try {
       renderRow(rowOf('u-1'), { storeKey: A });
       act(() => editAndResubmitRow(rowOf('u-1')));
@@ -136,7 +145,7 @@ describe('Edit turns the bubble into an editor in its place', () => {
   });
 
   it('Send waits while a turn runs, and says why', async () => {
-    useSessions.setState({ engine: new Map([[A, status(A, { engineState: 'running', turn: { origin: 'human', startedAt: '2026-09-28T10:00:00.000Z', userMessageUuids: [] } })]]) });
+    useSessions.setState({ engine: new Map([[A, pageStatus({ engineState: 'running', turn: { origin: 'human', startedAt: '2026-09-28T10:00:00.000Z', userMessageUuids: [] } })]]) });
     renderRow(rowOf('u-1'), { storeKey: A });
     act(() => editAndResubmitRow(rowOf('u-1')));
     expect((within(editor()).getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true);
@@ -145,26 +154,26 @@ describe('Edit turns the bubble into an editor in its place', () => {
 
   // P2-A (2026-10-09; the execution document §5.6): an edit's Send on an exited session starts it first (resubmit)
   it('on an exited session Send stays enabled; it starts the session, reading Starting…, then rewinds once ready', async () => {
-    useSessions.setState({ engine: new Map([[A, status(A, { process: 'exited' })]]) });
+    useSessions.setState({ engine: new Map([[A, pageStatus({ process: 'exited' })]]) });
     renderRow(rowOf('u-1'), { storeKey: A });
     act(() => editAndResubmitRow(rowOf('u-1')));
     expect(fake.invoked('session.acquire')).toEqual([]);
     const send = within(editor()).getByRole('button', { name: 'Send' }) as HTMLButtonElement;
     expect(send.disabled).toBe(false);
     fireEvent.click(send);
-    await waitFor(() => expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'resubmit' }]));
+    await waitFor(() => expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A_ID, reason: 'resubmit' }]));
     expect(within(editor()).getByRole('status').textContent).toBe('Starting this session…');
     expect(send.disabled).toBe(true);
     expect((within(editor()).getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled, 'Cancel may leave a start').toBe(false);
-    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false }));
-    act(() => useSessions.setState({ engine: new Map([[A, status(A)]]) }));
+    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A_ID, launched: true, joined: false }));
+    act(() => useSessions.setState({ engine: new Map([[A, pageStatus()]]) }));
     await waitFor(() => expect(fake.pending('session.rewind')).toBe(1));
     expect(fake.invoked('session.acquire')).toHaveLength(1);
   });
 
   // M3 review: a crash mid-turn keeps the engine's last `engineState: running` on the exited status; it closes nothing
   it('a session that crashed mid-turn (exited, engineState still running) lets the edit be resubmitted', () => {
-    useSessions.setState({ engine: new Map([[A, status(A, { process: 'exited', engineState: 'running' })]]) });
+    useSessions.setState({ engine: new Map([[A, pageStatus({ process: 'exited', engineState: 'running' })]]) });
     renderRow(rowOf('u-1'), { storeKey: A });
     act(() => editAndResubmitRow(rowOf('u-1')));
     expect((within(editor()).getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(false);
@@ -172,7 +181,7 @@ describe('Edit turns the bubble into an editor in its place', () => {
   });
 
   it('a session a terminal holds keeps Send disabled with the holder named', () => {
-    useSessions.setState({ records: new Map([[A, { ...record(A), holder: { kind: 'terminal', pid: 42 } }]]), engine: new Map(), digests: new Map([[A, digest(A, { availability: 'foreign_held' })]]) });
+    useSessions.setState({ records: new Map([[A, { ...pageRecord(), holder: { kind: 'terminal', pid: 42 } }]]), engine: new Map(), digests: new Map([[A, digest(A, { availability: 'foreign_held' })]]) });
     renderRow(rowOf('u-1'), { storeKey: A });
     act(() => editAndResubmitRow(rowOf('u-1')));
     expect((within(editor()).getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true);
@@ -180,7 +189,7 @@ describe('Edit turns the bubble into an editor in its place', () => {
   });
 
   it('with C10’s provider, Fork sends the edited text in a forked session from that message and leaves this one', async () => {
-    const forkFrom = vi.fn(async () => ({ appSessionId: 'app-fork' as AppSessionId }));
+    const forkFrom = vi.fn(async () => ({ appSessionId: at('app-fork' as AppSessionId) }));
     const off = registerResubmitProvider({ forkFrom });
     try {
       renderRow(rowOf('u-1'), { storeKey: A });
@@ -201,7 +210,7 @@ describe('Edit turns the bubble into an editor in its place', () => {
     fireEvent.click(within(editor()).getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(fake.pending('session.send')).toBe(1));
     expect(fake.invoked('session.rewind')).toEqual([]);
-    expect(fake.invoked('session.send')).toEqual([{ appSessionId: A, content: 'second prompt' }]);
+    expect(fake.invoked('session.send')).toEqual([{ appSessionId: A_ID, content: 'second prompt' }]);
   });
 });
 

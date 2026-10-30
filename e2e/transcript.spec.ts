@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test as base, type Locator, type Page } from '@playwright/test';
 import type { HarnessApi, HarnessMetrics } from '../src/renderer/src/harness/api';
+import { addressed } from './support/address';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
@@ -979,7 +980,7 @@ test('a mod’s toast, log lines and status line show in the session (R1, pass3/
     await expect.poll(async () => (id = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === engineId)?.appId ?? '')).not.toBe('');
     await (await sidebarRow(page, { appSessionId: id })).click();
     const pane = page.locator('[data-region="main"] [data-pane="0"]');
-    await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();
+    await expect(pane.locator(`[data-composer="${await addressed(page, id)}"]`)).toBeVisible();
 
     // The index seed may hydrate before launch. Make that history deterministic rather than letting a
     // lazy transcript's timing decide whether the startup log is the first row in the whole transcript.
@@ -1042,7 +1043,7 @@ async function surfaceReplay(fixture: string | ((root: string) => string), body:
     await page.mouse.move(0, 0);
     await expect(page.getByTestId('hover-meta')).toBeHidden();
     const pane = page.locator('[data-region="main"] [data-pane="0"]');
-    await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();
+    await expect(pane.locator(`[data-composer="${await addressed(page, id)}"]`)).toBeVisible();
     await beforeLaunch?.(pane);
     if (attached) {
       await launchReady(page, id, replayPath, { cwd: repo, ...(seed ? { resume: { sessionId: engineId as never, fork: false } } : {}) });
@@ -1221,7 +1222,7 @@ test('R3 owner to-human draws every span as Markdown, folds the working record, 
     await captureR3bEvidence(page, 'to-human-folded');
     const usersBefore = await pane.locator('[data-kind="user"]').count();
     await report.getByRole('button', { name: /^1: One/ }).click();
-    await expect(pane.locator(`[data-composer="${id}"] [contenteditable="true"]`)).toHaveText('Answering "Which path?": One');
+    await expect(pane.locator(`[data-composer="${await addressed(page, id)}"] [contenteditable="true"]`)).toHaveText('Answering "Which path?": One');
     expect(value(await invoke(page, 'session.status', { appSessionId: id as never })).turn).toBeNull();
     expect(await pane.locator('[data-kind="user"]').count()).toBe(usersBefore);
     await report.getByRole('button', { name: 'working record', exact: true }).click();
@@ -1340,7 +1341,7 @@ test('the report folds work while marked text retains its authored flow and geom
     await (await sidebarRow(page, { appSessionId: id })).click();
     await page.mouse.move(0, 0);
     const pane = page.locator('[data-region="main"] [data-pane="0"]');
-    await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();
+    await expect(pane.locator(`[data-composer="${await addressed(page, id)}"]`)).toBeVisible();
     await launchReady(page, id, fixture, { cwd: repo });
     const prompts = readFileSync(join(REPO_ROOT, fixture), 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { direction: string; frame: { type?: string; message?: { content?: string } } }).filter((row) => row.direction === 'out' && row.frame.type === 'user').map((row) => row.frame.message!.content!);
     for (const content of prompts) {

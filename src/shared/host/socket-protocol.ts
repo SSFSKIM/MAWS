@@ -20,6 +20,12 @@
 // (src/shared/ipc/tolerant.ts). Protocol 2's hello and welcome are kept, unchanged, for one major (the protocol-2
 // window): a client refused by a protocol-2 supervisor whose fingerprint equals its own speaks protocol 2 to it, and a
 // server answers a protocol-2 hello as protocol 2 did. They go when major 4 lands.
+//
+// P5 O2 M4 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md): a third record kind after the welcome, the pty frame
+// (`0x01`, `encodePtyFrame`), carries a pty host's `pty.data` event as bytes instead of a base64 JSON line. It is gated by
+// the capability `socket.ptyFrames` (PTY_FRAMES_CAPABILITY): a writer frames `pty.data` only for a peer whose hello or
+// welcome listed it, so a peer of an earlier minor, or any protocol-2 one, never reads a `0x01` and the frozen lines
+// (P5 Decision Log 42) are untouched; a reader decodes the frame into the same `evt` it replaces.
 import * as z from 'zod';
 import { ActorSchema } from '../artifacts/actor';
 
@@ -151,9 +157,12 @@ export function splitLines(onLine: (line: string) => void | 'stop', onOverflow: 
 // A record after the welcome is either
 //   a JSON line   the UTF-8 JSON of one object and 0x0A; its first byte is `{` (JSON of an object), never 0x00
 //   a doc frame   0x00 | u32 BE length L | u32 BE channel | L - 4 bytes: one port-provider frame (src/artifacts/provider)
+//   a pty frame   0x01 | u32 BE length L | u8 n | n bytes ptyId (ASCII) | u32 BE offset high | u32 BE offset low |
+//                 L - 9 - n bytes of output (P5 O2 M4, under PTY_FRAMES_CAPABILITY; offset < 2^53)
 // so a reader at a record boundary tells them apart by one byte. JSON escapes every control character, so a line holds
-// neither 0x00 nor a raw 0x0A; a frame's payload may hold both and is skipped by its length. The channel is main's u32
-// key for one open document; a Yjs clientId (53-bit on v14) never goes in a frame header.
+// neither 0x00 nor 0x01 nor a raw 0x0A; a frame's payload may hold all three and is skipped by its length. The channel is
+// main's u32 key for one open document; a Yjs clientId (53-bit on v14) never goes in a frame header. Either frame's whole
+// record is at most DOC_FRAME_CAP + 9 bytes (L - 4 <= the frame cap).
 export const DOC_MARK = 0x00;
 export const DOC_HEADER = 9;
 export const DOC_FRAME_CAP = 64 * 1024 * 1024; // one frame's payload, as LINE_CAP bounds a line
@@ -167,9 +176,64 @@ export function encodeDocFrame(channel: number, frame: Uint8Array): Buffer {
   return out;
 }
 
+// P5 O2 M4 start: the pty frame (above), for one `pty.data` event's payload
+export const PTY_MARK = 0x01;
+export const PTY_FRAMES_CAPABILITY = 'socket.ptyFrames';
+// P5 O3-D (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §D, §I, §L; D4): one capability per
+// direction. `host.attachment` on the engine host's welcome says it serves the command of that name, and on a client's
+// hello that the client will send it (only `mawsd` does); `machine.spine` on an app's hello says the app runs no spine of
+// its own and reads the machine's.
+export const ATTACHMENT_CAPABILITY = 'host.attachment';
+export const MACHINE_SPINE_CAPABILITY = 'machine.spine';
+// What each peer lists of itself in its hello or welcome: only what it implements. The wire's capability list
+// (WIRE_CAPABILITIES, the manifest's) is the union of every name a peer of this major may list, and no peer reads it as
+// its own. At O3-D M1 every list was the one it was; from M3 the engine host's welcome and `mawsd`'s hello to it list
+// `host.attachment` (the engine host serves it; `mawsd` declares it only with its permanent-client option on, which
+// drops the name from this list otherwise, src/mawsd/daemon.ts); main's hellos list `machine.spine` from M5b, when main
+// stops composing the spine on the daemon shape (`mawsd` refuses a hello on engine-host.sock that does not list it).
+// `mawsd`'s relays welcome with the upstream's list and `daemon`'s added.
+export const PEER_CAPABILITIES = {
+  engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY], // the engine host's welcome (P5 O3-D M3: it serves host.attachment)
+  ptyHost: [PTY_FRAMES_CAPABILITY], // the pty host's welcome
+  app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY], // main's hellos, to `mawsd`'s sockets and to a direct engine host (P5 O3-D M5b: machine.spine)
+  daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY], // `mawsd`'s hello to the engine host (P5 O3-D M3: under its permanent-client option)
+  daemonToPtyHost: [PTY_FRAMES_CAPABILITY], // `mawsd`'s hello to the pty host
+  daemon: [PTY_FRAMES_CAPABILITY], // `mawsd`'s welcome on machine.sock, and what its relays add
+  link: [PTY_FRAMES_CAPABILITY], // O6's link's hello to another profile's machine.sock
+} as const satisfies Record<string, readonly string[]>;
+const PTY_FIXED = 9; // the id's length byte and the offset's two words, inside L
+const OFFSET_HIGH_LIMIT = 2 ** 21; // the offset's high word stays below this: offset < 2^53
+
+export interface PtyFrame {
+  ptyId: string;
+  offset: number;
+  data: Uint8Array;
+}
+
+// The frame of one chunk, or null when it cannot be one (an id that is not ASCII or is longer than 255 bytes, an offset
+// that is not an integer in 0..2^53 - 1, or output past the frame cap): the writer then sends the event as a JSON line.
+export function encodePtyFrame({ ptyId, offset, data }: PtyFrame, frameCap: number = DOC_FRAME_CAP): Buffer | null {
+  if (ptyId.length > 255 || [...ptyId].some((char) => char.charCodeAt(0) > 0x7f)) return null;
+  if (!Number.isSafeInteger(offset) || offset < 0) return null;
+  const length = PTY_FIXED + ptyId.length + data.byteLength;
+  if (length - 4 > frameCap) return null;
+  const out = Buffer.allocUnsafe(5 + length);
+  out[0] = PTY_MARK;
+  out.writeUInt32BE(length, 1);
+  out[5] = ptyId.length;
+  out.write(ptyId, 6, 'latin1');
+  const at = 6 + ptyId.length;
+  out.writeUInt32BE(Math.floor(offset / 2 ** 32), at);
+  out.writeUInt32BE(offset % 2 ** 32, at + 4);
+  out.set(data, at + 8);
+  return out;
+}
+// P5 O2 M4 end
+
 export interface RecordHandlers {
   line(text: string): void;
   doc(channel: number, frame: Uint8Array): void; // an exact-size copy with its own buffer, safe to post on a port
+  pty(frame: PtyFrame): void; // P5 O2 M4: its data an exact-size copy, as a doc frame's
   overflow(why: string): void; // once; the splitter goes deaf and the caller closes the connection
 }
 
@@ -179,8 +243,9 @@ export interface RecordSplitter {
 
 // The reader of everything after the handshake. A partial record is kept as the pieces it arrived in and joined once,
 // when it completes, so a long line or a large frame read in many chunks is copied a bounded number of times. A line
-// longer than `lineCap` bytes or a frame whose payload exceeds `frameCap` (or whose length cannot hold a channel) calls
-// `overflow` once and the splitter goes deaf.
+// longer than `lineCap` bytes or a frame whose payload exceeds `frameCap` (or whose length cannot hold a channel, or a
+// pty frame's id and offset; P5 O2 M4: or whose id or offset breaks its rules) calls `overflow` once and the splitter
+// goes deaf.
 export function splitRecords(handlers: RecordHandlers, lineCap: number = LINE_CAP, frameCap: number = DOC_FRAME_CAP): RecordSplitter {
   let parts: Buffer[] = []; // the incomplete record at the head of the stream
   let size = 0;
@@ -207,13 +272,29 @@ export function splitRecords(handlers: RecordHandlers, lineCap: number = LINE_CA
   // The frame's length from a header at `at`, or null after an overflow.
   const frameSize = (bytes: Buffer, at: number): number | null => {
     const length = bytes.readUInt32BE(at + 1);
-    if (length < 4 || length - 4 > frameCap) {
-      fail(`a doc frame of ${length} bytes`);
+    const pty = bytes[at] === PTY_MARK; // P5 O2 M4
+    if (length < (pty ? PTY_FIXED : 4) || length - 4 > frameCap) {
+      fail(`a ${pty ? 'pty' : 'doc'} frame of ${length} bytes`);
       return null;
     }
     return 5 + length;
   };
-  const emitFrame = (bytes: Buffer, at: number, total: number) => handlers.doc(bytes.readUInt32BE(at + 5), new Uint8Array(bytes.subarray(at + DOC_HEADER, at + total)));
+  const emitFrame = (bytes: Buffer, at: number, total: number) => {
+    if (bytes[at] === PTY_MARK) return emitPty(bytes, at, total); // P5 O2 M4
+    handlers.doc(bytes.readUInt32BE(at + 5), new Uint8Array(bytes.subarray(at + DOC_HEADER, at + total)));
+  };
+  // P5 O2 M4: a pty frame whose id runs past its length, is not ASCII, or whose offset reaches 2^53 is a broken record
+  const emitPty = (bytes: Buffer, at: number, total: number) => {
+    const n = bytes[at + 5];
+    const offsetAt = at + 6 + n;
+    if (offsetAt + 8 > at + total) return fail(`a pty frame whose id of ${n} bytes runs past its length`);
+    const id = bytes.subarray(at + 6, offsetAt);
+    if (id.some((byte) => byte > 0x7f)) return fail('a pty frame whose id is not ASCII');
+    const high = bytes.readUInt32BE(offsetAt);
+    if (high >= OFFSET_HIGH_LIMIT) return fail('a pty frame whose offset is past 2^53');
+    handlers.pty({ ptyId: id.toString('latin1'), offset: high * 2 ** 32 + bytes.readUInt32BE(offsetAt + 4), data: new Uint8Array(bytes.subarray(offsetAt + 8, at + total)) });
+  };
+  const isFrame = (byte: number) => byte === DOC_MARK || byte === PTY_MARK; // P5 O2 M4
 
   return {
     push(chunk) {
@@ -221,7 +302,7 @@ export function splitRecords(handlers: RecordHandlers, lineCap: number = LINE_CA
       while (!dead && at < chunk.length) {
         if (size > 0) {
           // completing the record at the head
-          if (parts[0][0] === DOC_MARK) {
+          if (isFrame(parts[0][0])) {
             if (need === 0) {
               // its header is still short of 9 bytes: join the few bytes kept with this chunk and read on from there
               chunk = Buffer.concat([take(), chunk.subarray(at)]);
@@ -250,7 +331,7 @@ export function splitRecords(handlers: RecordHandlers, lineCap: number = LINE_CA
           continue;
         }
         // at a record boundary
-        if (chunk[at] === DOC_MARK) {
+        if (isFrame(chunk[at])) {
           if (chunk.length - at < DOC_HEADER) {
             keep(chunk.subarray(at));
             return;

@@ -7,6 +7,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
+import { at, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
 import { replaceVerdict, requestCloseTab, runAction } from '../../../keymap/actions-runtime';
 import { Tab } from '../../../main/Tab';
@@ -20,11 +21,11 @@ import { useViewer } from '../viewer/viewer-store';
 import { EditorDialogs, useEditorDialog } from './EditorDialogs';
 import { registerEditor } from './register';
 
-const A = 'app-a' as AppSessionId;
+const A = at('app-a' as AppSessionId); // P5 O6 M2: the page's address
 const APP = '/r/app.ts';
-const ID = `file:${APP}`;
+const ID = `file:${TEST_MACHINE}:${APP}`;
 
-const fileTab = (path = APP): Extract<TabRef, { kind: 'file' }> => ({ id: `file:${path}`, kind: 'file', path, line: null, appSessionId: A, pinned: false });
+const fileTab = (path = APP): Extract<TabRef, { kind: 'file' }> => ({ id: `file:${TEST_MACHINE}:${path}`, kind: 'file', path, line: null, appSessionId: A, machine: TEST_MACHINE, pinned: false });
 const entry = () => useViewer.getState().entries.get(ID)!;
 const view = () => EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement)!;
 const type = (text: string) => act(() => view().dispatch({ changes: { from: 0, insert: text }, userEvent: 'input.type', annotations: isolateHistory.of('full') }));
@@ -158,7 +159,7 @@ describe('editor registrations', () => {
       disk.files[APP] = 'const a = 2;\n'; // no event: the save finds it
       await act(async () => void (await useViewer.getState().save(ID)));
       expect(entry().theirs?.view).toBe('merge');
-      act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: 'app-s' as AppSessionId }));
+      act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: at('app-s' as AppSessionId) }));
       expect(activeTab(useLayout.getState().main)?.id).not.toBe(ID);
       await act(() => requestCloseTab(ID));
       expect(sheet()).toBeNull();
@@ -173,7 +174,7 @@ describe('editor registrations', () => {
   describe('file.save', () => {
     it('saves the focused pane’s file tab, and writes nothing while a session tab is active', async () => {
       const { disk } = await openApp({ dirty: true });
-      act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: 'app-s' as AppSessionId }));
+      act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: at('app-s' as AppSessionId) }));
       runAction('file.save');
       await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
       expect(disk.callsOf('files.write')).toHaveLength(0);
@@ -194,7 +195,7 @@ describe('editor registrations', () => {
       expect(tab.getAttribute('data-dirty')).toBe('true');
       expect(within(tab).getByRole('img', { name: 'Unsaved changes' }).textContent).toBe('•');
       marked.unmount();
-      const session = strip({ id: 'session:app-s', kind: 'session', appSessionId: 'app-s' as AppSessionId, pinned: false });
+      const session = strip({ id: `session:${at('app-s')}`, kind: 'session', appSessionId: at('app-s' as AppSessionId), pinned: false });
       expect(session.container.querySelector('[data-dirty]')).toBeNull();
       expect(session.queryByRole('img', { name: 'Unsaved changes' })).toBeNull();
     });

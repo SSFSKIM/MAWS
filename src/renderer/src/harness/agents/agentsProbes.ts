@@ -4,6 +4,7 @@
 import type { AgentId, TaskId } from '@shared/graph/ids';
 import type { SubagentEntry } from '@shared/ipc/schema/fs';
 import type { PersistedTask } from '@shared/wire/store';
+import { bareOf } from '@shared/machine/address';
 import { SubagentMetaSchema, WorkflowSnapshotSchema } from '@shared/wire/store';
 import { instanceIds, instanceOf, shownSession, usePanelHost } from '../../panel/host';
 import { useLayout } from '../../stores/layout';
@@ -509,7 +510,11 @@ export const agentsProbes: AgentsHarnessApi = {
     await frames();
     return n;
   },
-  calls: () => fake.calls(),
+  calls() {
+    // P5 O6 M2: the page sent addresses; the API names a fake session by its bare id ('A'), as the specs do
+    const { steer, stopTask, readSpill } = fake.calls();
+    return { steer: steer.map((call) => ({ ...call, appSessionId: bareOf(call.appSessionId) })), stopTask: stopTask.map((call) => ({ ...call, appSessionId: bareOf(call.appSessionId) })), readSpill };
+  },
   answerStop: (taskId, outcome) => fake.answerStop(taskId, outcome),
   subagents,
   tree, // E7

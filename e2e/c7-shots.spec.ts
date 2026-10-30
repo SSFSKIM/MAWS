@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import type { CardsHarnessApi, HarnessIntent } from '../src/renderer/src/harness/composer/api';
 import type { EditorHarnessApi } from '../src/renderer/src/harness/composer/editor-api';
+import { addressed } from './support/address';
 import { invoke, launchReady, turnsJournal, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT } from './support/launch';
 import { sidebarRow } from './support/sidebar';
@@ -126,7 +127,7 @@ test('the shell: the frame docked under a live transcript, the docked approvals,
     const pane = page.locator('[data-region="main"] [data-pane="0"]');
     const open = async (id: string) => {
       await (await sidebarRow(page, { appSessionId: id })).click(); // W11: its project expanded first
-      await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();
+      await expect(pane.locator(`[data-composer="${await addressed(page, id)}"]`)).toBeVisible();
     };
     const message = pane.getByRole('textbox', { name: 'Message' });
 
@@ -195,7 +196,7 @@ test('the harness: the frame centred on an unstarted session, and the slash pale
       cards.intent(i, it);
       cards.show([{ composer: i, shell: true }, null]);
     }, [id, intent] as const);
-    await expect(page.locator(`[data-composer="${id}"]`)).toBeVisible();
+    await expect(page.locator(`[data-composer="${await addressed(page, id)}"]`)).toBeVisible();
     await shoot(page, 'frame-unstarted', true);
 
     // 04 vignette 4: the stub widget registered for /model (as C11 will), opened from the palette

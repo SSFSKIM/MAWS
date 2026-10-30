@@ -12,6 +12,7 @@ import { agentWorkClient } from '../client';
 import { LOG_COPY } from '../copy';
 import { AGENT_TOOL_IDS } from '../tool-ids';
 import { atEnd, earlierRead, formatBytes, LOG_PAGE_BYTES, nextRead, NO_PAGES, refreshRead, withPage, type LogPages, type PageRead } from './log-model';
+import { machineFor } from '../../../ipc/machine';
 
 // path null: the cell reported no file (the "no file reported" state; nothing is read).
 export interface LogParams {
@@ -71,11 +72,11 @@ export class LogHandle {
 
   // One read at a time; a refusal is shown with the path and never retried on its own.
   private async read(target: PageRead | null): Promise<void> {
-    const { path } = this.state;
+    const { path, appSessionId } = this.state;
     if (target === null || path === null || this.state.loading || this.disposed) return;
     this.update({ loading: true });
     try {
-      const answer = await agentWorkClient().readSpill({ path, offset: target.offset, length: LOG_PAGE_BYTES });
+      const answer = await agentWorkClient().readSpill(machineFor(appSessionId), { path, offset: target.offset, length: LOG_PAGE_BYTES });
       if (this.disposed) return;
       this.update({ ...withPage(this.state, target.index, answer), loading: false, error: null });
     } catch (error) {

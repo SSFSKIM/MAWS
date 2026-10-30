@@ -7,7 +7,7 @@ import { ipc } from '../../ipc/client';
 import { registerAction } from '../../keymap/actions-runtime';
 
 export async function setCommentsView(view: CommentsView): Promise<void> {
-  const result = await ipc.invoke('settings.set', { artifacts: { commentsView: view } });
+  const result = await ipc.invoke('settings.set', { artifacts: { commentsView: view } }, { machine: ipc.localMachine }); // P5 O6 M4: the settings are this machine's (O3)
   if (!result.ok) console.error('[document] settings.set commentsView failed', result.error);
 }
 

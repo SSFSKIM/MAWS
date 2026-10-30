@@ -2,15 +2,17 @@
 // small window of stream messages is ever queued in the channel itself. The channel seals and sends in one queue, in
 // order (RL2), so every stream message handed to it is one a later control message (`ack`, `done`, `result`, `caps`,
 // `paused`, `ended`) waits behind; a device's credit alone allows 64 subscriptions × 4 MiB of them. Here a stream
-// message goes to the channel only while less than STREAM_WINDOW_BYTES of stream traffic is still unsealed in it (one
+// message goes to the channel only while less than STREAM_WINDOW_BYTES of stream traffic is still in it untaken (one
 // message at least, whatever its size), and the channel's subscriptions take their turns, one message each. A message
-// the channel hasn't sealed within its deadline (a carrier that stopped taking bytes while the device's own traffic
-// keeps the channel alive) ends the carrier under it: a sealed close would wait behind the same send. The channel
-// closes, and its subscriptions' cursors resume on the device's next channel.
+// is taken once it is sealed and its carrier has room again (its socket's send buffer under the soft cap,
+// send-buffer.ts), so a device that reads slowly holds the stream to its own pace and its socket holds at most about a
+// window past the cap. A message not taken within its deadline (a carrier that stopped taking bytes while the device's
+// own traffic keeps the channel alive) ends the carrier under it: a sealed close would wait behind the same bytes. The
+// channel closes, and its subscriptions' cursors resume on the device's next channel.
 import type { EndpointMessage } from 'org-protocol';
 import type { RemoteChannel } from './channels';
 
-/** Stream bytes handed to the channel and not yet sealed onto its carrier, at most (one message past it at most). */
+/** Stream bytes handed to the channel and not yet taken by its carrier, at most (one message past it at most). */
 export const STREAM_WINDOW_BYTES = 256 * 1024;
 
 /** A subscription's side: its next message the device's credit allows, or null when it has none to send now. */

@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OperationCommand, OperationEvent } from '@shared/engine/operations';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { CommandInput } from '@shared/ipc/schema';
+import type { CommandInput, AddressedInvoke } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import { OPERATION } from './copy';
 import { transportWords } from './read';
@@ -69,7 +69,7 @@ export function useOperation<C extends OperationCommand>(appSessionId: AppSessio
       mine.current = null;
       early.current.clear();
       const completed = new Promise<OperationEvent['outcome'] | null>((resolve) => (waiting.current = resolve));
-      const result = await ipc.invoke(command, { ...input, appSessionId } as CommandInput<C>);
+      const result = await (ipc.invoke as AddressedInvoke)(command, { ...input, appSessionId } as CommandInput<C>); // the session's address names the machine
       if (!result.ok) {
         waiting.current = null;
         setState({ phase: 'unsent', error: transportWords(result.error) });

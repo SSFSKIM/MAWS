@@ -2,16 +2,19 @@
 // the panel rule (a thread opened while its parent is not shown is added without activation and a toast says where);
 // the chip strip of the session's threads, newest first; the thread view yielding to a main tab of the same thread
 // and publishing the child it draws for the unread rule.
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Anchor } from '@shared/anchor/anchor';
 import { promotionMessage } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import { bareOf } from '@shared/machine/address';
 import type { Lineage, SessionRecord } from '@shared/graph/session';
 import type { SideExchange } from '@shared/side/question';
 import { digest, record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { at } from '../../../../test/support/machine';
 import { rowsOf } from '../transcript/model/derive';
 import { applyEvents, createState } from '../transcript/model/reduce';
 import { builder, uuid } from '../transcript/model/test-events';
@@ -43,8 +46,11 @@ import { ARTIFACTS_TOOL_ID, type ArtifactsParams } from '../tools/artifacts/Arti
 import { browser, resetBrowser } from '../tools/browser/store'; // P2-F L146
 import { registerDock } from '../tools/browser/comment/dock'; // P2-F L146
 
-const ONE = 'side-one' as AppSessionId;
-const TWO = 'side-two' as AppSessionId;
+const ONE = at('side-one' as AppSessionId);
+const TWO = at('side-two' as AppSessionId);
+// P5 O6 M2: the page holds addresses; main (the fakes installed as `window.maws`) is asked with the bare ids
+const A_ID = bareOf(A);
+const ONE_ID = bareOf(ONE);
 const ANCHOR: Anchor = { kind: 'file-line', locator: '/work/app-a/x.ts#L42', label: 'x.ts:42', path: '/work/app-a/x.ts', line: 42 };
 
 const lineage = (over: Partial<Lineage> = {}): Lineage => ({ kind: 'side-thread', parentAppSessionId: A, parentEngineSessionId: null, anchor: ANCHOR, openedBy: 'comment', ...over });
@@ -106,8 +112,8 @@ describe('the Side pane', () => {
   });
 
   it('lists the session’s side threads newest first, not its forks or another session’s threads', () => {
-    const fork = { ...record('fork-x'), lineage: lineage({ kind: 'fork', openedBy: 'fork', anchor: undefined }) };
-    const other = thread('other-thread' as AppSessionId, '2026-10-06T03:00:00.000Z', { parentAppSessionId: B });
+    const fork = { ...record(at('fork-x')), lineage: lineage({ kind: 'fork', openedBy: 'fork', anchor: undefined }) };
+    const other = thread(at('other-thread' as AppSessionId), '2026-10-06T03:00:00.000Z', { parentAppSessionId: B });
     withThreads(thread(ONE, '2026-10-06T01:00:00.000Z'), thread(TWO, '2026-10-06T02:00:00.000Z', { anchor: undefined, openedBy: 'btw' }), fork, other);
     expect(sideThreadsOf(useSessions.getState().records, A).map((r) => r.appId)).toEqual([TWO, ONE]);
     mount();
@@ -156,7 +162,7 @@ describe('the Side pane', () => {
     act(() => openSideThread(A, ONE));
     mount();
     await userEvent.click(screen.getByRole('button', { name: url }));
-    expect(main.callsOf('browser.tabs.open')).toEqual([{ appSessionId: A, url, select: true, reuse: 'url' }]);
+    expect(main.callsOf('browser.tabs.open')).toEqual([{ appSessionId: A_ID, url, select: true, reuse: 'url' }]);
     expect(panelOf(A)!.tabs.some((t) => t.toolId === browserTool.id)).toBe(true);
     expect(panelOf(ONE)).toBeUndefined();
     cleanup();
@@ -175,7 +181,7 @@ describe('the Side pane', () => {
     const main = installFakeMain((name, input) => (name === 'browser.tabs.open' ? ok({ tab: browserTab(T1, input.appSessionId as AppSessionId, { url }), reused: false }) : ok()));
     render(<ThreadView parent={ONE} child={TWO} visible={false} />);
     await userEvent.click(screen.getByRole('button', { name: url }));
-    expect(main.callsOf('browser.tabs.open')).toEqual([{ appSessionId: ONE, url, select: true, reuse: 'url' }]);
+    expect(main.callsOf('browser.tabs.open')).toEqual([{ appSessionId: ONE_ID, url, select: true, reuse: 'url' }]);
   });
   // E4d end
 
@@ -183,7 +189,7 @@ describe('the Side pane', () => {
   // from an artifact element (P2-E1 document, D7). ELEMENT is an anchor stored before the cutover, on E2's scheme.
   describe('Show in artifact', () => {
     const RECORD_ID = '00000000-0000-4000-8000-0000000000e1';
-    const ELEMENT: Anchor = { kind: 'artifact-element', locator: '#hero', label: 'Dashboard v1 › h1#hero “Sales overview”', pageUrl: deliverableUrl(A, RECORD_ID, 1) };
+    const ELEMENT: Anchor = { kind: 'artifact-element', locator: '#hero', label: 'Dashboard v1 › h1#hero “Sales overview”', pageUrl: deliverableUrl(A_ID, RECORD_ID, 1) }; // its URL names main's bare id
     const SHOW = 'Show in artifact';
     beforeEach(() => {
       useCommentCard.setState({ open: null });
@@ -352,7 +358,7 @@ describe('the Side pane', () => {
         await userEvent.click(screen.getByRole('button', { name: REOPEN }));
         const browserTabRef = panelOf(A)!.tabs.find((t) => t.toolId === browserTool.id)!;
         expect(panelOf(A)!.activeTabId, 'Browser is the panel’s tool again').toBe(browserTabRef.id);
-        expect(main.callsOf('browser.tabs.select')).toEqual([{ appSessionId: A, tabId: T1 }]);
+        expect(main.callsOf('browser.tabs.select')).toEqual([{ appSessionId: A_ID, tabId: T1 }]);
         expect(useCommentCard.getState().open).toMatchObject({
           parent: A, anchor: ELEMENT, host: 'browser', hostId: null, claimMode: 'panel', rect: null,
           target: { kind: 'browser', pageUrl: PAGE }, phase: { kind: 'thread', child: ONE, echo: null },
@@ -376,7 +382,7 @@ describe('the Side pane’s question view', () => {
   let fake: FakeClient;
   const listing = (exchanges: SideExchange[]) => {
     fake = fakeClient({ 'side.question.list': { exchanges } });
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
   };
   beforeEach(() => resetSideQuestions());
 
@@ -394,12 +400,26 @@ describe('the Side pane’s question view', () => {
     await userEvent.click(chips[0] as HTMLElement);
     expect(sidePaneOf(useSidePane.getState(), A).view).toEqual({ kind: 'btw' });
     await screen.findByText('ZEBRA');
-    expect(fake.invoked('side.question.list')).toEqual([{ appSessionId: A }]);
+    expect(fake.invoked('side.question.list')).toEqual([{ appSessionId: A_ID }]);
     expect([...document.querySelectorAll('[data-side-exchange]')].map((el) => el.getAttribute('data-side-exchange'))).toEqual(['answered', 'answered', 'pending', 'failed']);
     expect(document.querySelectorAll('[data-side-synthetic]')).toHaveLength(1);
     expect(screen.getByText('The engine substituted this answer')).toBeTruthy();
     expect(screen.getByText('Answering…')).toBeTruthy();
     expect(screen.getByRole('alert').textContent).toContain('Side question cancelled');
+  });
+
+  // P5 O9: a terminal session's question whose acknowledgement was unknown stays pending with its doubt, Retry offered
+  it('draws a pending question with a doubt as answering still, the doubt said beside a Retry', async () => {
+    withThreads(thread(ONE, '2026-10-06T01:00:00.000Z'));
+    listing([exchange({ id: 'op-5', question: 'Still?', state: 'pending', response: null, answeredAt: null, error: 'It may have been asked: its answer shows here if it was' })]);
+    act(() => setSideView(A, { kind: 'btw' }));
+    mount();
+    await screen.findByText('Still?');
+    expect(screen.getByText('Answering…')).toBeTruthy();
+    const doubt = document.querySelector<HTMLElement>('[data-side-uncertain]')!;
+    expect(doubt.textContent).toContain('It may have been asked: its answer shows here if it was');
+    expect(within(doubt).getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   // P2-A (2026-10-09; the execution document §5.6): Ask and Retry on an exited session start it (side), then ask
@@ -412,12 +432,12 @@ describe('the Side pane’s question view', () => {
     expect(fake.invoked('session.acquire')).toEqual([]);
     expect(screen.getByText('Starts this session')).toBeTruthy();
     await userEvent.type(screen.getByRole('textbox', { name: 'Ask a side question' }), 'More?{Enter}');
-    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'side' }]);
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A_ID, reason: 'side' }]);
     expect(screen.getByText('Starting…')).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Ask' }) as HTMLButtonElement).disabled).toBe(true);
     expect(fake.invoked('session.sideQuestion')).toEqual([]);
-    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false }));
-    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A, question: 'More?' }]);
+    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A_ID, launched: true, joined: false }));
+    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A_ID, question: 'More?' }]);
     expect((screen.getByRole('textbox', { name: 'Ask a side question' }) as HTMLTextAreaElement).value).toBe('');
     expect(fake.invoked('session.acquire')).toHaveLength(1);
   });
@@ -428,11 +448,11 @@ describe('the Side pane’s question view', () => {
     act(() => setSideView(A, { kind: 'btw' }));
     mount();
     await userEvent.click(await screen.findByRole('button', { name: 'Retry' }));
-    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'side' }]);
-    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false }));
-    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A, question: 'What word?', retryOf: 'op-2' }]);
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A_ID, reason: 'side' }]);
+    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A_ID, launched: true, joined: false }));
+    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A_ID, question: 'What word?', retryOf: 'op-2' }]);
     await userEvent.type(screen.getByRole('textbox', { name: 'Ask a side question' }), 'Again?{Enter}');
-    await act(() => fake.reply('session.acquire', { status: 'missing_directory', appSessionId: A, directory: '/gone' }));
+    await act(() => fake.reply('session.acquire', { status: 'missing_directory', appSessionId: A_ID, directory: '/gone' }));
     expect(screen.getByText('Directory not found: /gone')).toBeTruthy();
     expect(fake.invoked('session.sideQuestion')).toHaveLength(1);
     expect((screen.getByRole('textbox', { name: 'Ask a side question' }) as HTMLTextAreaElement).value).toBe('Again?');
@@ -460,7 +480,7 @@ describe('the Side pane’s question view', () => {
     await screen.findByText(/Ask about the conversation without adding to it/);
     expect((screen.getByRole('button', { name: 'Continue as a side thread' }) as HTMLButtonElement).disabled).toBe(true);
     await userEvent.type(screen.getByRole('textbox', { name: 'Ask a side question' }), 'What word?{Enter}');
-    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A, question: 'What word?' }]);
+    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A_ID, question: 'What word?' }]);
     expect((screen.getByRole('textbox', { name: 'Ask a side question' }) as HTMLTextAreaElement).value).toBe('');
     expect(screen.getByText('What word?')).toBeTruthy(); // pending at once
   });
@@ -475,7 +495,7 @@ describe('the Side pane’s question view', () => {
     act(() => setInlineQuestions(ONE, true));
     await screen.findByText('ZEBRA');
     expect(document.querySelector(`[data-side-thread-view="${ONE}"] [data-side-btw-view="${ONE}"]`)).not.toBeNull();
-    expect(fake.invoked('side.question.list')).toEqual([{ appSessionId: ONE }]);
+    expect(fake.invoked('side.question.list')).toEqual([{ appSessionId: ONE_ID }]);
     expect(shown()).toBe(A); // the main view stays
     const toggle = screen.getByRole('button', { name: '/btw side questions' }); // scale-review C scalpel-5#4: the name holds the visible "/btw"
     expect(toggle.textContent).toBe('/btw');

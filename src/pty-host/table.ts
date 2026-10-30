@@ -17,10 +17,17 @@
 //
 // A pty that exits on its own stays as a dead entry for an hour, so a reloaded renderer can still show its last
 // screen; one the renderer killed is removed when it exits. An id the table does not hold fails with `unknown pty`.
+//
+// P5 O2 M4 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md): an attach with `credit: false` (a remote viewer's, which
+// `mawsd` forces) answers as any attach does but leaves the flow untouched, so the reader that holds the credit keeps it;
+// `shutdown` ends every live pty through the kill ladder, for the socket mode's exit order; from its start every spawn is
+// refused, before and after its wait on the environment, so none outlives it. `setEnvironment` (pty.recaptureEnv) swaps
+// in a fresh capture once it resolves; a spawn already waiting keeps the environment it awaited.
 import { randomUUID } from 'node:crypto';
 import * as nodePty from 'node-pty';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HostEmit } from '@shared/host/runtime';
+import { loginShell } from '@shared/host/shell-env';
 import type { CommandInput, CommandOutput, PtyCheckpoint, PtyId, PtyInfo } from '@shared/ipc/schema';
 import { HIGH_WATERMARK, INITIAL_FLOW, stepFlow, type Flow, type FlowInput } from './flow';
 import { foregroundOf } from './foreground';
@@ -33,7 +40,6 @@ export const RING_BYTES = 512 * 1024;
 if (RING_BYTES !== 2 * HIGH_WATERMARK) throw new Error('the ring buffer must hold twice the high watermark');
 
 export const DEAD_ENTRY_TTL_MS = 60 * 60 * 1000;
-const DEFAULT_SHELL = '/bin/zsh';
 const LOGIN_ARGS = ['-l'];
 const FLUSH_BYTES = 64 * 1024;
 const FLUSH_INTERVAL_MS = 5;
@@ -63,6 +69,8 @@ export interface PtyTableOptions {
   // The terminal environment every pty starts with (`terminalEnvironment` over `baseEnvironment()`); a promise
   // because the login-shell capture runs once, asynchronously, at host start.
   environment: Promise<Record<string, string>>;
+  onLive?(live: number): void; // the live ptys' count after each spawn and each exit (P5 Decision Log 124's quiet)
+  onShutdown?(): void; // shutdown began, before it ends any pty (the idle collection stops)
 }
 
 export interface PtyTable {
@@ -75,12 +83,22 @@ export interface PtyTable {
   attach(input: CommandInput<'pty.attach'>): CommandOutput<'pty.attach'>;
   list(): CommandOutput<'pty.list'>;
   foreground(input: CommandInput<'pty.foreground'>): Promise<CommandOutput<'pty.foreground'>>;
+  shutdown(): Promise<void>; // P5 O2 M4: every live pty killed, each through its ladder; resolves once all have settled
+  setEnvironment(next: Promise<Record<string, string>>): void; // P5 O2 M4: the spawns after it resolves start with it
+  quiet(): boolean; // no live pty and no shutdown begun, as the table stands now (P5 Decision Log 124's quiet)
   // tests: the flow state, the ring's oldest offset, and node-pty's reads and bytes read (flushed or pending)
   inspect(ptyId: string): { flow: Flow; ringStart: number; reads: number; read: number };
 }
 
-export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable {
+export function createPtyTable({ emit, environment: initial, onLive, onShutdown }: PtyTableOptions): PtyTable {
   const entries = new Map<string, PtyEntry>();
+  const tellLive = () => onLive?.([...entries.values()].filter((entry) => entry.info.alive).length);
+  let environment = initial; // P5 O2 M4: what a spawn waits on; replaced once a recapture resolves
+  let latestCapture: Promise<Record<string, string>> | null = null; // the newest recapture, which alone may replace it
+  let closing = false; // P5 O2 M4: shutdown began; no spawn starts a pty
+  const refuseWhileClosing = () => {
+    if (closing) throw new Error('the pty host is shutting down');
+  };
 
   const get = (ptyId: string): PtyEntry => {
     const entry = entries.get(ptyId);
@@ -129,15 +147,26 @@ export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable
     else if (effect === 'resume') entry.pty.resume();
   };
 
+  // A live pty asked to end: removed once it has exited, through the shared ladder.
+  const end = (ptyId: string, entry: PtyEntry, signal: string): Promise<void> => {
+    entry.killed = true;
+    // A paused pty would never read to its end, and node-pty reports the exit only once the output is drained.
+    step(ptyId, entry, { kind: 'attach' });
+    entry.termination ??= terminate(entry, signal);
+    return entry.termination;
+  };
+
   return {
     async spawn({ appSessionId, label, cwd, cols, rows, shell, args, command }) {
+      refuseWhileClosing();
       const env = await environment;
+      refuseWhileClosing(); // nothing has been made yet: the rest of the spawn runs without yielding
       for (const [id, entry] of entries) {
         if (entry.info.appSessionId !== appSessionId || entry.info.label !== label) continue;
         if (entry.info.alive) throw new Error(`session ${appSessionId} already has a live pty labelled ${label}`);
         remove(id); // a dead terminal under the same tab is superseded by its replacement
       }
-      const program = shell ?? (env.SHELL || DEFAULT_SHELL);
+      const program = shell ?? loginShell(env); // P5 O2 M8: $SHELL, else the passwd entry's, else the platform's default
       const ptyId = randomUUID() as PtyId;
       const [wrapper, ...wrapperArgs] = IUTF8_WRAPPER;
       const pty = nodePty.spawn(wrapper, [...wrapperArgs, program, ...(args ?? LOGIN_ARGS)], {
@@ -170,6 +199,7 @@ export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable
         read: 0,
       };
       entries.set(ptyId, entry);
+      tellLive();
 
       pty.onData((chunk: string | Buffer) => {
         const buffer = chunk as Buffer;
@@ -194,6 +224,7 @@ export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable
         const exit = { exitCode, signal: signal || null };
         entry.info = { ...entry.info, alive: false, exit };
         emit('pty.exit', { ptyId, ...exit });
+        tellLive();
         if (entry.killed) remove(ptyId);
         else if (entries.get(ptyId) === entry) {
           entry.expiry = setTimeout(() => remove(ptyId), DEAD_ENTRY_TTL_MS);
@@ -222,11 +253,7 @@ export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable
         remove(ptyId);
         return Promise.resolve();
       }
-      entry.killed = true;
-      // A paused pty would never read to its end, and node-pty reports the exit only once the output is drained.
-      step(ptyId, entry, { kind: 'attach' });
-      entry.termination ??= terminate(entry, signal ?? 'SIGHUP');
-      return entry.termination;
+      return end(ptyId, entry, signal ?? 'SIGHUP');
     },
 
     ack({ ptyId, offset }) {
@@ -240,10 +267,10 @@ export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable
       entry.checkpoint = { offset: Math.min(offset, entry.flow.total), state };
     },
 
-    attach({ ptyId }) {
+    attach({ ptyId, credit = true }) {
       const entry = get(ptyId);
       flush(ptyId, entry); // nextOffset covers every byte read, and the renderer receives them as a live event
-      step(ptyId, entry, { kind: 'attach' });
+      if (credit) step(ptyId, entry, { kind: 'attach' }); // P5 O2 M4: a non-crediting reader leaves the credit where it is
       const replayFrom = Math.max(entry.checkpoint?.offset ?? 0, entry.ring.start);
       return {
         info: infoOf(entry),
@@ -262,6 +289,25 @@ export function createPtyTable({ emit, environment }: PtyTableOptions): PtyTable
       const entry = get(ptyId);
       if (!entry.info.alive) return { process: null, busy: false };
       return foregroundOf({ pid: entry.info.pid, shell: entry.info.shell, process: entry.pty.process });
+    },
+
+    async shutdown() {
+      closing = true;
+      onShutdown?.();
+      const live = [...entries.values()].filter((entry) => entry.info.alive);
+      const ended = await Promise.allSettled(live.map((entry) => end(entry.info.ptyId, entry, 'SIGHUP')));
+      for (const [i, result] of ended.entries()) if (result.status === 'rejected') console.error(`[pty-host] ${live[i]!.info.ptyId} did not end at shutdown`, result.reason);
+    },
+
+    quiet() {
+      return !closing && [...entries.values()].every((entry) => !entry.info.alive);
+    },
+
+    setEnvironment(next) {
+      latestCapture = next;
+      void next.then((env) => {
+        if (latestCapture === next) environment = Promise.resolve(env);
+      });
     },
 
     inspect(ptyId) {

@@ -5,23 +5,26 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { project, record } from '../../../../test/support/builders';
+import { at } from '../../../../test/support/machine';
 import { formatDateTime } from '@shared/app/date-format';
 import { useSessions } from '../stores/sessions';
 import { RESUME_COPY } from './copy';
 import { clearPreviewCache, SETTLE_MS } from './preview';
 import { ResumeChooser } from './ResumeChooser';
 
-const P = project('p', 0, { name: 'maws' });
-const Q = project('q', 1, { name: 'usage' });
-const at = (minutes: number) => new Date(Date.UTC(2026, 9, 1, 12, minutes)).toISOString();
+// P5 O6 M2: the store holds the page's ids (addressed); a record keeps the title and directory the builder gives its bare id
+const P = project(at('p'), 0, { name: 'maws', directory: '/work/p' });
+const Q = project(at('q'), 1, { name: 'usage', directory: '/work/q' });
+const pageRecord = (id: string, over: Partial<SessionRecord> = {}) => record(at(id), { title: { text: id, source: 'user' }, directory: `/work/${id}`, ...over });
+const minute = (minutes: number) => new Date(Date.UTC(2026, 9, 1, 12, minutes)).toISOString();
 const base: SessionRecord[] = [
-  record('alpha', { projectId: P.id, updatedAt: at(9) }),
-  record('beta', { projectId: P.id, updatedAt: at(5) }),
-  record('gamma', { projectId: P.id, updatedAt: at(1) }),
-  record('elsewhere', { projectId: Q.id, updatedAt: at(3) }),
+  pageRecord('alpha', { projectId: P.id, updatedAt: minute(9) }),
+  pageRecord('beta', { projectId: P.id, updatedAt: minute(5) }),
+  pageRecord('gamma', { projectId: P.id, updatedAt: minute(1) }),
+  pageRecord('elsewhere', { projectId: Q.id, updatedAt: minute(3) }),
 ];
 
 const fill = (records: SessionRecord[]) => useSessions.setState({ records: new Map(records.map((r) => [r.appId, r])), digests: new Map(), projects: new Map([P, Q].map((p) => [p.id, p])) });
@@ -29,7 +32,7 @@ const fill = (records: SessionRecord[]) => useSessions.setState({ records: new M
 const change = (appId: string, over: Partial<SessionRecord>) =>
   act(() => {
     const records = new Map(useSessions.getState().records);
-    const current = [...records.values()].find((r) => r.appId === appId)!;
+    const current = [...records.values()].find((r) => r.appId === at(appId))!;
     records.set(current.appId, { ...current, ...over });
     useSessions.setState({ records });
   });
@@ -39,12 +42,12 @@ beforeEach(() => {
   window.maws = fakeClient({
     'git.worktree.list': { repoRoot: P.directory, commonDir: `${P.directory}/.git`, worktrees: [] },
     'session.recentTurns': { turns: [], earlier: false, source: 'transcript' },
-  }).client;
+  }).client as unknown as PreloadBridge;
 });
 afterEach(() => {
   cleanup();
   useSessions.setState({ records: new Map(), digests: new Map(), projects: new Map() });
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 const mount = (projectId: ProjectId | null = P.id as ProjectId) => render(<ResumeChooser context={{ projectId, exclude: null }} close={vi.fn()} />);
@@ -73,7 +76,7 @@ describe('the resume chooser', () => {
     fill(base);
     mount();
     expect(selected()).toBe('alpha');
-    change('gamma', { updatedAt: at(30) });
+    change('gamma', { updatedAt: minute(30) });
     expect(titles()).toEqual(['gamma', 'alpha', 'beta']);
     expect(selected()).toBe('alpha');
   });
@@ -84,7 +87,7 @@ describe('the resume chooser', () => {
     mount();
     await user.keyboard('a'); // alpha, beta, gamma
     expect(selected()).toBe('alpha');
-    change('beta', { updatedAt: at(30) });
+    change('beta', { updatedAt: minute(30) });
     expect(titles()[0]).toBe('beta');
     expect(selected()).toBe('alpha');
   });
@@ -105,7 +108,7 @@ describe('the resume chooser', () => {
     vi.useFakeTimers();
     try {
       const fake = fakeClient({ 'git.worktree.list': { repoRoot: P.directory, commonDir: `${P.directory}/.git`, worktrees: [] }, 'session.recentTurns': { turns: [], earlier: false, source: 'transcript' } });
-      window.maws = fake.client;
+      window.maws = fake.client as unknown as PreloadBridge;
       const read = () => fake.invoked('session.recentTurns').map((input) => (input as { appSessionId: string }).appSessionId);
       fill(base);
       mount();
@@ -125,7 +128,7 @@ describe('the resume chooser', () => {
   });
 
   it('a conversation whose turns all lie before the read window says earlier messages are not shown, not that it has none', async () => {
-    window.maws = fakeClient({ 'git.worktree.list': { repoRoot: P.directory, commonDir: `${P.directory}/.git`, worktrees: [] }, 'session.recentTurns': { turns: [], earlier: true, source: 'transcript' } }).client;
+    window.maws = fakeClient({ 'git.worktree.list': { repoRoot: P.directory, commonDir: `${P.directory}/.git`, worktrees: [] }, 'session.recentTurns': { turns: [], earlier: true, source: 'transcript' } }).client as unknown as PreloadBridge;
     fill(base);
     mount();
     const turns = screen.getByTestId('resume-turns');
@@ -136,7 +139,7 @@ describe('the resume chooser', () => {
   it('a row’s time and the preview’s last activity carry the date and time in the display locale, as the rest of MAWS', () => {
     fill(base);
     mount();
-    const full = formatDateTime(Date.parse(at(9)));
+    const full = formatDateTime(Date.parse(minute(9)));
     const alpha = screen.getAllByRole('option').find((o) => o.querySelector('[data-title]')!.textContent === 'alpha')!;
     expect(alpha.querySelector(`[title="${full}"]`)).not.toBeNull();
     expect(within(screen.getByTestId('resume-preview')).getByTitle(full)).toBeTruthy();
@@ -157,7 +160,7 @@ describe('the resume chooser', () => {
   it('draws the 100 newest, loads 100 more when the list scrolls near its end or ArrowDown passes the last row, and a new search starts over', async () => {
     const user = userEvent.setup();
     const t0 = Date.UTC(2026, 9, 1, 12);
-    fill(Array.from({ length: 250 }, (_, k) => record(`s${String(k).padStart(3, '0')}`, { projectId: P.id, updatedAt: new Date(t0 - k * 60_000).toISOString() })));
+    fill(Array.from({ length: 250 }, (_, k) => pageRecord(`s${String(k).padStart(3, '0')}`, { projectId: P.id, updatedAt: new Date(t0 - k * 60_000).toISOString() })));
     mount();
     const list = screen.getByRole('listbox');
     expect(titles()).toHaveLength(100);

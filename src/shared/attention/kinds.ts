@@ -11,5 +11,8 @@ const ACTIONABLE = new Set<AttentionKind>(ACTIONABLE_KINDS);
 
 // An item still waits on a human while pending or delivered (§4.6: delivered is not an alarm state, but it is not
 // answered yet either).
-export const isOpen = (item: AttentionItem) => item.state === 'pending' || item.state === 'delivered';
+export const isOpen = (item: Pick<AttentionItem, 'state'>) => item.state === 'pending' || item.state === 'delivered';
+// P5 O10: an open item standing for a request, which waits on its answer: what a remote `cards` view shows, and the
+// count `notify` tells of a lane B session (the engine host's `engine.pendingItems` and the endpoint's live events alike).
+export const waitsOnAnswer = (item: Pick<AttentionItem, 'state'> & { request: Pick<AttentionItem['request'], 'requestId'> }) => isOpen(item) && item.request.requestId !== null;
 export const isActionable = (item: AttentionItem) => ACTIONABLE.has(item.kind);

@@ -1,7 +1,9 @@
 // The device's part of the app (P5 O13 M3), started once the member is known: the device record and the org store
 // read from IndexedDB, the registry socket opened as an app's while a device record exists (its `state` notices to the
 // org store's pinned sync, its listings to the listings store), and the push subscription handed to the hub again,
-// bound to the device while the head lists it, at start and whenever the device's state moves.
+// bound to the device while the head lists it, at start and whenever the device's state moves. While the head lists
+// the device, the cut-over machines are watched (watch.ts): each one's Machine socket open for the hub's presence, the
+// cards board drawn from it and the listings (M5).
 //
 // `window.deskDevice()` answers what the device holds, for a scripted read (the browser suites): its state, the head's
 // version, and the sessions listed. Nothing it answers is a key: the record's channel key is a CryptoKey no script reads.
@@ -14,16 +16,22 @@ import { registerServiceWorker } from '../pwa/service-worker';
 import { gridApp } from '../state/grid';
 import type { AppFrames } from '../hub/grid-client';
 import { createCardsPasskey } from './cards-passkey';
+import { socketFor } from './client';
 import { idbDeviceStore } from './device-store';
 import { browserDeviceHub } from './hub';
 import { ListingsStore } from './listings-store';
 import { activateOrgStore, idbOrgPersistence, OrgStore } from './org-store';
 import { activateDevice, DeviceController, deviceController, useDevice } from './register';
+import { watchCards } from './watch';
 
 let listings: ListingsStore | null = null;
+let orgState: OrgStore | null = null;
 
 /** The verified listings store of the app's device (the cards list's, M5); null before the app starts it. */
 export const listingsStore = (): ListingsStore | null => listings;
+
+/** The org state the app's device holds (its head and certificates, for a landing's listing, M5); null before it starts. */
+export const deviceOrgStore = (): OrgStore | null => orgState;
 
 export type DeviceReadout = { state: string | null; deviceId: string | null; version: number | null; listings: Array<{ machine: string; session: string; revision: number; title: string }> };
 
@@ -44,6 +52,7 @@ export function startDevice(me: Me): () => void {
   activateOrgStore(orgStore);
   activateDevice(controller);
   listings = store;
+  orgState = orgStore;
   const offOrg = orgStore.onChange(() => void store.orgChanged());
   const frames: AppFrames = {
     opened: () => store.opened(),
@@ -52,11 +61,19 @@ export function startDevice(me: Me): () => void {
     listing: (frame) => void store.listing(frame.record),
   };
 
-  // What a push subscription is bound to follows the device: handed over again at start, then at each move.
+  // What a push subscription is bound to follows the device: handed over again at start, then at each move. The cut-over
+  // machines are watched while the head lists the device.
   let bound: string | undefined;
+  let unwatch: (() => void) | null = null;
   const offView = useDevice.subscribe((view) => {
     gridApp(view.record === null ? null : frames);
     if (view.record === null) store.clear();
+    const listed = view.record?.state.kind === 'listed' && orgStore.ready;
+    if (listed && unwatch === null) unwatch = watchCards({ member: view.record!.member, org: orgStore, listings: store, socketFor: (ref) => socketFor(ref) });
+    else if (!listed && unwatch !== null) {
+      unwatch();
+      unwatch = null;
+    }
     const now = view.record === null ? '' : `${view.record.deviceId} ${view.record.state.kind}`;
     if (!view.loaded || now === bound) return;
     bound = now;
@@ -75,12 +92,14 @@ export function startDevice(me: Me): () => void {
   };
   return () => {
     offView();
+    unwatch?.();
     offOrg();
     gridApp(null);
     bindPushDevice(null);
     activateDevice(null);
     activateOrgStore(null);
     if (listings === store) listings = null;
+    if (orgState === orgStore) orgState = null;
     delete window.deskDevice;
   };
 }

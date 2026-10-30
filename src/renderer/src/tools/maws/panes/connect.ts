@@ -31,6 +31,7 @@ import { artifactScopeOf, type LineageSource } from '@shared/maws/artifact-scope
 import { PANES, type Pane } from '@shared/maws/panes';
 import { TOOL_ERRORS } from '@shared/maws/tools';
 import { ipc } from '../../../ipc/client';
+import { machineFor } from '../../../ipc/machine';
 import { panelHost, shownSession } from '../../../panel/host';
 import type { PanelTool } from '../../../panel/tool';
 import { useLayout } from '../../../stores/layout';
@@ -61,7 +62,7 @@ export function showPane({ appSessionId, requestId, pane, target, line, at }: Ma
     if (target === null) return { ok: false, error: TOOL_ERRORS.targetRequired(pane) }; // the host resolves one for `file`
     openFile(appSessionId, target, line);
     const path = normalizeLexically(target);
-    return { ok: true, opened: { kind: 'main-tab', tabId: tabId({ kind: 'file', path, line, appSessionId }), path, line } };
+    return { ok: true, opened: { kind: 'main-tab', tabId: tabId({ kind: 'file', path, line, appSessionId, machine: machineFor(appSessionId) }), path, line } };
   }
   const tool = panelHost.tools().find((candidate) => candidate.id === where.toolId);
   if (!tool) return { ok: false, error: TOOL_ERRORS.paneUnavailable(pane) };

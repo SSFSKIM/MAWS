@@ -16,6 +16,7 @@ interface PageState {
 
 const states = new WeakMap<WebContents, PageState>();
 const pages = new WeakMap<ClientRef, WebContents>(); // the live instances only
+const byId = new Map<string, ClientRef>(); // P5 O3-D M5b: the live instances by id, for a request mawsd sends back (clientOfId)
 
 // The live instance's ref, minting the next generation's on the first call after the previous instance ended.
 export function clientOf(contents: WebContents): ClientRef {
@@ -27,6 +28,7 @@ export function clientOf(contents: WebContents): ClientRef {
       const ending = current.live;
       if (!ending) return;
       pages.delete(ending); // before its listeners run, so pageOf answers null inside them
+      byId.delete(ending.id);
       ending.end();
       current.live = null;
     };
@@ -45,7 +47,15 @@ export function clientOf(contents: WebContents): ClientRef {
   }
   state.live = instance;
   pages.set(instance, contents);
+  byId.set(instance.id, instance);
   return instance;
+}
+
+// P5 O3-D M5b (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §E): the live instance a `ClientRef` id
+// names (the id main's `machine` transport sent with a request, which `mawsd`'s client port names back); null once it
+// ended.
+export function clientOfId(id: string): ClientRef | null {
+  return byId.get(id) ?? null;
 }
 
 // The page itself while its instance lives, for the client-shell handlers that act on it; null once it has ended.

@@ -3,9 +3,11 @@
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import { bareOf } from '@shared/machine/address';
 import { digest, record } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { resetSlots, useSlot } from '../app/slots';
 import { SessionPane } from '../session/SessionPane';
 import { useLayout } from '../stores/layout';
@@ -43,7 +45,7 @@ afterEach(() => {
   disconnect();
   resetSlots();
   for (const key of Object.keys(useTranscriptStore.getState().entries)) useTranscriptStore.getState().drop(key);
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 function history() {
@@ -62,38 +64,38 @@ describe('the transcript slot', () => {
   });
 
   it('a session tab renders the session’s rows over its IPC source, not the fallback', async () => {
-    const APP = 'app-shell-1' as AppSessionId;
+    const APP = at('app-shell-1' as AppSessionId);
     const fake = fakeClient({ 'session.events': { events: history(), lastSeq: 3, complete: true }, 'attention.request': { event: null } });
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     useSessions.setState({ records: new Map([[APP, record(APP)]]) });
     render(<SessionPane appSessionId={APP} paneIndex={0} />);
     await waitFor(() => expect(screen.getByRole('region', { name: 'Your message' })).toBeTruthy());
-    expect(fake.invoked('session.events')).toEqual([{ appSessionId: APP, afterSeq: null, limit: null }]);
+    expect(fake.invoked('session.events')).toEqual([{ appSessionId: bareOf(APP), afterSeq: null, limit: null }]);
     expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toContain('See the file');
     expect(screen.queryByText('Transcript unavailable')).toBeNull();
   });
 
   it('tells the store whether the session’s process is live, from C5’s digest (the read model’s liveness rule)', () => {
-    const APP = 'app-shell-3' as AppSessionId;
+    const APP = at('app-shell-3' as AppSessionId);
     const CHILD = 'agent-1' as AgentId;
-    window.maws = fakeClient().client;
+    window.maws = fakeClient().client as unknown as PreloadBridge;
     const live = (key: string) => useTranscriptStore.getState().live[key];
     const view = render(<ShellTranscript appSessionId={APP} agentId={null} paneIndex={0} />);
     expect(live(APP)).toBe(false); // no digest: no live process known
     for (const [phase, expected] of [['working', true], ['waiting', true], ['idle', true], ['starting', true], ['exited', false], ['failed', false], ['foreign', false]] as const) {
-      act(() => useSessions.getState().applyDigest(digest(APP, { phase, revision: (useSessions.getState().digests.get(APP)?.revision ?? 0) + 1 })));
+      act(() => useSessions.getState().applyDigest(digest(APP, { phase, revision: (useSessions.getState().digests.get(APP)?.revision ?? 0) + 1 }), TEST_MACHINE));
       expect(live(APP), phase).toBe(expected);
     }
     view.unmount();
     // A child agent runs in its parent's process.
-    act(() => useSessions.getState().applyDigest(digest(APP, { phase: 'working', revision: 100 })));
+    act(() => useSessions.getState().applyDigest(digest(APP, { phase: 'working', revision: 100 }), TEST_MACHINE));
     render(<ShellTranscript appSessionId={APP} agentId={CHILD} paneIndex={0} />);
     expect(live(`${APP}:${CHILD}`)).toBe(true);
   });
 
   it('forgets the key’s liveness when the tab closes, so a later mount elsewhere ticks again', () => {
-    const APP = 'app-shell-4' as AppSessionId;
-    window.maws = fakeClient().client;
+    const APP = at('app-shell-4' as AppSessionId);
+    window.maws = fakeClient().client as unknown as PreloadBridge;
     const view = render(<ShellTranscript appSessionId={APP} agentId={null} paneIndex={0} />);
     expect(useTranscriptStore.getState().live[APP]).toBe(false);
     view.unmount();
@@ -102,13 +104,13 @@ describe('the transcript slot', () => {
   });
 
   it('a path chip opens C5’s file tab; links keep the default layout.openExternal', async () => {
-    const APP = 'app-shell-2' as AppSessionId;
-    window.maws = fakeClient({ 'session.events': { events: history(), lastSeq: 3, complete: true } }).client;
+    const APP = at('app-shell-2' as AppSessionId);
+    window.maws = fakeClient({ 'session.events': { events: history(), lastSeq: 3, complete: true } }).client as unknown as PreloadBridge;
     expect(registeredActions().openExternal).toBe(DEFAULT_ACTIONS.openExternal);
     render(<ShellTranscript appSessionId={APP} agentId={null} paneIndex={0} />);
     await waitFor(() => expect(document.querySelector('[data-chip="path"]')).toBeTruthy());
     fireEvent.click(document.querySelector<HTMLElement>('[data-chip="path"]')!);
     const pane = currentSet(useLayout.getState().main).panes[0];
-    expect(pane.tabs.find((tab) => tab.id === pane.activeTabId)).toMatchObject({ kind: 'file', path: 'src/a.ts', line: null, appSessionId: null });
+    expect(pane.tabs.find((tab) => tab.id === pane.activeTabId)).toMatchObject({ kind: 'file', path: 'src/a.ts', line: null, appSessionId: null, machine: TEST_MACHINE });
   });
 });

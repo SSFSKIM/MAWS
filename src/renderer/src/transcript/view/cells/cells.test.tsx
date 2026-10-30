@@ -108,7 +108,7 @@ describe('shell detail', () => {
 describe('edit detail', () => {
   it('renders the hunks as diff lines with line numbers and add and del lines, and the path opens the file', async () => {
     const hunk = { oldStart: 42, oldLines: 2, newStart: 42, newLines: 3, lines: [' const rect = row.getBoundingClientRect();', '-setTarget(id);', '+const edge = y < mid;', '+setTarget({ id, edge });', 'return;'] }; // the last line unprefixed (seen in a synthetic journal): context, whole
-    const { cell, actions } = await expandedCell((b) => {
+    const { cell, actions, store } = await expandedCell((b) => {
       b.toolUse('t1', 'Edit', { file_path: '/p/src/drag.ts', old_string: 'setTarget(id);', new_string: 'x' });
       b.result('t1', 'ok', { structured: { filePath: '/p/src/drag.ts', structuredPatch: [hunk] } });
       b.toolUse('t2', 'Bash', { command: 'ls' });
@@ -120,13 +120,13 @@ describe('edit detail', () => {
     expect(lines[4].textContent).toContain('return;');
     expect(lines[1].textContent).toContain('setTarget(id);');
     fireEvent.click(within(cell).getByRole('button', { name: '/p/src/drag.ts' }));
-    expect(actions.openFile).toHaveBeenCalledWith('/p/src/drag.ts', 42);
+    expect(actions.openFile).toHaveBeenCalledWith('/p/src/drag.ts', 42, store.key);
   });
 });
 
 describe('read detail', () => {
   it('lists path chips that open the file at the first line of its range', async () => {
-    const { cell, actions } = await expandedCell((b) => {
+    const { cell, actions, store } = await expandedCell((b) => {
       b.toolUse('t1', 'Read', { file_path: '/p/a.ts', offset: 10, limit: 5 });
       b.result('t1', '10\tconst a = 1;');
       b.toolUse('t2', 'Read', { file_path: '/p/b.ts' });
@@ -137,7 +137,7 @@ describe('read detail', () => {
     const chips = within(cell.querySelector('.transcript-cell-detail') as HTMLElement).getAllByRole('button', { name: /\.ts/ });
     expect(chips.map((chip) => chip.textContent)).toEqual(['a.ts:10–14']);
     fireEvent.click(chips[0]);
-    expect(actions.openFile).toHaveBeenCalledWith('/p/a.ts', 10);
+    expect(actions.openFile).toHaveBeenCalledWith('/p/a.ts', 10, store.key);
     expect(cell.textContent).not.toContain('const b = 2;');
   });
 });

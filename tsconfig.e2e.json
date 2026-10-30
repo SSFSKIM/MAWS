@@ -62,9 +62,33 @@
     "src/engine-host/journal.ts",
     "src/engine-host/launch.ts",
     "src/engine-host/relay-health.ts",
+    "src/engine-host/supervisor-files.ts", // P5 O2 M3: src/shared/host's detached transport and identity read the supervisor's files
+    "src/mawsd/machine-client.ts", // P5 O3-D M2: the mawsd-with-the-spine reading's bare machine.sock client
+    "src/pty-host/files.ts", // P5 O3-B: a launch's cleanup removes the pty host's socket fallback with the profile's processes
     "src/engine-host/transport.ts",
-    "src/main/git/runner.ts",
-    "src/main/index/migrations.ts",
+    "src/services/git/runner.ts",
+    "src/services/index/migrations.ts",
+    "src/services/index/browser-staging.ts", // P5 O3-A: migration 14's staging step, which migrations.ts imports
+    "src/services/index/db.ts",
+    // P5 O3-C M5: the spine's idle reading writes its profile-sized fixture through the index's own stores and the
+    // prompt history (test/support/spine-fixture.ts)
+    "src/services/attention/store.ts",
+    "src/services/history/prompt-history.ts",
+    "src/services/index/attention.ts",
+    "src/services/index/drafts.ts",
+    "src/services/index/index.ts",
+    "src/services/index/org-project.ts",
+    "src/services/index/projects.ts",
+    "src/services/index/replay-fixtures.ts",
+    "src/services/index/session-search.ts",
+    "src/services/index/sessions.ts",
+    "src/services/index/side-threads.ts",
+    "src/services/library/store.ts",
+    "src/services/owner/answers.ts",
+    "src/services/owner/prompt-state.ts",
+    "src/services/owner/store.ts",
+    "test/support/index-fixture.ts",
+    "test/support/spine-fixture.ts",
     "src/renderer/src/app/date-format.ts",
     "src/renderer/src/composer/dev/resume-spec.ts",
     "src/renderer/src/harness/agents/api.ts",
@@ -75,6 +99,7 @@
     "src/renderer/src/harness/document/api.ts", // P3-B M3
     "src/renderer/src/harness/panel/api.ts",
     "src/renderer/src/harness/widgets/api.ts",
+    "src/renderer/src/settings-tab/copy.ts", // P5 O8 M4a Task 8: the Org page spec reads the page's own words
     "src/renderer/src/tools/agents/copy.ts",
     "src/renderer/src/tools/agents/model/elapsed.ts",
     "src/renderer/src/tools/agents/model/relay.ts",
@@ -94,8 +119,10 @@
     "test/support/builders.ts",
     "test/support/chrome-profile.ts",
     "test/support/claude-env.ts",
+    "test/support/daemon-idle.ts", // P5 O2 M1: the idle-cost measurement's statistics, baseline and bound
     "test/support/cua-fake-host.ts",
     "test/support/engine-pin/index.ts",
+    "test/support/fake-bridge.ts", // P5 O9 M5: e2e:lane-a's terminal sessions are served by the fake bridge
     "test/support/file-lock.ts",
     "test/support/fixture-session-id.ts",
     "test/support/git-env.ts",
@@ -104,6 +131,7 @@
     "test/support/latency-engine.ts", // P5 O1 M1: the local-latency bench's engine wrapper and markers
     "test/support/local-latency.ts", // P5 O1 M1: the local-latency bench's statistics, baseline and budget
     "test/support/live-seed.ts",
+    "test/support/machine.ts", // P5 O6 M2: through widget-backend.ts
     "test/support/owner-file.ts",
     "test/support/panel-child-tail.ts",
     "test/support/plugin-cli-stub.ts",
@@ -116,6 +144,7 @@
     "test/support/scenario.ts",
     "test/support/scratch-repo.ts",
     "test/support/shell-home.ts",
+    "test/support/spine-files.ts", // P5 O3-D M6: the spine's files and those a process holds open, shared with src/mawsd/process-yield.test.ts
     "test/support/store-fixture.ts",
     "test/support/synth-transcript.ts",
     "test/support/to-human-plugin.ts", // P4-R7z: the to-human spec installs the plugin's style and the plugin in its scratch home

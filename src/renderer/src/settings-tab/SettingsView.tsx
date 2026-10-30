@@ -16,10 +16,11 @@ import { useSettingsValue } from './parts';
 import { VoiceSection } from './VoiceSection'; // E9
 import { BrowserSection } from './BrowserSection'; // E4a
 import { ArtifactsSection } from './ArtifactsSection'; // P3-D
+import { OrgSection } from './org/OrgSection'; // P5 O8 M1; M4a: the Org page, split by group
 import { openCustomize } from '../customize/open';
 
 export type SettingsSection = NonNullable<Extract<TabRef, { kind: 'settings' }>['section']>;
-const ORDER: SettingsSection[] = ['engine', 'gateway', 'keyboard', 'voice', 'appearance', 'notifications', 'sessions', 'browser', 'artifacts']; // E9: Voice after Keyboard; E4a: Browser; P3-D: Artifacts last
+const ORDER: SettingsSection[] = ['engine', 'gateway', 'keyboard', 'voice', 'appearance', 'notifications', 'sessions', 'browser', 'artifacts', 'org']; // E9: Voice after Keyboard; E4a: Browser; P3-D: Artifacts; P5 O8 M1: Org last
 const HINTS: Partial<Record<SettingsSection, string>> = { keyboard: KEYBOARD.hint }; // W9 (H4): no charter labels in the UI
 const headingId = (section: SettingsSection) => `settings-${section}`;
 
@@ -117,6 +118,10 @@ export function SettingsView({ section }: { section: SettingsSection | null }) {
               {/* P3-D: the design-system defaults (settings 14) */}
               <Section id="artifacts">
                 <ArtifactsSection artifacts={settings.artifacts} />
+              </Section>
+              {/* P5 O8 M1: the sign-in to the org, over org.* rather than settings */}
+              <Section id="org">
+                <OrgSection />
               </Section>
             </div>
           )}

@@ -6,15 +6,20 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { EngineSessionStatus } from '@shared/engine/status';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { record } from '../../../../test/support/builders';
+import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
 import { ReloadPluginsWidget } from './ReloadPluginsWidget';
 
 const ROOT = join(__dirname, '../../../..');
-const ID = 'app-7412a115' as AppSessionId;
+// P5 O6 M2: the backend is main (bare ids); the page holds the address
+const BARE = 'app-7412a115' as AppSessionId;
+const ID = at(BARE);
+const lifted = (status: EngineSessionStatus): EngineSessionStatus => ({ ...status, appSessionId: at(status.appSessionId) });
 let backend: WidgetBackend;
 
 beforeEach(() => {
@@ -24,7 +29,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   useSessions.setState({ engine: new Map() });
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: unknown }).maws;
 });
 
 const mount = () =>
@@ -38,7 +43,7 @@ const reloads = () => backend.calls.filter((c) => c.subtype === 'reload_plugins'
 describe('/reload-plugins', () => {
   it('reloads once on opening, says Working… and then what the reload loaded; Reload plugins runs it again', async () => {
     backend.holdOperations(true);
-    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+    useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
     mount();
     expect(document.querySelector('[data-widget="reload-plugins"] h3')?.textContent).toBe('Reload plugins');
     await waitFor(() => expect(screen.getByText('Working…')).toBeTruthy());
@@ -52,9 +57,9 @@ describe('/reload-plugins', () => {
 
   // P2-A (2026-10-09; the execution document §5.6): no ready process offers Load now; opening starts and asks nothing
   it('without a ready process offers Load now and asks nothing of the engine; Load now starts it, then the reload runs', async () => {
-    const offStatus = backend.bridge().on('session.status', (event) => useSessions.getState().applyStatus(event));
-    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]), records: new Map([[ID, record(ID)]]) });
-    act(() => void backend.emitStatus(ID, { process: 'exited' })); // the backend's engine and the store alike
+    const offStatus = ipc.on('session.status', (event) => useSessions.getState().applyStatus(event, TEST_MACHINE));
+    useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]), records: new Map([[ID, record(ID)]]) });
+    act(() => void backend.emitStatus(BARE, { process: 'exited' })); // the backend's engine and the store alike
     mount();
     expect(screen.getByText('Not read yet.')).toBeTruthy();
     expect(screen.queryByText(/not running/)).toBeNull();
@@ -63,7 +68,7 @@ describe('/reload-plugins', () => {
     expect(backend.calls.filter((c) => c.command === 'session.acquire')).toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: 'Load now' }));
     await waitFor(() => expect(reloads()).toHaveLength(1));
-    expect(backend.calls.filter((c) => c.command === 'session.acquire').map((c) => c.input)).toEqual([{ appSessionId: ID, reason: 'read' }]);
+    expect(backend.calls.filter((c) => c.command === 'session.acquire').map((c) => c.input)).toEqual([{ appSessionId: BARE, reason: 'read' }]);
     offStatus();
     useSessions.setState({ records: new Map() });
   });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { LAYOUT_DEFAULTS, StoredMainSchema } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS, storedMainSchema } from '@shared/ipc/schema/layout';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 import { activeTab, currentSet, openTab, togglePinned } from '../stores/layout-model';
 
 describe('app destinations', () => {
@@ -11,6 +12,6 @@ describe('app destinations', () => {
     expect(activeTab(main)).toEqual({ id: 'customize', kind: 'customize', section: 'mcp', pinned: false });
     expect(togglePinned(main, 'customize')).toBe(main);
     expect(togglePinned(main, 'projects')).toBe(main);
-    expect(StoredMainSchema.parse(main)).toEqual(main);
+    expect(storedMainSchema(TEST_MACHINE).parse(main)).toEqual(main);
   });
 });

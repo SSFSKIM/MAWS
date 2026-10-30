@@ -17,7 +17,7 @@ import { newDoc, type Doc } from '@artifacts/yjs';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { CommandName, MawsBridge } from '@shared/ipc/schema';
 import type { LibraryRow } from '@shared/ipc/schema/library';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { connectLibrary, resetLibrary } from '../../library/store';
 import { resetMarkupSurfaces } from '../../markup/surface';
 import { EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
@@ -92,7 +92,7 @@ beforeEach(() => {
   resetEditorHosts();
   resetMarkupSurfaces();
   resetArtifactEditors();
-  useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V19, resolvedTheme: 'light' } });
+  useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V21, resolvedTheme: 'light' } });
   librarySystems = [HARBOR, HOUSE, OWNERS];
   // main's library, which the binding reads for the live systems; read again at each `library.changed`
   main = installFakeMain((name: CommandName) => (name === 'library.list' ? ok({ rows: librarySystems.map(row), counts }) : ok(null)));
@@ -122,7 +122,7 @@ const until = async (check: () => boolean, what: string) => {
 function deps(placement: { designSystemId?: string; spaceId?: string }): () => DocumentTabDeps {
   return () => {
     const ipc: Pick<MawsBridge, 'invoke' | 'on'> = {
-      invoke: (async (name: CommandName) => ({ ok: true, value: name === 'artifacts.get' ? { artifact: { id: DOC, kind: 'document', title: 'Syllabus', lastViewedAt: null, revision: 1, ...placement } } : name === 'artifacts.versions' ? { versions: [] } : undefined })) as MawsBridge['invoke'],
+      invoke: (async (name: CommandName) => ({ ok: true, value: name === 'artifacts.get' ? { artifact: { id: DOC, kind: 'document', title: 'Syllabus', lastViewedAt: null, revision: 1, ...placement } } : name === 'artifacts.versions' ? { versions: [] } : undefined })) as unknown as MawsBridge['invoke'],
       on: (() => () => {}) as MawsBridge['on'],
     };
     const host = {
@@ -161,7 +161,7 @@ function pageAccent(): string | null {
 }
 const drawn = (accent: string, what: string) => until(() => page() !== null && pageAccent() === accent, what);
 const setDefaults = (artifacts: { defaultDesignSystem: string | null; spaceDesignSystems: Record<string, string>; commentsView: 'expand' | 'minimize' | 'hide' /* P4-B1 */ }) =>
-  act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V19, artifacts }, resolvedTheme: 'light' } }));
+  act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, artifacts }, resolvedTheme: 'light' } }));
 
 describe('B’s document page under D’s scope', () => {
   it('draws the page in its own system’s tokens, the page element inside D’s scope', async () => {

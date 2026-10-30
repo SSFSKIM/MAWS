@@ -5,12 +5,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
+import { at, TEST_MACHINE } from '../../../../../test/support/machine';
 import { loadJournal } from '../../../../../test/support/fixtures';
 import { resetSurfaceRegistry, useSpinnerText } from '../../engine-surface';
 import { useSessions } from '../../stores/sessions';
 import { PluginBand, PluginHint, PluginModeSlot } from './PluginSites';
 
-const ID = 'app-r2' as AppSessionId;
+// P5 O6 M2: `ID` is the page's id (an address); `fake`, read as `window.maws`, stands for main and is asked with `BARE`.
+const BARE = 'app-r2' as AppSessionId;
+const ID = at(BARE);
 const ENGINE = { tree: { type: 'engine', ref: 0 }, props: {}, rewritten: false, hooked: false };
 
 // The render answers the fixture recorded, by component (the first of each).
@@ -28,7 +31,7 @@ function recorded(): Record<string, unknown> {
 const ANSWERS = recorded();
 
 let fake: FakeClient;
-const attach = () => act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...status(ID), uiSurface: { clientId: 'maws-main' } } }));
+const attach = () => act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...status(BARE), appSessionId: ID, uiSurface: { clientId: 'maws-main' } } }, TEST_MACHINE));
 beforeEach(() => {
   resetSurfaceRegistry();
   useSessions.setState({ engine: new Map() });
@@ -84,7 +87,7 @@ describe('the composer’s plugin sites (R2)', () => {
     view.rerender(<Spinner working />);
     await act(async () => {});
     expect(screen.getByTestId('label').textContent).toBe('MODS_PROBE_SPIN Working requesting');
-    expect(fake.invoked('session.ui.render')).toEqual([{ appSessionId: ID, component: 'Spinner', instanceId: 'main', props: { word: 'Working', message: null, suffix: '…', mode: 'requesting' } }]);
+    expect(fake.invoked('session.ui.render')).toEqual([{ appSessionId: BARE, component: 'Spinner', instanceId: 'main', props: { word: 'Working', message: null, suffix: '…', mode: 'requesting' } }]);
   });
 });
 

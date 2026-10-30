@@ -124,8 +124,8 @@ export function createFakeAgentWorkClient(init: { session: AppSessionId; roots?:
   const client: AgentWorkClient = {
     subagents: async (appSessionId) => (ours(appSessionId) ? disk.sidecars : []),
     workflows: async (appSessionId) => (ours(appSessionId) ? disk.runs : []),
-    tasks: async (listId) => disk.tasks[listId] ?? [],
-    readSpill(input) {
+    tasks: async (_machine, listId) => disk.tasks[listId] ?? [],
+    readSpill(_machine, input) {
       recorded.readSpill.push(input);
       const text = disk.spills[input.path];
       return track(text === undefined ? Promise.reject(new Error(`${SPILL_NOT_FOUND}: ${input.path}`)) : Promise.resolve(page(text, input)));

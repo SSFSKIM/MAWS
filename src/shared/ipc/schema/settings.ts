@@ -3,8 +3,11 @@
 // policy, the near-limit threshold, the monospace font and the per-kind notification switches. Version 4 (C12): the
 // memory budget. Version 5 (W2): the transcript's width. Version 6 (W3): the mode a session takes when the engine refuses
 // auto. Version 7 (W7): the memory budget's switch. Version 8 (W13): the engine's pin retired (MAWS runs the installed
-// Claude Code). Version 9 (E9): the dictation recognizer's locale. Version 10 (E10): the background supervisor. Version 11 (E4a): the in-app browser. Version 12 (cua #90): the bookmarks bar's switch. Version 13 (P2-C): the built-in mods and the owner channel's two notification groups. Version 14 (P3-D): the design-system defaults. Version 15 (P4-B1): the documents' comments view. Version 16 (P4-R8): the MCP servers MAWS passes to the sessions it launches. Version 17 (P4-A2): the launch profile those sessions run under. Version 18 (UX1): inactive-session archive and completed-turn notifications. Version 19: the launch profile's output style removed (the owner's ruling of 2026-10-28). Migrations live in `src/shared/settings/defaults.ts`,
-// run by main's store; the schema never defaults.
+// Claude Code). Version 9 (E9): the dictation recognizer's locale. Version 10 (E10): the background supervisor. Version 11 (E4a): the in-app browser. Version 12 (cua #90): the bookmarks bar's switch. Version 13 (P2-C): the built-in mods and the owner channel's two notification groups. Version 14 (P3-D): the design-system defaults. Version 15 (P4-B1): the documents' comments view. Version 16 (P4-R8): the MCP servers MAWS passes to the sessions it launches. Version 17 (P4-A2): the launch profile those sessions run under. Version 18 (UX1): inactive-session archive and completed-turn notifications. Version 19: the launch profile's output style removed (the owner's ruling of 2026-10-28). Version 20 (P5 O2): the supervisor's shape. Version 21 (P5 O3-A): the file splits by owner
+// (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §3): `settings.json` keeps the client's fields at version 21 and
+// `machine-settings.json` takes the machine's on a version line of its own from 1 (both schemas below), while the
+// renderer keeps one merged `Settings` whose version is the client file's. Migrations live in
+// `src/shared/settings/defaults.ts`, run by main's stores; the schema never defaults.
 import * as z from 'zod';
 import { ACTION_IDS } from '../../keymap/actions';
 import { CHORD_PATTERN } from '../../keymap/chord';
@@ -96,7 +99,12 @@ export const VoiceSettingsSchema = z.strictObject({ locale: z.string().min(2).ma
 // long a kept session with no hard reason runs while no app is connected); null = never. keepRunningDefault: whether
 // "Quit and keep sessions running" is the quit question's default button when work is in flight.
 export const MAX_IDLE_MINUTES = 1440; // a day; host.configure's millisecond cap is derived from it (schema/host.ts)
-export const SupervisorSettingsSchema = z.strictObject({ idleExitMinutes: z.number().int().min(1).max(MAX_IDLE_MINUTES).nullable(), keepRunningDefault: z.boolean() });
+// P5 O2 M7 (version 20; docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M7 "The shape setting"): shape, where the
+// sessions and terminals run, read once per launch before the hosts start: `daemon` (under the machine daemon, `mawsd`)
+// or `embedded` (the app's own engine host and pty host, as before P5 O2).
+export const SupervisorShapeSchema = z.enum(['embedded', 'daemon']);
+export type SupervisorShape = z.infer<typeof SupervisorShapeSchema>;
+export const SupervisorSettingsSchema = z.strictObject({ idleExitMinutes: z.number().int().min(1).max(MAX_IDLE_MINUTES).nullable(), keepRunningDefault: z.boolean(), shape: SupervisorShapeSchema });
 // E10 end
 // E4a start: version 11, the in-app browser (E4a execution document, Interfaces "X15: settings 11"). profile: the imported
 // Chrome profile's directory whose partition new tabs open in (E4b lists them in profiles.json); null = the default
@@ -136,7 +144,7 @@ export type ArtifactsSettings = z.infer<typeof ArtifactsSettingsSchema>;
 export const SessionSettingsSchema = z.strictObject({ archiveInactiveDays: z.union([z.literal(7), z.literal(14), z.literal(30)]).nullable() });
 
 export const SettingsSchema = z.strictObject({
-  version: z.literal(19), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed); E9: version 9 (voice); E10: version 10 (supervisor); E4a: version 11 (browser); cua #90: version 12 (browser.bookmarksBar); P2-C: version 13 (mods, notifications.kinds.asyncInput and .essential); P3-D: version 14 (artifacts); P4-B1: version 15 (artifacts.commentsView); P4-R8: version 16 (engine.mcpServers); P4-A2: version 17 (engine.launchProfile); UX1: version 18 (sessions.archiveInactiveDays, notifications.kinds.turnFinished); version 19 (engine.launchProfile.outputStyle removed)
+  version: z.literal(21), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed); E9: version 9 (voice); E10: version 10 (supervisor); E4a: version 11 (browser); cua #90: version 12 (browser.bookmarksBar); P2-C: version 13 (mods, notifications.kinds.asyncInput and .essential); P3-D: version 14 (artifacts); P4-B1: version 15 (artifacts.commentsView); P4-R8: version 16 (engine.mcpServers); P4-A2: version 17 (engine.launchProfile); UX1: version 18 (sessions.archiveInactiveDays, notifications.kinds.turnFinished); version 19 (engine.launchProfile.outputStyle removed); P5 O2: version 20 (supervisor.shape); P5 O3-A: version 21, the client file's (the merged settings have no file of their own; the split by owner below)
   theme: ThemeSettingSchema,
   // Overrides only; null unbinds; absent means the default. `partialRecord`, because zod 4's enum-keyed `record` is
   // exhaustive and would reject `{}` and every single override; unknown keys are still rejected.
@@ -157,6 +165,40 @@ export const SettingsSchema = z.strictObject({
   sessions: SessionSettingsSchema, // UX1: v18 migration fills absent policy
 });
 export type Settings = z.infer<typeof SettingsSchema>;
+
+// P5 O3-A start (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §3, binding; contract O3X3): each settings file has
+// one owner and one writer. The client (main) writes `settings.json`, what the app draws or acts on; the machine (the
+// spine, in main until O3-D) writes `machine-settings.json`, what every launch on the machine reads and `mawsd` reads
+// with no app. A section both own (`supervisor`, `artifacts`) is split field by field; the machine file keeps the
+// unified file's nesting, so a reader that addresses an entry by its path in the file (`engine.mcpServers`) keeps it.
+// Every field of `Settings` is in exactly one of the two (defaults.test.ts holds the partition to §3's table).
+export const CLIENT_SETTINGS_VERSION = 21;
+export const MACHINE_SETTINGS_VERSION = 1;
+export const ClientSettingsSchema = z.strictObject({
+  version: z.literal(CLIENT_SETTINGS_VERSION),
+  theme: SettingsSchema.shape.theme,
+  keymap: SettingsSchema.shape.keymap,
+  notifications: SettingsSchema.shape.notifications,
+  usage: SettingsSchema.shape.usage, // the status line's banner threshold
+  appearance: SettingsSchema.shape.appearance,
+  voice: SettingsSchema.shape.voice,
+  browser: SettingsSchema.shape.browser,
+  supervisor: SupervisorSettingsSchema.omit({ idleExitMinutes: true }), // the shape, read before any daemon; the quit question's default
+  artifacts: ArtifactsSettingsSchema.pick({ commentsView: true, exportAuthorName: true }), // a view preference; the name on the app's exports
+});
+export type ClientSettings = z.infer<typeof ClientSettingsSchema>;
+export const MachineSettingsSchema = z.strictObject({
+  version: z.literal(MACHINE_SETTINGS_VERSION),
+  engine: SettingsSchema.shape.engine, // every launch on the machine
+  gateway: SettingsSchema.shape.gateway, // the inference route is per machine (RL6)
+  permissions: SettingsSchema.shape.permissions, // applied at launch by the session service
+  mods: SettingsSchema.shape.mods, // the owner channel's launch decision
+  supervisor: SupervisorSettingsSchema.pick({ idleExitMinutes: true }), // the engine host's idle time; mawsd reads it with no app
+  artifacts: ArtifactsSettingsSchema.pick({ defaultDesignSystem: true, spaceDesignSystems: true }), // relayed to the engine host's store
+  sessions: SettingsSchema.shape.sessions, // the sweep
+});
+export type MachineSettings = z.infer<typeof MachineSettingsSchema>;
+// P5 O3-A end
 
 // C11: a section is patched by field (each section `.partial()`), and `notifications.kinds` one level further, so one
 // kind is patched alone; `applySettingsPatch` (src/shared/settings/defaults.ts) is the one merge. The keymap is a
@@ -183,6 +225,19 @@ export const SettingsPatchSchema = z.strictObject({
   // P3-D end
 });
 export type SettingsPatch = z.infer<typeof SettingsPatchSchema>;
+// P5 O3-D (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §G): a patch of the machine half alone, the
+// shape `machineSettings.set` takes: the machine file's sections, each patched by field as `SettingsPatchSchema` patches
+// it, the shared sections narrowed to the machine's fields.
+export const MachineSettingsPatchSchema = z.strictObject({
+  engine: SettingsPatchSchema.shape.engine,
+  gateway: SettingsPatchSchema.shape.gateway,
+  permissions: SettingsPatchSchema.shape.permissions,
+  mods: SettingsPatchSchema.shape.mods,
+  supervisor: MachineSettingsSchema.shape.supervisor.partial().optional(),
+  artifacts: MachineSettingsSchema.shape.artifacts.partial().optional(),
+  sessions: SettingsPatchSchema.shape.sessions,
+});
+export type MachineSettingsPatch = z.infer<typeof MachineSettingsPatchSchema>;
 
 export const SettingsStateSchema = z.strictObject({ settings: SettingsSchema, resolvedTheme: z.enum(['light', 'dark']) });
 export type SettingsState = z.infer<typeof SettingsStateSchema>;
@@ -232,12 +287,12 @@ const c11Commands = {
 export const UserEngineDefaultsSchema = z.strictObject({ model: z.string().nullable(), effortLevel: EffortSchema.nullable(), defaultMode: PermissionModeSchema.nullable() });
 export type UserEngineDefaults = z.infer<typeof UserEngineDefaultsSchema>;
 const w3Commands = {
-  'settings.userEngineDefaults': { input: z.void(), output: UserEngineDefaultsSchema, owner: 'main' },
+  'settings.userEngineDefaults': { input: z.void(), output: UserEngineDefaultsSchema, owner: 'machine' },
 } as const satisfies Record<`settings.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // W3 end
 
 const c12Commands = {
-  'settings.engineApplied': { input: z.void(), output: z.void(), owner: 'main' },
+  'settings.engineApplied': { input: z.void(), output: z.void(), owner: 'machine' },
 } as const satisfies Record<`settings.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // C12 end
 

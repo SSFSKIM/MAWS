@@ -1,0 +1,1090 @@
+// The session service (C10 execution document, Interfaces "Session service"; charter §3 "Sessions", D-16): main's owner
+// of a session's lifecycle. An unstarted session is an app id with a persisted setup intent and no record; `start`
+// runs its setup (worktree → trusting → launching → ready, `setup.ts`) or resumes a record; `fork`, `archive`,
+// `remove` (delete conversation) and `rename` act on records; at app start every stale `self` holder is reset, stale
+// bootstrap ids are forgotten and intents whose record exists are reconciled (`recovery.ts`), never re-run.
+//
+// A command answers synchronously only what is fast (its guards, or `starting`); everything that can take seconds
+// streams as `session.setup`. MAWS's own lifecycle operations on one app id are serialised through a per-id lock, so
+// two never interleave on one session. Guards never read `SessionRecord.holder`: "live in MAWS" is C3's process table
+// and "foreign" a fresh registry read (holders.ts), which fails closed.
+import { NO_USER_DEFAULTS } from '../settings/user-engine-defaults'; // W3
+import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import type { AppSessionId, MessageUuid, ProjectId } from '@shared/graph/ids';
+import type { PtyId } from '@shared/ipc/schema/pty';
+import type { SessionRecord } from '@shared/graph/session';
+import { worktreeDirName } from '@shared/sessions/worktree';
+import type { FirstMessage, ForkTarget, Location, SetupIntent, SetupIntentPatch } from '@shared/sessions/intent';
+import type { SetupResources, StartOutcome } from '@shared/sessions/setup';
+import type { TrustState } from '@shared/sessions/trust';
+import { isNoClient, NO_CLIENT_REASON } from '@shared/client/port';
+import type { ClientRef } from '@shared/ipc/client';
+import type { ArchiveOutcome, DeleteOutcome, StartOptions } from '@shared/ipc/schema/session';
+import { emptyProgress, HostError, hostCall, STOP_WAIT_MS, WATCHDOG_MS, type SessionServiceDeps } from './context';
+import { DeletionManifests, type DeletionManifest } from './delete-manifest';
+import { checkAdditionalDirectories, checkLocation, sessionDirectoryOf, trustDirectoryOf, type RuleVerdict } from './intent-rules';
+import { readSettings, seedPermissionMode } from './launch-mapping';
+import { archiveRecord, deleteRecord, forkIntentOf, previewDeletion, renameRecord, revealablePath } from './record-actions';
+import type { BootstrapNote } from './intents';
+import { awaitsReady, liveRows, markInterrupted, reconcileIntent, type LiveRows } from './recovery';
+import { removeCreatedWorktree, retainedWorktree, type Setup } from './setup';
+import { forkRefusal, guardIntentStart, guardResumeStart, sideThreadRefusal, type GuardContext, type Guarded } from './start-guards';
+// E3 start
+import { promotionMessage } from '@shared/anchor/message';
+import type { ContentBlock } from '@shared/graph/events';
+import type { Lineage } from '@shared/graph/session';
+import { sendContentRefusal } from '@shared/engine/session-state-store';
+import type { SideThreadFrom } from '@shared/ipc/schema/side';
+import { commentContent, screenshotRoots, withoutScreenshot } from '../side/content';
+import { screenshotPreview } from '../side/screenshot'; // E11 F2b (Q4)
+import { InvalidSideInput } from '../side/invalid';
+import { sendToMain, type SendToMainInput, type SendToMainOutput } from '../side/send-to-main';
+// E3 end
+import { trustKeyOf, trustStateOf } from './trust';
+import { findPane, paneCall, readProcesses } from './pane-holder';
+import { pauseTakeOver, until } from './pause-take-over';
+import { holderAuthority } from './holders';
+import { reservationOf } from './context';
+import type { SetupEvent } from '@shared/sessions/setup';
+import { releaseHolder, type TakeOverDeps } from './take-over'; // W7
+import type { ForeignHolder } from '@shared/graph/session'; // W7
+import type { TakeOverOutcome } from '@shared/ipc/schema/session'; // W7
+// P2-A start (2026-10-09; X16)
+import type { AcquireReason } from '@shared/ipc/schema/session';
+import type { AcquireOutcome } from '@shared/sessions/setup';
+import type { AcquisitionMemory } from './availability';
+import { EXIT_WAIT_MS } from './context';
+import { Work } from '../work'; // P5 O3-D M2
+import { acquireOutcomeOf, acquireOutcomeOfGuard, canonicalOptions, capturingSetup, InflightRegistry, type Registration } from './inflight';
+import { LaunchWatch } from './launch-watch';
+// P2-A end
+import type { CommandInput, CommandOutput } from '@shared/ipc/schema'; // P5 O3-D M4
+import { RewindNotes, type ConversationAct } from './rewind-note'; // P5 O3-D M4
+
+// A refusal of an intent command, mapped to X2 by the registration: `invalid` is `invalid_input` naming the field;
+// `starting`, `retained_worktree` and the rest are `internal` with this message.
+export class IntentRefused extends Error {
+  constructor(
+    readonly reason: 'invalid' | 'starting' | 'retained_worktree' | 'unknown_intent' | 'no_retained_worktree',
+    message: string,
+    readonly field: string | null = null,
+  ) {
+    super(message);
+    this.name = 'IntentRefused';
+  }
+}
+
+// E10: what a start reads of an intent (its message and progress), compared across a deferred recovery: a draft edit
+// leaves it, a start or a release changes it.
+function startState(intent: SetupIntent): string {
+  return JSON.stringify([intent.message, intent.progress]);
+}
+
+// P2-A: what an acquisition that ran nothing leaves: the record and its conversation as they were.
+const UNTOUCHED: SetupResources = { worktree: null, record: 'kept', transcript: 'kept' };
+
+export class SessionService {
+  private setup: Setup | null = null;
+  private readyPromise: Promise<void> | null = null;
+  private readonly locks = new Map<string, Promise<void>>();
+  private readonly starting = new Set<string>(); // ids with a start in flight (guards through the end of the setup)
+  private readonly startingNames = new Set<string>(); // new-worktree directory names a start in flight holds (claimWorktreeName)
+  private readonly resumeMessages = new Map<string, FirstMessage>(); // a resume's message, retained behind a card
+  private readonly reconcileFailures = new Map<string, string>(); // ids whose start-time reconciliation failed
+  // E10: the start-time recovery, deferred while the host's table cannot be read, re-run when the host streams again.
+  // `unrecovered` is what the deferring boot left: its intents with their message and progress, and its bootstrap
+  // notes. `unreconciled` is every intent the recovery still owes a reconciliation, kept until one ran (a start runs it
+  // first); `startedSince`, the ids a start or a take-over began on since the deferring boot.
+  private unrecovered: { intents: ReadonlyMap<string, string>; notes: ReadonlySet<string> } | null = null;
+  private readonly unreconciled = new Set<string>();
+  private readonly startedSince = new Set<string>();
+  private recovering: Promise<void> | null = null;
+  private streamed = false; // the host streamed while a recovery's table read was in flight
+  private offReady: (() => void) | null = null;
+  private readonly manifests: DeletionManifests;
+  // P2-A (X16): every run that can launch an engine for an id, registered before its first await; and what the last
+  // acquisition of each id ended with when not ready (this app run only, D-16)
+  private readonly inflight = new InflightRegistry((appSessionId) => this.publishAcquisition(appSessionId));
+  // P5 O3-D M2 (Interfaces §A, D27): what runs past a command's answer, or with none (a setup, a reconciliation, a
+  // recovery), so a release waits for it before the index closes. A wait for the host is not counted: nothing is written
+  // until it ends, and a released root's waits are dropped with its host adapter.
+  readonly work = new Work();
+  private disposed = false; // P5 O3-D M2: the root stopped; the startup and a deferred recovery end at their next boundary
+  private readonly lastAttempt = new Map<AppSessionId, NonNullable<AcquisitionMemory['last']>>();
+  // P5 O3-D M4 (D18): each session's last act while it is a rewind, which a resume repeats (rewind-note.ts)
+  private readonly rewinds: RewindNotes;
+  private offStatus: (() => void) | null = null;
+  private readonly now: () => string;
+  private readonly log: (message: string) => void;
+
+  constructor(private readonly deps: SessionServiceDeps) {
+    this.manifests = new DeletionManifests(join(deps.userData, 'sessions', 'deletions'));
+    this.now = deps.now ?? (() => new Date().toISOString());
+    this.log = deps.log ?? ((message) => console.warn(`[sessions] ${message}`));
+    this.rewinds = new RewindNotes(join(deps.userData, 'sessions', 'rewinds'), { dispatch: deps.host.dispatch, now: this.now, log: this.log, track: (promise) => this.work.track(promise) });
+  }
+
+  // D-16 at start: every `self` holder is stale (C3 owns no process yet) and is reset before anything else, then the
+  // intents load, stale bootstrap ids are forgotten, and intents whose record exists are reconciled. `intent.list` and
+  // every command wait for it. E10: a row the supervisor kept is re-marked `self` by its status in the connect burst,
+  // and the recovery reads the host's table first (`recover`).
+  start(): Promise<void> {
+    if (this.readyPromise) return this.readyPromise;
+    try {
+      const reset = this.deps.index.sessions.resetSelfHolders();
+      if (reset > 0) this.log(`reset ${reset} stale self holder${reset === 1 ? '' : 's'} (D-16)`);
+    } catch (error) {
+      // an index this app cannot write (a newer app's, opened read-only) answers every call with its reason; the app runs on
+      this.log(`the D-16 reset could not run: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    this.readyPromise = this.boot();
+    return this.readyPromise;
+  }
+
+  // Stops listening and halts every watch in flight, leaving their setups where they are (the tests' app restart; P5
+  // O3-D M2: the root's stop, after which a startup still waiting resumes into nothing, since the index may be closed and
+  // spine.lock another process's).
+  dispose(): void {
+    this.disposed = true;
+    this.offReady?.();
+    this.offReady = null;
+    this.offStatus?.(); // P5 O3-D M4
+    this.offStatus = null;
+    this.rewinds.close();
+    for (const watch of [...(this.setup?.watches ?? [])]) watch.halt();
+  }
+
+  // P5 O3-D M2: cancellable at each async boundary (a disposed service resumes into nothing), and each phase that can
+  // write counted in `work`; the waits for the environment and for the host are not (nothing is written across them,
+  // and a host that never streams would hold a release forever).
+  private async boot(): Promise<void> {
+    this.offStatus = this.deps.host.onEvent('session.status', ({ status }) => this.rewinds.observe(status)); // P5 O3-D M4: a launch's end through end_session
+    const env = await this.deps.env;
+    if (this.disposed) return;
+    this.setup = {
+      sessions: this.deps.index.sessions,
+      sideThreads: this.deps.index.sideThreads ?? null, // E3
+      dispatch: this.deps.host.dispatch,
+      onEvent: this.deps.host.onEvent,
+      worktrees: this.deps.worktrees,
+      git: this.deps.git,
+      intents: this.deps.intents,
+      bootstraps: this.deps.bootstraps,
+      emit: this.deps.emit,
+      env,
+      replay: this.deps.replay ?? null,
+      settings: this.deps.settings ?? readSettings,
+      userDefaults: this.deps.userDefaults ?? (async () => NO_USER_DEFAULTS), // W3
+      launchGate: this.deps.launchGate ?? (async () => null), // C12
+      browserBackend: this.deps.browserBackend ?? (() => null), // E13
+      owner: this.deps.ownerChannel ?? null, // P2-C (2026-10-09)
+      now: this.now,
+      log: this.log,
+      watchdogMs: this.deps.timing?.watchdogMs ?? WATCHDOG_MS,
+      stopWaitMs: this.deps.timing?.stopWaitMs ?? STOP_WAIT_MS,
+      watches: new Set(),
+      rewinds: this.rewinds, // P5 O3-D M4
+    };
+    await this.work.track(this.deps.intents.load());
+    if (this.disposed) return;
+    await this.deps.host.ready?.();
+    if (this.disposed) return;
+    const manifests = await this.work.track(this.manifests.list());
+    if (this.disposed) return;
+    for (const manifest of manifests) {
+      this.log(`a deletion of ${manifest.appSessionId} was interrupted (${manifest.trashed.length} of ${manifest.paths.length} moved); session.delete finishes it`);
+    }
+    this.offReady = this.deps.host.onReady?.(() => {
+      this.streamed = true;
+      this.rerunDeferred();
+    }) ?? null;
+    await this.work.track(this.recover()); // P5 O3-D M2
+  }
+
+  // Runs the deferred recovery again (the host streamed), unless none is owed or one is already running.
+  private rerunDeferred(): void {
+    if (this.disposed || this.unrecovered === null || this.recovering !== null) return;
+    this.recovering = this.work.track(this.recover()) // P5 O3-D M2
+      .catch((error: unknown) => this.log(`the deferred recovery failed: ${error instanceof Error ? error.message : String(error)}`))
+      .finally(() => (this.recovering = null));
+  }
+
+  // The start-time recovery (recovery.ts). E10: it reads the host's live rows first; when `engine.sessions` cannot be
+  // answered (a host crashed, waiting on an incompatible supervisor or held by a lock), a kept session may be live where
+  // main cannot see it, so none of the steps runs (nothing marked failed, no record removed, no bootstrap forgotten)
+  // and the recovery runs again the next time the host streams (at once when it streamed during the read). A re-run
+  // happens mid-app, so it acts only on what the deferring boot left, and each step passes over what it could misread:
+  // - marking and bootstrap retirement: an intent a start began on since (a trust card's start holds its message with no
+  //   record, which would read as a quit), whose message or progress changed, or that is locked or starting;
+  // - reconciliation reads the live table and the record, which no command misleads, so it passes over only an id that
+  //   is locked or starting; that id stays owed (`unreconciled`), settled under its lock once the re-run ends, and a
+  //   start reconciles it first meanwhile.
+  // Each item's failure is logged and the rest go on.
+  private async recover(): Promise<void> {
+    let live: LiveRows | null = null;
+    while (live === null) {
+      this.streamed = false;
+      try {
+        live = await liveRows(this.deps.host.dispatch);
+      } catch (error) {
+        if (this.disposed) return; // P5 O3-D M2
+        if (this.streamed) continue; // the host streamed while the read was in flight: read again
+        if (this.unrecovered === null) {
+          const intents = this.deps.intents.list();
+          for (const intent of intents) this.unreconciled.add(intent.appSessionId);
+          this.unrecovered = { intents: new Map(intents.map((i) => [i.appSessionId, startState(i)])), notes: new Set((await this.bootstrapNotes()).map((n) => n.bootstrapId)) };
+        }
+        this.log(`recovery waits for the engine host (engine.sessions: ${error instanceof Error ? error.message : String(error)}); nothing is failed, removed or forgotten until it answers`);
+        // a streaming during the notes read found nothing owed yet and left the re-run to this run: start it now
+        if (this.streamed) this.rerunDeferred();
+        return;
+      }
+    }
+    if (this.disposed) return; // P5 O3-D M2: the root stopped while the table was read
+    const scope = this.unrecovered; // null: the boot's own run, before any command could act
+    const idle = (id: string) => !this.starting.has(id) && (scope === null || !this.locks.has(id));
+    // decided once, before the steps' own writes change an intent; each step re-reads it
+    const markable = this.deps.intents.list()
+      .filter((i) => idle(i.appSessionId) && (scope === null || (!this.startedSince.has(i.appSessionId) && scope.intents.get(i.appSessionId) === startState(i))))
+      .map((i) => i.appSessionId);
+    const current = (id: AppSessionId): SetupIntent | null => (idle(id) ? this.deps.intents.get(id) : null);
+    const each = async (what: string, id: string, step: () => Promise<unknown>) => {
+      try {
+        await step();
+      } catch (error) {
+        this.log(`${id}: could not ${what}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    };
+    // a start the quit cut short before any record is marked failed, so its tab offers Retry (recovery.ts)
+    for (const id of markable) {
+      const intent = current(id);
+      if (intent !== null) await each('mark the interrupted start', id, () => markInterrupted(this.s, intent));
+    }
+    // every bootstrap id a previous run left is forgotten; one whose row is live is stopped first (nothing drives it)
+    for (const id of markable) {
+      const intent = current(id);
+      const bootstrap = intent?.progress.bootstrap ?? null;
+      if (intent === null || bootstrap === null) continue;
+      await each('retire its bootstrap', id, async () => {
+        if (await this.retireBootstrap(bootstrap.appSessionId, live)) await this.putIntent({ ...intent, progress: { ...intent.progress, bootstrap: null } });
+      });
+    }
+    for (const note of await this.bootstrapNotes()) {
+      if (this.starting.has(note.appSessionId) || (scope !== null && !scope.notes.has(note.bootstrapId))) continue;
+      await each('retire the bootstrap', note.bootstrapId, async () => {
+        if (await this.retireBootstrap(note.bootstrapId, live)) await this.deps.bootstraps.remove(note.bootstrapId);
+      });
+    }
+    // every intent the recovery owes, and every reconciliation that failed (a start's included)
+    const owed = scope === null ? this.deps.intents.list().map((i) => i.appSessionId) : [...this.unreconciled];
+    for (const id of new Set<string>([...owed, ...this.reconcileFailures.keys()]) as Set<AppSessionId>) {
+      const intent = this.deps.intents.get(id);
+      if (intent === null) this.unreconciled.delete(id);
+      else if (idle(id) && awaitsReady(intent, live)) this.reconcileWhenReady(id); // W2-A: beside the recovery
+      else if (idle(id)) await this.reconcileOne(intent, live);
+    }
+    this.unrecovered = null;
+    this.startedSince.clear();
+    if (this.unreconciled.size > 0) void this.work.track(this.settleUnreconciled()).catch((error: unknown) => this.log(`the owed reconciliations failed: ${error instanceof Error ? error.message : String(error)}`));
+  }
+
+  // P4 W2-A: a reconciliation that waits for its live row's ready (the first message not yet C3's) runs beside the
+  // recovery, since every command waits for the recovery. As the setup it resumes, it holds the id's `starting` mark,
+  // its lock and an in-flight entry from this tick, so a start or an intent operation is refused `starting` and an
+  // acquisition joins it, answered once the reconciliation ended.
+  private reconcileWhenReady(appSessionId: AppSessionId): void {
+    this.starting.add(appSessionId);
+    const registration = this.inflight.open(appSessionId, 'setup');
+    void this.work.track(this.serial(appSessionId, async () => {
+      const intent = this.deps.intents.get(appSessionId);
+      return intent === null ? null : this.reconcileOne(intent, null);
+    })
+      .then(
+        async (failure) => ({ outcome: await this.reconciledOutcome(appSessionId, failure) }),
+        (error: unknown) => ({ error }),
+      )
+      .then((result) => {
+        this.starting.delete(appSessionId);
+        registration.end(result);
+      })); // P5 O3-D M2: tracked to its end
+  }
+
+  // What a joiner of that reconciliation is answered: ready when the row is, else why it is not.
+  private async reconciledOutcome(appSessionId: AppSessionId, failure: string | null): Promise<AcquireOutcome> {
+    const live = await reservationOf(this.s.dispatch, appSessionId).catch(() => null);
+    if (failure === null && live?.process === 'ready') return { status: 'ready', appSessionId, launched: true, joined: false };
+    const last = this.deps.intents.get(appSessionId)?.progress.lastFailure ?? null;
+    return { status: 'failed', appSessionId, message: failure ?? last?.message ?? 'The session did not start.', resources: last?.resources ?? UNTOUCHED };
+  }
+
+  // The reconciliations a re-run passed over (their id locked or starting), each under its id's lock once the command
+  // holding it is done (it may be waiting for the re-run, so this never runs inside it). A start reconciles first.
+  private async settleUnreconciled(): Promise<void> {
+    for (const id of [...this.unreconciled] as AppSessionId[]) {
+      await this.serial(id, async () => {
+        const intent = this.deps.intents.get(id);
+        if (intent === null) this.unreconciled.delete(id);
+        else if (this.unreconciled.has(id) && !this.starting.has(id)) await this.reconcileOne(intent, null);
+      });
+    }
+  }
+
+  private async bootstrapNotes(): Promise<BootstrapNote[]> {
+    try {
+      return await this.deps.bootstraps.list();
+    } catch (error) {
+      this.log(`the bootstrap notes could not be read: ${error instanceof Error ? error.message : String(error)}`);
+      return [];
+    }
+  }
+
+  // A bootstrap id a previous run left: forgotten, after a stop when its row is live (a trust bootstrap the supervisor
+  // kept running through a keep-quit). False (logged) when the host refuses or cannot answer; the id stays noted.
+  private async retireBootstrap(bootstrapId: AppSessionId, live: LiveRows): Promise<boolean> {
+    if (live.has(bootstrapId)) {
+      try {
+        await hostCall(this.deps.host.dispatch, 'session.stop', { appSessionId: bootstrapId, reason: 'stop' });
+      } catch (error) {
+        this.log(`could not stop the bootstrap ${bootstrapId}: ${error instanceof Error ? error.message : String(error)}`);
+        return false;
+      }
+    }
+    return this.forgetQuietly(bootstrapId);
+  }
+
+  private get s(): Setup {
+    if (this.setup === null) throw new Error('the session service has not started');
+    return this.setup;
+  }
+
+  private async ready(): Promise<Setup> {
+    await (this.readyPromise ?? this.start());
+    await this.recovering; // E10: a deferred recovery the host's return started
+    return this.s;
+  }
+
+  // ---- serialisation ---------------------------------------------------------------------------------------------
+
+  private async lock(id: string): Promise<() => void> {
+    const previous = this.locks.get(id) ?? Promise.resolve();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const tail = previous.then(() => held);
+    this.locks.set(id, tail);
+    await previous;
+    return () => {
+      release();
+      if (this.locks.get(id) === tail) this.locks.delete(id);
+    };
+  }
+
+  private async serial<T>(id: string, fn: () => Promise<T>): Promise<T> {
+    const release = await this.lock(id);
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+
+  // ---- intents ----------------------------------------------------------------------------------------------------
+
+  private async putIntent(intent: SetupIntent): Promise<SetupIntent> {
+    await this.deps.intents.put(intent);
+    this.deps.emit('session.intent.changed', { appSessionId: intent.appSessionId, intent });
+    return intent;
+  }
+
+  private intentOf(appSessionId: AppSessionId): SetupIntent {
+    const intent = this.deps.intents.get(appSessionId);
+    if (intent === null) throw new IntentRefused('unknown_intent', `no setup intent for ${appSessionId}`);
+    return intent;
+  }
+
+  private refuseWhileStarting(appSessionId: AppSessionId): void {
+    if (this.starting.has(appSessionId)) throw new IntentRefused('starting', `starting: a start is in flight for ${appSessionId}`);
+  }
+
+  async listIntents(): Promise<SetupIntent[]> {
+    await this.ready();
+    return this.deps.intents.list();
+  }
+
+  async getIntent(appSessionId: AppSessionId): Promise<SetupIntent | null> {
+    await this.ready();
+    return this.deps.intents.get(appSessionId);
+  }
+
+  // `session.create`: an app id and a persisted intent; no process, no record, no row. With neither a project nor a
+  // location it is a New chat (2026-10-01): no location until the composer's project picker patches one in.
+  async create(req: { projectId: ProjectId | null; location: Location | null }): Promise<{ appSessionId: AppSessionId; intent: SetupIntent }> {
+    const s = await this.ready();
+    const appSessionId = randomUUID() as AppSessionId;
+    const now = this.now();
+    const location = req.location ?? this.projectLocation(req.projectId);
+    const intent: SetupIntent = {
+      appSessionId,
+      projectId: location === null ? null : req.projectId,
+      createdAt: now,
+      updatedAt: now,
+      kind: 'create',
+      source: null,
+      location,
+      additionalDirectories: [],
+      model: null,
+      effort: null,
+      permissionMode: seedPermissionMode(await s.userDefaults()), // W3: the user's defaultMode, else auto
+      gateway: s.settings().gateway.defaultRoute,
+      trust: 'unanswered',
+      trustKey: null,
+      message: null,
+      draft: null,
+      progress: emptyProgress(),
+    };
+    await this.putIntent(intent);
+    return { appSessionId, intent };
+  }
+
+  // The project's directory as a location; none for no project or an unknown one (the New chat's project picker asks).
+  private projectLocation(projectId: ProjectId | null): Location | null {
+    const project = projectId === null ? undefined : this.knownProject(projectId);
+    return project ? { kind: 'directory', path: project.directory } : null;
+  }
+
+  private knownProject(projectId: ProjectId) {
+    return this.deps.index.projects.list({ includeHidden: true }).find((p) => p.id === projectId);
+  }
+
+  // The location a project choice moves a New chat to when the patch names none: the project's directory, or for
+  // "Don't work in a project" (null) the home directory the engine receives, whose session lists under Other sessions.
+  private projectChoiceLocation(projectId: ProjectId | null): Location {
+    if (projectId === null) return { kind: 'directory', path: this.s.env.HOME ?? homedir() };
+    const location = this.projectLocation(projectId);
+    if (location === null) throw new IntentRefused('invalid', `projectId: unknown project ${projectId}`, 'projectId');
+    return location;
+  }
+
+  // `session.intent.patch`: the changed fields validated; a location change re-binds the trust decision to its key.
+  // New chat: the project chip patches `projectId`, alone (the location follows it) or with a location; a project
+  // must be one the index knows.
+  async patch(appSessionId: AppSessionId, requested: SetupIntentPatch): Promise<SetupIntent> {
+    this.refuseWhileStarting(appSessionId);
+    return this.serial(appSessionId, async () => {
+      const s = await this.ready();
+      const intent = this.intentOf(appSessionId);
+      this.refuseWhileStarting(appSessionId);
+      if (requested.projectId != null && this.knownProject(requested.projectId) === undefined) {
+        throw new IntentRefused('invalid', `projectId: unknown project ${requested.projectId}`, 'projectId');
+      }
+      const patch = requested.projectId !== undefined && requested.location === undefined ? { ...requested, location: this.projectChoiceLocation(requested.projectId) } : requested;
+      if (patch.location !== undefined && intent.progress.worktree?.createdHere) {
+        throw new IntentRefused('retained_worktree', `retained_worktree: the failed attempt's worktree ${intent.progress.worktree.path} is kept; discard it or keep it first`);
+      }
+      let next: SetupIntent = { ...intent, ...patch, updatedAt: this.now() };
+      if (patch.location !== undefined) {
+        this.rule(await checkLocation(s, next, { forStart: false }));
+        if (intent.progress.worktree !== null) next = { ...next, progress: { ...next.progress, worktree: null } }; // an existing worktree's note: the next start re-reads it
+      }
+      if (patch.location !== undefined || patch.additionalDirectories !== undefined) {
+        this.rule(await checkAdditionalDirectories(next, next.location === null ? null : await sessionDirectoryOf(s, next.location)));
+      }
+      next = await this.bindTrust(next, patch.location !== undefined, patch.trust);
+      return this.putIntent(next);
+    });
+  }
+
+  private rule(verdict: RuleVerdict): void {
+    if (verdict.ok) return;
+    if (verdict.kind === 'invalid') throw new IntentRefused('invalid', `${verdict.field}: ${verdict.message}`, verdict.field);
+    throw new IntentRefused('invalid', `location: directory not found: ${verdict.directory}`, 'location');
+  }
+
+  // A decision answers one trust key: when the effective key moved (a location change), the decision resets before
+  // anything else, so a decision for A never attests B; a decision given now is bound to the key as it is now. The
+  // recorded trust belongs to the key it was recorded for: whenever the bound key moves (to null included), it goes.
+  // A New chat with no location has no key, so it holds no decision.
+  private async bindTrust(intent: SetupIntent, locationChanged: boolean, decision: SetupIntent['trust'] | undefined): Promise<SetupIntent> {
+    if (!locationChanged && decision === undefined) return intent;
+    const key = intent.location === null ? null : (await trustKeyOf(trustDirectoryOf(intent.location), this.s.git)).trustKey;
+    let next = intent;
+    if (next.trustKey !== null && next.trustKey !== key) next = { ...next, trust: 'unanswered', trustKey: null };
+    if (decision !== undefined) next = { ...next, trust: key === null ? 'unanswered' : decision, trustKey: decision === 'unanswered' ? null : key };
+    if (next.trustKey !== intent.trustKey && next.progress.trustRecorded) next = { ...next, progress: { ...next.progress, trustRecorded: false } };
+    return next;
+  }
+
+  // `session.intent.release`: the hand-back after a cancelled card or "Back to editing"; the draft is untouched.
+  // A record's id releases whatever message a resume retained behind its card (none, for a resume sent without one) and
+  // answers null, so the hand-back is idempotent and the renderer need not know what main retained; an id with neither
+  // an intent nor a record is unknown.
+  async release(appSessionId: AppSessionId): Promise<SetupIntent | null> {
+    this.refuseWhileStarting(appSessionId);
+    return this.serial(appSessionId, async () => {
+      await this.ready();
+      this.refuseWhileStarting(appSessionId);
+      if (this.deps.intents.get(appSessionId) === null && (this.resumeMessages.delete(appSessionId) || this.deps.index.sessions.get(appSessionId) !== null)) return null;
+      const intent = this.intentOf(appSessionId);
+      return this.putIntent({ ...intent, message: null, updatedAt: this.now() });
+    });
+  }
+
+  // `session.intent.discard`: the intent (and its draft) goes; a bootstrap id no longer reserved is forgotten, and so
+  // are the failed attempts' store file and journal when no record stands on them. A worktree a failed attempt created
+  // and could not remove is named, left for the cleanup dialog.
+  async discard(appSessionId: AppSessionId): Promise<{ leftover: { worktree: { path: string; branch: string | null } } | null }> {
+    this.refuseWhileStarting(appSessionId);
+    return this.serial(appSessionId, async () => {
+      await this.ready();
+      const intent = this.deps.intents.get(appSessionId);
+      if (intent === null) return { leftover: null };
+      this.refuseWhileStarting(appSessionId);
+      if (intent.progress.bootstrap !== null) await this.forgetQuietly(intent.progress.bootstrap.appSessionId);
+      if (this.deps.index.sessions.get(appSessionId) === null) await this.forgetQuietly(appSessionId);
+      await this.deps.intents.remove(appSessionId);
+      this.reconcileFailures.delete(appSessionId);
+      this.deps.emit('session.intent.changed', { appSessionId, intent: null });
+      const w = intent.progress.worktree;
+      return { leftover: w !== null && w.createdHere ? { worktree: { path: w.path, branch: w.branch } } : null };
+    });
+  }
+
+  // The failure card's two resolutions of a checkout a failed attempt created and kept: "Discard changes and remove"
+  // (the acknowledged discard, then the branch step; `progress.worktree` cleared) or "Keep the worktree" (detached from
+  // the attempt: the location becomes that existing worktree, editable again).
+  async resolveRetainedWorktree(appSessionId: AppSessionId, resolution: 'discard' | 'keep'): Promise<{ intent: SetupIntent; worktree: NonNullable<SetupResources['worktree']> }> {
+    this.refuseWhileStarting(appSessionId);
+    return this.serial(appSessionId, async () => {
+      const s = await this.ready();
+      const intent = this.intentOf(appSessionId);
+      this.refuseWhileStarting(appSessionId);
+      const w = intent.progress.worktree;
+      if (w === null || !w.createdHere || intent.location?.kind !== 'newWorktree') throw new IntentRefused('no_retained_worktree', `no retained worktree for ${appSessionId}`);
+      const repoRoot = intent.location.repoRoot;
+      if (resolution === 'keep') {
+        const next = await this.putIntent({
+          ...intent,
+          updatedAt: this.now(),
+          location: { kind: 'existingWorktree', repoRoot, path: w.path },
+          progress: { ...intent.progress, worktree: { ...w, createdHere: false } },
+        });
+        return { intent: next, worktree: { path: w.path, branch: w.branch, createdHere: false, state: 'kept', detail: null, branchState: 'none' } };
+      }
+      const { resource, removed } = await removeCreatedWorktree(s, repoRoot, w, { newBranch: intent.location.branch.kind === 'new', discard: true });
+      const next = removed ? await this.putIntent({ ...intent, updatedAt: this.now(), progress: { ...intent.progress, worktree: null } }) : intent;
+      return { intent: next, worktree: resource };
+    });
+  }
+
+  // ---- take over (W7) ----------------------------------------------------------------------------------------------
+
+  // `session.takeOver`: ends the foreign holder the owner confirmed and waits for the registry to clear (take-over.ts).
+  // Refused while a start of this id is in flight; the resume that follows is the renderer's `session.start`.
+  async takeOverPane(pid: number): Promise<{ ptyId: PtyId; label: string } | null> {
+    await this.ready();
+    const target = await findPane(this.s.dispatch, pid);
+    return target ? { ptyId: target.pane.ptyId, label: target.pane.label } : null;
+  }
+
+  // P2-A: registered in the caller's tick when nothing is in flight (before readiness, as an acquisition registers), so
+  // an acquisition arriving after it waits for it and then runs its own attempt (a take-over usually ends `released`,
+  // the resume left to the caller); with a run in flight the registry is read again once ready.
+  takeOver(appSessionId: AppSessionId, expected: ForeignHolder, paneId?: string | null): Promise<TakeOverOutcome> {
+    const early = this.inflight.has(appSessionId) ? null : this.inflight.open(appSessionId, 'take-over');
+    return this.takeOverWhenReady(appSessionId, expected, paneId, early);
+  }
+
+  private async takeOverWhenReady(appSessionId: AppSessionId, expected: ForeignHolder, paneId: string | null | undefined, early: Registration | null): Promise<TakeOverOutcome> {
+    const end = (registration: Registration | null) => registration?.end({ outcome: { status: 'refused', appSessionId, reason: 'busy', message: 'The session was being taken over.' } }); // its joiners run their own attempt
+    try {
+      await this.ready();
+    } catch (error) {
+      end(early);
+      throw error;
+    }
+    // P2-A: any run in flight counts as a start (an acquisition sits in its pre-lock steps without the `starting` mark)
+    if (this.starting.has(appSessionId) || (early === null && this.inflight.has(appSessionId))) {
+      end(early);
+      return { status: 'refused', reason: 'self', message: 'This session is starting in MAWS.' };
+    }
+    this.starting.add(appSessionId);
+    if (this.unrecovered !== null) this.startedSince.add(appSessionId); // E10
+    const registration = early ?? this.inflight.open(appSessionId, 'take-over');
+    try {
+      return await this.serial(appSessionId, async () => {
+        const record = this.deps.index.sessions.get(appSessionId);
+        if (record === null) return { status: 'refused', reason: 'unknown_session', message: `no session record for ${appSessionId}` };
+        const deps: TakeOverDeps = {
+          dispatch: this.s.dispatch, sessions: this.s.sessions, env: this.s.env, ...this.deps.takeOver, paneId,
+          resumePane: async (target) => pauseTakeOver({
+            processes: this.deps.takeOver?.processes ?? readProcesses,
+            write: (data) => paneCall(this.s.dispatch, 'pty.write', { ptyId: target.pane.ptyId, data }),
+            foreground: () => paneCall(this.s.dispatch, 'pty.foreground', { ptyId: target.pane.ptyId }),
+            signal: (pid, signal) => process.kill(pid, signal),
+            clear: async () => {
+              const { holders } = await hostCall(this.s.dispatch, 'fs.holders', { sessionIds: [record.engineSessionId!], directories: null });
+              return !holders.some((row) => row.holder.kind === 'terminal' && row.holder.pid === target.holder.pid);
+            },
+            resume: async (paused) => {
+              let outcome: SetupEvent['outcome'] = null;
+              const setup: Setup = { ...this.s, emit: (name, payload) => {
+                if (name === 'session.setup') outcome = (payload as SetupEvent).outcome;
+                return this.s.emit(name, payload);
+              } };
+              const [guard, run] = await guardResumeStart(setup, record, { message: null, options: {} }, this.resumeMessages, paused);
+              if (!run) throw new Error(`MAWS could not resume this session: ${guard.status}.`);
+              await run();
+              const answer = outcome as SetupEvent['outcome'];
+              if (answer?.kind !== 'ready') throw new Error(answer?.kind === 'error' ? answer.message : `MAWS could not become ready: ${answer?.kind ?? 'no answer'}.`);
+              this.lastAttempt.delete(appSessionId); // F-AB: this launch is MAWS's last start of it (published at the run's end)
+            },
+            authority: (paused) => holderAuthority({ dispatch: this.s.dispatch, sessions: this.s.sessions }, { appSessionId, engineSessionId: record.engineSessionId! }, paused),
+            cancel: async () => {
+              if (await reservationOf(this.s.dispatch, appSessionId)) await hostCall(this.s.dispatch, 'session.stop', { appSessionId, reason: 'stop' });
+              return until(async () => await reservationOf(this.s.dispatch, appSessionId) === null, STOP_WAIT_MS, 100);
+            },
+          }, { appSessionId, engineSessionId: record.engineSessionId! }, target),
+        };
+        return releaseHolder(deps, { engineSessionId: record.engineSessionId, appSessionId, expected });
+      });
+    } finally {
+      this.starting.delete(appSessionId);
+      end(registration);
+    }
+  }
+
+  // ---- start ------------------------------------------------------------------------------------------------------
+
+  // `session.start`: an intent's setup, or a record's resume. `starting` is the only answer after which phases stream.
+  // P2-A: registered in the caller's tick when nothing is in flight (before readiness, as an acquisition registers), so
+  // an acquisition arriving after it joins this start; its end is the setup's own `ready` or `failed`. With a run in
+  // flight the join is decided once ready, when the intents are loaded.
+  startSession(appSessionId: AppSessionId, args: { message: FirstMessage | null; options: StartOptions }): Promise<StartOutcome> {
+    const early = this.inflight.has(appSessionId) ? null : this.inflight.open(appSessionId, this.deps.intents.get(appSessionId) !== null ? 'setup' : 'record-start', args.options);
+    return this.startWhenReady(appSessionId, args, early);
+  }
+
+  private async startWhenReady(appSessionId: AppSessionId, args: { message: FirstMessage | null; options: StartOptions }, early: Registration | null): Promise<StartOutcome> {
+    try {
+      await this.ready();
+    } catch (error) {
+      early?.end({ error });
+      throw error;
+    }
+    // P2-A start: a record's start with no message joins a run in flight (an acquisition's, another start's) and answers
+    // what its guards answered, when it asks with no options or the same ones; with other options (C11's route switch)
+    // it waits for that run to settle and then runs its own start, since a joined switch would report a route its launch
+    // never took. One carrying a message stays refused `starting` (no message is dropped), as does every start while a
+    // take-over runs.
+    const joinable = early === null ? this.inflight.get(appSessionId) : undefined;
+    if (joinable !== undefined && joinable.kind !== 'take-over' && args.message === null && this.deps.intents.get(appSessionId) === null) {
+      const own = canonicalOptions(args.options);
+      if (own === '{}' || own === joinable.options) return joinable.guarded;
+      const settled = () => this.startSession(appSessionId, args);
+      return joinable.done.then(settled, settled);
+    }
+    if (joinable !== undefined) throw new IntentRefused('starting', `starting: a start is in flight for ${appSessionId}`);
+    // P2-A end
+    // Marked synchronously, before the guards' first await: a second start, a patch or a release of this id is refused
+    // `starting` from here on, and a new worktree's name is reserved against every other start, so two starts can
+    // never both pass their guards for one checkout.
+    try {
+      this.refuseWhileStarting(appSessionId);
+    } catch (error) {
+      early?.end({ error });
+      throw error;
+    }
+    this.starting.add(appSessionId);
+    if (this.unrecovered !== null) this.startedSince.add(appSessionId); // E10: a deferred recovery's re-run leaves it
+    const registration = early ?? this.inflight.open(appSessionId, this.deps.intents.get(appSessionId) !== null ? 'setup' : 'record-start', args.options); // P2-A
+    const captured = capturingSetup(this.s, appSessionId, registration.tagged); // W2-A: tagged once an acquisition joins a record's start
+    const claim = this.claimWorktreeName(this.deps.intents.get(appSessionId));
+    let release: (() => void) | null = null;
+    let handedOff = false;
+    let answered: StartOutcome | null = null; // P2-A: what this start answered without a run (its registration's end)
+    try {
+      if (claim === 'taken') {
+        const location = this.intentOf(appSessionId).location as Extract<Location, { kind: 'newWorktree' }>;
+        return (answered = await this.rejectIntent(appSessionId, { status: 'invalid', appSessionId, field: 'location', message: `a worktree named ${location.name} is being created by another start` }));
+      }
+      release = await this.lock(appSessionId);
+      // a reconciliation that failed at start is re-run first, never the setup in its place; E10: so is one the recovery
+      // still owes (an intent with a record, whose row a supervisor kept may still run: a setup's rollback would stop it)
+      const intentBefore = this.deps.intents.get(appSessionId);
+      const owed = this.unreconciled.has(appSessionId) && this.deps.index.sessions.get(appSessionId) !== null;
+      if (intentBefore !== null && (this.reconcileFailures.has(appSessionId) || owed)) {
+        const failure = await this.reconcileOne(intentBefore, null);
+        if (failure !== null) throw new Error(failure);
+      }
+      const intent = this.deps.intents.get(appSessionId);
+      let outcome: StartOutcome;
+      let run: (() => Promise<void>) | null;
+      if (intent !== null) [outcome, run] = await this.guardIntent(captured.setup, intent, args);
+      else {
+        const record = this.deps.index.sessions.get(appSessionId);
+        if (record === null) return (answered = { status: 'refused', appSessionId, reason: 'unknown_session', message: `no setup intent and no session record for ${appSessionId}` });
+        [outcome, run] = await this.guardResume(captured.setup, record, args);
+      }
+      registration.guard(outcome); // P2-A
+      if (run === null) return (answered = outcome);
+      handedOff = true;
+      const held = release;
+      void this.work.track(run().finally(() => { // P5 O3-D M2: the setup runs past the answer
+        this.endStart(appSessionId, claim);
+        held();
+        const ended = acquireOutcomeOf(appSessionId, captured.outcome());
+        // F-AB: a start that reached ready is MAWS's last start of the session, so an earlier acquisition's answer no
+        // longer describes it once this process exits (published by the end below)
+        if (ended.status === 'ready') this.lastAttempt.delete(appSessionId);
+        registration.end({ outcome: ended }); // P2-A
+      }));
+      return outcome;
+    } catch (error) {
+      registration.end({ error }); // P2-A: a guard that could not answer fails its joiners as it fails this start
+      throw error;
+    } finally {
+      if (!handedOff) {
+        this.endStart(appSessionId, claim);
+        release?.();
+        if (answered !== null) registration.end({ outcome: acquireOutcomeOfGuard(answered) }); // P2-A
+      }
+    }
+  }
+
+  // A new worktree an unretained intent would create, claimed by its directory name (every repository alike: two spellings
+  // of one repository must not both pass, and the name is known without an await). 'taken' when another start holds it.
+  private claimWorktreeName(intent: SetupIntent | null): string | null | 'taken' {
+    if (intent === null || intent.location?.kind !== 'newWorktree' || intent.progress.worktree !== null) return null;
+    const key = worktreeDirName(intent.location.name);
+    if (this.startingNames.has(key)) return 'taken';
+    this.startingNames.add(key);
+    return key;
+  }
+
+  private endStart(appSessionId: AppSessionId, claim: string | null | 'taken'): void {
+    this.starting.delete(appSessionId);
+    if (claim !== null && claim !== 'taken') this.startingNames.delete(claim);
+  }
+
+  // A rejected guard hands the message back: C7's gate reads `intent.message`, so the editor unlocks the moment the
+  // answer lands; the draft is untouched.
+  private async rejectIntent<T extends StartOutcome | null>(appSessionId: AppSessionId, outcome: T): Promise<T> {
+    const intent = this.deps.intents.get(appSessionId);
+    if (intent !== null && intent.message !== null) await this.putIntent({ ...intent, message: null, updatedAt: this.now() });
+    return outcome;
+  }
+
+  // The start guards (start-guards.ts). One that could not answer (the relay check, a fail-closed holder read, a git
+  // failure) hands the message back as a rejection does, then fails the command with its error.
+  private async guardIntent(s: Setup, intentIn: SetupIntent, args: { message: FirstMessage | null; options: StartOptions }): Promise<Guarded> {
+    try {
+      return await guardIntentStart(s, this.guardContext, intentIn, args);
+    } catch (error) {
+      await this.rejectIntent(intentIn.appSessionId, null).catch(() => {});
+      throw error;
+    }
+  }
+
+  private async guardResume(s: Setup, record: SessionRecord, args: { message: FirstMessage | null; options: StartOptions }): Promise<Guarded> {
+    try {
+      return await guardResumeStart(s, record, args, this.resumeMessages);
+    } catch (error) {
+      this.resumeMessages.delete(record.appId); // a guard that could not answer hands the message back
+      throw error;
+    }
+  }
+
+  // what the start guards write through: the service's intent writes and its bootstrap forgetting
+  private readonly guardContext: GuardContext = {
+    putIntent: (intent) => this.putIntent(intent),
+    rejectIntent: (appSessionId, outcome) => this.rejectIntent(appSessionId, outcome),
+    bindTrust: (intent, locationChanged, decision) => this.bindTrust(intent, locationChanged, decision),
+    forgetQuietly: (appSessionId) => this.forgetQuietly(appSessionId),
+  };
+
+  // ---- acquisition (P2-A, X16; the execution document §5.3) ---------------------------------------------------------
+
+  // `session.acquire`: the one entry every engine-needing gesture calls. It answers at once for a ready session, joins
+  // a run already in flight (a take-over excepted, and a run with other options: those wait for it, then run their
+  // own), or runs the guarded resume, and answers after the launch: `ready`, a card, a refusal, or `failed`. Only owner
+  // gestures call it (nothing on mount, on a poll or on a timer); `reason` is logged and nothing branches on it.
+  acquire(appSessionId: AppSessionId, reason: AcquireReason, options: StartOptions = {}): Promise<AcquireOutcome> {
+    this.log(`acquire ${appSessionId} (${reason})`);
+    return this.acquireOrJoin(appSessionId, options);
+  }
+
+  private acquireOrJoin(appSessionId: AppSessionId, options: StartOptions): Promise<AcquireOutcome> {
+    const entry = this.inflight.get(appSessionId);
+    if (entry === undefined) return this.acquirable(appSessionId) ? this.acquireOnce(appSessionId, options) : this.refuseUnknown(appSessionId);
+    const own = canonicalOptions(options);
+    if (entry.kind !== 'take-over' && (own === '{}' || own === entry.options)) {
+      entry.joinedByAcquisition(); // W2-A: the rest of a record start's phases stream tagged; this reply tells its end
+      return entry.done.then((outcome) => (outcome.status === 'ready' ? { ...outcome, joined: true } : outcome));
+    }
+    const settled = () => this.acquireOrJoin(appSessionId, options);
+    return entry.done.then(settled, settled);
+  }
+
+  // A durable record no intent owns. An intent's provisional record (a failed or interrupted setup keeps both) is C10's:
+  // it starts with its first message, never by acquisition.
+  private acquirable(appSessionId: AppSessionId): boolean {
+    return this.deps.index.sessions.get(appSessionId) !== null && this.deps.intents.get(appSessionId) === null;
+  }
+
+  // No durable record and nothing in flight: refused without registering, so a start of an unstarted intent is never
+  // refused `starting` for it. Acquisition never runs C10's setup.
+  private async refuseUnknown(appSessionId: AppSessionId): Promise<AcquireOutcome> {
+    await this.ready();
+    return this.refusal(appSessionId);
+  }
+
+  private refusal(appSessionId: AppSessionId): AcquireOutcome {
+    const message = this.deps.intents.get(appSessionId) !== null ? 'an unstarted session starts with its first message' : `no session record for ${appSessionId}`;
+    return { status: 'refused', appSessionId, reason: 'unknown_session', message };
+  }
+
+  // One acquisition: registered in the caller's tick, its memory published (in flight, the last answer cleared), the
+  // steps run, and the answer remembered when it is a card, a missing directory or a failure.
+  private async acquireOnce(appSessionId: AppSessionId, options: StartOptions): Promise<AcquireOutcome> {
+    this.lastAttempt.delete(appSessionId);
+    const registration = this.inflight.open(appSessionId, 'acquire', options);
+    let outcome: AcquireOutcome;
+    try {
+      outcome = await this.acquisition(appSessionId, options, registration);
+    } catch (error) {
+      this.remember(appSessionId, 'failed', error instanceof Error ? error.message : String(error));
+      registration.end({ error });
+      throw error;
+    }
+    if (outcome.status === 'needs_trust' || outcome.status === 'missing_directory') this.remember(appSessionId, outcome.status, null);
+    if (outcome.status === 'failed') this.remember(appSessionId, 'failed', outcome.message);
+    registration.end({ outcome });
+    return outcome;
+  }
+
+  private async acquisition(appSessionId: AppSessionId, options: StartOptions, registration: Registration): Promise<AcquireOutcome> {
+    const s = await this.ready();
+    if (!this.acquirable(appSessionId)) return this.refusal(appSessionId); // the intents are loaded only once ready
+    // the watch before the reservation read, so a ready status landing between the two is not missed
+    const watch = new LaunchWatch(s, appSessionId);
+    try {
+      const live = await reservationOf(s.dispatch, appSessionId);
+      if (live?.process === 'ready') return { status: 'ready', appSessionId, launched: false, joined: false };
+      if (live?.process === 'exiting') {
+        // a stop or a budget release mid-ladder: its exit is waited out, bounded
+        const gone = await until(async () => (await reservationOf(s.dispatch, appSessionId)) === null, this.deps.timing?.exitWaitMs ?? EXIT_WAIT_MS, 100);
+        if (!gone) return { status: 'failed', appSessionId, message: 'The session is still stopping.', resources: UNTOUCHED };
+      } else if (live !== null) {
+        // launching outside the registry (a harness's own `session.launch`; every product launch registers)
+        const end = await watch.untilReady();
+        if (end.kind === 'ready') return { status: 'ready', appSessionId, launched: false, joined: false };
+        if (end.kind === 'timeout') return { status: 'failed', appSessionId, message: 'The session did not become ready.', resources: UNTOUCHED };
+      }
+    } finally {
+      watch.dispose();
+    }
+    return this.resumeForAcquisition(appSessionId, options, registration);
+  }
+
+  // The guarded resume under the id's lock and the `starting` mark, the record read again first: an archive or a delete
+  // holds the same lock and may have run while the steps above waited. Nothing is retained (no message), so a card's
+  // continuation is the caller's own next acquisition.
+  private async resumeForAcquisition(appSessionId: AppSessionId, options: StartOptions, registration: Registration): Promise<AcquireOutcome> {
+    const release = await this.lock(appSessionId);
+    this.starting.add(appSessionId);
+    if (this.unrecovered !== null) this.startedSince.add(appSessionId); // E10
+    try {
+      const record = this.deps.index.sessions.get(appSessionId);
+      if (record === null || this.deps.intents.get(appSessionId) !== null) return this.refusal(appSessionId);
+      const captured = capturingSetup(this.s, appSessionId, registration.tagged); // its phases stream tagged: the reply tells its end
+      const [guard, run] = await guardResumeStart(captured.setup, record, { message: null, options }, this.resumeMessages);
+      registration.guard(guard);
+      if (run === null) return acquireOutcomeOfGuard(guard);
+      await run();
+      return acquireOutcomeOf(appSessionId, captured.outcome());
+    } finally {
+      this.starting.delete(appSessionId);
+      release();
+    }
+  }
+
+  private remember(appSessionId: AppSessionId, kind: NonNullable<AcquisitionMemory['last']>['kind'], message: string | null): void {
+    this.lastAttempt.set(appSessionId, { kind, at: this.now(), message });
+  }
+
+  private publishAcquisition(appSessionId: AppSessionId): void {
+    this.deps.acquisitions?.observeAcquisition(appSessionId, { inFlight: this.inflight.has(appSessionId), last: this.lastAttempt.get(appSessionId) ?? null });
+  }
+
+  // ---- fork, archive, delete, rename, reveal (record-actions.ts) --------------------------------------------------
+
+  // `session.fork`: a fork intent over the source's conversation, started at once. The outcome's id is the fork's. A
+  // start that is rejected or throws opens no tab, so the fork's intent goes before the answer (nothing launched: there
+  // is nothing else to forget).
+  async fork(appSessionId: AppSessionId, target: ForkTarget, args: { message: FirstMessage | null; rewindTo: MessageUuid | null }): Promise<StartOutcome> {
+    const allocated = await this.serial(appSessionId, async (): Promise<StartOutcome | AppSessionId> => {
+      const s = await this.ready();
+      const source = s.sessions.get(appSessionId);
+      const refusal = await forkRefusal(s, appSessionId);
+      if (source === null || refusal !== null) return { status: 'refused', appSessionId, ...(refusal ?? { reason: 'unknown_session', message: `no session ${appSessionId}` }) };
+      const intent = await forkIntentOf(s, source, target, args);
+      if ('invalid' in intent) return { status: 'invalid', appSessionId, field: 'target', message: intent.invalid };
+      await this.putIntent(intent);
+      return intent.appSessionId;
+    });
+    return typeof allocated === 'string' ? this.startFork(allocated) : allocated;
+  }
+
+  // A fork's intent, started at once; one its start rejects or that throws is dropped before the answer.
+  private async startFork(forkId: AppSessionId): Promise<StartOutcome> {
+    let outcome: StartOutcome;
+    try {
+      outcome = await this.startSession(forkId, { message: null, options: {} });
+    } catch (error) {
+      await this.dropForkIntent(forkId);
+      throw error;
+    }
+    if (outcome.status === 'invalid' || outcome.status === 'missing_directory' || outcome.status === 'refused') await this.dropForkIntent(forkId);
+    return outcome;
+  }
+
+  // E3 start: `side.thread.open` (E3 execution document, Design §3): C10's fork of the parent, in place and at its current
+  // point, under the side thread's own guard (a running turn does not refuse it), its intent carrying the lineage the
+  // record takes and the anchored first message (or the promotion of answered side questions). The outcome's id is the
+  // thread's. A screenshot outside the allowed roots throws `ScreenshotRefused`, and a first message larger than a send
+  // may be `InvalidSideInput`, both before anything is created.
+  async openSideThread(appSessionId: AppSessionId, from: SideThreadFrom): Promise<StartOutcome> {
+    const allocated = await this.serial(appSessionId, async (): Promise<StartOutcome | AppSessionId> => {
+      const s = await this.ready();
+      const source = s.sessions.get(appSessionId);
+      const refusal = await sideThreadRefusal(s, appSessionId);
+      if (source === null || refusal !== null) return { status: 'refused', appSessionId, ...(refusal ?? { reason: 'unknown_session', message: `no session ${appSessionId}` }) };
+      const content: ContentBlock[] =
+        from.kind === 'comment'
+          ? await commentContent({ ...from, destination: 'thread' }, () => screenshotRoots(this.deps.userData, source))
+          : [{ type: 'text', text: promotionMessage(from.exchanges, from.text) }];
+      const tooLarge = sendContentRefusal(content);
+      if (tooLarge !== null) throw new InvalidSideInput([], `the side thread's first message is too large: ${tooLarge.message}`);
+      const display = String(content.at(-1)!.text); // the anchored text, whole: what a failed setup hands back to the editor
+      const lineage: Lineage = {
+        kind: 'side-thread',
+        parentAppSessionId: source.appId,
+        parentEngineSessionId: source.engineSessionId,
+        ...(from.kind === 'comment' ? { anchor: withoutScreenshot(from.anchor) } : {}),
+        openedBy: from.kind,
+      };
+      const intent = await forkIntentOf(s, source, { kind: 'inPlace' }, { message: { content, display }, rewindTo: null }, lineage);
+      if ('invalid' in intent) return { status: 'invalid', appSessionId, field: 'target', message: intent.invalid }; // never for an in-place fork
+      await this.putIntent(intent);
+      return intent.appSessionId;
+    });
+    return typeof allocated === 'string' ? this.startFork(allocated) : allocated;
+  }
+
+  // `side.sendToMain` (Design §8): the anchored comment to the parent itself.
+  async sendToMain(input: SendToMainInput): Promise<SendToMainOutput> {
+    return sendToMain(await this.ready(), this.deps.userData, input);
+  }
+  // E3 end
+
+  // E11 F2b (Q4): `side.screenshot.preview`, the comment composer's thumbnail, under the roots the send would accept.
+  async screenshotPreview(appSessionId: AppSessionId, path: string): Promise<{ dataUrl: string }> {
+    const session = (await this.ready()).sessions.get(appSessionId);
+    const roots = session === null ? [this.deps.userData] : await screenshotRoots(this.deps.userData, session);
+    return { dataUrl: await screenshotPreview(path, roots) };
+  }
+
+  private dropForkIntent(forkId: AppSessionId): Promise<void> {
+    return this.serial(forkId, async () => {
+      if (this.deps.intents.get(forkId) === null) return;
+      await this.deps.intents.remove(forkId);
+      this.deps.emit('session.intent.changed', { appSessionId: forkId, intent: null });
+    });
+  }
+
+  archive(appSessionId: AppSessionId, opts: { onlyIfIdle?: boolean; eligible?: () => Promise<boolean>; stillEligible?: () => boolean } = {}): Promise<ArchiveOutcome> {
+    return this.serial(appSessionId, async () => archiveRecord(await this.ready(), appSessionId, opts));
+  }
+
+  remove(appSessionId: AppSessionId, stopIfLive: boolean): Promise<DeleteOutcome> {
+    return this.serial(appSessionId, async () => {
+      const outcome = await deleteRecord(await this.ready(), { manifests: this.manifests, trash: this.deps.trash }, appSessionId, stopIfLive);
+      if (outcome.status === 'deleted') await this.rewinds.clear(appSessionId); // P5 O3-D M4: no conversation to repair
+      return outcome;
+    });
+  }
+
+  // What a delete would move, for its sheet; a delete interrupted half-way, for the session's tab ("Finish deleting"
+  // is `session.delete` again; "Keep" drops the manifest and leaves what did not move where it is).
+  previewDeletion = async (appSessionId: AppSessionId) => previewDeletion(await this.ready(), appSessionId);
+  listDeletions = async (): Promise<DeletionManifest[]> => this.ready().then(() => this.manifests.list());
+  keepDeletion = (appSessionId: AppSessionId): Promise<void> => this.serial(appSessionId, () => this.manifests.remove(appSessionId));
+
+  rename(appSessionId: AppSessionId, title: string): Promise<{ record: SessionRecord; via: 'engine' | 'override' }> {
+    return this.serial(appSessionId, async () => renameRecord(await this.ready(), appSessionId, title));
+  }
+
+  async revealPath(path: string, client: ClientRef | null): Promise<void> {
+    const answer = await this.deps.port.reveal(client, await revealablePath(await this.ready(), this.deps.index.projects, path));
+    if (isNoClient(answer)) throw new Error(`not revealed: ${NO_CLIENT_REASON}`);
+  }
+
+  // ---- the rewind repair (P5 O3-D M4, D18; rewind-note.ts) --------------------------------------------------------
+
+  // `session.rewind` and the conversation acts that follow it, intercepted on their way to the engine host. Neither waits
+  // for the service's start: a rewind or a send goes to a live session, and the notes are read on their first use.
+  rewind(input: CommandInput<'session.rewind'>): Promise<CommandOutput<'session.rewind'>> {
+    return this.rewinds.rewind(input);
+  }
+
+  conversationAct<N extends ConversationAct>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> {
+    return this.rewinds.act(name, input);
+  }
+
+  // P5 O3-D M5a (D47): lane B's claimed op (`host.op`, the endpoint's), through the note when it runs the rewind or a
+  // conversation act (rewind-note.ts's `claimed`)
+  claimedOp(input: CommandInput<'host.op'>): Promise<CommandOutput<'host.op'>> {
+    return this.rewinds.claimed(input);
+  }
+
+  // `session.trust.check`, read with the environment the engine receives.
+  async trustCheck(directory: string): Promise<TrustState> {
+    const s = await this.ready();
+    return trustStateOf(directory, { git: s.git, env: s.env });
+  }
+
+  // ---- reconciliation ---------------------------------------------------------------------------------------------
+
+  // One intent's reconciliation; answers the failure's message (kept for the tab's Retry) or null. `live` null: the
+  // host's live rows are read here (a Retry of a failed reconciliation), a read failure failing this reconciliation.
+  private async reconcileOne(intent: SetupIntent, live: LiveRows | null): Promise<string | null> {
+    try {
+      await reconcileIntent(this.s, intent, live ?? (await liveRows(this.s.dispatch)));
+      this.reconcileFailures.delete(intent.appSessionId);
+      this.unreconciled.delete(intent.appSessionId); // E10
+      return null;
+    } catch (error) {
+      const message = `reconciliation failed: ${error instanceof Error ? error.message : String(error)}`;
+      this.log(`${intent.appSessionId}: ${message}`);
+      this.reconcileFailures.set(intent.appSessionId, message);
+      const current = this.deps.intents.get(intent.appSessionId);
+      if (current !== null) {
+        const resources: SetupResources = { worktree: retainedWorktree(current), record: 'kept', transcript: 'none' };
+        await this.putIntent({ ...current, updatedAt: this.now(), progress: { ...current.progress, lastFailure: { at: this.now(), phase: 'launching', message, resources } } }).catch(() => {});
+      }
+      return message;
+    }
+  }
+
+  // `session.forget` for an id nothing reserves; false (logged) when the host refuses or cannot answer.
+  private async forgetQuietly(appSessionId: AppSessionId): Promise<boolean> {
+    try {
+      await hostCall(this.deps.host.dispatch, 'session.forget', { appSessionId });
+      return true;
+    } catch (error) {
+      this.log(`could not forget ${appSessionId}: ${error instanceof HostError || error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
+  }
+}

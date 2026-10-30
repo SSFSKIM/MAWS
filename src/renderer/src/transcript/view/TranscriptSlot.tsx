@@ -13,10 +13,14 @@
 // local (`Transcript`'s). Absent, the slot draws as before.
 // P2-C (2026-10-09): a session's slot follows its owner channel (`stores/owner-channel.ts`) and tells the transcript
 // whether the lane is on, which the report view and the report module read.
+// P5 O9 M5: a terminal session driven through its bridge streams its reply into the tail (`lane-a/stream/overlay.ts`),
+// keeps what an interrupt cut of it in its turn, and is at rest while its controls port says no main turn runs.
 // L197: the slot gives the transcript the session's agents from its task graph (agent-lookup.ts), so a message to an
 // agent no loaded turn launched names it.
+// P5 O9 M9: another machine's terminal session (a listed lane A row) draws through `lane-a/view/RemoteTranscriptSlot.tsx`,
+// from its machine's plane. A subagent's own transcript there is a gap, said in its place.
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
-import { useEffect, useMemo } from 'react';
+import { lazy, Suspense, useEffect, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useShownEffort } from '../../composer/effective-effort';
 import { useOwnerChannel } from '../../stores/owner-channel'; // P2-C
@@ -28,8 +32,16 @@ import type { Row } from '../model/rows';
 import { ipcRewind, ipcSource } from '../source/ipc';
 import { useAgentLookup } from './agent-lookup'; // L197
 import type { TranscriptActions } from './context';
+import { useLaneAStreaming } from '../../lane-a/stream/use-overlay'; // P5 O9 M5
+import { useRemoteLaneA } from '../../lane-a/remote-session'; // P5 O9 M9
+import { LANE_A_WORDS } from '../../session/controls/lane-a'; // P5 O9 M9
+import { useSessionControls } from '../../session/controls/controls-for'; // P5 O9 M5
 import { useRegisteredActions, useRegisteredRequestRenderer } from './registry';
 import { storeKeyOf, Transcript } from './Transcript';
+
+// P5 O9 M9: loaded only when another machine's session is shown, so the plane transcript it draws through stays out of
+// the chunk every local transcript loads.
+const RemoteTranscriptSlot = lazy(() => import('../../lane-a/view/RemoteTranscriptSlot').then((module) => ({ default: module.RemoteTranscriptSlot })));
 
 export interface TranscriptSlotProps {
   appSessionId: AppSessionId;
@@ -40,14 +52,35 @@ export interface TranscriptSlotProps {
   actions?: Partial<TranscriptActions>; // P2-E1: merged over the registered actions, for this mount only
 }
 
-export function TranscriptSlot({ appSessionId, agentId, className, startAt, presentation, actions: overrides }: TranscriptSlotProps) {
+export function TranscriptSlot(props: TranscriptSlotProps) {
+  const remote = useRemoteLaneA(props.appSessionId); // P5 O9 M9
+  if (!remote) return <LocalTranscriptSlot {...props} />;
+  if (props.agentId !== undefined) {
+    return <p className={`m-0 px-4 py-3 text-ui-sm text-fg-muted ${props.className ?? ''}`} role="status" data-testid="remote-subagent-gap">{LANE_A_WORDS.remoteSubagentRows}</p>;
+  }
+  return (
+    <Suspense fallback={null}>
+      <RemoteTranscriptSlot {...props} />
+    </Suspense>
+  );
+}
+
+function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presentation, actions: overrides }: TranscriptSlotProps) {
   const registered = useRegisteredActions();
   const actions = useMemo(() => (overrides ? { ...registered, ...overrides } : registered), [registered, overrides]);
   const renderRequest = useRegisteredRequestRenderer(); // C7's card; the placeholder until it registers
   const source = ipcSource(appSessionId, agentId); // memoised per key
   const storeKey = storeKeyOf(source);
   useAgentLookup(storeKey, appSessionId); // L197: an agent no loaded turn launched, named from the session's task graph
-  const rewind = useMemo(() => (agentId === undefined ? ipcRewind(appSessionId) : undefined), [appSessionId, agentId]);
+  // P5 O9 M5: a session driven through its bridge keeps Restore files in place, disabled with its reason (acceptance 2)
+  const controls = useSessionControls(appSessionId);
+  const filesGap = controls !== null && controls.turn() !== null ? controls.capability('rewind-files') : null;
+  // P5 O9 (the M8 sitting): such a session runs exactly while its port says a main turn is open, the one source custody
+  // reads. Its disk rows leave turns open that nothing there ends (a turn the bridge interrupted), so while the port
+  // says none runs those draw closed, as the desk draws a session its host calls idle.
+  const atRest = agentId === undefined && controls?.turn()?.running === false;
+  const filesReason = filesGap !== null && !filesGap.available ? filesGap.reason : null;
+  const rewind = useMemo(() => (agentId === undefined ? { ...ipcRewind(appSessionId), unavailable: filesReason } : undefined), [appSessionId, agentId, filesReason]);
   // Where the session runs, from its record (its worktree's checkout when it has one): the engine's Bash input names no
   // cwd, so a shell call shows this, labelled as the session's directory. Not for a child agent's transcript: a
   // worktree-isolated subagent's shell ran elsewhere.
@@ -68,7 +101,9 @@ export function TranscriptSlot({ appSessionId, agentId, className, startAt, pres
       return askIds.map((askId) => askId !== null && state !== undefined && askAnsweredHere(state, askId));
     }),
   );
-  const tail = useMemo(() => held.filter((_, i) => !answered[i]).map(heldRow), [held, answered]);
+  // P5 O9 M5: a terminal session driven through its bridge draws its reply as it is written, after the rows on disk
+  const streaming = useLaneAStreaming(agentId === undefined ? appSessionId : null, storeKey);
+  const tail = useMemo(() => [...streaming.tail, ...held.filter((_, i) => !answered[i]).map(heldRow)], [streaming.tail, held, answered]);
   const withdrawn = useMemo(() => new Set<string>(queue.withdrawn), [queue.withdrawn]);
   const effort = useShownEffort(appSessionId);
   const ownerLane = useOwnerChannel(agentId === undefined ? appSessionId : null)?.lane.on ?? false; // P2-C: a session's, never a child's
@@ -87,6 +122,8 @@ export function TranscriptSlot({ appSessionId, agentId, className, startAt, pres
       startAt={startAt}
       presentation={presentation}
       ownerLane={agentId === undefined ? ownerLane : undefined}
+      atRest={atRest}
+      placed={streaming.kept}
     />
   );
 }

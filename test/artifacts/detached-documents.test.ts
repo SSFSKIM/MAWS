@@ -30,6 +30,8 @@ import { clientOf } from '../../src/main/ipc/clients';
 import type { HostOwner } from '../../src/main/ipc/router';
 import { CommandFailure } from '../../src/main/ipc/router';
 import { createArtifactHost, type DocPorts } from '../../src/renderer/src/artifacts/host';
+import type { MachineRef } from '../../src/shared/machine/ref';
+import { TEST_MACHINE as LOCAL } from '../support/machine';
 import { fakeProfile, FakeProcesses, FakeSupervisor, type FakeProfile } from '../support/fake-supervisor';
 
 const AGENT: Actor = { kind: 'session', appSessionId: 'app-agent' as never };
@@ -130,7 +132,8 @@ function window(id = 1) {
     },
   };
   const opens: number[] = [];
-  const ipc: Pick<MawsBridge, 'invoke' | 'on'> = {
+  const ipc: Pick<MawsBridge, 'invoke' | 'on' | 'localMachine'> = {
+    localMachine: LOCAL,
     invoke: (async (name: CommandName, input: unknown) => {
       if (name !== 'artifacts.open') return supervisor.dispatch('engine-host', name, input as never);
       opens.push(Date.now());
@@ -141,7 +144,8 @@ function window(id = 1) {
         throw error;
       }
     }) as MawsBridge['invoke'],
-    on: ((name: string, listener: (state: HostState) => void) => (name === 'engine.hostState' ? supervisor.onState('engine-host', listener) : () => {})) as MawsBridge['on'],
+    on: ((name: string, listener: (state: HostState, from: { machine: MachineRef }) => void) =>
+      name === 'engine.hostState' ? supervisor.onState('engine-host', (state: HostState) => listener(state, { machine: LOCAL })) : () => {}) as MawsBridge['on'],
   };
   return { host: createArtifactHost({ ipc, ports, log: () => {} }), opens };
 }

@@ -2,7 +2,7 @@
 // the architect's ruling that no test or acceptance driver may raise a native panel on the owner's desktop): under `MAWS_E2E=1` the injected open dialog never opens the native panel. It
 // answers the paths `MAWS_E2E_PICK_PATHS` lists (separated as PATH is, read at each pick so a driver can set the next
 // answer through the main process's environment), or answers as cancelled when the variable is unset or empty. Gated
-// as the Trash seam is (`src/main/sessions/e2e-trash.ts`): outside MAWS_E2E the native dialog is returned untouched. A
+// as the Trash seam is (`src/services/sessions/e2e-trash.ts`): outside MAWS_E2E the native dialog is returned untouched. A
 // listed path is checked as the native panel would guarantee it (absolute, present, a directory exactly when the pick
 // asks for one, one path unless the pick allows several), so a misconfigured run fails loudly instead of passing on
 // an answer no panel could give.

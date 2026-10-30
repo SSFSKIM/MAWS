@@ -12,9 +12,11 @@ import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/hos
 import { threadStates } from '@artifacts/slides/threads';
 import { anchoredMessage } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
+import { at } from '../../../../../test/support/machine';
 import { artifactEditorFor, handArtifactViewOver, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
 import { NO_SESSION_CONTEXT } from '../../artifacts/session-context';
 import { resetLibrary } from '../../library/store';
@@ -31,7 +33,7 @@ import { artifactCommentAnchor, useDocumentComments } from '../document/comments
 import { registerDesignEditor } from './index';
 import type { DesignTabState } from './tab-state';
 
-const PARENT = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
+const PARENT = at('a1111111-1111-4111-8111-111111111111' as AppSessionId);
 const onBoard: CommentedPassage = { threadId: 't1', tabId: 'phone', tabTitle: 'Phone', quote: 'Phone', artifactTarget: 'board' };
 const onElement: CommentedPassage = { threadId: 't2', tabId: 'phone', tabTitle: 'Phone', quote: 'Ship the first week.', artifactTarget: 'element' };
 
@@ -78,7 +80,8 @@ describe('a design comment’s anchor', () => {
 // session as before; with no chat shown the design's own context (H's owner-start policy), its own session opening the
 // card that names it, or with no context the card's notice saying why.
 describe('a design opened as its own tab', () => {
-  const OWN = 'a2222222-2222-4222-8222-222222222222' as AppSessionId;
+  const OWN_BARE = 'a2222222-2222-4222-8222-222222222222' as AppSessionId; // as main's library row names it
+  const OWN = at(OWN_BARE);
   const DESIGN = '66666666-6666-4666-8666-666666666666';
   const scope: EditorHostScope = { surface: 'main', tabId: 'main-tab-1' };
   // a library row as main answers it (the IPC client validates every answer)
@@ -109,7 +112,7 @@ describe('a design opened as its own tab', () => {
   }
   // L's main tab: the kind's Main with the state held for the tab's scope, the design's row as the library answers it
   async function mount(answer: LibraryRow) {
-    window.maws = fakeClient({ 'session.intent.get': null, 'library.get': { row: answer } }).client;
+    window.maws = fakeClient({ 'session.intent.get': null, 'library.get': { row: answer } }).client as unknown as PreloadBridge;
     const handle = handleOf();
     const host = { open: vi.fn(async () => handle), assetUrl: () => '', identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' }) } as unknown as ArtifactHost;
     off = registerDesignEditor(() => ({ host, log: () => {}, confirmDiscard: async () => true }));
@@ -131,14 +134,14 @@ describe('a design opened as its own tab', () => {
 
   it('beside a chat: the card goes to the shown session, as before, without naming it', async () => {
     act(() => useLayout.getState().openSession(PARENT));
-    await mount(row({ createdBy: { kind: 'session', appSessionId: OWN } }));
+    await mount(row({ createdBy: { kind: 'session', appSessionId: OWN_BARE } }));
     await comment();
     expect(useCommentCard.getState().open).toMatchObject({ parent: PARENT, anchor: { kind: 'artifact-comment', artifactKind: 'design', artifactTarget: 'board', locator: 'Phone' } });
     expect(document.querySelector('[data-card-parent]')).toBeNull();
   });
 
   it('with no chat shown: Comment opens the card on the design’s own session, naming it', async () => {
-    await mount(row({ createdBy: { kind: 'session', appSessionId: OWN } }));
+    await mount(row({ createdBy: { kind: 'session', appSessionId: OWN_BARE } }));
     await comment();
     expect(useCommentCard.getState().open).toMatchObject({ parent: OWN, anchor: { kind: 'artifact-comment', artifactKind: 'design', artifactTarget: 'board' } });
     expect(document.querySelector<HTMLElement>('[data-card-parent]')?.textContent).toBe('Session: Own plan');
@@ -175,7 +178,7 @@ describe('a design’s compose card keeps its draft', () => {
   });
 
   async function mount() {
-    window.maws = fakeClient({ 'session.intent.get': null, 'library.get': { row: null } }).client;
+    window.maws = fakeClient({ 'session.intent.get': null, 'library.get': { row: null } }).client as unknown as PreloadBridge;
     const doc = design([{ id: 'b1', at: { x: 0, y: 0, w: 390, h: 844 }, title: 'Phone' }]);
     const document: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false };
     const handle = { doc, awareness: new Awareness(doc), state: () => document, subscribe: () => () => {}, onRestored: () => () => {}, onProvisional: () => () => {}, holdRemote() {}, close() {} } as unknown as DocumentHandle;

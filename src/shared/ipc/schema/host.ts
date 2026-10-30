@@ -1,12 +1,14 @@
 // X2 `host.*` (P1 interface ledger §5; E10 execution document, Interfaces "X2 additions"): the supervisor. The engine
-// host owns its own facts (`host.supervisorStatus`, command and event on every change) and the three levers main pulls
-// on it (`host.configure`, `host.stopAll`, `host.exitWhenIdle`), which only main may send: main's transport must know
+// host owns its own facts (`host.supervisorStatus`, command and event on every change) and the levers main pulls on it
+// (`host.configure`, `host.stopAll`, `host.exitWhenIdle`; P5 O2 M2: `host.interest`), which only main may send: main's transport must know
 // a stop it asked for from a crash. Main owns what the app shows (`host.status`, the last SupervisorStatus composed with
 // main's own facts) and the two actions behind the Settings and Diagnostics rows and the banners (`host.restart`,
 // `host.openLog`). The main-owned half never crosses the socket, so only the engine-host half is in the wire fingerprint.
 import * as z from 'zod';
+import { AppSessionIdSchema } from '../../graph/ids';
 import { IpcErrorSchema } from '../errors';
 import { HostStateSchema, JsonValueSchema, type CommandSpec } from './common';
+import { DaemonStatusSchema } from './daemon'; // P5 O2 M7
 import { MAX_IDLE_MINUTES } from './settings';
 
 // The supervisor's idle time: settings' 1 to MAX_IDLE_MINUTES minutes, in ms, or null for never. Capped on the wire
@@ -29,6 +31,9 @@ export const SupervisorStatusSchema = z.strictObject({
   socketPath: z.string().nullable(), // null in utility mode
   logPath: z.string().nullable(), // null in utility mode
   orphansKilled: z.number().int(), // engines of a dead predecessor this supervisor stopped at its start
+  // P5 O2 M2 (additive): the idle release's role and idle time (a laptop's the idle exit's, null for never; a server's
+  // 24 hours); optional for an older supervisor
+  release: z.strictObject({ role: z.enum(['laptop', 'server']), idleMs: z.number().int().positive().nullable() }).optional(),
 });
 export type SupervisorStatus = z.infer<typeof SupervisorStatusSchema>;
 
@@ -37,8 +42,13 @@ export type SupervisorStatus = z.infer<typeof SupervisorStatusSchema>;
 export const MainBuildSchema = z.strictObject({ version: z.string(), commit: z.string(), builtAt: z.string() });
 export type MainBuild = z.infer<typeof MainBuildSchema>;
 
+// P5 O2 M7 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M7 "Status"): `transport` is `daemon` when the engine host
+// is reached through the machine daemon, whose own `daemon.status` is `daemon` (null in the embedded shape, and until
+// the daemon first answers); `daemonUnavailable` says why a launch whose setting asks for the daemon runs embedded (no
+// unit installed for an unpackaged run, a unit the system refuses), null otherwise. On the daemon shape `matches` compares
+// the engine host's build with the one the daemon would start (`daemon.build.engineHostBuildId`).
 export const HostStatusSchema = z.strictObject({
-  transport: z.enum(['utility', 'detached']),
+  transport: z.enum(['utility', 'detached', 'daemon']),
   state: HostStateSchema.shape.state,
   supervisor: SupervisorStatusSchema.nullable(), // null while none is connected
   appBuildId: z.string(),
@@ -50,6 +60,12 @@ export const HostStatusSchema = z.strictObject({
   waitingLiveSessions: z.number().int().nonnegative().nullable(),
   // the last unexpected exit this app run; code and signal only for a supervisor this run spawned
   lastExit: z.strictObject({ code: z.number().int().nullable(), signal: z.string().nullable(), at: z.string(), interrupted: z.number().int() }).nullable(),
+  daemon: DaemonStatusSchema.nullable(), // P5 O2 M7
+  daemonUnavailable: z.string().nullable(), // P5 O2 M7
+  // P5 O3-A (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §2): why this run does not run the machine's services and
+  // writes none of its files (another live process holds the profile's spine.lock, named by pid and build); null while
+  // it holds the lock. Optional, so the status of a build before O3-A (another profile's, over O6's link) still reads.
+  spineRefused: z.string().nullable().optional(),
 });
 export type HostStatus = z.infer<typeof HostStatusSchema>;
 
@@ -59,8 +75,8 @@ export type HostStatus = z.infer<typeof HostStatusSchema>;
 // command through the host's own handler table and keeps its result; a known id answers what the ledger holds and runs
 // nothing. `host.opQuery` is RL4's query, which tombstones an absent id when asked, so `not-received` is said only once a
 // late copy can no longer run. Neither is bridged to a window: only the endpoint sends them (`internal`).
-const OpIdSchema = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/); // sminos's OP_ID_RE, as org-protocol's action has it
-const OpBindingShape = { member: z.string().min(1), device: z.string().min(1), fingerprint: z.string().min(1) };
+export const OpIdSchema = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/); // sminos's OP_ID_RE, as org-protocol's action has it
+export const OpBindingShape = { member: z.string().min(1), device: z.string().min(1), fingerprint: z.string().min(1) };
 export const OpRequestDigestSchema = z.strictObject({ session: z.string(), request: z.string(), tool: z.string(), input_sha256: z.string().regex(/^[0-9a-f]{64}$/) });
 export const HostOpInputSchema = z.strictObject({
   opId: OpIdSchema,
@@ -99,8 +115,15 @@ export const commands = {
   // the supervisor exits after answering; a utility host answers engine.shutdown's body and main forks a fresh one
   'host.stopAll': host(z.strictObject({ graceMs: z.number().int().nonnegative() }), z.strictObject({ stopped: z.number().int(), forced: z.number().int() })),
   'host.exitWhenIdle': host(z.strictObject({ armed: z.boolean() }), z.void()),
+  // P5 O2 M2: the sessions the asking connection holds interest in (main's: open session tabs and on-screen sessions),
+  // the full set, replacing its last; it ends with the connection. Main-only (a remote viewer's arrives through mawsd).
+  'host.interest': host(z.strictObject({ sessions: z.array(AppSessionIdSchema).max(10_000) }), z.void()),
   'host.op': host(HostOpInputSchema, HostOpOutputSchema), // P5 O10 M7: the endpoint's only
   'host.opQuery': host(z.strictObject({ opId: OpIdSchema, opCreated: z.string(), tombstoneIfAbsent: z.boolean() }), HostOpQueryOutputSchema), // P5 O10 M7
+  // P5 O3-D (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §D; O3X5): whether an app is attached, told
+  // by a client that listed the capability `host.attachment` (ATTACHMENT_CAPABILITY), which only `mawsd` does; the engine
+  // host keys its app-bound gates on it for such a client (served from O3-D M3). Main-only.
+  'host.attachment': host(z.strictObject({ attached: z.boolean() }), z.void()),
   'host.status': main(z.void(), HostStatusSchema),
   'host.restart': main(z.strictObject({ stopSessions: z.boolean() }), z.void()), // the banner's Restart now and Settings' Stop all
   'host.openLog': main(z.void(), z.void()), // shell.openPath on host.log

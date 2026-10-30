@@ -4,6 +4,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 import { useLayout } from '../stores/layout';
 import { activeTab, allTabs } from '../stores/layout-model';
 import { fail, installFakeMain, ok } from '../test-support/code';
@@ -67,10 +68,10 @@ describe('opening an artifact', () => {
     useLayout.setState({ regions: { ...LAYOUT_DEFAULTS.regions, panel: { ...LAYOUT_DEFAULTS.regions.panel, maximized: true } } });
     openArtifactTab(A);
     expect(useLayout.getState().regions.panel.maximized).toBe(false);
-    expect(activeTab(useLayout.getState().main)).toEqual({ id: `artifact:${A}`, kind: 'artifact', artifactId: A, pinned: false });
+    expect(activeTab(useLayout.getState().main)).toEqual({ id: `artifact:${TEST_MACHINE}:${A}`, kind: 'artifact', artifactId: A, machine: TEST_MACHINE, pinned: false });
     useLayout.getState().openTab({ kind: 'diagnostics' });
     openArtifactTab(A);
-    expect(activeTab(useLayout.getState().main)?.id).toBe(`artifact:${A}`);
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`artifact:${TEST_MACHINE}:${A}`);
     expect(allTabs(useLayout.getState().main).filter((t) => t.kind === 'artifact')).toHaveLength(1);
   });
 
@@ -84,6 +85,6 @@ describe('opening an artifact', () => {
     act(() => openArtifactTab(A, { block: 'b7' }));
     expect(asked.result.current).toMatchObject({ artifactId: A, at: 'latest', location: { block: 'b7' }, surface: 'main' });
     expect(takeOpenRequest(asked.result.current!.serial)).toBe(true);
-    expect(activeTab(useLayout.getState().main)?.id).toBe(`artifact:${A}`);
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`artifact:${TEST_MACHINE}:${A}`);
   });
 });

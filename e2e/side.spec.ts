@@ -16,6 +16,8 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import { anchoredMessage } from '../src/shared/anchor/message';
 import { ScratchRepo } from '../test/support/scratch-repo';
+import { addressed, localRef } from './support/address';
+import { bareOf } from '../src/shared/machine/address';
 import { collectBestEffortEvidence } from './support/best-effort-evidence';
 import { StoreFixture } from '../test/support/store-fixture';
 import { menu, otherThemeColours } from './support/code-product';
@@ -186,7 +188,7 @@ const panelRegion = (page: Page) => page.locator('[data-region="panel"]');
 async function showSession(page: Page, id: string): Promise<void> {
   await (await sidebarRow(page, { appSessionId: id })).click();
   await page.mouse.move(700, 450); // off the sidebar: its hover card would cover what follows
-  await expect(mainTabById(page, `session:${id}`)).toHaveAttribute('aria-selected', 'true');
+  await expect(mainTabById(page, `session:${await addressed(page, id)}`)).toHaveAttribute('aria-selected', 'true');
 }
 
 // Files in the panel, the repository expanded down to `relative`, and its tab opened; answers the viewer.
@@ -239,7 +241,7 @@ async function openThreadFromGutter(c: Case & { parent: string }): Promise<{ chi
   await sheet.getByRole('button', { name: 'Send' }).click();
   await expect(sheet, 'the sheet closes once the thread starts').toHaveCount(0);
   const child = await sideThreadOf(page, c.parent, 'comment');
-  const pane = panelRegion(page).locator(`[data-side-thread-view="${child}"]`);
+  const pane = panelRegion(page).locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
   await expect(pane, 'the Side pane opens on the new thread').toBeVisible();
   await closeSurface(page, 'Files');
   await expect(pane.getByText(CHILD_REPLY)).toBeVisible({ timeout: 20_000 });
@@ -251,9 +253,11 @@ const fileAnchor = (repo: ScratchRepo, line: number) => ({ kind: 'file-line' as 
 // The sidebar's rows of the parent's project, in order: their ids and levels.
 async function projectRows(page: Page, parent: string): Promise<{ id: string; level: string | null }[]> {
   await sidebarRow(page, { appSessionId: parent }); // its project expanded
-  const projectId = value(await invoke(page, 'session.get', { appSessionId: parent as never }))?.projectId ?? 'other';
-  const project = sidebarOf(page).locator(`[data-kind="project"][data-tree-id="p:${projectId}"]`);
-  return project.locator('[role="treeitem"][data-menu^="session:"]').evaluateAll((rows) => rows.map((r) => ({ id: r.getAttribute('data-menu')!.slice('session:'.length), level: r.getAttribute('aria-level') })));
+  // the row that holds the parent (P5 O6 M5: a row is keyed by its org project's key, a session of none sits in its
+  // machine's own row)
+  const project = sidebarOf(page).locator('[data-kind="project"]').filter({ has: page.locator(`[data-menu="session:${await addressed(page, parent)}"]`) });
+  const rows = await project.locator('[role="treeitem"][data-menu^="session:"]').evaluateAll((rows) => rows.map((r) => ({ id: r.getAttribute('data-menu')!.slice('session:'.length), level: r.getAttribute('aria-level') })));
+  return rows.map((row) => ({ ...row, id: bareOf(row.id) })); // the rows name addresses; the callers, the raw bridge's bare ids
 }
 
 test.describe('side threads, Send to main and /btw (E3)', () => {
@@ -323,13 +327,13 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
 
     // the parent's transcript: one row for the thread, finished with its reply, whose Open shows it
     await showSession(page, parent);
-    const row = mainRegion(page).locator(`[data-side-thread="${child}"]`);
+    const row = mainRegion(page).locator(`[data-side-thread="${await addressed(page, child)}"]`);
     await expect(row).toHaveAttribute('data-state', 'finished');
     await expect(row).toContainText(`Side thread on app.ts:3 finished: ${CHILD_REPLY}`);
     expect(writtenUsers(maws, parent), 'the main conversation received no message').toHaveLength(1);
 
     // the thread's own composer sends to the thread; the parent's row counts its turns in place
-    const threadPane = panelRegion(page).locator(`[data-side-thread-view="${child}"]`);
+    const threadPane = panelRegion(page).locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
     await threadPane.getByRole('textbox', { name: 'Message' }).click();
     await page.keyboard.type(CHILD_FOLLOW_UP);
     await threadPane.locator('[data-submit-state]').click();
@@ -345,14 +349,14 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await threadPane.getByRole('textbox', { name: 'Message' }).click();
     await page.keyboard.type(`/btw ${SIDE_QUESTION}`);
     await page.keyboard.press('Enter');
-    const inline = threadPane.locator(`[data-side-btw-view="${child}"]`);
+    const inline = threadPane.locator(`[data-side-btw-view="${await addressed(page, child)}"]`);
     await expect(inline.locator('[data-side-exchange="answered"]').first()).toContainText('ZEBRA', { timeout: 20_000 });
     await expect(threadPane.getByRole('button', { name: 'Side questions' })).toHaveAttribute('aria-pressed', 'true');
     expect(writtenControls(maws, child, 'side_question').map((r) => r.frame.request)).toEqual([{ subtype: 'side_question', question: SIDE_QUESTION }]);
     expect(writtenControls(maws, parent, 'side_question')).toEqual([]);
     expect(writtenUsers(maws, child), 'no user frame for the question').toHaveLength(2);
     await expect(page.getByText('Side question asked in the panel of', { exact: false })).toHaveCount(0);
-    await expect(mainRegion(page).locator(`[data-side-thread="${child}"]`), 'the main view still shows the parent').toBeVisible();
+    await expect(mainRegion(page).locator(`[data-side-thread="${await addressed(page, child)}"]`), 'the main view still shows the parent').toBeVisible();
     await threadPane.getByRole('button', { name: 'Side questions' }).click();
     await expect(inline).toHaveCount(0);
 
@@ -362,7 +366,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
 
     // the head's label opens the file at the line, in the parent's context
     await threadPane.getByRole('button', { name: 'Open app.ts:3' }).click();
-    await expect(mainTabById(page, `file:${repo.path(APP)}`)).toHaveAttribute('aria-selected', 'true');
+    await expect(mainTabById(page, `file:${await localRef(page)}:${repo.path(APP)}`)).toHaveAttribute('aria-selected', 'true');
     expect(maws.consoleErrors()).toEqual([]);
   });
 
@@ -373,19 +377,19 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const { child } = await openThreadFromGutter(c);
     await showSession(page, parent);
     const panel = panelRegion(page);
-    const thread = panel.locator(`[data-side-thread-view="${child}"]`);
+    const thread = panel.locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
 
     // away to the question view, then back through the parent's row
     await panel.locator('[data-side-chip="btw"]').click();
-    await expect(panel.locator(`[data-side-btw-view="${parent}"]`)).toBeVisible();
+    await expect(panel.locator(`[data-side-btw-view="${await addressed(page, parent)}"]`)).toBeVisible();
     await expect(thread).toHaveCount(0);
-    await mainRegion(page).locator(`[data-side-thread="${child}"]`).getByRole('button', { name: 'Open' }).click();
+    await mainRegion(page).locator(`[data-side-thread="${await addressed(page, child)}"]`).getByRole('button', { name: 'Open' }).click();
     await expect(thread).toBeVisible();
-    await expect(panel.locator(`[data-side-chip="${child}"]`)).toHaveAttribute('aria-current', 'true');
+    await expect(panel.locator(`[data-side-chip="${await addressed(page, child)}"]`)).toHaveAttribute('aria-current', 'true');
 
     // Open as tab: the main area shows the thread; the pane says so instead of drawing a second one
     await thread.getByRole('button', { name: 'Open as tab' }).click();
-    const tab = mainTabById(page, `session:${child}`);
+    const tab = mainTabById(page, `session:${await addressed(page, child)}`);
     await expect(tab).toHaveAttribute('aria-selected', 'true');
     await expect(mainRegion(page).getByText(CHILD_REPLY)).toBeVisible();
     // the panel follows the shown session (now the thread): back to the parent's tab to see its pane
@@ -399,7 +403,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(tab).toHaveCount(0);
     await expect(thread.getByText('Shown in the main area')).toHaveCount(0);
     await expect(thread.getByText(CHILD_REPLY)).toBeVisible();
-    await expect(thread.locator(`[data-composer="${child}"]`)).toBeVisible();
+    await expect(thread.locator(`[data-composer="${await addressed(page, child)}"]`)).toBeVisible();
 
     // the index: the lineage as the record carries it, written from the intent
     const row = indexRow(maws, child);
@@ -513,7 +517,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await page.keyboard.type(`/btw ${SIDE_QUESTION}`);
     await page.keyboard.press('Enter');
     await expect(composer).toHaveText('');
-    const view = panelRegion(page).locator(`[data-side-btw-view="${parent}"]`);
+    const view = panelRegion(page).locator(`[data-side-btw-view="${await addressed(page, parent)}"]`);
     await expect(view).toBeVisible();
     await expect(view.locator('[data-side-exchange]').first()).toContainText(SIDE_QUESTION);
     await expect(view.locator('[data-side-exchange="answered"]').first()).toContainText('ZEBRA');
@@ -533,7 +537,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     // Continue as a side thread: a fork whose first prompt lists the exchanges, shown in the pane
     await view.getByRole('button', { name: 'Continue as a side thread' }).click();
       const promoted = await sideThreadOf(page, parent, 'btw');
-    const thread = panelRegion(page).locator(`[data-side-thread-view="${promoted}"]`);
+    const thread = panelRegion(page).locator(`[data-side-thread-view="${await addressed(page, promoted)}"]`);
     await expect(thread).toBeVisible();
     await expect(thread.getByText(PROMOTED_REPLY)).toBeVisible({ timeout: 20_000 });
     await expect(thread.locator('header')).toContainText('Side question');
@@ -640,7 +644,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const parent = await startParent(first.page, s.repo);
     const { child } = await openThreadFromGutter({ ...s, maws: first, page: first.page, parent });
     await showSession(first.page, parent);
-    await expect(mainRegion(first.page).locator(`[data-side-thread="${child}"]`)).toHaveAttribute('data-state', 'finished');
+    await expect(mainRegion(first.page).locator(`[data-side-thread="${await addressed(first.page, child)}"]`)).toHaveAttribute('data-state', 'finished');
     const sideEvents = async (page: Page) =>
       value(await invoke(page, 'session.appEvents', { appSessionId: parent as never }))
         .events.filter((e) => e.kind.startsWith('side.thread.'))
@@ -659,7 +663,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const page = second.page;
     await expect.poll(() => sideEvents(page), { message: 'session.appEvents re-synthesised from the index' }).toEqual(live);
     await showSession(page, parent);
-    const row = mainRegion(page).locator(`[data-side-thread="${child}"]`);
+    const row = mainRegion(page).locator(`[data-side-thread="${await addressed(page, child)}"]`);
     await expect(row).toHaveAttribute('data-state', 'finished');
     await expect(row).toContainText(`Side thread on app.ts:3 finished: ${CHILD_REPLY}`);
     await expect(mainRegion(page).locator('[data-side-thread]')).toHaveCount(1);
@@ -691,7 +695,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await showSession(page, parent);
     const main = mainRegion(page);
     await expect(main.getByText('Read it: the total is recomputed on every call, by design.')).toBeVisible({ timeout: 20_000 });
-    await expect(main.locator(`[data-side-thread="${child}"]`)).toHaveAttribute('data-state', 'finished');
+    await expect(main.locator(`[data-side-thread="${await addressed(page, child)}"]`)).toHaveAttribute('data-state', 'finished');
     // and a side question, answered
     await main.getByRole('textbox', { name: 'Message' }).click();
     await page.keyboard.type(`/btw ${SIDE_QUESTION}`);
@@ -711,7 +715,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
       };
 
       // the sheet, over the file's tab
-      await mainTabById(page, `file:${repo.path(APP)}`).click();
+      await mainTabById(page, `file:${await localRef(page)}:${repo.path(APP)}`).click();
       const open = await commentOn(page, viewer, 3);
       await open.getByRole('textbox', { name: 'Comment' }).fill(COMMENT);
       await shoot(open, 'comment-sheet');
@@ -720,10 +724,10 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
 
       // the parent: its transcript, the pane on its thread, the question view, the sidebar
       await showSession(page, parent);
-      await panel.locator(`[data-side-chip="${child}"]`).click();
-      await expect(panel.locator(`[data-side-thread-view="${child}"]`).getByText(CHILD_REPLY)).toBeVisible();
+      await panel.locator(`[data-side-chip="${await addressed(page, child)}"]`).click();
+      await expect(panel.locator(`[data-side-thread-view="${await addressed(page, child)}"]`).getByText(CHILD_REPLY)).toBeVisible();
       await shoot(panel, 'side-pane-thread');
-      await main.locator(`[data-side-thread="${child}"]`).scrollIntoViewIfNeeded();
+      await main.locator(`[data-side-thread="${await addressed(page, child)}"]`).scrollIntoViewIfNeeded();
       await shoot(main, 'parent-transcript');
       await panel.locator('[data-side-chip="btw"]').click();
       await expect(panel.locator('[data-side-exchange="answered"]')).toContainText('ZEBRA');
@@ -858,7 +862,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(strip).toContainText('Waiting for your permission');
     await strip.getByRole('button', { name: 'Open in Side pane' }).click();
     await expect(card).toHaveCount(0);
-    const pane = panelRegion(page).locator(`[data-side-thread-view="${child}"]`);
+    const pane = panelRegion(page).locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
     const docked = pane.getByRole('group', { name: 'Approval needed' });
     await expect(docked).toContainText('echo second-step');
     await docked.getByRole('radio', { name: 'Allow once' }).click();
@@ -893,7 +897,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(card.locator('[data-needs-you]')).toContainText('Waiting for your permission', { timeout: 20_000 });
     await card.locator('[data-needs-you]').getByRole('button', { name: 'Open in Side pane' }).click();
     await expect(card).toHaveCount(0);
-    const pane = panelRegion(page).locator(`[data-side-thread-view="${child}"]`);
+    const pane = panelRegion(page).locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
     const docked = pane.getByRole('group', { name: 'Approval needed' });
     await expect(docked).toContainText('echo the-step');
     await docked.getByRole('radio', { name: 'Allow once' }).click();
@@ -907,7 +911,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const viewer = panelRegion(page).locator('[data-artifact-viewer]');
     const redocked = viewer.locator('[data-comment-card]');
     await expect(redocked).toHaveAttribute('data-card-phase', 'thread');
-    await expect(redocked.locator(`[data-card-thread="${child}"]`)).toBeVisible();
+    await expect(redocked.locator(`[data-card-thread="${await addressed(page, child)}"]`)).toBeVisible();
     await expect(redocked.getByText(CARD_REPLY)).toBeVisible({ timeout: 20_000 });
     await expect(redocked).toHaveAttribute('data-placement', 'below');
     const hero = viewer.frameLocator('[data-artifact-frame="html"]').locator('#hero');

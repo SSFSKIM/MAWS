@@ -17,7 +17,7 @@ import { toolVerb } from '../../../../../src/renderer/src/request-card/tools';
 import { QuestionBody } from '../../../../../src/renderer/src/request-card/variants/Question';
 import { capabilities } from '../../conversation/capabilities';
 import { cardState, isAsyncQuestion, isQuestion, type CardState } from '../../conversation/card-state';
-import { settledText } from '../../conversation/words';
+import { settledText } from '../../../../../src/renderer/src/lane-a/conversation/words';
 import { sessionName } from '../../log/projection';
 import type { RequestRecord, RpcEntry } from '../../project/conversation';
 import { useConnected, useDesk } from '../conversation/desk-context';
@@ -26,10 +26,10 @@ import { RpcStatus } from '../conversation/RpcStatus';
 type PermissionEvent = Extract<SessionEvent, { kind: 'permission.requested' }>;
 
 /** The raised request as MAWS's permission pieces read it: the tool's name and input, and nothing MAWS-only. */
-const asPermission = (raised: Raised) => ({ kind: 'permission.requested', toolName: raised.tool, input: raised.input, displayName: null, mcpServer: null, description: null }) as unknown as PermissionEvent;
+export const asPermission = (raised: Pick<Raised, 'tool' | 'input'>) => ({ kind: 'permission.requested', toolName: raised.tool, input: raised.input, displayName: null, mcpServer: null, description: null }) as unknown as PermissionEvent;
 
 /** The native AskUserQuestion input as MAWS's question stepper reads it (the chat's receipt reads the headers off it too). */
-export function questionsOf(raised: Raised): Question[] {
+export function questionsOf(raised: Pick<Raised, 'input'>): Question[] {
   const questions = Array.isArray(raised.input.questions) ? raised.input.questions : [];
   return questions.flatMap((q) => {
     if (typeof q !== 'object' || q === null || Array.isArray(q) || typeof q.question !== 'string') return [];

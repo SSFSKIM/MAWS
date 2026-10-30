@@ -8,9 +8,14 @@
 // nothing on the page writes to the replay on its own.
 // Main blocks navigation, so an end-to-end test drives the page through `window.__maws_widgets`; for manual use
 // `?session=<id>` shows a session (`&driver=replay` passively), `&widget=<name>` opens a widget and `?theme=dark`.
+// P5 O6 M2: the page holds addresses, while `window.__maws_widgets` and the query take the raw bridge's bare ids, as the
+// specs read them from `window.maws`: the page addresses them with the local machine.
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import { REGISTRY } from '@shared/ipc/registry';
+import { addressingOf, addressOf } from '@shared/machine/address';
+import { ipc } from '../../ipc/client';
 import { ToastHost } from '../../app/ToastHost';
 import { connectDirectLogin } from '../../gateway/direct-login';
 import { GatewayDialogs } from '../../gateway/SwitchSheet';
@@ -68,12 +73,16 @@ function RoutePane({ appSessionId }: { appSessionId: AppSessionId }) {
 // recorded arguments verbatim; nothing else calls them through this table.
 const CONTROLS: Record<string, (input: never) => Promise<unknown>> = { setModel, setEffort, applyFlagSettings, setPermissionMode };
 
+const local = (id: string): AppSessionId => addressOf(ipc.localMachine, id as AppSessionId);
+const addressedPane = (pane: WidgetsPane): WidgetsPane => pane && { ...pane, appSessionId: local(pane.appSessionId) };
+const addressing = addressingOf(REGISTRY);
+
 function initial(): { pane: WidgetsPane; widget: { name: string; args: string } | null } {
   const params = new URLSearchParams(location.search);
   const session = params.get('session');
   const widget = params.get('widget');
   return {
-    pane: session ? { appSessionId: session, mode: params.get('driver') === 'replay' ? 'passive' : 'interactive' } : null,
+    pane: session ? { appSessionId: local(session), mode: params.get('driver') === 'replay' ? 'passive' : 'interactive' } : null,
     widget: widget ? { name: widget, args: params.get('args') ?? '' } : null,
   };
 }
@@ -148,14 +157,15 @@ export function WidgetsHarness() {
     mirrorLayout(start.pane);
     const offs = [connectShell(), connectKeys(), connectUsage(), registerAllWidgets(), connectDirectLogin(queryClient), registerSessionActions()]; // C10's actions: /rename's dialog, Resume
     window.__maws_widgets = {
-      show: (next) => {
+      show: (shown) => {
+        const next = addressedPane(shown);
         mirrorLayout(next);
         setOpened(null);
         setPane(next);
       },
       open: (name, args = '') => setOpened({ name, args }),
-      read: (command, input) => readIntoCache(queryClient, command as SessionRead, input as never),
-      control: (name, input) => (CONTROLS[name] ? CONTROLS[name](input as never) : Promise.reject(new Error(`no widget control named ${name}`))),
+      read: (command, input) => readIntoCache(queryClient, command as SessionRead, addressing.input(command).lift(input, ipc.localMachine) as never),
+      control: (name, input) => (CONTROLS[name] ? CONTROLS[name]({ ...input, appSessionId: local(input.appSessionId as string) } as never) : Promise.reject(new Error(`no widget control named ${name}`))),
     };
     return () => {
       offs.forEach((off) => off());

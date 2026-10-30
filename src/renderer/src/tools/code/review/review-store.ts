@@ -11,7 +11,9 @@ import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import { type MawsBridge } from '@shared/ipc/schema';
 import type { GitStatus } from '@shared/ipc/schema/git';
+import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../../../ipc/client';
+import { checkoutKey, machineFor } from '../../../ipc/machine';
 import { useGit } from '../../../stores/git';
 import { useTranscriptStore, type TurnActivity, type TurnId } from '../../../transcript';
 import { REVIEW_COPY } from '../copy';
@@ -24,6 +26,7 @@ export const REVIEW_REFRESH_MS = HELD_DIFF_REFRESH_MS;
 
 export type GitScope = Exclude<ReviewScope, 'turn'>;
 export interface DiffTarget {
+  machine: MachineRef; // P5 O6 M4: the directory's, its session's machine
   directory: string;
   scope: GitScope;
   base: string | null; // This branch's base; null for the other scopes
@@ -35,21 +38,21 @@ export type BaseLookup = { status: 'loading' } | { status: 'ok'; base: string } 
 export interface ReviewStore {
   diffs: ReadonlyMap<string, ScopeDiff>; // by diffKey
   files: ReadonlyMap<string, FileDiff>; // by fileKey: one file of a scope past its cap
-  bases: ReadonlyMap<string, BaseLookup>; // by `${repoRoot}\0${branch}`
+  bases: ReadonlyMap<string, BaseLookup>; // by `${checkoutKey(machine, repoRoot)}\0${branch}`
   hold(target: DiffTarget): () => void; // ref-counted; the first reads, the last forgets
   refresh(target: DiffTarget): void; // re-read now (the tool shown again, a focus request)
-  statusChanged(directory: string): void; // a new status for the directory: every held scope of it re-reads, trailing
+  statusChanged(checkout: string): void; // a new status for the git store's checkout: every held scope of it re-reads, trailing
   loadFile(target: DiffTarget, path: string): void;
-  lookupBase(repoRoot: string, branch: string): void;
+  lookupBase(machine: MachineRef, repoRoot: string, branch: string): void;
   reset(): void; // tests
 }
 
-const keys = diffKeys<DiffTarget>((t) => `${t.directory}\0${t.scope}\0${t.base ?? ''}`, '\0');
-const baseKey = (repoRoot: string, branch: string) => `${repoRoot}\0${branch}`;
+const keys = diffKeys<DiffTarget>((t) => `${checkoutKey(t.machine, t.directory)}\0${t.scope}\0${t.base ?? ''}`, '\0');
+const baseKey = (machine: MachineRef, repoRoot: string, branch: string) => `${checkoutKey(machine, repoRoot)}\0${branch}`;
 
 export const diffOf = (s: Pick<ReviewStore, 'diffs'>, t: DiffTarget) => s.diffs.get(keys.diff(t));
 export const fileDiffOf = (s: Pick<ReviewStore, 'files'>, t: DiffTarget, path: string) => s.files.get(keys.file(t, path));
-export const baseOf = (s: Pick<ReviewStore, 'bases'>, repoRoot: string, branch: string) => s.bases.get(baseKey(repoRoot, branch));
+export const baseOf = (s: Pick<ReviewStore, 'bases'>, machine: MachineRef, repoRoot: string, branch: string) => s.bases.get(baseKey(machine, repoRoot, branch));
 
 const diffInput = (t: DiffTarget, path?: string) => ({
   directory: t.directory,
@@ -73,20 +76,20 @@ export function createReviewStore(
       hold: heldDiffs.hold,
       refresh: heldDiffs.refresh,
 
-      statusChanged(directory) {
-        heldDiffs.reread((t) => t.directory === directory);
+      statusChanged(checkout) {
+        heldDiffs.reread((t) => checkoutKey(t.machine, t.directory) === checkout);
       },
 
       loadFile: heldDiffs.loadFile,
 
-      lookupBase(repoRoot, branch) {
-        const key = baseKey(repoRoot, branch);
+      lookupBase(machine, repoRoot, branch) {
+        const key = baseKey(machine, repoRoot, branch);
         const known = get().bases.get(key);
         if (known && !(known.status === 'unavailable' && known.failed)) return;
         set((s) => ({ bases: mapWith(s.bases, key, { status: 'loading' }) }));
         // C10's answer: null when `refs/heads/<branch>` does not resolve, which for the branch HEAD names means it has no
         // commits yet; `base` is the main worktree's branch, `HEAD` when that is detached.
-        void settled(client.invoke('git.worktree.branch', { repoRoot, branch })).then((result) => {
+        void settled(client.invoke('git.worktree.branch', { repoRoot, branch }, { machine })).then((result) => {
           const next: BaseLookup = !result.ok
             ? { status: 'unavailable', reason: result.error.message, failed: true }
             : result.value === null
@@ -108,7 +111,7 @@ export function createReviewStore(
   });
 
   // A new status C8a's store took for a directory re-reads the scopes held over that directory.
-  if (options.git) followGitStatus(options.git, (directory) => store.getState().statusChanged(directory));
+  if (options.git) followGitStatus(options.git, (checkout) => store.getState().statusChanged(checkout));
   return store;
 }
 
@@ -116,7 +119,7 @@ export const useReview = createReviewStore(ipc, { git: useGit });
 
 // ---- what a Review surface shows for a session's directory and a scope ----------------------------------------------
 
-const NOT_A_REPOSITORY = 'not a git repository'; // C4's message (src/main/git/runner.ts), as C8a's Environment reads it
+const NOT_A_REPOSITORY = 'not a git repository'; // C4's message (src/services/git/runner.ts), as C8a's Environment reads it
 
 // Settled: known, available with its base or unavailable with the reason (the disabled chip's tooltip).
 export type BranchAvailability =
@@ -159,26 +162,27 @@ function branchOf(status: GitStatus | null, lookup: BaseLookup | undefined): Bra
 // Holds C8a's git watch on the directory and the scope's diff while mounted; Last turn reads the transcript store.
 export function useReviewData(input: { appSessionId: AppSessionId; directory: string; scope: ReviewScope | null; turnId: TurnId | null }): ReviewData {
   const { appSessionId, directory, scope, turnId } = input;
-  const entry = useGit((s) => s.entries.get(directory));
+  const machine = machineFor(appSessionId);
+  const entry = useGit((s) => s.entries.get(checkoutKey(machine, directory)));
   const status = entry?.status ?? null;
   const gitError = entry?.error ?? null;
   const repoRoot = status?.repoRoot ?? null;
   const branchName = status?.branch ?? null;
-  const lookup = useReview((s) => (repoRoot !== null && branchName !== null ? baseOf(s, repoRoot, branchName) : undefined));
+  const lookup = useReview((s) => (repoRoot !== null && branchName !== null ? baseOf(s, machine, repoRoot, branchName) : undefined));
   const branch = useMemo(() => branchOf(status, lookup), [status, lookup]);
 
-  useEffect(() => useGit.getState().watch(directory), [directory]);
+  useEffect(() => useGit.getState().watch(machine, directory), [machine, directory]);
   useEffect(() => {
-    if (repoRoot !== null && branchName !== null) useReview.getState().lookupBase(repoRoot, branchName);
-  }, [repoRoot, branchName]);
+    if (repoRoot !== null && branchName !== null) useReview.getState().lookupBase(machine, repoRoot, branchName);
+  }, [machine, repoRoot, branchName]);
 
   const known = status !== null;
   const base = branch.base;
   const target = useMemo<DiffTarget | null>(() => {
     if (!known || scope === null || scope === 'turn') return null;
-    if (scope === 'branch') return base === null ? null : { directory, scope, base };
-    return { directory, scope, base: null };
-  }, [known, scope, directory, base]);
+    if (scope === 'branch') return base === null ? null : { machine, directory, scope, base };
+    return { machine, directory, scope, base: null };
+  }, [known, scope, machine, directory, base]);
   useEffect(() => (target ? useReview.getState().hold(target) : undefined), [target]);
   const diff = useReview((s) => (target ? diffOf(s, target) : undefined));
 

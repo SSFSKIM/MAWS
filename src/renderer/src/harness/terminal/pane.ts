@@ -6,6 +6,7 @@
 // Held outside React so the emulator survives the page's re-renders; the page mounts `renderer.element` and reads
 // `debug` through the store. (M3's registry is the product's version of this wiring; the probe stays a harness.)
 import type { AppSessionId } from '@shared/graph/ids';
+import { addressOf } from '@shared/machine/address';
 import type { EventPayload, PtyId } from '@shared/ipc/schema';
 import { SCRATCH_CWD, resolveProgram, WIDTH_FIXTURES, type Bins, type Phase, type ProgramWorkload } from '../../../../../spikes/terminal-probe/workloads.mjs';
 import { ipc } from '../../ipc/client';
@@ -72,7 +73,7 @@ const ESC = '\x1b';
 const SYNC_ON = `${ESC}[?2026h`;
 // The probe's pty spawns belong to a session of their own; each spawn has a fresh label (the host refuses a second
 // live pty under the same session and label).
-const PROBE_SESSION = 'probe' as AppSessionId;
+const PROBE_SESSION = addressOf(ipc.localMachine, 'probe' as AppSessionId); // P5 O6 M2: the local machine's
 let spawns = 0;
 // Ack coalescing (Residue *PTY stream and flow control*): one ack per 32 KiB parsed, or 16 ms after the last parse.
 const ACK_BYTES = 32 * 1024;

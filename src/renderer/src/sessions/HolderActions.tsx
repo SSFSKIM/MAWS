@@ -5,6 +5,8 @@
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import { machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
 import { attachOrSay } from './attach';
@@ -14,19 +16,20 @@ type ForeignHolder = Extract<SessionRecord['holder'], { kind: 'terminal' | 'back
 
 const BUTTON = 'rounded-sm border border-border px-2 py-0.5 whitespace-nowrap hover:bg-bg-hover disabled:text-fg-faint';
 
-// The installed binary's version (W13: what attach runs), for the note beside Attach when the job runs another.
-function useInstalledVersion(wanted: boolean): string | null {
+// The installed binary's version (W13: what attach runs), for the note beside Attach when the job runs another: the
+// session's machine's, where the attach runs (P5 O6).
+function useInstalledVersion(wanted: boolean, machine: MachineRef): string | null {
   const [version, setVersion] = useState<string | null>(null);
   useEffect(() => {
     if (!wanted) return;
     let live = true;
-    void ipc.invoke('engine.binaryInfo', undefined).then((result) => {
+    void ipc.invoke('engine.binaryInfo', undefined, { machine }).then((result) => {
       if (live && result.ok) setVersion(result.value.version);
     });
     return () => {
       live = false;
     };
-  }, [wanted]);
+  }, [wanted, machine]);
   return version;
 }
 
@@ -34,7 +37,7 @@ export function HolderActions({ appSessionId, holder }: { appSessionId: AppSessi
   const attachable = holder.kind === 'background_job' && holder.jobId !== null;
   // the version the job's transcript was last written with: the job's own binary
   const jobVersion = useSessions((s) => s.records.get(appSessionId)?.engineVersion ?? null);
-  const installed = useInstalledVersion(attachable);
+  const installed = useInstalledVersion(attachable, machineOf(appSessionId));
   const [attaching, setAttaching] = useState(false);
   const [takingOver, setTakingOver] = useState(false); // W7
 

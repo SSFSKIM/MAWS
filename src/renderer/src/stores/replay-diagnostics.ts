@@ -48,7 +48,7 @@ export function createReplayDiagnosticsStore(client: MawsBridge) {
     },
     async start(fixture, speed) {
       set({ error: null });
-      const result = await client.invoke('session.replay.start', { source: { kind: fixture.kind, path: fixture.path }, speed });
+      const result = await client.invoke('session.replay.start', { source: { kind: fixture.kind, path: fixture.path }, speed }, { machine: client.localMachine }); // P5 O6 M4: Diagnostics' fixtures are this machine's
       if (!result.ok) {
         set({ error: result.error.message });
         return;

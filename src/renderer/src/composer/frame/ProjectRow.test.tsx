@@ -5,15 +5,19 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { project, record } from '../../../../../test/support/builders';
+import { addressOf } from '@shared/machine/address';
+import { at, OTHER_MACHINE } from '../../../../../test/support/machine';
 import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
 import type { HookResult } from '../setup-intent';
 import type { ProjectRowBinding } from './bindings';
 import { matchesProject, ProjectRow, recentProjects } from './ProjectRow';
 
-const ALPHA = 'alpha' as ProjectId;
-const BETA = 'beta' as ProjectId;
-const GAMMA = 'gamma' as ProjectId;
+// P5 O6 M2: the page holds addresses; the picker lists this machine's projects (M5)
+const ALPHA = at('alpha' as ProjectId);
+const BETA = at('beta' as ProjectId);
+const GAMMA = at('gamma' as ProjectId);
+const THERE = addressOf(OTHER_MACHINE, 'studio' as ProjectId);
 
 function binding(over: Partial<ProjectRowBinding> = {}): ProjectRowBinding {
   return {
@@ -35,13 +39,14 @@ beforeEach(() => {
   // beta was active last, then alpha; gamma has no session (it sorts by when it was added, the oldest here)
   useSessions.setState({
     projects: new Map([
-      [ALPHA, project('alpha', 0, { name: 'Alpha', directory: '/work/alpha' })],
-      [BETA, project('beta', 1, { name: 'beta', directory: '/work/beta' })],
-      [GAMMA, project('gamma', 2, { name: 'Alpha', directory: '/elsewhere/alpha-two', createdAt: '2026-01-01T00:00:00.000Z' })],
+      [ALPHA, project(ALPHA, 0, { name: 'Alpha', directory: '/work/alpha' })],
+      [BETA, project(BETA, 1, { name: 'beta', directory: '/work/beta' })],
+      [GAMMA, project(GAMMA, 2, { name: 'Alpha', directory: '/elsewhere/alpha-two', createdAt: '2026-01-01T00:00:00.000Z' })],
+      [THERE, project(THERE, 3, { name: 'studio-only', directory: '/work/studio' })], // another machine's: not offered
     ]),
     records: new Map([
-      ['s-a' as AppSessionId, record('s-a', { projectId: ALPHA, updatedAt: '2026-09-29T10:00:00.000Z' })],
-      ['s-b' as AppSessionId, record('s-b', { projectId: BETA, updatedAt: '2026-09-30T10:00:00.000Z' })],
+      [at('s-a' as AppSessionId), record(at('s-a'), { projectId: ALPHA, updatedAt: '2026-09-29T10:00:00.000Z' })],
+      [at('s-b' as AppSessionId), record(at('s-b'), { projectId: BETA, updatedAt: '2026-09-30T10:00:00.000Z' })],
     ]),
   });
 });
@@ -199,7 +204,7 @@ describe('the project row', () => {
 describe('the picker’s order and search', () => {
   it('orders as the sidebar’s level one, and matches a name or a path', () => {
     const { records, digests, projects } = useSessions.getState();
-    expect(recentProjects({ records, digests, projects: [...projects.values()], rows: [] }).map((p) => p.id)).toEqual([BETA, ALPHA, GAMMA]);
+    expect(recentProjects({ records, digests, projects: [...projects.values()].filter((p) => p.id !== THERE), rows: [] }).map((p) => p.id)).toEqual([BETA, ALPHA, GAMMA]);
     const gamma = projects.get(GAMMA)!;
     expect([matchesProject(gamma, ''), matchesProject(gamma, 'ALPHA'), matchesProject(gamma, 'elsewhere'), matchesProject(gamma, 'beta')]).toEqual([true, true, true, false]);
   });

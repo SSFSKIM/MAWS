@@ -14,6 +14,8 @@
 // The real-store case is the one read-only observation of the owner's store: it copies launchMaws's environment
 // (MAWS_E2E=1 kept, so Chromium stays on a mock keychain) and deletes only CLAUDE_CONFIG_DIR; it launches no engine and
 // mutates no session, commits only counts and timing, and keeps its screenshot under the scratch root.
+import { addressed } from './support/address';
+import { bareOf } from '../src/shared/machine/address';
 import { mainTabById, openSurface, surface, surfaceRow, unfoldSessionCard } from './support/shell';
 import { hookStartedCommand, terminalPwdCommand } from '../test/support/prerun-commands';
 import { execFileSync } from 'node:child_process';
@@ -161,14 +163,16 @@ async function recordOf(page: Page, sessionId: string, timeout = 30_000): Promis
   return found!;
 }
 
-// A project's session rows in the sidebar (W11: the project expanded in place; at most eight show).
+// A project's session rows in the sidebar (W11: the project expanded in place; at most eight show), by their bare ids
+// (the rows name addresses).
 async function projectRows(page: Page, projectName: string): Promise<string[]> {
   await showProjectList(page);
   await expect(projectRow(page, projectName)).toBeVisible({ timeout: 30_000 });
   await openProject(page, projectName);
-  return projectRow(page, projectName)
+  const rows = await projectRow(page, projectName)
     .locator('[role="treeitem"][data-kind="session"]')
     .evaluateAll((els) => els.map((el) => el.getAttribute('data-menu')!.replace(/^session:/, '')));
+  return rows.map((id) => bareOf(id));
 }
 
 // ---- §10.1 ---------------------------------------------------------------------------------------------------------
@@ -211,7 +215,7 @@ test('§10.1 terminal-started sessions show under their projects, the live one f
     await expect.poll(async () => (await digestOf(page, ids.northLive!))?.phase, { timeout: 20_000 }).toBe('foreign');
     const phases = Object.fromEntries(await Promise.all(Object.entries(ids).map(async ([k, id]) => [k, (await digestOf(page, id))?.phase ?? null] as const)));
     const board = (await openOverview(page)).getByRole('list', { name: 'Overview' });
-    await expect(board.locator(`[data-card="${ids.northLive}"]`).getByTestId('card-activity')).toHaveText(`Terminal · pid ${term.pid}`);
+    await expect(board.locator(`[data-card="${await addressed(page, ids.northLive)}"]`).getByTestId('card-activity')).toHaveText(`Terminal · pid ${term.pid}`);
     rec.note('10.1', {
       projects: { north: northRows.length, south: southRows.length }, phases, liveRowLine: `Terminal · pid ${term.pid}`, overviewCard: 'foreign card with the holder line',
       screenshots: await shoot(page, '10.1-overview'),
@@ -280,10 +284,10 @@ test('§10.1 real store, read only', async () => {
     const ds = await digests(page);
     const foreign = ds.filter((d) => d.phase === 'foreign').length;
     await showProjectList(page); // W11: five projects, then the rest behind "Show more"
-    const projectRowsShown = await sidebar(page).locator('[data-kind="project"][data-menu^="project:"]').count(); // not Other sessions' row
+    const projectRowsShown = await sidebar(page).locator('[data-kind="project"][data-menu^="project:"]').count(); // not a machine's own row (P5 O6 M5)
     const cards = await board.getByRole('article').count();
     // W11: session rows show inside each expanded project (eight at most), so the foreign glyphs are counted project by
-    // project (Other sessions too), each reached by its row's id, taken once: the list reorders as the owner's sessions
+    // project (the machine's own row too), each reached by its row's id, taken once: the list reorders as the owner's sessions
     // work. Each project is collapsed again after its count.
     let foreignGlyphs = 0;
     for (const key of await projectList.evaluateAll((els) => els.map((el) => el.getAttribute('data-tree-id')!))) {
@@ -372,7 +376,7 @@ async function plus(page: Page, repo: string, first: string, o: { mode?: string;
 
 async function openRow(page: Page, id: string): Promise<void> {
   await (await rowOf(page, id)).click();
-  await expect(main(page).locator(`[data-composer="${id}"]`)).toBeVisible({ timeout: 20_000 });
+  await expect(main(page).locator(`[data-composer="${await addressed(page, id)}"]`)).toBeVisible({ timeout: 20_000 });
 }
 
 // The session's event log through `session.events`, read incrementally (C8b's live driver, trimmed): waits on events,
@@ -600,8 +604,8 @@ test('§10.3 from Overview cards: approve P, answer Q; R asks while the window i
 
     const overview = await openOverview(page);
     const board = overview.getByRole('list', { name: 'Overview' });
-    const cardP = board.locator(`[data-card="${P}"]`);
-    const cardQ = board.locator(`[data-card="${Q}"]`);
+    const cardP = board.locator(`[data-card="${await addressed(page, P)}"]`);
+    const cardQ = board.locator(`[data-card="${await addressed(page, Q)}"]`);
     await expect(cardP.getByRole('button', { name: 'Allow', exact: true })).toBeVisible({ timeout: 20_000 });
     await expect(cardQ.getByRole('button', { name: 'Submit' })).toBeVisible();
     const shotsCards = await shoot(page, '10.3-overview-cards');
@@ -618,7 +622,7 @@ test('§10.3 from Overview cards: approve P, answer Q; R asks while the window i
     await expect(overview).toHaveCount(0);
 
     await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('attention.next')?.click());
-    await expect(main(page).locator(`[data-composer="${R}"]`)).toBeVisible({ timeout: 10_000 });
+    await expect(main(page).locator(`[data-composer="${await addressed(page, R)}"]`)).toBeVisible({ timeout: 10_000 });
     await expect(main(page).getByRole('group', { name: 'Approval needed' })).toBeVisible();
     const shotsNext = await shoot(page, '10.3-attention-next-r');
     const who = (id: string) => (id === R ? 'R' : id === P ? 'P' : id === Q ? 'Q' : 'other');
@@ -723,7 +727,7 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
       await page.keyboard.press('Escape');
       await expect(env).toBeVisible({ timeout: 15_000 });
       await env.getByRole('button', { name: 'Session info' }).click();
-      await expect(surface(page, 'session-info').locator(`[data-session-info="${id}"]`)).toBeVisible({ timeout: 15_000 });
+      await expect(surface(page, 'session-info').locator(`[data-session-info="${await addressed(page, id!)}"]`)).toBeVisible({ timeout: 15_000 });
       out.sessionInfo = { moreSurfacesMenu: items, opensFromModelRow: true, screenshots: await shoot(page, '10.4-session-info') };
       expect(items).toContain('Session info');
     });
@@ -1010,7 +1014,7 @@ test('§10.6 in brief on the owner build: one release and its Send-to-resume; th
       expect(release.reply ?? '', 'the resumed session answered the message').toContain('X1 BACK');
     });
 
-    await step('the quit question names a turn in flight, background work and a busy terminal; cancel, then quit when idle', async () => {
+    await step('the quit question names a turn in flight, background work and a busy terminal; cancel, then quit when idle (on the daemon shape: not asked, and all three outlive the app)', async () => {
       await openRow(page, x2);
       await send(page, 'Use the Bash tool with run_in_background set to true to run exactly this command and nothing else: sleep 45. Do not wait for it; reply with exactly the word STARTED.');
       await expect.poll(async () => {
@@ -1022,6 +1026,25 @@ test('§10.6 in brief on the owner build: one release and its Send-to-resume; th
       await openRow(page, x1);
       await send(page, 'Use the Bash tool to run exactly this command in the foreground and nothing else: sleep 30. Then reply with exactly the word SLEPT.');
       await expect.poll(async () => (await statusOf(page, x1)).turn !== null, { timeout: 60_000 }).toBe(true);
+
+      // P5 O3-D (Q1, D12; docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md): on the daemon shape the sessions and the
+      // terminals belong to mawsd and outlive the app, so the quit asks nothing, says what it left, and stops nothing
+      if (value(await invoke(page, 'host.status', undefined)).transport === 'daemon') {
+        const engine = (await statusOf(page, x1)).pid;
+        const terminal = value(await invoke(page, 'pty.list', undefined)).ptys.find((p) => p.ptyId === ptyId)?.pid ?? null;
+        const gone = new Promise<number>((resolve) => app.process().once('exit', () => resolve(Date.now())));
+        const quitAt = Date.now();
+        await app.evaluate(({ app: a }) => a.quit());
+        const exitAt = await Promise.race([gone, new Promise<number>((r) => setTimeout(() => r(-1), 20_000))]);
+        exited = exitAt > 0;
+        const alive = (pid: number | null) => pid !== null && (() => { try { process.kill(pid, 0); return true; } catch { return false; } })();
+        out.quit = { notAsked: lines(), quitToExitMs: exited ? exitAt - quitAt : null, engineAlive: alive(engine), terminalAlive: alive(terminal) };
+        expect(exited, 'the quit is not held').toBe(true);
+        expect(lines().filter((l) => l.startsWith('quit-guard:'))).toEqual([expect.stringMatching(/^quit-guard: \d+ mid-turn, \d+ background work, (\d+ busy terminals?|terminals unknown), not asked: they outlive the app$/)]);
+        expect(alive(engine), 'the turn in flight outlives the app').toBe(true);
+        expect(alive(terminal), 'the busy terminal outlives the app').toBe(true);
+        return;
+      }
 
       await app.evaluate(({ app: a }) => a.quit());
       await expect.poll(() => lines().find((l) => l.includes('auto-answered cancel')) ?? '', { timeout: 20_000 }).toMatch(/mid-turn.*background work.*busy terminal/);
@@ -1557,7 +1580,7 @@ test('C8 item 9: Attach adds the Terminal tab and activates its session (a claud
       await (await rowOf(page, bg!.appId)).click({ button: 'right' });
       const items = await page.getByRole('menuitem').allTextContents();
       await page.getByRole('menuitem', { name: 'Attach in a terminal tab' }).click();
-      await expect(mainTabById(page, `session:${bg!.appId}`)).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });
+      await expect(mainTabById(page, `session:${await addressed(page, bg!.appId)}`)).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });
       await expect(surface(page, 'terminal').getByRole('tab', { selected: true }).first()).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });
       await expect.poll(async () => value(await invoke(page, 'pty.list', undefined)).ptys.some((p) => p.appSessionId === bg!.appId && p.alive), { timeout: 15_000 }).toBe(true);
       out.attach = { rowMenu: items, sessionTabActivated: true, terminalTabActive: true, screenshots: await shoot(page, 'c8-attach') };

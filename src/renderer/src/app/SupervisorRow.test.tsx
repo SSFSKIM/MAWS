@@ -4,11 +4,12 @@
 // Restart now.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 import type { HostStatus } from '@shared/ipc/schema/host';
 import { useHosts } from '../stores/hosts';
 import { useNotices } from '../stores/notices';
-import { hostStatus, supervisorStatus, updatedStatus, waitingStatus } from '../test-support/host-status';
+import { daemonShapeStatus, hostStatus, supervisorStatus, updatedStatus, waitingStatus } from '../test-support/host-status';
 import { describeSupervisor, SupervisorRow } from './SupervisorRow';
 import { formatClock } from '@shared/app/date-format'; // L129
 
@@ -59,7 +60,7 @@ describe('the supervisor row', () => {
   let invoke: ReturnType<typeof vi.fn>;
   beforeEach(() => {
     invoke = vi.fn(async () => ({ ok: true, value: undefined }));
-    window.maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
+    window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
     useNotices.setState({ notices: [] });
   });
   afterEach(() => {
@@ -77,7 +78,7 @@ describe('the supervisor row', () => {
     expect(screen.getByRole('status', { name: 'supervisor' }).textContent).toBe(describeSupervisor(hostStatus()));
     expect(screen.queryByRole('button', { name: 'Restart now' })).toBeNull();
     await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Open log' })));
-    expect(invoke).toHaveBeenCalledWith('host.openLog', undefined);
+    expect(invoke).toHaveBeenCalledWith('host.openLog', undefined, TEST_MACHINE);
   });
 
   it('a log that does not open is a warning toast with the reason', async () => {
@@ -85,6 +86,13 @@ describe('the supervisor row', () => {
     show(hostStatus());
     await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Open log' })));
     expect(useNotices.getState().notices.map((n) => [n.kind, n.level, n.text])).toEqual([['toast', 'warning', "The supervisor's log did not open · /u/supervisor/host.log could not be opened: gone"]]);
+  });
+
+  // P5 O2 M7: the engine host behind mawsd is still the supervisor, with its own log
+  it('reads the engine host behind the machine daemon, and opens its log', () => {
+    show(daemonShapeStatus());
+    expect(screen.getByRole('status', { name: 'supervisor' }).textContent).toMatch(/^supervisor · daemon · pid 48213 · build matches/);
+    expect(screen.getByRole('button', { name: 'Open log' })).toBeTruthy();
   });
 
   it('offers no log for the engine host inside the app', () => {
@@ -96,7 +104,7 @@ describe('the supervisor row', () => {
     show(waitingStatus(2));
     expect(screen.getByRole('status', { name: 'supervisor' }).textContent).toContain('waiting');
     await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Restart now' })));
-    expect(invoke).toHaveBeenCalledWith('host.restart', { stopSessions: true });
+    expect(invoke).toHaveBeenCalledWith('host.restart', { stopSessions: true }, TEST_MACHINE);
     expect(screen.getByRole('button', { name: 'Open log' })).toBeTruthy(); // the log still opens while it is not reachable
   });
 

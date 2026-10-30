@@ -30,6 +30,7 @@ import { previewHidesBody } from './rows'; // E7
 import { needsSeparator, separatorLabel } from './time';
 import { confirmsSettingChange, isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf, type UserText } from './user-text';
 import { handbackReport, messageText, parsePeerMessage, peerLabel, sendMessageOutcome } from '@shared/engine/peer-envelope'; // E7
+import { INTERRUPT_CUT, parseInterruptCut } from '@shared/lane-a/interrupt-cut'; // P5 O9
 import { parseListing } from './agent-listing'; // E7
 import { peerMessageCopy } from './copy'; // E7
 // E4c start
@@ -130,9 +131,17 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // alone (`/compact`: its boundary and its output) has no work and no "Worked for 0s" divider. A question still counts as
 // work for where the answer starts (WORK_ROWS).
 export const isPersistentRow = (row: Row): boolean =>
-  row.kind === 'to_human' /* P4-R7 */ || row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'browser_action' /* E4c */ || row.kind === 'browser_activity' /* E13: never derived here; placed by the view */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
+  (row.kind === 'assistant_text' && row.cut === true) /* P5 O9: a reply an interrupt cut off, no work of the turn */ || row.kind === 'to_human' /* P4-R7 */ || row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'browser_action' /* E4c */ || row.kind === 'browser_activity' /* E13: never derived here; placed by the view */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
   || isPersistentMessage(row) // E7
   || row.kind === 'owner_record'; // P2-C (2026-10-09): placed by the report projection, never a work row
+
+// P5 O9 (the M10 sitting): the rows the fold leaves in view, the persistent ones and, while any agent it names still
+// works, an `Agent` call's row. A turn can end while the agents it started work in the background (a terminal session's
+// engine runs them so, and its turn ends at once): their row stays in view, as a turn still running shows it, until
+// every one of them has ended, then folds with the turn's other work. It stays the turn's work, so the divider is as
+// before.
+const AGENTS_ENDED: ReadonlySet<SubagentStatus> = new Set(['finished', 'finished_with_errors', 'stopped']);
+export const staysInView = (row: Row): boolean => isPersistentRow(row) || (row.kind === 'subagent' && !AGENTS_ENDED.has(row.status));
 
 // W1: a message held in MAWS's queue until the running turn ends, as the dimmed bubble the transcript's tail shows
 // for it (Claude Desktop's pattern); it becomes its own turn when the queue releases it.
@@ -159,6 +168,26 @@ export function askAnsweredHere(state: TranscriptState, askId: string): boolean 
 export function withQueueTail(rows: Row[], withdrawn: ReadonlySet<string>, tail: readonly Row[]): Row[] {
   const kept = withdrawn.size === 0 ? rows : rows.filter((row) => !(row.kind === 'user' && row.messageUuid !== null && withdrawn.has(row.messageUuid) && (row.dropped || row.pending !== undefined)));
   return tail.length === 0 ? kept : [...kept, ...tail];
+}
+
+// P5 O9: rows a mount keeps outside the store (a terminal session's reply its interrupt cut before the engine wrote it,
+// `lane-a/stream/overlay.ts`), each after the last row of its turn, in their order; one whose turn is not drawn, last.
+export function withPlacedRows(rows: Row[], placed: readonly Row[]): Row[] {
+  if (placed.length === 0) return rows;
+  const after = new Map<TurnId, Row[]>();
+  const loose: Row[] = [];
+  const last = new Map<TurnId, number>();
+  rows.forEach((row, i) => row.turnId !== null && last.set(row.turnId, i));
+  for (const row of placed) {
+    if (row.turnId === null || !last.has(row.turnId)) loose.push(row);
+    else after.set(row.turnId, [...(after.get(row.turnId) ?? []), row]);
+  }
+  const out: Row[] = [];
+  rows.forEach((row, i) => {
+    out.push(row);
+    if (row.turnId !== null && last.get(row.turnId) === i) out.push(...(after.get(row.turnId) ?? []));
+  });
+  return [...out, ...loose];
 }
 
 // The desk (DC9): the flat rows with each turn the engine was running drawn as an exit nobody saw closes it, at the
@@ -257,7 +286,7 @@ type Item =
   | { kind: 'browser_action'; toolUseId: ToolUseId } // E4c: as E2's, for a browser tool call
   | { kind: 'message'; toolUseId: ToolUseId }; // P4-R7: a message tool's call, a message or (refused) a cell
 
-interface SubagentGroup { id: RowId; at: string; apiMessageId: string | null; refs: SubagentRef[]; statuses: Map<TaskId, SubagentStatus>; lastTool: Map<TaskId, string | null>; phase: string | null }
+interface SubagentGroup { id: RowId; at: string; apiMessageId: string | null; refs: SubagentRef[]; statuses: Map<TaskId, SubagentStatus>; lastTool: Map<TaskId, string | null>; phase: string | null; ended: boolean /* P5 O9: made before the session's process exited (TurnState.agentsEndedAt) */ }
 interface Pending { kind: 'question' | 'plan'; use: Event<'tool.use'>; answers: Record<string, string> | null; outcome: RowOf<'plan'>['outcome']; feedback: string | null; requestId: RequestId | null; error: string | null /* E1: the engine's refusal */ }
 
 // E1 start: what a turn's events say about one `ask` call (its capsule) and one `send_file` call (its delivery row). The
@@ -430,7 +459,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     const previous = items.at(-1);
     const last = previous?.kind === 'subagents' ? previous.group : null;
     if (last && apiMessageId !== null && last.apiMessageId === apiMessageId) return last;
-    const group: SubagentGroup = { id: key, at, apiMessageId, refs: [], statuses: new Map(), lastTool: new Map(), phase: null };
+    const group: SubagentGroup = { id: key, at, apiMessageId, refs: [], statuses: new Map(), lastTool: new Map(), phase: null, ended: turn.agentsEndedAt !== undefined && position < turn.agentsEndedAt };
     subagents.push(group);
     items.push({ kind: 'subagents', group });
     return group;
@@ -443,10 +472,15 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     if (group.refs.length === 1) group.id = rowId.subagent(ref.taskId);
   };
 
-  for (const event of turn.events) {
+  let position = 0; // the event's place in `turn.events`, for `agentsEndedAt`
+  for (const [at, event] of turn.events.entries()) {
+    position = at;
     switch (event.kind) {
       case 'user.message': {
-        if (event.bash?.part === 'input') {
+        if (event.origin === INTERRUPT_CUT) { // P5 O9: the reply an interrupt cut off, as the sminos bridge records it
+          const row = cutRowOf(event, turn.id);
+          if (row) items.push({ kind: 'row', row });
+        } else if (event.bash?.part === 'input') {
           items.push({ kind: 'row', row: bashRowOf(event, turn.id) });
         } else if (event.bash?.part === 'output') {
           const at = items.findIndex((item) => item.kind === 'row' && item.row.kind === 'bash' && item.row.exitCode === null);
@@ -810,6 +844,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       case 'subagents': {
         if (item.group.refs.length === 0) break;
         for (const ref of item.group.refs) if (ref.toolUseId && agentIds.has(ref.toolUseId)) ref.agentId = agentIds.get(ref.toolUseId)!;
+        if (item.group.ended) endedByExit(item.group);
         resolved.push({ kind: 'row', row: subagentRow(item.group, turn.id) });
         break;
       }
@@ -865,7 +900,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       toolCalls: summary.toolCalls, denied: denied.length, autoDenied: summary.autoDenied, firstDeniedCell: firstDenied, expanded, summary, files: changedFiles(cells, turn),
     });
   }
-  rows.push(...(expanded ? allRows : allRows.filter(isPersistentRow))); // with no divider there is no work: every row is persistent
+  rows.push(...(expanded ? allRows : allRows.filter(staysInView))); // with no divider there is no work: every row is persistent
   return { rows, summary, cells, work: workOf(turn, tools, cells, subagents, state?.cwd ?? null), readAgents };
 }
 
@@ -1053,6 +1088,18 @@ function summaryOf(turn: TurnState, cells: Cell[], subagents: SubagentGroup[], m
     durationMs: ended?.durationMs ?? null, toolCalls, byCategory, denials, autoDenied: denials.filter((d) => d.disposition === 'auto_denied').length, safeguard,
     costUsd: ended?.costUsd ?? null, usage: ended?.usage ?? null, model, childAgents: subagents.reduce((n, group) => n + group.refs.length, 0), terminalReason: ended?.terminalReason ?? null,
   };
+}
+
+// P5 O9 (the M10 fixes' review): a session's process exiting ends the agents it ran, though no finish of theirs will
+// come (a crash, a kill, E10's idle stop, C4's exit synthesised for a transcript nobody holds): an agents row made
+// before the exit (`ended`, by arrival order) reads its agents still running stopped, so it folds with its turn rather
+// than staying in view (`staysInView`). An ordinary end of the turn that made the call is no exit: background agents
+// outlive it.
+function endedByExit(group: SubagentGroup): void {
+  for (const ref of group.refs) {
+    const status = group.statuses.get(ref.taskId) ?? 'started';
+    if (!AGENTS_ENDED.has(status)) group.statuses.set(ref.taskId, 'stopped');
+  }
 }
 
 function subagentRow(group: SubagentGroup, turnId: TurnId): RowOf<'subagent'> {
@@ -1428,6 +1475,15 @@ function boundaryRow(event: Event<'boundary.compaction' | 'boundary.reset' | 'bo
 
 // The engine's local-command echo, tags stripped; the raw text stands when the wrapper is absent (C3 tagged it). An
 // echo that only confirms a setting change draws nothing (E11 §2.3).
+// P5 O9 (the M10 sitting): the sminos bridge's row of a reply an interrupt cut off (`@shared/lane-a/interrupt-cut`), as
+// the cut-off text a live view kept from the stream draws (`lane-a/view/streaming-rows.ts`): settled, marked cut off,
+// never the turn's answer, and saying when it starts partway through.
+function cutRowOf(event: Event<'user.message'>, turnId: TurnId | null): RowOf<'assistant_text'> | null {
+  const cut = parseInterruptCut(messageText(event.content));
+  if (cut === null || cut.text.trim() === '') return null;
+  return { id: rowId.cut(event.id), turnId, at: event.at, kind: 'assistant_text', messageUuid: null, blockIndex: 0, markdown: cut.text, live: false, phase: 'commentary', model: null, cut: true, ...(cut.partway && { partway: true as const }) };
+}
+
 function localCommandRow(event: Event<'user.message'>, turnId: TurnId | null): RowOf<'local_command'> | null {
   const content = typeof event.content === 'string' ? event.content : event.content.filter((block) => block.type === 'text').map((block) => str(block.text)).join('\n');
   if (slashCommandLine(content) !== null) return null; // the system echo, not the human's command
@@ -1477,7 +1533,10 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
   for (const event of events) {
     switch (event.kind) {
       case 'user.message': {
-        if (event.bash?.part === 'input') rows.push(bashRowOf(event, null));
+        if (event.origin === INTERRUPT_CUT) { // P5 O9: a recorded cut whose turn is not loaded (a page starting at its marker)
+          const row = cutRowOf(event, null);
+          if (row) rows.push(row);
+        } else if (event.bash?.part === 'input') rows.push(bashRowOf(event, null));
         else if (event.bash?.part === 'output') {
           const at = rows.findIndex((row) => row.kind === 'bash' && row.exitCode === null);
           if (at >= 0) rows[at] = withBashOutput(rows[at] as RowOf<'bash'>, event);

@@ -6,6 +6,8 @@ import { decodeFrame, encodeFrame, type Frame } from '@artifacts/provider/frames
 import type { PortLike } from '@artifacts/provider/port';
 import { applyV1, checkUpdate, diffV1, newDoc, onUpdate, stateVector, type Doc } from '@artifacts/yjs';
 import type { CommandName, CommandResult, EventName, MawsBridge } from '@shared/ipc/schema';
+import type { MachineRef } from '@shared/machine/ref';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { createArtifactHost, RECONNECT_BACKOFF_MS, type DocPorts } from './host';
 import { windowDocPorts } from './window-ports';
 
@@ -102,7 +104,7 @@ function harness(options: { host?: TestHost; holdPorts?: boolean } = {}) {
   let hostUp = true;
   const answers = new Map<string, Answer>();
   const calls: { name: string; input: unknown }[] = [];
-  const eventListeners = new Map<string, Set<(payload: unknown) => void>>();
+  const eventListeners = new Map<string, Set<(payload: unknown, from: { machine: MachineRef }) => void>>();
   const waiting = new Map<number, AsyncPort>();
   const held: (() => void)[] = [];
   const ports: DocPorts = {
@@ -115,6 +117,7 @@ function harness(options: { host?: TestHost; holdPorts?: boolean } = {}) {
     },
   };
   const ipc = {
+    localMachine: TEST_MACHINE,
     invoke: vi.fn(async (name: string, input: unknown) => {
       calls.push({ name, input });
       if (name === 'artifacts.open') {
@@ -132,15 +135,15 @@ function harness(options: { host?: TestHost; holdPorts?: boolean } = {}) {
       if (name === 'artifacts.status') return { ok: true, value: { status: 'ok', reason: null } };
       return { ok: false, error: { code: 'internal', message: `no answer for ${name}` } };
     }),
-    on: vi.fn((name: string, listener: (payload: unknown) => void) => {
+    on: vi.fn((name: string, listener: (payload: unknown, from: { machine: MachineRef }) => void) => {
       const set = eventListeners.get(name) ?? new Set();
       set.add(listener);
       eventListeners.set(name, set);
       return () => void set.delete(listener);
     }),
   };
-  const artifacts = createArtifactHost({ ipc: ipc as unknown as Pick<MawsBridge, 'invoke' | 'on'>, ports, log: () => {} });
-  const emit = (name: EventName, payload: unknown) => eventListeners.get(name)?.forEach((l) => l(payload));
+  const artifacts = createArtifactHost({ ipc: ipc as unknown as Pick<MawsBridge, 'invoke' | 'on' | 'localMachine'>, ports, log: () => {} });
+  const emit = (name: EventName, payload: unknown, machine: MachineRef = TEST_MACHINE) => eventListeners.get(name)?.forEach((l) => l(payload, { machine }));
   return {
     host,
     artifacts,
@@ -150,7 +153,7 @@ function harness(options: { host?: TestHost; holdPorts?: boolean } = {}) {
     setHostUp: (up: boolean) => void (hostUp = up),
     heldPorts: () => held.length,
     releasePort: () => held.shift()!(),
-    hostState: (state: 'ready' | 'restarting', revision: number) => emit('engine.hostState', { state, pid: state === 'ready' ? 2 : null, restarts: 1, revision }),
+    hostState: (state: 'ready' | 'restarting', revision: number, machine?: MachineRef) => emit('engine.hostState', { state, pid: state === 'ready' ? 2 : null, restarts: 1, revision }, machine),
   };
 }
 
@@ -230,6 +233,19 @@ describe('the renderer’s ArtifactHost (M4)', () => {
     expect(handle.state().phase).toBe('off');
     await settle(RECONNECT_BACKOFF_MS[0]);
     await vi.waitFor(() => expect(handle.state().phase).toBe('live'));
+    handle.close();
+  });
+
+  // The branch review: artifacts are this machine's (O7 spans them), and `engine.hostState` crosses machine links, so
+  // another machine's engine host neither drops this machine's ports nor outranks its revisions.
+  it('hears only this machine’s engine host: another’s leaving drops nothing, and its revision outranks nothing', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    h.hostState('restarting', 90, OTHER_MACHINE);
+    expect(handle.state().phase, 'another machine’s host leaving keeps this port').toBe('live');
+    h.hostState('restarting', 3);
+    expect(handle.state().phase, 'this machine’s, at a revision under the other’s, still drops it').toBe('off');
     handle.close();
   });
 

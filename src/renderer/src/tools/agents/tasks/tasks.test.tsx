@@ -54,7 +54,7 @@ beforeEach(() => {
   const fake = fakeAgentWorkClient();
   const client = {
     ...fake.client,
-    tasks: async (listId: string) => {
+    tasks: async (_machine: unknown, listId: string) => {
       tasksCalls.push(listId);
       const answer = lists[listId] ?? [];
       if (answer instanceof Error) throw answer;

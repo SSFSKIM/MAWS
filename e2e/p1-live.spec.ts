@@ -62,7 +62,10 @@
 // docs/doperpowers/evidence/p1-e11/ only under MAWS_E11_SHOTS=1.
 // It spends money; run on purpose only (the script builds, the flag runs):
 //   MAWS_P1_LIVE=1 pnpm e2e:p1-live
-// (`pnpm e2e:p1-live` alone builds and reports every case skipped.)
+// (`pnpm e2e:p1-live` alone builds and reports every case skipped.) The script, the gate's live group
+// (`ci-gate.sh --live`), names the run's cap (every sitting's own summed, so none starves another), the installed
+// engine and the logs' directory under test-results/.
+import { addressed } from './support/address';
 import { activeMainTab, openSurface, surface } from './support/shell';
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -88,8 +91,8 @@ import { invoke, value } from './support/c7-replay';
 import { journalSpend, ptyEngine, terminalEnv, transcriptFile, type PtyEngine } from './support/c12-prerun';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { sessionSpent } from './support/live-budget';
-import { clearToasts, eventsOf, frameAt, listOf, mcpCalls, mcpResultOf, ofKind, openArtifacts, pageUrlOf, recordEvents, rowOf, seedTranscripts, show, unfoldWork, viewerOf, type Scene } from './support/maws-tools';
-import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, costRecorded, costShown, DEFAULT_CAP_USD, dominantColour, forkOverspend, initPluginsOf, installedEngine, launchReservation, liveOutDir, resumeNoOutput, runRoot, settleAll, settledReservation, sittingLog, SITTING_CAP_USD, spentBySitting, terminalUsdBound, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
+import { clearToasts, eventsOf, frameAt, listOf, mcpCalls, mcpResultOf, ofKind, openArtifacts, pageUrlOf, pointInFrame, recordEvents, rowOf, seedTranscripts, show, unfoldWork, viewerOf, type Scene } from './support/maws-tools';
+import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, costRecorded, costShown, DEFAULT_CAP_USD, dominantColour, forkOverspend, foregroundJob, initPluginsOf, installedEngine, launchReservation, liveOutDir, resumeNoOutput, runRoot, settleAll, settledReservation, sittingLog, SITTING_CAP_USD, spentBySitting, terminalUsdBound, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
 import { isAlive, processesNaming, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
 
@@ -128,7 +131,8 @@ const PROMPTS = {
     'Then call mcp__maws__artifact_read with artifact "p1-page". ' +
     'Then read page-v2.html and call mcp__maws__artifact_publish with artifact "p1-page", baseRevision the revision artifact_read returned, and files {"index.html": the whole text of page-v2.html}. ' +
     'Then reply with exactly one word: ANCHORED.',
-  slow: 'Run the Bash command `sleep 25; echo SLEPT` yourself, in the foreground (never in the background, never through an agent), then reply with its output.',
+  // a turn held open by a running command (`foregroundJob`: 2.1.310 refuses a leading `sleep 25` in the foreground)
+  slow: `Run the Bash command \`${foregroundJob(25, 'SLEPT')}\` yourself, a 25-second job that prints SLEPT when it ends, in the foreground (never in the background, never through an agent), then reply with its output.`,
   steer: 'When you reply, add the word STEER_SEEN at the end.',
   btw: 'In one word: what was the background colour of the artifact’s first version?',
   resumeSeed: 'Reply with exactly: OK',
@@ -576,8 +580,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     const frame = await frameAt(l.page, await pageUrlOf(l.page, artifact!.deliverableId, Number(await viewer.getAttribute('data-version'))));
     await l.panel.locator('[data-editor-header]').getByRole('button', { name: 'Comment', exact: true }).click();
     const box = (await viewer.locator('[data-artifact-frame="html"]').boundingBox())!;
-    await l.page.mouse.move(box.x + 60, box.y + 30);
-    await expect(frame.locator('[data-maws-pick-overlay]')).toHaveCount(1);
+    await pointInFrame(l.page, frame, box.x + 60, box.y + 30);
     await l.page.mouse.click(box.x + 60, box.y + 30);
     const card = viewer.locator('[data-comment-card]');
     await expect(card).toHaveAttribute('data-card-phase', 'composing');
@@ -617,12 +620,12 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
       const record = value(await invoke(l.page, 'session.get', { appSessionId: child }));
       const anchor = record?.lineage?.anchor;
       expect(record?.lineage).toMatchObject({ kind: 'side-thread', parentAppSessionId: parent, openedBy: 'comment', anchor: { kind: 'artifact-element', locator: '#title' } });
-      await expect(card.locator(`[data-card-thread="${child}"]`), 'the card draws the thread').toBeVisible();
+      await expect(card.locator(`[data-card-thread="${await addressed(l.page, child)}"]`), 'the card draws the thread').toBeVisible();
       await expect(card.locator('[data-chip="anchor"]').first(), 'the comment under its anchor chip').toHaveAttribute('data-anchor-kind', 'artifact-element');
-      await expect(l.panel.locator(`[data-side-thread-view="${child}"]`), 'no Side pane on the thread').toHaveCount(0);
+      await expect(l.panel.locator(`[data-side-thread-view="${await addressed(l.page, child)}"]`), 'no Side pane on the thread').toHaveCount(0);
       await expect(surface(l.page, 'artifacts'), 'the Artifacts surface stays open').toBeVisible();
 
-      const row = l.page.locator(`[data-region="main"] [data-side-thread="${child}"]`);
+      const row = l.page.locator(`[data-region="main"] [data-side-thread="${await addressed(l.page, child)}"]`);
       const allowed: string[] = [];
       // the thread's turn, or its receipts reaching its allocation, whichever comes first
       const done = async () => mainTurnsEnded(await events(l, child)).length > 0 && (await idleNow(l, child));
@@ -736,7 +739,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     // charged before it is asked: its answer comes as a control response, with no result frame to receipt it
     charge(note, { key: 's3-btw', case: 's3', label: 'the /btw side question (reserved: answered with no result frame)', usd: BTW_RESERVATION_USD, sideQuestionOf: parent });
     await sendFromComposer(l, parent, `/btw ${PROMPTS.btw}`, { typed: true });
-    const view = l.panel.locator(`[data-side-btw-view="${parent}"]`);
+    const view = l.panel.locator(`[data-side-btw-view="${await addressed(l.page, parent)}"]`);
     await expect(view).toBeVisible({ timeout: 30_000 });
     const answered = view.locator('[data-side-exchange="answered"]').first();
     await expect(answered).toBeVisible({ timeout: 120_000 });
@@ -940,7 +943,7 @@ test('S6 8t: ten terminal resumes of the same session, each bounded 30 s to firs
     owners.push(...ownerPlugins(plugins, [ROOT]));
     const ok = firstOutputMs !== null && firstOutputMs <= FIRST_OUTPUT_MS && result?.subtype === 'success';
     results.push({ i, ok, firstOutputMs, result: result?.result ?? null, costUsd });
-    note(`terminal resume ${i}: ${ok ? 'ok' : 'STALL'}: first output ${firstOutputMs ?? '—'} ms after spawn, exit ${code} after ${Date.now() - t0} ms, pid ${child.pid}; init session ${init?.session_id ?? '—'} model ${init?.model ?? '—'} plugins ${JSON.stringify(plugins.map((p) => p.source))}; result ${result?.subtype ?? 'none'} ${JSON.stringify(result?.result ?? null)} US$${costUsd?.toFixed(4) ?? '—'}${err.trim() ? `; stderr ${JSON.stringify(err.trim().slice(0, 300))}` : ''}${captured ? `; captured under ${captured}` : ''}`);
+    note(`terminal resume ${i}: ${ok ? 'ok' : 'STALL'}: first output ${firstOutputMs ?? '—'} ms after spawn, exit ${code} after ${Date.now() - t0} ms, pid ${child.pid}; init session ${init?.session_id ?? '—'} model ${init?.model ?? '—'} plugins ${JSON.stringify(plugins.map((p) => p.source))}; result ${result?.subtype ?? 'none'} ${JSON.stringify(result?.result ?? null)} US$${costUsd?.toFixed(4) ?? '—'}${err.trim() ? `; stderr ${JSON.stringify(redactJournal(err.trim(), env).slice(0, 300))}` : ''}${captured ? `; captured under ${captured}` : ''}`);
   }
   const a15After = a15Reading();
   note(a15Line('after S6 8t', a15, a15After, [ROOT]));
@@ -1013,7 +1016,7 @@ test('A-47: a permission request on a session not in front raises the fallback t
     note(`A-47: window focused at the request: ${focused === null ? 'none' : `window ${focused}`}; the main view's tab ${JSON.stringify(shownTab)} (the back session not in front); permission.requested ${requested!.toolName} ${requested!.requestId}; attention.notified delivery ${notified!.delivery} at ${notified!.at}; the toast ${JSON.stringify(toastText)}; session.answer ${JSON.stringify(answer)} ${answeredAt - notifiedAt} ms after the notice; the toast gone ${goneAt - answeredAt} ms after the answer (${goneAt - notifiedAt} ms after the notice; the toast's own timeout is 6 s)`);
     expect(focused, 'no MAWS window focused').toBeNull();
     expect(notified!.delivery, 'the notifier’s fallback (the OS notification refused)').toBe('fallback');
-    expect(shownTab).not.toBe(`session:${back}`);
+    expect(shownTab).not.toBe(`session:${await addressed(live.page, back)}`);
     expect(answer).toEqual({ outcome: 'delivered' });
     // retracted, not timed out: gone inside the toast's own 6 s (TOAST_DURATION_MS), or still shown past it until the answer
     expect(goneAt - notifiedAt < 6_000 || answeredAt - notifiedAt >= 6_000, 'gone by the answer, not by the toast’s own timeout').toBe(true);

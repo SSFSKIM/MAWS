@@ -4,7 +4,7 @@
 // Chrome or Keychain, in the product app over the replay (no engine).
 //
 // M1a (bookmarks behind the chrome) proves: (1) the import sheet asks about Bookmarks with the count found and the report
-// counts them, the rows reach the index per partition; (5, IPC half) an edited `Bookmarks` is read again at the next
+// counts them, the rows reach the browser's database per partition; (5, IPC half) an edited `Bookmarks` is read again at the next
 // launch, and `browser.bookmarks.sync` reads it again now, a deleted file keeping the rows and recording the error;
 // (6, the answer's shape) the address field's suggestions carry the partition's bookmarks above its history; (10, the
 // rows) removing the profile leaves no `browser_bookmarks` row of its partition. Nothing logs a value.
@@ -43,6 +43,7 @@
 // Runs under `pnpm e2e:browser-chrome` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch
 // passes MAWS_HARNESS=0, so the window is the product app.
 import { mainTabById, mainTabs as chromeTabs } from './support/shell';
+import { addressed } from './support/address';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -72,9 +73,10 @@ const shape = (node: BookmarkNode): Shape => (node.kind === 'url' ? node.name : 
 const treeOf = async (page: Page, partition = DEFAULT): Promise<BookmarkTree> => value(await invoke(page, 'browser.bookmarks.tree', { partition })).tree;
 const barOf = async (page: Page, partition = DEFAULT) => (await treeOf(page, partition)).bar.children.map(shape);
 
-// The index's rows of a partition, read beside the running app (WAL: a reader sees what main committed).
+// The browser's database's rows of a partition (its own file since P5 O3-A), read beside the running app (WAL: a reader
+// sees what main committed).
 function bookmarkRows(userData: string, partition: string): number {
-  const db = new DatabaseSync(join(userData, 'index.sqlite'), { readOnly: true });
+  const db = new DatabaseSync(join(userData, 'browser', 'browser.sqlite'), { readOnly: true });
   try {
     return (db.prepare('SELECT count(*) AS n FROM browser_bookmarks WHERE partition = ?').get(partition) as { n: number }).n;
   } finally {
@@ -96,7 +98,7 @@ const changesHeard = (page: Page): Promise<string[]> => page.evaluate(() => (win
 
 // ---- (1, 6, 10) the import, the suggestions, the removal ---------------------------------------------------------------
 
-test('1, 6, 10: the import asks about Bookmarks and counts them, the rows reach the index, the address field suggests them above history, and removal leaves no row', async () => {
+test('1, 6, 10: the import asks about Bookmarks and counts them, the rows reach the browser\'s database, the address field suggests them above history, and removal leaves no row', async () => {
   const { scratch, chrome } = importScratch(['cua #90: bookmarks']);
   const server = await startBrowserServer();
   try {
@@ -116,7 +118,7 @@ test('1, 6, 10: the import asks about Bookmarks and counts them, the rows reach 
       await expect(sheet.getByRole('checkbox', { name: 'Bookmarks', exact: true })).toBeChecked();
       await closeSheet(s);
 
-      // (1) the report: 46 imported, 1 skipped; the phase between verifying and extensions; the rows in the index
+      // (1) the report: 46 imported, 1 skipped; the phase between verifying and extensions; the rows in the browser's database
       const done = await importThrough(s);
       await expect(done.locator('[data-import-summary]')).toContainText('46 bookmarks');
       await expect(done.locator('[data-import-summary]')).toContainText('1 bookmark not imported');
@@ -869,13 +871,14 @@ test('9, 10, 12: the extensions action bar: the probe\'s icon right of the addre
       // ordinary tab that the options tab's main tab shows in place (one main tab where there was one), with no Back
       // into the options page
       const mainTabs = () => chromeTabs(s.page).locator('[role="tab"][data-tab-id^="browser:"]').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id')));
-      expect(await mainTabs()).toEqual([`browser:${id}:${pageTab}`, `browser:${id}:${optionsTab}`]);
+      const session = await addressed(s.page, id); // a browser main tab's id names its session's address
+      expect(await mainTabs()).toEqual([`browser:${session}:${pageTab}`, `browser:${session}:${optionsTab}`]);
       value(await invoke(s.page, 'browser.tabs.navigate', { tabId: optionsTab, to: { url: server.url('/b.html'), typed: false } }));
       await expect.poll(async () => (await tabsOf(s, id)).tabs.some((tab) => tab.tabId === optionsTab)).toBe(false);
       const left = (await tabsOf(s, id)).tabs.find((tab) => tab.tabId !== pageTab)!;
       expect(left).toMatchObject({ url: server.url('/b.html'), internal: null, partition: DEFAULT });
-      await expect.poll(mainTabs).toEqual([`browser:${id}:${pageTab}`, `browser:${id}:${left.tabId}`]);
-      await expect(mainTabById(s.page, `browser:${id}:${left.tabId}`)).toHaveAttribute('aria-selected', 'true');
+      await expect.poll(mainTabs).toEqual([`browser:${session}:${pageTab}`, `browser:${session}:${left.tabId}`]);
+      await expect(mainTabById(s.page, `browser:${session}:${left.tabId}`)).toHaveAttribute('aria-selected', 'true');
       expect((await tabsOf(s, id)).selected).toBe(left.tabId);
       await expect(chipOf(main, left.tabId).locator('[aria-selected]')).toHaveAttribute('aria-selected', 'true');
       await expect.poll(async () => (await viewOf(s, left.tabId))?.visible).toBe(true);

@@ -6,6 +6,7 @@ import { CONNECTOR_WATCH_LIMIT, type ConnectorCallOutcome } from '@shared/artifa
 import type { CommandName, MawsBridge } from '@shared/ipc/schema';
 import { createConnectorHost } from './connectors';
 import { ArtifactCommandError } from './host';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 
 const ARTIFACT = '11111111-1111-4111-8111-111111111111';
 const LEASE = '22222222-2222-4222-8222-222222222222';
@@ -26,7 +27,7 @@ interface Sent {
 // A bridge whose every command waits for the test to answer it, in the order sent; `auto` answers some at once.
 function bridge(auto: Partial<Record<CommandName, (input: never) => unknown>> = {}) {
   const sent: Sent[] = [];
-  const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  const listeners = new Map<string, Set<(payload: unknown, from: { machine: typeof TEST_MACHINE }) => void>>();
   const ipc = {
     invoke: vi.fn((name: CommandName, input: unknown) => {
       const handler = auto[name];
@@ -35,14 +36,14 @@ function bridge(auto: Partial<Record<CommandName, (input: never) => unknown>> = 
         sent.push({ name, input, answer: (value) => resolve({ ok: true, value }), fail: (message = 'no') => resolve({ ok: false, error: { code: 'internal', message } }) });
       });
     }),
-    on: vi.fn((name: string, listener: (payload: unknown) => void) => {
+    on: vi.fn((name: string, listener: (payload: unknown, from: { machine: typeof TEST_MACHINE }) => void) => {
       const set = listeners.get(name) ?? new Set();
       set.add(listener);
       listeners.set(name, set);
       return () => set.delete(listener);
     }),
   };
-  const emit = (name: string, payload: unknown) => listeners.get(name)?.forEach((listener) => listener(payload));
+  const emit = (name: string, payload: unknown) => listeners.get(name)?.forEach((listener) => listener(payload, { machine: TEST_MACHINE }));
   const names = () => ipc.invoke.mock.calls.map(([name]) => name);
   return { ipc: ipc as unknown as Pick<MawsBridge, 'invoke' | 'on'>, sent, emit, names, invoke: ipc.invoke };
 }

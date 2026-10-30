@@ -6,6 +6,8 @@
 import type * as z from 'zod';
 import type { IpcError } from './errors';
 import type { BridgedCommandName, BridgedEventName, MainOnlyCommandName } from './names';
+import type { PathCommandName } from './routes'; // P5 O6 M2
+import type { MachineRef } from '../machine/ref'; // P5 O6 M2
 import * as attention from './schema/attention';
 import type { CommandSpec, Namespace } from './schema/common';
 import * as engine from './schema/engine';
@@ -59,6 +61,13 @@ import * as connectors from './schema/connectors'; // P3-H H3b
 import * as delivery from './schema/delivery'; // P4-B5
 import * as customization from './schema/customization'; // UX2-K
 import * as catalog from './schema/catalog'; // P4-AGG M2
+import * as daemon from './schema/daemon'; // P5 O2 M5
+import * as machine from './schema/machine'; // P5 O6 M1
+import * as machines from './schema/machines'; // P5 O6 M3
+import * as org from './schema/org'; // P5 O8 M1
+import * as laneA from './schema/lane-a'; // P5 O9 M2
+import * as machineSettings from './schema/machine-settings'; // P5 O3-D
+import * as clientPort from './schema/client-port'; // P5 O3-D
 export { CustomizationInventorySchema, type CustomizationInventory, type CustomizationSkill, type CustomizationServer, type CustomizationEndpoint } from './schema/customization';
 
 export {
@@ -158,6 +167,13 @@ export const commands = {
   ...delivery.commands, // P4-B5
   ...customization.commands, // UX2-K
   ...catalog.commands, // P4-AGG M2
+  ...daemon.commands, // P5 O2 M5
+  ...machine.commands, // P5 O6 M1
+  ...machines.commands, // P5 O6 M3
+  ...org.commands, // P5 O8 M1
+  ...laneA.commands, // P5 O9 M2
+  ...machineSettings.commands, // P5 O3-D
+  ...clientPort.commands, // P5 O3-D
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -205,6 +221,13 @@ export const events = {
   ...delivery.events, // P4-B5
   ...customization.events, // UX2-K
   ...catalog.events, // P4-AGG M2
+  ...daemon.events, // P5 O2 M5
+  ...machine.events, // P5 O6 M1
+  ...machines.events, // P5 O6 M3
+  ...org.events, // P5 O8 M1
+  ...laneA.events, // P5 O9 M2
+  ...machineSettings.events, // P5 O3-D
+  ...clientPort.events, // P5 O3-D
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;
@@ -245,17 +268,64 @@ export const HOST_EVENTS = [
   'connectors.directOperation', // P3-HD: a direct operation's end, its id alone
 ] as const satisfies readonly EventName[];
 // E10 end
+// P5 O2 M4 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md): the events the pty host emits. Under the daemon shape
+// the pty host is `mawsd`'s build, which may be another than the app's, so they join the wire manifest beside
+// HOST_EVENTS (not the protocol-2 fingerprint, which no pty host link ever speaks); the host runtime refuses a pty host
+// event outside the list, as it does the engine host's. `pty.hostState` is main's.
+export const PTY_HOST_EVENTS = ['pty.data', 'pty.exit'] as const satisfies readonly EventName[];
+// P5 O3-D (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §I): the events the machine host emits, the
+// services front in `mawsd` on the daemon shape (main's embedded binding emits the same in process): every event the
+// spine's parts emit through the services bus, and the front's own (the machine half's settings, the visible set, the
+// client port). They join the wire manifest beside the other two lists; a name in two lists (`session.eventBatch`, which
+// the spine synthesises too) is one entry and one schema. src/services/spine-root.test.ts holds the list to what the
+// spine's source emits; the front's emit gate is M2's.
+export const MACHINE_EVENTS = [
+  'attention.changed',
+  'session.changed', 'session.removed', 'session.projects.changed', 'session.digest', 'session.setup', 'session.intent.changed',
+  'session.eventBatch', 'session.status', 'engine.budget', // the side threads', setups' and yield's rows; the scenario stub's statuses and budget
+  'library.changed', 'ownerChannel.changed', 'laneA.changed', 'laneA.plane',
+  'machineSettings.changed', 'session.visibleChanged', 'clientPort.request', // the front's own
+] as const satisfies readonly EventName[];
 export type CommandInput<N extends CommandName> = z.input<(typeof commands)[N]['input']>;
 export type CommandOutput<N extends CommandName> = z.output<(typeof commands)[N]['output']>;
 export type EventPayload<N extends EventName> = z.output<(typeof events)[N]>;
 
 export type CommandResult<N extends CommandName> = { ok: true; value: CommandOutput<N> } | { ok: false; error: IpcError };
 
-// The whole surface the preload exposes as `window.maws`; nothing else is bridged.
+// P5 O6 M2 (OX2; docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "The bridge types"): every invoke goes to a
+// machine and every event comes from one. `MawsBridge` is the renderer client's surface (`src/renderer/src/ipc/client.ts`),
+// over addresses; `PreloadBridge` is `window.maws`, the raw pipe over bare ids, whose invoke with no machine is the local
+// machine's (the e2e specs' and harness pages' convenience).
+export interface InvokeOptions {
+  machine?: MachineRef;
+}
+// A `path` command's options name its machine (`src/shared/ipc/routes.ts`; M4 required it): a path is no machine's by
+// itself, so every call site names the machine of the session or project it is about. Every other command's options are
+// optional: its addresses name its machine, else it is the local machine's.
+export type MachineOptions<N extends CommandName> = N extends PathCommandName ? [opts: { machine: MachineRef }] : [opts?: InvokeOptions];
+export type InvokeRest<N extends CommandName> = MachineOptions<N>;
+// `invoke` as seen by a wrapper generic over commands whose every input carries an address (a session read, a session
+// operation), which names the machine: TypeScript defers `InvokeRest` over a generic name, so such a wrapper calls this.
+export type AddressedInvoke = <N extends CommandName>(name: N, input: CommandInput<N>) => Promise<CommandResult<N>>;
+export interface EventSource {
+  machine: MachineRef;
+}
+
+// The renderer client's surface over `window.maws`: components and stores use it through `ipc`.
 export interface MawsBridge {
-  invoke<N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandResult<N>>;
-  on<N extends EventName>(name: N, listener: (payload: EventPayload<N>) => void): () => void; // returns unsubscribe
+  readonly localMachine: MachineRef;
+  invoke<N extends CommandName>(name: N, input: CommandInput<N>, ...opts: InvokeRest<N>): Promise<CommandResult<N>>;
+  on<N extends EventName>(name: N, listener: (payload: EventPayload<N>, from: EventSource) => void): () => void; // returns unsubscribe
   pathForFile(file: File): string; // C7: a dropped file's path through Electron's webUtils.getPathForFile; '' when Electron has none (a file dragged from a browser)
+}
+
+// The whole surface the preload exposes as `window.maws`; nothing else is bridged. Typed by name as the client is (the ids
+// it carries are bare, which the same branded types describe), so a spec's raw call reads its answer typed.
+export interface PreloadBridge {
+  readonly localMachine: MachineRef;
+  invoke<N extends CommandName>(name: N, input: CommandInput<N>, machine?: MachineRef): Promise<CommandResult<N>>; // no machine: the local one
+  on<N extends EventName>(name: N, listener: (payload: EventPayload<N>, machine: MachineRef | undefined) => void): () => void;
+  pathForFile(file: File): string;
 }
 
 // The bridged and main-only zod-free lists together cover the registries, without exposing main-only commands.

@@ -16,6 +16,7 @@
 // purpose only (the script builds, the flag runs):
 //   MAWS_LIBRARY_LIVE=1 pnpm e2e:library-live
 // (`pnpm e2e:library-live` alone builds and reports the case skipped.)
+import { addressed } from './support/address';
 import { openArtifactInPanel } from './support/shell';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
@@ -142,7 +143,7 @@ test('an agent makes an html artifact and a file artifact through the tools; the
     // the real composer
     await (await sidebarRow(page, { appSessionId: id })).click();
     await page.mouse.move(700, 20);
-    await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();
+    await expect(pane.locator(`[data-composer="${await addressed(page, id)}"]`)).toBeVisible();
     const spec = { ...launchDefaults(id, repo), model: 'haiku', permissionMode: 'default' as const, subagentModel: 'haiku', maxBudgetUsd: CAP_USD };
     expect(value(await invoke(page, 'session.launch', { spec }))).toMatchObject({ status: 'launching' });
     journalPath = (await statusOf()).journalPath;

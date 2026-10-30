@@ -10,9 +10,12 @@
 //   3. relaunched on the same profile: the same supervisor, the same launch (id and pid, one `spawn` and no `exit` in
 //      its journal), the grant held, and the page reads again through that same engine and server, with no new grant;
 //   4. revoked from the header: the page reads it, nothing more is called; the artifact deleted: its grant gone;
-//   5. an ordinary idle quit stops the engine, and a relaunch acquires none (the page's timer asks for a route only).
+//   5. the session stopped and the app quit (on the embedded shape an ordinary idle quit stops the engine; on the daemon
+//      shape a quit stops nothing, Q1 and D12 of P5 O3-D, so the owner stops it first), and a relaunch acquires none
+//      (the page's timer asks for a route only).
 // Evidence: the call log and the timeline (pids, launches, the hidden and closed spans) attached to the test.
 import { test, expect, type Locator } from '@playwright/test';
+import type { AppSessionId } from '@shared/graph/ids';
 import { invoke, TOOL, TOOL_NAME, value, wait, WATCH_MS, withScene } from './support/connector-scene';
 
 test.skip(process.env.MAWS_CONNECTORS_SOAK !== '1', 'the connector soak runs under pnpm e2e:connectors-soak (MAWS_CONNECTORS_SOAK=1)');
@@ -93,9 +96,13 @@ test('soak: hidden five minutes and closed five minutes with the engine live, no
     await wait(WATCH_MS + 5_000);
     expect(scene.toolCalls(), 'nothing is called for a deleted artifact').toHaveLength(deleted);
 
-    // 5. an ordinary idle quit stops the engine; a relaunch acquires none
+    // 5. the engine gone, then a relaunch acquires none. On the embedded shape an ordinary idle quit stops the engine with
+    // the app; on the daemon shape (P5 O3-D Q1, D12) a quit stops nothing and the session would outlive the app under its
+    // mawsd until the idle clock (D38: 10 min), so the owner stops it first, as connectors.spec.ts does (O3-D M5b)
+    const daemon = value(await invoke(second.page, 'host.status', undefined)).transport === 'daemon';
+    if (daemon) value(await invoke(second.page, 'session.stop', { appSessionId: engine.appSessionId as AppSessionId, reason: 'stop' }));
     await scene.quit(second);
-    await expect.poll(() => scene.pidAlive(engine.pid), { timeout: 30_000, message: 'the engine stopped with the app' }).toBe(false);
+    await expect.poll(() => scene.pidAlive(engine.pid), { timeout: 30_000, message: daemon ? 'the engine stopped before the quit' : 'the engine stopped with the app' }).toBe(false);
     const third = await scene.launch();
     await wait(WATCH_MS);
     expect(await scene.live(third.page), 'no engine acquired after the relaunch').toEqual([]);

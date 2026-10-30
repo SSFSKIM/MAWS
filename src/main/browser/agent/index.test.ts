@@ -8,6 +8,8 @@ import { TabStore } from '../tabs';
 import { TabControls } from './control';
 import { AgentCursor } from './cursor';
 import { e2eTabIds, reachableSessions, startAgentPresence } from './index';
+import { record } from '../../../../test/support/builders';
+import { fakeSpineView } from '../../../../test/support/fake-spine-view';
 
 // What stays of E4c's browser tools in main (P1 A-54; the in-app browser spec of 2026-10-08, M4): the lineage rule, the
 // e2e's tab ids, and the agent's presence over E4a's real store (the dialogs' wrap, parking, the e2e seam).
@@ -16,23 +18,15 @@ const A = 'App-A' as AppSessionId;
 
 describe('reachableSessions (P-24, Decision Log 29)', () => {
   const T = 'App-T' as AppSessionId;
-  it('reaches a side thread and its parent; a fork, a plain session or an unreadable index reach themselves', () => {
-    const records: Record<string, unknown> = {
-      [T]: { lineage: { kind: 'side-thread', parentAppSessionId: A } },
-      'App-F': { lineage: { kind: 'fork', parentAppSessionId: A } },
-      [A]: { lineage: null },
-    };
-    const sessions = { get: (id: AppSessionId) => (records[id] ?? null) as never };
-    expect(reachableSessions(sessions, T)).toEqual([T, A]);
-    expect(reachableSessions(sessions, 'App-F' as AppSessionId)).toEqual(['App-F']);
-    expect(reachableSessions(sessions, A)).toEqual([A]);
-    expect(reachableSessions(sessions, 'App-unknown' as AppSessionId)).toEqual(['App-unknown']);
-    const broken = {
-      get: () => {
-        throw new Error('index unavailable');
-      },
-    };
-    expect(reachableSessions(broken, T)).toEqual([T]);
+  it('reaches a side thread and its parent; a fork, a plain session or a session the view does not hold reach themselves', () => {
+    const view = fakeSpineView({
+      records: [record(T, { lineage: { kind: 'side-thread', parentAppSessionId: A } as never }), record('App-F', { lineage: { kind: 'fork', parentAppSessionId: A } as never }), record(A)],
+    });
+    expect(reachableSessions(view, T)).toEqual([T, A]);
+    expect(reachableSessions(view, 'App-F' as AppSessionId)).toEqual(['App-F']);
+    expect(reachableSessions(view, A)).toEqual([A]);
+    expect(reachableSessions(view, 'App-unknown' as AppSessionId)).toEqual(['App-unknown']);
+    expect(reachableSessions(fakeSpineView({ unavailable: 'refused' }), T)).toEqual([T]); // an unavailable view holds no record
   });
 });
 

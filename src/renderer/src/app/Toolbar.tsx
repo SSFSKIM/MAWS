@@ -4,7 +4,7 @@
 // the session actions menu and the panel toggle.
 // Every control is `no-drag`, so clicks reach it rather than moving the window.
 import { preserveSubmenuPointer } from '@artifacts/ui/menu-pointer';
-import { useRef } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -15,12 +15,17 @@ import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
-import { useSessions } from '../stores/sessions';
+import { useSessions, type ListedSession } from '../stores/sessions';
+import { localProjectOfSet } from '../stores/org-projects'; // P5 O6 M5
+import { ipc } from '../ipc/client';
 import { FolderIcon, Icon, IconButton, SidebarIcon } from './IconButton';
 import { useShellGeometry, useShellView } from './shell-view';
 import { mountChromeTabs } from '../main/chrome-tabs';
 import { SurfaceRow } from '../panel/SurfaceRow';
 import { runSessionAction, SESSION_ACTIONS, sessionActionsFor, useSessionActionEnabled, type SessionActionId } from './session-actions';
+import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
+import { useRemoteLaneA } from '../lane-a/remote-session'; // P5 O9 M9
+import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M9
 import { displayTitle } from '../sessions/title';
 // P3-L start
 import { LIBRARY_COPY } from '../library/copy';
@@ -38,6 +43,7 @@ export function toolbarTitle(
   records: ReadonlyMap<AppSessionId, SessionRecord>,
   browserTitle: string | null = null, // E4a
   artifactTitle: string | null = null, // P3-L: an `artifact` tab's row title, when the library store holds it
+  listed: ReadonlyMap<AppSessionId, ListedSession> = new Map(), // P5 O9 M9: another machine's session, titled by its row
 ): { title: string; branch: string | null } {
   switch (tab?.kind) {
     case undefined:
@@ -45,7 +51,8 @@ export function toolbarTitle(
     case 'session':
     case 'agent': {
       const record = records.get(tab.appSessionId);
-      const title = displayTitle(record); // no record yet (an unstarted session) or no title yet: "New chat"
+      const row = record ? undefined : listed.get(tab.appSessionId)?.title.trim(); // P5 O9 M9: a session of another machine has its row alone
+      const title = row || displayTitle(record); // no record yet (an unstarted session) or no title yet: "New chat"
       return { title: tab.kind === 'agent' ? `${title} · agent` : title, branch: branchLabel(recordBranch(record)) }; // W9 (H2)
     }
     case 'file':
@@ -141,7 +148,7 @@ export const PROJECT_CHIP_COPY = {
 
 function ProjectChip() {
   const current = useLayout((s) => s.main.current);
-  const project = useSessions((s) => (current === NO_PROJECT ? undefined : s.projects.get(current)));
+  const project = useSessions((s) => (current === NO_PROJECT ? undefined : localProjectOfSet(s, current, ipc.localMachine))); // P5 O6 M5: the set's checkout here
   const canCreate = useSessionCreatorRegistered();
   const revealing = useRef(false); // the reveal focuses the project's row: the closing menu gives the chip no focus back
   if (!project) return null;
@@ -203,25 +210,43 @@ const BoardIcon = () => (
 
 // §5.1's session actions for the session on screen, as its sidebar menus offer them (`sessionActionsFor`: a
 // foreign-live session has none here); "Open" and "Open in new tab" are left out because it is the open tab. A session
-// with no record (an unstarted one) offers nothing yet, and with nothing to offer the menu is disabled.
+// with no record (an unstarted one) offers nothing yet, and with nothing to offer the menu is disabled. P5 O9 M9:
+// another machine's terminal session (a listed lane A row, no record here) offers Take over, disabled in place with the
+// reason its controls port gives (Q2: a gap is shown where the control would be).
 function SessionMenuOverflow({ appSessionId }: { appSessionId: AppSessionId }) {
   const record = useSessions((s) => s.records.get(appSessionId));
-  const ids = record ? sessionActionsFor(record).filter((id) => id !== 'open' && id !== 'openInNewTab') : [];
+  const bridged = useLaneAState(appSessionId)?.bridge === 'live'; // P5 O9 M5: Take over and Fork for a bridged terminal session
+  const remote = useRemoteLaneA(appSessionId) && !record;
+  const controls = useSessionControls(appSessionId);
+  if (remote) {
+    const takeOver = controls?.capability('take-over') ?? null;
+    return <SessionMenu disabled={false}>
+      <SessionMenuItem id="takeOver" appSessionId={appSessionId} label={SESSION_ACTIONS.takeOver} gap={takeOver === null || takeOver.available ? null : takeOver.reason} />
+    </SessionMenu>;
+  }
+  const ids = record ? sessionActionsFor(record, { bridged }).filter((id) => id !== 'open' && id !== 'openInNewTab') : [];
+  return <SessionMenu disabled={ids.length === 0}>
+    {record && ids.map((id) => <SessionMenuItem key={id} id={id} appSessionId={record.appId} label={id === 'pin' && record.pinned ? 'Unpin' : SESSION_ACTIONS[id]} />)}
+  </SessionMenu>;
+}
+
+function SessionMenu({ disabled, children }: { disabled: boolean; children: ReactNode }) {
   return <DropdownMenu.Sub>
-    <DropdownMenu.SubTrigger onPointerLeave={preserveSubmenuPointer} disabled={ids.length === 0} className="flex h-8 items-center rounded-sm px-2 text-ui outline-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover">Session actions</DropdownMenu.SubTrigger>
+    <DropdownMenu.SubTrigger onPointerLeave={preserveSubmenuPointer} disabled={disabled} className="flex h-8 items-center rounded-sm px-2 text-ui outline-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover">Session actions</DropdownMenu.SubTrigger>
     <DropdownMenu.Portal><DropdownMenu.SubContent className="z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
-      {record && ids.map((id) => <SessionMenuItem key={id} id={id} appSessionId={record.appId} label={id === 'pin' && record.pinned ? 'Unpin' : SESSION_ACTIONS[id]} />)}
+      {children}
     </DropdownMenu.SubContent></DropdownMenu.Portal>
   </DropdownMenu.Sub>;
 }
 
-function SessionMenuItem({ id, appSessionId, label }: { id: SessionActionId; appSessionId: AppSessionId; label: string }) {
-  const enabled = useSessionActionEnabled(id);
+// `gap`: why the session can't take the action at all (P5 O9 M9), shown in place of the unregistered words.
+function SessionMenuItem({ id, appSessionId, label, gap = null }: { id: SessionActionId; appSessionId: AppSessionId; label: string; gap?: string | null }) {
+  const enabled = useSessionActionEnabled(id) && gap === null;
   return (
     <DropdownMenu.Item
       disabled={!enabled}
       onSelect={() => runSessionAction(id, appSessionId)}
-      title={enabled ? undefined : 'Not available here'}
+      title={enabled ? undefined : (gap ?? 'Not available here')}
       className="flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover"
     >
       {label}

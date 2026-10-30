@@ -7,7 +7,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
+import { addressOf } from '@shared/machine/address';
 import { SCRATCH_CWD } from '../../../../../spikes/terminal-probe/workloads.mjs';
+import { ipc } from '../../ipc/client';
 import { useTerminals } from '../../stores/terminals';
 import { terminals, type TerminalId } from '../../terminal/registry';
 import { counterText, countersOf, ping, tap, useSamples, wasPausedSeen } from './debug-tap';
@@ -16,7 +18,7 @@ import { createTerminalsApi } from './terminals-api';
 export type { TerminalsHarnessApi } from './terminals-api';
 
 // The registry pane's terminals belong to a session of their own, so a reload re-adopts exactly them.
-export const REGISTRY_SESSION = 'probe-registry' as AppSessionId;
+export const REGISTRY_SESSION = addressOf(ipc.localMachine, 'probe-registry' as AppSessionId); // P5 O6 M2: the local machine's
 
 const useSelection = create<{ selected: TerminalId | null }>()(() => ({ selected: null }));
 const select = (selected: TerminalId | null) => useSelection.setState({ selected });

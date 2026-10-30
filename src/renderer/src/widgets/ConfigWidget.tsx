@@ -11,6 +11,8 @@ import { CONFIG, PERMISSIONS, SHARED, WIDGET_TITLE } from './copy';
 import { Group, KeyValues, Mono, parseEach, RevealButton, Row, Rows, TextButton } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
+import { machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 
 const SourceSchema = z.looseObject({ source: z.string(), settings: z.record(z.string(), z.unknown()).catch({}) });
 const AppliedSchema = z.looseObject({ model: z.string().nullable().optional(), effort: z.string().nullable().optional(), advisor: z.unknown().optional(), ultracode: z.boolean().optional() });
@@ -51,7 +53,7 @@ export function sourceFile(source: string, cwd: string | null, configHome: strin
   return null;
 }
 
-export function ConfigBody({ view, cwd, configHome, close }: { view: ConfigView; cwd: string | null; configHome: string | null; close(): void }) {
+export function ConfigBody({ view, machine, cwd, configHome, close }: { view: ConfigView; machine: MachineRef; cwd: string | null; configHome: string | null; close(): void }) {
   return (
     <div className="flex flex-col">
       <Group label={CONFIG.effective}>
@@ -66,7 +68,7 @@ export function ConfigBody({ view, cwd, configHome, close }: { view: ConfigView;
           <Rows label={CONFIG.sourceList}>
             {view.sources.map((s) => {
               const file = sourceFile(s.source, cwd, configHome);
-              return <Row key={s.source} main={s.label} detail={s.keys.length > 0 ? s.keys.join(', ') : CONFIG.noKeys} actions={file ? <RevealButton path={file}>{CONFIG.openFile}</RevealButton> : null} />;
+              return <Row key={s.source} main={s.label} detail={s.keys.length > 0 ? s.keys.join(', ') : CONFIG.noKeys} actions={file ? <RevealButton path={file} machine={machine}>{CONFIG.openFile}</RevealButton> : null} />;
             })}
           </Rows>
         </Group>
@@ -108,7 +110,7 @@ export function ConfigWidget({ appSessionId, close }: { appSessionId: AppSession
   const userFile = memory.data?.files.find((f) => f.kind === 'user')?.path;
   return (
     <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.config} command="config" state={read.state} error={read.error} readAt={read.readAt} close={close}>
-      {read.data && <ConfigBody view={present(read.data)} cwd={cwd} configHome={userFile ? dirname(userFile) : null} close={close} />}
+      {read.data && <ConfigBody view={present(read.data)} machine={machineOf(appSessionId)} cwd={cwd} configHome={userFile ? dirname(userFile) : null} close={close} />}
     </WidgetFrame>
   );
 }

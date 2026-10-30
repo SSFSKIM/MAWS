@@ -8,9 +8,11 @@ import { StrictMode } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { artifactUrl } from '@shared/artifacts/scheme';
 import { digest, record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
+import { at } from '../../../../../test/support/machine';
 import { useNotices } from '../../stores/notices';
 import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
@@ -20,7 +22,9 @@ import { openComment } from '../register';
 import { CommentCardHost, type CardFrame } from './CardHost';
 import { useCommentCard } from './store';
 
-const PARENT = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
+// P5 O6 M2: main is asked with the bare id; the page holds its address
+const PARENT_ID = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
+const PARENT = at(PARENT_ID);
 const RECORD = '00000000-0000-4000-8000-000000000001';
 const ANCHOR: Anchor = { kind: 'artifact-element', locator: '#hero', label: 'Dashboard v1 › h1#hero “Sales overview”', pageUrl: artifactUrl(RECORD, 1, 'index.html') };
 const RECT = { x: 24, y: 0, width: 300, height: 90 };
@@ -51,7 +55,7 @@ beforeEach(() => {
   resetShellStores();
   useNotices.setState({ notices: [] });
   fake = fakeClient({ 'side.sendToMain': { messageUuid: null, disposition: 'sent' } });
-  window.maws = fake.client;
+  window.maws = fake.client as unknown as PreloadBridge;
   offComposer = registerCommentComposer(openComment);
   restoreFocus.mockClear();
   withParent('ready');
@@ -189,7 +193,7 @@ describe('the composer half', () => {
 
   it('Side thread sends exactly the sheet’s side.thread.open for the same anchor and text; Enter sends, Shift+Enter breaks, a composition’s Enter does not', async () => {
     fake = fakeClient();
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     mount();
     act(() => openCommentComposer(ANCHOR, { appSessionId: PARENT }));
     await userEvent.type(field(), 'Line one{Shift>}{Enter}{/Shift}line two{Enter}');
@@ -202,14 +206,14 @@ describe('the composer half', () => {
     await userEvent.type(field(), '{Enter}');
     const [sheet, fromCard] = fake.invoked('side.thread.open');
     expect(fromCard).toEqual(sheet);
-    expect(fromCard).toEqual({ appSessionId: PARENT, from: { kind: 'comment', anchor: ANCHOR, text: 'Line one\nline two', screenshot: null } });
+    expect(fromCard).toEqual({ appSessionId: PARENT_ID, from: { kind: 'comment', anchor: ANCHOR, text: 'Line one\nline two', screenshot: null } });
     expect(screen.getByRole('button', { name: 'Starting…' })).toBeTruthy();
     expect(field().disabled).toBe(true);
   });
 
   it('a refused Side thread stays in the card with Retry and Send to main instead', async () => {
     fake = fakeClient();
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     mount();
     pick();
     await userEvent.type(field(), 'Why?{Enter}');
@@ -233,7 +237,7 @@ describe('the composer half', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Send' }));
     const [sheet, fromCard] = fake.invoked('side.sendToMain');
     expect(fromCard).toEqual(sheet);
-    expect(fromCard).toEqual({ appSessionId: PARENT, anchor: ANCHOR, text: 'Look here', screenshot: null });
+    expect(fromCard).toEqual({ appSessionId: PARENT_ID, anchor: ANCHOR, text: 'Look here', screenshot: null });
     expect(card()).toBeNull();
     expect(useCommentCard.getState().open).toBeNull();
     expect(restoreFocus).toHaveBeenCalledTimes(1);
@@ -246,7 +250,7 @@ describe('the composer half', () => {
     expect(screen.getByText('Screenshot · 640 × 480')).toBeTruthy();
     await userEvent.click(screen.getByRole('radio', { name: 'Send to main' }));
     await userEvent.type(field(), 'Here{Enter}');
-    expect(fake.invoked('side.sendToMain')).toEqual([{ appSessionId: PARENT, anchor: ANCHOR, text: 'Here', screenshot }]);
+    expect(fake.invoked('side.sendToMain')).toEqual([{ appSessionId: PARENT_ID, anchor: ANCHOR, text: 'Here', screenshot }]);
 
     pick({ ...ANCHOR, screenshot });
     await userEvent.click(screen.getByRole('button', { name: 'Remove screenshot' }));
@@ -295,7 +299,7 @@ describe('dismissal', () => {
 
   it('a refusal arriving after the card closed mid-send is a toast with its reason', async () => {
     fake = fakeClient();
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     mount();
     pick();
     await userEvent.type(field(), 'Why?{Enter}');
@@ -315,7 +319,7 @@ describe('dismissal', () => {
     );
     async function sentThenRemounted() {
       fake = fakeClient();
-      window.maws = fake.client;
+      window.maws = fake.client as unknown as PreloadBridge;
       const view = render(hostAs('a'));
       pick();
       await userEvent.type(field(), 'Why?{Enter}');
@@ -341,7 +345,7 @@ describe('dismissal', () => {
 
     it('a send that went reaches the new form: Send to main closes the card, nothing sent twice', async () => {
       fake = fakeClient();
-      window.maws = fake.client;
+      window.maws = fake.client as unknown as PreloadBridge;
       const view = render(hostAs('a'));
       pick();
       await userEvent.click(screen.getByRole('radio', { name: 'Send to main' }));
@@ -394,7 +398,7 @@ describe('the frame’s card hooks (P3-B)', () => {
     expect(settled.mock.calls).toEqual([[true]]);
 
     fake = fakeClient({ 'session.intent.get': null });
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     pick();
     await userEvent.type(field(), 'Why?{Enter}');
     expect(onSending).toHaveBeenCalledTimes(2);
@@ -410,7 +414,7 @@ describe('the frame’s card hooks (P3-B)', () => {
     const settled = vi.fn();
     mount('anchored', { ...FRAME, onSending: () => settled });
     fake = fakeClient({ 'session.intent.get': null });
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     pick();
     await userEvent.type(field(), 'Why?{Enter}');
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, TaskId } from '@shared/graph/ids';
 import { fakeClient } from '../../../../../test/support/fake-client';
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { agentWorkClient, createAgentWorkClient, setAgentWorkClient } from './client';
 
 const A = 'A' as AppSessionId;
@@ -21,8 +22,8 @@ describe('agent-work client', () => {
     const client = createAgentWorkClient(fake.client);
     expect(await client.subagents(A)).toEqual([]);
     expect(await client.workflows(A)).toEqual([]);
-    expect(await client.tasks('list-1')).toEqual([]);
-    expect(await client.readSpill({ path: '/p', offset: 0, length: 4 })).toMatchObject({ content: 'x', length: 1 });
+    expect(await client.tasks(TEST_MACHINE, 'list-1')).toEqual([]);
+    expect(await client.readSpill(TEST_MACHINE, { path: '/p', offset: 0, length: 4 })).toMatchObject({ content: 'x', length: 1 });
     expect(await client.events(A, 3)).toEqual({ events: [], lastSeq: 7, complete: true });
     expect(await client.steer(A, 'hello', 'next')).toEqual({ messageUuid: 'u1' });
     await client.stopTask(A, 't1' as TaskId);

@@ -3,6 +3,7 @@
 // by `createState` and disposed when the tab goes or the surface shows something else.
 import { act, cleanup, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 import type { EditorHostScope } from '../panel/editor-host';
 import { useLayout } from '../stores/layout';
 import { resetShellStores } from '../test-support/shell-stores';
@@ -118,8 +119,8 @@ describe('the state an editor keeps per tab', () => {
   it('a main tab’s state is disposed when the tab leaves main, not when it moves between panes or is inactive', () => {
     const e = editor();
     registerArtifactEditor('document', e);
-    act(() => useLayout.getState().openTab({ kind: 'artifact', artifactId: A }));
-    const scope: EditorHostScope = { surface: 'main', tabId: `artifact:${A}` };
+    act(() => useLayout.getState().openTab({ kind: 'artifact', artifactId: A, machine: TEST_MACHINE }));
+    const scope: EditorHostScope = { surface: 'main', tabId: `artifact:${TEST_MACHINE}:${A}` };
     const held = holdArtifactEditorState(scope, A, 'document', artifactEditorFor('document')!);
     act(() => useLayout.getState().openTab({ kind: 'diagnostics' })); // the artifact's tab inactive
     act(() => useLayout.getState().moveTab(scope.tabId, 1, 0)); // to the other pane
@@ -150,8 +151,8 @@ describe('the state an editor keeps per tab', () => {
     await act(async () => releaseArtifactEditorState(panel));
     expect(seen.result.current).toBeNull();
 
-    act(() => useLayout.getState().openTab({ kind: 'artifact', artifactId: A }));
-    const scope: EditorHostScope = { surface: 'main', tabId: `artifact:${A}` };
+    act(() => useLayout.getState().openTab({ kind: 'artifact', artifactId: A, machine: TEST_MACHINE }));
+    const scope: EditorHostScope = { surface: 'main', tabId: `artifact:${TEST_MACHINE}:${A}` };
     const main = renderHook(() => useHeldArtifactEditorState(scope));
     let held!: ArtifactEditorHold;
     await act(async () => void (held = holdArtifactEditorState(scope, A, 'document', docEditor)));
@@ -166,7 +167,7 @@ describe('the state an editor keeps per tab', () => {
 // kind and editor takes it; whatever nobody adopted by the end of the move's task is disposed.
 describe('the hand-off of a hold between surfaces', () => {
   const panel: EditorHostScope = { surface: 'panel', tabId: 'p1' };
-  const main: EditorHostScope = { surface: 'main', tabId: `artifact:${A}` };
+  const main: EditorHostScope = { surface: 'main', tabId: `artifact:${TEST_MACHINE}:${A}` };
   const editor = () => ({ Panel, createState: vi.fn((target: { artifactId: string }) => ({ ...target })), dispose: vi.fn() });
   const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -249,7 +250,7 @@ describe('the hand-off of a hold between surfaces', () => {
   it('a main tab closing while its hold is staged does not dispose it (the move closes its source after staging)', async () => {
     const e = editor();
     registerArtifactEditor('document', e);
-    act(() => useLayout.getState().openTab({ kind: 'artifact', artifactId: A }));
+    act(() => useLayout.getState().openTab({ kind: 'artifact', artifactId: A, machine: TEST_MACHINE }));
     const held = holdArtifactEditorState(main, A, 'document', artifactEditorFor('document')!);
     stageArtifactEditorState(main);
     act(() => useLayout.getState().closeTab(main.tabId));
@@ -279,7 +280,7 @@ describe('the hand-off of a hold between surfaces', () => {
 // it once (`takeCarriedView`).
 describe('the view carried with a hold', () => {
   const panel: EditorHostScope = { surface: 'panel', tabId: 'p1' };
-  const main: EditorHostScope = { surface: 'main', tabId: `artifact:${A}` };
+  const main: EditorHostScope = { surface: 'main', tabId: `artifact:${TEST_MACHINE}:${A}` };
   const editor = () => ({ Panel, createState: vi.fn((target: { artifactId: string }) => ({ ...target })), dispose: vi.fn() });
   const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
   const held = () => {

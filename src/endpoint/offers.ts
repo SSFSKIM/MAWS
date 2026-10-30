@@ -61,12 +61,14 @@ export const OFFERS: Offers = {
     'sminos.decide': laneA('act', 'approve'),
     'sminos.compact': laneA('act', 'manage'),
     'sminos.command': laneA('act', { floor: 'converse', byEffect: true }),
+    // A person's message, in either turn state (O9 M1; its Interfaces §E): graded by its text, as `session.send`'s.
+    'sminos.send': laneA('act', { floor: 'converse', byEffect: true }),
     'sminos.spawn': { kind: 'act', executor: 'sminos', target: 'machine', grade: 'spawn' },
     'sminos.rows': laneA('call', 'view'),
     'sminos.diff': laneA('call', 'view'),
     'sminos.output': laneA('call', 'view'),
     'sminos.read': laneA('call', 'view'),
-    // The endpoint's own, and mawsd's content-free reads (O2 and O6 grade them `list`: `ungraded` until they land).
+    // The endpoint's own, and mawsd's content-free reads (O2 grades `daemon.status` `list`; O6's is `ungraded` until it lands).
     'endpoint.grant': { kind: 'act', executor: 'endpoint', target: 'machine', grade: null },
     'endpoint.state': { kind: 'act', executor: 'endpoint', target: 'machine', grade: null },
     'endpoint.listings': { kind: 'call', executor: 'endpoint', target: 'machine', grade: 'list' },

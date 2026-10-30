@@ -1,20 +1,25 @@
 // Launches MAWS for an end-to-end test: the built app (`out/main/index.js` under the repo's Electron) by default, or
 // the executable named by MAWS_E2E_EXECUTABLE (the packaged `MAWS.app/Contents/MacOS/MAWS`). Every launch gets
 // MAWS_E2E=1, a fresh `userData` under the OS temp directory, an empty engine store (`CLAUDE_CONFIG_DIR`) and a scratch
-// shell home, so nothing depends on or touches a real profile or the owner's shell history.
+// shell home, so nothing depends on or touches a real profile or the owner's shell history. The app runs the shape the
+// owner's does, the daemon's with a private `mawsd` on the scratch profile, unless MAWS_HOST_MODE or the profile's
+// settings name another (P5 O3-B), and a launch's cleanup ends every process the profile's launch left.
 // Later children's end-to-end tests start from here, through the `maws` fixture of `test`.
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { _electron, test as base, type ElectronApplication, type Page } from '@playwright/test';
 import { writeReplayEngine } from '../../test/support/replay-engine';
 import { writeScratchShellHome } from '../../test/support/shell-home';
 import { writeDiscoverScratch, type DiscoverScratch, type DiscoverScratchOptions } from './discover-scratch'; // P4-AGG M1
-import { shellsUnder, untilExited } from './processes';
+import { untilHostReady, untilSpineReady } from './host-ready'; // P5 O3-B; P5 O3-D M5b: the spine's line
+import { endProfileProcesses, killProfileProcessesNow, processesNaming, shellsUnder, untilExited } from './processes';
 import { realEngine, type RealEngine } from './real-engine'; // P4-AGG M1
 import { assertEngineKeychainEnv, assertNoKeychainPrompt, killTree, loginShellEnvironment, watchKeychainPrompt } from './keychain-guard'; // fixB
 import { launchEnvironment } from './scratch-env';
+import { launchMode } from '@shared/sessions/select-source';
+import { captureAllowed, processEvidence } from './process-evidence.mjs';
 import { cornerOrigin, windowCorner } from './window-origin';
 
 export const REPO_ROOT = resolve(__dirname, '../..');
@@ -39,6 +44,7 @@ export interface MawsLaunch {
   consoleErrors(): string[]; // the first window's console errors and uncaught errors so far, from its first load on
   userData: string;
   shellHome: string; // the scratch shell home under `userData` (ZDOTDIR, and where the shells' history goes)
+  sminosHome: string; // P5 O9 M5: the scratch sminos home lane A looks for bridges under (a test's `env` may name another)
   packaged: boolean;
   launchedAt: number; // Date.now() just before the process was started
   // P4-AGG M1: under the `realEngine` option, the engine the app runs and the scratch written around it
@@ -50,6 +56,9 @@ export interface MawsLaunch {
 // C9 reuse it, through the `mawsEnv` option below, instead of editing this file).
 export interface MawsLaunchOptions {
   env?: Record<string, string>;
+  // Raw CI evidence for this test-owned synthetic engine only (never a wrapper forwarding to an installed engine).
+  // The default replay stub is known automatically; an override is private unless its author identifies it here.
+  syntheticEngineBin?: string;
 }
 // C3 end
 
@@ -85,10 +94,16 @@ export interface ShellLaunchOptions extends MawsLaunchOptions {
   // marketplace and its test-source descriptor, the recorded catalog sources, and a scratch HOME unless `home: 'runner'`.
   // The engine store stays the launch's own `claude-config`.
   realEngine?: DiscoverScratchOptions;
+  // P5 O3-B (default true): false skips the wait for the daemon shape's engine host, for a spec timing the window from `launchedAt`
+  hostReady?: boolean;
   // The two-build check (e2e/cross-build.spec.ts): the root of another checkout, a build of its own (its out/ and its
   // node_modules), whose app runs in this one's place: its out/main/index.js under its own Electron, from its root, as
   // this checkout's runs from here. Its supervisor is then that build's, spawned from its own bundle.
   root?: string;
+  // P5 O8 M4a Task 8: AppKit user defaults for this launch alone, through the argument domain (`-<key> <value>` after the
+  // app's entry, where Chromium takes neither for the app's path), e.g. `{ AppleShowScrollBars: 'Always' }` for classic
+  // scrollbars whatever the desktop's setting. Nothing is written to any defaults domain.
+  appKitDefaults?: Record<string, string>;
 }
 // C5 end
 
@@ -105,6 +120,14 @@ export async function onLaunched<T>(hook: (app: ElectronApplication) => void, la
   }
 }
 // E4b end
+
+// P5 O3-B: the profiles of this worker's launches whose cleanup has not run (a test that failed or timed out before it,
+// a spec with none), one entry per launch. The daemon shape's private `mawsd` and its hosts outlive an app Playwright
+// closes, so the worker's exit ends what names each of them.
+const uncleaned = new Set<{ userData: string }>();
+process.once('exit', () => {
+  for (const userData of new Set([...uncleaned].map((launch) => launch.userData))) killProfileProcessesNow(userData);
+});
 
 export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLaunch> {
   // P4-AGG M1: verified before anything is created, so a missing engine leaves nothing behind; the scratch is written
@@ -132,12 +155,14 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   // E11 W-E (Decision Log 22): the runner's environment without its CLAUDE* variables or the dev-server and Node
   // switches, with the e2e mark, the profile, the empty engine store (C4) and no ClaudeUsage data (C7):
   // scratch-env.ts's launchEnvironment, pinned by its unit test. A test's `env` may name a CLAUDE* variable on purpose.
-  const env = launchEnvironment(process.env, userData);
+  const sminosHome = mkdtempSync('/tmp/mws-'); // P5 O9 M5: short, so a bridge's socket path fits 103 bytes
+  const env = launchEnvironment(process.env, userData, sminosHome);
   if (engine) env.MAWS_E2E_ENGINE_BIN = engine.bin; // P4-AGG M1: the real engine, never the replay stub
   // FX4: replay launch gates need a version, not an installed engine. Live specs explicitly pass ENGINE_BIN;
   // an environment override or the Engine setting can still name another binary. The scratch owns this stub.
   const keptStub = opts.keepConfigHome && existsSync(join(userData, 'replay-engine')) ? join(userData, 'replay-engine') : null; // E10
-  env.MAWS_E2E_ENGINE_BIN ??= opts.env?.MAWS_E2E_ENGINE_BIN ?? keptStub ?? writeReplayEngine(userData);
+  let replayEngine: string | undefined;
+  env.MAWS_E2E_ENGINE_BIN ??= opts.env?.MAWS_E2E_ENGINE_BIN ?? (replayEngine = keptStub ?? writeReplayEngine(userData));
   // C4 start: an empty engine store (C4 reads the config home the engine would), so the run never reads the owner's
   // ~/.claude; a test's `env` may still name another.
   mkdirSync(env.CLAUDE_CONFIG_DIR!, { recursive: opts.keepConfigHome === true }); // E10: kept, it may exist
@@ -153,6 +178,10 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   if (discover) Object.assign(env, discover.env);
   Object.assign(env, opts.env); // C3
   if (opts.ownerConfigHome) delete env.CLAUDE_CONFIG_DIR; // P4-A1
+  // P5 O3-D M5b (D11): on the daemon shape a scenario plays in the profile's mawsd, started with the launch's environment
+  // and outliving the app; a relaunch over a given profile in launch mode scenario ends it first, so the relaunch's mawsd
+  // plays this launch's scenario from its start, as main's own spine did before the cutover
+  if (!ownsUserData && launchMode(env, executable !== null) === 'scenario') await endProfileProcesses(userData);
   // fixB keychain conditions (b)(c): a real engine on a Mac can reach the login keychain (under the runner's HOME it is
   // the owner's). No prompt may be pending before the app starts; under the runner's HOME, the login shell the engine
   // host builds every engine's environment from must name the scratch store and nothing that renames the engine's items
@@ -160,24 +189,43 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   const keychainScene = Boolean(opts.realEngine) && process.platform === 'darwin';
   let keychainWatch: { stop(): Error | null } | null = null;
 
+  const info = base.info();
+  const canKeepEvidence = () => captureAllowed({ file: info.file, env, userData, syntheticEngineBin: opts.syntheticEngineBin ?? replayEngine, realEngine: Boolean(opts.realEngine), ownerConfigHome: opts.ownerConfigHome });
+  let evidence: ReturnType<typeof processEvidence> | null = null;
   let app: ElectronApplication | null = null;
   let child: ReturnType<ElectronApplication['process']> | null = null;
   let closed = false;
+  const entry = { userData };
+  uncleaned.add(entry);
   const cleanup = async () => {
     const prompted = keychainWatch?.stop() ?? null;
     keychainWatch = null;
     // P3-F (the terminal e2e's ENOTEMPTY, tracker 2026-10-17): a shell the app started saves its history into the shell
     // home as it exits on its terminal's hang-up, which can come after the app has closed, so the removal waits for the
-    // shells it found before the close (never signalling one) and retries a directory that filled meanwhile.
-    const shells = child && !closed ? shellsUnder(child.pid!) : [];
+    // shells it found before the close (never signalling one) and retries a directory that filled meanwhile. P5 O3-B: on
+    // the daemon shape a terminal's shell is the profile's pty host's, which outlives the app, so its shells count too.
+    const named = processesNaming(join(userData, sep));
+    reportShape(named);
+    const shells = shellsUnder([...(child && !closed ? [child.pid!] : []), ...named.map((p) => p.pid)]);
+    let leftover: unknown;
     try {
       if (app && child && !closed) await closeOrKill(app, child);
     } finally {
+      // P5 O3-B: the daemon shape's private `mawsd` and its hosts outlive the app; they end here, for a given profile too,
+      // as the utility shape's hosts ended with the app (processes.ts), and one that will not is the launch's failure
+      leftover = await endProfileProcesses(userData).then(() => null, (error: unknown) => error);
+      uncleaned.delete(entry);
       const left = await untilExited(shells, SHELL_EXIT_MS);
       if (left.length > 0) console.error(`[e2e] shells still running ${SHELL_EXIT_MS} ms after the app closed: ${left.map((p) => p.pid).join(', ')}`);
-      if (ownsUserData) rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); // C5: a given profile is the caller's
+      try {
+        evidence?.finish(); // preserve the stopped host's log even on failure, before the scratch profile disappears
+      } finally {
+        if (ownsUserData) rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); // C5: a given profile is the caller's
+        rmSync(sminosHome, { recursive: true, force: true }); // P5 O9 M5
+      }
     }
     if (prompted) throw prompted;
+    if (leftover) throw leftover;
     if (keychainScene) assertNoKeychainPrompt('after the app closed');
   };
 
@@ -187,24 +235,30 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
       if (opts.realEngine?.home === 'runner') assertEngineKeychainEnv(loginShellEnvironment(env), env.CLAUDE_CONFIG_DIR!, 'the login shell the engine host captures');
     }
     opts.prepare?.({ userData, shellHome: shellHome.dir, claudeConfigDir: env.CLAUDE_CONFIG_DIR }); // E6: inside, so a throw still cleans up
+    // A prepared/reused profile may configure a real engine ahead of the environment's replay stub. Check after
+    // preparation, and again at finish so a later unknown override cannot leave raw logs in public test-results.
+    evidence = canKeepEvidence() ? processEvidence(info.outputPath(), userData, canKeepEvidence, env) : null;
     const launchedAt = Date.now();
     const appArgs = opts.lang ? [`--lang=${opts.lang}`] : E2E_APP_ARGS; // P4-W2L
+    const defaults = Object.entries(opts.appKitDefaults ?? {}).flatMap(([key, value]) => [`-${key}`, value]); // P5 O8 M4a Task 8
     app = executable
-      ? await _electron.launch({ executablePath: executable, args: appArgs, env, cwd: REPO_ROOT })
-      : await _electron.launch({ ...(electron !== undefined && { executablePath: electron }), args: [...loader, ...(opts.requireFirst ? ['-r', opts.requireFirst] : []), ...appArgs, main], env, cwd: root });
+      ? await _electron.launch({ executablePath: executable, args: [...appArgs, ...defaults], env, cwd: REPO_ROOT })
+      : await _electron.launch({ ...(electron !== undefined && { executablePath: electron }), args: [...loader, ...(opts.requireFirst ? ['-r', opts.requireFirst] : []), ...appArgs, main, ...defaults], env, cwd: root });
     // Playwright's process() reads its live application channel, which may already be disposed before 'close' arrives.
     // Keep the actual ChildProcess while available, including for cleanup's failed-close fallback.
     child = app.process();
+    evidence?.capture(child);
     if (keychainScene) keychainWatch = watchKeychainPrompt(() => child?.pid !== undefined && killTree(child.pid)); // the app, its hosts, their engines and their `security` children
     launchedHook?.(app); // E4b
     app.on('close', () => (closed = true));
-    const page = await app.firstWindow();
+    const page = await appWindow(app); // P5 O3-B: the app's own window, not whichever page came first
     applications.set(page, app);
     const consoleErrors = await collectConsoleErrors(page);
     await sizeForGroup(app, page); // P3-F1
     await placeForInstance(app); // ci-kit's mac-lane concurrency spec, M2
     await reportForeground(app);
-    return { app, page, consoleErrors, userData, shellHome: shellHome.dir, packaged: executable !== null, launchedAt, ...(engine && discover && { realEngine: { ...engine, scratch: discover } }), cleanup };
+    if (opts.hostReady !== false) await untilDaemonHostReady(page, launchedAt); // P5 O3-B
+    return { app, page, consoleErrors, userData, shellHome: shellHome.dir, sminosHome: env.SMINOS_HOME ?? sminosHome, packaged: executable !== null, launchedAt, ...(engine && discover && { realEngine: { ...engine, scratch: discover } }), cleanup };
   } catch (error) {
     await cleanup().catch((cleanupError) => console.error('[e2e] cleanup after a failed launch also failed', cleanupError));
     throw error;
@@ -212,11 +266,13 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
 }
 
 // One launch per test, closed and removed at teardown; a teardown failure is reported beside the test's own result.
-// C3: `test.use({ mawsEnv: { … } })` sets extra environment variables for a file's launches.
-export const test = base.extend<{ maws: MawsLaunch; mawsEnv: Record<string, string> }>({
+// C3: `test.use({ mawsEnv: { … } })` sets extra environment variables for a file's launches. P5 O3-B:
+// `test.use({ mawsHostReady: false })` passes `hostReady: false` to them.
+export const test = base.extend<{ maws: MawsLaunch; mawsEnv: Record<string, string>; mawsHostReady: boolean }>({
   mawsEnv: [{}, { option: true }], // C3
-  maws: async ({ mawsEnv }, use) => {
-    const maws = await launchMaws({ env: mawsEnv }); // C3: the env option
+  mawsHostReady: [true, { option: true }], // P5 O3-B
+  maws: async ({ mawsEnv, mawsHostReady }, use) => {
+    const maws = await launchMaws({ env: mawsEnv, hostReady: mawsHostReady }); // C3: the env option; P5 O3-B: the host wait
     try {
       await use(maws);
     } finally {
@@ -253,6 +309,56 @@ async function placeForInstance(app: ElectronApplication): Promise<void> {
   await app.evaluate(({ BrowserWindow }, [x, y]) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setPosition(x, y), [x, y] as const);
 }
 
+// P5 O3-B (browser-chrome.spec.ts:747, a flake of after-set 1 on 67ccfdd35, run 40786637414): `firstWindow` resolves on
+// the first page target, which may be another page than the app's (a tab or an extension page a relaunch restores) or the
+// app's own before its document has loaded; either way `window.maws` was missing where the scene read it. The app's
+// window is the one whose preload exposes `window.maws`, so the launch waits, at most 30 s, for a window that does, and
+// says so when the first was not it at once (its URL then, and the one taken).
+const APP_WINDOW_MS = 30_000;
+async function appWindow(app: ElectronApplication): Promise<Page> {
+  const first = await app.firstWindow();
+  const bridged = (page: Page) => page.evaluate(() => typeof window.maws !== 'undefined').catch(() => false);
+  if (await bridged(first)) return first;
+  const firstUrl = first.url();
+  const started = Date.now();
+  for (;;) {
+    for (const page of app.windows()) {
+      if (!(await bridged(page))) continue;
+      console.log(`[e2e] the first window (${firstUrl}) had no window.maws; took ${page === first ? 'it' : 'another window'} at ${page.url()} after ${Date.now() - started} ms`);
+      return page;
+    }
+    if (Date.now() - started >= APP_WINDOW_MS) return first; // the spec's own reads then say what is missing
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
+// P5 O3-B: on the daemon shape a launch starts its hosts cold, `mawsd` first and then the engine host and pty host it
+// serves, where the utility shape forked them beside the window; the specs' first waits after a launch (a seeded session
+// indexed through the engine host's scan within 5 s) were written for the utility shape's start. So on the daemon shape
+// the launch returns once the engine host is ready through `mawsd`; bounded at 30 s even while a read is pending, and
+// never failing, so a spec about a host that does not come up still reads its state itself (host-ready.ts). Any other
+// shape, or a page without the bridge, returns at once. Each daemon-shape launch prints one line with the wait and the
+// time from the launch to the host's ready (`[e2e] daemon host ready:`), so a slower cold start shows in the job logs
+// rather than hiding behind the wait. P5 O3-D M5b (D24): the spine in `mawsd` is then measured, not waited for: its line,
+// `[e2e] spine ready:`, the cold-start budget's reading, is printed when it lands, the launch having returned at the host's
+// ready; a spec's first read polls within its own bound, as it did before the cutover.
+async function untilDaemonHostReady(page: Page, launchedAt: number): Promise<void> {
+  const line = await untilHostReady({
+    read: () => page.evaluate(() => window.maws.invoke('host.status', undefined)).then((status) => (status.ok ? status.value : null)),
+    now: () => Date.now(),
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms).unref()), // the bound's timer outlives an early return; it holds no worker open
+  }, launchedAt);
+  if (line === null) return;
+  console.log(line);
+  // P5 O3-D M5b (D24): the spine's cold start, the first available session.list (host-ready.ts), beside the test
+  void untilSpineReady({
+    list: () => page.evaluate(() => window.maws.invoke('session.list', {})).then((answer) => (answer.ok ? { ok: true as const } : { ok: false as const, error: `${answer.error.code}: ${answer.error.message}` })),
+    closed: () => page.isClosed(),
+    now: () => Date.now(),
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms).unref()),
+  }, launchedAt).then((spineLine) => console.log(spineLine));
+}
+
 // Under MAWS_E2E_FOREGROUND=1 (src/main/window-show.ts) the app activates and its window
 // becomes key. Whether macOS granted that is said once per worker in the run's output, so a run on a desktop where
 // another app holds focus shows it.
@@ -268,6 +374,15 @@ async function reportForeground(app: ElectronApplication): Promise<void> {
     key = await keyed();
   }
   console.log(`[e2e] MAWS_E2E_FOREGROUND: the first window ${key ? 'is key' : 'is not key after 3 s (another app holds focus)'}`);
+}
+
+// P5 O3-B: once per worker, the processes naming the profile at a launch's cleanup, by their first word (`mawsd`,
+// `maws-engine-host`, `maws-pty-host` on the daemon shape), so a group's output shows the shape it ran on.
+let shapeReported = false;
+function reportShape(named: readonly { command: string }[]): void {
+  if (shapeReported) return;
+  shapeReported = true;
+  console.log(`[e2e] the profile's own processes at the first cleanup: ${named.map((p) => p.command.split(' ')[0]).join(', ') || 'none'}`);
 }
 
 // Playwright keeps a page's console messages and page errors from before anyone listened (Electron is attached from

@@ -10,6 +10,7 @@ import { MEMORY, SHARED, WIDGET_TITLE } from './copy';
 import { Group, Mono, RevealButton, Row, Rows, TextButton } from './parts';
 import { useEngineRead } from './read';
 import { WidgetFrame } from './WidgetFrame';
+import { machineOf } from '@shared/machine/address';
 
 const StatusSchema = z.looseObject({ status: z.string() });
 
@@ -48,7 +49,7 @@ export function MemoryBody({ view, appSessionId, close }: { view: MemoryView; ap
                   {f.description && <span> · {f.description}</span>}
                 </>
               }
-              actions={f.exists ? <RevealButton path={f.path}>{SHARED.reveal}</RevealButton> : null}
+              actions={f.exists ? <RevealButton path={f.path} machine={machineOf(appSessionId)}>{SHARED.reveal}</RevealButton> : null}
             />
           ))}
         </Rows>
@@ -57,7 +58,7 @@ export function MemoryBody({ view, appSessionId, close }: { view: MemoryView; ap
         <Group label={MEMORY.folders}>
           <Rows label={MEMORY.folderList}>
             {view.folders.map((f) => (
-              <Row key={f.path} main={f.label} detail={<Mono>{f.path}</Mono>} actions={<RevealButton path={f.path}>{SHARED.reveal}</RevealButton>} />
+              <Row key={f.path} main={f.label} detail={<Mono>{f.path}</Mono>} actions={<RevealButton path={f.path} machine={machineOf(appSessionId)}>{SHARED.reveal}</RevealButton>} />
             ))}
           </Rows>
         </Group>

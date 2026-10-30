@@ -42,11 +42,36 @@ runs:
         chmod +x "$displayplacer"
         id=$("$displayplacer" list | sed -n 's/^Persistent screen id: //p' | head -1)
         "$displayplacer" "id:$id res:1920x1080 hz:60 color_depth:7 scaling:off origin:(0,0) degree:0"
+        # Automatic chooses legacy 15px gutters on this VM's input devices. Use overlay scrollbars, as on the
+        # mini's desktop: layout-transfer accounts for the whole document width, with no reserved tools column.
+        echo "AppleShowScrollBars before: $(defaults read -g AppleShowScrollBars 2>/dev/null || echo Automatic)"
+        defaults write -g AppleShowScrollBars -string WhenScrolling
+        echo "AppleShowScrollBars after: $(defaults read -g AppleShowScrollBars)"
         defaults write com.apple.dock autohide -bool true
         killall Dock
         display=$(osascript -l JavaScript -e 'ObjC.import("AppKit"); const s = $.NSScreen.mainScreen; `${s.frame.size.width}x${s.frame.size.height}@${s.backingScaleFactor}x`')
         echo "ci-kit desktop: $(sw_vers -productVersion) $(sysctl -n machdep.cpu.brand_string) cpus $(sysctl -n hw.ncpu) memory $(($(sysctl -n hw.memsize) / 1073741824)) GiB display $display $(.github/scripts/desktop-dock.sh --wait 15)"
         if [[ $display != 1920x1080@1x ]]; then echo "::error title=ci-kit desktop::the display is $display, not 1920x1080@1x"; exit 1; fi
+    # MAWS's git runner calls /usr/bin/git under a 10 s bound (src/services/git/runner.ts). On a hosted Mac that is xcrun's
+    # shim into Xcode's toolchain, and a fresh VM's first call through it can pass the bound: each hosted git timeout so far
+    # (a session start's `git rev-parse`, the index's org project) was the job's first call. One call here, in the
+    # runner's reduced environment, pays it before any spec runs, and the line keeps both calls' times. It never fails the
+    # job: a call still running after 120 s is ended and named, and any other failure in the step is let through.
+    - if: runner.environment == 'github-hosted' && runner.os == 'macOS'
+      continue-on-error: true
+      shell: bash
+      run: |
+        call() {
+          local start
+          start=$(perl -MTime::HiRes=time -e 'printf "%.3f", time')
+          if ! env -i PATH="$PATH" HOME="$HOME" perl -e 'alarm 120; exec @ARGV' /usr/bin/git -C "$GITHUB_WORKSPACE" rev-parse --show-toplevel >/dev/null 2>&1; then
+            echo "::warning title=hosted git::/usr/bin/git rev-parse did not answer within 120 s, or failed"
+          fi
+          took=$(perl -MTime::HiRes=time -e "printf '%.3f', time - $start")
+        }
+        call; first=$took
+        call; second=$took
+        echo "hosted git: /usr/bin/git ($(xcode-select -p 2>&1)) first call $first s, second $second s"
     # ci-kit's own Macs (the mini's host and its guest): their display mode is ci-kit's job-started line (`ci-kit desktop
     # (job-started): … display=…`); beside it, the Dock and the visible frame, read from the job, never set.
     - if: runner.environment == 'self-hosted' && runner.os == 'macOS'

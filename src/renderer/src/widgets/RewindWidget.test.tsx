@@ -3,9 +3,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { at } from '../../../../test/support/machine';
 import { resetComposerStore, useComposerStore } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
 import { resetShellStores } from '../test-support/shell-stores';
@@ -13,7 +14,9 @@ import { ipcSource, useTranscriptStore } from '../transcript';
 import { builder } from '../transcript/model/test-events';
 import { RewindWidget } from './RewindWidget';
 
-const A = 'app-a' as AppSessionId;
+// P5 O6 M2: the fake is main: asked with the bare id; the page holds the address
+const A_ID = 'app-a' as AppSessionId;
+const A = at(A_ID);
 let fake: FakeClient;
 
 beforeEach(async () => {
@@ -25,14 +28,14 @@ beforeEach(async () => {
   b.turn('u-2', 'second prompt\nwith a second line');
   b.end(['u-2']);
   fake = fakeClient({ 'session.events': () => ({ events: b.events, lastSeq: b.events.length, complete: true }) });
-  window.maws = fake.client;
+  window.maws = fake.client as unknown as PreloadBridge;
   useSessions.setState({ records: new Map([[A, record(A)]]), engine: new Map([[A, status(A)]]), recordsVersion: 1 });
   await act(() => useTranscriptStore.getState().attach(A, ipcSource(A)));
 });
 afterEach(() => {
   cleanup();
   for (const key of Object.keys(useTranscriptStore.getState().entries)) useTranscriptStore.getState().drop(key);
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: unknown }).maws;
 });
 
 const mount = () => {
@@ -55,7 +58,7 @@ describe('the rewind picker', () => {
     expect(option('Conversation').getAttribute('aria-checked')).toBe('true');
     fireEvent.click(screen.getByRole('button', { name: 'Rewind to before it' }));
     await waitFor(() => expect(fake.pending('session.rewind')).toBe(1));
-    expect(fake.invoked('session.rewind')).toEqual([{ appSessionId: A, targetMessageUuid: 'u-1', lastSeenMessageUuid: 'u-2', files: false }]);
+    expect(fake.invoked('session.rewind')).toEqual([{ appSessionId: A_ID, targetMessageUuid: 'u-1', lastSeenMessageUuid: 'u-2', files: false }]);
     await act(() => fake.reply('session.rewind', rewound('first prompt')));
     await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
     expect(useComposerStore.getState().prefills.get(A)).toEqual({ text: 'first prompt' });
@@ -71,7 +74,7 @@ describe('the rewind picker', () => {
     const close = mount();
     fireEvent.click(option('Files'));
     fireEvent.click(screen.getByRole('button', { name: 'Rewind to before it' }));
-    await waitFor(() => expect(fake.invoked('session.rewindFiles')).toEqual([{ appSessionId: A, userMessageUuid: 'u-2', dryRun: false }]));
+    await waitFor(() => expect(fake.invoked('session.rewindFiles')).toEqual([{ appSessionId: A_ID, userMessageUuid: 'u-2', dryRun: false }]));
     await act(() => fake.reply('session.rewindFiles', { ok: true, enabled: true, message: null, dryRun: false, changedFiles: null, insertions: null, deletions: null, skippedLinks: 0 }));
     await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
     expect(fake.invoked('session.rewind')).toEqual([]);
@@ -80,7 +83,7 @@ describe('the rewind picker', () => {
     mount();
     fireEvent.click(option('Both'));
     fireEvent.click(screen.getByRole('button', { name: 'Rewind to before it' }));
-    await waitFor(() => expect(fake.invoked('session.rewind')).toEqual([{ appSessionId: A, targetMessageUuid: 'u-2', lastSeenMessageUuid: 'u-2', files: true }]));
+    await waitFor(() => expect(fake.invoked('session.rewind')).toEqual([{ appSessionId: A_ID, targetMessageUuid: 'u-2', lastSeenMessageUuid: 'u-2', files: true }]));
   });
 
   it('says why a refused rewind did nothing, and issues nothing while a turn runs', async () => {

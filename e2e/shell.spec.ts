@@ -6,17 +6,20 @@
 // quit guard by its stderr line, whose count is the one the driven engine state implies. Never `setViewportSize`: the
 // window's own bounds are what the test drives (it shifted hover coordinates in M3's live check). This spec is the
 // template for C7's and C8's end-to-end tests.
-import { readFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { ACTIONS, type ActionId } from '../src/shared/keymap/actions';
 import type { EventPayload } from '../src/shared/ipc/schema';
 import { formatChord } from '../src/shared/keymap/chord';
+import { addressed, localName, localRef } from './support/address';
+import { invoke, value } from './support/c7-replay'; // P5 O6 M2: the upgrade scene's raw-bridge calls
 import { activateForScene, traceForeground } from './support/foreground-trace';
 import { launchMaws, type MawsLaunch } from './support/launch';
+import { scratchProject } from './support/maws-tools'; // P5 O6 M2: the upgrade scene's indexed sessions
 import { slashPaletteMovesNothing } from './support/palette-geometry';
 import { closeProject, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
-import { mainTabs, surfaceRow as shellSurfaceRow, usagePill } from './support/shell';
+import { mainTabById, mainTabs, surfaceRow as shellSurfaceRow, usagePill } from './support/shell';
 
 const SHELL_ENV = {
   MAWS_HARNESS: '0',
@@ -50,20 +53,121 @@ test('shell: sidebar, overview, hover approve, tabs and split, persistence, them
   try {
     const firstStderr = collectStderr(first.app);
     const saved = await firstInstance(first, test.info());
+    // P5 O3-D (Q1): on the daemon shape the sessions outlive the app, so the quit asks nothing and says what it left
+    const daemon = value(await invoke(first.page, 'host.status', undefined)).transport === 'daemon';
+    const quitLine = (parts: string) => `quit-guard: ${parts}, ${daemon ? 'not asked: they outlive the app' : 'auto-answered quit'}`;
     await first.app.close();
-    expect(quitLines(firstStderr()), 'the quit guard counts four mid-turn after the 8 s entry').toEqual(['quit-guard: 4 mid-turn, auto-answered quit']);
+    expect(quitLines(firstStderr()), 'the quit guard counts four mid-turn after the 8 s entry').toEqual([quitLine('4 mid-turn')]);
 
     const second = await launchMaws({ env: SHELL_ENV, userData: first.userData });
     try {
       const secondStderr = collectStderr(second.app);
       await relaunchedInstance(second, saved);
       await second.app.close();
-      expect(quitLines(secondStderr()), 'the relaunched clock is back at 0: five mid-turn').toEqual(['quit-guard: 5 mid-turn, auto-answered quit']);
+      expect(quitLines(secondStderr()), 'the relaunched clock is back at 0: five mid-turn').toEqual([quitLine('5 mid-turn')]);
     } finally {
       await second.cleanup();
     }
   } finally {
     await first.cleanup(); // removes the profile both launches used
+  }
+});
+
+// P5 O6 M2 (acceptance 4; docs/doperpowers/plans/2026-10-27-p5-o6-machine-dimension.md, "Proves"): a profile written
+// before O6 holds bare ids. Its layout is written as such a build wrote it, through the raw bridge (which speaks bare
+// ids): a version-2 `main.tabs` with a session tab and a file tab, a bare `panel.<id>` key, and a draft. After the upgrade
+// launch the tabs, the panel tab and the draft are back, `main.tabs` is version 3 with addresses and the panel key is the
+// address's; a third launch rewrites nothing. Indexed sessions, since a stub scenario keeps its drafts in memory.
+test('a layout from before O6 comes back after the upgrade, addressed, and a third launch rewrites nothing', async () => {
+  test.setTimeout(150_000);
+  const scratch = scratchProject({ titles: ['Upgrade alpha', 'Upgrade beta'], label: 'o6-upgrade' });
+  const launch = () => launchMaws({ userData: scratch.userData, env: { MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config } });
+  const notes = join(scratch.repo, 'notes.md');
+  writeFileSync(notes, '# Notes\n');
+  const DRAFT = 'kept across the upgrade';
+  const PANEL = { tabs: [{ id: 'artifacts:upgrade1', toolId: 'artifacts', pinned: false }], activeTabId: 'artifacts:upgrade1' };
+  const get = async (page: Page, key: string) => value(await invoke(page, 'layout.get', { key: key as never })).value;
+  const keys = async (page: Page) => value(await invoke(page, 'layout.list', undefined)).keys.sort();
+  const held = async (page: Page) => Object.fromEntries(await Promise.all((await keys(page)).filter((key) => key !== 'window.main').map(async (key) => [key, await get(page, key)] as const)));
+  try {
+    // First launch: the seeded session's bare id, and the old build's layout and draft
+    const first = await launch();
+    let id = '';
+    let project = '';
+    try {
+      const { page } = first;
+      await expect
+        .poll(
+          async () => {
+            const { sessions } = value(await invoke(page, 'session.list', {}));
+            const record = sessions.find((s) => s.engineSessionId === scratch.engineIds[0]);
+            id = record?.appId ?? '';
+            project = record?.projectId ?? '';
+            return id !== '' && project !== '';
+          },
+          { timeout: 20_000, message: 'the seeded sessions are indexed with their project' },
+        )
+        .toBe(true);
+      await expect.poll(() => keys(page), { message: 'hydration wrote its defaults' }).toContain('main.tabs');
+      const session = { id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false };
+      const file = { id: `file:${notes}`, kind: 'file', path: notes, line: null, appSessionId: id, pinned: false };
+      const set = { panes: [{ tabs: [session, file], activeTabId: session.id }], focusedPane: 0, splitRatio: 0.5 };
+      value(await invoke(page, 'layout.set', { key: 'main.tabs', value: { version: 2, current: project, sets: { [project]: set }, closedTabs: [] } }));
+      value(await invoke(page, 'layout.set', { key: `panel.${id}` as never, value: PANEL }));
+      const doc = { type: 'doc', attrs: { attachments: [] }, content: [{ type: 'paragraph', content: [{ type: 'text', text: DRAFT }] }] };
+      value(await invoke(page, 'session.drafts.set', { appSessionId: id, draft: { doc, attachments: [], updatedAt: new Date().toISOString() } }));
+      await first.app.close();
+    } finally {
+      await first.cleanup();
+    }
+
+    // The upgrade: everything is back, addressed, and written back once
+    const second = await launch();
+    let written: Record<string, unknown> = {};
+    try {
+      const { page } = second;
+      const ref = await localRef(page);
+      const address = await addressed(page, id);
+      await expect(mainTabById(page, `session:${address}`), 'the session tab is back').toBeVisible({ timeout: 20_000 });
+      await expect(mainTabById(page, `file:${ref}:${notes}`), 'the file tab is back, on this machine').toBeAttached();
+      await expect(page.locator('[data-region="main"]').getByRole('textbox', { name: 'Message' }), 'the draft is back in its session’s composer').toHaveText(DRAFT);
+      await expect.poll(() => keys(page), { message: 'the bare panel key is renamed to the address’s' }).toContain(`panel.${address}`);
+      expect(await keys(page)).not.toContain(`panel.${id}`);
+      expect(await get(page, `panel.${address}`), 'the panel tab is back').toEqual(PANEL);
+      // P5 O6 M5: the set keyed by the project's address moves to its row's key once the machine has derived the project's
+      // org key; the seeded folder was only discovered (nobody opened it), so its sessions' row is the machine's own
+      await expect
+        .poll(async () => ((await get(page, 'main.tabs')) as { current: string }).current, { message: 'the set follows its row' })
+        .toBe(`machine:${ref}`);
+      const main = (await get(page, 'main.tabs')) as { version: number; current: string; sets: Record<string, { panes: { tabs: { id: string; appSessionId?: string; machine?: string }[] }[] }> };
+      expect(main.version).toBe(3);
+      expect(Object.keys(main.sets), 'no set is left at the project’s address').not.toContain(await addressed(page, project));
+      expect(main.sets[main.current]!.panes[0]!.tabs.map((tab) => ({ id: tab.id, appSessionId: tab.appSessionId, machine: tab.machine }))).toEqual([
+        { id: `session:${address}`, appSessionId: address, machine: undefined },
+        { id: `file:${ref}:${notes}`, appSessionId: address, machine: ref },
+      ]);
+      await page.waitForTimeout(1000); // past the write delay: whatever this launch writes is written
+      written = await held(page);
+      expect(second.consoleErrors()).toEqual([]);
+      await second.app.close();
+    } finally {
+      await second.cleanup();
+    }
+
+    // A third launch reads what the upgrade wrote as it is
+    const third = await launch();
+    try {
+      const { page } = third;
+      await expect(mainTabById(page, `session:${await addressed(page, id)}`)).toBeVisible({ timeout: 20_000 });
+      await page.waitForTimeout(1000);
+      expect(await held(page), 'nothing rewritten').toEqual(written);
+      expect(third.consoleErrors()).toEqual([]);
+      await third.app.close();
+    } finally {
+      await third.cleanup();
+    }
+  } finally {
+    rmSync(scratch.root, { recursive: true, force: true });
   }
 });
 
@@ -135,13 +239,16 @@ test('tab sets per project: the strip switches with the project, ⌘1 counts in 
     expect(before, 'the new tab is in front').not.toContain(await selectedTab(page, 'Open tabs'));
     await expect(label).toHaveText('codex_somersault');
 
-    // Other sessions is the no-project set: no label
-    await clickProject('Other sessions');
+    // the machine's own row (P5 O6 M5, T3: its name, in place of "Other sessions") has a set of its own and no label
+    await clickProject(await localName(page));
     await expect(label).toHaveCount(0);
+    // a set of a project is keyed by its address while it has no org project (the stub source's projects derive none)
+    const ref = await localRef(page);
+    const projectSets = [await addressed(page, 'proj-codex-somersault'), await addressed(page, 'proj-maws')];
     await expect.poll(async () => {
       const value = (await layoutGet(page, 'main.tabs')) as { version: number; current: string; sets: Record<string, unknown> };
       return [value.version, value.current, Object.keys(value.sets).sort()];
-    }, { message: 'version 2, one set per project with tabs' }).toEqual([2, 'none', ['none', 'proj-codex-somersault', 'proj-maws']]);
+    }, { message: 'version 3, one set per project with tabs' }).toEqual([3, `machine:${ref}`, [`machine:${ref}`, ...projectSets].sort()]);
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
     await maws.cleanup();
@@ -274,7 +381,15 @@ test('the slash palette opens above a started session’s composer and moves not
     await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ x: 72, y: 48, width: 1200, height: 440 }));
     await (await sidebarRow(page, NORTH)).click();
-    await expect(page.locator('[data-region="main"]').getByRole('textbox', { name: 'Message' })).toBeVisible();
+    const composer = page.locator('[data-region="main"]').getByRole('textbox', { name: 'Message' });
+    await expect(composer).toBeVisible();
+    // The pointer leaves the row it clicked: resting there, it opens the row's hover card 300 ms later, which on a slow
+    // runner stands over the composer when the palette's check clicks it, and never closes while the pointer stays. It
+    // goes to the composer's far end: a card already open stands beside the sidebar, 342 px wide, and a pointer on the
+    // card holds it open (at this window's 440 px a session's card reaches down over the composer's middle).
+    const box = (await composer.boundingBox())!;
+    await page.mouse.move(box.x + box.width - 8, box.y + box.height / 2);
+    await expect(page.locator('[data-hover-card]')).toHaveCount(0);
     await slashPaletteMovesNothing(page, 'a started session');
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
@@ -447,13 +562,14 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await expect(sidebar.getByRole('button', { name: 'Filter projects' })).toBeFocused();
     await sidebar.getByRole('searchbox').focus();
     await expect(page.locator('[data-hover-card]')).toHaveCount(0);
-    expect(await projectRows(sidebar)).toEqual([USAGE_PROJECT, 'codex_somersault', 'MAWS', 'Other sessions']);
-    expect(await rollups(sidebar)).toEqual({ [USAGE_PROJECT]: '●1', codex_somersault: '◐1', MAWS: '◐2●1', 'Other sessions': '' });
+    const here = await localName(page); // P5 O6 M5 (T3): the machine's own row, in place of "Other sessions"
+    expect(await projectRows(sidebar)).toEqual([USAGE_PROJECT, 'codex_somersault', 'MAWS', here]);
+    expect(await rollups(sidebar)).toEqual({ [USAGE_PROJECT]: '●1', codex_somersault: '◐1', MAWS: '◐2●1', [here]: '' });
     const pages: Record<string, string[]> = {
       MAWS: ['Workstation north star', FIX, SIP, 'Charter + research'],
       codex_somersault: [QUOTA, 'Somersault terminal run', 'Trace stream reconnects'],
       [USAGE_PROJECT]: ['Usage reset countdown', 'Settings idle probe', 'SDK wire inventory'],
-      'Other sessions': ['Terminal workflow notes'],
+      [here]: ['Terminal workflow notes'],
     };
     const glyphs: Record<string, string | null | undefined> = {};
     const unread: string[] = [];
@@ -534,7 +650,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
       MAWS: ['Charter + research'],
       codex_somersault: ['Somersault terminal run'],
       [USAGE_PROJECT]: ['Usage reset countdown', 'Settings idle probe'],
-      'Other sessions': ['Terminal workflow notes'],
+      [await localName(page)]: ['Terminal workflow notes'], // P5 O6 M5 (T3): its machine's, in place of "Other sessions"
     });
     const fixCard = board.getByRole('article', { name: FIX });
     await expect(fixCard.getByTestId('request-input')).toHaveText('git log --oneline');
@@ -726,6 +842,10 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     const stripBox = (await strip.boundingBox())!;
     await drag(page, await sidebarRow(page, 'Charter + research'), { x: stripBox.x + stripBox.width - 8, y: stripBox.y + stripBox.height / 2 });
     await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'the dropped row opens a tab' }).toEqual([three[0], three[2], 'Charter + research']);
+    // The drag's press left keyboard focus on the sidebar row. The palette below hands focus back where it found it when
+    // it closes after a keystroke, where it reads as the keyboard's and opens the row's hover card 300 ms later: on a slow
+    // runner over the next palette, which then loses its Escape to the card. The dropped session's tab takes the focus.
+    await page.getByRole('tab', { name: 'Charter + research' }).focus();
   });
 
   await test.step('Item 8: the ⌘K palette', async () => {
@@ -806,9 +926,9 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
         const main = (await layoutGet(page, 'main.tabs')) as { version: number; current: string; sets: Record<string, { panes: unknown[] }> };
         return [regions.sidebar.width, regions.panel.width, regions.panel.collapsed, regions.sidebar.expandedProjects.includes(usageProjectId), main.version, main.current, main.sets[main.current]?.panes.length];
       }, { message: 'the layout is written back' })
-      .toEqual([200, 320, true, true, 2, 'proj-maws', 2]);
+      .toEqual([200, 320, true, true, 3, await addressed(page, 'proj-maws'), 2]);
     // UX2 preserves the per-project layout and adds only the surface-selection key and this session's Files refs.
-    expect((await layoutList(page)).sort()).toEqual(['main.tabs', `panel.${CHARTER}`, 'panel.pinned', 'panelTools.surfaces', 'regions', 'window.main'].sort());
+    expect((await layoutList(page)).sort()).toEqual(['main.tabs', `panel.${await addressed(page, CHARTER)}`, 'panel.pinned', 'panelTools.surfaces', 'regions', 'window.main'].sort());
   });
 
   expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
@@ -877,9 +997,9 @@ async function openPalette(app: ElectronApplication, page: Page): Promise<void> 
 // Plays the scenario's timeline up to `ms` (the manual clock, MAWS_SCENARIO_CLOCK=manual).
 async function advanceTo(app: ElectronApplication, ms: number): Promise<void> {
   await app.evaluate((_electron, ms) => {
-    const scenario = (globalThis as { __maws_scenario?: { advanceTo(ms: number): void } }).__maws_scenario;
+    const scenario = (globalThis as { __maws_scenario?: { advanceTo(ms: number): unknown } }).__maws_scenario;
     if (!scenario) throw new Error('no scenario clock: the app is not in launch mode scenario with MAWS_SCENARIO_CLOCK=manual');
-    scenario.advanceTo(ms);
+    return scenario.advanceTo(ms); // M5b fix round 2: on the daemon shape a relay to mawsd, awaited (D11)
   }, ms);
 }
 

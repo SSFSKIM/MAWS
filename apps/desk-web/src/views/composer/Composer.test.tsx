@@ -131,6 +131,21 @@ describe('the session composer’s hint', () => {
   });
 });
 
+// The freeze's one seam (P5 O13 M6): a session on a machine moved to MAWS keeps its composer drawn, disabled, saying why.
+describe('a session on a machine moved to MAWS', () => {
+  it('draws the composer disabled with the reason, and sends nothing', () => {
+    mount(<SessionComposer session={{ ...session(S1, 'maws-45'), movedToMaws: true }} />);
+    const box = screen.getByRole('textbox', { name: 'Message maws-45' }) as HTMLTextAreaElement;
+    expect(box.disabled).toBe(true);
+    for (const verb of ['send', 'model', 'compact']) expect((document.querySelector(`[data-verb="${verb}"]`) as HTMLButtonElement).disabled, verb).toBe(true);
+    expect(screen.getByTestId('composer-note').textContent).toBe("moved to MAWS: its cards are on this phone's channel");
+    fireEvent.keyDown(box, { key: 'Enter' });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(say).not.toHaveBeenCalled();
+    expect(command).not.toHaveBeenCalled();
+  });
+});
+
 describe('Model', () => {
   it("offers the session's own default and the ids the project's sessions were seen answering from, never a bare alias", () => {
     noteModel('p1', 'claude-fable-5-1');

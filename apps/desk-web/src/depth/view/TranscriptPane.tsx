@@ -13,17 +13,18 @@ import type { TranscriptActions } from '../../../../../src/renderer/src/transcri
 import { Transcript, type TranscriptListHandle, type TranscriptProps } from '../../../../../src/renderer/src/transcript/view/Transcript';
 import { useAccess } from '../../hub/access';
 import type { DeskSession } from '../../shell/sessions';
-import type { DeskTranscript, DepthTranscriptState } from '../source/desk-transcript';
-import { reachOf, TranscriptKeeper } from '../source/keeper';
-import type { StreamBlock } from '../stream/layer';
-import { drawnRows } from './drawn-rows';
-import { useKeepPlaceThroughOlderRows } from './keep-place';
-import { useOlderPages } from './older-pages';
-import { latestTurn, streamingRows } from './streaming-rows';
+import type { PlaneTranscript, PlaneTranscriptState } from '../../../../../src/renderer/src/lane-a/plane-transcript';
+import { TranscriptKeeper } from '../../../../../src/renderer/src/lane-a/keeper';
+import { reachOf } from '../source/desk-source';
+import type { StreamBlock } from '../../../../../src/renderer/src/lane-a/stream/layer';
+import { drawnRows } from '../../../../../src/renderer/src/lane-a/view/drawn-rows';
+import { useKeepPlaceThroughOlderRows } from '../../../../../src/renderer/src/lane-a/view/keep-place';
+import { useOlderPages } from '../../../../../src/renderer/src/lane-a/view/older-pages';
+import { latestTurn, streamingRows } from '../../../../../src/renderer/src/lane-a/view/streaming-rows';
 
 const NO_ROWS: readonly Row[] = [];
 
-const ENDED: Record<NonNullable<DepthTranscriptState['ended']>['reason'], string> = {
+const ENDED: Record<NonNullable<PlaneTranscriptState['ended']>['reason'], string> = {
   'machine-offline': 'The machine is offline. The transcript resumes when it is back.',
   'session-ended': 'The session has ended.',
   unsubscribed: 'The hub stopped serving this transcript.',
@@ -50,7 +51,7 @@ export function transcriptStatus(state: PaneState): string {
  * A transcript's state as the pane draws it: the controller's, when the next retry after an end is due, and whether a
  * disruption is still quiet (`keeper.ts`).
  */
-export type PaneState = DepthTranscriptState & { retryIn?: number | null; quiet?: boolean };
+export type PaneState = PlaneTranscriptState & { retryIn?: number | null; quiet?: boolean };
 
 /** The pane's state of a kept transcript: its controller's, with the keeper's notice. */
 export function useKeptTranscript(keeper: TranscriptKeeper): PaneState {
@@ -63,7 +64,7 @@ export function useKeptTranscript(keeper: TranscriptKeeper): PaneState {
  * A transcript one view holds alone (a subagent's in the column): kept while mounted (`keeper.ts`), its store key
  * forgotten when it goes, so reopening draws a fresh snapshot.
  */
-export function useDeskTranscript(controller: DeskTranscript, session: DeskSession): PaneState {
+export function useDeskTranscript(controller: PlaneTranscript, session: DeskSession): PaneState {
   const [keeper] = useState(() => new TranscriptKeeper(controller, useTranscriptStore));
   const reach = reachOf(session);
   useEffect(() => {
@@ -75,7 +76,7 @@ export function useDeskTranscript(controller: DeskTranscript, session: DeskSessi
 }
 
 type PaneProps = {
-  controller: DeskTranscript;
+  controller: PlaneTranscript;
   state: PaneState;
   variant: 'session' | 'child';
   actions: Partial<TranscriptActions>;
@@ -132,7 +133,7 @@ export function TranscriptPane({ controller, state, variant, actions, list, owne
           {state.retryIn != null ? ` Trying again in ${Math.round(state.retryIn / 1000)} s.` : ''}
         </p>
       )}
-      <Transcript source={state.source} variant={variant} actions={actions} tail={tail} handle={list} className="min-h-0 flex-1" ownerLane={ownerLane} renderRequest={renderRequest} atRest={atRest} />
+      <Transcript source={state.source} variant={variant} actions={actions} tail={tail} handle={list} className="min-h-0 flex-1" ownerLane={ownerLane} renderRequest={renderRequest} atRest={atRest} browserActivity={false} />
     </>
   );
 }

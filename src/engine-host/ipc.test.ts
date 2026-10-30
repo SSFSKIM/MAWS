@@ -123,17 +123,19 @@ describe('x2 deadlines fit the bridge', () => {
   it('every host.* command the engine host owns has one deadline shape and a Supervision handler; stopAll alone is bounded', () => {
     const hostOwned = Object.entries(hostSchema.commands).filter(([, spec]) => spec.owner === 'engine-host').map(([name]) => name);
     expect(Object.keys(HOST_DEADLINE_SHAPES).sort()).toEqual(hostOwned.sort());
-    expect(HOST_DEADLINE_SHAPES).toEqual({ 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.op': 'bounded', 'host.opQuery': 'immediate' });
+    expect(HOST_DEADLINE_SHAPES).toEqual({ 'host.supervisorStatus': 'immediate', 'host.configure': 'immediate', 'host.stopAll': 'bounded', 'host.exitWhenIdle': 'immediate', 'host.interest': 'immediate' /* P5 O2 M2 */, 'host.op': 'bounded', 'host.opQuery': 'immediate', 'host.attachment': 'immediate' /* P5 O3-D */ });
+    // P5 O3-D M3: `host.attachment` sets the runtime's presence, registered beside it (attachment.ts)
+    const attachmentCommands = ['host.attachment'];
     // P5 O10 M7: lane B's operation ledger is the engine ipc's (ops.ts), not the supervisor's
     const ledgerCommands = ['host.op', 'host.opQuery'];
     expect([...engineHost().handlers.keys()].filter((name) => name.startsWith('host.')).sort()).toEqual(ledgerCommands);
     const registered: string[] = [];
     new Supervision({
-      mode: 'utility', identity: { pid: 1, startedAt: 't', buildId: 'b', protocol: 1, wire: 'w', socketPath: null, logPath: null } as never,
-      table: { onChange: () => () => {}, onRowsChanged: () => () => {}, setIdleRelease: () => {}, list: () => [] } as never,
-      plugins: { busy: () => false, onIdle: () => () => {} }, shutdown: async () => ({ stopped: 0, forced: 0 }), emit: () => true, log: () => {},
+      mode: 'utility', identity: { pid: 1, startedAt: 't', buildId: 'b', protocol: 1, wire: 'w', socketPath: null, logPath: null } as never, role: 'laptop',
+      table: { onChange: () => () => {}, onRowsChanged: () => () => {}, setIdleRelease: () => {}, setInterest: () => {}, list: () => [] } as never,
+      plugins: { busy: () => false, onIdle: () => () => {}, onBusy: () => () => {} }, shutdown: async () => ({ stopped: 0, forced: 0 }), emit: () => true, log: () => {},
     }).register((name) => void registered.push(name), { onConnect: () => {} });
-    expect(registered.sort()).toEqual(hostOwned.filter((name) => !ledgerCommands.includes(name)).sort());
+    expect(registered.sort()).toEqual(hostOwned.filter((name) => !ledgerCommands.includes(name) && !attachmentCommands.includes(name)).sort());
   });
 
   it('every bounded wait fits under the router\'s 10 s with the two IPC hops to spare', () => {
@@ -366,9 +368,9 @@ describe('engine host X2 surface', () => {
   });
 
   // P5 O10 M8: the broker's items as a read, the same list `session.brokerItems` last published
-  it('session.pendingItems answers the session’s pending items: the permission while it waits, none once it is answered', async () => {
+  it('session.pendingItems answers the session’s pending items, and engine.pendingItems every session’s count waiting on an answer: the permission while it waits, none once it is answered', async () => {
     const { O10_DEADLINE_SHAPES } = await import('./ipc');
-    expect(O10_DEADLINE_SHAPES).toEqual({ 'session.pendingItems': 'immediate' });
+    expect(O10_DEADLINE_SHAPES).toEqual({ 'session.pendingItems': 'immediate', 'engine.pendingItems': 'immediate' });
     const host = engineHost();
     expect(host.handlers.has('session.pendingItems')).toBe(true);
     const id = 'app-items';
@@ -381,11 +383,14 @@ describe('engine host X2 surface', () => {
     const read = await host.call('session.pendingItems', { appSessionId: id as AppSessionId });
     expect(read.items).toMatchObject([{ kind: 'permission', state: 'pending' }]);
     expect(read).toEqual({ items: published.items });
+    // P5 O10: every row's count at once, the endpoint's restatement of lane B's counts
+    expect(await host.call('engine.pendingItems', undefined)).toEqual({ sessions: [{ appSessionId: id, waiting: 1 }] });
     const requested = host.events(id).find((e) => e.kind === 'permission.requested') as Extract<SessionEvent, { kind: 'permission.requested' }>;
     await host.call('session.answer', { appSessionId: id as AppSessionId, requestId: requested.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } });
     await until(() => host.events(id).some((e) => e.kind === 'turn.ended'), 'turn.ended');
     expect((await host.call('session.pendingItems', { appSessionId: id as AppSessionId })).items.filter((i) => i.state === 'pending')).toEqual([]);
     await expect(host.call('session.pendingItems', { appSessionId: 'app-none' as AppSessionId })).rejects.toThrow(/unknown session/);
+    expect(await host.call('engine.pendingItems', undefined)).toEqual({ sessions: [] });
     await host.call('session.stop', { appSessionId: id as AppSessionId, reason: 'stop' });
   });
 
@@ -979,11 +984,12 @@ describe('maws.* commands (E1 M1)', () => {
     await host.ipc.table.get(id)!.exited;
   });
 
-  // E10 (X13, §Design 4): the runtime's hasClient reaches each session's bridges through the launcher, so with no app
-  // connected a show_pane fails at once with appNotOpen and no maws.pane.show is emitted
-  it('answers show_pane with appNotOpen at once and emits nothing when no client is connected', async () => {
+  // E10 (X13, §Design 4): the app's presence reaches each session's bridges through the launcher, so with no app
+  // attached a show_pane fails at once with appNotOpen and no maws.pane.show is emitted; P5 O3-D M3: the presence, not the
+  // connection, which stays (`mawsd`'s permanent link with no app attached)
+  it('answers show_pane with appNotOpen at once and emits nothing when no app is attached, its client connected', async () => {
     const transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder()) });
-    const host = engineHost({ spawn: () => transport, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }), hasClient: () => false });
+    const host = engineHost({ spawn: () => transport, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }), hasClient: () => true, appAttached: () => false });
     const id = 'app-ipc' as AppSessionId;
     await host.call('session.launch', { spec: spec() });
     await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
@@ -1154,9 +1160,12 @@ describe('the capture bridge and an agent’s downloads (E2 M1, E13)', () => {
     const launch = commands['session.launch'].input;
     expect(launch.safeParse({ spec: spec(), artifactScope: [parent] }).success).toBe(true);
     expect(launch.safeParse({ spec: spec(), artifactScope: Array.from({ length: 17 }, (_, k) => `app-${k}`) }).success).toBe(false);
+    // A launch answers before its process spawns (the session loads its state first), so two launches in flight spawn in
+    // either order; the queue hands transports out in spawn order, so the thread launches once the parent's process is up.
     await host.call('session.launch', { spec: spec({ appSessionId: parent }) });
+    await until(() => host.statuses(parent).some((s) => s.process === 'ready'), 'the parent ready');
     await host.call('session.launch', { spec: spec({ appSessionId: thread }), artifactScope: [parent] });
-    await until(() => host.statuses(parent).some((s) => s.process === 'ready') && host.statuses(thread).some((s) => s.process === 'ready'), 'both ready');
+    await until(() => host.statuses(thread).some((s) => s.process === 'ready'), 'the thread ready');
     const call = (transport: ScriptedTransport, requestId: string, name: string, args: unknown) =>
       transport.push({ type: 'control_request', request_id: requestId, request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name, arguments: args } } } });
     const answerOf = (transport: ScriptedTransport, requestId: string) =>
@@ -1291,3 +1300,52 @@ describe('session.steer.cancel and session.promptHistory (P2-C M3)', () => {
   });
 });
 // P2-C end
+
+// P5 O2 M2: the owner's Keep running mark (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M2 "Keep")
+describe('session.setKeep (P5 O2 M2)', () => {
+  it('has one immediate deadline shape and a handler', async () => {
+    const { P5O2_DEADLINE_SHAPES } = await import('./ipc');
+    const { P5O2_SESSION_COMMANDS } = await import('@shared/ipc/schema/session');
+    expect(P5O2_DEADLINE_SHAPES).toEqual({ 'session.setKeep': 'immediate' });
+    expect(Object.keys(P5O2_DEADLINE_SHAPES)).toEqual([...P5O2_SESSION_COMMANDS]);
+    expect(engineHost().handlers.has('session.setKeep')).toBe(true);
+  });
+
+  it('persists the mark in the state file, sets it on the live row, and the status reports it; the next launch reads it', async () => {
+    const store = new FileSessionStateStore(userData);
+    const table = new ProcessTable({ ps: async () => '' });
+    let transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder({ end_session: () => null })) });
+    const host = engineHost({ table, store, spawn: () => transport, binaryProbe: async () => OK_BINARY, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const id = 'app-ipc' as AppSessionId;
+    await host.call('session.launch', { spec: spec() });
+    await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
+    expect(table.get(id)!.status().kept).toBe(false);
+    expect(await host.call('session.setKeep', { appSessionId: id, keep: true })).toEqual({ kept: true });
+    expect(host.statuses(id).at(-1)!.kept).toBe(true);
+    expect(await store.loadKeep(id)).toBe(true);
+    const stopping = host.call('session.stop', { appSessionId: id, reason: 'stop' });
+    await until(() => transport.requestsOf('end_session').length === 1, 'end_session');
+    transport.exit(0);
+    await stopping;
+    expect(await host.call('session.setKeep', { appSessionId: id, keep: true })).toEqual({ kept: true }); // an exited row takes it too
+    transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder({ end_session: () => null })) });
+    const before = host.statuses(id).length;
+    await host.call('session.launch', { spec: spec({ resume: { sessionId: '44444444-4444-4444-8444-444444444444' as never, fork: false } }) });
+    await until(() => host.statuses(id).slice(before).some((s) => s.process === 'ready'), 'the relaunch ready');
+    expect(host.statuses(id).slice(before).every((s) => s.kept === true)).toBe(true); // read from the state file before its first status
+    const stopAgain = host.call('session.stop', { appSessionId: id, reason: 'stop' });
+    await until(() => transport.requestsOf('end_session').length === 1, 'end_session');
+    transport.exit(0);
+    await stopAgain;
+  });
+
+  it('a session with a state file and no row takes the mark; one the host never saw is unknown', async () => {
+    const store = new MemorySessionStateStore();
+    await store.saveQueue('app-off' as AppSessionId, { entries: [], paused: false });
+    const host = engineHost({ store });
+    expect(await host.call('session.setKeep', { appSessionId: 'app-off' as AppSessionId, keep: true })).toEqual({ kept: true });
+    expect(store.keeps.get('app-off' as AppSessionId)).toBe(true);
+    await expect(host.call('session.setKeep', { appSessionId: 'app-never' as AppSessionId, keep: true })).rejects.toThrow('unknown session app-never');
+    expect(store.keeps.has('app-never' as AppSessionId)).toBe(false);
+  });
+});

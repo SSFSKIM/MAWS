@@ -6,7 +6,7 @@ import { BROWSER_SET_LIMIT, newNonce, seal, importOrgKey, type HumanDraft, type 
 import { DOUBLE_MEMBER, HubDouble } from '../../test/double/hub-double';
 import { VECTOR_KEY, VECTOR_PROJECT as PROJECT } from '../../test/vectors';
 import { ProjectClient, type ConnectionStatus, type RpcStateFrame } from './project-client';
-import type { SubscriptionListener } from '../shell/session-plane';
+import type { SubscriptionListener } from '../../../../src/renderer/src/lane-a/session-plane';
 import { catalogs, catalogKey } from '../state/catalog';
 import type { Catalog } from 'desk-hub/protocol';
 import { latency } from '../latency/latency';
@@ -33,7 +33,7 @@ afterEach(async () => {
   await double.close();
 });
 
-function client(options: { beforeFrame?: () => boolean; held?: () => number; frameLimit?: number; resubscribeDelay?: (attempt: number) => number; readTimeoutMs?: number } = {}) {
+function client(options: { beforeFrame?: () => boolean; held?: () => number; frameLimit?: number; resubscribeDelay?: (attempt: number) => number; readTimeoutMs?: number; movedToMaws?: (machine: string) => boolean } = {}) {
   const got: Array<{ offset: number; event: LogEvent }> = [];
   const statuses: ConnectionStatus[] = [];
   const caughtUp: number[] = [];
@@ -47,6 +47,7 @@ function client(options: { beforeFrame?: () => boolean; held?: () => number; fra
     frameLimit: options.frameLimit,
     resubscribeDelay: options.resubscribeDelay,
     readTimeoutMs: options.readTimeoutMs,
+    movedToMaws: options.movedToMaws,
     handlers: {
       beforeFrame: options.beforeFrame,
       held,
@@ -259,6 +260,28 @@ describe('what goes up', () => {
     await until(() => caughtUp.length === 4);
     await new Promise((r) => setTimeout(r, 50));
     expect(sent()).toBe(3);
+  });
+
+  // The freeze's seam at the send boundary (P5 O13 M6b): a machine moved to MAWS refuses every DX6 request, and this
+  // client sends it none — a new one, an uncertain one's Retry, or one kept to be sent again at the next welcome.
+  it('sends nothing to a machine moved to MAWS: not a new RPC, not a retry, not one kept from before it moved', async () => {
+    const moved = new Set<string>();
+    const { c, caughtUp } = client({ movedToMaws: (machine) => moved.has(machine) });
+    await until(() => caughtUp.length === 1);
+    const sent = () => double.up.filter((u) => u.frame.t === 'rpc').length;
+    const rpc = rpcTo();
+    expect(c.sendRpc(rpc)).toBe(true);
+    await until(() => sent() === 1);
+    double.answerRpc(PROJECT, rpc.nonce, 'uncertain');
+    moved.add('mini'); // the machine cuts over while the RPC's result is unknown
+    expect(c.sendRpc(rpcTo())).toBe(false);
+    expect(c.resendRpc(rpc)).toBe(false);
+    double.dropConnections();
+    await until(() => caughtUp.length === 2);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sent()).toBe(1);
+    expect(c.sendRpc({ ...rpcTo(), machine: 'SK.local' })).toBe(true); // another machine's are sent as ever
+    await until(() => sent() === 2);
   });
 
   it('cuts a large frame into parts on the way up', async () => {

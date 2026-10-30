@@ -1,12 +1,13 @@
 // `mawsd endpoint` commands that need no hub (O10 M2): the policy, a state delivered by hand (`revoke`), a grant kept
 // out of band by the ledger's rule, the legacy key following the head's retirement, and the refusals around them; and
-// O14 M1's local `unenroll` and `retire`'s refusal of an attended enrollment.
+// O14 M1's local `unenroll` and `retire`'s refusal of an attended enrollment; and O14 M4's `attest-history` one run at a
+// time, against a stand-in for the hub's history inventory.
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { endorseDevice, generateSigningKey, keyId, NO_CERTIFICATES, SIGNING_DOMAINS, signRecord, type Grant, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import { encodeEnrollmentCodeV2 } from 'desk-hub/protocol';
-import { createEndpoint, type Endpoint } from '../../src/endpoint';
+import { createEndpoint, type Endpoint, type EndpointOptions } from '../../src/endpoint';
 import { EndpointOrg } from '../../src/endpoint/org-sync';
 import { EndpointState } from '../../src/endpoint/state/store';
 import { fakeServices, type FakeServices } from './fake-services';
@@ -19,7 +20,7 @@ const ORG = 'org-cli';
 type Enrolled = { endpoint: Endpoint; head: SignedOrgState; a1: TestDevice; A: string; machineKey: string; recovery: SigningKey };
 
 /** A started endpoint enrolled in ORG, whose head lists the machine owned by A. */
-async function enrolled(): Promise<Enrolled> {
+async function enrolled(options?: EndpointOptions): Promise<Enrolled> {
   services = fakeServices();
   const ref = services.machine.ref;
   const state = EndpointState.open(services.machine.stateDir);
@@ -38,7 +39,7 @@ async function enrolled(): Promise<Enrolled> {
   });
   state.setOrg({ version: 1, org: ORG, pinned: { roots: s1.state.root.keys, recoveryPub: recovery.pub }, head: null, chain: [], hashes: [], certificates: NO_CERTIFICATES, acceptedTransitions: [], highWater: 0 });
   await new EndpointOrg(state, { log: () => {} }).adopt([s1, s2], []);
-  const endpoint = createEndpoint();
+  const endpoint = createEndpoint(options);
   await endpoint.start(services);
   return { endpoint, head: s2, a1, A, machineKey, recovery };
 }
@@ -339,6 +340,51 @@ describe('unenroll and retire, with no hub (O14 M1)', () => {
     expect((await endpoint.cli('retire', ['--not-after', 'tomorrow'])).code).toBe(1);
     expect((await endpoint.cli('unenroll', [])).code).toBe(0);
     expect(await endpoint.cli('retire', [])).toEqual({ code: 0, out: 'nothing to retire: this machine holds no certificate and no credential' });
+    await endpoint.stop();
+  });
+});
+
+// `attest-history` (O14 M4) reads every inventory writer's events from the hub, minutes on a machine with hundreds of
+// writers: while one run is in progress, attesting or checking, another is refused rather than started beside it.
+describe('attest-history: one run at a time', () => {
+  it('refuses a second run, attesting or checking, while one reads the hub; once it ends, failed or not, the next one runs', async () => {
+    let release = () => {};
+    const held = new Promise<void>((done) => (release = done));
+    const inventories: string[] = [];
+    let refuseNext = false;
+    const { endpoint } = await enrolled({
+      fetch: async (input) => {
+        const url = new URL(String(input));
+        if (url.pathname !== '/machine/history-inventory') throw new TypeError('fetch failed'); // no hub: the org sync's reads fail
+        inventories.push(url.search);
+        if (inventories.length === 1) await held; // the first run's read, until released
+        if (refuseNext) return (refuseNext = false), Response.json({ error: 'unavailable' }, { status: 503 });
+        return Response.json({ projects: [] });
+      },
+    });
+    const first = endpoint.cli('attest-history', ['--check']);
+    for (const args of [['--check'], [], ['--check', '--project', 'p', '--json']]) {
+      const refused = await endpoint.cli('attest-history', args);
+      expect(refused.code, args.join(' ')).toBe(1);
+      expect(refused.out).toMatch(/^attest-history --check has been in progress since \d{4}-\d\d-\d\dT[\d:.]+Z: /);
+    }
+    release();
+    expect(await first).toEqual({ code: 0, out: 'no DX1 writer under mini' });
+    expect(inventories).toHaveLength(1); // the refused runs read nothing
+    refuseNext = true;
+    expect(await endpoint.cli('attest-history', ['--check'])).toMatchObject({ code: 1, out: expect.stringMatching(/^attest-history failed: /) as string });
+    expect(await endpoint.cli('attest-history', ['--check', '--json'])).toEqual({ code: 0, out: JSON.stringify({ names: ['mini'], writers: [] }) });
+    expect(inventories).toHaveLength(3);
+    // Each run's start and end are in mawsd's log, where a caller that stopped waiting finds its outcome.
+    const said = services.lines.filter((line) => line.startsWith('endpoint: attest-history'));
+    expect(said).toEqual([
+      'endpoint: attest-history --check started under mini',
+      'endpoint: attest-history --check ended, exit 0: no DX1 writer under mini',
+      'endpoint: attest-history --check started under mini',
+      expect.stringMatching(/^endpoint: attest-history --check failed: /) as string,
+      'endpoint: attest-history --check started under mini',
+      'endpoint: attest-history --check ended, exit 0: no DX1 writer under mini',
+    ]);
     await endpoint.stop();
   });
 });

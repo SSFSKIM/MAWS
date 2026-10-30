@@ -5,9 +5,10 @@ import { EditorView } from '@tiptap/pm/view';
 import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import type { Draft } from '@shared/ipc/schema/session';
 import { fakeClient } from '../../../../../test/support/fake-client';
+import { at, TEST_MACHINE } from '../../../../../test/support/machine';
 import { connectKeys } from '../../keymap/dispatcher';
 import { resetCatalogStore } from '../../stores/catalog';
 import { prefillComposer, resetComposerStore, useComposerStore } from '../../stores/composer';
@@ -17,9 +18,10 @@ import { docOf, hardBreak, paragraph, pastedNode, textNode } from './doc';
 import { Editor, type DraftPort, type EditorHandle } from './Editor';
 import type { Serialized } from './serialize';
 
-const APP = 'app-1' as AppSessionId;
+const APP = at('app-1' as AppSessionId); // P5 O6 M2: the page's id; `client` is the page's client
 
 const client = {
+  localMachine: TEST_MACHINE,
   invoke: vi.fn(async (name: string) => (name === 'session.history.list' ? { ok: true, value: { entries: [] } } : { ok: false, error: { code: 'internal', message: 'no session' } })),
   on: () => () => {},
   pathForFile: () => '',
@@ -279,7 +281,7 @@ describe('the editor mounts over its draft, takes prefills and submits through t
 
   it('the @ menu holds Enter while its file search lags the query: never the half-typed token, never a stale row', async () => {
     const fake = fakeClient();
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge; // main's side
     try {
       const onSubmit = vi.fn<(s: Serialized) => Promise<boolean>>(async () => false);
       const { port } = drafts(null);
@@ -318,7 +320,7 @@ describe('the editor mounts over its draft, takes prefills and submits through t
         { directory: '/repo', query: 'src/b', limit: 30 },
       ]);
     } finally {
-      delete (window as { maws?: MawsBridge }).maws;
+      delete (window as { maws?: PreloadBridge }).maws;
     }
   });
 

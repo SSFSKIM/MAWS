@@ -1,13 +1,17 @@
 // An answer from the phone (P5 O13 M4, §D; RL4, RL §5.10): the one kind of action a `web-cards` device sends. Exactly
-// five forms, nothing else built (the endpoint refuses the rest `class`, O10 §G):
+// seven forms, nothing else built (the endpoint refuses the rest `class`, O10 §G):
 //   lane A question     sminos.answer   args { session, answers, digest }
 //   lane A permission   sminos.decide   args { session, decision: 'allow' | 'deny', digest }        no scope, no message
+//   lane A decline      sminos.decide   args { session, decision: 'deny', digest }                  a native question's
 //   lane B              session.answer  args { appSessionId, requestId, answer }, the answer one of
 //                         { kind: 'permission', decision: 'allow', scope: 'once' }   Allow
-//                         { kind: 'permission', decision: 'deny' }                    Deny: no scope (the schema forbids it)
+//                         { kind: 'permission', decision: 'deny' }                    Deny: no scope (the schema forbids it),
+//                                                                                     and a question's decline
 //                         { kind: 'question', answers }                               keyed by question text
-// each with its session's context (lane A `{lane, session, launch}`, lane B `{lane, launchId, engineSessionId}`) and
-// the request digest the card drew. An answer seals its operation with a fresh nonce and time and a WebAuthn assertion
+// A question is declined as DX6 and Esc in the terminal decline it: on lane B the plain deny the engine reads as the
+// question skipped (`isQuestionSkip`), which the endpoint admits a `web-cards` device on a pending native question
+// alone; an async question is answered, never declined. Each answer goes with its session's context (lane A `{lane, session, launch}`, lane B `{lane, launchId, engineSessionId}`) and the request digest the
+// card drew. An answer seals its operation with a fresh nonce and time and a WebAuthn assertion
 // whose challenge is the action's digest (one gesture each), sends `act`, and reads `ack` then `done`.
 //
 // A `done` is an envelope: its outcome is normalized here before any view sees it (`outcomeOf`). No `ack` within 10 s,
@@ -18,12 +22,14 @@
 import { actionDigest, base64urlEncode, NONCE_BYTES, type Action, type DeviceIdentity } from 'org-protocol';
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { Assert } from './cards-passkey';
+import { isAsyncQuestion } from '../conversation/card-state';
 import { cardKind, unanswerable, type Card } from './cards';
 import type { MachineChannel } from './client';
 
 export type { Assert } from './cards-passkey';
 
-export type Answer = { kind: 'question'; answers: Record<string, string> } | { kind: 'decision'; decision: 'allow' | 'deny' };
+/** A question's answers, a permission's decision, or a question declined. */
+export type Answer = { kind: 'question'; answers: Record<string, string> } | { kind: 'decision'; decision: 'allow' | 'deny' } | { kind: 'decline' };
 
 /** What the ledgers' fingerprint binds: the action less what each sealing changes. Retained per card for the tab's life. */
 export type Operation = Omit<Action, 'nonce' | 'created' | 'stepUp' | 'webauthn'>;
@@ -51,21 +57,23 @@ export function operationFor(identity: DeviceIdentity, machine: string, card: Ca
   const blocked = unanswerable(card);
   if (blocked !== null) throw new AnswerError(blocked.text);
   const kind = cardKind(card);
-  if ((kind === 'question') !== (given.kind === 'question')) throw new AnswerError(`a ${kind} card takes no ${given.kind === 'question' ? 'answers' : 'decision'}`);
+  // A question takes answers or a decline, any other card a decision.
+  if ((kind === 'question') === (given.kind === 'decision')) throw new AnswerError(`a ${kind} card takes no ${given.kind === 'question' ? 'answers' : given.kind}`);
   const head = { v: 1 as const, org: identity.org, machine, device: identity.device, opId: random(16), opCreated: new Date(now).toISOString() };
   if (card.lane === 'A') {
     const session = card.raised.session;
     const digest = card.digest;
     const common = { ...head, session, context: { lane: 'A' as const, session, launch: card.launch! }, requestDigest: digest };
+    if (given.kind === 'decline' && isAsyncQuestion(card.raised as Parameters<typeof isAsyncQuestion>[0])) throw new AnswerError('an async question is answered, never declined');
     return given.kind === 'question'
       ? { ...common, action: 'sminos.answer', args: { session, answers: given.answers, digest } }
-      : { ...common, action: 'sminos.decide', args: { session, decision: given.decision, digest } };
+      : { ...common, action: 'sminos.decide', args: { session, decision: given.kind === 'decline' ? 'deny' : given.decision, digest } };
   }
   const appSessionId = card.item.appSessionId;
   const answer: RequestAnswer =
     given.kind === 'question'
       ? { kind: 'question', answers: given.answers }
-      : given.decision === 'allow'
+      : given.kind === 'decision' && given.decision === 'allow'
         ? { kind: 'permission', decision: 'allow', scope: 'once' }
         : { kind: 'permission', decision: 'deny' };
   return {

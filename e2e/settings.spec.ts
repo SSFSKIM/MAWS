@@ -13,6 +13,8 @@ import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { TESTED_ENGINE_VERSION } from '../src/engine-host/engine-compat';
 import { launchMaws, REPO_ROOT } from './support/launch';
+import { invoke, value } from './support/c7-replay'; // P5 O3-D M5b: the shape flip's raw reads
+import { isAlive } from './support/processes';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
 const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
@@ -32,7 +34,9 @@ async function menu(app: ElectronApplication, id: string): Promise<void> {
 const accelerator = (app: ElectronApplication, id: string) => app.evaluate(({ Menu }, id) => Menu.getApplicationMenu()?.getMenuItemById(id)?.accelerator ?? null, id);
 const panel = (page: Page) => page.locator('[data-region="main"]').getByRole('tabpanel');
 const keyRow = (page: Page, title: string) => panel(page).getByRole('table', { name: 'Key bindings' }).getByRole('row', { name: title, exact: true });
-const readSettings = (userData: string) => JSON.parse(readFileSync(join(userData, 'settings.json'), 'utf8')) as Record<string, unknown> & { version: number; keymap: object; gateway: object; permissions: object };
+// P5 O3-A (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §3): the client's file and the machine's, each its owner's fields
+const readSettings = (userData: string) => JSON.parse(readFileSync(join(userData, 'settings.json'), 'utf8')) as Record<string, unknown> & { version: number; keymap: object };
+const readMachineSettings = (userData: string) => JSON.parse(readFileSync(join(userData, 'machine-settings.json'), 'utf8')) as Record<string, unknown> & { version: number; engine: object; gateway: object; permissions: object };
 
 test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, refused, unbound and reset; the route and policy persist', async () => {
   test.setTimeout(120_000);
@@ -50,26 +54,31 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
       // P2-C: to version 13, with the to-human lane and its two notification groups on. P3-D: to version 14, with the
       // house design system as the default and no Space defaults. P4-B1: to version 15, with the comments view expanded.
       // P4-R8: to version 16, with no app MCP servers. P4-A2: to version 17, with the launch profile at the user scope.
-      // UX1: to version 18. Then to version 19, the launch profile without an output style.
-      expect(readSettings(userData)).toMatchObject({
-        version: 19, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17; UX1: 18; the style removed: 19
-        sessions: { archiveInactiveDays: null },
+      // UX1: to version 18. Then to version 19, the launch profile without an output style. P5 O2 M7: to version 20,
+      // under the machine daemon (the harness still runs its hosts in the app). P5 O3-A: then split by owner, exactly:
+      // settings.json the client's fields at version 21, machine-settings.json the machine's at its own version 1.
+      expect(readSettings(userData)).toEqual({
+        version: 21, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17; UX1: 18; the style removed: 19; P5 O2: 20; P5 O3-A: 21
         theme: 'system',
         keymap: { 'attention.next': 'Cmd+Alt+J' },
         notifications: { enabled: false, sound: true, kinds: { turnFinished: true, approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false, asyncInput: true, essential: true /* P2-C */ } },
-        engine: { binaryPath: null, subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [] /* C12 */, memoryBudget: { enabled: true } /* W7 */, mcpServers: [] /* P4-R8 */, launchProfile: { plugins: { off: [] }, hooks: 'user' } /* P4-A2 */ }, // W13: no pinnedVersion
-        gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', offerDirect: true },
         usage: { nearLimitPercent: 90 },
         appearance: { monoFont: null, transcriptWidth: 768 /* W2 */ },
-        permissions: { autoFallback: 'acceptEdits' }, // W3
         voice: { locale: null }, // E9
-        supervisor: { idleExitMinutes: 10, keepRunningDefault: true }, // E10
+        supervisor: { keepRunningDefault: true, shape: 'daemon' }, // E10; P5 O2 M7: the machine daemon
         browser: { profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app', bookmarksBar: 'shown' }, // E4a; cua #90
-        mods: { toHuman: { enabled: true } }, // P2-C
-        artifacts: { defaultDesignSystem: null, spaceDesignSystems: {}, commentsView: 'expand' }, // P3-D; P4-B1
+        artifacts: { commentsView: 'expand' }, // P4-B1
       });
-      expect(readSettings(userData).engine).not.toHaveProperty('pinnedVersion'); // W13
-      expect(readSettings(userData).engine).toHaveProperty('launchProfile', { plugins: { off: [] }, hooks: 'user' }); // version 19: exactly, no output style
+      expect(readMachineSettings(userData)).toEqual({
+        version: 1, // P5 O3-A
+        engine: { binaryPath: null, subagentModel: null, memoryBudgetMiB: null, statefulMcpServers: [] /* C12 */, memoryBudget: { enabled: true } /* W7 */, mcpServers: [] /* P4-R8 */, launchProfile: { plugins: { off: [] }, hooks: 'user' } /* P4-A2; version 19: exactly, no output style */ }, // W13: no pinnedVersion
+        gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', offerDirect: true },
+        permissions: { autoFallback: 'acceptEdits' }, // W3
+        mods: { toHuman: { enabled: true } }, // P2-C
+        supervisor: { idleExitMinutes: 10 }, // E10
+        artifacts: { defaultDesignSystem: null, spaceDesignSystems: {} }, // P3-D
+        sessions: { archiveInactiveDays: null }, // UX1
+      });
 
       // Settings… sits in the application menu at ⌘, and opens the singleton tab.
       expect(await accelerator(app, 'settings.open')).toBe('Cmd+,');
@@ -81,7 +90,7 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
       await expect(fallback.locator('option')).toHaveText(['Manual', 'Accept edits', 'Plan', 'Bypass permissions', "Don't ask"]);
       await expect(fallback).toHaveValue('acceptEdits');
       await fallback.selectOption({ label: 'Plan' });
-      await expect.poll(() => readSettings(userData).permissions).toEqual({ autoFallback: 'plan' });
+      await expect.poll(() => readMachineSettings(userData).permissions).toEqual({ autoFallback: 'plan' });
 
       // Record ⌘⇧U for Next Needs-you: the row and the Go menu's item follow.
       const next = keyRow(page, 'Next Needs-you');
@@ -111,8 +120,8 @@ test('settings: a v2 file migrates; ⌘, opens the tab; a chord is recorded, ref
       const gateway = panel(page).getByRole('region', { name: 'Gateway' });
       await gateway.getByRole('radio', { name: 'Direct' }).check();
       await gateway.getByRole('combobox', { name: 'Relay unreachable at launch' }).selectOption('wait');
-      await expect.poll(() => readSettings(userData).gateway).toEqual({ defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: true });
-      expect(readSettings(userData).permissions).toEqual({ autoFallback: 'plan' });
+      await expect.poll(() => readMachineSettings(userData).gateway).toEqual({ defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: true });
+      expect(readMachineSettings(userData).permissions).toEqual({ autoFallback: 'plan' });
       expect(readSettings(userData).keymap).toEqual({});
       expect(maws.consoleErrors()).toEqual([]);
     } finally {
@@ -161,8 +170,10 @@ test('settings: the to-human switch and the two notification groups for an agent
       await expect(kinds.getByRole('checkbox', { name: 'must-read messages' })).not.toBeChecked();
       await expect
         .poll(() => {
-          const file = readSettings(userData) as unknown as { mods: { toHuman: { enabled: boolean } }; notifications: { kinds: { asyncInput: boolean; essential: boolean } } };
-          return [file.mods.toHuman.enabled, file.notifications.kinds.asyncInput, file.notifications.kinds.essential];
+          // P5 O3-A: the to-human switch is the machine's (the owner channel's launch decision), the kinds the client's
+          const machine = readMachineSettings(userData) as unknown as { mods: { toHuman: { enabled: boolean } } };
+          const file = readSettings(userData) as unknown as { notifications: { kinds: { asyncInput: boolean; essential: boolean } } };
+          return [machine.mods.toHuman.enabled, file.notifications.kinds.asyncInput, file.notifications.kinds.essential];
         })
         .toEqual([false, true, false]);
       expect(maws.consoleErrors()).toEqual([]);
@@ -548,4 +559,58 @@ test('Customize and Projects are reachable without a chat, at desktop and narrow
       expect(await page.evaluate(async () => { const snapshot = await window.maws.invoke('session.list', {}); return snapshot.ok ? snapshot.value.sessions.length : -1; })).toBe(0);
     } finally { await maws.cleanup(); }
   } finally { rmSync(userData, { recursive: true, force: true }); }
+});
+
+// P5 O3-D M5b (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, acceptance 2): the profile flips between the shapes
+// by the client file's `supervisor.shape`, read at the next launch, and the spine's one writer follows it: on the daemon
+// shape `mawsd` holds spine.lock; on the embedded shape main does, the launch having ended the profile's `mawsd`; and back.
+// Each launch's app is closed rather than cleaned up, so the profile's processes live on into the next launch as an
+// owner's would; the cleanups run at the end.
+test('settings: the shape flips by the client file, and spine.lock names the spine’s one writer on each shape', async () => {
+  test.setTimeout(180_000);
+  const userData = realpathSync(mkdtempSync(join(tmpdir(), 'maws-e2e-shape-')));
+  const lockPid = () => {
+    try {
+      return (JSON.parse(readFileSync(join(userData, 'spine.lock'), 'utf8')) as { pid: number }).pid;
+    } catch {
+      return null;
+    }
+  };
+  const status = async (page: Page) => value(await invoke(page, 'host.status', undefined));
+  const launches: Awaited<ReturnType<typeof launchMaws>>[] = [];
+  try {
+    // the daemon shape (the default): mawsd holds the lock
+    const first = await launchMaws({ userData });
+    launches.push(first);
+    const before = await status(first.page);
+    expect(before.transport).toBe('daemon');
+    const daemon = before.daemon!.pid;
+    await expect.poll(lockPid, { timeout: 30_000, message: 'mawsd holds spine.lock' }).toBe(daemon);
+    value(await invoke(first.page, 'settings.set', { supervisor: { shape: 'embedded' } }));
+    expect(readSettings(userData)).toMatchObject({ supervisor: { shape: 'embedded' } });
+    await first.app.close();
+    expect(isAlive(daemon), 'mawsd outlives the app that quit').toBe(true);
+
+    // embedded: the launch ends mawsd, and main composes the spine and holds the lock
+    const second = await launchMaws({ userData });
+    launches.push(second);
+    expect((await status(second.page)).transport).not.toBe('daemon');
+    await expect.poll(() => isAlive(daemon), { timeout: 15_000, message: 'the embedded launch ended the profile’s mawsd' }).toBe(false);
+    await expect.poll(lockPid, { timeout: 30_000, message: 'main holds spine.lock' }).toBe(second.app.process().pid);
+    value(await invoke(second.page, 'settings.set', { supervisor: { shape: 'daemon' } }));
+    await second.app.close();
+    await expect.poll(lockPid, { timeout: 10_000, message: 'main released spine.lock at its exit' }).toBeNull();
+
+    // daemon again: the next launch runs the spine in a mawsd of its own
+    const third = await launchMaws({ userData });
+    launches.push(third);
+    const after = await status(third.page);
+    expect(after.transport).toBe('daemon');
+    expect(after.daemon!.pid).not.toBe(daemon);
+    await expect.poll(lockPid, { timeout: 30_000, message: 'the new mawsd holds spine.lock' }).toBe(after.daemon!.pid);
+    expect(after.spineRefused).toBeNull();
+  } finally {
+    for (const launch of launches.reverse()) await launch.cleanup().catch((error: unknown) => console.error(error));
+    rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
 });

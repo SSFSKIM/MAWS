@@ -24,6 +24,7 @@ import { connectPluginPanes, resetPaneRosters } from './panes';
 import { pluginPaneTool } from './PaneTool';
 import { resetSurfaceRegistry } from './registry';
 import { usePaneRosters } from './pane-roster';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 
 // The Pane answer of the fixture (seq 58).
 const PANE_ANSWER = (() => {
@@ -37,7 +38,7 @@ const pane = (id: string, title: string) => ({ id, title, plugin: 'mods-probe', 
 const roster = (panes: ReturnType<typeof pane>[], shownId: string | null = panes[0]?.id ?? null, over: Partial<PaneRoster> = {}): PaneRoster => ({ panes, shownId, focusedId: null, focusRequestedId: null, ...over });
 const push = (fake: FakeClient, value: PaneRoster, seq = 1) =>
   act(() => fake.event('session.eventBatch', { appSessionId: A, events: [{ id: `${A}:L:${seq}:0`, sessionId: 's', at: '2026-10-02T00:00:00.000Z', seq, agentId: null, parentToolUseId: null, kind: 'plugin.panes', ...value } as SessionEvent] }));
-const attach = () => act(() => useSessions.getState().applyStatus({ appSessionId: A, status: { ...status(A), uiSurface: { clientId: 'maws-main' } } }));
+const attach = () => act(() => useSessions.getState().applyStatus({ appSessionId: A, status: { ...status(A), uiSurface: { clientId: 'maws-main' } } }, TEST_MACHINE));
 const tabs = () => screen.queryAllByRole('tab').map((t) => [t.textContent, t.getAttribute('aria-selected') === 'true']);
 const paneTabs = () => (panelOf(A)?.tabs ?? []).filter((t) => t.toolId === 'plugin-pane');
 
@@ -216,7 +217,7 @@ describe('plugin panes as panel tabs (R2)', () => {
     render(<TestHost />);
     attach();
     await waitFor(() => expect(paneTabs()).toHaveLength(1));
-    act(() => useSessions.getState().applyStatus({ appSessionId: A, status: status(A, { process: 'exited' }) }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: A, status: status(A, { process: 'exited' }) }, TEST_MACHINE));
     await waitFor(() => expect(paneTabs()).toEqual([]));
     expect(fake.invoked('session.ui.close')).toEqual([]);
   });
@@ -224,15 +225,15 @@ describe('plugin panes as panel tabs (R2)', () => {
   it.each(['exiting', 'exited'] as const)('clears a roster received during initialization when the session becomes %s', async (process) => {
     connect({ 'session.ui.render': PANE_ANSWER });
     render(<TestHost />);
-    act(() => useSessions.getState().applyStatus({ appSessionId: A, status: status(A, { process: 'initializing' }) }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: A, status: status(A, { process: 'initializing' }) }, TEST_MACHINE));
     push(fake, roster([pane('early', 'Early')]));
     await waitFor(() => expect(paneTabs()).toHaveLength(1));
     // Status can advance while attach's roster read is still awaited, before ready is ever reached.
-    act(() => useSessions.getState().applyStatus({ appSessionId: A, status: { ...status(A, { process: 'initializing' }), uiSurface: { clientId: 'maws-main' } } }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: A, status: { ...status(A, { process: 'initializing' }), uiSurface: { clientId: 'maws-main' } } }, TEST_MACHINE));
     expect(usePaneRosters.getState().rosters.has(A)).toBe(true);
     expect(fake.invoked('session.ui.panes')).toEqual([]);
 
-    act(() => useSessions.getState().applyStatus({ appSessionId: A, status: status(A, { process }) }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: A, status: status(A, { process }) }, TEST_MACHINE));
     await waitFor(() => expect(paneTabs()).toEqual([]));
     expect(usePaneRosters.getState().rosters.has(A)).toBe(false);
     expect(fake.invoked('session.ui.close')).toEqual([]);
@@ -241,10 +242,10 @@ describe('plugin panes as panel tabs (R2)', () => {
   it('forgets a pre-ready roster before hydration can create its tabs, including a late batch after exit', async () => {
     resetPanelStores({ hydrated: false });
     connect({ 'session.ui.render': PANE_ANSWER });
-    act(() => useSessions.getState().applyStatus({ appSessionId: A, status: status(A, { process: 'initializing' }) }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: A, status: status(A, { process: 'initializing' }) }, TEST_MACHINE));
     push(fake, roster([pane('early', 'Early')]));
     expect(usePaneRosters.getState().rosters.has(A)).toBe(true);
-    act(() => useSessions.getState().applyStatus({ appSessionId: A, status: status(A, { process: 'exited' }) }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: A, status: status(A, { process: 'exited' }) }, TEST_MACHINE));
     expect(usePaneRosters.getState().rosters.has(A)).toBe(false);
     push(fake, roster([pane('early', 'Early')]), 2);
     act(() => useLayout.setState({ hydrated: true }));

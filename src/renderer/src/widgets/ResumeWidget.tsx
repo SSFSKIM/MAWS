@@ -4,12 +4,19 @@
 // widget dialog gives it the library box; Esc closes it and returns the keyboard to this session's composer.
 import { useMemo } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import { ipc } from '../ipc/client';
 import { ResumeChooser } from '../resume/ResumeChooser';
+import { rowOfSession, selectOrgIndex } from '../stores/org-projects';
 import { useSessions } from '../stores/sessions';
 
+// P5 O6 M5: scoped to the session's sidebar row (its org project's, else its machine's own), as the row's Resume… is.
 export function ResumeWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const projectId = useSessions((s) => s.records.get(appSessionId)?.projectId ?? null);
-  const context = useMemo(() => ({ projectId, exclude: appSessionId }), [projectId, appSessionId]);
+  const row = useSessions((s) => {
+    const record = s.records.get(appSessionId);
+    return record === undefined ? undefined : (rowOfSession(selectOrgIndex(s, ipc.localMachine), s.projects, record) ?? undefined);
+  });
+  const context = useMemo(() => ({ projectId, row, exclude: appSessionId }), [projectId, row, appSessionId]);
   return (
     <div data-widget="resume" className="flex min-h-0 min-w-0 flex-1 flex-col">
       <ResumeChooser context={context} close={close} />

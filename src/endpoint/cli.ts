@@ -12,7 +12,8 @@
 //   legacy status          the DX1 org key: held, retired (bytes kept), purged or none (O14 M5a: the org state retires it)
 //   legacy purge           deletes the retired key's bytes for good, the stale copies' too (O14's final brief)
 //   attest-history [--former NAME]… [--project ID] [--check] [--json]
-//                          signs the machine's phase-1 history, or checks what the hub keeps of it (history.ts, O14 M4)
+//                          signs the machine's phase-1 history, or checks what the hub keeps of it (history.ts, O14 M4);
+//                          one run at a time, its start and end in mawsd's log
 //
 // `-` reads the file's content from the request's `secret`, as `mawsd`'s client sends stdin. Exit codes are O2's: 0
 // done, 1 failed, 2 not available here, 3 not running, 4 enrolled with the hub but not yet listed in the org state.
@@ -20,12 +21,13 @@ import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
 import { decodeProvisioningCodeV2, isIsoMillis, keyId, stateHash, type ProvisioningCodeV2, type SignedOrgState } from 'org-protocol';
+import { keysAnswer, policyAnswer, statusAnswer } from './answers';
 import { EnrollError, enrollAttended } from './enroll';
 import { attestHistory, checkHistory, historyNames, type Attested, type Checked } from './history';
 import { defaultMachineName, provisionInto } from './provision';
 import type { Endpoint } from './endpoint';
 import { acceptGrant } from './grants';
-import { describePolicy, isCeiling } from './policy';
+import { isCeiling } from './policy';
 
 export const EXIT = { done: 0, failed: 1, notHere: 2, notRunning: 3, notListed: 4 } as const;
 
@@ -171,39 +173,30 @@ async function unenroll(endpoint: Endpoint, args: readonly string[]): Promise<Ou
   return { code: EXIT.done, out: `enrollment: none; ${keyIds.length} private key(s) destroyed (their ids kept in ${kept}/keys.json), the rest of the state moved to ${kept}/` };
 }
 
+// `keys`, `status` and `policy` (unset) render through answers.ts, which `mawsd` renders them with before it loads
+// the module (presence.ts): change what they say there, and both say it.
 async function keys(endpoint: Endpoint, args: readonly string[]): Promise<Out> {
   const { values } = parse(args, { json: { type: 'boolean' } });
   const { state, services } = endpoint.parts!;
   const enrollment = state.enrolled ? state.enrollment : null;
-  // A redemption whose set is not yet whole is the hub's already (O14 M1), as `status` says it.
-  const pending = enrollment === null ? (state.provisioning?.redeemed ?? null) : null;
-  const named = enrollment ?? (pending === null ? null : { name: pending.machine, org: pending.org });
   const key = endpoint.key;
-  const view = {
-    enrollment: enrollment?.state ?? (pending === null ? 'none' : 'hub-confirmed'),
-    ...(named === null ? {} : { name: named.name, org: named.org }),
-    ref: services.machine.ref,
-    delegated: state.delegation !== null,
-    ...(key === null || enrollment === null ? {} : { keyId: await keyId(key.pub), heldKeys: state.ledger?.heldKeys.length ?? 0 }),
-    ...(state.refusing === null ? {} : { refusing: state.refusing }),
-  };
-  if (values.json) return { code: EXIT.done, out: JSON.stringify(view) };
-  const lines = [`enrollment: ${view.enrollment}`, ...(named === null ? [] : [`machine: ${named.name} in ${named.org}`]), `ref: ${view.ref}`];
-  if ('keyId' in view) lines.push(`machine key: ${view.keyId} (${view.heldKeys} held over its enrollments)`);
-  if (view.delegated) lines.push(`delegated: under the delegation ${state.delegation?.id}`);
-  if (state.refusing !== null) lines.push(`refusing its state: ${state.refusing} (the log names the path)`);
-  return { code: EXIT.done, out: lines.join('\n') };
+  const out = keysAnswer(
+    {
+      ref: services.machine.ref,
+      enrollment,
+      pending: enrollment === null ? (state.provisioning?.redeemed ?? null) : null,
+      delegation: state.delegation,
+      key: key === null || enrollment === null ? null : { keyId: await keyId(key.pub), heldKeys: state.ledger?.heldKeys.length ?? 0 },
+      refusing: state.refusing,
+    },
+    values.json === true,
+  );
+  return { code: EXIT.done, out };
 }
 
 function status(endpoint: Endpoint, args: readonly string[]): Out {
   const { values } = parse(args, { json: { type: 'boolean' } });
-  const s = endpoint.status();
-  if (values.json) return { code: EXIT.done, out: JSON.stringify(s) };
-  const lines = [`enrollment: ${s.enrollment}${s.name === undefined ? '' : ` (${s.name} in ${s.org})`}`];
-  if (s.stateVersion !== undefined) lines.push(`org state: version ${s.stateVersion}`);
-  lines.push(`hub: ${s.hub.connected ? 'connected' : 'not connected'}; channels: ${s.channels.relayed} relayed, ${s.channels.direct} direct; sminos: ${s.rl10.connected ? 'connected' : 'not connected'}`);
-  if (s.refusing !== undefined) lines.push(`refusing: ${s.refusing}`);
-  return { code: EXIT.done, out: lines.join('\n') };
+  return { code: EXIT.done, out: statusAnswer(endpoint.status(), values.json === true) };
 }
 
 /** The content of `<file|->`: a path read here, or `-` for the request's `secret`. */
@@ -253,8 +246,7 @@ function policy(endpoint: Endpoint, args: readonly string[]): Out {
     if (endpoint.parts!.state.refusing !== null) return { code: EXIT.failed, out: `the endpoint's state is refused (${endpoint.parts!.state.refusing}): nothing is written` };
     endpoint.policy.set({ ...(readOnly === undefined ? {} : { read_only: readOnly === 'on' }), ...(values.ceiling === undefined || !isCeiling(values.ceiling) ? {} : { ceiling: values.ceiling }) });
   }
-  const current = endpoint.policy.current();
-  return { code: EXIT.done, out: values.json ? JSON.stringify(current) : describePolicy(current) };
+  return { code: EXIT.done, out: policyAnswer(endpoint.policy.current(), values.json === true) };
 }
 
 /**
@@ -280,13 +272,26 @@ function legacy(endpoint: Endpoint, args: readonly string[]): Out {
 }
 
 /**
+ * The `attest-history` run in progress on each endpoint, and since when. A run reads every inventory writer's events
+ * from the hub page by page, minutes on a machine with hundreds of writers, and goes on to its end when its caller stops
+ * waiting; so one runs at a time, attesting or checking alike: a second is refused rather than started beside it (a
+ * check beside an attest would also judge records the attest is still posting).
+ */
+const historyRuns = new WeakMap<Endpoint, { run: string; since: string }>();
+
+/**
  * `attest-history`: the machine's DX1 writers under its current name and each `--former` one, attested (exit 0 when
  * every one is attested or was already, 1 when any is skipped or refused), or with `--check` judged against what the hub
  * keeps (exit 0 only when every one is `verified`). Attesting needs the legacy key in use, to check each event's code:
  * at a head that retired it (O14 M5a's tombstone, its bytes kept) nothing is attested; the check needs no key. Both need the machine listed in the org state, whose key signs.
+ * One run at a time (`historyRuns`); each holds a private mawsd up until it ends, and logs its start and its outcome.
  */
 async function attestHistoryCommand(endpoint: Endpoint, args: readonly string[]): Promise<Out> {
   const { values } = parse(args, { former: { type: 'string', multiple: true }, project: { type: 'string' }, check: { type: 'boolean' }, json: { type: 'boolean' } });
+  const running = historyRuns.get(endpoint);
+  if (running !== undefined) {
+    return { code: EXIT.failed, out: `${running.run} has been in progress since ${running.since}: no second run starts beside it; its outcome is in mawsd's log (\`mawsd logs\`) when it ends` };
+  }
   const { state, org, services } = endpoint.parts!;
   const enrollment = state.enrolled ? state.enrollment : null;
   if (enrollment === null) return { code: EXIT.failed, out: 'not enrolled: there is no machine key to sign with' };
@@ -311,16 +316,31 @@ async function attestHistoryCommand(endpoint: Endpoint, args: readonly string[])
     certificates: org.certificates(),
     verifiesCode: (project: string, event: object) => legacy.verifies(project, event),
   };
-  if (values.check) {
-    const checked = await checkHistory(ctx, names, values.project);
-    const code = checked.every((c) => c.outcome === 'verified') ? EXIT.done : EXIT.failed;
-    if (values.json) return { code, out: JSON.stringify({ names, writers: checked }) };
-    return { code, out: [...checked.map(checkedLine), summary(checked, names)].join('\n') };
+  // Nothing above awaits, so no second run can pass the check above before this one is recorded.
+  const run = values.check ? 'attest-history --check' : 'attest-history';
+  historyRuns.set(endpoint, { run, since: new Date(endpoint.deps.now()).toISOString() });
+  const release = services.hold(run);
+  services.log(`endpoint: ${run} started under ${names.join(', ')}`);
+  try {
+    let answer: { code: number; writers: Array<Attested | Checked>; lines: string[] };
+    if (values.check) {
+      const checked = await checkHistory(ctx, names, values.project);
+      answer = { code: checked.every((c) => c.outcome === 'verified') ? EXIT.done : EXIT.failed, writers: checked, lines: checked.map(checkedLine) };
+    } else {
+      const attested = await attestHistory(ctx, names, values.project);
+      answer = { code: attested.every((a) => a.outcome === 'attested' || a.outcome === 'already') ? EXIT.done : EXIT.failed, writers: attested, lines: attested.map(attestedLine) };
+    }
+    const said = summary(answer.writers, names);
+    services.log(`endpoint: ${run} ended, exit ${answer.code}: ${said}`);
+    if (values.json) return { code: answer.code, out: JSON.stringify({ names, writers: answer.writers }) };
+    return { code: answer.code, out: [...answer.lines, said].join('\n') };
+  } catch (error) {
+    services.log(`endpoint: ${run} failed: ${(error as Error).message}`);
+    throw error;
+  } finally {
+    release();
+    historyRuns.delete(endpoint);
   }
-  const attested = await attestHistory(ctx, names, values.project);
-  const code = attested.every((a) => a.outcome === 'attested' || a.outcome === 'already') ? EXIT.done : EXIT.failed;
-  if (values.json) return { code, out: JSON.stringify({ names, writers: attested }) };
-  return { code, out: [...attested.map(attestedLine), summary(attested, names)].join('\n') };
 }
 
 function attestedLine(a: Attested): string {

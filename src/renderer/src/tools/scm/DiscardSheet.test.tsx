@@ -4,10 +4,11 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { StoreApi } from 'zustand/vanilla';
 import { fail, ok } from '../../test-support/code';
-import { A, refusal, scmMain } from '../../test-support/scm';
+import { A, DIR, refusal, scmMain } from '../../test-support/scm';
 import { DiscardSheet } from './DiscardSheet';
 import { useScm } from './store';
 import { createScmUi, type ScmSheet, type ScmUi } from './view-state';
+import { at } from '../../../../../test/support/machine';
 
 type Entries = Extract<ScmSheet, { kind: 'discard' }>['entries'];
 
@@ -16,14 +17,14 @@ let ui: StoreApi<ScmUi>;
 
 function open(entries: Entries) {
   ui.setState({ sheet: { kind: 'discard', entries } });
-  return render(<DiscardSheet appSessionId={A} ui={ui} entries={entries} />);
+  return render(<DiscardSheet appSessionId={at(A)} ui={ui} directory={DIR} entries={entries} />);
 }
 const paths = (sheet: HTMLElement) => [...sheet.querySelectorAll('[data-scm-sheet-path]')].map((el) => el.textContent);
 
 beforeEach(() => {
   useScm.getState().reset();
   main = scmMain();
-  ui = createScmUi({ session: A });
+  ui = createScmUi({ session: at(A) });
 });
 afterEach(() => cleanup());
 

@@ -1,12 +1,14 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import type { ModelCatalogue } from '@shared/sessions/models';
 import { BUILTIN_MODELS, GATEWAY_AUTO_NOTE } from '@shared/sessions/models';
 import type { StartOutcome } from '@shared/sessions/setup';
 import { record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { ipc } from '../ipc/client';
 import { useUnstartedTitle } from '../keymap/actions-runtime';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
@@ -18,6 +20,7 @@ import { connectSessions, createUnstartedSession, retainsTab, unstartedTitle } f
 import { connectSetup, useSetup } from './store';
 import { modelsOf, projectFacts, useSetupIntent, worktreeNameFor } from './useSetupIntent';
 import type { UseSetupIntent } from '../composer/setup-intent';
+import { preloadOf } from '../test-support/preload-of';
 
 const CATALOGUE: ModelCatalogue = {
   source: 'cached',
@@ -29,7 +32,12 @@ const CATALOGUE: ModelCatalogue = {
   ],
 };
 const WORKTREE = `${REPO}/.claude/worktrees/one`;
-const P1 = 'p-1' as ProjectId;
+// P5 O6 M2: the page holds addresses (`A`, `P1`, and its intents through `pageIntent`); the fake `window.maws` (main)
+// is asked and answers with the bare ids (`ID`, `BARE_P1`, and `intent`)
+const A = at(ID);
+const BARE_P1 = 'p-1' as ProjectId;
+const P1 = at(BARE_P1);
+const pageIntent: typeof intent = (over = {}) => intent({ appSessionId: A, ...over });
 
 let fake: FakeClient;
 // `auto` answers commands at once; a command given as undefined waits for the test to answer it.
@@ -49,7 +57,7 @@ function withMain(auto: Parameters<typeof fakeClient>[0] = {}) {
     ...auto,
   };
   fake = fakeClient(Object.fromEntries(Object.entries(answers).filter(([, answer]) => answer !== undefined)));
-  window.maws = fake.client;
+  window.maws = preloadOf(fake);
 }
 
 beforeEach(() => {
@@ -60,7 +68,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   closeDialog();
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 // C7's side of the seam as landed: App.tsx's `registerSetupIntentHook(useSetupIntent)` typechecks against it (pnpm
@@ -71,13 +79,13 @@ void assignableToC7;
 describe('setup intent hook', () => {
   it('is null for an id with a record and a status, and non-null for an intent', async () => {
     withMain();
-    const { result } = renderHook(() => useSetupIntent(ID));
+    const { result } = renderHook(() => useSetupIntent(A));
     expect(result.current).toBeNull();
-    act(() => putIntent(intent()));
-    expect(result.current?.intent.appSessionId).toBe(ID);
-    act(() => useSessions.setState({ records: new Map([[ID, record(ID)]]) }));
+    act(() => putIntent(pageIntent()));
+    expect(result.current?.intent.appSessionId).toBe(A);
+    act(() => useSessions.setState({ records: new Map([[A, record(A)]]) }));
     expect(result.current, 'a provisional record without a status is still unstarted').not.toBeNull();
-    act(() => useSessions.setState({ engine: new Map([[ID, status(ID)]]) }));
+    act(() => useSessions.setState({ engine: new Map([[A, status(A)]]) }));
     expect(result.current).toBeNull();
   });
 
@@ -85,8 +93,8 @@ describe('setup intent hook', () => {
   it('describes the project row: the project, the checkout’s branch read-only, and the Worktree checkbox in a repository', async () => {
     withMain();
     useSessions.setState({ projects: new Map([[P1, { id: P1, name: 'Repo', directory: REPO, order: 0, createdAt: '2026-09-29T10:00:00.000Z' }]]) });
-    putIntent(intent({ projectId: P1 }));
-    const { result } = renderHook(() => useSetupIntent(ID));
+    putIntent(pageIntent({ projectId: P1 }));
+    const { result } = renderHook(() => useSetupIntent(A));
     await waitFor(() => expect(result.current?.project.branch).toBe('main'));
     expect(result.current!.project).toMatchObject({ projectId: P1, label: 'Repo', path: REPO, branch: 'main', worktree: false });
     void result.current!.project.setWorktree(true); // the patch waits for main's answer, which this test never gives
@@ -101,11 +109,11 @@ describe('setup intent hook', () => {
 
   it('answers the running setup’s phase in words (the composer’s disabled-state reason), and null otherwise', async () => {
     withMain();
-    putIntent(intent({ location: { kind: 'newWorktree', repoRoot: REPO, name: 'one', branch: { kind: 'new', name: 'worktree-one', base: 'HEAD' } }, trust: 'accepted', trustKey: REPO }));
-    const { result } = renderHook(() => useSetupIntent(ID));
+    putIntent(pageIntent({ location: { kind: 'newWorktree', repoRoot: REPO, name: 'one', branch: { kind: 'new', name: 'worktree-one', base: 'HEAD' } }, trust: 'accepted', trustKey: REPO }));
+    const { result } = renderHook(() => useSetupIntent(A));
     expect(result.current!.phase).toBeNull();
     const phase = (p: 'worktree' | 'trusting' | 'launching' | 'ready' | 'failed', detail: string | null) =>
-      act(() => useSetup.getState().applySetup({ appSessionId: ID, phase: p, detail, outcome: p === 'failed' ? { kind: 'error', message: 'no', resources: { worktree: null, record: 'none', transcript: 'none' } } : null }));
+      act(() => useSetup.getState().applySetup({ appSessionId: A, phase: p, detail, outcome: p === 'failed' ? { kind: 'error', message: 'no', resources: { worktree: null, record: 'none', transcript: 'none' } } : null }));
     phase('worktree', 'Creating worktree one');
     expect(result.current!.phase).toBe('Creating worktree one…');
     phase('trusting', `Trusting ${REPO}`);
@@ -120,8 +128,8 @@ describe('setup intent hook', () => {
 
   it('shows the built-in catalogue when the host cannot answer', async () => {
     withMain({ 'engine.models': undefined });
-    putIntent(intent());
-    const { result } = renderHook(() => useSetupIntent(ID));
+    putIntent(pageIntent());
+    const { result } = renderHook(() => useSetupIntent(A));
     await act(() => fake.fail('engine.models', 'host unavailable'));
     expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'opus', 'fable', 'sonnet', 'haiku']);
   });
@@ -129,12 +137,12 @@ describe('setup intent hook', () => {
   it('reads the catalogue again at every mount, so a later tab sees what the host learned since', async () => {
     let catalogue: ModelCatalogue = { models: [{ value: 'default', displayName: 'Default' }], source: 'builtin', at: null };
     withMain({ 'engine.models': () => catalogue });
-    putIntent(intent());
-    const first = renderHook(() => useSetupIntent(ID));
+    putIntent(pageIntent());
+    const first = renderHook(() => useSetupIntent(A));
     await waitFor(() => expect(first.result.current!.options.models.map((m) => m.value)).toEqual(['default']));
     first.unmount();
     catalogue = CATALOGUE; // a launch filled the host's cache, the relay's aliases included
-    const second = renderHook(() => useSetupIntent(ID));
+    const second = renderHook(() => useSetupIntent(A));
     await waitFor(() => expect(second.result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
     expect(fake.invoked('engine.models')).toEqual([{ refresh: false, gateway: 'gateway', cwd: REPO }, { refresh: false, gateway: 'gateway', cwd: REPO }]);
   });
@@ -146,12 +154,12 @@ describe('setup intent hook', () => {
       direct: { models: [{ value: 'sonnet', displayName: 'Sonnet 5' }], source: 'cached', at: null } satisfies ModelCatalogue,
     };
     withMain({ 'engine.models': (input: { gateway: 'gateway' | 'direct' }) => byRoute[input.gateway] });
-    putIntent(intent({ gateway: 'direct' }));
-    const { result } = renderHook(() => useSetupIntent(ID));
+    putIntent(pageIntent({ gateway: 'direct' }));
+    const { result } = renderHook(() => useSetupIntent(A));
     await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['sonnet']));
-    act(() => putIntent(intent({ gateway: 'gateway' })));
+    act(() => putIntent(pageIntent({ gateway: 'gateway' })));
     await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
-    act(() => putIntent(intent({ gateway: 'gateway', model: 'claude/astra' })));
+    act(() => putIntent(pageIntent({ gateway: 'gateway', model: 'claude/astra' })));
     await act(async () => {});
     expect(fake.invoked('engine.models'), 'a patch that keeps the route reads nothing').toEqual([
       { refresh: false, gateway: 'direct', cwd: REPO },
@@ -163,10 +171,10 @@ describe('setup intent hook', () => {
   // launch in: an existing worktree itself, a worktree not yet made by its repository
   it('names the directory whose settings the launch would read: an existing worktree’s own path, a new worktree’s repository', async () => {
     withMain();
-    putIntent(intent({ location: { kind: 'existingWorktree', repoRoot: REPO, path: WORKTREE } }));
-    renderHook(() => useSetupIntent(ID));
+    putIntent(pageIntent({ location: { kind: 'existingWorktree', repoRoot: REPO, path: WORKTREE } }));
+    renderHook(() => useSetupIntent(A));
     await waitFor(() => expect(fake.invoked('engine.models')).toEqual([{ refresh: false, gateway: 'gateway', cwd: WORKTREE }]));
-    act(() => putIntent(intent({ location: { kind: 'newWorktree', repoRoot: REPO, name: 'two', branch: { kind: 'new', name: 'worktree-two', base: 'HEAD' } } })));
+    act(() => putIntent(pageIntent({ location: { kind: 'newWorktree', repoRoot: REPO, name: 'two', branch: { kind: 'new', name: 'worktree-two', base: 'HEAD' } } })));
     await waitFor(() => expect(fake.invoked('engine.models').at(-1)).toEqual({ refresh: false, gateway: 'gateway', cwd: REPO }));
   });
 
@@ -191,23 +199,23 @@ describe('setup intent hook', () => {
   // C7 calls the hook from every composer: a started session's has no intent and reads nothing
   it('reads no catalogue for an id without an intent, and reads it once the intent arrives', async () => {
     withMain();
-    const { result } = renderHook(() => useSetupIntent(ID));
+    const { result } = renderHook(() => useSetupIntent(A));
     await act(async () => {});
     expect(result.current).toBeNull();
     expect(fake.invoked('engine.models'), 'a started session’s composer asks nothing').toEqual([]);
-    act(() => putIntent(intent()));
+    act(() => putIntent(pageIntent()));
     await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
     expect(fake.invoked('engine.models')).toEqual([{ refresh: false, gateway: 'gateway', cwd: REPO }]);
   });
 
   it('notes a model that cannot hold auto mode, and a gateway model’s local auto lane', async () => {
     withMain();
-    putIntent(intent({ model: 'haiku', permissionMode: 'auto' }));
-    const { result } = renderHook(() => useSetupIntent(ID));
+    putIntent(pageIntent({ model: 'haiku', permissionMode: 'auto' }));
+    const { result } = renderHook(() => useSetupIntent(A));
     await waitFor(() => expect(result.current!.options.autoModeNote).toBe("Auto mode isn't available for Haiku. This session will use Accept edits instead.")); // W3: the fallback setting's default
-    act(() => putIntent(intent({ model: 'claude/astra', permissionMode: null, updatedAt: '2026-09-29T10:00:01.000Z' })));
+    act(() => putIntent(pageIntent({ model: 'claude/astra', permissionMode: null, updatedAt: '2026-09-29T10:00:01.000Z' })));
     expect(result.current!.options.autoModeNote).toBe(GATEWAY_AUTO_NOTE);
-    act(() => putIntent(intent({ model: 'claude/astra', permissionMode: 'default', updatedAt: '2026-09-29T10:00:02.000Z' })));
+    act(() => putIntent(pageIntent({ model: 'claude/astra', permissionMode: 'default', updatedAt: '2026-09-29T10:00:02.000Z' })));
     expect(result.current!.options.autoModeNote).toBeNull();
   });
 
@@ -216,8 +224,8 @@ describe('setup intent hook', () => {
   // (docs/doperpowers/evidence/p2-finish/l99-model-change-from-auto.jsonl), so the list claims no verdict on auto mode
   it('claims nothing about auto mode from the built-in list: Haiku in auto has no note and keeps auto offered', async () => {
     withMain({ 'engine.models': () => ({ models: [...BUILTIN_MODELS], source: 'builtin', at: null }) satisfies ModelCatalogue });
-    putIntent(intent({ model: 'haiku', permissionMode: 'auto' }));
-    const { result } = renderHook(() => useSetupIntent(ID));
+    putIntent(pageIntent({ model: 'haiku', permissionMode: 'auto' }));
+    const { result } = renderHook(() => useSetupIntent(A));
     await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'opus', 'fable', 'sonnet', 'haiku']));
     expect(result.current!.options.autoModeNote).toBeNull();
     expect(result.current!.options.models.find((m) => m.value === 'haiku')!.supportsAutoMode).toBe(true); // offered, as an unknown model is
@@ -230,8 +238,8 @@ describe('setup intent hook', () => {
 
   it("surfaces the validator's message from patch", async () => {
     withMain({ 'session.intent.patch': undefined });
-    putIntent(intent());
-    const { result } = renderHook(() => useSetupIntent(ID));
+    putIntent(pageIntent());
+    const { result } = renderHook(() => useSetupIntent(A));
     const messages = [
       'location: directory not found: /nowhere',
       "location: Worktree name cannot start with '-'",
@@ -249,26 +257,26 @@ describe('setup intent hook', () => {
   it('start resolves ok on starting, needs_trust and relay_unreachable, and not ok on invalid, which the editor keeps', async () => {
     let outcome: StartOutcome = { status: 'starting', appSessionId: ID };
     withMain({ 'session.start': () => outcome });
-    putIntent(intent());
-    const { result } = renderHook(() => useSetupIntent(ID));
+    putIntent(pageIntent());
+    const { result } = renderHook(() => useSetupIntent(A));
     await waitFor(() => expect(result.current!.project.branch).toBe('main')); // the repository read
     expect(await act(() => result.current!.start(MESSAGE))).toEqual({ ok: true });
     expect(fake.invoked('session.start')[0]).toEqual({ appSessionId: ID, message: MESSAGE, options: {} });
     outcome = { status: 'needs_trust', appSessionId: ID, trust: trustState() };
     expect(await act(() => result.current!.start(MESSAGE))).toEqual({ ok: true });
-    expect(useSetup.getState().cards.get(ID)).toMatchObject({ kind: 'trust', message: MESSAGE });
+    expect(useSetup.getState().cards.get(A)).toMatchObject({ kind: 'trust', message: MESSAGE });
     outcome = { status: 'relay_unreachable', appSessionId: ID, health: health() };
     expect(await act(() => result.current!.start(MESSAGE))).toEqual({ ok: true });
-    expect(useSetup.getState().cards.get(ID)).toMatchObject({ kind: 'relay' });
+    expect(useSetup.getState().cards.get(A)).toMatchObject({ kind: 'relay' });
     outcome = { status: 'invalid', appSessionId: ID, field: 'location', message: 'base not found: no-such-branch' };
     expect(await act(() => result.current!.start(MESSAGE))).toEqual({ ok: false, error: 'base not found: no-such-branch' });
-    expect(useSetup.getState().cards.has(ID)).toBe(false);
+    expect(useSetup.getState().cards.has(A)).toBe(false);
   });
 
   it('refuses to start with the error when the trust check failed', async () => {
     withMain({ 'session.trust.check': undefined, 'session.start': () => ({ status: 'starting', appSessionId: ID }) });
-    putIntent(intent());
-    const { result } = renderHook(() => useSetupIntent(ID));
+    putIntent(pageIntent());
+    const { result } = renderHook(() => useSetupIntent(A));
     await act(() => fake.fail('session.trust.check', 'global config unreadable: EACCES'));
     const refused = result.current!.start(MESSAGE); // Send checks again first
     await act(() => fake.fail('session.trust.check', 'global config unreadable: EACCES'));
@@ -278,8 +286,8 @@ describe('setup intent hook', () => {
 
   it('checks trust again at Send after a failed check, and starts once the check answers', async () => {
     withMain({ 'session.trust.check': undefined, 'session.start': () => ({ status: 'starting', appSessionId: ID }) });
-    putIntent(intent());
-    const { result } = renderHook(() => useSetupIntent(ID));
+    putIntent(pageIntent());
+    const { result } = renderHook(() => useSetupIntent(A));
     await act(() => fake.fail('session.trust.check', 'global config unreadable: EACCES'));
     const started = result.current!.start(MESSAGE);
     await act(() => fake.reply('session.trust.check', trustState({ trusted: true, source: 'trustKey' })));
@@ -291,31 +299,31 @@ describe('setup intent hook', () => {
 describe('close guard', () => {
   it('closes a session with a record at once, and discards an empty intent silently', async () => {
     withMain({ 'session.intent.discard': () => ({ leftover: null }) });
-    const other = '22222222-2222-4222-8222-222222222222' as AppSessionId;
+    const other = at('22222222-2222-4222-8222-222222222222' as AppSessionId);
     useSessions.setState({ records: new Map([[other, record(other)]]) });
     expect(await beforeCloseUnstarted(other)).toBe('closed');
-    putIntent(intent());
-    expect(await beforeCloseUnstarted(ID)).toBe('closed');
+    putIntent(pageIntent());
+    expect(await beforeCloseUnstarted(A)).toBe('closed');
     expect(fake.invoked('session.intent.discard')).toEqual([{ appSessionId: ID }]);
     expect(useDialogs.getState().open).toBeNull();
   });
 
   it('refuses while a start runs', async () => {
     withMain();
-    putIntent(intent());
-    useSetup.getState().applySetup({ appSessionId: ID, phase: 'launching', detail: 'Starting', outcome: null });
-    expect(await beforeCloseUnstarted(ID)).toBe('kept');
+    putIntent(pageIntent());
+    useSetup.getState().applySetup({ appSessionId: A, phase: 'launching', detail: 'Starting', outcome: null });
+    expect(await beforeCloseUnstarted(A)).toBe('kept');
     expect(fake.invoked('session.intent.discard')).toEqual([]);
   });
 
   it('asks before discarding a draft, and keeps the tab on Cancel', async () => {
     withMain({ 'session.intent.discard': () => ({ leftover: null }) });
-    putIntent(intent({ draft: { doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'half a thought' }] }] }, attachments: [], updatedAt: '2026-09-29T10:00:00.000Z' } }));
-    const kept = beforeCloseUnstarted(ID);
+    putIntent(pageIntent({ draft: { doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'half a thought' }] }] }, attachments: [], updatedAt: '2026-09-29T10:00:00.000Z' } }));
+    const kept = beforeCloseUnstarted(A);
     await waitFor(() => expect(useDialogs.getState().open).toMatchObject({ kind: 'confirm', title: 'Discard this unstarted session?', body: 'Its draft will be lost.' }));
     act(() => closeDialog());
     expect(await kept).toBe('kept');
-    const closed = beforeCloseUnstarted(ID);
+    const closed = beforeCloseUnstarted(A);
     await waitFor(() => expect(useDialogs.getState().open?.kind).toBe('confirm'));
     act(() => (useDialogs.getState().open as { answer(yes: boolean): void }).answer(true));
     expect(await closed).toBe('closed');
@@ -326,13 +334,13 @@ describe('close guard', () => {
     const path = `${REPO}/.claude/worktrees/accept-fail`;
     withMain({ 'session.intent.discard': () => ({ leftover: { worktree: { path, branch: 'worktree-accept-fail' } } }) });
     const location = { kind: 'newWorktree' as const, repoRoot: REPO, name: 'accept-fail', branch: { kind: 'new' as const, name: 'worktree-accept-fail', base: 'HEAD' } };
-    putIntent(intent({ location, progress: { ...intent().progress, worktree: { path, branch: 'worktree-accept-fail', head: 'abc', createdHere: true } } }));
-    expect(await beforeCloseUnstarted(ID)).toBe('closed');
+    putIntent(pageIntent({ location, progress: { ...intent().progress, worktree: { path, branch: 'worktree-accept-fail', head: 'abc', createdHere: true } } }));
+    expect(await beforeCloseUnstarted(A)).toBe('closed');
     const [notice] = useNotices.getState().notices;
     expect(notice?.text).toBe(`Worktree ${path} was kept`);
     expect(notice?.actions.map((a) => a.label)).toEqual(['Remove worktree…']);
     act(() => notice!.actions[0]!.run());
-    expect(useDialogs.getState().open).toEqual({ kind: 'cleanup', target: { repoRoot: REPO, path, branch: 'worktree-accept-fail' } });
+    expect(useDialogs.getState().open).toEqual({ kind: 'cleanup', target: { machine: TEST_MACHINE, repoRoot: REPO, path, branch: 'worktree-accept-fail' } });
   });
 });
 
@@ -340,16 +348,16 @@ describe('close guard', () => {
 describe('replace verdict', () => {
   it('a blank chat is replaced (null), a draft or a held first message is set aside, a start in flight keeps the tab, a started session is not its business', () => {
     withMain();
-    putIntent(intent());
-    expect(unstartedReplaceVerdict(ID)).toBeNull();
-    putIntent(intent({ draft: { doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'half a thought' }] }] }, attachments: [], updatedAt: '2026-09-29T10:00:00.000Z' } }));
-    expect(unstartedReplaceVerdict(ID)).toEqual({ aside: 'The new chat’s draft is kept; ⌘⇧T or Reopen brings it back' });
+    putIntent(pageIntent());
+    expect(unstartedReplaceVerdict(A)).toBeNull();
+    putIntent(pageIntent({ draft: { doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'half a thought' }] }] }, attachments: [], updatedAt: '2026-09-29T10:00:00.000Z' } }));
+    expect(unstartedReplaceVerdict(A)).toEqual({ aside: 'The new chat’s draft is kept; ⌘⇧T or Reopen brings it back' });
     expect(useDialogs.getState().open, 'nothing asked').toBeNull();
-    putIntent(intent({ message: MESSAGE }));
-    expect(unstartedReplaceVerdict(ID)).toMatchObject({ aside: expect.any(String) });
-    useSetup.getState().applySetup({ appSessionId: ID, phase: 'launching', detail: 'Starting', outcome: null });
-    expect(unstartedReplaceVerdict(ID)).toEqual({ keep: 'The new chat is starting' });
-    const other = '22222222-2222-4222-8222-222222222222' as AppSessionId;
+    putIntent(pageIntent({ message: MESSAGE }));
+    expect(unstartedReplaceVerdict(A)).toMatchObject({ aside: expect.any(String) });
+    useSetup.getState().applySetup({ appSessionId: A, phase: 'launching', detail: 'Starting', outcome: null });
+    expect(unstartedReplaceVerdict(A)).toEqual({ keep: 'The new chat is starting' });
+    const other = at('22222222-2222-4222-8222-222222222222' as AppSessionId);
     useSessions.setState({ records: new Map([[other, record(other)]]) });
     expect(unstartedReplaceVerdict(other)).toBeNull();
   });
@@ -359,25 +367,25 @@ describe('tab retention', () => {
   it('waits for the settled intent list, retains a failed intent, and lets go once main drops it', async () => {
     withMain({ 'session.intent.list': undefined, 'session.deletions.list': () => ({ manifests: [] }) });
     useSetup.setState({ loaded: false });
-    const connection = connectSetup(fake.client);
+    const connection = connectSetup(ipc); // P5 O6 M2: through the client, so main's bare events arrive lifted
     let ready = false;
     void connection.ready.then(() => (ready = true));
     expect(fake.calls.slice(0, 2)).toEqual(['on session.intent.changed', 'on session.setup']); // subscribed first
     const failed = intent({ progress: { ...intent().progress, lastFailure: { at: '2026-09-29T10:00:00.000Z', phase: 'launching', message: 'MAWS quit before the session started', resources: { worktree: null, record: 'removed', transcript: 'none' } } } });
     await act(() => fake.reply('session.intent.list', { intents: [failed] }));
     expect(ready).toBe(true);
-    expect(retainsTab(ID)).toBe(true);
+    expect(retainsTab(A)).toBe(true);
     act(() => fake.event('session.intent.changed', { appSessionId: ID, intent: null }));
-    expect(retainsTab(ID)).toBe(false);
+    expect(retainsTab(A)).toBe(false);
     connection.disconnect();
   });
 
   it('an older snapshot does not bring back an intent main dropped', async () => {
     withMain({ 'session.intent.list': undefined, 'session.deletions.list': () => ({ manifests: [] }) });
-    const connection = connectSetup(fake.client);
+    const connection = connectSetup(ipc); // P5 O6 M2: through the client, so main's bare events arrive lifted
     act(() => fake.event('session.intent.changed', { appSessionId: ID, intent: null }));
     await act(() => fake.reply('session.intent.list', { intents: [intent()] }));
-    expect(retainsTab(ID)).toBe(false);
+    expect(retainsTab(A)).toBe(false);
     connection.disconnect();
   });
 });
@@ -394,26 +402,26 @@ describe('the project row’s facts', () => {
   const repo = { name: 'Repo', directory: REPO };
 
   it('none chosen: no label, branch or checkbox', () => {
-    expect(projectFacts(intent({ location: null }), null, null)).toEqual({ projectId: null, label: null, path: null, branch: null, worktree: null });
+    expect(projectFacts(pageIntent({ location: null }), null, null)).toEqual({ projectId: null, label: null, path: null, branch: null, worktree: null });
   });
 
   it('a project: its name and the checkout’s branch, the checkbox off in a repository and hidden outside one', () => {
-    expect(projectFacts(intent({ projectId: P1 }), repo, repository)).toEqual({ projectId: P1, label: 'Repo', path: REPO, branch: 'main', worktree: false });
-    expect(projectFacts(intent({ projectId: P1 }), repo, { repoRoot: null, worktrees: [] })).toMatchObject({ branch: null, worktree: null });
-    expect(projectFacts(intent({ projectId: P1, location: { kind: 'directory', path: `${WORKTREE}/pkg` } }), repo, repository).branch).toBe('worktree-one'); // the deepest checkout holding it
+    expect(projectFacts(pageIntent({ projectId: P1 }), repo, repository)).toEqual({ projectId: P1, label: 'Repo', path: REPO, branch: 'main', worktree: false });
+    expect(projectFacts(pageIntent({ projectId: P1 }), repo, { repoRoot: null, worktrees: [] })).toMatchObject({ branch: null, worktree: null });
+    expect(projectFacts(pageIntent({ projectId: P1, location: { kind: 'directory', path: `${WORKTREE}/pkg` } }), repo, repository).branch).toBe('worktree-one'); // the deepest checkout holding it
   });
 
   it('the Worktree checkbox on: a new worktree, the branch it starts from', () => {
     const location = { kind: 'newWorktree' as const, repoRoot: REPO, name: 'repo-1a2b', branch: { kind: 'new' as const, name: 'worktree-repo-1a2b', base: 'HEAD' } };
-    expect(projectFacts(intent({ projectId: P1, location }), repo, repository)).toEqual({ projectId: P1, label: 'Repo', path: REPO, branch: 'main', worktree: true });
+    expect(projectFacts(pageIntent({ projectId: P1, location }), repo, repository)).toEqual({ projectId: P1, label: 'Repo', path: REPO, branch: 'main', worktree: true });
   });
 
   it('an existing worktree (a worktree group’s "+"): its folder and branch, the checkbox hidden', () => {
-    expect(projectFacts(intent({ projectId: P1, location: { kind: 'existingWorktree', repoRoot: REPO, path: WORKTREE } }), repo, repository)).toEqual({ projectId: P1, label: 'one', path: WORKTREE, branch: 'worktree-one', worktree: null });
+    expect(projectFacts(pageIntent({ projectId: P1, location: { kind: 'existingWorktree', repoRoot: REPO, path: WORKTREE } }), repo, repository)).toEqual({ projectId: P1, label: 'one', path: WORKTREE, branch: 'worktree-one', worktree: null });
   });
 
   it('no project ("Don’t work in a project"): "No project", the checkbox hidden', () => {
-    expect(projectFacts(intent({ projectId: null, location: { kind: 'directory', path: '/Users/someone' } }), null, { repoRoot: null, worktrees: [] })).toEqual({ projectId: null, label: 'No project', path: '/Users/someone', branch: null, worktree: null });
+    expect(projectFacts(pageIntent({ projectId: null, location: { kind: 'directory', path: '/Users/someone' } }), null, { repoRoot: null, worktrees: [] })).toEqual({ projectId: null, label: 'No project', path: '/Users/someone', branch: null, worktree: null });
   });
 
   it('names a worktree after its project with a short id, in the engine’s worktree-name characters', () => {
@@ -423,16 +431,16 @@ describe('the project row’s facts', () => {
 
   it('chooses a project by id alone (main moves the location), keeps the same choice, and adds a picked folder as a New project', async () => {
     withMain({ 'layout.pickFiles': () => ({ files: [{ path: '/picked', name: 'picked', bytes: 0, mediaType: 'inode/directory', data: null }] }), 'session.projects.addFolder': () => ({ project: { id: 'p-9', name: 'picked', directory: '/picked', order: 3, createdAt: '2026-10-01T00:00:00.000Z' }, location: { kind: 'directory', path: '/picked' } }) });
-    putIntent(intent({ location: null }));
-    const { result } = renderHook(() => useSetupIntent(ID));
+    putIntent(pageIntent({ location: null }));
+    const { result } = renderHook(() => useSetupIntent(A));
     void result.current!.project.choose(P1);
-    await waitFor(() => expect(fake.invoked('session.intent.patch')).toEqual([{ appSessionId: ID, patch: { projectId: P1 } }]));
+    await waitFor(() => expect(fake.invoked('session.intent.patch')).toEqual([{ appSessionId: ID, patch: { projectId: BARE_P1 } }]));
     void result.current!.project.newProject();
     await waitFor(() => expect(fake.invoked('session.intent.patch')).toHaveLength(2));
     expect(fake.invoked('layout.pickFiles')).toEqual([{ kind: 'directory', directory: null, multiple: false }]);
     expect(fake.invoked('session.projects.addFolder')).toEqual([{ directory: '/picked' }]);
     expect(fake.invoked('session.intent.patch')[1]).toEqual({ appSessionId: ID, patch: { projectId: 'p-9', location: { kind: 'directory', path: '/picked' } } });
-    act(() => putIntent(intent({ projectId: P1 })));
+    act(() => putIntent(pageIntent({ projectId: P1 })));
     expect(await result.current!.project.choose(P1)).toEqual({ ok: true }); // the same project: nothing to change
     expect(fake.invoked('session.intent.patch')).toHaveLength(2);
   });
@@ -440,13 +448,13 @@ describe('the project row’s facts', () => {
 
 describe('the unstarted title and the creator', () => {
   it('updates the rendered unstarted title when its chosen project is renamed', async () => {
-    withMain({ 'session.launchMode': { mode: 'index' }, 'session.intent.list': { intents: [intent({ projectId: P1 })] }, 'session.deletions.list': { manifests: [] } });
+    withMain({ 'session.launchMode': { mode: 'index' }, 'session.intent.list': { intents: [intent({ projectId: BARE_P1 })] }, 'session.deletions.list': { manifests: [] } });
     const project = { id: P1, name: 'Original', directory: REPO, order: 0, createdAt: '2026-09-29T10:00:00.000Z' };
     useSessions.setState({ projects: new Map([[P1, project]]) });
     let disconnect!: () => void;
-    await act(async () => { disconnect = connectSessions(fake.client); });
+    await act(async () => { disconnect = connectSessions(ipc); });
     try {
-      const { result } = renderHook(() => useUnstartedTitle(ID));
+      const { result } = renderHook(() => useUnstartedTitle(A));
       expect(result.current).toEqual({ title: 'New chat', project: 'Original', projectId: P1 });
       act(() => useSessions.setState({ projects: new Map([[P1, { ...project, name: 'Renamed' }]]) }));
       expect(result.current).toEqual({ title: 'New chat', project: 'Renamed', projectId: P1 });
@@ -457,13 +465,13 @@ describe('the unstarted title and the creator', () => {
 
   it("titles the tab 'New chat' with its project once one is chosen, and the creator opens with main's intent", async () => {
     withMain({ 'session.create': () => ({ appSessionId: ID, intent: intent({ location: null }) }) });
-    expect(unstartedTitle(ID)).toBeNull();
-    expect(await createUnstartedSession(null, fake.client)).toBe(ID);
+    expect(unstartedTitle(A)).toBeNull();
+    expect(await createUnstartedSession(null, ipc)).toBe(A);
     expect(fake.invoked('session.create')).toEqual([{ projectId: null, location: null }]);
-    expect(unstartedTitle(ID)).toEqual({ title: 'New chat', project: null, projectId: null });
-    act(() => putIntent(intent({ projectId: P1 }))); // chosen in the row; the project's own record not read yet: its folder
-    expect(unstartedTitle(ID)).toEqual({ title: 'New chat', project: 'repo', projectId: P1 });
-    act(() => putIntent(intent({ projectId: null }))); // "Don't work in a project"
-    expect(unstartedTitle(ID)).toEqual({ title: 'New chat', project: null, projectId: null });
+    expect(unstartedTitle(A)).toEqual({ title: 'New chat', project: null, projectId: null });
+    act(() => putIntent(pageIntent({ projectId: P1 }))); // chosen in the row; the project's own record not read yet: its folder
+    expect(unstartedTitle(A)).toEqual({ title: 'New chat', project: 'repo', projectId: P1 });
+    act(() => putIntent(pageIntent({ projectId: null }))); // "Don't work in a project"
+    expect(unstartedTitle(A)).toEqual({ title: 'New chat', project: null, projectId: null });
   });
 });

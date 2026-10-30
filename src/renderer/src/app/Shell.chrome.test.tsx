@@ -10,6 +10,7 @@ import { currentSet } from '../stores/layout-model';
 import { useLayout } from '../stores/layout';
 import { A, mainShowing, probeTool, ref, resetPanelStores } from '../test-support/panel';
 import { Shell } from './Shell';
+import { at } from '../../../../test/support/machine';
 import { useShellView } from './shell-view';
 import { registerSlot, resetSlots } from './slots';
 import { registerSessionAction } from './session-actions';
@@ -204,7 +205,7 @@ it('leaves composing Escape and keyboard focus in a narrow sheet field', async (
 });
 
 it('does not show Session cards as pressed for an unstarted New chat', () => {
-  useLayout.getState().openTab({ kind: 'session', appSessionId: 'unstarted-chat' as typeof A });
+  useLayout.getState().openTab({ kind: 'session', appSessionId: at('unstarted-chat') as typeof A });
   renderShell();
   const cards = within(chrome()).getByRole('button', { name: 'Session cards' });
   expect(cards.getAttribute('aria-pressed')).toBe('false');

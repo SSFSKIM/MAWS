@@ -8,13 +8,19 @@ import { useEffect, type KeyboardEvent, type MouseEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { UNPINNABLE_KINDS, type TabRef } from '@shared/ipc/schema/layout';
 import { PinIcon, useChordHint } from '../app/IconButton';
+import { BRIDGED_LINE, holderLine } from '../attention/derive'; // P5 O9
 import { GlyphMark } from '../attention/GlyphMark';
+import { useSessionControls } from '../session/controls/controls-for'; // P5 O9
 import { glyphFor, type Glyph } from '../attention/glyph';
 import { requestCloseTab, useUnstartedTitle } from '../keymap/actions-runtime';
 import { selectEndedWithErrorOf, selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
+import { machineOf } from '@shared/machine/address';
+import { ipc } from '../ipc/client';
+import { selectOffline, useMachines } from '../stores/machines';
+import { sessionSetKey } from '../stores/org-projects';
 import { displayTitle } from '../sessions/title';
 // E5 start
 import { EDITOR_COPY } from '../tools/code/copy';
@@ -57,23 +63,28 @@ function useProjectName(appSessionId: AppSessionId | null): string | null {
   });
 }
 
-// A session tab's label: the record's title, project and glyph; with no record yet it is an unstarted session, titled
-// through `registerUnstartedTitle` and without a glyph.
-function useSessionLabel(appSessionId: AppSessionId): TabLabel {
+// A session tab's label: the record's title, project and glyph; with no record, its listed row's title (P5 O9 M9: another
+// machine's terminal session, which has its row alone), the title the tab last knew (P5 O6 M2: a
+// session of a machine not loaded in this run), else an unstarted session's, titled through `registerUnstartedTitle`,
+// without a glyph. The project is named when the session's set is not the strip's (P5 O6 M5: sets are keyed by org
+// project, `sessionSetKey`).
+function useSessionLabel(appSessionId: AppSessionId, lastKnown?: string): TabLabel {
   const record = useSessions((s) => s.records.get(appSessionId));
+  const listedTitle = useSessions((s) => s.listed.get(appSessionId)?.title.trim() || null); // P5 O9 M9
   const digest = useSessions((s) => s.digests.get(appSessionId));
   const pending = useAttention((s) => selectPendingOf(s, appSessionId));
   const ended = useAttention((s) => selectEndedWithErrorOf(s, appSessionId)); // E11 F2b
   const project = useProjectName(appSessionId);
   const unstarted = useUnstartedTitle(appSessionId);
   const current = useLayout((s) => s.main.current);
-  if (!record) return { title: unstarted.title, secondary: null, glyph: null, fileType: null };
-  return { title: displayTitle(record), secondary: record.projectId === current ? null : project, glyph: glyphFor(record, digest ?? null, pending, ended), fileType: null };
+  const set = useSessions((s) => (s.records.has(appSessionId) ? sessionSetKey(s, ipc.localMachine, appSessionId, () => undefined) : undefined));
+  if (!record) return { title: listedTitle ?? lastKnown ?? unstarted.title, secondary: null, glyph: null, fileType: null };
+  return { title: displayTitle(record), secondary: set === current ? null : project, glyph: glyphFor(record, digest ?? null, pending, ended), fileType: null };
 }
 
 export function useTabLabel(tab: TabRef): TabLabel {
   const appSessionId = tab.kind === 'session' || tab.kind === 'agent' ? tab.appSessionId : ('' as AppSessionId);
-  const session = useSessionLabel(appSessionId);
+  const session = useSessionLabel(appSessionId, tab.kind === 'session' ? tab.title : undefined);
   const browserTitle = useBrowserTitle(tab.kind === 'browser' ? tab.appSessionId : null, tab.kind === 'browser' ? tab.browserTabId : null); // E4a
   const artifactTitle = useArtifactTitle(tab.kind === 'artifact' ? tab.artifactId : null); // P3-L
   switch (tab.kind) {
@@ -102,6 +113,23 @@ export function useTabLabel(tab: TabRef): TabLabel {
   }
 }
 
+// P5 O9 (the owner's Q1): a session a terminal or a `--bg` job holds reads like any MAWS session while MAWS drives it
+// through its bridge (its controls port is lane A: `turn()` non-null), with a small mark of where it runs, titled with
+// the hover card's line, in the tab's own `small` style. Null for every other tab.
+function useHolderMark(tab: TabRef): { text: string; title: string } | null {
+  const appSessionId = tab.kind === 'session' ? tab.appSessionId : null;
+  const record = useSessions((s) => (appSessionId === null ? null : (s.records.get(appSessionId) ?? null)));
+  const controls = useSessionControls(appSessionId ?? ('' as AppSessionId));
+  if (record === null || controls === null || controls.turn() === null) return null;
+  const terminal = record.holder.kind === 'terminal';
+  return { text: terminal ? 'Terminal' : 'Background job', title: BRIDGED_LINE(terminal ? null : holderLine(record)) };
+}
+
+function useSessionOffline(tab: TabRef): boolean {
+  const appSessionId = tab.kind === 'session' || tab.kind === 'agent' ? tab.appSessionId : null;
+  return useMachines((s) => appSessionId !== null && selectOffline(s, machineOf(appSessionId)));
+}
+
 // E11 F2b (plan 2.5; owner decision 2): opening a session replaces the shown tab unless it is pinned.
 export const PINNED_HINT = 'Pinned: stays open when you open another session';
 
@@ -116,11 +144,13 @@ export interface TabProps {
 
 export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
   const label = useTabLabel(tab);
+  const offline = useSessionOffline(tab); // P5 O6 M5 (T5): an offline machine's kept tab, its title in the disabled token
   const name = label.secondary ? `${label.title} · ${label.secondary}` : label.title;
   const closeChord = useChordHint('tab.close');
   const dirty = useFileTabDirty(tab); // E5
+  const holderMark = useHolderMark(tab); // P5 O9
   // Keep plain tabs compact, but reserve each nonshrinking mark plus its gap before truncating the title.
-  const minWidth = Math.max(active ? 24 : 16, 16 + (label.glyph ? 4 : 0) + (label.fileType ? 8 : 0) + (tab.pinned ? 4 : 0) + (dirty ? 4 : 0) + (label.secondary ? 20 : 0));
+  const minWidth = Math.max(active ? 24 : 16, 16 + (label.glyph ? 4 : 0) + (label.fileType ? 8 : 0) + (tab.pinned ? 4 : 0) + (dirty ? 4 : 0) + (label.secondary ? 20 : 0) + (holderMark ? 16 : 0));
 
   const onAuxClick = (event: MouseEvent) => {
     if (event.button === 1) void requestCloseTab(tab.id);
@@ -158,7 +188,12 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
         </span>
       )}
       {dirty && <DirtyMark />}{/* E5 */}
-      <span className="truncate">{label.title}</span>
+      <span className={`truncate ${offline ? 'text-fg-faint' : ''}`}>{label.title}</span>
+      {holderMark && ( // P5 O9 (Q1)
+        <small data-holder-marker title={holderMark.title} className="shrink-0 text-fg-muted">
+          {holderMark.text}
+        </small>
+      )}
       {label.secondary && <small className="max-w-16 shrink-0 truncate text-fg-muted">{label.secondary}</small>}
       <button
         type="button"

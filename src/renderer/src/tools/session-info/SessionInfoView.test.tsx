@@ -6,12 +6,18 @@ import { join } from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { EngineSessionStatus } from '@shared/engine/status';
+import { EngineSessionStatusSchema, type EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge, Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import type { PreloadBridge, Settings } from '@shared/ipc/schema';
+import { addressOf, compileAddressing } from '@shared/machine/address';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import type { UsageSnapshot } from '@shared/usage/types';
-import { digest } from '../../../../../test/support/builders';
+import { digest, remoteRow } from '../../../../../test/support/builders';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
+import type { LaneAState } from '@shared/ipc/schema/lane-a';
+import { laneAState } from '../../lane-a/test-support/lane-a-state';
+import { LANE_A_WORDS } from '../../session/controls/lane-a';
+import { applyLaneAState, resetLaneAStore } from '../../stores/lane-a';
 import { useReadLoads } from '../../widgets/read';
 import { loadScenario } from '../../../../../test/support/scenario';
 import { createWidgetBackend, fixtureLine, RESPONSES, type WidgetBackend } from '../../../../../test/support/widget-backend';
@@ -21,6 +27,7 @@ import { panelHost } from '../../panel/host';
 import { useSetup } from '../../sessions/store';
 import { useSettings } from '../../stores/settings';
 import { intent } from '../../test-support/setup-intents';
+import { pageScenario } from '../../test-support/shell-stores';
 import type { PanelToolContext } from '../../panel/tool';
 import { rememberListedModels, useComposerStore, type ListedModel } from '../../stores/composer';
 import { useSessions } from '../../stores/sessions';
@@ -38,10 +45,13 @@ import { REL } from '../../test-support/relative-time';
 // E4a end
 
 const ROOT = join(__dirname, '../../../../..');
-const READY = 'app-7412a115' as AppSessionId; // Settings idle probe: ready, idle, routed, auto
+const READY_BARE = 'app-7412a115' as AppSessionId; // Settings idle probe: ready, idle, routed, auto
+const READY = at(READY_BARE); // the page's
 const scenario = loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json'));
-const record = scenario.sessions.find((r) => r.appId === READY)!;
+const record = pageScenario(scenario).sessions.find((r) => r.appId === READY)!;
 let backend: WidgetBackend;
+// the backend's status of the session (main's, bare) as the page's store holds it
+const pageStatus = (): EngineSessionStatus => compileAddressing(EngineSessionStatusSchema).lift(backend.status(READY_BARE), TEST_MACHINE) as EngineSessionStatus;
 
 const snapshot: UsageSnapshot = {
   available: true, dataDir: '/x', readAt: '2026-09-29T07:36:17Z', error: null, drainTarget: 'u3', drainTargetIsManual: false,
@@ -55,7 +65,7 @@ const snapshot: UsageSnapshot = {
 beforeEach(() => {
   backend = createWidgetBackend({ root: ROOT, statuses: scenario.engine });
   window.maws = backend.bridge();
-  useSessions.setState({ engine: new Map([[READY, backend.status(READY)]]), records: new Map([[READY, record]]), digests: new Map() });
+  useSessions.setState({ engine: new Map([[READY, pageStatus()]]), records: new Map([[READY, record]]), digests: new Map() });
   useUsage.getState().applySnapshot(snapshot);
 });
 afterEach(() => {
@@ -65,7 +75,7 @@ afterEach(() => {
   useSetup.setState({ intents: new Map(), phases: new Map(), invoking: new Set() }); // W2
   useSettings.setState({ state: null }); // W2
   useReadLoads.setState({ loads: new Map() }); // P2-A
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 const ctxOf = (appSessionId: AppSessionId | null, visible = true): PanelToolContext => ({
@@ -126,7 +136,7 @@ describe('session info renders the six sections', () => {
   it('names the requested model as pending until an init frame resolves it, agreeing with the lane', async () => {
     const catalogue = (fixtureLine(ROOT, RESPONSES.list_models) as { models: ListedModel[] }).models;
     rememberListedModels(READY, catalogue);
-    const status = backend.status(READY);
+    const status = pageStatus();
     useSessions.setState({ engine: new Map([[READY, { ...status, model: { requested: 'claude/astra', resolved: 'claude-sonnet-5[1m]' } }]]) });
     mount(ctxOf(READY));
     expect(valueOf('Main')).toMatch(/^claude\/astra( · \w+)? · set · the next init frame confirms it$/);
@@ -159,7 +169,7 @@ describe('session info renders the six sections', () => {
     it.each(cases)('$name', ({ held, model, main, pending }) => {
       const catalogue = (fixtureLine(ROOT, RESPONSES.list_models) as { models: ListedModel[] }).models;
       rememberListedModels(READY, catalogue);
-      const status = { ...backend.status(READY), model };
+      const status = { ...pageStatus(), model };
       useSessions.setState({ engine: new Map([[READY, status]]) });
       if (held) useModelRequests.setState({ model: new Map([[READY, held]]) });
       mount(ctxOf(READY));
@@ -190,14 +200,14 @@ describe('session info renders the six sections', () => {
   });
 
   it('names the overrides when the launch passed some, and the subagent model chosen at launch', () => {
-    useSessions.setState({ engine: new Map([[READY, { ...backend.status(READY), subagentModel: 'haiku', modelOverrides: { ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-5-5' } }]]) });
+    useSessions.setState({ engine: new Map([[READY, { ...pageStatus(), subagentModel: 'haiku', modelOverrides: { ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-5-5' } }]]) });
     mount(ctxOf(READY));
     expect(valueOf('Subagents')).toBe('haiku · CLAUDE_CODE_SUBAGENT_MODEL, chosen at launch');
     expect(valueOf('Overrides')).toBe('ANTHROPIC_DEFAULT_OPUS_MODEL → claude-opus-5-5 · passed through from your shell');
   });
 
   it("a direct session reads the engine's own login from its get_status (routing-flag-override seq 12)", async () => {
-    const direct: EngineSessionStatus = { ...backend.status(READY), gateway: { mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer: 'enabled', localLane: null } };
+    const direct: EngineSessionStatus = { ...pageStatus(), gateway: { mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer: 'enabled', localLane: null } };
     useSessions.setState({ engine: new Map([[READY, direct]]) });
     backend.script('session.getStatus', () => fixtureLine(ROOT, 'pass2/routing-flag-override#12'));
     mount(ctxOf(READY));
@@ -224,7 +234,7 @@ describe('session info renders the six sections', () => {
 describe('session info of a session with no live process', () => {
   const ago = (ms: number) => new Date(Date.now() - ms - 60_000).toISOString();
   const facts = (over: Record<string, unknown>) => ({
-    version: 1, appSessionId: READY, engineSessionId: null, writtenAt: ago(0), source: 'journal', launches: ['L1'],
+    version: 1, appSessionId: READY_BARE, engineSessionId: null, writtenAt: ago(0), source: 'journal', launches: ['L1'],
     engineVersion: null, model: null, effort: null, mode: null, outputStyle: null, plugins: null, contextUsage: null, complete: true, ...over,
   });
   const offline = () => useSessions.setState({ engine: new Map(), records: new Map([[READY, record]]), digests: new Map() });
@@ -268,7 +278,7 @@ describe('session info of a session with no live process', () => {
     const acquires = () => backend.calls.filter((c) => c.command === 'session.acquire').map((c) => c.input);
     expect(acquires()).toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
-    await waitFor(() => expect(acquires()).toEqual([{ appSessionId: READY, reason: 'read' }]));
+    await waitFor(() => expect(acquires()).toEqual([{ appSessionId: READY_BARE, reason: 'read' }]));
   });
 
   // M3 review (§10 Q7, acceptance 6): a terminal holding the session: its facts read-only, the holder's actions in place of Refresh
@@ -288,7 +298,7 @@ describe('session info of a session with no live process', () => {
 
 // W2 (C3; §5.5 as amended 2026-10-01): the status line is gone, so what only its usage popover's footer offered lives here.
 describe('the route switch and the Direct poll, re-homed from the status line', () => {
-  const settingsWith = (gateway: Partial<Settings['gateway']>) => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V19, gateway: { ...SETTINGS_DEFAULTS_V19.gateway, ...gateway } }, resolvedTheme: 'light' } as never });
+  const settingsWith = (gateway: Partial<Settings['gateway']>) => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, gateway: { ...SETTINGS_DEFAULTS_V21.gateway, ...gateway } }, resolvedTheme: 'light' } as never });
   const route = () => screen.getByText('Route', { selector: 'dt' }).nextElementSibling as HTMLElement;
 
   it('a routed session’s Route offers Switch to Direct…, which opens the switch’s confirm', async () => {
@@ -335,7 +345,7 @@ describe('the route switch and the Direct poll, re-homed from the status line', 
   });
 
   it('a Direct session’s get_usage is read while the tab is shown, and not while it is hidden', async () => {
-    const direct: EngineSessionStatus = { ...backend.status(READY), gateway: { mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer: 'enabled', localLane: null } };
+    const direct: EngineSessionStatus = { ...pageStatus(), gateway: { mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer: 'enabled', localLane: null } };
     useSessions.setState({ engine: new Map([[READY, direct]]) });
     mount(ctxOf(READY, false));
     await new Promise((r) => setTimeout(r, 30));
@@ -356,7 +366,7 @@ describe('session info names the browser’s loaded pages', () => {
     mount(ctxOf(READY));
     expect(valueOf('Browser tabs')).toBe('No tabs loaded');
     cleanup();
-    const other = 'app-other' as AppSessionId;
+    const other = at('app-other' as AppSessionId);
     browser.setState({
       sessions: new Map([
         [READY, { tabs: [browserTab(T1, READY, { memoryKiB: 300 * 1024 }), browserTab(T2, READY, { suspended: true, memoryKiB: null })], selected: T1 }],
@@ -368,3 +378,42 @@ describe('session info names the browser’s loaded pages', () => {
   });
 });
 // E4a end
+
+// P5 O9 M9 (fix wave 1): another machine's terminal session (a listed lane A row, no record here) shows what this
+// device can't do to it, each with the reason its controls port gives (Q2: in place, never missing).
+describe('session info for another machine’s terminal session', () => {
+  const REMOTE = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
+  const LINK: NonNullable<LaneAState['link']> = { state: 'up', refusal: null, carrier: 'direct', member: 'm', clientClass: 'native-mac', rights: [], reason: null };
+  afterEach(() => {
+    resetLaneAStore();
+    useSessions.setState({ listed: new Map() });
+  });
+
+  it('lists the remote gaps under Not available here, each with its reason', () => {
+    useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', availability: 'foreign_held' }), appId: REMOTE }]]) });
+    applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], turn: { running: true, unknown: false } }));
+    mount({ ...ctxOf(REMOTE), session: null });
+    const unavailable = screen.getByRole('region', { name: 'Not available here' });
+    const rows = within(unavailable).getAllByRole('term').map((term) => [term.textContent, term.nextElementSibling?.textContent]);
+    expect(rows).toEqual(expect.arrayContaining([
+      ['Subagent rows', LANE_A_WORDS.remoteSubagentRows],
+      ['Stop a background shell', LANE_A_WORDS.remoteStopTask],
+      ['Take over in MAWS', LANE_A_WORDS.remoteTakeOver],
+      ['Reopen', LANE_A_WORDS.remoteReopen],
+      ['Attachments', LANE_A_WORDS.remoteMedia],
+    ]));
+  });
+
+  // sminos 1.27.14: its bridge's status read says the mode the session last reported
+  it('names the mode the session reported, with how long ago, and that none was before it reports one', () => {
+    const rowsOf = () => within(screen.getByRole('region', { name: 'Permissions' })).getAllByRole('term').map((term) => [term.textContent, term.nextElementSibling?.textContent]);
+    useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', availability: 'foreign_held' }), appId: REMOTE }]]) });
+    applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [] }));
+    mount({ ...ctxOf(REMOTE), session: null });
+    expect(rowsOf()).toEqual([['Mode', `${LANE_A_WORDS.modeNotReported} · ${LANE_A_WORDS.mode}`]]);
+    cleanup();
+    applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], mode: { mode: 'plan', at: Date.now() - 5 * 60_000 - 5_000, from: 'UserPromptSubmit' } }));
+    mount({ ...ctxOf(REMOTE), session: null });
+    expect(rowsOf()).toEqual([['Mode', `Plan · Reported ${REL.ago(5, 'minute')}`]]);
+  });
+});

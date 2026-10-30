@@ -4,11 +4,19 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import { addressOf, bareOf } from '@shared/machine/address';
 import { askSteerText } from '@shared/maws/ask';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { OTHER_MACHINE, TEST_MACHINE, at } from '../../../../../test/support/machine';
+import { remoteRow } from '../../../../../test/support/builders'; // P5 O9 M9
+import { Chain, SESSION } from '../../lane-a/test-support/chain-rows'; // P5 O9 M9
+import { resetRemoteTranscripts } from '../../lane-a/remote-source'; // P5 O9 M9
+import { laneAState } from '../../lane-a/test-support/lane-a-state'; // P5 O9
+import { resetLaneAWatches, watchLaneA } from '../../lane-a/watches'; // P5 O9
+import { applyLaneAState, resetLaneAStore } from '../../stores/lane-a'; // P5 O9
 import { resetQueueStore } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
 import { applyTaskEvents, emptyGraph } from '../../tools/agents/model/task-graph';
@@ -36,7 +44,7 @@ afterAll(() => Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offs
 // React's renders and effects): `settle` drains it inside act by yielding the event loop once, and the expectation is
 // read once, so load can slow a case but not fail it.
 beforeAll(async () => {
-  await Promise.all([import('./TranscriptSlot'), import('./Transcript'), import('./markdown/Markdown')]);
+  await Promise.all([import('./TranscriptSlot'), import('./Transcript'), import('./markdown/Markdown'), import('../../lane-a/view/RemoteTranscriptSlot') /* P5 O9 M9 */]);
 });
 const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 
@@ -51,7 +59,7 @@ afterEach(() => {
   for (const dispose of disposers.splice(0)) dispose();
   for (const key of Object.keys(useTranscriptStore.getState().entries)) useTranscriptStore.getState().drop(key);
   resetQueueStore();
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 describe('registerTranscriptActions', () => {
@@ -76,7 +84,7 @@ describe('registerTranscriptActions', () => {
 });
 
 describe('TranscriptSlot', () => {
-  const APP = 'app-slot' as AppSessionId;
+  const APP = at('app-slot' as AppSessionId);
   const EMPTY = { entries: [], paused: false, pauseReason: null, steers: [], withdrawn: [] };
   function history(): SessionEvent[] {
     const b = builder();
@@ -98,11 +106,11 @@ describe('TranscriptSlot', () => {
               : { ok: false, error: { code: 'internal', message: 'unexpected' } },
       ),
     );
-    (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
+    window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
     render(<TranscriptSlot appSessionId={APP} className="slot" />);
     await settle();
     expect(screen.getByRole('region', { name: 'Your message' })).toBeTruthy();
-    expect(invoke).toHaveBeenCalledWith('session.events', { appSessionId: APP, afterSeq: null, limit: null });
+    expect(invoke).toHaveBeenCalledWith('session.events', { appSessionId: bareOf(APP), afterSeq: null, limit: null }, TEST_MACHINE);
     expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toContain('See the file');
 
     const editAndResubmit = vi.fn();
@@ -114,7 +122,7 @@ describe('TranscriptSlot', () => {
     fireEvent.click(screen.getByTitle('Edit here · Send rewinds this session to this message'));
     expect(editAndResubmit).toHaveBeenCalledTimes(1);
     fireEvent.click(document.querySelector<HTMLElement>('[data-chip="path"]')!);
-    expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined);
+    expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined, APP);
 
     const again = vi.fn();
     let dispose = () => {};
@@ -129,17 +137,17 @@ describe('TranscriptSlot', () => {
   });
 
   it('tells the Transcript where the session runs, from its record: a shell call with no cwd shows the worktree’s checkout', async () => {
-    const id = 'app-slot-shell' as AppSessionId;
+    const id = at('app-slot-shell' as AppSessionId);
     const b = builder();
     b.turn('u1', 'List it');
     b.toolUse('t1', 'Bash', { command: 'ls' });
     b.result('t1', 'a', { structured: BASH_RESULT('a') });
     b.end(['u1']);
     const records = useSessions.getState().records;
-    act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project', worktree: { path: '/w/project-wt', branch: 'wt' } } as unknown as SessionRecord]]) }));
+    act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project', worktree: { path: '/w/project-wt', branch: 'wt' }, holder: { kind: 'self' } } as unknown as SessionRecord]]) }));
     onTestFinished(() => useSessions.setState({ records }));
     const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.queue.list' ? EMPTY : name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 3, complete: true } }));
-    (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
+    window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
     render(<TranscriptSlot appSessionId={id} />);
     await settle();
     expect(useTranscriptStore.getState().entries[id]?.phase).toBe('live');
@@ -150,7 +158,7 @@ describe('TranscriptSlot', () => {
 
   // A child agent's shell may have run in its own worktree, so its transcript names no directory it cannot vouch for.
   it('tells a child agent’s Transcript no session directory', async () => {
-    const id = 'app-slot-child-shell' as AppSessionId;
+    const id = at('app-slot-child-shell' as AppSessionId);
     const agent = 'agent-shell' as AgentId;
     const c = builder();
     c.turn('c1', 'List it');
@@ -159,14 +167,14 @@ describe('TranscriptSlot', () => {
     c.end(['c1']);
     const events = c.events.map((event) => ({ ...event, agentId: agent }));
     const records = useSessions.getState().records;
-    act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project', worktree: null } as unknown as SessionRecord]]) }));
+    act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project', worktree: null, holder: { kind: 'self' } } as unknown as SessionRecord]]) }));
     onTestFinished(() => useSessions.setState({ records }));
     const invoke = vi.fn((name: string) =>
       Promise.resolve(
         name === 'session.events' || name === 'session.appEvents' ? { ok: true, value: { events: [], lastSeq: 0, complete: true } } : { ok: true, value: { events, complete: true } },
       ),
     );
-    (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
+    window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
     render(<TranscriptSlot appSessionId={id} agentId={agent} />);
     const key = `${id}:${agent}`;
     await settle();
@@ -182,7 +190,7 @@ describe('TranscriptSlot', () => {
   // session's task graph (what the store holds; the slot opens no watch of its own), pushed again only when the agents
   // it names change.
   it('names an agent the transcript never launched from the session’s task graph, and re-pushes only when the agents change', async () => {
-    const id = 'app-slot-child-lookup' as AppSessionId;
+    const id = at('app-slot-child-lookup' as AppSessionId);
     const agent = 'agent-writer' as AgentId;
     const c = builder();
     c.turn('c1', 'Coordinate');
@@ -194,7 +202,7 @@ describe('TranscriptSlot', () => {
         name === 'session.events' || name === 'session.appEvents' ? { ok: true, value: { events: [], lastSeq: 0, complete: true } } : { ok: true, value: { events, complete: true } },
       ),
     );
-    (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
+    window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
     const entries = useTaskGraph.getState().entries;
     onTestFinished(() => useTaskGraph.setState({ entries }));
     const g = builder();
@@ -221,11 +229,11 @@ describe('TranscriptSlot', () => {
   // The held tail and the withdrawn-steer filter read C7's queue store, which the slot attaches itself: a session's
   // transcript shown without its composer follows the queue as it changes, and lets it go when it unmounts.
   it('attaches the session’s queue itself: mounted alone, its held tail follows the queue’s events', async () => {
-    const id = 'app-slot-queue' as AppSessionId;
+    const id = at('app-slot-queue' as AppSessionId);
     const b = builder();
     b.turn('u1', 'Start the work');
     b.text('m1', 0, 'Working on it.');
-    const held = (queueId: string, content: string) => ({ queueId, appSessionId: id, content, createdAt: '2026-10-01T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false });
+    const held = (queueId: string, content: string) => ({ queueId, appSessionId: bareOf(id), content, createdAt: '2026-10-01T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false });
     const listeners = new Set<(payload: unknown) => void>();
     const invoke = vi.fn((name: string) =>
       Promise.resolve({
@@ -238,17 +246,17 @@ describe('TranscriptSlot', () => {
       listeners.add(listener);
       return () => listeners.delete(listener);
     });
-    (window as { maws?: MawsBridge }).maws = { invoke, on } as unknown as MawsBridge;
+    window.maws = { localMachine: TEST_MACHINE, invoke, on } as unknown as PreloadBridge;
     const { unmount } = render(<TranscriptSlot appSessionId={id} />);
     const heldTexts = () => [...document.querySelectorAll('[data-pending="held"]')].map((bubble) => bubble.querySelector('[data-bubble]')?.textContent);
     await settle();
     expect(heldTexts()).toEqual(['Then run the tests']);
-    expect(invoke).toHaveBeenCalledWith('session.queue.list', { appSessionId: id });
+    expect(invoke).toHaveBeenCalledWith('session.queue.list', { appSessionId: bareOf(id) }, TEST_MACHINE);
 
-    act(() => listeners.forEach((listener) => listener({ appSessionId: id, ...EMPTY, entries: [held('q-1', 'Then run the tests'), held('q-2', 'And commit')] })));
+    act(() => listeners.forEach((listener) => listener({ appSessionId: bareOf(id), ...EMPTY, entries: [held('q-1', 'Then run the tests'), held('q-2', 'And commit')] })));
     await settle();
     expect(heldTexts()).toEqual(['Then run the tests', 'And commit']);
-    act(() => listeners.forEach((listener) => listener({ appSessionId: id, ...EMPTY, entries: [held('q-2', 'And commit')] })));
+    act(() => listeners.forEach((listener) => listener({ appSessionId: bareOf(id), ...EMPTY, entries: [held('q-2', 'And commit')] })));
     await settle();
     expect(heldTexts()).toEqual(['And commit']);
 
@@ -261,7 +269,7 @@ describe('TranscriptSlot', () => {
   // derive draws no bubble for it; the queued envelope is none at the tail either (it stays queued and sends as it is).
   // A held message that answered no capsule here, an envelope naming another ask included, keeps its bubble.
   it('draws no held bubble for an ask’s answer held back into the queue once its capsule reads Answered', async () => {
-    const id = 'app-slot-ask-held' as AppSessionId;
+    const id = at('app-slot-ask-held' as AppSessionId);
     const questions: AskQuestion[] = [{ id: 'q1', question: 'Which colour?', modality: 'choice', options: [{ label: 'Red' }, { label: 'Blue' }] }];
     const answers: AskAnswer[] = [{ id: 'q1', question: 'Which colour?', status: 'answered', value: ['Blue'] }];
     const envelope = askSteerText('toolu_a', questions, answers);
@@ -271,10 +279,10 @@ describe('TranscriptSlot', () => {
     b.result('toolu_a', [{ type: 'text', text: JSON.stringify({ status: 'asked', askId: 'toolu_a' }) }]);
     b.toolUse('t1', 'Bash', { command: 'sleep 1' });
     b.emit('user.message', { messageUuid: uuid('u2'), content: envelope, isReplay: false, isSynthetic: false, origin: 'human', bash: null }); // the answer's steer
-    const held = (queueId: string, content: string) => ({ queueId, appSessionId: id, content, createdAt: '2026-10-01T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false });
+    const held = (queueId: string, content: string) => ({ queueId, appSessionId: bareOf(id), content, createdAt: '2026-10-01T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false });
     const queue = { ...EMPTY, entries: [held('q-1', envelope), held('q-2', 'Then run the tests'), held('q-3', askSteerText('toolu_other', questions, answers))], withdrawn: ['u2'] };
     const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.queue.list' ? queue : name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 9, complete: true } }));
-    (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
+    window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
     render(<TranscriptSlot appSessionId={id} />);
     await settle();
     expect(useTranscriptStore.getState().rows(id).find((row) => row.kind === 'ask')).toMatchObject({ state: 'answered', answers });
@@ -291,8 +299,8 @@ describe('TranscriptSlot', () => {
     b.toolUse('q1', 'AskUserQuestion', { questions: [] });
     b.emit('question.requested', { requestId: request('r1'), toolUseId: tool('q1'), questions: [] });
     const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.queue.list' ? EMPTY : name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 3, complete: true } }));
-    (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
-    render(<TranscriptSlot appSessionId={'app-slot-request' as AppSessionId} />);
+    window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
+    render(<TranscriptSlot appSessionId={at('app-slot-request' as AppSessionId)} />);
     const slot = () => document.querySelector<HTMLElement>('[data-kind="request_slot"]');
     await settle();
     expect(slot()?.textContent).toBe('Waiting for you · AskUserQuestion · answer in the composer');
@@ -318,7 +326,7 @@ describe('TranscriptSlot', () => {
   // answers null, and it is told whether the history is loaded); `actions` override the registered ones for this mount;
   // `presentation` reaches the rows' context. Without them the slot draws exactly as before.
   it('startAt, actions and presentation: the rows from startAt’s index (none while null), the overrides over the registered actions, the presentation on the context', async () => {
-    const id = 'app-slot-card' as AppSessionId;
+    const id = at('app-slot-card' as AppSessionId);
     const b = builder();
     b.turn('u1', 'The parent’s copied prompt');
     b.text('m1', 0, 'The parent’s copied answer.');
@@ -327,7 +335,7 @@ describe('TranscriptSlot', () => {
     b.text('m2', 0, '<to-human>See [the file](src/a.ts).</to-human>');
     b.end(['u2']);
     const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.queue.list' ? EMPTY : name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 9, complete: true } }));
-    (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
+    window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
     const registered = vi.fn();
     const override = vi.fn();
     register({ openFile: registered });
@@ -353,7 +361,7 @@ describe('TranscriptSlot', () => {
     expect(document.body.textContent).not.toContain('The parent’s copied');
     expect(document.querySelector('.owner-message-ink')).not.toBeNull(); // the local presenter
     fireEvent.click(document.querySelector<HTMLElement>('[data-chip="path"]')!);
-    expect(override).toHaveBeenCalledWith('src/a.ts', undefined);
+    expect(override).toHaveBeenCalledWith('src/a.ts', undefined, id);
     expect(registered).not.toHaveBeenCalled();
 
     view.rerender(<TranscriptSlot appSessionId={id} />); // inert by default: every row, the registered action
@@ -361,5 +369,191 @@ describe('TranscriptSlot', () => {
     expect(screen.getAllByRole('region', { name: 'Your message' })).toHaveLength(2);
     fireEvent.click(document.querySelector<HTMLElement>('[data-chip="path"]')!);
     expect(registered).toHaveBeenCalledTimes(1);
+  });
+
+  // P5 O9 (the M8 sitting's first defect): a terminal session driven through its bridge is running exactly while its
+  // controls port says a main turn is open (`turn()`, the bridge's turn events and heartbeat), the one source custody
+  // reads. Its disk transcript leaves a turn open that no row ends: a slash command's echo opens one the engine never
+  // closes, and the bridge's interrupt marker is a meta row, so a stopped turn has no row ending it either. Such a turn
+  // draws closed while the port says nothing runs, in the words its own rows give (a stop's marker: "You stopped").
+  describe('a session driven through its bridge', () => {
+    const id = at('app-slot-bridged' as AppSessionId);
+    afterEach(() => {
+      resetLaneAWatches();
+      resetLaneAStore();
+    });
+    let plane: ((payload: unknown, machine?: string) => void) | null = null;
+    function mount(events: SessionEvent[]) {
+      const records = useSessions.getState().records;
+      act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project', worktree: null, holder: { kind: 'terminal', pid: 4242 } } as unknown as SessionRecord]]) }));
+      onTestFinished(() => useSessions.setState({ records }));
+      const invoke = vi.fn((name: string) =>
+        Promise.resolve(
+          name === 'session.queue.list'
+            ? { ok: true, value: EMPTY }
+            : name === 'session.appEvents'
+              ? { ok: true, value: { events: [] } }
+              : name === 'session.events'
+                ? { ok: true, value: { events, lastSeq: events.length, complete: true } }
+                : name === 'laneA.watch'
+                  ? { ok: true, value: { watch: 'w-1' } }
+                  : { ok: true, value: null },
+        ),
+      );
+      plane = null;
+      const on = vi.fn((name: string, listener: (payload: unknown, machine?: string) => void) => {
+        if (name === 'laneA.plane') plane = listener;
+        return () => {};
+      });
+      window.maws = { localMachine: TEST_MACHINE, invoke, on } as unknown as PreloadBridge;
+      render(<TranscriptSlot appSessionId={id} />);
+    }
+    // the pane's watch hears DX4 messages, as main's driver reshapes the bridge's stream
+    const step = { turnId: 'turn-bridge-1', agentId: null, step: 0 };
+    const hear = (...messages: { kind: string; body: unknown }[]) =>
+      act(() => plane!({ appSessionId: bareOf(id), watch: 'w-1', messages: messages.map((m, n) => ({ project: '', machine: 'm', session: 'eng-1', sub: 'w-1', n, ...m })) }));
+    const divider = () => document.querySelector('[data-kind="divider"]')?.textContent ?? null;
+    const running = (on: boolean) => act(() => applyLaneAState(id, laneAState(id, { turn: { running: on, unknown: false } })));
+
+    it('reads a stopped turn as working only while the bridge says it runs, then in its stop’s words', async () => {
+      const b = builder();
+      b.turn('u1', 'count slowly to 300, one line each');
+      b.text('m1', 0, '1 2 3');
+      b.emit('user.message', { messageUuid: uuid('u1-stop'), content: '[Request interrupted by user]', isReplay: false, isSynthetic: true, origin: 'interrupt-marker', bash: null }); // the bridge's marker: a meta row
+      running(true);
+      mount(b.events);
+      await settle();
+      expect(divider()).toMatch(/^Working/);
+      running(false);
+      await settle();
+      expect(divider()).toMatch(/^You stopped after/);
+      expect(document.body.textContent).not.toMatch(/Working/);
+    });
+
+    // The M8 sitting's second defect: Stop dropped the partly streamed reply. The engine writes no row for what an
+    // interrupt cut, so the text stays as lane B keeps a stopped reply's: settled, in its turn, never streaming.
+    it('keeps the partly streamed reply an interrupt cut, settled, after the rows while no later turn says which turn it was', async () => {
+      const b = builder();
+      b.turn('u1', 'count slowly to 300, one line each');
+      running(true);
+      mount(b.events);
+      await settle();
+      hear({ kind: 'snapshot', body: { streaming: [], usage: null } }, { kind: 'chunk', body: { ...step, chunkIndex: 0, chunk: { kind: 'text', index: 0, text: '1\n\n2\n\n3' } } });
+      await settle();
+      expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toContain('3');
+      hear({ kind: 'step-end', body: step }); // the interrupt: the step ends with nothing named
+      running(false);
+      await settle();
+      const kept = document.querySelectorAll('[data-kind="assistant_text"]');
+      expect(kept).toHaveLength(1);
+      expect(kept[0].textContent).toContain('3');
+      expect(kept[0].getAttribute('data-turn-id')).toBeNull(); // its turn is the latest, or a later one not read yet
+      expect(document.querySelectorAll('[data-kind]')[document.querySelectorAll('[data-kind]').length - 1]).toBe(kept[0]); // last
+      expect(document.body.textContent).not.toMatch(/Working/); // at rest, the turn closed
+    });
+
+    // The fix wave's review: a mount opened later, on the watch another consumer holds, is replayed the interrupt's
+    // step-end after a newer prompt is on disk; the cut stays in the turn that ran at its time, not the latest one.
+    it('places a cut a later mount is replayed in the turn that ran at its time, before a newer prompt', async () => {
+      const b = builder();
+      b.turn('u1', 'count slowly to 300, one line each');
+      b.tick(10_000);
+      b.turn('u2', 'something else');
+      const interrupted = Date.parse(b.events[1].at) + 2_000; // the bridge's time of the cut, inside u1's turn
+      running(false);
+      mount([]); // the plane listener, the watch's opener
+      cleanup();
+      const holder = watchLaneA(id, () => {}); // another consumer holds the page's watch
+      await settle();
+      hear({ kind: 'snapshot', body: { streaming: [], usage: null } }, { kind: 'chunk', body: { ...step, chunkIndex: 0, chunk: { kind: 'text', index: 0, text: 'one, two, three' } } }, { kind: 'step-end', body: { ...step, t: interrupted } });
+      for (const key of Object.keys(useTranscriptStore.getState().entries)) useTranscriptStore.getState().drop(key);
+      mount(b.events);
+      await settle();
+      const kept = [...document.querySelectorAll('[data-kind="assistant_text"]')].find((el) => el.textContent?.includes('one, two, three'));
+      const users = [...document.querySelectorAll('[data-kind="user"]')];
+      expect(kept?.getAttribute('data-turn-id')).toBe(users[0].getAttribute('data-turn-id'));
+      expect(kept!.compareDocumentPosition(users[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // before the newer prompt
+      holder();
+    });
+
+    it('never reads a slash command’s turn, which no row ends, as working while no turn runs', async () => {
+      const b = builder();
+      b.turn('u1', 'list the files here');
+      b.text('m1', 0, 'Nothing but .git.');
+      b.end(['u1']);
+      b.turn('u2', '<command-name>/effort</command-name>\n<command-message>effort</command-message>\n<command-args>medium</command-args>');
+      running(false);
+      mount(b.events);
+      await settle();
+      expect(document.body.textContent).not.toMatch(/Working/);
+      expect(document.querySelector('[data-kind="divider"][data-turn-id]')).toBeNull();
+    });
+  });
+});
+
+// P5 O9 M9: another machine's terminal session (a listed lane A row, no record) draws from its machine's plane through
+// the page's watch; a subagent's own transcript there is a gap, said in its place.
+describe('TranscriptSlot for another machine’s terminal session', () => {
+  const REMOTE = addressOf(OTHER_MACHINE, SESSION as AppSessionId);
+  const listed = () => useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, SESSION, { lane: 'A', availability: 'foreign_held' }), appId: REMOTE }]]) });
+  afterEach(() => {
+    resetRemoteTranscripts();
+    resetLaneAWatches();
+    resetLaneAStore();
+    useSessions.setState({ listed: new Map() });
+  });
+
+  it('opens the page’s watch on its machine and draws the snapshot’s rows', async () => {
+    listed();
+    const listeners = new Map<string, (payload: unknown, machine: string) => void>();
+    const invoke = vi.fn((name: string) => Promise.resolve(name === 'laneA.watch' ? { ok: true, value: { watch: 'w1' } } : { ok: false, error: { code: 'internal', message: 'unexpected' } }));
+    const on = vi.fn((name: string, listener: (payload: unknown, machine: string) => void) => (listeners.set(name, listener), () => {}));
+    window.maws = { localMachine: TEST_MACHINE, invoke, on } as unknown as PreloadBridge;
+    render(<TranscriptSlot appSessionId={REMOTE} />);
+    await settle();
+    expect(invoke).toHaveBeenCalledWith('laneA.watch', { appSessionId: SESSION }, OTHER_MACHINE);
+    const c = new Chain('c4a1f000', 'sminos');
+    c.prompt('List the files.');
+    c.answer('Two files.');
+    const snapshot = { project: 'p', machine: OTHER_MACHINE, session: SESSION, kind: 'snapshot', sub: 'up-1', n: 0, body: { rows: [...c.rows].reverse(), more: false, subagents: [], presence: { record: { status: 'idle' }, bridge: true }, streaming: [] } };
+    act(() => listeners.get('laneA.plane')!({ appSessionId: SESSION, watch: 'w1', messages: [snapshot] }, OTHER_MACHINE));
+    await settle();
+    await settle();
+    expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toContain('Two files.');
+  });
+
+  // Fix wave 2: an underfilled pane cannot scroll to ask again, so an older page the link could not carry says why at
+  // the top with a Retry, and the pane does not ask again by itself meanwhile.
+  it('offers Retry with the reason for an older page the link could not carry, and asks it again on a click', async () => {
+    listed();
+    const listeners = new Map<string, (payload: unknown, machine: string) => void>();
+    let reads = 0;
+    const invoke = vi.fn((name: string) => {
+      if (name === 'laneA.watch') return Promise.resolve({ ok: true, value: { watch: 'w1' } });
+      if (name === 'laneA.read') return Promise.resolve({ ok: true, value: ++reads === 1 ? { ok: false, code: 'failed', message: 'mini isn’t reachable' } : { ok: true, result: { requested: true } } });
+      return Promise.resolve({ ok: false, error: { code: 'internal', message: 'unexpected' } });
+    });
+    const on = vi.fn((name: string, listener: (payload: unknown, machine: string) => void) => (listeners.set(name, listener), () => {}));
+    window.maws = { localMachine: TEST_MACHINE, invoke, on } as unknown as PreloadBridge;
+    render(<TranscriptSlot appSessionId={REMOTE} />);
+    await settle();
+    const c = new Chain('c4a1f100', 'sminos');
+    c.prompt('Newer words.');
+    const snapshot = { project: 'p', machine: OTHER_MACHINE, session: SESSION, kind: 'snapshot', sub: 'up-1', n: 0, body: { rows: [...c.rows].reverse(), more: true, subagents: [], presence: { record: { status: 'idle' }, bridge: true }, streaming: [] } };
+    act(() => listeners.get('laneA.plane')!({ appSessionId: SESSION, watch: 'w1', messages: [snapshot] }, OTHER_MACHINE));
+    for (let i = 0; i < 10 && screen.queryByRole('button', { name: 'Retry' }) === null; i++) await settle();
+    expect(screen.getByTestId('older-failed').textContent).toContain('mini isn’t reachable');
+    for (let i = 0; i < 5; i++) await settle();
+    expect(reads).toBe(1); // no spin while the link is down
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    for (let i = 0; i < 5 && reads < 2; i++) await settle();
+    expect(reads).toBe(2);
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+  });
+
+  it('says a subagent’s own transcript there isn’t shown yet', () => {
+    listed();
+    render(<TranscriptSlot appSessionId={REMOTE} agentId={'a1' as AgentId} />);
+    expect(screen.getByRole('status').textContent).toBe('A subagent’s own transcript on another machine isn’t shown yet');
   });
 });

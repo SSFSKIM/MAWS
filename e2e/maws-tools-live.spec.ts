@@ -12,6 +12,9 @@
 // It spends money, within the sitting's cap MAWS_E1_LIVE_MAX_USD (US$0.20 when unset; each session launches with what
 // is left of it); run on purpose only, after a build:
 //   MAWS_HARNESS=1 electron-vite build && MAWS_E1_LIVE=1 pnpm exec playwright test e2e/maws-tools-live.spec.ts
+// In the gate it is the live group e2e:tools-live (`ci-gate.sh --live`), its cap and its directory under test-results/
+// in its script.
+import { addressed } from './support/address';
 import { surface } from './support/shell';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -152,7 +155,7 @@ const begun: Session[] = []; // every session the sitting launched, so a failed 
 async function begin(s: Sitting, label: string, id: string, prompt: string): Promise<Session> {
   await (await sidebarRow(s.page, { appSessionId: id })).click();
   await s.page.mouse.move(700, 20);
-  await expect(s.pane.locator(`[data-composer="${id}"]`)).toBeVisible();
+  await expect(s.pane.locator(`[data-composer="${await addressed(s.page, id)}"]`)).toBeVisible();
   const maxBudgetUsd = Number(remainingUsd().toFixed(4));
   expect(maxBudgetUsd, `${label}: the sitting's cap US$${CAP_USD} has room left`).toBeGreaterThan(0);
   const spec = { ...launchDefaults(id as AppSessionId, s.scratch.repo), model: 'haiku', permissionMode: 'default' as const, subagentModel: 'haiku', maxBudgetUsd };

@@ -374,6 +374,31 @@ describe('a followed session backfills, then tails its transcript', () => {
     expect(all.filter((e) => e.kind === 'boundary.retraction')).toEqual([]);
   });
 
+  // P5 O3-D M5b fix round 3 (C): on the daemon shape a disk follow's batches go beside the streams, with no journal
+  // cursor, so a client away from them (mawsd's link restreaming, main's machine.sock reconnecting) misses them live, as a
+  // client away from the engine host's socket always has (the runtime drops events while no client is ready). What its
+  // pane reads when it attaches again (session.events, answered from the follow) is the whole history, the batches it
+  // missed included, each once
+  it('answers a reattaching reader with the whole history: the batches delivered while it was away, each once, in order', async () => {
+    const path = await fixture.addTranscript(REWIND_DIR, REWIND, rewindLines.slice(0, 26));
+    const fs = await start();
+    fs.bind([{ sessionId: REWIND, appSessionId: APP }]);
+    const first = await fs.eventsSnapshot(APP, null);
+    const before = delivered().length;
+
+    await fixture.appendLines(path, rewindLines.slice(26)); // delivered as batches no reader takes
+    await expect.poll(() => lastState()?.leafUuid).toMatch(/^7c05f769/);
+    const missed = delivered().slice(before);
+    expect(missed.length).toBeGreaterThan(0);
+
+    const again = await fs.eventsSnapshot(APP, null);
+    expect(again.complete).toBe(true);
+    expect(ids(again.events)).toEqual(ids(delivered()));
+    expect(ids(again.events).slice(0, first.events.length)).toEqual(ids(first.events));
+    for (const event of missed) expect(ids(again.events)).toContain(event.id);
+    expect(new Set(ids(again.events)).size).toBe(again.events.length);
+  });
+
   it('answers a second snapshot while following with every event once and complete, and stops on fs.unfollow', async () => {
     const path = await fixture.addTranscript(REWIND_DIR, REWIND, rewindLines);
     const fs = await start();

@@ -17,7 +17,7 @@ import { DepthPlayer, type PlayerOptions } from './depth-player';
 import { expect, seedKey, test } from './fixtures';
 import { PROJECT, S, stageProject } from './scene';
 import type { HubDouble } from '../test/double/hub-double';
-import { readRecording } from '../test/double/session-stream';
+import { readRecording } from '../../../src/renderer/src/lane-a/test-support/session-stream';
 
 const recording = readRecording();
 const DIFF = readFileSync(join(TWO_SUBAGENTS, 'diff.patch'), 'utf8');
@@ -126,14 +126,33 @@ test("a streaming message stays authored text until closed, then receives unboxe
   player.advance(player.script.length);
   await expect(stream).toHaveCount(0);
   const settled = view.locator('[data-kind="assistant_text"]').filter({ hasText: 'Both subagents reported back.' });
-  await expect(settled).toHaveCount(1); // one answer row, not one ink span per Markdown leaf
+  await expect(settled).toHaveCount(1); // one answer row
   await expect(settled).toContainText('Both subagents reported back. The kettle is on the second shelf, and the last word in words.txt is "gamma".');
-  await expect(settled.locator('p .owner-message-ink').filter({ hasText: 'Both subagents reported back.' })).toHaveCount(1);
+  // #332 interim: the message is one mark around all its blocks (not one per Markdown leaf), in the text colour with an
+  // accent bar and an accent "To you" label, in both themes.
+  const mark = settled.locator('.owner-message-ink');
+  await expect(mark).toHaveCount(1);
+  await expect(mark.locator('p').first()).toContainText('Both subagents reported back.');
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate((name) => { document.documentElement.dataset.theme = name; }, theme);
+    const look = await mark.evaluate((el) => {
+      const paint = (property: string) => { const probe = document.createElement('i'); probe.style.color = `var(${property})`; el.appendChild(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; };
+      const box = getComputedStyle(el);
+      const label = getComputedStyle(el, '::before');
+      return { text: getComputedStyle(el.querySelector('p')!).color, fg: paint('--fg'), accent: paint('--accent'), bar: box.borderLeftColor, barWidth: box.borderLeftWidth, barStyle: box.borderLeftStyle, label: label.content, labelColor: label.color };
+    });
+    expect(look.text, `${theme}: text colour`).toBe(look.fg);
+    expect(look.text, `${theme}: text is not the accent`).not.toBe(look.accent);
+    expect(look.bar, `${theme}: bar colour`).toBe(look.accent);
+    expect([look.barStyle, look.barWidth], `${theme}: a thin bar`).toEqual(['solid', '2px']);
+    expect([look.label, look.labelColor], `${theme}: the label`).toEqual(['"To you"', look.accent]);
+  }
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
   await expect(settled.locator('li')).toHaveText([
     'notes.md: the kettle is on the second shelf.',
     'words.txt: the file lists alpha, beta, gamma, then an empty trailing line, so the last word is "gamma".',
   ]);
-  await expect(settled.locator('[data-streamdown="strong"] .owner-message-ink')).toHaveText(['notes.md:', 'words.txt:']);
+  await expect(settled.locator('.owner-message-ink [data-streamdown="strong"]')).toHaveText(['notes.md:', 'words.txt:']);
   await expect(view.locator('[data-owner-card], .owner-card-label')).toHaveCount(0);
   expect(await view.evaluate((el) => el.textContent?.includes('<message>'))).toBe(false);
   await expect(view).not.toContainText('Peer session worked');

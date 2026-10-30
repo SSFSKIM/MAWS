@@ -13,8 +13,8 @@ import { DepthPlayer, type PlayerOptions } from './depth-player';
 import { expect, seedKey, test } from './fixtures';
 import { PROJECT, S, stageProject } from './scene';
 import type { HubDouble } from '../test/double/hub-double';
-import type { LiveItem } from '../test/double/session-stream';
-import { STRAY } from '../test/double/session-stream';
+import type { LiveItem } from '../../../src/renderer/src/lane-a/test-support/session-stream';
+import { STRAY } from '../../../src/renderer/src/lane-a/test-support/session-stream';
 
 const ANSWER = 'Both subagents reported back.';
 const isChunk = (kind: string) => (item: LiveItem) => item.kind === 'chunk' && item.body.chunk.kind === kind;

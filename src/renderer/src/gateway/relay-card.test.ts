@@ -4,15 +4,18 @@
 // start's overrides.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { CommandName, MawsBridge, Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import type { CommandName, PreloadBridge, Settings } from '@shared/ipc/schema';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { useSetup } from '../sessions/store';
 import { useSessions } from '../stores/sessions'; // P2-A
 import { record } from '../../../../test/support/builders'; // P2-A
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { intent, MESSAGE } from '../test-support/setup-intents';
 import { relayPolicyOf, runDirect } from './relay-card';
 
-const ID = intent().appSessionId as AppSessionId;
+// P5 O6 M2: the page holds `ID` (an address); the fake `window.maws`, standing for main, is asked and answers with `BARE`.
+const BARE = intent().appSessionId as AppSessionId;
+const ID = at(BARE);
 let calls: { name: CommandName; input: unknown }[];
 
 beforeEach(() => {
@@ -21,21 +24,22 @@ beforeEach(() => {
     invoke: vi.fn(async (name: CommandName, input: unknown) => {
       calls.push({ name, input });
       if (name === 'session.intent.patch') return { ok: true, value: { ...intent(), ...(input as { patch: object }).patch } };
-      if (name === 'session.start') return { ok: true, value: { status: 'starting', appSessionId: ID } };
-      if (name === 'session.acquire') return { ok: true, value: { status: 'ready', appSessionId: ID, launched: true, joined: false } }; // P2-A: a record's card
+      if (name === 'session.start') return { ok: true, value: { status: 'starting', appSessionId: BARE } };
+      if (name === 'session.acquire') return { ok: true, value: { status: 'ready', appSessionId: BARE, launched: true, joined: false } }; // P2-A: a record's card
       return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
     }),
     on: () => () => {},
     pathForFile: () => '',
-  } as unknown as MawsBridge;
+    localMachine: TEST_MACHINE,
+  } as unknown as PreloadBridge;
 });
 afterEach(() => {
   useSetup.setState({ intents: new Map(), cards: new Map(), invoking: new Set(), phases: new Map() });
   useSessions.setState({ records: new Map() }); // P2-A
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
-const settings = (relayUnreachable: Settings['gateway']['relayUnreachable']): Settings => ({ ...SETTINGS_DEFAULTS_V19, gateway: { ...SETTINGS_DEFAULTS_V19.gateway, relayUnreachable } });
+const settings = (relayUnreachable: Settings['gateway']['relayUnreachable']): Settings => ({ ...SETTINGS_DEFAULTS_V21, gateway: { ...SETTINGS_DEFAULTS_V21.gateway, relayUnreachable } });
 
 describe("the relay card's policy", () => {
   it("wait makes the ClaudeUsage path the primary; ask and direct keep both (under direct the card shows only for a gateway model)", () => {
@@ -51,15 +55,15 @@ describe('Run direct', () => {
     const pick = vi.fn();
     await runDirect(ID, MESSAGE, false, pick);
     expect(pick).not.toHaveBeenCalled();
-    expect(calls).toEqual([{ name: 'session.start', input: { appSessionId: ID, message: null, options: { gateway: 'direct' } } }]);
+    expect(calls).toEqual([{ name: 'session.start', input: { appSessionId: BARE, message: null, options: { gateway: 'direct' } } }]);
   });
 
   it("on a gateway model, an unstarted session's intent takes the chosen model and effort through the hook's patch, then starts direct", async () => {
-    useSetup.setState({ intents: new Map([[ID, intent({ model: 'claude/astra', effort: 'max' })]]) });
+    useSetup.setState({ intents: new Map([[ID, intent({ appSessionId: ID, model: 'claude/astra', effort: 'max' })]]) });
     await runDirect(ID, MESSAGE, true, async () => ({ model: 'sonnet', effort: 'high' }));
     expect(calls).toEqual([
-      { name: 'session.intent.patch', input: { appSessionId: ID, patch: { model: 'sonnet', effort: 'high' } } },
-      { name: 'session.start', input: { appSessionId: ID, message: null, options: { gateway: 'direct' } } },
+      { name: 'session.intent.patch', input: { appSessionId: BARE, patch: { model: 'sonnet', effort: 'high' } } },
+      { name: 'session.start', input: { appSessionId: BARE, message: null, options: { gateway: 'direct' } } },
     ]);
     expect(useSetup.getState().intents.get(ID)).toMatchObject({ model: 'sonnet', effort: 'high' }); // C7's chips agree
   });
@@ -68,18 +72,18 @@ describe('Run direct', () => {
   it("on a gateway model, a record's resume passes the choice as the acquisition's overrides (no effort key when the model admits the current one)", async () => {
     useSessions.setState({ records: new Map([[ID, record(ID)]]) });
     await runDirect(ID, null, true, async () => ({ model: 'sonnet', effort: null }));
-    expect(calls).toEqual([{ name: 'session.acquire', input: { appSessionId: ID, reason: 'resume', options: { gateway: 'direct', model: 'sonnet' } } }]);
+    expect(calls).toEqual([{ name: 'session.acquire', input: { appSessionId: BARE, reason: 'resume', options: { gateway: 'direct', model: 'sonnet' } } }]);
   });
 
   // P2-A (M1's re-review): the card dismissed or replaced while the model pick was open ends the wait
   it('a choice made after its card went starts nothing', async () => {
-    useSetup.setState({ intents: new Map([[ID, intent({ model: 'claude/astra' })]]) });
+    useSetup.setState({ intents: new Map([[ID, intent({ appSessionId: ID, model: 'claude/astra' })]]) });
     await runDirect(ID, MESSAGE, true, async () => ({ model: 'sonnet', effort: null }), () => false);
     expect(calls).toEqual([]);
   });
 
   it('a cancelled choice starts nothing', async () => {
-    useSetup.setState({ intents: new Map([[ID, intent({ model: 'claude/astra' })]]) });
+    useSetup.setState({ intents: new Map([[ID, intent({ appSessionId: ID, model: 'claude/astra' })]]) });
     await runDirect(ID, MESSAGE, true, async () => null);
     expect(calls).toEqual([]);
   });

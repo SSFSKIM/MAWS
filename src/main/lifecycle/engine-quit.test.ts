@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { engineQuitDeps } from './engine-quit';
 
 // The engine host's half of the quit guard (E10 execution document, §Design 5).
 describe('the engine host at quit', () => {
-  const settingsWith = (extra: Partial<Settings>): Settings => ({ ...SETTINGS_DEFAULTS_V19, ...extra });
+  const settingsWith = (extra: Partial<Settings>): Settings => ({ ...SETTINGS_DEFAULTS_V21, ...extra });
   const hostsIn = (transport: 'utility' | 'detached') => ({ stopAllForQuit: vi.fn<(graceMs: number) => Promise<void>>(async () => {}), facts: vi.fn(() => ({ transport })) });
 
   it('stops every session through the quit’s stop-all with the 5 s grace, in either mode', async () => {
@@ -21,13 +21,19 @@ describe('the engine host at quit', () => {
     expect(engineQuitDeps(hostsIn('utility'), () => settingsWith({})).keepOffered()).toBe(false);
   });
 
+  // P5 O3-D (Q1, D12): on the daemon shape the sessions run under mawsd, past the app: nothing to keep
+  it('offers no keep on the daemon shape, where the sessions and the terminals outlive the app', () => {
+    const deps = engineQuitDeps(hostsIn('detached'), () => settingsWith({}), () => true);
+    expect([deps.keepOffered(), deps.sessionsOutlive?.(), deps.terminalsOutlive?.()]).toEqual([false, true, true]);
+  });
+
   it('reads the keep default from settings version 10 at each question, keep by default', () => {
     let settings = settingsWith({});
     const deps = engineQuitDeps(hostsIn('detached'), () => settings);
     expect(deps.keepDefault()).toBe(true);
-    settings = settingsWith({ supervisor: { idleExitMinutes: 10, keepRunningDefault: false } });
+    settings = settingsWith({ supervisor: { idleExitMinutes: 10, keepRunningDefault: false, shape: 'daemon' } });
     expect(deps.keepDefault()).toBe(false);
-    settings = settingsWith({ supervisor: { idleExitMinutes: null, keepRunningDefault: true } });
+    settings = settingsWith({ supervisor: { idleExitMinutes: null, keepRunningDefault: true, shape: 'daemon' } });
     expect(deps.keepDefault()).toBe(true);
   });
 });

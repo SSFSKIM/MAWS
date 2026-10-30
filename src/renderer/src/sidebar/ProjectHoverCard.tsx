@@ -14,6 +14,8 @@ import { ipc } from '../ipc/client';
 import { branchLabel } from '../sessions/branch-label';
 import type { ProjectEntry } from './derive';
 import { SidebarHoverCard } from './HoverCard';
+import { machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 
 export interface ProjectHoverCardProps {
   entry: ProjectEntry & { project: ProjectRecord };
@@ -34,10 +36,10 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 
 function Body({ entry }: { entry: ProjectEntry & { project: ProjectRecord } }) {
-  const { project, sessions, rollup, lastActivity } = entry;
+  const { project, sessions, listed, rollup, lastActivity } = entry;
   const now = useNow();
   const elapsed = lastActivity === null ? null : Math.max(0, now - lastActivity);
-  const counts = [plural(sessions.length, 'session', 'sessions'), `${rollup.waiting} waiting`, `${rollup.working} working`].join(' · ');
+  const counts = [plural(sessions.length + listed.length, 'session', 'sessions') /* P5 O8 M2: listed rows too */, `${rollup.waiting} waiting`, `${rollup.working} working`].join(' · ');
 
   return (
     <div className="flex flex-col gap-2 text-ui-sm text-fg">
@@ -51,7 +53,7 @@ function Body({ entry }: { entry: ProjectEntry & { project: ProjectRecord } }) {
       <p data-testid="project-activity" className="m-0 text-fg-muted tabular-nums">
         {elapsed === null ? 'No activity yet' : elapsed < 60_000 ? 'Active now' : `Last active ${formatAgo(elapsed, { narrow: true })}`}
       </p>
-      <Worktrees directory={project.directory} />
+      <Worktrees machine={machineOf(project.id)} directory={project.directory} />
     </div>
   );
 }
@@ -59,18 +61,18 @@ function Body({ entry }: { entry: ProjectEntry & { project: ProjectRecord } }) {
 type Read = { state: 'reading' } | { state: 'read'; worktrees: WorktreeInfo[] } | { state: 'none' };
 
 // The checkouts of the project's repository in git's order, the main one first; nothing for a folder git does not know.
-function Worktrees({ directory }: { directory: string }) {
+function Worktrees({ machine, directory }: { machine: MachineRef; directory: string }) {
   const [read, setRead] = useState<Read>({ state: 'reading' });
   useEffect(() => {
     let live = true;
-    void ipc.invoke('git.worktree.list', { repoRoot: directory }).then(
+    void ipc.invoke('git.worktree.list', { repoRoot: directory }, { machine }).then(
       (result) => live && setRead(result.ok ? { state: 'read', worktrees: result.value.worktrees } : { state: 'none' }),
       () => live && setRead({ state: 'none' }),
     );
     return () => {
       live = false;
     };
-  }, [directory]);
+  }, [machine, directory]);
 
   if (read.state === 'none') return null;
   return (

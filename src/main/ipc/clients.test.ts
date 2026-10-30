@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import type { WebContents } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
-import { clientOf, pageOf } from './clients';
+import { clientOf, clientOfId, pageOf } from './clients';
 
 // A fake page: Electron's WebContents is an EventEmitter with an id; `destroy` stands for the window closing.
 let nextId = 100;
@@ -29,6 +29,16 @@ describe('clientOf: one ClientRef per page instance', () => {
     expect(clientOf(page.contents)).toBe(client);
     expect(client.id).toBe(`page:${page.contents.id}.1`);
     expect(pageOf(client)).toBe(page.contents);
+  });
+
+  // P5 O3-D M5b: the id mawsd's client port names back resolves to the live instance, and to nothing once it ended
+  it('finds the live instance by its id, and none once it ended', () => {
+    const page = fakePage();
+    const client = clientOf(page.contents);
+    expect(clientOfId(client.id)).toBe(client);
+    page.navigate({ isMainFrame: true, isSameDocument: false });
+    expect(clientOfId(client.id)).toBeNull();
+    expect(clientOfId('page:0.0')).toBeNull();
   });
 
   it('gives two pages two refs', () => {

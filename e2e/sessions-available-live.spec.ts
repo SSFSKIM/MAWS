@@ -15,7 +15,9 @@
 // ~/.claude.json (A-15, its /tmp project keys and their digest) and ~/.claude/settings.json are read before and after,
 // never written. Run on purpose only; it spends usage (one Haiku turn):
 //   MAWS_HARNESS=1 pnpm exec electron-vite build && MAWS_P2A_LIVE=1 [MAWS_LIVE_MAX_USD=0.20] pnpm exec playwright test e2e/sessions-available-live.spec.ts --reporter=line
+// In the gate it is the live group e2e:available-live (`ci-gate.sh --live`), its cap and the installed engine in its script.
 // Its log, observations and screenshots stay in the scratch root, which the run leaves in place and names.
+import { addressed } from './support/address';
 import { mainTabById, openSurface, surface } from './support/shell';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -37,13 +39,14 @@ import { seedTranscript, transcript } from './support/side-replay';
 import { sidebarRow } from './support/sidebar';
 
 const RELAY = 'http://127.0.0.1:8641';
+test.skip(process.env.MAWS_P2A_LIVE !== '1', 'the P2-A live acceptance runs only under MAWS_P2A_LIVE=1');
+// Under the flag only: the engine and the relay the run would reach.
 function skipReason(): string | null {
-  if (process.env.MAWS_P2A_LIVE !== '1') return 'the P2-A live acceptance runs only under MAWS_P2A_LIVE=1';
   if (!existsSync(ENGINE_BIN)) return `engine binary missing at ${ENGINE_BIN}`;
   if (!ENGINE_VERSION) return `engine did not report a version at ${ENGINE_BIN}`;
   return relaySkipReason(RELAY);
 }
-const skip = skipReason();
+const skip = process.env.MAWS_P2A_LIVE === '1' ? skipReason() : null;
 test.skip(skip !== null, skip ?? '');
 test.describe.configure({ timeout: 900_000 });
 
@@ -138,7 +141,7 @@ async function appIdOf(page: Page, engineSessionId: string): Promise<string> {
 async function open(page: Page, appId: string): Promise<void> {
   await (await sidebarRow(page, { appSessionId: appId as AppSessionId })).click();
   await page.mouse.move(700, 450);
-  await expect(mainTabById(page, `session:${appId}`)).toHaveAttribute('aria-selected', 'true');
+  await expect(mainTabById(page, `session:${await addressed(page, appId)}`)).toHaveAttribute('aria-selected', 'true');
 }
 async function sessionInfo(page: Page) {
   await openSurface(page, 'Session info');
@@ -159,6 +162,7 @@ test('P2-A live: discovered sessions open with nothing started; Send, Load now a
   prepare();
   engine = await cappedEngine({ root, real: ENGINE_BIN });
   log(`P2-A live acceptance · ${new Date().toISOString()} · engine ${ENGINE_VERSION} (${ENGINE_BIN.replace(homedir(), '~')}) · cap ${capWords(engine)} · relay ${RELAY} · scratch ${root}`);
+  console.log(`P2-A live: engine ${ENGINE_VERSION} (${ENGINE_BIN}), cap ${capWords(engine)}, log ${logFile}`);
   const a15First = a15Reading();
   const ownerBefore = ownerFiles();
   log(a15Line('before', a15First, a15First, [root]));

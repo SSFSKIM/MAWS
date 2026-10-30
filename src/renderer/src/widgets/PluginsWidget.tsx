@@ -42,11 +42,14 @@ import { DISCOVER } from '../customize/discover/copy';
 import { DiscoverPane } from '../customize/discover/DiscoverPane';
 import { DiscoverToolbar } from '../customize/discover/DiscoverToolbar';
 import { openDiscover, takeDiscoverRequest, useDiscoverRequest } from '../customize/open';
+import { machineOf } from '@shared/machine/address';
+import { ipc } from '../ipc/client';
 
-// The sessions a change reloads: those with a ready process (the host's fan-out targets).
+// The sessions a change reloads: those with a ready process (the host's fan-out targets). P5 O6 M4: this machine's, whose
+// plugin CLI the change runs (another machine's sessions are not reloaded by it).
 const readyCount = (engine: ReadonlyMap<AppSessionId, EngineSessionStatus>): number => {
   let n = 0;
-  for (const status of engine.values()) if (status.process === 'ready') n += 1;
+  for (const status of engine.values()) if (status.process === 'ready' && machineOf(status.appSessionId) === ipc.localMachine) n += 1;
   return n;
 };
 
@@ -106,6 +109,15 @@ const ReadySession = memo(function ReadySession({ appSessionId, onChange }: { ap
 export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   // the CLI's cwd: the launch's directory (which the host compares for project and local scope), else the record's
   const cwd = useSessions((s) => s.engine.get(appSessionId)?.cwd ?? s.records.get(appSessionId)?.directory ?? null);
+  // P5 O6 M4: the plugin CLI runs on this machine until O4 spans machines, so another machine's session's directory is
+  // never read or changed here as if it were this machine's.
+  if (machineOf(appSessionId) !== ipc.localMachine) {
+    return (
+      <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.plugins} command="plugins" state="ready" error={null} close={close}>
+        <p className="m-0 text-fg-muted">{PLUGIN_MANAGEMENT.otherMachine}</p>
+      </WidgetFrame>
+    );
+  }
   return <SessionLibrary cwd={cwd} appSessionId={appSessionId} presentation={{ variant: 'modal', appSessionId, close }} />;
 }
 

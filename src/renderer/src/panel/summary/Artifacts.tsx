@@ -8,6 +8,8 @@ import { openArtifacts } from '../../main/artifacts';
 import { useSessions } from '../../stores/sessions';
 import { FloatingCard } from './FloatingCard';
 import { actionClass } from './Section';
+import { machineOf } from '@shared/machine/address';
+import { ipc } from '../../ipc/client';
 
 export function Artifacts({ projectId }: { projectId: ProjectId | null }) {
   const [selected, setSelected] = useState(projectId);
@@ -18,7 +20,8 @@ export function Artifacts({ projectId }: { projectId: ProjectId | null }) {
       <select aria-label="Artifacts project" value={selected ?? ''} onChange={(event) => setSelected(event.target.value as ProjectId || null)} className="h-7 min-w-0 flex-1 rounded-sm border border-border bg-bg-raised px-1 text-ui-sm text-fg outline-accent focus-visible:outline-2">
         <option value="" disabled>Choose a project</option>
         {selected && !projects.has(selected) && <option value={selected}>Current project</option>}
-        {[...projects.values()].map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+        {/* P5 O6 M4: this machine's projects; the library is this machine's until O7 (library/store.ts) */}
+        {[...projects.values()].filter((project) => machineOf(project.id) === ipc.localMachine).map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
       </select>
     </label>
   );

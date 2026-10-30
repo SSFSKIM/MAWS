@@ -5,6 +5,10 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { SessionDigest } from '@shared/ipc/schema';
 import { project, record } from '../../../../test/support/builders';
 import { formatClock, formatShortDate, formatWeekdayClock } from '@shared/app/date-format';
+import { addressOf } from '@shared/machine/address';
+import type { OrgKey } from '@shared/machine/org-key';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import type { RowKey } from '../stores/org-projects';
 import { chooserGroups, chooserRows, folderBadge, groupOf, initialToggles, NO_TOGGLES, rowTime, sessionBranch, shortBranch, TOGGLE_KEYS, type ChooserInput } from './model';
 
 const P = project('p', 0, { name: 'maws' });
@@ -29,6 +33,7 @@ const input = (over: Partial<ChooserInput> = {}): ChooserInput => ({
   toggles: NO_TOGGLES,
   branch: 'master',
   query: '',
+  local: TEST_MACHINE,
   ...over,
 });
 const ids = (rows: { record: { appId: AppSessionId } }[]) => rows.map((r) => r.record.appId);
@@ -56,6 +61,26 @@ describe('the chooser’s rows', () => {
     expect(initialToggles({ projectId: null, exclude: null }).allProjects).toBe(true);
     expect(initialToggles({ projectId: P.id as ProjectId, exclude: null })).toEqual(NO_TOGGLES);
     expect(ids(chooserRows(input({ context: { projectId: null, exclude: null } }))), 'All projects off: Other sessions').toEqual(['no-project']);
+  });
+
+  // P5 O6 M5: a sidebar row's Resume… scopes to the row's sessions, every machine's (`rowOfSession`)
+  it('a row’s chooser lists the sessions of every checkout the row groups, and none it does not', () => {
+    const org = (name: string) => ({ key: 'repo:maws' as OrgKey, name, source: 'remote' as const, smnsId: null });
+    const here = project(addressOf(TEST_MACHINE, 'm1'), 0, { name: 'maws', org: org('maws') });
+    const there = project(addressOf(OTHER_MACHINE, 'm2'), 1, { name: 'maws-b', org: org('maws-b') });
+    const loose = project(addressOf(OTHER_MACHINE, 'tmp'), 2, { discovered: true, org: { ...org('tmp'), key: `folder:${OTHER_MACHINE}:tmp` as OrgKey } });
+    const rows = [
+      record(addressOf(TEST_MACHINE, 'a'), { projectId: here.id, updatedAt: at(1) }),
+      record(addressOf(OTHER_MACHINE, 'b'), { projectId: there.id, updatedAt: at(2) }),
+      record(addressOf(OTHER_MACHINE, 'c'), { projectId: loose.id, updatedAt: at(3) }),
+      record(addressOf(OTHER_MACHINE, 'd'), { projectId: null, updatedAt: at(4) }),
+    ];
+    const scoped = input({
+      records: new Map(rows.map((r) => [r.appId, r])),
+      projects: new Map([here, there, loose].map((p) => [p.id, p])),
+      context: { projectId: here.id, row: 'repo:maws' as RowKey, exclude: null },
+    });
+    expect(ids(chooserRows(scoped))).toEqual([addressOf(OTHER_MACHINE, 'b'), addressOf(TEST_MACHINE, 'a')]);
   });
 
   it('the search narrows by title, project name, folder and branch (G2: the branch joins the sidebar’s matcher)', () => {

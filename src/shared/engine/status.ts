@@ -73,6 +73,23 @@ export const EngineSessionStatusSchema = z.strictObject({
   // answered, until `ui_detach` or the exit), naming the client it attached as; absent otherwise, and on an engine
   // without `ui_surface_v1`. The renderer asks the render sites only while it is present.
   uiSurface: z.strictObject({ clientId: z.string() }).optional(),
+  // P5 O2 M2 start (additive X6): the background work the process holds beyond `backgroundTasks`, as the engine host reads
+  // it (src/engine-host/work-state.ts): the session's crons as its last Stop listed them with its durable ones (the
+  // project's scheduled-tasks file, P5 Decision Log 46), and why its work cannot be read
+  // now (null: it can). `unknown` is a string, so a new reason is additive: 'resumed', 'adopted', 'dirty',
+  // 'turn_ended_without_stop', 'stop_unreadable', 'durable_unreadable'. `kept`: the owner's Keep running mark
+  // (`session.setKeep`), which exempts the session from the idle release only. Both optional for an older host.
+  work: z.strictObject({
+    crons: z.array(z.strictObject({ id: z.string(), schedule: z.string(), recurring: z.boolean(), prompt: z.string() })),
+    unknown: z.string().nullable(),
+  }).optional(),
+  kept: z.boolean().optional(),
+  // P5 O2 M2 end
+  // P5 E312 (additive X6): the last change this process's session published for review, from the engine's
+  // `system/code_change_published` (a `gh pr` verb, a push to a PR's branch): its URL as the command printed it
+  // (unverified), the verb, and when. It moves no ref the git watcher sees, so the PR row re-asks gh when `at` moves
+  // rather than at its next poll. Absent before the first, and from an older host.
+  published: z.strictObject({ url: z.string(), action: z.string().nullable(), at: z.string() }).optional(),
 });
 export type EngineSessionStatus = z.infer<typeof EngineSessionStatusSchema>;
 

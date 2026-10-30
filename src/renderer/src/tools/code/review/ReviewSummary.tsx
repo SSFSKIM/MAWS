@@ -5,6 +5,7 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import { SUMMARY_COPY } from '../../../panel/copy';
 import { changeLine } from '../../../panel/summary/derive';
+import { checkoutKey, machineFor } from '../../../ipc/machine';
 import { useGit } from '../../../stores/git';
 import { useSessions } from '../../../stores/sessions';
 import { REVIEW_COPY } from '../copy';
@@ -15,7 +16,7 @@ export function ReviewSummary({ appSessionId, open }: { appSessionId: AppSession
     const record = s.records.get(appSessionId);
     return record ? (record.worktree?.path ?? record.directory) : null;
   });
-  const entry = useGit((s) => (directory === null ? undefined : s.entries.get(directory)));
+  const entry = useGit((s) => (directory === null ? undefined : s.entries.get(checkoutKey(machineFor(appSessionId), directory))));
   if (!entry) return null;
   const line = changeLine(entry.status, entry.uncommitted?.files ?? null);
   const staged = entry.status?.files.filter((file) => !file.untracked && file.index !== '.').length ?? 0;

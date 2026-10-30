@@ -6,6 +6,11 @@
 //   - a quit asks with both parts named, and `cancel` keeps the app;
 //   - `when_idle` shows the banner and quits once the replayed tasks settle (the fixture's next turn, then the engine's
 //     own follow-up turn after `background_tasks_changed []`) and the terminal's command ends (^C);
+//   - P5 O3-D (Q1, D12; docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md): on the daemon shape the session and the
+//     terminal belong to `mawsd` and outlive the app, so the same quit asks nothing (the guard logs what it did not
+//     ask) and exits within the probe bound; the terminal's command and the session's background work run on, a second
+//     client of machine.sock lists the session, and the reopened app shows the session's events with no gap and its
+//     background work still running. The questions above are the embedded shape's (`e2e:c7-utility`'s utility host);
 //   - a quit with nothing busy asks nothing and exits within the probe bound.
 // Run by `pnpm e2e:c12` (MAWS_C12_E2E=1), part of `pnpm verify`.
 import { randomUUID } from 'node:crypto';
@@ -16,6 +21,9 @@ import { expect, test, type ElectronApplication, type Page } from '@playwright/t
 import type { AppSessionId } from '@shared/graph/ids';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { isAlive } from './support/processes';
+import { daemonPaths } from '@shared/daemon/files';
+import { reachMachine } from '../src/mawsd/machine-client';
 
 test.skip(process.env.MAWS_C12_E2E !== '1', 'the quit e2e runs under pnpm e2e:c12 (MAWS_C12_E2E=1)');
 
@@ -68,7 +76,7 @@ function seedRecord(config: string, repo: string): string {
 const statusOf = async (page: Page, id: string) => value(await invoke(page, 'session.status', { appSessionId: id as AppSessionId }));
 
 // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured
-test('quit names a replayed session’s background work and a busy terminal; cancel keeps the app; quit when idle waits for both', async ({}, testInfo) => {
+test('quit names a replayed session’s background work and a busy terminal; cancel keeps the app; quit when idle waits for both; on the daemon shape both outlive the app unasked', async ({}, testInfo) => {
   test.setTimeout(120_000);
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-c12-quit-')));
   const repo = join(root, 'repo');
@@ -78,7 +86,8 @@ test('quit names a replayed session’s background work and a busy terminal; can
   try {
     mkdirSync(repo);
     const engineId = seedRecord(config, repo);
-    maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config, MAWS_E2E_QUIT_ANSWER: 'cancel' } });
+    const env = { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config, MAWS_E2E_QUIT_ANSWER: 'cancel' };
+    maws = await launchMaws({ env });
     child = maws.app.process(); // Playwright drops app.process() when the app closes; teardown still needs the handle.
     const lines = stderrOf(maws.app);
     const { app, page } = maws;
@@ -98,6 +107,45 @@ test('quit names a replayed session’s background work and a busy terminal; can
     // A cold pty can report spawn-helper or the startup wrapper as busy before the shell reaches its prompt.
     // Wait for our command, not that transient busy reading, before comparing the renderer and quit probes.
     await expect.poll(async () => value(await invoke(page, 'pty.foreground', { ptyId }))).toEqual({ process: 'sleep', busy: true });
+    // P5 O3-B: the shape this launch runs; on the daemon's the terminal belongs to the pty host under `mawsd`
+    const daemon = value(await invoke(page, 'host.status', undefined)).transport === 'daemon';
+    const terminal = value(await invoke(page, 'pty.list', undefined)).ptys.find((p) => p.ptyId === ptyId)!.pid;
+
+    if (daemon) {
+      // P5 O3-D (Q1): nothing is asked; the quit leaves the session and the terminal running under mawsd
+      const seen = value(await invoke(page, 'session.events', { appSessionId: id as AppSessionId, afterSeq: null, limit: null })).events.map((e) => e.id);
+      const started = Date.now();
+      const gone = exited(app);
+      await quit(app);
+      const exitAt = await exitWithin(gone, 20_000, lines);
+      expect(lines().filter((l) => l.startsWith('quit-guard:')), 'not asked: the guard says what it left running').toEqual(['quit-guard: 1 background work, 1 busy terminal, not asked: they outlive the app']);
+      expect(lines().find((l) => l.startsWith('quit-report:'))).toMatch(/^quit-report: \d+ ms · 1 background work, 1 busy terminal$/);
+      testInfo.annotations.push({ type: 'quit latency (daemon shape)', description: `quit to exit ${exitAt - started} ms` });
+      expect(exitAt - started, 'no stop-all: the quit is the report and the exit').toBeLessThan(PROBE_BOUND_MS + 8_000);
+      expect(isAlive(terminal), 'the terminal outlives the app').toBe(true);
+      const machine = await reachMachine(daemonPaths(maws.userData), { build: 'e2e-c12-second-client' });
+      if (!machine.ok) throw new Error(`machine.sock: ${machine.state}: ${machine.why}`);
+      try {
+        const listed = await machine.link.request('session.list', {});
+        expect(listed.ok && (listed.value as { sessions: { appId: string }[] }).sessions.some((s) => s.appId === id), 'a second client of machine.sock lists the session with no app').toBe(true);
+      } finally {
+        machine.link.close();
+      }
+      // the reopened app: the session's events with no gap, its background work still running
+      const reopened = await launchMaws({ env, userData: maws.userData, keepConfigHome: true });
+      try {
+        await expect.poll(async () => {
+          const events = value(await invoke(reopened.page, 'session.events', { appSessionId: id as AppSessionId, afterSeq: null, limit: null })).events.map((e) => e.id);
+          return seen.filter((e) => !events.includes(e)).length;
+        }, { timeout: 20_000, message: 'every event read before the quit is there after the reopen' }).toBe(0);
+        await expect.poll(async () => (await statusOf(reopened.page, id)).backgroundTasks.length, { timeout: 20_000, message: 'the session’s background work runs on' }).toBe(2);
+        expect(value(await invoke(reopened.page, 'pty.list', undefined)).ptys.find((p) => p.ptyId === ptyId)?.alive, 'the terminal is listed again').toBe(true);
+        expect(reopened.consoleErrors()).toEqual([]);
+      } finally {
+        await reopened.cleanup(); // the profile is the first launch's, removed by its cleanup
+      }
+      return;
+    }
 
     // a quit asks with both parts named; cancel keeps the app
     await quit(app);

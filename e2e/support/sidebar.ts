@@ -3,11 +3,14 @@
 // that reaches a session's row expands its project first; the project comes from the session's own record
 // (`session.list`), so a test names only the session.
 import { expect, type Locator, type Page } from '@playwright/test';
+import { addressOf } from '../../src/shared/machine/address';
+import type { MachineRef } from '../../src/shared/machine/ref';
+import { addressed, localRef } from './address';
 import { clickRevealed } from './hover';
 
 export const sidebarOf = (page: Page) => page.locator('[data-region="sidebar"]');
 
-// The row of a project, by name ("Other sessions" included). The row holds its sessions once expanded.
+// The row of a project, by name (a machine's own row included, named after the machine: P5 O6 M5). The row holds its sessions once expanded.
 export const projectRow = (page: Page, name: string) => sidebarOf(page).locator(`[data-kind="project"][aria-label="${name}"]`);
 // The project row's own line (the row itself also holds its expanded sessions): what a click toggles and a hover reveals.
 export const projectLine = (row: Locator) => row.locator('[data-project-line]');
@@ -34,12 +37,24 @@ export async function showProjectList(page: Page): Promise<void> {
 // a read that says collapsed, and the row is read back until it holds expanded; a click the restored state overtook is
 // made again from a fresh read (a click is a discrete event, whose toggle React renders before the event's dispatch
 // returns to Playwright, so the read-back does not race the click it follows).
-async function expandRow(page: Page, row: Locator): Promise<void> {
-  await expect(async () => {
-    if ((await row.getAttribute('aria-expanded')) !== 'true') await projectLine(row).click();
-    await expect(row).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 });
-  }).toPass({ timeout: 10_000 });
+// P5 O3-B: `rowOf` may locate the row afresh at each try (sidebarRow's, whose key can change under it), and the row
+// expanded is returned; a row that never holds expanded is named with every project row then on the list (its tree
+// id and state), so a failure says whether the row was there and collapsing, or gone.
+async function expandRow(page: Page, rowOf: Locator | (() => Promise<Locator>)): Promise<Locator> {
+  const locate = async () => (typeof rowOf === 'function' ? await rowOf() : rowOf);
+  let row = await locate();
+  try {
+    await expect(async () => {
+      row = await locate();
+      if ((await row.getAttribute('aria-expanded', { timeout: 1_000 })) !== 'true') await projectLine(row).click({ timeout: 1_000 });
+      await expect(row).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 });
+    }).toPass({ timeout: 10_000 });
+  } catch (error) {
+    const rows = await sidebarOf(page).locator('[data-kind="project"]').evaluateAll((els) => els.map((el) => `${el.getAttribute('data-tree-id')} ${el.getAttribute('aria-expanded')}`)).catch(() => []);
+    throw new Error(`${row} did not hold expanded; the project rows: ${rows.join('; ') || 'none'}`, { cause: error });
+  }
   await settled(page);
+  return row;
 }
 
 // Expands a project in place by its name on the list.
@@ -71,27 +86,48 @@ export async function newChatIn(page: Page, name: string): Promise<void> {
 export type SessionMatch = string | { appSessionId: string };
 
 // The row of a session, its project expanded first, and its project's "Show more" opened when the row is past the first
-// five. A session past the eighth is the Resume… picker's, not the tree's.
-export async function sidebarRow(page: Page, match: SessionMatch): Promise<Locator> {
-  const key = await page.evaluate(async (match) => {
-    const [sessions, projects] = await Promise.all([window.maws.invoke('session.list', { includeArchived: true }), window.maws.invoke('session.projects.list', undefined)]);
-    if (!sessions.ok || !projects.ok) throw new Error('session.list or session.projects.list failed');
-    const record = sessions.value.sessions.find((r) => (typeof match === 'string' ? r.title.text === match : r.appId === match.appSessionId));
-    if (!record) throw new Error(`no session ${JSON.stringify(match)}`);
-    const project = projects.value.projects.find((p) => p.id === record.projectId);
-    if (project?.discovered && !project.hidden) {
-      const added = await window.maws.invoke('session.projects.add', { directory: project.directory });
-      if (!added.ok) throw new Error(added.error.message);
-    }
-    return project ? project.id : 'other';
-  }, match);
-  await showProjectList(page);
-  const project = sidebarOf(page).locator(`[data-kind="project"][data-tree-id="p:${key}"]`);
-  await expandRow(page, project);
+// five. A session past the eighth is the Resume… picker's, not the tree's. P5 O6 M4: `machine` names another machine's
+// session, read through the raw bridge on that machine (a `{ appSessionId }` match is then that machine's bare id).
+export async function sidebarRow(page: Page, match: SessionMatch, machine?: MachineRef): Promise<Locator> {
+  const read = () =>
+    page.evaluate(async ([match, machine]) => {
+      const on = (machine ?? undefined) as never;
+      const [sessions, projects] = await Promise.all([window.maws.invoke('session.list', { includeArchived: true }, on), window.maws.invoke('session.projects.list', undefined, on)]);
+      if (!sessions.ok || !projects.ok) throw new Error('session.list or session.projects.list failed');
+      const record = sessions.value.sessions.find((r) => (typeof match === 'string' ? r.title.text === match : r.appId === match.appSessionId));
+      if (!record) throw new Error(`no session ${JSON.stringify(match)}`);
+      const project = projects.value.projects.find((p) => p.id === record.projectId);
+      if (project?.discovered && !project.hidden) {
+        const added = await window.maws.invoke('session.projects.add', { directory: project.directory }, on);
+        if (!added.ok) throw new Error(added.error.message);
+      }
+      return project ? { id: project.id, org: project.org?.key ?? null } : null;
+    }, [match, machine ?? null] as const);
+  // The page's tree ids hold addresses; the raw bridge answered bare ids. P5 O6 M5: a project's row is keyed by its org
+  // project's key, or by its address until its machine has derived one, which lands just after the project is made (so
+  // the read is made again until the row it names shows); a session of no project sits in its machine's own row.
+  const address = async (id: string) => (machine === undefined ? addressed(page, id) : addressOf(machine, id));
+  // P5 O3-B (terminal-take-over.ts:26, a flake of after-set 2 on 67ccfdd35, run 40807073983): a project just added
+  // (above) is re-keyed from its address to its org project's key when its machine derives one, as a new row,
+  // collapsed, and a project whose machine never derives one (a stub source's) keeps its address; so the row is located
+  // afresh from a new read at each try, and never by a key an earlier read gave.
+  const locate = async () => {
+    const bare = await read();
+    const keys = bare === null ? [`machine:${machine ?? (await localRef(page))}`] : [...(bare.org === null ? [] : [bare.org]), await address(bare.id)];
+    await showProjectList(page);
+    return sidebarOf(page).locator(keys.map((key) => `[data-kind="project"][data-tree-id="p:${key}"]`).join(', '));
+  };
+  let project = sidebarOf(page).locator('[data-kind="project"]').first();
+  await expect(async () => {
+    project = await locate();
+    await expect(project).toHaveCount(1, { timeout: 1_000 });
+  }).toPass({ timeout: 10_000 });
+  project = await expandRow(page, locate);
+  const key = (await project.getAttribute('data-tree-id'))!.slice('p:'.length);
   const row =
     typeof match === 'string'
       ? project.getByRole('treeitem', { name: match, exact: true })
-      : project.locator(`[role="treeitem"][data-menu="session:${match.appSessionId}"]`);
+      : project.locator(`[role="treeitem"][data-menu="session:${await address(match.appSessionId)}"]`);
   const more = project.locator(`[data-tree-id="more:${key}"]`);
   if ((await row.count()) === 0 && (await more.count()) > 0) {
     await more.click();

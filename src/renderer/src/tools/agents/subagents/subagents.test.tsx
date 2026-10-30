@@ -7,7 +7,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import { at as address, TEST_MACHINE } from '../../../../../../test/support/machine';
 import type { SubagentEntry, WorkflowRun } from '@shared/ipc/schema/fs';
 import { digest, item, record, status } from '../../../../../../test/support/builders';
 import { event, recordedTeamListing, replayed, sidecarsOf, workflowRunsOf } from '../../../../../../test/support/agents-events';
@@ -31,6 +32,14 @@ import { SubagentsSummary } from './SubagentsSummary';
 import type { BackgroundHandle } from '../background/BackgroundTool';
 import { subagentsTool, type SubagentsHandle, type SubagentsParams } from './SubagentsTool';
 import { REL } from '../../../test-support/relative-time';
+import { laneAState } from '../../../lane-a/test-support/lane-a-state'; // P5 O9
+import { applyLaneAState, resetLaneAStore } from '../../../stores/lane-a'; // P5 O9
+import { STOP_DOUBT_MS } from './shared'; // P5 O9
+import { addressOf } from '@shared/machine/address'; // P5 O9 M9
+import type { LaneAState } from '@shared/ipc/schema/lane-a'; // P5 O9 M9
+import { remoteRow } from '../../../../../../test/support/builders'; // P5 O9 M9
+import { OTHER_MACHINE } from '../../../../../../test/support/machine'; // P5 O9 M9
+import { LANE_A_WORDS } from '../../../session/controls/lane-a'; // P5 O9 M9
 
 const M3 = REL.agoNarrow(3, 'minute'); // 3m ago, 3분 전
 
@@ -43,8 +52,8 @@ vi.mock('../../../transcript', async (importOriginal) => {
   return { ...actual, ipcSource: ipcSourceSpy.mockImplementation(actual.ipcSource) };
 });
 
-const A = 'A' as AppSessionId;
-const B = 'B' as AppSessionId;
+const A = address('A' as AppSessionId);
+const B = address('B' as AppSessionId);
 const TITLE = 'Fix drag';
 const T = '2026-09-29T10:00:00.000Z';
 const at = (seconds: number) => new Date(Date.parse(T) + seconds * 1000).toISOString();
@@ -59,14 +68,14 @@ const create = (params: SubagentsParams | undefined, appSessionId: AppSessionId 
   return handle;
 };
 
-const live = (over: Partial<EngineSessionStatus> = {}): EngineSessionStatus => ({ ...status('A'), launchId: 'journal', ...over });
+const live = (over: Partial<EngineSessionStatus> = {}): EngineSessionStatus => ({ ...status(A), launchId: 'journal', ...over });
 const openTurn = { id: 'app:journal:1:0', origin: 'human', startedAt: T, acceptedAt: T, userMessageUuids: [] } as unknown as EngineSessionStatus['turn'];
 
 function seedSessions(statusOfA: EngineSessionStatus | null): void {
   useSessions.setState((s) => ({
     records: new Map([
-      [A, record('A', { title: { text: TITLE, source: 'user' } })],
-      [B, record('B', { title: { text: 'Other session', source: 'user' } })],
+      [A, record(A, { title: { text: TITLE, source: 'user' } })],
+      [B, record(B, { title: { text: 'Other session', source: 'user' } })],
     ]),
     engine: statusOfA ? new Map([[A, statusOfA]]) : new Map(),
     digests: new Map(),
@@ -127,7 +136,7 @@ async function mount(opts: MountOptions = {}) {
   return { handle, ...view };
 }
 
-const push = (events: SessionEvent[]) => act(() => fake.batch('A', events));
+const push = (events: SessionEvent[]) => act(() => fake.batch(A, events));
 type Section = 'agents' | 'done' | 'disk'; // E7: the tree's Agents and Done, and On disk
 const section = (name: Section) => document.querySelector<HTMLElement>(`[data-section="${name}"]`);
 const rowsOf = (name: Section) =>
@@ -318,7 +327,7 @@ describe('subagents lists', () => {
   it('badges an agent with an open request of its own: waiting and Approval needed', async () => {
     await mount({ events: [started('a1', 1), started('a2', 2)] });
     act(() =>
-      useAttention.getState().applySnapshot([item('A', 'permission', T, { request: { requestId: 'r1' as RequestId, toolUseId: null, taskId: null, agentId: 'a1' as AgentId } })]),
+      useAttention.getState().applySnapshot([item(A, 'permission', T, { request: { requestId: 'r1' as RequestId, toolUseId: null, taskId: null, agentId: 'a1' as AgentId } })], TEST_MACHINE),
     );
     expect(rowsOf('agents').map((r) => [r.id, r.waiting])).toEqual([['a1', true], ['a2', false]]);
     expect(row('a1').querySelector('[data-part="waiting"]')?.textContent).toBe('waiting');
@@ -412,6 +421,7 @@ function parentStream(child: AgentId, childEvents: SessionEvent[]): SessionEvent
 }
 function installBridge(parent: SessionEvent[], answers: Record<string, unknown> = {}): void {
   window.maws = {
+    localMachine: TEST_MACHINE,
     invoke: async (name: string) =>
       name === 'session.events'
         ? { ok: true, value: { events: parent, lastSeq: parent.length, complete: true } }
@@ -419,7 +429,7 @@ function installBridge(parent: SessionEvent[], answers: Record<string, unknown> 
           ? { ok: true, value: answers[name] }
           : { ok: false, error: { code: 'internal', message: `unexpected ${name}` } },
     on: () => () => {},
-  } as unknown as MawsBridge;
+  } as unknown as PreloadBridge;
 }
 
 describe('drill-in', () => {
@@ -457,7 +467,7 @@ describe('drill-in', () => {
     b.emit('permission.requested', { requestId, toolUseId, toolName, displayName, input, description, decisionReasonType, suggestions, blockedPath });
     installBridge(parentStream(child, b.events), { 'attention.request': { event: { ...perm, sessionId: b.events[0].sessionId } } });
     await mount({ events: [started(child, 1)], params: { agentId: child } });
-    act(() => useAttention.getState().applySnapshot([itemFor(perm, A)]));
+    act(() => useAttention.getState().applySnapshot([itemFor(perm, A)], TEST_MACHINE));
     const drill = document.querySelector<HTMLElement>('[data-view="agent"]')!;
     await waitFor(() => expect(within(drill).getByRole('heading', { name: 'Bash' })).toBeTruthy());
     expect(within(drill).getAllByRole('button').some((button) => /Allow/.test(button.textContent ?? ''))).toBe(true);
@@ -465,7 +475,7 @@ describe('drill-in', () => {
     const openFile = vi.fn();
     const off = registerTranscriptActions({ openFile });
     fireEvent.click(await within(drill).findByTitle('src/a.ts'));
-    expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined);
+    expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined, A);
     off();
   });
 
@@ -485,7 +495,7 @@ describe('drill-in', () => {
     installBridge([]);
     const { handle } = await mount({ params: { toolUseId: 'toolu_01CYiK6ncgQLFUQ2iqC1b4oB' as ToolUseId } });
     expect(handle.snapshot().view.kind).toBe('pending');
-    act(() => fake.subagentsChanged('A', sidecarsOf('subagent-sidecars')));
+    act(() => fake.subagentsChanged(A, sidecarsOf('subagent-sidecars')));
     expect(handle.snapshot().view).toEqual({ kind: 'agent', agentId: 'ad286defbc77bc090' });
   });
 
@@ -545,6 +555,92 @@ describe('drill-in', () => {
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Stop' }));
     expect(fake.inputs.stopTask).toEqual([[A, 'a1']]);
     expect(screen.getByRole('button', { name: 'stopping…' })).toBeTruthy();
+  });
+
+  // P5 O9: a terminal session driven through its bridge stops a subagent by its id, whatever engine status MAWS kept
+  // from an earlier run of the session; a stop whose outcome is unknown says so and is offered again after a wait.
+  describe('of a terminal session driven through its bridge', () => {
+    let stopAgent: unknown;
+    const invoked: [string, unknown][] = [];
+    beforeEach(() => {
+      invoked.splice(0);
+      stopAgent = { state: 'done', result: null };
+      window.maws = {
+        localMachine: TEST_MACHINE,
+        invoke: async (name: string, input: unknown) => {
+          invoked.push([name, input]);
+          if (name === 'session.events') return { ok: true, value: { events: [], lastSeq: 0, complete: true } };
+          if (name === 'laneA.stopAgent') return { ok: true, value: stopAgent };
+          return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
+        },
+        on: () => () => {},
+      } as unknown as PreloadBridge;
+    });
+    afterEach(() => resetLaneAStore());
+
+    async function mountDriven() {
+      await mount({ status: live({ process: 'exited' }), events: [started('a1', 1, { description: 'Long survey' })], params: { agentId: 'a1' as AgentId } });
+      act(() => {
+        useSessions.setState((s) => ({ records: new Map(s.records).set(A, { ...s.records.get(A)!, holder: { kind: 'terminal', pid: 4242 } }) }));
+        applyLaneAState(A, laneAState(A));
+      });
+    }
+    const stopThroughBridge = async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Stop agent' }));
+      fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Stop' }));
+      await waitFor(() => expect(invoked.filter(([name]) => name === 'laneA.stopAgent')).toHaveLength(1));
+    };
+
+    it('reads the lists as not live here once a terminal drives the session, whatever engine status was kept', async () => {
+      await mount({ events: [started('a1', 1, { description: 'Long survey' })] });
+      expect(screen.getByText('Live activity · includes nested agents')).toBeTruthy();
+      expect(screen.queryByText('Status is known only while the session runs here')).toBeNull();
+      act(() => {
+        useSessions.setState((s) => ({ records: new Map(s.records).set(A, { ...s.records.get(A)!, holder: { kind: 'terminal', pid: 4242 } }) }));
+        applyLaneAState(A, laneAState(A));
+      });
+      expect(screen.queryByText('Live activity · includes nested agents')).toBeNull();
+      expect(screen.getByText('Status is known only while the session runs here')).toBeTruthy();
+    });
+
+    it('stops the agent through the bridge, though an exited engine status is kept', async () => {
+      await mountDriven();
+      expect(screen.getAllByRole('button', { name: 'Stop agent' })).toHaveLength(1);
+      await stopThroughBridge();
+      expect(invoked.find(([name]) => name === 'laneA.stopAgent')?.[1]).toEqual({ appSessionId: 'A', agentId: 'a1' }); // the bare id, as the client sends it
+      expect(fake.inputs.stopTask).toEqual([]);
+      expect(screen.getByRole('button', { name: 'stopping…' })).toBeTruthy();
+    });
+
+    // P5 O9 M9 (landing fix wave): another machine's terminal session withholds a subagent's own rows (its port's
+    // `subagent-rows` gap), so the drill-in reached from its tree says so with the reason in place of the transcript, and
+    // asks this machine's `session.events` nothing; Stop and Tell stay, through its port.
+    it('shows a remote session’s subagent rows as unavailable with the reason, building no child source, and keeps Stop and Tell', async () => {
+      const remote = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
+      const link: NonNullable<LaneAState['link']> = { state: 'up', refusal: null, carrier: 'direct', member: 'm', clientClass: 'native-mac', rights: [], reason: null };
+      useSessions.setState({ listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', availability: 'foreign_held' }), appId: remote }]]) });
+      applyLaneAState(remote, laneAState(remote, { engineSessionId: 'eng-r', link, acts: [], turn: { running: true, unknown: false } }));
+      ipcSourceSpy.mockClear();
+      render(<Mounted state={create({ agentId: 'a1' as AgentId }, remote)} appSessionId={remote} />);
+      expect(screen.getByTestId('subagent-rows-gap').textContent).toBe(LANE_A_WORDS.remoteSubagentRows);
+      expect(ipcSourceSpy).not.toHaveBeenCalled();
+      expect(invoked.filter(([name]) => name === 'session.events')).toEqual([]);
+      expect((screen.getByRole('button', { name: 'Stop agent' }) as HTMLButtonElement).disabled).toBe(false);
+      expect(screen.getByRole('textbox')).toBeTruthy(); // Tell, the relay composer
+      useSessions.setState({ listed: new Map() });
+    });
+
+    it('says a stop with an unknown outcome may not have stopped, and offers Stop again after the wait', async () => {
+      stopAgent = { state: 'unknown', why: 'timeout' };
+      await mountDriven();
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      await stopThroughBridge();
+      await waitFor(() => expect(screen.getByText('May not have stopped')).toBeTruthy());
+      expect((screen.getByRole('button', { name: 'stopping…' }) as HTMLButtonElement).disabled).toBe(true);
+      await act(async () => vi.advanceTimersByTimeAsync(STOP_DOUBT_MS));
+      expect((screen.getByRole('button', { name: 'Stop agent' }) as HTMLButtonElement).disabled).toBe(false);
+      expect(screen.getByText('May not have stopped')).toBeTruthy();
+    });
   });
 });
 
@@ -817,7 +913,7 @@ describe('subagents tool', () => {
     rerender(<Mounted state={handle} appSessionId={B} />);
     expect(document.querySelector('[data-view="agent"]')).toBeNull();
     expect(handle.snapshot()).toMatchObject({ appSessionId: B, view: { kind: 'lists' }, scrollTop: 0, draft: '', expandedFolds: new Set() });
-    expect(fake.calls).toContain('subagents B');
+    expect(fake.calls).toContain(`subagents ${B}`);
     expect(fake.calls.filter((c) => c === 'off eventBatch')).toHaveLength(1); // A's watch released
   });
   it('a selection for another session makes a tab still on the old one follow it first, keeping the selection', async () => {
@@ -855,7 +951,7 @@ describe('subagents summary', () => {
 
   it('reads the digest’s counts while the graph has not loaded, and the sidecars on disk for a disk-only session', async () => {
     seedSessions(null);
-    act(() => useSessions.setState((s) => ({ digests: new Map([[A, digest('A', { childAgents: { active: 2, done: 1 } })]]), digestsVersion: s.digestsVersion + 1 })));
+    act(() => useSessions.setState((s) => ({ digests: new Map([[A, digest(A, { childAgents: { active: 2, done: 1 } })]]), digestsVersion: s.digestsVersion + 1 })));
     showSummary();
     expect(summary().textContent).toContain('2 working · 1 done');
     await act(async () => {

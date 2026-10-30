@@ -1,7 +1,8 @@
 // The hub's projection of the org state (O11 M3; RL §5.2, §7.1): members are admitted by Access as the head lists
 // them, by email, with the head's role; a member the head drops loses admission at once, and every socket the hub can
 // close goes with it; each accepted state is announced to every project, retried, and taken as told by a project on
-// the code before the announcement; and the device pairing exchange. (`access-sync` reading it: org-access-sync.test.ts.)
+// the code before the announcement; and the device pairing exchange, with an admin's read of another member's entries.
+// (`access-sync` reading it: org-access-sync.test.ts.)
 import { generateSigningKey, type OrgState, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { PendingDevice } from '../src/protocol/identity';
@@ -247,5 +248,34 @@ describe('the pairing exchange', () => {
     const d2Endorsed = await endorsed(ORG, D, d2, d1);
     await accept(await next(head, (s) => s.members.find((m) => m.id === D)!.devices.push(d2Endorsed.device)), a1);
     expect(await listedNow()).not.toContain('d2');
+  });
+
+  it('lists another member’s entries to an admin, as stored, and to no one else (O8’s H1)', async () => {
+    const of = async (who: string, member: string) => {
+      const response = await hub.fetchAs(who, `/api/devices/pending?member=${member}`);
+      const answer = (await response.json()) as { error?: string };
+      return [response.status, answer.error ?? answer];
+    };
+    // A member with no device yet, the first of which an admin enrolls.
+    const E = memberId();
+    await accept(await next(head, (s) => s.members.push({ id: E, email: 'e@example.com', role: 'member', devices: [] })), a1);
+    const e1 = await newDevice('e1');
+    const first = { deviceId: 'e1', class: 'native-mac', keyStorage: 'software', channelPub: e1.device.channelPub, stepUpPub: e1.device.stepUpPub, mac: fakeMac() };
+    expect((await post('e@example.com', first)).status).toBe(201);
+    const own = await pending('e@example.com');
+    expect(own).toEqual([{ ...first, member: E, created: expect.any(String), expires: expect.any(String) }]);
+    // The admin reads them as the member does, the MAC unchecked; without an id, the admin's own are still all they get.
+    expect(await of(ADMIN, E)).toEqual([200, { pending: own }]);
+    expect(await pending(ADMIN)).toEqual([]);
+    // The caller's own id answers as no id does, an admin's or not.
+    expect(await of(ADMIN, A)).toEqual([200, { pending: [] }]);
+    expect(await of('d@example.com', D)).toEqual([200, { pending: await pending('d@example.com') }]);
+    // Another's is refused to a member before the id is looked up, so the refusal says nothing of who is listed.
+    expect(await of('d@example.com', E)).toEqual([403, 'not-admin']);
+    expect(await of('d@example.com', memberId())).toEqual([403, 'not-admin']);
+    expect(await of(ADMIN, memberId())).toEqual([404, 'no-member']);
+    // A member the head no longer lists is no one's to read, though their entries wait out their expiry.
+    await accept(await next(head, without(E)), a1);
+    expect(await of(ADMIN, E)).toEqual([404, 'no-member']);
   });
 });

@@ -22,11 +22,12 @@ import { createServer, type Server, type Socket } from 'node:net';
 import { join } from 'node:path';
 import type { BrowserAgentActivity } from '@shared/browser/activity';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { BrowserActivityStore } from '../../index/browser-activity';
+import type { BrowserActivityStore } from '../data/activity';
 import type { MawsDownloadRecorded } from '@shared/ipc/schema/maws';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import type { LeaseHolds } from '../agent/visible';
 import type { RunDialogCallback, RunDialogInfo } from '../agent/dialogs';
+import { CUA_SOCKET_DIR, cuaSocketPath } from '@shared/browser/cua-socket';
 import { ActivityFeed } from './activity';
 import { TabClaims } from './claims';
 import { CuaConnection } from './connection';
@@ -34,9 +35,6 @@ import { HeldDialogs } from './dialogs';
 import { agentDownloads, type AgentDownloads } from './downloads';
 import { AgentPresence, type PresenceDeps } from './presence';
 import { authorizePeer, PEER_ROOT_WAIT_MS, rootOf, socketFd, type PeerAddon, type PeerRefusal, type ProcessRoot } from './peer';
-
-// sockaddr_un's sun_path on macOS is 104 bytes, the terminating NUL included.
-export const MAX_SOCKET_PATH_BYTES = 103;
 
 export interface CuaBackendDeps {
   store: Pick<TabStore, 'all' | 'entry' | 'list' | 'open' | 'close' | 'load' | 'update' | 'setControl' | 'onViewCreated' | 'onViewDestroying' | 'onUpdated'>;
@@ -79,7 +77,7 @@ export interface CuaBackend extends LeaseHolds {
   // M3: the `-run-dialog` wrap's held route: a leased tab's alert or confirm, answered by the vendor or the 30 s default
   dialogs: { holds(tabId: string): boolean; hold(entry: TabEntry, info: RunDialogInfo, callback: RunDialogCallback): void };
   // M3 fix wave: the session's agent activity, oldest first (`browser.agent.activities.list`); since cua board #93 an
-  // earlier app run's too, from the index
+  // earlier app run's too, from the browser's data
   activities(appSessionId: AppSessionId): BrowserAgentActivity[];
   dispose(): void;
 }
@@ -97,7 +95,7 @@ const refusalLine = (appSessionId: AppSessionId, { reason, pid }: PeerRefusal) =
 
 export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
   const log = deps.log ?? ((line: string) => console.warn(`[browser] ${line}`));
-  const dir = join(deps.userData, 'browser', 'cua');
+  const dir = join(deps.userData, ...CUA_SOCKET_DIR);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   chmodSync(dir, 0o700); // a directory an older run made otherwise
   for (const name of readdirSync(dir)) if (name.endsWith('.sock')) rmSync(join(dir, name), { force: true }); // nothing listens at start
@@ -124,19 +122,23 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
   };
   const hasLiveRoot = (appSessionId: AppSessionId) => addon !== null && rootsOf(appSessionId).some((root) => addon.process(root.pid)?.start === root.start);
 
-  // The verdict on an accepted socket, which nothing has read yet: refused, it is destroyed unread; accepted, it becomes
-  // a connection (whose hello goes at once) and only then is read.
+  // The verdict on an accepted socket, which nothing has read yet: refused, it is counted and then destroyed unread;
+  // accepted, it becomes a connection, counted before its hello goes, and only then is read. The order is what a reader
+  // of the server sees: the e2e seam's `inspect`, which Node's inspector runs at its next interrupt (between any two
+  // calls of this synchronous code), finds the peer counted as soon as the peer can hear the hello or the close.
   const decide = (appSessionId: AppSessionId, listening: Listening, socket: Socket, acceptedAt: number) => {
     listening.pending.delete(socket);
     if (socket.destroyed) return;
     const refusal = authorizePeer(socketFd(socket), rootsOf(appSessionId), { addon, now: acceptedAt, uid });
     if (refusal) {
-      socket.destroy();
       listening.refused += 1;
       log(refusalLine(appSessionId, refusal));
+      socket.destroy(); // last: the peer can see the close from here on
       return;
     }
-    listening.connections.add(new CuaConnection(ctx, appSessionId, socket, (closed) => listening.connections.delete(closed)));
+    const connection = new CuaConnection(ctx, appSessionId, socket, (closed) => listening.connections.delete(closed));
+    listening.connections.add(connection);
+    connection.greet();
     socket.resume();
   };
 
@@ -169,14 +171,14 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
     return listening;
   };
 
-  const close = (listening: Listening) => {
+  const close = (listening: Listening, why: string) => {
     listening.server.close();
     for (const [socket, { timer }] of listening.pending) {
       clearTimeout(timer);
       socket.destroy();
     }
     listening.pending.clear();
-    for (const connection of listening.connections) connection.disconnect();
+    for (const connection of listening.connections) connection.disconnect(why);
     rmSync(listening.path, { force: true });
   };
 
@@ -210,9 +212,9 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
     socketPathFor(appSessionId) {
       const existing = sessions.get(appSessionId);
       if (existing) return existing.path;
-      const path = join(dir, `${appSessionId}.sock`);
-      if (Buffer.byteLength(path) > MAX_SOCKET_PATH_BYTES) {
-        if (!tooLong.has(appSessionId)) log(`the cua socket path of ${appSessionId} is longer than a Unix socket allows (${Buffer.byteLength(path)} bytes): cua cannot reach this session's browser`);
+      const path = cuaSocketPath(dir, appSessionId);
+      if (path === null) {
+        if (!tooLong.has(appSessionId)) log(`the cua socket path of ${appSessionId} is longer than a Unix socket allows (${Buffer.byteLength(join(dir, `${appSessionId}.sock`))} bytes): cua cannot reach this session's browser`);
         tooLong.add(appSessionId);
         return null;
       }
@@ -231,12 +233,12 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
       }
     },
     closeSession(appSessionId) {
-      feed?.forgetSession(appSessionId); // the session was removed: its activity goes with it (its index rows with its record)
+      feed?.forgetSession(appSessionId); // the session was removed: its activity goes with it (its stored rows too, BrowserData)
       engineRoots.delete(appSessionId);
       const listening = sessions.get(appSessionId);
       if (!listening) return;
       sessions.delete(appSessionId);
-      close(listening);
+      close(listening, 'its session was removed');
     },
     holds: (tabId) => claims.leasedTo(tabId) !== undefined,
     onChange: (listener) => claims.onChange(listener),
@@ -262,7 +264,7 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
       for (const stop of stops.splice(0)) stop();
       feed?.dispose();
       held.dispose();
-      for (const listening of sessions.values()) close(listening);
+      for (const listening of sessions.values()) close(listening, 'MAWS stopped its server');
       sessions.clear();
       engineRoots.clear();
     },

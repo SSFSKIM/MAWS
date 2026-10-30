@@ -1,10 +1,13 @@
-// DX8 — the layout: where the owner is (the grid, every session of the org, or a project and one of its channels) and
-// the depth column's state. The route is the URL's (`/`, `/sessions`, `/p/<project>`, `/p/<project>/s/<session>`), so a
-// reload and a link land in the same place; the depth column's open state and width are the browser's own and outlive a reload.
+// DX8 — the layout: where the owner is (the grid, every session of the org, a project and one of its channels, or the
+// cards of the machines moved to MAWS) and the depth column's state. The route is the URL's (`/`, `/sessions`,
+// `/p/<project>`, `/p/<project>/s/<session>`, `/cards`, `/cards/<machine ref>/<session>`), so a reload and a link land in
+// the same place; the depth column's open state and width are the browser's own and outlive a reload.
 import { create } from 'zustand';
 
 export type Channel = { kind: 'group' } | { kind: 'session'; session: string };
-export type Route = { view: 'grid' } | { view: 'org' } | { view: 'project'; project: string; channel: Channel };
+/** The cards (P5 O13 M5, §E): the list of what waits on the cut-over machines, or one session's cards on one of them. */
+export type CardsRoute = { view: 'cards' } | { view: 'cards'; machine: string; session: string };
+export type Route = { view: 'grid' } | { view: 'org' } | { view: 'project'; project: string; channel: Channel } | CardsRoute;
 
 export type DepthState = { open: boolean; width: number };
 const DEPTH_DEFAULT: DepthState = { open: true, width: 380 }; // MAWS's --panel-w
@@ -17,12 +20,14 @@ export function parseRoute(pathname: string): Route {
     return { view: 'project', project: parts[1], channel: { kind: 'group' } };
   }
   if (parts[0] === 'sessions' && parts.length === 1) return { view: 'org' };
+  if (parts[0] === 'cards') return parts.length === 3 ? { view: 'cards', machine: parts[1], session: parts[2] } : { view: 'cards' };
   return { view: 'grid' };
 }
 
 export function routePath(route: Route): string {
   if (route.view === 'grid') return '/';
   if (route.view === 'org') return '/sessions';
+  if (route.view === 'cards') return 'machine' in route ? `/cards/${encodeURIComponent(route.machine)}/${encodeURIComponent(route.session)}` : '/cards';
   const base = `/p/${encodeURIComponent(route.project)}`;
   return route.channel.kind === 'group' ? base : `${base}/s/${encodeURIComponent(route.channel.session)}`;
 }

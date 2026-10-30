@@ -11,7 +11,7 @@ import { INDEX } from './copy';
 // One field through `settings.set`; the row re-renders from the settings store, which main's `settings.changed` feeds.
 // A refusal is a toast, and the row keeps showing what the store last held.
 export async function writeSettings(patch: SettingsPatch, client: MawsBridge = ipc): Promise<boolean> {
-  const result = await client.invoke('settings.set', patch);
+  const result = await client.invoke('settings.set', patch, { machine: client.localMachine }); // P5 O6 M4: this machine's settings (O3)
   if (result.ok) return true;
   console.error('[settings] settings.set failed', result.error);
   toast({ level: 'warning', text: INDEX.writeFailed(result.error.message), actions: [], dismissible: true });
@@ -20,12 +20,14 @@ export async function writeSettings(patch: SettingsPatch, client: MawsBridge = i
 
 export const useSettingsValue = () => useSettings((s) => s.state?.settings ?? null);
 
-export const TEXT_ACTION = 'rounded-sm px-1.5 py-0.5 text-ui-sm whitespace-nowrap text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
+export const TEXT_ACTION = 'shrink-0 rounded-sm px-1.5 py-0.5 text-ui-sm whitespace-nowrap text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
 export const INPUT = 'h-7 w-full min-w-0 rounded-sm border border-border-strong bg-bg px-2 text-ui-sm text-fg outline-accent focus-visible:outline-2';
 
 // W9 (H1): in a Settings view narrower than 32rem (the view is the `settings` query container, SettingsView.tsx) the
 // row stacks in one column, the label over the control and the note under the control, as Codex's settings rows stack
 // when narrow (readable/chatgpt-26.928.40906/renderer/app/app-shared-360504a28a87.js:380386-380388).
+// P5 O8 M4a Task 8: a word wider than its column (a member's widened name, an email, a path) breaks inside its cell
+// instead of running past it; text that fits wraps as before, and a text action never shrinks or breaks.
 const SETTING_ROW = 'grid min-h-[34px] grid-cols-[168px_minmax(0,1fr)] items-center gap-x-3 gap-y-1 py-1 text-ui-sm @max-lg/settings:grid-cols-1';
 const SETTING_NOTE = 'col-start-2 -mt-0.5 mb-0.5 text-ui-sm leading-normal text-fg-muted @max-lg/settings:col-start-1';
 
@@ -33,10 +35,10 @@ export function Setting({ label, note, children }: { label: string; note?: React
   const id = useId();
   return (
     <div role="group" aria-labelledby={id} className={SETTING_ROW}>
-      <span id={id} className="text-fg-muted">
+      <span id={id} className="min-w-0 text-fg-muted [overflow-wrap:anywhere]">
         {label}
       </span>
-      <div className="flex min-w-0 flex-wrap items-center gap-2">{children}</div>
+      <div className="flex min-w-0 flex-wrap items-center gap-2 [overflow-wrap:anywhere]">{children}</div>
       {note !== undefined && note !== null && <div className={SETTING_NOTE}>{note}</div>}
     </div>
   );
@@ -46,8 +48,21 @@ export function Chip({ children }: { children: ReactNode }) {
   return <span className="inline-flex items-center rounded-sm border border-border px-2 py-0.5 text-ui-sm whitespace-nowrap text-fg-muted">{children}</span>;
 }
 
-export function Segment<V extends string>({ label, value, options, onChange }: { label: string; value: V; options: readonly { value: V; label: string }[]; onChange(value: V): void }) {
+// An `onChange` that answers its write's promise: the option chosen shows while the write is out (on the daemon shape a
+// machine field's crosses to `mawsd` and back before the store moves, M5b fix round 2), then whatever the store holds,
+// the old value again for a refused write.
+export function Segment<V extends string>({ label, value, options, onChange }: { label: string; value: V; options: readonly { value: V; label: string }[]; onChange(value: V): void | Promise<unknown> }) {
   const name = useId();
+  const [pending, setPending] = useState<{ chosen: V; over: V } | null>(null);
+  if (pending !== null && pending.over !== value) setPending(null); // the store moved: show its value
+  const shown = pending?.chosen ?? value;
+  const choose = (next: V) => {
+    const writing = onChange(next);
+    if (!(writing instanceof Promise)) return;
+    const mine = { chosen: next, over: value };
+    setPending(mine);
+    void writing.finally(() => setPending((current) => (current === mine ? null : current)));
+  };
   return (
     <span role="radiogroup" aria-label={label} className="flex max-w-[260px] flex-1 rounded-sm border border-border-strong bg-bg p-[3px]">
       {options.map((option) => (
@@ -55,7 +70,7 @@ export function Segment<V extends string>({ label, value, options, onChange }: {
           key={option.value}
           className="relative flex-1 cursor-default rounded-sm px-1.5 py-1 text-center text-ui-sm whitespace-nowrap text-fg-muted has-[:checked]:bg-bg-active has-[:checked]:text-fg has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent"
         >
-          <input type="radio" name={name} value={option.value} checked={value === option.value} onChange={() => onChange(option.value)} className="absolute opacity-0" />
+          <input type="radio" name={name} value={option.value} checked={shown === option.value} onChange={() => choose(option.value)} className="absolute opacity-0" />
           {option.label}
         </label>
       ))}

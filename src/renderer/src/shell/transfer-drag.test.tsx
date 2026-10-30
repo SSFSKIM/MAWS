@@ -30,6 +30,7 @@ import { ARTIFACTS_TOOL_ID, artifactsTool, type ArtifactsHandle } from '../tools
 import { TRANSFER_COPY } from '../tools/artifacts/copy';
 import { coverPane, resetCovering } from '../tools/browser/covering';
 import { PANEL_TAB_DRAG_TYPE, TAB_DRAG_TYPE } from './transfer';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 
 vi.mock('../app/Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
@@ -38,9 +39,9 @@ const row = (id: string, title: string): LibraryRow => ({
   id, kind: 'document', title, createdBy: { kind: 'human' }, createdAt: 0, updatedAt: 0, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false,
   revision: 1, lastEditor: { kind: 'human' }, lastEditedAt: 0, sessions: [],
 });
-const DOC_TAB: TabRef = { id: tabId({ kind: 'artifact', artifactId: DOC }), kind: 'artifact', artifactId: DOC, pinned: false };
+const DOC_TAB: TabRef = { id: tabId({ kind: 'artifact', artifactId: DOC, machine: TEST_MACHINE }), kind: 'artifact', artifactId: DOC, machine: TEST_MACHINE, pinned: false };
 const NOTES = '00000000-0000-4000-8000-000000000002';
-const NOTES_TAB: TabRef = { id: tabId({ kind: 'artifact', artifactId: NOTES }), kind: 'artifact', artifactId: NOTES, pinned: false };
+const NOTES_TAB: TabRef = { id: tabId({ kind: 'artifact', artifactId: NOTES, machine: TEST_MACHINE }), kind: 'artifact', artifactId: NOTES, machine: TEST_MACHINE, pinned: false };
 const panes = (...pieces: TabRef[][]): LayoutMain => ({
   ...LAYOUT_DEFAULTS.main,
   sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: pieces.map((tabs) => ({ tabs, activeTabId: tabs.at(-1)!.id })) as TabSet['panes'], focusedPane: 0 } },
@@ -82,7 +83,7 @@ beforeEach(() => {
   resetPanelStores();
   // Transfer targets need a visible surface; an empty panel no longer reserves a column.
   const surface = { id: 'background:probe', toolId: 'background', pinned: true };
-  useLayout.setState({ panelPinned: [surface], panelSurfaces: { version: 1, stacks: { [A]: [surface.id], '@none': [surface.id] }, pinnedTools: [], contexts: {} } });
+  useLayout.setState({ panelPinned: [surface], panelSurfaces: { version: 2, stacks: { [A]: [surface.id], '@none': [surface.id] }, pinnedTools: [], contexts: {} } });
   resetArtifactEditors();
   resetLibrary();
   resetCovering();
@@ -165,7 +166,7 @@ describe('a main tab dragged onto the panel', () => {
     drag('drop', target, dt);
     await settle();
     expect(mainIds()).toEqual([sessionTab(A).id]);
-    expect(recordOf(artifactsTabOfA()!)).toEqual({ kind: 'record', artifactId: DOC });
+    expect(recordOf(artifactsTabOfA()!)).toEqual({ kind: 'record', artifactId: DOC, machine: TEST_MACHINE });
     expect(useLayout.getState().dragging, 'INV-5').toBeNull();
     expect(panelTarget()).toBeNull();
   });
@@ -294,7 +295,7 @@ describe('the browser cover while a drag is on', () => {
     drag('dragOver', panelTarget()!, dt);
     drag('drop', panelTarget()!, dt);
     await settle();
-    expect(recordOf(artifactsTabOfA()!)).toEqual({ kind: 'record', artifactId: DOC });
+    expect(recordOf(artifactsTabOfA()!)).toEqual({ kind: 'record', artifactId: DOC, machine: TEST_MACHINE });
     expect(covers()).toEqual([true, false]);
     page.release();
   });
@@ -485,7 +486,7 @@ describe('the menus and actions share the drop’s refusal (M1 to M5)', () => {
     await settle();
     expect(mainIds()).toEqual([sessionTab(A).id]);
     const id = artifactsTabOfA()!;
-    expect(recordOf(id)).toEqual({ kind: 'record', artifactId: DOC });
+    expect(recordOf(id)).toEqual({ kind: 'record', artifactId: DOC, machine: TEST_MACHINE });
 
     await act(async () => runAction('artifact.moveToTab'));
     await settle();

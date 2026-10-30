@@ -160,8 +160,24 @@ export type BlockRow = { uuid: string; turnId: string; agentId: string | null; s
  * That model request ended — finished, aborted, or cut off by its turn's end — from DX5's `step end` or `turn complete`.
  * Sent after every `block-row` of the step, so a block of it still without one never gets one: the browser drops its
  * partial text, and no partial text outlives its request. The hub relays it uninterpreted.
+ *
+ * Each optional field is present only when the producer knows it, never null for unknown; a producer older than
+ * sminos 1.27.12 sends none of them.
  */
-export type StepEnd = { turnId: string; agentId: string | null; step: number };
+export type StepEnd = {
+  turnId: string;
+  agentId: string | null;
+  step: number;
+  /** The bridge's stamp of the event that ended the step, ms since the epoch on the machine's clock (as a chunk's `t`):
+   * its `step end`, or the `turn complete` that cut it off. */
+  t?: number;
+  /** What the request was sent with, as its `step start` carried it: for the main loop, the model chosen through the
+   * bridge applied. */
+  model?: string;
+  /** Its effort, likewise; null when the request named none. A step begun before the subscription carries its snapshot
+   * entry's `model` and no `effort`, which the entry does not keep. */
+  effort?: string | null;
+};
 
 export type SessionPresence = {
   /** `status`, `waitingFor`, and `needs` of `~/.claude/sessions/<pid>.json` verbatim; null when no process is live. */
@@ -176,6 +192,12 @@ export type SessionPresence = {
   capabilities?: Capabilities;
   /** The bridge's reading of the session's permission mode and when it was read (M3); absent before any reading. */
   mode?: ModeReading;
+  /**
+   * The launch the session's bridge serves (its `GET /status` `launch`, O12 M7), on RL10's plane only: what a lane A act
+   * names in its context, so one sealed for an earlier process is refused at the effect (P5 O9). Absent elsewhere, and
+   * from a bridge that names none.
+   */
+  launch?: string;
 };
 
 /**

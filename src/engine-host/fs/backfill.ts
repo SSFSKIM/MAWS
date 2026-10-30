@@ -5,12 +5,13 @@
 // same backfill twice deduplicate.
 import type { ContentBlock, EventBase, SessionEvent } from '@shared/graph/events';
 import type { AgentId, ApiMessageId, EventId, MessageUuid, ParentToolUseId, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
-import type { AgentMeta, TranscriptRecord } from '@shared/wire/transcript';
+import { isNoContent, type AgentMeta, type TranscriptRecord } from '@shared/wire/transcript';
 import { slashCommandLine } from '@shared/wire/local-command';
 import { INTERRUPT_MARKER } from '../normalizer-support';
 import { apiRetryOfApiError } from '../normalizer-system';
 import { messageText, parsePeerMessage, peerEventsOf } from '@shared/engine/peer-envelope'; // E7
 import { isMadeUpFinalAnswer } from '@shared/owner/message-call';
+import { INTERRUPT_CUT, parseInterruptCut } from '@shared/lane-a/interrupt-cut';
 
 // The three engine strings that name a spilled result (SPEC 12.12 and 20.10); the structured field wins when present.
 export const SPILL_MARKER = /(?:Full output saved to|were saved to|was saved to):? (\/[^\r\n]+\.(?:txt|json))(?=[.;\s]|$)/;
@@ -45,6 +46,16 @@ export interface BackfillContext {
   // steer (blockedPrompt, below) from a blocked prompt of its own.
   inToolLoop: boolean;
   lastAssistantWasApiError: boolean;
+  // P5 O9: the rows a sminos bridge appended lately, by their words on one line, waiting for the transcript line that
+  // says which of them were the owner's words delivered into a running turn (sminosDelivery, below)
+  readonly bridgeRows: Map<string, { uuid: MessageUuid; content: string }>;
+  // P5 O9 (the fix wave): whether a turn runs, from its `turn.started` to its `turn.ended` or an interrupt marker, and
+  // the owner's words the bridge delivered while none did, waiting for the turn that answers them (withWaitingWords)
+  running: boolean;
+  readonly waitingWords: { uuid: MessageUuid; content: string }[];
+  // P5 O9 (the M10 sitting): the latest `<local-command-caveat>` record, whose child is a command the terminal ran
+  // (localCommandTurn, below)
+  localCaveat: MessageUuid | null;
 }
 
 export function createBackfillContext(init: {
@@ -66,6 +77,10 @@ export function createBackfillContext(init: {
     lastTurnUserUuid: null,
     inToolLoop: false,
     lastAssistantWasApiError: false,
+    bridgeRows: new Map(),
+    running: false,
+    waitingWords: [],
+    localCaveat: null,
   };
 }
 
@@ -101,6 +116,7 @@ export function recordToEvents(record: TranscriptRecord, ctx: BackfillContext): 
 
   switch (record.type) {
     case 'user':
+      noteBridgeRow(record, uuid, ctx);
       userEvents(record, uuid, ctx, base, events);
       break;
     case 'assistant':
@@ -120,7 +136,7 @@ export function recordToEvents(record: TranscriptRecord, ctx: BackfillContext): 
     default:
       events.push({ ...base(), kind: 'frame.unknown', frameType: `transcript:${record.type}`, subtype: null });
   }
-  return events;
+  return withWaitingWords(record, events, ctx, base);
 }
 
 type Base = () => EventBase;
@@ -238,6 +254,7 @@ function taskNotificationAttachment(record: TranscriptRecord, uuid: MessageUuid,
 
 function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext, base: Base, events: SessionEvent[], sourceUuid: MessageUuid | null = uuid): void {
   const content = messageContent(record);
+  if (isNoContent(content)) return; // P5 O9: the engine's word for a message with none: no prompt, no turn
   // W1 (A5): the summary `/compact` writes after its boundary (`isCompactSummary`, w1-compact.jsonl line 29) is the
   // engine's context for the model, which the live stream sends as a synthetic frame: no bubble and no turn, like meta.
   const isMeta = record.isMeta === true || record.isCompactSummary === true;
@@ -252,6 +269,13 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
     events.push({ ...base(), kind: 'turn.started', userMessageUuid: uuid, origin });
   };
   if (marker) ctx.inToolLoop = false; // an interrupt ends the loop: no model call follows
+  // P5 O9 (the M10 sitting): the reply an interrupt cut off, as the sminos bridge records it after the interrupt's marker
+  // and note (1.27.16): the model's context in the turn it cut, never a prompt or a turn; drawn marked cut off.
+  const cut = interruptCutText(record);
+  if (cut !== null) {
+    events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: cut, isReplay: false, isSynthetic: true, origin: INTERRUPT_CUT, bash: null });
+    return;
+  }
   // E7 start
   if (!marker && isPeerPrompt(record)) {
     peerMessage(record, uuid, ctx, base, events);
@@ -272,8 +296,10 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
     }
     const origin = notification === null ? humanOrigin : 'task-notification'; // preserve typed provenance; notifications are engine-initiated
     const bash = parseBash(content);
+    const command = localCommandTurn(record, ctx);
     turn(origin);
     events.push({ ...base(), kind: 'user.message', messageUuid: uuid, content: bashStripped(content, bash), isReplay: false, isSynthetic: isMeta, origin, bash });
+    if (command) events.push(endedOf(base, uuid, null));
     if (record.isMeta === true) hookFeedback(content, uuid, base, events);
     // The real completion of a background agent: the notification naming the tool use that started it.
     if (notification !== null && notification.toolUseId !== null) {
@@ -474,12 +500,14 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
       return;
     case 'local_command':
     case 'local_command_output':
+      if (isNoContent(record.content)) return; // P5 O9: a command that said nothing (`/reload-plugins`)
       events.push({ ...base(), kind: 'user.message', messageUuid: record.uuid as MessageUuid, content: typeof record.content === 'string' ? record.content : '', isReplay: false, isSynthetic: record.isMeta === true, origin: 'local-command', bash: null });
       return;
     case 'informational': {
+      if (sminosDelivery(record, ctx, base, events)) return;
       const blocked = blockedPrompt(record);
       if (blocked === null) {
-        const text = typeof record.content === 'string' ? record.content.trim() : '';
+        const text = typeof record.content === 'string' ? withoutMirroredCut(record.content).trim() : '';
         if (record.level === 'info') return;
         if (record.level !== 'warning' && record.level !== 'notice') break; // preserve unknown shapes as compatibility signals
         if (text) events.push({ ...base(), kind: 'notice.posted', level: record.level, text, key: 'informational' });
@@ -507,24 +535,7 @@ function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base
       events.push({ ...base(), kind: 'turn.started', userMessageUuid: uuid, origin: null });
       prompt();
       blockingHook(uuid, 'UserPromptSubmit', blocked.blockingError, base, events);
-      events.push({
-        ...base(),
-        kind: 'turn.ended',
-        result: 'success',
-        isError: false,
-        terminalReason: null,
-        resultText: blocked.text,
-        durationMs: 0,
-        numTurns: 0,
-        costUsd: 0,
-        usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, thinkingTokens: null },
-        permissionDenials: [],
-        errors: [],
-        userMessageUuids: [uuid],
-        origin: null,
-        resultIndex: null,
-        isEchoReceipt: false,
-      });
+      events.push(endedOf(base, uuid, blocked.text));
       return;
     }
   }
@@ -559,6 +570,145 @@ function hookFeedback(content: string, uuid: MessageUuid, base: Base, events: Se
   if (match !== null) blockingHook(uuid, match[1], match[2], base, events);
 }
 
+// P5 O9 (the M8 sitting; doperpowers `sminos/hooks/mods/bridge.tsx`, `appendDelivery`): a terminal session's sminos bridge
+// gives words it delivers while a turn runs (the bridge's `deliver` from MAWS, sminos's send) to the running turn as a
+// row of its own, which the engine keeps as it keeps every row a plugin appends: a meta `user` record of the plugin's
+// origin whose content is the words, as text. The bridge's other rows (an interrupt's marker and note, a stop's note)
+// are kept alike, so the record alone does not say which are the owner's. The transcript line the bridge writes after a
+// delivery's row does: a `system/informational` record reading `sminos: delivered: <the words on one line>`. So each
+// such row is held by its words until a line names them; then the words are what lane B's mid-turn send reads as
+// (steeredPrompt): the owner's words folded into the running turn at that point, under the row's own uuid, which the
+// bridge's `delivered` names, and the line no notice. A line naming no row this context saw stays a notice.
+const SMINOS_DELIVERED = 'sminos: delivered: ';
+const BRIDGE_ROWS_HELD = 32;
+const oneLine = (text: string) => text.replaceAll('\n', ' ');
+
+function noteBridgeRow(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext): void {
+  const origin = record.origin as { kind?: unknown; name?: unknown } | undefined;
+  if (record.isMeta !== true || origin?.kind !== 'plugin' || origin.name !== 'sminos') return;
+  const content = messageContent(record);
+  const blocks = Array.isArray(content) ? content.filter(isContentBlock) : [];
+  const text = typeof content === 'string' ? content : blocks.length > 0 && blocks.every((b) => b.type === 'text' && typeof b.text === 'string') ? blocks.map((b) => b.text as string).join('') : null;
+  if (text === null || text.trim() === '') return;
+  ctx.bridgeRows.delete(oneLine(text));
+  ctx.bridgeRows.set(oneLine(text), { uuid, content: text });
+  while (ctx.bridgeRows.size > BRIDGE_ROWS_HELD) ctx.bridgeRows.delete(ctx.bridgeRows.keys().next().value as string);
+}
+
+function sminosDelivery(record: TranscriptRecord, ctx: BackfillContext, base: Base, events: SessionEvent[]): boolean {
+  if (typeof record.content !== 'string' || !record.content.startsWith(SMINOS_DELIVERED)) return false;
+  const key = record.content.slice(SMINOS_DELIVERED.length);
+  const row = ctx.bridgeRows.get(key);
+  if (row === undefined) return false;
+  ctx.bridgeRows.delete(key);
+  if (!ctx.running) {
+    ctx.waitingWords.push(row);
+    return true;
+  }
+  events.push({ ...base(), kind: 'user.message', messageUuid: row.uuid, content: row.content, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+  events.push({ ...base(), kind: 'command.lifecycle', commandUuid: row.uuid, state: 'started' });
+  return true;
+}
+
+// P5 O9 (the fix wave): words the bridge delivers while no turn runs go in as such a row too: after a stop, since the
+// engine then refuses a plugin's prompt (the bridge wakes the session through its inbox, which the engine keeps as a
+// peer message); or the row lands as the turn it was given into ends (the bridge's wake is then its prompt as the user).
+// No turn runs to take them as sent during it, so they wait for the turn that answers them, as desk-web's view has them
+// (`renderer/src/lane-a/source/appended-turn.ts`): the bridge's wake opens a turn of the words', the first its prompt
+// (the wake's own text the model's context, no bubble) and any others sent during it; any other turn that starts first
+// takes them all as sent during it. A turn the interrupt left open on this mapping (the marker opens and ends nothing
+// here) is not one that runs: the next turn's start closes it, stopped.
+const BRIDGE_WAKE_LINE = '[sminos bridge]'; // doperpowers `sminos/hooks/mods/bridge.tsx`, `WAKE_LINE`
+
+function withWaitingWords(record: TranscriptRecord, events: SessionEvent[], ctx: BackfillContext, base: Base): SessionEvent[] {
+  const start = events.findIndex((event) => event.kind === 'turn.started');
+  let out = events;
+  if (start >= 0 && ctx.waitingWords.length > 0) {
+    const [first, ...rest] = ctx.waitingWords.splice(0);
+    const said = (row: { uuid: MessageUuid; content: string }): SessionEvent => ({ ...base(), kind: 'user.message', messageUuid: row.uuid, content: row.content, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    const sentDuring = (rows: { uuid: MessageUuid; content: string }[]) => rows.flatMap((row): SessionEvent[] => [said(row), { ...base(), kind: 'command.lifecycle', commandUuid: row.uuid, state: 'started' }]);
+    if (isBridgeWake(record)) {
+      ctx.lastTurnUserUuid = first.uuid;
+      const opened = { ...events[start], userMessageUuid: first.uuid, origin: null } as SessionEvent;
+      const wake = events.slice(start + 1).map((event) => (event.kind === 'user.message' && event.messageUuid === record.uuid ? { ...event, isSynthetic: true } : event));
+      out = [...events.slice(0, start), opened, said(first), ...sentDuring(rest), ...wake];
+    } else out = [...events, ...sentDuring([first, ...rest])];
+  }
+  for (const event of out) {
+    if (event.kind === 'turn.started') ctx.running = true;
+    else if (event.kind === 'turn.ended' || (event.kind === 'user.message' && event.origin === 'interrupt-marker')) ctx.running = false;
+  }
+  return out;
+}
+
+// The bridge's wake, by its first line: its prompt as the user, or its inbox message, kept as a peer's (the line opens
+// the envelope's body). Desk-web reads it alike (`renderer/src/lane-a/conversation/delivery-frame.ts`, `isBridgeWake`).
+function isBridgeWake(record: TranscriptRecord): boolean {
+  if (record.type !== 'user') return false;
+  const origin = record.origin as { kind?: unknown; asUser?: unknown } | undefined;
+  const content = messageContent(record);
+  const text = typeof content === 'string' ? content : Array.isArray(content) ? messageText(content.filter(isContentBlock)) : '';
+  let body: string | null = null;
+  if (origin?.kind === 'plugin' && origin.asUser === true) body = text;
+  else if (origin?.kind === 'peer') {
+    const envelope = parsePeerMessage(text);
+    body = envelope?.kind === 'cross-session' && envelope.frame === null ? envelope.body : null;
+  }
+  return body !== null && body.split('\n', 1)[0] === BRIDGE_WAKE_LINE;
+}
+
+// P5 O9 (the M10 sitting): the sminos bridge's mirror of an interrupt's rows for the terminal (`<plugin>: interrupt: …`)
+// ends, from 1.27.16, with up to 300 characters of the reply the interrupt cut off. That reply is drawn from its own
+// row (interruptCutText), so the notice drops it and keeps the rest.
+const MIRRORED_CUT = / The reply it cut off: [\s\S]*$/;
+const withoutMirroredCut = (text: string) => (/^(?:sminos|doperpowers): interrupt: /.test(text) ? text.replace(MIRRORED_CUT, '') : text);
+
+// The sminos bridge's row of an interrupt's cut-off reply (`@shared/lane-a/interrupt-cut`), its whole text: a meta user
+// row of its plugin (sminos, or doperpowers before sminos 1.0.0) whose one text block opens with the row's line; else null.
+function interruptCutText(record: TranscriptRecord): string | null {
+  const origin = record.origin as { kind?: unknown; name?: unknown } | undefined;
+  if (record.type !== 'user' || record.isMeta !== true || origin?.kind !== 'plugin' || (origin.name !== 'sminos' && origin.name !== 'doperpowers')) return null;
+  const text = singleText(record);
+  return text !== null && parseInterruptCut(text) !== null ? text : null;
+}
+
+// The end of a turn that ran nothing (`num_turns` 0), as the live stream has one: a prompt a hook blocked, a command the
+// terminal ran.
+function endedOf(base: Base, uuid: MessageUuid, resultText: string | null): SessionEvent {
+  return {
+    ...base(),
+    kind: 'turn.ended',
+    result: 'success',
+    isError: false,
+    terminalReason: null,
+    resultText,
+    durationMs: 0,
+    numTurns: 0,
+    costUsd: 0,
+    usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, thinkingTokens: null },
+    permissionDenials: [],
+    errors: [],
+    userMessageUuids: [uuid],
+    origin: null,
+    resultIndex: null,
+    isEchoReceipt: false,
+  };
+}
+
+// P5 O9 (the M10 sitting): a command typed at the terminal (`/model haiku`, `/effort low`) is written as three user
+// records: the engine's `<local-command-caveat>` (meta), the command's own record under it (`<command-name>…`, not
+// meta), then its output (2.1.312, the sitting's transcript; w1-compact.jsonl lines 30-32 on 2.1.283). The command's
+// record opens its turn as any prompt does, its words the person's bubble, but a local command runs no model: nothing
+// on disk ends that turn (no `turn_duration`), so its turn ends where it starts, as the live stream's `result` for a
+// local command ends it, and the output joins it. Only the record under a caveat: a skill's command record has none,
+// and its turn runs the model. Called on every user record with text a context maps, in order.
+function localCommandTurn(record: TranscriptRecord, ctx: BackfillContext): boolean {
+  const kind = localCommandKind(record);
+  const caveat = ctx.localCaveat;
+  ctx.localCaveat = kind === 'caveat' && typeof record.uuid === 'string' ? (record.uuid as MessageUuid) : null;
+  return kind === 'echo' && caveat !== null && record.parentUuid === caveat;
+}
+
 // A prompt a UserPromptSubmit hook blocked leaves no user record, only a system `informational` record:
 // `UserPromptSubmit operation blocked by hook:\n<blockingError>` and, unless the hook suppressed it, `\n\nOriginal
 // prompt: <prompt>` (2.1.283 cli.pretty.js 525245-525248). The first such separator splits them. The same record is
@@ -579,6 +729,7 @@ function blockedPrompt(record: TranscriptRecord): { text: string; blockingError:
 export function startsTurn(record: TranscriptRecord): boolean {
   if (record.type !== 'user' || record.isMeta === true || record.isCompactSummary === true || isInterruptMarker(record) || isLocalCommandOutput(record)) return false; // W1: a compact summary and a command's output too
   const content = messageContent(record);
+  if (isNoContent(content)) return false; // P5 O9: the engine's word for a message with none
   if (typeof content === 'string') return true;
   if (!Array.isArray(content)) return false;
   const blocks = content.filter(isContentBlock);

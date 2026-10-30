@@ -6,11 +6,13 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import type { ScmRemoteOutput } from '@shared/ipc/schema/scm';
 import { isolatedGitEnv } from '../../../../../test/support/git-env';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
 import { createClient } from '../../ipc/client';
+import { checkoutKey } from '../../ipc/machine';
 import { queryClient } from '../../ipc/query';
 import { createGitStore } from '../../stores/git';
 import { fail, installFakeMain, ok, type Handler } from '../../test-support/code';
@@ -22,7 +24,7 @@ import { createScmUi, forSession } from './view-state';
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 // The renderer's validating client over the fake, so every answer and event the cases script is held to its schema.
-const validated = (bridge: MawsBridge) => createClient(() => bridge);
+const validated = (bridge: PreloadBridge) => createClient(() => bridge);
 
 // ---- real git: the patches C4's service answers --------------------------------------------------------------------
 
@@ -31,7 +33,7 @@ function git(cwd: string, args: string[]): { stdout: string; status: number | nu
   const result = spawnSync('/usr/bin/git', args, { cwd, env: isolatedGitEnv(), encoding: 'utf8' });
   return { stdout: result.stdout, status: result.status };
 }
-// `GitService.untrackedDiff`'s argv (src/main/git/service.ts), run from the top level.
+// `GitService.untrackedDiff`'s argv (src/services/git/service.ts), run from the top level.
 const untrackedDiff = (cwd: string, path: string) =>
   git(cwd, ['-c', 'diff.autoRefreshIndex=false', 'diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-index', '--src-prefix=a/', '--dst-prefix=b/', '-U3', '--', '/dev/null', path]);
 // `GitService.diff`'s `worktree` scope.
@@ -88,8 +90,8 @@ describe('splitPatch on a real untracked patch (task 1’s deferred proof)', () 
 
 const APP_PATCH = 'diff --git a/src/app.ts b/src/app.ts\nindex 1..2 100644\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+new\n';
 const APP_FILES = [{ path: 'src/app.ts', oldPath: null, insertions: 1, deletions: 1, binary: false }];
-const STAGED: ScmDiffTarget = { directory: DIR, scope: 'staged' };
-const WORKTREE: ScmDiffTarget = { directory: DIR, scope: 'worktree' };
+const STAGED: ScmDiffTarget = { machine: TEST_MACHINE, directory: DIR, scope: 'staged' };
+const WORKTREE: ScmDiffTarget = { machine: TEST_MACHINE, directory: DIR, scope: 'worktree' };
 
 function scmMain(extra: Handler = () => ok(), status: GitStatus = statusOf()) {
   return installFakeMain((name, input) => {
@@ -127,7 +129,7 @@ describe('source control store: diffs', () => {
     const offs = [store.getState().hold(STAGED), store.getState().hold(WORKTREE)];
     await tick();
     expect(main.callsOf('git.diff').filter((input) => input.scope === 'untracked')).toEqual([]);
-    const target: ScmDiffTarget = { directory: DIR, scope: 'untracked', path: 'untracked.txt' };
+    const target: ScmDiffTarget = { machine: TEST_MACHINE, directory: DIR, scope: 'untracked', path: 'untracked.txt' };
     const off = store.getState().hold(target);
     await tick();
     expect(main.callsOf('git.diff').filter((input) => input.scope === 'untracked')).toEqual([{ directory: DIR, scope: 'untracked', path: 'untracked.txt' }]);
@@ -159,12 +161,12 @@ describe('source control store: diffs', () => {
     const main = scmMain();
     const git = createGitStore(validated(main.bridge), { diffDelayMs: 10_000 });
     const store = createScmStore(validated(main.bridge), { git });
-    const unwatch = git.getState().watch(DIR);
-    const offs = [store.getState().hold(STAGED), store.getState().hold({ directory: DIR, scope: 'untracked', path: 'untracked.txt' }), store.getState().hold({ directory: '/other', scope: 'staged' })];
+    const unwatch = git.getState().watch(TEST_MACHINE, DIR);
+    const offs = [store.getState().hold(STAGED), store.getState().hold({ machine: TEST_MACHINE, directory: DIR, scope: 'untracked', path: 'untracked.txt' }), store.getState().hold({ machine: TEST_MACHINE, directory: '/other', scope: 'staged' })];
     const scmDiffs = () => main.callsOf('git.diff').filter((input) => input.scope !== 'all'); // the git store's own sum aside
     await vi.advanceTimersByTimeAsync(0);
     expect(scmDiffs()).toHaveLength(3);
-    git.getState().applyChanged({ repoRoot: DIR, status: statusOf({ checkedAt: '2026-10-06T10:00:01.000Z' }), reason: 'index' });
+    git.getState().applyChanged({ repoRoot: DIR, status: statusOf({ checkedAt: '2026-10-06T10:00:01.000Z' }), reason: 'index' }, TEST_MACHINE);
     await vi.advanceTimersByTimeAsync(SCM_REFRESH_MS - 1);
     expect(scmDiffs()).toHaveLength(3);
     await vi.advanceTimersByTimeAsync(1);
@@ -238,7 +240,7 @@ describe('source control store: diffs', () => {
   // answered after it says nothing about the file, so the "No diff for this entry" flash before git.changed is gone
   it('drops an untracked answer when a stage or discard of the file went out since the read was asked, and reads again after it', async () => {
     vi.useFakeTimers();
-    const target: ScmDiffTarget = { directory: DIR, scope: 'untracked', path: 'untracked.txt' };
+    const target: ScmDiffTarget = { machine: TEST_MACHINE, directory: DIR, scope: 'untracked', path: 'untracked.txt' };
     const reads: ((answer: 'patch' | 'gone') => void)[] = [];
     const main = installFakeMain(async (name, input) => {
       if (name === 'scm.stage' || name === 'scm.discard') return ok({ ok: true, status: statusOf({ files: [] }), output: '' });
@@ -247,15 +249,15 @@ describe('source control store: diffs', () => {
       return answer === 'gone' ? fail(`not an untracked file: ${input.path}`) : ok({ patch: untrackedPatch, files: [{ path: input.path, oldPath: null, insertions: 2, deletions: 0, binary: false }] });
     });
     const store = createScmStore(validated(main.bridge));
-    const ui = createScmUi({ session: A });
+    const ui = createScmUi({ session: at(A) });
     const off = store.getState().hold(target);
     await vi.advanceTimersByTimeAsync(0);
     reads[0]('patch');
     await vi.advanceTimersByTimeAsync(0);
     expect(diffOf(store.getState(), target)).toMatchObject({ status: 'ok' });
 
-    for (const [i, mutate] of [() => store.getState().stage(ui, A, ['untracked.txt']), () => store.getState().discard(ui, A, [{ path: 'untracked.txt', group: 'untracked' }])].entries()) {
-      store.getState().statusChanged(DIR); // a re-read, in flight when the mutation goes out
+    for (const [i, mutate] of [() => store.getState().stage(ui, at(A), DIR, ['untracked.txt']), () => store.getState().discard(ui, at(A), DIR, [{ path: 'untracked.txt', group: 'untracked' }])].entries()) {
+      store.getState().statusChanged(checkoutKey(TEST_MACHINE, DIR)); // a re-read, in flight when the mutation goes out
       await vi.advanceTimersByTimeAsync(SCM_REFRESH_MS);
       await mutate();
       reads[1 + 2 * i]!('gone'); // main staged it first: C4 no longer lists it as untracked
@@ -267,7 +269,7 @@ describe('source control store: diffs', () => {
       await vi.advanceTimersByTimeAsync(0);
     }
 
-    store.getState().statusChanged(DIR); // with no mutation since it was asked, a refusal is the answer
+    store.getState().statusChanged(checkoutKey(TEST_MACHINE, DIR)); // with no mutation since it was asked, a refusal is the answer
     await vi.advanceTimersByTimeAsync(SCM_REFRESH_MS);
     reads[5]!('gone');
     await vi.advanceTimersByTimeAsync(0);
@@ -275,10 +277,59 @@ describe('source control store: diffs', () => {
     off();
   });
 
+  // P5 O6 M4 (the task review): a stage or discard is of one checkout on one machine; another machine's checkout of the
+  // same directory and path is neither dropped nor read again because of it.
+  it('a stage on one machine leaves another machine’s untracked diff of the same path alone', async () => {
+    vi.useFakeTimers();
+    const here: ScmDiffTarget = { machine: TEST_MACHINE, directory: DIR, scope: 'untracked', path: 'untracked.txt' };
+    const there: ScmDiffTarget = { ...here, machine: OTHER_MACHINE };
+    const diffsAsked: (string | undefined)[] = [];
+    const main = installFakeMain((name, _input, machine) => {
+      if (name === 'scm.stage') return ok({ ok: true, status: statusOf({ files: [] }), output: '' });
+      if (name === 'git.diff') diffsAsked.push(machine);
+      return name === 'git.diff' ? ok({ patch: untrackedPatch, files: [{ path: 'untracked.txt', oldPath: null, insertions: 2, deletions: 0, binary: false }] }) : ok();
+    });
+    const store = createScmStore(validated(main.bridge));
+    const ui = createScmUi({ session: at(A) });
+    const offs = [store.getState().hold(here), store.getState().hold(there)];
+    await vi.advanceTimersByTimeAsync(0);
+    const diffsOn = (machine: string) => diffsAsked.filter((m) => m === machine).length;
+    expect([diffsOn(TEST_MACHINE), diffsOn(OTHER_MACHINE)]).toEqual([1, 1]);
+    await store.getState().stage(ui, at(A), DIR, ['untracked.txt']);
+    await vi.advanceTimersByTimeAsync(SCM_REFRESH_MS);
+    expect([diffsOn(TEST_MACHINE), diffsOn(OTHER_MACHINE)]).toEqual([2, 1]);
+    offs.forEach((off) => off());
+  });
+
+  it('keeps another machine’s untracked answer that a stage on this machine went out during', async () => {
+    vi.useFakeTimers();
+    const there: ScmDiffTarget = { machine: OTHER_MACHINE, directory: DIR, scope: 'untracked', path: 'untracked.txt' };
+    const reads: ((answer: 'patch' | 'gone') => void)[] = [];
+    const main = installFakeMain(async (name, input) => {
+      if (name === 'scm.stage') return ok({ ok: true, status: statusOf({ files: [] }), output: '' });
+      if (name !== 'git.diff') return ok();
+      const answer = await new Promise<'patch' | 'gone'>((resolve) => reads.push(resolve));
+      return answer === 'gone' ? fail(`not an untracked file: ${input.path}`) : ok({ patch: untrackedPatch, files: [{ path: 'untracked.txt', oldPath: null, insertions: 2, deletions: 0, binary: false }] });
+    });
+    const store = createScmStore(validated(main.bridge));
+    const ui = createScmUi({ session: at(A) });
+    const off = store.getState().hold(there);
+    await vi.advanceTimersByTimeAsync(0);
+    reads[0]!('patch');
+    await vi.advanceTimersByTimeAsync(0);
+    store.getState().statusChanged(checkoutKey(OTHER_MACHINE, DIR)); // B's re-read, in flight when A stages
+    await vi.advanceTimersByTimeAsync(SCM_REFRESH_MS);
+    await store.getState().stage(ui, at(A), DIR, ['untracked.txt']);
+    reads[1]!('gone');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(diffOf(store.getState(), there)).toEqual({ status: 'error', message: 'not an untracked file: untracked.txt' });
+    off();
+  });
+
   it('says why a read failed', async () => {
     const main = installFakeMain((name) => (name === 'git.diff' ? fail('not an untracked file: udir/') : ok()));
     const store = createScmStore(validated(main.bridge));
-    const target: ScmDiffTarget = { directory: DIR, scope: 'untracked', path: 'udir/' };
+    const target: ScmDiffTarget = { machine: TEST_MACHINE, directory: DIR, scope: 'untracked', path: 'udir/' };
     const off = store.getState().hold(target);
     await tick();
     expect(diffOf(store.getState(), target)).toEqual({ status: 'error', message: 'not an untracked file: udir/' });
@@ -293,14 +344,14 @@ describe('source control store applies no status of its own and resumes a run fr
     const main = scmMain((name) => (name === 'scm.stage' || name === 'scm.unstage' ? ok({ ok: true, status: statusOf({ files: [] }), output: '' }) : ok()));
     const git = createGitStore(validated(main.bridge));
     const store = createScmStore(validated(main.bridge), { git });
-    const unwatch = git.getState().watch(DIR);
+    const unwatch = git.getState().watch(TEST_MACHINE, DIR);
     await tick();
     const entries = git.getState().entries;
-    const ui = createScmUi({ session: A });
+    const ui = createScmUi({ session: at(A) });
     ui.setState({ notice: { kind: 'changed', text: 'stale', output: '' } });
-    const result = await store.getState().stage(ui, A, ['src/app.ts', 'udir/']);
+    const result = await store.getState().stage(ui, at(A), DIR, ['src/app.ts', 'udir/']);
     expect(result).toMatchObject({ ok: true, value: { ok: true } });
-    await store.getState().unstage(ui, A, ['src/app.ts']);
+    await store.getState().unstage(ui, at(A), ['src/app.ts']);
     expect(main.callsOf('scm.stage')).toEqual([{ appSessionId: A, paths: ['src/app.ts', 'udir/'] }]);
     expect(main.callsOf('scm.unstage')).toEqual([{ appSessionId: A, paths: ['src/app.ts'] }]);
     expect(ui.getState().notice).toBeNull();
@@ -312,17 +363,17 @@ describe('source control store applies no status of its own and resumes a run fr
     let answer = ok(refusal('git_failed', 'pre-commit hook failed', 'nope\n'));
     const main = scmMain(() => answer);
     const store = createScmStore(validated(main.bridge));
-    const ui = createScmUi({ session: A });
+    const ui = createScmUi({ session: at(A) });
     ui.setState({ message: 'Fix' });
-    await store.getState().commit(ui, A);
+    await store.getState().commit(ui, at(A));
     expect(ui.getState()).toMatchObject({ notice: { kind: 'git_failed', text: 'pre-commit hook failed', output: 'nope\n' }, message: 'Fix', lastCommit: null });
     answer = { ok: false, error: { code: 'timeout', message: 'git timed out' } };
-    await store.getState().unstage(ui, A, ['a.ts']);
+    await store.getState().unstage(ui, at(A), ['a.ts']);
     expect(ui.getState().notice).toEqual({ kind: 'error', text: 'git timed out', output: '' });
     // E11 W-D: a discard's refusal or failure is its sheet's to show (the sheet stays open), not the notice behind it
     answer = ok(refusal('unmerged', '"a.ts" has a merge conflict'));
     ui.setState({ notice: null });
-    await store.getState().discard(ui, A, [{ path: 'a.ts', group: 'unstaged' }]);
+    await store.getState().discard(ui, at(A), DIR, [{ path: 'a.ts', group: 'unstaged' }]);
     expect(ui.getState().notice).toBeNull();
     expect(main.callsOf('scm.discard')).toEqual([{ appSessionId: A, entries: [{ path: 'a.ts', group: 'unstaged' }] }]);
   });
@@ -330,9 +381,9 @@ describe('source control store applies no status of its own and resumes a run fr
   it('commits the draft, then records the commit and clears the draft and Skip hooks', async () => {
     const main = scmMain((name) => (name === 'scm.commit' ? ok(committed) : ok()));
     const store = createScmStore(validated(main.bridge));
-    const ui = createScmUi({ session: A });
+    const ui = createScmUi({ session: at(A) });
     ui.setState({ message: 'Fix\n\nThe body.', noVerify: true, notice: { kind: 'nothing_staged', text: '', output: '' } });
-    await store.getState().commit(ui, A);
+    await store.getState().commit(ui, at(A));
     expect(main.callsOf('scm.commit')).toEqual([{ appSessionId: A, message: 'Fix\n\nThe body.', noVerify: true }]);
     expect(ui.getState()).toMatchObject({ lastCommit: { sha: 'abc1234def', subject: 'Fix' }, message: '', noVerify: false, notice: null });
   });
@@ -345,9 +396,9 @@ describe('source control store applies no status of its own and resumes a run fr
       return ok(committed);
     });
     const store = createScmStore(validated(main.bridge));
-    const ui = createScmUi({ session: A });
+    const ui = createScmUi({ session: at(A) });
     ui.setState({ message: 'Fix' });
-    const done = store.getState().commit(ui, A);
+    const done = store.getState().commit(ui, at(A));
     await tick();
     ui.setState({ message: 'Fix, and the next one' });
     release();
@@ -363,28 +414,28 @@ describe('source control store applies no status of its own and resumes a run fr
       return ok(committed);
     });
     const store = createScmStore(validated(main.bridge));
-    const ui = createScmUi({ session: A });
+    const ui = createScmUi({ session: at(A) });
     ui.setState({ message: 'Fix', noVerify: true });
-    const done = store.getState().commit(ui, A);
+    const done = store.getState().commit(ui, at(A));
     await tick();
-    ui.setState(forSession(ui.getState(), B));
+    ui.setState(forSession(ui.getState(), at(B)));
     ui.setState({ message: 'B’s draft' });
     releases[0]();
     await done;
-    expect(ui.getState()).toMatchObject({ session: B, message: 'B’s draft', lastCommit: null, notice: null });
-    expect(ui.getState().drafts.has(A)).toBe(false);
-    ui.setState(forSession(ui.getState(), A));
-    expect(ui.getState()).toMatchObject({ session: A, message: '', noVerify: false });
+    expect(ui.getState()).toMatchObject({ session: at(B), message: 'B’s draft', lastCommit: null, notice: null });
+    expect(ui.getState().drafts.has(at(A))).toBe(false);
+    ui.setState(forSession(ui.getState(), at(A)));
+    expect(ui.getState()).toMatchObject({ session: at(A), message: '', noVerify: false });
 
     // A draft edited before the switch is not the one committed: it stays parked.
     ui.setState({ message: 'Next' });
-    const again = store.getState().commit(ui, A);
+    const again = store.getState().commit(ui, at(A));
     await tick();
     ui.setState({ message: 'Next, edited' });
-    ui.setState(forSession(ui.getState(), B));
+    ui.setState(forSession(ui.getState(), at(B)));
     releases[1]();
     await again;
-    expect(ui.getState().drafts.get(A)).toEqual({ message: 'Next, edited', noVerify: false });
+    expect(ui.getState().drafts.get(at(A))).toEqual({ message: 'Next, edited', noVerify: false });
   });
 
   it('applies an answer only to the session it was asked for', async () => {
@@ -395,10 +446,10 @@ describe('source control store applies no status of its own and resumes a run fr
       return ok(refusal('untrusted', 'not trusted'));
     });
     const store = createScmStore(validated(main.bridge));
-    const ui = createScmUi({ session: A });
-    const done = store.getState().stage(ui, A, ['a.ts']);
+    const ui = createScmUi({ session: at(A) });
+    const done = store.getState().stage(ui, at(A), DIR, ['a.ts']);
     await tick();
-    ui.setState({ session: B });
+    ui.setState({ session: at(B) });
     release();
     await done;
     expect(ui.getState().notice).toBeNull();
@@ -423,68 +474,68 @@ describe('source control store applies no status of its own and resumes a run fr
   it('seeds the run from scm.remote.last at seq 3, ignores events 1 to 3 and appends 4', async () => {
     const main = scmMain((name) => (name === 'scm.remote.last' ? ok(snapshot()) : ok()));
     const store = createScmStore(validated(main.bridge));
-    const release = store.getState().resume(A);
+    const release = store.getState().resume(at(A));
     await tick();
     expect(main.callsOf('scm.remote.last')).toEqual([{ appSessionId: A }]);
-    expect(store.getState().runs.get(A)).toMatchObject({ token: TOKEN, kind: 'push', plan: planOf(), running: true, seq: 3, lines: ['one', 'two', 'three', ''] });
+    expect(store.getState().runs.get(at(A))).toMatchObject({ token: TOKEN, kind: 'push', plan: planOf(), running: true, seq: 3, lines: ['one', 'two', 'three', ''] });
     for (const seq of [1, 2, 3]) main.emit('scm.remote.output', out(seq, `again ${seq}\n`));
     main.emit('scm.remote.output', out(4, 'four\n'));
     main.emit('scm.remote.output', { ...out(5, 'B’s run\n', OTHER_TOKEN), appSessionId: B }); // another session's run
     main.emit('scm.remote.output', exit(5, 0));
-    expect(store.getState().runs.get(A)).toMatchObject({ seq: 5, lines: ['one', 'two', 'three', 'four', ''], running: false, exitCode: 0 });
+    expect(store.getState().runs.get(at(A))).toMatchObject({ seq: 5, lines: ['one', 'two', 'three', 'four', ''], running: false, exitCode: 0 });
     release();
-    expect(store.getState().runs.has(A)).toBe(false);
+    expect(store.getState().runs.has(at(A))).toBe(false);
     main.emit('scm.remote.output', out(6, 'late\n'));
-    expect(store.getState().runs.has(A)).toBe(false);
+    expect(store.getState().runs.has(at(A))).toBe(false);
   });
 
   it('folds events that arrive before the snapshot by seq, and drops another run’s', async () => {
     let answer!: (value: unknown) => void;
     const main = scmMain(async (name) => (name === 'scm.remote.last' ? ok(await new Promise((resolve) => (answer = resolve))) : ok()));
     const store = createScmStore(validated(main.bridge));
-    const release = store.getState().resume(A);
+    const release = store.getState().resume(at(A));
     await tick();
     main.emit('scm.remote.output', out(3, 'three\n')); // already folded into the snapshot
     main.emit('scm.remote.output', out(9, 'older run\n', OTHER_TOKEN)); // a run before the snapshot's
     main.emit('scm.remote.output', out(4, 'four\n'));
     answer(snapshot());
     await tick();
-    expect(store.getState().runs.get(A)).toMatchObject({ token: TOKEN, seq: 4, lines: ['one', 'two', 'three', 'four', ''] });
+    expect(store.getState().runs.get(at(A))).toMatchObject({ token: TOKEN, seq: 4, lines: ['one', 'two', 'three', 'four', ''] });
     release();
   });
 
   it('takes a new run’s events once the held run has ended, never while it runs, and fills in the plan when the push answers', async () => {
     const main = scmMain((name) => (name === 'scm.remote.last' ? ok(null) : ok()));
     const store = createScmStore(validated(main.bridge));
-    const release = store.getState().resume(A);
+    const release = store.getState().resume(at(A));
     await tick();
-    expect(store.getState().runs.get(A)).toBeNull();
+    expect(store.getState().runs.get(at(A))).toBeNull();
     main.emit('scm.remote.output', out(1, 'Enumerating objects: 3, done.\n')); // the push's first chunk before its answer
-    expect(store.getState().runs.get(A)).toMatchObject({ token: TOKEN, plan: null, kind: null, running: true, seq: 1 });
-    store.getState().started(A, planOf());
-    expect(store.getState().runs.get(A)).toMatchObject({ token: TOKEN, plan: planOf(), kind: 'push', seq: 1, lines: ['Enumerating objects: 3, done.', ''] });
+    expect(store.getState().runs.get(at(A))).toMatchObject({ token: TOKEN, plan: null, kind: null, running: true, seq: 1 });
+    store.getState().started(at(A), planOf());
+    expect(store.getState().runs.get(at(A))).toMatchObject({ token: TOKEN, plan: planOf(), kind: 'push', seq: 1, lines: ['Enumerating objects: 3, done.', ''] });
     main.emit('scm.remote.output', out(1, 'stale\n', OTHER_TOKEN)); // one run per checkout: not newer than a running one
-    expect(store.getState().runs.get(A)).toMatchObject({ token: TOKEN });
+    expect(store.getState().runs.get(at(A))).toMatchObject({ token: TOKEN });
     main.emit('scm.remote.output', exit(2, 0));
     const pr = planOf({ token: OTHER_TOKEN, kind: 'pr', program: '/opt/gh', argv: ['pr', 'create'] });
-    store.getState().started(A, pr);
-    expect(store.getState().runs.get(A)).toMatchObject({ token: OTHER_TOKEN, kind: 'pr', plan: pr, lines: [], seq: 0, running: true });
+    store.getState().started(at(A), pr);
+    expect(store.getState().runs.get(at(A))).toMatchObject({ token: OTHER_TOKEN, kind: 'pr', plan: pr, lines: [], seq: 0, running: true });
     main.emit('scm.remote.output', out(1, 'https://github.com/o/r/pull/7\n', OTHER_TOKEN));
-    expect(store.getState().runs.get(A)).toMatchObject({ token: OTHER_TOKEN, lines: ['https://github.com/o/r/pull/7', ''] });
+    expect(store.getState().runs.get(at(A))).toMatchObject({ token: OTHER_TOKEN, lines: ['https://github.com/o/r/pull/7', ''] });
     release();
   });
 
   it('follows the run it holds from another session on the same checkout, and nothing else of that session', async () => {
     const main = scmMain((name) => (name === 'scm.remote.last' ? ok(snapshot()) : ok()));
     const store = createScmStore(validated(main.bridge));
-    const release = store.getState().resume(B); // B's checkout's latest run is A's push
+    const release = store.getState().resume(at(B)); // B's checkout's latest run is A's push
     await tick();
-    expect(store.getState().runs.get(B)).toMatchObject({ token: TOKEN, seq: 3 });
+    expect(store.getState().runs.get(at(B))).toMatchObject({ token: TOKEN, seq: 3 });
     main.emit('scm.remote.output', out(4, 'four\n'));
     main.emit('scm.remote.output', exit(5, 0));
-    expect(store.getState().runs.get(B)).toMatchObject({ seq: 5, lines: ['one', 'two', 'three', 'four', ''], running: false, exitCode: 0 });
+    expect(store.getState().runs.get(at(B))).toMatchObject({ seq: 5, lines: ['one', 'two', 'three', 'four', ''], running: false, exitCode: 0 });
     main.emit('scm.remote.output', out(1, 'A’s next run\n', OTHER_TOKEN)); // A's own, not the run B holds
-    expect(store.getState().runs.get(B)).toMatchObject({ token: TOKEN, seq: 5 });
+    expect(store.getState().runs.get(at(B))).toMatchObject({ token: TOKEN, seq: 5 });
     release();
   });
 
@@ -493,9 +544,9 @@ describe('source control store applies no status of its own and resumes a run fr
   it('reads every PR state again when any run ends, mounted or not; output chunks and a disconnected listener do not', async () => {
     const main = scmMain();
     const client = validated(main.bridge);
-    const prA = prStateKey(A);
-    const prB = prStateKey(B);
-    const statusA = scmStatusKey(A);
+    const prA = prStateKey(at(A));
+    const prB = prStateKey(at(B));
+    const statusA = scmStatusKey(at(A));
     queryClient.clear();
     for (const key of [prA, prB, statusA]) queryClient.setQueryData(key, {});
     const invalidated = (key: readonly unknown[]) => queryClient.getQueryState(key)?.isInvalidated;
@@ -515,13 +566,13 @@ describe('source control store applies no status of its own and resumes a run fr
     let answer!: (value: unknown) => void;
     const main = scmMain(async (name) => (name === 'scm.remote.last' ? ok(await new Promise((resolve) => (answer = resolve))) : ok()));
     const store = createScmStore(validated(main.bridge));
-    const release = store.getState().resume(B);
+    const release = store.getState().resume(at(B));
     await tick();
     main.emit('scm.remote.output', out(4, 'four\n'));
     main.emit('scm.remote.output', out(1, 'unrelated\n', OTHER_TOKEN));
     answer(snapshot());
     await tick();
-    expect(store.getState().runs.get(B)).toMatchObject({ token: TOKEN, seq: 4, lines: ['one', 'two', 'three', 'four', ''] });
+    expect(store.getState().runs.get(at(B))).toMatchObject({ token: TOKEN, seq: 4, lines: ['one', 'two', 'three', 'four', ''] });
     release();
   });
 });

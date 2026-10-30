@@ -16,9 +16,11 @@ export const TranscriptRecordSchema = z.looseObject({
 export type TranscriptRecord = z.infer<typeof TranscriptRecordSchema>;
 
 // The anchor a rewind appends (`rewound: true`); parsed and exposed for C4's anchor handling, never walked by currentChain.
+// `lastPrompt` is absent when the rewinding process has taken no prompt (a "Load now" rewind on a resumed session; P5
+// O3-F's pre-release fixture), and the anchor cuts all the same.
 export const LastPromptAnchorSchema = TranscriptRecordSchema.extend({
   type: z.literal('last-prompt'),
-  lastPrompt: z.string(),
+  lastPrompt: z.string().optional(),
   rewound: z.boolean().optional(),
   leafUuid: z.string().optional(),
 });
@@ -38,6 +40,17 @@ export type AgentMeta = z.infer<typeof AgentMetaSchema>;
 
 export function parseTranscriptRecord(line: unknown): TranscriptRecord {
   return TranscriptRecordSchema.parse(line);
+}
+
+// P5 O9 (the M8 sitting, engine 2.1.312): the words the engine writes for a message with no content, as a user record's
+// content (a plugin's start-up wrote two before the first prompt) and as a local command's output (`/reload-plugins`).
+// A record holding only them holds nothing: no prompt, no bubble, no title, no command output.
+export const NO_CONTENT = '(no content)';
+
+/** A record's content (a message's, or a system record's) that is the engine's word for none, alone. */
+export function isNoContent(content: unknown): boolean {
+  if (typeof content === 'string') return content === NO_CONTENT;
+  return Array.isArray(content) && content.length === 1 && (content[0] as { type?: unknown; text?: unknown } | null)?.type === 'text' && (content[0] as { text?: unknown }).text === NO_CONTENT;
 }
 
 export interface ChainResult {

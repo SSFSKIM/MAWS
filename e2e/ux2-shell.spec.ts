@@ -8,6 +8,7 @@ import { scratchMarketplace, writePluginCliStub } from '../test/support/plugin-c
 import { expect, type Locator, type Page, type TestInfo } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '../src/shared/ipc/schema';
 import { AppSessionIdSchema } from '../src/shared/graph/ids';
+import { addressed, localRef } from './support/address';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
 import { sidebarRow } from './support/sidebar';
@@ -154,7 +155,7 @@ test('Chrome measurements: document, deck and live Customize at both desktop siz
           await disclosure.click();
         }
         await sidebar(page).getByRole('button', { name: 'Customize', exact: true }).click();
-        await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption('proj-harness');
+        await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption(await addressed(page, 'proj-harness')); // P5 O6 M2: the option's value is the project's address
         await expect(page.getByRole('combobox', { name: 'Live session', exact: true })).toBeVisible();
         await expect(page.locator('[data-plugin-row="chrome-review@chrome-tools"]')).toBeVisible({ timeout: 15_000 });
         await capture('customize-live-plugins', { header: '[data-region="main"] header', sections: '[aria-label="Customize sections"]', project: 'select[aria-label="Project"]', live: 'select[aria-label="Live session"]', library: '[data-widget-variant="embedded"] > header', loaded: '[data-plugins-loaded]', firstPlugin: '[data-plugin-row="chrome-review@chrome-tools"]' });
@@ -186,7 +187,7 @@ test('Chrome: live Customize keeps scopes on its two control rows and loaded fee
       const { page } = maws;
       await openSession(page);
       await sidebar(page).getByRole('button', { name: 'Customize', exact: true }).click();
-      await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption('proj-harness');
+      await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption(await addressed(page, 'proj-harness')); // P5 O6 M2: the option's value is the project's address
       const header = main(page).locator('[data-customize-header]');
       const library = page.locator('[data-widget="plugins"][data-widget-variant="embedded"] > header');
       await expect(library.getByRole('combobox', { name: 'Live session', exact: true })).toBeVisible();
@@ -255,7 +256,7 @@ test('UX2: plain-click stacking, same-tool tabs, and overflow icon pinning', asy
   await expect(environment).toContainText('/tmp/maws-harness/a');
   await expect(environment.getByText('…', { exact: true })).toHaveCount(0); // git watch has answered
   await expect(connectors.getByText('Connector status not reported', { exact: true })).toBeVisible();
-  await expect(artifacts.getByRole('combobox', { name: 'Artifacts project', exact: true })).toHaveValue('proj-harness');
+  await expect(artifacts.getByRole('combobox', { name: 'Artifacts project', exact: true })).toHaveValue(await addressed(page, 'proj-harness'));
   await expect(artifacts.getByText('No artifacts in this project yet', { exact: true })).toBeVisible();
   for (const { width, height } of SIZES) {
     await size(maws, width, height);
@@ -338,7 +339,7 @@ test('UX2: at 900 the sidebar yields; at 620 a surface is a dismissible sheet', 
   await openSession(page);
   await openSurface(page, 'Files');
   await expect(surface(page, 'files')).toBeVisible();
-  await expect.poll(() => layout(page, 'panelTools.surfaces')).toMatchObject({ stacks: { A: [expect.any(String)] } });
+  await expect.poll(() => layout(page, 'panelTools.surfaces')).toMatchObject({ stacks: { [await addressed(page, 'A')]: [expect.any(String)] } });
   const remembered = await layout(page, 'regions');
   await size(maws, 900, 820);
   await expect(sidebar(page)).toHaveJSProperty('inert', true);
@@ -615,14 +616,15 @@ test('Acceptance: compact inactive file tabs contain their extension, pin, dirty
   const names = Array.from({ length: 10 }, (_, index) => `adornment-heavy-context-${index}.typescript`);
   await withProduct(async (p) => {
     const { maws, page, scratch } = p;
+    const [machine, session] = [await localRef(page), await addressed(page, scratch.appSessionId)]; // the page's tabs hold addresses
     await size(maws, 1280, 820);
     // restoreWithTab reads persisted layout; a selected DOM tab can precede that write.
     await expect.poll(async () => {
       const saved = value(await invoke(page, 'layout.get', { key: 'main.tabs' })).value as import('../src/shared/ipc/schema/layout').LayoutMain | null;
       if (!saved) return false;
-      return saved.sets[saved.current]?.panes.some((pane) => pane.tabs.some((tab) => tab.id === `session:${scratch.appSessionId}`)) ?? false;
+      return saved.sets[saved.current]?.panes.some((pane) => pane.tabs.some((tab) => tab.id === `session:${session}`)) ?? false;
     }, { message: 'the scratch session reached the persisted current tab set before restoring file tabs' }).toBe(true);
-    await restoreWithTab(p, names.map((name): import('../src/shared/ipc/schema/layout').TabRef => ({ id: `file:${scratch.path(name)}`, kind: 'file', appSessionId: AppSessionIdSchema.parse(scratch.appSessionId), path: scratch.path(name), line: null, pinned: true })));
+    await restoreWithTab(p, names.map((name): import('../src/shared/ipc/schema/layout').TabRef => ({ id: `file:${machine}:${scratch.path(name)}`, kind: 'file', appSessionId: AppSessionIdSchema.parse(session), path: scratch.path(name), line: null, machine, pinned: true })));
     const name = names.at(-1)!;
     const tab = page.locator('[data-chrome-tabs]').getByRole('tab', { name, exact: true });
     await expect(tab).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });

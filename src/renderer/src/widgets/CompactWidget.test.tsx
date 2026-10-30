@@ -3,9 +3,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { EngineSessionStatus } from '@shared/engine/status';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { resetQueueStore } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
 import { registerFocusTarget } from '../stores/composer';
@@ -13,19 +14,22 @@ import { CompactWidget } from './CompactWidget';
 import { ContextWidget } from './ContextWidget';
 
 const ROOT = join(__dirname, '../../../..');
-const ID = 'app-7412a115' as AppSessionId;
+// P5 O6 M2: the backend is main (bare ids); the page holds the address
+const BARE = 'app-7412a115' as AppSessionId;
+const ID = at(BARE);
+const lifted = (status: EngineSessionStatus): EngineSessionStatus => ({ ...status, appSessionId: at(status.appSessionId) });
 let backend: WidgetBackend;
 
 beforeEach(() => {
   backend = createWidgetBackend({ root: ROOT, statuses: loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json')).engine });
   window.maws = backend.bridge();
-  useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+  useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
 });
 afterEach(() => {
   cleanup();
   resetQueueStore();
   useSessions.setState({ engine: new Map() });
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: unknown }).maws;
 });
 
 const mount = (args = '', close = vi.fn()) => {
@@ -44,7 +48,7 @@ describe('compact widget', () => {
   it("shows get_context_usage's summary corrected as C3 corrects its sample, before a sample arrives", async () => {
     mount();
     await screen.findByText('21,508 of 200,000 · 11% · autocompact at 167,000');
-    expect(backend.calls.find((c) => c.subtype === 'get_context_usage')?.input).toEqual({ appSessionId: ID, detail: 'summary' });
+    expect(backend.calls.find((c) => c.subtype === 'get_context_usage')?.input).toEqual({ appSessionId: BARE, detail: 'summary' });
   });
 
   it("shows C3's sample (the status line's ctx) once one arrived", async () => {
@@ -59,7 +63,7 @@ describe('compact widget', () => {
     fireEvent.change(await screen.findByRole('textbox', { name: 'Instructions' }), { target: { value: 'focus on tests' } });
     fireEvent.click(compactNow());
     await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
-    expect(backend.calls.filter((c) => c.command === 'session.send').map((c) => c.input)).toEqual([{ appSessionId: ID, content: '/compact focus on tests' }]);
+    expect(backend.calls.filter((c) => c.command === 'session.send').map((c) => c.input)).toEqual([{ appSessionId: BARE, content: '/compact focus on tests' }]);
   });
 
   it('`/compact focus on tests` fills the field; with nothing typed it sends a bare /compact', async () => {
@@ -68,12 +72,12 @@ describe('compact widget', () => {
     cleanup();
     mount();
     fireEvent.click(await screen.findByRole('button', { name: 'Compact now' }));
-    await waitFor(() => expect(backend.calls.find((c) => c.command === 'session.send')?.input).toEqual({ appSessionId: ID, content: '/compact' }));
+    await waitFor(() => expect(backend.calls.find((c) => c.command === 'session.send')?.input).toEqual({ appSessionId: BARE, content: '/compact' }));
   });
 
   it('refuses while a turn is open: the control reads Wait for the turn', async () => {
-    act(() => void backend.emitTurnStarted(ID));
-    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
+    act(() => void backend.emitTurnStarted(BARE));
+    useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
     mount();
     await screen.findByRole('textbox', { name: 'Instructions' });
     expect(compactNow()).toHaveProperty('disabled', true);
@@ -81,14 +85,14 @@ describe('compact widget', () => {
   });
 
   it('refuses behind queued messages, and names why a paused queue paused', async () => {
-    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), queue: { length: 1, paused: false } }]]) });
+    useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), queue: { length: 1, paused: false } }]]) });
     mount();
     await screen.findByText('Queued messages go first');
     expect(compactNow()).toHaveProperty('disabled', true);
     cleanup();
     resetQueueStore();
     backend.script('session.queue.list', () => ({ entries: [], paused: true, pauseReason: 'interrupt' }));
-    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), queue: { length: 1, paused: true } }]]) });
+    useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), queue: { length: 1, paused: true } }]]) });
     mount();
     await screen.findByText('Queue paused because you interrupted');
     expect(compactNow()).toHaveProperty('disabled', true);
@@ -118,7 +122,7 @@ describe('compact widget', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('The engine did not answer · the command may still run; check the transcript before sending again'));
     expect(compactNow()).toHaveProperty('disabled', true); // no immediate second /compact
     expect(close).not.toHaveBeenCalled();
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: backend.emitStatus(ID, { engineState: 'running' }) }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: lifted(backend.emitStatus(BARE, { engineState: 'running' })) }, TEST_MACHINE));
     await waitFor(() => expect(compactNow()).toHaveProperty('disabled', false));
   });
 

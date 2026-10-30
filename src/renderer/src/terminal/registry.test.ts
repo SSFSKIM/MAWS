@@ -11,9 +11,12 @@ import { FakeRenderer } from './renderer.fake';
 import type { TerminalTheme } from './renderer';
 import { TerminalRegistry, type Adopting } from './registry';
 import { alignReplay, explicitModes, INITIAL_STREAM } from './replay';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
+import { addressOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 
-const A = 'session-a' as AppSessionId;
+const A = at('session-a' as AppSessionId);
 const KiB = 1024;
 const bytes = (text: string) => new TextEncoder().encode(text);
 const filled = (length: number, char = 'x') => bytes(char.repeat(length));
@@ -37,7 +40,7 @@ const fail = (code: Failure['code'], message: string) => new Failure(code, messa
 
 // A bridge whose commands answer from handlers (a returned promise holds the reply) and whose events the test emits.
 function fakeBridge() {
-  const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  const listeners = new Map<string, Set<(payload: unknown, from: { machine: MachineRef }) => void>>();
   const calls: { name: string; input: unknown }[] = [];
   let ptys = 0;
   const handlers: Record<string, Handler> = {
@@ -47,6 +50,7 @@ function fakeBridge() {
     'pty.foreground': () => ({ process: 'zsh', busy: false }),
   };
   const bridge = {
+    localMachine: TEST_MACHINE,
     async invoke(name: CommandName, input: unknown) {
       calls.push({ name, input });
       const handler = handlers[name];
@@ -54,7 +58,7 @@ function fakeBridge() {
       if (value instanceof Failure) return { ok: false, error: { code: value.code, message: value.message } };
       return { ok: true, value };
     },
-    on(name: EventName, listener: (payload: unknown) => void) {
+    on(name: EventName, listener: (payload: unknown, from: { machine: MachineRef }) => void) {
       const set = listeners.get(name) ?? new Set();
       set.add(listener);
       listeners.set(name, set);
@@ -66,8 +70,8 @@ function fakeBridge() {
     handlers,
     calls,
     inputs: (name: CommandName) => calls.filter((c) => c.name === name).map((c) => c.input as Record<string, unknown>),
-    emit<N extends EventName>(name: N, payload: EventPayload<N>) {
-      listeners.get(name)?.forEach((cb) => cb(payload));
+    emit<N extends EventName>(name: N, payload: EventPayload<N>, machine: MachineRef = TEST_MACHINE) {
+      listeners.get(name)?.forEach((cb) => cb(payload, { machine }));
     },
     data(ptyId: string, offset: number, data: Uint8Array<ArrayBuffer>) {
       this.emit('pty.data', { ptyId: ptyId as PtyId, offset, data });
@@ -576,6 +580,23 @@ describe('terminal registry lifecycle', () => {
     expect(live.renderer.writes).toEqual([]);
   });
 
+  // P5 O6 M3/M4 (the branch review): `pty.hostState` crosses machine links, so another machine's pty host leaving takes
+  // only that machine's terminals, and each machine's revisions are judged apart.
+  it('a host crash on one machine loses only that machine’s terminals, each machine’s revisions judged apart', async () => {
+    const registry = makeRegistry();
+    const local = await openRunning(registry, 't1');
+    const id = registry.open({ appSessionId: addressOf(OTHER_MACHINE, 'session-b' as AppSessionId), label: 't2', cwd: '/tmp/b' });
+    registry.mount(id, parent());
+    await settle();
+    const crashedB: HostState = { state: 'crashed', pid: null, restarts: 9, revision: 50 };
+    ipc.emit('pty.hostState', crashedB, OTHER_MACHINE);
+    expect(registry.get(id)!.info.status, 'B’s terminal goes with B’s host').toBe('lost');
+    expect(registry.get(local.id)!.info.status, 'A’s terminal is untouched').toBe('running');
+    expect(registry.host(), 'the local host state stays the local machine’s').toMatchObject({ state: 'ready', revision: 1 });
+    ipc.emit('pty.hostState', { state: 'crashed', pid: null, restarts: 1, revision: 2 }, TEST_MACHINE);
+    expect(registry.get(local.id)!.info.status, 'A’s own crash, at a revision under B’s, still counts').toBe('lost');
+  });
+
   it('respawns a lost terminal with its cwd and label in the same handle, the old screen cleared', async () => {
     const registry = makeRegistry();
     const { id, ptyId, renderer } = await openRunning(registry);
@@ -712,20 +733,162 @@ describe('terminal registry lifecycle', () => {
   });
 });
 
+// P5 O2 M4 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md): a socket-mode pty host whose link closed comes back as the
+// same process with its shells alive, so running terminals wait through `restarting` and reattach when it is `ready`
+// with the pid they knew; another pid, or `crashed`, ends them as before (a utility host always comes back new).
+describe('terminal registry across a reconnect to the pty host', () => {
+  const READY: HostState = { state: 'ready', pid: 42, restarts: 0, revision: 1 };
+  const restarting = (revision: number): HostState => ({ state: 'restarting', pid: null, restarts: 0, revision });
+  const ready = (pid: number, revision: number): HostState => ({ state: 'ready', pid, restarts: 0, revision });
+  const attachOf = (ptyId: PtyId, replay: Uint8Array<ArrayBuffer>, replayFrom: number, checkpoint: PtyAttach['checkpoint'] = null): PtyAttach => ({
+    info: ptyInfo({ ptyId, label: 't1', pid: 1001, cols: 80, rows: 24, offset: replayFrom + replay.byteLength }),
+    checkpoint,
+    replay,
+    replayFrom,
+    nextOffset: replayFrom + replay.byteLength,
+  });
+
+  // A running terminal that has shown `hello` (5 bytes), with the host's ready pid 42 known.
+  async function shown() {
+    const registry = makeRegistry();
+    const terminal = await openRunning(registry);
+    ipc.emit('pty.hostState', READY);
+    ipc.data(terminal.ptyId, 0, bytes('hello'));
+    await settle();
+    return { registry, ...terminal };
+  }
+
+  it('keeps a running terminal through restarting and, at the same pid, continues it from what it shows', async () => {
+    const { registry, id, ptyId, renderer } = await shown();
+    ipc.emit('pty.hostState', restarting(2));
+    expect(registry.get(id)!.info.status).toBe('running');
+    expect(ipc.inputs('pty.attach')).toEqual([]);
+    const held = deferred<PtyAttach>();
+    ipc.handlers['pty.attach'] = () => held.promise;
+    ipc.emit('pty.hostState', ready(42, 3));
+    await settle();
+    expect(ipc.inputs('pty.attach')).toEqual([{ ptyId }]);
+    ipc.data(ptyId, 12, bytes('live')); // emitted after the host's answer, before it reaches the page: held, then written
+    held.resolve(attachOf(ptyId, bytes('hello meanwhile'.slice(0, 12)), 0));
+    await settle();
+    expect(renderer.writes).toEqual(['hello', ' meanwh', 'live']); // the screen kept: only what it lacked, then live
+    expect(renderer.resets).toBe(0);
+    expect(registry.get(id)!.info).toMatchObject({ status: 'running', reconnect: 'exact', pid: 1001 });
+    ipc.data(ptyId, 16, bytes('!'));
+    expect(renderer.writes.at(-1)).toBe('!');
+  });
+
+  it('restores from the checkpoint or the ring when the ring no longer reaches what it shows', async () => {
+    const { registry, id, ptyId, renderer } = await shown();
+    ipc.emit('pty.hostState', restarting(2));
+    ipc.handlers['pty.attach'] = () => attachOf(ptyId, bytes('tail\r\nnew line\r\n'), 600 * KiB);
+    ipc.emit('pty.hostState', ready(42, 3));
+    await settle();
+    expect(renderer.resets).toBe(1);
+    expect(renderer.writes.at(-1)).toBe('new line\r\n'); // the lossy path's aligned tail
+    expect(registry.get(id)!.info).toMatchObject({ status: 'running', reconnect: 'lossy' });
+
+    // and exactly from a checkpoint the ring still reaches: the old screen cleared once, the checkpoint, then the replay
+    ipc.emit('pty.hostState', restarting(4));
+    ipc.handlers['pty.attach'] = () => attachOf(ptyId, bytes('after'), 700 * KiB, { offset: 700 * KiB, state: 'STATE' });
+    ipc.emit('pty.hostState', ready(42, 5));
+    await settle();
+    expect(renderer.resets).toBe(2);
+    expect(renderer.writes.slice(-2)).toEqual(['STATE', 'after']);
+    expect(registry.get(id)!.info).toMatchObject({ status: 'running', reconnect: 'exact' });
+  });
+
+  it('keeps waiting when the host goes again before it answers, and reattaches at the next ready of the same pid', async () => {
+    const { registry, id, ptyId, renderer } = await shown();
+    ipc.emit('pty.hostState', restarting(2));
+    const first = deferred<unknown>();
+    ipc.handlers['pty.attach'] = () => first.promise;
+    ipc.emit('pty.hostState', ready(42, 3));
+    await settle();
+    ipc.emit('pty.hostState', restarting(4));
+    first.resolve(fail('host_unavailable', 'pty-host disconnected before answering pty.attach'));
+    await settle();
+    expect(registry.get(id)!.info.status).toBe('running');
+    ipc.handlers['pty.attach'] = () => attachOf(ptyId, bytes('hello!'), 0);
+    ipc.emit('pty.hostState', ready(42, 5));
+    await settle();
+    expect(ipc.inputs('pty.attach')).toHaveLength(2);
+    expect(renderer.writes).toEqual(['hello', '!']);
+  });
+
+  it('ignores the answer of a reattach a later one overtook', async () => {
+    const { ptyId, renderer } = await shown();
+    const answers = [deferred<PtyAttach>(), deferred<PtyAttach>()];
+    let asked = 0;
+    ipc.handlers['pty.attach'] = () => {
+      const answer = answers[asked]!;
+      asked += 1;
+      return answer.promise;
+    };
+    ipc.emit('pty.hostState', restarting(2));
+    ipc.emit('pty.hostState', ready(42, 3));
+    ipc.emit('pty.hostState', restarting(4));
+    ipc.emit('pty.hostState', ready(42, 5));
+    await settle();
+    expect(asked).toBe(2);
+    answers[1]!.resolve(attachOf(ptyId, bytes('hello, then'), 0));
+    await settle();
+    answers[0]!.resolve(attachOf(ptyId, bytes('hello'), 0)); // older, and shorter than the screen: would reset it
+    await settle();
+    expect(renderer.writes).toEqual(['hello', ', then']);
+    expect(renderer.resets).toBe(0);
+  });
+
+  it('ends a waiting terminal when the host comes back with another pid, or crashed, without asking for an attach', async () => {
+    const first = await shown();
+    ipc.emit('pty.hostState', restarting(2));
+    ipc.emit('pty.hostState', ready(43, 3));
+    await settle();
+    expect(first.registry.get(first.id)!.info).toMatchObject({ status: 'lost', exit: { exitCode: null, signal: null } });
+
+    ipc = fakeBridge();
+    const second = await shown();
+    ipc.emit('pty.hostState', restarting(2));
+    ipc.emit('pty.hostState', { state: 'crashed', pid: null, restarts: 3, revision: 3 });
+    expect(second.registry.get(second.id)!.info.status).toBe('lost');
+    expect(ipc.inputs('pty.attach')).toEqual([]);
+  });
+
+  it('ends a waiting terminal whose pty the host no longer knows', async () => {
+    const { registry, id } = await shown();
+    ipc.emit('pty.hostState', restarting(2));
+    ipc.handlers['pty.attach'] = () => fail('internal', 'unknown pty');
+    ipc.emit('pty.hostState', ready(42, 3));
+    await settle();
+    expect(registry.get(id)!.info.status).toBe('lost');
+  });
+
+  it('ends a waiting terminal at the next ready when it never saw the host ready before', async () => {
+    const registry = makeRegistry();
+    ipc.handlers['pty.hostState'] = () => restarting(1);
+    const { id } = await openRunning(registry);
+    ipc.emit('pty.hostState', restarting(2));
+    ipc.emit('pty.hostState', ready(42, 3));
+    await settle();
+    expect(registry.get(id)!.info.status).toBe('lost');
+    expect(ipc.inputs('pty.attach')).toEqual([]);
+  });
+});
+
 describe('terminal key filter', () => {
   it('reads effective application bindings on each key, without sending them to xterm or dispatching them twice', async () => {
     const previous = useSettings.getState().state;
     try {
-      useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V19, resolvedTheme: 'light' } });
+      useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V21, resolvedTheme: 'light' } });
       const registry = makeRegistry();
       const { renderer } = await openRunning(registry);
       expect(renderer.key('keydown', { key: 'F6', code: 'F6' })).toBe(false);
-      useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V19, keymap: { 'region.focusNext': 'F8' } }, resolvedTheme: 'light' } });
+      useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, keymap: { 'region.focusNext': 'F8' } }, resolvedTheme: 'light' } });
       expect(renderer.key('keydown', { key: 'F8', code: 'F8' })).toBe(false);
       expect(renderer.key('keyup', { key: 'F8', code: 'F8' })).toBe(false);
       expect(renderer.key('keydown', { key: 'F6', code: 'F6' })).toBe(true);
       expect(runAction).not.toHaveBeenCalled(); // the application menu alone owns these bindings
-      useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V19, keymap: { 'tab.next': 'F9', 'tab.previous': null } }, resolvedTheme: 'light' } });
+      useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, keymap: { 'tab.next': 'F9', 'tab.previous': null } }, resolvedTheme: 'light' } });
       expect(renderer.key('keydown', { key: 'Tab', code: 'Tab', ctrlKey: true })).toBe(true);
       expect(renderer.key('keydown', { key: 'Tab', code: 'Tab', ctrlKey: true, shiftKey: true })).toBe(true);
       expect(renderer.key('keydown', { key: 'F9', code: 'F9' })).toBe(false);
@@ -883,7 +1046,7 @@ describe('terminal theme from tokens', () => {
     registry.unmount(hidden.id);
     expect(shown.renderer.options.theme.background).toBe('light-bg');
     currentTheme = theme('dark-bg');
-    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V19, theme: 'dark' }, resolvedTheme: 'dark' });
+    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V21, theme: 'dark' }, resolvedTheme: 'dark' });
     expect(shown.renderer.theme.background).toBe('dark-bg');
     expect(hidden.renderer.theme.background).toBe('dark-bg');
   });
@@ -919,7 +1082,7 @@ describe('terminal font from the root --font-mono', () => {
     registry.unmount(hidden.id);
     const fit = vi.spyOn(shown.renderer, 'fit');
     currentFont = { ...MONO, family: '"MesloLGM Nerd Font Mono", "SF Mono", monospace' };
-    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V19, appearance: { ...SETTINGS_DEFAULTS_V19.appearance, monoFont: 'MesloLGM Nerd Font Mono' } }, resolvedTheme: 'light' });
+    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V21, appearance: { ...SETTINGS_DEFAULTS_V21.appearance, monoFont: 'MesloLGM Nerd Font Mono' } }, resolvedTheme: 'light' });
     expect(shown.renderer.font.family).toBe(currentFont.family);
     expect(hidden.renderer.font.family).toBe(currentFont.family);
     await vi.advanceTimersByTimeAsync(1_000);
@@ -953,7 +1116,7 @@ describe('terminal font from the root --font-mono', () => {
     const id = registry.open({ appSessionId: A, label: 'second', cwd: '/tmp/a' });
     registry.mount(id, parent()); // its renderer is being created with the font of this moment
     currentFont = { ...MONO, family: '"Changed", monospace' };
-    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V19, appearance: { ...SETTINGS_DEFAULTS_V19.appearance, monoFont: 'Changed' } }, resolvedTheme: 'light' });
+    ipc.emit('settings.changed', { settings: { ...SETTINGS_DEFAULTS_V21, appearance: { ...SETTINGS_DEFAULTS_V21.appearance, monoFont: 'Changed' } }, resolvedTheme: 'light' });
     await settle();
     const renderer = registry.get(id)!.renderer as FakeRenderer;
     expect(renderer.options.font.family).toBe('mono');

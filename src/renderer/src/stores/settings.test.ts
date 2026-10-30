@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandResult, MawsBridge, SettingsState } from '@shared/ipc/schema';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 import { createSettingsStore } from './settings';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 
-const LIGHT: SettingsState = { settings: { ...SETTINGS_DEFAULTS_V19, theme: 'light' }, resolvedTheme: 'light' };
-const DARK: SettingsState = { settings: { ...SETTINGS_DEFAULTS_V19, theme: 'dark' }, resolvedTheme: 'dark' };
-const SYSTEM_DARK: SettingsState = { settings: { ...SETTINGS_DEFAULTS_V19, theme: 'system' }, resolvedTheme: 'dark' };
+const LIGHT: SettingsState = { settings: { ...SETTINGS_DEFAULTS_V21, theme: 'light' }, resolvedTheme: 'light' };
+const DARK: SettingsState = { settings: { ...SETTINGS_DEFAULTS_V21, theme: 'dark' }, resolvedTheme: 'dark' };
+const SYSTEM_DARK: SettingsState = { settings: { ...SETTINGS_DEFAULTS_V21, theme: 'system' }, resolvedTheme: 'dark' };
 
 // A client whose replies the test releases by hand, in any order, so event/reply orderings can be staged.
 function fakeClient() {
@@ -15,6 +16,7 @@ function fakeClient() {
     'settings.set': [],
   };
   const client = {
+    localMachine: TEST_MACHINE,
     invoke: vi.fn(
       (name: 'settings.get' | 'settings.set') =>
         new Promise<CommandResult<'settings.get'>>((resolve) => pending[name].push(resolve)),
@@ -107,7 +109,7 @@ describe('renderer settings store', () => {
     const fake = fakeClient();
     const store = createSettingsStore(fake.client);
     const done = store.getState().setTheme('dark');
-    expect(fake.raw.invoke).toHaveBeenCalledWith('settings.set', { theme: 'dark' });
+    expect(fake.raw.invoke).toHaveBeenCalledWith('settings.set', { theme: 'dark' }, { machine: TEST_MACHINE });
     await fake.reply('settings.set', 0, ok(DARK));
     await done;
     expect(store.getState().state).toEqual(DARK);

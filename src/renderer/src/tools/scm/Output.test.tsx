@@ -10,6 +10,7 @@ import { A, OTHER_TOKEN, planOf, prPlanOf, scmMain, TOKEN } from '../../test-sup
 import { Output } from './Output';
 import { useScm } from './store';
 import { createScmUi, type ScmUi } from './view-state';
+import { at } from '../../../../../test/support/machine';
 
 let main: ReturnType<typeof scmMain>;
 let ui: StoreApi<ScmUi>;
@@ -33,8 +34,8 @@ const snapshot = (over: Partial<NonNullable<ScmRemoteLast>> = {}): ScmRemoteLast
 
 async function mount(last: ScmRemoteLast) {
   main.state.answers['scm.remote.last'] = () => ok(last);
-  release = useScm.getState().resume(A);
-  const view = render(<Output appSessionId={A} ui={ui} />);
+  release = useScm.getState().resume(at(A));
+  const view = render(<Output appSessionId={at(A)} ui={ui} />);
   await waitFor(() => expect(main.callsOf('scm.remote.last')).toHaveLength(1));
   return view;
 }
@@ -45,7 +46,7 @@ const state = () => section().querySelector('[data-scm-output-state]');
 beforeEach(() => {
   useScm.getState().reset();
   main = scmMain();
-  ui = createScmUi({ session: A });
+  ui = createScmUi({ session: at(A) });
 });
 afterEach(() => {
   release();
@@ -108,7 +109,7 @@ describe('output appends chunks in order, drops a seq at or below the snapshot�
   it('opens itself when a new run starts, and offers the pull request a PR run printed', async () => {
     await mount(null);
     expect(screen.queryByRole('region', { name: 'Output' })).toBeNull();
-    useScm.getState().started(A, prPlanOf({ token: OTHER_TOKEN }));
+    useScm.getState().started(at(A), prPlanOf({ token: OTHER_TOKEN }));
     await waitFor(() => expect(state()?.textContent).toBe('Pull request · Running…'));
     expect(ui.getState().output).toBe(true);
     main.emit('scm.remote.output', out(1, 'https://github.com/o/r/pull/7\n', { token: OTHER_TOKEN, kind: 'stdout' }));

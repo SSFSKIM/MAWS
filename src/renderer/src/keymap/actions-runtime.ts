@@ -15,6 +15,8 @@ import { NEW_CHAT } from '../sessions/title';
 import { allTabs, currentSet } from '../stores/layout-model';
 import { focusPaneElement, paneDomId } from '../main/pane-dom';
 import { useSessions } from '../stores/sessions';
+import { localProjectOfSet } from '../stores/org-projects'; // P5 O6 M5
+import { ipc } from '../ipc/client';
 import { create } from 'zustand';
 import { createHandlerRegistry } from './registry';
 
@@ -225,10 +227,12 @@ export const unstartedProjectOf = (appSessionId: AppSessionId): ProjectId | null
 // The project a New chat starts in when a project is focused, so the common case is one step: the project whose tab set
 // the strip shows (W12; every session tab in it is that project's, and a click or Enter on a project row in the sidebar
 // switches to it), unless it is gone or hidden from the sidebar (W11). None from the no-project set: the chat then
-// starts with "Choose a project".
+// starts with "Choose a project". P5 O6 M5: the set is an org project's, and the chat starts in its checkout on this
+// machine; a machine's row, or an org project with no checkout here, starts with "Choose a project" (a session starts
+// on another machine from O7's picker).
 export function focusedProject(): ProjectId | null {
   const { current } = useLayout.getState().main;
-  const project = current === NO_PROJECT ? undefined : useSessions.getState().projects.get(current);
+  const project = current === NO_PROJECT ? undefined : localProjectOfSet(useSessions.getState(), current, ipc.localMachine);
   return project && !project.hidden ? project.id : null;
 }
 

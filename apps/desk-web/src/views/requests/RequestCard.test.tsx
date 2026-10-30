@@ -11,6 +11,7 @@ import { memoryLogRecord } from '../../log/record';
 import { ProjectConnection } from '../../project/connection';
 import { requestKey, type RequestRecord } from '../../project/conversation';
 import type { DeskSession } from '../../shell/sessions';
+import { useCardsBoard } from '../../cards/board';
 import { DeskContext } from '../conversation/desk-context';
 import { RequestCard } from './RequestCard';
 
@@ -134,5 +135,30 @@ describe('Skip', () => {
     expect(answer).not.toHaveBeenCalled();
     expect(decide).not.toHaveBeenCalled();
     expect(screen.getByTestId('skip-note').textContent).toBe('Nothing was sent: an async question waits for an answer to at least one of its questions, and cannot be declined.');
+  });
+});
+
+// The reviewer's case (P5 O13 M6b, review round 1): a decision whose result is unknown when its machine cuts over still
+// draws as uncertain with Retry (`cardState` reads the RPC before the capability), and its Retry sends nothing to the
+// moved machine, which refuses every DX6 request: the send boundary withholds it.
+describe('an uncertain decision on a machine that moved to MAWS', () => {
+  afterEach(() => useCardsBoard.setState({ watching: false, machines: [] }));
+
+  it('sends nothing on Retry, the machine offline to DX', () => {
+    useCardsBoard.setState({ watching: true, machines: [{ ref: 'ref-mini', name: 'MINI', online: true, sessions: [] }] });
+    const r = record(A, 'toolu_bash', { tool: 'Bash' });
+    const rpc = { rpc: 'decide', project: PROJECT, machine: 'mini', member: MEMBER, created: new Date().toISOString(), nonce: 'nonce-1', args: { session: A, decision: 'allow' }, mac: 'x' };
+    connection.conversation.store.setState({ requests: { [r.key]: r }, rpcs: { 'nonce-1': { nonce: 'nonce-1', rpc, state: 'uncertain', request: r.key } } } as never);
+    const client = connection.client as unknown as { welcomed: boolean; socket: { send(frame: unknown): boolean } };
+    client.welcomed = true;
+    const send = vi.spyOn(client.socket, 'send').mockReturnValue(true);
+    render(
+      <DeskContext.Provider value={{ connection, member: MEMBER, sessions: new Map([[A, { ...session(A, 'maws-45'), machineOnline: false, presence: null, movedToMaws: true }]]) }}>
+        <RequestCard request={r.key} />
+      </DeskContext.Provider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(send.mock.calls.filter(([frame]) => (frame as { t: string }).t === 'rpc')).toEqual([]);
+    expect(connection.conversation.store.getState().rpcs['nonce-1'].state).toBe('uncertain');
   });
 });

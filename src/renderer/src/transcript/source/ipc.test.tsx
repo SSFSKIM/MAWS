@@ -3,9 +3,12 @@
 // `loadSpill` over `fs.readSpill`, and the receipt's rewind interface over `session.rewindFiles`.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, EventId, ParentToolUseId, TaskId } from '@shared/graph/ids';
-import type { CommandName, CommandResult, EventName, EventPayload, MawsBridge } from '@shared/ipc/schema';
+import type { CommandName, CommandResult, EventName, EventPayload, EventSource, MawsBridge } from '@shared/ipc/schema';
 import { act, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
+import { addressOf, bareOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 import { useTranscriptStore } from '../../stores/transcript';
 import { rowsOf } from '../model/derive';
 import { turnId } from '../model/keys';
@@ -18,21 +21,23 @@ import { Transcript } from '../view/Transcript';
 import { ipcLoadSpillOver, ipcRewindOver, ipcSourceOver, KNOWN_WAIT_MS } from './ipc';
 import type { TranscriptSource } from './types';
 
-const APP = 'app-1' as AppSessionId;
+const APP = at('app-1' as AppSessionId); // the page's: the sources run behind the client, over addresses
+const MAIN_APP = bareOf(APP); // P5 O6 M2: an event id is main's, under the bare app id
 const AGENT = 'agent-7' as AgentId;
 
-// A fake X2 client: every invoke waits for the test to answer it, but for main's `session.appEvents`, answered at once
+// A fake X2 client (the page's side, on `TEST_MACHINE`): every invoke waits for the test to answer it, but for main's `session.appEvents`, answered at once
 // from `appEvents` (what main's read model keeps); events are pushed by name.
 function fakeClient() {
-  const listeners = new Map<string, Set<(payload: unknown) => void>>();
-  const calls: { name: string; input: unknown; answer: (result: CommandResult<CommandName>) => void; answered?: boolean }[] = [];
+  const listeners = new Map<string, Set<(payload: unknown, from: EventSource) => void>>();
+  const calls: { name: string; input: unknown; machine?: MachineRef; answer: (result: CommandResult<CommandName>) => void; answered?: boolean }[] = [];
   const appEvents = new Map<AppSessionId, SessionEvent[]>();
   const client: MawsBridge = {
-    invoke: ((name: CommandName, input: unknown) =>
+    localMachine: TEST_MACHINE,
+    invoke: ((name: CommandName, input: unknown, opts?: { machine?: MachineRef }) =>
       name === 'session.appEvents'
         ? Promise.resolve({ ok: true, value: { events: appEvents.get((input as { appSessionId: AppSessionId }).appSessionId) ?? [] } })
-        : new Promise((resolve) => calls.push({ name, input, answer: resolve as never }))) as MawsBridge['invoke'],
-    on: ((name: EventName, listener: (payload: unknown) => void) => {
+        : new Promise((resolve) => calls.push({ name, input, ...(opts?.machine && { machine: opts.machine }), answer: resolve as never }))) as MawsBridge['invoke'],
+    on: ((name: EventName, listener: (payload: unknown, from: EventSource) => void) => {
       const set = listeners.get(name) ?? new Set();
       set.add(listener);
       listeners.set(name, set);
@@ -40,8 +45,8 @@ function fakeClient() {
     }) as MawsBridge['on'],
     pathForFile: () => '', // C7: MawsBridge gained pathForFile
   };
-  const emit = <N extends EventName>(name: N, payload: EventPayload<N>) => {
-    for (const listener of listeners.get(name) ?? []) listener(payload);
+  const emit = <N extends EventName>(name: N, payload: EventPayload<N>, machine: MachineRef = TEST_MACHINE) => {
+    for (const listener of listeners.get(name) ?? []) listener(payload, { machine });
   };
   return { client, calls, emit, listeners, appEvents };
 }
@@ -110,7 +115,7 @@ describe('ipcSource', () => {
 
     fake.emit('session.eventBatch', batch(all.slice(2, 4))); // before the snapshot: buffered; the snapshot carries both
     fake.emit('session.eventBatch', batch([...all.slice(4, 6), ...all.slice(6, 8)])); // half overlaps the snapshot's seq-null tail
-    fake.emit('session.eventBatch', batch(all.slice(0, 12), 'app-other' as AppSessionId)); // another session: ignored
+    fake.emit('session.eventBatch', batch(all.slice(0, 12), at('app-other' as AppSessionId))); // another session: ignored
     expect(useTranscriptStore.getState().entries[APP].phase).toBe('hydrating');
     expect(rowsOf(useTranscriptStore.getState().entries[APP].state)).toEqual([]);
 
@@ -146,9 +151,9 @@ describe('ipcSource', () => {
     r.turn('u2');
     r.text('m2', 0, 'After the resume.');
     r.end(['u2']);
-    const liveForm = r.events.map((event, i) => ({ ...event, id: `${APP}:launch-2:${i + 1}:0` as EventId, seq: i + 1 }));
+    const liveForm = r.events.map((event, i) => ({ ...event, id: `${MAIN_APP}:launch-2:${i + 1}:0` as EventId, seq: i + 1 }));
     const diskForm = r.events.map((event) => ({ ...event, id: `disk:${event.id}` as EventId, seq: null }));
-    const notice = { ...r.emit('notice.posted', { level: 'warning', key: 'relay:direct_fallback', text: 'Direct route.' }), id: `${APP}:c10:relay-fallback:1` as EventId, seq: null };
+    const notice = { ...r.emit('notice.posted', { level: 'warning', key: 'relay:direct_fallback', text: 'Direct route.' }), id: `${MAIN_APP}:c10:relay-fallback:1` as EventId, seq: null };
 
     const fake = fakeClient();
     const source = ipcSourceOver(fake.client, APP);
@@ -186,7 +191,7 @@ describe('ipcSource', () => {
     b.turn('u1');
     b.text('m1', 0, 'Reply.');
     b.end(['u1']);
-    const liveForm = b.events.map((event, i) => ({ ...event, id: `${APP}:launch-1:${i + 1}:0` as EventId, seq: i + 1 }));
+    const liveForm = b.events.map((event, i) => ({ ...event, id: `${MAIN_APP}:launch-1:${i + 1}:0` as EventId, seq: i + 1 }));
     const diskForm = b.events.map((event) => ({ ...event, id: `disk:${event.id}` as EventId, seq: null }));
     const fake = fakeClient();
     const subject = ipcSourceOver(fake.client, APP);
@@ -257,7 +262,7 @@ describe('ipcSource', () => {
     b.end(['u1']);
     const noticeAt = new Date(Date.parse(b.events[0].at) - 50).toISOString(); // posted between the launch and the first send
     const notice = {
-      id: `${APP}:c10:relay-fallback:1` as EventId, sessionId: 'unknown', at: noticeAt, seq: null, agentId: null, parentToolUseId: null,
+      id: `${MAIN_APP}:c10:relay-fallback:1` as EventId, sessionId: 'unknown', at: noticeAt, seq: null, agentId: null, parentToolUseId: null,
       kind: 'notice.posted', level: 'warning', key: 'relay:direct_fallback', text: 'The relay was unreachable, so this session started on the direct route.',
     } as unknown as SessionEvent;
     fake.appEvents.set(APP, [notice]); // posted before this page loaded: main has it, the page never heard it
@@ -297,7 +302,7 @@ describe('ipcSource', () => {
       await settle();
       expect(fake.calls).toHaveLength(1);
       expect(useTranscriptStore.getState().entries[APP]).toMatchObject({ phase: 'hydrating', error: null });
-      fake.emit('session.status', { appSessionId: 'another' as AppSessionId, status: {} as never });
+      fake.emit('session.status', { appSessionId: at('another' as AppSessionId), status: {} as never });
       await settle();
       expect(fake.calls, 'another session’s sign wakes nothing').toHaveLength(1);
       fake.emit('session.status', { appSessionId: APP, status: {} as never });
@@ -565,7 +570,7 @@ describe('child source provenance', () => {
     await flush();
     expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual(disk.map((e) => e.id));
     fake.emit('fs.followState', { ...followState('stopped'), agentId: null });
-    fake.emit('fs.followState', { ...followState('stopped'), appSessionId: 'another' as AppSessionId });
+    fake.emit('fs.followState', { ...followState('stopped'), appSessionId: at('another' as AppSessionId) });
     await flush();
     expect(fake.calls.filter((c) => c.name === 'fs.agentEvents')).toHaveLength(3);
     useTranscriptStore.getState().detach(CHILD_KEY);
@@ -958,7 +963,7 @@ describe('child source provenance', () => {
     });
     fake.emit('engine.hostState', { state: 'restarting' } as never);
     fake.emit('engine.hostState', { state: 'ready' } as never);
-    answer(fake, 'engine.sessions', [{ appSessionId: 'other' as AppSessionId }]);
+    answer(fake, 'engine.sessions', [{ appSessionId: at('other' as AppSessionId) }]);
     await flush();
     off();
     expect(seen[0]).toMatchObject({ phase: 'live', divider: { state: 'stopped', cause: 'crash' } }); // in the live state, before the reset
@@ -1085,7 +1090,7 @@ describe('ipcSource after MAWS yields to a foreign holder (W7)', () => {
     b.text('m1', 0, 'MAWS wrote this.');
     b.end(['u1']);
     const mine = b.events.length;
-    const liveForm = b.events.map((event, i) => ({ ...event, id: `${APP}:launch-1:${i + 1}:0` as EventId, seq: i + 1 }));
+    const liveForm = b.events.map((event, i) => ({ ...event, id: `${MAIN_APP}:launch-1:${i + 1}:0` as EventId, seq: i + 1 }));
     b.turn('t1');
     b.text('m2', 0, 'The terminal wrote this.');
     b.end(['t1']);
@@ -1119,7 +1124,7 @@ describe('ipcSource after MAWS yields to a foreign holder (W7)', () => {
     b.turn('u1');
     b.text('m1', 0, 'MAWS wrote this.');
     b.end(['u1']);
-    const liveForm = b.events.map((event, i) => ({ ...event, id: `${APP}:launch-1:${i + 1}:0` as EventId, seq: i + 1 }));
+    const liveForm = b.events.map((event, i) => ({ ...event, id: `${MAIN_APP}:launch-1:${i + 1}:0` as EventId, seq: i + 1 }));
     const fake = fakeClient();
     const source = ipcSourceOver(fake.client, APP);
     const store = useTranscriptStore.getState();
@@ -1137,7 +1142,7 @@ describe('ipcSource after MAWS yields to a foreign holder (W7)', () => {
 // E10 (Task 4.1's crash screenshot): a host that dies takes its engine processes along and sends no exit for them, and
 // a successor that never ran the session never will. The session's source closes what its live stream left running.
 describe('ipcSource after the engine host is lost (E10)', () => {
-  const liveIds = (events: SessionEvent[]) => events.map((event, i) => ({ ...event, id: `${APP}:launch-1:${i + 1}:0` as EventId, seq: i + 1 }));
+  const liveIds = (events: SessionEvent[]) => events.map((event, i) => ({ ...event, id: `${MAIN_APP}:launch-1:${i + 1}:0` as EventId, seq: i + 1 }));
   // A turn mid-tool, as a supervisor's kill -9 leaves it: started, a Bash call with no result, no end.
   const midTurn = () => {
     const b = builder();
@@ -1169,7 +1174,7 @@ describe('ipcSource after the engine host is lost (E10)', () => {
     fake.emit('engine.hostState', { state: 'restarting' } as never);
     fake.emit('engine.hostState', { state: 'ready' } as never);
     expect(fake.calls.map((call) => call.name)).toEqual(['session.events', 'engine.sessions']);
-    table(fake, ['other' as AppSessionId]);
+    table(fake, [at('other' as AppSessionId)]);
     await flush();
     expect(divider().state).toBe('stopped');
     expect(useTranscriptStore.getState().entries[APP].working).toBe(false);
@@ -1214,6 +1219,33 @@ describe('ipcSource after the engine host is lost (E10)', () => {
     await flush();
     expect(second.fake.calls.map((call) => call.name)).toEqual(['session.events']);
     useTranscriptStore.getState().detach(second.source.key!);
+  });
+
+  // The branch review: `engine.hostState` crosses machine links. Another machine's host leaving says nothing about this
+  // session's process, and a session on another machine reads that machine's table.
+  it('hears only its own machine’s engine host, and reads its own machine’s table', async () => {
+    const { fake, source } = await hydrated(midTurn());
+    fake.emit('engine.hostState', { state: 'restarting' } as never, OTHER_MACHINE);
+    fake.emit('engine.hostState', { state: 'ready' } as never, OTHER_MACHINE);
+    await flush();
+    expect(fake.calls.map((call) => call.name), 'B’s host says nothing of a session on this machine').toEqual(['session.events']);
+    expect(divider().state).toBe('working');
+    useTranscriptStore.getState().detach(source.key!);
+
+    const onB = addressOf(OTHER_MACHINE, 'app-b' as AppSessionId);
+    const other = fakeClient();
+    const bSource = ipcSourceOver(other.client, onB);
+    const attached = useTranscriptStore.getState().attach(bSource.key!, bSource);
+    const events = midTurn().map((event) => ({ ...event, id: (event.id as string).replace(MAIN_APP, 'app-b') as EventId }));
+    other.calls[0].answer({ ok: true, value: { events, lastSeq: events.length, complete: true } } as never);
+    await attached;
+    other.emit('engine.hostState', { state: 'restarting' } as never, TEST_MACHINE);
+    other.emit('engine.hostState', { state: 'ready' } as never, TEST_MACHINE);
+    expect(other.calls.map((call) => call.name), 'this machine’s host says nothing of B’s session').toEqual(['session.events']);
+    other.emit('engine.hostState', { state: 'restarting' } as never, OTHER_MACHINE);
+    other.emit('engine.hostState', { state: 'ready' } as never, OTHER_MACHINE);
+    expect(other.calls.filter((call) => call.name === 'engine.sessions').map((call) => call.machine), 'B’s table, read on B').toEqual([OTHER_MACHINE]);
+    useTranscriptStore.getState().detach(bSource.key!);
   });
 
   it('a table read asked before a later departure says nothing; the next ready asks again', async () => {

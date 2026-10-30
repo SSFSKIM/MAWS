@@ -6,6 +6,7 @@
 // the product shell over C5's scenario and the committed ClaudeUsage fixture moved to now (accounts.spec.ts's recipe).
 // Nothing here asserts a look: it drives each state to where the mockup shows it and photographs it. Run on purpose only:
 //   MAWS_HARNESS=1 pnpm exec electron-vite build && MAWS_C11_SHOTS=1 pnpm exec playwright test e2e/c11-shots.spec.ts
+import { addressed } from './support/address';
 import { hideSurfaces, mainTab } from './support/shell';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -80,7 +81,7 @@ test('the widgets and Session info on the #widgets harness page', async () => {
     await page.evaluate((id) => (window as unknown as { __maws_widgets: WidgetsHarnessApi }).__maws_widgets.show({ appSessionId: id, mode: 'interactive' }), READY);
     const message = page.getByRole('textbox', { name: 'Message' });
     await expect(message).toBeVisible();
-    await expect(page.locator(`[data-session-info="${READY}"]`)).toBeVisible();
+    await expect(page.locator(`[data-session-info="${await addressed(page, READY)}"]`)).toBeVisible();
 
     // mockup 06 vignette 05: the palette, then the permissions widget it opens
     await message.click();
@@ -107,9 +108,9 @@ test('the widgets and Session info on the #widgets harness page', async () => {
     await shoot(page, 'model-widget', true);
     await page.keyboard.press('Escape');
     await page.evaluate((id) => (window as unknown as { __maws_widgets: WidgetsHarnessApi }).__maws_widgets.control('setModel', { appSessionId: id, model: 'claude/astra' }), READY);
-    await expect(page.locator(`[data-session-info="${READY}"]`)).toContainText('Local (expected)');
+    await expect(page.locator(`[data-session-info="${await addressed(page, READY)}"]`)).toContainText('Local (expected)');
     // the tool scrolls inside its panel: its top, then its bottom
-    const info = page.locator(`[data-session-info="${READY}"]`);
+    const info = page.locator(`[data-session-info="${await addressed(page, READY)}"]`);
     for (const theme of THEMES) {
       await setTheme(page, theme, true);
       await info.evaluate((el) => (el.scrollTop = 0));

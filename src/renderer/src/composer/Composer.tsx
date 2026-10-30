@@ -23,6 +23,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
+import { machineOf } from '@shared/machine/address';
 import type { Draft } from '@shared/ipc/schema/session';
 import { ipc } from '../ipc/client';
 import { useCommand } from '../ipc/query';
@@ -36,8 +37,12 @@ import { useSessionQueue } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
 import { gitAnswerOf } from '../sessions/branch-label'; // W9 (H2)
 import { availabilityIn, useAvailability } from '../sessions/availability'; // P2-A
+import { heldWords, useSessionControls } from '../session/controls/controls-for'; // P5 O9 M4
 import { holderWords } from '../sessions/holder-words'; // P2-A
 import { DictationNotice } from './dictation/MicControl'; // E9
+import { PendingSends } from './PendingSends'; // P5 O9 M5
+import { PendingUploads } from './PendingUploads'; // P5 O9 M7
+import { useSettling } from '../lane-a/race'; // P5 O9 M6
 import { useDockedCards } from './docked/registry';
 import { swapOf } from './docked/swap';
 import { attachmentsOf, emptyDoc, isMultiline, type ComposerDoc } from './editor/doc';
@@ -48,7 +53,7 @@ import { acquireBeforeMode, submitHumanSerialized, submitSerialized, type Dispat
 import { useEffectiveEffort } from './effective-effort'; // W3
 import { autoFallbackNotice } from '@shared/sessions/models'; // W3
 import { ResubmitLine } from './InlineEdit'; // W3 (B6)
-import { endedBindings, intentBindings, liveBindings, workspaceDirectoriesOf, type FrameBindings } from './frame/bindings';
+import { endedBindings, intentBindings, workspaceDirectoriesOf, type FrameBindings } from './frame/bindings';
 import { ContextRing } from './frame/ContextRing';
 import { Frame } from './frame/Frame';
 import { PluginBand, PluginHint } from './frame/PluginSites'; // R2
@@ -78,7 +83,7 @@ function useSessionStatus(appSessionId: AppSessionId, client: MawsBridge) {
     if (useSessions.getState().engine.has(appSessionId)) return;
     let live = true;
     void client.invoke('session.status', { appSessionId }).then((result) => {
-      if (live && result.ok && !useSessions.getState().engine.has(appSessionId)) useSessions.getState().applyStatus({ appSessionId, status: result.value });
+      if (live && result.ok && !useSessions.getState().engine.has(appSessionId)) useSessions.getState().applyStatus({ appSessionId, status: result.value }, machineOf(appSessionId));
     });
     return () => void (live = false);
   }, [appSessionId, client]);
@@ -122,7 +127,7 @@ function useLiveReads(
 ) {
   const ready = status?.process === 'ready';
   const models = useListModels(appSessionId, want.models);
-  const modelNames = useModelCatalogue(route, ready, directory);
+  const modelNames = useModelCatalogue(machineOf(appSessionId), route, ready, directory);
   const effort = useEffectiveEffort(appSessionId, status, client); // W3: get_settings once per ready and per change
   const rules = useCommand('session.listPermissionRules', { appSessionId }, { enabled: want.rules, staleTime: 10_000 });
   const asked = useModelRequests((s) => heldModel(s, appSessionId, status)) ?? null; // P2-F S chip (review): the selector's request
@@ -163,14 +168,21 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // ---- what the frame binds to ------------------------------------------------------------------------------------
   const location = setup?.intent.location ?? null; // New chat: null until a project is chosen
   const cwd = setup ? (location === null ? '' : locationPath(location)) : (status?.cwd ?? record?.directory ?? '');
-  const repo = useGitWatch(setup ? null : cwd || null, client);
+  const repo = useGitWatch(machineOf(appSessionId), setup ? null : cwd || null, client);
   const [opened, setOpened] = useState({ models: false, rules: false });
   const ready = status?.process === 'ready';
   const reads = useLiveReads(appSessionId, { models: ready && opened.models, rules: ready && opened.rules }, setup ? null : cwd || null, repo, routeOf(status, record), status, client);
   // W3: an unstarted tab names what the engine will use, the user's own settings included (read only)
   const userDefaults = useCommand('settings.userEngineDefaults', undefined, { enabled: unstarted, staleTime: 30_000 }).data ?? null;
   const availability = useAvailability(appSessionId); // P2-A: what the chips and the submit control may start
-  const bindings: FrameBindings = setup ? intentBindings(setup, { starting }, userDefaults) : status || record ? liveBindings(status, record, reads, client, availability) : endedBindings();
+  // P5 O9 M4: a started session's chips and controls are its port's (lane B: today's live bindings over this frame); a
+  // session no port drives is read-only, its chips refused with who holds it
+  const controls = useSessionControls(appSessionId, { client, frame: { status, reads, availability } });
+  const bindings: FrameBindings = setup ? intentBindings(setup, { starting }, userDefaults) : controls ? controls.bindings() : endedBindings(heldWords(appSessionId));
+  // P5 O9 M5: a session another process runs and the port drives (lane A): its turn is that process's, and Send and Stop
+  // go by the port's capabilities
+  const elsewhere = setup ? null : (controls?.turn() ?? null);
+  const driven = elsewhere && controls ? { running: elsewhere.running, send: controls.capability('send'), stop: controls.capability('interrupt') } : null;
   // W3 (C5): the engine refused auto and the host set the fallback (requested auto, a refusal, another effective mode)
   const permission = status?.permissionMode ?? null;
   const modeNote = setup ? setup.options.autoModeNote : permission && permission.requested === 'auto' && permission.effective !== 'auto' && permission.refusal !== null ? autoFallbackNotice(permission.effective) : null;
@@ -191,6 +203,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     mode: draft.mode,
     availability, // P2-A
     heldBy, // P2-A
+    driven, // P5 O9 M5
   });
 
   // ---- the docked swap ---------------------------------------------------------------------------------------------
@@ -200,7 +213,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const swap = useMemo(() => swapOf(items, requests), [items, requests]);
   useEffect(() => swap.unread.forEach((item) => void useAttention.getState().loadRequest(client, item)), [swap.unread, client]);
   const card = cards[0] ?? null;
-  const docked = card !== null || swap.item !== null;
+  const settling = useSettling(swap.item); // P5 O9 M6: a request its terminal answered first stays docked, settled, for a moment (Q3)
+  const docked = card !== null || settling !== null;
   const waiting = cards.length - (card ? 1 : 0) + (card && swap.item ? 1 : 0) + swap.waiting;
 
   // ---- focus: the one app-level ⌘L and the docked frame's return go through this -----------------------------------------
@@ -282,8 +296,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     }
     // P2-0: the human seam owns steer-or-send, the acquisition (P2-A) and state refusals. The submit-state table above
     // still draws the button; `!` and `#` keep their existing mode gating and dispatch.
-    if (s.mode === 'send') return submitHumanSerialized(client, appSessionId, s, retry);
-    const decided = submitState({ status, intent: null, queue, empty: s.empty, mode: s.mode, availability: availabilityIn(useSessions.getState(), appSessionId), heldBy });
+    if (s.mode === 'send') return controls !== null && submitHumanSerialized(controls, client, appSessionId, s, retry);
+    const decided = submitState({ status, intent: null, queue, empty: s.empty, mode: s.mode, availability: availabilityIn(useSessions.getState(), appSessionId), heldBy, driven });
     if (!decided.enabled) return false;
     // P2-A: `!` and `#` on a record with no ready process acquire it first; a card they meet docks without their text,
     // which stays in the draft (never sent to the model as a prompt by the card's continuation)
@@ -294,18 +308,18 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
 
   // The plain stop (the Stop button): nothing runs after it (W1)
   const stop = () =>
-    void client.invoke('session.interrupt', { appSessionId, cancelEngineQueued: false, holdEngineQueued: true }).then((result) => {
+    void controls?.interrupt({ cancelEngineQueued: false, holdEngineQueued: true }).then((result) => {
       if (!result.ok) console.warn('[composer] session.interrupt failed', result.error);
     });
   // Esc's interrupt: a waiting `next` steer runs right after it (W1)
   const interrupt = () =>
-    void client.invoke('session.interrupt', { appSessionId, cancelEngineQueued: false }).then((result) => {
+    void controls?.interrupt({ cancelEngineQueued: false }).then((result) => {
       if (!result.ok) console.warn('[composer] session.interrupt failed', result.error);
     });
   const onPrimary = () => {
     if (decision.primary === 'stop') return stop();
     if (decision.primary === 'resume')
-      return void client.invoke('session.queue.setPaused', { appSessionId, paused: false }).then((result) => {
+      return void controls?.queue()?.setPaused({ paused: false }).then((result) => {
         if (!result.ok) toast({ level: 'warning', text: result.error.message, actions: [], dismissible: true }); // as the queued list does
       });
     handle.current?.submit();
@@ -317,6 +331,12 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // is just a stop. Unlike ⌘. it holds nothing back. An uncertain head waits for the human's own decision. Not busy,
   // Esc is not the composer's (W3: but two of them on an empty editor open the rewind picker, below).
   const escapeTurn = (): boolean => {
+    // P5 O9 M5: the bridge holds no MAWS queue, so Esc on a running lane A turn just interrupts
+    if (driven) {
+      if (!driven.running) return false;
+      interrupt();
+      return true;
+    }
     const current = useSessions.getState().engine.get(appSessionId) ?? null;
     if (current?.process !== 'ready' || !isBusy(current, queue.entries)) return false;
     const head = queue.entries.find((e) => e.state === 'queued' && !e.uncertain);
@@ -324,7 +344,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       interrupt();
       return true;
     }
-    void client.invoke('session.queue.promote', { appSessionId, queueId: head.queueId, priority: steerPriority('interrupt_and_send') }).then((result) => {
+    void controls?.queue()?.promote({ queueId: head.queueId, priority: steerPriority('interrupt_and_send') }).then((result) => {
       if (!result.ok) toast({ level: 'warning', text: result.error.message, actions: [], dismissible: true });
     });
     return true;
@@ -352,7 +372,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // The editor is read-only while C10 holds the first send (starting, or its message retained behind a card).
   const editorDisabled = setup && (starting || messageHeld) ? decision.reason : null;
   // R2: the prompt requests' view of the composer, and a suggestion gone once a turn runs or the box holds text
-  const working = isBusy(status, queue.entries);
+  const working = driven ? driven.running : isBusy(status, queue.entries); // P5 O9 M5: a driven session's turn is its holder's
   useLayoutEffect(() => {
     promptState.current = { docked, readOnly: editorDisabled !== null || setup !== null, busy: working, disabled: editorDisabled !== null };
   });
@@ -383,6 +403,10 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         </p>
       )}
       {!unstarted && <QueueList appSessionId={appSessionId} queue={queue} busy={isBusy(status, queue.entries)} sessionId={sessionId} cwd={cwd} client={client} />}
+      {/* P5 O9 M5: lane A's sends whose fate was not known when the bridge answered, each with its text */}
+      {!unstarted && <PendingSends appSessionId={appSessionId} client={client} />}
+      {/* P5 O9 M7: the images and PDFs lane A handed to the bridge, each with its state */}
+      {!unstarted && <PendingUploads appSessionId={appSessionId} />}
       {rewoundEdit && <ResubmitLine resubmit={resubmit} onSend={() => void sendInlineEdit(client, appSessionId)} onLeave={() => cancelInlineEdit(appSessionId)} />}
       {swap.notice && <RequestCard key={swap.notice.id} item={swap.notice} request={null} placement="docked" paneIndex={paneIndex} />}
       {/* R2: a plugin's band above the frame, only while a plugin draws one */}
@@ -396,8 +420,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
             <>
               {card ? (
                 <div key={`card:${card.id}`}>{card.render()}</div>
-              ) : swap.item ? (
-                <RequestCard key={swap.item.id} item={swap.item} request={requests.get(swap.item.id) ?? null} placement="docked" paneIndex={paneIndex} />
+              ) : settling ? (
+                <RequestCard key={settling.id} item={settling} request={requests.get(settling.id) ?? null} placement="docked" paneIndex={paneIndex} />
               ) : null}
               {waiting > 0 && <p className="m-0 text-ui-sm text-fg-muted">{waiting === 1 ? '1 more waiting' : `${waiting} more waiting`}</p>}
             </>

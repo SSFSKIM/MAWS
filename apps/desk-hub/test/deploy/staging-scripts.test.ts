@@ -93,7 +93,7 @@ describe('the admin step', () => {
     const run = spawnSync('zsh', [runner, 'admin', 'devices'], { encoding: 'utf8', env });
     expect(run.status, run.stdout + run.stderr).toBe(0);
     const args = readFileSync(join(dir, 'args'), 'utf8').trim().split('\n');
-    expect(args.slice(args.indexOf('deployment'))).toEqual(['deployment', 'admin', 'devices', '--keys', `${device}/keys.json`, '--config', 'deploy/staging.json']);
+    expect(args.slice(args.indexOf('deployment'))).toEqual(['deployment', 'admin', '--config', 'deploy/staging.json', '--keys', `${device}/keys.json`, 'devices']);
     expect(readFileSync(join(dir, 'stdin'), 'utf8')).toBe(`DESK_ACCESS_TOKEN=${token}\n`);
     expect(run.stdout).toContain('head version 3, issued 2 days ago');
     expect(run.stdout).not.toContain('secret');
@@ -102,6 +102,29 @@ describe('the admin step', () => {
     const log = readFileSync(join(dir, 'state', logs[0]), 'utf8');
     expect(log).toBe('head version 3, issued 2 days ago\ndevices listed\n');
     expect(run.stdout + run.stderr + log).not.toContain(token);
+  });
+
+  // The step's own options go after the command word and before the owner's arguments, so a device id after `--` (a
+  // base64url id starts with '-' about one time in 64) stays the last positional, and today's forms parse as before.
+  it.skipIf(!zsh)("hands the owner's arguments on last and whole: an id after `--`, and a verb with none", () => {
+    for (const args of [['root', 'add', '--', '-Dash-led_id'], ['remove-device', '--', '-Dash-led_id'], ['show']]) {
+      const { dir, device, env } = setup();
+      const run = spawnSync('zsh', [runner, 'admin', ...args], { encoding: 'utf8', env });
+      expect(run.status, run.stdout + run.stderr).toBe(0);
+      const given = readFileSync(join(dir, 'args'), 'utf8').trim().split('\n');
+      expect(given.slice(given.indexOf('deployment')), args.join(' ')).toEqual(['deployment', 'admin', '--config', 'deploy/staging.json', '--keys', `${device}/keys.json`, ...args]);
+    }
+  });
+
+  // Another verb through the same helper: the deployment after its command word, then the step's options and the
+  // owner's. A `--config` of the owner's reaches the command beside the step's, and the command refuses two (deployArgs:
+  // `name one deployment`), so neither wins.
+  it.skipIf(!zsh)('relay-measure reaches its command with the deployment after the command word', () => {
+    const { dir, device, env } = setup();
+    const run = spawnSync('zsh', [runner, 'relay-measure', '--rounds', '3'], { encoding: 'utf8', env });
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+    const given = readFileSync(join(dir, 'args'), 'utf8').trim().split('\n');
+    expect(given.slice(given.indexOf('deployment'))).toEqual(['deployment', 'relay-measure', '--config', 'deploy/staging.json', '--device-keys', `${device}/keys.json`, '--rounds', '3']);
   });
 
   it.skipIf(!zsh)('names the deployment and the keys itself: no option that would name others, no init, no keys, nothing run', () => {
@@ -133,7 +156,7 @@ describe('the admin step', () => {
     expect(readdirSync(dir)).not.toContain('args');
     const args = readFileSync(join(dir, 'node-args'), 'utf8').trim().split('\n');
     expect(args[0]).toMatch(/\/apps\/desk-hub$/);
-    expect(args.slice(args.indexOf('deploy/bin.ts'))).toEqual(['deploy/bin.ts', 'admin', ...create, '--keys', `${device}/keys.json`, '--config', 'deploy/staging.json']);
+    expect(args.slice(args.indexOf('deploy/bin.ts'))).toEqual(['deploy/bin.ts', 'admin', '--config', 'deploy/staging.json', '--keys', `${device}/keys.json`, ...create]);
     expect(run.stderr).toContain('head version 3, issued 2 days ago');
     expect(run.stderr).not.toContain('secret');
     const logs = readdirSync(join(dir, 'state')).filter((name) => name.startsWith('admin-delegation-pipe-'));
@@ -288,5 +311,276 @@ describe('curl and the owner’s token', () => {
 
   it('a restore whose /api/me read failed is a failed restore, named', () => {
     expect(scripts[0].text).toMatch(/restore check failed: /);
+  });
+});
+
+describe('the phone step', () => {
+  // `staging-run.sh phone <n>` (P5 O13 M7): the live suite with the owner's token in its environment alone, its sink
+  // behind a quick tunnel tried three times, then its cleanup pass, production's build compared and the log scanned for
+  // the token. Stubs stand for cloudflared (a synthetic token; a tunnel that fails, or comes up), curl (production's
+  // build header) and pnpm (recording each run's arguments and environment, and printing a line holding the token).
+  const token = `eyJ${'p'.repeat(20)}.synthetic`;
+  // `api`: cloudflared's own request for a quick tunnel fails, the runner's to the quick-tunnel API answers, and
+  // cloudflared runs on the credentials it wrote (the stub records the file's mode and whether it holds the secret).
+  const apiSecret = `qt${'s'.repeat(24)}.synthetic`; // low-entropy, assembled here: no committed line reads as a key
+  const setup = (tunnel: 'fails' | 'up' | 'api', anchor = true, leak = false, hang = false) => {
+    const dir = mkdtempSync(join(tmpdir(), 'staging-phone-'));
+    const device = join(dir, 'device');
+    mkdirSync(device);
+    writeFileSync(join(device, 'keys.json'), '{}', { mode: 0o600 });
+    if (anchor) writeFileSync(join(device, 'keys.json.org.json'), '{}', { mode: 0o600 });
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    const up = "echo 'INF |  https://quick-test-1.trycloudflare.com  |'; echo 'INF Registered tunnel connection'; exec sleep 30";
+    writeFileSync(
+      join(bin, 'cloudflared'),
+      [
+        '#!/bin/sh',
+        `if [ "$1" = access ]; then printf '%s' '${token}'; exit 0; fi`,
+        `case " $* " in *' --credentials-file '*) f=$(printf '%s\\n' "$@" | sed -n '/^--credentials-file$/{n;p;}'); echo api >> '${dir}/tunnels'; python3 -I -c 'import os, sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777)[2:])' "$f" > '${dir}/creds-mode'; grep -c '${apiSecret}' "$f" > '${dir}/creds-secret'; echo 'INF Registered tunnel connection'; exec sleep 30;; esac`,
+        `echo try >> '${dir}/tunnels'`,
+        tunnel === 'up' ? up : "echo 'ERR failed to request quick Tunnel'; exit 1",
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    );
+    const answer = JSON.stringify({ success: true, result: { id: '0f0e0d0c-0b0a-4908-8706-050403020100', name: 'qt-x', hostname: 'spike-host-one.trycloudflare.com', account_tag: 'acct0123', secret: apiSecret } });
+    writeFileSync(
+      join(bin, 'curl'),
+      `#!/bin/sh\ncase "$*" in *api.trycloudflare.com/tunnel*) ${tunnel === 'api' ? `printf '%s' '${answer}'` : "printf 'upstream request timeout'"}; exit 0;; esac\ncat > /dev/null\nprintf 'X-Desk-Build: hub@0123abcd web@master.0123abcd\\r\\n'\n`,
+      { mode: 0o755 },
+    );
+    writeFileSync(
+      join(bin, 'pnpm'),
+      [
+        '#!/bin/sh',
+        `n=$(ls '${dir}' | grep -c '^run-.*-args$')`,
+        `printf '%s\\n' "$@" > '${dir}/run-'$n'-args'`,
+        `env | grep '^DESK_' | sort > '${dir}/run-'$n'-env'`,
+        // The suite that hangs: its process stays until a signal reaches it (a run's endpoint waiting on staging).
+        ...(hang ? [`[ "$DESK_STAGING_PHONE" = 1 ] && { echo $$ > '${dir}/hung.pid'; exec sleep 40; }`] : []),
+        'echo "PASS registration"',
+        'echo "a line holding $DESK_ACCESS_TOKEN"',
+        // A secret the run handled, listed for the search, which the run (here) also printed.
+        ...(leak ? ['[ -n "$DESK_STAGING_PHONE_SCAN" ] && echo smns-pair-v1.synthetic >> "$DESK_STAGING_PHONE_SCAN" && echo "code smns-pair-v1.synthetic"'] : []),
+        'echo "cleanup: nothing of the run is current"',
+        'exit 0',
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    );
+    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, DESK_STAGING_DIR: join(dir, 'state'), DESK_STAGING_DEVICE: device, DESK_STAGING_SECRETS: join(dir, 'secrets') };
+    return { dir, device, env };
+  };
+  const envOf = (dir: string, run: number) => Object.fromEntries(readFileSync(join(dir, `run-${run}-env`), 'utf8').trim().split('\n').map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+
+  it.skipIf(!zsh)('refuses a bad run id, an option it does not take and a missing anchor before reading a token', () => {
+    for (const [args, why, anchor] of [
+      [['phone', 'A/1'], /bad run id/, true],
+      [['phone', '1', '--trace'], /phone takes --rehearse, --lane-b and --device <id>/, true],
+      [['phone', '1', '--device', 'a b'], /--device <the phone's device id>/, true],
+      [['phone', '1'], /no admin device keys and anchor/, false],
+    ] as const) {
+      const { dir, env } = setup('fails', anchor);
+      const run = spawnSync('zsh', [runner, ...args], { encoding: 'utf8', env });
+      expect(run.status, args.join(' ')).toBe(2);
+      expect(run.stdout + run.stderr, args.join(' ')).toMatch(why);
+      expect(existsSync(join(dir, 'tunnels')) || existsSync(join(dir, 'run-0-args'))).toBe(false);
+    }
+  });
+
+  it.skipIf(!zsh)('runs the suite with the token in its environment alone, says NOT SHOWN’s reason after three tunnel tries, then its cleanup pass', () => {
+    const { dir, device, env } = setup('fails');
+    const run = spawnSync('zsh', [runner, 'phone', 'r1', '--rehearse', '--lane-b'], { encoding: 'utf8', env });
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+    expect(readFileSync(join(dir, 'tunnels'), 'utf8')).toBe('try\ntry\ntry\n');
+    expect(run.stdout).toMatch(/the quick-tunnel API gave no tunnel/);
+    const args = readFileSync(join(dir, 'run-0-args'), 'utf8').trim().split('\n');
+    expect(args.slice(args.indexOf('exec'))).toEqual(['exec', 'vitest', 'run', '--project', 'node', 'test/endpoint/staging-phone.live.test.ts']);
+    expect(envOf(dir, 0)).toMatchObject({
+      DESK_ACCESS_TOKEN: token,
+      DESK_STAGING_PHONE: '1',
+      DESK_STAGING_PHONE_RUN: 'r1',
+      DESK_STAGING_PHONE_MODE: 'rehearse',
+      DESK_STAGING_PHONE_LANE_B: 'required',
+      DESK_STAGING_PHONE_NO_SINK: 'tunnel: the quick tunnel did not come up in 3 tries, nor through the quick-tunnel API',
+      DESK_STAGING_ADMIN_KEYS: `${device}/keys.json`,
+    });
+    expect(envOf(dir, 1)).toMatchObject({ DESK_ACCESS_TOKEN: token, DESK_STAGING_PHONE: 'cleanup', DESK_STAGING_PHONE_RUN: 'r1' });
+    for (const n of [0, 1]) expect(readFileSync(join(dir, `run-${n}-args`), 'utf8')).not.toContain(token);
+    const logs = readdirSync(join(dir, 'state')).filter((name) => name.startsWith('phone-r1-'));
+    expect(logs).toHaveLength(1);
+    const log = readFileSync(join(dir, 'state', logs[0]), 'utf8');
+    expect(log).toContain('PASS registration');
+    expect(log).toContain('production untouched: X-Desk-Build: hub@0123abcd');
+    expect(log).toContain('files holding the Access token or a secret the run handled: 0');
+    expect(run.stdout + run.stderr + log).not.toContain(token);
+    // The run's list of handled secrets and the endpoint's profile, handed to the suite and removed with the run.
+    const state = join(dir, 'state');
+    expect(envOf(dir, 0)).toMatchObject({ DESK_STAGING_PHONE_SCAN: `${state}/phone-r1.scan`, DESK_STAGING_PHONE_PROFILE: `${state}/phone-r1.profile` });
+    expect(existsSync(join(state, 'phone-r1.scan')) || existsSync(join(state, 'phone-r1.profile'))).toBe(false);
+  });
+
+  it.skipIf(!zsh)('fails a run whose log holds a secret the suite listed as handled', () => {
+    const { env } = setup('fails', true, true);
+    const run = spawnSync('zsh', [runner, 'phone', 'r3', '--rehearse'], { encoding: 'utf8', env });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain('files holding the Access token or a secret the run handled: 1');
+  });
+
+  it.skipIf(!zsh)('stops a suite still running when the runner is sent TERM, then runs its cleanup pass at once', async () => {
+    const { dir, env } = setup('fails', true, false, true);
+    const started = Date.now();
+    const child = spawn('zsh', [runner, 'phone', 'r4', '--rehearse'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    child.stdout.on('data', (d: Buffer) => (out += d.toString()));
+    child.stderr.on('data', (d: Buffer) => (out += d.toString()));
+    const exited = new Promise<number | null>((resolve) => child.on('exit', (code) => resolve(code)));
+    for (let i = 0; i < 400 && !existsSync(join(dir, 'hung.pid')); i++) await new Promise((r) => setTimeout(r, 50));
+    expect(existsSync(join(dir, 'hung.pid')), out).toBe(true);
+    const hung = Number(readFileSync(join(dir, 'hung.pid'), 'utf8'));
+    const termed = Date.now();
+    child.kill('SIGTERM');
+    const code = await exited;
+    // Within a bounded wait of the signal, not after the suite's own 40 s.
+    expect(Date.now() - termed, out).toBeLessThan(15_000);
+    expect(code, out).not.toBe(0);
+    const alive = (() => {
+      try {
+        process.kill(hung, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    expect(alive, `the suite's process ${hung}`).toBe(false);
+    expect(envOf(dir, 1)).toMatchObject({ DESK_STAGING_PHONE: 'cleanup', DESK_STAGING_PHONE_RUN: 'r4' });
+    expect(out).toMatch(/the suite stopped/);
+    expect(out).toContain('production untouched');
+    expect(Date.now() - started).toBeLessThan(40_000);
+  }, 60_000);
+
+  it.skipIf(!zsh)('falls back to the quick-tunnel API after three tries: cloudflared run on its credentials, the file 0600 and gone after, its secret never printed', () => {
+    const { dir, env } = setup('api');
+    const run = spawnSync('zsh', [runner, 'phone', 'r5', '--rehearse'], { encoding: 'utf8', env, timeout: 90_000 });
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+    expect(readFileSync(join(dir, 'tunnels'), 'utf8')).toBe('try\ntry\ntry\napi\n');
+    expect(readFileSync(join(dir, 'creds-mode'), 'utf8').trim()).toBe('600');
+    expect(readFileSync(join(dir, 'creds-secret'), 'utf8').trim()).toBe('1');
+    expect(envOf(dir, 0)).toMatchObject({ DESK_STAGING_PHONE_SINK: 'https://spike-host-one.trycloudflare.com/staging-run', DESK_STAGING_PHONE_SINK_PORT: '18744' });
+    expect(envOf(dir, 0).DESK_STAGING_PHONE_NO_SINK).toBeUndefined();
+    expect(run.stdout).toMatch(/push sink: https:\/\/spike-host-one\.trycloudflare\.com -> 127\.0\.0\.1:18744 \(through the quick-tunnel API\)/);
+    expect(run.stdout).toMatch(/tunnel stopped: pid \d+ at .*, process gone/);
+    const state = join(dir, 'state');
+    expect(readdirSync(state).filter((name) => name.includes('tunnel') && name.endsWith('.json'))).toEqual([]);
+    const logs = readdirSync(state).filter((name) => name.endsWith('.log'));
+    for (const log of logs) expect(readFileSync(join(state, log), 'utf8'), log).not.toContain(apiSecret);
+    expect(run.stdout + run.stderr).not.toContain(apiSecret);
+    expect(run.stdout).toContain('files holding the Access token or a secret the run handled: 0');
+  }, 120_000);
+
+  it.skipIf(!zsh)('removes a credentials file an earlier run under the same id left, though the tunnel comes up on its first try', () => {
+    const { dir, env } = setup('up');
+    const state = join(dir, 'state');
+    mkdirSync(state, { recursive: true });
+    const stale = join(state, 'phone-r6.tunnel.json');
+    writeFileSync(stale, JSON.stringify({ AccountTag: 'acct0123', TunnelSecret: apiSecret, TunnelID: '0f0e0d0c-0b0a-4908-8706-050403020100' }), { mode: 0o600 });
+    const run = spawnSync('zsh', [runner, 'phone', 'r6', '--rehearse'], { encoding: 'utf8', env, timeout: 60_000 });
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+    expect(readFileSync(join(dir, 'tunnels'), 'utf8')).toBe('try\n');
+    expect(existsSync(stale)).toBe(false);
+  }, 90_000);
+
+  it.skipIf(!zsh)('hands the suite the sink once the tunnel is up, and stops the tunnel when the run ends', () => {
+    const { dir, env } = setup('up');
+    const run = spawnSync('zsh', [runner, 'phone', 'r2', '--device', 'AbC-_9'], { encoding: 'utf8', env, timeout: 60_000 });
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+    expect(readFileSync(join(dir, 'tunnels'), 'utf8')).toBe('try\n');
+    expect(envOf(dir, 0)).toMatchObject({ DESK_STAGING_PHONE_MODE: 'phone', DESK_STAGING_PHONE_LANE_B: 'probe', DESK_STAGING_PHONE_DEVICE: 'AbC-_9', DESK_STAGING_PHONE_SINK: 'https://quick-test-1.trycloudflare.com/staging-run', DESK_STAGING_PHONE_SINK_PORT: '18744' });
+    expect(envOf(dir, 0).DESK_STAGING_PHONE_NO_SINK).toBeUndefined();
+    expect(run.stdout).toMatch(/push sink: https:\/\/quick-test-1\.trycloudflare\.com -> 127\.0\.0\.1:18744 \(try 1\)/);
+    expect(run.stdout).toMatch(/tunnel stopped: pid \d+ at .*, process gone/);
+  }, 90_000);
+});
+
+describe('the endpoint step', () => {
+  // `staging-run.sh endpoint [args…]` (P5 O10 M11): `deployment endpoint-acceptance` on staging's config with the admin
+  // device's keys, the token on its stdin alone, the run's secrets listed for the search after it, its hub deploy this
+  // script's own `deploy` step; production's build compared before and after. Stubs stand for cloudflared (a synthetic
+  // token), curl (production's build header) and pnpm (recording its arguments and stdin, printing a line holding a
+  // secret it listed and one holding the token).
+  const token = `eyJ${'e'.repeat(20)}.synthetic`;
+  const setup = (leak = false) => {
+    const dir = mkdtempSync(join(tmpdir(), 'staging-endpoint-'));
+    const device = join(dir, 'device');
+    mkdirSync(device);
+    writeFileSync(join(device, 'keys.json'), '{}', { mode: 0o600 });
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'cloudflared'), `#!/bin/sh\nprintf '%s' '${token}'\n`, { mode: 0o755 });
+    writeFileSync(join(bin, 'curl'), `#!/bin/sh\ncat > /dev/null\nprintf 'X-Desk-Build: hub@0123abcd web@master.0123abcd\\r\\n'\n`, { mode: 0o755 });
+    writeFileSync(
+      join(bin, 'pnpm'),
+      [
+        '#!/bin/sh',
+        `printf '%s\\n' "$@" > '${dir}/args'`,
+        `cat > '${dir}/stdin'`,
+        'scan=$(printf "%s\\n" "$@" | sed -n "/^--scan$/{n;p;}")',
+        '[ -n "$scan" ] && echo smns-enroll-v2.synthetic-endpoint-code >> "$scan"',
+        ...(leak ? ['echo "code smns-enroll-v2.synthetic-endpoint-code"'] : []),
+        'echo "PASS 9"',
+        "echo 'a line naming a secret'",
+        'exit 0',
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    );
+    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, DESK_STAGING_DIR: join(dir, 'state'), DESK_STAGING_DEVICE: device, DESK_STAGING_SECRETS: join(dir, 'secrets') };
+    return { dir, device, env };
+  };
+
+  it.skipIf(!zsh)('runs the acceptance on staging with the device’s keys and its own deploy step, the token on stdin alone, production compared', () => {
+    const { dir, device, env } = setup();
+    const run = spawnSync('zsh', [runner, 'endpoint', '--items', '9'], { encoding: 'utf8', env, timeout: 60_000 });
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+    const args = readFileSync(join(dir, 'args'), 'utf8').trim().split('\n');
+    const state = join(dir, 'state');
+    expect(args.slice(args.indexOf('deployment'))).toEqual([
+      'deployment', 'endpoint-acceptance', '--config', 'deploy/staging.json', '--device-keys', `${device}/keys.json`, '--scan', join(state, 'endpoint.scan'), '--hub-deploy', runner, '--items', '9',
+    ]);
+    expect(readFileSync(join(dir, 'stdin'), 'utf8')).toBe(`DESK_ACCESS_TOKEN=${token}\n`);
+    expect(run.stdout).toContain('PASS 9');
+    expect(run.stdout).not.toContain('a line naming a secret');
+    // Production's build header is all it compares: it says so, and claims no more.
+    expect(run.stdout).toContain('production build unchanged: X-Desk-Build: hub@0123abcd web@master.0123abcd');
+    expect(run.stdout).not.toContain('production untouched');
+    expect(run.stdout).toContain('files holding the Access token or a secret the run handled: 0');
+    expect(existsSync(join(state, 'endpoint.scan'))).toBe(false);
+    expect(run.stdout + run.stderr).not.toContain(token);
+  });
+
+  it.skipIf(!zsh)('fails a run that printed a secret it handled, however its items went', () => {
+    const { env } = setup(true);
+    const run = spawnSync('zsh', [runner, 'endpoint'], { encoding: 'utf8', env, timeout: 60_000 });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain('files holding the Access token or a secret the run handled: 1');
+  });
+
+  it.skipIf(!zsh)('sets the VM scene up from a base the VM holds, or tears it down, with no token read', () => {
+    for (const [args, expected] of [
+      [['endpoint-vm', 'setup', 'd392c4d8c'], ['endpoint-acceptance', '--config', 'deploy/staging.json', '--vm-setup', '--base', 'd392c4d8c']],
+      [['endpoint-vm', 'teardown'], ['endpoint-acceptance', '--config', 'deploy/staging.json', '--vm-teardown']],
+    ] as const) {
+      const { dir, env } = setup();
+      const run = spawnSync('zsh', [runner, ...args], { encoding: 'utf8', env, timeout: 60_000 });
+      expect(run.status, run.stdout + run.stderr).toBe(0);
+      const given = readFileSync(join(dir, 'args'), 'utf8').trim().split('\n');
+      expect(given.slice(given.indexOf('deployment') + 1)).toEqual(expected);
+      expect(readFileSync(join(dir, 'stdin'), 'utf8')).toBe('');
+    }
+    const { env } = setup();
+    const bad = spawnSync('zsh', [runner, 'endpoint-vm', 'setup', 'HEAD;rm'], { encoding: 'utf8', env });
+    expect(bad.status).toBe(2);
+    expect(bad.stdout).toMatch(/endpoint-vm setup <base commit> \| teardown/);
   });
 });

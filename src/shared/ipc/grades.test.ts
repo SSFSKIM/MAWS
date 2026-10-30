@@ -69,8 +69,13 @@ describe('every command of the registry', () => {
 });
 
 describe('the routing classes', () => {
-  it('give internal to exactly the main-only commands', () => {
-    expect(graded('internal')).toEqual([...MAIN_ONLY_COMMANDS].sort());
+  // P5 O2 M5 (an O1 rubric line, settled with O10): a main-only command a remote caller reaches through the endpoint takes
+  // its effect's grade, not `internal`, so the daemon's status and restart leave the set
+  it('give internal to exactly the main-only commands, less those the endpoint grades by effect', () => {
+    const byEffectOfMainOnly = ['daemon.status', 'daemon.restart'];
+    expect(graded('internal')).toEqual(MAIN_ONLY_COMMANDS.filter((name) => !byEffectOfMainOnly.includes(name)).sort());
+    expect(gradeOf('daemon.status')).toBe('list');
+    expect(gradeOf('daemon.restart')).toBe('machine-admin');
   });
 
   it("give client to exactly the commands that stay with the client (survey §2), as M4's rubric lists them", () => {
@@ -81,6 +86,8 @@ describe('the routing classes', () => {
       'presentations.present', 'artifacts.downloadAsset', 'library.saveAs', 'pty.openLink', 'pty.hostState',
       // the rubric's row leaves it out; survey §2 keeps it with the client, as pty.hostState (the report's decisions)
       'engine.hostState',
+      'machines.list', // P5 O6 M3: the app's own connection manager
+      ...NAMES.org.commands, // P5 O8 M1: this app's own sign-in to the org
     ].sort());
   });
 });

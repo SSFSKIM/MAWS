@@ -4,22 +4,23 @@ import { useEffect, useRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { at } from '../../../../test/support/machine';
 import { Toolbar } from '../app/Toolbar';
 import { registerSessionCreator } from '../keymap/actions-runtime';
 import { registerFocusTarget, resetComposerStore } from '../stores/composer';
 import { registerReplaceGuard, useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
-import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { OverviewLayer, placeRect } from './OverviewPanel';
 
 const nine = scenarioFile('nine-sessions');
-const NEW = 'app-overview-created' as AppSessionId;
+const NEW = at('app-overview-created' as AppSessionId);
 const disposers: (() => void)[] = [];
 const nextTask = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title)!.appId;
+const idOf = (title: string) => pageScenario(nine).sessions.find((r) => r.title.text === title)!.appId; // P5 O6 M2: the page's id
 const requests: Record<string, SessionEvent> = Object.assign({}, ...nine.attention.map((a) => a.requests));
 
 // happy-dom lays nothing out: the area the panel moves in reads 1000 × 700.
@@ -81,7 +82,7 @@ beforeEach(() => {
   fillStores(nine);
   sized('clientWidth', AREA.width);
   sized('clientHeight', AREA.height);
-  window.maws = fakeClient({ 'attention.request': ({ requestId }: { requestId: string }) => ({ event: requests[requestId] ?? null }) }).client;
+  window.maws = fakeClient({ 'attention.request': ({ requestId }: { requestId: string }) => ({ event: requests[requestId] ?? null }) }).client as unknown as PreloadBridge;
 });
 afterEach(() => {
   cleanup();
@@ -89,7 +90,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
   delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 describe('the floating Overview', () => {
@@ -259,7 +260,7 @@ describe('the floating Overview', () => {
   // the click's own layout change closes the panel.
   it('a card clicked over an unstarted draft opens its session and closes the panel; the draft goes once its guard agrees', async () => {
     const user = userEvent.setup();
-    const DRAFT = 'app-new-1' as AppSessionId;
+    const DRAFT = at('app-new-1' as AppSessionId);
     let release!: (discard: boolean) => void;
     const off = registerReplaceGuard({ unstarted: (id) => id === DRAFT, discard: () => new Promise<boolean>((resolve) => (release = resolve)) });
     try {

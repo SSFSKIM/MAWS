@@ -19,6 +19,7 @@ import { recording, startWorld, until, type World } from '../../test/local/endpo
 import { answer, operationFor, retry, seal, type Answer, type Operation } from './answers';
 import { cardId, cardKind, laneACard, laneADigest, laneBCards, unanswerable, type Card, type CardSession } from './cards';
 import { followCards, subscribeCards, type MachineChannel } from './client';
+import { deviceStateIn } from './register';
 
 let world: World;
 const APP = 'app-own';
@@ -179,6 +180,26 @@ describe('a cold cards subscription, and its answers', () => {
     expect(answeredOnce(`${APP} rq-session`)).toBe(0);
     b.close();
   });
+
+  // A lane B question's decline is the plain permission deny the engine's broker reads as the question skipped
+  // (`isQuestionSkip`, src/engine-host/broker.ts), which the endpoint admits a `web-cards` device on a pending native
+  // question (src/endpoint/authorize.ts `#asPending`).
+  it('declines a lane B question with the plain deny: done, delivered once, the ledger holding one record of it', async () => {
+    world.host.request(APP, 'question', 'rq-decline');
+    const channel = await open();
+    const b = watch(channel, { lane: 'B', id: APP });
+    const card = find(await b.until(has('rq-decline'), 'the question'), 'rq-decline');
+    const { operation, outcome } = await answer(channel, world.phone.identity, card, { kind: 'decline' }, world.phone.assert);
+    expect(outcome).toMatchObject({ state: 'done', result: { outcome: 'delivered' } });
+    expect(JSON.stringify(sentAnswers().at(-1)!.input.answer)).toBe('{"kind":"permission","decision":"deny"}');
+    expect(answeredOnce(`${APP} rq-decline`)).toBe(1);
+    await b.until(lacks('rq-decline'), 'the question settled');
+    const ledger = fs.readFileSync(join(world.services.machine.stateDir, 'cards-host-ops.jsonl'), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { opId: string; claim?: unknown });
+    expect(ledger.filter((r) => r.opId === operation.opId && r.claim !== undefined)).toHaveLength(1);
+    const queried = await reply(channel, { t: 'query', opId: operation.opId, opCreated: operation.opCreated, executor: 'engine-host' }, (m) => m.t === 'queried' && m.opId === operation.opId);
+    expect(queried).toMatchObject({ state: 'done', outcome: { state: 'done', result: { outcome: 'delivered' } } });
+    b.close();
+  });
 });
 
 describe('lane A’s cards as sminos raises them', () => {
@@ -192,6 +213,21 @@ describe('lane A’s cards as sminos raises them', () => {
     expect((await answer(channel, world.phone.identity, card, left, world.phone.assert)).outcome).toMatchObject({ state: 'done' });
     expect(world.sminos.effects.filter((e) => e.endsWith('toolu_async'))).toEqual(['answer la-1 toolu_async']);
     await a.until(lacks('toolu_async'), 'the question settled');
+    a.close();
+  });
+
+  it('declines a native question as `sminos.decide` deny over the question’s digest: done, its effect once', async () => {
+    world.sminos.raise(question('toolu_decline'));
+    const channel = await open();
+    const a = watch(channel, { lane: 'A', id: 'la-1' });
+    const card = find(await a.until(has('toolu_decline'), 'the question'), 'toolu_decline');
+    const before = counter();
+    expect((await answer(channel, world.phone.identity, card, { kind: 'decline' }, world.phone.assert)).outcome).toMatchObject({ state: 'done' });
+    expect(counter()).toBe(before + 1);
+    const sent = world.sminos.s.received.filter((f) => f.t === 'rpc' && (f.rpc as { args: { digest?: { request: string } } }).args.digest?.request === 'toolu_decline');
+    expect(sent.map((f) => f.rpc)).toMatchObject([{ rpc: 'decide', args: { session: 'la-1', decision: 'deny', digest: await laneADigest(question('toolu_decline')) } }]);
+    expect(world.sminos.effects.filter((e) => e.endsWith('toolu_decline'))).toEqual(['decide la-1 toolu_decline']);
+    await a.until(lacks('toolu_decline'), 'the question settled');
     a.close();
   });
 
@@ -463,6 +499,10 @@ describe('following a session across a dropped channel, and the device’s remov
     // `closed`: a refusal's reason is not shown before the channel is sealed.
     expect(refused).toBeInstanceOf(ChannelError);
     expect((refused as ChannelError).reason).toBe('closed');
+    // What the open card view turns on: the phone's next read of the hub's org state judges the device removed, so the
+    // view shows its standing rather than retrying a handshake that reads `closed` for ever (ChannelCards.tsx).
+    await world.phone.orgStore.sync(world.phone.record.pins);
+    expect(deviceStateIn(world.phone.record, world.phone.orgStore.head(), Date.now())).toEqual({ kind: 'removed', version: world.phone.orgStore.head().state.version });
     follow.close();
   });
 });

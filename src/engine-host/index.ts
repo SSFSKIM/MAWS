@@ -4,6 +4,7 @@
 // E10: one bundle, two modes, decided at load: `process.parentPort` present → `utility` (an Electron utility process
 // forked by main, served over a MessagePort, as before); `--detached <supervisorDir>` in argv → `detached` (the
 // supervisor: the Electron binary as Node, outliving the app, served over a Unix socket; detached.ts).
+import { idleCollector } from '@shared/host/idle-collect';
 import { hostPing, runHost, type HostOn, type HostRegister } from '@shared/host/runtime';
 import { captureShellEnvironment } from '@shared/host/shell-env';
 // C3 start
@@ -22,6 +23,7 @@ import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { runDetached } from './detached';
 import { Supervision } from './supervision';
+import { readMachineRole } from './role'; // P5 O2 M2
 import { buildIdOf } from './supervisor-files';
 import { openSupervisorLog } from './supervisor-log';
 // E10 end
@@ -50,6 +52,7 @@ import { registerDesigns } from './designs'; // E1's M2
 import { registerGoogleFaces } from './presentations/google-faces'; // P4-B2 D19
 import { registerConnectors } from './connectors/register'; // P3-H H3b
 import { hostDatasetRefresh } from './connectors/dataset-requests'; // E3
+import { registerAttachment } from './attachment'; // P5 O3-D M3
 
 const HOST_VERSION = __MAWS_VERSION__;
 
@@ -90,9 +93,12 @@ const register: HostRegister = (untimedOn, emit, client) => {
   documents = openDocuments(userData);
   if (documents) registerDocumentKind(documents.store); // P3-B: the document kind's hooks on every document update
   if (documents && documentPerfSeamRequested(process.env)) startDocumentPerfSeam(documents.store, join(userData, 'document-perf')); // P3-B M9: the scale gate's seam, MAWS_E2E=1 and MAWS_DOCUMENT_PERF=1 only
+  // P5 O3-D M3 (Interfaces §D): the app's presence, which the app-bound gates below read: told by `host.attachment` when
+  // the client declared it (`mawsd`, the permanent client), the connection otherwise (main's direct link, a utility port)
+  registerAttachment(on, client);
   // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3): agents' dataset refreshes, asked of main by id alone;
-  // the sessions' tools ask, main reads (artifacts.*) and answers (maws.*), route E's starts claim; main's going ends them
-  const datasetRefresh = hostDatasetRefresh(emit, client);
+  // the sessions' tools ask, main reads (artifacts.*) and answers (maws.*), route E's starts claim; the app's going ends them
+  const datasetRefresh = hostDatasetRefresh(emit, client.presence);
   const artifacts = registerArtifacts(on, emit, client, { documents, env: process.env, datasetRefresh });
   const store = documents?.store ?? null; // M6: the artifact tools' store (a session's tools answer `unavailable` without one)
   // P3-L: main's library reads, the linked-directory mirror and (M6b) the X12 import at store open
@@ -105,6 +111,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
   const designs = registerDesigns({ documents, chain: designSystems.chain, refresh: library.refresh }); // P3-E (E1's M2): the design's adapter (its legacy migration among its hooks) and its mirror writer, kept fresh under its governing system
   const googleFaces = registerGoogleFaces({ documents }); // P4-B2 D19: a deck's or a design's named Google Fonts face fetched once into its assets (OFL only), under the host's egress rule
   let connectors: { close(): void; closeDirect(): Promise<void> } | null = null; // P3-H H3b: below, over the process table
+  const idle = idleCollector({ log: (line) => console.log(`[supervisor] ${line}`), quiet: () => supervision?.quiet() ?? false }); // P5 Decision Log 124's lever: a collection at each entry into Supervision's quiet, asked again as it collects
   // C3 start
   ipc = registerEngineIpc(on, emit, {
     afterShutdown: () => {
@@ -118,20 +125,24 @@ const register: HostRegister = (untimedOn, emit, client) => {
       googleFaces.close(); // P4-B2
       documents?.close(); // P3-A
     },
-    duringShutdown: async () => connectors?.closeDirect(), // P3-HD M2: route D's owned processes, ended beside the sessions
+    duringShutdown: async () => {
+      idle.stop(); // every exit runs this body (main's quit, a stop-all, the detached exit order): no collection after
+      await connectors?.closeDirect(); // P3-HD M2: route D's owned processes, ended beside the sessions
+    },
     userData, replayEnabled: process.env.MAWS_ENGINE_REPLAY === '1', appVersion: HOST_VERSION,
     replayRowMs: replayRowDelayMs(process.env), // E10: the e2e pacing seam
     replayTranscripts: replayTranscriptProjects(process.env), // P3-F L242: a replay's transcript, into the e2e scratch store only
     diskEvents: (id) => fs.eventsSnapshot(id, null) /* C4 */, heldElsewhere: (id, since) => fs.heldElsewhere(id, since) /* W7 */,
     onConnect: client.onConnect, hasClient: client.hasClient, // E10: the connect burst; a refused batch told from a client gone
+    appAttached: client.presence.attached, // P5 O3-D M3: the bridges ask only an attached app
     artifacts: () => store, // P3-A (M6)
     datasetRefresh, // E3
   });
   ({ table } = ipc);
   table.startSampling();
   // C3 end
-  // P3-H H3b: route E's engine leg and the grant store's commands, main's alone; ended when main's client goes
-  connectors = registerConnectors(on, emit, client, { sessions: table, store, datasetRefresh, deliveryConfig: { userData, captureEnv: captureShellEnvironment } }); // WR 76/78: cold owner delivery; E3: its registry
+  // P3-H H3b: route E's engine leg and the grant store's commands, main's alone; ended when the app goes (P5 O3-D M3)
+  connectors = registerConnectors(on, emit, client.presence, { sessions: table, store, datasetRefresh, deliveryConfig: { userData, captureEnv: captureShellEnvironment } }); // WR 76/78: cold owner delivery; E3: its registry
   // C3: journal pruning at host start (E10: here, so a detached candidate that finds the lock held prunes nothing; and
   // every 24 h after, keeping every launch the table holds a row for, since a supervisor outlives the app by days)
   const rows = table;
@@ -144,8 +155,11 @@ const register: HostRegister = (untimedOn, emit, client) => {
     mode,
     identity: { pid: process.pid, startedAt: new Date().toISOString(), buildId: buildIdOf(entryFile), protocol: SOCKET_PROTOCOL, wire: wireFingerprint(), socketPath: null, logPath: null },
     table, plugins: ipc.plugins, shutdown: ipc.shutdown,
+    role: readMachineRole(), // P5 O2 M2: read once, at the start
     emit: (status) => emit('host.supervisorStatus', status),
     log: (line) => console.log(`[supervisor] ${line}`),
+    collector: idle,
+    startup: designSystems.ready, // the register's gate: no collection lands mid-seed
   });
   supervision.register(on, client);
   return designSystems.ready; // one bounded startup admission gate, before any request handler may run

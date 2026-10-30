@@ -13,6 +13,8 @@ import { guardFrames, type SeamEnv } from '../artifacts/policies';
 import { pageOf } from '../ipc/clients';
 import type { registerMainHandler } from '../ipc/router';
 import { showAppWindow } from '../window-show';
+import { localMachineArgument } from '@shared/machine/page-argument'; // P5 O6 M2
+import { localMachine } from '../machine/local'; // P5 O6 M2
 
 export type PresentRole = 'audience' | 'presenter';
 
@@ -104,6 +106,7 @@ function openPresentWindow(spec: PresentWindowSpec, appUrl: string, env: SeamEnv
       nodeIntegration: false,
       webSecurity: true,
       preload: join(__dirname, '../preload/index.js'),
+      additionalArguments: [localMachineArgument(localMachine())], // P5 O6 M2: window.maws.localMachine, read by the preload
     },
   });
   guardFrames(win.webContents, env); // the embeds' frames are store frames: the policies the app window has

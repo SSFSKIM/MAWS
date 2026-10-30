@@ -22,6 +22,7 @@ import { requestDigestOf } from '@shared/host/request-digest';
 import type { CommandInput } from '@shared/ipc/schema';
 import { validateCommandInput } from '@shared/ipc/validate';
 import { opCommands } from '../../src/engine-host/ops';
+import { machineOps } from '../../src/services/machine-ops';
 import { createEndpoint, type Endpoint } from '../../src/endpoint';
 import { OFFERS, type Offers } from '../../src/endpoint/offers';
 import { EndpointOrg } from '../../src/endpoint/org-sync';
@@ -70,6 +71,8 @@ function engineHost() {
     ['session.answer', async () => (runs.push('answer'), { outcome: 'delivered' })],
     ['session.interrupt', async () => (hang ? new Promise(() => {}) : (runs.push('interrupt'), { stillQueued: [], cancelled: [] }))],
   ]);
+  // P5 O3-D M4: the services' ledger, as mawsd's front answers machine.op over the spine's invoke
+  const machine = machineOps({ ledger: OpLedger.open(hostDir, 'spine-ops.jsonl'), invoke: (async (name: string, input: unknown) => (runs.push(`machine ${name}`), { ok: true, value: { ran: input } })) as never });
   let ops = opCommands({
     ledger: OpLedger.open(hostDir, 'ops.jsonl'),
     handler: (name) => handlers.get(name),
@@ -79,6 +82,11 @@ function engineHost() {
   const ok = (value: unknown): HostResponse => ({ t: 'res', id: '0', ok: true, value });
   const no = (code: 'unknown_command' | 'internal' | 'invalid_input'): HostResponse => ({ t: 'res', id: '0', ok: false, error: { code, message: code } });
   const dispatch = async (owner: string, name: string, input: unknown): Promise<HostResponse> => {
+    if (owner === 'machine' && (name === 'machine.op' || name === 'machine.opQuery')) {
+      const checked = validateCommandInput(name, input);
+      if (!checked.ok) return no('invalid_input');
+      return ok(name === 'machine.op' ? await machine.op(checked.value as CommandInput<'machine.op'>, CTX) : machine.opQuery(checked.value as CommandInput<'machine.opQuery'>));
+    }
     if (owner !== 'engine-host') return no('unknown_command');
     const { appSessionId, requestId } = (input ?? {}) as { appSessionId?: string; requestId?: string };
     if (name === 'session.status') return appSessionId !== undefined && sessions[appSessionId] !== undefined ? ok({ appSessionId, ...sessions[appSessionId] }) : no('internal');
@@ -354,19 +362,31 @@ describe('the endpoint’s checks, before anything is handed on', () => {
     expect(f.host.runs).toEqual([]);
   });
 
-  it('refuses an action for an executor that keeps no ledger (`no-ledger`): pty.spawn, daemon.restart', async () => {
+  it('refuses an action for an executor that keeps no ledger (`no-ledger`): pty.spawn', async () => {
     const offers: Offers = {
       ...OFFERS,
       commands: {
         ...OFFERS.commands,
         'pty.spawn': { kind: 'act', executor: 'pty-host', target: 'machine', grade: 'shell' },
-        'daemon.restart': { kind: 'act', executor: 'machine', target: 'machine', grade: 'machine-admin' },
       },
     };
     const f = await start({ offers });
     const a = await open(f, a1, A);
     expect(await act(a, await a.device.stepUp(a.device.action({ machine: f.ref, action: 'pty.spawn', args: {} })))).toBe('no-ledger');
-    expect(await act(a, await a.device.stepUp(a.device.action({ machine: f.ref, action: 'daemon.restart', args: {} })))).toBe('no-ledger');
+  });
+
+  // P5 O3-D M4 (Interfaces §H; D28): the services' ledger. No production row names the executor yet (O7's, O8's), so the
+  // route is proved with injected rows.
+  it('sends a `machine`-executor action through machine.op, run once whatever its reseals', async () => {
+    const offers: Offers = { ...OFFERS, commands: { ...OFFERS.commands, 'session.rename': { kind: 'act', executor: 'machine', target: 'appSessionId' } } };
+    const f = await start({ offers });
+    const a = await open(f, a1, A);
+    // A session's act carries the session's context (RL4); the services' ledger claims no launch, so it reads none
+    const action = laneB(f, a, 'session.rename', 'app-own', { title: 'Renamed' });
+    const first = await run(a, action);
+    expect(first).toEqual({ state: 'done', result: { ran: { appSessionId: 'app-own', title: 'Renamed' } } });
+    expect(await run(a, a.device.reseal(action))).toEqual(first);
+    expect(f.host.runs).toEqual(['machine session.rename']);
   });
 });
 
@@ -669,6 +689,63 @@ describe('lane A, through sminos’s ledger over RL10', () => {
     await s.next((x) => x.t === 'rpc' && (x.rpc as Record<string, unknown>).nonce === copy.nonce, 'the resealed copy');
     s.send({ t: 'rpc-result', project: PROJECT, opId: first.opId, nonce: copy.nonce, outcome: { state: 'done', result: {} } });
     expect(await done(again, copy)).toEqual({ state: 'done', result: {} });
+  });
+
+  it('hands a send down as an `rpc` named `send` with its args, context and fingerprint, and answers sminos’s result, its refusal of an RPC it lacks too', async () => {
+    const f = await start();
+    const s = await sminos(f);
+    const a = await open(f, a1, A);
+    const message = laneA(f, a, 'send', { text: 'please look at the tests' });
+    expect(await actA(a, s, message)).toBe('ok');
+    const rpc = (await s.next((x) => x.t === 'rpc', 'the send rpc')).rpc as Record<string, unknown>;
+    expect(rpc).toMatchObject({ rpc: 'send', project: PROJECT, member: A, device: 'a1', created: message.created, nonce: message.nonce, opId: message.opId, opCreated: message.opCreated });
+    expect(rpc.args).toEqual({ session: 'la-1', text: 'please look at the tests' });
+    expect(rpc.context).toEqual({ lane: 'A', session: 'la-1', launch: 'L1' });
+    expect(rpc.fingerprint).toBe(await actionFingerprint(message));
+    s.send({ t: 'rpc-result', project: PROJECT, opId: message.opId, nonce: message.nonce, outcome: { state: 'done', result: { entered: true, uuid: 'row-1' } } });
+    expect(await done(a, message)).toEqual({ state: 'done', result: { entered: true, uuid: 'row-1' } });
+    // A sminos that predates `send` refuses it as an RPC it doesn't have; the device reads that refusal's code.
+    const early = laneA(f, a, 'send', { text: 'are you there?' });
+    expect(await actA(a, s, early)).toBe('ok');
+    await s.next((x) => x.t === 'rpc' && (x.rpc as Record<string, unknown>).nonce === early.nonce, 'the second send rpc');
+    s.send({ t: 'rpc-result', project: PROJECT, opId: early.opId, nonce: early.nonce, outcome: { state: 'failed', error: { code: 'unsupported', message: "no RPC 'send' on this machine" } } });
+    expect(await done(a, early)).toEqual({ state: 'failed', error: { code: 'unsupported' } });
+  });
+
+  it('refuses a send whose args name another session than its context (`malformed`), sealed for another launch (`context`), or on a session with no bridge (`unavailable`), sending nothing down', async () => {
+    const f = await start();
+    const s = await sminos(f);
+    const a = await open(f, a1, A);
+    const elsewhere = a.device.action({ machine: f.ref, action: 'sminos.send', session: 'la-1', context: { lane: 'A', session: 'la-1', launch: 'L1' }, args: { session: 'la-other', text: 'x' } });
+    expect(await act(a, elsewhere)).toBe('malformed');
+    expect(await act(a, laneA(f, a, 'send', { text: 'x' }, 'L0'))).toBe('context');
+    member(s, undefined);
+    await until(() => f.endpoint.rl10.members.get('la-1')?.launch === undefined, 'the bridge gone');
+    expect(await act(a, laneA(f, a, 'send', { text: 'x' }))).toBe('unavailable');
+    await sleep(200);
+    expect(s.received.filter((x) => x.t === 'rpc')).toEqual([]);
+  });
+
+  it('refuses a send whose text is no message (`malformed`: no string, blank, or past 65,536 UTF-16 code units), sending nothing down, and hands one of exactly 65,536 down', async () => {
+    const f = await start();
+    const s = await sminos(f);
+    const a = await open(f, a1, A);
+    const texts: Array<[string, Record<string, unknown>]> = [
+      ['no text', {}],
+      ['a number', { text: 7 }],
+      ['empty', { text: '' }],
+      ['blank', { text: ' \n\t ' }],
+      ['65,537 characters', { text: 'x'.repeat(65_537) }],
+      // 32,769 code points, which a code-point count would take: the bound is MAWS's prompt limit, in UTF-16 units.
+      ['65,538 UTF-16 code units', { text: '😀'.repeat(32_769) }],
+    ];
+    for (const [what, args] of texts) expect(await act(a, laneA(f, a, 'send', args)), what).toBe('malformed');
+    await sleep(200);
+    expect(s.received.filter((x) => x.t === 'rpc')).toEqual([]);
+    const longest = laneA(f, a, 'send', { text: 'x'.repeat(65_536) });
+    expect(await actA(a, s, longest)).toBe('ok');
+    const rpc = (await s.next((x) => x.t === 'rpc', 'the longest send')).rpc as Record<string, unknown>;
+    expect((rpc.args as { text: string }).text).toHaveLength(65_536);
   });
 
   it('refuses an action sealed for another launch (`context`), and one on a session with no bridge (`unavailable`), sending nothing down', async () => {

@@ -19,6 +19,7 @@ import { confirm } from './dialogs'; // W7
 import { resumeSession } from './setup-actions'; // W7
 import { displayTitle } from './title';
 import { terminals } from '../terminal/registry';
+import { machineOf } from '@shared/machine/address';
 
 const fail = (text: string) => toast({ level: 'danger', text, actions: [], dismissible: true });
 
@@ -155,9 +156,7 @@ export const resubmitProvider: ResubmitProvider = {
 
 // ---- take over (W7) ----------------------------------------------------------------------------------------------
 
-// The holder "Take over here" can end: an interactive terminal (signalled), or a `--bg` job with the id `claude stop`
-// takes. A job MAWS cannot name is left to "Fork a copy".
-export const canTakeOver = (holder: ForeignHolder): boolean => holder.kind === 'terminal' || holder.jobId !== null;
+export { canTakeOver } from './holder-words'; // P5 O9: kept there, light enough for the lane A port and desk-web to import
 
 export function takeOverWords(holder: ForeignHolder, paneTitle?: string): { title: string; body: string } {
   const what =
@@ -175,7 +174,10 @@ export function takeOverWords(holder: ForeignHolder, paneTitle?: string): { titl
 export async function takeOverSession(appSessionId: AppSessionId, holder: ForeignHolder): Promise<void> {
   let pane: { ptyId: string; label: string } | null = null;
   if (holder.kind === 'terminal') {
-    const found = await ipc.invoke('session.takeOverPane', { pid: holder.pid });
+    // P5 O6 M4: the holder's pid is a process on the session's machine, so its pane is looked for there (the command
+    // names no machine of its own; with none it would look on this one, and `session.takeOver` would then be refused for
+    // naming two machines).
+    const found = await ipc.invoke('session.takeOverPane', { pid: holder.pid }, { machine: machineOf(appSessionId) });
     if (!found.ok) { fail(found.error.message); return; }
     pane = found.value;
   }

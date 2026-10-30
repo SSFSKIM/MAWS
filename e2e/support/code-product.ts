@@ -3,6 +3,7 @@
 // theme scan's palette). The product has no harness API, so these helpers read what a case asserts from the DOM and
 // drive it with the clicks a reader makes.
 import { expect, type Locator, type Page } from '@playwright/test';
+import { addressed } from './address';
 import { buildCodeScratch, type CodeScratch } from './code-scratch';
 import { launchMaws, type MawsLaunch } from './launch';
 import { CHARTER } from './panel-support';
@@ -85,8 +86,9 @@ export async function withProduct(body: (p: Product) => Promise<void>, prepare?:
     await expect(sidebarOf(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
     await (await sidebarRow(page, CHARTER)).click();
     const panel = page.locator('[data-region="panel"]');
-    await expect(mainTabById(page, `session:${scratch.appSessionId}`)).toHaveAttribute('aria-selected', 'true');
-    await expect(mainTabById(page, `session:${scratch.appSessionId}`)).toContainText(CHARTER);
+    const tab = mainTabById(page, `session:${await addressed(page, scratch.appSessionId)}`);
+    await expect(tab).toHaveAttribute('aria-selected', 'true');
+    await expect(tab).toContainText(CHARTER);
     await body({ maws, page, panel, scratch });
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {

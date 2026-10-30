@@ -32,6 +32,10 @@
 // plane (lane A from sminos's session plane over RL10, lane B from the engine host's events and journal); each is
 // authorized again at every record change and every new head. A `call` the gate lets through is read by calls.ts. A
 // device's lane B subscriptions are interest (OX5).
+//
+// `notify`'s counts come from sminos's pending sets for lane A and from the engine host for lane B (lane-b-pending.ts):
+// every session's broker items as the engine host publishes them, subscribed or not, and the whole set read again at
+// each engine-host link `mawsd` reports.
 import { homedir, networkInterfaces } from 'node:os';
 import { importSigningKey, isListingGone, stateHash, type MachineIdentity, type OrgState, type Right, type Rl1Refusal, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { Authorizer, type AuthorizeContext } from './authorize';
@@ -41,13 +45,14 @@ import { DirectListener, type DirectListenerOptions } from './direct-listener';
 import { Actions } from './actions';
 import { runCli } from './cli';
 import { EndpointActions, type EffectResult } from './endpoint-actions';
-import { speaksFor, syncAndPromote, type EnrollContext, type EnrollmentState } from './enroll';
+import { current, speaksFor, syncAndPromote, type EnrollContext, type EnrollmentState } from './enroll';
 import { Freshness } from './freshness';
 import { Gate } from './gate';
 import { acceptGrant, dropRevokedGrants, machineOwnerMembers, machineRights } from './grants';
 import type { HubDeps } from './hub-http';
 import { HubLink } from './hub-link';
 import { Interest } from './interest';
+import { LaneBPending } from './lane-b-pending';
 import { EndpointRecords, Listings, RecordRetries, type RecordsContext } from './listings';
 import { Notifier } from './notify';
 import { EndpointOrg, type OrgChange } from './org-sync';
@@ -59,7 +64,7 @@ import { retireInto, type Retired } from './retire';
 import { Queries } from './queries';
 import { Rl10 } from './rl10/link';
 import type { EndpointModule, EndpointServices } from './services';
-import type { CheckoutSource, RecordSource, SessionTarget } from './sources';
+import { anyCheckout, type CheckoutSource, type RecordSource, type SessionTarget } from './sources';
 import { EndpointState } from './state/store';
 import { Subscriptions } from './subscriptions';
 import { endpointStatus, NO_LINKS, type EndpointLinks, type EndpointStatus } from './status';
@@ -82,6 +87,8 @@ export type EndpointOptions = {
   pingMs?: readonly [number, number];
   direct?: { interfaces?(): InterfaceTable } & Pick<DirectListenerOptions, 'listen' | 'limits' | 'rescanMs'>;
   authorization?: { records?: RecordSource; checkouts?: CheckoutSource; settingsMode?(): string } & Pick<AuthorizeContext, 'offers' | 'gradeOf' | 'registry'>;
+  /** MAWS's own projects as checkouts (P5 O3-D M4, `mawsd` injects them), known beside RL10's; `authorization.checkouts` replaces both. */
+  projects?: CheckoutSource;
   /** The suites' seams for subscriptions: the resume window, lane A's ring and the unsent stream's bound. */
   subscriptions?: { resumeMs?: number; ringBytes?: number; backlogBytes?: number; recheckRetryMs?: readonly number[]; transmitDeadlineMs?: number };
 };
@@ -104,6 +111,8 @@ export class Endpoint implements EndpointModule {
   readonly endpointRecords: EndpointRecords;
   /** `notify` from the pending sets and the to-human messages (M6 feeds them). */
   readonly notifier: Notifier;
+  /** Lane B's pending counts for the notifier, from the engine host's broker items. */
+  readonly laneB: LaneBPending;
   /** The devices' channels, over either carrier (M4); M5–M8 set its routes. */
   readonly channels: Channels;
   /** Every remote request's decision (M5); M7 and M8 ask it too (a query's binding, a subscription's re-check). */
@@ -112,6 +121,8 @@ export class Endpoint implements EndpointModule {
   readonly gate: Gate;
   /** RL10 (M6): the sminos daemon's socket; its members are the records and checkouts authorization reads. */
   readonly rl10: Rl10;
+  /** The checkouts a remote spawn may run in: RL10's projects' presences and MAWS's own projects. */
+  readonly checkouts: CheckoutSource;
   /** Actions to their executing side (M7), and the endpoint's own under its ledger. */
   readonly actions: Actions;
   readonly own: EndpointActions;
@@ -206,6 +217,14 @@ export class Endpoint implements EndpointModule {
       store: { read: () => this.#state?.notified ?? {}, write: (file) => this.#state?.setNotified(file) },
       log,
     });
+    this.laneB = new LaneBPending({
+      dispatch: (owner, name, input) => {
+        if (this.#services === null) return Promise.reject(new Error('the endpoint has not started'));
+        return this.#services.dispatch(owner, name, input);
+      },
+      notifier: this.notifier,
+      log,
+    });
     this.rl10 = new Rl10({
       stateDir: () => {
         if (this.#services === null) throw new Error('the endpoint has not started');
@@ -254,6 +273,7 @@ export class Endpoint implements EndpointModule {
     });
     this.hub.setChannels(this.channels.relay(this.hub));
     const authorization = options.authorization ?? {};
+    this.checkouts = authorization.checkouts ?? (options.projects === undefined ? this.rl10.members : anyCheckout(this.rl10.members, options.projects));
     this.authorizer = new Authorizer({
       ref: () => this.#services?.machine.ref ?? null,
       org: () => {
@@ -264,7 +284,7 @@ export class Endpoint implements EndpointModule {
       policy: () => this.policy.current(),
       settingsMode: authorization.settingsMode ?? (() => settingsDefaultMode(homedir())),
       records: authorization.records ?? this.rl10.members,
-      checkouts: authorization.checkouts ?? this.rl10.members,
+      checkouts: this.checkouts,
       dispatch: (owner, name, input) => {
         if (this.#services === null) return Promise.reject(new Error('the endpoint has not started'));
         return this.#services.dispatch(owner, name, input);
@@ -396,12 +416,22 @@ export class Endpoint implements EndpointModule {
     });
     this.#state = state;
     this.#org = org;
-    // Lane B's live events and the app's attachment (none at start, O2's seam), for the subscriptions.
-    this.#unseam.push(
-      services.onEvent((owner, message) => this.planeB.event(owner, message)),
-      services.onAttachment((attached) => this.planeB.attachment(attached)),
-    );
+    // What notify told the hub before a restart, read before anything below feeds it.
     this.notifier.restore();
+    // Lane B's live events and their availability (none at start; an app's attachment, or P5 O3-D's permanent link), for
+    // the subscriptions; its events and each engine-host link, for notify's counts.
+    this.#unseam.push(
+      services.onEvent((owner, message) => {
+        this.planeB.event(owner, message);
+        this.laneB.event(owner, message);
+      }),
+      services.onAttachment((attached) => this.planeB.attachment(attached)),
+      services.onUpstream((link) => {
+        if (!link.connected) return;
+        this.laneB.restate();
+        this.planeB.relinked(); // P5 O3-D D41: each streaming of the link, every subscription catches up from its cursor
+      }),
+    );
     if (state.refusing !== null) return;
     // A provisioning interrupted mid-set (O14 M1) is whole again before anything below reads the directory.
     await completeProvisioning(state, org, log, () => this.rl10.forgetRecords());
@@ -410,7 +440,7 @@ export class Endpoint implements EndpointModule {
       try {
         this.#key = await importSigningKey(state.machineKey.jwk);
       } catch (error) {
-        log(`endpoint: refusing its state: the machine key in ${services.machine.stateDir} does not import (${(error as Error).message})`);
+        log(`endpoint: refusing its state: the machine key in ${services.machine.stateDir} does not import: ${(error as Error).message}`); // no `import (` in a string: the bundle guard reads one as a dynamic import
         this.links.refusing = 'state-malformed';
         return;
       }
@@ -458,6 +488,11 @@ export class Endpoint implements EndpointModule {
     const stopped = this.hub.stopped;
     const links = this.links.refusing === undefined && stopped !== null ? { ...this.links, refusing: stopped } : this.links;
     return endpointStatus(this.#state, this.#headHash, links, { endpoint: this.own.closed, engineHost: this.#engineHostLedger });
+  }
+
+  /** The enrollment held (`machine.identity`'s project id, P5 O3-D D38); null while unenrolled, a pending provisioning included. */
+  enrollment(): EnrollmentState | null {
+    return this.#state?.enrolled ? current(this.#state) : null;
   }
 
   cli(command: string, args: readonly string[], secret?: string): Promise<{ code: number; out: string }> {

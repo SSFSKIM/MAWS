@@ -5,7 +5,7 @@
 // failure is not the store's (a timeout, an unavailable host).
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
-import type { CommandInput, CommandName, CommandOutput, IpcError, MawsBridge } from '@shared/ipc/schema';
+import type { CommandInput, CommandName, CommandOutput, InvokeRest, IpcError, MawsBridge } from '@shared/ipc/schema';
 import { artifactRefusalOf, type ArtifactRefusal, type ArtifactRow } from '@shared/ipc/schema/artifacts';
 import type { Space } from '@shared/artifacts/entity';
 import { ipc } from '../ipc/client';
@@ -14,18 +14,20 @@ import { requestArtifactOpen } from '../tools/artifacts/viewers/requests'; // P4
 
 export type LibraryActionResult<T> = { ok: true; value: T } | { ok: false; error: IpcError; refusal: ArtifactRefusal | null };
 
-async function run<N extends CommandName, T>(client: MawsBridge, name: N, input: CommandInput<N>, pick: (output: CommandOutput<N>) => T): Promise<LibraryActionResult<T>> {
-  const result = await client.invoke(name, input);
+async function run<N extends CommandName, T>(client: MawsBridge, name: N, input: CommandInput<N>, pick: (output: CommandOutput<N>) => T, ...opts: InvokeRest<N>): Promise<LibraryActionResult<T>> {
+  const result = await client.invoke(name, input, ...opts);
   return result.ok ? { ok: true, value: pick(result.value) } : { ok: false, error: result.error, refusal: artifactRefusalOf(result.error) };
 }
 
 const artifactOf = ({ artifact }: { artifact: ArtifactRow }) => artifact;
 const spaceOf = ({ space }: { space: Space }) => space;
 const nothing = () => undefined;
+// P5 O6 M4: the library is this machine's, and so are the folders a Space links, until it spans machines (O4, O7).
+const local = (client: MawsBridge) => ({ machine: client.localMachine });
 
 // ---- artifacts ---------------------------------------------------------------------------------------------------------
 
-export const createArtifact = (input: CommandInput<'artifacts.create'> & { kind: ArtifactKind }, client: MawsBridge = ipc) => run(client, 'artifacts.create', input, artifactOf);
+export const createArtifact = (input: CommandInput<'artifacts.create'> & { kind: ArtifactKind }, client: MawsBridge = ipc) => run(client, 'artifacts.create', input, artifactOf, local(client));
 export const renameArtifact = (artifactId: string, title: string, client: MawsBridge = ipc) => run(client, 'artifacts.update', { artifactId, title }, artifactOf);
 export const setArtifactPinned = (artifactId: string, pinned: boolean, client: MawsBridge = ipc) => run(client, 'artifacts.update', { artifactId, pinned }, artifactOf);
 // null: out of every Space
@@ -38,10 +40,10 @@ export const markArtifactViewed = (artifactId: string, client: MawsBridge = ipc)
 // ---- Spaces ------------------------------------------------------------------------------------------------------------
 
 export const createSpace = (name: string, linkedDir?: string, client: MawsBridge = ipc) =>
-  run(client, 'spaces.create', linkedDir === undefined ? { name } : { name, linkedDir }, spaceOf);
-export const renameSpace = (spaceId: string, name: string, client: MawsBridge = ipc) => run(client, 'spaces.update', { spaceId, name }, spaceOf);
+  run(client, 'spaces.create', linkedDir === undefined ? { name } : { name, linkedDir }, spaceOf, local(client));
+export const renameSpace = (spaceId: string, name: string, client: MawsBridge = ipc) => run(client, 'spaces.update', { spaceId, name }, spaceOf, local(client));
 // null: unlinked (its mirror's files are removed by the host)
-export const linkSpaceDirectory = (spaceId: string, linkedDir: string | null, client: MawsBridge = ipc) => run(client, 'spaces.update', { spaceId, linkedDir }, spaceOf);
+export const linkSpaceDirectory = (spaceId: string, linkedDir: string | null, client: MawsBridge = ipc) => run(client, 'spaces.update', { spaceId, linkedDir }, spaceOf, local(client));
 // Its artifacts are left in no Space (A's rule).
 export const deleteSpace = (spaceId: string, client: MawsBridge = ipc) => run(client, 'spaces.delete', { spaceId }, nothing);
 
@@ -55,5 +57,5 @@ export function openArtifactTab(artifactId: string, location?: ArtifactLocation)
   if (location !== undefined) requestArtifactOpen(artifactId, 'latest', 'main', location);
   const layout = useLayout.getState();
   layout.revealMain();
-  layout.openTab({ kind: 'artifact', artifactId });
+  layout.openTab({ kind: 'artifact', artifactId, machine: ipc.localMachine }); // P5 O6 M2: the library is this machine's
 }

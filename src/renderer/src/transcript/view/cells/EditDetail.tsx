@@ -5,7 +5,7 @@
 import { partsTruncationOf } from '../../model/cells';
 import { DETAIL } from '../../model/copy';
 import type { Cell, CellDetail, Hunk } from '../../model/rows';
-import { useActions } from '../context';
+import { useActions, useRowSession } from '../context';
 import { Omitted, Truncated } from './Truncated';
 
 type Edit = Extract<CellDetail, { kind: 'edit' }>;
@@ -94,9 +94,10 @@ export function EditDiff({ hunks, cell }: { hunks: Hunk[]; cell: Cell | null }) 
 
 export function EditDetail({ cell, detail }: { cell: Cell; detail: Edit }) {
   const actions = useActions();
+  const session = useRowSession();
   return (
     <div className="transcript-edit">
-      <button type="button" className="transcript-chip" title={detail.filePath} onClick={() => actions.openFile(detail.filePath, detail.hunks[0]?.newStart)}>
+      <button type="button" className="transcript-chip" title={detail.filePath} onClick={() => actions.openFile(detail.filePath, detail.hunks[0]?.newStart, session)}>
         {detail.filePath}
       </button>
       {detail.hunks.length === 0 ? <p className="transcript-detail-note">{DETAIL.noDiff}</p> : <EditDiff hunks={detail.hunks} cell={cell} />}

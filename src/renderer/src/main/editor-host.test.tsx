@@ -5,7 +5,7 @@
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { registerShellActions } from '../app/shell-actions';
 import { Shell } from '../app/Shell';
@@ -14,7 +14,7 @@ import { registerCloseGuard, requestCloseTab } from '../keymap/actions-runtime';
 import { editorHostOf, registerEditorHost, resetEditorHosts, useEditorHost, useEditorHostScope, type EditorHostScope } from '../panel/editor-host';
 import { useLayout } from '../stores/layout';
 import { allTabs } from '../stores/layout-model';
-import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 
 vi.mock('../app/Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
@@ -23,18 +23,18 @@ const main = () => document.querySelector<HTMLElement>('[data-region="main"]')!;
 const mainHeader = () => main().querySelector<HTMLElement>('[data-editor-header]');
 const settingsOpen = () => allTabs(useLayout.getState().main).some((t) => t.kind === 'settings');
 const nine = scenarioFile('nine-sessions');
-const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title)!.appId;
+const idOf = (title: string) => pageScenario(nine).sessions.find((r) => r.title.text === title)!.appId; // P5 O6 M2: the page's id
 
 beforeEach(() => {
   resetShellStores();
   resetEditorHosts();
   fillStores(nine);
   offs.push(registerShellActions({ invoke: vi.fn(async () => ({ ok: true, value: undefined })), on: vi.fn(() => () => {}) } as unknown as MawsBridge));
-  window.maws = fakeClient({ 'attention.request': { event: null } }).client;
+  window.maws = fakeClient({ 'attention.request': { event: null } }).client as unknown as PreloadBridge;
 });
 afterEach(() => {
   cleanup();
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
   resetSlots();
   offs.splice(0).forEach((off) => off());
 });

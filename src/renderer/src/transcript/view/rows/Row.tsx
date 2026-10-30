@@ -20,6 +20,7 @@ import { BrowserActionRow } from './BrowserAction'; // E4c
 import { BrowserActivityRow } from './BrowserActivity'; // E13
 import { OwnerRecordRow } from '../../../owner/report/OwnerRecordRow'; // P2-C
 import { FoldedAssistantProbes, SurfaceAssistantRow, SurfaceCommandRow, SurfaceGroupRow, SurfaceQuestionRow, SurfaceUserRow } from '../../surface/Rows';
+import { CutTextRow } from './AssistantText'; // P5 O9
 import { BashRow } from './Bash';
 import { BoundaryRow } from './Boundary';
 import { CellRow } from './Cell';
@@ -36,7 +37,7 @@ function body(row: Row) {
   switch (row.kind) {
     case 'time': return <TimeRow row={row} />;
     case 'user': return <SurfaceUserRow row={row} />;
-    case 'assistant_text': return <SurfaceAssistantRow row={row} />;
+    case 'assistant_text': return row.cut ? <CutTextRow row={row} /> : <SurfaceAssistantRow row={row} />; // P5 O9: a cut reply is no answer a surface draws
     case 'thinking': return <ThinkingRow row={row} />;
     case 'divider': return <><FoldedAssistantProbes row={row} /><DividerRow row={row} /></>;
     case 'group': return <SurfaceGroupRow row={row} />;

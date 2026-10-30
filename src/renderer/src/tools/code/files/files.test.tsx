@@ -4,7 +4,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { FilesEntry } from '@shared/ipc/schema/files';
+import { bareOf } from '@shared/machine/address';
 import { record } from '../../../../../../test/support/builders';
+import { at, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
 import { instanceOf, panelHost, registerPanelTool } from '../../../panel/host';
 import { useLayout } from '../../../stores/layout';
@@ -19,7 +21,9 @@ import { currentSet } from '../../../stores/layout-model';
 import { useSetup } from '../../../sessions/store'; // E11
 import { FILES_COPY } from '../copy'; // E11
 
-const S = 'app-a' as AppSessionId;
+// P5 O6 M2: the page's ids (S, and the panel's A and B) are addresses; the fake main is asked and emits with bare ids.
+const MAIN_S = 'app-a' as AppSessionId;
+const S = at(MAIN_S);
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 const dir = (path: string): FilesEntry => ({ name: path.slice(path.lastIndexOf('/') + 1), path, kind: 'dir', size: 0, mtimeMs: 0, target: null });
@@ -159,9 +163,9 @@ describe('files store', () => {
     await flush();
     main.calls.splice(0);
     useFiles.getState().applyChanged({ appSessionId: S, path: '/r/src/a.ts', kind: 'changed' });
-    useFiles.getState().applyChanged({ appSessionId: 'app-b' as AppSessionId, path: '/r/other/x', kind: 'created' }); // another session's
+    useFiles.getState().applyChanged({ appSessionId: at('app-b' as AppSessionId), path: '/r/other/x', kind: 'created' }); // another session's
     await flush();
-    expect(main.callsOf('files.list')).toEqual([{ appSessionId: S, path: '/r/src' }]);
+    expect(main.callsOf('files.list')).toEqual([{ appSessionId: MAIN_S, path: '/r/src' }]);
   });
 
   it('counts watches per directory, installs once and unwatches only after the grace', async () => {
@@ -170,7 +174,7 @@ describe('files store', () => {
     const one = useFiles.getState().watch(S, '/r');
     const two = useFiles.getState().watch(S, '/r');
     await vi.advanceTimersByTimeAsync(0);
-    expect(main.callsOf('files.watch')).toEqual([{ appSessionId: S, path: '/r' }]);
+    expect(main.callsOf('files.watch')).toEqual([{ appSessionId: MAIN_S, path: '/r' }]);
     one.release();
     two.release();
     await vi.advanceTimersByTimeAsync(WATCH_GRACE_MS - 1);
@@ -180,7 +184,7 @@ describe('files store', () => {
     expect(main.callsOf('files.unwatch')).toHaveLength(0);
     again.release();
     await vi.advanceTimersByTimeAsync(WATCH_GRACE_MS);
-    expect(main.callsOf('files.unwatch')).toEqual([{ appSessionId: S, path: '/r' }]);
+    expect(main.callsOf('files.unwatch')).toEqual([{ appSessionId: MAIN_S, path: '/r' }]);
   });
 
   it('drops a listing when its watch is finally released, so it is listed afresh on the next expand', async () => {
@@ -230,7 +234,7 @@ describe('files store', () => {
     expect(main.callsOf('files.unwatch')).toHaveLength(0);
     gate.resolve();
     await vi.advanceTimersByTimeAsync(0);
-    expect(main.callsOf('files.unwatch')).toEqual([{ appSessionId: S, path: '/r' }]);
+    expect(main.callsOf('files.unwatch')).toEqual([{ appSessionId: MAIN_S, path: '/r' }]);
   });
 
   it('lists a directory whose watch is installing only once the watch has answered, so no change is missed in between', async () => {
@@ -409,7 +413,7 @@ describe('files tool', () => {
     await screen.findByText('src');
     fireEvent.click(await screen.findByText('src'));
     fireEvent.click(await screen.findByText('app.ts'));
-    expect(fileTabs()).toEqual([{ id: 'file:/r/src/app.ts', kind: 'file', path: '/r/src/app.ts', line: null, appSessionId: A, pinned: false }]);
+    expect(fileTabs()).toEqual([{ id: `file:${TEST_MACHINE}:/r/src/app.ts`, kind: 'file', path: '/r/src/app.ts', line: null, appSessionId: A, machine: TEST_MACHINE, pinned: false }]);
     expect(panelOf(A)?.tabs.map((t) => t.toolId)).toEqual(['files']);
     expect(item('app.ts').getAttribute('aria-selected')).toBe('true');
     fireEvent.click(item('link-out'));
@@ -444,7 +448,7 @@ describe('files tool', () => {
     openTool({ path: '/app/config.ts', line: 2 });
     await waitFor(() => expect(fileTabs()).toEqual([expect.objectContaining({ path: '/app/config.ts', line: 2, appSessionId: A })]));
     expect(item('app').getAttribute('aria-expanded')).toBe('true');
-    expect(main.callsOf('files.list').filter((input) => input.path !== undefined)).toEqual([{ appSessionId: A, path: '/Users/new/work/app' }]);
+    expect(main.callsOf('files.list').filter((input) => input.path !== undefined)).toEqual([{ appSessionId: bareOf(A), path: '/Users/new/work/app' }]);
   });
 
   it('lists the roots again when the session record changes its directories', async () => {
@@ -468,7 +472,7 @@ describe('files tool', () => {
     installFakeMain((name, input) => {
       if (QUIET[name]) return QUIET[name];
       if (name === 'files.watch' || name === 'files.unwatch') return answer();
-      if (name === 'files.list' && input.path === undefined) return chosen ? answer({ root: null, path: '', entries: [dir('/r')], truncated: false }) : fail(`unknown app session: ${A}`);
+      if (name === 'files.list' && input.path === undefined) return chosen ? answer({ root: null, path: '', entries: [dir('/r')], truncated: false }) : fail(`unknown app session: ${bareOf(A)}`);
       return fail(`unexpected ${name}`);
     });
     const intent = (location: unknown) => ({ appSessionId: A, location, additionalDirectories: [], updatedAt: chosen ? '2026-10-08T10:00:01.000Z' : '2026-10-08T10:00:00.000Z', progress: { worktree: null } }) as never;
@@ -573,11 +577,11 @@ describe('files tool', () => {
     fireEvent.click(await screen.findByText('app.ts'));
     REPO['/r/src'] = [file('/r/src/app.ts'), file('/r/src/new.ts'), file('/r/src/staged.ts')];
     try {
-      act(() => main.emit('files.changed', { appSessionId: A, path: '/r/src/new.ts', kind: 'created' }));
+      act(() => main.emit('files.changed', { appSessionId: bareOf(A), path: '/r/src/new.ts', kind: 'created' }));
       await screen.findByText('new.ts');
       expect(item('app.ts').getAttribute('aria-selected')).toBe('true');
       main.calls.splice(0);
-      act(() => main.emit('files.changed', { appSessionId: A, path: '/r/src', kind: 'invalidated' }));
+      act(() => main.emit('files.changed', { appSessionId: bareOf(A), path: '/r/src', kind: 'invalidated' }));
       await waitFor(() => expect(main.calls.map((c) => [c.name, c.input.path])).toEqual([
         ['files.watch', '/r/src'],
         ['files.list', '/r/src'],
@@ -598,7 +602,7 @@ describe('files tool', () => {
     const state = instanceOf(id)!.state as FilesState;
     act(() => useLayout.getState().openSession(B));
     act(() => panelHost.selectTab(id));
-    await waitFor(() => expect(main.callsOf('files.list')).toContainEqual({ appSessionId: B }));
+    await waitFor(() => expect(main.callsOf('files.list')).toContainEqual({ appSessionId: bareOf(B) }));
     await waitFor(() => expect(state.ui.getState().views[B]?.defaultRoot).toBe('/r'));
     act(() => useLayout.getState().openSession(A));
     expect(await screen.findByText('src')).toBeTruthy(); // A's expansion kept

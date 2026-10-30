@@ -5,9 +5,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge, SessionDigest } from '@shared/ipc/schema';
+import type { PreloadBridge, SessionDigest } from '@shared/ipc/schema';
+import { REGISTRY } from '@shared/ipc/registry';
+import { addressingOf } from '@shared/machine/address';
 import { digest, record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
+import { at, TEST_MACHINE } from '../../../../../test/support/machine';
 import { resetCatalogStore } from '../../stores/catalog';
 import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
@@ -15,7 +18,13 @@ import { useReadLoads } from '../../widgets/read';
 import { ContextRing, contextRingOf } from './ContextRing';
 import { REL } from '../../test-support/relative-time';
 
-const A = 'app-a' as AppSessionId;
+// P5 O6 M2: the store holds the page's id `A` (an address) and the builders' values lifted; `fake`, installed as
+// `window.maws`, stands for main, asked and answering with the bare `A_ID`.
+const A_ID = 'app-a' as AppSessionId;
+const A = at(A_ID);
+const addressing = addressingOf(REGISTRY);
+const pageRecord = (over?: Parameters<typeof record>[1]) => addressing.output('session.get').lift(record(A_ID, over), TEST_MACHINE)!;
+const pageStatus = (compact?: Parameters<typeof status>[1]) => addressing.output('engine.sessions').lift([status(A_ID, compact)], TEST_MACHINE)[0]!;
 const CONTEXT = {
   categories: [
     { name: 'System prompt', tokens: 6810, kind: 'used' },
@@ -31,9 +40,9 @@ const catalog = (names: string[], terminalOnly: string[] = []) => ({
 let fake: FakeClient;
 
 function mount(answers: Parameters<typeof fakeClient>[0] = {}, context: SessionDigest['context'] = null) {
-  fake = fakeClient({ 'session.status': status('app-a'), ...answers });
-  window.maws = fake.client;
-  useSessions.setState({ records: new Map([[A, record('app-a')]]), engine: new Map([[A, status('app-a')]]), digests: new Map([[A, digest('app-a', { context })]]) });
+  fake = fakeClient({ 'session.status': status(A_ID), ...answers });
+  window.maws = fake.client as unknown as PreloadBridge;
+  useSessions.setState({ records: new Map([[A, pageRecord()]]), engine: new Map([[A, pageStatus()]]), digests: new Map([[A, digest(A, { context })]]) });
   return render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <ContextRing appSessionId={A} />
@@ -51,7 +60,7 @@ afterEach(() => {
   cleanup();
   resetCatalogStore();
   useReadLoads.setState({ loads: new Map() }); // P2-A: a Refresh a case left unanswered
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
   vi.useRealTimers();
 });
 
@@ -81,7 +90,7 @@ describe('the context ring', () => {
     expect(within(popover).getByText('47k of 200k · autocompact at 167k')).toBeTruthy();
     expect(within(popover).getByText('23.4% used · 120k until compaction')).toBeTruthy();
     expect(within(popover).queryByRole('button', { name: 'Compact now' })).toBeNull();
-    expect(fake.invoked('session.getContextUsage')).toEqual([{ appSessionId: A, detail: 'full' }]);
+    expect(fake.invoked('session.getContextUsage')).toEqual([{ appSessionId: A_ID, detail: 'full' }]);
   });
 
   it('Compact now sends /compact when the catalogue lists it and it is not terminal-only', async () => {
@@ -90,7 +99,7 @@ describe('the context ring', () => {
     await settle();
     fireEvent.click(screen.getByRole('button', { name: 'Compact now' }));
     await settle();
-    expect(fake.invoked('session.send')).toEqual([{ appSessionId: A, content: '/compact' }]);
+    expect(fake.invoked('session.send')).toEqual([{ appSessionId: A_ID, content: '/compact' }]);
     expect(screen.queryByRole('dialog', { name: 'Context window' })).toBeNull(); // closed first
     cleanup();
     resetCatalogStore();
@@ -105,13 +114,13 @@ describe('the context ring', () => {
 // when; "Not observed yet" where there is none; nothing is read from the engine
 describe('the context ring of a session with no live process', () => {
   const observed = (contextUsage: unknown) => ({
-    version: 1, appSessionId: A, engineSessionId: null, writtenAt: '2026-10-09T09:00:00.000Z', source: 'live', launches: ['L1'],
+    version: 1, appSessionId: A_ID, engineSessionId: null, writtenAt: '2026-10-09T09:00:00.000Z', source: 'live', launches: ['L1'],
     engineVersion: null, model: null, effort: null, mode: null, outputStyle: null, plugins: null, contextUsage, complete: true,
   });
   function mountExited(facts: unknown) {
     fake = fakeClient({ 'session.observedFacts': facts });
-    window.maws = fake.client;
-    useSessions.setState({ records: new Map([[A, record('app-a')]]), engine: new Map([[A, status('app-a', { process: 'exited' })]]), digests: new Map([[A, digest('app-a', { context: null })]]) });
+    window.maws = fake.client as unknown as PreloadBridge;
+    useSessions.setState({ records: new Map([[A, pageRecord()]]), engine: new Map([[A, pageStatus({ process: 'exited' })]]), digests: new Map([[A, digest(A, { context: null })]]) });
     return render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <ContextRing appSessionId={A} />
@@ -151,13 +160,13 @@ describe('the context ring of a session with no live process', () => {
     expect(fake.invoked('session.acquire')).toEqual([]);
     fireEvent.click(within(screen.getByRole('dialog', { name: 'Context window' })).getByRole('button', { name: 'Refresh' }));
     await settle();
-    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'read' }]);
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A_ID, reason: 'read' }]);
   });
 
   // M3 review (§10 Q7, acceptance 6): a terminal holding the session: the holder's actions where Refresh would be
   it('the popover of a session a terminal holds names the holder and offers its actions in place of Refresh', async () => {
     mountExited(null);
-    act(() => useSessions.setState({ records: new Map([[A, record('app-a', { holder: { kind: 'terminal', pid: 4711 } })]]), digests: new Map([[A, digest('app-a', { context: null, availability: 'foreign_held' })]]) }));
+    act(() => useSessions.setState({ records: new Map([[A, pageRecord({ holder: { kind: 'terminal', pid: 4711 } })]]), digests: new Map([[A, digest(A, { context: null, availability: 'foreign_held' })]]) }));
     await settle();
     fireEvent.click(ring());
     await settle();
@@ -173,8 +182,8 @@ describe('the context ring of a session with no live process', () => {
   const twelve = { percent: 12, totalTokens: 24_000, maxTokens: 200_000, autoCompactThreshold: null };
   function mountWith(process: 'ready' | 'exited', answers: Parameters<typeof fakeClient>[0]) {
     fake = fakeClient(answers);
-    window.maws = fake.client;
-    useSessions.setState({ records: new Map([[A, record('app-a')]]), engine: new Map([[A, status('app-a', { process })]]), digests: new Map([[A, digest('app-a', { context: twelve })]]) });
+    window.maws = fake.client as unknown as PreloadBridge;
+    useSessions.setState({ records: new Map([[A, pageRecord()]]), engine: new Map([[A, pageStatus({ process })]]), digests: new Map([[A, digest(A, { context: twelve })]]) });
     return render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <ContextRing appSessionId={A} />
@@ -207,7 +216,7 @@ describe('the context ring of a session with no live process', () => {
     await settle();
     const popover = () => screen.getByRole('dialog', { name: 'Context window' });
     expect(within(popover()).getByText('47k of 200k · autocompact at 167k')).toBeTruthy();
-    act(() => useSessions.setState({ engine: new Map([[A, status('app-a', { process: 'exited' })]]) }));
+    act(() => useSessions.setState({ engine: new Map([[A, pageStatus({ process: 'exited' })]]) }));
     await settle();
     expect(within(popover()).queryByText('47k of 200k · autocompact at 167k')).toBeNull();
     expect(within(popover()).getByText('31% of 200k used')).toBeTruthy();

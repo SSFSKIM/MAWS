@@ -10,6 +10,10 @@
 // rolls out, and a session keeps the mod it loaded until a reload: each is offered only when what it needs (`NEEDS`) is
 // advertised — a bridge op or read in the session's `presence.capabilities`, a daemon RPC in the machine's `desk` — and
 // otherwise names the stale session or the older machine, so the owner is sent to the right place.
+//
+// A session whose machine moved to MAWS (P5 O13, acceptance 5: the machine is one of the org state's, which answers its
+// cards over this phone's channel and refuses every DX6 request) can do nothing from here, whatever else holds: the one
+// seam the frozen views have.
 import type { DeskCapabilities, SessionPresence } from 'desk-hub/protocol';
 import { sessionName, type SessionGroup } from '../log/projection';
 import type { TranscriptServed } from '../shell/transcript-served';
@@ -33,6 +37,8 @@ export type CapabilityInput = {
   ended?: { by: string; reason: string } | null;
   /** Whether its machine serves its transcript, as its subscription said (`useTranscriptServed`); absent or null until it does. */
   transcript?: TranscriptServed | null;
+  /** Its machine is one of the org state's cut-over machines (`cards/board.ts` `movedToMaws`); absent or false otherwise. */
+  movedToMaws?: boolean;
 };
 
 /**
@@ -97,6 +103,9 @@ export const turnRunning = (s: CapabilityInput): boolean => {
   return typeof status === 'string' && status !== 'idle';
 };
 
+/** Why a session on a machine moved to MAWS offers nothing here: its cards are answered over the phone's own channel. */
+export const MOVED_TO_MAWS = "moved to MAWS: its cards are on this phone's channel";
+
 const yes = (note?: string): Capability => (note === undefined ? { can: true, reason: null } : { can: true, reason: null, note });
 const no = (reason: string): Capability => ({ can: false, reason });
 
@@ -106,6 +115,10 @@ const no = (reason: string): Capability => ({ can: false, reason });
  * hold. A send is a log `human`, held and sent once the socket is back.
  */
 export function capabilities(s: CapabilityInput, connected = true): Record<Verb, Capability> {
+  if (s.movedToMaws === true) {
+    const moved = no(MOVED_TO_MAWS);
+    return Object.fromEntries(VERBS.map((verb) => [verb, moved])) as Record<Verb, Capability>;
+  }
   const byKind = capabilitiesByKind(s);
   // A send to a retired session is only recorded, whatever its process or its machine is doing: sminos delivers nothing
   // to a session that is not a member.

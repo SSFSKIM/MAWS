@@ -5,6 +5,8 @@
 import { useState } from 'react';
 import { EffortSchema, type Effort } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
+import { machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 import type { ModelCatalogue } from '@shared/sessions/models';
 import { DEFAULT_ROW, listName } from '@shared/sessions/model-label';
 import { useCommand } from '../ipc/query';
@@ -26,8 +28,8 @@ const rowsOf = (catalogue: ModelCatalogue): ModelRow[] =>
 // The catalogue's Claude-group models (null while it is read, or while `enabled` is false: nothing is asked), from the
 // direct route's cache: the host keys its catalogue by route, and a route left unnamed answers the latest one updated.
 // With the session's directory, whose settings may set a model environment of its own (debt wave 5).
-export function useClaudeModels(enabled = true, cwd: string | null = null): readonly ModelRow[] | null {
-  const read = useCommand('engine.models', cwd === null ? { refresh: false, gateway: 'direct' } : { refresh: false, gateway: 'direct', cwd }, { staleTime: 60_000, enabled });
+export function useClaudeModels(machine: MachineRef, enabled = true, cwd: string | null = null): readonly ModelRow[] | null {
+  const read = useCommand('engine.models', cwd === null ? { refresh: false, gateway: 'direct' } : { refresh: false, gateway: 'direct', cwd }, { staleTime: 60_000, enabled }, { machine });
   if (!read.data) return read.isError ? [] : null;
   const all = rowsOf(read.data);
   const rows = all.map((m) => (m.value === DEFAULT_ROW ? { ...m, displayName: listName(m, all) } : m)); // W3: `default` named by the model it runs
@@ -58,7 +60,7 @@ export function useSessionDirectory(appSessionId: AppSessionId): string | null {
 // for an explicit pick, since the restart changes the session's model; `pickDirectModel`'s dialog, whose one act is the
 // choice, preselects.
 export function useDirectChoice(appSessionId: AppSessionId, initial: string | null, preselect: boolean, enabled = true) {
-  const models = useClaudeModels(enabled, useSessionDirectory(appSessionId));
+  const models = useClaudeModels(machineOf(appSessionId), enabled, useSessionDirectory(appSessionId));
   const effort = useCurrentEffort(appSessionId);
   const [picked, pick] = useState<string | null>(initial);
   const row = models === null ? null : (models.find((m) => m.value === picked) ?? (preselect ? preselected(models) : null));

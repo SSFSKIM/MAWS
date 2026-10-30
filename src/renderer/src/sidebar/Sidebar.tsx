@@ -1,12 +1,15 @@
 // The sidebar (§5.1 as amended 2026-10-01, W11; C5 execution document, M3): Codex's flat tree under the New chat row and
-// one search field. The project rows, most recently active first, five of them and then "Show more" for the rest, with
-// Other sessions last; each expands in place to its sessions (`ProjectRow.tsx`), and which are expanded persists in the
+// one search field. The project rows (P5 O6 M5: org projects, each holding every machine's sessions of it), most recently
+// active first, five of them and then "Show more" for the rest, with each machine's own row last (its sessions with no
+// checkout, in place of "Other sessions"); each expands in place to its sessions (`ProjectRow.tsx`), and which are expanded persists in the
 // `regions` layout key (`expandedProjects`), so a relaunch shows what the person left; the search and the "Show more"
 // reveals do not persist. The search filters every project (by name, or holding a matching session) and shows each
 // listed project open on its matching sessions without changing what is expanded. M2 restores Needs you above the
 // tree, independent of search and hidden projects, from the same attention table as the Overview. One context menu
 // serves every row, and the tree is one roving tab stop (`tree.ts`). A project removed from the sidebar (I5) is listed
-// nowhere, its sessions with it, and "Hidden projects…" at the end offers it back.
+// nowhere, its sessions with it, and "Hidden projects…" at the end offers it back. P5 O8 M2: other machines' listed
+// sessions the member owns join their rows' sessions (`projectItems`), under the same caps and search. P5 O8 M5: other
+// people's join them too under a row whose People toggle is on (`stores/people.ts`), each row naming its owners.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { FolderIcon, GearIcon, IconButton, SortIcon } from '../app/IconButton';
@@ -15,7 +18,9 @@ import { useChordHint } from '../app/IconButton'; // C11
 import { useSlot } from '../app/slots';
 import { createSession, focusedProject, NEW_CHAT, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { runAction, useActionEnabled } from '../keymap/actions-runtime'; // C11: the footer's gear opens Settings
-import type { ProjectId } from '@shared/graph/ids';
+import { ipc } from '../ipc/client';
+import { useMachines } from '../stores/machines';
+import { machineName, selectOrgIndex } from '../stores/org-projects'; // P5 O6 M5
 import { ProjectFilter } from './ProjectFilter';
 import type { SidebarSort } from '../overview/derive';
 import { selectNeedsYou, useAttention } from '../stores/attention';
@@ -23,8 +28,10 @@ import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { openArtifacts } from '../main/artifacts'; // P3-G
 import { selectHiddenProjects, selectProjectOrder, useSessions } from '../stores/sessions';
+import { usePeople } from '../stores/people'; // P5 O8 M5
 import { openDialog } from '../sessions/dialogs';
-import { filterProjectList, nestLineage, OTHER_SESSIONS, projectList, projectSessions, PROJECTS_FIRST, SESSIONS_CAP, sessionMatcher, shownCount, type ProjectEntry, type ProjectKey, type SessionTreeRow } from './derive';
+import { filterProjectList, isListedRow, listedMatcher, nestItems, projectItems, projectList, projectSessions, PROJECTS_FIRST, SESSIONS_CAP, sessionMatcher, shownCount, sidebarSessionId, type ProjectEntry, type ProjectKey, type SidebarSession, type SidebarTreeRow } from './derive';
+import type { AppSessionId } from '@shared/graph/ids';
 import { menuTargetOf, SidebarMenuContent, type MenuTarget } from './menus';
 import { ProjectRow, ShowMoreRow } from './ProjectRow';
 import { ResumeChooserHost } from '../resume/host'; // P2-D
@@ -49,11 +56,14 @@ export function Sidebar() {
   );
 }
 
+// A project's entry with its sessions in the sidebar's order (P5 O8 M2: records and listed rows together).
+type RankedEntry = ProjectEntry & { items: SidebarSession[] };
+
 // A listed project as the tree shows it: open or not, the sessions it shows and how many more its "Show more" reveals.
 interface ShownProject {
-  entry: ProjectEntry;
+  entry: RankedEntry;
   open: boolean;
-  sessions: SessionTreeRow[]; // E3: each nested under its lineage parent when that is listed
+  sessions: SidebarTreeRow[]; // E3: each nested under its lineage parent when that is listed
   more: number;
 }
 
@@ -64,21 +74,29 @@ function SidebarBody() {
   const records = useSessions((s) => s.records);
   const recordsVersion = useSessions((s) => s.recordsVersion);
   const digests = useSessions((s) => s.digests);
-  const [projectFilter, setProjectFilter] = useState<ReadonlySet<ProjectId> | null>(null);
+  const listedSessions = useSessions((s) => s.listed); // P5 O8 M2
+  const people = usePeople((s) => s.on); // P5 O8 M5: the rows drawing other people's sessions
+  const [projectFilter, setProjectFilter] = useState<ReadonlySet<ProjectKey> | null>(null);
   const allKnownProjects = useSessions(selectProjectOrder);
   const hiddenProjects = useSessions(selectHiddenProjects);
   const rows = useAttention((s) => selectNeedsYou(s, { records, recordsVersion }));
-  const projects = useMemo(() => {
-    const waiting = new Set(rows.map((row) => row.appSessionId));
-    const retained = new Set([...records.values()].filter((r) => !r.archived && (r.pinned || r.holder.kind !== 'none' || waiting.has(r.appId)
-      || digests.get(r.appId)?.phase === 'working' || digests.get(r.appId)?.phase === 'starting')).map((r) => r.projectId));
-    return allKnownProjects.filter((p) => !p.discovered || retained.has(p.id) || projectFilter?.has(p.id));
-  }, [allKnownProjects, records, digests, rows, projectFilter]);
+  // P5 O6 M5: every machine's projects, grouped by org project; a machine's sessions with no checkout under its own row
+  const projects = useSessions((s) => s.projects);
+  const machines = useMachines((s) => s.machines);
+  const local = ipc.localMachine;
+  const index = useSessions((s) => selectOrgIndex(s, local));
   const sidebar = useLayout((s) => s.regions.sidebar);
-  const selected = useLayout((s) => {
+  const selectedTab = useLayout((s) => {
     const tab = activeTab(s.main);
     return tab?.kind === 'session' ? tab.appSessionId : null;
   });
+  // P5 O8 M2: a listed row clicked with no opener for its lane is the selection until the shown tab changes or another
+  // row is clicked.
+  // Cleared, not just hidden, at the first render with another tab, so the tab it was picked over coming back does not
+  // bring it back (React's state adjusted while rendering: this render is discarded for the one without it).
+  const [picked, setPicked] = useState<{ id: AppSessionId; over: AppSessionId | null } | null>(null);
+  if (picked !== null && picked.over !== selectedTab) setPicked(null);
+  const selected = picked !== null && picked.over === selectedTab ? picked.id : selectedTab;
 
   const [query, setQuery] = useState('');
   const [allProjects, setAllProjects] = useState(false); // the list's own "Show more" (transient)
@@ -123,12 +141,10 @@ function SidebarBody() {
   const scroller = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLDivElement>(null);
 
-  const byId = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
-  const hidden = useMemo(() => new Set([...hiddenProjects, ...allKnownProjects.filter((p) => !projects.some((listed) => listed.id === p.id))].map((p) => p.id)), [hiddenProjects, allKnownProjects, projects]);
-  const rankedEntries = useMemo(() => projectList({ records, digests, projects, rows, hidden }).map((entry) => ({
-    ...entry,
-    sessions: projectSessions({ sessions: entry.sessions, digests, rows, sort: sidebar.sort, matches: () => true }),
-  })), [records, digests, projects, rows, hidden, sidebar.sort]);
+  const rankedEntries = useMemo((): RankedEntry[] => projectList({ records, digests, projects, rows, local, machineName: (m) => machineName(machines, m, local), alsoListed: projectFilter ?? undefined, listed: listedSessions, people }).map((entry) => {
+    const sorted = projectSessions({ sessions: entry.sessions, digests, rows, sort: sidebar.sort, matches: () => true });
+    return { ...entry, sessions: sorted, items: projectItems({ sorted, listed: entry.listed, digests, rows, sort: sidebar.sort }) };
+  }), [records, digests, projects, rows, local, machines, projectFilter, sidebar.sort, listedSessions, people]);
   // Hold ranks, not data: titles, glyphs and counts remain live. Pointer presence, keyboard focus (including
   // portalled cards/menus), or an open context menu keeps the same targets in place until the person leaves.
   // A deliberate sort change is immediate; no timer can reshuffle a row between two actions.
@@ -142,36 +158,40 @@ function SidebarBody() {
     const previous = new Map(settledOrder.entries.map((entry) => [entry.key, entry]));
     return holdOrder(rankedEntries, settledOrder.entries, (entry) => entry.key).map((entry) => ({
       ...entry,
-      sessions: holdOrder(entry.sessions, previous.get(entry.key)?.sessions ?? [], (record) => record.appId),
+      items: holdOrder(entry.items, previous.get(entry.key)?.items ?? [], sidebarSessionId),
     }));
   }, [rankedEntries, settledOrder, holding]);
   const searching = query.trim() !== '';
-  const matches = useMemo(() => sessionMatcher(query, byId), [query, byId]);
+  const matches = useMemo(() => sessionMatcher(query, projects), [query, projects]);
+  const itemMatches = useMemo(() => {
+    const matchesListed = listedMatcher(query);
+    return (item: SidebarSession) => (item.kind === 'record' ? matches(item.record) : matchesListed(item.listed));
+  }, [query, matches]);
   const expanded = useMemo(() => new Set(sidebar.expandedProjects), [sidebar.expandedProjects]);
 
-  // Five project rows, then "Show more" for the rest (Codex's `maxGroups`); Other sessions stays last whatever is folded.
-  // A search lists every project it finds.
+  // Five project rows, then "Show more" for the rest (Codex's `maxGroups`); the machines' rows stay last whatever is
+  // folded. A search lists every project it finds.
   const { listed, folded } = useMemo(() => {
-    const found = filterProjectList(everyEntry, query, byId).filter((entry) => projectFilter === null || (entry.project !== null && projectFilter.has(entry.project.id)));
+    const found = filterProjectList(everyEntry, query, projects).filter((entry) => projectFilter === null || (entry.machine === null && projectFilter.has(entry.key)));
     if (searching || allProjects || projectFilter !== null) return { listed: found, folded: 0 };
-    const real = found.filter((e) => e.project !== null);
-    const other = found.filter((e) => e.project === null);
-    return { listed: [...real.slice(0, PROJECTS_FIRST), ...other], folded: Math.max(0, real.length - PROJECTS_FIRST) };
-  }, [everyEntry, query, byId, searching, allProjects, projectFilter]);
+    const real = found.filter((e) => e.machine === null);
+    const own = found.filter((e) => e.machine !== null);
+    return { listed: [...real.slice(0, PROJECTS_FIRST), ...own], folded: Math.max(0, real.length - PROJECTS_FIRST) };
+  }, [everyEntry, query, projects, searching, allProjects, projectFilter]);
 
   const shown: ShownProject[] = useMemo(
     () =>
       listed.map((entry) => {
         const open = searching || expanded.has(entry.key);
         if (!open) return { entry, open, sessions: [], more: 0 };
-        const all = nestLineage(entry.sessions.filter(matches)); // E3: the caps count trees; rank was settled above
+        const all = nestItems(entry.items.filter(itemMatches)); // E3: the caps count trees; rank was settled above
         const count = searching ? all.length : shownCount(all.length, more.has(entry.key));
         return { entry, open, sessions: all.slice(0, count).flatMap((tree) => tree.rows), more: searching ? 0 : Math.min(all.length, SESSIONS_CAP) - count };
       }),
-    [listed, searching, expanded, matches, more],
+    [listed, searching, expanded, itemMatches, more],
   );
-  // The list's "Show more" sits after the last project row, before Other sessions.
-  const moreAt = folded > 0 ? shown.filter((p) => p.entry.project !== null).length : -1;
+  // The list's "Show more" sits after the last project row, before the machines' rows.
+  const moreAt = folded > 0 ? shown.filter((p) => p.entry.machine === null).length : -1;
 
   // The tree items on screen, in order: what the arrow keys walk.
   const nodes = useMemo(() => {
@@ -182,7 +202,9 @@ function SidebarBody() {
       out.push({ id, kind: 'project', key: entry.key, expanded: open });
       if (!open) return;
       // E3: a nested row's parent is its lineage parent's row, so ArrowLeft lands there
-      out.push(...sessions.map(({ record: r, nestedUnder }): TreeNode => ({ id: sessionNodeId(r.appId), kind: 'session', appSessionId: r.appId, parent: nestedUnder === null ? id : sessionNodeId(nestedUnder) })));
+      out.push(...sessions.map((row): TreeNode => isListedRow(row)
+        ? { id: sessionNodeId(row.listed.appId), kind: 'listed', appSessionId: row.listed.appId, parent: id }
+        : { id: sessionNodeId(row.record.appId), kind: 'session', appSessionId: row.record.appId, parent: row.nestedUnder === null ? id : sessionNodeId(row.nestedUnder) }));
       if (hidden > 0) out.push({ id: moreNodeId(entry.key), kind: 'more', key: entry.key, parent: id });
     });
     if (moreAt === shown.length) out.push({ id: MORE_PROJECTS, kind: 'more', key: null, parent: null });
@@ -212,21 +234,21 @@ function SidebarBody() {
   // lifts a collapsed sidebar's `inert`).
   useEffect(
     () =>
-      registerProjectRevealer((projectId) => {
+      registerProjectRevealer((key) => {
         setQuery('');
         setProjectFilter(null);
         setAllProjects(true);
         setFocused(null);
-        pendingFocus.current = projectNodeId(projectId);
+        pendingFocus.current = projectNodeId(key);
         rerender(); // the row may be on screen already: the focus effect still runs
       }),
     [],
   );
 
   // A project's activation, one path for a click on its row and its keys (Enter, Space, ArrowRight, ArrowLeft): the strip
-  // shows the project's tab set (W12; Other sessions: the no-project set), and the row opens or closes.
+  // shows the row's tab set (W12; P5 O6 M5: a machine's row has its own), and the row opens or closes.
   const toggleProject = (key: ProjectKey) => {
-    useLayout.getState().setCurrentProject(key === OTHER_SESSIONS ? null : key);
+    useLayout.getState().setCurrentProject(key);
     if (searching) return; // a search shows its matches open without changing what is expanded
     const open = sidebar.expandedProjects.includes(key);
     if (open && more.has(key)) {
@@ -242,7 +264,7 @@ function SidebarBody() {
   };
   const showMore = (key: ProjectKey | null) => {
     if (key === null) {
-      const next = everyEntry.filter((e) => e.project !== null)[PROJECTS_FIRST];
+      const next = everyEntry.filter((e) => e.machine === null)[PROJECTS_FIRST];
       setAllProjects(true);
       if (next) focusItem(projectNodeId(next.key));
       return;
@@ -251,8 +273,8 @@ function SidebarBody() {
     if (!group) return;
     setMore(new Set(more).add(key));
     const shownTrees = group.sessions.filter((row) => row.nestedUnder === null).length; // E3: the next tree's root
-    const next = nestLineage(group.entry.sessions.filter(matches))[shownTrees]?.root;
-    if (next) focusItem(sessionNodeId(next.appId));
+    const next = nestItems(group.entry.items.filter(itemMatches))[shownTrees]?.root;
+    if (next) focusItem(sessionNodeId(sidebarSessionId(next)));
   };
 
   const onTreeKeyDown = (event: KeyboardEvent<HTMLElement>) => {
@@ -277,8 +299,9 @@ function SidebarBody() {
     }
   };
 
-  const tree = { tabStop, selected, onFocusItem: setFocused };
-  const listEmpty = projects.length === 0 && everyEntry.every((entry) => entry.sessions.length === 0);
+  const tree = { tabStop, selected, onFocusItem: setFocused, onPick: (id: AppSessionId) => setPicked({ id, over: selectedTab }) };
+  const selectedKey = everyEntry.find((entry) => entry.machine === null && selected !== null && entry.sessions.some((r) => r.appId === selected))?.key ?? null; // the filter's own: an org row's
+  const listEmpty = everyEntry.length === 0;
   const moreProjects = <ShowMoreRow id={MORE_PROJECTS} level={1} onShow={() => showMore(null)} />;
 
   return (
@@ -319,7 +342,7 @@ function SidebarBody() {
             >
               <NeedsYou rows={rows} selected={selected} onEmptyFocus={() => search.current?.querySelector('input')?.focus()} />
               <SectionHeading title="Projects">
-                <ProjectFilter projects={allKnownProjects} current={selected ? records.get(selected)?.projectId ?? null : null} selected={projectFilter} onChange={setProjectFilter} />
+                <ProjectFilter projects={allKnownProjects} index={index} current={selectedKey} selected={projectFilter} onChange={setProjectFilter} />
                 <SortMenu sort={sidebar.sort} />
                 <AddProject />
               </SectionHeading>
@@ -327,7 +350,7 @@ function SidebarBody() {
               {listed.length === 0 ? (
                 searching && <p className="m-0 px-[9px] py-1.5 text-ui-sm text-fg-faint">No projects match</p>
               ) : (
-                <div role="tree" aria-label="Projects" onKeyDown={onTreeKeyDown} className="flex flex-col gap-px">
+                <div role="tree" aria-label="Projects" onKeyDown={onTreeKeyDown} onClickCapture={() => setPicked(null)} /* a listed row picks itself after this */ className="flex flex-col gap-px">
                   {shown.map((group, i) => (
                     <Fragment key={group.entry.key}>
                       {i === moreAt && moreProjects}

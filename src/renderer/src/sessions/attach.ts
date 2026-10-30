@@ -17,7 +17,7 @@
 // shell has ended, gives way to a new one.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { AttachTabsSchema, type AttachTab } from '@shared/ipc/schema/layout';
+import { storedAttachTabsSchema, type AttachTab } from '@shared/ipc/schema/layout';
 import { attachCommand } from '@shared/sessions/attach';
 import { ipc } from '../ipc/client';
 import { panelHost, shownSession } from '../panel/host';
@@ -28,6 +28,8 @@ import { terminals, type TerminalId } from '../terminal/registry';
 import { openTerminal } from '../tools/terminal';
 import { toastHeld } from './holder-words';
 import { startNoticeId } from './store'; // P2-A
+import { machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 
 export const ATTACH_TABS_KEY = 'sessions.attachTabs';
 
@@ -53,7 +55,7 @@ function rememberedTabs(): Promise<AttachTab[] | null> {
       console.error(`[sessions] layout.get ${ATTACH_TABS_KEY} failed`, result.error);
       return null;
     }
-    const parsed = result.value.value === null ? null : AttachTabsSchema.safeParse(result.value.value);
+    const parsed = result.value.value === null ? null : storedAttachTabsSchema(ipc.localMachine).safeParse(result.value.value); // P5 O6 M2: version 1 reads lifted
     if (parsed && !parsed.success) console.warn(`[sessions] ${ATTACH_TABS_KEY} is not a valid value; no attach tabs remembered`);
     remembered = parsed?.success ? parsed.data.tabs : [];
     return remembered;
@@ -75,7 +77,7 @@ function remember(entry: AttachTab): Promise<void> {
     if (current === null) return; // logged by the read
     const tabs = [...current.filter((t) => (t.appSessionId !== entry.appSessionId || t.jobId !== entry.jobId) && tabListed(t.tabId, t.appSessionId as AppSessionId)), entry];
     remembered = tabs;
-    const written = await ipc.invoke('layout.set', { key: ATTACH_TABS_KEY, value: { version: 1, tabs } });
+    const written = await ipc.invoke('layout.set', { key: ATTACH_TABS_KEY, value: { version: 2, tabs } });
     if (!written.ok) console.error(`[sessions] layout.set ${ATTACH_TABS_KEY} failed`, written.error);
   });
   writes = run.catch(() => {});
@@ -149,7 +151,7 @@ async function typeCommand(terminalId: TerminalId, command: string): Promise<str
 
 async function jobOf(record: SessionRecord, known: KnownJob | null): Promise<{ jobId: string; cwd: string } | { error: string }> {
   if (record.engineSessionId !== null) {
-    const read = await ipc.invoke('fs.holders', { sessionIds: [record.engineSessionId], directories: null });
+    const read = await ipc.invoke('fs.holders', { sessionIds: [record.engineSessionId], directories: null }, { machine: machineOf(record.appId) });
     if (!read.ok && known === null) return { error: read.error.message };
     for (const { sessionId, holder, cwd } of read.ok ? read.value.holders : []) {
       if (sessionId === record.engineSessionId && holder.kind === 'background_job' && holder.jobId !== null) return { jobId: holder.jobId, cwd: cwd ?? record.directory };
@@ -159,9 +161,10 @@ async function jobOf(record: SessionRecord, known: KnownJob | null): Promise<{ j
   return { error: 'No background job holds this session now; nothing to attach to' };
 }
 
-async function commandFor(jobId: string, known: KnownJob | null): Promise<string | { error: string }> {
+// The attach runs in a terminal on the session's machine, so it names that machine's binary (P5 O6).
+async function commandFor(jobId: string, known: KnownJob | null, machine: MachineRef): Promise<string | { error: string }> {
   if (known?.jobId === jobId) return known.command;
-  const binary = await ipc.invoke('engine.binaryInfo', undefined);
+  const binary = await ipc.invoke('engine.binaryInfo', undefined, { machine });
   return binary.ok ? attachCommand(binary.value.path, jobId) : { error: binary.error.message };
 }
 
@@ -193,7 +196,7 @@ async function attach(appSessionId: AppSessionId, known: KnownJob | null): Promi
   if (existing !== undefined && state.kind === 'running') {
     const rerun = await atPrompt(state.terminalId);
     if (rerun) {
-      const command = await commandFor(job.jobId, known);
+      const command = await commandFor(job.jobId, known, machineOf(appSessionId));
       if (typeof command !== 'string') return { ok: false, error: command.error };
       const failed = await typeCommand(state.terminalId, command);
       if (failed !== null) return { ok: false, error: failed };
@@ -201,7 +204,7 @@ async function attach(appSessionId: AppSessionId, known: KnownJob | null): Promi
     showTab(appSessionId, existing);
     return { ok: true, tabId: existing, how: rerun ? 'rerun' : 'shown' };
   }
-  const command = await commandFor(job.jobId, known);
+  const command = await commandFor(job.jobId, known, machineOf(appSessionId));
   if (typeof command !== 'string') return { ok: false, error: command.error };
   showPanel();
   const tabId = openTerminal({ appSessionId, cwd: job.cwd, command });

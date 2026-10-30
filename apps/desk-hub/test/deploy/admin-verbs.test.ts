@@ -77,9 +77,29 @@ function fake(answers: string[] = [], over: Partial<AdminIo> & { stdin?: string 
   return f;
 }
 
+/**
+ * What a printed key, token or code looks like: a `smns-…` code, a JWK's private `"d"`, or a JWT- or JWK-shaped token,
+ * which is `eyJ` (base64url of `{"`) at a token boundary and then the rest of an encoded JSON object. A bare `eyJ`
+ * would also match inside a hash or an id that is legitimately printed, about once per few thousand characters.
+ */
+const shaped = /smns-(enroll|provision|pair)-v\d\.|(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}|"d"\s*:/;
+
+describe('the shape of a printed secret', () => {
+  const jwt = 'eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln';
+  it('catches a token printed after a space, a quote or `=`', () => {
+    for (const line of [`token ${jwt}`, `"${jwt}"`, `DESK_ACCESS_TOKEN=${jwt}`, jwt, `key: eyJrdHkiOiJFQyJ9`]) expect(line).toMatch(shaped);
+  });
+  it('catches a code and a JWK private part, as before', () => {
+    expect('smns-enroll-v2.abc').toMatch(shaped);
+    expect('{"d": "x"}').toMatch(shaped);
+  });
+  it('does not match `eyJ` inside a longer base64url run, such as a hash or an id', () => {
+    for (const line of ['hash AbC9eyJx_k2', 'id=Zm9vYmFyeyJhbGciOiJFUzI1NiJ9AAAA', 'eyJ', 'eyJ.not-a-token', 'sha256:q-eyJabcdefghijklmnop']) expect(line).not.toMatch(shaped);
+  });
+});
+
 /** No fake's stdout or stderr holds anything shaped like a key, a token or a code, or any secret a case handled. */
 function nothingSecretPrinted(): void {
-  const shaped = /smns-(enroll|provision|pair)-v\d\.|eyJ|"d"\s*:/;
   for (const f of fakes) {
     const printed = [...f.out, ...f.err].join('\n');
     expect(printed).not.toMatch(shaped);
@@ -220,6 +240,34 @@ describe('on the local hub', () => {
     expect(await running).toBe(1);
     expect(f.err.join('\n')).toMatch(/m1 is bound to ref .* for the life of the org, and this machine posted ref .*: nothing was signed/);
     expect((await head()).state.version).toBe(before.state.version);
+  });
+
+  it('refuses before signing a successor the package would refuse (successorProblems): a key another signer listed while the owner compared', async () => {
+    // The hub refuses a key another holder has at its post (`409 key-held`, org-enrollment's suite). One that another
+    // signer lists after the post, here a successor under this admin's own keys while the owner compares, is the
+    // pre-sign check's to refuse.
+    let answer: (line: string) => void = () => {};
+    const f = fake([], { openTerminal: () => ({ write: (text) => void f.term.push(text), readLine: () => new Promise<string>((resolve) => (answer = resolve)) }) });
+    const running = runAdmin(['enroll', 'twin', '--wait', '20', ...asLocal()], f.io);
+    const code = await codeOn(f);
+    const decoded = decodeEnrollmentCodeV2(code);
+    for (const secret of [code, decoded.token, decoded.k]) secrets.add(secret);
+    const twin = await enrollV2(code, 'twin');
+    await until(() => f.term.join('').endsWith('then list it? [y/N] '));
+    const decoy = { name: 'decoy', ref: mintRef(), pub: twin.key.pub, owners: [member] };
+    const listing = await successor((await head()).state, (s) => {
+      s.machines.push(decoy);
+      s.machineNames.push({ name: decoy.name, ref: decoy.ref });
+    });
+    const listed = await signOrgState(listing, [(await readAdminKeys(keys)).stepUp]);
+    expect((await hub.fetchAs(ADMIN, '/api/org/state', { body: listed })).status).toBe(201);
+    answer('y');
+    expect(await running).toBe(1);
+    expect(f.err.join('\n')).toMatch(new RegExp(`version ${listing.version + 1} would be refused: key-held-twice \\(.*machine ${decoy.ref}.*\\): nothing was signed`));
+    expect((await head()).state.version).toBe(listing.version);
+    expect(anchor().pending).toBeUndefined();
+    // The decoy goes, its key retired, so the cases after see only the machines they made.
+    expect(await runAdmin(['machine', 'drop', 'decoy', ...asLocal('--yes')], fake().io)).toBe(0);
   });
 
   it('holds the anchor\'s lock for its signing alone: a refresh during its wait signs, and it signs next on the head it reads again', async () => {

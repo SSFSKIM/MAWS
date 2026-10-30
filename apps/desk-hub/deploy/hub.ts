@@ -16,6 +16,11 @@ export class Person {
     private readonly token: string,
     /** Called before each request, which it refuses by throwing: an interrupted run's (proof.ts, `Cleanup.check`). */
     private readonly gate: () => void = () => {},
+    /**
+     * `requestMs` bounds each request, its body's reading included; `signal` (the run's interruption) ends the requests
+     * in flight when it aborts, while one made after it (the cleanup's) has its own bound alone.
+     */
+    private readonly options: { requestMs?: number; signal?: AbortSignal } = {},
   ) {}
 
   get headers(): Record<string, string> {
@@ -25,20 +30,43 @@ export class Person {
   /** A request as this person; `signal` ends it, its body's reading included. */
   async fetch(path: string, init: { method?: string; body?: unknown; signal?: AbortSignal } = {}): Promise<Response> {
     this.gate();
-    return fetch(`${this.hub}${path}`, {
-      method: init.method ?? (init.body === undefined ? 'GET' : 'POST'),
-      headers: { ...this.headers, ...(init.body === undefined ? {} : { 'content-type': 'application/json' }) },
-      body: init.body === undefined ? undefined : JSON.stringify(init.body),
-      redirect: 'manual',
-      signal: init.signal,
-    });
+    const method = init.method ?? (init.body === undefined ? 'GET' : 'POST');
+    const signals = [
+      ...(init.signal ? [init.signal] : []),
+      ...(this.options.requestMs ? [AbortSignal.timeout(this.options.requestMs)] : []),
+      ...(this.options.signal && !this.options.signal.aborted ? [this.options.signal] : []),
+    ];
+    try {
+      return await fetch(`${this.hub}${path}`, {
+        method,
+        headers: { ...this.headers, ...(init.body === undefined ? {} : { 'content-type': 'application/json' }) },
+        body: init.body === undefined ? undefined : JSON.stringify(init.body),
+        redirect: 'manual',
+        signal: signals.length === 0 ? undefined : signals.length === 1 ? signals[0] : AbortSignal.any(signals),
+      });
+    } catch (error) {
+      throw this.#failed(method, path, error);
+    }
   }
 
   async json<T>(path: string, init: { method?: string; body?: unknown; signal?: AbortSignal } = {}, status = 200): Promise<T> {
     const response = await this.fetch(path, init);
-    const text = await response.text();
-    if (response.status !== status) throw new Error(`${init.method ?? 'GET'} ${path}: ${response.status} ${text.slice(0, 300)}`);
+    const method = init.method ?? (init.body === undefined ? 'GET' : 'POST');
+    let text: string;
+    try {
+      text = await response.text();
+    } catch (error) {
+      throw this.#failed(method, path, error);
+    }
+    if (response.status !== status) throw new Error(`${method} ${path}: ${response.status} ${text.slice(0, 300)}`);
     return JSON.parse(text) as T;
+  }
+
+  /** A request's failure, named: its deadline passed, the run was interrupted, or the network's own error. */
+  #failed(method: string, path: string, error: unknown): Error {
+    if (error instanceof Error && error.name === 'TimeoutError' && this.options.requestMs) return new Error(`${method} ${path}: no answer within ${this.options.requestMs / 1000} s`);
+    if (this.options.signal?.aborted && error === this.options.signal.reason) return error as Error;
+    return error instanceof Error ? error : new Error(String(error));
   }
 
   /** A one-time enrollment token (an admin's). */

@@ -13,8 +13,12 @@
 import { Command } from 'cmdk';
 import { Popover } from 'radix-ui';
 import { useMemo, useState } from 'react';
-import type { ProjectRecord } from '@shared/ipc/schema';
-import { projectList } from '../../sidebar/derive';
+import type { AppSessionId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
+import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
+import { machineOf } from '@shared/machine/address';
+import { ipc } from '../../ipc/client';
+import { projectsByRecency } from '../../sidebar/derive';
 import { selectProjectOrder, useSessions } from '../../stores/sessions';
 import type { HookResult } from '../setup-intent';
 import type { ProjectRowBinding } from './bindings';
@@ -27,9 +31,9 @@ export const NO_PROJECT = "Don't work in a project";
 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 
-// Every project the index lists, most recently active first: the sidebar's level-one order (`projectList`).
-export function recentProjects(input: Parameters<typeof projectList>[0]): ProjectRecord[] {
-  return projectList(input).flatMap((entry) => (entry.project ? [entry.project] : []));
+// Every project the index lists, most recently active first: the sidebar's level-one order (`projectsByRecency`).
+export function recentProjects({ records, digests, projects }: { records: ReadonlyMap<AppSessionId, SessionRecord>; digests: ReadonlyMap<AppSessionId, SessionDigest>; projects: readonly ProjectRecord[]; rows?: unknown }): ProjectRecord[] {
+  return projectsByRecency(records, digests, projects);
 }
 
 // Codex's search over a project: its name, its folder and its path (app-primary:154181-154183).
@@ -44,7 +48,9 @@ function ProjectMenu({ binding, disabled, onWrite }: { binding: ProjectRowBindin
   const [query, setQuery] = useState('');
   const records = useSessions((s) => s.records);
   const digests = useSessions((s) => s.digests);
-  const projects = useSessions(selectProjectOrder);
+  // P5 O6 M5: this machine's projects; a session starts on another machine from O7's picker
+  const all = useSessions(selectProjectOrder);
+  const projects = useMemo(() => all.filter((p) => machineOf(p.id) === ipc.localMachine), [all]);
   const ordered = useMemo(() => recentProjects({ records, digests, projects, rows: [] }), [records, digests, projects]);
   const shown = ordered.filter((p) => matchesProject(p, query));
   const collides = useMemo(() => {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { MachineRef } from '../machine/ref'; // P5 O6 M2
 import { IpcErrorSchema } from './errors';
 import { NAMES, MAIN_ONLY_COMMANDS } from './names';
 import { commandChannel, commands, eventChannel, events, HOST_EVENTS, NAMESPACES, type Namespace } from './schema';
@@ -32,7 +33,7 @@ import * as maws from './schema/maws';
 import * as side from './schema/side';
 // E3 end
 // C11 start
-import { SETTINGS_DEFAULTS_V19 } from '../settings/defaults';
+import { SETTINGS_DEFAULTS_V21 } from '../settings/defaults';
 // C11 end
 // E9 start
 import * as voice from './schema/voice';
@@ -67,9 +68,16 @@ import * as connectors from './schema/connectors'; // P3-H H3b
 import * as delivery from './schema/delivery'; // P4-B5
 import * as customization from './schema/customization'; // UX2-K
 import * as catalog from './schema/catalog'; // P4-AGG M2
+import * as daemon from './schema/daemon'; // P5 O2 M5
+import * as machine from './schema/machine'; // P5 O6 M1
+import * as machines from './schema/machines'; // P5 O6 M3
+import * as org from './schema/org'; // P5 O8 M1
+import * as laneA from './schema/lane-a'; // P5 O9 M2
+import * as machineSettings from './schema/machine-settings'; // P5 O3-D
+import * as clientPort from './schema/client-port'; // P5 O3-D
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */, delivery /* P4-B5 */, customization /* UX2-K */, catalog /* P4-AGG M2 */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */, delivery /* P4-B5 */, customization /* UX2-K */, catalog /* P4-AGG M2 */, daemon /* P5 O2 M5 */, machine /* P5 O6 M1 */, machines /* P5 O6 M3 */, org /* P5 O8 M1 */, laneA /* P5 O9 M2 */, machineSettings, clientPort /* P5 O3-D */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -136,10 +144,10 @@ describe('ipc schema validates both directions', () => {
       ]);
     });
 
-    // C4 (M4): the record side of the index, owned by main.
-    it('carries the C4 session.* record, project and draft entries, every command owned by main', () => {
+    // C4 (M4): the record side of the index, owned by main; P5 O3-D: by `machine`, the spine's (retagged with it).
+    it('carries the C4 session.* record, project and draft entries, every command owned by machine', () => {
       const c4 = ['session.drafts.get', 'session.drafts.set', 'session.get', 'session.list', 'session.projects.add', 'session.projects.list', 'session.projects.remove', 'session.projects.update', 'session.update'];
-      for (const name of c4) expect(commands[name as keyof typeof commands]?.owner, name).toBe('main');
+      for (const name of c4) expect(commands[name as keyof typeof commands]?.owner, name).toBe('machine');
       for (const name of ['session.changed', 'session.removed', 'session.projects.changed']) expect(Object.hasOwn(events, name), name).toBe(true);
       expect(validateCommandInput('session.update', { appSessionId: 'a', patch: {} }).ok).toBe(false); // at least one field
       expect(validateCommandInput('session.update', { appSessionId: 'a', patch: { title: { text: 'x', source: 'generated' } } }).ok).toBe(false); // MAWS never sets generated
@@ -148,8 +156,8 @@ describe('ipc schema validates both directions', () => {
 
     // C4 (M5): replay, started in main and run in the engine host.
     it('carries the C4 session.replay.* entries with their owners and the speed and source bounds', () => {
-      expect(commands['session.replay.start'].owner).toBe('main');
-      expect(commands['session.replay.fixtures'].owner).toBe('main');
+      expect(commands['session.replay.start'].owner).toBe('machine'); // P5 O3-D: started by the spine, main's until then
+      expect(commands['session.replay.fixtures'].owner).toBe('machine');
       expect(commands['session.replay.launch'].owner).toBe('engine-host');
       expect(commands['session.replay.control'].owner).toBe('engine-host');
       expect(Object.hasOwn(events, 'session.replay.progress')).toBe(true);
@@ -168,7 +176,7 @@ describe('ipc schema validates both directions', () => {
     // C4 (M6): the read-only git service, owned by main.
     it('carries the C4 git.* entries, every command owned by main, with the diff and log bounds', () => {
       expect(Object.keys(git.commands).filter((name) => !name.startsWith('git.worktree.')) /* C10: its block is pinned below */.sort()).toEqual(['git.branches', 'git.diff', 'git.log', 'git.lsFiles' /* C7 */, 'git.status', 'git.unwatch', 'git.watch']);
-      for (const spec of Object.values(git.commands)) expect(spec.owner).toBe('main');
+      for (const [name, spec] of Object.entries(git.commands)) if (!name.startsWith('git.worktree.')) expect(spec.owner, name).toBe('main'); // O3-E moves them
       expect(Object.keys(git.events)).toEqual(['git.changed']);
       expect(validateCommandInput('git.diff', { directory: '/r', scope: 'all', base: 'main', path: 'a.ts', context: 20 }).ok).toBe(true);
       expect(validateCommandInput('git.diff', { directory: '/r', scope: 'everything' }).ok).toBe(false);
@@ -185,11 +193,12 @@ describe('ipc schema validates both directions', () => {
     });
     // E6 end
 
-    // C10 start: the worktree service's git.worktree.* entries (C10 execution document, Interfaces "Worktrees"), owner main.
-    it('carries the C10 git.worktree.* entries, every command owned by main, with the cleanup ladder’s refusals', () => {
+    // C10 start: the worktree service's git.worktree.* entries (C10 execution document, Interfaces "Worktrees"), owner main;
+    // P5 O3-D: `machine`, since the spine registers the worktree service.
+    it('carries the C10 git.worktree.* entries, every command owned by machine, with the cleanup ladder’s refusals', () => {
       const c10 = Object.keys(git.commands).filter((name) => name.startsWith('git.worktree.'));
       expect(c10.sort()).toEqual(['git.worktree.add', 'git.worktree.branch', 'git.worktree.deleteBranch', 'git.worktree.list', 'git.worktree.remove', 'git.worktree.status']);
-      for (const name of c10) expect(git.commands[name as keyof typeof git.commands].owner, name).toBe('main');
+      for (const name of c10) expect(git.commands[name as keyof typeof git.commands].owner, name).toBe('machine');
       const add = (branch: unknown) => validateCommandInput('git.worktree.add', { repoRoot: '/r', name: 'a', branch }).ok;
       expect(add({ kind: 'new', name: 'worktree-a', base: 'HEAD' })).toBe(true);
       expect(add({ kind: 'existing', name: 'b' })).toBe(true);
@@ -207,9 +216,10 @@ describe('ipc schema validates both directions', () => {
 
     // C5 start: the shell's own entries (C5 execution document, Interfaces "X2"); the sibling entries it consumes are
     // pinned by C3's and C4's cases above.
-    it('carries the C5 session.*, attention.* and layout.* entries, every command owned by main', () => {
-      const c5 = ['session.digests', 'session.setVisible', 'session.launchMode', 'attention.pendingNavigate', 'layout.get', 'layout.set', 'layout.list', 'layout.openExternal', 'layout.setEnabledActions'];
+    it('carries the C5 session.*, attention.* and layout.* entries, the session reads owned by machine (P5 O3-D) and the rest by main', () => {
+      const c5 = ['attention.pendingNavigate', 'layout.get', 'layout.set', 'layout.list', 'layout.openExternal', 'layout.setEnabledActions'];
       for (const name of c5) expect(commands[name as keyof typeof commands]?.owner, name).toBe('main');
+      for (const name of ['session.digests', 'session.setVisible', 'session.launchMode'] as const) expect(commands[name].owner, name).toBe('machine');
       for (const name of ['session.digest', 'attention.notified', 'attention.navigate', 'layout.action']) expect(Object.hasOwn(events, name), name).toBe(true);
     });
     // C5 end
@@ -343,7 +353,7 @@ describe('ipc schema validates both directions', () => {
   });
 
   describe('command output (renderer, on receipt)', () => {
-    const state = { settings: { ...SETTINGS_DEFAULTS_V19, theme: 'system' }, resolvedTheme: 'dark' };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V21, theme: 'system' }, resolvedTheme: 'dark' };
 
     it('accepts a settings state and returns it unchanged', () => {
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
@@ -378,7 +388,7 @@ describe('ipc schema validates both directions', () => {
     it('accepts well-formed events unchanged', () => {
       const exit = { ptyId: 'p1', exitCode: null, signal: null };
       expect(validateEventPayload('pty.exit', exit)).toEqual({ ok: true, value: exit });
-      const changed = { settings: { ...SETTINGS_DEFAULTS_V19, theme: 'light' }, resolvedTheme: 'light' };
+      const changed = { settings: { ...SETTINGS_DEFAULTS_V21, theme: 'light' }, resolvedTheme: 'light' };
       expect(validateEventPayload('settings.changed', changed)).toEqual({ ok: true, value: changed });
     });
 
@@ -400,10 +410,10 @@ describe('ipc schema validates both directions', () => {
       queue: { length: 0, paused: false }, keepAlive: [], busy: false, lastUsedAt: '2026-09-28T10:00:00.000Z' /* C12 */, memory: { rssKiB: null, treeRssKiB: null, sampledAt: null }, journalPath: '/j', hostHooks: [], lastEventSeq: 0, trust: { attested: false, recorded: null } /* C10 */,
     };
 
-    it('registers every command and event of the X2 tables, owner engine-host but attention.* (owner main, ruling 1)', () => {
+    it('registers every command and event of the X2 tables, owner engine-host but attention.* (owner main, ruling 1; machine since P5 O3-D)', () => {
       for (const name of c3Commands) expect(Object.hasOwn(commands, name), name).toBe(true);
       for (const name of [...C3_SESSION_EVENTS, ...C3_ENGINE_EVENTS, ...C3_ATTENTION_EVENTS]) expect(Object.hasOwn(events, name), name).toBe(true);
-      for (const name of c3Commands) expect(commands[name].owner, name).toBe(name.startsWith('attention.') ? 'main' : 'engine-host');
+      for (const name of c3Commands) expect(commands[name].owner, name).toBe(name.startsWith('attention.') ? 'machine' : 'engine-host');
       expect(C3_SESSION_EVENTS).toEqual(['session.eventBatch', 'session.status', 'session.queue', 'session.brokerItems', 'session.operation', 'session.forgotten']);
       expect(C3_ATTENTION_COMMANDS).toEqual(['attention.list', 'attention.request']);
       expect(C3_ATTENTION_EVENTS).toEqual(['attention.changed']);
@@ -509,6 +519,16 @@ describe('ipc schema validates both directions', () => {
   });
   // C8a end
 
+  // P5 O8 M5: the People toggle's layout key (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §L)
+  it('takes sidebar.people as a layout key, outside the panel namespace, and holds its value to its shape', () => {
+    const value = { version: 1, on: ['remote:github.com/o/r', 'machine:studio'] };
+    expect(validateCommandInput('layout.get', { key: 'sidebar.people' }).ok).toBe(true);
+    expect(validateCommandInput('layout.set', { key: 'sidebar.people', value })).toEqual({ ok: true, value: { key: 'sidebar.people', value } });
+    expect(layout.SidebarPeopleSchema.safeParse(value).success).toBe(true);
+    expect(layout.SidebarPeopleSchema.safeParse({ version: 2, on: [] }).success).toBe(false);
+    expect(layout.SidebarPeopleSchema.safeParse({ version: 1, on: [1] }).success).toBe(false);
+  });
+
   // C7 start: C7's additions (C7 execution document, Interfaces "X2 additions" and the Decision Log's execution-start entry)
   describe('C7 entries', () => {
     it("carries the queue's pause reason on session.queue and session.queue.list as a closed, nullable, optional set", () => {
@@ -523,7 +543,8 @@ describe('ipc schema validates both directions', () => {
     });
 
     it('registers the catalogue event, history, usage, file picking and file listing with their owners', () => {
-      for (const name of ['session.history.list', 'session.history.append', 'settings.usage', 'layout.pickFiles', 'git.lsFiles'] as const) expect(commands[name].owner, name).toBe('main');
+      for (const name of ['settings.usage', 'layout.pickFiles', 'git.lsFiles'] as const) expect(commands[name].owner, name).toBe('main');
+      for (const name of ['session.history.list', 'session.history.append'] as const) expect(commands[name].owner, name).toBe('machine'); // P5 O3-D: the spine's
       for (const name of ['session.catalogChanged', 'settings.usageChanged']) expect(Object.hasOwn(events, name), name).toBe(true);
     });
 
@@ -588,11 +609,16 @@ describe('ipc schema validates both directions', () => {
   // C10 start: the attach tabs' layout key (C10 execution document, M5)
   describe('C10 layout entries', () => {
     it('takes sessions.attachTabs as a layout key, outside the panel namespace, and holds its value to its shape', () => {
-      const value = { version: 1, tabs: [{ tabId: 'terminal:abc', appSessionId: 'a1111111-1111-4111-8111-111111111111', jobId: 'e6dcd828' }] };
+      // P5 O6 M2: version 2 holds addresses; version 1, from before O6, reads lifted with the local machine
+      const local = 'LocalMachineRef0000000' as MachineRef;
+      const bare = { tabId: 'terminal:abc', appSessionId: 'a1111111-1111-4111-8111-111111111111', jobId: 'e6dcd828' };
+      const value = { version: 2, tabs: [{ ...bare, appSessionId: `${local}/${bare.appSessionId}` }] };
       expect(validateCommandInput('layout.set', { key: 'sessions.attachTabs', value })).toEqual({ ok: true, value: { key: 'sessions.attachTabs', value } });
       expect(layout.AttachTabsSchema.safeParse(value).success).toBe(true);
-      expect(layout.AttachTabsSchema.safeParse({ version: 1, tabs: [{ ...value.tabs[0], command: 'x' }] }).success).toBe(false);
-      expect(layout.AttachTabsSchema.safeParse({ version: 2, tabs: [] }).success).toBe(false);
+      expect(layout.AttachTabsSchema.safeParse({ version: 2, tabs: [{ ...value.tabs[0], command: 'x' }] }).success).toBe(false);
+      expect(layout.AttachTabsSchema.safeParse({ version: 3, tabs: [] }).success).toBe(false);
+      expect(layout.storedAttachTabsSchema(local).parse({ version: 1, tabs: [bare] })).toEqual(value);
+      expect(layout.storedAttachTabsSchema(local).parse(value)).toEqual(value);
     });
   });
   // C10 end
@@ -605,13 +631,13 @@ describe('ipc schema validates both directions', () => {
       // added since; E2's `deliverables` was too, until P3-L's cutover removed it).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */, 'delivery' /* P4-B5 */, 'customization' /* UX2-K */, 'catalog' /* P4-AGG M2 */]);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */, 'delivery' /* P4-B5 */, 'customization' /* UX2-K */, 'catalog' /* P4-AGG M2 */, 'daemon' /* P5 O2 M5 */, 'machine' /* P5 O6 M1 */, 'machines' /* P5 O6 M3 */, 'org' /* P5 O8 M1 */, 'laneA' /* P5 O9 M2 */, 'machineSettings', 'clientPort' /* P5 O3-D */]);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
 
-    it('settings.get and settings.changed carry the whole version 19 state', () => { // P4-R8: the app MCP servers; P4-A2: the launch profile
-      const state = { settings: { ...SETTINGS_DEFAULTS_V19, engine: { ...SETTINGS_DEFAULTS_V19.engine, mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }], launchProfile: { plugins: { off: ['ptc@ptc-tool'] }, hooks: 'none' } }, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
+    it('settings.get and settings.changed carry the whole version 20 state', () => { // P4-R8: the app MCP servers; P4-A2: the launch profile
+      const state = { settings: { ...SETTINGS_DEFAULTS_V21, engine: { ...SETTINGS_DEFAULTS_V21.engine, mcpServers: [{ name: 'notion', type: 'http', url: 'https://mcp.notion.com/mcp' }], launchProfile: { plugins: { off: ['ptc@ptc-tool'] }, hooks: 'none' } }, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
       expect(validateEventPayload('settings.changed', state).ok).toBe(true);
       expect(validateEventPayload('settings.changed', { ...state, settings: { ...state.settings, version: 2 } }).ok).toBe(false);
@@ -1084,9 +1110,9 @@ describe('ipc schema validates both directions', () => {
   // E3 start: anchored comments and side questions (P1 ledger §5)
   describe('E3 entries', () => {
     const anchor = { kind: 'file-line', locator: '/r/a.ts#L3', label: 'a.ts:3', path: '/r/a.ts', line: 3 };
-    it('adds the side namespace: three main commands (E11 F2b: the screenshot preview), two engine-host commands, no event', () => {
+    it('adds the side namespace: three main commands (E11 F2b: the screenshot preview; machine since P5 O3-D), two engine-host commands, no event', () => {
       expect(Object.fromEntries(Object.entries(side.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({
-        'side.thread.open': 'main', 'side.sendToMain': 'main', 'side.screenshot.preview': 'main', 'side.question.list': 'engine-host', 'side.question.clear': 'engine-host',
+        'side.thread.open': 'machine', 'side.sendToMain': 'machine', 'side.screenshot.preview': 'machine', 'side.question.list': 'engine-host', 'side.question.clear': 'engine-host',
       });
       expect([...NAMES.side.commands]).toEqual(Object.keys(side.commands));
       expect(Object.keys(side.events)).toEqual([]);
@@ -1146,21 +1172,36 @@ describe('ipc schema validates both directions', () => {
       mode: 'detached', pid: 4321, startedAt: '2026-10-06T10:00:00.000Z', buildId: '0123456789abcdef', protocol: 1, wire: 'fedcba9876543210', liveSessions: 1, rows: 2,
       idleExitMs: 600_000, idleExitAt: null, exitWhenIdle: false, socketPath: '/u/supervisor/host.sock', logPath: '/u/supervisor/host.log', orphansKilled: 0,
     };
-    const status = { transport: 'detached', state: 'ready', supervisor, appBuildId: '0123456789abcdef', appWire: 'fedcba9876543210', mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: '2026-10-08T09:05:53.000Z' }, matches: 'same', reason: null, waitingLiveSessions: null, lastExit: null };
+    const status = { transport: 'detached', state: 'ready', supervisor, appBuildId: '0123456789abcdef', appWire: 'fedcba9876543210', mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: '2026-10-08T09:05:53.000Z' }, matches: 'same', reason: null, waitingLiveSessions: null, lastExit: null, daemon: null, daemonUnavailable: null }; // P5 O2 M7: the embedded shape
 
     it('adds the host namespace: four engine-host commands (three main-only senders), three main-owned, one event each side', () => {
+      // P5 O2 M2 adds host.interest (main-only, below)
       // P5 O10 M7: `host.op` and `host.opQuery`, lane B's operation ledger, are the endpoint's (main-only: never a window's)
-      expect(Object.keys(host.commands)).toEqual(['host.supervisorStatus', 'host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.op', 'host.opQuery', 'host.status', 'host.restart', 'host.openLog']);
+      // P5 O3-D: `host.attachment`, mawsd's signal of an app's attachment (main-only)
+      expect(Object.keys(host.commands)).toEqual(['host.supervisorStatus', 'host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.interest', 'host.op', 'host.opQuery', 'host.attachment', 'host.status', 'host.restart', 'host.openLog']);
       const owners = Object.fromEntries(Object.entries(host.commands).map(([name, spec]) => [name, spec.owner]));
       expect(owners).toEqual({
-        'host.supervisorStatus': 'engine-host', 'host.configure': 'engine-host', 'host.stopAll': 'engine-host', 'host.exitWhenIdle': 'engine-host',
-        'host.op': 'engine-host', 'host.opQuery': 'engine-host',
+        'host.supervisorStatus': 'engine-host', 'host.configure': 'engine-host', 'host.stopAll': 'engine-host', 'host.exitWhenIdle': 'engine-host', 'host.interest': 'engine-host',
+        'host.op': 'engine-host', 'host.opQuery': 'engine-host', 'host.attachment': 'engine-host',
         'host.status': 'main', 'host.restart': 'main', 'host.openLog': 'main',
       });
       expect(Object.keys(host.events)).toEqual(['host.supervisorStatus', 'host.status']);
       // only main stops, configures or arms the supervisor: a renderer's stopAll would read as a crash to main's transport
-      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.op', 'host.opQuery']));
+      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['host.configure', 'host.stopAll', 'host.exitWhenIdle', 'host.op', 'host.opQuery', 'host.attachment']));
       expect([...NAMES.host.commands]).toEqual(['host.supervisorStatus', 'host.status', 'host.restart', 'host.openLog']);
+    });
+
+    it('P5 O2 M2: host.interest carries a client\'s full interest set, main-only; the status names the release', () => {
+      expect(MAIN_ONLY_COMMANDS).toContain('host.interest');
+      expect([...NAMES.host.commands]).not.toContain('host.interest');
+      expect(validateCommandInput('host.interest', { sessions: [] }).ok).toBe(true);
+      expect(validateCommandInput('host.interest', { sessions: ['a', 'b'] }).ok).toBe(true);
+      expect(validateCommandInput('host.interest', { sessions: [''] }).ok).toBe(false);
+      expect(validateCommandInput('host.interest', { sessions: ['a'], extra: 1 }).ok).toBe(false);
+      expect(validateCommandInput('host.interest', { sessions: Array.from({ length: 10_001 }, (_, i) => `s${i}`) }).ok).toBe(false);
+      expect(validateEventPayload('host.supervisorStatus', { ...supervisor, release: { role: 'server', idleMs: 86_400_000 } }).ok).toBe(true);
+      expect(validateEventPayload('host.supervisorStatus', { ...supervisor, release: { role: 'laptop', idleMs: null } }).ok).toBe(true);
+      expect(validateEventPayload('host.supervisorStatus', { ...supervisor, release: { role: 'desktop', idleMs: null } }).ok).toBe(false);
     });
 
     it('validates the supervisor status, its commands and the app-side status', () => {
@@ -1196,6 +1237,12 @@ describe('ipc schema validates both directions', () => {
       expect(validateEventPayload('host.status', waiting).ok).toBe(true);
       expect(validateEventPayload('host.status', { ...waiting, waitingLiveSessions: 1.5 }).ok).toBe(false);
       expect(validateEventPayload('host.status', { ...status, waitingLiveSessions: undefined }).ok).toBe(false);
+      // P5 O2 M7: the daemon shape: its transport, the daemon's own status, and why a launch asked for it runs embedded
+      const daemon = { pid: 4100, startedAt: 't', kind: 'unit', build: { version: '0.0.0', commit: 'c', builtAt: 't', buildId: 'b', engineHostBuildId: 'e' }, machine: 'mRef0123456789abcdefAB', profile: '/p', platform: 'darwin', role: 'laptop', hosts: { 'engine-host': { state: 'ready', pid: 1, build: 'e', liveSessions: 0 }, 'pty-host': { state: 'parked', pid: null, build: null, liveSessions: null } }, clients: { engineHost: true, ptyHost: false, machine: 1 }, idleExitAt: null, logPath: '/p/mawsd/mawsd.log', endpoint: { present: false, detail: null } };
+      expect(validateEventPayload('host.status', { ...status, transport: 'daemon', daemon }).ok).toBe(true);
+      expect(validateEventPayload('host.status', { ...status, daemonUnavailable: 'no LaunchAgent is installed' }).ok).toBe(true);
+      expect(validateEventPayload('host.status', { ...status, transport: 'daemon', daemon: { ...daemon, kind: 'remote' } }).ok).toBe(false);
+      expect(validateEventPayload('host.status', { ...status, daemon: undefined }).ok).toBe(false);
       expect(validateCommandInput('host.restart', { stopSessions: true }).ok).toBe(true);
       expect(validateCommandInput('host.restart', {}).ok).toBe(false);
       expect(validateCommandInput('host.openLog', undefined).ok).toBe(true);
@@ -1612,8 +1659,8 @@ describe('ipc schema validates both directions', () => {
   // P2-C start (2026-10-09): the built-in mods (X20; the P2-C document, §9) and the binary's flag declaration
   describe('P2-C entries', () => {
     const row = { id: 'maws.to-human', name: 'To-human', description: 'd', version: 1, enabled: true, source: 'maws-contract' };
-    it('adds the mods namespace: two main commands, no event', () => {
-      expect(Object.fromEntries(Object.entries(mods.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'mods.list': 'main', 'mods.setSessionOverride': 'main' });
+    it('adds the mods namespace: two main commands (machine since P5 O3-D), no event', () => {
+      expect(Object.fromEntries(Object.entries(mods.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'mods.list': 'machine', 'mods.setSessionOverride': 'machine' });
       expect([...NAMES.mods.commands]).toEqual(Object.keys(mods.commands));
       expect(Object.keys(mods.events)).toEqual([]);
     });
@@ -1642,9 +1689,9 @@ describe('ipc schema validates both directions', () => {
     });
 
     // M4 (2026-10-09): main's owner channel
-    it('adds the ownerChannel namespace: four main commands and its changed event', () => {
+    it('adds the ownerChannel namespace: four main commands (machine since P5 O3-D) and its changed event', () => {
       expect(Object.fromEntries(Object.entries(ownerChannel.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({
-        'ownerChannel.state': 'main', 'ownerChannel.answered': 'main', 'ownerChannel.cancel': 'main', 'ownerChannel.markRead': 'main',
+        'ownerChannel.state': 'machine', 'ownerChannel.answered': 'machine', 'ownerChannel.cancel': 'machine', 'ownerChannel.markRead': 'machine',
       });
       expect([...NAMES.ownerChannel.commands]).toEqual(Object.keys(ownerChannel.commands));
       expect([...NAMES.ownerChannel.events]).toEqual(Object.keys(ownerChannel.events));
@@ -1846,11 +1893,12 @@ describe('ipc schema validates both directions', () => {
     const row = { ...entry, lastEditorTitle: 'Make a page', sessions: [{ appSessionId: 'sess-1', title: 'Make a page', roles: ['created', 'edited'], lastAt: 2 }], space: { id, name: 'Work' }, snippet: 'the page' };
     const counts = { document: 0, presentation: 0, design: 0, design_system: 0, dashboard: 0, html: 1, file: 0 };
 
-    it('owns the three reads in main and the three host reads in the engine host, main-only, and emits library.changed from main', () => {
+    // P5 O3-D: the three reads and files' admission read are the spine's library, `machine`-owned
+    it('owns the three reads in the spine (machine) and the three host reads in the engine host, main-only, and emits library.changed from the spine', () => {
       const owners = Object.fromEntries(Object.entries(library.commands).map(([name, spec]) => [name, spec.owner]));
       const files = { 'library.exportFormats': 'main', 'library.content': 'main', 'library.openExternally': 'main', 'library.reveal': 'main', 'library.read': 'main', 'library.saveAs': 'main' }; // M5b; M6b fix wave 2: library.read
-      expect(owners).toEqual({ 'library.list': 'main', 'library.get': 'main', 'library.spaces': 'main', ...files, 'library.snapshot': 'engine-host', 'library.entry': 'engine-host', 'library.text': 'engine-host', 'library.testImport': 'engine-host' /* M6b */ });
-      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['library.snapshot', 'library.entry', 'library.text']));
+      expect(owners).toEqual({ 'library.list': 'machine', 'library.get': 'machine', 'library.spaces': 'machine', 'library.fileLinkedPaths': 'machine', ...files, 'library.snapshot': 'engine-host', 'library.entry': 'engine-host', 'library.text': 'engine-host', 'library.testImport': 'engine-host' /* M6b */ });
+      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['library.snapshot', 'library.entry', 'library.text', 'library.fileLinkedPaths']));
       expect(MAIN_ONLY_COMMANDS).not.toContain('library.testImport'); // M6b: the e2e calls it from a window; the host refuses it outside MAWS_E2E=1
       expect([...NAMES.library.commands]).toEqual(['library.list', 'library.get', 'library.spaces', ...Object.keys(files), 'library.testImport']);
       expect(validateCommandOutput('library.testImport', { imported: 2, skipped: 1, missing: 0, failed: 0 }).ok).toBe(true);
@@ -1999,4 +2047,78 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // P3-H H3b end
+
+  // P5 O3-D M1 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §C, §E, §G, §H, §I): the services front's
+  // commands and events and the machine half's
+  describe('P5 O3-D entries', () => {
+    it('adds machineSettings.* and clientPort.*, machine-owned, the answer main-only and the settings bridged', () => {
+      expect(Object.fromEntries(Object.entries(machineSettings.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'machineSettings.get': 'machine', 'machineSettings.set': 'machine' });
+      expect(Object.keys(machineSettings.events)).toEqual(['machineSettings.changed']);
+      expect(Object.fromEntries(Object.entries(clientPort.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'clientPort.answer': 'machine' });
+      expect(Object.keys(clientPort.events)).toEqual(['clientPort.request']);
+      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['clientPort.answer', 'session.follow', 'session.visible', 'library.fileLinkedPaths', 'machine.client', 'machine.op', 'machine.opQuery', 'host.attachment', 'fs.scan', 'fs.bind', 'fs.unbind', 'maws.artifact.captured', 'maws.download.recorded']));
+      expect(MAIN_ONLY_COMMANDS).not.toContain('machineSettings.get');
+      expect(MAIN_ONLY_COMMANDS).not.toContain('machineSettings.set');
+    });
+
+    it('patches the machine half alone: its sections by field, the shared ones narrowed to the machine’s fields', () => {
+      const set = (patch: unknown) => validateCommandInput('machineSettings.set', { patch }).ok;
+      expect(set({})).toBe(true);
+      expect(set({ supervisor: { idleExitMinutes: 7 } })).toBe(true);
+      expect(set({ sessions: { archiveInactiveDays: null } })).toBe(true);
+      expect(set({ artifacts: { defaultDesignSystem: null } })).toBe(true);
+      expect(set({ theme: 'dark' }), 'a client field').toBe(false);
+      expect(set({ supervisor: { shape: 'daemon' } }), 'the client half of a shared section').toBe(false);
+      expect(set({ artifacts: { commentsView: 'margin' } }), 'the client half of a shared section').toBe(false);
+      const machine = SETTINGS_DEFAULTS_V21;
+      const half = { version: 1, engine: machine.engine, gateway: machine.gateway, permissions: machine.permissions, mods: machine.mods, supervisor: { idleExitMinutes: machine.supervisor.idleExitMinutes }, artifacts: { defaultDesignSystem: machine.artifacts.defaultDesignSystem, spaceDesignSystems: machine.artifacts.spaceDesignSystems }, sessions: machine.sessions };
+      expect(validateCommandOutput('machineSettings.get', { settings: half, version: 0 }).ok).toBe(true);
+      expect(validateEventPayload('machineSettings.changed', { settings: half }).ok).toBe(true);
+      expect(validateEventPayload('machineSettings.changed', { settings: { ...half, theme: 'dark' } }).ok).toBe(false);
+    });
+
+    it('follows sessions with RL3 cursors, and answers each stream’s mode', () => {
+      const follow = (input: unknown) => validateCommandInput('session.follow', input).ok;
+      expect(follow({ sessions: [{ appSessionId: 'app-1', cursor: { launchId: 'L1', seq: 12, idx: 0 } }, { appSessionId: 'app-2', cursor: null }], live: true })).toBe(true);
+      expect(follow({ sessions: [{ appSessionId: 'app-1', cursor: { launchId: 'L1', seq: 0, idx: -1 } }], live: false }), 'a cursor at the launch’s start').toBe(true);
+      expect(follow({ sessions: [{ appSessionId: 'app-1', cursor: { launchId: '', seq: 1, idx: 0 } }], live: false })).toBe(false);
+      expect(follow({ sessions: [{ appSessionId: 'app-1' }], live: false }), 'the cursor is said, null for none').toBe(false);
+      expect(validateCommandOutput('session.follow', { streams: [{ appSessionId: 'app-1', mode: 'missing', launchId: 'L1' }, { appSessionId: 'app-2', mode: 'live', launchId: null }] }).ok).toBe(true);
+      expect(validateCommandOutput('session.follow', { streams: [{ appSessionId: 'app-1', mode: 'snapshot', launchId: null }] }).ok).toBe(false);
+      expect(validateCommandOutput('session.visible', { sessions: ['app-1'] }).ok).toBe(true);
+      expect(validateEventPayload('session.visibleChanged', { appSessionId: 'app-1', visible: false }).ok).toBe(true);
+    });
+
+    it('carries a client port request to one client by kind, and its answer by id', () => {
+      expect(validateEventPayload('clientPort.request', { id: 'r1', client: 'page:3.1', kind: 'pick', request: { directory: true } }).ok).toBe(true);
+      expect(validateEventPayload('clientPort.request', { id: 'r2', client: null, kind: 'notifyClose', request: null }).ok).toBe(true);
+      expect(validateEventPayload('clientPort.request', { id: 'r3', client: null, kind: 'trash', request: {} }).ok, 'no trash: mawsd moves it itself (D10)').toBe(false);
+      expect(validateCommandInput('clientPort.answer', { id: 'r1', answer: { paths: ['/a'] } }).ok).toBe(true);
+      expect(validateCommandInput('clientPort.answer', { id: '', answer: null }).ok).toBe(false);
+    });
+
+    it('claims a machine act as host.op claims a lane B one, and answers as host.op answers', () => {
+      const op = { opId: 'op_0123456789abcdef', opCreated: '2026-10-29T10:00:00.000Z', claim: { member: 'm', device: 'd', fingerprint: 'f' }, name: 'session.archive', input: { appSessionId: 'app-1' } };
+      expect(validateCommandInput('machine.op', op).ok).toBe(true);
+      expect(validateCommandInput('machine.op', { ...op, opId: 'short' }).ok).toBe(false);
+      expect(validateCommandInput('machine.op', { ...op, claim: { member: 'm', device: 'd' } }).ok).toBe(false);
+      expect(validateCommandOutput('machine.op', { state: 'done', result: { ok: true } }).ok).toBe(true);
+      expect(validateCommandOutput('machine.opQuery', { state: 'not-received' }).ok).toBe(true);
+      expect(validateCommandInput('machine.client', { browserSocket: null }).ok).toBe(true);
+      expect(validateCommandInput('host.attachment', { attached: true }).ok).toBe(true);
+      expect(validateCommandInput('host.attachment', { attached: 'yes' }).ok).toBe(false);
+    });
+
+    it('fills the optional fields the mirror reads: attention’s silent ids, every project row, the daemon’s spine', () => {
+      const project = { id: 'p1', name: 'p', directory: '/p', order: 0, createdAt: '2026-10-29T10:00:00.000Z', hidden: true };
+      expect(validateEventPayload('attention.changed', { appSessionId: 'app-1', items: [], silent: [] }).ok).toBe(true);
+      expect(validateEventPayload('attention.changed', { appSessionId: 'app-1', items: [], silent: [''] }).ok).toBe(false);
+      expect(validateEventPayload('session.projects.changed', { projects: [], revision: 1, rows: [project] }).ok).toBe(true);
+      expect(validateCommandOutput('session.projects.list', { projects: [], revision: 1, rows: [project] }).ok).toBe(true);
+      const spine = { state: 'loaded', refused: null, loadedAt: '2026-10-29T10:00:00.000Z', heldDropped: 0 };
+      expect(daemon.DaemonStatusSchema.shape.spine.safeParse(spine).success).toBe(true);
+      expect(daemon.DaemonStatusSchema.shape.spine.safeParse(undefined).success, 'a daemon before O3-D says nothing of it').toBe(true);
+      expect(daemon.DaemonStatusSchema.shape.spine.safeParse({ ...spine, heldDropped: -1 }).success).toBe(false);
+    });
+  });
 });

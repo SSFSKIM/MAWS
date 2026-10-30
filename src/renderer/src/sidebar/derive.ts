@@ -9,13 +9,17 @@ import type { NeedsYouRow } from '../attention/derive';
 import { dateFormats, formatAgo } from '@shared/app/date-format';
 import { lastActivity, sortSessions, type SidebarSort } from '../overview/derive';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
-import { displayTitle } from '../sessions/title'; // E3
+import { displayTitle, NEW_CHAT } from '../sessions/title'; // E3
 import { projectLabels } from './project-labels';
+import type { MachineRef } from '@shared/machine/ref';
+import { machineOfRow, machineOrder, machineProject, orgIndex, orgKeyOf, primaryCheckout, rowOfListed, rowOfSession, type OrgProject, type RowKey } from '../stores/org-projects'; // P5 O6 M5
+import type { ListedSession } from '../stores/sessions'; // P5 O8 M2
 import { SIDE_COPY } from '../side/copy'; // E3
 
-// "Other sessions": the pseudo-project at the end of the list, for sessions without a (known) project.
-export const OTHER_SESSIONS = 'other' as const;
-export type ProjectKey = ProjectId | typeof OTHER_SESSIONS;
+// P5 O6 M5: a row is an org project's, keyed by its org key (an address while its machine has not derived it), or a
+// machine's own project's (`machine:<ref>`), which took the place of "Other sessions": one per machine, after the
+// projects (`stores/org-projects.ts`).
+export type ProjectKey = RowKey;
 
 const isWorking = (digest: SessionDigest | undefined) => digest?.phase === 'working' || digest?.phase === 'starting';
 
@@ -32,71 +36,162 @@ export function sessionMatcher(query: string, projects: ReadonlyMap<ProjectId, P
     (branchLabel(recordBranch(record))?.toLowerCase().includes(q) ?? false); // P2-D
 }
 
+// P5 O8 M2: a listed row's title, "New chat" while its listing has none (as `displayTitle` reads a record's); the search
+// matches a listed row by its title alone.
+export const listedTitle = (listed: Pick<ListedSession, 'title'>): string => (listed.title.trim() === '' ? NEW_CHAT : listed.title);
+export function listedMatcher(query: string): (listed: ListedSession) => boolean {
+  const q = query.trim().toLowerCase();
+  return q === '' ? () => true : (listed) => listedTitle(listed).toLowerCase().includes(q);
+}
+// A listed row's last activity: when its listing was issued.
+const issuedAt = (listed: ListedSession): number => {
+  const at = Date.parse(listed.issued);
+  return Number.isFinite(at) ? at : Number.NEGATIVE_INFINITY;
+};
+
 // ---- the project list --------------------------------------------------------------------------------------------------
 
 export interface ProjectListInput {
   records: ReadonlyMap<AppSessionId, SessionRecord>;
   digests: ReadonlyMap<AppSessionId, SessionDigest>;
-  projects: readonly ProjectRecord[]; // the listed ones
+  projects: ReadonlyMap<ProjectId, ProjectRecord>; // every machine's, hidden and discovered ones included
   rows: NeedsYouRow[]; // the Needs-you rows: a project's waiting count is how many of its sessions have one
-  hidden?: ReadonlySet<ProjectId>; // W11 (I5): projects removed from the sidebar, whose sessions show nowhere in it
+  local: MachineRef;
+  machineName(machine: MachineRef): string;
+  alsoListed?: ReadonlySet<ProjectKey>; // keys listed for the moment though no checkout lists them (the project filter's)
+  listed?: ReadonlyMap<AppSessionId, ListedSession>; // P5 O8 M2: other machines' listed sessions (the sessions store's)
+  people?: ReadonlySet<ProjectKey>; // P5 O8 M5: the rows whose People toggle is on (`stores/people.ts`)
 }
 
 export interface ProjectEntry {
   key: ProjectKey;
-  project: ProjectRecord | null; // null for Other sessions
+  org: OrgProject;
+  project: ProjectRecord | null; // the checkout the row's actions and card act on (`primaryCheckout`); null for a machine's row
+  machine: MachineRef | null; // a machine row's machine; null for an org project's
   name: string;
   sessions: SessionRecord[]; // not archived, unsorted
-  rollup: { waiting: number; working: number };
-  lastActivity: number | null; // W11 (I6): the latest movement of any of its sessions, archived ones included; null without one
+  listed: ListedSession[]; // P5 O8 M2: the listed rows drawn under it, unsorted
+  rollup: { waiting: number; working: number }; // P5 O8 M5: yours only
+  lastActivity: number | null; // W11 (I6): the latest movement of any of its drawn sessions, archived ones included; null without one
+  others: number; // P5 O8 M5: other people's sessions filed under it and not drawn (its People toggle is off)
 }
 
-const OTHER_NAME = 'Other sessions';
-
-// Every listed project, then Other sessions when nonempty, each with its sessions, its waiting (◐) and working
-// (●) counts and its last activity; a hidden project's sessions are in neither. Projects are sorted by recency of
-// activity: the latest movement of any of their sessions (archived ones included, so archiving does not demote a
-// project), a project without sessions by when it was added; ties by the project order, then the name.
-export function projectList({ records, digests, projects, rows, hidden }: ProjectListInput): ProjectEntry[] {
-  const byId = new Map(projects.map((p) => [p.id, p]));
-  const labels = projectLabels(projects);
+// P5 O6 M5: every listed org project, then each machine's own project that holds a session (T3: named after the machine,
+// the local machine's first, then by name), each with its sessions from every machine, its waiting (◐) and working (●)
+// counts and its last activity; a hidden project's sessions are in none. Org projects are sorted by recency of activity:
+// the latest movement of any of their sessions (archived ones included, so archiving does not demote a project), one
+// without sessions by when its checkout was added; ties by its checkout's order, then the name.
+//
+// P5 O8 M2 ("Drawing", membership): another machine's listed session the member owns joins the row `rowOfListed` files it
+// under, unless a record holds its address (the yield rule: the record's row is drawn); its issue counts as activity, and
+// a listed row waiting or busy adds to the counts.
+//
+// P5 O8 M5 ("The People toggle"): ownership comes first. An address, a record's or a listing's, is others' when a listing
+// at it exists and isn't the member's, and yours otherwise (a record carries no owners). Filed as above, others' rows are
+// drawn only under a row whose People toggle is on (`people`), else counted in its `others`, so a record a lane opened of
+// someone else's session leaves the list with the toggle. Drawn, they count as activity but never in the rollups, which
+// say what needs you; a machine's row with others' sessions alone is kept, so its "+N others" and toggle stay reachable.
+export function projectList({ records, digests, projects, rows, local, machineName, alsoListed, listed: remoteSessions = new Map(), people = new Set() }: ProjectListInput): ProjectEntry[] {
+  const index = orgIndex(projects.values(), local);
   const waiting = new Set(rows.map((row) => row.appSessionId));
-  const grouped = new Map<ProjectKey, { live: SessionRecord[]; activity: number }>();
+  const grouped = new Map<ProjectKey, { live: SessionRecord[]; listed: ListedSession[]; activity: number; theirs: Set<AppSessionId>; others: number }>();
+  const groupOf = (key: ProjectKey) => {
+    let entry = grouped.get(key);
+    if (!entry) grouped.set(key, (entry = { live: [], listed: [], activity: Number.NEGATIVE_INFINITY, theirs: new Set(), others: 0 }));
+    return entry;
+  };
+  const isTheirs = (appId: AppSessionId) => remoteSessions.get(appId)?.mine === false;
   for (const record of records.values()) {
-    if (record.projectId !== null && hidden?.has(record.projectId)) continue; // never Other sessions'
-    const key: ProjectKey = record.projectId !== null && byId.has(record.projectId) ? record.projectId : OTHER_SESSIONS;
-    const entry = grouped.get(key) ?? { live: [], activity: Number.NEGATIVE_INFINITY };
-    if (!grouped.has(key)) grouped.set(key, entry);
+    const key = rowOfSession(index, projects, record, alsoListed);
+    if (key === null) continue; // a hidden project's: nowhere
+    const entry = groupOf(key);
+    if (isTheirs(record.appId)) {
+      if (!people.has(key)) {
+        if (!record.archived) entry.others++;
+        continue;
+      }
+      entry.theirs.add(record.appId);
+    }
     entry.activity = Math.max(entry.activity, lastActivity(record, digests.get(record.appId)));
     if (!record.archived) entry.live.push(record);
   }
-  const entryOf = (key: ProjectKey, project: ProjectRecord | null): ProjectEntry => {
-    const group = grouped.get(key);
+  for (const session of remoteSessions.values()) {
+    if (records.has(session.appId)) continue; // the record's row is drawn (or counted) in its place
+    const key = rowOfListed(index, session, alsoListed);
+    if (key === null) continue; // an all-hidden project's: nowhere
+    const entry = groupOf(key);
+    if (!session.mine) {
+      if (!people.has(key)) {
+        entry.others++;
+        continue;
+      }
+      entry.theirs.add(session.appId);
+    }
+    entry.activity = Math.max(entry.activity, issuedAt(session));
+    entry.listed.push(session);
+  }
+  const listedKeys = [...index.orgs.keys()].filter((key) => index.listed.has(key) || alsoListed?.has(key));
+  const primaries = new Map(listedKeys.flatMap((key) => {
+    const primary = primaryCheckout(index, key, local);
+    return primary ? [[key, primary] as const] : [];
+  }));
+  const labels = projectLabels([...primaries.values()].map((p) => ({ ...p, name: index.orgs.get(orgKeyOf(p))!.name })));
+  // a row's latest drawn movement; null with none (others' rows the toggle hides leave a group with no activity)
+  const entryActivity = (key: ProjectKey): number | null => {
+    const activity = grouped.get(key)?.activity;
+    return activity !== undefined && Number.isFinite(activity) ? activity : null;
+  };
+  const entryOf = (org: OrgProject, project: ProjectRecord | null, machine: MachineRef | null, name: string): ProjectEntry => {
+    const group = grouped.get(org.id);
     const sessions = group?.live ?? [];
+    const remote = group?.listed ?? [];
+    const yours = (id: AppSessionId) => !group?.theirs.has(id);
+    const count = (state: string) => remote.filter((l) => l.state === state && yours(l.appId)).length;
     return {
-      key,
+      key: org.id,
+      org,
       project,
-      name: project ? labels.get(project.id)! : OTHER_NAME,
+      machine,
+      name,
       sessions,
-      rollup: { waiting: sessions.filter((r) => waiting.has(r.appId)).length, working: sessions.filter((r) => isWorking(digests.get(r.appId))).length },
-      lastActivity: group && Number.isFinite(group.activity) ? group.activity : null,
+      listed: remote,
+      rollup: {
+        waiting: sessions.filter((r) => yours(r.appId) && waiting.has(r.appId)).length + count('waiting'),
+        working: sessions.filter((r) => yours(r.appId) && isWorking(digests.get(r.appId))).length + count('busy'),
+      },
+      lastActivity: entryActivity(org.id),
+      others: group?.others ?? 0,
     };
   };
-  const activityOf = (key: ProjectKey, project: ProjectRecord) => grouped.get(key)?.activity ?? Date.parse(project.createdAt);
-  const listed = projects
-    .map((project) => ({ entry: entryOf(project.id, project), activity: activityOf(project.id, project) }))
+  const listed = [...primaries]
+    .map(([key, project]) => ({ entry: entryOf(index.orgs.get(key)!, project, null, labels.get(project.id)!), activity: entryActivity(key) ?? Date.parse(project.createdAt) }))
     .sort((a, b) => b.activity - a.activity || a.entry.project!.order - b.entry.project!.order || a.entry.name.localeCompare(b.entry.name))
     .map(({ entry }) => entry);
-  const other = entryOf(OTHER_SESSIONS, null);
-  return other.sessions.length > 0 ? [...listed, other] : listed;
+  const machines = [...new Set([...grouped.keys()].map(machineOfRow).filter((m) => m !== null))].sort(machineOrder(local, machineName));
+  const own = machines.map((machine) => entryOf(machineProject(machine, machineName(machine)), null, machine, machineName(machine))).filter((entry) => entry.sessions.length > 0 || entry.listed.length > 0 || entry.others > 0);
+  return [...listed, ...own];
 }
 
-// The list while searching: the projects whose name matches, and those holding a session that matches.
-export function filterProjectList(entries: ProjectEntry[], query: string, projects: ReadonlyMap<ProjectId, ProjectRecord>): ProjectEntry[] {
+
+// The list while searching: the org projects whose name matches, and every row holding a session that matches.
+export function filterProjectList<E extends ProjectEntry>(entries: E[], query: string, projects: ReadonlyMap<ProjectId, ProjectRecord>): E[] {
   const q = query.trim().toLowerCase();
   if (q === '') return entries;
   const matches = sessionMatcher(query, projects);
-  return entries.filter((e) => (e.project !== null && e.name.toLowerCase().includes(q)) || e.sessions.some(matches));
+  const matchesListed = listedMatcher(query);
+  return entries.filter((e) => (e.machine === null && e.name.toLowerCase().includes(q)) || e.sessions.some(matches) || e.listed.some(matchesListed));
+}
+
+// The projects in order of recency, as the sidebar ranks its rows (a New chat's project picker): the latest movement of
+// any of a project's sessions, else when it was added; ties by its order, then its name.
+export function projectsByRecency(records: ReadonlyMap<AppSessionId, SessionRecord>, digests: ReadonlyMap<AppSessionId, SessionDigest>, projects: readonly ProjectRecord[]): ProjectRecord[] {
+  const activity = new Map<ProjectId, number>();
+  for (const record of records.values()) {
+    if (record.projectId === null) continue;
+    activity.set(record.projectId, Math.max(activity.get(record.projectId) ?? Number.NEGATIVE_INFINITY, lastActivity(record, digests.get(record.appId))));
+  }
+  const at = (p: ProjectRecord) => activity.get(p.id) ?? Date.parse(p.createdAt);
+  return [...projects].sort((a, b) => at(b) - at(a) || a.order - b.order || a.name.localeCompare(b.name));
 }
 
 // ---- an expanded project's sessions ------------------------------------------------------------------------------------
@@ -182,6 +277,66 @@ export function lineageCaption(record: SessionRecord, nested: boolean, parentTit
   return label !== null && label !== displayTitle(record) ? label : null;
 }
 // E3 end
+
+// P5 O8 M2 ("Drawing", membership): an expanded project's records and listed rows in one ordering by last activity (a
+// record's `lastActivity`, a listed row's `issued`), under the same caps and Show more. What the chosen sort puts first
+// stays first: pinned records, and under `priority` the records it ranks by attention, unread or work; the listed rows
+// carry none of those and merge among the rest by recency. Lineage nests records only; a listed row is a tree of one.
+export type SidebarSession = { kind: 'record'; record: SessionRecord } | { kind: 'listed'; listed: ListedSession };
+export interface ListedTreeRow {
+  listed: ListedSession;
+  nestedUnder: null;
+  depth: 0;
+}
+export type SidebarTreeRow = SessionTreeRow | ListedTreeRow;
+export interface SidebarTree {
+  root: SidebarSession;
+  rows: SidebarTreeRow[];
+}
+export const isListedRow = (row: SidebarTreeRow): row is ListedTreeRow => 'listed' in row;
+export const sidebarSessionId = (session: SidebarSession): AppSessionId => (session.kind === 'record' ? session.record.appId : session.listed.appId);
+
+export interface ProjectItemsInput {
+  sorted: readonly SessionRecord[]; // `projectSessions`'s order
+  listed: readonly ListedSession[];
+  digests: ReadonlyMap<AppSessionId, SessionDigest>;
+  rows: NeedsYouRow[];
+  sort: SidebarSort;
+}
+
+export function projectItems({ sorted, listed, digests, rows, sort }: ProjectItemsInput): SidebarSession[] {
+  const waiting = new Set(rows.map((row) => row.appSessionId));
+  const leads = (r: SessionRecord) => r.pinned || (sort === 'priority' && (waiting.has(r.appId) || r.unread || isWorking(digests.get(r.appId))));
+  const split = sorted.findIndex((r) => !leads(r));
+  const head = split === -1 ? sorted : sorted.slice(0, split);
+  const rest = split === -1 ? [] : sorted.slice(split);
+  const remote = [...listed].sort((a, b) => issuedAt(b) - issuedAt(a) || listedTitle(a).localeCompare(listedTitle(b)));
+  const out: SidebarSession[] = head.map((record) => ({ kind: 'record', record }));
+  let i = 0;
+  let j = 0;
+  while (i < rest.length || j < remote.length) {
+    const record = rest[i];
+    if (j >= remote.length || (record !== undefined && lastActivity(record, digests.get(record.appId)) >= issuedAt(remote[j]))) {
+      out.push({ kind: 'record', record });
+      i++;
+    } else {
+      out.push({ kind: 'listed', listed: remote[j] });
+      j++;
+    }
+  }
+  return out;
+}
+
+// The trees the caps count, in the items' order: each record's lineage tree (`nestLineage`) where its root sits, each
+// listed row a tree of one.
+export function nestItems(items: readonly SidebarSession[]): SidebarTree[] {
+  const trees = new Map(nestLineage(items.flatMap((i) => (i.kind === 'record' ? [i.record] : []))).map((tree) => [tree.root.appId, tree]));
+  return items.flatMap((item): SidebarTree[] => {
+    if (item.kind === 'listed') return [{ root: item, rows: [{ listed: item.listed, nestedUnder: null, depth: 0 }] }];
+    const tree = trees.get(item.record.appId);
+    return tree ? [{ root: item, rows: tree.rows }] : [];
+  });
+}
 
 // ---- row text ----------------------------------------------------------------------------------------------------------
 

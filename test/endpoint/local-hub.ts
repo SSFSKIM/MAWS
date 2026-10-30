@@ -45,22 +45,26 @@ const answers = (port: number) =>
     socket.on('error', () => done(false));
   });
 
-/** Starts the runner on a free port pair and waits (60 s at most) until the hub answers through its stand-in. */
-export async function startLocalHub(): Promise<LocalHub> {
+/**
+ * Starts the runner on a free port pair and waits (60 s at most) until the hub answers through its stand-in. `heartbeatMs`
+ * is the machine stream's (the runner's own default, 2 s, unless given; the deployed hub's is 15 s).
+ */
+export async function startLocalHub(options: { heartbeatMs?: number } = {}): Promise<LocalHub> {
   const state = fs.mkdtempSync(join(tmpdir(), 'endpoint-hub-'));
   let child: ChildProcess | null = null;
   let url = '';
+  let output = '';
   for (let attempt = 0; attempt < 5 && child === null; attempt++) {
     const port = 20_000 + 2 * Math.floor(Math.random() * 15_000);
     if ((await answers(port)) || (await answers(port + 1))) continue;
-    const started = spawn(process.execPath, ['--experimental-strip-types', '--disable-warning=ExperimentalWarning', RUNNER, '--port', String(port), '--state', state], {
+    const started = spawn(process.execPath, ['--experimental-strip-types', '--disable-warning=ExperimentalWarning', RUNNER, '--port', String(port), '--state', state, ...(options.heartbeatMs === undefined ? [] : ['--heartbeat-ms', String(options.heartbeatMs)])], {
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
       env: { ...process.env, WRANGLER_SEND_METRICS: 'false' },
     });
-    let output = '';
-    started.stdout?.on('data', (chunk) => (output += String(chunk)));
-    started.stderr?.on('data', (chunk) => (output += String(chunk)));
+    output = '';
+    started.stdout?.on('data', (chunk) => (output = (output + String(chunk)).slice(-20_000)));
+    started.stderr?.on('data', (chunk) => (output = (output + String(chunk)).slice(-20_000)));
     url = `http://127.0.0.1:${port}`;
     const deadline = Date.now() + 60_000;
     for (;;) {
@@ -82,12 +86,18 @@ export async function startLocalHub(): Promise<LocalHub> {
   }
   if (child === null) throw new Error('the local hub could not take a free port');
   const running = child;
+  // A hub gone mid-suite fails every case after it at once, by ECONNREFUSED alone: its last words say why.
+  let stopping = false;
+  running.once('exit', (code, signal) => {
+    if (!stopping) console.error(`the local hub exited mid-suite (${signal ?? `code ${code}`}):\n${output.slice(-4000)}`);
+  });
   let admin: Promise<Member> | null = null;
   return {
     url,
     person: (email = LOCAL_ADMIN) => new StandinPerson(url, email),
     admin: () => (admin ??= Member.open(new StandinPerson(url, LOCAL_ADMIN))),
     async stop() {
+      stopping = true;
       kill(running);
       await new Promise((r) => (running.exitCode !== null ? r(null) : running.once('exit', r)));
       fs.rmSync(state, { recursive: true, force: true });

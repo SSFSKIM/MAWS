@@ -22,7 +22,8 @@ import type { StartOptions } from '../../src/shared/ipc/schema/session';
 import type { AcquireOutcome, SetupEvent, StartOutcome } from '../../src/shared/sessions/setup'; // P2-A: AcquireOutcome
 import type { IpcError } from '../../src/shared/ipc/errors';
 import { EventIdSchema, type AppSessionId, type EventId } from '../../src/shared/graph/ids';
-import type { CommandName, CommandResult, EventName, EventPayload, MawsBridge } from '../../src/shared/ipc/schema';
+import type { CommandName, CommandResult, EventName, EventPayload, PreloadBridge } from '../../src/shared/ipc/schema';
+import { TEST_MACHINE } from './machine';
 
 // A fixture line: `<journal>#<seq>` names an `in` row of `spikes/protocol-probe/fixtures/<journal>.jsonl` (a control
 // response's payload, or the frame itself for any other row); `widgets/<name>.json` a SPEC-derived synthetic answer
@@ -208,7 +209,7 @@ export interface WidgetBackend {
   emitTurnStarted(appSessionId: AppSessionId): EventId; // opens a turn with a fresh id in C3's EventId form
   emitOperation(event: OperationEvent): void;
   emitSetup(event: SetupEvent): void; // a phase of C10's setup (a resume that failed after it started)
-  bridge(): MawsBridge; // an X2 bridge over `answer` and the emitted events, for unit tests
+  bridge(): PreloadBridge; // the preload's bridge over `answer` and the emitted events, for unit tests (P5 O6 M2: main's side, bare ids, on `TEST_MACHINE`)
 }
 
 const appSessionIdOf = (input: unknown): AppSessionId | null => {
@@ -497,6 +498,7 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
     },
     bridge() {
       return {
+        localMachine: TEST_MACHINE,
         async invoke(name, input) {
           if (!WIDGET_BACKEND_COMMANDS.includes(name) && !scripts.has(name)) return { ok: false, error: { code: 'host_unavailable', message: `the widget backend does not answer ${name}` } };
           try {
@@ -514,7 +516,7 @@ export function createWidgetBackend(options: WidgetBackendOptions): WidgetBacken
           return () => void set.delete(entry);
         },
         pathForFile: () => '',
-      } as MawsBridge;
+      } as PreloadBridge;
     },
   };
   return backend;

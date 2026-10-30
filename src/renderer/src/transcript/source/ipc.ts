@@ -5,6 +5,7 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, EventId, MessageUuid } from '@shared/graph/ids';
 import type { CommandName, CommandOutput, CommandResult, MawsBridge } from '@shared/ipc/schema';
+import { bareOf, machineOf } from '@shared/machine/address';
 import { isAppSynthesised } from '@shared/sessions/app-events';
 import { ipc } from '../../ipc/client';
 import { useTranscriptStore } from '../../stores/transcript';
@@ -113,11 +114,14 @@ function withAppEvents(app: SessionEvent[], events: SessionEvent[]): SessionEven
 // source closes it as the reducer closes any crashed process, with an app-synthesised exit (its id under the app id, so
 // the disk-form filter lets it pass; its time the departure's). The exit lives in this transcript's state only: a later
 // hydration reads the session from disk through the successor. A read asked before a later departure says nothing; the
-// next ready asks again.
+// next ready asks again. P5 O6: the host is the session's machine's; another machine's host state crosses its link too,
+// and says nothing of this session.
 function onHostLoss(client: MawsBridge, appSessionId: AppSessionId, running: () => SessionEvent | null, lost: (exit: SessionEvent) => void): () => void {
+  const machine = machineOf(appSessionId);
   let departedAt: string | null = null; // when the host was first heard leaving ready with the process running
   let heard = 0;
-  return client.on('engine.hostState', ({ state }) => {
+  return client.on('engine.hostState', ({ state }, from) => {
+    if (from.machine !== machine) return;
     const asked = ++heard;
     if (state !== 'ready') {
       if (running() !== null) departedAt ??= new Date().toISOString();
@@ -126,11 +130,12 @@ function onHostLoss(client: MawsBridge, appSessionId: AppSessionId, running: () 
     const at = departedAt;
     departedAt = null;
     if (at === null || running() === null) return;
-    void client.invoke('engine.sessions', undefined).then((result) => {
+    void client.invoke('engine.sessions', undefined, { machine }).then((result) => {
       const last = running();
       if (asked !== heard || !result.ok || last === null || result.value.some((status) => status.appSessionId === appSessionId)) return;
       lost({
-        id: `${appSessionId}:host-lost:${at}` as EventId, sessionId: last.sessionId, at, seq: null, agentId: null, parentToolUseId: null,
+        // P5 O6 M2: under the bare app id, as main's synthesised ids are
+        id: `${bareOf(appSessionId)}:host-lost:${at}` as EventId, sessionId: last.sessionId, at, seq: null, agentId: null, parentToolUseId: null,
         kind: 'process.exited', code: null, signal: null, reason: 'crash', lostAttentionCount: 0, budget: null,
       });
     });
@@ -151,7 +156,8 @@ function onHostLoss(client: MawsBridge, appSessionId: AppSessionId, running: () 
 // which C3 then answers (src/engine-host/ipc.ts), followed read-only from there.
 function sessionSource(client: MawsBridge, appSessionId: AppSessionId): TranscriptSource {
   const liveForm = (event: SessionEvent) => event.seq !== null;
-  const diskForm = (event: SessionEvent) => event.seq === null && !isAppSynthesised(appSessionId, event);
+  // P5 O6 M2: an event id is its machine's, under the bare app id (main's synthesised ones and C3's live ones alike)
+  const diskForm = (event: SessionEvent) => event.seq === null && !isAppSynthesised(bareOf(appSessionId), event);
   // Per subscription (the store subscribes once per attachment, then snapshots): whether it has seen the live form, the
   // batches that arrived before its snapshot answered, and its filter. A snapshot serves the subscription made just
   // before it, so a second subscription or a stale snapshot never delivers into another's listener.
@@ -466,8 +472,9 @@ export const ipcSource = (appSessionId: AppSessionId, agentId?: AgentId): Transc
 const truncatedSpills = new Set<string>();
 export const spillWasTruncated = (path: string) => truncatedSpills.has(path);
 
-export const ipcLoadSpillOver = (client: MawsBridge) => async (spill: Spill): Promise<string> => {
-  const read = valueOf(await client.invoke('fs.readSpill', { path: spill.path, length: SPILL_READ_BYTES }));
+export const ipcLoadSpillOver = (client: MawsBridge) => async (spill: Spill, appSessionId: AppSessionId | null = null): Promise<string> => {
+  const machine = appSessionId === null ? client.localMachine : machineOf(appSessionId); // P5 O6 M4: the row's session's machine holds the file
+  const read = valueOf(await client.invoke('fs.readSpill', { path: spill.path, length: SPILL_READ_BYTES }, { machine }));
   if (read.truncated) truncatedSpills.add(spill.path);
   else truncatedSpills.delete(spill.path);
   return read.content;

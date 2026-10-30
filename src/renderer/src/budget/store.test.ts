@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, TaskId } from '@shared/graph/ids';
 import type { BudgetState } from '@shared/ipc/schema/engine';
+import type { EngineSessionStatus } from '@shared/engine/status'; // P5 O2 M2
 import { status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { OTHER_MACHINE } from '../../../../test/support/machine';
 import { useNotices } from '../stores/notices';
 import { BUDGET, clockTime, gb, reasonWords } from './copy';
 import { formatClock } from '@shared/app/date-format';
@@ -53,6 +55,17 @@ describe('the budget’s words', () => {
       'mid-turn', 'working', '2 background tasks', 'waiting for you', '1 queued message', 'held message', 'stateful server c12-kernel',
     ]);
     expect(reasonWords('background_tasks', null, stateful)).toBe('background tasks');
+  });
+
+  it('P5 O2 M2: names the scheduled jobs and the work MAWS cannot read yet beside the tasks', () => {
+    const job = { id: 'c1', schedule: '0 3 * * *', recurring: true, prompt: 'nightly' };
+    const task = { taskId: 't1' as TaskId, taskType: 'local_bash', description: 'sleep', ambient: false };
+    const words = (over: Partial<EngineSessionStatus>) => reasonWords('background_tasks', { ...status(A), ...over }, new Set());
+    expect(words({ work: { crons: [job], unknown: null } })).toBe('1 scheduled job');
+    expect(words({ work: { crons: [job, { ...job, id: 'c2' }], unknown: null }, backgroundTasks: [task] })).toBe('1 background task, 2 scheduled jobs');
+    expect(words({ work: { crons: [], unknown: 'resumed' } })).toBe("background work MAWS can't read yet");
+    expect(words({ work: { crons: [job], unknown: 'turn_ended_without_stop' }, backgroundTasks: [task] })).toBe("1 background task, 1 scheduled job, background work MAWS can't read yet");
+    expect(words({ work: { crons: [], unknown: null } })).toBe('background tasks'); // nothing to name: the reason's own word
   });
 
   it('counts the held sessions in the banner', () => {
@@ -135,6 +148,18 @@ describe('the budget store across engine host generations', () => {
     off = connectBudget(fake.client);
   });
   afterEach(() => off());
+
+  // The branch review: the budget is this machine's engine host's (`engine.budget` crosses no link), while
+  // `engine.hostState` crosses machine links; another machine's host coming and going leaves it as it is.
+  it('another machine’s engine host leaving or returning keeps this machine’s budget and banner, and reads nothing', async () => {
+    await fake.reply('engine.budget', over([A]));
+    expect(banners()).toHaveLength(1);
+    fake.event('engine.hostState', { state: 'restarting', pid: null, restarts: 1, revision: 40 }, OTHER_MACHINE);
+    fake.event('engine.hostState', { state: 'ready', pid: 9, restarts: 1, revision: 41 }, OTHER_MACHINE);
+    expect(useBudget.getState().state).toEqual(over([A]));
+    expect(banners()).toHaveLength(1);
+    expect(fake.calls.filter((call) => call === 'invoke engine.budget')).toHaveLength(1);
+  });
 
   it('a startup read the host refused is made again once the host is ready', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});

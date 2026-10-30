@@ -12,11 +12,13 @@ import { ManageProvider, useManageState } from '../../widgets/plugins/manage';
 import { usePluginsEnv } from '../../widgets/plugins/read';
 import { resolutionOf } from '../../widgets/PluginsWidget';
 import { DiscoverPane } from './DiscoverPane';
+import { machineOf } from '@shared/machine/address';
+import { ipc } from '../../ipc/client';
 
 export function SkillsManage({ cwd, children }: { cwd: string | null; children?: ReactNode }) {
   const env = usePluginsEnv();
   const { reread } = env;
-  const readySessions = useSessions((s) => [...s.engine.values()].filter((status) => status.process === 'ready').length);
+  const readySessions = useSessions((s) => [...s.engine.values()].filter((status) => status.process === 'ready' && machineOf(status.appSessionId) === ipc.localMachine).length); // P5 O6 M4: this machine's, which the change reloads
   const resolveEngine = useCallback(async () => resolutionOf(await reread()), [reread]);
   const directory = cwd ?? env.data?.configHome ?? '';
   const { manage, sheet } = useManageState({ cwd: directory, readySessions, keep: `customize:skills:${cwd ?? 'user'}` }, null, resolveEngine); // the page's own: they outlive its views

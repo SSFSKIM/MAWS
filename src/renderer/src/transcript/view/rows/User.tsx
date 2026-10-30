@@ -172,7 +172,7 @@ function AnchorChip({ anchor }: { anchor: Anchor }) {
   return (
     <div className="transcript-user-anchor">
       {path !== undefined ? (
-        <button type="button" className="transcript-chip" data-chip="anchor" data-anchor-kind={anchor.kind} title={anchor.locator} onClick={() => actions.openFile(path, anchor.line)}>
+        <button type="button" className="transcript-chip" data-chip="anchor" data-anchor-kind={anchor.kind} title={anchor.locator} onClick={() => actions.openFile(path, anchor.line, session)}>
           {content}
         </button>
       ) : (

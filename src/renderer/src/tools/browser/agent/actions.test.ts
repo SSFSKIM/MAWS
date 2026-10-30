@@ -2,6 +2,7 @@
 // the tab in main; a side thread acting in its parent's tab opens the parent's tool, and a tab the window's mirror does
 // not list is looked for in the row's session.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { bareOf } from '@shared/machine/address';
 import { registerPanelTool } from '../../../panel/host';
 import { installFakeMain, ok } from '../../../test-support/code';
 import { browserTab, T1, T2 } from '../../../test-support/browser';
@@ -30,12 +31,12 @@ describe('openBrowserTab', () => {
     expect(browserTabs(A)).toEqual([]);
     expect(browserTabs(B)).toHaveLength(1);
     expect(panelOf(B)!.activeTabId).toBe(browserTabs(B)[0]!.id);
-    expect(main.callsOf('browser.tabs.select')).toEqual([{ appSessionId: B, tabId: T1 }]);
+    expect(main.callsOf('browser.tabs.select')).toEqual([{ appSessionId: bareOf(B), tabId: T1 }]);
   });
 
   it('a tab the mirror does not list is asked of the row’s session', () => {
     openBrowserTab(A, T2);
     expect(browserTabs(A)).toHaveLength(1);
-    expect(main.callsOf('browser.tabs.select')).toEqual([{ appSessionId: A, tabId: T2 }]);
+    expect(main.callsOf('browser.tabs.select')).toEqual([{ appSessionId: bareOf(A), tabId: T2 }]);
   });
 });

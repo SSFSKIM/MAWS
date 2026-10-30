@@ -14,6 +14,7 @@ import { BACKGROUND_COPY } from '../copy';
 import { formatElapsed, formatTokenCount } from '../model/elapsed';
 import { emptyGraph } from '../model/task-graph';
 import { agentsOf, defaultPhase, resolveRun, runView, type PhaseSelection, type RunAgent, type RunPhase } from '../model/workflow-run';
+import { useSessionControls } from '../../../session/controls/controls-for'; // P5 O9
 import { useTaskGraph } from '../store';
 import { useTicker } from '../subagents/shared';
 import { AGENT_TOOL_IDS } from '../tool-ids';
@@ -38,6 +39,10 @@ export function RunWidget({ appSessionId, handle, openedOn, phase, stopError, ct
   const taskId = resolveRun(graph, [openedOn]);
   const node = taskId === null ? undefined : graph.tasks.get(taskId);
   const now = useTicker(ctx.visible && node?.status === 'running');
+  // P5 O9: a session a terminal drives through its bridge is not live here, whatever engine status MAWS kept from an
+  // earlier run of it, so it offers no lane B Stop workflow (as Background work's card offers none)
+  const controls = useSessionControls(appSessionId);
+  const driven = controls !== null && controls.turn() !== null;
   const back = (
     <button type="button" onClick={handle.back} className="self-start rounded-sm text-ui-sm text-fg-muted outline-accent hover:text-fg focus-visible:outline-2">
       {BACKGROUND_COPY.back}
@@ -56,7 +61,7 @@ export function RunWidget({ appSessionId, handle, openedOn, phase, stopError, ct
   // the owner's pick while the snapshot still has it, else the default (a phase a later snapshot dropped)
   const kept = phase === 'all' || view.phases.some((p) => p.index === phase) ? phase : null;
   const selection = kept ?? defaultPhase(view.phases);
-  const live = ctx.status !== null;
+  const live = !driven && ctx.status !== null;
   // the selection names its session, so a pinned Subagents tab still on another session follows this one first
   const openAgent = (agentId: AgentId) => ctx.openTool(AGENT_TOOL_IDS.subagents, { appSessionId, params: { agentId, appSessionId } });
   return (

@@ -2,18 +2,19 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { registerSessionCreator } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
-import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { Overview } from './Overview';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 import { formatClock } from '@shared/app/date-format'; // L129
 
 const nine = scenarioFile('nine-sessions');
-const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title)!.appId;
+const idOf = (title: string) => pageScenario(nine).sessions.find((r) => r.title.text === title)!.appId; // P5 O6 M2: the page's id
 const requests: Record<string, SessionEvent> = Object.assign({}, ...nine.attention.map((a) => a.requests));
 const offs: (() => void)[] = [];
 
@@ -24,12 +25,12 @@ const card = (title: string) => screen.getByRole('article', { name: title });
 beforeEach(() => {
   resetShellStores();
   fillStores(nine);
-  window.maws = fakeClient({ 'attention.request': ({ requestId }: { requestId: string }) => ({ event: requests[requestId] ?? null }) }).client;
+  window.maws = fakeClient({ 'attention.request': ({ requestId }: { requestId: string }) => ({ event: requests[requestId] ?? null }) }).client as unknown as PreloadBridge;
 });
 afterEach(() => {
   cleanup();
   offs.splice(0).forEach((off) => off());
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 describe('overview board', () => {
@@ -40,7 +41,7 @@ describe('overview board', () => {
       'MAWS',
       'codex_somersault',
       'claude-usage-menubar',
-      'Other sessions',
+      'This Mac', // P5 O6 M5 (T3): the sessions of no project are their machine's
     ]);
     expect(cardTitles(group('Needs you'))).toEqual(['Fix sidebar drag', 'Sidebar interaction pass', 'Quota reset recovery']);
     expect(cardTitles(group('claude-usage-menubar'))).toEqual(['Usage reset countdown', 'Settings idle probe']);
@@ -179,7 +180,7 @@ describe('a released session’s card', () => {
   it('stays on the board, idle, with the muted word released', () => {
     const id = idOf('Settings idle probe');
     const digest = useSessions.getState().digests.get(id)!;
-    act(() => useSessions.getState().applyDigest({ ...digest, released: { at: AT_RELEASE, reason: 'budget', limitKiB: 8 * 1024 * 1024 }, revision: digest.revision + 1 }));
+    act(() => useSessions.getState().applyDigest({ ...digest, released: { at: AT_RELEASE, reason: 'budget', limitKiB: 8 * 1024 * 1024 }, revision: digest.revision + 1 }, TEST_MACHINE));
     render(<Overview paneIndex={0} />);
     const released = card('Settings idle probe');
     expect(within(released).getByTestId('card-activity').textContent).toBe('Idle');

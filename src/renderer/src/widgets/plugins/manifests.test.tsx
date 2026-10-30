@@ -5,12 +5,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import type { ManifestItemRef, PluginManifestView } from '@shared/ipc/schema/plugins';
 import { WidgetReadPolicyContext } from '../read';
 import { manifestKeyOf } from './library';
 import { usePluginManifests, type ManifestRequest } from './manifests';
 import { usePluginsRead } from './read';
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 
 const CWD = '/work/maws';
 const view = (key: ManifestItemRef, over: Partial<PluginManifestView> = {}): PluginManifestView => ({
@@ -42,6 +43,7 @@ beforeEach(() => {
   answer = (key) => view(key);
   ending = 'answer';
   window.maws = {
+    localMachine: TEST_MACHINE,
     invoke: vi.fn(async (_name: string, input: { items: ManifestItemRef[] }) => {
       asked.push(input.items);
       if (ending === 'reject') throw new Error('the bridge went away');
@@ -49,11 +51,11 @@ beforeEach(() => {
       return { ok: true, value: { manifests: input.items.map((key) => answer(key)) } };
     }),
     on: () => () => {},
-  } as unknown as MawsBridge;
+  } as unknown as PreloadBridge;
 });
 afterEach(() => {
   cleanup();
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: unknown }).maws;
 });
 
 const client = new QueryClient();
@@ -143,6 +145,7 @@ describe('usePluginManifests under the marketplace listing', () => {
     changed = new Set();
     hold = { listing: null, manifest: null };
     window.maws = {
+      localMachine: TEST_MACHINE,
       invoke: vi.fn(async (command: string, input: { items: ManifestItemRef[] }) => {
         if (command === 'marketplaces.list') {
           listings += 1;
@@ -159,7 +162,7 @@ describe('usePluginManifests under the marketplace listing', () => {
         changed.add(listener);
         return () => void changed.delete(listener);
       },
-    } as unknown as MawsBridge;
+    } as unknown as PreloadBridge;
   });
   // the hook as its callers hold it: beside their own read of the marketplace listing
   const useCaller = (cwd: string, items: readonly ManifestRequest[]) => {

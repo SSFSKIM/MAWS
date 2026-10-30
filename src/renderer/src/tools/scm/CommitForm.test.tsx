@@ -11,6 +11,7 @@ import { groupsOf } from './groups';
 import { Notice } from './Notice';
 import { useScm } from './store';
 import { createScmUi, type ScmUi } from './view-state';
+import { at } from '../../../../../test/support/machine';
 
 let main: ReturnType<typeof scmMain>;
 let ui: StoreApi<ScmUi>;
@@ -19,7 +20,7 @@ function renderForm(status: GitStatus = statusOf({ files: SCRATCH_FILES }), trus
   return render(
     <>
       <Notice ui={ui} />
-      <CommitForm appSessionId={A} ui={ui} groups={groupsOf(status)} trusted={trusted} />
+      <CommitForm appSessionId={at(A)} ui={ui} groups={groupsOf(status)} trusted={trusted} />
     </>,
   );
 }
@@ -30,7 +31,7 @@ const reason = () => document.querySelector('[data-scm-commit-reason]')?.textCon
 beforeEach(() => {
   useScm.getState().reset();
   main = scmMain();
-  ui = createScmUi({ session: A });
+  ui = createScmUi({ session: at(A) });
 });
 afterEach(() => cleanup());
 
@@ -39,14 +40,14 @@ describe('the commit form', () => {
     const { rerender } = renderForm(statusOf({ files: SCRATCH_FILES }), null);
     expect(commit().disabled).toBe(true);
     expect(reason()).toBeNull(); // the trust is still being read: disabled, nothing to say yet
-    rerender(<CommitForm appSessionId={A} ui={ui} groups={groupsOf(statusOf({ files: SCRATCH_FILES }))} trusted={false} />);
+    rerender(<CommitForm appSessionId={at(A)} ui={ui} groups={groupsOf(statusOf({ files: SCRATCH_FILES }))} trusted={false} />);
     expect(commit().disabled).toBe(true);
     expect(reason()).toBe('Trust the folder to commit');
-    rerender(<CommitForm appSessionId={A} ui={ui} groups={groupsOf(statusOf({ files: [scmFile('f.txt', 'U', 'U'), ...SCRATCH_FILES] }))} trusted />);
+    rerender(<CommitForm appSessionId={at(A)} ui={ui} groups={groupsOf(statusOf({ files: [scmFile('f.txt', 'U', 'U'), ...SCRATCH_FILES] }))} trusted />);
     expect(reason()).toBe('Resolve the conflicts first');
-    rerender(<CommitForm appSessionId={A} ui={ui} groups={groupsOf(statusOf({ files: [scmFile('a.ts', '.', 'M')] }))} trusted />);
+    rerender(<CommitForm appSessionId={at(A)} ui={ui} groups={groupsOf(statusOf({ files: [scmFile('a.ts', '.', 'M')] }))} trusted />);
     expect(reason()).toBe('Nothing staged');
-    rerender(<CommitForm appSessionId={A} ui={ui} groups={groupsOf(statusOf({ files: SCRATCH_FILES }))} trusted />);
+    rerender(<CommitForm appSessionId={at(A)} ui={ui} groups={groupsOf(statusOf({ files: SCRATCH_FILES }))} trusted />);
     expect(reason()).toBe('Write a commit message');
     fireEvent.change(message(), { target: { value: '   ' } });
     expect(commit().disabled).toBe(true);

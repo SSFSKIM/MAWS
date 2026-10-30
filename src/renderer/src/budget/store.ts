@@ -87,8 +87,10 @@ export function connectBudget(client: MawsBridge = ipc): () => void {
       snapshotPending = false; // an event is newer than any snapshot still on its way
       apply(state);
     }),
-    client.on('engine.hostState', (host) => {
-      if (!live) return;
+    // P5 O6: the budget is this machine's engine host's (`engine.budget` crosses no link); another machine's host state,
+    // which crosses its link, says nothing of it
+    client.on('engine.hostState', (host, from) => {
+      if (!live || from.machine !== client.localMachine) return;
       generation += 1;
       snapshotPending = true;
       if (host.state === 'ready') return read();

@@ -5,8 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import { bareOf } from '@shared/machine/address';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { BUTTON_LIKE_INPUTS, connectKeys } from '../keymap/dispatcher';
 import { bindingsOf } from '../keymap/useKeyChord';
 import { useAttention } from '../stores/attention';
@@ -21,7 +23,8 @@ import { HEADINGS as PREVIEW_HEADINGS } from '../sidebar/RequestPreview';
 import { BUTTON_LIKE_INPUTS as CARD_INPUTS, HEADINGS, RequestCard, type Placement } from './RequestCard';
 import { fixtureRequest, itemFor, permission, syntheticRequest, type RequestEvent } from './test-requests';
 
-const APP = 'app-test' as AppSessionId;
+const APP = at('app-test' as AppSessionId);
+const MAIN_APP = bareOf(APP); // P5 O6 M2: as main (the fake bridge) is asked
 let fake: FakeClient;
 let outcome: 'delivered' | 'not_pending' | 'write_failed' = 'delivered';
 let sessionEvents: SessionEvent[] = []; // what `session.events` answers for APP (the transcript's IPC source)
@@ -34,14 +37,14 @@ beforeEach(() => {
   outcome = 'delivered';
   sessionEvents = [];
   fake = fakeClient({ 'session.answer': () => ({ outcome }), 'session.events': () => ({ events: sessionEvents, lastSeq: sessionEvents.length, complete: true }) });
-  window.maws = fake.client;
+  window.maws = fake.client as unknown as PreloadBridge;
   disconnect = connectKeys();
 });
 afterEach(() => {
   disconnect();
   cleanup();
   for (const key of Object.keys(useTranscriptStore.getState().entries)) useTranscriptStore.getState().drop(key);
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
   vi.useRealTimers();
 });
 
@@ -245,7 +248,7 @@ describe('request card placements and delivery states', () => {
     fireEvent.click(await screen.findByRole('link', { name: 'Website' }));
     expect(fake.invoked('layout.openExternal')).toEqual([{ url: 'https://example.com/' }]);
     fireEvent.click(screen.getByTitle('/r/app.ts'));
-    expect(currentSet(useLayout.getState().main).panes.flatMap((pane) => pane.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: '/r/app.ts', line: 7, appSessionId: APP }));
+    expect(currentSet(useLayout.getState().main).panes.flatMap((pane) => pane.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: '/r/app.ts', line: 7, appSessionId: APP, machine: TEST_MACHINE }));
   });
 
   it.each(['constructor', 'toString', '__proto__'])('renders and submits a question named %s', async (text) => {
@@ -580,13 +583,13 @@ describe('request card placements and delivery states', () => {
 
   it('fetches the request through the attention store when the placement passes none, showing a skeleton meanwhile', async () => {
     fake = fakeClient({ 'session.answer': () => ({ outcome }) });
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     const item = itemFor(reapply, APP);
     render(<RequestCard item={item} request={null} placement="inline" paneIndex={null} />);
     expect(screen.getByText('Loading the request…')).toBeTruthy();
     await act(() => fake.reply('attention.request', { event: reapply }));
     expect(screen.getByRole('heading', { name: 'Bash' })).toBeTruthy();
-    expect(fake.invoked('attention.request')).toEqual([{ appSessionId: APP, requestId: reapply.requestId }]);
+    expect(fake.invoked('attention.request')).toEqual([{ appSessionId: MAIN_APP, requestId: reapply.requestId }]);
     expect(useAttention.getState().requests.get(item.id)).toEqual(reapply);
   });
 
@@ -598,7 +601,7 @@ describe('request card placements and delivery states', () => {
     });
     render(<RequestCard item={item} request={null} placement="inline" paneIndex={null} />);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Switch to Manual mode' }));
-    expect(fake.invoked('session.setPermissionMode')).toEqual([{ appSessionId: APP, mode: 'default' }]);
+    expect(fake.invoked('session.setPermissionMode')).toEqual([{ appSessionId: MAIN_APP, mode: 'default' }]);
   });
 
   it('a request the store could not read shows its notice with the failure instead of loading', () => {
@@ -642,8 +645,8 @@ describe('request card placements and delivery states', () => {
 
 describe('card focus owner is the Overview article', () => {
   function Articles() {
-    const a = itemFor(reapply, 'app-a');
-    const b = itemFor({ ...reapply, requestId: 'req-b' } as RequestEvent, 'app-b');
+    const a = itemFor(reapply, at('app-a'));
+    const b = itemFor({ ...reapply, requestId: 'req-b' } as RequestEvent, at('app-b'));
     return (
       <Pane>
         <Card event={reapply} placement="card" item={a} />
@@ -673,10 +676,10 @@ describe('card focus owner is the Overview article', () => {
     render(
       <>
         <Pane index={0}>
-          <RequestCard item={itemFor(reapply, 'app-a')} request={reapply} placement="docked" paneIndex={0} />
+          <RequestCard item={itemFor(reapply, at('app-a'))} request={reapply} placement="docked" paneIndex={0} />
         </Pane>
         <Pane index={1}>
-          <RequestCard item={itemFor({ ...reapply, requestId: 'req-b' } as RequestEvent, 'app-b')} request={{ ...reapply, requestId: 'req-b' } as SessionEvent} placement="docked" paneIndex={1} />
+          <RequestCard item={itemFor({ ...reapply, requestId: 'req-b' } as RequestEvent, at('app-b'))} request={{ ...reapply, requestId: 'req-b' } as SessionEvent} placement="docked" paneIndex={1} />
         </Pane>
       </>,
     );

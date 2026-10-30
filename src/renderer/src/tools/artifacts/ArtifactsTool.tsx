@@ -22,13 +22,17 @@
 // P4-B3 (its Decision Log 22; X5 as amended; tracker row 290): the artifact a tab shows is its persisted params
 // (`{target}` through the layout store's `setPanelParams`; none while it shows the list or once the instance goes), which
 // the host hands back to the tab restored at the next launch, so the tab shows the same record, pinned or a session's.
+// P5 O6 M2 (OX2): a record names its artifact's machine too (`{target, machine}`), as a main artifact tab does; a record
+// persisted before O6 holds none and is the local machine's.
 import { useEffect, useSyncExternalStore } from 'react';
 import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { AppSessionId } from '@shared/graph/ids';
+import { MachineRefSchema, type MachineRef } from '@shared/machine/ref';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { Icon } from '../../app/IconButton';
 import type { ArtifactOpenAt } from '../../artifacts/open-at';
 import { releaseArtifactEditorState } from '../../artifacts/registry';
+import { ipc } from '../../ipc/client';
 import { askEditorHostClose, clearEditorHost, type EditorHostScope } from '../../panel/editor-host';
 import { panelHost, usePanelHost } from '../../panel/host';
 import type { PanelTool, PanelToolContext } from '../../panel/tool';
@@ -49,6 +53,7 @@ export { ARTIFACTS_TOOL_ID };
 // version's id, names the version shown), and the list's scope.
 export interface ArtifactsParams {
   target?: string;
+  machine?: MachineRef; // P5 O6 M2: the target's machine; none, the local machine
   at?: ArtifactOpenAt;
   location?: ArtifactLocation;
   scope?: ArtifactsScope;
@@ -60,8 +65,9 @@ export interface ArtifactsParams {
 // What the tool persisted for a restored tab, read back: the record's artifact id, else (anything else stored) the list.
 // The version shown and the list's scope are not persisted; a restored record shows the latest.
 const restoredParams = (stored: unknown): ArtifactsParams | undefined => {
-  const target = typeof stored === 'object' && stored !== null && !Array.isArray(stored) ? (stored as { target?: unknown }).target : undefined;
-  return typeof target === 'string' && target !== '' ? { target } : undefined;
+  const record = typeof stored === 'object' && stored !== null && !Array.isArray(stored) ? (stored as { target?: unknown; machine?: unknown }) : {};
+  const machine = MachineRefSchema.safeParse(record.machine);
+  return typeof record.target === 'string' && record.target !== '' ? { target: record.target, machine: machine.success ? machine.data : ipc.localMachine } : undefined;
 };
 
 // An artifact in the panel's Artifacts tool, in the session's panel, activated (P3-L M5b: the comment card's re-dock;
@@ -75,7 +81,7 @@ export function openArtifactInPanel(appSessionId: AppSessionId | null, artifactI
   panelHost.addTool<ArtifactsParams>(ARTIFACTS_TOOL_ID, { appSessionId, pin: appSessionId === null, params, activate: true });
 }
 
-export type ArtifactsView = { kind: 'list' } | { kind: 'record'; artifactId: string };
+export type ArtifactsView = { kind: 'list' } | { kind: 'record'; artifactId: string; machine: MachineRef };
 
 export interface ArtifactsState {
   appSessionId: AppSessionId | null; // the session the list belongs to
@@ -123,7 +129,7 @@ export class ArtifactsHandle {
   // The tab's persisted params: the record shown, none for the list.
   private persist(): void {
     const { view } = this.state;
-    useLayout.getState().setPanelParams(this.editorScope.tabId, view.kind === 'record' ? { target: view.artifactId } : null);
+    useLayout.getState().setPanelParams(this.editorScope.tabId, view.kind === 'record' ? { target: view.artifactId, machine: view.machine } : null);
   }
 
   // The tab stops showing its artifact: the editor's state and its header registration go.
@@ -182,8 +188,9 @@ export class ArtifactsHandle {
     const serial = params?.carried ? null : requestArtifactOpen(target, params?.at ?? 'latest', this.editorScope.surface, params?.location);
     if (serial === null) withdrawVersionRequest(target, this.editorScope.surface);
     const { view } = this.state;
-    if (view.kind === 'record' && view.artifactId === target) return this.withdraw();
-    this.leaveThen({ kind: 'record', artifactId: target }, () => serial !== null && cancelOpenRequest(serial));
+    const machine = params?.machine ?? ipc.localMachine;
+    if (view.kind === 'record' && view.artifactId === target && view.machine === machine) return this.withdraw();
+    this.leaveThen({ kind: 'record', artifactId: target, machine }, () => serial !== null && cancelOpenRequest(serial));
   };
 
   back = () => {

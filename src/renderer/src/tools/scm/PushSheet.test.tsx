@@ -10,6 +10,7 @@ import { A, DIR, OTHER_TOKEN, planOf, refusal, scmMain, scmStatusOf, statusOf, T
 import { PushSheet } from './PushSheet';
 import { useScm } from './store';
 import { createScmUi, type ScmUi } from './view-state';
+import { at } from '../../../../../test/support/machine';
 
 let main: ReturnType<typeof scmMain>;
 let ui: StoreApi<ScmUi>;
@@ -17,7 +18,7 @@ let release: () => void = () => {};
 
 function open(status: GitStatus = statusOf({ ahead: 1 }), scm: ScmStatus = scmStatusOf()) {
   ui.setState({ sheet: { kind: 'push' } });
-  render(<PushSheet appSessionId={A} ui={ui} status={status} scm={scm} />);
+  render(<PushSheet appSessionId={at(A)} ui={ui} status={status} scm={scm} />);
   return screen.getByRole('dialog', { name: 'Push' });
 }
 const submitOf = (sheet: HTMLElement) => within(sheet).getByRole('button', { name: 'Push' }) as HTMLButtonElement;
@@ -28,8 +29,8 @@ const rowOf = (sheet: HTMLElement, name: string) => sheet.querySelector(`[data-s
 beforeEach(() => {
   useScm.getState().reset();
   main = scmMain();
-  ui = createScmUi({ session: A });
-  release = useScm.getState().resume(A); // the body holds the session's latest run while mounted
+  ui = createScmUi({ session: at(A) });
+  release = useScm.getState().resume(at(A)); // the body holds the session's latest run while mounted
 });
 afterEach(() => {
   release();
@@ -51,7 +52,7 @@ describe("push and PR sheets show the plan's command and destination and run onl
     fireEvent.click(submitOf(sheet));
     await waitFor(() => expect(main.callsOf('scm.push')).toEqual([{ appSessionId: A, token: TOKEN }]));
     await waitFor(() => expect(ui.getState().sheet).toBeNull());
-    expect(useScm.getState().runs.get(A)).toMatchObject({ token: TOKEN, kind: 'push', plan: planOf(), running: true });
+    expect(useScm.getState().runs.get(at(A))).toMatchObject({ token: TOKEN, kind: 'push', plan: planOf(), running: true });
   });
 
   it('Push: lists every push destination, one per line, a bare path as it is', async () => {

@@ -9,11 +9,14 @@
   },
   "include": [
     "electron.vite.config.ts",
+    "scripts/latin1-bundles.ts", // the config's output plugin (main-process bundles as Latin-1 text)
     "vitest.config.ts",
     "src/main/**/*",
+    "src/services/**/*", // P5 O3-C: the machine services library (the spine and the checkouts)
     "src/preload/**/*",
     "src/engine-host/**/*",
     "src/pty-host/**/*",
+    "src/mawsd/**/*", // P5 O2 M5: the machine daemon
     "src/shared/**/*",
     "src/artifacts/**/*", // P3-A: the portable artifact layer, typechecked as the host will import it
     "apps/org-protocol/src/**/*.ts", // P5-O10 M9: the remote layer's protocol package, which main's device keys sign with
@@ -31,9 +34,26 @@
     "apps/desk-hub/deploy/hub.ts",
     "apps/desk-hub/deploy/org-admin.ts",
     "apps/desk-hub/deploy/proof.ts",
+    // P5 O8 M1: test/org/sign-in.local.test.ts roots its org and approves its pairing with O13's `deployment admin`
+    "apps/desk-hub/deploy/admin.ts",
+    "apps/desk-hub/deploy/admin-device.ts",
+    "apps/desk-hub/deploy/admin-machines.ts",
+    "apps/desk-hub/deploy/deploy.ts",
+    "apps/desk-hub/deploy/run-lock.ts",
+    "apps/desk-hub/deploy/terminal.ts",
+    // P5 O10 M11: test/endpoint/acceptance-local.test.ts runs the endpoint acceptance run itself against a local mawsd
+    "apps/desk-hub/deploy/endpoint-*.ts",
+    "apps/org-protocol/test-support/*.ts",
     "apps/desk-hub/fake-machine/json-file.ts",
     "apps/desk-hub/fake-machine/link.ts",
     "apps/desk-hub/fake-machine/org.ts",
+    // P5 O9 M9: test/lane-a/fake-plane.ts plays a session's steps through the fake machine's DX4 producer (SessionDepth)
+    "apps/desk-hub/fake-machine/session.ts",
+    "apps/desk-hub/fake-machine/jobs.ts",
+    "apps/desk-hub/fake-machine/output.ts",
+    "apps/desk-hub/fake-machine/recording.ts",
+    "apps/desk-hub/fake-machine/routes.ts",
+    "apps/desk-hub/fake-machine/dx4/*.json",
     // M3: the RL1 suite runs desk-hub's own suites' hub (its Worker bundled, in Miniflare, behind the stand-in) and reads
     // its pushes as a device would
     "apps/desk-hub/test/support/bundle.ts",
@@ -65,13 +85,16 @@
     // test/support/scratch-env.test.ts the e2e launches' environments, and test/support/p1-live.test.ts the live
     // sittings' pure parts and the OOPIF page (Task 6.1)
     "e2e/support/processes.ts",
+    "e2e/support/canonical-mawsd.ts", // O14 residue 18: the packaged daemon-shape check's watch, exercised by test/support/canonical-mawsd.test.ts
     "e2e/support/best-effort-evidence.ts", // Reload diagnostics' bounded teardown, exercised by test/support/best-effort-evidence.test.ts
     "e2e/support/scratch-env.ts",
+    "e2e/support/local-org.ts", // P5 O10 M10: test/support/local-org.test.ts enrolls a built mawsd in the enrolled idle scene's org
     "e2e/support/p1-live.ts",
     "e2e/support/oopif-page.ts",
     // E11 end
     // P2-F: test/support/live-budget.test.ts runs the live specs' engine cap
     "e2e/support/live-budget.ts",
+    "e2e/support/process-evidence.d.mts", // the live heavy guard's timing-only artifact
     // P2-F F-E: test/support/live-turns.test.ts runs the live specs' wait for a submitted turn
     "e2e/support/live-turns.ts",
     // P3-C M9: test/support/text-run.test.ts runs the LibreOffice compare's text matcher
@@ -93,6 +116,7 @@
     "e2e/support/packaged-resolution.ts", // P3-F: test/support/packaged-resolution.test.ts checks packaged resolution
     // P3-HD M4a: test/support/connector-oauth*.test.ts run the toy OAuth fixture's logic, its scene support and fake browser
     "e2e/support/connector-oauth-core.d.mts",
+    "e2e/support/daemon-unit-guard.d.mts", // P5 O2 M7: test/support/daemon-unit-guard.test.ts runs e2e:daemon-unit's CI guard and labels
     "e2e/support/connector-oauth.ts",
     "e2e/support/keychain-guard.ts", // fixB: the custody's keychain prompt guard and engine-environment checks
     "e2e/support/connector-oauth-browser.ts",
@@ -118,12 +142,17 @@
     "e2e/support/live-data-bounds.ts", // E3 M4: test/support/live-data-bounds.test.ts runs the live block's on-screen judgement
     "e2e/support/quiet.ts", // P4-W: test/support/quiet.test.ts runs the measured specs' quiet admission
     "e2e/support/clock.ts", // P4 W2-D: test/support/clock.test.ts holds the e2e clock pin to the app's own clock
-    "e2e/support/window-origin.ts" // ci-kit's mac-lane concurrency spec, M2: test/support/window-origin.test.ts runs a shared desktop's corners
+    "e2e/support/window-origin.ts", // ci-kit's mac-lane concurrency spec, M2: test/support/window-origin.test.ts runs a shared desktop's corners
+    "e2e/support/host-ready.ts" // P5 O3-B: test/support/host-ready.test.ts runs the launch's bounded wait for the daemon shape's engine host
   ],
   // P3-B: the document editor's React and DOM, and the importers that parse HTML through the DOM (M6), typechecked by
   // tsconfig.web.json. P3-D M4: the design system's React and DOM (the apply API's scopes, the page), likewise. P3-C M4:
   // the slide canvas and the deck editor, likewise (M9: `canvas/css.ts` stays in, since the exporters in main write it).
   "exclude": [
+    // P5 O13 M7: the staging phone run drives desk-web's cards client and device code (DOM-typed), so it is typechecked
+    // by apps/desk-web/tsconfig.node.json, as desk-web's own harness over the endpoint (test/local/endpoint.ts) is
+    "test/endpoint/staging/**/*",
+    "test/endpoint/staging-phone.live.test.ts",
     "src/main/artifacts/*.dom.test.tsx",
     "src/artifacts/ui/**/*", // portable React/DOM helpers are typechecked by tsconfig.web.json
     "src/artifacts/document/editor/**/*",

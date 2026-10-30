@@ -1,20 +1,29 @@
 import { Popover } from 'radix-ui';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ProjectId } from '@shared/graph/ids';
 import type { ProjectRecord } from '@shared/ipc/schema';
 import { IconButton } from '../app/IconButton';
+import { orgKeyOf, type OrgIndex, type RowKey } from '../stores/org-projects';
 import { projectLabels } from './project-labels';
 
-export function ProjectFilter({ projects, current, selected, onChange }: {
-  projects: readonly ProjectRecord[];
-  current: ProjectId | null;
-  selected: ReadonlySet<ProjectId> | null;
-  onChange(value: ReadonlySet<ProjectId> | null): void;
+// P5 O6 M5: the filter chooses org projects, each once whatever machines hold it; choosing one no checkout lists (a
+// folder only discovered) lists it while it is chosen.
+export function ProjectFilter({ projects, index, current, selected, onChange }: {
+  projects: readonly ProjectRecord[]; // every machine's, not hidden
+  index: OrgIndex;
+  current: RowKey | null;
+  selected: ReadonlySet<RowKey> | null;
+  onChange(value: ReadonlySet<RowKey> | null): void;
 }) {
   const [open, setOpen] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const content = useRef<HTMLDivElement>(null);
-  const labels = useMemo(() => projectLabels(projects), [projects]);
+  // one entry per org project, named as its row is, the first of its projects standing for it
+  const options = useMemo(() => {
+    const seen = new Map<RowKey, ProjectRecord>();
+    for (const p of projects) if (!seen.has(orgKeyOf(p))) seen.set(orgKeyOf(p), { ...p, name: index.orgs.get(orgKeyOf(p))?.name ?? p.name });
+    const labels = projectLabels([...seen.values()]);
+    return [...seen].map(([key, p]) => ({ key, label: labels.get(p.id)!, title: p.directory }));
+  }, [projects, index]);
   const enter = () => { clearTimeout(timer.current); setOpen(true); };
   const leave = () => {
     clearTimeout(timer.current);
@@ -35,10 +44,10 @@ export function ProjectFilter({ projects, current, selected, onChange }: {
       onPointerEnter={enter} onPointerLeave={leave}
       className="z-50 max-h-[60vh] min-w-48 overflow-auto rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
       <button type="button" onClick={() => onChange(null)} className="w-full rounded-sm px-2 py-1.5 text-left outline-accent hover:bg-bg-hover focus-visible:outline-2">All projects</button>
-      {projects.map((p) => <label key={p.id} className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 hover:bg-bg-hover">
-        <input type="checkbox" checked={selected?.has(p.id) ?? false} className="accent-accent outline-accent focus-visible:outline-2"
-          onChange={(event) => { const next = new Set(selected ?? []); if (event.target.checked) next.add(p.id); else next.delete(p.id); onChange(next.size ? next : null); }} />
-        <span title={p.directory}>{labels.get(p.id)}</span>
+      {options.map((o) => <label key={o.key} className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 hover:bg-bg-hover">
+        <input type="checkbox" checked={selected?.has(o.key) ?? false} className="accent-accent outline-accent focus-visible:outline-2"
+          onChange={(event) => { const next = new Set(selected ?? []); if (event.target.checked) next.add(o.key); else next.delete(o.key); onChange(next.size ? next : null); }} />
+        <span title={o.title}>{o.label}</span>
       </label>)}
     </Popover.Content></Popover.Portal>
   </Popover.Root>;

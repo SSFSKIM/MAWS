@@ -8,6 +8,7 @@ import { applyTaskEvents, emptyGraph } from './model/task-graph';
 import { createTaskGraphStore, STOP_SETTLE_MS } from './store';
 import { event, replayed, sidecarsOf, upTo } from '../../../../../test/support/agents-events';
 import { fakeAgentWorkClient, flush, type FakeAgentWorkClient } from './fake-work-client';
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 
 const A = 'A' as AppSessionId;
 const pass1 = replayed('pass1', 'subagent');
@@ -20,7 +21,7 @@ let sessions: ReturnType<typeof createSessionsStore>;
 let store: ReturnType<typeof createTaskGraphStore>;
 
 const live = (over: Partial<EngineSessionStatus> = {}): EngineSessionStatus => ({ ...status('A'), launchId: 'journal', ...over });
-const setStatus = (s: EngineSessionStatus) => sessions.getState().applyStatus({ appSessionId: A, status: s });
+const setStatus = (s: EngineSessionStatus) => sessions.getState().applyStatus({ appSessionId: A, status: s }, TEST_MACHINE);
 const entry = () => {
   const found = store.getState().entries.get(A);
   if (!found) throw new Error('no entry for A');

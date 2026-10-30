@@ -1,7 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { HostState, MawsBridge, SettingsState } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import type { HostState, PreloadBridge, SettingsState } from '@shared/ipc/schema';
+import { TEST_MACHINE } from '../../../test/support/machine';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { SUPERVISOR_NOTICES } from './app/copy';
 import { updatedStatus } from './test-support/host-status';
 
@@ -45,7 +46,7 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
     send('pty.data', { ptyId: 'p1', offset: line.byteLength, data: new TextEncoder().encode('MAWS_ECHO_OK\r\n$ ') });
     markEchoed();
   };
-  const state = () => ({ settings: { ...SETTINGS_DEFAULTS_V19, theme }, resolvedTheme: theme === 'dark' ? 'dark' : 'light' });
+  const state = () => ({ settings: { ...SETTINGS_DEFAULTS_V21, theme }, resolvedTheme: theme === 'dark' ? 'dark' : 'light' });
   const answer = (name: string, input: { theme: typeof theme; data: string }) => {
     switch (name) {
       case 'settings.set':
@@ -59,7 +60,7 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
         return HOSTS[name];
       // E10: the supervisor's status the hosts store reads at connect (the engine host in the app, as under the harness)
       case 'host.status':
-        return { transport: 'utility', state: 'ready', supervisor: null, appBuildId: 'b', appWire: 'w', mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: '2026-10-08T09:05:53.000Z' }, matches: null, reason: null, waitingLiveSessions: null, lastExit: null };
+        return { transport: 'utility', state: 'ready', supervisor: null, appBuildId: 'b', appWire: 'w', mainBuild: { version: '0.0.0', commit: 'ac8724a6', builtAt: '2026-10-08T09:05:53.000Z' }, matches: null, reason: null, waitingLiveSessions: null, lastExit: null, daemon: null, daemonUnavailable: null };
       case 'fs.state':
         return {
           configHome: '/Users/new/.claude',
@@ -72,6 +73,10 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
           lastScanAt: '2026-09-28T10:00:01.000Z',
           lastScan: { projects: 3, sessions: 1, changed: 1, durationMs: 1234 },
         };
+      case 'machines.list': // P5 O6 M4: the roster the shell reads at connect: this machine only
+        return { machines: [{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-10-27T10:00:00.000Z', generation: 0 }] };
+      case 'org.rows': // P5 O8 M2: the org's rows at connect: no other machine, nothing listed
+        return { machines: [], rows: [], complete: true, pending: [], members: [], member: null }; // M5: and no owners
       case 'session.list':
         return { sessions: [], revision: 1 };
       case 'session.projects.list':
@@ -134,6 +139,9 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       case 'browser.import.list':
         return { profiles: [], fileBroken: false, running: null };
       // E4b end
+      // P5 O9 M5: the lane A store's first list at connect (no terminal session driven through its bridge)
+      case 'laneA.list':
+        return { states: [] };
       case 'pty.spawn':
         return { ptyId: 'p1', pid: 3333 };
       case 'pty.write':
@@ -150,7 +158,8 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
       listeners.get(name)!.add(listener);
       return () => listeners.get(name)!.delete(listener);
     }),
-  } as unknown as MawsBridge;
+    localMachine: TEST_MACHINE,
+  } as unknown as PreloadBridge;
   current = { send };
   return { send, echoed, answerEcho };
 }
@@ -163,7 +172,7 @@ let current: { send(name: string, payload: unknown): void } | null = null;
 beforeAll(async () => {
   fakeMain('light');
   await import('./App');
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 }, 300_000);
 
 // The strip lives in the Diagnostics tab (C5 M4): the app opens, then Help › Diagnostics arrives from the menu.
@@ -181,7 +190,7 @@ describe('theme in the page', () => {
   });
   afterEach(() => {
     cleanup();
-    delete (window as { maws?: MawsBridge }).maws;
+    delete (window as { maws?: PreloadBridge }).maws;
   });
 
   it('mirrors the persisted theme onto <html data-theme>', async () => {
@@ -196,7 +205,7 @@ describe('theme in the page', () => {
     await renderApp();
     expect(document.documentElement.dataset.theme).toBe('light');
     await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Dark' })));
-    expect(window.maws.invoke).toHaveBeenCalledWith('settings.set', { theme: 'dark' });
+    expect(window.maws.invoke).toHaveBeenCalledWith('settings.set', { theme: 'dark' }, TEST_MACHINE);
     expect(document.documentElement.dataset.theme).toBe('dark');
     expect(screen.getByRole('button', { name: 'Light' }).getAttribute('aria-pressed')).toBe('false');
   });
@@ -212,7 +221,7 @@ describe('theme in the page', () => {
 describe('hosts in the diagnostics strip', () => {
   afterEach(() => {
     cleanup();
-    delete (window as { maws?: MawsBridge }).maws;
+    delete (window as { maws?: PreloadBridge }).maws;
   });
 
   it('reads both hosts ready with their pids from the snapshots', async () => {
@@ -265,7 +274,7 @@ describe('hosts in the diagnostics strip', () => {
       main.answerEcho();
       await main.echoed;
     });
-    expect(window.maws.invoke).toHaveBeenCalledWith('pty.spawn', expect.objectContaining({ shell: '/bin/sh' }));
+    expect(window.maws.invoke).toHaveBeenCalledWith('pty.spawn', expect.objectContaining({ shell: '/bin/sh' }), TEST_MACHINE);
     expect(echo()).toBe('MAWS_ECHO_OK · shell pid 3333');
   });
 });
@@ -273,7 +282,7 @@ describe('hosts in the diagnostics strip', () => {
 describe('store section of the diagnostics strip', () => {
   afterEach(() => {
     cleanup();
-    delete (window as { maws?: MawsBridge }).maws;
+    delete (window as { maws?: PreloadBridge }).maws;
   });
 
   it('shows the watched config home, the counts (projects from the index), and each record with its title, source, directory, pin and holder badge', async () => {
@@ -323,14 +332,14 @@ describe('store section of the diagnostics strip', () => {
     // Git (M6): the row's Git button watches its directory; the detail reads branch, ahead/behind and the dirty count,
     // lists the files, and follows git.changed.
     await act(async () => void fireEvent.click(within(row).getByRole('button', { name: 'Git' })));
-    expect(window.maws.invoke).toHaveBeenCalledWith('git.watch', { directory: '/private/tmp/maws-accept' });
+    expect(window.maws.invoke).toHaveBeenCalledWith('git.watch', { directory: '/private/tmp/maws-accept' }, TEST_MACHINE);
     expect(screen.getByRole('status', { name: 'git status' }).textContent).toBe('main · ahead 1 / behind 0 · dirty · 1 file');
     const untracked = { path: '.c4-accept', oldPath: null, index: '?', worktree: '?', untracked: true };
     act(() => main.send('git.changed', { repoRoot: GIT_STATUS.repoRoot, status: { ...GIT_STATUS, files: [...GIT_STATUS.files, untracked] }, reason: 'worktree' }));
     expect(screen.getByRole('status', { name: 'git status' }).textContent).toBe('main · ahead 1 / behind 0 · dirty · 2 files');
     expect(within(screen.getByRole('list', { name: 'Changed files' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['.M src/a.ts', '?? .c4-accept']);
     await act(async () => void fireEvent.click(within(row).getByRole('button', { name: 'Git' })));
-    expect(window.maws.invoke).toHaveBeenCalledWith('git.unwatch', { directory: '/private/tmp/maws-accept' });
+    expect(window.maws.invoke).toHaveBeenCalledWith('git.unwatch', { directory: '/private/tmp/maws-accept' }, TEST_MACHINE);
     expect(screen.queryByRole('status', { name: 'git status' })).toBeNull();
   });
 });
@@ -339,7 +348,7 @@ describe('store section of the diagnostics strip', () => {
 describe("C7's registrations from the app", () => {
   afterEach(() => {
     cleanup();
-    delete (window as { maws?: MawsBridge }).maws;
+    delete (window as { maws?: PreloadBridge }).maws;
   });
 
   it("registers the composer's edit-and-resubmit adapter as the transcript's editAndResubmit", async () => {
@@ -357,7 +366,7 @@ describe("C7's registrations from the app", () => {
 describe('host actions from the app', () => {
   afterEach(() => {
     cleanup();
-    delete (window as { maws?: MawsBridge }).maws;
+    delete (window as { maws?: PreloadBridge }).maws;
   });
 
   it("gives a Markdown surface outside any Transcript an artifact chip whose click opens the artifact's main tab", async () => {

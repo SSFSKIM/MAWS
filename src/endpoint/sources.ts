@@ -44,5 +44,10 @@ export interface CheckoutSource {
 export const NO_RECORDS: RecordSource = { record: () => null, onChange: () => () => {} };
 export const NO_CHECKOUTS: CheckoutSource = { known: () => false };
 
+/** The checkouts any of `sources` knows (RL10's presences and MAWS's own projects, P5 O3-D M4). */
+export function anyCheckout(...sources: readonly CheckoutSource[]): CheckoutSource {
+  return { known: (path) => sources.some((source) => source.known(path)) };
+}
+
 /** The machine's own owners, as `@machine` resolves (RL §5.8). */
 export const MACHINE_OWNERS = '@machine';

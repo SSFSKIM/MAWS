@@ -1,5 +1,6 @@
 // The composer and card harness's automation surface, `window.__maws_cards` (C7 execution document, M2 and M4):
-// Playwright drives the page through it. Types only, so the e2e project can import them.
+// Playwright drives the page through it. Types only, so the e2e project can import them. P5 O6 M2: every session id it
+// takes or answers is bare, as the raw bridge (`window.maws`) speaks; the page addresses them with the local machine.
 export type HarnessPlacement = 'docked' | 'card' | 'hover' | 'inline';
 
 // What a pane shows: a session's waiting request in one placement, a focusable region whose `request.accept` binding

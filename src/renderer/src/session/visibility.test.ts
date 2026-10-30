@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { record } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { resetShellStores } from '../test-support/shell-stores';
@@ -10,8 +11,8 @@ import { hideSideChild, showSideChild, useSidePane } from '../side/store'; // E3
 import { hideCardThread, showCardThread, useCommentCard } from '../side/card/store'; // P2-E1
 import { closeCard, dockSplit, floatSplit, openCard, useFloatingCard } from '../shell/floating'; // P3-G; P4-B3: the split's
 
-const A = 'app-a' as AppSessionId;
-const B = 'app-b' as AppSessionId;
+const A = at('app-a' as AppSessionId);
+const B = at('app-b' as AppSessionId);
 
 let fake: FakeClient;
 let stop: () => void;
@@ -27,7 +28,7 @@ const showSurface = (appSessionId: AppSessionId, toolId: string) => {
 
 beforeEach(() => {
   resetShellStores();
-  useSessions.setState({ records: new Map([[A, record('app-a')], [B, record('app-b')]]) });
+  useSessions.setState({ records: new Map([[A, record(A)], [B, record(B)]]) });
   focused = true;
   visibility = 'visible';
   vi.spyOn(document, 'hasFocus').mockImplementation(() => focused);
@@ -45,12 +46,12 @@ afterEach(() => {
 
 describe('session visibility', () => {
   it('tracks a Side slot in remembered document context and re-reports when only the surface stack changes', () => {
-    const CHILD = 'app-child' as AppSessionId;
+    const CHILD = at('app-child' as AppSessionId);
     useSessions.setState({ records: new Map([[A, record(A)], [CHILD, record(CHILD)]]) });
     useLayout.getState().openSession(A);
     const side = showSurface(A, 'side');
     const terminal = showSurface(A, 'terminal');
-    useLayout.getState().openTab({ kind: 'artifact', artifactId: 'doc' });
+    useLayout.getState().openTab({ kind: 'artifact', artifactId: 'doc', machine: TEST_MACHINE });
     showSideChild(A, CHILD);
     expect(sent().at(-1)).toEqual({ appSessionId: CHILD, visible: true });
     const before = sent().length;
@@ -153,17 +154,17 @@ describe('session visibility', () => {
   });
 
   it('reports an unstarted session only once its record arrives', () => {
-    const NEW = 'app-new' as AppSessionId;
+    const NEW = at('app-new' as AppSessionId);
     useLayout.getState().openSession(NEW);
     expect(sent()).toEqual([]);
-    useSessions.getState().applyChanged({ record: record('app-new'), cause: 'live', revision: 5 } as never);
+    useSessions.getState().applyChanged({ record: record(NEW), cause: 'live', revision: 5 } as never, TEST_MACHINE);
     expect(sent()).toEqual([{ appSessionId: NEW, visible: true }]);
   });
 
   // E3: a side thread the Side pane draws counts as on screen while the panel is open beside its visible parent
   it('counts the side pane’s child while the panel is open and its parent shown; not when the panel collapses or the pane stops', () => {
-    const CHILD = 'app-child' as AppSessionId;
-    useSessions.setState({ records: new Map([[A, record('app-a')], [B, record('app-b')], [CHILD, record('app-child')]]) });
+    const CHILD = at('app-child' as AppSessionId);
+    useSessions.setState({ records: new Map([[A, record(A)], [B, record(B)], [CHILD, record(CHILD)]]) });
     useLayout.getState().setPanel({ collapsed: false });
     useLayout.getState().openSession(A);
     showSurface(A, 'side');
@@ -183,8 +184,8 @@ describe('session visibility', () => {
 
   // M3's review (M4): a maximized panel covers the main area but shows the pane, so the child it draws is on screen
   it('counts the side pane’s child while the panel is maximized (its parent covered), and drops it when the panel collapses', () => {
-    const CHILD = 'app-child' as AppSessionId;
-    useSessions.setState({ records: new Map([[A, record('app-a')], [CHILD, record('app-child')]]) });
+    const CHILD = at('app-child' as AppSessionId);
+    useSessions.setState({ records: new Map([[A, record(A)], [CHILD, record(CHILD)]]) });
     useLayout.getState().setPanel({ collapsed: false });
     useLayout.getState().openSession(A);
     showSurface(A, 'side');
@@ -203,10 +204,10 @@ describe('session visibility', () => {
   });
 
   it('counts the side pane’s child while a file tab of its parent is the shown tab (the panel shows that session)', () => {
-    const CHILD = 'app-child' as AppSessionId;
-    useSessions.setState({ records: new Map([[A, record('app-a')], [CHILD, record('app-child')]]) });
+    const CHILD = at('app-child' as AppSessionId);
+    useSessions.setState({ records: new Map([[A, record(A)], [CHILD, record(CHILD)]]) });
     useLayout.getState().setPanel({ collapsed: false });
-    useLayout.getState().openTab({ kind: 'file', path: '/work/a.ts', line: null, appSessionId: A });
+    useLayout.getState().openTab({ kind: 'file', path: '/work/a.ts', line: null, appSessionId: A, machine: TEST_MACHINE });
     showSurface(A, 'side');
     showSideChild(A, CHILD);
     expect(sent()).toEqual([{ appSessionId: CHILD, visible: true }]);
@@ -215,8 +216,8 @@ describe('session visibility', () => {
   // P2-E1: a thread a comment card shows (published while its host is on screen) is on screen, so its unread mark clears
   // as the Side pane's does; the window's focus still rules
   it('counts the thread a comment card shows while the card publishes it, and not once it stops or the window blurs', () => {
-    const CHILD = 'app-child' as AppSessionId;
-    useSessions.setState({ records: new Map([[A, record('app-a')], [CHILD, record('app-child')]]) });
+    const CHILD = at('app-child' as AppSessionId);
+    useSessions.setState({ records: new Map([[A, record(A)], [CHILD, record(CHILD)]]) });
     showCardThread(A, CHILD);
     expect(sent()).toEqual([{ appSessionId: CHILD, visible: true }]);
     focused = false;

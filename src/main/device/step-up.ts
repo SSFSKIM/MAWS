@@ -9,8 +9,26 @@
 // 2026-10-27) settled it on Electron's `promptTouchID`, which main uses unless it injects another: Touch ID, or the
 // login password where there is none. Its tested fallback is a LocalAuthentication addon with device-owner
 // authentication (the spike's candidate 2), should `promptTouchID` ever lose the password path.
+//
+// The step-up key is also the key of an org root (RL5: `root.keys` holds admin devices' step-up key ids), so the org
+// states this device signs as a root are signed here too, behind the same confirmation (`createStateSigner`, P5-O8 M3).
+// The key never leaves this module (P5 Decision Log 53): the org signer composes the state and its words and hands both
+// in, and gets back only the signed state.
 import { systemPreferences, type SystemPreferences } from 'electron';
-import { base64urlEncode, canonicalize, isAction, NONCE_BYTES, signStepUp, type Action, type SigningKey } from '../../../apps/org-protocol/src/index.ts';
+import {
+  base64urlEncode,
+  canonicalize,
+  endorseDevice,
+  isAction,
+  keyId,
+  NONCE_BYTES,
+  signOrgState,
+  signStepUp,
+  type Action,
+  type OrgState,
+  type SignedOrgState,
+  type SigningKey,
+} from '../../../apps/org-protocol/src/index.ts';
 
 /** What the person is asked to confirm: `summary` fits a system prompt's one line; `text` is every field, one per line. */
 export type StepUpPrompt = { summary: string; text: string };
@@ -85,6 +103,57 @@ export function createStepUp(deps: { device: { org: string; device: string }; ke
       const sealed: Action = { ...shown, opCreated: opCreated ?? sealedAt, nonce: random(NONCE_BYTES), created: sealedAt };
       if (!isAction(sealed)) return { ok: false, reason: 'malformed' };
       return { ok: true, action: await signStepUp(sealed, deps.key) };
+    },
+  };
+}
+
+/**
+ * What a state signature may carry beside the state (P5-O8 M4a, "Endorsement inside one Touch ID"). `endorse`: devices
+ * this key endorses on the copy it signs, each one the state lists under that member (a later device of this key's own
+ * member, which the protocol's `endorsed` asks one of the member's step-up keys to endorse). `live`: whether what the
+ * person is asked about still stands (a pairing neither cancelled nor expired), read once after they answer yes and
+ * before anything is endorsed or signed.
+ */
+export type StateSignOptions = { endorse?: ReadonlyArray<{ member: string; device: string }>; live?(): boolean };
+
+/** Signs org states with the step-up key, each after the person confirmed the words the org signer composed for it. */
+export type StateSigner = {
+  /** keyId(stepUp.pub): the id `root.keys` lists for this device. */
+  kid: string;
+  /**
+   * Every refusal of the confirmation is `cancelled`: nothing was signed, whatever the reason; so is a `live` that says
+   * no after the person said yes. One confirmation covers the endorsements and the state. Throws, before asking, when
+   * `endorse` names a device the state doesn't list under that member (the caller's error, never the person's).
+   */
+  sign(state: OrgState, prompt: StepUpPrompt, options?: StateSignOptions): Promise<{ ok: true; signed: SignedOrgState } | { ok: false; reason: 'cancelled' }>;
+};
+
+/** `confirm` defaults to `promptTouchIDConfirmation(systemPreferences)`, main's confirmation. Async only for the key id. */
+export async function createStateSigner(deps: { key: SigningKey; confirm?: Confirm }): Promise<StateSigner> {
+  const confirm = deps.confirm ?? promptTouchIDConfirmation(systemPreferences);
+  return {
+    kid: await keyId(deps.key.pub),
+    async sign(state, prompt, options = {}) {
+      // A private copy in the canonical form the signature covers, taken before the person is asked: the caller keeps
+      // its reference and may change it while the person decides. What was asked about is what is signed.
+      const asked = JSON.parse(canonicalize(state)) as OrgState;
+      const endorsing = (options.endorse ?? []).map(({ member, device }) => {
+        const listed = asked.members.find((m) => m.id === member)?.devices.find((d) => d.id === device);
+        if (listed === undefined) throw new Error(`the state lists no device ${device} under member ${member} to endorse`);
+        return { member, device: listed };
+      });
+      let answer: Confirmation;
+      try {
+        answer = await confirm(prompt);
+      } catch {
+        answer = { ok: false, reason: 'failed' };
+      }
+      if (!answer.ok) return { ok: false, reason: 'cancelled' };
+      // What the person was asked about may have ended meanwhile (a pairing cancelled or expired): nothing is endorsed or signed.
+      if (options.live !== undefined && !options.live()) return { ok: false, reason: 'cancelled' };
+      // An endorsement covers the device without one (`endorseDevice` leaves it out), so one the caller left is replaced.
+      for (const { member, device } of endorsing) device.endorsement = await endorseDevice(asked.org, member, device, deps.key.privateKey, deps.key.pub);
+      return { ok: true, signed: await signOrgState(asked, [deps.key]) };
     },
   };
 }

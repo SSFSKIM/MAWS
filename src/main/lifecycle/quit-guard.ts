@@ -33,13 +33,19 @@
 // its sessions on. Every other quit stops the sessions as before (shutdownEngine). With files unsaved E5's question
 // comes first, unchanged; after Save all the ordinary question, keep included, follows. An unbusy quit is never asked.
 // E10 end
+// P5 O3-D start (Q1, D12; docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md): on the daemon shape the sessions, like
+// the terminals, belong to `mawsd`, which outlives the app and frees them at its idle release (`sessionsOutlive`). The
+// report decides and asks on its unsaved files alone: Quit asks only about them (Save all, Quit anyway, Cancel), offers
+// no keep and no when-idle, and every quit leaves the sessions running (no stop-all, no SIGKILL rung). The report is
+// still logged whole, and a quit that would have asked logs what it did not ask. The embedded shape keeps the question.
+// P5 O3-D end
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto'; // E5
 import { basename } from 'node:path'; // E5
 import { app, type MessageBoxOptions } from 'electron';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { ClientId, ClientRef } from '@shared/ipc/client';
-import type { SessionReadModel } from '../sessions/read-model';
+import type { SpineView } from '@shared/spine/view';
 import { QUIT_KEEP } from './copy'; // E10
 
 // C12 start
@@ -80,7 +86,9 @@ export interface QuitPty {
 
 const LIVE = new Set<EngineSessionStatus['process']>(['starting', 'initializing', 'ready']);
 const LAUNCHING = new Set<EngineSessionStatus['process']>(['starting', 'initializing']);
-const total = (r: BusyReport) => r.midTurn + r.backgroundWork + r.busyTerminals + r.unsavedFiles.length; // E5: an unsaved file holds a quit too
+// E5: an unsaved file holds a quit too; P5 O2 M7: a busy terminal does not while terminals outlive the app (the daemon shape)
+const NOTHING_BUSY: BusyReport = { midTurn: 0, backgroundWork: 0, busyTerminals: 0, terminalsUnknown: false, unsavedFiles: [] }; // P5 O3-D
+const total = (r: BusyReport, terminalsOutlive = false) => r.midTurn + r.backgroundWork + (terminalsOutlive ? 0 : r.busyTerminals) + r.unsavedFiles.length;
 
 function within<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -93,7 +101,7 @@ function within<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 export async function busyReport(
-  model: Pick<SessionReadModel, 'midTurnCount' | 'engineStatuses'>,
+  model: Pick<SpineView, 'midTurnCount' | 'engineStatuses'>, // P5 O3-C (reader R3): the spine's view
   pty: QuitPty,
   unsavedFiles: () => readonly string[] = () => [], // E5: the windows' last pushes
 ): Promise<BusyReport> {
@@ -155,8 +163,9 @@ export async function killEngines(statuses: readonly EngineSessionStatus[], deps
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 // E10: keep is offered (detached mode), as the default button or not; `kept()` counts the sessions a keep leaves
-// running, read when the answer is logged
-export interface KeepOffer { isDefault: boolean; kept(): number }
+// running, read when the answer is logged. P5 O2 M7: `terminalsOutlive`, on the daemon shape: the terminals keep running
+// whatever the answer, so the question names none among what is busy and its detail says they keep running.
+export interface KeepOffer { isDefault: boolean; kept(): number; terminalsOutlive?: boolean }
 
 // E5: the unsaved question's detail names the files by basename, at most five. A file the last Save all could not save
 // gets a line of its own with the reason its window gave (`app.ts: Changed on disk since you opened it`); the others
@@ -177,10 +186,11 @@ export function quitQuestion(
   reasons: ReadonlyMap<string, string> = new Map(), // E5
   keep: KeepOffer | null = null, // E10
 ): MessageBoxOptions {
+  const outlive = keep?.terminalsOutlive === true; // P5 O2 M7
   const parts = [
     report.midTurn > 0 ? `${plural(report.midTurn, 'session', 'sessions')} mid-turn` : null,
     report.backgroundWork > 0 ? `${plural(report.backgroundWork, 'session', 'sessions')} running background work` : null,
-    report.terminalsUnknown ? 'the terminals did not answer' : report.busyTerminals > 0 ? `${plural(report.busyTerminals, 'terminal', 'terminals')} running a command` : null,
+    outlive ? null : report.terminalsUnknown ? 'the terminals did not answer' : report.busyTerminals > 0 ? `${plural(report.busyTerminals, 'terminal', 'terminals')} running a command` : null,
   ].filter((p): p is string => p !== null);
   const stops = `${verb === 'Quit' ? 'Quitting' : 'Restarting'} stops them. Transcripts stay on disk and can be resumed.`;
   // E5 start: unsaved files are named first and the buttons are theirs: Save all, or go on without saving. "When idle"
@@ -198,15 +208,17 @@ export function quitQuestion(
   }
   // E5 end
   // E10: keep first; terminals cannot be kept, which the detail says when one is busy. P4: the detail names what keep
-  // and the verb each do, since keep may be the default button under it
+  // and the verb each do, since keep may be the default button under it. P5 O2 M7: on the daemon shape a busy terminal
+  // keeps running whichever button is pressed, which the detail says instead.
   if (keep) {
+    const terminals = report.busyTerminals === 0 ? [] : !outlive ? [QUIT_KEEP.terminalsClose] : [QUIT_KEEP.terminalsKeep(report.terminalsUnknown ? null : report.busyTerminals)];
     return {
       type: 'warning',
       buttons: [QUIT_KEEP.button, verb, `${verb} when idle`, 'Cancel'],
       defaultId: keep.isDefault ? 0 : 1,
       cancelId: 3,
       message: parts.join(' · '),
-      detail: [QUIT_KEEP.detail(verb), ...(report.busyTerminals > 0 ? [QUIT_KEEP.terminalsClose] : [])].join('\n'),
+      detail: [QUIT_KEEP.detail(verb), ...terminals].join('\n'),
     };
   }
   return {
@@ -284,6 +296,8 @@ export interface QuitGuardDeps {
   keepOffered(): boolean; // the engine host runs detached: its sessions can outlive the app
   keepDefault(): boolean; // the setting `supervisor.keepRunningDefault`: keep is the default button
   // E10 end
+  terminalsOutlive?(): boolean; // P5 O2 M7: the pty host runs under the machine daemon (the daemon shape); false unless said
+  sessionsOutlive?(): boolean; // P5 O3-D (Q1): the sessions run under the machine daemon (the daemon shape); false unless said
 }
 
 export interface QuitGuard {
@@ -292,12 +306,16 @@ export interface QuitGuard {
   cancelWait(): void; // the banner's Cancel
 }
 
-export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 'engineStatuses' | 'on'>, deps: QuitGuardDeps): QuitGuard {
+export function installQuitGuard(model: Pick<SpineView, 'midTurnCount' | 'engineStatuses' | 'on'>, deps: QuitGuardDeps): QuitGuard {
   let disarmed = false; // set only right before the one final app.quit()
   let quitting: Promise<void> | null = null; // the one quit in flight: outside quits stay held, outstanding work is inert
   let asking = false; // a report or a question is under way
   let wait: { report: BusyReport; stop: () => void } | null = null; // each wait is its own object: a cancelled one's reads are inert
   const report = () => busyReport(model, deps.pty, deps.unsavedFiles);
+  const outlive = () => deps.terminalsOutlive?.() === true; // P5 O2 M7
+  const sessionsOutlive = () => deps.sessionsOutlive?.() === true; // P5 O3-D (Q1)
+  // P5 O3-D (Q1): what the quit asks about; on the daemon shape the unsaved files alone
+  const askable = (r: BusyReport): BusyReport => (sessionsOutlive() ? { ...NOTHING_BUSY, unsavedFiles: r.unsavedFiles } : r);
 
   const finalQuit = () => {
     disarmed = true;
@@ -310,12 +328,12 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
     deps.publish(null);
   };
   // Every quit, busy or not: the engines end through their ladders, bounded, then the one final app.quit(). E10: a keep
-  // leaves them running (no shutdown, no SIGKILL rung) and quits.
+  // leaves them running (no shutdown, no SIGKILL rung) and quits. P5 O3-D (Q1): so does every quit on the daemon shape.
   const quit = (keep = false): Promise<void> => {
     if (quitting) return quitting;
     stopWaiting();
     quitting = (async () => {
-      if (keep) return finalQuit(); // the answer's log line names the sessions kept (askToQuit)
+      if (keep || sessionsOutlive()) return finalQuit(); // the answer's log line names the sessions kept (askToQuit)
       try {
         await within(deps.shutdownEngine(), SHUTDOWN_BOUND_MS);
       } catch (error) {
@@ -331,7 +349,11 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
     })();
     return quitting;
   };
-  const startWaiting = (first: BusyReport) => {
+  // P5 O3-B: what a wait publishes and answers is what it waits for: on the daemon shape a busy terminal outlives the app,
+  // so the banner counts none (the question names none either)
+  const waited = (r: BusyReport): BusyReport => (outlive() ? { ...r, busyTerminals: 0, terminalsUnknown: false } : r);
+  const startWaiting = (asked: BusyReport) => {
+    const first = waited(asked);
     if (wait) {
       wait.report = first;
       deps.publish(first);
@@ -354,11 +376,11 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
       void report()
         .then((next) => {
           if (wait !== mine || again) return;
-          if (total(next) === 0) {
+          if (total(next, outlive()) === 0) {
             void quit();
           } else {
-            mine.report = next;
-            deps.publish(next);
+            mine.report = waited(next);
+            deps.publish(mine.report);
           }
         })
         .finally(() => {
@@ -391,11 +413,13 @@ export function installQuitGuard(model: Pick<SessionReadModel, 'midTurnCount' | 
         // (each round waits for the owner's answer, so the loop needs no bound), naming the files Save all could not save
         // with their reasons; outside quits stay held throughout
         let reasons: ReadonlyMap<string, string> = new Map();
-        for (let r = first, round = 0; ; r = await report(), round += 1) {
+        // P5 O3-D (Q1): a quit the daemon shape does not ask about says what it left running, for the e2e
+        if (total(askable(first), outlive()) === 0 && total(first, outlive()) > 0) deps.log?.(`quit-guard: ${logParts(first)}, not asked: they outlive the app`);
+        for (let r = askable(first), round = 0; ; r = askable(await report()), round += 1) {
           if (quitting) return;
-          if (total(r) === 0) return quit();
+          if (total(r, outlive()) === 0) return quit();
           // E10: keep is offered in detached mode, its default read at each question; it keeps every live session
-          const keep = deps.keepOffered() ? { isDefault: deps.keepDefault(), kept: () => model.engineStatuses().filter((s) => s.process !== 'exited').length } : null;
+          const keep = deps.keepOffered() ? { isDefault: deps.keepDefault(), kept: () => model.engineStatuses().filter((s) => s.process !== 'exited').length, ...(outlive() ? { terminalsOutlive: true } : {}) } : null;
           const answer = await deps.ask(r, { round, reasons }, keep).catch((error: unknown) => {
             console.error('[quit-guard] the quit question failed; treating it as Cancel', error);
             return 'cancel' as const;

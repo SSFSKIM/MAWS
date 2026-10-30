@@ -4,10 +4,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import type { SetupIntentPatch } from '@shared/sessions/intent';
 import { status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { at } from '../../../../test/support/machine';
 import { Composer } from '../composer/Composer';
 import { resetDockedCards } from '../composer/docked/registry';
 import { registerSetupIntentHook } from '../composer/setup-intent';
@@ -21,6 +22,8 @@ import { beforeCloseUnstarted } from './setup-actions';
 import { useSetup } from './store';
 import { useSetupIntent } from './useSetupIntent';
 
+// P5 O6 M2: the page holds the intent's id as an address; the fake `window.maws` (main) answers with the bare `ID`
+const A = at(ID);
 let fake: FakeClient;
 let dispose: () => void;
 
@@ -35,26 +38,26 @@ beforeEach(() => {
     'engine.models': { models: [], source: 'builtin', at: null },
     'session.queue.list': { entries: [], paused: false, pauseReason: null },
     'session.history.list': { entries: [] },
-    'session.intent.patch': ({ patch }: { patch: SetupIntentPatch }) => ({ ...useSetup.getState().intents.get(ID)!, ...patch, updatedAt: new Date().toISOString() }),
+    'session.intent.patch': ({ patch }: { patch: SetupIntentPatch }) => ({ ...useSetup.getState().intents.get(A)!, appSessionId: ID, ...patch, updatedAt: new Date().toISOString() }),
     'session.intent.discard': { leftover: null },
   });
-  window.maws = fake.client;
+  window.maws = fake.client as unknown as PreloadBridge;
   dispose = registerSetupIntentHook(useSetupIntent);
 });
 afterEach(() => {
   cleanup();
   closeDialog();
   dispose();
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 describe("a failed setup's retained tab", () => {
   it('binds the hook (an exited status, no record): its chips are editable, its draft reaches the intent, and closing it asks', async () => {
-    putIntent(intent({ progress: { ...intent().progress, lastFailure: { at: '2026-09-29T10:00:01.000Z', phase: 'launching', message: 'the engine exited before it was ready', resources: resources() } } }));
-    useSessions.setState({ engine: new Map([[ID, { ...status(ID), process: 'exited' }]]) });
+    putIntent(intent({ appSessionId: A, progress: { ...intent().progress, lastFailure: { at: '2026-09-29T10:00:01.000Z', phase: 'launching', message: 'the engine exited before it was ready', resources: resources() } } }));
+    useSessions.setState({ engine: new Map([[A, { ...status(A), process: 'exited' }]]) });
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <Composer appSessionId={ID} paneIndex={0} />
+        <Composer appSessionId={A} paneIndex={0} />
       </QueryClientProvider>,
     );
     // New chat: the intent's project row (an intent with no project runs in its directory), not the live location chip
@@ -66,10 +69,10 @@ describe("a failed setup's retained tab", () => {
     const control = document.querySelector<HTMLButtonElement>('[data-submit-state]')!;
     await waitFor(() => expect(control.disabled).toBe(false));
     expect(control.textContent).toBe('Send');
-    await waitFor(() => expect(JSON.stringify(useSetup.getState().intents.get(ID)?.draft ?? null)).toContain('typed after the failure'), { timeout: 3_000 });
+    await waitFor(() => expect(JSON.stringify(useSetup.getState().intents.get(A)?.draft ?? null)).toContain('typed after the failure'), { timeout: 3_000 });
     expect(fake.invoked('session.drafts.set')).toEqual([]);
 
-    const closing = beforeCloseUnstarted(ID);
+    const closing = beforeCloseUnstarted(A);
     await waitFor(() => expect(useDialogs.getState().open).toMatchObject({ kind: 'confirm', title: 'Discard this unstarted session?' }));
     act(() => closeDialog());
     expect(await closing).toBe('kept');

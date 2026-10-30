@@ -20,6 +20,12 @@ export function registerServiceWorker(): Promise<ServiceWorkerRegistration> | nu
 export type Landed = { project: string; session: string; landing: Landing };
 export const useLanding = create<{ landed: Landed | null; clear(): void }>()((set) => ({ landed: null, clear: () => set({ landed: null }) }));
 
+/**
+ * The latest landing on a session's cards (a v2 notice's `/cards/<ref>/<session>`, P5 O13 M6), counted: a second tap on
+ * the same cards reuses the open view, which checks its machine again at each.
+ */
+export const useCardsLanding = create<{ landed: { machine: string; session: string; n: number } | null }>()(() => ({ landed: null }));
+
 /** Lands on the URL's card (a notification's URL), navigating there when `navigate` is set; the query is dropped. */
 export function land(url: URL, navigate: boolean): void {
   const route = parseRoute(url.pathname);
@@ -27,6 +33,10 @@ export function land(url: URL, navigate: boolean): void {
   if (navigate) useDeskLayout.getState().navigate(route);
   if (route.view === 'project' && route.channel.kind === 'session' && landing) {
     useLanding.setState({ landed: { project: route.project, session: route.channel.session, landing } });
+  }
+  if (route.view === 'cards' && 'machine' in route) {
+    const n = (useCardsLanding.getState().landed?.n ?? 0) + 1;
+    useCardsLanding.setState({ landed: { machine: route.machine, session: route.session, n } });
   }
   if (url.search) history.replaceState(history.state, '', url.pathname);
 }

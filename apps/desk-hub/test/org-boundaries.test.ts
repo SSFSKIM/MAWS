@@ -46,6 +46,7 @@ const adminCalls: Array<[string, ...unknown[]]> = [
   ['revoke', 'no-such-machine'],
   ['designateArchive', '0a1b2c3d-0000-4000-8000-000000000000', { machine: null }],
   ['purgeOrgKeys'],
+  ['pendingDevicesOf', B],
 ];
 const refusal = (error: string) => expect.objectContaining({ ok: false, status: 403, error });
 
@@ -66,6 +67,16 @@ describe('a route this code added', () => {
     const response = await hub.fetchAs(ADMIN, '/api/org/state');
     await hub.registryLacks(null);
     expect([response.status, ((await response.json()) as { error: string }).error]).toEqual([503, 'hub-updating']);
+  });
+
+  it('answers another member’s pending devices 503 hub-updating from a Registry before it, never as the caller’s own', async () => {
+    await hub.registryLacks('pendingDevicesOf');
+    const other = await hub.fetchAs(ADMIN, `/api/devices/pending?member=${B}`);
+    // The caller's own id is today's read, which that Registry has.
+    const own = await hub.fetchAs(ADMIN, `/api/devices/pending?member=${fresh.id}`);
+    await hub.registryLacks(null);
+    expect([other.status, ((await other.json()) as { error: string }).error]).toEqual([503, 'hub-updating']);
+    expect([own.status, await own.json()]).toEqual([200, { pending: [] }]);
   });
 });
 

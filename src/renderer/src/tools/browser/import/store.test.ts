@@ -3,7 +3,8 @@
 // main's changes and E4a's profile list is invalidated with them, and a moved-aside records file raises one banner.
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import type { MachineRef } from '@shared/machine/ref';
 import { CANCELLED_REPORT } from '../../../../../../test/support/import-reports';
 import { ipc } from '../../../ipc/client';
 import { useNotices } from '../../../stores/notices';
@@ -43,7 +44,7 @@ afterEach(() => {
   resetBrowserImport();
   useSettings.setState({ state: null });
   useNotices.setState({ notices: [] });
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 describe('the run’s end', () => {
@@ -94,10 +95,10 @@ describe('the run’s end', () => {
     let answer!: () => void;
     b.answers['browser.import.start'] = () => ({ importId: IMPORT_ID });
     const invoke = b.bridge.invoke;
-    b.bridge.invoke = (async (name: string, input: unknown) => {
+    b.bridge.invoke = (async (name: string, input: unknown, machine?: MachineRef) => {
       if (name === 'browser.import.start') await new Promise<void>((resolve) => (answer = resolve));
-      return invoke(name as never, input as never);
-    }) as MawsBridge['invoke'];
+      return invoke(name as never, input as never, machine);
+    }) as PreloadBridge['invoke'];
     const started = start(CHOICE);
     await expect.poll(() => typeof answer).toBe('function');
     b.emit('browser.import.progress', { importId: IMPORT_ID, phase: 'history', done: 0, total: 6 });
@@ -150,10 +151,10 @@ describe('a window connecting mid-run (Decision Log 41)', () => {
   it('a run the list names that this window already saw end, or a run already shown, is left as it is', async () => {
     let answer!: () => void;
     const invoke = b.bridge.invoke;
-    b.bridge.invoke = (async (name: string, input: unknown) => {
+    b.bridge.invoke = (async (name: string, input: unknown, machine?: MachineRef) => {
       if (name === 'browser.import.list') await new Promise<void>((resolve) => (answer = resolve));
-      return invoke(name as never, input as never);
-    }) as MawsBridge['invoke'];
+      return invoke(name as never, input as never, machine);
+    }) as PreloadBridge['invoke'];
     connect({ 'browser.import.list': () => ({ profiles: [], fileBroken: false, running: { importId: IMPORT_ID, profileDir: 'Default', phase: null } }) });
     await expect.poll(() => typeof answer).toBe('function');
     b.emit('browser.import.finished', { importId: IMPORT_ID, report: DONE });
@@ -204,10 +205,10 @@ describe('the sheet’s stages', () => {
     connect();
     let answer!: () => void;
     const invoke = b.bridge.invoke;
-    b.bridge.invoke = (async (name: string, input: unknown) => {
+    b.bridge.invoke = (async (name: string, input: unknown, machine?: MachineRef) => {
       if (name === 'browser.import.inspect') await new Promise<void>((resolve) => (answer = resolve));
-      return invoke(name as never, input as never);
-    }) as MawsBridge['invoke'];
+      return invoke(name as never, input as never, machine);
+    }) as PreloadBridge['invoke'];
     let inspecting = inspect(CHROME, 'Default');
     await expect.poll(() => typeof answer).toBe('function');
     discard(); // the sheet closed in pick
@@ -259,10 +260,10 @@ describe('the records', () => {
   it('a list answer arriving after a change does not overwrite it', async () => {
     let answer!: () => void;
     const invoke = b.bridge.invoke;
-    b.bridge.invoke = (async (name: string, input: unknown) => {
+    b.bridge.invoke = (async (name: string, input: unknown, machine?: MachineRef) => {
       if (name === 'browser.import.list') await new Promise<void>((resolve) => (answer = resolve));
-      return invoke(name as never, input as never);
-    }) as MawsBridge['invoke'];
+      return invoke(name as never, input as never, machine);
+    }) as PreloadBridge['invoke'];
     connect({ 'browser.import.list': () => ({ profiles: [RECORD], fileBroken: false, running: null }) });
     await expect.poll(() => typeof answer).toBe('function');
     b.emit('browser.import.changed', { profiles: [] });

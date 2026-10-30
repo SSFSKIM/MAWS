@@ -1,17 +1,22 @@
 // The direct listener (O10 M4; RL §4.1, P5 Decision Log 39), over a fake interface table: it binds only the tailnet's
 // addresses the table names (here each is listened on at 127.0.0.1, so no real tailnet, wildcard or LAN address is
 // ever bound and no firewall prompt is raised), advertises them, rebinds when they change, reads nothing but the
-// handshake before it verifies, and answers past its rate limit `busy`.
+// handshake before it verifies, and answers past its rate limit `busy`. Its send buffer, against a device that stops
+// reading: the channel's stream held at the soft cap and let go on when the device reads, the connection ended past the
+// ceiling or after bytes held with no frame written, and no WebSocket pong the caps don't count.
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { NetworkInterfaceInfo } from 'node:os';
-import { canonicalize, generateEphemeral, generateSigningKey, HANDSHAKE_PAGE_BYTES, memoryOrgView, type ByteDuplex, type SignedOrgState, type SigningKey } from 'org-protocol';
+import { canonicalize, generateEphemeral, generateSigningKey, HANDSHAKE_PAGE_BYTES, memoryOrgView, type ByteDuplex, type Channel, type SignedOrgState, type SigningKey } from 'org-protocol';
 import WebSocket from 'ws';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { TestDevice as Device } from '../../apps/org-protocol/test-support/test-device.ts';
-import { Channels } from '../../src/endpoint/channels';
+import { Channels, type CarrierDuplex, type RemoteChannel } from '../../src/endpoint/channels';
 import { DirectListener, HandshakeLimiter, type DirectListenerOptions } from '../../src/endpoint/direct-listener';
+import type { SendLimits } from '../../src/endpoint/send-buffer';
+import { STREAM_WINDOW_BYTES, StreamWindow } from '../../src/endpoint/stream-window';
 import type { InterfaceTable } from '../../src/endpoint/tailnet';
+import { until } from './fake-hub';
 import { mintRef } from './fake-services';
 import { genesis, memberId, newDevice, successor, type TestDevice } from './org-fixtures';
 
@@ -48,6 +53,8 @@ type Fixture = {
   table: { current: InterfaceTable };
   reads: { count: number };
   channels: Channels;
+  /** Each connection's carrier and its admitted channel, in the order they came. */
+  carriers: Array<{ io: CarrierDuplex; channel: Promise<RemoteChannel | null> }>;
 };
 const fixtures: Fixture[] = [];
 
@@ -58,9 +65,12 @@ afterEach(async () => {
   }
 });
 
-/** Listens on 127.0.0.1 in the address's place: the fake table's tailnet addresses aren't this machine's. */
-function loopback(requested: string[], ports: Map<string, number>, servers: Map<string, Server>, failing: Set<string>): NonNullable<DirectListenerOptions['listen']> {
-  return (server: Server, address: string) =>
+/**
+ * Listens on 127.0.0.1 in the address's place: the fake table's tailnet addresses aren't this machine's. It answers the
+ * loopback port it got, or with `configured` the port it was asked for, as a real bind on a fixed port does each time.
+ */
+function loopback(requested: string[], ports: Map<string, number>, servers: Map<string, Server>, failing: Set<string>, configured = false): NonNullable<DirectListenerOptions['listen']> {
+  return (server: Server, address: string, asked: number) =>
     new Promise<number>((resolve, reject) => {
       requested.push(address);
       if (failing.delete(address)) return reject(Object.assign(new Error(`listen EADDRNOTAVAIL ${address}`), { code: 'EADDRNOTAVAIL' }));
@@ -69,12 +79,12 @@ function loopback(requested: string[], ports: Map<string, number>, servers: Map<
       server.listen(0, '127.0.0.1', () => {
         const port = (server.address() as AddressInfo).port;
         ports.set(address, port);
-        resolve(port);
+        resolve(configured ? asked : port);
       });
     });
 }
 
-async function fixture(options: { table?: InterfaceTable; limits?: DirectListenerOptions['limits']; failing?: string[] } = {}): Promise<Fixture> {
+async function fixture(options: { table?: InterfaceTable; limits?: DirectListenerOptions['limits']; failing?: string[]; sendLimits?: SendLimits; configuredPort?: boolean } = {}): Promise<Fixture> {
   const requested: string[] = [];
   const ports = new Map<string, number>();
   const servers = new Map<string, Server>();
@@ -82,6 +92,7 @@ async function fixture(options: { table?: InterfaceTable; limits?: DirectListene
   const log: string[] = [];
   const table = { current: options.table ?? { utun4: [v4('100.101.102.103'), v6('fd7a:115c:a1e0::abcd')], en0: [v4('192.168.1.20')], lo0: [v4('127.0.0.1')] } };
   const reads = { count: 0 };
+  const carriers: Fixture['carriers'] = [];
   const view = memoryOrgView({ chain: [...chain] });
   const channels = new Channels({
     identity: () => ({ ref: REF, key: machineKey, build: 'm4-direct', capabilities: [] }),
@@ -98,13 +109,14 @@ async function fixture(options: { table?: InterfaceTable; limits?: DirectListene
       reads.count++;
       return table.current;
     },
-    listen: loopback(requested, ports, servers, new Set(options.failing)),
-    connection: (io) => void channels.accept('direct', io, { deadlineMs: 10_000 }),
+    listen: loopback(requested, ports, servers, new Set(options.failing), options.configuredPort),
+    connection: (io) => void carriers.push({ io, channel: channels.accept('direct', io, { deadlineMs: 10_000 }) }),
     addresses: (urls) => void reports.push(urls),
     log: (line) => void log.push(line),
     limits: options.limits,
+    sendLimits: options.sendLimits,
   });
-  const f = { listener, requested, ports, servers, reports, log, table, reads, channels };
+  const f = { listener, requested, ports, servers, reports, log, table, reads, channels, carriers };
   fixtures.push(f);
   await listener.start();
   return f;
@@ -137,9 +149,10 @@ async function reachesLetGo(f: Fixture, address: string): Promise<boolean> {
 
 const closedOf = (socket: WebSocket) => new Promise<number>((resolve) => socket.once('close', (code) => resolve(code)));
 
-/** The device's carrier over a WebSocket. */
-async function dial(url: string): Promise<ByteDuplex> {
+/** The device's carrier over a WebSocket; `sockets` gets the socket, which a test pauses to stop reading. */
+async function dial(url: string, sockets: WebSocket[] = []): Promise<ByteDuplex> {
   const socket = new WebSocket(url);
+  sockets.push(socket);
   await opened(socket);
   const closes: Array<(reason: string) => void> = [];
   socket.on('close', (_code, reason) => closes.forEach((l) => l(reason.toString() || 'closed')));
@@ -227,6 +240,16 @@ describe('binding', () => {
       expect(await reachesLetGo(f, address)).toBe(false);
     }
   });
+
+  it('advertises the same addresses again when started after stop(), though they are the ones it had', async () => {
+    const f = await fixture({ configuredPort: true });
+    const urls = ['ws://100.101.102.103:47830', 'ws://[fd7a:115c:a1e0::abcd]:47830'];
+    expect(f.reports).toEqual([urls]);
+    await f.listener.stop();
+    await f.listener.start();
+    expect(f.listener.bound).toBe(true);
+    expect(f.reports).toEqual([urls, urls]);
+  });
 });
 
 describe('a connection', () => {
@@ -291,6 +314,128 @@ describe('a connection', () => {
       }));
     }
     expect(answers).toEqual([101, 101, 101, 503]);
+  });
+});
+
+describe('the send buffer, against a device that stops reading', () => {
+  /** A device's channel over the listener, its WebSocket, and the endpoint's side: the carrier and the admitted channel. */
+  async function connected(f: Fixture): Promise<{ channel: Channel; socket: WebSocket; io: CarrierDuplex; remote: RemoteChannel }> {
+    const sockets: WebSocket[] = [];
+    const dev = new Device({ identity: { org: ORG, member: A, device: 'a1', clientClass: 'native-mac', channelKey: a1.channel, build: 'device', capabilities: [] }, org: memoryOrgView({ chain: [...chain] }) });
+    const channel = await dev.open(() => dial(`ws://127.0.0.1:${f.ports.get('100.101.102.103')}`, sockets), REF);
+    const { io, channel: admitted } = f.carriers.at(-1)!;
+    return { channel, socket: sockets.at(-1)!, io, remote: (await admitted)! };
+  }
+
+  /** The most the carrier held unsent right after each send it took. */
+  function peakOf(io: CarrierDuplex, after?: () => void): { peak: number; sends: number } {
+    const seen = { peak: 0, sends: 0 };
+    const send = io.send.bind(io);
+    io.send = (bytes) => {
+      send(bytes);
+      seen.sends++;
+      seen.peak = Math.max(seen.peak, io.buffered);
+      after?.();
+    };
+    return seen;
+  }
+
+  const closeOf = (remote: RemoteChannel) => new Promise<string>((resolve) => remote.onClose(resolve));
+
+  it('holds the channel’s stream at the soft cap while the device reads nothing, and lets it go on, in order, once it reads', async () => {
+    const limits: SendLimits = { soft: 256 * 1024, ceiling: 64 * 1024 * 1024, stallMs: 60_000 };
+    const f = await fixture({ sendLimits: limits });
+    const { channel, socket, io, remote } = await connected(f);
+    const got: number[] = [];
+    channel.onMessage((m) => void (m.t === 'ev' && got.push(m.seq as number)));
+    socket.pause();
+    const seen = peakOf(io);
+    const body = 'e'.repeat(64 * 1024);
+    const total = 400; // 25 MiB: far past the kernel's buffers and the soft cap
+    let produced = 0;
+    const window = new StreamWindow(remote, { deadlineMs: 60_000, log: (line) => void f.log.push(line) });
+    window.ready({ next: () => (produced < total ? { message: { t: 'ev', sub: 's', epoch: 'e', seq: ++produced, body }, bytes: body.length } : null) });
+    // Held: everything the window handed is on the carrier, the carrier is over its soft cap, and nothing drains.
+    await until(() => seen.sends === produced && io.buffered >= limits.soft, 'the stream held');
+    expect(produced).toBeLessThan(total);
+    expect(seen.peak).toBeLessThanOrEqual(limits.soft + STREAM_WINDOW_BYTES + 2 * body.length);
+    expect(remote.closed).toBe(false);
+    socket.resume();
+    await until(() => got.length === total, 'the whole stream at the device', 15_000);
+    expect(got).toEqual(Array.from({ length: total }, (_, i) => i + 1));
+    expect(seen.peak).toBeLessThanOrEqual(limits.soft + STREAM_WINDOW_BYTES + 2 * body.length);
+  });
+
+  it('ends the connection once what it holds unread would pass its ceiling, having held no more than it', async () => {
+    const limits: SendLimits = { soft: 64 * 1024, ceiling: 2 * 1024 * 1024, stallMs: 60_000 };
+    const f = await fixture({ sendLimits: limits });
+    const { socket, io, remote } = await connected(f);
+    socket.pause();
+    const closed = closeOf(remote);
+    const output = 'r'.repeat(128 * 1024);
+    const most = 512; // 64 MiB at most: the cap is reached long before
+    let sent = 0;
+    // Control messages, which no window holds: one more each time the carrier takes one.
+    const pump = () => {
+      if (!remote.closed && sent < most) remote.send({ t: 'result', id: String(++sent), ok: true, output });
+    };
+    const seen = peakOf(io, pump);
+    pump();
+    expect(await closed).toBe('overflow');
+    expect(sent).toBeLessThan(most);
+    expect(seen.peak).toBeLessThanOrEqual(limits.ceiling);
+    expect(f.log.some((line) => line.includes('past its ceiling'))).toBe(true);
+  });
+
+  it('ends the connection when it holds bytes and has written no frame for its stall bound', async () => {
+    const limits: SendLimits = { soft: 64 * 1024, ceiling: 64 * 1024 * 1024, stallMs: 200 };
+    const f = await fixture({ sendLimits: limits });
+    const { socket, io, remote } = await connected(f);
+    socket.pause();
+    const closed = closeOf(remote);
+    const output = 's'.repeat(128 * 1024);
+    let sent = 0;
+    // Sends until the carrier itself holds more than any kernel's socket buffers could still take, then nothing more.
+    const pump = () => {
+      if (!remote.closed && io.buffered < 12 * 1024 * 1024 && sent < 512) remote.send({ t: 'result', id: String(++sent), ok: true, output });
+    };
+    peakOf(io, pump);
+    pump();
+    expect(await closed).toBe('stalled');
+    expect(f.log.some((line) => line.includes('written nothing'))).toBe(true);
+  });
+
+  it('closes a channel gracefully only after what its socket holds: the device reads every result, then the sealed close', async () => {
+    const limits: SendLimits = { soft: 64 * 1024, ceiling: 64 * 1024 * 1024, stallMs: 60_000 };
+    const f = await fixture({ sendLimits: limits });
+    const { channel, socket, io, remote } = await connected(f);
+    const got: string[] = [];
+    channel.onMessage((m) => void (m.t === 'result' && got.push(m.id as string)));
+    const closed = new Promise<{ reason: string; got: number }>((resolve) => channel.onClose((reason) => resolve({ reason, got: got.length })));
+    socket.pause();
+    const seen = peakOf(io);
+    const output = 'c'.repeat(128 * 1024);
+    const results = 64; // 8 MiB: past the kernel's buffers, so most of it is still held at the close
+    for (let i = 1; i <= results; i++) remote.send({ t: 'result', id: String(i), ok: true, output });
+    await until(() => seen.sends === results, 'every result sealed and on the carrier');
+    expect(io.buffered).toBeGreaterThan(2 * 1024 * 1024);
+    remote.close('done');
+    socket.resume();
+    expect(await closed).toEqual({ reason: 'done', got: results });
+    expect(got).toEqual(Array.from({ length: results }, (_, i) => String(i + 1)));
+  });
+
+  it('answers no WebSocket ping: every byte a connection is sent is the channel’s, which the caps count', async () => {
+    const f = await fixture();
+    const socket = raw(f);
+    await opened(socket);
+    const heard: string[] = [];
+    socket.on('pong', () => void heard.push('pong'));
+    const h2 = new Promise<void>((resolve) => socket.once('message', () => resolve(void heard.push('h2'))));
+    socket.ping();
+    socket.send(Buffer.from(await validH1()));
+    await h2;
+    expect(heard).toEqual(['h2']);
   });
 });
 

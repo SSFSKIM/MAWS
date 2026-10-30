@@ -9,10 +9,16 @@ import { eventChannel } from '@shared/ipc/schema';
 import type { DirectOperationOutcome, DirectSource } from '@shared/ipc/schema/connectors';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 import { clientOf } from '../ipc/clients';
+import { TEST_MACHINE } from '../../../test/support/machine'; // P5 O6 M2: a main handler's ctx names its target
 import type { MainContext } from '../ipc/router';
 import { startConnectors, type ConnectorsDeps } from '.';
 import { createDirectRoute, type DirectRouteDeps } from './direct-route';
 import type { ConnectorOAuthProvider } from './oauth-provider';
+import { project, record } from '../../../test/support/builders';
+import { fakeSpineView } from '../../../test/support/fake-spine-view';
+
+// P5 O3-C (reader R8): the spine's view, holding the artifact's creator and its project
+const ownView = () => fakeSpineView({ records: [record('app-own', { projectId: 'proj' as never, directory: '/repo' })], projects: [project('proj', 0, { directory: '/repo' })] });
 
 const ART = '11111111-1111-4111-8111-111111111111';
 const SOURCE_ID = '22222222-2222-4222-8222-222222222222';
@@ -96,7 +102,7 @@ function start(over: Partial<ConnectorsDeps> = {}) {
   service = startConnectors({
     hosts: { dispatch: fake.dispatch as never, onEvent: fake.onEvent as never, onState: fake.onState as never, onStreaming: fake.onStreaming as never, streaming: fake.streaming as never },
     register: ((name: string, handler: (input: unknown, context: MainContext) => unknown) => void handlers.set(name, handler)) as never,
-    index: { sessions: { get: () => ({ projectId: 'proj', directory: '/repo' }) }, projects: { list: () => [{ id: 'proj', directory: '/repo' }] } },
+    view: ownView(),
     realpath: (path) => path,
     windowShown: () => null,
     port: { openExternal: vi.fn() },
@@ -148,7 +154,7 @@ afterEach(() => {
 async function invoke(name: CommandName, input: unknown): Promise<unknown> {
   const checked = validateCommandInput(name, input);
   if (!checked.ok) throw new Error(`invalid input for ${name}`);
-  const answer = handlers.get(name)!(checked.value, { client: clientOf(me as never) });
+  const answer = handlers.get(name)!(checked.value, { client: clientOf(me as never), target: TEST_MACHINE });
   for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(0);
   const value = await answer;
   expect(validateCommandOutput(name, value).ok, `${name} output ${JSON.stringify(value)}`).toBe(true);

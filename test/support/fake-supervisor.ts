@@ -15,8 +15,8 @@ import { HostReadySchema, HostRequestV2Schema } from '@shared/ipc/host-protocol'
 import { createHostRuntime, type HostEmit, type HostRegister, type HostRuntime } from '@shared/host/runtime';
 import { SocketPort } from '@shared/host/socket-port';
 import { serveSocketClients, type SocketClients } from '@shared/host/socket-server';
-import { ClientExitSchema, ClientHelloV2Schema, HelloPreambleSchema, SOCKET_PROTOCOL, SOCKET_PROTOCOL_V2, splitLines, type ServerRefuse, type ServerWelcomeV2 } from '@shared/host/socket-protocol';
-import { WIRE_CAPABILITIES, WIRE_MINOR } from '@shared/ipc/wire';
+import { ClientExitSchema, ClientHelloV2Schema, HelloPreambleSchema, PEER_CAPABILITIES, SOCKET_PROTOCOL, SOCKET_PROTOCOL_V2, splitLines, type ServerRefuse, type ServerWelcomeV2 } from '@shared/host/socket-protocol';
+import { WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { buildIdOf, socketPathFor, SUPERVISOR_FILES, type LockFile } from '../../src/engine-host/supervisor-files';
 
@@ -73,7 +73,7 @@ export interface FakeSupervisorOptions {
   buildId?: string;
   protocol?: number;
   minor?: number; // P5 O1 M6: WIRE_MINOR unless told
-  capabilities?: string[]; // P5 O1 M6: WIRE_CAPABILITIES unless told
+  capabilities?: string[]; // P5 O1 M6: the engine host's own list (PEER_CAPABILITIES.engineHost; P5 O3-D) unless told
   token?: string;
   counts?: { liveSessions: number; rows: number };
   register?: HostRegister;
@@ -83,6 +83,8 @@ export interface FakeSupervisorOptions {
   docHighWater?: number; // P3-A M5: the document channels' reset mark
   // What `exit {when: 'now'}` does; by default the supervisor exits at once (its files removed, its pid dead).
   onExitNow?: (supervisor: FakeSupervisor) => void;
+  // P5 O2 M5: what `exit {when: 'idle'}` does once armed; by default nothing (it is recorded), as a host with work does
+  onExitIdle?: (supervisor: FakeSupervisor) => void;
 }
 
 export class FakeSupervisor {
@@ -147,7 +149,7 @@ export class FakeSupervisor {
           protocol: this.options.protocol ?? SOCKET_PROTOCOL,
           minor: this.options.minor ?? WIRE_MINOR,
           buildId: this.options.buildId ?? buildIdOf(this.profile.modulePath),
-          capabilities: this.options.capabilities ?? WIRE_CAPABILITIES,
+          capabilities: this.options.capabilities ?? PEER_CAPABILITIES.engineHost,
           wire: this.options.wire ?? wireFingerprint(),
           pid: this.pid,
           startedAt: lock.startedAt,
@@ -157,6 +159,7 @@ export class FakeSupervisor {
         onExit: (when) => {
           this.exits.push(when);
           if (when === 'now') (this.options.onExitNow ?? ((s) => void s.die()))(this);
+          else this.options.onExitIdle?.(this); // P5 O2 M5
         },
         log: (line) => void this.logs.push(line),
         docHighWater: this.options.docHighWater, // P3-A M5

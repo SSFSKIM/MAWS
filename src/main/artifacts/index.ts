@@ -1,10 +1,10 @@
 // The artifact store's side of main (docs/doperpowers/plans/2026-10-12-p3-a-store.md, M4): `artifacts.open`, which
-// hands a window a document's port (open.ts), and the relay of the design-system defaults main owns in settings
-// (defaults.ts). Main never opens `store.sqlite`; every other `artifacts.*` and `spaces.*` command is the engine host's
-// and reaches it through the router. Under MAWS_E2E=1 the e2e's seam `globalThis.__maws_documents` opens a further app
+// hands a window a document's port (open.ts). The relay of the design-system defaults (defaults.ts) is the spine's
+// since P5 O3-C (D23), composed beside this by main's root. Main never opens `store.sqlite`; every other `artifacts.*`
+// and `spaces.*` command is the engine host's and reaches it through the router. Under MAWS_E2E=1 the e2e's seam `globalThis.__maws_documents` opens a further app
 // window (the store's e2e syncs one document across two windows).
 //
-// P3-A M5: in detached mode main relays the document ports (hosts/doc-relay.ts), ending a window's channels when it
+// P3-A M5: in detached mode main relays the document ports (@shared/host/doc-relay.ts), ending a window's channels when it
 // closes or navigates; and each time the engine host's connection starts streaming (either mode), main announces
 // `artifacts.resync`, since the store's events of a span with no ready client are not replayed.
 //
@@ -17,12 +17,11 @@
 // capture service (capture.ts), which renders an `html` artifact's revision through the same scheme. Under MAWS_E2E=1
 // `globalThis.__maws_captures` runs a capture in main directly (no IPC command exists for it).
 import { MessageChannelMain, session, type BrowserWindow } from 'electron';
-import type { CommandInput, CommandName, CommandResult, EventName, EventPayload, HostState, Settings } from '@shared/ipc/schema';
+import type { CommandInput, CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
 import type { MawsArtifactCapture } from '@shared/ipc/schema/maws';
 import { CAPTURE_PARTITION, captureArtifact, startCaptureService } from './capture';
 import type { HostSupervisor } from '../hosts/supervisor';
 import type { registerMainHandler } from '../ipc/router';
-import { startArtifactDefaults } from './defaults';
 import { ExporterRegistry, printHtmlToPdf, registerHtmlExporters, startExportService } from './export';
 import { renderDocumentViewport } from './inspection';
 import { openDocument } from './open';
@@ -34,11 +33,9 @@ export { registerStoreSchemes } from './protocol';
 export type { ExportContext, Exporter, ExporterRegistry, ExportRequest } from './export';
 
 export interface ArtifactsDeps {
-  hosts: Pick<HostSupervisor, 'dispatch' | 'postDocPort' | 'closeDocPorts' | 'snapshot' | 'onState' | 'onStreaming' | 'onEvent'>;
+  hosts: Pick<HostSupervisor, 'dispatch' | 'postDocPort' | 'closeDocPorts' | 'onState' | 'onStreaming' | 'onEvent'>;
   register: typeof registerMainHandler;
   emit: <N extends EventName>(name: N, payload: EventPayload<N>) => boolean; // P3-A M5: to the renderer
-  settings(): Settings;
-  onSettingsChanged(listener: (settings: Settings) => void): () => void;
   env: Record<string, string | undefined>;
   openWindow(): BrowserWindow; // the e2e seam's second window
   root: string; // P3-A M7: `<userData>/artifacts`, where the library's exports are written
@@ -54,7 +51,7 @@ export function installStorePolicies(env: NodeJS.ProcessEnv, appUrl: string): vo
 }
 
 // P4-B5: `exports`, the export service itself (X31), for main's delivery (Send to), which exports as the library does
-export function startArtifacts({ hosts, register, emit, settings, onSettingsChanged, env, openWindow, root }: ArtifactsDeps): { stop(): void; exporters: ExporterRegistry; exports: Pick<ReturnType<typeof startExportService>, 'exportForLibrary'> } {
+export function startArtifacts({ hosts, register, emit, env, openWindow, root }: ArtifactsDeps): { stop(): void; exporters: ExporterRegistry; exports: Pick<ReturnType<typeof startExportService>, 'exportForLibrary'> } {
   const deps = { dispatch: hosts.dispatch, postDocPort: hosts.postDocPort, closeDocPorts: hosts.closeDocPorts, channel: () => new MessageChannelMain() };
   register('artifacts.open', ({ artifactId, doc }, { client }) => openDocument(deps, artifactId, client, doc));
   // P3-A M7: the scheme and the export service
@@ -85,13 +82,6 @@ export function startArtifacts({ hosts, register, emit, settings, onSettingsChan
     content,
     env,
   });
-  const stopDefaults = startArtifactDefaults({
-    settings,
-    onSettingsChanged,
-    hostState: (): HostState => hosts.snapshot('engine-host'),
-    onHostState: (listener) => hosts.onState('engine-host', listener),
-    dispatch: (input) => hosts.dispatch('engine-host', 'artifacts.setDefaults', input) as Promise<CommandResult<'artifacts.setDefaults'>>,
-  });
   const stopResync = hosts.onStreaming('engine-host', () => void emit('artifacts.resync', {})); // P3-A M5
   const seam = globalThis as {
     __maws_documents?: { openWindow(): number };
@@ -116,7 +106,6 @@ export function startArtifacts({ hosts, register, emit, settings, onSettingsChan
     exporters,
     exports, // P4-B5
     stop: () => {
-      stopDefaults();
       stopResync();
       stopLosses(); // E3
       stopCaptures();

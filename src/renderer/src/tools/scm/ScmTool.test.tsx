@@ -11,6 +11,7 @@ import { useLayout } from '../../stores/layout';
 import { useSessions } from '../../stores/sessions';
 import { panelOf, resetPanelStores, TestHost } from '../../test-support/panel';
 import { A, B, DIR, scmMain, stubCanvas } from '../../test-support/scm';
+import { at } from '../../../../../test/support/machine'; // P5 O6 M2: the page's ids; scm's A and B are main's
 import { useViewer } from '../code/viewer/viewer-store';
 import { registerScmTool, SCM_TOOL_ID, type ScmParams } from './index';
 import { useScm } from './store';
@@ -21,7 +22,7 @@ stubCanvas();
 const offs: (() => void)[] = [];
 let main: ReturnType<typeof scmMain>;
 
-const openScm = (params?: ScmParams, pin = false) => act(() => void panelHost.addTool(SCM_TOOL_ID, { appSessionId: A, params, pin }));
+const openScm = (params?: ScmParams, pin = false) => act(() => void panelHost.addTool(SCM_TOOL_ID, { appSessionId: at(A), params, pin }));
 const draft = () => screen.getByRole('textbox', { name: 'Commit message' }) as HTMLTextAreaElement;
 const selectedRow = () => document.querySelector<HTMLElement>('[data-scm-select][aria-current="true"]')?.closest<HTMLElement>('[data-scm-row]')?.dataset.path ?? null;
 const fileHeader = () => document.querySelector('[data-scm-file-header]')?.textContent;
@@ -31,7 +32,7 @@ beforeEach(() => {
   useScm.getState().reset();
   useViewer.getState().reset();
   main = scmMain();
-  useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { directory: DIR })).set(B, record(B, { directory: '/repo-b' })) }));
+  useSessions.setState((s) => ({ records: new Map(s.records).set(at(A), record(at(A), { directory: DIR })).set(at(B), record(at(B), { directory: '/repo-b' })) }));
   offs.push(registerScmTool());
 });
 afterEach(() => {
@@ -58,7 +59,7 @@ describe('the source control tool’s registration', () => {
     await waitFor(() => expect(fileHeader()).toBe('src/app.ts · Modified'));
     openScm({ target: `${DIR}/src/staged.ts` }); // re-targets the open tab (single instance)
     await waitFor(() => expect(fileHeader()).toBe('src/staged.ts · Added'));
-    expect(panelOf(A)!.tabs).toHaveLength(1);
+    expect(panelOf(at(A))!.tabs).toHaveLength(1);
     expect(selectedRow()).toBe('src/staged.ts');
   });
 
@@ -70,12 +71,12 @@ describe('the source control tool’s registration', () => {
     fireEvent.change(draft(), { target: { value: 'Draft for A' } });
     fireEvent.click(document.querySelector<HTMLButtonElement>('[data-scm-row][data-path="src/app.ts"] [data-scm-select]')!);
     expect(selectedRow()).toBe('src/app.ts');
-    act(() => useLayout.getState().openSession(B));
+    act(() => useLayout.getState().openSession(at(B)));
     act(() => panelHost.selectTab(tabId));
     await waitFor(() => expect(main.callsOf('git.watch')).toContainEqual({ directory: '/repo-b' }));
     await waitFor(() => expect(draft().value).toBe(''));
     expect(selectedRow()).toBeNull();
-    act(() => useLayout.getState().openSession(A));
+    act(() => useLayout.getState().openSession(at(A)));
     act(() => panelHost.selectTab(tabId));
     await waitFor(() => expect(draft().value).toBe('Draft for A'));
     expect(selectedRow()).toBeNull(); // the selection was the other checkout's moment, as Review's
@@ -86,7 +87,7 @@ describe('the source control tool’s registration', () => {
     render(<TestHost />);
     await waitFor(() => expect(screen.getByRole('region', { name: 'Unstaged' })).toBeTruthy());
     fireEvent.change(draft(), { target: { value: 'Unsaved draft' } });
-    await act(() => panelHost.closeTab(panelOf(A)!.tabs[0].id));
-    expect(panelOf(A)!.tabs).toEqual([]);
+    await act(() => panelHost.closeTab(panelOf(at(A))!.tabs[0].id));
+    expect(panelOf(at(A))!.tabs).toEqual([]);
   });
 });

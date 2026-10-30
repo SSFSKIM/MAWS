@@ -4,6 +4,7 @@
 // registers the real creator.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
+import { addressOf } from '@shared/machine/address';
 import { ipc } from '../ipc/client';
 import { registerSessionCreator } from '../keymap/actions-runtime';
 
@@ -16,7 +17,8 @@ export function connectScenarioSessionCreator(client: MawsBridge = ipc): () => v
       console.warn('[shell] session.launchMode unavailable; new sessions stay disabled', result.error);
       return;
     }
-    if (result.value.mode === 'scenario') off = registerSessionCreator(async () => `app-new-${crypto.randomUUID()}` as AppSessionId);
+    // P5 O6 M2: an id the page mints is the local machine's address, drawn once per new session
+    if (result.value.mode === 'scenario') off = registerSessionCreator(async () => addressOf(client.localMachine, `app-new-${crypto.randomUUID()}` as AppSessionId));
   });
   return () => {
     live = false;

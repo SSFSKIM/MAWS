@@ -4,6 +4,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import { render } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { vi } from 'vitest';
+import { at } from '../../../../../../test/support/machine';
 import { useTranscriptStore } from '../../../stores/transcript';
 import type { Row } from '../../model/rows';
 import type { TranscriptSource } from '../../source/types';
@@ -14,7 +15,7 @@ let keys = 0;
 
 // A store key hydrated with `events`, and a push for later batches.
 export async function storeWith(events: SessionEvent[]) {
-  const key = `test-${++keys}`;
+  const key = at(`test-${++keys}`); // P5 O6 M4: a transcript's store key is its session's address, whose machine a row's file actions name
   let listener: ((batch: SessionEvent[]) => void) | null = null;
   const source: TranscriptSource = {
     subscribe(l) {

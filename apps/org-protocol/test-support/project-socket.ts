@@ -11,7 +11,7 @@ import { JsonSocket, openSocket, socketUrl, type Frame, type Headers } from './s
 export const projectSocketPath = (project: string) => `/api/projects/${project}/socket`;
 
 /** A device's `human` before the hub positions it. */
-export type DeviceHuman = { kind: 'human'; from: 'human'; member: string; to: '*'; text: string; created: string; nonce: string; sig: Sig };
+export type DeviceHuman = { kind: 'human'; from: 'human'; member: string; to: '*' | Array<{ session: string; alias: string }>; text: string; created: string; nonce: string; sig: Sig };
 export type HumanAck = { t: 'human-ack'; nonce: string; offset: number; writer: string; seq: number };
 export type HumanRefused = { t: 'refused'; refusal: { reason: string; nonce?: string; message?: string } };
 export type LoggedEvent = { offset: number; event: Record<string, unknown> & { writer: string; seq: number } };

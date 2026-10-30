@@ -319,7 +319,39 @@ describe('a /compact on disk', () => {
       [true, 'This session is being co'], [true, '<local-command-caveat>Ca'], [false, '<command-name>/compact</'], [false, '<local-command-stdout>Co'],
     ]);
     expect(only(events, 'turn.started').map((e) => e.userMessageUuid)).toEqual([messages[2].messageUuid]); // the command's turn only
+    expect(only(events, 'turn.ended').map((e) => e.userMessageUuids)).toEqual([[messages[2].messageUuid]]); // P5 O9: which ends at its record
     expect(records.slice(at, at + 5).map((record) => startsTurn(record))).toEqual([false, false, false, true, false]);
+  });
+});
+
+// P5 O9 (the M10 sitting): commands typed at the terminal, as 2.1.312 wrote them in the sitting's transcript (the
+// caveat, the command's record under it, its output), shapes kept and words shortened. A local command runs no model,
+// so its turn ends where it starts; a skill's command record, under no caveat, opens a turn the model then runs.
+describe('a command typed at the terminal', () => {
+  const caveat = (uuid: string, parent: string | null, n: number) =>
+    rec({ type: 'user', uuid, parentUuid: parent, timestamp: at(n), isMeta: true, message: { role: 'user', content: '<local-command-caveat>The command below was run directly in Claude Code, not sent to you as a request.</local-command-caveat>' } });
+  const command = (uuid: string, parent: string, n: number, name: string, args: string) =>
+    rec({ type: 'user', uuid, parentUuid: parent, timestamp: at(n), message: { role: 'user', content: `<command-name>/${name}</command-name>\n            <command-message>${name}</command-message>\n            <command-args>${args}</command-args>` } });
+  const output = (uuid: string, parent: string, n: number, text: string) =>
+    rec({ type: 'user', uuid, parentUuid: parent, timestamp: at(n), message: { role: 'user', content: `<local-command-stdout>${text}</local-command-stdout>` } });
+
+  it('opens and ends the command’s turn at its record, the output after it, for each of two in a row', () => {
+    const events = mapAll([
+      caveat('c1', 'prior', 1), command('m1', 'c1', 1, 'model', 'haiku'), output('o1', 'm1', 2, 'Set model to `Haiku 5.5` and saved as your default for new sessions'),
+      caveat('c2', 'o1', 3), command('e2', 'c2', 3, 'effort', 'low'), output('o2', 'e2', 4, 'Set effort level to low (saved as your default for new sessions): Quick'),
+    ]);
+    const turns = events.filter((e) => e.kind === 'turn.started' || e.kind === 'turn.ended').map((e) => [e.kind, e.kind === 'turn.started' ? e.userMessageUuid : e.userMessageUuids, e.id]);
+    expect(turns).toEqual([
+      ['turn.started', 'm1', 'm1'], ['turn.ended', ['m1'], 'm1#2'],
+      ['turn.started', 'e2', 'e2'], ['turn.ended', ['e2'], 'e2#2'],
+    ]);
+    expect(only(events, 'turn.ended').map((e) => [e.numTurns, e.result, e.resultText])).toEqual([[0, 'success', null], [0, 'success', null]]);
+    expect(kinds(events.filter((e) => e.id.startsWith('o1') || e.id.startsWith('o2')))).toEqual(['user.message', 'user.message']); // the outputs open nothing
+  });
+
+  it('a skill’s command record, under no caveat, opens a turn it leaves running', () => {
+    const events = mapAll([output('o0', 'prior', 1, 'done'), command('s1', 'o0', 2, 'doperpowers:brainstorming', 'a feature')]);
+    expect(kinds(events.filter((e) => e.kind === 'turn.started' || e.kind === 'turn.ended'))).toEqual(['turn.started']);
   });
 });
 
@@ -780,3 +812,71 @@ describe('peer messages from disk (E7)', () => {
   });
 });
 // E7 end
+
+// P5 O9 (the M8 sitting, recorded 2026-10-29 on engine 2.1.312): the engine writes `(no content)` for a message with no
+// content, here three records a plugin's start-up left before the first prompt (a meta and a plain user record of the
+// plugin's origin, and the output of the `/reload-plugins` it ran). Each is a record of nothing: no bubble, no turn, no
+// command output.
+describe('records with no content', () => {
+  const doperpowers = { kind: 'plugin', name: 'doperpowers' };
+  const meta = rec({ type: 'user', uuid: 'c1', parentUuid: null, cwd: '/d', isMeta: true, timestamp: at(0), origin: doperpowers, queuePriority: 'later', message: { role: 'user', content: '(no content)' } });
+  const plain = rec({ type: 'user', uuid: 'c2', parentUuid: 'c1', cwd: '/d', timestamp: at(0), origin: doperpowers, queuePriority: 'later', message: { role: 'user', content: '(no content)' } });
+  const output = rec({ type: 'system', subtype: 'local_command', uuid: 'c3', parentUuid: 'c2', timestamp: at(0), content: '(no content)', level: 'info', isMeta: false, commandRun: { command: 'reload-plugins', args: '' } });
+  const blocks = rec({ type: 'user', uuid: 'c4', parentUuid: 'c3', timestamp: at(0), message: { role: 'user', content: [{ type: 'text', text: '(no content)' }] } });
+  const hi = rec({ type: 'user', uuid: 'u1', parentUuid: 'c4', timestamp: at(1), message: { role: 'user', content: 'hi' } });
+
+  it('maps to nothing and opens no turn; the first prompt after them does', () => {
+    const events = mapAll([meta, plain, output, blocks, hi]);
+    expect(kinds(events)).toEqual(['session.started', 'turn.started', 'user.message']);
+    expect(only(events, 'user.message')[0]).toMatchObject({ messageUuid: 'u1', content: 'hi' });
+    expect([meta, plain, output, blocks].map(startsTurn)).toEqual([false, false, false, false]);
+    expect(startsTurn(hi)).toBe(true);
+  });
+});
+
+// P5 O9 (the M8 sitting, recorded 2026-10-29 on sminos 1.27.10 and engine 2.1.312): words a terminal session's sminos
+// bridge delivered while a turn ran. The bridge appends them as the running turn's row, which the engine keeps alike
+// for every row a plugin appends (a meta user record of the plugin's origin), and mirrors them in a transcript line,
+// `sminos: delivered: <the words on one line>`, the one place the record says they are the owner's. Read together they
+// are what lane B's mid-turn send reads as (steeredPrompt): the owner's words folded into the running turn at that point,
+// under the row's own uuid (which the bridge's `delivered` names), and no notice.
+describe('a sminos delivery into a running turn', () => {
+  const sminos = { kind: 'plugin', name: 'sminos' };
+  const prompt = rec({ type: 'user', uuid: 'p1', parentUuid: null, cwd: '/d', timestamp: at(0), origin: { ...sminos, asUser: true }, message: { role: 'user', content: 'list the files here again' } });
+  const row = (uuid: string, text: string) => rec({ type: 'user', uuid, parentUuid: 'p1', isMeta: true, timestamp: at(1), origin: sminos, promptId: 'x', message: { role: 'user', content: [{ type: 'text', text }] } });
+  const line = (uuid: string, parentUuid: string, content: string) => rec({ type: 'system', subtype: 'informational', uuid, parentUuid, isMeta: false, timestamp: at(2), content, level: 'notice' });
+
+  it('reads the row and its transcript line as the owner’s words steered into the turn, with no notice', () => {
+    const events = mapAll([prompt, row('d1', 'and count them'), line('n1', 'd1', 'sminos: delivered: and count them')]);
+    expect(only(events, 'notice.posted')).toEqual([]);
+    const words = only(events, 'user.message').filter((e) => !e.isSynthetic);
+    expect(words.map((e) => [e.messageUuid, e.content, e.origin])).toEqual([
+      ['p1', 'list the files here again', null],
+      ['d1', 'and count them', 'human'],
+    ]);
+    expect(only(events, 'command.lifecycle').map((e) => [e.commandUuid, e.state])).toEqual([['d1', 'started']]);
+    expect(only(events, 'turn.started').map((e) => e.userMessageUuid)).toEqual(['p1']); // it starts no turn
+  });
+
+  it('matches words of several lines, which the line carries on one', () => {
+    const events = mapAll([prompt, row('d1', 'and count them\nthen stop'), line('n1', 'd1', 'sminos: delivered: and count them then stop')]);
+    expect(only(events, 'user.message').find((e) => e.messageUuid === 'd1' && !e.isSynthetic)?.content).toBe('and count them\nthen stop');
+    expect(only(events, 'notice.posted')).toEqual([]);
+  });
+
+  it('leaves the bridge’s other rows silent and its other lines notices, and a line whose row it never saw a notice', () => {
+    const events = mapAll([
+      prompt,
+      row('m1', '[Request interrupted by user]'),
+      row('m2', 'The interrupt came from outside the terminal.'),
+      line('n1', 'm2', 'sminos: interrupt: [Request interrupted by user] The interrupt came from outside the terminal.'),
+      line('n2', 'm2', 'sminos: delivered: words this transcript never held'),
+    ]);
+    expect(only(events, 'user.message').filter((e) => !e.isSynthetic && e.origin !== 'interrupt-marker').map((e) => e.messageUuid)).toEqual(['p1']);
+    expect(only(events, 'command.lifecycle')).toEqual([]);
+    expect(only(events, 'notice.posted').map((e) => e.text)).toEqual([
+      'sminos: interrupt: [Request interrupted by user] The interrupt came from outside the terminal.',
+      'sminos: delivered: words this transcript never held',
+    ]);
+  });
+});

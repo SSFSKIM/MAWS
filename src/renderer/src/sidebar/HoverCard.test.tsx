@@ -5,13 +5,15 @@ import { REL } from '../test-support/relative-time';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, ProjectId, RequestId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { item, status, humanTurn } from '../../../../test/support/builders';
 import { ev } from '../../../../test/support/events';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { useAttention } from '../stores/attention';
+import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
-import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { projectList } from './derive';
 import { RequestPreview } from './RequestPreview';
 import { useLayout } from '../stores/layout';
@@ -23,10 +25,17 @@ import { RequestCard } from '../request-card/RequestCard';
 import { askItemFor, askOpened } from '../request-card/test-requests';
 import { applyAskEvents, resetAskSheets } from '../tools/maws/ask/store';
 
+// P5 O6 M2: the scenario file is main's (bare ids), which the fake `window.maws` is asked with and answers; the page holds
+// it lifted (`page`), so a test finds a store's or the DOM's id through `idOf` and main's through `bareIdOf`
 const nine = scenarioFile('nine-sessions');
-const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title)!.appId;
-// The scenario's 3 s entry: the synthetic read-only request for Charter + research.
+const page = pageScenario(nine);
+const idOf = (title: string) => page.sessions.find((r) => r.title.text === title)!.appId;
+const bareIdOf = (title: string) => nine.sessions.find((r) => r.title.text === title)!.appId;
+// The scenario's 3 s entry: the synthetic read-only request for Charter + research, as the page holds it.
 const readOp = nine.timeline.find((op) => op.op === 'attention')! as Extract<(typeof nine.timeline)[number], { op: 'attention' }>;
+const readAttention = pageScenario({ ...nine, attention: [{ appSessionId: readOp.appSessionId, items: readOp.items, requests: readOp.requests }] }).attention[0]!;
+// An attention item as the page holds it: its ids addresses.
+const pageItem = (...args: Parameters<typeof item>) => { const bare = item(...args); return { ...bare, id: at(bare.id), appSessionId: at(bare.appSessionId) }; };
 const requests: Record<string, SessionEvent> = Object.assign({}, ...nine.attention.map((a) => a.requests), readOp.requests);
 
 let fake: FakeClient;
@@ -35,7 +44,7 @@ function withMain(outcome: 'delivered' | 'not_pending' = 'delivered') {
     'attention.request': ({ requestId }: { requestId: string }) => ({ event: requests[requestId] ?? null }),
     'session.answer': () => ({ outcome }),
   });
-  window.maws = fake.client;
+  window.maws = fake.client as unknown as PreloadBridge;
 }
 
 // W5: the card sits on every session row; both requests' sessions are on MAWS's page.
@@ -44,12 +53,13 @@ const needsRow = (title: string) => screen.getByRole('treeitem', { name: title }
 beforeEach(() => {
   resetShellStores();
   fillStores(nine);
-  useLayout.getState().setSidebar({ expandedProjects: ['proj-maws' as ProjectId] });
-  act(() => useAttention.getState().applyChanged({ appSessionId: readOp.appSessionId, items: readOp.items }));
+  useLayout.getState().setSidebar({ expandedProjects: [at('proj-maws' as ProjectId)] });
+  act(() => useAttention.getState().applyChanged({ appSessionId: readAttention.appSessionId, items: readAttention.items }, TEST_MACHINE));
 });
 afterEach(() => {
   cleanup();
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
+  useMachines.setState({ roster: 'unread', machines: new Map() });
 });
 
 describe.each(['tree', 'Needs you'] as const)('%s hover card approves read-only only', (placement) => {
@@ -81,7 +91,7 @@ describe.each(['tree', 'Needs you'] as const)('%s hover card approves read-only 
     expect(within(card).getByRole('button', { name: 'Deny' })).toBeTruthy();
     await user.click(approve);
     expect(fake.invoked('session.answer')).toEqual([
-      { appSessionId: idOf('Charter + research'), requestId: 'req-synthetic-read-9a1d4262', answer: { kind: 'permission', decision: 'allow', scope: 'once' } },
+      { appSessionId: bareIdOf('Charter + research'), requestId: 'req-synthetic-read-9a1d4262', answer: { kind: 'permission', decision: 'allow', scope: 'once' } },
     ]);
   });
 
@@ -100,14 +110,14 @@ describe.each(['tree', 'Needs you'] as const)('%s hover card approves read-only 
       await user.keyboard(' ');
     }
     expect(fake.invoked('session.answer')).toEqual([]);
-    expect(useAttention.getState().bySession.get(readOp.appSessionId)).toEqual(readOp.items); // still pending
+    expect(useAttention.getState().bySession.get(readAttention.appSessionId)).toEqual(readAttention.items); // still pending
     await user.click(approve);
     expect(fake.invoked('session.answer')).toHaveLength(1);
   });
 
   it('a synthetic click with no pointer press before it answers nothing', async () => {
     withMain();
-    render(<RequestPreview item={readOp.items[0]} request={requests['req-synthetic-read-9a1d4262']} placement="hover" paneIndex={null} />);
+    render(<RequestPreview item={readAttention.items[0]} request={requests['req-synthetic-read-9a1d4262']} placement="hover" paneIndex={null} />);
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }), { detail: 1 });
     fireEvent.click(screen.getByRole('button', { name: 'Deny' }), { detail: 0 });
     expect(fake.invoked('session.answer')).toEqual([]);
@@ -144,9 +154,9 @@ describe('a session row’s hover card', () => {
 
   it('a working session: its status, age and context, its activity and its last answer', async () => {
     withMain();
-    useLayout.getState().setSidebar({ expandedProjects: ['proj-claude-usage-menubar' as ProjectId] });
+    useLayout.getState().setSidebar({ expandedProjects: [at('proj-claude-usage-menubar' as ProjectId)] });
     const digest = useSessions.getState().digests.get(idOf('Usage reset countdown'))!;
-    act(() => useSessions.getState().applyDigest({ ...digest, context: { percent: 41.4, totalTokens: 414_000, maxTokens: 1_000_000, autoCompactThreshold: null }, revision: digest.revision + 1 }));
+    act(() => useSessions.getState().applyDigest({ ...digest, context: { percent: 41.4, totalTokens: 414_000, maxTokens: 1_000_000, autoCompactThreshold: null }, revision: digest.revision + 1 }, TEST_MACHINE));
     render(<Sidebar />);
     const card = await open('Usage reset countdown');
     expect(within(card).getByRole('heading', { name: 'Usage reset countdown' })).toBeTruthy();
@@ -158,7 +168,7 @@ describe('a session row’s hover card', () => {
 
   it('a foreign-live session names its holder', async () => {
     withMain();
-    useLayout.getState().setSidebar({ expandedProjects: ['proj-codex-somersault' as ProjectId] });
+    useLayout.getState().setSidebar({ expandedProjects: [at('proj-codex-somersault' as ProjectId)] });
     render(<Sidebar />);
     const card = await open('Somersault terminal run');
     expect(within(card).getByTestId('hover-activity').textContent).toBe('Terminal · pid 7135');
@@ -168,8 +178,8 @@ describe('a session row’s hover card', () => {
   // E3: whose side thread or fork it is
   it('a side thread or fork names its parent', async () => {
     withMain();
-    const charter = idOf('Charter + research');
-    const drag = idOf('Fix sidebar drag');
+    const charter = bareIdOf('Charter + research'); // fillStores takes the scenario as main's
+    const drag = bareIdOf('Fix sidebar drag');
     act(() =>
       fillStores({
         ...nine,
@@ -188,8 +198,8 @@ describe('a session row’s hover card', () => {
 
   it('a worktree session names its branch and the worktree’s folder; a main session its branch', async () => {
     withMain();
-    const charter = idOf('Charter + research');
-    const drag = idOf('Fix sidebar drag');
+    const charter = bareIdOf('Charter + research'); // fillStores takes the scenario as main's
+    const drag = bareIdOf('Fix sidebar drag');
     act(() =>
       fillStores({
         ...nine,
@@ -211,6 +221,23 @@ describe('a session row’s hover card', () => {
     const main = await open('Fix sidebar drag');
     expect(within(main).getByTestId('hover-place').textContent).toBe('⎇ master');
   });
+
+  // P5 O6 M5: the card always names the session's machine; an offline one's also says when it was last seen
+  it('names the session’s machine, and an offline machine’s last sighting', async () => {
+    withMain();
+    const since = new Date(Date.now() - 5 * 60_000).toISOString();
+    const roster = (state: 'up' | 'down') =>
+      useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'Studio', local: true, state, since, generation: 0 }]);
+    act(() => roster('up'));
+    render(<Sidebar />);
+    expect(within(await open('Fix sidebar drag')).getByTestId('hover-machine').textContent).toBe('Studio');
+    cleanup();
+    act(() => roster('down'));
+    render(<Sidebar />);
+    await userEvent.setup().hover(needsRow('Fix sidebar drag, machine offline'));
+    const card = await screen.findByRole('dialog', { name: 'Fix sidebar drag' });
+    expect(within(card).getByTestId('hover-machine').textContent).toBe(`Studio · offline · last seen ${formatAgo(5 * 60_000, { narrow: true })}`);
+  });
 });
 
 // W11 (I6): a project row's card, in the same shell: the name, the path home-abbreviated, the counts, the last activity
@@ -227,7 +254,7 @@ describe('a project’s hover card', () => {
         worktrees: [info('/Users/new/Developer/GitHub/MAWS', 'master', true), info('/Users/new/Developer/GitHub/MAWS/.claude/worktrees/accept-one', 'worktree-accept-one')],
       },
     });
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     useLayout.getState().setSidebar({ expandedProjects: [] });
     render(<Sidebar />);
     expect(fake.invoked('git.worktree.list')).toEqual([]); // nothing read while closed
@@ -239,7 +266,7 @@ describe('a project’s hover card', () => {
     expect(within(card).getByTestId('project-path').getAttribute('title')).toBe(maws.directory);
     expect(within(card).getByTestId('project-counts').textContent).toBe('4 sessions · 3 waiting · 1 working'); // the 3 s request included
     const s = useSessions.getState();
-    const last = projectList({ records: s.records, digests: s.digests, projects: [...s.projects.values()], rows: [] }).find((e) => e.key === 'proj-maws')!.lastActivity!;
+    const last = projectList({ records: s.records, digests: s.digests, projects: s.projects, rows: [], local: TEST_MACHINE, machineName: () => 'This Mac' }).find((e) => e.key === at('proj-maws'))!.lastActivity!;
     const elapsed = Date.now() - last;
     expect(within(card).getByTestId('project-activity').textContent).toBe(elapsed < 60_000 ? 'Active now' : `Last active ${formatAgo(elapsed, { narrow: true })}`);
     const worktrees = await within(card).findByRole('list', { name: 'Worktrees' });
@@ -247,9 +274,9 @@ describe('a project’s hover card', () => {
     expect(fake.invoked('git.worktree.list')).toEqual([{ repoRoot: maws.directory }]);
   });
 
-  it('opens on the project row’s keyboard focus, says nothing of worktrees outside a repository, and Other sessions has none', async () => {
+  it('opens on the project row’s keyboard focus, says nothing of worktrees outside a repository, and a machine’s own row has none', async () => {
     fake = fakeClient();
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     render(<Sidebar />);
     act(() => screen.getByRole('treeitem', { name: 'codex_somersault' }).focus());
     const card = await screen.findByRole('dialog', { name: 'codex_somersault' });
@@ -260,35 +287,35 @@ describe('a project’s hover card', () => {
     expect(within(card).queryByRole('list', { name: 'Worktrees' })).toBeNull();
     act(() => screen.getByRole('treeitem', { name: 'codex_somersault' }).blur());
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'codex_somersault' })).toBeNull());
-    act(() => screen.getByRole('treeitem', { name: 'Other sessions' }).focus());
+    act(() => screen.getByRole('treeitem', { name: 'This Mac' }).focus());
     await new Promise((resolve) => setTimeout(resolve, 350));
-    expect(screen.queryByRole('dialog', { name: 'Other sessions' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: 'This Mac' })).toBeNull();
   });
 });
 
 describe('request preview', () => {
-  const at = '2026-09-28T10:00:00.000Z';
+  const WHEN = '2026-09-28T10:00:00.000Z';
   const itemFor = (id: string, kind: AttentionItem['kind'], requestId: string) =>
-    item(id, kind, at, { request: { requestId: requestId as RequestId, toolUseId: null, taskId: null, agentId: null } });
+    pageItem(id, kind, WHEN, { request: { requestId: requestId as RequestId, toolUseId: null, taskId: null, agentId: null } });
 
   it('Deny sends a plain deny with no scope', async () => {
     withMain();
     const request = requests['req-synthetic-read-9a1d4262'];
-    render(<RequestPreview item={readOp.items[0]} request={request} placement="hover" paneIndex={null} />);
+    render(<RequestPreview item={readAttention.items[0]} request={request} placement="hover" paneIndex={null} />);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Deny' }));
     expect(fake.invoked('session.answer')).toEqual([
-      { appSessionId: idOf('Charter + research'), requestId: 'req-synthetic-read-9a1d4262', answer: { kind: 'permission', decision: 'deny' } },
+      { appSessionId: bareIdOf('Charter + research'), requestId: 'req-synthetic-read-9a1d4262', answer: { kind: 'permission', decision: 'deny' } },
     ]);
   });
 
   it('never offers Approve outside the hover placement', () => {
-    render(<RequestPreview item={readOp.items[0]} request={requests['req-synthetic-read-9a1d4262']} placement="card" paneIndex={null} />);
+    render(<RequestPreview item={readAttention.items[0]} request={requests['req-synthetic-read-9a1d4262']} placement="card" paneIndex={null} />);
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Open session' })).toBeTruthy();
   });
 
   it('shows a question’s headers and options', () => {
-    const q = nine.attention.find((a) => a.appSessionId === idOf('Sidebar interaction pass'))!;
+    const q = page.attention.find((a) => a.appSessionId === idOf('Sidebar interaction pass'))!;
     render(<RequestPreview item={q.items[0]} request={Object.values(q.requests)[0]} placement="hover" paneIndex={null} />);
     expect(screen.getByText('Color')).toBeTruthy();
     expect(screen.getByText('Which color do you prefer?')).toBeTruthy();
@@ -319,12 +346,12 @@ describe('request preview', () => {
   });
 
   it('shows the item’s summary while the request is not known', () => {
-    render(<RequestPreview item={item('a1', 'interrupted', at, { summary: 'Session interrupted, 1 approval lost' })} request={null} placement="hover" paneIndex={null} />);
+    render(<RequestPreview item={pageItem('a1', 'interrupted', WHEN, { summary: 'Session interrupted, 1 approval lost' })} request={null} placement="hover" paneIndex={null} />);
     expect(screen.getByText('Session interrupted, 1 approval lost')).toBeTruthy();
   });
 
   it('never offers Approve for a foreign-live session', () => {
-    const foreign = idOf('Somersault terminal run');
+    const foreign = bareIdOf('Somersault terminal run');
     const read = ev('permission.requested', { toolName: 'Read', input: { file_path: '/r/a.md' } });
     render(<RequestPreview item={itemFor(foreign as AppSessionId, 'permission', 'req_1')} request={read} placement="hover" paneIndex={null} />);
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
@@ -341,13 +368,13 @@ describe('answering a waiting question from the hover card', () => {
   beforeEach(() => {
     resetAskSheets();
     registerSlot('requestCard', RequestCard);
-    useAttention.getState().applyChanged({ appSessionId: id, items: [attention] });
-    useSessions.getState().applyStatus({ appSessionId: id, status: status(id, { turn: humanTurn }) });
+    useAttention.getState().applyChanged({ appSessionId: id, items: [attention] }, TEST_MACHINE);
+    useSessions.getState().applyStatus({ appSessionId: id, status: status(id, { turn: humanTurn }) }, TEST_MACHINE);
     fake = fakeClient({
       'attention.request': { event },
       'maws.asks.list': { asks: [{ askId: event.askId, toolUseId: event.toolUseId, requestId: event.requestId, title: event.title, context: event.context, blocking: event.blocking, questions: event.questions, openedAt: event.at }] },
     });
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
   });
   afterEach(() => {
     resetSlots();
@@ -371,7 +398,7 @@ describe('answering a waiting question from the hover card', () => {
     const submit = within(card).getByRole('button', { name: 'Submit' });
     await userEvent.click(submit);
     await waitFor(() => expect(fake.invoked('maws.ask.answer')).toEqual([{
-      appSessionId: id, askId: event.askId, answers: [
+      appSessionId: bareIdOf(title), askId: event.askId, answers: [
         { id: 'q1', question: 'Which colour?', status: 'answered', value: ['Blue'] },
         { id: 'q2', question: 'What title?', status: 'answered', value: 'Release notes' },
       ],
@@ -409,7 +436,7 @@ describe('answering a waiting question from the hover card', () => {
   it('does not offer a follow-up reply while a native question is waiting either', async () => {
     const native = ev('question.requested', { questions: [{ header: 'Colour', question: 'Which colour?', multiSelect: false, options: [{ label: 'Blue', description: 'Calm', preview: null }] }] });
     fake = fakeClient({ 'attention.request': { event: native } });
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     const card = await open();
     expect(await within(card).findByText('Which colour?')).toBeTruthy();
     expect(within(card).queryByRole('textbox', { name: `Reply to ${title}` })).toBeNull();
@@ -426,8 +453,8 @@ describe('hover quick reply', () => {
       'session.send': { disposition: 'sent', queueId: 'q1', messageUuid: '11111111-1111-4111-8111-111111111111' },
       'session.steer': { messageUuid: '11111111-1111-4111-8111-111111111111' },
     });
-    window.maws = fake.client;
-    useSessions.getState().applyStatus({ appSessionId: id, status: status(id, { turn: busy ? humanTurn : null }) });
+    window.maws = fake.client as unknown as PreloadBridge;
+    useSessions.getState().applyStatus({ appSessionId: id, status: status(id, { turn: busy ? humanTurn : null }) }, TEST_MACHINE);
     render(<Sidebar />);
     await userEvent.hover(needsRow('Charter + research'));
     const card = await screen.findByRole('dialog', { name: 'Charter + research' });
@@ -435,7 +462,7 @@ describe('hover quick reply', () => {
     await userEvent.type(reply, 'Please use the smaller layout');
     await userEvent.click(within(card).getByRole('button', { name: 'Send reply' }));
     await waitFor(() => expect(fake.invoked(busy ? 'session.steer' : 'session.send')).toEqual([
-      { appSessionId: id, content: 'Please use the smaller layout', ...(busy ? { priority: 'next' } : {}) },
+      { appSessionId: bareIdOf('Charter + research'), content: 'Please use the smaller layout', ...(busy ? { priority: 'next' } : {}) },
     ]));
     expect(fake.invoked(busy ? 'session.send' : 'session.steer')).toEqual([]);
     await waitFor(() => expect((reply as HTMLInputElement).value).toBe(''));
@@ -445,8 +472,8 @@ describe('hover quick reply', () => {
 it('keeps a refused hover reply for correction and retry, including across closing the card', async () => {
   const id = idOf('Charter + research');
   fake = fakeClient({ 'attention.request': { event: null }, 'session.queue.list': { entries: [], paused: false } });
-  window.maws = fake.client;
-  useSessions.getState().applyStatus({ appSessionId: id, status: status(id) });
+  window.maws = fake.client as unknown as PreloadBridge;
+  useSessions.getState().applyStatus({ appSessionId: id, status: status(id) }, TEST_MACHINE);
   render(<Sidebar />);
   await userEvent.hover(needsRow('Charter + research'));
   let card = await screen.findByRole('dialog', { name: 'Charter + research' });
@@ -466,8 +493,8 @@ it('keeps a refused hover reply for correction and retry, including across closi
 it('a reply still sending when the card closes is still sending when it reopens: no second send, and its answer clears only that draft', async () => {
   const id = idOf('Charter + research');
   fake = fakeClient({ 'attention.request': { event: null }, 'session.queue.list': { entries: [], paused: false } });
-  window.maws = fake.client;
-  useSessions.getState().applyStatus({ appSessionId: id, status: status(id) });
+  window.maws = fake.client as unknown as PreloadBridge;
+  useSessions.getState().applyStatus({ appSessionId: id, status: status(id) }, TEST_MACHINE);
   render(<Sidebar />);
   await userEvent.hover(needsRow('Charter + research'));
   let card = await screen.findByRole('dialog', { name: 'Charter + research' });
@@ -495,9 +522,9 @@ it('a reply still sending when the card closes is still sending when it reopens:
 describe('a hover card with its reply focused', () => {
   const openWithReplyFocused = async () => {
     fake = fakeClient({ 'attention.request': { event: null }, 'session.queue.list': { entries: [], paused: false } });
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     const id = idOf('Charter + research');
-    useSessions.getState().applyStatus({ appSessionId: id, status: status(id) });
+    useSessions.getState().applyStatus({ appSessionId: id, status: status(id) }, TEST_MACHINE);
     render(<Sidebar />);
     const user = userEvent.setup();
     await user.hover(needsRow('Charter + research'));

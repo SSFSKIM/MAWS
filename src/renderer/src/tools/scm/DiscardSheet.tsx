@@ -15,7 +15,7 @@ import type { ScmNotice, ScmSheet, ScmUi } from './view-state';
 
 export type DiscardEntries = Extract<ScmSheet, { kind: 'discard' }>['entries'];
 
-export function DiscardSheet({ appSessionId, ui, entries }: { appSessionId: AppSessionId; ui: StoreApi<ScmUi>; entries: DiscardEntries }) {
+export function DiscardSheet({ appSessionId, ui, directory, entries }: { appSessionId: AppSessionId; ui: StoreApi<ScmUi>; directory: string; entries: DiscardEntries }) {
   const [acknowledged, setAcknowledged] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<ScmNotice | null>(null);
@@ -27,7 +27,7 @@ export function DiscardSheet({ appSessionId, ui, entries }: { appSessionId: AppS
   const submit = async () => {
     setRunning(true);
     setError(null);
-    const result = await useScm.getState().discard(ui, appSessionId, entries);
+    const result = await useScm.getState().discard(ui, appSessionId, directory, entries);
     setRunning(false);
     if (ui.getState().session !== appSessionId) return; // a pinned tool moved on: its sheet is already gone
     if (!result.ok) setError({ kind: 'error', text: result.error.message, output: '' });

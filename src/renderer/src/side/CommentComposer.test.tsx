@@ -5,15 +5,19 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { digest, record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { at } from '../../../../test/support/machine';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { fileLineAnchor } from '../tools/code/anchor/anchor';
 import { resetShellStores } from '../test-support/shell-stores';
 import { CommentComposerHost, openComposer, useCommentComposer } from './CommentComposer';
 
-const PARENT = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
+// P5 O6 M2: main is asked and answers with the bare id; the page holds its address
+const PARENT_ID = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
+const PARENT = at(PARENT_ID);
 const ANCHOR = fileLineAnchor('/work/repo/src/x.ts', 42);
 
 let fake: FakeClient;
@@ -28,7 +32,7 @@ beforeEach(() => {
   resetShellStores();
   useNotices.setState({ notices: [] });
   fake = fakeClient({ 'side.sendToMain': { messageUuid: null, disposition: 'sent' } });
-  window.maws = fake.client;
+  window.maws = fake.client as unknown as PreloadBridge;
 });
 afterEach(() => {
   cleanup();
@@ -81,15 +85,15 @@ describe('the comment composer', () => {
 
   it('Send to main on an exited parent starts it (side), reading Starting…, then sends once and closes', async () => {
     fake = fakeClient({ 'side.sendToMain': { messageUuid: null, disposition: 'sent' } });
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     withParent('exited');
     show();
     await userEvent.click(screen.getByRole('radio', { name: /Send to main/ }));
     await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), 'Look here{Enter}');
-    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: PARENT, reason: 'side' }]);
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: PARENT_ID, reason: 'side' }]);
     expect(screen.getByRole('button', { name: 'Starting…' })).toBeTruthy();
     expect(fake.invoked('side.sendToMain')).toEqual([]);
-    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: PARENT, launched: true, joined: false }));
+    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: PARENT_ID, launched: true, joined: false }));
     expect(fake.invoked('side.sendToMain')).toHaveLength(1);
     expect(fake.invoked('session.acquire')).toHaveLength(1);
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -100,7 +104,7 @@ describe('the comment composer', () => {
     show();
     await userEvent.click(screen.getByRole('radio', { name: /Send to main/ }));
     await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), 'Look here{Enter}');
-    await act(() => fake.reply('session.acquire', { status: 'missing_directory', appSessionId: PARENT, directory: '/gone' }));
+    await act(() => fake.reply('session.acquire', { status: 'missing_directory', appSessionId: PARENT_ID, directory: '/gone' }));
     expect(screen.getByRole('alert').textContent).toContain('Directory not found: /gone');
     expect(fake.invoked('side.sendToMain')).toEqual([]);
     expect((screen.getByRole('textbox', { name: 'Comment' }) as HTMLTextAreaElement).value).toBe('Look here');
@@ -113,7 +117,7 @@ describe('the comment composer', () => {
     await userEvent.click(screen.getByRole('radio', { name: /Send to main/ }));
     await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), 'Look here{Enter}');
     act(() => useCommentComposer.setState({ open: null }));
-    await act(() => fake.reply('session.acquire', { status: 'needs_trust', appSessionId: PARENT, trust: { directory: '/work/repo', trustKey: '/work/repo', keyKind: 'directory', configPath: '/home/.claude.json', trusted: false, source: null, isHome: false, found: [] } }));
+    await act(() => fake.reply('session.acquire', { status: 'needs_trust', appSessionId: PARENT_ID, trust: { directory: '/work/repo', trustKey: '/work/repo', keyKind: 'directory', configPath: '/home/.claude.json', trusted: false, source: null, isHome: false, found: [] } }));
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['The comment was not sent: Trust this folder in the session to continue']);
     expect(fake.invoked('side.sendToMain')).toEqual([]);
   });
@@ -123,7 +127,7 @@ describe('the comment composer', () => {
     show();
     const field = screen.getByRole('textbox', { name: 'Comment' });
     await userEvent.type(field, 'Line one{Shift>}{Enter}{/Shift}line two{Enter}');
-    expect(fake.invoked('side.thread.open')).toEqual([{ appSessionId: PARENT, from: { kind: 'comment', anchor: ANCHOR, text: 'Line one\nline two', screenshot: null } }]);
+    expect(fake.invoked('side.thread.open')).toEqual([{ appSessionId: PARENT_ID, from: { kind: 'comment', anchor: ANCHOR, text: 'Line one\nline two', screenshot: null } }]);
     expect(screen.getByRole('button', { name: 'Starting…' })).toBeTruthy();
     await act(() => fake.reply('side.thread.open', { status: 'refused', appSessionId: 'b2222222-2222-4222-8222-222222222222', reason: 'no_engine_session', message: 'This session has not started yet' }));
     expect(screen.getByRole('alert').textContent).toContain('This session has not started yet');
@@ -140,7 +144,7 @@ describe('the comment composer', () => {
     await userEvent.click(screen.getByRole('radio', { name: /Send to main/ }));
     await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), 'Look here');
     await userEvent.click(screen.getByRole('button', { name: 'Send' }));
-    expect(fake.invoked('side.sendToMain')).toEqual([{ appSessionId: PARENT, anchor: ANCHOR, text: 'Look here', screenshot }]);
+    expect(fake.invoked('side.sendToMain')).toEqual([{ appSessionId: PARENT_ID, anchor: ANCHOR, text: 'Look here', screenshot }]);
     expect(screen.queryByRole('dialog')).toBeNull();
     act(() => openComposer({ ...ANCHOR, screenshot }, { appSessionId: PARENT }));
     await userEvent.click(screen.getByRole('button', { name: 'Remove screenshot' }));
@@ -153,14 +157,14 @@ describe('the comment composer', () => {
   it('shows a producer’s screenshot as a thumbnail named with its size, removable by keyboard; an unreadable one keeps its words', async () => {
     const DATA = 'data:image/png;base64,iVBORw0KGgo=';
     fake = fakeClient({ 'side.screenshot.preview': { dataUrl: DATA } });
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     withParent('ready');
     render(<CommentComposerHost />);
     const screenshot = { path: '/user-data/browser/crops/one.png', width: 640, height: 480 };
     act(() => openComposer({ ...ANCHOR, screenshot }, { appSessionId: PARENT }));
     const thumbnail = await screen.findByRole('img', { name: 'Screenshot · 640 × 480' });
     expect(thumbnail.getAttribute('src')).toBe(DATA);
-    expect(fake.invoked('side.screenshot.preview')).toEqual([{ appSessionId: PARENT, screenshot }]);
+    expect(fake.invoked('side.screenshot.preview')).toEqual([{ appSessionId: PARENT_ID, screenshot }]);
     const remove = screen.getByRole('button', { name: 'Remove screenshot' });
     remove.focus();
     await userEvent.keyboard('{Enter}');
@@ -168,7 +172,7 @@ describe('the comment composer', () => {
     act(() => useCommentComposer.setState({ open: null }));
 
     fake = fakeClient({});
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     act(() => openComposer({ ...ANCHOR, screenshot }, { appSessionId: PARENT }));
     await act(() => fake.fail('side.screenshot.preview', 'screenshot: not found'));
     expect(screen.queryByRole('img', { name: 'Screenshot · 640 × 480' })).toBeNull();
@@ -189,7 +193,7 @@ describe('the comment composer', () => {
 
   it('Send to main held by the app queue says so in a toast', async () => {
     fake = fakeClient({ 'side.sendToMain': { messageUuid: null, disposition: 'queued' } });
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     withParent('ready');
     show();
     await userEvent.click(screen.getByRole('radio', { name: /Send to main/ }));
@@ -200,7 +204,7 @@ describe('the comment composer', () => {
 
   it('Retry is disabled once its destination can no longer send (Send to main, the parent archived meanwhile); an exited parent can still be started', async () => {
     fake = fakeClient(); // main answers when the test says
-    window.maws = fake.client;
+    window.maws = fake.client as unknown as PreloadBridge;
     withParent('ready');
     show();
     await userEvent.click(screen.getByRole('radio', { name: /Send to main/ }));

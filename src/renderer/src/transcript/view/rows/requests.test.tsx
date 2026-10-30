@@ -1,10 +1,11 @@
 // Requests, boundaries, errors and spills (C6 M5): historical plan and question rows, the request slot with C7's card
 // or the placeholder, boundary rows (the rewind reveal), error rows, and the spilled-result loader over fs.readSpill.
 import type { EventId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { loadEventFixture, loadJournal, loadSyntheticJournal } from '../../../../../../test/support/fixtures';
+import { TEST_MACHINE } from '../../../../../../test/support/machine';
 import { useTranscriptStore } from '../../../stores/transcript';
 import { journalToEvents } from '../../dev/journal';
 import { rowId } from '../../model/keys';
@@ -316,13 +317,13 @@ describe('error row', () => {
 
 describe('spilled result', () => {
   afterEach(() => {
-    delete (window as { maws?: MawsBridge }).maws;
+    delete (window as { maws?: PreloadBridge }).maws;
   });
 
   it('events/spill: Load full result (184 KB), then the content from fs.readSpill, capped with the omitted marker over 64 KB', async () => {
     const content = `${'line of the build log\n'.repeat(5000)}BUILD OK`; // about 107 KB
     const invoke = vi.fn(() => Promise.resolve({ ok: true, value: { content, bytes: content.length, offset: 0, length: content.length, truncated: false } }));
-    (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
+    (window as { maws?: PreloadBridge }).maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
     const store = await storeWith(loadEventFixture('spill'));
     useTranscriptStore.getState().expandAll(store.key, { cells: true });
     const cellRow = () => store.rows().find((row) => row.kind === 'cell' || row.kind === 'group')!;
@@ -330,7 +331,7 @@ describe('spilled result', () => {
     const load = screen.getByRole('button', { name: 'Load full result (184 KB)' });
     expect(view.container.textContent).toContain('[3/1200] compiling src/view/List.tsx'); // the wire preview until then
     fireEvent.click(load);
-    expect(invoke).toHaveBeenCalledWith('fs.readSpill', { path: '/Users/owner/.claude/projects/-tmp-demo/session/tool-results/toolu_spill_1.txt', length: 2 * 1024 * 1024 });
+    expect(invoke).toHaveBeenCalledWith('fs.readSpill', { path: '/Users/owner/.claude/projects/-tmp-demo/session/tool-results/toolu_spill_1.txt', length: 2 * 1024 * 1024 }, TEST_MACHINE);
     await waitFor(() => expect(useTranscriptStore.getState().entries[store.key].state.ui.spills.values().next().value?.state).toBe('loaded'));
     view.rerenderRow(cellRow());
     expect(screen.queryByRole('button', { name: /Load full result/ })).toBeNull();
@@ -359,7 +360,7 @@ describe('spilled result', () => {
 
   it('an unknown-size spill answered truncated by fs.readSpill is partial: the head, then Showing the first 2 MB with Open full log', async () => {
     const invoke = vi.fn(() => Promise.resolve({ ok: true, value: { content: 'head of the dump', bytes: 3_250_000, offset: 0, length: 16, truncated: true } }));
-    (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
+    (window as { maws?: PreloadBridge }).maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
     const { store, cellRow, spillOf } = await unknownSizeSpill();
     expect(spillOf()).toMatchObject({ bytes: null, state: 'not_loaded' });
     const actions = { ...spyActions(), loadSpill: DEFAULT_ACTIONS.loadSpill };

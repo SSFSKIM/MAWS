@@ -3,6 +3,8 @@ import type { Editor } from '@tiptap/core';
 import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { createRef } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { AppSessionId } from '@shared/graph/ids';
+import { at } from '../../../../../test/support/machine';
 import { registerAction } from '../../keymap/actions-runtime';
 import { EMPTY_CATALOG, type SessionCatalog } from '../../stores/catalog';
 import type { PopupHandle, PopupItem } from './popup';
@@ -21,7 +23,7 @@ describe('the slash palette', () => {
       range: { from: 1, to: 7 },
       editor: {} as Editor,
       command: () => {},
-      ctx: { cwd: '', additionalDirectories: [], catalog: EMPTY_CATALOG, widgets: new Set<string>(), openWidget: () => {} },
+      ctx: { appSessionId: at('app-slash') as AppSessionId, cwd: '', additionalDirectories: [], catalog: EMPTY_CATALOG, widgets: new Set<string>(), openWidget: () => {} },
       pluginKey: new PluginKey('test-slash'),
     };
     render(<SlashPalette {...props} />);
@@ -60,7 +62,7 @@ describe('the slash palette groups its rows by origin', () => {
       range: { from: 1, to: 1 + query.length },
       editor: { state: {} } as unknown as Editor,
       command,
-      ctx: { cwd: '', additionalDirectories: [], catalog: { ...catalog, ...extra }, widgets: new Set(['status']), openWidget: () => {} },
+      ctx: { appSessionId: at('app-slash') as AppSessionId, cwd: '', additionalDirectories: [], catalog: { ...catalog, ...extra }, widgets: new Set(['status']), openWidget: () => {} },
       pluginKey: new PluginKey('test-slash-groups'),
     };
     render(<SlashPalette {...props} ref={ref} />);

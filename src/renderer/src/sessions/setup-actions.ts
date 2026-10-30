@@ -8,7 +8,7 @@ import type { FirstMessage, SetupIntent, SetupIntentPatch } from '@shared/sessio
 import type { SetupResources, StartOutcome } from '@shared/sessions/setup';
 import { isEmptyDoc, liveDraftDoc } from '../composer/editor/drafts';
 import { appendHistory } from '../composer/editor/submit'; // P2-F (L118)
-import { sendHumanPrompt } from '../composer/submit/send-human-prompt'; // P2-A
+import { sendToSession } from '../session/controls/controls-for'; // P2-A; P5 O9 M4: through the session's controls port
 import { pickDirectModel } from '../gateway/direct-model'; // debt wave 4: the direct route's model refusal
 import { ipc } from '../ipc/client';
 import { clearComposer } from '../stores/composer'; // P2-A
@@ -21,6 +21,7 @@ import { cleanupTargetAt, confirm, removeWorktreeAction } from './dialogs';
 import { holderWords } from './holder-words';
 import { returnMessage } from './message-return';
 import { isStarting, startNoticeId, useSetup, type HeldMessage } from './store'; // P2-A: startNoticeId; P2-F: HeldMessage
+import { machineOf } from '@shared/machine/address';
 
 export type HookResult = { ok: true } | { ok: false; error: string };
 export type WorktreeResource = NonNullable<SetupResources['worktree']>;
@@ -155,7 +156,7 @@ async function continueRecord(appSessionId: AppSessionId, options: StartOptions,
       // the pasted segments go along: a card the seam's own acquisition docks again keeps them for the history row
       // P2-F F-C1: and `current` goes along, so a card dismissed during the seam's own awaits (a second acquisition, the
       // queue read) sends nothing and docks nothing again (X22: the continuation dies with its card)
-      const sent = await sendHumanPrompt(appSessionId, docked.content, { origin: 'composer', display: docked.display, current, ...(docked.pastedContents !== undefined && { pastedContents: docked.pastedContents }) });
+      const sent = await sendToSession(appSessionId, docked.content, { origin: 'composer', display: docked.display, current, ...(docked.pastedContents !== undefined && { pastedContents: docked.pastedContents }) });
       if (sent.disposition === 'refused' || sent.disposition === 'held') return refuse(sent.reason ?? 'The message was not sent');
       appendHistory(ipc, appSessionId, { display: docked.display, pastedContents: docked.pastedContents ?? {} }); // P2-F (L118): the host accepted it
       if (!current()) return dismissed; // dismissed during the send: the draft is the owner's again, never cleared
@@ -222,7 +223,7 @@ export async function resolveWorktree(appSessionId: AppSessionId, resolution: 'd
   const { intent, worktree } = result.value;
   useSetup.getState().setIntent(intent);
   if (resolution === 'keep' && worktree.state === 'kept') {
-    const target = cleanupTargetAt(worktree, repositoryOf(intent));
+    const target = cleanupTargetAt(machineOf(intent.appSessionId), worktree, repositoryOf(intent));
     toast({ level: 'info', text: `Worktree ${basename(worktree.path)} kept as this session’s location`, actions: [removeWorktreeAction(target)], dismissible: true });
   }
   return worktree;
@@ -303,6 +304,6 @@ export async function beforeCloseUnstarted(appSessionId: AppSessionId): Promise<
   }
   // no record names this checkout, so the notice is its way into the cleanup
   const leftover = result.value.leftover?.worktree;
-  if (leftover) toast({ level: 'info', text: `Worktree ${leftover.path} was kept`, actions: [removeWorktreeAction(cleanupTargetAt(leftover, repositoryOf(intent)))], dismissible: true });
+  if (leftover) toast({ level: 'info', text: `Worktree ${leftover.path} was kept`, actions: [removeWorktreeAction(cleanupTargetAt(machineOf(intent.appSessionId), leftover, repositoryOf(intent)))], dismissible: true });
   return 'closed';
 }

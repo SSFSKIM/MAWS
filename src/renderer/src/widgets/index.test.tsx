@@ -3,16 +3,23 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { EngineSessionStatus } from '@shared/engine/status';
+import { SessionRecordSchema } from '@shared/graph/session';
+import { compileAddressing } from '@shared/machine/address';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { registeredWidgetNames, slashWidget, WIDGET_COMMANDS } from '../composer/mentions/widgets';
 import { resetCatalogStore } from '../stores/catalog';
 import { useSessions } from '../stores/sessions';
 import { registerAllWidgets } from './index';
 
 const ROOT = join(__dirname, '../../../..');
-const ID = 'app-7412a115' as AppSessionId;
+// P5 O6 M2: the backend is main (bare ids); the page holds the address
+const BARE = 'app-7412a115' as AppSessionId;
+const ID = at(BARE);
+const lifted = (status: EngineSessionStatus): EngineSessionStatus => ({ ...status, appSessionId: at(status.appSessionId) });
+const RECORD_ADDRESSING = compileAddressing(SessionRecordSchema);
 const NAMES = WIDGET_COMMANDS.map((w) => w.name);
 
 describe('widget registration covers every WIDGET_COMMANDS name', () => {
@@ -37,7 +44,7 @@ describe('every widget renders its fixture response', () => {
     backend.script('plugins.list', () => ({ plugins: [] }));
     backend.script('marketplaces.list', () => ({ marketplaces: [] }));
     window.maws = backend.bridge();
-    useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]), records: new Map(scenario.sessions.map((r) => [r.appId, r])) });
+    useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]), records: new Map(scenario.sessions.map((r) => [at(r.appId), RECORD_ADDRESSING.lift(r, TEST_MACHINE)])) });
     off = registerAllWidgets();
   });
   afterEach(() => {
@@ -45,7 +52,7 @@ describe('every widget renders its fixture response', () => {
     off();
     resetCatalogStore();
     useSessions.setState({ engine: new Map(), records: new Map() });
-    delete (window as { maws?: MawsBridge }).maws;
+    delete (window as { maws?: unknown }).maws;
   });
 
   // What each widget shows once its read answered: a line of the pinned fixture.
@@ -116,6 +123,6 @@ describe('every widget renders its fixture response', () => {
         <Context appSessionId={ID} args="" close={() => {}} />
       </QueryClientProvider>,
     );
-    await waitFor(() => expect(backend.calls.find((c) => c.subtype === 'get_context_usage')?.input).toEqual({ appSessionId: ID, detail: 'full' }));
+    await waitFor(() => expect(backend.calls.find((c) => c.subtype === 'get_context_usage')?.input).toEqual({ appSessionId: BARE, detail: 'full' }));
   });
 });

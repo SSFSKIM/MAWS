@@ -15,6 +15,10 @@ import type { TaskGraphEntry } from '../store';
 // list shown again does not read a stale time for a whole period.
 export const SLOW_TICK_MS = 30_000;
 
+// P5 O9: how long a terminal session's stop whose outcome is unknown (a subagent's or a background task's) reads
+// stopping… before Stop is offered again, if nothing has shown it stopped by then.
+export const STOP_DOUBT_MS = 5000;
+
 // E7 (M7): the clock every ticker reads, the wall clock unless the `#panel` harness fixed it (`setClock`), so a case
 // reads the widget's elapsed and the Scheduled rows' next runs and expiries at a known now. Fixing or releasing it
 // gives every mounted ticker the new time at once.

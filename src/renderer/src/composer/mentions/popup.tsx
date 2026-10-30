@@ -47,8 +47,8 @@ export function suggestionRenderer(Component: PopupComponent, env: () => EditorE
     let renderer: ReactRenderer<PopupHandle, PopupProps> | null = null;
     let unmount: (() => void) | null = null;
     const propsOf = (p: SuggestionProps<PopupItem, PopupItem>): PopupProps => {
-      const { cwd, additionalDirectories, catalog, widgets, openWidget } = env();
-      return { query: p.query, range: p.range, editor: p.editor, command: p.command, ctx: { cwd, additionalDirectories, catalog, widgets, openWidget }, pluginKey };
+      const { appSessionId, cwd, additionalDirectories, catalog, widgets, openWidget } = env();
+      return { query: p.query, range: p.range, editor: p.editor, command: p.command, ctx: { appSessionId, cwd, additionalDirectories, catalog, widgets, openWidget }, pluginKey };
     };
     let anchor: SuggestionProps<PopupItem, PopupItem>['clientRect'] = null;
     return {

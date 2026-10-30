@@ -10,11 +10,15 @@
 #
 # Pushes the tree, plus one empty commit, to refs/heads/ci/<label>-<short> (force), waits for the run of
 # .github/workflows/gate.yml on it, prints each job's conclusion, downloads the failed e2e jobs' reports to
-# /tmp/maws-review/gates/ci-<short>/ (a hosted group's from the SSFSKIM/maws-app run its log names), keeps the whole transcript in /tmp/maws-review/gates/ci-<short>.log, deletes the
-# ref (unless --keep) and exits with the run's status (0 green, 1 anything else). A job GCE preempted on ci-kit's pool
-# is rerun alone, once per job per run, and the script reports the run's final attempt: the line before the run's status,
-# `ci-gate: run <id> <conclusion>`, is `ci-gate: run <id> attempt <n>`, and a line before those names each preempted job
-# and how its rerun ended, one preempted again staying red (Decision Log 70). When the mini refused jobs (ci-kit's
+# /tmp/maws-review/gates/ci-<short>-<run-id>-<invocation>/reports/ (including hosted reports from SSFSKIM/maws-app),
+# keeps the whole transcript beside it in transcript.log, deletes the
+# ref (unless --keep) and exits with the run's status (0 green, 1 anything else). On ci-kit's pool, a failed GCE job
+# annotated "The operation was canceled." without a timeout, or a failed EC2 job annotated "The self-hosted runner
+# lost communication with the server.", is rerun alone, once per job per run. The EC2 annotation can mean a spot
+# interruption or a box the tree starved, not a proven preemption. The script reports the run's final attempt: the line
+# before the run's status, `ci-gate: run <id> <conclusion>`, is `ci-gate: run <id> attempt <n>`, and a line before those
+# names each interrupted job and how its rerun ended, one interrupted again staying red (Decision Log 70).
+# When the mini refused jobs (ci-kit's
 # job-started check: a dialog or the wrong app in front; its measured-job guard: a MEASURED_E2E group's desktop not
 # settled within 15 minutes), the last line before the run's status names the refused, the green and the red, and the
 # --gates that relaunches the refused and the red on the same tree (Decision Log 58(c), 59(1)), with --default-beside
@@ -75,7 +79,9 @@
 #                      line carries the peer as resolved, its sha or `none`
 #   --hosted-route     override HOSTED_MAC_ROUTE for this run: direct (macos-26 in MAWS) or mirror (maws-app).
 #                      Unset uses the repository variable, which defaults to mirror. Admission and --lane still apply.
-#   --label            the ref's name before the short sha (default: the worktree's branch, else `gate`)
+#   --label            the ref's name before the short sha, sanitized as before. Without it: auto-<branch-or-gate>-
+#                      <gates-and-lane>-<configuration-hash>, bounded and never a reserved final label. Different
+#                      configurations have distinct refs; an identical call may supersede its predecessor
 #   --keep             leave the ci/ ref in place
 #
 # Every invocation pushes a fresh empty commit on top of the sha: its message carries a unique nonce (so the push always
@@ -83,6 +89,9 @@
 # default set), `Runner:`, `Class1a:`, `Lane:`, `DefaultBeside:`, `Evidence:` and `Live:` trailers; under --affected its subject is
 # `ci-gate: <short> affected` and it carries `Selection: affected`, `Affected-Count:` and an `Affected:` trailer per path.
 # The peer's `Peer:`, `Peer-Wire:` and `Wire:` trailers follow when there is one (--peer).
+# Direct e2e runs without --lane hosted or no-hosted add `Mac-Backlog:` when the caller can read the account queues and
+# EC2 runner (cached for 60 s).
+# The plan may overflow eligible groups to EC2; an absent or older-than-five-minute sample preserves normal placement.
 # A successful local plan adds `Pool-Demand:`, ci-kit's advisory attempt-1 pre-launch hint: the exact multiset of pool
 # jobs, or `none` when no job uses the pool. If it fails, no hint is written and the push still proceeds.
 # The pushed tree is always the tested tree plus that one commit. A Linux lane admits only the e2e groups green there (§3.1); the plan refuses the rest.
@@ -100,8 +109,27 @@
 # run whose plan puts no job on a Mac (its e2e groups all hosted) goes ahead. A failed read warns and goes ahead
 # (scripts/ci-gate-alerts.mjs).
 #
+# The last two lines name the transcript and reports directory (also on green or error), or explicitly say none
+# when validation/preflight stopped the call before logging. Once preflight succeeds but before a run exists,
+# they live under ci-pending.<invocation>/; once found, that directory is renamed to include its run id. Read the
+# printed paths, not a path reconstructed from the sha. Each invocation owns its paths, including identical calls.
+#
 #   MAWS_GATE_IGNORE_ALERTS=1  skip that check, for an alert left open by mistake
 set -uo pipefail
+
+# Preflight errors keep stderr and have no run evidence. Once admitted, every exit names this invocation's paths.
+log=''
+reports=''
+print_paths() {
+  if [[ -n $log ]]; then
+    echo "ci-gate: transcript in $log"
+    echo "ci-gate: reports in $reports/"
+  else
+    echo 'ci-gate: transcript: none (stopped before a run)'
+    echo 'ci-gate: reports: none (stopped before a run)'
+  fi
+}
+trap print_paths EXIT
 
 REPO=SSFSKIM/MAWS
 # refusals: the refused against the finished, and the relaunch line, when the mini refused jobs (Decision Log 58(c), 66).
@@ -184,9 +212,9 @@ else
   branch=''
 fi
 
-# Resolve the pushed ref before preflight: reserved final refs stay on the self-hosted Mac.
+# Explicit labels preserve their routing (reserved final refs stay on the self-hosted Mac).
+# The default is derived after peer, affected paths and repository variables are resolved.
 short=${sha:0:8}
-label=${label:-${branch:-gate}}
 label=${label//[^A-Za-z0-9._-]/-}
 ref=ci/$label-$short
 
@@ -205,32 +233,6 @@ fi
 relaunch_peer=$(printf '%s\n' "$peer_trailers" | sed -n 's/^Peer: //p')
 relaunch_peer=${relaunch_peer:-none}
 
-# ci-kit's alert watcher: while no online Mac runner is free of an open alert, a run with Mac jobs is not pushed, its jobs
-# would only be refused. Exit 2, as for the script's other refusals; anything else from the check goes ahead.
-if [[ ${MAWS_GATE_IGNORE_ALERTS:-} == 1 ]]; then
-  alert_check='ci-gate: MAWS_GATE_IGNORE_ALERTS=1, the ci-kit alert check skipped'
-else
-  # the peer's trailers, and an iteration run's Selection, which keeps the peer groups off the run
-  alert_trailers=$peer_trailers
-  [[ -n $hosted_route ]] && alert_trailers+=$'\n'"Hosted-Route: $hosted_route"
-  [[ -n $affected ]] && alert_trailers+=$'\n'"Selection: affected"
-  alert_check=$(node "$(dirname "$0")/ci-gate-alerts.mjs" --gates "$gates_trailer" --runner "$runner" --class1a "$class1a" --lane "$lane" --live "$live" --trailers "$alert_trailers" --git-dir "$git_dir" --sha "$sha" --ref "$ref")
-  case $? in
-    0) ;;
-    2)
-      printf '%s\n' "$alert_check" >&2
-      echo "ci-gate: to push anyway, for an alert left open by mistake: MAWS_GATE_IGNORE_ALERTS=1 scripts/ci-gate.sh ${args[*]}" >&2
-      exit 2 ;;
-    *) alert_check+="${alert_check:+$'\n'}ci-gate: warning: the ci-kit alert check failed; going ahead (the runner's job-started check still refuses jobs under a dialog)" ;;
-  esac
-fi
-out=/tmp/maws-review/gates
-mkdir -p "$out"
-log=$out/ci-$short.log
-exec > >(tee "$log") 2>&1
-[[ -z $alert_check ]] || printf '%s\n' "$alert_check"
-[[ -z $peer_said ]] || printf '%s\n' "$peer_said"
-
 # --affected: the change's paths, from the merge base with origin/master to the tested commit, each as a line of
 # `git diff --name-status -M` (status, tab, path, and a rename's new path after another tab). A failed fetch goes ahead:
 # a stale origin/master only widens the set. Above AFFECTED_BOUND paths none is listed and the plan runs the whole suite
@@ -240,6 +242,7 @@ exec > >(tee "$log") 2>&1
 # 14); a change that size reaches most suites anyway.
 AFFECTED_BOUND=200
 affected_lines=()
+affected_note=''
 if [[ -n $affected ]]; then
   git -C "$git_dir" fetch --quiet origin master || echo 'ci-gate: warning: fetching origin/master failed; the change is taken from the local origin/master'
   base=$(git -C "$git_dir" merge-base origin/master "$sha") || { echo "ci-gate: --affected: no merge base of $short with origin/master" >&2; exit 2; }
@@ -253,7 +256,7 @@ if [[ -n $affected ]]; then
     fi
     affected_lines+=("$change_status"$'\t'"$change_path${change_to:+$'\t'$change_to}")
   done < <(git -C "$git_dir" diff --name-status -M -z "$base" "$sha")
-  echo "ci-gate: --affected: ${#affected_lines[@]} paths from the merge base ${base:0:8} with origin/master$( ((${#affected_lines[@]} > AFFECTED_BOUND)) && echo ", above the bound of $AFFECTED_BOUND, so none is listed and the plan runs the whole suite")"
+  affected_note="ci-gate: --affected: ${#affected_lines[@]} paths from the merge base ${base:0:8} with origin/master$(if ((${#affected_lines[@]} > AFFECTED_BOUND)); then echo ", above the bound of $AFFECTED_BOUND, so none is listed and the plan runs the whole suite"; fi)"
 fi
 
 # One paragraph of trailers: the nonce makes every pushed sha unique, so pushing the same sha again still triggers a run.
@@ -274,14 +277,84 @@ fi
 # ci-kit's attempt-1 pre-launch hint: this plan's exact pool jobs, not the shape of a historical run. Advisory only:
 # an unreadable variable, tree or plan omits the hint and leaves the launcher its history fallback. Read the variables
 # now, and the package scripts and workflow env at the sha we push (never the caller's possibly dirty checkout).
-if gate_runner=$(gh variable get GATE_RUNNER -R "$REPO") &&
-   gate_e2e_runner=$(gh variable get GATE_E2E_RUNNER -R "$REPO") &&
-   gate_hosted_route=$(gh variable list -R "$REPO" --json name,value --jq '.[] | select(.name == "HOSTED_MAC_ROUTE") | .value') &&
+variables_ok=true
+gate_runner=$(gh variable get GATE_RUNNER -R "$REPO") || variables_ok=false
+gate_e2e_runner=$(gh variable get GATE_E2E_RUNNER -R "$REPO") || variables_ok=false
+gate_hosted_route=$(gh variable list -R "$REPO" --json name,value --jq '.[] | select(.name == "HOSTED_MAC_ROUTE") | .value') || variables_ok=false
+# Sample only when the direct route could host e2e work (unit may add the peer group) and the caller named no hosted
+# lane: --lane hosted asks for GitHub's hosted Macs themselves (a trial or an admission), so nothing of it may move to
+# EC2, and no-hosted puts nothing there. The caller's token sees the account-wide queue and EC2 state. Missing/failed
+# reads leave out the trailer; gate-plan then does exactly as before.
+backlog_trailer=''
+if [[ ${hosted_route:-$gate_hosted_route} == direct && $lane != no-hosted && $lane != hosted && -z $live ]]; then
+  case $gates in
+    all|*e2e:*|*unit*) backlog_trailer=$(node "$(dirname "$0")/ci-gate-backlog.mjs") || backlog_trailer='' ;;
+  esac
+  [[ -z $backlog_trailer ]] || trailers+=$'\n'"$backlog_trailer"
+fi
+if [[ -z $label ]]; then
+  label=$(HEAD_MESSAGE="$trailers" GATE_RUNNER="$gate_runner" GATE_E2E_RUNNER="$gate_e2e_runner" HOSTED_MAC_ROUTE="$gate_hosted_route" \
+    node "$(dirname "$0")/ci-gate-identity.mjs" --git-dir "$git_dir" --sha "$sha" --branch "$branch") || exit 2
+  label=${label//[^A-Za-z0-9._-]/-}
+  ref=ci/$label-$short
+fi
+
+# ci-kit's alert watcher: while no online Mac runner is free of an open alert, a run with Mac jobs is not pushed, its jobs
+# would only be refused. Exit 2, as for the script's other refusals; anything else from the check goes ahead.
+if [[ ${MAWS_GATE_IGNORE_ALERTS:-} == 1 ]]; then
+  alert_check='ci-gate: MAWS_GATE_IGNORE_ALERTS=1, the ci-kit alert check skipped'
+else
+  # the peer's trailers, and an iteration run's Selection, which keeps the peer groups off the run
+  alert_trailers=$peer_trailers
+  [[ -z $backlog_trailer ]] || alert_trailers+=$'\n'"$backlog_trailer"
+  [[ -n $hosted_route ]] && alert_trailers+=$'\n'"Hosted-Route: $hosted_route"
+  [[ -n $affected ]] && alert_trailers+=$'\n'"Selection: affected"
+  alert_check=$(node "$(dirname "$0")/ci-gate-alerts.mjs" --gates "$gates_trailer" --runner "$runner" --class1a "$class1a" --lane "$lane" --live "$live" --trailers "$alert_trailers" --git-dir "$git_dir" --sha "$sha" --ref "$ref")
+  case $? in
+    0) ;;
+    2)
+      printf '%s\n' "$alert_check" >&2
+      echo "ci-gate: to push anyway, for an alert left open by mistake: MAWS_GATE_IGNORE_ALERTS=1 scripts/ci-gate.sh ${args[*]}" >&2
+      exit 2 ;;
+    *) alert_check+="${alert_check:+$'\n'}ci-gate: warning: the ci-kit alert check failed; going ahead (the runner's job-started check still refuses jobs under a dialog)" ;;
+  esac
+fi
+out=/tmp/maws-review/gates
+mkdir -p "$out" || exit 2
+invocation=$(mktemp -d "$out/ci-pending.XXXXXX") || exit 2
+invocation_token=${invocation##*.}
+mkdir -p "$invocation/reports" || exit 2
+log=$invocation/transcript.log
+reports=$invocation/reports
+exec > >(tee "$log") 2>&1
+[[ -z $alert_check ]] || printf '%s\n' "$alert_check"
+[[ -z $peer_said ]] || printf '%s\n' "$peer_said"
+[[ -z $affected_note ]] || printf '%s\n' "$affected_note"
+[[ -z $backlog_trailer ]] || printf 'ci-gate: %s\n' "$backlog_trailer"
+
+if [[ $variables_ok == true ]] &&
    pool_demand=$(HEAD_MESSAGE="$trailers" GATE_RUNNER="$gate_runner" GATE_E2E_RUNNER="$gate_e2e_runner" HOSTED_MAC_ROUTE="$gate_hosted_route" \
      node "$(dirname "$0")/ci-gate-pool-demand.mjs" --git-dir "$git_dir" --sha "$sha"); then
   trailers+=$'\n'"Pool-Demand: $pool_demand"
 else
   echo 'ci-gate: warning: could not plan pool demand; pushing without the advisory Pool-Demand trailer'
+fi
+# Advisory unit and spec-import coverage: use the merge-base diff and the committed tree, even without dependencies.
+# All already requests the whole set. A failed check never stops the push; its notes travel to the run summary.
+if [[ -n $gates_trailer ]]; then
+  git -C "$git_dir" fetch --quiet origin master || echo 'ci-gate: warning: fetching origin/master failed; coverage uses the local origin/master' >&2
+  if unit_trailers=$(node "$(dirname "$0")/ci-gate-unit-coverage.mjs" --git-dir "$git_dir" --sha "$sha" --gates "$gates_trailer"); then
+    [[ -z $unit_trailers ]] || trailers+=$'\n'"$unit_trailers"
+  else
+    echo 'ci-gate: warning: unit coverage failed; going ahead' >&2
+    trailers+=$'\n''Unit-Coverage: note: unit coverage failed; no advice available'
+  fi
+  if coverage_trailers=$(node "$(dirname "$0")/ci-gate-e2e-coverage.mjs" --git-dir "$git_dir" --sha "$sha" --gates "$gates_trailer"); then
+    [[ -z $coverage_trailers ]] || trailers+=$'\n'"$coverage_trailers"
+  else
+    echo 'ci-gate: warning: spec-import coverage failed; going ahead' >&2
+    trailers+=$'\n''E2E-Coverage: note: spec-import coverage failed; no advice available'
+  fi
 fi
 pushed=$(git -C "$git_dir" commit-tree "$sha^{tree}" -p "$sha" -m "ci-gate: $short${affected:+ affected}" -m "$trailers") || exit 1
 
@@ -296,7 +369,6 @@ finish() {
       echo "ci-gate: left $ref (moved by a later push)"
     fi
   fi
-  echo "ci-gate: transcript in $log"
   exit "$status"
 }
 # shellcheck disable=SC2329 # invoked by the trap below
@@ -328,12 +400,18 @@ for _ in $(seq 1 30); do
   sleep 2
 done
 [[ -n $run_id ]] || { echo "ci-gate: no run of $pushed on $ref" >&2; finish 1; }
+# tee keeps the same open file while the invocation directory gains its run id.
+run_dir=$out/ci-$short-$run_id-$invocation_token
+mv "$invocation" "$run_dir" || finish 1
+invocation=$run_dir
+log=$invocation/transcript.log
+reports=$invocation/reports
 echo "ci-gate: https://github.com/$REPO/actions/runs/$run_id"
 
 # A failed watch (an API error mid-poll) is not the end of the run: only the status `completed` is.
 # A run that can no longer be read (credentials revoked, run deleted) would be retried forever, so consecutive read failures are bounded.
 await_run() {
-  local unreadable=0 view_err=$out/ci-$short.err run_status
+  local unreadable=0 view_err=$invocation/view.err run_status
   while :; do
     gh -R "$REPO" run watch "$run_id" --compact --interval 30 >/dev/null 2>&1
     if run_status=$(gh -R "$REPO" run view "$run_id" --json status --jq .status 2>"$view_err"); then
@@ -357,15 +435,16 @@ settle_run
 printf '%s\n' "$jobs"
 
 if [[ $conclusion != success ]]; then
-  rm -rf "$out/ci-$short"
-  if gh -R "$REPO" run download "$run_id" -D "$out/ci-$short" 2>/dev/null; then echo "ci-gate: failed jobs' reports in $out/ci-$short/"; fi
+  if gh -R "$REPO" run download "$run_id" -D "$reports" 2>/dev/null; then echo "ci-gate: failed jobs' reports in $reports/"; fi
   failed_log=$(gh -R "$REPO" run view "$run_id" --log-failed | perl -pe 's/(\e|\^\[)\[[0-9;]*[A-Za-z]//g')
-  hosted_reports "$failed_log" "$out/ci-$short"
+  hosted_reports "$failed_log" "$reports"
   # The failed steps' last lines, each under its job's name, colours and timestamps stripped.
   printf '%s\n' "$failed_log" | perl -pe 's/^([^\t]*)\t[^\t]*\t\S+ /$1  /' | tail -80
 fi
 [[ -z $preemptions ]] || printf '%s\n' "$preemptions"
 [[ $conclusion == success ]] || refusals "$jobs" "$failed_log"
+# Retry passes are still flakes: keep their locations beside the verdict, also on a green run.
+if [[ $jobs == *e2e:* ]]; then node "$(dirname "$0")/ci-gate-flaky.mjs" "$REPO" "$run_id"; fi
 # The attempt on a line of its own, so the status line stays what every waiter matches (^ci-gate: run [0-9]+ [a-z_]+$).
 echo "ci-gate: run $run_id attempt $run_attempt"
 echo "ci-gate: run $run_id $conclusion"

@@ -8,6 +8,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PanelSessionState, PanelTabRef } from '@shared/ipc/schema/layout';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 import { queryClient } from '../ipc/query';
 import { connectPanelHost, instanceIds, panelHost, pendingAdds, registerPanelTool, resetPanelHost } from '../panel/host';
 import { PanelHost } from '../panel/PanelHost';
@@ -41,7 +42,7 @@ const connect = () => offs.push(connectPanelHost());
 // As connectShell does on session.removed (each removal a newer revision: the sessions store keeps a tombstone per id).
 let revision = 1000;
 const removeA = () => {
-  if (useSessions.getState().applyRemoved({ appSessionId: A, revision: (revision += 1) })) useLayout.getState().dropSession(A);
+  if (useSessions.getState().applyRemoved({ appSessionId: A, revision: (revision += 1) }, TEST_MACHINE)) useLayout.getState().dropSession(A);
 };
 const settle = () => act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 
@@ -164,13 +165,13 @@ describe('shell renders the panel host in the region', () => {
     register(terminal.tool);
     useLayout.setState({ main: mainShowing(A, B) });
     useLayout.getState().activateTab(`session:${A}`);
-    useLayout.getState().openTab({ kind: 'artifact', artifactId: 'document-a' });
+    useLayout.getState().openTab({ kind: 'artifact', artifactId: 'document-a', machine: TEST_MACHINE });
     renderShell();
     const row = within(screen.getByRole('toolbar', { name: 'Session surfaces' }));
     expect((row.getByRole('button', { name: 'Session cards' }) as HTMLButtonElement).disabled).toBe(true);
     await user.click(row.getByRole('button', { name: 'Terminal' }));
     const id = panelOf(A)!.activeTabId!;
-    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'artifact', artifactId: 'document-a' });
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'artifact', artifactId: 'document-a', machine: TEST_MACHINE });
     expect(terminal.probe.created).toEqual([expect.objectContaining({ appSessionId: A, instanceId: id })]);
     expect(panelOf(B)).toBeUndefined();
     expect(screen.getByTestId(`body:${id}`).textContent).toContain(`${A} · unpinned · visible`);

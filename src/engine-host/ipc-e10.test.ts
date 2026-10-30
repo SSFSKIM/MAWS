@@ -10,6 +10,7 @@ import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
+import { endableClientRef } from '@shared/ipc/client'; // P5 O2 M2
 import { LaunchSpecSchema, type LaunchSpec } from '@shared/engine/launch-spec';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { HostEmit, HostOn } from '@shared/host/runtime';
@@ -176,7 +177,8 @@ describe('the engine host’s connect burst (E10)', () => {
 
 // E10 Task 2.3: the supervisor's life over the real engine ipc and process table (supervision.ts), as the detached
 // entry composes them: with no client, a replay row that holds nothing is released as `idle` after the idle time, and
-// the supervisor then idles out; its status follows each step.
+// the supervisor then idles out; its status follows each step. P5 O2 M2: what keeps the row while the app is there is
+// the app's interest in it (`host.interest`), which ends with the app's connection.
 describe('the supervisor’s clocks over the engine host (E10)', () => {
   // Real timers under a loaded suite: each clock is asserted by a lower bound (it never fires early) and waited for in a
   // window far above its time, so a slow machine delays the test rather than failing it.
@@ -187,22 +189,25 @@ describe('the supervisor’s clocks over the engine host (E10)', () => {
     const statuses: SupervisorStatus[] = [];
     const supervision = new Supervision({
       mode: 'detached', identity, table: host.ipc.table, plugins: host.ipc.plugins, shutdown: host.ipc.shutdown,
-      emit: (status) => statuses.push(status) > 0, log: () => {},
+      emit: (status) => statuses.push(status) > 0, log: () => {}, role: 'laptop', // P5 O2 M2: a laptop's idle time is main's push
     });
-    const commands = new Map<string, (input: unknown) => Promise<unknown>>();
-    supervision.register((name, handler) => void commands.set(name, handler as (input: unknown) => Promise<unknown>), { onConnect: () => {} });
+    const commands = new Map<string, (input: unknown, ctx?: unknown) => Promise<unknown>>();
+    supervision.register((name, handler) => void commands.set(name, handler as (input: unknown, ctx?: unknown) => Promise<unknown>), { onConnect: () => {} });
+    const app = endableClientRef('app'); // P5 O2 M2: the app's connection, the holder of its interest
     const exits: { reason: SupervisorExit; at: number }[] = [];
     supervision.started(identity, (reason) => void exits.push({ reason, at: Date.now() }));
     supervision.clientChanged(true);
     await commands.get('host.configure')!({ idleExitMs: IDLE_MS }); // main's push
     await host.call('session.launch', { spec: spec('app-idle') });
     await until(() => host.statuses('app-idle').some((s) => s.process === 'ready'), 'ready', 10_000);
+    await commands.get('host.interest')!({ sessions: ['app-idle'] }, { client: app }); // the app holds it open (P5 O2 M2)
     await new Promise((r) => setTimeout(r, 3 * IDLE_MS)); // past the idle time, however late the timer runs
-    expect(host.ipc.table.get('app-idle' as AppSessionId)!.lifecycle).toBe('ready'); // a client is connected: kept
+    expect(host.ipc.table.get('app-idle' as AppSessionId)!.lifecycle).toBe('ready'); // the app's interest: kept
     expect(statuses.at(-1)).toMatchObject({ liveSessions: 1, rows: 1, idleExitMs: IDLE_MS, idleExitAt: null });
 
     const left = Date.now();
-    supervision.clientChanged(false); // the app quits, keeping its session
+    app.end(); // the app quits, keeping its session: its connection ends, and its interest with it
+    supervision.clientChanged(false);
     await until(() => host.ipc.table.get('app-idle' as AppSessionId)!.lifecycle === 'exited', 'the idle release', 10_000);
     const exited = host.ipc.table.get('app-idle' as AppSessionId)!.status();
     expect(exited.exit).toMatchObject({ reason: 'idle', release: null });

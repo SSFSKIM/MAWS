@@ -4,13 +4,17 @@
 // `window.open`, the context menu, the keyboard), the input attribution over each tab's TabDebugger (with focus
 // emulation when it is on), the memory sample and its soft cap, `browser.*`, and under MAWS_E2E=1 the e2e's seam
 // (inspect.ts). Tabs belong to sessions (P-21): a session whose record is deleted closes its tabs, and at boot a tab
-// whose session the index does not know is dropped from the file. Main never waits on the renderer.
+// whose session the spine does not know is dropped from the file. Main never waits on the renderer. The history,
+// bookmarks and agent activity are the browser's own database since P5 O3-A (data/), opened by main before the browser
+// starts and told here the sessions the spine knows. P5 O3-C (readers R6, R7): the spine is read through its view.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { app, BrowserWindow, session } from 'electron';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { SpineView } from '@shared/spine/view';
+import type { EngineSessionStatus } from '@shared/engine/status';
 import type { BrowserSettings } from '@shared/ipc/schema/settings';
-import type { Index } from '../index/index';
+import type { BrowserData } from './data';
 import type { registerMainHandler } from '../ipc/router';
 import { isAppWindow } from '../windows';
 import { attachContextMenu } from './context-menu';
@@ -56,7 +60,10 @@ export interface BrowserDeps {
   // Settings 11's `browser` section, read when a tab opens (the profile: a change applies to tabs opened afterwards) and
   // when a page opens a window (`linkTarget`, at the moment of the open).
   settings(): BrowserSettings;
-  index: Pick<Index, 'sessions' | 'unavailable' | 'browserHistory' | 'browserActivity' | 'browserBookmarks' /* cua #90 */>;
+  view: Pick<SpineView, 'record' | 'records' | 'unavailable' | 'on' | 'engineStatuses'>; // the spine's view (P5 O3-C)
+  // P5 O3-A: the history, bookmarks and agent activity (data/index.ts), and the snapshot and changes of the spine's
+  // sessions it keeps the activity by
+  data: Pick<BrowserData, 'history' | 'bookmarks' | 'activity' | 'reattach' | 'sessionChanged'>;
   register: typeof registerMainHandler;
   emit: BrowserEmit;
   env: NodeJS.ProcessEnv; // MAWS_BROWSER_FOCUS_EMULATION; MAWS_E2E with MAWS_E2E_OPEN_LOG (seam.ts) and MAWS_E2E_SAVE_PATH
@@ -81,7 +88,7 @@ export interface Browser {
   extensions: Pick<ExtensionUi, 'removing'>; // cua #90: the action bar's popups and options tabs, for a profile's removal
 }
 
-export function startBrowser({ userData, settings, index, register, emit, env, profiles: listProfiles, /* E4c */ hosts }: BrowserDeps): Browser {
+export function startBrowser({ userData, settings, view, data, register, emit, env, profiles: listProfiles, /* E4c */ hosts }: BrowserDeps): Browser {
   const dir = join(userData, 'browser');
   mkdirSync(dir, { recursive: true });
   const tabsFile = join(dir, 'tabs.json');
@@ -89,7 +96,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   const profiles = listProfiles ?? (() => readProfiles(profilesFile));
 
   const { file, broken } = readTabsFile(tabsFile);
-  const restored = knownSessionsOnly(file, index);
+  const restored = knownSessionsOnly(file, view);
   // Each partition's browser preload (Decision Log 56), permission and download handlers. The last two close over `store`
   // and `downloads`, declared below: a partition is first opened by a tab's open or load (resolvePartition,
   // createTabView), never while startBrowser runs, so both exist by then (startBrowser opens no tab, and a restored tab is
@@ -137,7 +144,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     agent: { owns: (entry) => cua.downloads.owns(entry), started: (entry, download) => cua.downloads.started(entry, download) },
   });
   const favicons = new Favicons((partition, url, init) => partitions.session(partition).fetch(url, init));
-  const navigator = new Navigator({ store, history: index.browserHistory, favicons, emit, seam });
+  const navigator = new Navigator({ store, history: data.history, favicons, emit, seam });
   const childPreferences = tabWebPreferences();
   store.onViewCreated((entry) => {
     navigator.attach(entry);
@@ -152,11 +159,11 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   // cua #90 start: the bookmarks bar's menus (recorded for the e2e's seam under MAWS_E2E=1) and its commands
   const menus = new NativeMenus({ e2e: env.MAWS_E2E === '1' });
   const confirmOpenAll = openAllConfirmation(env);
-  const bar = new BookmarkBar({ tabs: store, navigator, bookmarks: index.browserBookmarks, menus, confirmOpenAll });
+  const bar = new BookmarkBar({ tabs: store, navigator, bookmarks: data.bookmarks, menus, confirmOpenAll });
   // cua #90 end
   registerBrowserHandlers({
-    store, views, navigator, downloads, history: index.browserHistory, profiles, register,
-    bookmarks: index.browserBookmarks, bar, windowOf, favicons, avatars: new ProfileAvatars(userData), // cua #90
+    store, views, navigator, downloads, history: data.history, profiles, register,
+    bookmarks: data.bookmarks, bar, windowOf, favicons, avatars: new ProfileAvatars(userData), // cua #90
   });
   // cua #90: the extensions action bar (its list, popups, options tabs and menus)
   const extensionUi = startExtensionUi({ store, views, partitions, leaveInternal: (entry, url) => void navigator.leaveInternal(entry, url), records: profiles, menus, windowOf, emit, register, linkTarget: () => settings().linkTarget, seam, env });
@@ -177,7 +184,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     peer: { addon: peerAddon, trustedRoots },
     ...(controls && cursor && { presence: { controls, cursor } }),
     emit,
-    activityStore: index.browserActivity, // cua board #93
+    activityStore: data.activity, // cua board #93
     recordDownload: async (download) => {
       if (!hosts) return;
       const result = await hosts.dispatch('engine-host', 'maws.download.recorded', download);
@@ -188,19 +195,26 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
       BrowserWindow.getAllWindows()
         .filter((win) => !win.isDestroyed() && isAppWindow(win))
         .map((win) => ({ id: win.id, focused: win.isFocused() })),
-    reaches: (appSessionId, tabSessionId) => reachableSessions(index.sessions, appSessionId).includes(tabSessionId),
+    reaches: (appSessionId, tabSessionId) => reachableSessions(view, appSessionId).includes(tabSessionId),
     userData,
     version: app.getVersion(),
   });
-  // the session's agent activity, which a transcript lists when it mounts (M3 fix wave), kept across restarts in the
-  // index since cua board #93
+  // the session's agent activity, which a transcript lists when it mounts (M3 fix wave), kept across restarts since cua
+  // board #93 (in the browser's own database since P5 O3-A)
   register('browser.agent.activities.list', ({ appSessionId }) => ({ activities: cua.activities(appSessionId as AppSessionId) }));
   // every status of a known session names its engine to the socket's peer check (the pid while it runs, none once exited)
-  const stopCuaStatus = hosts?.onEvent('session.status', ({ appSessionId, status }) => {
-    if (!knownSession(index, appSessionId)) return; // never a trust bootstrap's id
+  const engineSeen = (appSessionId: AppSessionId, status: Pick<EngineSessionStatus, 'process' | 'pid'>) => {
+    if (view.record(appSessionId) === null) return; // never a trust bootstrap's id
     if (status.process !== 'exited') cua.socketPathFor(appSessionId);
     cua.engineProcess(appSessionId, status.process === 'exited' ? null : status.pid);
-  });
+  };
+  const stopCuaStatus = hosts?.onEvent('session.status', ({ appSessionId, status }) => engineSeen(appSessionId as AppSessionId, status));
+  // P5 O3-D M5b fix round 1: on the daemon shape a kept session's status can arrive before the snapshot holds its record
+  // (the mirror's snapshot and follow run independently, and the snapshot fires no record event), so the records'
+  // arrival sets each known session up from the statuses the view kept
+  const engineStatusesSeen = () => {
+    if (hosts && view.unavailable() === null) for (const status of view.engineStatuses()) engineSeen(status.appSessionId as AppSessionId, status);
+  };
   // E13 end
   // A request with no page behind it, a favicon fetched on a tab's partition (`ses.fetch`) among them, asks the app for a
   // client certificate, and Electron's default hands over the keychain's first identity: no certificate is chosen, as
@@ -211,11 +225,22 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
     callback();
   };
   app.on('select-client-certificate', refuseUnownedCertificate);
-  const stopSessions = index.sessions.onChange((record, cause) => {
-    if (cause !== 'removed') return;
-    store.removeSession(record.appId);
-    cua.closeSession(record.appId); // E13
+  // P5 O3-A: every change tells the browser's data which sessions the spine knows (a removal takes the session's activity
+  // rows), and the snapshot taken once that listener is in place reconciles the rows against the spine's records. P5 O3-C:
+  // reconciled again whenever the view's availability changes (null while it is unavailable, which reconciles nothing;
+  // in process it never changes after start, so the start is the only reconciliation)
+  const stopSessions = view.on('record', (appSessionId, record) => {
+    data.sessionChanged(appSessionId, record === null);
+    if (record !== null) return;
+    store.removeSession(appSessionId);
+    cua.closeSession(appSessionId); // E13
   });
+  const stopAvailability = view.on('availability', () => {
+    data.reattach(sessionSnapshot(view));
+    engineStatusesSeen();
+  });
+  data.reattach(sessionSnapshot(view));
+  engineStatusesSeen();
   const inspector = env.MAWS_E2E === '1' ? browserInspector({ store, emit }) : null;
   if (inspector) globalThis.__maws_browser = inspector;
   // E13: the e2e's fake host reads the socket and the leases; `trustRoot` makes a process (the test's own) a root beside
@@ -263,6 +288,7 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
       controls?.dispose(); // E13
       app.removeListener('select-client-certificate', refuseUnownedCertificate);
       stopSessions();
+      stopAvailability();
       memory.stop();
       views.dispose();
       writer.close(); // the pages closed next destroy their webContents, which drops tabs nobody closed
@@ -271,31 +297,16 @@ export function startBrowser({ userData, settings, index, register, emit, env, p
   };
 }
 
-// E13: whether the index has a record under the id (a trust bootstrap's id never has one); false when it cannot be read.
-function knownSession(index: BrowserDeps['index'], appSessionId: AppSessionId): boolean {
-  try {
-    return index.sessions.get(appSessionId) !== null;
-  } catch {
-    return false;
-  }
+// P5 O3-A: every record's id, the spine's sessions as the browser's data reconciles against them; null while the view is
+// unavailable (P5 O3-C: a refused run, or launch mode scenario, D10), which reconciles nothing.
+function sessionSnapshot(view: BrowserDeps['view']): string[] | null {
+  return view.unavailable() === null ? view.records().map((record) => record.appId) : null;
 }
 
-// The restored tabs whose session the index knows; all of them when the index cannot be read (nothing is known then).
-function knownSessionsOnly(file: TabsFile, index: BrowserDeps['index']): TabsFile {
-  if (index.unavailable !== null) return file;
-  const known = new Map<string, boolean>();
-  const knows = (appSessionId: string) => {
-    let answer = known.get(appSessionId);
-    if (answer === undefined) {
-      try {
-        answer = index.sessions.get(appSessionId as AppSessionId) !== null;
-      } catch {
-        answer = true;
-      }
-      known.set(appSessionId, answer);
-    }
-    return answer;
-  };
+// The restored tabs whose session the spine knows; all of them while the view is unavailable (nothing is known then).
+function knownSessionsOnly(file: TabsFile, view: BrowserDeps['view']): TabsFile {
+  if (view.unavailable() !== null) return file;
+  const knows = (appSessionId: string) => view.record(appSessionId as AppSessionId) !== null;
   const tabs = file.tabs.filter((tab) => knows(tab.appSessionId));
   const selected = Object.fromEntries(Object.entries(file.selected).filter(([appSessionId]) => knows(appSessionId)));
   return { ...file, tabs, selected };

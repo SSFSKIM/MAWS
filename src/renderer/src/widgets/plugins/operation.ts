@@ -134,7 +134,7 @@ class OperationBook {
     this.set((prior) => new Map(prior).set(key, { request, opId: null, state: { phase: 'working', opId: null, line: null, reloading: false } }));
     if (this.kept) this.listen(); // a kept book listens before it asks, shown or not
     this.asking += 1;
-    const result = await ipc.invoke(COMMAND_OF[request.action], { cwd, binary, ...request.input } as never);
+    const result = await ipc.invoke(COMMAND_OF[request.action], { cwd, binary, ...request.input } as never, { machine: ipc.localMachine }); // P5 O6 M4: this machine's plugins (read.ts)
     this.asking -= 1;
     const held = this.early;
     if (this.asking === 0) this.early = [];

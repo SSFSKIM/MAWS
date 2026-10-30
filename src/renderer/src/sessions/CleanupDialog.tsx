@@ -17,8 +17,11 @@ import { holderWords } from './holder-words';
 import { Sheet, SheetForm } from './Sheet';
 import { CHOICE, DANGER, PRIMARY } from './ui';
 import { displayTitle } from './title';
+import { machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 
 interface Identity {
+  machine: MachineRef;
   repoRoot: string;
   path: string;
   branch: string | null;
@@ -37,7 +40,7 @@ const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? pat
 // The cleanup target of a session's worktree (a hand-made one is asked through the session's directory); null for a
 // session with no worktree.
 export function cleanupTargetOf(record: SessionRecord): CleanupTarget | null {
-  return record.worktree === null ? null : cleanupTargetAt(record.worktree, record.directory);
+  return record.worktree === null ? null : cleanupTargetAt(machineOf(record.appId), record.worktree, record.directory);
 }
 
 // Git's identity of the target at open. The path is matched by main (NFC realpath on both sides, so `/tmp` and
@@ -45,22 +48,22 @@ export function cleanupTargetOf(record: SessionRecord): CleanupTarget | null {
 // the record's branch is still read, so its leftover branch keeps its ladder step.
 async function readIdentity(target: CleanupTarget): Promise<Identity | { error: string }> {
   const [list, status] = await Promise.all([
-    ipc.invoke('git.worktree.list', { repoRoot: target.repoRoot }),
-    ipc.invoke('git.worktree.status', { repoRoot: target.repoRoot, path: target.path }),
+    ipc.invoke('git.worktree.list', { repoRoot: target.repoRoot }, { machine: target.machine }),
+    ipc.invoke('git.worktree.status', { repoRoot: target.repoRoot, path: target.path }, { machine: target.machine }),
   ]);
   if (!list.ok) return { error: list.error.message };
   if (!status.ok) return { error: status.error.message };
   const repoRoot = list.value.repoRoot;
   const entry = status.value;
   const branchName = entry !== null ? entry.branch : target.branch;
-  const branch = branchName === null ? null : await ipc.invoke('git.worktree.branch', { repoRoot, branch: branchName });
-  return { repoRoot, path: entry?.path ?? target.path, branch: branchName, head: entry?.head ?? null, branchHead: branch?.ok ? (branch.value?.head ?? null) : null };
+  const branch = branchName === null ? null : await ipc.invoke('git.worktree.branch', { repoRoot, branch: branchName }, { machine: target.machine });
+  return { machine: target.machine, repoRoot, path: entry?.path ?? target.path, branch: branchName, head: entry?.head ?? null, branchHead: branch?.ok ? (branch.value?.head ?? null) : null };
 }
 
 async function readFacts(identity: Identity): Promise<Facts | { error: string }> {
   const [status, branch] = await Promise.all([
-    ipc.invoke('git.worktree.status', { repoRoot: identity.repoRoot, path: identity.path }),
-    identity.branch === null ? Promise.resolve(null) : ipc.invoke('git.worktree.branch', { repoRoot: identity.repoRoot, branch: identity.branch }),
+    ipc.invoke('git.worktree.status', { repoRoot: identity.repoRoot, path: identity.path }, { machine: identity.machine }),
+    identity.branch === null ? Promise.resolve(null) : ipc.invoke('git.worktree.branch', { repoRoot: identity.repoRoot, branch: identity.branch }, { machine: identity.machine }),
   ]);
   if (!status.ok) return { error: status.error.message };
   if (branch !== null && !branch.ok) return { error: branch.error.message };
@@ -181,7 +184,7 @@ export function CleanupDialog({ target }: { target: CleanupTarget }) {
       }
       if (steps.remove || steps.discard) {
         if (identity.head === null) return setError('missing: the checkout was already gone when this dialog opened');
-        const removed = await ipc.invoke('git.worktree.remove', { repoRoot: identity.repoRoot, path: identity.path, expect: { branch: identity.branch, head: identity.head }, discard: steps.discard });
+        const removed = await ipc.invoke('git.worktree.remove', { repoRoot: identity.repoRoot, path: identity.path, expect: { branch: identity.branch, head: identity.head }, discard: steps.discard }, { machine: identity.machine });
         if (!removed.ok) return setError(removed.error.message);
         if ('refused' in removed.value) return setError(`Remove refused · ${refusalWords(removed.value)}`);
       }
@@ -189,7 +192,7 @@ export function CleanupDialog({ target }: { target: CleanupTarget }) {
       // no branch or failed, and the step's `expect` has nothing to hold git to
       if (steps.deleteBranch && identity.branch !== null) {
         if (identity.branchHead === null) return setError('Delete branch not run: the branch was not read when this dialog opened; close and reopen it');
-        const deleted = await ipc.invoke('git.worktree.deleteBranch', { repoRoot: identity.repoRoot, branch: identity.branch, expect: { head: identity.branchHead }, acknowledgeUnmerged: acks.unmerged });
+        const deleted = await ipc.invoke('git.worktree.deleteBranch', { repoRoot: identity.repoRoot, branch: identity.branch, expect: { head: identity.branchHead }, acknowledgeUnmerged: acks.unmerged }, { machine: identity.machine });
         if (!deleted.ok) return setError(deleted.error.message);
         if ('refused' in deleted.value) return setError(`Delete branch refused · ${refusalWords(deleted.value)}`);
       }

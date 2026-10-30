@@ -14,24 +14,31 @@
 //
 // Task 2.5: after listen the orphan sweep reads the predecessor's ledger (live.json) and, when that supervisor is dead,
 // stops the engines it left; once the sweep has ended the engine host's table records this supervisor's own ledger
-// (`life.orphansSwept`). A welcomed client drops the cached login-shell capture, so the next launch captures again.
-import { randomBytes } from 'node:crypto';
-import * as fs from 'node:fs';
-import { createServer, type Server } from 'node:net';
+// (`life.orphansSwept`). A welcomed client drops the cached login-shell capture, so the next launch captures again;
+// P5 O3-D M3: a client that declared `host.attachment` (`mawsd`, whose connection outlives every app) drops it at its
+// {attached: true} instead (attachment.ts), since its welcome is no owner coming back.
+//
+// P5 O2 M3 (RL §5.11): the directory and the socket's directory are created 0700 when missing and checked before the
+// lock, the token and the listen (@shared/host/private-path): a symlink, another owner or a mode wider than 0700 stops
+// the start (exit 1, the log naming the path). One that exists is no longer corrected to 0700. Before the listen, the
+// socket path may hold nothing or this uid's stale socket (removed); a symlink, a file or another uid's socket is
+// refused and left in place (@shared/host/private-listen).
+//
+// P5 O2 M4: the lock, the token, the listen and the exit order are @shared/host/socket-host's, which the pty host's
+// socket mode shares; this entry keeps the orphan ledger (the exit order's clean step), the sweep and Supervision.
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { format } from 'node:util';
-import { createHostRuntime, type HostRegister } from '@shared/host/runtime';
 import { invalidateShellEnvironment } from '@shared/host/shell-env';
-import { serveSocketClients } from '@shared/host/socket-server';
-import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
+import { runSocketHost, START_EXIT_ABORTED, startSocketHost, type HostProcess } from '@shared/host/socket-host'; // P5 O2 M4
+import { ATTACHMENT_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
+import type { HostRegister } from '@shared/host/runtime';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
-import { WIRE_CAPABILITIES, WIRE_MINOR } from '@shared/ipc/wire'; // P5 O1 M6
-import { clearLive, signalOrphan, sweepOrphans, writeLive, type LiveRow, type Owner } from './live-ledger';
-import { buildIdOf, isAlive, procStartOf, readLock, socketPathFor, START_EXIT_HELD, SUPERVISOR_FILES, takeLock } from './supervisor-files';
+import { clearLive, signalOrphan, sweepOrphans, writeLive, type LiveRow } from './live-ledger';
+import { isAlive, procStartOf, socketPathFor, SUPERVISOR_FILES } from './supervisor-files';
 import type { SupervisorExit, SupervisorIdentity } from './supervision';
 
 export { BREAK_STALE_MS, buildIdOf, socketPathFor, START_EXIT_HELD, takeLock, type LockDeps, type LockFile } from './supervisor-files';
+export { START_EXIT_ABORTED };
 
 export interface DetachedOptions {
   dir: string; // <userData>/supervisor
@@ -60,213 +67,53 @@ export interface RunningSupervisor {
   stop(reason: ExitReason, code?: 0 | 1): Promise<void>; // the exit order; a second call joins the first
 }
 
-export interface SupervisorProcess {
-  exit(code: number): void;
-  aborted?(): boolean; // a SIGTERM arrived while the start was under way
-}
-
-// The exit code of a start a SIGTERM aborted (128 + SIGTERM): its lock, if it took one, is already removed.
-export const START_EXIT_ABORTED = 143;
+export type SupervisorProcess = HostProcess;
 
 export const EXIT_GRACE_MS = 3_000; // the exit order's ladder grace for every live row
-const EXIT_SHUTDOWN_BOUND_MS = 10_000; // past this the exit order goes on without the ladder's answer
 
-// The detached entry: routes console into the log, treats an uncaught exception as fatal and SIGTERM as an exit, and
-// starts the supervisor. Exit codes: 0 clean, 1 fatal, START_EXIT_HELD (3) when another supervisor holds the lock,
-// START_EXIT_ABORTED (143) when a SIGTERM arrived during the start (main reads 1 and 143 as an unexpected exit).
+// The detached entry (@shared/host/socket-host's process wiring). Exit codes: 0 clean, 1 fatal, START_EXIT_HELD (3) when
+// another supervisor holds the lock, START_EXIT_ABORTED (143) when a SIGTERM arrived during the start (main reads 1 and
+// 143 as an unexpected exit).
 export function runDetached(hostVersion: string, register: HostRegister, opts: DetachedOptions): void {
-  routeConsole(opts.log);
-  // Socket peer authentication (cua spec 2026-10-09-maws-socket-peer-auth-design.md, Decision Log 2026-10-10): the
-  // supervisor is the app binary run as Node, so without a listener a same-user SIGUSR1 opens a Node inspector whose code
-  // drives every session's engine, a route around the cua socket's peer check. A listener of its own keeps Node from it.
-  process.on('SIGUSR1', () => {});
-  const proc: SupervisorProcess = { exit: (code) => process.exit(code) };
-  let supervisor: RunningSupervisor | null = null;
-  const fatal = (error: unknown) => {
-    opts.log(`fatal: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
-    if (supervisor) void supervisor.stop('fatal', 1);
-    else proc.exit(1);
-  };
-  process.on('uncaughtException', fatal);
-  // A stray rejection is logged, not fatal: a supervisor holding sessions outlives a bug in one of them.
-  process.on('unhandledRejection', (reason) => opts.log(`unhandled rejection: ${reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)}`));
-  // A SIGTERM during the start does not exit past takeLock's cleanup: the start sees it at its next step and aborts.
-  let abortRequested = false;
-  proc.aborted = () => abortRequested;
-  process.on('SIGTERM', () => {
-    if (supervisor) void supervisor.stop('signal');
-    else abortRequested = true;
-  });
-  startSupervisor(hostVersion, register, opts, proc).then((started) => {
-    supervisor = started;
-    if (started && abortRequested) void started.stop('signal'); // the signal landed between listen and this line
-  }, fatal);
+  runSocketHost(opts.log, (proc) => startSupervisor(hostVersion, register, opts, proc));
 }
 
-// lock → token → listen → serve; null when it exited instead (the lock held, or the socket could not be created).
+// lock → token → listen → serve, then the sweep; null when it exited instead (the lock held, or the socket could not
+// be created).
 export async function startSupervisor(hostVersion: string, register: HostRegister, opts: DetachedOptions, proc: SupervisorProcess): Promise<RunningSupervisor | null> {
   const { dir, log } = opts;
-  const pid = process.pid;
-  privateDirectory(dir);
-  const buildId = buildIdOf(opts.modulePath);
-  const socketPath = socketPathFor(dir, dirname(dir), tmpdir());
-  log(`supervisor ${hostVersion} pid ${pid} build ${buildId} starting in ${dir}`);
-
-  const lockDeps = { fs, isAlive, procStartOf, now: () => Date.now(), sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)) };
-  if ((await takeLock(dir, { protocol: SOCKET_PROTOCOL, buildId, socketPath }, lockDeps)) === 'held') {
-    log(`another supervisor (pid ${readLock(dir)?.pid ?? 'unknown'}) holds the lock; exiting ${START_EXIT_HELD}`);
-    proc.exit(START_EXIT_HELD);
-    return null;
-  }
-  // The owner and start time as the lock recorded them, so the exit order's ownership check compares like with like
-  // even if a later `ps` of this process fails.
-  const written = readLock(dir);
-  const owner: Owner = { pid, procStart: written?.pid === pid ? written.procStart : '' };
-  const startedAt = written?.startedAt ?? new Date().toISOString();
-  const lockNamesMe = (): boolean => {
-    const lock = readLock(dir);
-    return lock !== null && lock.pid === owner.pid && lock.procStart === owner.procStart;
-  };
-  const abortStart = (stage: string): null => {
-    log(`start aborted by a signal ${stage}; exiting ${START_EXIT_ABORTED}`);
-    if (lockNamesMe()) {
-      removeFallbackDirectory(socketPath, dir);
-      unlinkQuietly(join(dir, SUPERVISOR_FILES.lock));
-    }
-    proc.exit(START_EXIT_ABORTED);
-    return null;
-  };
-  if (proc.aborted?.()) return abortStart('after taking the lock');
-  const token = writeToken(dir);
-  if (dirname(socketPath) !== dir) privateDirectory(dirname(socketPath));
-  try {
-    fs.unlinkSync(socketPath); // a socket file left by a dead supervisor; no live one can own it, since we hold the lock
-  } catch {
-    // none, or something listen will report
-  }
-
-  const runtime = createHostRuntime(register);
-  const server = createServer();
-  let stopping: Promise<void> | null = null;
-
-  const clients = serveSocketClients(server, {
-    runtime,
-    identity: () => ({ protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, buildId, capabilities: WIRE_CAPABILITIES, wire: wireFingerprint(), pid, startedAt }), // P5 O1 M6: the major, minor and capabilities (OX1)
-    counts: () => opts.counts(),
-    token: () => token,
-    onExit: (when) => {
-      if (when === 'now') void stop('exit');
-      else opts.life.exitWhenIdle();
+  return startSocketHost(
+    {
+      kind: 'supervisor',
+      hostVersion,
+      dir,
+      files: SUPERVISOR_FILES,
+      socketPath: socketPathFor(dir, dirname(dir), tmpdir()),
+      modulePath: opts.modulePath,
+      register,
+      badToken: 'refuse', // E10's `refuse token` (P5 Decision Log 29)
+      capabilities: PEER_CAPABILITIES.engineHost, // P5 O3-D: with `host.attachment`, which it serves from M3
+      counts: () => opts.counts(),
+      shutdown: () => opts.shutdown(EXIT_GRACE_MS), // (2) every live row stopped (grace 3 s) and the plugin runner with it
+      clean: (owner) => clearLive(dir, owner), // the orphan ledger, if this process still owns it
+      exitWhenIdle: () => opts.life.exitWhenIdle(),
+      onClient: (connected, peer) => {
+        // the owner is back: the next launch captures the shell again (a declaring client says so by host.attachment)
+        if (connected && !peer?.capabilities.includes(ATTACHMENT_CAPABILITY)) invalidateShellEnvironment();
+        opts.life.clientChanged(connected);
+      },
+      // the predecessor's ledger is read here, synchronously, before anything can launch; its orphans are stopped in the
+      // background (up to the sweep's grace) while this supervisor already serves
+      listening: (host) => {
+        const sweep = sweepOrphans(dir, { isAlive, procStartOf, signal: signalOrphan, sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)), log });
+        const { pid } = host.owner;
+        opts.life.started({ pid, startedAt: host.startedAt, buildId: host.buildId, protocol: SOCKET_PROTOCOL, wire: wireFingerprint(), socketPath: host.socketPath, logPath: join(dir, SUPERVISOR_FILES.log) }, (reason) => void host.stop(reason));
+        void sweep.then((killed) => {
+          if (!host.stopping()) opts.life.orphansSwept(killed, (rows) => writeLive(dir, host.owner, rows)); // an exit under way records nothing
+        });
+      },
+      log,
     },
-    onClient: (connected) => {
-      if (connected) invalidateShellEnvironment(); // the owner is back: the next launch captures the shell again
-      opts.life.clientChanged(connected);
-    },
-    log,
-  });
-
-  function stop(reason: ExitReason, code: 0 | 1 = 0): Promise<void> {
-    stopping ??= (async () => {
-      log(`exiting (${reason})`);
-      server.close(); // (1) no new client; the callback would wait for the client, which (5) closes
-      try {
-        await Promise.race([opts.shutdown(EXIT_GRACE_MS), new Promise((resolve) => setTimeout(resolve, EXIT_SHUTDOWN_BOUND_MS).unref())]); // (2)
-      } catch (error) {
-        log(`stopping the sessions failed: ${error instanceof Error ? error.message : String(error)}`);
-      }
-      if (code === 0) {
-        clearLive(dir, owner); // (3)
-        if (lockNamesMe()) {
-          unlinkQuietly(socketPath); // (4) usually gone already: Node unlinks a listening path when its server closes
-          removeFallbackDirectory(socketPath, dir); // before the lock goes, so no successor can be using it yet
-          unlinkQuietly(join(dir, SUPERVISOR_FILES.lock));
-        }
-      }
-      clients.closeClient(); // (5)
-      proc.exit(code); // (6)
-    })();
-    return stopping;
-  }
-
-  try {
-    await listen(server, socketPath);
-  } catch (error) {
-    log(`cannot listen on ${socketPath}: ${error instanceof Error ? error.message : String(error)}`);
-    await stop('fatal', 1);
-    return null;
-  }
-  server.on('error', (error) => log(`server error: ${error.message}`)); // an accept failure must not become fatal
-  if (proc.aborted?.()) {
-    server.close(); // unlinks the socket file
-    return abortStart('while it started listening');
-  }
-  fs.chmodSync(socketPath, 0o600);
-  log(`listening on ${socketPath}`);
-  // the predecessor's ledger is read here, synchronously, before anything can launch; its orphans are stopped in the
-  // background (up to the sweep's grace) while this supervisor already serves
-  const sweep = sweepOrphans(dir, { isAlive, procStartOf, signal: signalOrphan, sleep: lockDeps.sleep, log });
-  opts.life.started({ pid, startedAt, buildId, protocol: SOCKET_PROTOCOL, wire: wireFingerprint(), socketPath, logPath: join(dir, SUPERVISOR_FILES.log) }, (reason) => void stop(reason));
-  void sweep.then((killed) => {
-    if (stopping === null) opts.life.orphansSwept(killed, (rows) => writeLive(dir, owner, rows)); // an exit under way records nothing
-  });
-  return { socketPath, stop };
-}
-
-function privateDirectory(path: string): void {
-  fs.mkdirSync(path, { recursive: true, mode: 0o700 });
-  fs.chmodSync(path, 0o700); // a pre-existing directory is corrected too
-}
-
-// 32 random bytes as hex, written through a temporary file so a reader never sees half a token.
-function writeToken(dir: string): string {
-  const token = randomBytes(32).toString('hex');
-  const path = join(dir, SUPERVISOR_FILES.token);
-  const temporary = `${path}.${process.pid}`;
-  fs.writeFileSync(temporary, token, { mode: 0o600 });
-  fs.chmodSync(temporary, 0o600);
-  fs.renameSync(temporary, path);
-  return token;
-}
-
-function listen(server: Server, path: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(path, () => {
-      server.off('error', reject);
-      resolve();
-    });
-  });
-}
-
-// The tmpdir fallback directory of a socket path too long for sun_path (socketPathFor), once its socket is gone: removed
-// only when empty, never recursively, so whatever another supervisor put there stays.
-function removeFallbackDirectory(socketPath: string, dir: string): void {
-  if (dirname(socketPath) === dir) return;
-  try {
-    fs.rmdirSync(dirname(socketPath));
-  } catch {
-    // not empty, or already gone
-  }
-}
-
-function unlinkQuietly(path: string): void {
-  try {
-    fs.unlinkSync(path);
-  } catch {
-    // already gone
-  }
-}
-
-// Every console line of the host goes to the supervisor's log (which rotates), not to the stdio descriptors main
-// opened on host.log at the spawn (which would keep writing into the rotated file).
-function routeConsole(log: (line: string) => void): void {
-  const to =
-    (prefix: string) =>
-    (...args: unknown[]) =>
-      log(`${prefix}${format(...args)}`);
-  console.log = to('');
-  console.info = to('');
-  console.debug = to('debug: ');
-  console.warn = to('warn: ');
-  console.error = to('error: ');
+    proc,
+  );
 }

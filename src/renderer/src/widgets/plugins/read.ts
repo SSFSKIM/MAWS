@@ -7,8 +7,9 @@
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useCallback, useContext, useEffect, useRef } from 'react';
 import type { CommandOutput } from '@shared/ipc/schema';
+import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../../ipc/client';
-import { IpcCommandError } from '../../ipc/query';
+import { IpcCommandError, machineKey } from '../../ipc/query';
 import { FRAME } from '../copy';
 import { errorWords, READ_STALE_MS, WidgetReadPolicyContext } from '../read';
 
@@ -20,8 +21,13 @@ export interface PluginsReadResult<T> {
   error: string | null; // the refusal in words; with data, that the list shown is the last one read
 }
 
-async function invokeRead<N extends PluginsRead | 'plugins.env'>(command: N, input: N extends 'plugins.env' ? Record<string, never> : { cwd: string }): Promise<CommandOutput<N>> {
-  const result = await ipc.invoke(command, input as never);
+// P5 O6 M2 (OX2): a directory is a machine's; none names the local machine. P5 O6 M4: every plugin surface names none, so
+// they are all this machine's, inside a session as well as outside it: a plugin operation's progress and `plugins.changed`
+// are this app's events, which no machine link carries (the link surface, src/main/machines/link-surface.ts), so an
+// operation on another machine could not be followed. Plugins across machines are O4's.
+async function invokeRead<N extends PluginsRead | 'plugins.env'>(command: N, input: N extends 'plugins.env' ? Record<string, never> : { cwd: string }, machine?: MachineRef): Promise<CommandOutput<N>> {
+  // P5 O6 M4: every read here but `plugins.env` is a `path` command; the cast names that set (`plugins.env` takes the option too).
+  const result = await ipc.invoke(command as PluginsRead, input as never, { machine: machine ?? ipc.localMachine });
   if (!result.ok) throw new IpcCommandError(result.error);
   return result.value as CommandOutput<N>;
 }
@@ -32,21 +38,22 @@ const resultOf = <T,>(data: T | undefined, failed: IpcCommandError | null, isErr
 };
 
 // A read's place in the query client: one per command and directory, whoever reads it.
-export const pluginsReadKey = (command: PluginsRead, cwd: string | null) => ['maws', command, { cwd }] as const;
+export const pluginsReadKey = (command: PluginsRead, cwd: string | null, machine?: MachineRef) => ['maws', command, { cwd }, ...machineKey(machine)] as const;
 // The installed list as it is now, read again (its answer kept for the list's observers): what a confirmation discloses.
-export const readInstalledNow = (client: QueryClient, cwd: string) => client.fetchQuery({ queryKey: pluginsReadKey('plugins.list', cwd), queryFn: () => invokeRead('plugins.list', { cwd }), staleTime: 0 });
+export const readInstalledNow = (client: QueryClient, cwd: string, machine?: MachineRef) =>
+  client.fetchQuery({ queryKey: pluginsReadKey('plugins.list', cwd, machine), queryFn: () => invokeRead('plugins.list', { cwd }, machine), staleTime: 0 });
 
 // `enabled: false` holds the read (Browse until its first click). `shown: false` keeps the last answer without
 // rereading it on a change (Browse's catalogue while My items shows, P2-B §5.8): a change meanwhile is read once it shows.
 // `retry` reads again through this observer: the client's `refetchQueries` may run another observer's options for the
 // key (the manifests' `skipToken` follower of `marketplaces.list`), which is no read.
-export function usePluginsRead<N extends PluginsRead>(command: N, cwd: string | null, enabled = true, shown = true): PluginsReadResult<CommandOutput<N>> & { retry(): void } {
+export function usePluginsRead<N extends PluginsRead>(command: N, cwd: string | null, enabled = true, shown = true, machine?: MachineRef): PluginsReadResult<CommandOutput<N>> & { retry(): void } {
   const active = useContext(WidgetReadPolicyContext).mode === 'active';
   const on = active && enabled && cwd !== null;
   const client = useQueryClient();
   const query = useQuery<CommandOutput<N>, IpcCommandError>({
-    queryKey: pluginsReadKey(command, cwd),
-    queryFn: () => invokeRead(command, { cwd: cwd! } as never),
+    queryKey: pluginsReadKey(command, cwd, machine),
+    queryFn: () => invokeRead(command, { cwd: cwd! } as never, machine),
     enabled: on,
     staleTime: READ_STALE_MS,
     refetchOnWindowFocus: false,
@@ -58,10 +65,10 @@ export function usePluginsRead<N extends PluginsRead>(command: N, cwd: string | 
   useEffect(() => {
     if (!on) return;
     return ipc.on('plugins.changed', () => {
-      if (!shown || client.isFetching({ queryKey: pluginsReadKey(command, cwd) }) > 0) owed.current = true;
+      if (!shown || client.isFetching({ queryKey: pluginsReadKey(command, cwd, machine) }) > 0) owed.current = true;
       else void refetch();
     });
-  }, [on, shown, client, command, cwd, refetch]);
+  }, [on, shown, client, command, cwd, machine, refetch]);
   useEffect(() => {
     if (isFetching || !owed.current || !on || !shown) return;
     owed.current = false;

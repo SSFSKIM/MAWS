@@ -8,7 +8,7 @@
 // screen, Access, the passkey, and a real push service are the owner's walk (the plan's M4).
 import { revealEarlier } from './transcript-history';
 import { loadRecording, SESSION_VIEW, type Recording } from 'desk-hub/fake-machine';
-import { inputSha256, seal, verifyRpc, importOrgKey, type JsonObject, type PushNotice, type Raised } from 'desk-hub/protocol';
+import { inputSha256, seal, verifyRpc, importOrgKey, type JsonObject, type OwnerNotice, type PushNotice, type Raised } from 'desk-hub/protocol';
 import type { BrowserContext, Locator, Page } from '@playwright/test';
 import { DOUBLE_MEMBER, type HubDouble } from '../test/double/hub-double';
 import { VECTOR_KEY } from '../test/vectors';
@@ -794,6 +794,65 @@ test('a pushed question draws from its payload alone, with no Allow or Deny, and
   expect(await verifyRpc(await importOrgKey(VECTOR_KEY), answer, PROJECT)).toBe(true);
   expect(answer.member).toBe(DOUBLE_MEMBER.id);
   expect(answer.args).toEqual({ session: S.asks, answers: { 'Which column do we keep?': 'user_id' }, digest: { session: S.asks, request: 'toolu_q1', tool: 'AskUserQuestion', input_sha256: await inputSha256({ questions: QUESTIONS }) } });
+});
+
+// The hub's v2 notice for a cut-over machine's session (P5 O13 M6, `Registry.notify`'s `OwnerNotice`): its project, the
+// machine's ref and the session, and nothing else. The double holds no org state, so the cards a tap opens say this
+// browser is not a device yet; M6's e2e-hub/cards-landing.spec.ts lands on them against a real endpoint.
+const MOVED_REF = 'b0Rj6m2xQ4uVv1n8T3kZfA';
+const v2 = (kind: OwnerNotice['kind']): OwnerNotice => ({ project: PROJECT, machine: MOVED_REF, session: S.asks, kind });
+
+test("a v2 waiting push says only that a session waits, leaves the badge, and its tap lands on that session's cards", async ({ browserName, context, page, hub }) => {
+  test.skip(browserName !== 'chromium', "a push is delivered through Chromium's DevTools protocol");
+  await stageProject(hub);
+  await context.grantPermissions(['notifications'], { origin: hub.url });
+  await page.goto(hub.url);
+  await expect(page.getByTestId('grid')).toBeVisible();
+  const worker = await serviceWorker(context, page);
+
+  await worker.deliver(JSON.stringify(v2('waiting')));
+  await expect.poll(worker.shown).toHaveLength(1);
+  const [notification] = await worker.shown();
+  expect(notification.title).toBe('A session is waiting for your answer');
+  expect(notification.options.body).toBe('Opens at its cards');
+  expect(notification.options.tag).toBe(`cards/${MOVED_REF}/${S.asks}`);
+  expect(notification.options.actions).toBeUndefined();
+  expect(await worker.badges()).toEqual([]); // a v2 notice carries no count
+  const url = notification.options.data!.url!;
+  expect(url).toBe(`/cards/${MOVED_REF}/${S.asks}`);
+
+  const phone = await context.newPage();
+  await phone.goto(`${hub.url}${url}`);
+  const cards = phone.getByTestId('channel-cards');
+  await expect(cards).toHaveAttribute('data-machine', MOVED_REF);
+  await expect(cards).toHaveAttribute('data-session', S.asks);
+  await expect(cards.getByTestId('cards-device')).toHaveAttribute('data-state', 'none');
+  await expect(phone.getByRole('button', { name: 'Back to Cards' })).toBeVisible(); // the phone's way back is to the list
+  await expect(phone).toHaveURL(`${hub.url}${url}`);
+});
+
+test('a v2 wrote push says a session sent a message, under a tag of its own, and its tap opens the cards list in the window already open', async ({ browserName, context, page, hub }) => {
+  test.skip(browserName !== 'chromium', "a push is delivered through Chromium's DevTools protocol");
+  await stageProject(hub);
+  await context.grantPermissions(['notifications'], { origin: hub.url });
+  await page.goto(`${hub.url}/p/${PROJECT}`);
+  const worker = await serviceWorker(context, page);
+
+  await worker.deliver(JSON.stringify(v2('wrote')));
+  await expect.poll(worker.shown).toHaveLength(1);
+  const [notification] = await worker.shown();
+  expect(notification.title).toBe('A session sent you a message');
+  expect(notification.options.body).toBe('Open MAWS to read it');
+  expect(notification.options.tag).toBe(`wrote/${MOVED_REF}/${S.asks}`);
+  expect(await worker.badges()).toEqual([]);
+  const url = notification.options.data!.url!;
+  expect(url).toBe('/cards');
+
+  await page.evaluate(() => ((window as unknown as { kept: boolean }).kept = true));
+  await page.evaluate((to) => navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'desk-open', url: to } })), url);
+  await expect(page.getByTestId('cards-list')).toBeVisible();
+  await expect(page).toHaveURL(`${hub.url}/cards`);
+  expect(await page.evaluate(() => (window as unknown as { kept?: boolean }).kept)).toBe(true);
 });
 
 test('a tap with the app already open sends that window to the card, in place', async ({ page, hub }) => {

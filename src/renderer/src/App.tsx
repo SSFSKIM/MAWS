@@ -9,12 +9,15 @@ import { connectAttention } from './attention/navigation';
 import { registerShellActions } from './app/shell-actions';
 import { ipc } from './ipc/client';
 import { connectShell } from './ipc/events';
+import { connectLaneA } from './stores/lane-a'; // P5 O9 M5
+import { connectRemoteLaneA } from './lane-a/remote-connect'; // P5 O9 M9
 import { queryClient } from './ipc/query';
 import { connectActions, connectKeys } from './keymap/dispatcher';
 import { connectEditClaimants } from './keymap/edit-claimants'; // P4-B2 K6
 import { connectVisibility } from './session/visibility';
 import { persistLayout } from './stores/layout';
 import { useSettings } from './stores/settings';
+import { usePeople } from './stores/people'; // P5 O8 M5
 import { connectTranscript } from './transcript/shell'; // C6
 // C8a start
 import { registerSlot } from './app/slots';
@@ -162,6 +165,8 @@ export function App() {
 
   useEffect(() => useSettings.getState().connect(), []);
   useEffect(() => connectShell(), []); // C5: sessions, attention and layout, app-wide
+  useEffect(() => connectLaneA(), []); // P5 O9 M5: the terminal sessions MAWS drives through their sminos bridges
+  useEffect(() => connectRemoteLaneA(), []); // P5 O9 M9: other machines' terminal sessions: their rows' opener, their cards
   useEffect(() => persistLayout(ipc), []); // C5: changed layout keys back to main
   useEffect(() => registerShellActions(), []); // C5: the frame's action handlers
   useEffect(() => connectAttention(), []); // C5: ⌘⇧J, notification clicks and the fallback toast
@@ -185,6 +190,7 @@ export function App() {
     return connectPanelHost();
   }, []);
   useEffect(() => connectPanelEvents(), []); // the summary's git.changed and fs.workflowChanged
+  useEffect(() => void usePeople.getState().load(), []); // P5 O8 M5: the sidebar's People toggles, read once
   // Tool registration is the panel host's line (ruling O2). Never unregistered: a registration's disposer closes the
   // tool's tabs, which StrictMode's effect replay would do on every mount.
   useEffect(() => {

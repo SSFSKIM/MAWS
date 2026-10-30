@@ -6,6 +6,7 @@ import { Awareness } from '@y/protocols/awareness';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { design } from '@artifacts/design/fixtures/support';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { fakeClient } from '../../../../../test/support/fake-client';
 import { artifactEditorFor, holdArtifactEditorState, releaseArtifactEditorState, resetArtifactEditors } from '../../artifacts/registry';
@@ -41,7 +42,7 @@ afterEach(() => {
 });
 
 async function mount(): Promise<DesignTabState> {
-  window.maws = fakeClient({ 'session.intent.get': null, 'library.get': { row } }).client;
+  window.maws = fakeClient({ 'session.intent.get': null, 'library.get': { row } }).client as unknown as PreloadBridge;
   const doc = design([
     { id: 'b1', at: { x: 0, y: 0, w: 390, h: 844 }, title: 'Phone' },
     { id: 'b2', at: { x: 500, y: 0, w: 1280, h: 800 }, title: 'Desktop' },

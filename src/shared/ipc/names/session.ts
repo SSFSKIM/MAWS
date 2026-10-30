@@ -32,14 +32,17 @@ export const commands = [
   'session.acquire',
   // P2-A end
   'session.recentTurns', // P2-D (2026-10-09): the resume chooser's preview read
+  'session.setKeep', // P5 O2 M2: the owner's Keep running mark
   'session.pendingItems', // P5 O10 M8: the broker's items as a read (a `view` read, as `session.pendingRequest` is)
 ] as const;
 
 // P4-AGG M4: the engine's own MCP sign-in, main's sign-in operation alone (src/main/connectors/sign-in.ts)
-export const mainOnlyCommands = ['session.mcpAuthenticate', 'session.mcpOAuthCallback'] as const;
+// P5 O3-D: a client's session streams on mawsd's services front and the mirror's visible set, main's and mawsd's clients'
+export const mainOnlyCommands = ['session.mcpAuthenticate', 'session.mcpOAuthCallback', 'session.follow', 'session.visible', 'session.engineStatuses' /* M5b fix round 6 */] as const;
 
 export const events = [
   'session.eventBatch', 'session.status', 'session.queue', 'session.brokerItems', 'session.operation',
   'session.forgotten', 'session.changed', 'session.removed', 'session.projects.changed', 'session.replay.progress',
   'session.digest', 'session.catalogChanged', 'session.setup', 'session.intent.changed',
+  'session.visibleChanged', // P5 O3-D
 ] as const;

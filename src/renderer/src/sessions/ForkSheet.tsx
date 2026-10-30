@@ -15,6 +15,7 @@ import { Sheet, SheetForm } from './Sheet';
 import { CHOICE, FIELD, PRIMARY } from './ui';
 import { defaultWorktreeName } from './useSetupIntent';
 import { displayTitle } from './title';
+import { machineOf } from '@shared/machine/address';
 
 export function ForkSheet({ appSessionId }: { appSessionId: AppSessionId }) {
   const record = useSessions((s) => s.records.get(appSessionId) ?? null);
@@ -32,13 +33,13 @@ export function ForkSheet({ appSessionId }: { appSessionId: AppSessionId }) {
   useEffect(() => {
     if (directory === null) return;
     let live = true;
-    void ipc.invoke('git.branches', { directory }).then((result) => {
+    void ipc.invoke('git.branches', { directory }, { machine: machineOf(appSessionId) }).then((result) => {
       if (live && result.ok) setBranches(result.value.branches.map((b) => b.name));
     });
     return () => {
       live = false;
     };
-  }, [directory]);
+  }, [appSessionId, directory]);
 
   if (record === null) return null;
   const nameProblem = validateWorktreeName(name);

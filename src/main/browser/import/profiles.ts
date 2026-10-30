@@ -21,7 +21,7 @@ import {
   upgradeProfileV1,
   type ImportedProfile,
 } from '@shared/browser/profiles';
-import { atomicWriteFile } from '../../files/atomic-write';
+import { atomicWriteFile } from '@shared/fs/atomic-write';
 import { importLog } from './log';
 
 export const profilesFile = (userData: string) => join(userData, 'browser', 'profiles.json');

@@ -6,12 +6,13 @@ import { act } from '@testing-library/react';
 import { useMemo } from 'react';
 import { vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { CommandName, CommandResult, MawsBridge } from '@shared/ipc/schema';
+import type { CommandName, CommandResult, MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import { queryClient } from '../ipc/query';
 import { useGit } from '../stores/git';
 import { useSummary } from '../stores/summary';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, type LayoutMain, type PanelSessionState, type PanelTabRef, type TabRef } from '@shared/ipc/schema/layout';
 import { record } from '../../../../test/support/builders';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { resetPanelHost, shownSession } from '../panel/host';
 import { resetEditorHosts } from '../panel/editor-host'; // P3-G
 import { PanelHost } from '../panel/PanelHost';
@@ -21,9 +22,10 @@ import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { useShellView } from '../app/shell-view';
 
-export const A = 'app-a' as AppSessionId;
-export const B = 'app-b' as AppSessionId;
-export const C = 'app-c' as AppSessionId;
+// P5 O6 M2: the page's ids, addresses on the test machine (test/support/machine.ts)
+export const A = at('app-a' as AppSessionId);
+export const B = at('app-b' as AppSessionId);
+export const C = at('app-c' as AppSessionId);
 
 export interface ProbeState {
   id: string;
@@ -125,9 +127,10 @@ const QUIET_ANSWERS: Record<string, CommandResult<CommandName>> = {
   'fs.workflows': { ok: true, value: { runs: [] } },
 };
 const quietBridge = {
+  localMachine: TEST_MACHINE,
   invoke: async (name: CommandName) => QUIET_ANSWERS[name] ?? { ok: false, error: { code: 'internal', message: `no answer for ${name} in the panel suites` } },
   on: () => () => {},
-} as unknown as MawsBridge;
+} as unknown as PreloadBridge;
 
 const ORIGINAL = (() => {
   const { updatePanelTabs, openSession, setPanelTabs } = useLayout.getState();
@@ -156,7 +159,7 @@ export function resetPanelStores(opts: { hydrated?: boolean } = {}): void {
     panelBySession: new Map(),
     panelActiveNoSession: null,
     panelParams: {}, // P4-B3
-    panelSurfaces: { version: 1, stacks: {}, pinnedTools: [], contexts: {} },
+    panelSurfaces: { version: 2, stacks: {}, pinnedTools: [], contexts: {} },
     knownSession: () => true,
     dragging: null, // P4-B3
     hydrated: opts.hydrated ?? true,
@@ -184,6 +187,7 @@ export function heldBridge(values: Record<string, unknown>) {
   const gate = new Promise<void>((resolve) => (release = resolve));
   const sets: { key: string; value: unknown }[] = [];
   const client = {
+    localMachine: TEST_MACHINE,
     async invoke(name: string, input: { key: string; value?: unknown }) {
       if (name === 'layout.list') return { ok: true, value: { keys: Object.keys(values) } };
       if (name === 'engine.sessions') return { ok: true, value: [] }; // the shell's connect reads the engine table

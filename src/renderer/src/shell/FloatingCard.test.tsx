@@ -8,6 +8,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, tabId } from '@shared/ipc/schema/layout';
 import { record } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { registerShellActions } from '../app/shell-actions';
 import { runAction } from '../keymap/actions-runtime'; // P3-F wave S (F6)
 import { Shell } from '../app/Shell';
@@ -30,8 +31,8 @@ import { fail, installFakeMain, ok } from '../test-support/code'; // P3-G (M4)
 
 vi.mock('../app/Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
-const A = 'app-a' as AppSessionId;
-const B = 'app-b' as AppSessionId;
+const A = at('app-a' as AppSessionId); // P5 O6 M2: the page's ids are addresses
+const B = at('app-b' as AppSessionId);
 const SURFACE = { id: 'files:probe', toolId: 'files', pinned: true };
 const focused: AppSessionId[] = [];
 
@@ -74,7 +75,7 @@ let off: () => void;
 beforeEach(() => {
   setWindowWidth(1440);
   resetShellStores();
-  useSessions.setState({ records: new Map([[A, { ...record('app-a'), title: { text: 'Alpha session', source: 'user' } }], [B, record('app-b')]]) });
+  useSessions.setState({ records: new Map([[A, { ...record(A), title: { text: 'Alpha session', source: 'user' } }], [B, record(B)]]) });
   // A real open surface earns the panel column; absent stacks derive these legacy selections.
   useLayout.setState({ main: mainShowing(A), panelPinned: [SURFACE], panelActiveNoSession: SURFACE.id, panelBySession: new Map([[A, { tabs: [], activeTabId: SURFACE.id }]]) });
   registerSlot('panelHost', (props) => <PanelHeader tabs={props.tabs} activeTabId={props.activeTabId} />);
@@ -138,7 +139,7 @@ describe('the floating card in the Shell', () => {
     const pill = screen.getByRole('button', { name: 'Show session card' });
     expect(pill.textContent).toBe('Alpha session');
     expect(pill.querySelector('[aria-label="Unread"]')).toBeNull();
-    act(() => useSessions.setState({ records: new Map([[A, { ...record('app-a'), title: { text: 'Alpha session', source: 'user' }, unread: true }]]) }));
+    act(() => useSessions.setState({ records: new Map([[A, { ...record(A), title: { text: 'Alpha session', source: 'user' }, unread: true }]]) }));
     expect(pill.querySelector('[aria-label="Unread"]')).not.toBeNull();
     await user.click(pill);
     expect(card()).not.toBeNull();
@@ -217,7 +218,7 @@ describe('the floating card in the Shell', () => {
   // action) floats nothing and says why in a toast; main and its tab strip stay on screen.
   it('with an artifact tab in front, the header’s Float is disabled with its reason and ⌥⌘B leaves main and its tab strip shown', async () => {
     installFakeMain(() => fail('not answered here'));
-    const artifact = { id: tabId({ kind: 'artifact', artifactId: 'deck-1' }), kind: 'artifact', artifactId: 'deck-1', pinned: false } as const;
+    const artifact = { id: tabId({ kind: 'artifact', artifactId: 'deck-1', machine: TEST_MACHINE }), kind: 'artifact', artifactId: 'deck-1', machine: TEST_MACHINE, pinned: false } as const;
     useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [artifact], activeTabId: artifact.id }] } } } });
     render(<Shell />);
     const header = region('panel').querySelector<HTMLElement>('[data-editor-header]')!;
@@ -252,7 +253,7 @@ describe('the floating card in the Shell', () => {
   // maximum (main pushed to its floor, and saved)
   it('a drag of the divider past the maximum with an artifact tab in front floats nothing and keeps the drag’s start as its width', async () => {
     installFakeMain(() => fail('not answered here'));
-    const artifact = { id: tabId({ kind: 'artifact', artifactId: 'deck-1' }), kind: 'artifact', artifactId: 'deck-1', pinned: false } as const;
+    const artifact = { id: tabId({ kind: 'artifact', artifactId: 'deck-1', machine: TEST_MACHINE }), kind: 'artifact', artifactId: 'deck-1', machine: TEST_MACHINE, pinned: false } as const;
     useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [artifact], activeTabId: artifact.id }] } } } });
     render(<Shell />);
     const divider = within(region('panel')).getByRole('separator', { name: 'Resize right panel' });
@@ -549,6 +550,7 @@ describe('a mark-up still taken under the open card', () => {
     render(<Shell />);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     window.maws = {
+      localMachine: TEST_MACHINE,
       invoke: async () => {
         throw new Error('the window went');
       },

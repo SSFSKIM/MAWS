@@ -4,16 +4,25 @@
 // in a project the endpoint doesn't relay, has no listing, and the hub would push it to no one while still learning its
 // id and its count.
 //
-// The counts come from sminos's pending sets (M6: each project's whole set, restated after every RL10 welcome). A rise
-// in a session's count is a new request waiting, `waiting` with the count; a fall is `settled` with what remains, which
-// pushes nothing. The hub is told each change once: what it was last told is kept, and a change made while no connection
-// was up is told at the next welcome. A count above 0 the hub was told is kept on disk (`notified.json`), so after a
-// restart the first pending set that leaves its session out still tells it `settled 0`; the hub keeps a count until it
-// is told otherwise. A session withdrawn while no connection is up owes its `settled 0`, kept there too and paid at the
-// next welcome, listed again or not (a count known then is told after it). The file is read when the notifier is made
-// and again at the module's start, before anything is fed. A `wrote` carries the last count told when sminos hasn't
-// restated one yet, and what it carries is what the hub was told. Any other session's first count after a restart is
-// told as it is (`settled 0` clears a badge left from before).
+// The counts come from sminos's lane A requests, kept here by id for each session of each project: a project's whole
+// pending set (M6: sent when sminos opens the project, so after every RL10 welcome) replaces what was held for it, and
+// between sets each question goes up alone as a session-wide `raised`, each answer as a `settled` naming its request,
+// which add the one request and take it away (a raise held already, or a settlement of a request not held, moves
+// nothing). A rise in a session's count is a new request waiting, `waiting` with the count; a fall is `settled` with
+// what remains, which pushes nothing. The hub is told each change once: what it was last told is kept, and a change
+// made while no connection was up is told at the next welcome. A count above 0 the hub was told is kept on disk
+// (`notified.json`), so after a restart the first pending set that leaves its session out still tells it `settled 0`;
+// the hub keeps a count until it is told otherwise. A session withdrawn while no connection is up owes its `settled 0`,
+// kept there too and paid at the next welcome, listed again or not (a count known then is told after it). The file is
+// read when the notifier is made and again at the module's start, before anything is fed. A `wrote` carries the last
+// count told when sminos hasn't restated one yet, and what it carries is what the hub was told. Any other session's
+// first count after a restart is told as it is (`settled 0` clears a badge left from before).
+//
+// Lane B's counts are the engine host's, not sminos's: sminos's sets hold only the requests its bridges raised (lane A).
+// A lane B session's count is its broker items that wait on an answer, followed for every session whether or not a
+// device is subscribed (lane-b-pending.ts): each change of one session's items, and the engine host's whole set at each
+// link to it, which settles a lane B session it leaves out as sminos's restated set does a project's. The two lanes'
+// sets are kept apart, on disk too (`lane: 'B'`), so neither settles the other's sessions after a restart.
 //
 // `wrote` is a to-human message: a session-lane `host` message sent outside any subscription whose event is a
 // `message`, which O12's phase 2 sends as each is written, whether or not a device is subscribed. It is told once per
@@ -53,7 +62,13 @@ export class Notifier {
   readonly #told = new Map<string, number>();
   /** Withdrawn sessions whose `settled 0` no connection carried yet, with their project (on disk as `owed`). */
   readonly #owed = new Map<string, string>();
-  readonly #inProject = new Map<string, Set<string>>();
+  /**
+   * Each project's lane A requests, by session: what its next set settles if it leaves a session out. A session restored
+   * from the store holds none, its count the hub's until sminos restates the set.
+   */
+  readonly #requests = new Map<string, Map<string, Set<string>>>();
+  /** Lane B sessions whose count here, or the hub's, may be above 0: what the engine host's next set settles if it leaves them out. */
+  readonly #laneB = new Set<string>();
   readonly #seen = new Set<string>();
   /** Sessions owed a `wrote`, oldest first. */
   #held: HeldWrote[] = [];
@@ -70,23 +85,60 @@ export class Notifier {
   restore(): void {
     this.#told.clear();
     this.#owed.clear();
-    this.#inProject.clear();
-    for (const [session, { project, pending, owed }] of Object.entries(this.#ctx.store.read())) {
+    this.#requests.clear();
+    this.#laneB.clear();
+    for (const [session, { project, pending, owed, lane }] of Object.entries(this.#ctx.store.read())) {
       if (owed === true) this.#owed.set(session, project);
       else {
         this.#told.set(session, pending);
-        this.#inProject.set(project, new Set([...(this.#inProject.get(project) ?? []), session]));
+        if (lane === 'B') this.#laneB.add(session);
+        else this.#sessionsOf(project).set(session, new Set());
       }
     }
   }
 
-  /** A project's whole pending set: each session's count, and 0 for one its last set, or the hub's count, held that this one doesn't. */
-  pendingSet(project: string, raised: ReadonlyArray<{ session: string }>): void {
-    const counts = new Map<string, number>();
-    for (const item of raised) counts.set(item.session, (counts.get(item.session) ?? 0) + 1);
-    for (const session of this.#inProject.get(project) ?? []) if (!counts.has(session)) counts.set(session, 0);
-    this.#inProject.set(project, new Set([...counts].filter(([, n]) => n > 0).map(([session]) => session)));
-    for (const [session, count] of counts) this.pending(session, count);
+  /** A project's whole pending set: each session's count, and 0 for one held before (or the hub's count) that it leaves out. */
+  pendingSet(project: string, raised: ReadonlyArray<{ session: string; request: string }>): void {
+    const before = this.#requests.get(project) ?? new Map<string, Set<string>>();
+    const now = new Map<string, Set<string>>();
+    for (const { session, request } of raised) {
+      const requests = now.get(session) ?? new Set<string>();
+      now.set(session, requests.add(request));
+    }
+    this.#requests.set(project, now);
+    for (const [session, requests] of now) this.pending(session, requests.size);
+    for (const session of before.keys()) if (!now.has(session)) this.pending(session, 0);
+  }
+
+  /** A session-wide `raised` or `settled` (sub-less, naming its request): the one request added to its session's, or taken. */
+  requestMessage(message: SessionLaneMessage): void {
+    const { kind, session, project } = message;
+    if ((kind !== 'raised' && kind !== 'settled') || message.sub !== null || session === null) return;
+    const request = (message.body as { request?: unknown } | null)?.request;
+    if (typeof request !== 'string') return;
+    const sessions = this.#sessionsOf(project);
+    const requests = sessions.get(session) ?? new Set<string>();
+    if (kind === 'raised') {
+      if (requests.has(request)) return;
+      sessions.set(session, requests.add(request));
+    } else {
+      if (!requests.delete(request)) return;
+      if (requests.size === 0) sessions.delete(session);
+    }
+    this.pending(session, requests.size);
+  }
+
+  /** The engine host's whole set of lane B counts: each session's, and 0 for a lane B session it leaves out. */
+  laneBSet(counts: ReadonlyMap<string, number>): void {
+    for (const session of [...this.#laneB]) if (!counts.has(session)) this.laneBCount(session, 0);
+    for (const [session, count] of counts) this.laneBCount(session, count);
+  }
+
+  /** A lane B session's count now; a 0 for one whose count was never above 0 here or at the hub tells nothing. */
+  laneBCount(session: string, count: number): void {
+    if (count > 0) this.#laneB.add(session);
+    else if (!this.#laneB.delete(session)) return;
+    this.pending(session, count);
   }
 
   /** A session's pending count now. */
@@ -114,6 +166,8 @@ export class Notifier {
   /** A session left the machine; a `settled 0` it still owes the hub stays owed. */
   forget(session: string): void {
     this.#counts.delete(session);
+    for (const sessions of this.#requests.values()) sessions.delete(session);
+    this.#laneB.delete(session);
     if (!this.#owed.has(session)) this.#setTold(session, '', undefined);
   }
 
@@ -176,6 +230,12 @@ export class Notifier {
     this.#held = kept;
   }
 
+  #sessionsOf(project: string): Map<string, Set<string>> {
+    const sessions = this.#requests.get(project) ?? new Map<string, Set<string>>();
+    this.#requests.set(project, sessions);
+    return sessions;
+  }
+
   #tell(session: string): void {
     const count = this.#counts.get(session);
     const listed = this.#ctx.listed(session);
@@ -194,9 +254,11 @@ export class Notifier {
     const file = this.#ctx.store.read();
     const kept = count !== undefined && count > 0;
     if (!kept && !(session in file)) return;
-    if (kept && file[session]?.project === project && file[session]?.pending === count && file[session]?.owed === undefined) return;
+    const lane = this.#laneB.has(session) ? 'B' : undefined;
+    const held = file[session];
+    if (kept && held?.project === project && held.pending === count && held.owed === undefined && held.lane === lane) return;
     const next = { ...file };
-    if (kept) next[session] = { project, pending: count };
+    if (kept) next[session] = { project, pending: count, ...(lane === undefined ? {} : { lane }) };
     else delete next[session];
     this.#ctx.store.write(next);
   }

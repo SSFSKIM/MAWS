@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandResult, HostState, MawsBridge } from '@shared/ipc/schema';
 import type { HostStatus } from '@shared/ipc/schema/host';
+import type { MachineState } from '@shared/ipc/schema/machines';
+import type { MachineRef } from '@shared/machine/ref';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { createHostsStore } from './hosts';
 
 type SnapshotName = 'engine.hostState' | 'pty.hostState' | 'host.status'; // E10: the supervisor's status
@@ -8,7 +11,7 @@ type Payload<N extends SnapshotName> = N extends 'host.status' ? HostStatus : Ho
 
 // A client whose snapshot replies the test releases by hand, so event/reply orderings can be staged.
 function fakeClient() {
-  const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  const listeners = new Map<string, Set<(payload: unknown, from: { machine: MachineRef }) => void>>();
   const pending: Record<SnapshotName, ((result: CommandResult<SnapshotName>) => void)[]> = {
     'engine.hostState': [],
     'pty.hostState': [],
@@ -16,11 +19,12 @@ function fakeClient() {
   };
   const calls: string[] = [];
   const client = {
+    localMachine: TEST_MACHINE,
     invoke: vi.fn((name: SnapshotName) => {
       calls.push(`invoke ${name}`);
       return new Promise<CommandResult<SnapshotName>>((resolve) => pending[name].push(resolve));
     }),
-    on: vi.fn((name: string, listener: (payload: unknown) => void) => {
+    on: vi.fn((name: string, listener: (payload: unknown, from: { machine: MachineRef }) => void) => {
       calls.push(`on ${name}`);
       if (!listeners.has(name)) listeners.set(name, new Set());
       listeners.get(name)!.add(listener);
@@ -30,7 +34,8 @@ function fakeClient() {
   return {
     client: client as unknown as MawsBridge,
     calls,
-    event: <N extends SnapshotName>(name: N, payload: Payload<N>) => listeners.get(name)?.forEach((l) => l(payload)),
+    event: <N extends SnapshotName>(name: N, payload: Payload<N>, machine: MachineRef = TEST_MACHINE) => listeners.get(name)?.forEach((l) => l(payload, { machine })),
+    roster: (machines: MachineState[]) => listeners.get('machines.changed')?.forEach((l) => l({ machines }, { machine: TEST_MACHINE })),
     reply: async <N extends SnapshotName>(name: N, index: number, payload: Payload<N>) => {
       pending[name][index]({ ok: true, value: payload } as CommandResult<SnapshotName>);
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -55,6 +60,7 @@ describe('renderer hosts store', () => {
       'on engine.hostState',
       'on pty.hostState',
       'on host.status',
+      'on machines.changed',
       'invoke engine.hostState',
       'invoke pty.hostState',
       'invoke host.status',
@@ -136,6 +142,8 @@ describe('renderer hosts store: the supervisor’s status', () => {
     reason: null,
     waitingLiveSessions: null,
     lastExit: null,
+    daemon: null, // P5 O2 M7
+    daemonUnavailable: null,
   });
 
   it('is null until main answers, then the snapshot', async () => {
@@ -170,5 +178,39 @@ describe('renderer hosts store: the supervisor’s status', () => {
     disconnect();
     fake.event('host.status', status(5));
     expect(store.getState().supervisor).toEqual(status(1));
+  });
+});
+
+// P5 O6 M4: the hosts per machine, each event kept by the machine it came from.
+describe('renderer hosts store: another machine’s hosts', () => {
+  const machine = (ref: MachineRef, state: MachineState['state'], generation: number): MachineState => ({ ref, name: ref, local: ref === TEST_MACHINE, state, since: '2026-10-27T10:00:00Z', generation });
+  const roster = (other: MachineState['state'], generation: number) => [machine(TEST_MACHINE, 'up', 0), machine(OTHER_MACHINE, other, generation)];
+
+  it('keeps another machine’s host events apart from the local machine’s', async () => {
+    const fake = fakeClient();
+    const store = createHostsStore(fake.client);
+    store.getState().connect();
+    await fake.reply('engine.hostState', 0, state('ready', 11, 1));
+    fake.event('engine.hostState', state('crashed', 99, 7), OTHER_MACHINE);
+    expect(store.getState().hosts.engine).toEqual(state('ready', 11, 1));
+    expect(store.getState().byMachine.get(OTHER_MACHINE)?.engine).toEqual(state('crashed', 99, 7));
+    expect(store.getState().byMachine.get(TEST_MACHINE)?.engine).toEqual(state('ready', 11, 1));
+  });
+
+  it('forgets another machine’s hosts when its link goes down or comes up as a new generation, and not on the first list', () => {
+    const fake = fakeClient();
+    const store = createHostsStore(fake.client);
+    store.getState().connect();
+    fake.event('pty.hostState', state('ready', 5, 9), OTHER_MACHINE);
+    fake.roster(roster('up', 3)); // the generation these came from
+    expect(store.getState().byMachine.get(OTHER_MACHINE)?.pty).toEqual(state('ready', 5, 9));
+    fake.roster(roster('down', 3));
+    expect(store.getState().byMachine.has(OTHER_MACHINE)).toBe(false);
+    fake.roster(roster('up', 4));
+    // The new generation's revisions start afresh: a low one is taken.
+    fake.event('pty.hostState', state('ready', 6, 1), OTHER_MACHINE);
+    expect(store.getState().byMachine.get(OTHER_MACHINE)?.pty).toEqual(state('ready', 6, 1));
+    fake.roster(roster('up', 5));
+    expect(store.getState().byMachine.has(OTHER_MACHINE)).toBe(false);
   });
 });

@@ -11,11 +11,13 @@
 // set and directory whenever the head changes them.
 //
 // What sminos sends:
-//   - the log plane (`hello`, `events`, `rejected`), relayed to RL1 (log-relay.ts);
+//   - the log plane (`hello`, `events`, `rejected`), relayed to RL1 (log-relay.ts); signed uploads wait for the hub
+//     link's room in the relay's own capped queue, never holding the frames behind them;
 //   - the session lane, which stops here and never reaches the hub: `member` and `restated` (members.ts), `pending`
-//     (M3's notify counts), and `session` messages of every DX4 kind: a `machine` presence gives its project's
-//     checkouts, a sub-less `host` is a to-human event (M3's `wrote`, once per `(writer, seq)`, durably), and every
-//     message goes to the session listeners (M8's subscriptions);
+//     (a project's whole set of requests, for M3's notify counts), and `session` messages of every DX4 kind: a
+//     `machine` presence gives its project's checkouts, a sub-less `host` is a to-human event (M3's `wrote`, once per
+//     `(writer, seq)`, durably), a sub-less `raised` or `settled` moves its session's notify count by one request
+//     between the sets, and every message goes to the session listeners (M8's subscriptions);
 //   - `words?`, answered `words` (words.ts); `policy-set`, the policy changed and restated; `legacy-key`, kept (logged
 //     and dropped once the org state retires the key);
 //   - `rpc-result`, handed to the result listeners (M7) and acknowledged `rpc-ack {opId, nonce}`; `queried` and
@@ -45,6 +47,15 @@ export const ANSWER_MS = 10_000;
 /** sminos's `opId` shape (`OP_ID_RE`): sminos answers nothing for another, so none is sent. */
 export const OP_ID = /^[A-Za-z0-9_-]{16,128}$/;
 
+/**
+ * The longest text a `send` carries, in UTF-16 code units: MAWS's own limit on a prompt as typed
+ * (`session.history.append`), so a text within it is within sminos's bound, which counts code points (O9 M1).
+ */
+const SEND_TEXT_MAX = 65_536;
+
+/** Whether a `send`'s text is one the endpoint hands on: a string, not blank, within `SEND_TEXT_MAX`. */
+const isSendText = (text: unknown): boolean => typeof text === 'string' && text.length <= SEND_TEXT_MAX && text.trim() !== '';
+
 export type Identity = { org: string; hub: string; name: string; ref: string; enrolled: string };
 
 export type Rl10Context = {
@@ -57,10 +68,15 @@ export type Rl10Context = {
   identity(): Identity | null;
   key(): { key: SigningKey; keyId: string } | null;
   policy: EndpointPolicy;
-  hub: { openProject(project: string, handler: LogProject): () => void; send(frame: Frame): boolean };
+  hub: { openProject(project: string, handler: LogProject): () => void; send(frame: Frame): boolean; writable?(): Promise<void> };
   /** M3's listings and notify, which the session lane feeds. */
   listings: MembersContext['listings'] & { refresh(): Promise<void>; listedSessions(): readonly string[] };
-  notifier: { pendingSet(project: string, raised: ReadonlyArray<{ session: string }>): void; hostMessage(message: SessionLaneMessage, sent?: () => void): void; forget(session: string): void };
+  notifier: {
+    pendingSet(project: string, raised: ReadonlyArray<{ session: string; request: string }>): void;
+    requestMessage(message: SessionLaneMessage): void;
+    hostMessage(message: SessionLaneMessage, sent?: () => void): void;
+    forget(session: string): void;
+  };
   machineOwners(): Promise<string[]>;
   dispatch: MembersContext['dispatch'];
   now(): number;
@@ -241,7 +257,8 @@ export class Rl10 {
    * An authorized lane A action down as DX2's `rpc` (Interfaces §D), or why it can't go: `unavailable` with no sminos
    * connected, no member for its session, or a member with no `launch` (no bridge to fence it: sminos would refuse it
    * unfenced anyway), or a spawn whose checkout no presence lists; `malformed` when the action's own session, context or
-   * digest disagree with its args, or an action on a session carries no lane A context; `context` (M7) when the launch it
+   * digest disagree with its args, an action on a session carries no lane A context, or a `send`'s text is no string, is
+   * blank or is longer than `SEND_TEXT_MAX`; `context` (M7) when the launch it
    * was sealed for is not the session's launch now (the bridge rechecks it at the effect, for a relaunch after this).
    */
   rpc(action: Action, who: { member: string; device: string }, fingerprint: string): { ok: true; frame: Frame } | { ok: false; reason: 'unavailable' | 'malformed' | 'context' } {
@@ -266,6 +283,8 @@ export class Rl10 {
       if (action.session !== undefined && action.session !== session) return { ok: false, reason: 'malformed' };
       if (action.context === undefined || action.context.lane !== 'A' || action.context.session !== session) return { ok: false, reason: 'malformed' };
       if (action.requestDigest !== undefined && JSON.stringify(action.requestDigest) !== JSON.stringify(digest)) return { ok: false, reason: 'malformed' };
+      // A `/` text is graded by its slash command (by-effect.ts) and refused by sminos itself, never here.
+      if (name === 'send' && !isSendText(args.text)) return { ok: false, reason: 'malformed' };
       const member = this.members.get(session);
       if (member === null || member.lane !== 'A' || member.launch === undefined) return { ok: false, reason: 'unavailable' };
       if (action.context.launch !== member.launch) return { ok: false, reason: 'context' };
@@ -433,7 +452,8 @@ export class Rl10 {
   #pending(frame: Frame): void {
     const { project, raised } = frame;
     if (typeof project !== 'string' || !Array.isArray(raised)) return this.#ctx.log('endpoint: an RL10 pending frame that is not one was ignored');
-    this.#ctx.notifier.pendingSet(project, raised.filter((r): r is { session: string } => typeof r === 'object' && r !== null && typeof (r as { session?: unknown }).session === 'string'));
+    const requests = raised.filter((r): r is { session: string; request: string } => typeof (r as { session?: unknown } | null)?.session === 'string' && typeof (r as { request?: unknown }).request === 'string');
+    this.#ctx.notifier.pendingSet(project, requests);
     for (const listener of this.#pendings) {
       try {
         listener(project, raised);
@@ -459,6 +479,7 @@ export class Rl10 {
     if (typeof message.kind !== 'string' || typeof message.project !== 'string') return this.#ctx.log('endpoint: an RL10 session message that is not one was ignored');
     if (message.kind === 'machine' && message.session === null) this.members.presence(message.project, message.body);
     if (message.kind === 'host' && message.sub === null) this.#host(message);
+    if (message.kind === 'raised' || message.kind === 'settled') this.#ctx.notifier.requestMessage(message);
     for (const listener of this.#sessions) {
       try {
         listener(message);

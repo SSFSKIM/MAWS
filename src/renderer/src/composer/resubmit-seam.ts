@@ -27,6 +27,7 @@
 // An edit does not survive a reload (as Codex's does not): nothing in flight resumes on its own.
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
+import { machineOf } from '@shared/machine/address';
 import { acquireSession, refusalWords } from '../sessions/acquire'; // P2-A
 import { inlineEditOf, prefillComposer, resubmitRecordOf, setInlineEdit, setResubmit, useComposerStore, type InlineEdit, type Resubmit, type ResubmitState } from '../stores/composer';
 import { useLayout } from '../stores/layout';
@@ -278,7 +279,7 @@ function whenReady(client: MawsBridge, appSessionId: AppSessionId, flight: Fligh
     void client.invoke('session.status', { appSessionId }).then(
       (result) => {
         if (done || !result.ok) return;
-        if (result.value.process === 'ready') useSessions.getState().applyStatus({ appSessionId, status: result.value }); // the subscription finishes it
+        if (result.value.process === 'ready') useSessions.getState().applyStatus({ appSessionId, status: result.value }, machineOf(appSessionId)); // the subscription finishes it
         else if (result.value.process === 'exited') finish('exited');
       },
       () => undefined, // the events and the bound still answer

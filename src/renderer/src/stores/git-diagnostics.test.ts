@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CommandName, CommandResult, EventName, EventPayload, MawsBridge } from '@shared/ipc/schema';
 import type { GitStatus } from '@shared/ipc/schema/git';
+import type { MachineRef } from '@shared/machine/ref';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { createGitDiagnosticsStore, describeGit, describeGitFile } from './git-diagnostics';
+
+const on = (directory: string, machine: MachineRef = TEST_MACHINE) => ({ machine, directory });
 
 const status = (over: Partial<GitStatus> = {}): GitStatus => ({
   repoRoot: '/repo',
@@ -25,10 +29,11 @@ const status = (over: Partial<GitStatus> = {}): GitStatus => ({
 });
 
 function fakeClient(answers: Partial<Record<CommandName, (input: unknown) => CommandResult<CommandName> | Promise<CommandResult<CommandName>>>> = {}) {
-  const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  const listeners = new Map<string, Set<(payload: unknown, from: { machine: MachineRef }) => void>>();
   const client = {
-    invoke: vi.fn(async (name: CommandName, input: unknown) => (await answers[name]?.(input)) ?? ({ ok: true, value: undefined } as CommandResult<CommandName>)),
-    on: vi.fn((name: string, listener: (payload: unknown) => void) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- the options are read back from the mock's calls (`machines`)
+    invoke: vi.fn(async (name: CommandName, input: unknown, _opts?: { machine: MachineRef }) => (await answers[name]?.(input)) ?? ({ ok: true, value: undefined } as CommandResult<CommandName>)),
+    on: vi.fn((name: string, listener: (payload: unknown, from: { machine: MachineRef }) => void) => {
       if (!listeners.has(name)) listeners.set(name, new Set());
       listeners.get(name)!.add(listener);
       return () => listeners.get(name)!.delete(listener);
@@ -38,7 +43,8 @@ function fakeClient(answers: Partial<Record<CommandName, (input: unknown) => Com
     client: client as unknown as MawsBridge,
     invoke: client.invoke,
     calls: (name: CommandName) => client.invoke.mock.calls.filter(([n]) => n === name).map(([, input]) => input),
-    event: <N extends EventName>(name: N, payload: EventPayload<N>) => listeners.get(name)?.forEach((l) => l(payload)),
+    machines: (name: CommandName) => client.invoke.mock.calls.filter(([n]) => n === name).map(([, , opts]) => opts?.machine),
+    event: <N extends EventName>(name: N, payload: EventPayload<N>, machine: MachineRef = TEST_MACHINE) => listeners.get(name)?.forEach((l) => l(payload, { machine })),
     listening: () => [...listeners.values()].reduce((n, set) => n + set.size, 0),
   };
 }
@@ -50,9 +56,9 @@ describe('git diagnostics', () => {
     const fake = fakeClient({ 'git.watch': () => ok(status()) });
     const store = createGitDiagnosticsStore(fake.client);
     const disconnect = store.getState().connect();
-    await store.getState().select('/repo/src');
+    await store.getState().select(on('/repo/src'));
     expect(fake.calls('git.watch')).toEqual([{ directory: '/repo/src' }]);
-    expect(store.getState()).toMatchObject({ directory: '/repo/src', status: status(), error: null });
+    expect(store.getState()).toMatchObject({ selected: on('/repo/src'), status: status(), error: null });
 
     const fresh = status({ files: [...status().files, { path: '.c4-accept', oldPath: null, index: '?', worktree: '?', untracked: true }] });
     fake.event('git.changed', { repoRoot: '/elsewhere', status: status({ repoRoot: '/elsewhere' }), reason: 'worktree' });
@@ -69,12 +75,12 @@ describe('git diagnostics', () => {
     const fake = fakeClient({ 'git.watch': (input) => ok(status({ repoRoot: (input as { directory: string }).directory })) });
     const store = createGitDiagnosticsStore(fake.client);
     store.getState().connect();
-    await store.getState().select('/a');
-    await store.getState().select('/b');
+    await store.getState().select(on('/a'));
+    await store.getState().select(on('/b'));
     await store.getState().select(null);
     expect(fake.calls('git.watch')).toEqual([{ directory: '/a' }, { directory: '/b' }]);
     expect(fake.calls('git.unwatch')).toEqual([{ directory: '/a' }, { directory: '/b' }]);
-    expect(store.getState()).toMatchObject({ directory: null, status: null });
+    expect(store.getState()).toMatchObject({ selected: null, status: null });
   });
 
   it('unwatches a watch that answers after the selection moved on, and keeps the newer selection', async () => {
@@ -85,11 +91,11 @@ describe('git diagnostics', () => {
     });
     const store = createGitDiagnosticsStore(fake.client);
     store.getState().connect();
-    const first = store.getState().select('/a');
-    await store.getState().select('/b');
+    const first = store.getState().select(on('/a'));
+    await store.getState().select(on('/b'));
     answerA(ok(status({ repoRoot: '/a' })));
     await first;
-    expect(store.getState()).toMatchObject({ directory: '/b', status: { repoRoot: '/b' } });
+    expect(store.getState()).toMatchObject({ selected: on('/b'), status: { repoRoot: '/b' } });
     expect(fake.calls('git.unwatch')).toEqual([{ directory: '/a' }]); // the stale watch, balanced; /a was never shown
   });
 
@@ -97,10 +103,25 @@ describe('git diagnostics', () => {
     const fake = fakeClient({ 'git.watch': () => ({ ok: false, error: { code: 'internal', message: 'not a git repository' } }) });
     const store = createGitDiagnosticsStore(fake.client);
     store.getState().connect();
-    await store.getState().select('/tmp');
-    expect(store.getState()).toMatchObject({ directory: '/tmp', status: null, error: 'not a git repository' });
+    await store.getState().select(on('/tmp'));
+    expect(store.getState()).toMatchObject({ selected: on('/tmp'), status: null, error: 'not a git repository' });
     await store.getState().select(null);
     expect(fake.calls('git.unwatch')).toEqual([]);
+  });
+
+  // P5 O6 M4: the selection is a checkout on its session's machine.
+  it('watches on the selected session’s machine and takes git.changed from that machine only', async () => {
+    const fake = fakeClient({ 'git.watch': () => ok(status()) });
+    const store = createGitDiagnosticsStore(fake.client);
+    store.getState().connect();
+    await store.getState().select(on('/repo', OTHER_MACHINE));
+    expect(fake.machines('git.watch')).toEqual([OTHER_MACHINE]);
+    fake.event('git.changed', { repoRoot: '/repo', status: status({ branch: 'on-this-machine' }), reason: 'head' });
+    expect(store.getState().status?.branch).toBe('main');
+    fake.event('git.changed', { repoRoot: '/repo', status: status({ branch: 'moved' }), reason: 'head' }, OTHER_MACHINE);
+    expect(store.getState().status?.branch).toBe('moved');
+    await store.getState().select(on('/repo'));
+    expect(fake.machines('git.unwatch')).toEqual([OTHER_MACHINE]);
   });
 
   it('describes branch, ahead/behind and the dirty count, and each file by its XY code', () => {

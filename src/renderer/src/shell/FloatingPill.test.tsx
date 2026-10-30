@@ -9,6 +9,8 @@ import { LAYOUT_DEFAULTS, NO_PROJECT, type TabRef } from '@shared/ipc/schema/lay
 import type { Draft } from '@shared/ipc/schema/session';
 import { humanTurn, record, status, T0 } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { at } from '../../../../test/support/machine';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { registerSlot, resetSlots } from '../app/slots';
 import { Composer } from '../composer/Composer';
 import { ComposerAppKeys, focusedSession } from '../composer/ComposerAppKeys';
@@ -25,8 +27,11 @@ import { resetShellStores } from '../test-support/shell-stores';
 import { FloatingCardLayer, SplitCardLayer } from './FloatingCard';
 import { useFloatingCard } from './floating';
 
-const A = 'app-a' as AppSessionId;
-const B = 'app-b' as AppSessionId;
+// P5 O6 M2: the page holds addresses; the fake `window.maws` (main) is asked with, and keys its drafts by, the bare ids
+const BARE_A = 'app-a' as AppSessionId;
+const BARE_B = 'app-b' as AppSessionId;
+const A = at(BARE_A);
+const B = at(BARE_B);
 const tab = (id: AppSessionId): TabRef => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false });
 const message = () => screen.getByRole('textbox', { name: 'Message', hidden: true }) as HTMLElement & { editor: Editor };
 const compact = () => screen.getByRole('region', { name: 'Compact session composer' });
@@ -49,7 +54,7 @@ beforeEach(() => {
     'session.send': { messageUuid: null, disposition: 'sent', queueId: 'q-1' },
     'session.interrupt': { stillQueued: [], cancelled: [] },
   });
-  window.maws = fake.client;
+  window.maws = fake.client as unknown as PreloadBridge;
   // A selected surface, not the now-floating summary cards, gives the panel float something to stand over.
   // Keep the pinned terminal selected for both sessions so switching A/B tests the same live card boundary.
   const terminal = ref('terminal:shared00', true);
@@ -94,7 +99,7 @@ async function stop() {
 }
 
 it('follows panel selection with a separate editor, draft persistence and submission for each session', async () => {
-  drafts.set(B, { doc: docOf([paragraph(textNode('Beta draft'))]), attachments: [], updatedAt: T0 });
+  drafts.set(BARE_B, { doc: docOf([paragraph(textNode('Beta draft'))]), attachments: [], updatedAt: T0 });
   mount();
   await waitFor(() => expect(fake.invoked('session.drafts.get')).toHaveLength(1));
   act(() => void message().editor.commands.insertContent('Alpha private draft'));
@@ -102,7 +107,7 @@ it('follows panel selection with a separate editor, draft persistence and submis
   await waitFor(() => expect(message().editor.getText()).toBe('Beta draft'));
   expect(compact().querySelector('[data-composer]')?.getAttribute('data-composer')).toBe(B);
   fireEvent.click(within(compact()).getByRole('button', { name: 'Send' }));
-  await waitFor(() => expect(fake.invoked('session.send')).toEqual([{ appSessionId: B, content: 'Beta draft' }]));
+  await waitFor(() => expect(fake.invoked('session.send')).toEqual([{ appSessionId: BARE_B, content: 'Beta draft' }]));
   act(() => useLayout.setState({ main: mainShowing(A) }));
   await waitFor(() => expect(message().editor.getText()).toBe('Alpha private draft'));
 });
@@ -121,13 +126,13 @@ it.each(['pointer', 'keyboard'] as const)('routes compact %s interaction to its 
   expect(useFloatingCard.getState().closed).toBe(true);
   expect(screen.queryByRole('region', { name: 'Session card' })).toBeNull();
   await stop();
-  expect(fake.invoked('session.interrupt').at(-1)).toMatchObject({ appSessionId: A });
+  expect(fake.invoked('session.interrupt').at(-1)).toMatchObject({ appSessionId: BARE_A });
 
   // Tab selection may leave the DOM editor focused until its next input; the layout target must still win.
   act(() => useLayout.getState().activateTab(b.id));
   expect(focusedSession()).toBe(B);
   await stop();
-  expect(fake.invoked('session.interrupt').at(-1)).toMatchObject({ appSessionId: B });
+  expect(fake.invoked('session.interrupt').at(-1)).toMatchObject({ appSessionId: BARE_B });
   expect(useFloatingCard.getState().closed).toBe(true);
   // A sidebar selection of the floated session deliberately opens it, unlike typing in the compact surface.
   act(() => useLayout.getState().openSession(A));
@@ -155,7 +160,8 @@ it.each([
   const elsewhere = screen.getByRole('button', { name: 'Elsewhere' });
   act(() => (ownedFocus ? message() : elsewhere).focus());
   const event = request(kind);
-  const item = itemFor(event, A);
+  const bare = itemFor(event, A);
+  const item = { ...bare, id: at(bare.id) };
   act(() => useAttention.setState({ bySession: new Map([[A, [item]]]), requests: new Map([[item.id, event]]) }));
   const card = await screen.findByRole('region', { name: 'Session card' });
   const frame = card.querySelector<HTMLElement>('[data-docked-frame]')!;

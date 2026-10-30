@@ -1,0 +1,435 @@
+// Lane A behind the controls port (P5 O9 M5, docs/doperpowers/plans/2026-10-28-p5-o9-lane-a.md, Interfaces §C and §D): a
+// session a terminal or a `--bg` job holds, driven through its sminos bridge by main's lane A driver (`laneA.*`). Every
+// control's capability is drawn from the session's capability list (its `LaneAState`: the bridge's ops, its
+// `capabilities.controls` and the turn), never from its lane; each gap is closed in place with its reason, in MAWS's
+// words where the owner's Q2 gives them and the bridge's sentence otherwise. Each method reaches its `laneA.*` command and
+// maps the answer into the port's (lane B's) types: a refusal and an unknown outcome as `{ok: false}` with
+// `issues: {refusal}` or `issues: {unknown}`, never a new `IpcError` code.
+//
+// - Send is the bridge's `deliver` in either turn state (main's delivery lane); a `/` text goes by its slash route, run
+//   through `laneA.command` when the bridge's catalog says it runs, refused with the route's reason otherwise. A send
+//   whose fate `laneA.send` could not name yet is handed to the pending-send strip by its key (`unconfirmed`).
+// - M7: a send's image and document blocks go first, as `laneA.media`'s files under the composer's names (main saves them
+//   and hands them to the bridge's `media` op), its text after them as the words; the upload's states are followed into
+//   the composer's upload strip (`lane-a/uploads.ts`). Nothing goes unless all of it can: the count, a `/` text, media's
+//   capability and the words' are checked first.
+// - The model chip lists the catalog's models (with `fable`, which the bridge takes though the catalog leaves it out)
+//   and the five efforts, names the bridge's override when set and otherwise the model and effort the session's latest
+//   request ran on, and sends only what changed. The mode and the directories are closed: no bridge op sets them. The
+//   mode chip names the mode the session last reported and when (`state.mode`: sminos 1.27.14's heartbeat and status
+//   read, which main keeps only from such a bridge), and no mode while none is reported.
+// - The palette lists the bridge's catalog and opens only the widgets a lane A read or op backs (the model selector,
+//   compact, MCP, the side question).
+// - M6: a card's answer is closed with its reason where §D can't carry it, and every answer once the request is the
+//   terminal's alone (a background request past its window, or one the bridge refused as `terminalOnly`); a late
+//   answer keeps the settlement it was told (`noteLaneASettlement`), so the card says who won the race.
+// - M9: a session on another machine (`remote`) takes the same port over main's remote adapter. Its gaps are closed in
+//   place (the owner's Q2): a subagent's own rows, stopping a background shell, "Take over in MAWS", reopening it, and
+//   attachments. While its link can't act from this device (`state.link.reason`), every control is closed with that
+//   reason; while a control's act is on its way (`state.acts`), that control is closed with the act's progress, and opens
+//   again at its outcome, a refusal showing where the control answers.
+import type { Catalog } from 'desk-hub/protocol';
+import type { RequestAnswer } from '@shared/engine/answers';
+import type { AttentionItem } from '@shared/graph/attention';
+import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
+import type { CommandName, CommandResult, IpcError, MawsBridge } from '@shared/ipc/schema';
+import { ipcError } from '@shared/ipc/errors';
+import type { ControlResult, LaneAAct, LaneARaised, LaneAState } from '@shared/ipc/schema/lane-a';
+import { aliasOf, chipLabel } from '@shared/sessions/model-label';
+import type { HookResult, ModelInfo } from '../../composer/setup-intent';
+import type { FrameBindings } from '../../composer/frame/bindings';
+import type { HumanPromptResult } from '../../composer/submit/send-human-prompt';
+import { WIDGET_COMMANDS } from '../../composer/mentions/widgets';
+import { commandRoute, slashItems } from '../../lane-a/conversation/catalog';
+import { announceCommand } from '../../lane-a/outcomes';
+import { followUpload } from '../../lane-a/uploads';
+import { watchLaneA } from '../../lane-a/watches';
+import { branchLabel, recordBranch } from '../../sessions/branch-label';
+import { canTakeOver } from '../../sessions/holder-words'; // not record-ops: its imports reach the terminal stack
+import type { SessionCatalog } from '../../stores/catalog';
+import { holdPendingSend, noteLaneASettlement, useLaneA } from '../../stores/lane-a';
+import { pastWindow, RACE } from '../../lane-a/race';
+import { MODE_OPTIONS } from '../../statusline/mode-menu';
+import type { Capability, ControlKey, SessionControls } from './types';
+
+// The words MAWS says for lane A's gaps (the owner's Q2, built as recommended).
+export const LANE_A_WORDS = {
+  noBridge: 'This session has no bridge MAWS can drive',
+  idle: 'Nothing is running in this session',
+  mode: "A terminal session's mode is changed in the terminal",
+  // no mode reported yet, or a bridge older than sminos 1.27.14 (the O9 sitting): the chip and Session info name none
+  modeNotReported: 'Not reported by the terminal session',
+  modeUnreported: 'Not reported by the terminal session: its mode is changed in the terminal',
+  rewind: 'Rewind is a terminal panel: use /rewind there',
+  queue: 'The terminal keeps its own queue',
+  elicitation: 'Answer this form in the terminal',
+  directories: 'Add a directory in the terminal',
+  location: 'Where the terminal runs this session',
+  reopen: 'The session is live in the terminal',
+  takeOver: 'Only an interactive terminal or a named background job can be taken over',
+  tooManyFiles: 'A terminal session takes at most 4 images or PDFs in one message',
+  commandWithFiles: 'A command goes without images or PDFs: send them as a message',
+  unknownMedia: 'The images or PDFs may have reached the session: check the transcript before sending them again',
+  wordsAfterFiles: (reason: string) => `The images or PDFs went, but the words were not sent: ${reason}`,
+  otherContent: 'A terminal session takes words, images and PDFs only',
+  widget: 'Not available for a terminal session',
+  catalog: 'The command catalog has not arrived yet',
+  unknownCommand: 'The command may have run: check the transcript before running it again',
+  unknownAsk: 'It may have been asked: its answer shows here if it was',
+  unknownAnswer: 'The answer may have been taken: the card settles if it was',
+  unknown: 'It may have run: the transcript shows it if it did',
+  // M9: a session on another machine (Q2's words where it gives them)
+  remoteSubagentRows: 'A subagent’s own transcript on another machine isn’t shown yet',
+  // an older page the link could not carry (fix wave 2): the reason main gave, and a way to ask again
+  olderFailed: (reason: string) => `Older messages didn’t load: ${reason}`,
+  retry: 'Retry',
+  remoteStopTask: 'A background shell on another machine is stopped there',
+  remoteTakeOver: 'A session on another machine is taken over on that machine',
+  remoteReopen: 'Reopening a session on another machine isn’t offered yet',
+  remoteMedia: 'Attachments to a session on another machine wait for uploads across machines',
+  // a control's act on its way to the session's machine (`state.acts`), by its progress
+  progress: (progress: LaneAAct['progress'], machine: string): string =>
+    ({ waiting: `Waiting to reach ${machine}`, sent: `Sent to ${machine}`, accepted: `${machine} has it`, unknown: `May not have reached ${machine}: waiting for its answer` })[progress],
+};
+
+// What the machine is called in a route's reason (`<machine>`): a local session's is this Mac, a remote one's its name.
+const HERE = 'this Mac';
+// M9: the gaps of a session on another machine, closed whatever its bridge says (Interfaces §C's "remote never").
+const REMOTE_GAPS: Partial<Record<ControlKey, string>> = {
+  'subagent-rows': LANE_A_WORDS.remoteSubagentRows,
+  'stop-task': LANE_A_WORDS.remoteStopTask,
+  'take-over': LANE_A_WORDS.remoteTakeOver,
+  reopen: LANE_A_WORDS.remoteReopen,
+  media: LANE_A_WORDS.remoteMedia,
+};
+// M9: the act a control makes (`LaneAAct.control`, its RPC): MCP's verbs go as `/mcp` commands.
+const ACT_OF: Partial<Record<ControlKey, { control: string; target?: string }>> = {
+  interrupt: { control: 'interrupt' },
+  model: { control: 'model' },
+  command: { control: 'command' },
+  btw: { control: 'btw' },
+  compact: { control: 'compact' },
+  'stop-agent': { control: 'stop-agent' },
+  tell: { control: 'tell' },
+  'mcp.enable': { control: 'command', target: 'mcp' },
+  'mcp.disable': { control: 'command', target: 'mcp' },
+  'mcp.reconnect': { control: 'command', target: 'mcp' },
+};
+type BridgeEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'; // the bridge's efforts (`model` op)
+// The widgets a lane A read or op backs in O9 (M5): the model selector's three names, compact, MCP and the side question.
+const BACKED_WIDGETS = new Set(['model', 'effort', 'fast', 'compact', 'mcp', 'btw']);
+const OP_OF: Partial<Record<ControlKey, string>> = { send: 'deliver', interrupt: 'interrupt', command: 'command', 'stop-task': 'stop' };
+const CONTROLLED = new Set<ControlKey>(['decide', 'decide.scope', 'decide.interrupt', 'decide.addDirectory', 'model', 'btw', 'compact', 'mcp.enable', 'mcp.disable', 'mcp.reconnect', 'stop-agent', 'tell', 'media', 'forget', 'rewind-files', 'elicitation.answer']);
+// A gap MAWS words itself, whatever the bridge says (Q2).
+const OWN_WORDS: Partial<Record<ControlKey, string>> = { mode: LANE_A_WORDS.mode, queue: LANE_A_WORDS.queue, rewind: LANE_A_WORDS.rewind, 'elicitation.answer': LANE_A_WORDS.elicitation, reopen: LANE_A_WORDS.reopen };
+
+const AVAILABLE: Capability = { available: true };
+const closed = (reason: string): Capability => ({ available: false, reason });
+// The bridge's sentence as MAWS shows one: its first letter capitalised.
+const sentence = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
+const notInSminos = (state: LaneAState) => `Not in sminos ${state.sminos ?? 'on this machine'}`;
+
+const failed = (message: string, issues: Record<string, string>): { ok: false; error: IpcError } => ({ ok: false, error: ipcError('internal', message, issues) });
+const transport = (error: { message: string }): ControlResult => ({ state: 'refused', code: 'transport', message: error.message });
+
+// One `laneA.*` control's answer as a ControlResult: the transport's failure refused with its words.
+async function control(call: Promise<CommandResult<CommandName>>): Promise<ControlResult> {
+  const result = await call;
+  return result.ok ? (result.value as ControlResult) : transport(result.error);
+}
+
+// The route a palette row of the bridge's catalog offers: its argument form when that runs (`/mcp`, `/rename`), else the
+// bare one.
+const offered = (entry: Catalog['commands'][number]) => (entry.withArgs && (entry.withArgs.class === 'run' || entry.withArgs.class === 'run-prompt') ? entry.withArgs : entry.route);
+
+// The catalog's models as the selector's rows: its options, then its aliases, then `fable`; each takes every effort.
+export function modelRows(catalog: Catalog | null): ModelInfo[] {
+  const aliases = catalog?.models.aliases ?? {};
+  const names = [...(catalog?.models.options ?? []), ...Object.keys(aliases).filter((name) => name !== 'default'), 'fable'];
+  return [...new Set(names)].map((value) => {
+    const resolved = aliases[value];
+    return { value, displayName: value, supportsEffort: true, ...(typeof resolved === 'string' && { resolvedModel: resolved }) };
+  });
+}
+
+type Block = { type: string; text?: unknown; source?: { type?: unknown; media_type?: unknown; data?: unknown } };
+type MediaFile = { name: string; mediaType: string; data: string };
+
+// A send's words and its files (M7): the text blocks joined, and each base64 image or document block as `laneA.media`
+// takes it, named as the composer named it (`attachmentNames`, in the blocks' order), else by its kind and place. A name
+// keeps the bridge's rule: no control character or line separator, at most 128 characters.
+// Null: a block that is neither (no caller sends one), which nothing here may drop unsaid.
+function partsOf(content: string | readonly Block[], names: readonly string[] = []): { text: string; files: MediaFile[] } | null {
+  if (typeof content === 'string') return { text: content, files: [] };
+  const files: MediaFile[] = [];
+  for (const block of content) {
+    if (block.type === 'text') continue;
+    if ((block.type !== 'image' && block.type !== 'document') || block.source?.type !== 'base64') return null;
+    const mediaType = String(block.source.media_type ?? '');
+    const given = (names[files.length] ?? '').replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, '').slice(0, 128).trim();
+    const name = given !== '' ? given : `${block.type}-${files.length + 1}.${mediaType === 'application/pdf' ? 'pdf' : (mediaType.split('/')[1] ?? 'bin').replace('jpeg', 'jpg')}`;
+    files.push({ name, mediaType, data: String(block.source.data ?? '') });
+  }
+  return { text: content.filter((block) => block.type === 'text').map((block) => String(block.text ?? '')).join('\n'), files };
+}
+const FILES_MAX = 4; // the bridge's MEDIA_FILES_MAX
+
+// Whether lane A carries a card's answer on this request, and why not (Interfaces §D): the same rules main's driver
+// applies before it posts (src/main/lane-a/decisions.ts), checked here before the option is offered.
+export function laneAAnswerCapability(raised: LaneARaised | null, answer: RequestAnswer, controls: LaneAState['controls']): Capability {
+  const control = (key: string, otherwise: string) => sentence(controls[key]?.reason ?? otherwise);
+  const question = raised !== null && (raised.tool === 'AskUserQuestion' || raised.async === true);
+  switch (answer.kind) {
+    case 'dialog':
+    case 'elicitation':
+      return closed(LANE_A_WORDS.elicitation);
+    case 'question':
+      return Object.keys(answer.answers).length === 0 && raised?.async === true ? closed('An async question needs an answer') : AVAILABLE;
+    case 'plan':
+      return answer.outcome === 'clear_and_implement' ? closed('/clear runs in the terminal') : AVAILABLE;
+    case 'permission': {
+      if (question) return answer.decision === 'deny' && raised?.async === true ? closed('An async question is answered, never declined') : AVAILABLE;
+      if (answer.decision === 'deny_and_stop') return closed(control('decide.interrupt', 'deny-and-interrupt is answered in the terminal'));
+      if (answer.updatedInput !== undefined) return closed('An edited input is answered in the terminal');
+      if (answer.decision === 'deny' || answer.scope === undefined || answer.scope === 'once') return AVAILABLE;
+      if (controls['decide.scope']?.available !== true) return closed(control('decide.scope', 'a scoped allow is answered in the terminal'));
+      const suggestions = raised?.suggestions ?? [];
+      if (suggestions.length !== 1) return closed(`A scoped allow takes the request's one suggestion; this request offers ${suggestions.length === 0 ? 'none' : suggestions.length}`);
+      const suggestion = suggestions[0] as { type?: unknown; destination?: unknown } | null;
+      if (suggestion?.type !== 'addRules' && suggestion?.type !== 'addDirectories') return closed('A scoped allow takes a rule or a directory the engine suggested');
+      if (answer.scope === 'local_settings' && suggestion.destination !== 'localSettings') return closed('Local settings only where the engine suggested them');
+      return AVAILABLE;
+    }
+  }
+}
+
+export interface LaneAInputs {
+  appSessionId: AppSessionId;
+  client: MawsBridge;
+  remote?: { machine: string }; // M9: the session runs on another machine, by its name
+}
+
+export function laneAControls(state: LaneAState, record: SessionRecord | null, { appSessionId, client, remote }: LaneAInputs): SessionControls {
+  const here = remote?.machine ?? HERE;
+  // M9: this device can't act on the session now (its link down or refused, no grades yet), said by main
+  const linkReason = state.link?.reason ?? null;
+  const live = linkReason !== null ? sentence(linkReason) : state.bridge === 'live' ? null : sentence(state.reason ?? LANE_A_WORDS.noBridge);
+  // M9: a control's act still on its way, as its progress says it; null when none is
+  const inFlight = (control: string, target?: string): Capability | null => {
+    const act = state.acts?.find((a) => a.control === control && (target === undefined || a.target === target));
+    return act === undefined ? null : closed(LANE_A_WORDS.progress(act.progress, here));
+  };
+  const catalogNow = (): Catalog | null => (useLaneA.getState().catalogs.get(appSessionId) as Catalog | undefined) ?? null;
+  const stateNow = (): LaneAState => useLaneA.getState().states.get(appSessionId) ?? state;
+  // The session's watch held across an op's call, so its `op` messages are kept even when an early end beats whoever
+  // follows them (`followOp`); let go a tick after the answer, once the follower holds its own.
+  const holdWatch = (): (() => void) => {
+    const off = watchLaneA(appSessionId, () => {}, { client });
+    return () => void setTimeout(off, 0);
+  };
+
+  function capability(key: ControlKey): Capability {
+    const gap = remote === undefined ? undefined : REMOTE_GAPS[key]; // a remote gap first: its words name the machine
+    if (gap !== undefined) return closed(gap);
+    const own = OWN_WORDS[key];
+    if (own !== undefined) return closed(own);
+    if (key === 'subagent-rows') return AVAILABLE;
+    if (key === 'take-over') return record && (record.holder.kind === 'terminal' || record.holder.kind === 'background_job') && canTakeOver(record.holder) ? AVAILABLE : closed(LANE_A_WORDS.takeOver);
+    if (live !== null) return closed(live);
+    if (key === 'answer') return AVAILABLE;
+    const act = ACT_OF[key];
+    const pending = act === undefined ? null : inFlight(act.control, act.target);
+    if (pending !== null) return pending;
+    const op = OP_OF[key];
+    if (op !== undefined) {
+      if (!state.ops.includes(op)) return closed(`Not in this session’s sminos${state.sminos ? ` (${state.sminos})` : ''}`);
+      return key === 'interrupt' && !state.turn.running ? closed(LANE_A_WORDS.idle) : AVAILABLE;
+    }
+    if (!CONTROLLED.has(key)) return closed(LANE_A_WORDS.widget);
+    const given = state.controls[key];
+    if (given === undefined) return closed(notInSminos(state));
+    if (!given.available) return closed(sentence(given.reason ?? notInSminos(state)));
+    if (key === 'mcp.enable' || key === 'mcp.disable' || key === 'mcp.reconnect') {
+      const catalog = catalogNow();
+      if (catalog === null) return closed(LANE_A_WORDS.catalog);
+      const route = commandRoute(catalog, 'mcp', `${key.slice('mcp.'.length)} server`, here);
+      if (route.kind !== 'command') return closed(sentence(route.kind === 'unavailable' ? route.reason : LANE_A_WORDS.widget));
+    }
+    return AVAILABLE;
+  }
+
+  // A `/` text by its slash route: run when the bridge's catalog says it runs, its outcome announced from its op.
+  async function slashSend(text: string): Promise<HumanPromptResult> {
+    const typed = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text.trim());
+    if (!typed) return { disposition: 'refused', started: false, reason: LANE_A_WORDS.widget };
+    const [, name, args = ''] = typed;
+    const route = commandRoute(catalogNow(), name, args, here);
+    if (route.kind === 'unavailable') return { disposition: 'refused', started: false, reason: route.reason };
+    if (route.kind === 'widget') return { disposition: 'refused', started: false, reason: `Use the ${route.name} control` };
+    const release = holdWatch();
+    const result = await control(client.invoke('laneA.command', { appSessionId, name, args: args.trim() })).finally(release);
+    if (result.state === 'refused') return { disposition: 'refused', started: false, reason: result.message };
+    if (result.state === 'unknown') return { disposition: 'refused', started: false, reason: LANE_A_WORDS.unknownCommand };
+    const id = (result.result as { id?: unknown } | null | undefined)?.id;
+    if (typeof id === 'string') announceCommand(appSessionId, name, id, client);
+    return { disposition: 'sent', started: false };
+  }
+
+  const models = () => modelRows(catalogNow());
+  const current = () => ({ model: stateNow().override?.model ?? null, effort: stateNow().override?.effort ?? null });
+
+  const bindings = (): FrameBindings => {
+    const override = state.override;
+    const rows = models();
+    const modelClosed = capability('model');
+    const refusedWith = (reason: string) => async (): Promise<HookResult> => ({ ok: false, error: reason });
+    return {
+      location: { path: record?.worktree?.path ?? record?.directory ?? '', branch: branchLabel(recordBranch(record), null), note: LANE_A_WORDS.location },
+      project: null,
+      model: {
+        value: { model: override?.model ?? null, effort: (override?.effort ?? null) as BridgeEffort | null },
+        // what the session runs on (its latest request's, so a `/model` or `/effort` typed in the terminal too), an
+        // override MAWS set naming itself before the next request carries it
+        label: chipLabel(aliasOf(override?.model ?? state.model, rows), (override?.effort ?? state.effort) as BridgeEffort | null),
+        options: rows,
+        disabled: modelClosed.available ? null : modelClosed.reason,
+        // Only what changed goes: the bridge's `model` op replaces both, and main keeps the other as it reads it fresh.
+        set: async (next) => {
+          if (!modelClosed.available) return { ok: false, error: modelClosed.reason };
+          const now = current();
+          const change = { ...(next.model !== now.model && { model: next.model }), ...(next.effort !== now.effort && { effort: next.effort }) };
+          if (Object.keys(change).length === 0) return { ok: true };
+          const result = await control(client.invoke('laneA.model', { appSessionId, ...change }));
+          return result.state === 'done' ? { ok: true } : { ok: false, error: result.state === 'refused' ? result.message : LANE_A_WORDS.unknown };
+        },
+      },
+      // the mode as the session reported it, or none; never set from here
+      mode: {
+        ...(state.mode === null ? { value: null, unreported: true, disabled: LANE_A_WORDS.modeUnreported } : { value: state.mode.mode, reportedAt: state.mode.at, disabled: LANE_A_WORDS.mode }),
+        options: MODE_OPTIONS.map((o) => o.mode),
+        refusal: null,
+        autoUnavailable: null,
+        set: refusedWith(LANE_A_WORDS.mode),
+      },
+      directories: { value: [...(record?.additionalDirectories ?? [])], options: [], disabled: LANE_A_WORDS.directories, set: refusedWith(LANE_A_WORDS.directories) },
+    };
+  };
+
+  return {
+    capability,
+    answerCapability: (item: AttentionItem, answer: RequestAnswer) => {
+      if (live !== null) return closed(live);
+      const requestId = item.request.requestId ?? undefined;
+      const pending = requestId === undefined ? null : (inFlight('answer', requestId) ?? inFlight('decide', requestId)); // M9: its answer on its way
+      if (pending !== null) return pending;
+      const raised = stateNow().pending.find((p) => p.request === item.request.requestId) ?? null;
+      const told = item.request.requestId === null ? undefined : useLaneA.getState().told.get(appSessionId)?.get(item.request.requestId);
+      if (told?.terminalOnly === true || (raised !== null && pastWindow(raised, Date.now()))) return closed(RACE.terminal); // M6: the terminal's alone
+      return laneAAnswerCapability(raised, answer, state.controls);
+    },
+    async send(content, options) {
+      if (options.current?.() === false || options.precheck?.() === false) return { disposition: 'refused', started: false };
+      const refuse = (reason: string): HumanPromptResult => ({ disposition: 'refused', started: false, reason });
+      const parts = partsOf(content as string | readonly Block[], options.attachmentNames);
+      if (parts === null) return refuse(LANE_A_WORDS.otherContent);
+      const { text, files } = parts;
+      const words = files.length === 0 || text.trim() !== '';
+      const sendable = capability('send');
+      if (words && !sendable.available) return refuse(sendable.reason);
+      // M7: the files first, so they are queued for the turn the words start; nothing goes unless all of it can
+      if (files.length > 0) {
+        if (files.length > FILES_MAX) return refuse(LANE_A_WORDS.tooManyFiles);
+        if (text.trimStart().startsWith('/')) return refuse(LANE_A_WORDS.commandWithFiles);
+        const media = capability('media');
+        if (!media.available) return refuse(media.reason);
+        const release = holdWatch(); // the upload's states are followed from its op messages
+        const uploaded = await control(client.invoke('laneA.media', { appSessionId, files })).finally(release);
+        if (uploaded.state === 'refused') return refuse(sentence(uploaded.message));
+        if (uploaded.state === 'unknown') return refuse(LANE_A_WORDS.unknownMedia);
+        const upload = (uploaded.result as { upload?: unknown } | null | undefined)?.upload;
+        if (typeof upload === 'string') followUpload(appSessionId, upload, files.map((f) => f.name), client);
+        if (!words) return { disposition: stateNow().turn.running ? 'steered' : 'sent', started: false };
+      }
+      if (text.trimStart().startsWith('/')) return slashSend(text);
+      const result = await client.invoke('laneA.send', { appSessionId, text });
+      if (!result.ok && files.length > 0) return refuse(LANE_A_WORDS.wordsAfterFiles(result.error.message));
+      if (!result.ok) throw new Error(result.error.message); // the composer shows the error with its Retry, as lane B's host error
+      const out = result.value;
+      if (out.state === 'entered') return { disposition: stateNow().turn.running ? 'steered' : 'sent', started: false, ...(out.uuid !== undefined && { messageUuid: out.uuid as MessageUuid }) };
+      if (out.state === 'refused') {
+        const reason = out.reason ?? 'The session did not take the message';
+        return refuse(files.length > 0 ? LANE_A_WORDS.wordsAfterFiles(reason) : reason);
+      }
+      if (out.key !== null) holdPendingSend(appSessionId, out.key, text); // its fate arrives in the state's deliveries
+      return { disposition: 'unconfirmed', started: false };
+    },
+    // The bridge holds no MAWS queue, so Stop and Esc both interrupt.
+    async interrupt() {
+      const result = await control(client.invoke('laneA.interrupt', { appSessionId }));
+      if (result.state === 'done') return { ok: true, value: { stillQueued: [], cancelled: [] } };
+      return result.state === 'refused' ? failed(result.message, { refusal: result.code }) : failed(LANE_A_WORDS.unknown, { unknown: result.why });
+    },
+    async answer(item, answer) {
+      const result = await client.invoke('laneA.answer', { appSessionId, request: item.request.requestId ?? '', answer });
+      if (!result.ok) return { ok: false, error: result.error };
+      const out = result.value;
+      if (out.outcome === 'delivered') return { ok: true, value: { outcome: 'delivered' } };
+      if (out.outcome === 'not_pending') {
+        // M6: who won, as the bridge named it, for the card (a background request past its window: the terminal's)
+        const settled = out.settled;
+        if (item.request.requestId !== null && (settled !== null || out.terminalOnly === true)) {
+          noteLaneASettlement(appSessionId, item.request.requestId, { winner: settled?.winner ?? null, outcome: settled?.outcome ?? null, by: settled?.by ?? null, ...(out.terminalOnly === true && { terminalOnly: true }) });
+        }
+        return { ok: true, value: { outcome: 'not_pending' } };
+      }
+      return out.outcome === 'refused' ? failed(out.message, { refusal: out.code }) : failed(LANE_A_WORDS.unknownAnswer, { unknown: out.why });
+    },
+    bindings,
+    queue: () => null,
+    // A retry asks again as a new op: the bridge keeps no log of side questions.
+    async btw(question) {
+      const release = holdWatch(); // its answer is followed by the side store
+      const result = await control(client.invoke('laneA.btw', { appSessionId, prompt: question })).finally(release);
+      if (result.state === 'refused') return failed(result.message, { refusal: result.code });
+      if (result.state === 'unknown') return failed(LANE_A_WORDS.unknownAsk, { unknown: result.why, ...(result.id !== undefined && { opId: result.id }) });
+      const id = (result.result as { id?: unknown } | null | undefined)?.id;
+      return typeof id === 'string' ? { ok: true, value: { opId: id } } : failed(LANE_A_WORDS.unknownAsk, { unknown: 'no-id' });
+    },
+    command(name, args) {
+      const release = holdWatch(); // its outcome is followed by the caller
+      return control(client.invoke('laneA.command', { appSessionId, name, args })).finally(release);
+    },
+    compact: (instructions) => control(client.invoke('laneA.compact', { appSessionId, ...(instructions !== undefined && instructions !== '' && { instructions }) })),
+    stopAgent: (agentId) => control(client.invoke('laneA.stopAgent', { appSessionId, agentId })),
+    tell: (agentId, text) => control(client.invoke('laneA.tell', { appSessionId, agentId, text })),
+    stopTask: (taskId) => control(client.invoke('laneA.stopTask', { appSessionId, taskId })),
+    turn: () => ({ running: stateNow().turn.running }),
+    slash(_engine, registered) {
+      const catalog = catalogNow();
+      const widgets = new Set([...registered].filter((name) => BACKED_WIDGETS.has(name)));
+      const unavailable: Record<string, string> = {};
+      // why each command of the catalog can't run from here, by the lifted desk-web rules (`catalog.ts`)
+      for (const item of catalog === null ? [] : slashItems(catalog, here, null)) {
+        if (item.action.kind === 'unavailable' && !BACKED_WIDGETS.has(item.name)) unavailable[item.name] = item.action.hint;
+      }
+      for (const { name } of WIDGET_COMMANDS) {
+        if (widgets.has(name) || catalog?.commands.some((c) => c.name === name)) continue;
+        unavailable[name] = name === 'rewind' ? LANE_A_WORDS.rewind : catalog === null ? LANE_A_WORDS.catalog : LANE_A_WORDS.widget;
+      }
+      const listed: SessionCatalog = {
+        launchId: `lane-a:${catalog?.fingerprint ?? ''}`,
+        revision: catalog === null ? 0 : 1,
+        commands: (catalog?.commands ?? []).map((entry) => {
+          const route = offered(entry);
+          return { name: entry.name, description: entry.description, argumentHint: route.forms?.hint ?? (route.forms?.args === 'required' ? '<arguments>' : null), builtin: entry.source === 'builtin' };
+        }),
+        agents: [],
+        skills: catalog?.skills ?? [],
+        terminalOnly: [],
+        unavailable,
+      };
+      return { catalog: listed, widgets };
+    },
+  };
+}

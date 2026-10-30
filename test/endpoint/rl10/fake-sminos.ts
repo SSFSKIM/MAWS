@@ -62,6 +62,11 @@ export class FakeSminos {
     }
   }
 
+  /** `send`, resolved once the kernel took the line: sminos's lane, which writes its next entry only after the last. */
+  write(frame: object): Promise<void> {
+    return new Promise((resolve) => this.#socket.write(`${JSON.stringify(frame)}\n`, () => resolve()));
+  }
+
   close(): void {
     this.#socket.destroy();
   }

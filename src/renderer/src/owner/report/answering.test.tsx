@@ -9,6 +9,7 @@ import type { CommandInput, CommandName, MawsBridge } from '@shared/ipc/schema';
 import { markIdOf } from '@shared/owner/marks';
 import type { OwnerChannelState, OwnerMark, QuestionState } from '@shared/owner/state';
 import { fakeClient } from '../../../../../test/support/fake-client';
+import { at } from '../../../../../test/support/machine';
 import { record } from '../../../../../test/support/builders';
 import type { HumanPromptOptions, HumanPromptResult } from '../../composer/submit/send-human-prompt';
 import { resetOwnerChannelStore, useOwnerChannelStore } from '../../stores/owner-channel';
@@ -30,10 +31,12 @@ vi.mock('../../ipc/client', () => ({ ipc: { invoke: (...args: unknown[]) => (hol
 vi.mock('../../composer/submit/send-human-prompt', () => ({ sendHumanPrompt: (id: string, content: unknown, options: HumanPromptOptions) => hold.seam!(id, content, options) }));
 vi.mock('../../sessions/record-ops', () => ({ canTakeOver: () => true, takeOverSession: (...args: unknown[]) => hold.takeOver(...args) }));
 
-const APP = 'app-answer' as AppSessionId;
+// P5 O6 M2: `ipc` is mocked at the page's level, so the session is its address; main's mark ids are built on the bare id
+const MAIN_APP = 'app-answer' as AppSessionId;
+const APP = at(MAIN_APP);
 const UUID = 'm-1' as MessageUuid;
 const anchor = { messageUuid: UUID, blockIndex: 0 };
-const Q = markIdOf(APP, 'need-input', { ...anchor, span: 0 });
+const Q = markIdOf(MAIN_APP, 'need-input', { ...anchor, span: 0 });
 const QUESTION = '<need-input>Which backend?\n<choice recommended>Postgres</choice>\n<choice>SQLite</choice>\n</need-input>';
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));
 
@@ -470,11 +473,11 @@ describe('the other actions', () => {
   });
 
   it('Mark read reads one essential; the report’s top reads them all', () => {
-    const essential = (span: number): OwnerMark => ({ id: markIdOf(APP, 'essential', { ...anchor, span }), kind: 'essential', anchor: { ...anchor, span }, head: 'x', at: '2026-10-09T10:00:00.000Z', item: true, essential: { state: 'unread', readAt: null } });
+    const essential = (span: number): OwnerMark => ({ id: markIdOf(MAIN_APP, 'essential', { ...anchor, span }), kind: 'essential', anchor: { ...anchor, span }, head: 'x', at: '2026-10-09T10:00:00.000Z', item: true, essential: { state: 'unread', readAt: null } });
     withMarks([essential(0), essential(1)]);
     draw('<essential>One.</essential><essential>Two.</essential>');
     fireEvent.click(screen.getAllByRole('button', { name: 'Mark read' })[1]!);
-    expect(fake.invoked('ownerChannel.markRead')).toEqual([{ appSessionId: APP, markIds: [markIdOf(APP, 'essential', { ...anchor, span: 1 })] }]);
+    expect(fake.invoked('ownerChannel.markRead')).toEqual([{ appSessionId: APP, markIds: [markIdOf(MAIN_APP, 'essential', { ...anchor, span: 1 })] }]);
     cleanup();
     useTranscriptStore.setState({ entries: { [APP]: { state: { ui: { ownerLane: true } } } as never } });
     render(<ReportBar appSessionId={APP} />);
@@ -485,7 +488,7 @@ describe('the other actions', () => {
 });
 
 describe('a Mark read that failed says so', () => {
-  const essential: OwnerMark = { id: markIdOf(APP, 'essential', { ...anchor, span: 0 }), kind: 'essential', anchor: { ...anchor, span: 0 }, head: 'x', at: '2026-10-09T10:00:00.000Z', item: true, essential: { state: 'unread', readAt: null } };
+  const essential: OwnerMark = { id: markIdOf(MAIN_APP, 'essential', { ...anchor, span: 0 }), kind: 'essential', anchor: { ...anchor, span: 0 }, head: 'x', at: '2026-10-09T10:00:00.000Z', item: true, essential: { state: 'unread', readAt: null } };
 
   it.each(['envelope', 'reject'] as const)('on the card, which keeps Mark read (%s)', async (how) => {
     withMarks([essential]);
@@ -501,7 +504,7 @@ describe('a Mark read that failed says so', () => {
   });
 
   it.each(['envelope', 'reject'] as const)('Mark all read, which has no card, as a toast with Retry (%s)', async (how) => {
-    withMarks([essential, { ...essential, id: markIdOf(APP, 'essential', { ...anchor, span: 1 }), anchor: { ...anchor, span: 1 } }]);
+    withMarks([essential, { ...essential, id: markIdOf(MAIN_APP, 'essential', { ...anchor, span: 1 }), anchor: { ...anchor, span: 1 } }]);
     useTranscriptStore.setState({ entries: { [APP]: { state: { ui: { ownerLane: true } } } as never } });
     failing('ownerChannel.markRead', how);
     render(<ReportBar appSessionId={APP} />);

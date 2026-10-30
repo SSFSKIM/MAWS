@@ -5,9 +5,12 @@
 // row's card (`SessionHoverCard`) says what the one-line row leaves out: the status and age, the context used, the
 // branch and worktree, who holds a foreign-live session or what a working one does, and the last assistant line; then
 // the pending request, if any, through the `requestCard` slot in its `hover` placement, with the originating request
-// fetched once per item through `attention.request` and cached in the attention store. Opening it answers nothing:
+// fetched once per item through `attention.request` and cached in the attention store. P5 O6 M5: the card always names
+// the session's machine, and for an offline machine says so and when it was last seen (the roster's `since`). Opening it answers nothing:
 // approval is an explicit click inside the card, and the slot offers it only for read-only tools. The project row's
-// card is `ProjectHoverCard.tsx`.
+// card is `ProjectHoverCard.tsx`. P5 O8 M2: a listed row's card (`ListedHoverCard`) says what its listing does: the title,
+// the machine, the state and when it was issued, and no actions. P5 O8 M5 (Q2): a session you don't own alone, listed or a
+// record at a listed address, has its card list every owner with its email.
 import { HoverCard as Radix } from 'radix-ui';
 import { useCallback, useContext, useEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
@@ -15,17 +18,22 @@ import { QuickReply, useQuickReply, type QuickReplyState } from './QuickReply';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import { formatAgo } from '@shared/app/date-format';
+import { useMachineMark } from '../app/machine-mark';
 import { useSlot } from '../app/slots';
 import { useNow } from '../app/use-now';
-import { holderLine, waitingItem } from '../attention/derive';
+import { BRIDGED_LINE, holderLine, waitingItem } from '../attention/derive';
 import { GlyphMark } from '../attention/GlyphMark';
-import { glyphFor } from '../attention/glyph';
+import { glyphFor, listedGlyph } from '../attention/glyph';
 import { ipc } from '../ipc/client';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { selectEndedWithErrorOf, selectPendingOf, useAttention } from '../stores/attention';
 import { useSessions } from '../stores/sessions';
-import { rowBranch, sessionAge } from './derive';
+import { listedTitle, rowBranch, sessionAge } from './derive';
+import { ownerEntries, ownersLabel } from './owners'; // P5 O8 M5
 import { displayTitle } from '../sessions/title';
+import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M4
+import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
 import { SidebarInteractionContext } from './interaction';
 import { SIDE_COPY } from '../side/copy'; // E3
 
@@ -159,12 +167,17 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
     return parent === undefined ? null : displayTitle(parent);
   });
   const now = useNow();
+  const machine = useMachineMark(appSessionId);
+  const controlled = useSessionControls(appSessionId) !== null; // P5 O9 M4: a session held elsewhere takes no reply
+  const bridged = useLaneAState(appSessionId)?.bridge === 'live'; // P5 O9 M5
   if (!record) return null;
   const glyph = glyphFor(record, digest, pending, ended, now);
   const waiting = waitingItem(pending);
   const place = placeOf(record);
   const working = digest?.phase === 'working' || digest?.phase === 'starting';
-  const doing = holderLine(record) ?? (working ? digest?.activity : null) ?? null;
+  const held = holderLine(record);
+  // P5 O9 M5 (the owner's Q1): a foreign session MAWS drives through its bridge says so
+  const doing = (held !== null && bridged ? BRIDGED_LINE(record.holder.kind === 'terminal' ? null : held) : held) ?? (working ? digest?.activity : null) ?? null;
   const meta = [glyph.label, sessionAge(record, digest, now), digest?.context ? `ctx ${Math.round(digest.context.percent)}%` : null].filter(Boolean).join(' · ');
 
   return (
@@ -176,6 +189,10 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
       <p data-testid="hover-meta" className="m-0 text-fg-muted tabular-nums">
         {meta}
       </p>
+      <p data-testid="hover-machine" className={`m-0 truncate ${machine.offline ? 'text-fg-faint' : 'text-fg-muted'}`}>
+        {machine.offline ? [machine.name, 'offline', lastSeen(machine.since, now)].filter(Boolean).join(' · ') : machine.name}
+      </p>
+      <Owners appId={appSessionId} />
       {place && (
         <p data-testid="hover-place" title={place.title ?? undefined} className="m-0 truncate text-fg-muted">
           {place.text}
@@ -202,10 +219,64 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
           <Request item={waiting.oldest} />
         </div>
       )}
-      {!pending.some((item) => item.kind === 'question') && !record.archived && record.holder.kind !== 'terminal' && record.holder.kind !== 'background_job' &&
+      {!pending.some((item) => item.kind === 'question') && !record.archived && controlled &&
         <QuickReply record={record} reply={reply} />}
     </div>
   );
+}
+
+// P5 O8 M2: another machine's listed session. Controlled, so a click on its row with no opener for its lane shows it.
+export function ListedHoverCard({ appId, title, open, onOpenChange, children }: { appId: AppSessionId; title: string; open: boolean; onOpenChange(open: boolean): void; children: ReactNode }) {
+  return <SidebarHoverCard label={title} open={open} onOpenChange={onOpenChange} content={<ListedBody appId={appId} />}>{children}</SidebarHoverCard>;
+}
+
+function ListedBody({ appId }: { appId: AppSessionId }) {
+  const listed = useSessions((s) => s.listed.get(appId));
+  const machine = useMachineMark(appId);
+  const now = useNow();
+  if (!listed) return null;
+  const glyph = listedGlyph(listed.state);
+  const issued = Date.parse(listed.issued);
+  const meta = [glyph.label, Number.isFinite(issued) ? `updated ${formatAgo(Math.max(0, now - issued), { narrow: true })}` : null].filter(Boolean).join(' · ');
+  return (
+    <div className="flex flex-col gap-2 text-ui-sm text-fg">
+      <div className="flex min-w-0 items-start gap-2">
+        <GlyphMark glyph={glyph} className="w-[14px] shrink-0 leading-[18px]" />
+        <h3 className="m-0 line-clamp-2 min-w-0 text-ui leading-[18px] font-semibold break-words">{listedTitle(listed)}</h3>
+      </div>
+      <p data-testid="hover-meta" className="m-0 text-fg-muted tabular-nums">
+        {meta}
+      </p>
+      <p data-testid="hover-machine" className={`m-0 truncate ${machine.offline ? 'text-fg-faint' : 'text-fg-muted'}`}>
+        {machine.offline ? [machine.name, 'offline', lastSeen(machine.since, now)].filter(Boolean).join(' · ') : machine.name}
+      </p>
+      <Owners appId={appId} />
+    </div>
+  );
+}
+
+// P5 O8 M5: the owners the listing at this address names, you first, each with its email; nothing when it is you alone.
+function Owners({ appId }: { appId: AppSessionId }) {
+  const owners = useSessions((s) => s.listed.get(appId)?.owners);
+  const member = useSessions((s) => s.member);
+  const members = useSessions((s) => s.members);
+  if (owners === undefined || ownersLabel(owners, member, members) === null) return null;
+  return (
+    <ul aria-label="Owners" className="m-0 flex list-none flex-col gap-0.5 p-0">
+      {ownerEntries(owners, member, members).map((owner) => (
+        <li key={owner.id} className="flex min-w-0 items-baseline gap-1.5">
+          <span className="shrink-0">{owner.name}</span>
+          {owner.email !== null && <span className="min-w-0 truncate text-fg-muted">{owner.email}</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// When an offline machine was last seen: when its link went down, as the roster says.
+function lastSeen(since: string | null, now: number): string | null {
+  const at = since === null ? Number.NaN : Date.parse(since);
+  return Number.isFinite(at) ? `last seen ${formatAgo(Math.max(0, now - at), { narrow: true })}` : null;
 }
 
 function Request({ item }: { item: AttentionItem }) {

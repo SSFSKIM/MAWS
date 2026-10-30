@@ -3,6 +3,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { registerSlot, resetSlots } from '../app/slots';
 import { PluginBand } from '../composer/frame/PluginSites';
 import { SessionPane } from '../session/SessionPane';
@@ -12,7 +14,7 @@ import { SurfaceRow } from './SurfaceRow';
 import { A, resetPanelStores, TestHost } from '../test-support/panel';
 import { connectPluginPanes, resetPaneRosters } from './panes';
 
-const ID = 'fx1-viewport' as AppSessionId;
+const ID = at('fx1-viewport' as AppSessionId); // P5 O6 M2: the page's id; `fake` is both main (`window.maws`) and the page's client here
 let fake: FakeClient;
 let width = 600;
 let height = 360;
@@ -38,7 +40,7 @@ beforeEach(() => {
     return { width: this.style.width === '1ch' ? 10 : width, height: this.style.width === '1ch' ? 18 : height } as DOMRect;
   });
   fake = fakeClient({ 'session.ui.render': { tree: { type: 'engine', ref: 0 }, props: {}, rewritten: false, hooked: true }, 'session.ui.panes': { panes: [{ id: 'pane', title: 'Pane', plugin: 'mod', closeOnEscape: false, holdToasts: false, rows: null, columns: null }], shownId: 'pane', focusedId: null, focusRequestedId: null } });
-  window.maws = fake.client;
+  window.maws = fake.client as unknown as PreloadBridge;
 });
 afterEach(() => { cleanup(); resetSlots(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -64,7 +66,7 @@ it('passes the measured docked pane viewport, not merely bodyColumns props', asy
   const disconnect = connectPluginPanes(fake.client);
   try {
     render(<TestHost />);
-    await act(async () => useSessions.getState().applyStatus({ appSessionId: A, status: { ...status(A), uiSurface: { clientId: 'maws-main' } } }));
+    await act(async () => useSessions.getState().applyStatus({ appSessionId: A, status: { ...status(A), uiSurface: { clientId: 'maws-main' } } }, TEST_MACHINE));
     resize(); await frame();
     expect(asks().filter((ask) => ask.component === 'Pane').at(-1)?.viewport).toEqual({ columns: 60, rows: 20, isFullscreen: true });
   } finally { disconnect(); }

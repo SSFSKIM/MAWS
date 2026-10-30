@@ -10,13 +10,14 @@ import { projectReveal } from '../sidebar/reveal';
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
-import { fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { at } from '../../../../test/support/machine';
 import { PROJECT_CHIP_COPY, Toolbar } from './Toolbar';
 
 const nine = scenarioFile('nine-sessions');
-const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title)!.appId;
-const MAWS = 'proj-maws' as ProjectId;
-const NEW = 'app-new' as AppSessionId;
+const idOf = (title: string) => pageScenario(nine).sessions.find((r) => r.title.text === title)!.appId; // P5 O6 M2: the page's ids
+const MAWS = at('proj-maws' as ProjectId);
+const NEW = at('app-new' as AppSessionId);
 const offs: (() => void)[] = [];
 
 const toolbar = () => screen.getByRole('banner');

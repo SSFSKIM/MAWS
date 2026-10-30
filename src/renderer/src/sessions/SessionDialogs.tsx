@@ -36,7 +36,7 @@ export function SessionDialogs() {
     case 'cleanup':
       return <CleanupDialog key={open.target.path} target={open.target} />;
     case 'archived':
-      return <ArchivedSessionsDialog key={open.projectId} projectId={open.projectId} />;
+      return <ArchivedSessionsDialog key={open.projectId ?? `none:${open.machine ?? ''}`} projectId={open.projectId} machine={open.machine} />;
     case 'hiddenProjects': // W11 (I5): the sidebar's "Hidden projects…"
       return <HiddenProjectsDialog />;
     // C12 start: the project menu's Worktrees… (a cleanup it opens returns here, mounting it afresh)

@@ -12,6 +12,7 @@ import { useSessions } from '../stores/sessions';
 import { forgetSession, invalidateSession, resetSurfaceRegistry } from './registry';
 import { connectEngineSurface, useSurfaceSite } from './site';
 import { textOf } from './tree';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 
 const ID = 'app-r2' as AppSessionId;
 const band = (presses: number) => ({ tree: { type: 'Text', children: [`MODS_PROBE_BAND presses=${presses}`] }, props: {}, rewritten: false, hooked: true });
@@ -22,7 +23,7 @@ function Band({ client, isWorking = false, instanceId = 'above-prompt' }: { clie
   return <p data-testid="band">{answer ? textOf(answer.tree) || (answer.hooked ? '' : 'unhooked') : 'none'}</p>;
 }
 
-const attach = (on: boolean) => act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...status(ID), ...(on && { uiSurface: { clientId: 'maws-main' } }) } }));
+const attach = (on: boolean) => act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: { ...status(ID), ...(on && { uiSurface: { clientId: 'maws-main' } }) } }, TEST_MACHINE));
 const invalidate = (fake: FakeClient) => act(() => fake.event('session.eventBatch', { appSessionId: ID, events: [{ id: `${ID}:L:9:0`, sessionId: 's', at: '2026-10-02T00:00:00.000Z', seq: 9, agentId: null, parentToolUseId: null, kind: 'plugin.invalidate', event: 'ui.render' } as SessionEvent] }));
 
 let fake: FakeClient;

@@ -1,6 +1,7 @@
 // Shell navigation only. Tests keep their assertions about the feature itself at the call site;
 // chrome placement and the route to an optional surface belong here.
 import { expect, type Locator, type Page } from '@playwright/test';
+import { localRef } from './address';
 import { applicationOf } from './launch';
 import { menu } from './menu';
 
@@ -113,13 +114,13 @@ export async function openArtifactReplicaInPanel(page: Page, artifactId: string)
   await list.getByRole('button', { name: 'All', exact: true }).click();
   await list.locator(`[data-artifact-row][data-artifact-id="${artifactId}"]`).click();
   await expect(record).toBeVisible();
-  if (prior && prior !== `artifact:${artifactId}` && await mainTabById(page, prior).count()) await mainTabById(page, prior).click();
+  if (prior && prior !== `artifact:${await localRef(page)}:${artifactId}` && await mainTabById(page, prior).count()) await mainTabById(page, prior).click();
   return record;
 }
 
 // The old Artifacts launcher is the project Library card now. Record editors still move into a surface through X38.
 export async function moveMainArtifactToPanel(page: Page, artifactId: string): Promise<Locator> {
-  await mainTabById(page, `artifact:${artifactId}`).click({ button: 'right' });
+  await mainTabById(page, `artifact:${await localRef(page)}:${artifactId}`).click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Move to side surface', exact: true }).click();
   const record = surface(page, 'artifacts').locator(`[data-artifact-record="${artifactId}"]`);
   await expect(record).toBeVisible();

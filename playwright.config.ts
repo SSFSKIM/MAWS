@@ -36,13 +36,14 @@ export default defineConfig({
   ...(process.env.MAWS_HARNESS === '1' || process.env.MAWS_PANEL_LIVE === '1' ? {} : { testMatch: /(?<!\/panel(-live)?)\.spec\.ts$/ }),
   // C8a end
   workers: 1,
-  retries: 0,
+  // One retry for direct hosted-eligible e2e, including EC2 overflow; never measured/live/secret groups.
+  retries: process.env.MAWS_E2E_RETRY === '1' ? 1 : 0,
   timeout: 60_000,
   // Gate-offload Decision Log 50: a child's acceptance script names its reserved final label and the variant its live
   // spec needs (MAWS_E2E_FINAL_BUNDLE=<label>:<variant>); the final reporter then writes that build into the evidence
   // when the whole invocation passed on that final gate (e2e/support/final-bundle-reporter.ts). Such a group forbids
   // `test.only`, which would narrow it unseen by its command line (P3-F). Unset: as before.
-  reporter: [['list'], ['html', { open: 'never' }], ...FINAL_REPORTER],
+  reporter: [['list'], ['html', { open: 'never' }], ...FINAL_REPORTER, ...(process.env.MAWS_E2E_RETRY === '1' ? [['./scripts/ci-flaky-reporter.mjs'] as ReporterDescription] : [])],
   forbidOnly: FINAL_REPORTER.length > 0,
 });
 

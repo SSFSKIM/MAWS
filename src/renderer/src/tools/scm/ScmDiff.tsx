@@ -7,6 +7,8 @@ import { lazy, Suspense, useEffect, useMemo, type ReactNode } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { MachineRef } from '@shared/machine/ref';
+import { machineFor } from '../../ipc/machine';
 import { openFile } from '../code/open-file';
 import { firstChangedLine, tooLarge, type PatchFile } from '../code/review/review-model';
 import type { FileDiff } from '../code/review/review-store';
@@ -29,13 +31,13 @@ const Note = ({ children, role }: { children: ReactNode; role?: 'status' }) => (
   </p>
 );
 
-const NOT_UNTRACKED = 'not an untracked file:'; // C4's refusal of the `untracked` scope (src/main/git/service.ts)
+const NOT_UNTRACKED = 'not an untracked file:'; // C4's refusal of the `untracked` scope (src/services/git/service.ts)
 
 // What the selection reads: null for a conflict and for a directory entry, which have no diff to draw.
-export function diffTarget(directory: string, group: ScmGroupName, path: string): ScmDiffTarget | null {
-  if (group === 'staged') return { directory, scope: 'staged' };
-  if (group === 'unstaged') return { directory, scope: 'worktree' };
-  if (group === 'untracked' && !path.endsWith('/')) return { directory, scope: 'untracked', path };
+export function diffTarget(machine: MachineRef, directory: string, group: ScmGroupName, path: string): ScmDiffTarget | null {
+  if (group === 'staged') return { machine, directory, scope: 'staged' };
+  if (group === 'unstaged') return { machine, directory, scope: 'worktree' };
+  if (group === 'untracked' && !path.endsWith('/')) return { machine, directory, scope: 'untracked', path };
   return null;
 }
 
@@ -52,7 +54,8 @@ function fileOf(target: ScmDiffTarget | null, split: ReadonlyMap<string, PatchFi
 
 export function ScmDiff({ appSessionId, directory, repoRoot, ui, group, entry }: { appSessionId: AppSessionId; directory: string; repoRoot: string; ui: StoreApi<ScmUi>; group: ScmGroupName; entry: ScmEntry }) {
   const { path } = entry;
-  const target = useMemo(() => diffTarget(directory, group, path), [directory, group, path]);
+  const machine = machineFor(appSessionId);
+  const target = useMemo(() => diffTarget(machine, directory, group, path), [machine, directory, group, path]);
   // Held while the selection shows; a new selection releases it before the scope's next re-read can ask for it.
   useEffect(() => (target ? useScm.getState().hold(target) : undefined), [target]);
   const scope = useScm((s) => (target ? diffOf(s, target) : undefined));

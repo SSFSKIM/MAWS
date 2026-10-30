@@ -9,6 +9,8 @@ import type { PendingAsk } from '@shared/maws/ask';
 import { ASK_SHEET_TOOL_ID } from '@shared/maws/panes';
 import type { AskQuestion } from '@shared/maws/tools';
 import { fakeClient } from '../../../../../../test/support/fake-client';
+import { OTHER_MACHINE } from '../../../../../../test/support/machine';
+import { addressOf } from '@shared/machine/address';
 import { record } from '../../../../../../test/support/builders';
 import { registerPanelTool } from '../../../panel/host';
 import { A, B, mainShowing, panelOf, probeTool, resetPanelStores } from '../../../test-support/panel';
@@ -96,6 +98,24 @@ describe('loading the host’s table', () => {
     await fake.reply('maws.asks.list', { asks: [] }); // the restarted host lost its table
     expect(state().asks.size).toBe(0);
     expect(shown()).toEqual({ kind: 'rest' });
+    off();
+  });
+
+  // The branch review: `engine.hostState` crosses machine links, and a machine's asks are its own host's table, so a
+  // machine's host back at ready re-reads that machine's sessions only.
+  it('a machine’s host back at ready re-reads only that machine’s sessions', async () => {
+    const fake = fakeClient();
+    const off = connectAsks(fake.client);
+    const onB = addressOf(OTHER_MACHINE, 'b-session' as AppSessionId);
+    ensureLoaded(A, fake.client);
+    ensureLoaded(onB, fake.client);
+    await fake.reply('maws.asks.list', { asks: [] });
+    await fake.reply('maws.asks.list', { asks: [] });
+    fake.event('engine.hostState', { state: 'ready', pid: 2, restarts: 1, revision: 3 }, OTHER_MACHINE);
+    expect(fake.invoked('maws.asks.list').slice(2), 'B’s host: B’s session only').toEqual([{ appSessionId: onB }]);
+    await fake.reply('maws.asks.list', { asks: [] });
+    fake.event('engine.hostState', { state: 'ready', pid: 2, restarts: 1, revision: 4 });
+    expect(fake.invoked('maws.asks.list').slice(3), 'this machine’s host: this machine’s session only').toEqual([{ appSessionId: A }]);
     off();
   });
 

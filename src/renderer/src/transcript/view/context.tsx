@@ -13,11 +13,15 @@ export interface TranscriptActions {
   openSubagent(ref: SubagentRef): void; // C8: Subagents tool with that agent selected
   openFullLog(cell: Cell): void; // C8: destination of "Open full log"
   reviewChanges(turnId: TurnId, path?: string): void; // C8: Review tool
-  openFile(path: string, line?: number): void; // C5: the layout store action openTab({ kind: 'file', path, line })
+  // C5: the layout store action openTab({ kind: 'file', path, line }). P5 O6 M4: `appSessionId` is the session of the row
+  // the chip is in, when it is in a mounted transcript, so the file opens on that session's machine.
+  openFile(path: string, line?: number, appSessionId?: AppSessionId | null): void;
   openExternal(url: string): void; // C5: layout.openExternal
   editAndResubmit(row: Extract<Row, { kind: 'user' }>): void; // C7: prefill the composer; forks history (§4.2)
   editPrompt(row: Extract<Row, { kind: 'user' }>): void; // C7 (W1): a prompt that never reached the model (a hook blocked it) back into the composer, as a new message
-  loadSpill(spill: Spill): Promise<string>; // C4: fs.readSpill; default adapter provided (DEFAULT_ACTIONS, ./default-actions.ts)
+  // C4: fs.readSpill; default adapter provided (DEFAULT_ACTIONS, ./default-actions.ts). P5 O6 M4: `appSessionId` is the session
+  // of the row the spill is in, whose machine holds the file.
+  loadSpill(spill: Spill, appSessionId?: AppSessionId | null): Promise<string>;
   // E1 start: the `maws` server's rows (tools/maws/actions.ts, registered from App.tsx's E1 block)
   openAsk(appSessionId: AppSessionId, ask: AskRowData): void; // the Question sheet with this ask, from the capsule's own data (residue 14)
   openDelivered(appSessionId: AppSessionId, path: string): Promise<string | null>; // files.openExternal; what to show inline when it was refused, null when opened
@@ -75,6 +79,7 @@ const NO_PEER_REPLIES: PeerReplies = { subscribe: () => () => {}, get: () => und
 export interface RewindInterface {
   canUndo(turnId: TurnId): Promise<{ ok: boolean; reason: string | null; files?: string[] | null }>; // dry run; disables the button with the reason as tooltip
   undo(turnId: TurnId): Promise<void>;
+  unavailable?: string | null; // P5 O9 M5: why this session can't roll files back here; the control stays, disabled, with it
 }
 
 const noop = () => {};

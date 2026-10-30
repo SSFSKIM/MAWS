@@ -6,7 +6,7 @@
 // and on `beforeunload`. W12 (I3): `main.tabs` holds a tab set per project; a tab of a session lives in its project's
 // set, which every open of it shows first.
 import { create } from 'zustand';
-import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import {
   LAYOUT_DEFAULTS,
@@ -14,10 +14,11 @@ import {
   PanelActiveNoSessionSchema,
   PanelParamsSchema,
   PanelPinnedSchema,
+  MAIN_CARD_PREFIX,
   PanelSessionStateSchema,
-  PanelSurfacesSchema,
-  StoredMainSchema,
-  StoredRegionsSchema,
+  storedMainSchema,
+  storedPanelSurfacesSchema,
+  storedRegionsSchema,
   type FloatingCardSize,
   type LayoutKey,
   type LayoutMain,
@@ -29,6 +30,8 @@ import {
   type TabSetKey,
   type TabTarget,
 } from '@shared/ipc/schema/layout';
+import { addressOf, isAddress, machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 import type * as z from 'zod';
 import * as model from './layout-model';
 import { normalizeSurfaceStack, rememberSurfaceContext, stackAfterSelection, surfaceRefs, surfaceScope, surfaceSession, surfaceTabs } from '../panel/surface-model';
@@ -65,16 +68,26 @@ export interface LayoutState {
   // `projectOf` (W12) answers the project a session's tabs belong with (its record's, else its unstarted intent's; null
   // for none; undefined for a session not known now), from then on; until it is given, every tab is in the no-project
   // set.
-  hydrate(client: MawsBridge, known: (appSessionId: AppSessionId) => boolean, opts?: { settle?: () => void; projectOf?: ProjectOf }): Promise<void>;
+  // P5 O6 M5: `rekeyOf` answers what a project key from before M5 (a project's address) becomes (`model.RekeyOf`); every
+  // set, expanded row and panel context keyed by one migrates at hydration and again at `rekeyProjects`.
+  // P5 O6 M2 (M6's scene): `titleOf` answers a held session's title, which its tabs keep (`refreshTabTitles`).
+  hydrate(client: MawsBridge, known: (appSessionId: AppSessionId) => boolean, opts?: { settle?: () => void; projectOf?: ProjectOf; rekeyOf?: model.RekeyOf; titleOf?: TitleOf }): Promise<void>;
   // A tab of a session opens in its project's set, which the strip shows first when it is activated (W12).
   openTab(ref: TabTarget, opts?: { pane?: model.PaneTarget; activate?: boolean }): void;
   // I2: replaces the focused pane's session unless `how: 'tab'` or `split` asks otherwise (`model.openSession`); W12:
   // in the session's project's set, which the strip shows first.
   openSession(appSessionId: AppSessionId, opts?: model.OpenSessionOptions): void;
-  // W12: the strip shows this project's set (null: the no-project set); a click on a project in the sidebar.
-  setCurrentProject(projectId: ProjectId | null): void;
+  // W12: the strip shows this row's set (null: the no-project set); a click on a row in the sidebar (P5 O6 M5: an org
+  // project's or a machine's).
+  setCurrentProject(key: TabSetKey | null): void;
   // W12: tabs whose session's project changed move to its set (the shell calls it when records or intents change).
   refileTabs(): void;
+  // P5 O6 M2 (M6's scene): session tabs take their sessions' titles where they differ (the shell calls it when records
+  // change); nothing differs, nothing changes, so nothing is written.
+  refreshTabTitles(): void;
+  // P5 O6 M5 ("Migrating project-keyed state"): the keys still from before M5 migrate, as far as `rekeyOf` now knows
+  // (the shell calls it when a machine's projects arrive). Before hydration, nothing: hydration migrates what it reads.
+  rekeyProjects(): void;
   closeTab(id: string, opts?: model.CloseOptions): void; // P4-B3: `remember: false` for a move (no ⌘⇧T entry)
   retargetTab(id: string, target: TabTarget): void; // cua #90: `model.retargetTab`
   reopenClosed(): void;
@@ -92,6 +105,11 @@ export interface LayoutState {
   floatSplit(sessionTabId: string, opts?: { foldPanel?: boolean }): void;
   dockSplit(): void;
   dropSession(appSessionId: AppSessionId): void; // session.removed
+  // P5 O6 M4 ("The layout across machines"): run after the first snapshot of each of a machine's link generations. The
+  // machine's tabs and panel states whose session `knownSession` (hydration's) no longer knows go, as hydration drops a
+  // local one's: what that machine does not list, unless the registered retention keeps it. Before hydration, nothing:
+  // hydration judges every tab against what is known then.
+  settleMachine(machine: MachineRef): void;
   // A patch, or an updater for a change that depends on the sidebar it lands on (an early one is replayed over the
   // hydrated value, not the default it was made against).
   setSidebar(patch: Partial<LayoutRegions['sidebar']> | ((sidebar: LayoutRegions['sidebar']) => Partial<LayoutRegions['sidebar']>)): void;
@@ -129,11 +147,16 @@ export interface LayoutState {
 }
 
 const PANEL_KEY = /^panel\.([^.]+)$/;
+const NO_SURFACES: PanelSurfaces = { version: 2, stacks: {}, pinnedTools: [], contexts: {} };
 
-// A session's project, null for none; undefined when the session is not known now (no record, no unstarted intent):
-// its tabs stay where they are.
-export type ProjectOf = (appSessionId: AppSessionId) => ProjectId | null | undefined;
+// The set a session's tabs belong in (W12: its project's; P5 O6 M5: its row's, an org project's or its machine's), null
+// for the no-project set; undefined when the session is not known now (no record, no unstarted intent): its tabs stay
+// where they are.
+export type ProjectOf = (appSessionId: AppSessionId) => TabSetKey | null | undefined;
+const WAIT: model.RekeyOf = () => 'wait';
 export const NO_PROJECT_OF: ProjectOf = () => null;
+// P5 O6 M2: a held session's title, undefined for a session the page does not hold
+export type TitleOf = (appSessionId: AppSessionId) => string | undefined;
 
 // I2: an unstarted tab a replace would take the place of is not replaced: the session opens beside it, then the tab
 // passes C10's close guard (it asks only about a non-empty draft) and goes with its intent, or stays when declined
@@ -194,7 +217,7 @@ export const FLOATING_CARD_SIZES_MAX = 64;
 export const SUMMARY_CARD_KEY = 'summary';
 // P4-B3 (its Decision Log 10): the key of the split card's size over a main tab (the pane beside the card), pruned with
 // the open main tabs as a panel tab's key is with the panel lists.
-export const mainCardKey = (tabId: string): string => `main:${tabId}`;
+export const mainCardKey = (tabId: string): string => `${MAIN_CARD_PREFIX}${tabId}`;
 
 const samePins = (a: PanelTabRef[], b: PanelTabRef[]) =>
   a.length === b.length && a.every((t, i) => t.id === b[i].id && t.toolId === b[i].toolId && t.pinned === b[i].pinned);
@@ -244,8 +267,8 @@ export function createLayoutStore() {
     // hydration asks the resolver hydration was given). Undefined for a session not known now: an open of it goes to the
     // current set, and its tabs are not refiled.
     const setOfSession = (appSessionId: AppSessionId): TabSetKey | undefined => {
-      const project = get().projectOf(appSessionId);
-      return project === undefined ? undefined : (project ?? NO_PROJECT);
+      const key = get().projectOf(appSessionId);
+      return key === undefined ? undefined : (key ?? NO_PROJECT);
     };
     const setOfTab = (tab: TabTarget): TabSetKey | null => {
       const appSessionId = model.sessionOfTab(tab);
@@ -255,8 +278,10 @@ export function createLayoutStore() {
     // the first `layout.get`) apply at once and are kept, then replayed over the hydrated tabs, so hydration never
     // wipes what the user just opened. After hydration a change simply applies.
     // P4-B3x: every change of the tabs or the regions lands through `commit`, so the fold rule holds at every state.
+    // P5 O6 M2: every change lands with its session tabs titled, so a tab is titled when it opens
+    let titleOf: TitleOf = () => undefined;
     const commit = (nextMain: LayoutMain, nextRegions: LayoutRegions) => {
-      const next = reconcileFold(get().main, { main: nextMain, regions: nextRegions });
+      const next = reconcileFold(get().main, { main: model.titleTabs(nextMain, titleOf), regions: nextRegions });
       set({ ...next, panelSurfaces: rememberSurfaceContext(get(), next.main) });
     };
     const earlySurfaces: ((state: PanelSurfaces) => PanelSurfaces)[] = [];
@@ -276,6 +301,18 @@ export function createLayoutStore() {
       if (!get().hydrated) earlyRegions.push(next);
       commit(get().main, next(get().regions));
     };
+    // P5 O6 M5: hydration's answer to what a pre-M5 project key becomes, and this machine (for `'other'`)
+    let rekeyOf: model.RekeyOf = WAIT;
+    let localMachine: MachineRef | null = null;
+    const rekeyRegions = (r: LayoutRegions): LayoutRegions => {
+      if (localMachine === null) return r;
+      const expandedProjects = model.rekeyExpanded(r.sidebar.expandedProjects, rekeyOf, localMachine);
+      return sameJson(expandedProjects, r.sidebar.expandedProjects) ? r : { ...r, sidebar: { ...r.sidebar, expandedProjects } };
+    };
+    const rekeySurfaces = (state: PanelSurfaces, bases: ReadonlyMap<TabSetKey, TabSetKey>): PanelSurfaces => {
+      const contexts = model.rekeyContexts(state.contexts, rekeyOf, bases);
+      return sameJson(contexts, state.contexts) ? state : { ...state, contexts };
+    };
     // Every change of the pins goes through here, so the no-session selection is revalidated against them each time;
     // an unchanged list keeps its identity, so nothing is persisted for a selection change alone.
     const pins = (next: PanelTabRef[], requested?: string | null) => {
@@ -290,7 +327,7 @@ export function createLayoutStore() {
       panelBySession: new Map(),
       panelActiveNoSession: null,
       panelParams: {},
-      panelSurfaces: { version: 1, stacks: {}, pinnedTools: [], contexts: {} },
+      panelSurfaces: NO_SURFACES,
       knownSession: () => true,
       hydrated: false,
       dragging: null,
@@ -299,6 +336,9 @@ export function createLayoutStore() {
 
       async hydrate(client, known, opts = {}) {
         set({ knownSession: known, ...(opts.projectOf ? { projectOf: opts.projectOf } : {}) });
+        rekeyOf = opts.rekeyOf ?? WAIT;
+        titleOf = opts.titleOf ?? titleOf;
+        localMachine = client.localMachine;
         const absent: LayoutKey[] = []; // keys layout.json does not hold yet (not keys that failed to read)
         const readAs = new Map<LayoutKey, unknown>(); // each key read as a valid value, as layout.json holds it
         const read = async <T>(key: LayoutKey, schema: z.ZodType<T>, fallback: T): Promise<T> => {
@@ -321,26 +361,34 @@ export function createLayoutStore() {
         // costs no read.
         const held = new Set<string>(listed.ok ? listed.value.keys : []);
         const readHeld = <T>(key: LayoutKey, schema: z.ZodType<T>, fallback: T): Promise<T> => (held.has(key) ? read(key, schema, fallback) : Promise.resolve(fallback));
-        const panelIds = listed.ok
+        // P5 O6 M2 (OX2): a session's panel key is its address's; a bare one is from before O6, the local machine's, renamed
+        // below once read. Every other key from before O6 reads lifted with the local machine (`storedMainSchema` and the rest).
+        const local = client.localMachine;
+        const panelKeys = listed.ok
           ? listed.value.keys.flatMap((key) => {
               const match = PANEL_KEY.exec(key);
-              return match && key !== 'panel.pinned' ? [match[1] as AppSessionId] : [];
+              if (!match || key === 'panel.pinned') return [];
+              const stored = match[1] as AppSessionId;
+              return [{ key: key as LayoutKey, id: isAddress(stored) ? stored : addressOf(local, stored), bare: !isAddress(stored) }];
             })
           : [];
         const [persistedRegions, persistedMain, panelPinned, storedParams, storedNoSession, storedSurfaces, ...panels] = await Promise.all([
-          read('regions', StoredRegionsSchema, LAYOUT_DEFAULTS.regions), // W5: a version-1 value is migrated
-          read('main.tabs', StoredMainSchema, LAYOUT_DEFAULTS.main), // W5: an Overview tab is dropped; W12: version 1 is filed by project
+          read('regions', storedRegionsSchema(local), LAYOUT_DEFAULTS.regions), // W5: a version-1 value is migrated
+          read('main.tabs', storedMainSchema(local), LAYOUT_DEFAULTS.main), // W5: an Overview tab is dropped; W12: version 1 is filed by project
           read('panel.pinned', PanelPinnedSchema, LAYOUT_DEFAULTS.panelPinned),
           readHeld('panelTools.params', PanelParamsSchema, { version: 1, params: {} }),
           readHeld('panelTools.activeNoSession', PanelActiveNoSessionSchema, { version: 1, activeTabId: null }),
-          readHeld('panelTools.surfaces', PanelSurfacesSchema, { version: 1, stacks: {}, pinnedTools: [], contexts: {} }),
-          ...panelIds.map((id) => read(`panel.${id}`, PanelSessionStateSchema.nullable(), null)),
+          readHeld('panelTools.surfaces', storedPanelSurfacesSchema(local), NO_SURFACES),
+          ...panelKeys.map(({ key }) => read(key, PanelSessionStateSchema.nullable(), null)),
         ]);
         opts.settle?.();
         const panelBySession = new Map<AppSessionId, PanelSessionState>();
-        panelIds.forEach((id, i) => {
+        const renamedPanels: LayoutKey[] = []; // bare panel keys whose state moved to the address's key
+        panelKeys.forEach(({ key, id, bare }, i) => {
           const state = panels[i];
-          if (state && known(id)) panelBySession.set(id, state);
+          if (!state || !known(id)) return;
+          panelBySession.set(id, state);
+          if (bare) renamedPanels.push(key);
         });
         const replayed = early.splice(0);
         // W12: a session whose project changed while the app was closed has its tabs moved to that project's set.
@@ -353,10 +401,12 @@ export function createLayoutStore() {
           const next = change(r);
           opened ||= !next.panel.collapsed;
           return next;
-        }, persistedRegions);
+        }, rekeyRegions(persistedRegions));
         const restored = opened ? model.unfold(stored) : stored;
-        const repaired = model.refile(model.repairMain(restored, known), setOfTab);
-        let panelSurfaces = rememberSurfaceContext({ panelSurfaces: storedSurfaces, knownSession: known }, repaired);
+        // P5 O6 M5: the sets keyed by a project from before M5 migrate first, so the refile files into the keys of now
+        const rekeyed = model.rekeySets(model.repairMain(restored, known), rekeyOf, setOfTab);
+        const repaired = model.refile(rekeyed.main, setOfTab, rekeyOf);
+        let panelSurfaces = rememberSurfaceContext({ panelSurfaces: rekeySurfaces(storedSurfaces, rekeyed.bases), knownSession: known }, repaired);
         const repairedMain = replayed.reduce((m, change) => {
           const next = change(m);
           panelSurfaces = rememberSurfaceContext({ panelSurfaces, knownSession: known }, next);
@@ -365,7 +415,7 @@ export function createLayoutStore() {
         panelSurfaces = earlySurfaces.splice(0).reduce((state, change) => change(state), panelSurfaces);
         // P4-B3x: a fold restored with its float stands; one whose float the reader dropped opens the panel it folded,
         // and one stored beside an open panel is dropped (both written back below).
-        const { main: hydratedMain, regions: foldedRegions } = reconcileFold(restored, { main: repairedMain, regions: replayedRegions });
+        const { main: hydratedMain, regions: foldedRegions } = reconcileFold(restored, { main: model.titleTabs(repairedMain, titleOf), regions: replayedRegions });
         const hydratedPins = pins(panelPinned, get().panelActiveNoSession ?? storedNoSession.activeTabId);
         const regions = surfaceRegions({ ...get(), main: hydratedMain, regions: foldedRegions, ...hydratedPins, panelBySession, panelSurfaces, hydrated: true });
         // P4-B3: the params of panel tabs no list holds now (closed, or a session's not kept) are not read; the
@@ -386,14 +436,27 @@ export function createLayoutStore() {
         // P4-B3x: so is one whose fold hydration dropped, or the next launch would read the stale mark again (a float the
         // reader drops would reopen a panel the owner has since closed).
         const unfolded = model.foldOf(stored) !== null && model.foldOf(hydratedMain) === null;
-        if (persistedMain.version === 1 || rewritten || unfolded || (replayed.length > 0 && JSON.stringify(hydratedMain) !== JSON.stringify(persistedMain))) unsaved.add('main.tabs');
-        if (regions !== persistedRegions) unsaved.add('regions');
-        if (!sameJson(panelSurfaces, storedSurfaces)) unsaved.add('panelTools.surfaces');
+        const migrated = rekeyed.bases.size > 0 && !sameJson(hydratedMain, persistedMain); // P5 O6 M5
+        const titled = model.titleTabs(repairedMain, titleOf) !== repairedMain; // P5 O6 M2: a title learnt at hydration is kept
+        if (persistedMain.version === 1 || rewritten || unfolded || migrated || titled || (replayed.length > 0 && JSON.stringify(hydratedMain) !== JSON.stringify(persistedMain))) unsaved.add('main.tabs');
+        if (regions !== persistedRegions || (readAs.has('regions') && !sameJson(readAs.get('regions'), persistedRegions))) unsaved.add('regions'); // P5 O6 M2: a migrated version too
+        if (!sameJson(panelSurfaces, storedSurfaces) || (readAs.has('panelTools.surfaces') && !sameJson(readAs.get('panelTools.surfaces'), storedSurfaces))) unsaved.add('panelTools.surfaces');
         const values: Partial<Record<LayoutKey, unknown>> = { regions, 'main.tabs': get().main, 'panel.pinned': panelPinned, 'panelTools.surfaces': panelSurfaces };
         for (const key of unsaved) {
           if (!(key in values)) continue;
           void client.invoke('layout.set', { key, value: values[key] }).then((result) => {
             if (!result.ok) console.error(`[layout] layout.set ${key} failed`, result.error);
+          });
+        }
+        // P5 O6 M2: a bare panel key is written under its address, then deleted, so layout.json keeps one key per session.
+        for (const bare of renamedPanels) {
+          const id = panelKeys.find((entry) => entry.key === bare)!.id;
+          const state = panelBySession.get(id);
+          if (state === undefined) continue;
+          void client.invoke('layout.set', { key: `panel.${id}`, value: state }).then(async (written) => {
+            if (!written.ok) return console.error(`[layout] layout.set panel.${id} failed`, written.error);
+            const deleted = await client.invoke('layout.set', { key: bare, value: null });
+            if (!deleted.ok) console.error(`[layout] cannot drop ${bare}`, deleted.error);
           });
         }
       },
@@ -447,12 +510,26 @@ export function createLayoutStore() {
           if (discarded && guard.unstarted(draft.appSessionId)) get().dropSession(draft.appSessionId);
         });
       },
-      setCurrentProject: (projectId) => main((m) => model.switchSet(m, projectId ?? NO_PROJECT)),
+      setCurrentProject: (key) => main((m) => model.switchSet(m, key ?? NO_PROJECT)),
       // Called on every records change, so nothing is set (and no subscriber woken) when nothing moves.
       refileTabs() {
         if (!get().hydrated) return;
-        const next = model.refile(get().main, setOfTab);
+        const next = model.refile(get().main, setOfTab, rekeyOf);
         if (next !== get().main) commit(next, get().regions);
+      },
+      refreshTabTitles() {
+        if (!get().hydrated) return;
+        const next = model.titleTabs(get().main, titleOf);
+        if (next !== get().main) commit(next, get().regions);
+      },
+      rekeyProjects() {
+        if (!get().hydrated) return;
+        const { main: rekeyed, bases } = model.rekeySets(get().main, rekeyOf, setOfTab);
+        const nextMain = rekeyed === get().main ? rekeyed : model.refile(rekeyed, setOfTab, rekeyOf);
+        const nextRegions = rekeyRegions(get().regions);
+        const nextSurfaces = rekeySurfaces(get().panelSurfaces, bases);
+        if (nextSurfaces !== get().panelSurfaces) set({ panelSurfaces: nextSurfaces });
+        if (nextMain !== get().main || nextRegions !== get().regions) commit(nextMain, nextRegions);
       },
       closeTab(id, opts = {}) {
         const found = model.locateTab(get().main, id);
@@ -497,6 +574,13 @@ export function createLayoutStore() {
           panelBySession.delete(appSessionId);
           set({ panelBySession });
         }
+      },
+      settleMachine(machine) {
+        const { hydrated, knownSession, main: current, panelBySession } = get();
+        if (!hydrated) return;
+        const sessions = new Set<AppSessionId>(panelBySession.keys());
+        for (const tab of [...model.allTabs(current), ...current.closedTabs]) if (tab.kind === 'session' || tab.kind === 'agent') sessions.add(tab.appSessionId);
+        for (const id of sessions) if (machineOf(id) === machine && !knownSession(id)) get().dropSession(id);
       },
 
       setSidebar: (patch) => regions((r) => ({ ...r, sidebar: { ...r.sidebar, ...(typeof patch === 'function' ? patch(r.sidebar) : patch) } })),
@@ -616,6 +700,12 @@ function persistedKeys(state: LayoutState): Map<LayoutKey, unknown> {
 const openSessionsOf = (main: LayoutMain): AppSessionId[] =>
   model.allTabs(main).flatMap((tab) => (tab.kind === 'session' || tab.kind === 'agent' ? [tab.appSessionId] : []));
 
+// A session's panel key whose session is another machine's than `local`.
+function otherMachinePanelKey(key: LayoutKey, local: MachineRef): boolean {
+  const id = PANEL_KEY.exec(key)?.[1];
+  return id !== undefined && key !== 'panel.pinned' && isAddress(id) && machineOf(id) !== local;
+}
+
 function storedValue(key: LayoutKey, slice: unknown): unknown {
   if (key === 'panelTools.params') return { version: 1, params: slice };
   if (key === 'panelTools.activeNoSession') return { version: 1, activeTabId: slice };
@@ -675,6 +765,8 @@ export function persistLayout(client: MawsBridge, store = useLayout): () => void
       clearTimeout(timer);
       pending.delete(key);
     }
+    // P5 O6 M4: main deletes the panel key of its own removed session, never another machine's, so the page deletes that.
+    for (const key of written?.keys() ?? []) if (!now.has(key) && otherMachinePanelKey(key, client.localMachine)) write(key, null);
     written = now;
   });
   window.addEventListener('beforeunload', flush);

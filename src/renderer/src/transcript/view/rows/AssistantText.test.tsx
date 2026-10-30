@@ -1,5 +1,7 @@
 import type { AppSessionId } from '@shared/graph/ids';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../../../test/support/fake-client';
+import { at } from '../../../../../../test/support/machine';
 import { status } from '../../../../../../test/support/builders';
 import { resetSurfaceRegistry } from '../../../engine-surface/registry';
 import { useSessions } from '../../../stores/sessions';
@@ -103,13 +105,14 @@ describe('assistant text row', () => {
 
 it('keeps extension presentation when it rewrites the native text to empty', async () => {
   const b = builder(); b.turn('u'); b.text('answer', 0, 'Visible answer.'); b.end(['u']);
-  const store = await storeWith(b.events);
-  const id = store.key as AppSessionId;
-  const fake = fakeClient(); window.maws = fake.client;
+  // P5 O6 M2: the session's store key is its id, an address on the page (`storeWith` keys bare ids, which the client refuses to send)
+  const id = at('surface-1' as AppSessionId);
+  await useTranscriptStore.getState().attach(id, { subscribe: () => () => {}, snapshot: () => Promise.resolve(b.events) });
+  const fake = fakeClient(); window.maws = fake.client as unknown as PreloadBridge;
   useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
   function View() {
-    const rows = useTranscriptStore((s) => s.entries[store.key].rows);
-    return <TranscriptProvider value={{ storeKey: store.key, variant: 'session', actions: NO_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'd1' }}>
+    const rows = useTranscriptStore((s) => s.entries[id].rows);
+    return <TranscriptProvider value={{ storeKey: id, variant: 'session', actions: NO_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'd1' }}>
       {rows.map((row) => <RowView key={row.id} row={row} />)}
     </TranscriptProvider>;
   }

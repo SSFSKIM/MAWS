@@ -7,3 +7,6 @@ declare const __MAWS_DEV_CSP_NONCE__: string | null;
 declare const __MAWS_VERSION__: string;
 // E11 §2.7: main's build stamp, the commit (`unknown` outside a checkout) and the build's ISO time.
 declare const __MAWS_BUILD__: { commit: string; builtAt: string };
+// P5 O8 M4a Task 8: true in a harness build (MAWS_HARNESS=1, or the dev server), false in every other; unit tests leave it
+// undefined, so a reader guards with `typeof` and a build folds the guard and drops what it keeps out.
+declare const __MAWS_HARNESS_BUILD__: boolean;

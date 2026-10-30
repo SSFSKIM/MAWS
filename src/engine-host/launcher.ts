@@ -52,7 +52,7 @@ export interface LauncherDeps {
   appVersion: string;
   log: (message: string) => void;
   wire: (session: EngineSession, plan: LaunchPlan, spec: LaunchSpec) => void; // attaches the session's listeners before it starts
-  hasClient?: () => boolean; // E10: the runtime's, handed to each session's bridges
+  appAttached?: () => boolean; // E10: handed to each session's bridges (P5 O3-D M3: the app's presence)
   observedFacts?: ObservedFactsService; // P2-A (X17): each launch records what the engine reports
   artifacts?: () => ArtifactStore | null; // P3-A (M6): the artifact store the sessions' artifact tools write through
   datasetRefresh?: Pick<DatasetRefreshRequests, 'ask'>; // E3: the registry the sessions' dataset refreshes ask main through
@@ -74,7 +74,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
   let prelude: JournalRow[] | null = null;
   const refused = (reason: Extract<LaunchResult, { status: 'refused' }>['reason'], message: string): LaunchResult => ({ status: 'refused', reason, message });
 
-  return async (spec, artifactScope = []) => {
+  const launch = async (spec: LaunchSpec, artifactScope: readonly AppSessionId[] = []): Promise<LaunchResult> => {
     assertSafeAppSessionId(spec.appSessionId); // before anything names a file after it (M5 review)
     if (spec.replay !== null && !deps.replayEnabled) return refused('replay_disabled', 'replay launches need MAWS_ENGINE_REPLAY=1');
     const liveNow = deps.table.get(spec.appSessionId);
@@ -122,14 +122,17 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
         : seedOnFirstUser(projects, { cwd: plan.cwd, sessionId: plan.sessionId, engineVersion: plan.engineVersion, permissionMode: spec.permissionMode }, (message) => deps.log(`${spec.appSessionId}: ${message}`));
     const spawn = replay !== null ? () => replayEngine(appReplayHandshake(replay, spec.trust), { prelude: prelude!, surfaceReads: true /* R2 */, rowDelayMs: deps.replayRowMs /* E10 */, onFirstUser }) : deps.spawn;
     const outcome = deps.table.reserve(spec.appSessionId, () => {
+      const released = deps.table.takeReleased(spec.appSessionId); // C12; P5 O2 M2: also what the work state starts from
       const session = new EngineSession({
         spec, plan, spawn, store: deps.store, appVersion: deps.appVersion, relayHealth, log: (message) => deps.log(`${spec.appSessionId}: ${message}`),
         journal: openSessionJournal(deps.userData, spec.appSessionId, plan.launchId), // P3-HD
         // C12 start: the budget policy's stateful servers (keepAlive), and `process_exit` for the first launch after a release
         statefulMcpServers: () => deps.table.statefulMcpServers,
-        reconnectTrigger: deps.table.takeReleased(spec.appSessionId) ? 'process_exit' : 'user',
+        reconnectTrigger: released ? 'process_exit' : 'user',
         // C12 end
-        hasClient: deps.hasClient, // E10: the bridges fail fast with no app connected
+        // P5 O2 M2: a resume after a release starts its crons known and empty; any other resume, unknown until its first Stop
+        launchKind: spec.resume === null ? 'fresh' : released ? 'resumed_after_release' : 'resumed',
+        appAttached: deps.appAttached, // E10: the bridges fail fast with no app attached
         unsettledPrompts: () => unsettledPrompts(journalDir(deps.userData, spec.appSessionId), plan.launchId), // P2-C
         observedFacts: deps.observedFacts, // P2-A
         artifactScope, // P2-E1
@@ -143,6 +146,8 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
     if (outcome.status === 'refused') return outcome; // a launch that raced this one to the reservation
     return { status: 'launching', session: outcome.session.status() };
   };
+  // the table holds it from its entry (P5 Decision Log 124: no collection lands on its preparation, which has no row yet)
+  return (spec, artifactScope) => deps.table.preparing(() => launch(spec, artifactScope));
 }
 
 // P2-F wave S (S-budget; the owner's D7, Q12 as ruled 2026-10-11): a side thread takes its parent's numeric

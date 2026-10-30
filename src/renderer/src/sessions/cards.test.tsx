@@ -1,13 +1,15 @@
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import type { StartOutcome } from '@shared/sessions/setup';
 import { TRUST_GATES } from '@shared/sessions/trust';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { ipc } from '../ipc/client';
 import { useNotices } from '../stores/notices';
 import { closeDialog, useDialogs } from './dialogs';
-import { health, ID, intent, MESSAGE, putIntent, REPO, resetSetupStore, resources, trustState } from '../test-support/setup-intents';
+import { health, ID as BARE_ID, intent as mainIntent, MESSAGE, putIntent, REPO, resetSetupStore, resources, trustState } from '../test-support/setup-intents';
 import { FailureCard } from './FailureCard';
 import { NewSessionEmptyState } from './NewSessionEmptyState';
 import { RelayCard } from './RelayCard';
@@ -21,6 +23,7 @@ import { record, status } from '../../../../test/support/builders';
 import { RELAY_POLL_MS } from './SetupCard';
 import { sendHumanPrompt } from '../composer/submit/send-human-prompt';
 import { submitHumanSerialized } from '../composer/editor/submit'; // P2-F (L118)
+import { sessionControls } from '../session/controls/controls-for'; // P5 O9 M4
 import { resetComposerStore, useComposerStore } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
 import { acquireSession } from './acquire';
@@ -30,13 +33,19 @@ import { TrustCard } from './TrustCard';
 // C11 start
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BUILTIN_MODELS } from '@shared/sessions/models';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { GatewayDialogs } from '../gateway/SwitchSheet';
 import { registerAction } from '../keymap/actions-runtime';
 import { useSettings } from '../stores/settings';
 import { REL } from '../test-support/relative-time';
+import { preloadOf } from '../test-support/preload-of';
 // C11 end
 
+// P5 O6 M2: the page holds the session's id as an address (`ID`, and its intents through `intent`); the fake
+// `window.maws` (main) is asked with, answers and emits the bare one (`BARE_ID`, `mainIntent`, `asMain`)
+const ID = at(BARE_ID);
+const intent: typeof mainIntent = (over = {}) => mainIntent({ appSessionId: ID, ...over });
+const asMain = <T extends { appSessionId: string }>(value: T): T => ({ ...value, appSessionId: BARE_ID });
 let fake: FakeClient;
 let returned: unknown[];
 let offReturn: () => void;
@@ -55,7 +64,7 @@ const dockedIds = () => screen.getByTestId('docked').dataset.cards;
 
 function withMain(auto: Parameters<typeof fakeClient>[0] = {}) {
   fake = fakeClient(auto);
-  window.maws = fake.client;
+  window.maws = preloadOf(fake);
 }
 
 beforeEach(() => {
@@ -71,11 +80,11 @@ afterEach(() => {
   cleanup();
   offDock();
   offReturn();
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 const answer = (outcome: StartOutcome) => () => outcome;
-const starting: StartOutcome = { status: 'starting', appSessionId: ID };
+const starting: StartOutcome = { status: 'starting', appSessionId: BARE_ID };
 
 describe('trust card', () => {
   it('lists what trust would load, or the generic gates, and names the key when it differs', () => {
@@ -96,7 +105,7 @@ describe('trust card', () => {
   });
 
   it('docks only on needs_trust, and sends accepted or declined as pressed', async () => {
-    withMain({ 'session.start': answer({ status: 'needs_trust', appSessionId: ID, trust: trustState() }), 'session.intent.release': () => intent() });
+    withMain({ 'session.start': answer({ status: 'needs_trust', appSessionId: BARE_ID, trust: trustState() }), 'session.intent.release': () => mainIntent() });
     putIntent(intent()); // before Send: main retains the message from the start on
     render(<Docked />);
     expect(screen.queryByRole('button', { name: 'Trust and start' })).toBeNull();
@@ -105,13 +114,13 @@ describe('trust card', () => {
     expect(dockedIds(), 'docked in the composer through C7\'s dockCard').toBe('c10:trust');
     expect(screen.getByRole('group', { name: 'Trust this folder?' }).textContent).toContain('Composer paused'); // C7's DockedCardFrame
     await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
-    expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: ID, message: null, options: { trust: 'accepted' } });
+    expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: BARE_ID, message: null, options: { trust: 'accepted' } });
     await userEvent.click(await screen.findByRole('button', { name: 'Start without trusting' }));
-    expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: ID, message: null, options: { trust: 'declined' } });
+    expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: BARE_ID, message: null, options: { trust: 'declined' } });
   });
 
   it('Cancel undocks, returns the retained message to the editor, then releases it', async () => {
-    withMain({ 'session.start': answer({ status: 'needs_trust', appSessionId: ID, trust: trustState() }), 'session.intent.release': () => intent() });
+    withMain({ 'session.start': answer({ status: 'needs_trust', appSessionId: BARE_ID, trust: trustState() }), 'session.intent.release': () => mainIntent() });
     putIntent(intent({ message: MESSAGE }));
     render(<Docked />);
     await act(() => startIntent(ID, MESSAGE));
@@ -125,18 +134,18 @@ describe('trust card', () => {
   it("answers Enter and Esc through C7's frame: Enter trusts and starts, Esc cancels and hands the message back", async () => {
     const disconnect = connectKeys();
     try {
-      withMain({ 'session.start': answer({ status: 'needs_trust', appSessionId: ID, trust: trustState() }), 'session.intent.release': () => intent() });
+      withMain({ 'session.start': answer({ status: 'needs_trust', appSessionId: BARE_ID, trust: trustState() }), 'session.intent.release': () => mainIntent() });
       putIntent(intent());
       render(<Docked />);
       await act(() => startIntent(ID, MESSAGE));
       const frame = screen.getByRole('group', { name: 'Trust this folder?' });
       act(() => frame.focus());
       await userEvent.keyboard('{Enter}');
-      expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: ID, message: null, options: { trust: 'accepted' } });
+      expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: BARE_ID, message: null, options: { trust: 'accepted' } });
       await waitFor(() => expect(screen.getByRole('group', { name: 'Trust this folder?' })).toBeTruthy()); // the answer docked it again
       act(() => screen.getByRole('group', { name: 'Trust this folder?' }).focus());
       await userEvent.keyboard('{Escape}');
-      await waitFor(() => expect(fake.invoked('session.intent.release')).toEqual([{ appSessionId: ID }]));
+      await waitFor(() => expect(fake.invoked('session.intent.release')).toEqual([{ appSessionId: BARE_ID }]));
       expect(returned).toEqual([MESSAGE]);
     } finally {
       disconnect();
@@ -146,7 +155,7 @@ describe('trust card', () => {
   it('a card whose continuation is running ignores Esc and Enter', async () => {
     const disconnect = connectKeys();
     try {
-      withMain({ 'session.intent.release': () => intent() }); // session.start waits for the test's answer
+      withMain({ 'session.intent.release': () => mainIntent() }); // session.start waits for the test's answer
       putIntent(intent());
       render(<Docked />);
       useSetup.getState().dock(ID, { kind: 'trust', trust: trustState(), message: MESSAGE });
@@ -169,11 +178,11 @@ describe('trust card', () => {
   });
 
   it("Cancel on a resume's card only undocks it, quietly: an acquisition retains nothing in main (P2-A)", async () => {
-    withMain({ 'session.acquire': () => ({ status: 'needs_trust', appSessionId: ID, trust: trustState() }), 'session.intent.release': () => null });
+    withMain({ 'session.acquire': () => ({ status: 'needs_trust', appSessionId: BARE_ID, trust: trustState() }), 'session.intent.release': () => null });
     useSessions.setState({ records: new Map([[ID, record(ID)]]) });
     render(<Docked />);
     expect(await act(() => resumeSession(ID))).toBe(true);
-    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: ID, reason: 'resume' }]);
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: BARE_ID, reason: 'resume' }]);
     await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(dockedIds()).toBe(''));
     expect(fake.invoked('session.intent.release')).toEqual([]);
@@ -182,12 +191,12 @@ describe('trust card', () => {
   });
 
   it('a continuation that is refused hands the docked message back and says why', async () => {
-    let outcome: StartOutcome = { status: 'needs_trust', appSessionId: ID, trust: trustState() };
+    let outcome: StartOutcome = { status: 'needs_trust', appSessionId: BARE_ID, trust: trustState() };
     withMain({ 'session.start': () => outcome });
     putIntent(intent({ message: MESSAGE }));
     render(<Docked />);
     await act(() => startIntent(ID, MESSAGE));
-    outcome = { status: 'missing_directory', appSessionId: ID, directory: REPO };
+    outcome = { status: 'missing_directory', appSessionId: BARE_ID, directory: REPO };
     await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
     await waitFor(() => expect(returned).toEqual([MESSAGE]));
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual([`Directory not found: ${REPO}`]);
@@ -196,13 +205,13 @@ describe('trust card', () => {
 
 describe('relay card', () => {
   it("'Run direct' re-invokes session.start with the direct route on the same id", async () => {
-    withMain({ 'session.start': answer({ status: 'relay_unreachable', appSessionId: ID, health: health() }), 'engine.relayHealth': () => health() });
+    withMain({ 'session.start': answer({ status: 'relay_unreachable', appSessionId: BARE_ID, health: health() }), 'engine.relayHealth': () => health() });
     putIntent(intent({ message: MESSAGE }));
     render(<Docked />);
     await act(() => startIntent(ID, MESSAGE));
     expect(await screen.findByText(/relay is not answering/)).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'Run direct' }));
-    expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: ID, message: null, options: { gateway: 'direct' } });
+    expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: BARE_ID, message: null, options: { gateway: 'direct' } });
   });
 
   it('docks on a late relay_unreachable from the launch, and restarts routed once the relay answers', async () => {
@@ -216,7 +225,7 @@ describe('relay card', () => {
       expect(await screen.findByRole('button', { name: 'Run direct' })).toBeTruthy();
       up = true;
       await act(() => vi.advanceTimersByTimeAsync(5_000));
-      await waitFor(() => expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: ID, message: null, options: { gateway: 'gateway' } }));
+      await waitFor(() => expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: BARE_ID, message: null, options: { gateway: 'gateway' } }));
     } finally {
       vi.useRealTimers();
     }
@@ -238,7 +247,7 @@ describe('relay card', () => {
 // P2-A (M1's re-review): an intent's relay card shares the path: a Recheck pending when it is cancelled starts nothing
 describe('relay card, a Recheck outliving its card', () => {
   it('an intent’s card cancelled while its Recheck is out starts nothing once the relay answers', async () => {
-    withMain({ 'session.intent.release': () => intent() });
+    withMain({ 'session.intent.release': () => mainIntent() });
     putIntent(intent({ message: MESSAGE }));
     act(() => useSetup.getState().dock(ID, { kind: 'relay', health: health(), message: MESSAGE }));
     render(<Docked />);
@@ -256,9 +265,9 @@ describe('relay card, with C11', () => {
   const docked = async (over: Parameters<typeof intent>[0] = {}) => {
     relayUp = false;
     withMain({
-      'session.start': answer({ status: 'relay_unreachable', appSessionId: ID, health: health() }),
+      'session.start': answer({ status: 'relay_unreachable', appSessionId: BARE_ID, health: health() }),
       'engine.relayHealth': () => health({ ok: relayUp, status: relayUp ? 200 : null, error: relayUp ? null : 'timed out' }),
-      'session.intent.patch': (input: unknown) => ({ ...intent(over), ...(input as { patch: object }).patch }),
+      'session.intent.patch': (input: unknown) => ({ ...mainIntent(over), ...(input as { patch: object }).patch }),
       'engine.models': { models: [...BUILTIN_MODELS], source: 'builtin', at: null },
     });
     putIntent(intent({ message: MESSAGE, ...over }));
@@ -274,7 +283,7 @@ describe('relay card, with C11', () => {
   afterEach(() => useSettings.setState({ state: null }));
 
   it("settings' relayUnreachable 'wait' makes Open ClaudeUsage, then start the primary, and it runs C11's hand-off", async () => {
-    useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V19, gateway: { ...SETTINGS_DEFAULTS_V19.gateway, relayUnreachable: 'wait' } }, resolvedTheme: 'light' } as never });
+    useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, gateway: { ...SETTINGS_DEFAULTS_V21.gateway, relayUnreachable: 'wait' } }, resolvedTheme: 'light' } as never });
     const handOff = vi.fn();
     const off = registerAction('gateway.openClaudeUsage', handOff);
     const card = await docked();
@@ -294,8 +303,8 @@ describe('relay card, with C11', () => {
     const pick = await screen.findByRole('dialog', { name: 'Choose a Claude model' });
     await userEvent.click(await within(pick).findByRole('radio', { name: /^Sonnet/ }));
     await userEvent.click(within(pick).getByRole('button', { name: 'Use this model' }));
-    await waitFor(() => expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: ID, message: null, options: { gateway: 'direct' } }));
-    expect(fake.invoked('session.intent.patch').at(-1)).toEqual({ appSessionId: ID, patch: { model: 'sonnet' } });
+    await waitFor(() => expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: BARE_ID, message: null, options: { gateway: 'direct' } }));
+    expect(fake.invoked('session.intent.patch').at(-1)).toEqual({ appSessionId: BARE_ID, patch: { model: 'sonnet' } });
   });
 
   it('while the Claude-model pick is open the card stops polling, so a recovering relay starts nothing under it', async () => {
@@ -311,7 +320,7 @@ describe('relay card, with C11', () => {
       expect(fake.invoked('session.start').map((i) => (i as { options: unknown }).options)).toEqual([{}]); // only the first send's
       await userEvent.click(within(pick).getByRole('button', { name: 'Cancel' }));
       await act(() => vi.advanceTimersByTimeAsync(5_000));
-      await waitFor(() => expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: ID, message: null, options: { gateway: 'gateway' } })); // the poll is back
+      await waitFor(() => expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: BARE_ID, message: null, options: { gateway: 'gateway' } })); // the poll is back
     } finally {
       vi.useRealTimers();
     }
@@ -322,19 +331,19 @@ describe('relay card, with C11', () => {
 // Debt wave 4: main refuses a relay alias on the direct route; Send offers the Direct-compatible choice first
 describe('a gateway model on the direct route', () => {
   const words = 'claude/astra is a gateway model, which the Direct route cannot serve · choose a Claude model, or start on the gateway';
-  const refusal: StartOutcome = { status: 'invalid', appSessionId: ID, field: 'model', message: words };
+  const refusal: StartOutcome = { status: 'invalid', appSessionId: BARE_ID, field: 'model', message: words };
 
   it('a pick is written with its effort and the message sent once more; the resend asks no second time', async () => {
     const outcomes = [refusal, starting];
-    withMain({ 'session.start': () => outcomes.shift(), 'session.intent.patch': ({ patch }: { patch: object }) => intent({ gateway: 'direct', ...patch }) });
+    withMain({ 'session.start': () => outcomes.shift(), 'session.intent.patch': ({ patch }: { patch: object }) => mainIntent({ gateway: 'direct', ...patch }) });
     putIntent(intent({ gateway: 'direct', model: 'claude/astra', effort: 'max' }));
     const pick = vi.fn(async () => ({ model: 'sonnet', effort: 'high' as const }));
     expect(await act(() => startIntent(ID, MESSAGE, pick))).toEqual({ ok: true });
     expect(pick).toHaveBeenCalledExactlyOnceWith(ID);
-    expect(fake.invoked('session.intent.patch')).toEqual([{ appSessionId: ID, patch: { model: 'sonnet', effort: 'high' } }]);
+    expect(fake.invoked('session.intent.patch')).toEqual([{ appSessionId: BARE_ID, patch: { model: 'sonnet', effort: 'high' } }]);
     expect(fake.invoked('session.start')).toEqual([
-      { appSessionId: ID, message: MESSAGE, options: {} },
-      { appSessionId: ID, message: MESSAGE, options: {} },
+      { appSessionId: BARE_ID, message: MESSAGE, options: {} },
+      { appSessionId: BARE_ID, message: MESSAGE, options: {} },
     ]);
     expect(useSetup.getState().intents.get(ID)).toMatchObject({ model: 'sonnet', effort: 'high' });
   });
@@ -348,12 +357,12 @@ describe('a gateway model on the direct route', () => {
   });
 
   it('a refusal after the pick is the editor’s error, with no second pick', async () => {
-    withMain({ 'session.start': answer(refusal), 'session.intent.patch': () => intent({ gateway: 'direct', model: 'sonnet' }) });
+    withMain({ 'session.start': answer(refusal), 'session.intent.patch': () => mainIntent({ gateway: 'direct', model: 'sonnet' }) });
     putIntent(intent({ gateway: 'direct', model: 'claude/astra' }));
     const pick = vi.fn(async () => ({ model: 'sonnet', effort: null }));
     expect(await act(() => startIntent(ID, MESSAGE, pick))).toEqual({ ok: false, error: words });
     expect(pick).toHaveBeenCalledTimes(1);
-    expect(fake.invoked('session.intent.patch')).toEqual([{ appSessionId: ID, patch: { model: 'sonnet' } }]);
+    expect(fake.invoked('session.intent.patch')).toEqual([{ appSessionId: BARE_ID, patch: { model: 'sonnet' } }]);
   });
 });
 
@@ -383,7 +392,7 @@ describe('failure card', () => {
 
   it('docks on failed; Retry re-invokes session.start with nothing beyond the id; Keep the worktree detaches it', async () => {
     const path = `${REPO}/.claude/worktrees/accept-fail`;
-    const detached = intent({ message: MESSAGE, location: { kind: 'existingWorktree', repoRoot: REPO, path }, progress: { ...intent().progress, worktree: { path, branch: 'worktree-accept-fail', head: 'abc', createdHere: false } } });
+    const detached = mainIntent({ message: MESSAGE, location: { kind: 'existingWorktree', repoRoot: REPO, path }, progress: { ...intent().progress, worktree: { path, branch: 'worktree-accept-fail', head: 'abc', createdHere: false } } });
     withMain({ 'session.start': answer(starting), 'session.intent.resolveWorktree': () => ({ intent: detached, worktree: { path, branch: 'worktree-accept-fail', createdHere: false, state: 'kept', detail: null, branchState: 'none' } }) });
     putIntent(intent({ message: MESSAGE, progress: { ...intent().progress, worktree: { path, branch: 'worktree-accept-fail', head: 'abc', createdHere: true } } }));
     render(<Docked />);
@@ -399,47 +408,47 @@ describe('failure card', () => {
     );
     expect(dockedIds()).toBe('c10:failure');
     await userEvent.click(await screen.findByRole('button', { name: 'Keep the worktree' }));
-    expect(fake.invoked('session.intent.resolveWorktree')).toEqual([{ appSessionId: ID, resolution: 'keep' }]);
+    expect(fake.invoked('session.intent.resolveWorktree')).toEqual([{ appSessionId: BARE_ID, resolution: 'keep' }]);
     // the kept checkout's cleanup is reachable from the result (no record names it until a session runs there)
     const [kept] = useNotices.getState().notices;
     expect(kept?.text).toBe('Worktree accept-fail kept as this session’s location');
     expect(kept?.actions.map((a) => a.label)).toEqual(['Remove worktree…']);
     act(() => kept!.actions[0]!.run());
-    expect(useDialogs.getState().open).toEqual({ kind: 'cleanup', target: { repoRoot: REPO, path, branch: 'worktree-accept-fail' } });
+    expect(useDialogs.getState().open).toEqual({ kind: 'cleanup', target: { machine: TEST_MACHINE, repoRoot: REPO, path, branch: 'worktree-accept-fail' } });
     act(() => closeDialog());
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(fake.invoked('session.start')).toEqual([{ appSessionId: ID, message: null, options: {} }]);
+    expect(fake.invoked('session.start')).toEqual([{ appSessionId: BARE_ID, message: null, options: {} }]);
   });
 
   it('a record’s failed resume is no card but a toast; the record stays an exited session', async () => {
     withMain({ 'session.intent.list': () => ({ intents: [] }), 'session.deletions.list': () => ({ manifests: [] }) });
-    const connection = connectSetup(fake.client);
+    const connection = connectSetup(ipc);
     render(<Docked />);
-    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) } }));
+    act(() => fake.event('session.setup', { appSessionId: BARE_ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) } }));
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['the engine exited (code 1)']);
     connection.disconnect();
   });
 
   it('a failed acquisition is told once: the row’s Resume names it from the reply; its run’s tagged failure toasts nothing (P2-A)', async () => {
-    withMain({ 'session.acquire': () => ({ status: 'failed', appSessionId: ID, message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) }), 'session.intent.list': () => ({ intents: [] }), 'session.deletions.list': () => ({ manifests: [] }) });
-    const connection = connectSetup(fake.client);
+    withMain({ 'session.acquire': () => ({ status: 'failed', appSessionId: BARE_ID, message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) }), 'session.intent.list': () => ({ intents: [] }), 'session.deletions.list': () => ({ manifests: [] }) });
+    const connection = connectSetup(ipc);
     await connection.ready;
-    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) }, acquisition: true }));
+    act(() => fake.event('session.setup', { appSessionId: BARE_ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) }, acquisition: true }));
     expect(await act(() => resumeSession(ID))).toBe(false);
-    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: ID, reason: 'resume' }]);
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: BARE_ID, reason: 'resume' }]);
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['the engine exited (code 1)']);
     expect(returned, 'an acquisition holds no message to hand back').toEqual([]);
     connection.disconnect();
   });
 
   it('a launch that kept its transcript is told after its intent went: a toast, no card, and its unsent first message back in the editor', async () => {
-    withMain({ 'session.intent.list': () => ({ intents: [intent({ message: MESSAGE })] }), 'session.deletions.list': () => ({ manifests: [] }) });
-    const connection = connectSetup(fake.client);
+    withMain({ 'session.intent.list': () => ({ intents: [mainIntent({ message: MESSAGE })] }), 'session.deletions.list': () => ({ manifests: [] }) });
+    const connection = connectSetup(ipc);
     await connection.ready;
     render(<Docked />);
-    act(() => fake.event('session.intent.changed', { appSessionId: ID, intent: null }));
-    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the model is not available', resources: resources({ record: 'kept', transcript: 'kept' }) } }));
+    act(() => fake.event('session.intent.changed', { appSessionId: BARE_ID, intent: null }));
+    act(() => fake.event('session.setup', { appSessionId: BARE_ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the model is not available', resources: resources({ record: 'kept', transcript: 'kept' }) } }));
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['the model is not available']);
     expect(returned, 'the handoff never happened: the message comes back').toEqual([MESSAGE]);
@@ -447,12 +456,12 @@ describe('failure card', () => {
   });
 
   it('a start that became ready and then lost its intent hands nothing back', async () => {
-    withMain({ 'session.intent.list': () => ({ intents: [intent({ message: MESSAGE })] }), 'session.deletions.list': () => ({ manifests: [] }) });
-    const connection = connectSetup(fake.client);
+    withMain({ 'session.intent.list': () => ({ intents: [mainIntent({ message: MESSAGE })] }), 'session.deletions.list': () => ({ manifests: [] }) });
+    const connection = connectSetup(ipc);
     await connection.ready;
-    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'ready', detail: null, outcome: { kind: 'ready', engineSessionId: 'e' as never, firstTurn: 'sent' } }));
-    act(() => fake.event('session.intent.changed', { appSessionId: ID, intent: null }));
-    act(() => fake.event('session.setup', { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'later', resources: resources({ record: 'kept' }) } }));
+    act(() => fake.event('session.setup', { appSessionId: BARE_ID, phase: 'ready', detail: null, outcome: { kind: 'ready', engineSessionId: 'e' as never, firstTurn: 'sent' } }));
+    act(() => fake.event('session.intent.changed', { appSessionId: BARE_ID, intent: null }));
+    act(() => fake.event('session.setup', { appSessionId: BARE_ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'later', resources: resources({ record: 'kept' }) } }));
     expect(returned).toEqual([]);
     connection.disconnect();
   });
@@ -460,35 +469,35 @@ describe('failure card', () => {
   // the window reloaded while a card waited (or a start ran): main holds the message and reports no failure, and the
   // card lived in the old page; the tab offers Retry and Back to editing instead of a composer locked with nothing to press
   it('after a reload, an intent still holding its message offers Retry (which docks the trust card again) and Back to editing', async () => {
-    withMain({ 'session.intent.list': () => ({ intents: [intent({ message: MESSAGE })] }), 'session.deletions.list': () => ({ manifests: [] }), 'session.start': answer({ status: 'needs_trust', appSessionId: ID, trust: trustState() }), 'session.intent.release': () => intent() });
-    const connection = connectSetup(fake.client);
+    withMain({ 'session.intent.list': () => ({ intents: [mainIntent({ message: MESSAGE })] }), 'session.deletions.list': () => ({ manifests: [] }), 'session.start': answer({ status: 'needs_trust', appSessionId: BARE_ID, trust: trustState() }), 'session.intent.release': () => mainIntent() });
+    const connection = connectSetup(ipc);
     await connection.ready;
     render(<Docked />);
     expect(await screen.findByText('Your first message has not been sent.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Back to editing' })).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(fake.invoked('session.start')).toEqual([{ appSessionId: ID, message: null, options: {} }]);
+    expect(fake.invoked('session.start')).toEqual([{ appSessionId: BARE_ID, message: null, options: {} }]);
     await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
     expect(returned).toEqual([MESSAGE]);
-    expect(fake.invoked('session.intent.release')).toEqual([{ appSessionId: ID }]);
+    expect(fake.invoked('session.intent.release')).toEqual([{ appSessionId: BARE_ID }]);
     connection.disconnect();
   });
 
   // (carried to M4b by the interim branch review) the reload card cannot know whether main still runs the start: Back to
   // editing asks main first and returns the message only once main handed it back
   it("after a reload, Back to editing releases first and returns the message only when main handed it back", async () => {
-    withMain({ 'session.intent.list': () => ({ intents: [intent({ message: MESSAGE })] }), 'session.deletions.list': () => ({ manifests: [] }) });
-    const connection = connectSetup(fake.client);
+    withMain({ 'session.intent.list': () => ({ intents: [mainIntent({ message: MESSAGE })] }), 'session.deletions.list': () => ({ manifests: [] }) });
+    const connection = connectSetup(ipc);
     await connection.ready;
     render(<Docked />);
     await userEvent.click(await screen.findByRole('button', { name: 'Back to editing' }));
-    expect(fake.invoked('session.intent.release')).toEqual([{ appSessionId: ID }]);
+    expect(fake.invoked('session.intent.release')).toEqual([{ appSessionId: BARE_ID }]);
     expect(returned, 'nothing before main answers').toEqual([]);
-    await act(() => fake.fail('session.intent.release', `starting: a start is in flight for ${ID}`));
+    await act(() => fake.fail('session.intent.release', `starting: a start is in flight for ${BARE_ID}`));
     expect(returned, 'main is sending it').toEqual([]);
     expect(useNotices.getState().notices.map((n) => [n.level, n.text])).toEqual([['info', 'Starting…']]);
     await userEvent.click(screen.getByRole('button', { name: 'Back to editing' }));
-    await act(() => fake.reply('session.intent.release', intent()));
+    await act(() => fake.reply('session.intent.release', mainIntent()));
     expect(returned).toEqual([MESSAGE]);
     await waitFor(() => expect(dockedIds()).toBe(''));
     connection.disconnect();
@@ -507,7 +516,7 @@ describe('failure card', () => {
     putIntent(intent({ message: MESSAGE }));
     render(<Docked />);
     await userEvent.click(await screen.findByRole('button', { name: 'Retry' }));
-    await act(() => fake.fail('session.start', `starting: a start is in flight for ${ID}`));
+    await act(() => fake.fail('session.start', `starting: a start is in flight for ${BARE_ID}`));
     expect(returned).toEqual([]);
     expect(useNotices.getState().notices.map((n) => [n.level, n.text])).toEqual([['info', 'Starting…']]);
   });
@@ -515,7 +524,7 @@ describe('failure card', () => {
   it('Discard changes and remove needs its acknowledgement; Back to editing returns the message and releases it', async () => {
     const path = `${REPO}/.claude/worktrees/accept-fail`;
     const lastFailure = { at: '2026-09-29T10:00:00.000Z', phase: 'launching' as const, message: 'MAWS quit before the session started', resources: resources({ worktree: { path, branch: 'worktree-accept-fail', createdHere: true, state: 'remove_refused', detail: 'dirty: 2 uncommitted changes', branchState: 'kept' } }) };
-    const discarded = intent({ message: MESSAGE, progress: { ...intent().progress, lastFailure } });
+    const discarded = mainIntent({ message: MESSAGE, progress: { ...intent().progress, lastFailure } });
     withMain({
       'session.intent.resolveWorktree': () => ({ intent: discarded, worktree: { path, branch: 'worktree-accept-fail', createdHere: true, state: 'removed', detail: null, branchState: 'deleted' } }),
       'session.intent.release': () => ({ ...discarded, message: null }),
@@ -529,13 +538,13 @@ describe('failure card', () => {
     expect(ack.getAttribute('aria-label'), 'named by its own attribute, not only by the label around it').toBe('Discard 2 uncommitted changes; this cannot be undone');
     await userEvent.click(ack);
     await userEvent.click(discard);
-    expect(fake.invoked('session.intent.resolveWorktree')).toEqual([{ appSessionId: ID, resolution: 'discard' }]);
+    expect(fake.invoked('session.intent.resolveWorktree')).toEqual([{ appSessionId: BARE_ID, resolution: 'discard' }]);
     expect(await screen.findByText('Worktree accept-fail removed')).toBeTruthy(); // the resolution's own outcome
     expect(screen.getByText('Branch worktree-accept-fail deleted')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Keep the worktree' })).toBeNull();
     await userEvent.click(screen.getByRole('button', { name: 'Back to editing' }));
     expect(returned).toEqual([MESSAGE]);
-    expect(fake.invoked('session.intent.release')).toEqual([{ appSessionId: ID }]);
+    expect(fake.invoked('session.intent.release')).toEqual([{ appSessionId: BARE_ID }]);
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()); // dismissed until the next start
   });
 });
@@ -548,8 +557,8 @@ describe('failure card', () => {
 // message through the human seam and clears the composer only once the host accepted it.
 describe('a record’s trust card and its continuation', () => {
   const TRUST = trustState();
-  const ACCEPTED = { status: 'ready', appSessionId: ID, launched: true, joined: false };
-  const NEEDS_TRUST = { status: 'needs_trust', appSessionId: ID, trust: TRUST };
+  const ACCEPTED = { status: 'ready', appSessionId: BARE_ID, launched: true, joined: false };
+  const NEEDS_TRUST = { status: 'needs_trust', appSessionId: BARE_ID, trust: TRUST };
   // `session.acquire` answers in turn: each call takes the next outcome (the last repeats)
   const acquiring = (...outcomes: unknown[]) => {
     let n = 0;
@@ -581,8 +590,8 @@ describe('a record’s trust card and its continuation', () => {
     render(<Docked />);
     await act(composerSend);
     await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
-    await waitFor(() => expect(fake.invoked('session.send')).toEqual([{ appSessionId: ID, content: MESSAGE.content }]));
-    expect(fake.invoked('session.acquire')[1]).toEqual({ appSessionId: ID, reason: 'send', options: { trust: 'accepted' } });
+    await waitFor(() => expect(fake.invoked('session.send')).toEqual([{ appSessionId: BARE_ID, content: MESSAGE.content }]));
+    expect(fake.invoked('session.acquire')[1]).toEqual({ appSessionId: BARE_ID, reason: 'send', options: { trust: 'accepted' } });
     await waitFor(() => expect(useComposerStore.getState().prefills.get(ID)).toEqual({ text: '' }));
     expect(dockedIds()).toBe('');
     expect(fake.invoked('session.intent.release')).toEqual([]);
@@ -595,12 +604,12 @@ describe('a record’s trust card and its continuation', () => {
     render(<Docked />);
     const pastedContents = { '1': { id: 1, type: 'text' as const, content: 'a long paste', contentHash: null, mediaType: null, filename: null } };
     const draft = { mode: 'send' as const, text: 'Look at a long paste', content: 'Look at a long paste', display: 'Look at [Pasted text #1]', pastedContents, omitted: 0, empty: false };
-    expect(await act(() => submitHumanSerialized(fake.client, ID, draft))).toBe(false);
+    expect(await act(() => submitHumanSerialized(sessionControls(ID)!, ipc, ID, draft))).toBe(false);
     await waitFor(() => expect(useSetup.getState().cards.get(ID)?.message).toMatchObject({ content: draft.content, display: draft.display }));
     expect(fake.invoked('session.history.append')).toEqual([]);
     await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
-    await waitFor(() => expect(fake.invoked('session.send')).toEqual([{ appSessionId: ID, content: draft.content }]));
-    await waitFor(() => expect(fake.invoked('session.history.append')).toEqual([{ appSessionId: ID, display: draft.display, pastedContents }]));
+    await waitFor(() => expect(fake.invoked('session.send')).toEqual([{ appSessionId: BARE_ID, content: draft.content }]));
+    await waitFor(() => expect(fake.invoked('session.history.append')).toEqual([{ appSessionId: BARE_ID, display: draft.display, pastedContents }]));
   });
 
   // L118 review: the seam may acquire again inside the continuation's send (the renderer's status trails the process);
@@ -610,18 +619,18 @@ describe('a record’s trust card and its continuation', () => {
     render(<Docked />);
     const pastedContents = { '1': { id: 1, type: 'text' as const, content: 'a long paste', contentHash: null, mediaType: null, filename: null } };
     const draft = { mode: 'send' as const, text: 'Look at a long paste', content: 'Look at a long paste', display: 'Look at [Pasted text #1]', pastedContents, omitted: 0, empty: false };
-    expect(await act(() => submitHumanSerialized(fake.client, ID, draft))).toBe(false);
+    expect(await act(() => submitHumanSerialized(sessionControls(ID)!, ipc, ID, draft))).toBe(false);
     await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
     await waitFor(() => expect(fake.invoked('session.acquire')).toHaveLength(3)); // the continuation's, then the seam's again
     await waitFor(() => expect(useSetup.getState().cards.get(ID)?.message).toEqual({ content: draft.content, display: draft.display, pastedContents }));
     expect(fake.invoked('session.send')).toEqual([]);
     await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
-    await waitFor(() => expect(fake.invoked('session.send')).toEqual([{ appSessionId: ID, content: draft.content }]));
-    await waitFor(() => expect(fake.invoked('session.history.append')).toEqual([{ appSessionId: ID, display: draft.display, pastedContents }]));
+    await waitFor(() => expect(fake.invoked('session.send')).toEqual([{ appSessionId: BARE_ID, content: draft.content }]));
+    await waitFor(() => expect(fake.invoked('session.history.append')).toEqual([{ appSessionId: BARE_ID, display: draft.display, pastedContents }]));
   });
 
   it('a refused continuation undocks the card and says why; the composer keeps the text (nothing is handed back or cleared)', async () => {
-    withMain({ 'session.acquire': acquiring(NEEDS_TRUST, { status: 'missing_directory', appSessionId: ID, directory: '/gone' }) });
+    withMain({ 'session.acquire': acquiring(NEEDS_TRUST, { status: 'missing_directory', appSessionId: BARE_ID, directory: '/gone' }) });
     render(<Docked />);
     await act(composerSend);
     await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
@@ -664,7 +673,7 @@ describe('a record’s trust card and its continuation', () => {
     expect(useSetup.getState().cards.get(ID)).toEqual({ kind: 'trust', trust: TRUST, message: null });
     await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
     await waitFor(() => expect(dockedIds()).toBe(''));
-    expect(fake.invoked('session.acquire')[1]).toEqual({ appSessionId: ID, reason: 'resume', options: { trust: 'accepted' } });
+    expect(fake.invoked('session.acquire')[1]).toEqual({ appSessionId: BARE_ID, reason: 'resume', options: { trust: 'accepted' } });
     expect(fake.invoked('session.send')).toEqual([]);
     expect(useComposerStore.getState().prefills.get(ID)).toBeUndefined();
   });
@@ -676,7 +685,7 @@ describe('a record’s trust card and its continuation', () => {
     const first = continueSetup(ID, { trust: 'accepted' }, MESSAGE);
     const rowResume = resumeSession(ID);
     await waitFor(() => expect(fake.pending('session.acquire')).toBe(2));
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }, TEST_MACHINE));
     await act(() => fake.reply('session.acquire', ACCEPTED));
     await act(() => fake.reply('session.acquire', READY_AGAIN));
     expect(await rowResume).toBe(true);
@@ -686,7 +695,7 @@ describe('a record’s trust card and its continuation', () => {
     expect(fake.invoked('session.acquire')).toHaveLength(2);
     await act(() => fake.reply('session.send', { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' }));
     expect(await first).toEqual({ ok: true });
-    expect(fake.invoked('session.send')).toEqual([{ appSessionId: ID, content: MESSAGE.content }]);
+    expect(fake.invoked('session.send')).toEqual([{ appSessionId: BARE_ID, content: MESSAGE.content }]);
     expect(isStarting(useSetup.getState(), ID)).toBe(false);
   });
 
@@ -701,19 +710,19 @@ describe('a record’s trust card and its continuation', () => {
       render(<Docked />);
       const sending = composerSend();
       await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
-      await act(() => fake.reply('session.acquire', { status: 'relay_unreachable', appSessionId: ID, health: health() }));
+      await act(() => fake.reply('session.acquire', { status: 'relay_unreachable', appSessionId: BARE_ID, health: health() }));
       expect(await sending).toMatchObject({ disposition: 'held', reason: 'relay' });
       await userEvent.click(await screen.findByRole('button', { name: 'Run direct' }));
       await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
       expect(isContinuing(ID)).toBe(true);
       await act(() => vi.advanceTimersByTimeAsync(RELAY_POLL_MS * 2)); // the poll finds the relay up while Run direct is in flight
       expect(fake.pending('session.acquire'), 'the poll started no second continuation').toBe(1);
-      expect(fake.invoked('session.acquire')[1]).toEqual({ appSessionId: ID, reason: 'send', options: { gateway: 'direct' } });
-      act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+      expect(fake.invoked('session.acquire')[1]).toEqual({ appSessionId: BARE_ID, reason: 'send', options: { gateway: 'direct' } });
+      act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }, TEST_MACHINE));
       await act(() => fake.reply('session.acquire', ACCEPTED));
       await waitFor(() => expect(dockedIds()).toBe(''));
       expect(fake.invoked('session.acquire')).toHaveLength(2);
-      expect(fake.invoked('session.send')).toEqual([{ appSessionId: ID, content: MESSAGE.content }]);
+      expect(fake.invoked('session.send')).toEqual([{ appSessionId: BARE_ID, content: MESSAGE.content }]);
     } finally {
       vi.useRealTimers();
     }
@@ -729,7 +738,7 @@ describe('a record’s trust card and its continuation', () => {
     await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(useSetup.getState().cards.has(ID)).toBe(false);
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }, TEST_MACHINE));
     await act(() => fake.reply('session.acquire', ACCEPTED));
     await waitFor(() => expect(isContinuing(ID)).toBe(false));
     expect(fake.invoked('session.send')).toEqual([]);
@@ -739,10 +748,10 @@ describe('a record’s trust card and its continuation', () => {
 
   // M1's round-4 review: a late answer of a dismissed card's acquisition docks nothing and says nothing
   it.each([
-    ['relay_unreachable', { status: 'relay_unreachable', appSessionId: ID, health: health() }],
-    ['needs_trust', { status: 'needs_trust', appSessionId: ID, trust: trustState() }],
-    ['missing_directory', { status: 'missing_directory', appSessionId: ID, directory: '/gone' }],
-    ['failed', { status: 'failed', appSessionId: ID, message: 'the model is not available', resources: { worktree: null, record: 'kept', transcript: 'kept' } }],
+    ['relay_unreachable', { status: 'relay_unreachable', appSessionId: BARE_ID, health: health() }],
+    ['needs_trust', { status: 'needs_trust', appSessionId: BARE_ID, trust: trustState() }],
+    ['missing_directory', { status: 'missing_directory', appSessionId: BARE_ID, directory: '/gone' }],
+    ['failed', { status: 'failed', appSessionId: BARE_ID, message: 'the model is not available', resources: { worktree: null, record: 'kept', transcript: 'kept' } }],
   ])('a card cancelled while its acquisition is out: a late %s docks no card and says nothing', async (_kind, outcome) => {
     withMain({ 'engine.relayHealth': () => health({ ok: true, status: 200, error: null }) });
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -784,7 +793,7 @@ describe('a record’s trust card and its continuation', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Run direct' }));
     await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }, TEST_MACHINE));
     await act(() => fake.reply('session.acquire', ACCEPTED));
     await waitFor(() => expect(isContinuing(ID)).toBe(false));
     expect(fake.invoked('session.send')).toEqual([]);
@@ -794,7 +803,7 @@ describe('a record’s trust card and its continuation', () => {
   it('a card cancelled while its message is being sent leaves the draft alone', async () => {
     withMain({ 'session.queue.list': { entries: [], paused: false } });
     act(() => useSetup.getState().dock(ID, { kind: 'trust', trust: trustState(), message: MESSAGE }));
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }, TEST_MACHINE));
     render(<Docked />);
     await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
     await act(() => fake.reply('session.acquire', ACCEPTED));
@@ -828,7 +837,7 @@ describe('a record’s trust card and its continuation', () => {
   it('a card cancelled while the seam reads the queue sends nothing', async () => {
     withMain({ 'session.send': { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' } });
     act(() => useSetup.getState().dock(ID, { kind: 'trust', trust: trustState(), message: MESSAGE }));
-    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }));
+    act(() => useSessions.getState().applyStatus({ appSessionId: ID, status: status(ID) }, TEST_MACHINE));
     render(<Docked />);
     await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
     await act(() => fake.reply('session.acquire', ACCEPTED));
@@ -870,15 +879,15 @@ describe('a record’s trust card and its continuation', () => {
   // caller in the `session.acquire` reply, which Electron delivers on another transport in no fixed order with the
   // events; the reply alone decides the card and tells the failure, whichever arrives first
   describe('with the setup stream connected, in either delivery order', () => {
-    const RELAY_FAILED = { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'relay_unreachable', health: health() }, acquisition: true } as const;
-    const RELAY_ANSWER = { status: 'relay_unreachable', appSessionId: ID, health: health() };
-    const ERROR_FAILED = { appSessionId: ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) }, acquisition: true } as const;
-    const ERROR_ANSWER = { status: 'failed', appSessionId: ID, message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) };
+    const RELAY_FAILED = { appSessionId: BARE_ID, phase: 'failed', detail: null, outcome: { kind: 'relay_unreachable', health: health() }, acquisition: true } as const;
+    const RELAY_ANSWER = { status: 'relay_unreachable', appSessionId: BARE_ID, health: health() };
+    const ERROR_FAILED = { appSessionId: BARE_ID, phase: 'failed', detail: null, outcome: { kind: 'error', message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) }, acquisition: true } as const;
+    const ERROR_ANSWER = { status: 'failed', appSessionId: BARE_ID, message: 'the engine exited (code 1)', resources: resources({ record: 'kept' }) };
     const ORDERS = ['event first', 'reply first'] as const;
     let connection: { disconnect(): void };
     beforeEach(() => {
       withMain({ 'session.intent.list': { intents: [] }, 'session.deletions.list': { manifests: [] } });
-      connection = connectSetup(fake.client);
+      connection = connectSetup(ipc);
       act(() => useSetup.getState().dock(ID, { kind: 'trust', trust: trustState(), message: MESSAGE }));
     });
     afterEach(() => connection.disconnect());
@@ -945,8 +954,8 @@ describe('a retained worktree with its card dismissed', () => {
   it('after Back to editing, the empty state keeps Discard changes and remove (acknowledged) and Keep the worktree', async () => {
     const held = retained('remove_refused', 'dirty: 2 uncommitted changes');
     withMain({
-      'session.intent.release': () => ({ ...held, message: null }),
-      'session.intent.resolveWorktree': () => ({ intent: { ...held, message: null, progress: { ...held.progress, worktree: null } }, worktree: { path, branch: 'worktree-accept-fail', createdHere: true, state: 'removed', detail: null, branchState: 'deleted' } }),
+      'session.intent.release': () => ({ ...asMain(held), message: null }),
+      'session.intent.resolveWorktree': () => ({ intent: { ...asMain(held), message: null, progress: { ...held.progress, worktree: null } }, worktree: { path, branch: 'worktree-accept-fail', createdHere: true, state: 'removed', detail: null, branchState: 'deleted' } }),
     });
     putIntent(held);
     render(
@@ -966,16 +975,16 @@ describe('a retained worktree with its card dismissed', () => {
     expect(discard.hasAttribute('disabled')).toBe(true);
     await userEvent.click(within(shown).getByRole('checkbox', { name: 'Discard 2 uncommitted changes; this cannot be undone' }));
     await userEvent.click(discard);
-    expect(fake.invoked('session.intent.resolveWorktree')).toEqual([{ appSessionId: ID, resolution: 'discard' }]);
+    expect(fake.invoked('session.intent.resolveWorktree')).toEqual([{ appSessionId: BARE_ID, resolution: 'discard' }]);
     await waitFor(() => expect(note(), 'resolved: nothing is retained any more').toBeNull());
   });
 
   it('after Cancel on the relay card C3 docked, Keep the worktree stays reachable (a clean checkout kept for the retry)', async () => {
     const held = retained('kept', null);
     withMain({
-      'session.intent.release': () => ({ ...held, message: null }),
+      'session.intent.release': () => ({ ...asMain(held), message: null }),
       'session.intent.resolveWorktree': () => ({
-        intent: { ...held, message: null, location: { kind: 'existingWorktree', repoRoot: REPO, path }, progress: { ...held.progress, worktree: { path, branch: 'worktree-accept-fail', head: 'abc', createdHere: false } } },
+        intent: { ...asMain(held), message: null, location: { kind: 'existingWorktree', repoRoot: REPO, path }, progress: { ...held.progress, worktree: { path, branch: 'worktree-accept-fail', head: 'abc', createdHere: false } } },
         worktree: { path, branch: 'worktree-accept-fail', createdHere: false, state: 'kept', detail: null, branchState: 'none' },
       }),
     });
@@ -992,7 +1001,7 @@ describe('a retained worktree with its card dismissed', () => {
     const shown = await waitFor(() => note()!);
     expect(within(shown).queryByRole('button', { name: 'Discard changes and remove' }), 'a clean kept checkout offers no discard, as on the card').toBeNull();
     await userEvent.click(within(shown).getByRole('button', { name: 'Keep the worktree' }));
-    expect(fake.invoked('session.intent.resolveWorktree')).toEqual([{ appSessionId: ID, resolution: 'keep' }]);
+    expect(fake.invoked('session.intent.resolveWorktree')).toEqual([{ appSessionId: BARE_ID, resolution: 'keep' }]);
     await waitFor(() => expect(note()).toBeNull());
   });
 

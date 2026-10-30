@@ -10,6 +10,11 @@
 // logged, never signed again. An event with no upload form is refused `malformed`; one under a writer not this
 // machine's current name, `writer-not-yours`.
 //
+// The uplink. Signed uploads go up through the uplink (uplink.ts): a capped queue for the hub link's room, which lets
+// an upload past its cap go and asks sminos for it again (`resend`), one hole at a time. The relay hands it each signed
+// upload, every refusal sminos hears (the endpoint's own and the hub's), the hub's `resend`s, and each RL1 welcome's
+// comparison of the hub's `have` with the ledger (below).
+//
 // Down. An arriving event goes to sminos only verified, wrapped `{event, signer, owners?}`:
 //   - under one of this machine's own writers (its current name, or a former one `machineNames` binds to its ref), only
 //     as an echo of what the endpoint signed at that `(project, writer, seq)`, the same upload form and signature: this
@@ -67,6 +72,7 @@ import type { InboundIndex } from './inbound-index';
 import type { LegacyKey } from './legacy';
 import type { Members } from './members';
 import { bodyHash, uploadForm, type Signature, type SignatureLedger } from './signature-ledger';
+import { Uplink, type UplinkContext } from './uplink';
 
 type Frame = { t: string } & Record<string, unknown>;
 
@@ -95,18 +101,23 @@ export type RelayContext = {
   ledger: SignatureLedger;
   index: InboundIndex;
   legacy: LegacyKey;
-  hub: { openProject(project: string, handler: LogProject): () => void; send(frame: Frame): boolean };
+  /** `writable`: resolves once the hub link's socket has room (hub-link.ts), which the uplink waits for. */
+  hub: { openProject(project: string, handler: LogProject): () => void; send(frame: Frame): boolean; writable?(): Promise<void> };
   /** A frame down RL10 to sminos (dropped when it isn't connected). */
   toSminos(frame: Frame): void;
   /** A project sminos opened (listings re-judge what they relay). */
   opened(project: string): void;
   now(): number;
   log(line: string): void;
+  /** The uplink's cap, reserve and ask wait (uplink.ts's defaults unless given). */
+  uplink?: UplinkContext['limits'];
 };
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const position = (e: unknown): { writer: string; seq: number } | null => (isObject(e) && typeof e.writer === 'string' && typeof e.seq === 'number' ? { writer: e.writer, seq: e.seq } : null);
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('base64url');
+/** A writer the hub stores (desk-hub's `eventShapeError`): `<machine>/<feed>`, at most 256 characters, none a control. */
+const isWriterName = (writer: string) => /^[^/]+\/.+$/.test(writer) && writer.length <= 256 && ![...writer].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f);
 
 export class LogRelay {
   readonly #ctx: RelayContext;
@@ -121,11 +132,21 @@ export class LogRelay {
    * upload at a time, across connections (a replaced connection's upload may still be signing when the new one resends).
    */
   readonly #signing = new Map<string, Promise<unknown>>();
+  readonly #uplink: Uplink;
   /** The arriving events held for a head that can judge them, by project, then `writer\nseq`, in arrival order. */
   readonly #held = new Map<string, Map<string, { event: unknown; since: number }>>();
 
   constructor(ctx: RelayContext) {
     this.#ctx = ctx;
+    this.#uplink = new Uplink({
+      send: (frame) => ctx.hub.send(frame),
+      writable: () => ctx.hub.writable?.() ?? Promise.resolve(),
+      toSminos: (frame) => ctx.toSminos(frame),
+      signed: (project, writer, seq) => ctx.ledger.get(project, writer, seq) !== null,
+      now: () => ctx.now(),
+      log: (line) => ctx.log(line),
+      limits: ctx.uplink,
+    });
   }
 
   /** The newest event time relayed from `name`'s writers, or null. */
@@ -164,9 +185,15 @@ export class LogRelay {
       else {
         const at = position(e);
         this.#ctx.toSminos({ t: 'refused', project, refusal: { reason: signed.reason, ...(at ?? {}), message: signed.message } });
+        if (at !== null) this.#uplink.refused(project, at.writer, isLogSeq(at.seq) ? at.seq : 0, signed.reason);
       }
     }
-    if (out.length > 0) this.#ctx.hub.send({ t: 'events', project, events: out });
+    if (out.length > 0) this.#uplink.upload(project, out);
+  }
+
+  /** The signed uploads' bytes waiting for the hub link's room. */
+  get uplinkQueued(): number {
+    return this.#uplink.queued;
   }
 
   /** sminos's `rejected` (an event it refused on import) on to the hub. */
@@ -181,6 +208,7 @@ export class LogRelay {
     this.#projects.clear();
     this.#fresh.clear();
     this.#held.clear();
+    this.#uplink.ended();
   }
 
   /** The head, the certificates or the legacy key moved: every held event judged again, in the order it arrived. */
@@ -207,6 +235,7 @@ export class LogRelay {
 
   async #up(project: string, e: unknown): Promise<Uploaded> {
     if (!isObject(e) || typeof e.writer !== 'string' || !isLogSeq(e.seq)) return { reason: 'bad-shape', message: 'not a log event (writer, seq)' };
+    if (!isWriterName(e.writer)) return { reason: 'bad-shape', message: 'writer is <machine>/<feed>, without control characters' };
     const at = `${project}\n${e.writer}\n${e.seq}`;
     const before = this.#signing.get(at) ?? Promise.resolve();
     const run = before.then(() => this.#upAt(project, e as Record<string, unknown> & { writer: string; seq: number }));
@@ -261,7 +290,11 @@ export class LogRelay {
   async fromHub(frame: { t: string; project: string } & Record<string, unknown>): Promise<void> {
     if (!this.#projects.has(frame.project)) return;
     if (frame.t === 'events') return this.#arrived(frame.project, frame.events);
+    // A gap the hub names in what the endpoint signed: a hole, asked for once there is room (uplink.ts).
+    if (frame.t === 'resend' && typeof frame.writer === 'string' && isLogSeq(frame.from) && this.#uplink.resend(frame.project, frame.writer, frame.from)) return;
     this.#ctx.toSminos(frame);
+    const refusal = frame.t === 'refused' && isObject(frame.refusal) ? frame.refusal : null;
+    if (refusal !== null && typeof refusal.writer === 'string' && typeof refusal.reason === 'string') this.#uplink.refused(frame.project, refusal.writer, isLogSeq(refusal.seq) ? refusal.seq : 0, refusal.reason);
     if (frame.t === 'have' && this.#fresh.delete(frame.project)) this.#behind(frame.project, frame.have);
   }
 
@@ -273,7 +306,7 @@ export class LogRelay {
       const name = writerMachine(writer);
       if (name === null || machineNameKey(name) !== machineNameKey(org.name)) continue;
       const at = typeof have[writer] === 'number' ? (have[writer] as number) : 0;
-      if (signed > at) this.#ctx.toSminos({ t: 'resend', project, writer, from: at + 1 });
+      this.#uplink.behind(project, writer, signed > at ? at + 1 : null);
     }
   }
 

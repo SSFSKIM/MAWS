@@ -10,7 +10,7 @@
 // rail looks again then.
 import type { HistoryApi } from '@artifacts/document/editor/history/api';
 import type { ArtifactHost } from '@artifacts/host';
-import type { CommandInput, CommandName, CommandOutput, MawsBridge } from '@shared/ipc/schema';
+import type { CommandInput, CommandName, CommandOutput, MawsBridge, InvokeRest } from '@shared/ipc/schema';
 
 const VERSIONS_QUIET_MS = 500; // a burst of writes re-reads the list once
 
@@ -37,8 +37,8 @@ export interface HistoryApiDeps {
 }
 
 export function createHistoryApi({ artifactId, ipc, host, viewedAt, viewedSeq, whenShown, sessionTitle, log, extraChanges /* P3-E */ }: HistoryApiDeps): HistoryApi {
-  const call = async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> => {
-    const result = await ipc.invoke(name, input);
+  const call = async <N extends CommandName>(name: N, input: CommandInput<N>, ...opts: InvokeRest<N>): Promise<CommandOutput<N>> => {
+    const result = await ipc.invoke(name, input, ...opts);
     if (!result.ok) throw new Error(result.error.message);
     return result.value;
   };

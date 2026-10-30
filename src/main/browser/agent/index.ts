@@ -10,7 +10,7 @@
 // `globalThis.__maws_browser`, so the e2e plays the person and reads the cursor without an engine.
 import type { KeyboardInputEvent, MouseInputEvent, MouseWheelInputEvent } from 'electron';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { SessionStore } from '../../index/sessions';
+import type { SpineView } from '@shared/spine/view';
 import type { InputEmission } from '../input';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import type { ViewManager } from '../view';
@@ -21,16 +21,12 @@ import { Parking, type LeaseHolds } from './visible';
 
 const LAST_INPUTS_KEPT = 32;
 
-// P-24 (Decision Log 29): a side thread reaches its own tabs and its parent session's; anything else, including an
-// index that cannot be read, reaches itself only.
-export function reachableSessions(sessions: Pick<SessionStore, 'get'>, appSessionId: AppSessionId): AppSessionId[] {
-  try {
-    const lineage = sessions.get(appSessionId)?.lineage;
-    if (lineage?.kind === 'side-thread') return [appSessionId, lineage.parentAppSessionId];
-  } catch {
-    // the index is unavailable: self only
-  }
-  return [appSessionId];
+// P-24 (Decision Log 29): a side thread reaches its own tabs and its parent session's; anything else, including a session
+// the spine's view does not hold (none while it is unavailable), reaches itself only. P5 O3-C (reader R7): the lineage is
+// the view's record's.
+export function reachableSessions(view: Pick<SpineView, 'record'>, appSessionId: AppSessionId): AppSessionId[] {
+  const lineage = view.record(appSessionId)?.lineage;
+  return lineage?.kind === 'side-thread' ? [appSessionId, lineage.parentAppSessionId] : [appSessionId];
 }
 
 // Design §13 (b), Decision Log 36: under MAWS_E2E=1 tab ids are `b_` and a zero-padded sequence, starting above any

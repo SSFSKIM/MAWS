@@ -2,7 +2,7 @@
 // port's save dialog at ~/Downloads/<defaultName>; the text is written to a temporary file beside the chosen path and renamed
 // over it, so a failed write never leaves half a file. The renderer names the file, never the directory.
 import { join } from 'node:path';
-import { atomicWriteFile } from './atomic-write';
+import { atomicWriteFile } from '@shared/fs/atomic-write';
 import type { ClientPort } from '@shared/client/port';
 import type { ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';

@@ -127,12 +127,12 @@ export const GitBranchDeletedSchema = z.union([z.strictObject({ deleted: z.liter
 export type GitBranchDeleted = z.infer<typeof GitBranchDeletedSchema>;
 
 const c10Commands = {
-  'git.worktree.list': { input: RepoRootSchema, output: GitWorktreeListSchema, owner: 'main' },
-  'git.worktree.status': { input: z.strictObject({ repoRoot: z.string(), path: z.string() }), output: WorktreeStatusSchema.nullable(), owner: 'main' }, // null: not listed
-  'git.worktree.branch': { input: z.strictObject({ repoRoot: z.string(), branch: z.string() }), output: BranchStatusSchema.nullable(), owner: 'main' }, // null: no such local branch
-  'git.worktree.add': { input: GitWorktreeAddInputSchema, output: WorktreeInfoSchema, owner: 'main' },
-  'git.worktree.remove': { input: GitWorktreeRemoveInputSchema, output: GitWorktreeRemovedSchema, owner: 'main' },
-  'git.worktree.deleteBranch': { input: GitWorktreeDeleteBranchInputSchema, output: GitBranchDeletedSchema, owner: 'main' },
+  'git.worktree.list': { input: RepoRootSchema, output: GitWorktreeListSchema, owner: 'machine' },
+  'git.worktree.status': { input: z.strictObject({ repoRoot: z.string(), path: z.string() }), output: WorktreeStatusSchema.nullable(), owner: 'machine' }, // null: not listed
+  'git.worktree.branch': { input: z.strictObject({ repoRoot: z.string(), branch: z.string() }), output: BranchStatusSchema.nullable(), owner: 'machine' }, // null: no such local branch
+  'git.worktree.add': { input: GitWorktreeAddInputSchema, output: WorktreeInfoSchema, owner: 'machine' },
+  'git.worktree.remove': { input: GitWorktreeRemoveInputSchema, output: GitWorktreeRemovedSchema, owner: 'machine' },
+  'git.worktree.deleteBranch': { input: GitWorktreeDeleteBranchInputSchema, output: GitBranchDeletedSchema, owner: 'machine' },
 } as const satisfies Record<`git.worktree.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // C10 end
 

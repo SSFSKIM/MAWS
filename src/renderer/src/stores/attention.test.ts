@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
+import { addressOf } from '@shared/machine/address';
 import { item, record } from '../../../../test/support/builders';
 import { ev } from '../../../../test/support/events';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { swapOf } from '../composer/docked/swap';
 import { createAttentionStore, REQUEST_RETRY_MS, selectNeedsYou, selectPendingOf } from './attention';
+
+const M = TEST_MACHINE; // the store reads no machine from ids, so the one-machine cases keep bare ids
 
 const S = 's1' as AppSessionId;
 const older = item('s1', 'permission', '2026-09-28T09:00:00Z');
@@ -13,36 +17,36 @@ const newer = item('s1', 'question', '2026-09-28T10:00:00Z');
 describe('attention snapshot and changes in both orders', () => {
   it('a change buffered while the snapshot is outstanding wins over the snapshot’s older items', () => {
     const store = createAttentionStore();
-    store.getState().beginSnapshot();
-    store.getState().applyChanged({ appSessionId: S, items: [newer] });
+    store.getState().beginSnapshot(M);
+    store.getState().applyChanged({ appSessionId: S, items: [newer] }, M);
     expect(store.getState().bySession.get(S)).toBeUndefined(); // buffered, not applied
-    store.getState().applySnapshot([older]);
+    store.getState().applySnapshot([older], M);
     expect(store.getState()).toMatchObject({ loaded: true, pendingReplacements: null });
     expect(store.getState().bySession.get(S)).toEqual([newer]);
   });
 
   it('an empty change buffered before the snapshot leaves the session empty', () => {
     const store = createAttentionStore();
-    store.getState().beginSnapshot();
-    store.getState().applyChanged({ appSessionId: S, items: [] });
-    store.getState().applySnapshot([older]);
+    store.getState().beginSnapshot(M);
+    store.getState().applyChanged({ appSessionId: S, items: [] }, M);
+    store.getState().applySnapshot([older], M);
     expect(store.getState().bySession.get(S)).toEqual([]);
   });
 
   it('keeps the last buffered change per session', () => {
     const store = createAttentionStore();
-    store.getState().beginSnapshot();
-    store.getState().applyChanged({ appSessionId: S, items: [older] });
-    store.getState().applyChanged({ appSessionId: S, items: [newer] });
-    store.getState().applySnapshot([]);
+    store.getState().beginSnapshot(M);
+    store.getState().applyChanged({ appSessionId: S, items: [older] }, M);
+    store.getState().applyChanged({ appSessionId: S, items: [newer] }, M);
+    store.getState().applySnapshot([], M);
     expect(store.getState().bySession.get(S)).toEqual([newer]);
   });
 
   it('a change arriving after the snapshot replaces that session’s list directly', () => {
     const store = createAttentionStore();
-    store.getState().beginSnapshot();
-    store.getState().applySnapshot([older, item('s2', 'plan', '2026-09-28T08:00:00Z')]);
-    store.getState().applyChanged({ appSessionId: S, items: [newer] });
+    store.getState().beginSnapshot(M);
+    store.getState().applySnapshot([older, item('s2', 'plan', '2026-09-28T08:00:00Z')], M);
+    store.getState().applyChanged({ appSessionId: S, items: [newer] }, M);
     expect(store.getState().bySession.get(S)).toEqual([newer]);
     expect(store.getState().bySession.get('s2' as AppSessionId)).toHaveLength(1);
   });
@@ -55,14 +59,14 @@ describe('attention snapshot and changes in both orders', () => {
 
   it('selects a session’s open items and the Needs-you rows', () => {
     const store = createAttentionStore();
-    store.getState().beginSnapshot();
-    store.getState().applySnapshot([older, item('s1', 'plan', '2026-09-28T08:00:00Z', { state: 'retired' })]);
+    store.getState().beginSnapshot(M);
+    store.getState().applySnapshot([older, item('s1', 'plan', '2026-09-28T08:00:00Z', { state: 'retired' })], M);
     expect(selectPendingOf(store.getState(), S)).toEqual([older]);
     const sessions = { records: new Map([[S, record('s1')]]), recordsVersion: 1 };
     const rows = selectNeedsYou(store.getState(), sessions);
     expect(rows.map((r) => r.appSessionId)).toEqual([S]);
     expect(selectNeedsYou(store.getState(), sessions)).toBe(rows); // memoised while the versions stand
-    store.getState().applyChanged({ appSessionId: S, items: [] });
+    store.getState().applyChanged({ appSessionId: S, items: [] }, M);
     expect(selectNeedsYou(store.getState(), sessions)).toEqual([]);
   });
 });
@@ -136,7 +140,7 @@ describe('the originating request of an item, fetched once', () => {
   it('Retry forgets an unreadable read and asks again; an answered or retired item’s failure is forgotten', async () => {
     const store = createAttentionStore();
     const fake = fakeClient();
-    store.getState().applySnapshot([older, newer]);
+    store.getState().applySnapshot([older, newer], M);
     store.setState({ requests: new Map([[older.id, null], [newer.id, null]]), unreadable: new Map([[older.id, 'no host'], [newer.id, 'no host']]) });
     const retry = store.getState().retryRequest(fake.client, older);
     expect(store.getState().requests.has(older.id)).toBe(false); // unread again: the docked swap waits for it
@@ -144,7 +148,7 @@ describe('the originating request of an item, fetched once', () => {
     await fake.reply('attention.request', { event });
     await retry;
     expect(store.getState().requests.get(older.id)).toBe(event);
-    store.getState().applyChanged({ appSessionId: S, items: [older, { ...newer, state: 'delivered' }] }); // newer answered
+    store.getState().applyChanged({ appSessionId: S, items: [older, { ...newer, state: 'delivered' }] }, M); // newer answered
     expect(store.getState().unreadable.size).toBe(0);
     expect(store.getState().requests.has(newer.id)).toBe(false);
     expect(store.getState().requests.get(older.id)).toBe(event); // a read request stays cached
@@ -155,17 +159,60 @@ describe('the originating request of an item, fetched once', () => {
 describe('a question card’s draft', () => {
   it('is kept while its item is open (pending or delivered) and dropped once it retires or leaves', () => {
     const store = createAttentionStore();
-    store.getState().applySnapshot([older, newer]);
+    store.getState().applySnapshot([older, newer], M);
     const draft = { step: 1, reached: 1, selected: { q: ['Red'] }, other: {} };
     store.getState().setDraft(newer.id, draft);
     store.getState().setDraft(older.id, draft);
-    store.getState().applyChanged({ appSessionId: S, items: [older, { ...newer, state: 'delivered' }] });
+    store.getState().applyChanged({ appSessionId: S, items: [older, { ...newer, state: 'delivered' }] }, M);
     expect(store.getState().drafts.get(newer.id)).toBe(draft);
-    store.getState().applyChanged({ appSessionId: S, items: [older, { ...newer, state: 'retired' }] });
+    store.getState().applyChanged({ appSessionId: S, items: [older, { ...newer, state: 'retired' }] }, M);
     expect(store.getState().drafts.has(newer.id)).toBe(false);
     expect(store.getState().drafts.get(older.id)).toBe(draft);
-    store.getState().beginSnapshot();
-    store.getState().applySnapshot([]);
+    store.getState().beginSnapshot(M);
+    store.getState().applySnapshot([], M);
     expect(store.getState().drafts.size).toBe(0);
+  });
+});
+
+// P5 O6 M4 (OX2): a machine's snapshot answers for that machine's sessions only, and buffers that machine's changes.
+describe('attention partitions its snapshots by machine', () => {
+  const onB = (id: string) => addressOf(OTHER_MACHINE, id) as AppSessionId;
+  const onBItem = item(onB('s9'), 'permission', '2026-09-28T09:30:00Z');
+
+  it('B’s snapshot replaces B’s sessions and none of A’s', () => {
+    const store = createAttentionStore();
+    store.getState().beginSnapshot(M);
+    store.getState().applySnapshot([older], M);
+    store.getState().beginSnapshot(OTHER_MACHINE);
+    store.getState().applySnapshot([onBItem], OTHER_MACHINE);
+    store.getState().beginSnapshot(OTHER_MACHINE);
+    store.getState().applySnapshot([], OTHER_MACHINE);
+    expect(store.getState().bySession.get(S)).toEqual([older]);
+    expect(store.getState().bySession.has(onB('s9'))).toBe(false);
+  });
+
+  it('while B’s snapshot is outstanding, A’s changes apply and B’s wait for it', () => {
+    const store = createAttentionStore();
+    store.getState().beginSnapshot(OTHER_MACHINE);
+    store.getState().applyChanged({ appSessionId: S, items: [newer] }, M);
+    store.getState().applyChanged({ appSessionId: onB('s9'), items: [onBItem] }, OTHER_MACHINE);
+    expect(store.getState().bySession.get(S)).toEqual([newer]);
+    expect(store.getState().bySession.has(onB('s9'))).toBe(false);
+    expect([...(store.getState().pendingReplacements?.keys() ?? [])]).toEqual([onB('s9')]);
+    store.getState().applySnapshot([], OTHER_MACHINE);
+    expect(store.getState().bySession.get(onB('s9'))).toEqual([onBItem]);
+    expect(store.getState().pendingReplacements).toBeNull();
+  });
+
+  it('a cancelled snapshot replays its buffer and removes nothing', () => {
+    const store = createAttentionStore();
+    store.getState().beginSnapshot(OTHER_MACHINE);
+    store.getState().applySnapshot([onBItem], OTHER_MACHINE);
+    store.getState().beginSnapshot(OTHER_MACHINE);
+    store.getState().applyChanged({ appSessionId: onB('s8'), items: [] }, OTHER_MACHINE);
+    store.getState().cancelSnapshot(OTHER_MACHINE);
+    expect(store.getState().bySession.get(onB('s9'))).toEqual([onBItem]);
+    expect(store.getState().bySession.get(onB('s8'))).toEqual([]);
+    expect(store.getState().pendingReplacements).toBeNull();
   });
 });

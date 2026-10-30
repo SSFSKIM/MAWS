@@ -12,7 +12,9 @@ import { showAppWindow } from './window-show';
 import { attributeConsole, guardFrames, guardWindowNavigation, isCspExempt } from './artifacts/policies';
 import { emit } from './ipc/events';
 // E2 end
-import type { ResolvedTheme } from './settings/store';
+import type { ResolvedTheme } from './client/settings-store'; // P5 O3-A: the client half's
+import { localMachineArgument } from '@shared/machine/page-argument'; // P5 O6 M2
+import { localMachine } from './machine/local'; // P5 O6 M2
 
 // Each theme's `--bg` (X7), so the window's first frame and any area the page has not painted match the page.
 export const THEME_BACKGROUND: Record<ResolvedTheme, string> = { light: '#faf9f6', dark: '#131313' };
@@ -80,6 +82,7 @@ export function createWindow(theme: ResolvedTheme, placement: WindowState | null
       webSecurity: true,
       plugins: true, // E2: Chromium's own PDF viewer, for a delivered PDF's frame (Design §3); Chromium ships no other plugin
       preload: join(__dirname, '../preload/index.js'),
+      additionalArguments: [localMachineArgument(localMachine())], // P5 O6 M2: window.maws.localMachine, read by the preload
     },
   });
   // E2 start: an app window (a capture window is not one), its store frames guarded and their console attributed

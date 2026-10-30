@@ -6,15 +6,17 @@
 // A page that answers `restarted` (its cursor's revision has gone) starts its query again the same way.
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useState } from 'react';
-import type { CommandInput, CommandName, CommandOutput, MawsBridge } from '@shared/ipc/schema';
+import type { CommandInput, CommandName, CommandOutput, InvokeRest, MawsBridge } from '@shared/ipc/schema';
 import type { CatalogPage, CatalogQueryInput, CatalogSourceStatus, CatalogTab } from '@shared/ipc/schema/catalog';
 import { ipc } from '../../ipc/client';
 import { IpcCommandError, queryClient } from '../../ipc/query';
 
 const ROOT = ['maws', 'catalog'] as const;
+// P5 O6 M4: Discover is this machine's, its directory one of this machine's, until the catalog spans machines (O4).
+const LOCAL = () => ({ machine: ipc.localMachine });
 
-async function invoke<N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> {
-  const answer = await ipc.invoke(name, input);
+async function invoke<N extends CommandName>(name: N, input: CommandInput<N>, ...opts: InvokeRest<N>): Promise<CommandOutput<N>> {
+  const answer = await ipc.invoke(name, input, ...opts);
   if (!answer.ok) throw new IpcCommandError(answer.error);
   return answer.value;
 }
@@ -41,10 +43,10 @@ export function connectCatalogEvents(bridge: MawsBridge = ipc, client: QueryClie
 }
 
 export const useCatalogHome = (tab: CatalogTab, cwd: string | null) =>
-  useQuery<CommandOutput<'catalog.home'>, IpcCommandError>({ queryKey: [...ROOT, 'home', { tab, cwd }], queryFn: () => invoke('catalog.home', { tab, cwd }), refetchOnWindowFocus: false, staleTime: Infinity });
+  useQuery<CommandOutput<'catalog.home'>, IpcCommandError>({ queryKey: [...ROOT, 'home', { tab, cwd }], queryFn: () => invoke('catalog.home', { tab, cwd }, LOCAL()), refetchOnWindowFocus: false, staleTime: Infinity });
 
 export const useCatalogItem = (id: string | null, cwd: string | null) =>
-  useQuery<CommandOutput<'catalog.item'>, IpcCommandError>({ queryKey: [...ROOT, 'item', { id, cwd }], queryFn: () => invoke('catalog.item', { id: id!, cwd }), enabled: id !== null, refetchOnWindowFocus: false, staleTime: Infinity });
+  useQuery<CommandOutput<'catalog.item'>, IpcCommandError>({ queryKey: [...ROOT, 'item', { id, cwd }], queryFn: () => invoke('catalog.item', { id: id!, cwd }, LOCAL()), enabled: id !== null, refetchOnWindowFocus: false, staleTime: Infinity });
 
 /** A query's pages, the next one asked by `more()`; a page whose cursor's revision has gone starts the query again. */
 export function useCatalogQuery(input: Omit<CatalogQueryInput, 'cursor'>) {
@@ -52,7 +54,7 @@ export function useCatalogQuery(input: Omit<CatalogQueryInput, 'cursor'>) {
   const queryKey = [...ROOT, 'query', input] as const;
   const query = useInfiniteQuery<CatalogPage, IpcCommandError, InfiniteData<CatalogPage, string | null>, typeof queryKey, string | null>({
     queryKey,
-    queryFn: ({ pageParam }) => invoke('catalog.query', { ...input, cursor: pageParam }),
+    queryFn: ({ pageParam }) => invoke('catalog.query', { ...input, cursor: pageParam }, LOCAL()),
     initialPageParam: null,
     getNextPageParam: (last) => last.nextCursor,
     refetchOnWindowFocus: false,
@@ -110,7 +112,7 @@ export const useCatalogIcon = (url: string | null) =>
 export const useCatalogPostures = (cwd: string | null, servers: readonly { name: string; scope: string }[] | undefined, readAt: number) =>
   useQuery<CommandOutput<'catalog.postures'>, IpcCommandError>({
     queryKey: [...ROOT, 'postures', { cwd, readAt }],
-    queryFn: () => invoke('catalog.postures', { cwd }),
+    queryFn: () => invoke('catalog.postures', { cwd }, LOCAL()),
     enabled: servers !== undefined && servers.length > 0,
     refetchOnWindowFocus: false,
     staleTime: Infinity,

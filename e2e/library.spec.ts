@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { artifactUrl } from '../src/shared/artifacts/scheme';
-import { MIGRATIONS } from '../src/main/index/migrations';
+import { MIGRATIONS } from '../src/services/index/migrations';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { ownTitles } from './support/library';
 import { invoke, pageParentJournal, sideThreadOf, startSessionCase, threadJournal, value } from './support/library-session'; // M5b
@@ -52,7 +52,7 @@ async function libraryRevision(page: Page, artifactId: string): Promise<number |
   return (await ok<{ row: { revision: number } | null }>(page, 'library.get', { artifactId })).row?.revision ?? null;
 }
 
-// Main's library stops following change events until the next host connection (src/main/library/index.ts's seam,
+// Main's library stops following change events until the next host connection (src/services/library/index.ts's seam,
 // MAWS_E2E=1 only), once the reads it has already taken have landed.
 async function holdLibraryRefreshes(launch: MawsLaunch): Promise<void> {
   await launch.app.evaluate(() => (globalThis as unknown as { __maws_library: { holdRefreshes(): Promise<void> } }).__maws_library.holdRefreshes());
@@ -239,12 +239,15 @@ function schemaOf(db: DatabaseSync): { version: unknown; objects: unknown[] } {
   };
 }
 
-// An index at version 9 as an install before P3-L left it: drop the library tables
-// (10/11) and UX1-B's conversation search (12), checked against migrations 1 to 9.
+// An index at version 9 as an install before P3-L left it: restore the browser's three tables (5 to 7), which P5 O3-A's
+// migration 14 moved to the browser's own database, and drop P5 O6 M5's org columns (13), the library tables (10/11) and
+// UX1-B's conversation search (12), checked against migrations 1 to 9.
 function rewindIndexTo9(path: string): void {
   const db = new DatabaseSync(path);
   try {
-    expect(schemaOf(db).version, 'the first launch left the index at 12').toBe(12);
+    expect(schemaOf(db).version, 'the first launch left the index at 14').toBe(14);
+    for (const migration of MIGRATIONS.filter((m) => m.version >= 5 && m.version <= 7)) db.exec(migration.sql);
+    db.exec('ALTER TABLE projects DROP COLUMN org_smns_id; ALTER TABLE projects DROP COLUMN org_source; ALTER TABLE projects DROP COLUMN org_name; ALTER TABLE projects DROP COLUMN org_key;');
     db.exec('DROP TRIGGER session_text_delete; DROP TABLE session_text_chunks; DROP TABLE session_text_state; DROP TABLE session_text;');
     db.exec('DROP TABLE library_text; DROP TABLE library_links; DROP TABLE library_artifacts; DROP TABLE library_spaces; PRAGMA user_version = 9;');
     const template = new DatabaseSync(':memory:');
@@ -334,7 +337,7 @@ test('an index at version 9 beside a populated host store migrates to the curren
   launch = null;
   const db = new DatabaseSync(join(userData, 'index.sqlite'), { readOnly: true });
   try {
-    expect(schemaOf(db).version, 'the index is at 12 again').toBe(12);
+    expect(schemaOf(db).version, 'the index is at 14 again').toBe(14);
     expect((db.prepare("SELECT count(*) AS n FROM library_artifacts WHERE kind <> 'design_system'").get() as { n: number }).n).toBe(3); // the case's own three (P3-D seeds design systems)
   } finally {
     db.close();

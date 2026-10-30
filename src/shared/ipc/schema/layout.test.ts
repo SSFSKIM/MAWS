@@ -1,5 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { commands, events, LAYOUT_DEFAULTS, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, PanelActiveNoSessionSchema, PanelParamsSchema, PanelSurfacesSchema, LayoutRegionsSchema, PanelPinnedSchema, PanelSessionStateSchema, StoredMainSchema, StoredRegionsSchema, TabRefSchema, tabId, UNPINNABLE_KINDS, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
+import type { MachineRef } from '../../machine/ref';
+import { commands, events, LAYOUT_DEFAULTS, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, PanelActiveNoSessionSchema, PanelParamsSchema, PanelSurfacesSchema, LayoutRegionsSchema, PanelPinnedSchema, PanelSessionStateSchema, storedMainSchema, storedPanelSurfacesSchema, storedRegionsSchema, TabRefSchema, tabId, UNPINNABLE_KINDS, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
+
+// P5 O6 M2 (OX2): a layout holds addresses; one written before O6 held bare ids, every one the local machine's, and reads
+// lifted with it.
+const L = 'LocalMachineRef0000000' as MachineRef;
+const at = (id: string) => `${L}/${id}`;
+const StoredMainSchema = storedMainSchema(L);
+const StoredRegionsSchema = storedRegionsSchema(L);
+// A session's tab as version 2 held it (bare) and as version 3 holds it.
+const session = (n: number) => ({ id: `session:a${n}`, kind: 'session', appSessionId: `a${n}`, pinned: false });
+const lifted = (n: number) => ({ id: `session:${at(`a${n}`)}`, kind: 'session', appSessionId: at(`a${n}`), pinned: false });
 
 describe('layout value shapes', () => {
   it('validates its own defaults', () => {
@@ -11,55 +22,111 @@ describe('layout value shapes', () => {
     // W5: the Overview floats over the main area rather than being a tab, so a fresh layout opens on one empty pane and
     // the panel in its default place.
     // W12: one tab set per project; nothing open is the no-project set's one empty pane.
-    expect(LAYOUT_DEFAULTS.main).toEqual({ version: 2, current: 'none', sets: { none: { panes: [{ tabs: [], activeTabId: '' }], focusedPane: 0, splitRatio: 0.5 } }, closedTabs: [] });
+    expect(LAYOUT_DEFAULTS.main).toEqual({ version: 3, current: 'none', sets: { none: { panes: [{ tabs: [], activeTabId: '' }], focusedPane: 0, splitRatio: 0.5 } }, closedTabs: [] });
     expect(LAYOUT_DEFAULTS.regions.overview).toBeNull();
   });
 
-  // W12: `main.tabs` version 2 holds a set per project; version 1 is still read (the store files it by project).
-  it('reads main.tabs version 2 as it is and version 1 as version 1; a set keyed by a project or none', () => {
-    const set = { panes: [{ tabs: [{ id: 'session:a', kind: 'session', appSessionId: 'a', pinned: false }], activeTabId: 'session:a' }], focusedPane: 0, splitRatio: 0.5 };
-    const v2 = { version: 2, current: 'proj-x', sets: { 'proj-x': set, none: LAYOUT_DEFAULTS.main.sets.none }, closedTabs: [] };
-    expect(StoredMainSchema.parse(v2)).toEqual(v2);
-    const v1 = { version: 1, ...set, closedTabs: [] };
-    expect(StoredMainSchema.parse(v1)).toEqual(v1);
-    expect(LayoutMainSchema.safeParse(v1).success).toBe(false);
-    expect(StoredMainSchema.safeParse({ ...v2, sets: { 'proj-x': { ...set, extra: 1 } } }).success).toBe(false);
-    expect(StoredMainSchema.safeParse({ ...v2, current: '' }).success).toBe(false);
+  // W12: `main.tabs` holds a set per project; version 1 is still read (the store files it by project). P5 O6 M2: version 3
+  // holds addresses; version 2 reads lifted to version 3, and version 1 as version 1 with its tabs lifted.
+  it('reads main.tabs version 3 as it is, version 2 lifted to version 3 and version 1 lifted as version 1; a set keyed by a project or none', () => {
+    const set = { panes: [{ tabs: [lifted(1)], activeTabId: lifted(1).id }], focusedPane: 0, splitRatio: 0.5 };
+    const v3 = { version: 3, current: at('proj-x'), sets: { [at('proj-x')]: set, none: LAYOUT_DEFAULTS.main.sets.none }, closedTabs: [] };
+    expect(StoredMainSchema.parse(v3)).toEqual(v3);
+    const bare = { panes: [{ tabs: [session(1)], activeTabId: session(1).id }], focusedPane: 0, splitRatio: 0.5 };
+    const v2 = { version: 2, current: 'proj-x', sets: { 'proj-x': bare, none: LAYOUT_DEFAULTS.main.sets.none }, closedTabs: [session(2)] };
+    expect(StoredMainSchema.parse(v2)).toEqual({ ...v3, closedTabs: [lifted(2)] });
+    expect(StoredMainSchema.parse({ version: 1, ...bare, closedTabs: [] })).toEqual({ version: 1, ...set, closedTabs: [] });
+    expect(LayoutMainSchema.safeParse({ version: 1, ...set, closedTabs: [] }).success).toBe(false);
+    expect(LayoutMainSchema.safeParse(v2).success).toBe(false);
+    expect(StoredMainSchema.safeParse({ ...v3, sets: { [at('proj-x')]: { ...set, extra: 1 } } }).success).toBe(false);
+    expect(StoredMainSchema.safeParse({ ...v3, current: '' }).success).toBe(false);
+  });
+
+  // P5 O6 M2: every kind of tab version 2 held, lifted: its session's id, a file's or an artifact's machine, its tab id,
+  // and every place that names a tab id (a pane's active tab, a floating set's tab) or a project (a set's key, `current`)
+  it('lifts every tab of version 2, with every id that names one', () => {
+    const agent = { id: 'agent:a1:g1', kind: 'agent', appSessionId: 'a1', agentId: 'g1', pinned: false };
+    const file = { id: 'file:/w/x.ts', kind: 'file', path: '/w/x.ts', line: 3, appSessionId: 'a1', pinned: true };
+    const loose = { id: 'file:/w/y.ts', kind: 'file', path: '/w/y.ts', line: null, appSessionId: null, pinned: false };
+    const diff = { id: 'diff:a1:HEAD', kind: 'diff', appSessionId: 'a1', ref: 'HEAD', pinned: false };
+    const artifact = { id: 'artifact:0b6c', kind: 'artifact', artifactId: '0b6c', pinned: false };
+    const browser = { id: 'browser:a1:b_0123456789ab', kind: 'browser', appSessionId: 'a1', browserTabId: 'b_0123456789ab', pinned: false };
+    const settings = { id: 'settings', kind: 'settings', section: null, pinned: false };
+    const v2 = {
+      version: 2,
+      current: 'proj-x',
+      sets: {
+        'proj-x': { panes: [{ tabs: [session(1), agent, file], activeTabId: 'file:/w/x.ts' }, { tabs: [diff, browser], activeTabId: 'session:a1' }], focusedPane: 1, splitRatio: 0.3, floating: { sessionTabId: 'session:a1', foldedPanel: true } },
+        none: { panes: [{ tabs: [loose, artifact, settings], activeTabId: 'artifact:0b6c' }], focusedPane: 0, splitRatio: 0.5 },
+      },
+      closedTabs: [file],
+    };
+    const v3 = {
+      version: 3,
+      current: at('proj-x'),
+      sets: {
+        [at('proj-x')]: {
+          panes: [
+            { tabs: [lifted(1), { ...agent, id: `agent:${at('a1')}:g1`, appSessionId: at('a1') }, { ...file, id: `file:${L}:/w/x.ts`, appSessionId: at('a1'), machine: L }], activeTabId: `file:${L}:/w/x.ts` },
+            { tabs: [{ ...diff, id: `diff:${at('a1')}:HEAD`, appSessionId: at('a1') }, { ...browser, id: `browser:${at('a1')}:b_0123456789ab`, appSessionId: at('a1') }], activeTabId: lifted(1).id },
+          ],
+          focusedPane: 1,
+          splitRatio: 0.3,
+          floating: { sessionTabId: lifted(1).id, foldedPanel: true },
+        },
+        none: { panes: [{ tabs: [{ ...loose, id: `file:${L}:/w/y.ts`, machine: L }, { ...artifact, id: `artifact:${L}:0b6c`, machine: L }, settings], activeTabId: `artifact:${L}:0b6c` }], focusedPane: 0, splitRatio: 0.5 },
+      },
+      closedTabs: [{ ...file, id: `file:${L}:/w/x.ts`, appSessionId: at('a1'), machine: L }],
+    };
+    expect(StoredMainSchema.parse(v2)).toEqual(v3);
+    expect(StoredMainSchema.parse(v3)).toEqual(v3); // idempotent: version 3 reads as it is
+    const tabs: { id: string }[] = [lifted(1), ...v3.sets[at('proj-x')]!.panes.flatMap((pane): { id: string }[] => pane.tabs), ...v3.sets.none!.panes[0]!.tabs];
+    for (const tab of tabs) expect(tabId(TabRefSchema.parse(tab)), tab.id).toBe(tab.id);
   });
 
   // W11: version 3's expanded projects replace version 2's open page and version 1's collapsed lists; an earlier value
   // keeps its sizes, sort and Overview rect. P3-G (§D1.1): version 4 adds the floating state and the card's sizes; every
-  // earlier version reads as version 4, not floating and with no card sizes.
-  it('reads a version-1, version-2 or version-3 regions value as version 4', () => {
+  // earlier version reads as version 4, not floating and with no card sizes. P5 O6 M2: version 5 holds addresses, and
+  // every earlier version reads as version 5, its project ids lifted ('other' kept).
+  it('reads a version-1, version-2, version-3 or version-4 regions value as version 5', () => {
     const v1 = {
       version: 1,
       sidebar: { width: 240, collapsed: true, sort: 'recency', collapsedProjects: ['proj-a'], collapsedSections: ['pinned'] },
       panel: { width: 320, collapsed: false, maximized: true },
     };
     const panel = { ...v1.panel, floating: false };
-    expect(StoredRegionsSchema.parse(v1)).toEqual({ version: 4, sidebar: { width: 240, collapsed: true, sort: 'recency', expandedProjects: [] }, panel, overview: null, floatingCard: {} });
+    expect(StoredRegionsSchema.parse(v1)).toEqual({ version: 5, sidebar: { width: 240, collapsed: true, sort: 'recency', expandedProjects: [] }, panel, overview: null, floatingCard: {} });
     const v2 = { version: 2, sidebar: { width: 260, collapsed: false, sort: 'priority', openProject: 'other' }, panel: v1.panel, overview: { x: 40, y: 12, width: 880, height: 640 } };
-    expect(StoredRegionsSchema.parse(v2)).toEqual({ version: 4, sidebar: { width: 260, collapsed: false, sort: 'priority', expandedProjects: ['other'] }, panel, overview: v2.overview, floatingCard: {} });
+    expect(StoredRegionsSchema.parse(v2)).toEqual({ version: 5, sidebar: { width: 260, collapsed: false, sort: 'priority', expandedProjects: ['other'] }, panel, overview: v2.overview, floatingCard: {} });
+    expect(StoredRegionsSchema.parse({ ...v2, sidebar: { ...v2.sidebar, openProject: 'proj-a' } }).sidebar.expandedProjects).toEqual([at('proj-a')]);
     expect(StoredRegionsSchema.parse({ ...v2, sidebar: { ...v2.sidebar, openProject: null } }).sidebar.expandedProjects).toEqual([]);
     const v3 = { version: 3, sidebar: { width: 280, collapsed: false, sort: 'recency', expandedProjects: ['proj-a', 'other'] }, panel: { width: 500, collapsed: true, maximized: false }, overview: v2.overview };
-    expect(StoredRegionsSchema.parse(v3)).toEqual({ ...v3, version: 4, panel: { ...v3.panel, floating: false }, floatingCard: {} });
+    expect(StoredRegionsSchema.parse(v3)).toEqual({ ...v3, version: 5, sidebar: { ...v3.sidebar, expandedProjects: [at('proj-a'), 'other'] }, panel: { ...v3.panel, floating: false }, floatingCard: {} });
     expect(StoredRegionsSchema.safeParse({ ...v3, sidebar: { ...v3.sidebar, openProject: null } }).success).toBe(false);
     // An older shape never carries the newer fields
     expect(StoredRegionsSchema.safeParse({ ...v3, panel: { ...v3.panel, floating: true } }).success).toBe(false);
     expect(StoredRegionsSchema.safeParse({ ...v3, floatingCard: {} }).success).toBe(false);
+    // version 4: its project ids, and the session inside a main tab's card key, lifted; a panel tab's key kept
+    const v4 = { ...v3, version: 4, panel: { ...v3.panel, floating: true }, floatingCard: { summary: { w: 420, h: 380 }, 'browser:t1': { w: 1, h: 2 }, 'main:session:a1': { w: 3, h: 4 }, 'main:file:/w/x.ts': { w: 5, h: 6 } } };
+    expect(StoredRegionsSchema.parse(v4)).toEqual({
+      ...v4,
+      version: 5,
+      sidebar: { ...v3.sidebar, expandedProjects: [at('proj-a'), 'other'] },
+      floatingCard: { summary: { w: 420, h: 380 }, 'browser:t1': { w: 1, h: 2 }, [`main:session:${at('a1')}`]: { w: 3, h: 4 }, [`main:file:${L}:/w/x.ts`]: { w: 5, h: 6 } },
+    });
   });
 
-  it('reads version 4 as it is: the floating state and the card sizes per panel tab', () => {
-    const v4 = { ...LAYOUT_DEFAULTS.regions, panel: { width: 420, collapsed: false, maximized: false, floating: true }, floatingCard: { summary: { w: 420, h: 380 }, 'browser:t1': { w: 500, h: 600 } } };
-    expect(StoredRegionsSchema.parse(v4)).toEqual(v4);
-    expect(LayoutRegionsSchema.safeParse({ ...v4, panel: { ...v4.panel, floating: undefined } }).success).toBe(false);
-    expect(LayoutRegionsSchema.safeParse({ ...v4, floatingCard: { summary: { w: 420.5, h: 380 } } }).success).toBe(false);
-    expect(LayoutRegionsSchema.safeParse({ ...v4, floatingCard: { summary: { w: 420, h: 380, x: 0 } } }).success).toBe(false);
-    expect(LAYOUT_DEFAULTS.regions).toMatchObject({ version: 4, panel: { floating: false }, floatingCard: {} });
+  it('reads version 5 as it is: the floating state and the card sizes per panel tab', () => {
+    const v5 = { ...LAYOUT_DEFAULTS.regions, panel: { width: 420, collapsed: false, maximized: false, floating: true }, floatingCard: { summary: { w: 420, h: 380 }, 'browser:t1': { w: 500, h: 600 } } };
+    expect(StoredRegionsSchema.parse(v5)).toEqual(v5);
+    expect(LayoutRegionsSchema.safeParse({ ...v5, panel: { ...v5.panel, floating: undefined } }).success).toBe(false);
+    expect(LayoutRegionsSchema.safeParse({ ...v5, floatingCard: { summary: { w: 420.5, h: 380 } } }).success).toBe(false);
+    expect(LayoutRegionsSchema.safeParse({ ...v5, floatingCard: { summary: { w: 420, h: 380, x: 0 } } }).success).toBe(false);
+    expect(LAYOUT_DEFAULTS.regions).toMatchObject({ version: 5, panel: { floating: false }, floatingCard: {} });
   });
 
   it('accepts the key grammar and nothing else', () => {
-    for (const key of ['regions', 'main.tabs', 'panel.pinned', 'panel.app-1', 'window.main', 'usage.banners' /* C7 */]) {
+    for (const key of ['regions', 'main.tabs', 'panel.pinned', 'panel.app-1', `panel.${at('app-1')}` /* P5 O6 M2 */, 'window.main', 'usage.banners' /* C7 */]) {
       expect(LayoutKeySchema.safeParse(key).success, key).toBe(true);
     }
     for (const key of ['main', 'panel.', 'panel.a.b', 'window.other', 'x', 'usage.other' /* C7 */, 'panelTools.other' /* P4-B3 */]) expect(LayoutKeySchema.safeParse(key).success, key).toBe(false);
@@ -80,33 +147,38 @@ describe('layout value shapes', () => {
   });
 
   it('admits the additive surface key and bounded versioned stacks without requiring their refs to be present', () => {
-    const value = { version: 1, stacks: { 'app-a': ['files:1', 'terminal:1'], '@none': [] }, pinnedTools: ['files'], contexts: { 'project-a': 'app-a', none: 'app-b' } };
+    const value = { version: 2, stacks: { [at('app-a')]: ['files:1', 'terminal:1'], '@none': [] }, pinnedTools: ['files'], contexts: { [at('project-a')]: at('app-a'), none: at('app-b') } };
     expect(LayoutKeySchema.parse('panelTools.surfaces')).toBe('panelTools.surfaces');
     expect(PanelSurfacesSchema.parse(value)).toEqual(value);
-    expect(PanelSurfacesSchema.safeParse({ ...value, version: 2 }).success).toBe(false);
-    expect(PanelSurfacesSchema.safeParse({ ...value, stacks: { 'app-a': ['a', 'b', 'c'] } }).success).toBe(false);
+    expect(PanelSurfacesSchema.safeParse({ ...value, version: 1 }).success).toBe(false);
+    expect(PanelSurfacesSchema.safeParse({ ...value, stacks: { [at('app-a')]: ['a', 'b', 'c'] } }).success).toBe(false);
     expect(PanelSurfacesSchema.safeParse({ ...value, contexts: { none: null } }).success).toBe(false);
     expect(PanelSurfacesSchema.safeParse({ ...value, extra: true }).success).toBe(false);
+    // P5 O6 M2: version 1 reads lifted: a session's stack key, a context's project key and every context's session
+    const v1 = { version: 1, stacks: { 'app-a': ['files:1', 'terminal:1'], '@none': [] }, pinnedTools: ['files'], contexts: { 'project-a': 'app-a', none: 'app-b' } };
+    expect(storedPanelSurfacesSchema(L).parse(v1)).toEqual(value);
+    expect(storedPanelSurfacesSchema(L).parse(value)).toEqual(value);
   });
 
   it('derives deterministic tab ids', () => {
     expect(tabId({ kind: 'session', appSessionId: 'a1' as never })).toBe('session:a1');
     expect(tabId({ kind: 'agent', appSessionId: 'a1' as never, agentId: 'g1' as never })).toBe('agent:a1:g1');
-    expect(tabId({ kind: 'file', path: '/x/y.ts', line: 3, appSessionId: null })).toBe('file:/x/y.ts');
+    expect(tabId({ kind: 'file', path: '/x/y.ts', line: 3, appSessionId: null, machine: L })).toBe(`file:${L}:/x/y.ts`); // P5 O6 M2: with its machine
     expect(tabId({ kind: 'diff', appSessionId: 'a1' as never, ref: 'HEAD' })).toBe('diff:a1:HEAD');
     expect(tabId({ kind: 'diagnostics' })).toBe('diagnostics');
-    expect(tabId({ kind: 'artifact', artifactId: '0b6c2f2e-6b1a-4d55-9a57-3f1f6f0c2a11' })).toBe('artifact:0b6c2f2e-6b1a-4d55-9a57-3f1f6f0c2a11'); // P3-L
+    expect(tabId({ kind: 'artifact', artifactId: '0b6c2f2e-6b1a-4d55-9a57-3f1f6f0c2a11', machine: L })).toBe(`artifact:${L}:0b6c2f2e-6b1a-4d55-9a57-3f1f6f0c2a11`); // P3-L; P5 O6 M2
   });
 
-  // P3-L (M6b; Decision Log 10, 18d): the `deliverable` kind is gone from the union; `main.tabs` stays at version 2 and
-  // its reader turns a stored deliverable tab into the artifact tab of the same id (the record's id is the artifact's),
-  // so the owner's open tabs survive the upgrade
+  // P3-L (M6b; Decision Log 10, 18d): the `deliverable` kind is gone from the union; its reader turns a stored deliverable
+  // tab into the artifact tab of the same id (the record's id is the artifact's), so the owner's open tabs survive the
+  // upgrade. P5 O6 M2: a deliverable tab is older than version 3, so its artifact tab reads lifted, with the local machine.
   describe('a stored main.tabs holding a deliverable tab (before P3-L’s cutover)', () => {
     const ID = '0b6c2f2e-6b1a-4d55-9a57-3f1f6f0c2a11';
-    const session = (n: number) => ({ id: `session:a${n}`, kind: 'session', appSessionId: `a${n}`, pinned: false });
     const deliverable = (id = ID, pinned = false) => ({ id: `deliverable:App-1:${id}`, kind: 'deliverable', appSessionId: 'App-1', deliverableId: id, pinned });
     const artifact = (id = ID, pinned = false) => ({ id: `artifact:${id}`, kind: 'artifact', artifactId: id, pinned });
+    const liftedArtifact = (id = ID, pinned = false) => ({ id: `artifact:${L}:${id}`, kind: 'artifact', artifactId: id, machine: L, pinned });
     const v2 = (panes: unknown[], closedTabs: unknown[] = []) => ({ version: 2, current: 'proj-x', sets: { 'proj-x': { panes, focusedPane: 0, splitRatio: 0.4 }, none: LAYOUT_DEFAULTS.main.sets.none }, closedTabs });
+    const v3 = (panes: unknown[], closedTabs: unknown[] = []) => ({ version: 3, current: at('proj-x'), sets: { [at('proj-x')]: { panes, focusedPane: 0, splitRatio: 0.4 }, none: LAYOUT_DEFAULTS.main.sets.none }, closedTabs });
 
     it('is no tab kind of this build', () => {
       expect(TabRefSchema.safeParse(deliverable()).success).toBe(false);
@@ -117,16 +189,16 @@ describe('layout value shapes', () => {
       const other = '1c7d3f3f-7c2b-4e66-8b68-4f2f7f1d3b22';
       const main = v2([{ tabs: [session(1), deliverable(ID, true)], activeTabId: `deliverable:App-1:${ID}` }, { tabs: [deliverable(other)], activeTabId: `deliverable:App-1:${other}` }], [deliverable(other), session(2)]);
       expect(StoredMainSchema.parse(main)).toEqual(
-        v2([{ tabs: [session(1), artifact(ID, true)], activeTabId: `artifact:${ID}` }, { tabs: [artifact(other)], activeTabId: `artifact:${other}` }], [artifact(other), session(2)]),
+        v3([{ tabs: [lifted(1), liftedArtifact(ID, true)], activeTabId: `artifact:${L}:${ID}` }, { tabs: [liftedArtifact(other)], activeTabId: `artifact:${L}:${other}` }], [liftedArtifact(other), lifted(2)]),
       );
     });
 
     it('keeps one tab when the artifact is open as both, the artifact tab kept, the pane’s active tab following it', () => {
       const main = v2([{ tabs: [artifact(), session(1), deliverable()], activeTabId: `deliverable:App-1:${ID}` }]);
-      expect(StoredMainSchema.parse(main)).toEqual(v2([{ tabs: [artifact(), session(1)], activeTabId: `artifact:${ID}` }]));
+      expect(StoredMainSchema.parse(main)).toEqual(v3([{ tabs: [liftedArtifact(), lifted(1)], activeTabId: `artifact:${L}:${ID}` }]));
       const across = v2([{ tabs: [deliverable()], activeTabId: `deliverable:App-1:${ID}` }, { tabs: [artifact(), session(1)], activeTabId: 'session:a1' }]);
       const read = StoredMainSchema.parse(across) as { sets: Record<string, { panes: { tabs: { id: string }[] }[] }> };
-      expect(read.sets['proj-x']!.panes.flatMap((pane) => pane.tabs.map((tab) => tab.id))).toEqual([`artifact:${ID}`, 'session:a1']);
+      expect(read.sets[at('proj-x')]!.panes.flatMap((pane) => pane.tabs.map((tab) => tab.id))).toEqual([`artifact:${L}:${ID}`, lifted(1).id]);
     });
   });
 
@@ -153,7 +225,7 @@ describe('layout value shapes', () => {
 
   // E4a (X14): a browser tab as a main tab, appended after E2's; one per browser tab, keyed by its session and tab id
   it('admits a browser tab with its session and a well-formed browser tab id, and derives its id', () => {
-    const tab = { id: 'browser:a1:b_0123456789ab', kind: 'browser', appSessionId: 'a1', browserTabId: 'b_0123456789ab', pinned: false };
+    const tab = { id: `browser:${at('a1')}:b_0123456789ab`, kind: 'browser', appSessionId: at('a1'), browserTabId: 'b_0123456789ab', pinned: false };
     expect(TabRefSchema.parse(tab)).toEqual(tab);
     expect(TabRefSchema.safeParse({ ...tab, browserTabId: 'tab-1' }).success).toBe(false);
     expect(TabRefSchema.safeParse({ ...tab, appSessionId: null }).success).toBe(false);
@@ -167,6 +239,7 @@ describe('layout value shapes', () => {
     const settings = { id: 'settings', kind: 'settings', section: 'browser', pinned: false };
     expect(TabRefSchema.parse(settings)).toEqual(settings);
     expect(TabRefSchema.safeParse({ ...settings, section: 'web' }).success).toBe(false);
+    expect(TabRefSchema.parse({ ...settings, section: 'org' })).toEqual({ ...settings, section: 'org' }); // P5 O8 M1: Settings › Org
   });
 
   // W5: only `StoredMainSchema` still knows the Overview's tab, to drop it from a layout saved before the panel.
@@ -185,27 +258,27 @@ describe('layout value shapes', () => {
 
   // W5: every layout saved before the floating Overview holds its tab, first and pinned, in one of its panes (and in the
   // ⌘⇧T history if a hand-edit closed it). Hydration reads `main.tabs` through `StoredMainSchema`, which drops that tab
-  // rather than failing the whole value back to the default and losing the user's tabs.
+  // rather than failing the whole value back to the default and losing the user's tabs. (Version 1, so its tabs read
+  // lifted: P5 O6 M2.)
   describe('a stored main.tabs from before the floating Overview', () => {
     const overview = { id: 'overview', kind: 'overview', pinned: true };
-    const session = (n: number) => ({ id: `session:a${n}`, kind: 'session', appSessionId: `a${n}`, pinned: false });
     const stored = (over: object) => ({ version: 1, panes: [], focusedPane: 0, splitRatio: 0.4, closedTabs: [], ...over });
 
     it('drops the Overview leading an active pane, activating the pane’s first remaining tab', () => {
       const main = stored({ panes: [{ tabs: [overview, session(1), session(2)], activeTabId: 'overview' }] });
       expect(LayoutMainSchema.safeParse(main).success).toBe(false);
-      expect(StoredMainSchema.parse(main)).toEqual(stored({ panes: [{ tabs: [session(1), session(2)], activeTabId: 'session:a1' }] }));
+      expect(StoredMainSchema.parse(main)).toEqual(stored({ panes: [{ tabs: [lifted(1), lifted(2)], activeTabId: lifted(1).id }] }));
       // a pane whose active tab was another keeps it
       const other = stored({ panes: [{ tabs: [overview, session(1), session(2)], activeTabId: 'session:a2' }] });
-      expect((StoredMainSchema.parse(other) as LayoutMainV1).panes).toEqual([{ tabs: [session(1), session(2)], activeTabId: 'session:a2' }]);
+      expect((StoredMainSchema.parse(other) as LayoutMainV1).panes).toEqual([{ tabs: [lifted(1), lifted(2)], activeTabId: lifted(2).id }]);
     });
 
     it('drops a pane the Overview was the only tab of, focusing pane 0', () => {
       const main = stored({ panes: [{ tabs: [session(1)], activeTabId: 'session:a1' }, { tabs: [overview], activeTabId: 'overview' }], focusedPane: 1 });
-      expect(StoredMainSchema.parse(main)).toEqual(stored({ panes: [{ tabs: [session(1)], activeTabId: 'session:a1' }], focusedPane: 0 }));
+      expect(StoredMainSchema.parse(main)).toEqual(stored({ panes: [{ tabs: [lifted(1)], activeTabId: lifted(1).id }], focusedPane: 0 }));
       // the split's other pane takes the emptied pane 0's place
       const first = stored({ panes: [{ tabs: [overview], activeTabId: 'overview' }, { tabs: [session(2)], activeTabId: 'session:a2' }], focusedPane: 1 });
-      expect(StoredMainSchema.parse(first)).toEqual(stored({ panes: [{ tabs: [session(2)], activeTabId: 'session:a2' }], focusedPane: 0 }));
+      expect(StoredMainSchema.parse(first)).toEqual(stored({ panes: [{ tabs: [lifted(2)], activeTabId: lifted(2).id }], focusedPane: 0 }));
     });
 
     it('leaves one empty pane when the Overview was all there was (the old default)', () => {
@@ -215,12 +288,12 @@ describe('layout value shapes', () => {
 
     it('drops the Overview from the closed-tab history', () => {
       const main = stored({ panes: [{ tabs: [session(1)], activeTabId: 'session:a1' }], closedTabs: [session(2), overview, session(3)] });
-      expect(StoredMainSchema.parse(main).closedTabs).toEqual([session(2), session(3)]);
+      expect(StoredMainSchema.parse(main).closedTabs).toEqual([lifted(2), lifted(3)]);
     });
 
-    it('reads a layout without the Overview unchanged, and still rejects what LayoutMainSchema rejects', () => {
+    it('reads a layout without the Overview with only its ids lifted, and still rejects what LayoutMainSchema rejects', () => {
       const main = stored({ panes: [{ tabs: [session(1)], activeTabId: 'session:a1' }, { tabs: [session(2)], activeTabId: 'session:a2' }], focusedPane: 1 });
-      expect(StoredMainSchema.parse(main)).toEqual(main);
+      expect(StoredMainSchema.parse(main)).toEqual(stored({ panes: [{ tabs: [lifted(1)], activeTabId: lifted(1).id }, { tabs: [lifted(2)], activeTabId: lifted(2).id }], focusedPane: 1 }));
       const pane = { tabs: [session(1)], activeTabId: 'session:a1' };
       expect(StoredMainSchema.safeParse(stored({ panes: [pane, pane, pane] })).success).toBe(false);
       expect(StoredMainSchema.safeParse(stored({ panes: [pane], closedTabs: [{ ...session(2), pinned: 'yes' }] })).success).toBe(false); // P3-G (§D5): a tab of an unknown kind is dropped instead
@@ -238,10 +311,9 @@ describe('layout value shapes', () => {
   // W6 (E1): the Accounts tab retired into the top bar's usage popover; a layout that held it reads without it.
   it('drops the retired Accounts tab from a stored main.tabs, panes and closed-tab history alike', () => {
     const accounts = { id: 'accounts', kind: 'accounts', pinned: false };
-    const session = { id: 'session:a1', kind: 'session', appSessionId: 'a1', pinned: false };
     expect(TabRefSchema.safeParse(accounts).success).toBe(false);
-    const main = { version: 1, panes: [{ tabs: [session, accounts], activeTabId: 'accounts' }], focusedPane: 0, splitRatio: 0.5, closedTabs: [accounts, session] };
-    expect(StoredMainSchema.parse(main)).toEqual({ ...main, panes: [{ tabs: [session], activeTabId: 'session:a1' }], closedTabs: [session] });
+    const main = { version: 1, panes: [{ tabs: [session(1), accounts], activeTabId: 'accounts' }], focusedPane: 0, splitRatio: 0.5, closedTabs: [accounts, session(1)] };
+    expect(StoredMainSchema.parse(main)).toEqual({ ...main, panes: [{ tabs: [lifted(1)], activeTabId: lifted(1).id }], closedTabs: [lifted(1)] });
   });
 
   // P3-G (§D5): the Artifacts tab, a singleton like Settings that the pin control never applies to.
@@ -254,26 +326,28 @@ describe('layout value shapes', () => {
     expect(UNPINNABLE_KINDS.has('artifacts')).toBe(true);
   });
 
-  // P3-L (Decision Log 7, 8): one artifact in its kind's editor, one tab per artifact, pinnable like a file tab.
-  it('admits an artifact tab with its artifact id, pinnable, and derives its id from the artifact', () => {
-    const tab = { id: 'artifact:0b6f7d52-1c1f-4c4e-9a37-5d0e7a0d1a01', kind: 'artifact', artifactId: '0b6f7d52-1c1f-4c4e-9a37-5d0e7a0d1a01', pinned: true };
+  // P3-L (Decision Log 7, 8): one artifact in its kind's editor, one tab per artifact, pinnable like a file tab. P5 O6 M2:
+  // with its machine, which its id carries.
+  it('admits an artifact tab with its artifact id and machine, pinnable, and derives its id from both', () => {
+    const tab = { id: `artifact:${L}:0b6f7d52-1c1f-4c4e-9a37-5d0e7a0d1a01`, kind: 'artifact', artifactId: '0b6f7d52-1c1f-4c4e-9a37-5d0e7a0d1a01', machine: L, pinned: true };
     expect(TabRefSchema.parse(tab)).toEqual(tab);
     expect(TabRefSchema.safeParse({ ...tab, appSessionId: 'a1' }).success, 'no session: the tab is the workspace’s').toBe(false);
     expect(TabRefSchema.safeParse({ ...tab, artifactId: undefined }).success).toBe(false);
-    expect(tabId({ kind: 'artifact', artifactId: tab.artifactId })).toBe(tab.id);
+    expect(TabRefSchema.safeParse({ ...tab, machine: undefined }).success).toBe(false);
+    expect(tabId({ kind: 'artifact', artifactId: tab.artifactId, machine: L })).toBe(tab.id);
     expect(UNPINNABLE_KINDS.has('artifact')).toBe(false);
     // a stored main.tabs holding one reads as it is, in a pane and in the closed-tab history
     const main = { ...LAYOUT_DEFAULTS.main, sets: { none: { panes: [{ tabs: [tab], activeTabId: tab.id }], focusedPane: 0, splitRatio: 0.5 } }, closedTabs: [{ ...tab, pinned: false }] };
     expect(StoredMainSchema.parse(main)).toEqual(main);
   });
 
-  // P3-G (§D5; the coordinator's condition, 2026-10-12): `main.tabs` keeps version 2 when a tab kind is added, so its
+  // P3-G (§D5; the coordinator's condition, 2026-10-12): `main.tabs` keeps its version when a tab kind is added, so its
   // reader drops a tab of a kind it does not know (a later build's, after a downgrade) rather than failing the whole
   // value back to the default; the rest of the layout is kept, and the read warns once.
   describe('a stored main.tabs holding a tab of a kind this build does not know', () => {
-    const session = (n: number) => ({ id: `session:a${n}`, kind: 'session', appSessionId: `a${n}`, pinned: false });
     const later = (n: number) => ({ id: `library:${n}`, kind: 'library', shelf: n, pinned: false });
-    const v2 = (panes: unknown[], over: object = {}) => ({ version: 2, current: 'proj-x', sets: { 'proj-x': { panes, focusedPane: 0, splitRatio: 0.4, ...over }, none: LAYOUT_DEFAULTS.main.sets.none }, closedTabs: [] });
+    const v3 = (panes: unknown[], over: object = {}) => ({ version: 3, current: at('proj-x'), sets: { [at('proj-x')]: { panes, focusedPane: 0, splitRatio: 0.4, ...over }, none: LAYOUT_DEFAULTS.main.sets.none }, closedTabs: [] });
+    const v2 = (panes: unknown[]) => ({ version: 2, current: 'proj-x', sets: { 'proj-x': { panes, focusedPane: 0, splitRatio: 0.4 }, none: LAYOUT_DEFAULTS.main.sets.none }, closedTabs: [] });
     let warn: ReturnType<typeof vi.spyOn>;
     beforeEach(() => {
       warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -281,46 +355,51 @@ describe('layout value shapes', () => {
     afterEach(() => warn.mockRestore());
 
     it('drops the tab from a pane, keeping the pane’s active tab', () => {
-      const main = v2([{ tabs: [session(1), later(1), session(2)], activeTabId: 'session:a2' }]);
-      expect(StoredMainSchema.parse(main)).toEqual(v2([{ tabs: [session(1), session(2)], activeTabId: 'session:a2' }]));
+      const main = v3([{ tabs: [lifted(1), later(1), lifted(2)], activeTabId: lifted(2).id }]);
+      expect(StoredMainSchema.parse(main)).toEqual(v3([{ tabs: [lifted(1), lifted(2)], activeTabId: lifted(2).id }]));
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledWith('[layout] dropped 1 tab(s) of unknown kind: library');
     });
 
     it('activates the pane’s first remaining tab when the dropped tab was the active one', () => {
-      const main = v2([{ tabs: [session(1), later(1), session(2)], activeTabId: 'library:1' }]);
-      expect(StoredMainSchema.parse(main)).toEqual(v2([{ tabs: [session(1), session(2)], activeTabId: 'session:a1' }]));
+      const main = v3([{ tabs: [lifted(1), later(1), lifted(2)], activeTabId: 'library:1' }]);
+      expect(StoredMainSchema.parse(main)).toEqual(v3([{ tabs: [lifted(1), lifted(2)], activeTabId: lifted(1).id }]));
     });
 
     it('drops a pane the tab was alone in, focusing pane 0, and leaves one empty pane when nothing else was open', () => {
-      const split = v2([{ tabs: [session(1)], activeTabId: 'session:a1' }, { tabs: [later(1)], activeTabId: 'library:1' }], { focusedPane: 1 });
-      expect(StoredMainSchema.parse(split)).toEqual(v2([{ tabs: [session(1)], activeTabId: 'session:a1' }]));
-      const alone = v2([{ tabs: [later(1)], activeTabId: 'library:1' }]);
-      expect(StoredMainSchema.parse(alone)).toEqual(v2([{ tabs: [], activeTabId: '' }]));
+      const split = v3([{ tabs: [lifted(1)], activeTabId: lifted(1).id }, { tabs: [later(1)], activeTabId: 'library:1' }], { focusedPane: 1 });
+      expect(StoredMainSchema.parse(split)).toEqual(v3([{ tabs: [lifted(1)], activeTabId: lifted(1).id }]));
+      const alone = v3([{ tabs: [later(1)], activeTabId: 'library:1' }]);
+      expect(StoredMainSchema.parse(alone)).toEqual(v3([{ tabs: [], activeTabId: '' }]));
     });
 
     it('drops the tab from the closed-tab history', () => {
-      const main = { ...v2([{ tabs: [session(1)], activeTabId: 'session:a1' }]), closedTabs: [session(2), later(1), session(3)] };
-      expect(StoredMainSchema.parse(main).closedTabs).toEqual([session(2), session(3)]);
+      const main = { ...v3([{ tabs: [lifted(1)], activeTabId: lifted(1).id }]), closedTabs: [lifted(2), later(1), lifted(3)] };
+      expect(StoredMainSchema.parse(main).closedTabs).toEqual([lifted(2), lifted(3)]);
+    });
+
+    it('drops it from version 2 too, lifting the rest', () => {
+      const main = v2([{ tabs: [session(1), later(1), session(2)], activeTabId: 'session:a2' }]);
+      expect(StoredMainSchema.parse(main)).toEqual(v3([{ tabs: [lifted(1), lifted(2)], activeTabId: lifted(2).id }]));
     });
 
     it('warns once per read, naming every unknown kind, across sets, panes and the history', () => {
       const other = (n: number) => ({ id: `canvas:${n}`, kind: 'canvas', pinned: false });
       const main = {
-        version: 2,
-        current: 'proj-x',
+        version: 3,
+        current: at('proj-x'),
         sets: {
-          'proj-x': { panes: [{ tabs: [later(1), session(1)], activeTabId: 'session:a1' }, { tabs: [other(1), session(2)], activeTabId: 'canvas:1' }], focusedPane: 1, splitRatio: 0.4 },
+          [at('proj-x')]: { panes: [{ tabs: [later(1), lifted(1)], activeTabId: lifted(1).id }, { tabs: [other(1), lifted(2)], activeTabId: 'canvas:1' }], focusedPane: 1, splitRatio: 0.4 },
           none: { panes: [{ tabs: [later(3)], activeTabId: 'library:3' }], focusedPane: 0, splitRatio: 0.5 },
         },
         closedTabs: [later(2)],
       };
       expect(StoredMainSchema.parse(main)).toEqual({
-        version: 2,
-        current: 'proj-x',
+        version: 3,
+        current: at('proj-x'),
         closedTabs: [],
         sets: {
-          'proj-x': { panes: [{ tabs: [session(1)], activeTabId: 'session:a1' }, { tabs: [session(2)], activeTabId: 'session:a2' }], focusedPane: 1, splitRatio: 0.4 },
+          [at('proj-x')]: { panes: [{ tabs: [lifted(1)], activeTabId: lifted(1).id }, { tabs: [lifted(2)], activeTabId: lifted(2).id }], focusedPane: 1, splitRatio: 0.4 },
           none: { panes: [{ tabs: [], activeTabId: '' }], focusedPane: 0, splitRatio: 0.5 },
         },
       });
@@ -330,17 +409,17 @@ describe('layout value shapes', () => {
 
     it('reads version 1 the same way', () => {
       const main = { version: 1, panes: [{ tabs: [later(1), session(1)], activeTabId: 'library:1' }], focusedPane: 0, splitRatio: 0.5, closedTabs: [later(2)] };
-      expect(StoredMainSchema.parse(main)).toEqual({ ...main, panes: [{ tabs: [session(1)], activeTabId: 'session:a1' }], closedTabs: [] });
+      expect(StoredMainSchema.parse(main)).toEqual({ ...main, panes: [{ tabs: [lifted(1)], activeTabId: lifted(1).id }], closedTabs: [] });
       expect(warn).toHaveBeenCalledTimes(1);
     });
 
     it('stays silent for a layout with only known kinds, and still fails a known kind that breaks its schema', () => {
-      const main = v2([{ tabs: [session(1)], activeTabId: 'session:a1' }]);
+      const main = v3([{ tabs: [lifted(1)], activeTabId: lifted(1).id }]);
       expect(StoredMainSchema.parse(main)).toEqual(main);
-      expect(StoredMainSchema.safeParse(v2([{ tabs: [{ ...session(1), pinned: 'yes' }], activeTabId: 'session:a1' }])).success).toBe(false);
+      expect(StoredMainSchema.safeParse(v3([{ tabs: [{ ...lifted(1), pinned: 'yes' }], activeTabId: lifted(1).id }])).success).toBe(false);
       expect(StoredMainSchema.safeParse({ ...main, closedTabs: [{ id: 'settings', kind: 'settings', pinned: false }] }).success).toBe(false);
       // a tab with no kind at all is malformed, not of an unknown kind
-      expect(StoredMainSchema.safeParse(v2([{ tabs: [{ id: 'x', pinned: false }], activeTabId: 'x' }])).success).toBe(false);
+      expect(StoredMainSchema.safeParse(v3([{ tabs: [{ id: 'x', pinned: false }], activeTabId: 'x' }])).success).toBe(false);
       expect(warn).not.toHaveBeenCalled();
     });
   });

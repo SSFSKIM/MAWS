@@ -15,6 +15,7 @@ import { createFreshness } from './freshness';
 import { useLayout } from './layout';
 import { allTabs } from './layout-model';
 import { useSessions } from './sessions';
+import { machineOf } from '@shared/machine/address';
 // C7 end
 
 export type { UsageWindow } from '@shared/usage/types'; // C7: ClaudeUsage's shape, `recordedAt` included
@@ -152,7 +153,8 @@ export function connectUsage(client: MawsBridge = ipc, stores: UsageStores = { u
     const records = stores.sessions.getState().records;
     const ids = new Set<string>();
     for (const tab of allTabs(stores.layout.getState().main)) { // W12: every project's tab set
-      const id = tab.kind === 'session' ? records.get(tab.appSessionId)?.engineSessionId : null;
+      // P5 O6 M4: this machine's sessions only, whose account pins this machine's main holds (another's: O3)
+      const id = tab.kind === 'session' && machineOf(tab.appSessionId) === client.localMachine ? records.get(tab.appSessionId)?.engineSessionId : null;
       if (id) ids.add(id);
     }
     return [...ids].sort().slice(0, MAX_ASKED_SESSIONS);
@@ -161,7 +163,7 @@ export function connectUsage(client: MawsBridge = ipc, stores: UsageStores = { u
     const engineSessionIds = openEngineIds();
     asked = engineSessionIds.join('\n');
     const fresh = freshness.stamp();
-    void client.invoke('settings.usage', { engineSessionIds }).then((result) => {
+    void client.invoke('settings.usage', { engineSessionIds }, { machine: client.localMachine }).then((result) => {
       if (!result.ok) console.warn('[usage] settings.usage failed', result.error);
       else if (fresh()) stores.usage.getState().applySnapshot(result.value);
     });

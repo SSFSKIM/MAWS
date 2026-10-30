@@ -17,4 +17,5 @@ export const events = [
 
 // Only main's settings coordinator may update host configuration or policy.
 // P2-A (2026-10-09): main alone reads the observed facts from the host, relaying them as `session.observedFacts`.
-export const mainOnlyCommands = ['engine.configure', 'engine.policy.set', 'engine.observedFacts' /* P2-A */] as const;
+// P5 O10: `engine.pendingItems` is the endpoint's (lane B's pending counts for `notify`), sent from `mawsd`, never a window.
+export const mainOnlyCommands = ['engine.configure', 'engine.policy.set', 'engine.observedFacts' /* P2-A */, 'engine.pendingItems'] as const;

@@ -8,6 +8,7 @@ import {
   connectLibrary, library, libraryList, libraryRow, librarySpaces, listKey, refreshLibrary, resetLibrary, UNWATCHED_KEPT, watchLibraryList,
   watchLibraryRow, watchLibrarySpaces,
 } from './store';
+import { preloadOf } from '../test-support/preload-of';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const COUNTS = { document: 0, presentation: 0, design: 0, design_system: 0, dashboard: 0, html: 0, file: 0 };
@@ -40,7 +41,7 @@ const offs: (() => void)[] = [];
 beforeEach(() => {
   resetLibrary();
   fake = fakeClient();
-  window.maws = fake.client;
+  window.maws = preloadOf(fake); // P5 O6 M2: main's side
   disconnect = connectLibrary();
 });
 afterEach(() => {

@@ -137,6 +137,29 @@ describe('while the project socket is not connected', () => {
   });
 });
 
+// The freeze's one seam (P5 O13, acceptance 5): a session whose machine moved to MAWS is answered over the phone's
+// channel, and nothing of it is done through DX6 from here, whatever its presence, its machine or the socket says.
+describe('a session on a machine moved to MAWS', () => {
+  const MOVED = { can: false, reason: "moved to MAWS: its cards are on this phone's channel" };
+  it('offers no verb, each with the one reason, before any other rule', () => {
+    const cases: Array<[string, Partial<CapabilityInput>, boolean]> = [
+      ['bridged', {}, true],
+      ['offline', { machineOnline: false }, true],
+      ['read-only', { machineReadOnly: true }, true],
+      ['retired', { member: false, ended: { by: 'owner', reason: 'retired' }, presence: { record: null, bridge: false } }, true],
+      ['not connected', {}, false],
+    ];
+    for (const [what, over, connected] of cases) {
+      const c = capabilities({ ...base, ...over, movedToMaws: true }, connected);
+      for (const verb of VERBS) expect(c[verb], `${what}: ${verb}`).toEqual(MOVED);
+    }
+  });
+
+  it('leaves every other session as it was', () => {
+    expect(capabilities({ ...base, movedToMaws: false })).toEqual(capabilities(base));
+  });
+});
+
 // The desk control surface's verbs (its spec, 2026-10-22, §4): read from both presences — the bridge's capabilities in
 // the session's, the daemon's `desk` in the machine's — with three fallbacks told apart so the reason sends the owner
 // to the right place: a stale session, an older machine, and a session without a bridge at all.

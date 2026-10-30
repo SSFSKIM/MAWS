@@ -1,11 +1,11 @@
 // Prints ci-kit's Pool-Demand trailer value for the exact tree and trailers ci-gate.sh will push. Repository variables
 // arrive through GATE_RUNNER and GATE_E2E_RUNNER, read at push time; the planner, its dependencies and inputs come from sha.
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { workflowEnv } from './ci-gate-alerts.mjs';
 
@@ -30,7 +30,7 @@ function poolDemand(outputs) {
 
 // Keep the target's imports and any legacy workflow side effects in a child. An unsupported planner may exit or print,
 // but only successfully decoded outputs from its exported planOf can become the CLI's advisory hint.
-function targetOutputs(gitDir, sha) {
+export function targetOutputs(gitDir, sha, message = process.env.HEAD_MESSAGE ?? '') {
   const dir = mkdtempSync(join(tmpdir(), 'maws-ci-gate-pool-demand-'));
   try {
     const top = execFileSync('git', ['-C', gitDir, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -42,7 +42,7 @@ function targetOutputs(gitDir, sha) {
     const env = {
       ...workflowEnv(readFileSync(join(dir, '.github/workflows/gate.yml'), 'utf8')),
       EVENT: 'push',
-      HEAD_MESSAGE: process.env.HEAD_MESSAGE ?? '',
+      HEAD_MESSAGE: message,
       GATE_RUNNER: process.env.GATE_RUNNER ?? '',
       GATE_E2E_RUNNER: process.env.GATE_E2E_RUNNER ?? '',
       HOSTED_MAC_ROUTE: process.env.HOSTED_MAC_ROUTE ?? '',
@@ -51,7 +51,7 @@ function targetOutputs(gitDir, sha) {
       import { readFileSync } from 'node:fs';
       const { planner, env, scripts } = JSON.parse(readFileSync(0, 'utf8'));
       const { planOf } = await import(planner);
-      process.stdout.write(JSON.stringify(planOf(env, scripts).outputs));
+      process.stdout.write(JSON.stringify(planOf(env, scripts, Date.now()).outputs));
     `], {
       cwd: dir,
       env: { PATH: process.env.PATH },
@@ -65,7 +65,7 @@ function targetOutputs(gitDir, sha) {
   }
 }
 
-try {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) try {
   const { values } = parseArgs({ options: { 'git-dir': { type: 'string' }, sha: { type: 'string' } } });
   if (!values['git-dir'] || !values.sha) throw new Error('--git-dir and --sha are required');
   process.stdout.write(`${poolDemand(targetOutputs(values['git-dir'], values.sha))}\n`);

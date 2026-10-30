@@ -19,6 +19,8 @@ import { isStarting, useSetup } from './store';
 import { QUIET, SECONDARY } from './ui';
 import { worktreeRows, type Claim, type WorktreeRow } from './worktree-rows';
 import { displayTitle } from './title';
+import { machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 
 type Loaded =
   | { kind: 'loading' }
@@ -28,11 +30,11 @@ type Loaded =
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-async function readWorktrees(directory: string): Promise<Loaded> {
-  const listed = await ipc.invoke('git.worktree.list', { repoRoot: directory });
+async function readWorktrees(machine: MachineRef, directory: string): Promise<Loaded> {
+  const listed = await ipc.invoke('git.worktree.list', { repoRoot: directory }, { machine });
   if (!listed.ok) return listed.error.message === 'not a git repository' ? { kind: 'not_repository' } : { kind: 'error', message: listed.error.message };
   const { repoRoot, worktrees } = listed.value;
-  const answers = await Promise.all(worktrees.map((w) => ipc.invoke('git.worktree.status', { repoRoot, path: w.path })));
+  const answers = await Promise.all(worktrees.map((w) => ipc.invoke('git.worktree.status', { repoRoot, path: w.path }, { machine })));
   const failed = answers.find((a) => !a.ok);
   if (failed && !failed.ok) return { kind: 'error', message: failed.error.message };
   return { kind: 'ready', repoRoot, worktrees, statuses: new Map(worktrees.map((w, i) => [w.path, answers[i]!.ok ? answers[i]!.value : null])) };
@@ -50,11 +52,11 @@ export function WorktreesDialog({ projectId }: { projectId: ProjectId }) {
   useEffect(() => {
     if (directory === null) return;
     let live = true;
-    void readWorktrees(directory).then((next) => live && setLoaded(next));
+    void readWorktrees(machineOf(projectId), directory).then((next) => live && setLoaded(next));
     return () => {
       live = false;
     };
-  }, [directory, version]);
+  }, [projectId, directory, version]);
 
   const claims: Claim[] = [...intents.values()].map((intent) => ({ intent, starting: isStarting({ invoking, phases }, intent.appSessionId) }));
   const title = `Worktrees${project ? ` · ${project.name}` : ''}`;
@@ -126,7 +128,7 @@ function Row({ projectId, repoRoot, row }: { projectId: ProjectId; repoRoot: str
     setBusy(false);
     closeDialog();
   };
-  const remove = () => openDialog({ kind: 'cleanup', target: cleanupTargetAt({ path: row.info.path, branch: row.info.branch }, repoRoot), returnTo: { kind: 'worktrees', projectId } });
+  const remove = () => openDialog({ kind: 'cleanup', target: cleanupTargetAt(machineOf(projectId), { path: row.info.path, branch: row.info.branch }, repoRoot), returnTo: { kind: 'worktrees', projectId } });
   const openSession = (id: AppSessionId) => {
     useLayout.getState().openSession(id);
     closeDialog();

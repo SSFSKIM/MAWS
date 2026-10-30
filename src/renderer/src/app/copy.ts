@@ -21,7 +21,7 @@ export const SUPERVISOR_ROW = {
   crashed: 'not running',
   heldLock: 'not running · another supervisor holds its lock and does not answer',
   waiting: (live: number) => `waiting · the previous version's supervisor still runs ${sessions(live)}`,
-  mode: (mode: 'detached' | 'utility') => mode,
+  mode: (mode: 'detached' | 'utility' | 'daemon') => mode, // P5 O2 M7: daemon, the engine host behind mawsd
   pid: (pid: number) => `pid ${pid}`,
   matches: { same: 'build matches', build: 'build differs', wire: 'wire differs', protocol: 'protocol differs' },
   held: (live: number) => `${sessions(live)} held`,
@@ -39,6 +39,26 @@ export const SUPERVISOR_ROW = {
   openLog: 'Open log',
   openLogFailed: (why: string) => `The supervisor's log did not open · ${why}`,
   restartNow: 'Restart now',
+};
+
+// P5 O2 M7: Diagnostics' machine daemon row (the daemon shape's `mawsd`, from main's host.status)
+export const DAEMON_ROW = {
+  label: 'mawsd',
+  unknown: 'mawsd · unknown',
+  connecting: 'connecting',
+  kind: { unit: 'at login', private: 'private' } as const,
+  pid: (pid: number) => `pid ${pid}`,
+  build: (commit: string, buildId: string) => `build ${commit} (${buildId})`,
+  machine: (ref: string) => `machine ${ref}`,
+  host: (name: string, state: string, pid: number | null) => `${name} ${state}${pid === null ? '' : ` pid ${pid}`}`,
+  unavailable: (why: string) => `not in use this launch · ${why}`,
+  embedded: 'not in use · MAWS runs its hosts itself',
+};
+
+// P5 O3-A: the spine's refusal, beside the daemon row
+export const SPINE_ROW = {
+  label: 'machine data',
+  refused: (why: string) => `refused this launch · ${why}`,
 };
 
 export const SUPERVISOR_NOTICES = {

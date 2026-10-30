@@ -3,7 +3,7 @@
 // directory with a reversible stand-in sealer (no keychain); a scripted flow stands for the SDK requests and the
 // browser, a scripted `closeHost` for the engine host's `connectors.directClose`. A second store over the same
 // directory is what a relaunch would read. What the host would receive is the evidence: a credential, or nothing.
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,6 +14,11 @@ import { ConnectorOAuthError } from './oauth-flow';
 import { createConnectorOAuthProvider, OAUTH_FORGET_READ_TIMEOUT_MS, OAUTH_HOST_CLOSE_TIMEOUT_MS, type ConnectorOAuthProvider, type ConnectorOAuthProviderDeps } from './oauth-provider';
 import { createConnectorOAuthStore, type ConnectorOAuthSealer, type ConnectorOAuthStore } from './oauth-store';
 import { oauthIdentityOf, type ConnectorOAuthGrant, type ConnectorOAuthIdentity, type ConnectorOAuthTokens } from './oauth-types';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults'; // P5 O3-A
+import { ConfiguredDeliverySources } from '../../engine-host/connectors/configured-delivery'; // P5 O3-A
+import { publicSource } from '../../engine-host/connectors/direct-calls'; // P5 O3-A
+import { settingsPaths } from '@shared/settings/paths';
+import { splitSettingsFiles } from '../../services/settings/split'; // P5 O3-A
 
 const SAVED = '11111111-1111-4111-8111-111111111111';
 const FRESH = '33333333-3333-4333-8333-333333333333';
@@ -1172,5 +1177,39 @@ describe('owner notifications and the unattributed snapshot', () => {
     provider.unauthorized({ source: source(), purpose: 'call', credential: null });
     expect(heard).not.toHaveBeenCalled();
     expect(await provider.state(IDENTITY)).toEqual({ state: 'needsConnect' });
+  });
+});
+
+// P5 O3-A (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §3; O3-A acceptance 4): MAWS's own servers move from the
+// unified settings.json to machine-settings.json at the split, and the app scope's identity keeps naming settings.json,
+// so a grant Connect saved before the upgrade is the one route D uses after it, with no new sign-in.
+describe('an app-scope grant saved before the settings split', () => {
+  const URL = 'https://mcp.example.com/mcp?tenant=7';
+  // the source main learns from a fresh engine host's cold delivery over the profile, as the host converts it
+  async function appSource(profile: string): Promise<DirectSource> {
+    const sources = new ConfiguredDeliverySources({ userData: profile, captureEnv: async () => ({ HOME: join(profile, 'home') }) });
+    const [candidate] = (await sources.candidates()).filter((c) => c.server === 'metrics');
+    const resolved = await sources.resolveSource(candidate!.cwd, candidate!.server);
+    if (!resolved.ok) throw new Error('the app source was not verified');
+    return publicSource(resolved.source);
+  }
+
+  it('is adopted after the split with no sign-in, its record naming <profile>/settings.json as the earlier build saved it', async () => {
+    const profile = join(root, 'profile');
+    mkdirSync(profile);
+    writeFileSync(join(profile, 'settings.json'), JSON.stringify({ ...SETTINGS_DEFAULTS_V21, version: 20, engine: { ...SETTINGS_DEFAULTS_V21.engine, mcpServers: [{ name: 'metrics', type: 'http', url: URL }] } }));
+    // the record the O2-era build sealed at Connect (src/main/connectors/oauth-store.test.ts builds one the same way)
+    await seed(tokens(1), { requestUrl: URL, server: 'metrics', scope: 'app', configPath: join(profile, 'settings.json'), entryPath: ['engine', 'mcpServers', 'name=metrics'] });
+    expect(credentialOf(await provider.prepare({ source: await appSource(profile), purpose: 'call', signal: new AbortController().signal }))).toMatchObject({ connectionId: SAVED, accessToken: 'at-1' });
+
+    expect(splitSettingsFiles(settingsPaths(profile), undefined, () => {}).outcome).toBe('split');
+    expect(JSON.parse(readFileSync(join(profile, 'settings.json'), 'utf8'))).not.toHaveProperty('engine'); // the servers are the machine file's now
+    provider.stop();
+    provider = makeProvider(); // a relaunch
+    const after = await appSource(profile);
+    expect(after.path).toBe(join(profile, 'settings.json'));
+    expect(credentialOf(await provider.prepare({ source: after, purpose: 'call', signal: new AbortController().signal }))).toMatchObject({ connectionId: SAVED, accessToken: 'at-1' });
+    expect(await provider.connect(after)).toEqual({ ok: true, connectionId: SAVED, reused: true });
+    expect(flow.connects).toEqual([]); // no browser, no new sign-in
   });
 });

@@ -7,21 +7,37 @@
 // Runs only over a packaged executable with the supervisor gate on, so neither the plain smoke, nor `pnpm e2e:packaged`,
 // nor `pnpm e2e:supervisor` (which names its own spec) runs it:
 //   pnpm build:app && pnpm e2e:supervisor:packaged
-import { execFileSync } from 'node:child_process';
+// P5 O2 M7 (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M7 "The suites"): under `MAWS_HOST_MODE=daemon`
+// (`pnpm e2e:supervisor-daemon:packaged`, a step of the gate's packaged job) the daemon shape's check runs instead: the
+// private `mawsd` of a scratch profile is the app binary run as Node, named `mawsd`, its entry inside `app.asar`, and
+// the engine host it starts is the app binary named `maws-supervisor` as above. It installs no LaunchAgent, and fails
+// if it creates, removes or rewrites anything of the account's canonical `dev.maws.mawsd` that the job could cause: its
+// plist, the default profile's sockets and lock, or that profile's mawsd/ tree, less what a live canonical mawsd writes
+// on its own (O14 residue 18: the gate's Mac runs a real one; ./support/canonical-mawsd.ts).
+//   pnpm build:app && pnpm e2e:supervisor-daemon:packaged
+// P5 O10 M10 (the architect's ruling on acceptance 14): that `mawsd` loads its endpoint at the first command that needs
+// it, a deferred load of a chunk beside mawsd.js, while a read-only one on an unenrolled machine is answered without it.
+// So the check runs both through the packaged binary as Node: `mawsd endpoint status` answers unenrolled and loads
+// nothing, and `mawsd enroll` with a code that is none loads the module from inside `app.asar`, whose own decoder
+// refuses it before anything is written or sent; a package that left the chunk out answers that it could not be loaded.
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
 import type { HostStatus } from '@shared/ipc/schema/host';
 import { invoke } from './support/c7-replay';
+import { canonicalDifferences, canonicalPaths, snapshotCanonical } from './support/canonical-mawsd'; // O14 residue 18
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { INSPECTOR_LINE, inspectorPortHolders, isAlive, killScratchProcesses, ps, tcpListeners } from './support/processes';
+import { launchEnvironment } from './support/scratch-env';
 import { tmpSocketDirOf } from './support/supervisor-socket';
 
 const EXECUTABLE = process.env.MAWS_E2E_EXECUTABLE ? realpathOr(resolve(REPO_ROOT, process.env.MAWS_E2E_EXECUTABLE)) : null;
 test.skip(process.env.MAWS_SUPERVISOR_E2E !== '1' || EXECUTABLE === null, 'the packaged supervisor check runs under pnpm e2e:supervisor:packaged (a packaged MAWS_E2E_EXECUTABLE and MAWS_SUPERVISOR_E2E=1)');
 
 const EVIDENCE = process.env.MAWS_E10_SHOTS === '1' ? join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e10') : null;
+const DAEMON = process.env.MAWS_HOST_MODE === 'daemon';
 
 function realpathOr(path: string): string {
   try {
@@ -40,6 +56,7 @@ function executableOf(pid: number): string {
 }
 
 test('packaged: the supervisor is the app binary run as Node, named maws-supervisor, its chunk inside app.asar', async () => {
+  test.skip(DAEMON, 'the embedded shape’s check (pnpm e2e:supervisor:packaged)');
   test.setTimeout(120_000);
   const exe = EXECUTABLE!;
   const macOS = dirname(exe); // …/MAWS.app/Contents/MacOS
@@ -94,7 +111,7 @@ test('packaged: the supervisor is the app binary run as Node, named maws-supervi
     expect(maws.consoleErrors()).toEqual([]);
 
     // a same-user SIGUSR1 opens no Node inspector in the supervisor (closed 2026-10-10: the socket peer authentication
-    // spec's SIGUSR1 route; `--disable-sigusr1` at the spawn, src/main/hosts/detached-transport.ts, and the entry's
+    // spec's SIGUSR1 route; `--disable-sigusr1` at the spawn, src/shared/host/detached-transport.ts, and the entry's
     // listener, src/engine-host/detached.ts): it stays alive, listens on no new TCP address and its log (its stderr)
     // holds no inspector line; with 9229 taken an inspector could not bind, so the port must be free first
     expect(command, 'the supervisor starts with --disable-sigusr1').toMatch(/^maws-supervisor --disable-sigusr1 /);
@@ -149,6 +166,89 @@ test('packaged: the supervisor is the app binary run as Node, named maws-supervi
     await killScratchProcesses(root, supervisorPid !== null ? [supervisorPid] : []).catch((error: unknown) => (leftover = error));
     const tmpSocketDir = socketPath !== null ? tmpSocketDirOf(userData, socketPath) : null; // a socket under root goes with it
     if (tmpSocketDir !== null) rmSync(tmpSocketDir, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+  if (leftover !== null) throw leftover;
+});
+
+test('packaged, the daemon shape: mawsd is the app binary run as Node, named mawsd, its entry inside app.asar', async () => {
+  test.skip(!DAEMON, 'the daemon shape’s check (pnpm e2e:supervisor-daemon:packaged)');
+  test.setTimeout(120_000);
+  const exe = EXECUTABLE!;
+  const macOS = dirname(exe);
+  const bundle = resolve(macOS, '../..');
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-o2-packaged-')));
+  const userData = join(root, 'ud'); // not the default profile: a private mawsd, never the LaunchAgent
+  mkdirSync(userData);
+  // The account's canonical mawsd is never touched, even by a packaged app: the gate's Mac runs the owner's real one
+  // once its account is cut over (O14), so the check fails if the job creates, removes or rewrites anything of it the job
+  // could cause, whether or not each part exists (./support/canonical-mawsd.ts says which differences count).
+  const canonical = canonicalPaths();
+  const canonicalBefore = snapshotCanonical(canonical);
+  let maws: MawsLaunch | null = null;
+  const pids: number[] = [];
+  let leftover: unknown = null;
+  try {
+    maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: 'daemon' } });
+    const app = maws.app;
+    const exited = new Promise<void>((done) => app.process().once('exit', () => done()));
+    let status: HostStatus | null = null;
+    await expect
+      .poll(async () => {
+        const answer = await invoke(maws!.page, 'host.status', undefined);
+        status = answer.ok ? answer.value : null;
+        return status !== null && status.state === 'ready' && status.supervisor !== null && status.daemon !== null;
+      }, { timeout: 30_000, message: 'main is connected to the engine host through mawsd' })
+      .toBe(true);
+    const s = status as unknown as HostStatus;
+    expect(s.transport).toBe('daemon');
+    expect(s.daemon!.kind).toBe('private');
+    const daemonPid = s.daemon!.pid;
+    const enginePid = s.supervisor!.pid;
+    pids.push(daemonPid, enginePid);
+    const lock = JSON.parse(readFileSync(join(userData, 'mawsd', 'mawsd.lock'), 'utf8')) as { pid: number };
+    expect(lock.pid, 'the lock names the daemon main reports').toBe(daemonPid);
+
+    const command = ps(daemonPid, 'command');
+    expect(command.split(' ')[0], 'argv0').toBe('mawsd');
+    expect(command, 'the entry is read from inside the asar').toContain(`${bundle}/Contents/Resources/app.asar/out/main/mawsd.js run --private --dir ${join(userData, 'mawsd')}`);
+    expect(command, 'mawsd starts with --disable-sigusr1').toMatch(/^mawsd --disable-sigusr1 /);
+    expect(realpathOr(executableOf(daemonPid)), 'mawsd runs the app binary itself').toBe(exe);
+    expect(Number(ps(daemonPid, 'pgid')), 'mawsd leads its own process group').toBe(daemonPid);
+    // the engine host it started: the app binary as Node too, from the same asar
+    const engine = ps(enginePid, 'command');
+    expect(engine.split(' ')[0]).toBe('maws-supervisor');
+    expect(engine).toContain(`${bundle}/Contents/Resources/app.asar/`);
+    expect(realpathOr(executableOf(enginePid))).toBe(exe);
+    expect(maws.consoleErrors()).toEqual([]);
+
+    // P5 O10 M10: unenrolled, `endpoint status` answers without the endpoint; `enroll` loads it from its chunk inside the asar
+    const mawsdLog = () => readFileSync(join(userData, 'mawsd', 'mawsd.log'), 'utf8');
+    const mawsd = (args: string[], input = '') => {
+      const ran = spawnSync(exe, [`${bundle}/Contents/Resources/app.asar/out/main/mawsd.js`, ...args], { env: { ...launchEnvironment(process.env, userData), ELECTRON_RUN_AS_NODE: '1' }, input, encoding: 'utf8', timeout: 30_000 });
+      return { ...ran, said: `mawsd ${args.join(' ')}: ${ran.status ?? ran.signal} ${ran.stdout}${ran.stderr}\n${mawsdLog()}` };
+    };
+    expect(mawsdLog(), 'an unenrolled mawsd starts without its endpoint').not.toContain('loading the endpoint');
+    const unenrolled = mawsd(['endpoint', 'status']);
+    expect(unenrolled.status, unenrolled.said).toBe(0);
+    expect(unenrolled.stdout, unenrolled.said).toBe('enrollment: none\nhub: not connected; channels: 0 relayed, 0 direct; sminos: not connected\n');
+    expect(mawsdLog(), 'a read-only command loads no endpoint').not.toContain('loading the endpoint');
+    const enroll = mawsd(['enroll'], 'not-a-code\n');
+    expect(enroll.status, enroll.said).toBe(1);
+    expect(enroll.stderr, enroll.said).toBe('not an enrollment code: not smns-enroll-v2\n');
+    expect(mawsdLog()).toContain('loading the endpoint for its first command');
+    expect(mawsdLog()).not.toContain('could not be loaded');
+
+    // the quit stops nothing (P5 O3-D Q1, D12): mawsd and its engine host outlive the app, the host parked by mawsd's
+    // idle clock only after the idle time (D38: 10 min; e2e:supervisor-daemon (a) proves the park with its idle seam set);
+    // the scene's cleanup ends them
+    await app.evaluate(({ app: electronApp }) => electronApp.quit());
+    await exited;
+    expect([daemonPid, enginePid].filter((pid) => !isAlive(pid)), 'mawsd and its engine host outlive the app').toEqual([]);
+    expect(canonicalDifferences(canonicalBefore, snapshotCanonical(canonical)), "the account's canonical mawsd (its plist, sockets, lock and profile) is untouched").toEqual([]);
+  } finally {
+    if (maws) await maws.cleanup().catch((error: unknown) => console.error(error));
+    await killScratchProcesses(root, pids).catch((error: unknown) => (leftover = error));
     rmSync(root, { recursive: true, force: true });
   }
   if (leftover !== null) throw leftover;

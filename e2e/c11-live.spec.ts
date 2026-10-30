@@ -12,6 +12,7 @@
 //   MAWS_HARNESS=1 pnpm exec electron-vite build && MAWS_C11_LIVE=1 pnpm exec playwright test e2e/c11-live.spec.ts
 // MAWS_C11_LIVE_GPT names the relay alias the gateway-model case uses (default `luna`; a Codex alias at its usage limit
 // is refused by the relay at `set_model`).
+import { addressed } from './support/address';
 import { openSurface } from './support/shell';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -201,13 +202,13 @@ async function settled(w: Locator): Promise<string> {
   return w.innerText();
 }
 
-const sessionInfo = (page: Page, id: string) => page.locator(`[data-session-info="${id}"]`);
-const infoRow = async (page: Page, id: string, label: string) => (await sessionInfo(page, id).innerText()).match(new RegExp(`${label}\\n([^\\n]+)`))?.[1] ?? null;
+const sessionInfo = async (page: Page, id: string) => page.locator(`[data-session-info="${await addressed(page, id)}"]`);
+const infoRow = async (page: Page, id: string, label: string) => (await (await sessionInfo(page, id)).innerText()).match(new RegExp(`${label}\\n([^\\n]+)`))?.[1] ?? null;
 // W2: the status line and its usage popover are gone (§5.5 as amended 2026-10-01): Session info carries
 // the windows (its Usage row) and the route with its switch (its Route row).
 async function openSessionInfo(page: Page, id: string): Promise<Locator> {
   await openSurface(page, 'Session info');
-  await expect(sessionInfo(page, id)).toBeVisible();
+  await expect(await sessionInfo(page, id)).toBeVisible();
   return sessionInfo(page, id);
 }
 const infoValue = (info: Locator, label: string) => info.getByRole('term').filter({ hasText: new RegExp(`^${label}$`) }).locator('xpath=following-sibling::dd[1]');

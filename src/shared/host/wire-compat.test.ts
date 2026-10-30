@@ -16,7 +16,7 @@ import { SOCKET_PROTOCOL } from './socket-protocol';
 // The supervisor imports electron for its utility transport, which this test never uses.
 vi.mock('electron', () => ({ app: { isPackaged: false, getPath: () => '/nonexistent' }, utilityProcess: {}, MessageChannelMain: class {} }));
 
-import { appIdentity, type AppIdentity } from '../../main/hosts/identity';
+import { appIdentity, type AppIdentity } from './identity';
 import { createHostSupervisor, type HostSupervisor } from '../../main/hosts/supervisor';
 
 const TIMING = { connectTimeoutMs: 200, helloTimeoutMs: 150, startTimeoutMs: 1_200, pidPollMs: 20, waitRetryMs: 80, killGraceMs: 60 };
@@ -36,6 +36,8 @@ const A = {
   },
   events: { 'probe.changed': z.strictObject({ n: z.number() }) },
   hostEvents: ['probe.changed'],
+  ptyHostEvents: [],
+  machineEvents: [],
   mainOnly: new Set<string>(),
 } as const satisfies WireRegistry;
 
@@ -47,6 +49,8 @@ const B = {
   },
   events: { 'probe.changed': z.strictObject({ n: z.number(), extra: z.string().optional() }), 'probe.newEvent': z.strictObject({ m: z.number() }) },
   hostEvents: ['probe.changed', 'probe.newEvent'],
+  ptyHostEvents: [],
+  machineEvents: [],
   mainOnly: new Set<string>(),
 } as const satisfies WireRegistry;
 

@@ -10,8 +10,9 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import type { BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { record } from '../../../../../../test/support/builders';
+import { at } from '../../../../../../test/support/machine';
 import { useFloatingCard } from '../../../shell/floating';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
@@ -27,9 +28,11 @@ import { registerSlot, resetSlots } from '../../../app/slots'; // P3-F (F-shell)
 import { browser, connectBrowser, onShowRequest, raiseNotice, resetBrowser } from '../store';
 import { Chrome, type ChromeProps } from './Chrome';
 
-const A = 'app-a' as AppSessionId;
-const B = 'app-b' as AppSessionId;
-const SEARCH = SETTINGS_DEFAULTS_V19.browser.searchUrl;
+// P5 O6 M2: the page's ids are addresses; main (installFakeMain) is asked and answers with the bare MAIN_A.
+const MAIN_A = 'app-a' as AppSessionId;
+const A = at(MAIN_A);
+const B = at('app-b' as AppSessionId);
+const SEARCH = SETTINGS_DEFAULTS_V21.browser.searchUrl;
 
 let main: ReturnType<typeof installFakeMain>;
 let disconnect: () => void;
@@ -53,7 +56,7 @@ beforeEach(() => {
       case 'browser.tabs.zoom':
         return ok({ zoom: 1 });
       case 'browser.tabs.open':
-        return ok({ tab: browserTab(T2, A, { url: '' }), reused: false });
+        return ok({ tab: browserTab(T2, MAIN_A, { url: '' }), reused: false });
       case 'browser.profiles.list': // cua #90: with the account's names and the avatar
         return ok({ profiles: [{ profileDir: 'Profile1', name: 'Work', gaiaName: null, userName: null, avatar: { kind: 'initials', letter: 'W' } }] });
       case 'browser.tabs.revealDownload':
@@ -62,7 +65,7 @@ beforeEach(() => {
         return ok();
     }
   });
-  disconnect = connectBrowser(main.bridge); // relays main's chrome commands
+  disconnect = connectBrowser(); // relays main's chrome commands, through the app's client over the fake main
 });
 afterEach(() => {
   disconnect();
@@ -301,7 +304,7 @@ describe('the address field', () => {
     await user.click(field());
     await user.keyboard('example.com{Enter}');
     await wait(0);
-    expect(calls('browser.tabs.open')).toEqual([{ appSessionId: A, url: null, select: true }]);
+    expect(calls('browser.tabs.open')).toEqual([{ appSessionId: MAIN_A, url: null, select: true }]);
     expect(calls('browser.tabs.navigate')).toEqual([{ tabId: T2, to: { url: 'https://example.com/', typed: true } }]);
     expect(openTab).not.toHaveBeenCalled(); // the panel shows the session's selected tab
   });
@@ -365,7 +368,7 @@ describe('the address field', () => {
     };
     registerSlot('panelHost', () => <Chrome appSessionId={A} surface="panel" tab={tab()} tabs={[tab()]} owns />);
     useSessions.setState({ records: new Map([[A, record(A)]]) });
-    useLayout.setState({ main: mainShowing(A), panelPinned: [], panelBySession: new Map(), panelSurfaces: { version: 1, stacks: {}, pinnedTools: [], contexts: {} } });
+    useLayout.setState({ main: mainShowing(A), panelPinned: [], panelBySession: new Map(), panelSurfaces: { version: 2, stacks: {}, pinnedTools: [], contexts: {} } });
     // UX2 opens the region only for an actual surface; floating alone does not create a panel column.
     useLayout.getState().setPanelTabs(A, { tabs: [{ id: 'browser:chrome', toolId: 'browser', pinned: false }], activeTabId: 'browser:chrome' });
     useLayout.getState().setPanel({ collapsed: false, floating: true });
@@ -498,9 +501,9 @@ describe('the tab strip', () => {
     fireEvent.click(screen.getByRole('button', { name: BROWSER_COPY.closeTabNamed('b.test') }));
     fireEvent.click(screen.getByRole('button', { name: BROWSER_COPY.newTabAction }));
     await wait(0);
-    expect(calls('browser.tabs.select')).toEqual([{ appSessionId: A, tabId: T2 }]);
+    expect(calls('browser.tabs.select')).toEqual([{ appSessionId: MAIN_A, tabId: T2 }]);
     expect(calls('browser.tabs.close')).toEqual([{ tabId: T2 }]);
-    expect(calls('browser.tabs.open')).toEqual([{ appSessionId: A, url: null, select: true }]);
+    expect(calls('browser.tabs.open')).toEqual([{ appSessionId: MAIN_A, url: null, select: true }]);
   });
 
   it('after a failed load a chip names the failed host, not the last page’s title', () => {
@@ -537,7 +540,7 @@ describe('the tab strip', () => {
     });
 
     it('sits at the tab row’s right end with the session’s title, hosts it while shown, and a click reopens the card', () => {
-      useSessions.setState({ records: new Map([[A, { ...record('app-a'), title: { text: 'Alpha session', source: 'user' }, unread: true }]]) });
+      useSessions.setState({ records: new Map([[A, { ...record(A), title: { text: 'Alpha session', source: 'user' }, unread: true }]]) });
       const { unmount } = show({ tab: tab(), owns: true });
       const shown = pill()!;
       expect(shown.textContent).toBe('Alpha session');

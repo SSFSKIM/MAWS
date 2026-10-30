@@ -2,8 +2,9 @@ import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within }
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import type { TabRef } from '@shared/ipc/schema/layout';
 import { record } from '../../../../test/support/builders';
 import { registerShellActions } from '../app/shell-actions';
@@ -15,14 +16,15 @@ import { useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { installResizeObserver } from '../test-support/resize';
-import { fileTabsByProject, fillStores, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { fileTabsByProject, fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { PINNED_HINT } from './Tab';
 import { TAB_DRAG_TYPE } from './TabStrip';
 
 vi.mock('../app/Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
 const nine = scenarioFile('nine-sessions');
-const idOf = (title: string) => nine.sessions.find((r) => r.title.text === title)!.appId;
+const page = pageScenario(nine); // P5 O6 M2: the ids the stores and the DOM hold
+const idOf = (title: string) => page.sessions.find((r) => r.title.text === title)!.appId;
 const offs: (() => void)[] = [];
 
 const main = () => document.querySelector<HTMLElement>('[data-region="main"]')!;
@@ -34,7 +36,7 @@ const tab = (name: string) => within(chrome()).getByRole('tab', { name });
 const selected = (strip = strips()[0]) => within(strip).getAllByRole('tab').find((t) => t.getAttribute('aria-selected') === 'true')?.getAttribute('aria-label');
 // A session's row, in its project expanded in place (W11).
 const sidebarRow = (title: string) => {
-  const projectId = nine.sessions.find((r) => r.title.text === title)!.projectId ?? 'other';
+  const projectId = page.sessions.find((r) => r.title.text === title)!.projectId ?? 'other';
   act(() => useLayout.getState().setSidebar({ expandedProjects: [projectId as ProjectId] }));
   return within(document.querySelector<HTMLElement>('[data-region="sidebar"]')!).getByRole('treeitem', { name: title });
 };
@@ -85,7 +87,7 @@ beforeEach(() => {
   resetShellStores();
   fillStores(nine);
   offs.push(registerShellActions(fakeBridge()));
-  window.maws = fakeClient({ 'attention.request': { event: null } }).client;
+  window.maws = fakeClient({ 'attention.request': { event: null } }).client as unknown as PreloadBridge;
 });
 async function cleanupShell() {
   cleanup();
@@ -98,7 +100,7 @@ afterEach(async () => {
     await cleanupShell();
   } finally {
     vi.useRealTimers();
-    delete (window as { maws?: MawsBridge }).maws;
+    delete (window as { maws?: PreloadBridge }).maws;
     resetSlots();
     offs.splice(0).forEach((off) => off());
   }
@@ -708,8 +710,8 @@ describe('the split’s float: the divider', () => {
 });
 
 describe('unstarted sessions', () => {
-  const MAWS = 'proj-maws' as ProjectId;
-  const NEW = 'app-new-1' as AppSessionId;
+  const MAWS = at('proj-maws' as ProjectId);
+  const NEW = at('app-new-1' as AppSessionId);
 
   beforeEach(() => {
     offs.push(registerSessionCreator(async () => NEW));
@@ -741,7 +743,7 @@ describe('unstarted sessions', () => {
     await act(async () => runAction('tab.close'));
     act(() => useLayout.getState().openSession(idOf('Quota reset recovery')));
     await user.click(within(strips()[0].parentElement!).getByRole('button', { name: 'New chat' }));
-    expect(asked).toEqual([null, 'proj-codex-somersault']);
+    expect(asked).toEqual([null, at('proj-codex-somersault')]);
     expect(selected()).toBe('New chat');
   });
 
@@ -749,7 +751,7 @@ describe('unstarted sessions', () => {
     render(<Shell />);
     await act(() => createSession(MAWS));
     act(() => {
-      useSessions.getState().applyChanged({ record: record(NEW, { projectId: MAWS, title: { text: 'Rename the tab strip', source: 'generated' } }), cause: 'live', revision: 99 } as never);
+      useSessions.getState().applyChanged({ record: record(NEW, { projectId: MAWS, title: { text: 'Rename the tab strip', source: 'generated' } }), cause: 'live', revision: 99 } as never, TEST_MACHINE);
     });
     const t = tab('Rename the tab strip · MAWS');
     expect(t.getAttribute('aria-selected')).toBe('true');
@@ -974,18 +976,18 @@ describe('tab sets per project', () => {
     act(() => useLayout.getState().setSidebar({ expandedProjects: [] }));
     fireEvent.contextMenu(label()!);
     await user.click(await screen.findByRole('menuitem', { name: 'Reveal in sidebar' }));
-    expect(useLayout.getState().regions.sidebar.expandedProjects).toEqual(['proj-maws']);
+    expect(useLayout.getState().regions.sidebar.expandedProjects).toEqual([at('proj-maws')]);
   });
 
-  it('a project with nothing open shows the empty pane under its name; Other sessions shows the unlabelled no-project set', async () => {
+  it('a project with nothing open shows the empty pane under its name; the machine’s own row shows its unlabelled set', async () => {
     const user = userEvent.setup();
     render(<Shell />);
     await user.click(projectRow('claude-usage-menubar'));
     expect(tabNames()).toEqual([]);
     expect(within(within(main()).getByRole('tabpanel')).getByText('No open tabs')).toBeTruthy();
     expect(label()?.textContent).toBe('claude-usage-menubar');
-    await user.click(projectRow('Other sessions'));
-    expect(useLayout.getState().main.current).toBe('none');
+    await user.click(projectRow('This Mac'));
+    expect(useLayout.getState().main.current).toBe(`machine:${TEST_MACHINE}`); // P5 O6 M5
     expect(label()).toBeNull();
   });
 
@@ -997,7 +999,7 @@ describe('tab sets per project', () => {
     act(() => useLayout.getState().openSession(idOf('Quota reset recovery')));
     act(() => useLayout.getState().openTab({ kind: 'settings', section: null }));
     expect(tabNames()).toEqual(['Quota reset recovery', 'Settings']);
-    act(() => useLayout.getState().setCurrentProject('proj-maws' as ProjectId));
+    act(() => useLayout.getState().setCurrentProject(at('proj-maws' as ProjectId)));
     expect(tabNames()).toEqual(['Charter + research']);
   });
 });

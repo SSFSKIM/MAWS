@@ -1,6 +1,11 @@
-// UX1 D7: titles own the row; worktree at left, status and age at right, detail in the hover card.
+// UX1 D7: titles own the row; worktree at left, status and age at right, detail in the hover card. P5 O6 M5 (P5 Decision
+// Log 28): another machine's row carries `@<name>` after its title (T1); an offline machine's greys in place, "offline"
+// where the chip was (T2). P5 O8 M5: a record at a listed address names the listing's owners after its title when they
+// aren't you alone.
 import type { SessionRecord } from '@shared/graph/session';
 import { PinIcon } from '../app/IconButton';
+import { MachineChip } from '../app/MachineChip';
+import { MACHINE_OFFLINE, useMachineMark } from '../app/machine-mark';
 import { sessionActionsFor } from '../app/session-actions';
 import { SessionOverflow } from './menus';
 import { useNow } from '../app/use-now';
@@ -13,6 +18,7 @@ import { lineageCaption, sessionAge } from './derive';
 import { SessionHoverCard } from './HoverCard';
 import { ReleasedMark } from '../budget/ReleasedMark'; // C12
 import { sessionNodeId, useTree } from './tree';
+import { RowTitle, useOwnersLabel } from './RowTitle'; // P5 O8 M5
 import { setSessionUnread } from '../keymap/session-navigation';
 import { displayTitle } from '../sessions/title';
 
@@ -40,6 +46,8 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
   const selected = tree.selected === id;
   const title = displayTitle(record);
   const hasActions = sessionActionsFor(record).includes('rename');
+  const machine = useMachineMark(id);
+  const owners = useOwnersLabel(id);
 
   return (
     <SessionHoverCard record={record}>
@@ -47,7 +55,8 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
         role="treeitem"
         aria-level={level}
         aria-selected={selected}
-        aria-label={title}
+        aria-label={machine.offline ? `${title}, ${MACHINE_OFFLINE}` : title}
+        data-offline={machine.offline || undefined}
         tabIndex={tree.tabStop === nodeId ? 0 : -1}
         data-tree-id={nodeId}
         data-kind="session"
@@ -70,7 +79,8 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
             ↳
           </span>
         )}
-        <span data-session-title className="min-w-0 flex-1 truncate text-ui text-fg">{title}</span>
+        <RowTitle title={title} owners={owners} offline={machine.offline} />
+        <MachineChip address={id} className="max-w-[35%]" />
         {/* E3: the lineage caption takes the branch's place; a nested side thread shares its parent's branch */}
         {caption !== null && (
           <span data-testid="row-lineage" title={caption} className={`max-w-[45%] shrink-0 truncate text-ui-sm text-fg-muted`}>

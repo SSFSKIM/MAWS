@@ -2,7 +2,7 @@
 // gate.yml's static job collects this file with scripts/*.test.mjs.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
@@ -42,8 +42,8 @@ function fixture(run) {
   }
 }
 
-function demand(tree, sha, trailers, vars = variables) {
-  return spawnSync(process.execPath, [cli, '--git-dir', tree, '--sha', sha], {
+function demand(tree, sha, trailers, vars = variables, script = cli) {
+  return spawnSync(process.execPath, [script, '--git-dir', tree, '--sha', sha], {
     cwd: tmpdir(), // neither package.json nor gate.yml may come from the caller's cwd
     encoding: 'utf8',
     env: { ...process.env, ...vars, HEAD_MESSAGE: message(trailers) },
@@ -98,9 +98,22 @@ function scheduledPoolDemand(outputs) {
   return [...counts].sort(([a], [b]) => b - a).map(([cpu, count]) => `${cpu}x${count}`).join(' ') || 'none';
 }
 
+// Read the list independently of the planner and workflowEnv, as gate-plan.test.mjs does (inline, folded, or empty).
+const workflowList = (name) => {
+  const [, value, folded] = new RegExp(`^ {2}${name}: (.*)\\n((?: {4}\\S.*\\n)*)`, 'm').exec(workflow);
+  return (value === '>-' ? folded : value).replace(/^''$/, '').trim().split(/\s+/).filter(Boolean);
+};
+// Only the waiter count follows admissions. Keep static, unit shards, desk-web and guest build variants pinned;
+// the extra cpus-2 box is probes, not a waiter.
+const wholeMacPoolDemand = `16x1 8x4 4x3 2x${1 + workflowList('HOSTED_MAC_E2E').length}`;
+// Pin the default set's exclusions rather than reproducing the planner's eligibility predicate: default selects
+// the rest of the run, desk-web runs on the pool, connectors-oauth needs secrets, discover needs secrets and home.
+const hostedLaneExcluded = new Set(['default', 'desk-web', 'connectors-oauth', 'discover']);
+const hostedLaneWaiters = workflowList('CLASS1_E2E').filter((group) => !hostedLaneExcluded.has(group)).length;
+
 const scenarios = [
   ['class 1a on the pool counts every unit shard', 'Gates: static,unit,probes\nClass1a: pool', '16x1 8x4 2x1'],
-  ['the whole macOS matrix counts pool e2e, each guest build variant and a waiter per HOSTED_MAC_E2E group, not Mac jobs', 'Runner: macos', '16x1 8x4 4x3 2x32'],
+  ['the whole macOS matrix counts pool e2e, each guest build variant and a waiter per HOSTED_MAC_E2E group, not Mac jobs', 'Runner: macos', wholeMacPoolDemand],
   ['a Mac-only run asks for no pool boxes', 'Gates: static,unit,unit:darwin,probes,packaged\nClass1a: macos\nRunner: macos', 'none'],
   ['affected selection counts the single related-unit job', 'Gates: static,unit,probes\nSelection: affected\nAffected-Count: 1\nAffected: M\tsrc/shared/pool-demand.ts', '16x1 8x1 2x1'],
   ['an affected fallback still counts all unit shards', 'Gates: unit\nSelection: affected\nAffected-Count: 1\nAffected: M\tpackage.json', '8x4'],
@@ -108,7 +121,7 @@ const scenarios = [
   ['hosted jobs and a hosted POOL_E2E group ask for no boxes', 'Gates: static,unit,probes,e2e:desk-web\nClass1a: linux\nRunner: linux', 'none'],
   // ci-kit's hosted-Mac spec: a hosted group's job is a waiter on one cpus-2 box, the code's own count of e2e entries.
   ['each group on a hosted Mac is one cpus-2 waiter box', 'Gates: e2e:document-app,e2e:transcript\nClass1a: linux\nRunner: macos\nLane: hosted', '2x2'],
-  ['the whole macOS matrix under Lane: hosted: a waiter per eligible group, beside the pool jobs it had', 'Runner: macos\nLane: hosted', '16x1 8x4 4x2 2x33'],
+  ['the whole macOS matrix under Lane: hosted: a waiter per eligible group, beside the pool jobs it had', 'Runner: macos\nLane: hosted', `16x1 8x4 4x2 2x${1 + hostedLaneWaiters}`],
 ];
 for (const [name, trailers, expected] of scenarios) {
   test(name, () => fixture(({ tree, sha, dir }) => {
@@ -118,6 +131,15 @@ for (const [name, trailers, expected] of scenarios) {
     assert.equal(result.stdout.trim(), scheduledPoolDemand(workflowPlan(dir, trailers)));
   }));
 }
+
+// Node canonicalizes import.meta.url but leaves argv[1] as spelled, so a symlinked checkout path must still run the CLI.
+test('the CLI prints its demand when invoked through a symlinked directory', () => fixture(({ dir, tree, sha }) => {
+  const linked = join(dir, 'linked-scripts');
+  symlinkSync(join(root, 'scripts'), linked);
+  const result = demand(tree, sha, 'Gates: static,unit,probes', variables, join(linked, 'ci-gate-pool-demand.mjs'));
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '16x1 8x4 2x1\n');
+}));
 
 test('the CLI reads scripts and env lists at the pushed sha, ignoring dirty files and ambient workflow inputs', () => fixture(({ tree, sha, put, git }) => {
   const changedScripts = JSON.parse(packageJson);
@@ -189,7 +211,7 @@ test('the CLI refuses an unreadable tree or invalid plan without emitting a hint
 // A real local origin captures the pushed empty commit; gh and sleep alone are fake. No Actions run is created, so
 // ci-gate ends at "no run" (exit 1) after the push, and --keep leaves the message available for inspection.
 function pushedGate(args, { failure = '', affected = false } = {}) {
-  return fixture(({ dir, tree, git, put, sha }) => {
+  return fixture(({ dir, tree, git, put }) => {
     const origin = join(dir, 'origin.git');
     execFileSync('git', ['init', '--quiet', '--bare', origin]);
     git('remote', 'add', 'origin', origin);
@@ -198,7 +220,6 @@ function pushedGate(args, { failure = '', affected = false } = {}) {
       put('src/shared/pool-demand.ts', 'export const value = 2;\n');
       git('add', '.');
       git('commit', '--quiet', '-m', 'source change');
-      sha = git('rev-parse', 'HEAD');
     }
     if (failure === 'workflow') put('.github/workflows/gate.yml', 'env:\n  MAC_VM_E2E: [cannot, read]\n');
     if (failure === 'missing-planner') rmSync(join(tree, '.github/scripts/gate-plan.mjs'));
@@ -206,7 +227,6 @@ function pushedGate(args, { failure = '', affected = false } = {}) {
     if (['workflow', 'missing-planner', 'unsupported-planner'].includes(failure)) {
       git('add', '.');
       git('commit', '--quiet', '-m', 'target cannot provide a pool hint');
-      sha = git('rev-parse', 'HEAD');
     }
     // Dirty caller files must not affect the hint, even for --gates all.
     put('package.json', '{}');
@@ -227,8 +247,10 @@ esac
     const result = spawnSync('bash', [join(root, 'scripts/ci-gate.sh'), tree, ...args, '--keep'], {
       cwd: tmpdir(), encoding: 'utf8', env: { ...process.env, ...identity, PATH: `${dir}:${process.env.PATH}`, MAWS_GATE_IGNORE_ALERTS: '1', MAWS_GATE_RUNNER: '' },
     });
-    const pushed = git('--git-dir', origin, 'log', '-1', '--format=%B', `refs/heads/ci/demand-${sha.slice(0, 8)}`);
-    rmSync(`/tmp/maws-review/gates/ci-${sha.slice(0, 8)}.log`, { force: true });
+    const ref = / as (ci\/\S+)/.exec(result.stdout)?.[1];
+    const pushed = git('--git-dir', origin, 'log', '-1', '--format=%B', `refs/heads/${ref}`);
+    const transcript = /^ci-gate: transcript in (.+)$/m.exec(result.stdout)?.[1];
+    if (transcript) rmSync(dirname(transcript), { recursive: true, force: true });
     assert.equal(result.status, 1, result.stdout + result.stderr);
     assert.match(result.stdout, /ci-gate: no run of/);
     return { message: pushed, calls: readFileSync(join(dir, 'gh-calls'), 'utf8') };
@@ -238,7 +260,7 @@ esac
 test('ci-gate pushes exactly one Pool-Demand line from the same trailers and push-time variables', () => {
   for (const [args, expected, affected] of [
     [['--gates', 'static,unit,probes'], '16x1 8x4 2x1', false],
-    [['--gates', 'all', '--runner', 'macos'], '16x1 8x4 4x3 2x32', false],
+    [['--gates', 'all', '--runner', 'macos'], wholeMacPoolDemand, false],
     [['--gates', 'unit', '--class1a', 'macos'], 'none', false],
     [['--gates', 'e2e:document,e2e:panel', '--runner', 'macos', '--hosted-route', 'direct'], 'none', false],
     [['--gates', 'e2e:document,e2e:panel', '--runner', 'macos', '--hosted-route', 'mirror'], '2x2', false],

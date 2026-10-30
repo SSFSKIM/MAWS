@@ -10,6 +10,8 @@ import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validat
 import { ConnectorBroker } from './broker';
 import { createDirectRoute, DIRECT_OPERATION_DEADLINE_MS, DIRECT_RESOLVE_DEADLINE_MS, DIRECT_PENDING_LIMIT, type DirectRoute, type DirectRouteDeps } from './direct-route';
 import type { ConnectorGrantAuthority, ConnectorRouteAnswer, ConnectorRouteTarget } from './route';
+import { project, record } from '../../../test/support/builders';
+import { fakeSpineView } from '../../../test/support/fake-spine-view';
 
 const ART = '11111111-1111-4111-8111-111111111111';
 const SOURCE_ID = '22222222-2222-4222-8222-222222222222';
@@ -41,8 +43,12 @@ class FakeHost {
   route!: DirectRoute;
   artifact: Record<string, unknown> = { id: ART, kind: 'html', title: 'Live', createdBy: { kind: 'session', appSessionId: 'app-own' }, projectId: 'proj', createdAt: 0, updatedAt: 0, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 1, lastEditor: { kind: 'human' }, lastEditedAt: 0 };
   spaces: Record<string, unknown>[] = [];
-  creator: { projectId: string | null; directory: string } | null = { projectId: 'proj', directory: '/repo' };
-  project: { id: string; directory: string }[] = [{ id: 'proj', directory: '/repo' }];
+  // the spine's view (P5 O3-C reader R8): the artifact's creator and its project
+  view = fakeSpineView({ records: [record('app-own', { projectId: 'proj' as never, directory: '/repo' })], projects: [project('proj', 0, { directory: '/repo' })] });
+  creator(over: { projectId: string; directory: string } | null): void {
+    if (over === null) this.view.removeRecord('app-own' as never);
+    else this.view.putRecord(record('app-own', { projectId: over.projectId as never, directory: over.directory }));
+  }
 
   call: DirectRouteDeps['call'] = async (name, input) => {
     expect(ALLOWED.has(name), `${name} is not a route D command`).toBe(true);
@@ -104,8 +110,7 @@ let log: ReturnType<typeof vi.fn<(line: string) => void>>;
 function makeRoute(): DirectRoute {
   return createDirectRoute({
     call: host.call,
-    sessions: { get: (id) => (id === 'app-own' ? host.creator : null) },
-    projects: { list: () => host.project },
+    view: host.view,
     realpath: (path) => path,
     streaming: () => host.streams,
     log,
@@ -169,8 +174,8 @@ describe('resolve (metadata only, immediately acknowledged)', () => {
   });
 
   it('is no route (null) with no canonical directory, without asking the host to resolve', async () => {
-    host.creator = null;
-    host.project = [];
+    host.creator(null);
+    host.view.setProjects([]);
     expect(await route.resolve(ART, ROWS, signalOf().signal)).toBeNull();
     expect(host.of('connectors.directResolve')).toHaveLength(0);
   });
@@ -256,21 +261,26 @@ describe('resolve (metadata only, immediately acknowledged)', () => {
 
 describe('a creator’s directories (the canonical decision route E shares)', () => {
   it('a creator filed elsewhere falls back to the row’s project; a deleted record too; a vanished directory is no route', async () => {
-    host.creator = { projectId: 'other', directory: '/other' };
+    host.creator({ projectId: 'other', directory: '/other' });
     void route.resolve(ART, ROWS, signalOf().signal);
     await settle();
     expect(host.last('connectors.directResolve').input.directories).toEqual(['/repo']);
-    host.creator = null;
+    host.creator(null);
     void route.resolve(ART, ROWS, signalOf().signal);
     await settle();
     expect(host.of('connectors.directResolve')[1]!.input.directories).toEqual(['/repo']);
-    const gone = createDirectRoute({ call: host.call, sessions: { get: () => host.creator }, projects: { list: () => host.project }, realpath: () => null, streaming: () => true, log });
+    // D8: a project row with no present session (one session.projects.list no longer lists) is still the directory
+    host.view.setProjects([], [project('proj', 0, { directory: '/repo' })]);
+    void route.resolve(ART, ROWS, signalOf().signal);
+    await settle();
+    expect(host.of('connectors.directResolve')[2]!.input.directories).toEqual(['/repo']);
+    const gone = createDirectRoute({ call: host.call, view: host.view, realpath: () => null, streaming: () => true, log });
     expect(await gone.resolve(ART, ROWS, signalOf().signal)).toBeNull();
     gone.stop();
   });
 
   it('a creator working in a worktree sends that worktree, never the project root', async () => {
-    host.creator = { projectId: 'proj', directory: '/repo/.claude/worktrees/feature' };
+    host.creator({ projectId: 'proj', directory: '/repo/.claude/worktrees/feature' });
     void route.resolve(ART, ROWS, signalOf().signal);
     await settle();
     expect(host.last('connectors.directResolve').input.directories).toEqual(['/repo/.claude/worktrees/feature']);
@@ -660,7 +670,7 @@ describe('P4-B5: locate and send for the owner’s delivery', () => {
     host.streams = false;
     expect(await route.send(source(), { artifactId: ART, tool: 't', arguments: {} }, signalOf().signal)).toMatchObject({ ok: false, reason: 'lost', sent: false });
     host.streams = true;
-    const refusing = createDirectRoute({ call: host.call, sessions: { get: () => null }, projects: { list: () => [] }, realpath: (path) => path, streaming: () => true, log, credentials: { prepare: async () => ({ ok: false }), unauthorized: () => {} } });
+    const refusing = createDirectRoute({ call: host.call, view: fakeSpineView(), realpath: (path) => path, streaming: () => true, log, credentials: { prepare: async () => ({ ok: false }), unauthorized: () => {} } });
     expect(await refusing.send(source({ transport: 'http', resourceUrl: 'https://mcp.example.com/mcp' }), { artifactId: ART, tool: 't', arguments: {} }, signalOf().signal)).toEqual({ ok: false, failure: 'unavailable', reason: 'lost', message: 'no credential could be prepared', sent: false, credential: false });
     expect(host.of('connectors.directSend')).toHaveLength(0);
     refusing.stop();

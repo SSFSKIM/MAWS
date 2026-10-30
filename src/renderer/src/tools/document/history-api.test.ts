@@ -5,7 +5,8 @@
 // versions heard from `artifacts.changed` for this artifact; failures to the renderer's log.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ArtifactVersion } from '@shared/artifacts/version';
-import type { CommandName, EventName, MawsBridge } from '@shared/ipc/schema';
+import type { CommandName, EventName, EventSource, MawsBridge } from '@shared/ipc/schema';
+import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { createHistoryApi } from './history-api';
 
 const A = '0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e';
@@ -14,7 +15,7 @@ const version: ArtifactVersion = { id: 3, seq: 12, at: 1_760_000_000_000, actor:
 
 function bridge(answers: Partial<Record<CommandName, unknown>> = {}) {
   const calls: Array<[string, unknown]> = [];
-  const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  const listeners = new Map<string, Set<(payload: unknown, from: EventSource) => void>>();
   const ipc: Pick<MawsBridge, 'invoke' | 'on'> = {
     invoke: (async (name: CommandName, input: unknown) => {
       calls.push([name, input]);
@@ -22,7 +23,7 @@ function bridge(answers: Partial<Record<CommandName, unknown>> = {}) {
       if (value instanceof Error) return { ok: false, error: { code: 'internal', message: value.message } };
       return { ok: true, value };
     }) as MawsBridge['invoke'],
-    on: ((name: EventName, listener: (payload: unknown) => void) => {
+    on: ((name: EventName, listener: (payload: unknown, from: EventSource) => void) => {
       const set = listeners.get(name) ?? new Set();
       listeners.set(name, set);
       set.add(listener);
@@ -30,7 +31,7 @@ function bridge(answers: Partial<Record<CommandName, unknown>> = {}) {
     }) as MawsBridge['on'],
   };
   const emit = (name: string, payload: unknown) => {
-    for (const listener of listeners.get(name) ?? []) listener(payload);
+    for (const listener of listeners.get(name) ?? []) listener(payload, { machine: TEST_MACHINE });
   };
   return { ipc, calls, emit, listeners };
 }

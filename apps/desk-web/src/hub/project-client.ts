@@ -30,7 +30,7 @@ import {
 import { catalogs, catalogKey } from '../state/catalog';
 import type { Catalog } from 'desk-hub/protocol';
 import { latency } from '../latency/latency';
-import { ReadError, type SessionPlane, type SessionTarget, type Subscription, type SubscriptionListener, type SubscriptionMessage } from '../shell/session-plane';
+import { ReadError, type SessionPlane, type SessionTarget, type Subscription, type SubscriptionListener, type SubscriptionMessage } from '../../../../src/renderer/src/lane-a/session-plane';
 import { backoff, HubSocket, type ConnectionStatus } from './socket';
 
 /** How often a visible tab says so again: a third of the 90 s the hub counts a socket as visible after the last. */
@@ -104,6 +104,11 @@ export type ProjectClientOptions = {
   resubscribeDelay?: (attempt: number) => number;
   /** How long a read waits for its answer (`READ_TIMEOUT_MS` by default). */
   readTimeoutMs?: number;
+  /**
+   * Whether `machine` moved to MAWS (P5 O13's seam): it refuses every DX6 request, so none is sent to it — not a new
+   * RPC, not a retry, not one kept from before it moved to be sent again at a welcome.
+   */
+  movedToMaws?: (machine: string) => boolean;
 };
 
 type OpenSubscription = {
@@ -209,18 +214,27 @@ export class ProjectClient implements SessionPlane {
       for (const listener of this.rpcListeners) listener({ t: 'rpc-state', nonce: rpc.nonce, state: 'failed', outcome });
       return true;
     }
-    if (!this.welcomed || !this.socket.send({ t: 'rpc', rpc })) return false;
+    if (this.moved(rpc) || !this.welcomed || !this.socket.send({ t: 'rpc', rpc })) return false;
     this.rpcs.set(rpc.nonce, rpc);
     return true;
   }
 
   /**
    * Sends an RPC already sent once again, exactly as sealed (an `uncertain` one's retry, DX6): kept and sent after
-   * each reconnect until its result, as when it was first sent.
+   * each reconnect until its result, as when it was first sent. False, nothing sent or kept, for a machine moved to MAWS.
    */
-  resendRpc(rpc: Rpc): void {
+  resendRpc(rpc: Rpc): boolean {
+    if (this.moved(rpc)) {
+      this.rpcs.delete(rpc.nonce);
+      return false;
+    }
     this.rpcs.set(rpc.nonce, rpc);
     if (this.welcomed) this.socket.send({ t: 'rpc', rpc });
+    return true;
+  }
+
+  private moved(rpc: Rpc): boolean {
+    return this.options.movedToMaws?.(rpc.machine) === true;
   }
 
   onRpcState(listener: (frame: RpcStateFrame) => void): () => void {
@@ -352,7 +366,7 @@ export class ProjectClient implements SessionPlane {
         this.socket.send({ t: 'resume', after: handlers.held() });
         if (this.visible !== null) this.socket.send({ t: 'visibility', visible: this.visible });
         for (const event of [...this.humans.values()].map((h) => h.event)) this.socket.send({ t: 'human', event });
-        for (const rpc of this.rpcs.values()) this.socket.send({ t: 'rpc', rpc });
+        for (const rpc of this.rpcs.values()) if (!this.moved(rpc)) this.socket.send({ t: 'rpc', rpc });
         for (const open of this.subs) this.sendSubscribe(open);
         return;
       case 'log': {

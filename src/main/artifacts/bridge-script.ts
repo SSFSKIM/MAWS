@@ -22,9 +22,12 @@
 // selector) is answered with `{ type: 'maws:located', id, selector, rect }`, the id echoed so the app tells two asks of
 // one selector apart, the rect `getBoundingClientRect` of `document.querySelector(selector)`, or null at once when the
 // selector is invalid (a throwing selector is caught). Neither an anchor the page has not added yet (a script that
-// renders after the load) nor a zero-size rect is final (P3-F L198): watch the page until the anchor exists (a
-// MutationObserver) and then until both its dimensions have size (a ResizeObserver), bounded by HtmlFrame's one-second
-// locate budget (null if it never comes or never gains size). The observers leave on the answer. A locate never starts
+// renders after the load) nor a zero-size rect is final (P3-F L198), nor one measured while the page's own viewport has
+// no size: a reloaded frame's page can load and answer before it is given the frame's size, and its anchor then measures
+// as its padding alone (P5 O6 M2, side case 11 on a loaded Mac). Watch the page until the anchor exists (a
+// MutationObserver), then until both its dimensions and the viewport's have size (a ResizeObserver on the anchor, and the
+// window's resize, which moves an anchor of fixed size without resizing it), bounded by HtmlFrame's one-second locate
+// budget (null if it never comes or never gains size). The observers leave on the answer. A locate never starts
 // picking or changes the page. The capture window loads the page top-level, where there is no parent to listen to, so
 // the script does nothing there.
 //
@@ -155,7 +158,7 @@ const SOURCE = String.raw`(function () {
     if (!data || typeof data !== 'object' || data.type !== 'maws:locate' || typeof data.id !== 'number' || typeof data.selector !== 'string') return;
     function answer(rect) { post({ type: 'maws:located', id: data.id, selector: data.selector, rect: rect }); }
     function rectOf(node) { var r = node.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; }
-    function sized(rect) { return rect.width > 0 && rect.height > 0; }
+    function sized(rect) { return rect.width > 0 && rect.height > 0 && window.innerWidth > 0 && window.innerHeight > 0; }
     var el;
     try { el = document.querySelector(data.selector); } catch (error) { answer(null); return; }
     var first = el ? rectOf(el) : null;
@@ -163,22 +166,27 @@ const SOURCE = String.raw`(function () {
     var done = false;
     var added = null;
     var resized = null;
+    var viewport = null;
     function finish(rect) {
       if (done) return;
       done = true;
       window.clearTimeout(timer);
       if (added) added.disconnect();
       if (resized) resized.disconnect();
+      if (viewport) window.removeEventListener('resize', viewport);
       answer(rect);
     }
     function measure(node) {
       var rect = rectOf(node);
       if (sized(rect)) { finish(rect); return; }
-      resized = new window.ResizeObserver(function () {
+      function again() {
         var r = rectOf(node);
         if (sized(r)) finish(r);
-      });
+      }
+      resized = new window.ResizeObserver(again);
       resized.observe(node);
+      viewport = again;
+      window.addEventListener('resize', viewport);
     }
     var timer = window.setTimeout(function () { finish(null); }, 1000);
     if (el) { measure(el); return; }

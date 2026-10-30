@@ -23,6 +23,7 @@ const KIND_PLURALS: Record<ArtifactKind, string> = {
 };
 
 export const LIBRARY_COPY = {
+  otherMachine: 'Artifacts made on another machine aren’t shown here yet', // P5 O6 M4: until O7 gives artifacts a machine
   fallbackTitle: 'Artifact', // an `artifact` tab whose row is not known (yet)
   reading: 'Opening…',
   readFailed: (message: string) => `Couldn’t read this artifact: ${message}`,

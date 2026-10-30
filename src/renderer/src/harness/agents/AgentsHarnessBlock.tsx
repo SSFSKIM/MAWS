@@ -14,6 +14,8 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, AttentionId, TaskId } from '@shared/graph/ids';
+import { addressOf } from '@shared/machine/address';
+import { ipc } from '../../ipc/client';
 import { useAttention } from '../../stores/attention';
 import { useSessions } from '../../stores/sessions';
 import { agentTranscriptActions, registerAgentTools, useRelays, useTaskGraph } from '../../tools/agents';
@@ -95,7 +97,7 @@ function seedAttention(appSessionId: AppSessionId, events: SessionEvent[]): void
   for (const event of events) {
     if (event.kind === 'permission.requested' && event.agentId !== null) {
       const item: AttentionItem = {
-        id: `harness-attention-${event.requestId}` as AttentionId,
+        id: addressOf(ipc.localMachine, `harness-attention-${event.requestId}` as AttentionId), // P5 O6 M2: the local machine's
         appSessionId,
         sessionId: event.sessionId,
         kind: 'permission',

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '../src/shared/owner/contract';
+import { addressed } from './support/address';
 import { invoke, value } from './support/c7-replay';
 import { traceForeground } from './support/foreground-trace';
 import { launchMaws } from './support/launch';
@@ -55,7 +56,7 @@ test('legacy mark text stays unboxed; attention jumps and owner-channel read/ans
     await page.mouse.move(700, 450);
     const pane = page.locator('[data-region="main"] [data-pane="0"]');
     const composer = pane.getByRole('textbox', { name: 'Message' });
-    await expect(pane.locator(`[data-composer="${asking}"]`)).toBeVisible();
+    await expect(pane.locator(`[data-composer="${await addressed(page, asking)}"]`)).toBeVisible();
 
     // Turn 1, the first Send starting the session: a must-read.
     await composer.click();
@@ -77,10 +78,10 @@ test('legacy mark text stays unboxed; attention jumps and owner-channel read/ans
     // Leaving the tab: the row's glyph is the question's; the compact Needs-you row names the oldest item for assistive tech.
     await (await sidebarRow(page, { appSessionId: other })).click();
     await page.mouse.move(700, 450);
-    await expect(pane.locator(`[data-composer="${other}"]`)).toBeVisible();
+    await expect(pane.locator(`[data-composer="${await addressed(page, other)}"]`)).toBeVisible();
     await expect((await sidebarRow(page, { appSessionId: asking })).getByRole('img', { name: 'Question waiting' })).toBeVisible();
     await page.mouse.move(700, 450);
-    const needs = page.getByRole('list', { name: 'Needs you' }).locator(`[data-needs-you="${asking}"]`);
+    const needs = page.getByRole('list', { name: 'Needs you' }).locator(`[data-needs-you="${await addressed(page, asking)}"]`);
     await expect(needs).toHaveAccessibleName(`repo · a session that asks · Must read — ${TO_HUMAN.essential}`);
     await expect(needs).not.toContainText(TO_HUMAN.essential);
 
@@ -92,7 +93,7 @@ test('legacy mark text stays unboxed; attention jumps and owner-channel read/ans
       async () => {
         await needs.click();
         await page.mouse.move(700, 450);
-        await expect(pane.locator(`[data-composer="${asking}"]`)).toBeVisible();
+        await expect(pane.locator(`[data-composer="${await addressed(page, asking)}"]`)).toBeVisible();
         await expect(pane.getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Report' })).toHaveAttribute('aria-pressed', 'true');
         await expect.poll(() => page.evaluate(() => document.activeElement?.textContent?.includes('The migration drops the legacy_users table.') === true)).toBe(true);
       },
@@ -164,7 +165,7 @@ test('a style declaring the plugin’s message tool (6): the supplement once and
     await page.mouse.move(700, 450);
     const pane = page.locator('[data-region="main"] [data-pane="0"]');
     const composer = pane.getByRole('textbox', { name: 'Message' });
-    await expect(pane.locator(`[data-composer="${id}"]`)).toBeVisible();
+    await expect(pane.locator(`[data-composer="${await addressed(page, id)}"]`)).toBeVisible();
     // Before any launch, the lane reads what the next launch would do.
     expect(await lane()).toMatchObject({ source: 'external-style-plus-supplement', pending: 'next-launch' });
 

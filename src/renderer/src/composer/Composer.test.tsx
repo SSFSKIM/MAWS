@@ -2,15 +2,19 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useRef, useSyncExternalStore, type ReactNode } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { QueueEntry } from '@shared/engine/session-state-store';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { AttentionItem } from '@shared/graph/attention';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import { REGISTRY } from '@shared/ipc/registry';
+import { addressingOf, bareOf } from '@shared/machine/address';
 import type { TabSet } from '@shared/ipc/schema/layout'; // E9
 import { digest, humanTurn, item, record, status } from '../../../../test/support/builders'; // C12: digest; E11 F2b: item
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { connectKeys } from '../keymap/dispatcher';
 import { bindingsOf, useKeyChord } from '../keymap/useKeyChord';
 import { itemFor, permission } from '../request-card/test-requests';
@@ -37,6 +41,7 @@ import { registerSlashWidget } from './mentions/widgets'; // W3
 import { closeWidgetDialog, openWidgetDialog, useWidgetDialog, WidgetDialogHost } from './WidgetDialog'; // W3; P2-B M6: the host and its open
 import { registerSetupIntentHook, type HookResult, type SetupIntentHook, type SetupIntentPatch } from './setup-intent';
 import { currentSet } from '../stores/layout-model';
+import { preloadOf } from '../test-support/preload-of';
 import { useSetup } from '../sessions/store'; // P2-A
 import { trustState } from '../test-support/setup-intents'; // P2-A
 import { DictationKeys } from './dictation/DictationKeys'; // E9
@@ -44,8 +49,16 @@ import { modelSelector } from '../widgets/ModelSelector'; // P2-F S chip (review
 import { resetModelRequests } from '../widgets/model'; // P2-F S chip (review)
 import { resetDictationStore, useDictationStore } from './dictation/store'; // E9
 
-const A = 'app-a' as AppSessionId;
-const B = 'app-b' as AppSessionId;
+// P5 O6 M2: `A` and `B` are the page's ids (addresses); `fake`, installed as `window.maws`, stands for main, so what it is
+// asked, answers and emits holds the bare `A_ID` and `B_ID`. The builders make main's values; the page's are lifted.
+const A_ID = 'app-a' as AppSessionId;
+const B_ID = 'app-b' as AppSessionId;
+const A = at(A_ID);
+const B = at(B_ID);
+const addressing = addressingOf(REGISTRY);
+const pageRecord = (id: AppSessionId, over?: Partial<SessionRecord>) => addressing.output('session.get').lift(record(bareOf(id), over), TEST_MACHINE)!;
+const pageStatus = (id: AppSessionId, compact?: Parameters<typeof status>[1]) => addressing.output('engine.sessions').lift([status(bareOf(id), compact)], TEST_MACHINE)[0]!;
+const pageItem = (item: AttentionItem) => addressing.output('attention.list').lift([item], TEST_MACHINE)[0]!;
 let fake: FakeClient;
 let disconnect: () => void;
 let queryClient: QueryClient;
@@ -92,7 +105,7 @@ beforeEach(() => {
     'layout.pickFiles': { files: [{ path: '/work/picked', name: 'picked', bytes: 0, mediaType: 'inode/directory', data: null }] },
     'session.setPermissionMode': { effective: 'default', refusal: 'auto_mode_model', error: 'model does not support auto' },
   });
-  window.maws = fake.client;
+  window.maws = preloadOf(fake);
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   disconnect = connectKeys();
 });
@@ -100,19 +113,19 @@ afterEach(() => {
   disconnect();
   cleanup();
   registerSetupIntentHook(() => null);
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
   vi.useRealTimers();
 });
 
 function live(appSessionId: AppSessionId, over: { status?: Partial<EngineSessionStatus>; record?: Partial<SessionRecord> } = {}) {
   const s = useSessions.getState();
   useSessions.setState({
-    records: new Map(s.records).set(appSessionId, record(appSessionId, over.record)),
-    engine: new Map(s.engine).set(appSessionId, { ...status(appSessionId), ...over.status }),
+    records: new Map(s.records).set(appSessionId, pageRecord(appSessionId, over.record)),
+    engine: new Map(s.engine).set(appSessionId, { ...pageStatus(appSessionId), ...over.status }),
     recordsVersion: s.recordsVersion + 1,
   });
 }
-const busy = (appSessionId: AppSessionId) => live(appSessionId, { status: status(appSessionId, { engineState: 'running', turn: humanTurn }) });
+const busy = (appSessionId: AppSessionId) => live(appSessionId, { status: pageStatus(appSessionId, { engineState: 'running', turn: humanTurn }) });
 
 function Pane({ index, children }: { index: 0 | 1; children: ReactNode }) {
   return (
@@ -171,7 +184,7 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(primary().textContent).toBe('Send');
     expect(primary().title).toBe('Send (Enter)');
     await key(editorOf(), { key: 'Enter' });
-    await waitFor(() => expect(invoked('session.send')).toEqual([{ appSessionId: A, content: 'hello' }]));
+    await waitFor(() => expect(invoked('session.send')).toEqual([{ appSessionId: A_ID, content: 'hello' }]));
     await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
 
     busy(A);
@@ -188,13 +201,13 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(within(composerOf(0)).queryByRole('button', { name: 'More ways to send' })).toBeNull();
     expect(within(composerOf(0)).queryByRole('button', { name: 'Stop' })).toBeNull();
     await key(editorOf(), { key: 'Enter' });
-    await waitFor(() => expect(invoked('session.steer')).toEqual([{ appSessionId: A, content: 'fold this in', priority: 'next' }]));
+    await waitFor(() => expect(invoked('session.steer')).toEqual([{ appSessionId: A_ID, content: 'fold this in', priority: 'next' }]));
     await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
 
     await type('and this');
     await userEvent.setup().click(primary());
     await waitFor(() => expect(invoked('session.steer')).toHaveLength(2));
-    expect(invoked('session.steer')[1]).toEqual({ appSessionId: A, content: 'and this', priority: 'next' });
+    expect(invoked('session.steer')[1]).toEqual({ appSessionId: A_ID, content: 'and this', priority: 'next' });
     expect(invoked('session.send')).toHaveLength(1);
     expect(invoked('session.history.append').map((i) => (i as { display: string }).display)).toEqual(['hello', 'fold this in', 'and this']);
   });
@@ -205,7 +218,7 @@ describe("composer DOM under C5's dispatcher", () => {
     await waitFor(() => expect(primary().textContent).toBe('Stop'));
     expect(primary().title).toBe('Stop the running turn (⌘.)');
     await userEvent.setup().click(primary());
-    await waitFor(() => expect(invoked('session.interrupt')).toEqual([{ appSessionId: A, cancelEngineQueued: false, holdEngineQueued: true }]));
+    await waitFor(() => expect(invoked('session.interrupt')).toEqual([{ appSessionId: A_ID, cancelEngineQueued: false, holdEngineQueued: true }]));
   });
 
   it('Esc while a turn runs interrupts and sends the held head now, or stops when nothing is held; it leaves Esc alone when idle (W1)', async () => {
@@ -217,12 +230,12 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(invoked('session.interrupt')).toEqual([]); // idle: not the composer's
     busy(A);
     await key(editorOf(), { key: 'Escape' });
-    await waitFor(() => expect(invoked('session.interrupt')).toEqual([{ appSessionId: A, cancelEngineQueued: false }])); // Esc holds nothing back: a waiting steer runs now
-    const uncertain: QueueEntry = { queueId: 'q-0', appSessionId: A, content: 'maybe sent', createdAt: '2026-09-29T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: true, steer: false };
+    await waitFor(() => expect(invoked('session.interrupt')).toEqual([{ appSessionId: A_ID, cancelEngineQueued: false }])); // Esc holds nothing back: a waiting steer runs now
+    const uncertain: QueueEntry = { queueId: 'q-0', appSessionId: A_ID, content: 'maybe sent', createdAt: '2026-09-29T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: true, steer: false };
     const held: QueueEntry = { ...uncertain, queueId: 'q-1', content: 'later', uncertain: false };
-    act(() => fake.event('session.queue', { appSessionId: A, entries: [uncertain, held], paused: false, pauseReason: null }));
+    act(() => fake.event('session.queue', { appSessionId: A_ID, entries: [uncertain, held], paused: false, pauseReason: null }));
     await key(editorOf(), { key: 'Escape' });
-    await waitFor(() => expect(invoked('session.queue.promote')).toEqual([{ appSessionId: A, queueId: 'q-1', priority: 'now' }])); // the uncertain one waits for the human
+    await waitFor(() => expect(invoked('session.queue.promote')).toEqual([{ appSessionId: A_ID, queueId: 'q-1', priority: 'now' }])); // the uncertain one waits for the human
     expect(invoked('session.interrupt')).toHaveLength(1);
   });
 
@@ -258,9 +271,9 @@ describe("composer DOM under C5's dispatcher", () => {
   it('reads Stop with an empty editor and Send with text while a first entry is submitting and no turn is open yet', async () => {
     live(A);
     mount([{ index: 0, id: A }]);
-    const submitting: QueueEntry = { queueId: 'q-1', appSessionId: A, content: 'first', createdAt: '2026-09-29T10:00:00.000Z', state: 'submitting', messageUuid: null, submittedAt: '2026-09-29T10:00:00.000Z', uncertain: false, steer: false };
+    const submitting: QueueEntry = { queueId: 'q-1', appSessionId: A_ID, content: 'first', createdAt: '2026-09-29T10:00:00.000Z', state: 'submitting', messageUuid: null, submittedAt: '2026-09-29T10:00:00.000Z', uncertain: false, steer: false };
     await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
-    act(() => fake.event('session.queue', { appSessionId: A, entries: [submitting], paused: false, pauseReason: null }));
+    act(() => fake.event('session.queue', { appSessionId: A_ID, entries: [submitting], paused: false, pauseReason: null }));
     await waitFor(() => expect(primary().textContent).toBe('Stop'));
     await type('second');
     await waitFor(() => expect(primary().textContent).toBe('Send'));
@@ -272,8 +285,8 @@ describe("composer DOM under C5's dispatcher", () => {
     live(A);
     mount([{ index: 0, id: A }]);
     await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
-    const queued: QueueEntry = { queueId: 'q-1', appSessionId: A, content: 'later', createdAt: '2026-09-29T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false };
-    act(() => fake.event('session.queue', { appSessionId: A, entries: [queued], paused: true, pauseReason: 'interrupt' }));
+    const queued: QueueEntry = { queueId: 'q-1', appSessionId: A_ID, content: 'later', createdAt: '2026-09-29T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false };
+    act(() => fake.event('session.queue', { appSessionId: A_ID, entries: [queued], paused: true, pauseReason: 'interrupt' }));
     await waitFor(() => expect(primary().textContent).toBe('Resume'));
     await userEvent.setup().click(primary());
     await waitFor(() => expect(fake.pending('session.queue.setPaused')).toBe(1));
@@ -284,7 +297,7 @@ describe("composer DOM under C5's dispatcher", () => {
     await waitFor(() => expect(primary().textContent).toBe('Send'));
     expect(primary().title).toBe('Sends this now (Enter)');
     await key(editorOf(), { key: 'Enter' });
-    await waitFor(() => expect(invoked('session.send')).toEqual([{ appSessionId: A, content: 'one more' }]));
+    await waitFor(() => expect(invoked('session.send')).toEqual([{ appSessionId: A_ID, content: 'one more' }]));
     expect(invoked('session.steer')).toEqual([]);
   });
 
@@ -332,7 +345,7 @@ describe("composer DOM under C5's dispatcher", () => {
     await type('a draft kept aside');
     act(() => editorOf().focus());
     const event = permission({ requestId: 'req-a' as never });
-    const item = itemFor(event, A);
+    const item = pageItem(itemFor(event, A_ID));
     act(() => useAttention.setState({ bySession: new Map([[A, [item]]]), requests: new Map([[item.id, event]]), version: 1 }));
     const frame = await within(composerOf(0)).findByRole('group', { name: 'Approval needed' });
     expect(composerOf(0).querySelector('[data-composer-draft]')!.hasAttribute('hidden')).toBe(true); // the box and the toolbar
@@ -348,13 +361,41 @@ describe("composer DOM under C5's dispatcher", () => {
     await waitFor(() => expect(editorOf().contains(document.activeElement)).toBe(true)); // focus is back in the editor
   });
 
+  // The O9 sitting (item 8): the Mode menu, open when an approval docked, jumped to the window's top corner, its anchor
+  // hidden with the toolbar. Every toolbar menu closes as the card takes the draft's place, and stays closed after.
+  it('closes a toolbar menu open when a card docks, and leaves it closed when the card goes', async () => {
+    live(A);
+    const offEffort = registerSlashWidget('effort', { title: 'Effort', placement: 'modelChip', component: () => <p>effort view</p> });
+    onTestFinished(offEffort);
+    mount([{ index: 0, id: A }]);
+    const user = userEvent.setup();
+    const toolbar = within(composerOf(0)).getByRole('toolbar', { name: 'Composer tools' });
+    const dock = (version: number, items: AttentionItem[]) => act(() => useAttention.setState({ bySession: new Map([[A, items]]), requests: new Map(items.map((i) => [i.id, permission({ requestId: 'req-m' as never })])), version }));
+    const item = pageItem(itemFor(permission({ requestId: 'req-m' as never }), A_ID));
+    const menus = [
+      { open: () => user.click(within(toolbar).getByRole('button', { name: /^Permission mode/ })), shown: () => screen.queryByRole('menu', { name: 'Permission mode' }) },
+      { open: () => user.click(within(toolbar).getByRole('button', { name: 'Add files, photos or commands' })), shown: () => screen.queryByRole('menuitem', { name: 'Slash commands' }) },
+      { open: () => user.click(within(toolbar).getByRole('button', { name: /^Model / })), shown: () => screen.queryByText('effort view') },
+    ];
+    for (const [i, menu] of menus.entries()) {
+      await menu.open();
+      await waitFor(() => expect(menu.shown()).not.toBeNull());
+      dock(2 * i + 1, [item]);
+      await within(composerOf(0)).findByRole('group', { name: 'Approval needed' });
+      await waitFor(() => expect(menu.shown()).toBeNull());
+      dock(2 * i + 2, []);
+      await waitFor(() => expect(composerOf(0).querySelector('[data-composer-draft]')!.hasAttribute('hidden')).toBe(false));
+      expect(menu.shown()).toBeNull();
+    }
+  });
+
   it('hands focus from a retiring docked request to the next one, whose Enter answers it (§5.7)', async () => {
     live(A);
     mount([{ index: 0, id: A }]);
     act(() => editorOf().focus());
     const first = permission({ requestId: 'req-1' as never, at: '2026-09-29T09:00:00.000Z' });
     const second = permission({ requestId: 'req-2' as never, at: '2026-09-29T09:01:00.000Z' });
-    const [one, two] = [itemFor(first, A), itemFor(second, A)];
+    const [one, two] = [pageItem(itemFor(first, A_ID)), pageItem(itemFor(second, A_ID))];
     const requests = new Map([
       [one.id, first],
       [two.id, second],
@@ -363,14 +404,14 @@ describe("composer DOM under C5's dispatcher", () => {
     await waitFor(() => expect(document.activeElement?.getAttribute('data-docked-frame')).toBe(A));
     expect(within(composerOf(0)).getByText('1 more waiting')).toBeTruthy();
     await key(document.activeElement as HTMLElement, { key: 'Enter' });
-    await waitFor(() => expect(invoked('session.answer')).toEqual([{ appSessionId: A, requestId: 'req-1', answer: { kind: 'permission', decision: 'allow', scope: 'once' } }]));
+    await waitFor(() => expect(invoked('session.answer')).toEqual([{ appSessionId: A_ID, requestId: 'req-1', answer: { kind: 'permission', decision: 'allow', scope: 'once' } }]));
     act(() => useAttention.setState({ bySession: new Map([[A, [two]]]), version: 2 })); // the first retires behind the second
     await waitFor(() => expect(composerOf(0).querySelector('[data-request-card]')?.getAttribute('data-request-card')).toBe(two.id));
     await new Promise((resolve) => requestAnimationFrame(resolve)); // past any deferred return to the editor
     const next = composerOf(0).querySelector<HTMLElement>('[data-docked-frame]')!;
     expect(document.activeElement).toBe(next);
     await key(next, { key: 'Enter' });
-    await waitFor(() => expect(invoked('session.answer').at(-1)).toEqual({ appSessionId: A, requestId: 'req-2', answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
+    await waitFor(() => expect(invoked('session.answer').at(-1)).toEqual({ appSessionId: A_ID, requestId: 'req-2', answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
   });
 
   it('docks a foreign card ahead of any request, hides the editor the same way, and answers Enter through its own onAccept', async () => {
@@ -463,7 +504,7 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(invoked('session.listModels')).toEqual([]); // the engine is not asked on mount
     view.unmount();
     // an exited session names it from the route its record kept
-    useSessions.setState({ engine: new Map(), records: new Map([[A, record(A, { model: { requested: null, resolved: 'claude-sonnet' } })]]) });
+    useSessions.setState({ engine: new Map(), records: new Map([[A, pageRecord(A, { model: { requested: null, resolved: 'claude-sonnet' } })]]) });
     mount([{ index: 0, id: A }]);
     await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet-relay'));
     expect(invoked('engine.models')).toContainEqual({ refresh: false, gateway: 'gateway', cwd: '/work/app-a' });
@@ -512,7 +553,7 @@ describe("composer DOM under C5's dispatcher", () => {
       await choose(/^Haiku/);
       await waitFor(() => expect(fake.pending('session.acquire')).toBe(1)); // the start is held
       await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku, setting…'));
-      await act(() => fake.reply('session.acquire', { status: 'failed', appSessionId: A, message: 'The session did not become ready.', resources: { worktree: null, record: 'kept', transcript: 'kept' } }));
+      await act(() => fake.reply('session.acquire', { status: 'failed', appSessionId: A_ID, message: 'The session did not become ready.', resources: { worktree: null, record: 'kept', transcript: 'kept' } }));
       await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet')); // nothing applied: the request is gone
     });
 
@@ -525,7 +566,7 @@ describe("composer DOM under C5's dispatcher", () => {
       await waitFor(() => expect(fake.pending('session.acquire')).toBe(1)); // the start is held
       await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku, setting…'));
       live(A, { status: { process: 'ready', model: { requested: null, resolved: 'claude-haiku-5-5' }, gateway: direct } });
-      await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false }));
+      await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A_ID, launched: true, joined: false }));
       await waitFor(() => expect(fake.pending('session.setModel')).toBe(1));
       expect(chip().getAttribute('aria-label')).toBe('Model haiku, setting…'); // acquired, set_model in flight
       live(A, { status: { model: { requested: 'haiku', resolved: 'claude-haiku-5-5' }, gateway: direct } }); // the host's status after the answer
@@ -550,7 +591,7 @@ describe("composer DOM under C5's dispatcher", () => {
       mount([{ index: 0, id: A }]);
       await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku'));
       await choose(/^Default/);
-      await waitFor(() => expect(invoked('session.setModel')).toEqual([{ appSessionId: A, model: null }]));
+      await waitFor(() => expect(invoked('session.setModel')).toEqual([{ appSessionId: A_ID, model: null }]));
       await act(() => fake.reply('session.setModel', SET));
       live(A, { status: { model: { requested: null, resolved: 'claude-haiku-5-5' }, gateway: direct } }); // the host records the null request
       await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet, setting…'));
@@ -572,7 +613,7 @@ describe("composer DOM under C5's dispatcher", () => {
       await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet-relay')); // the relay's row names it (the stub catalogue); the effort is not known yet
       await act(() => fake.reply('session.getSettings', { effective: {}, sources: [], applied: { model: 'claude-sonnet', effort: 'high', advisor: null, ultracode: false } }));
       await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet-relay high'));
-      expect(invoked('session.getSettings')).toEqual([{ appSessionId: A }]); // once, at ready
+      expect(invoked('session.getSettings')).toEqual([{ appSessionId: A_ID }]); // once, at ready
       await userEvent.click(chip());
       expect(await screen.findByText('effort view')).toBeTruthy(); // the chip opens on the effort view (Codex's)
       await userEvent.keyboard('{Escape}');
@@ -601,7 +642,7 @@ describe("composer DOM under C5's dispatcher", () => {
   // E11 F2b (plan 2.4): an error seen in its session stays as the notice above the frame until dismissed or the next turn
   it('keeps an error it has seen as its notice, and drops it once dismissed', () => {
     live(A);
-    const error = item(A, 'error', '2026-10-08T10:00:00.000Z', { summary: 'The turn ended with an error', state: 'confirmed', request: { requestId: null, toolUseId: null, taskId: null, agentId: null } });
+    const error = pageItem(item(A_ID, 'error', '2026-10-08T10:00:00.000Z', { summary: 'The turn ended with an error', state: 'confirmed', request: { requestId: null, toolUseId: null, taskId: null, agentId: null } }));
     useAttention.setState((s) => ({ bySession: new Map(s.bySession).set(A, [error]), version: s.version + 1 }));
     mount([{ index: 0, id: A }]);
     expect(within(composerOf(0)).getByText('The turn ended with an error')).toBeTruthy();
@@ -647,7 +688,7 @@ describe("composer DOM under C5's dispatcher", () => {
     await user.click(plusOf());
     await user.click(await screen.findByRole('menuitem', { name: 'Add directory…' }));
     await waitFor(() => expect(invoked('layout.pickFiles')).toEqual([{ kind: 'directory', directory: '/work/app-a', multiple: false }]));
-    await waitFor(() => expect(invoked('session.applyFlagSettings')).toEqual([{ appSessionId: A, settings: { permissions: { additionalDirectories: ['/work/app-a/extra', '/work/picked'] } } }]));
+    await waitFor(() => expect(invoked('session.applyFlagSettings')).toEqual([{ appSessionId: A_ID, settings: { permissions: { additionalDirectories: ['/work/app-a/extra', '/work/picked'] } } }]));
     await waitFor(() => expect(invoked('session.listPermissionRules')).toHaveLength(3)); // read at the change, and again afterwards
     await user.click(chip);
     await waitFor(() => expect(invoked('session.listModels')).toHaveLength(1)); // the mode menu reads the models as it opens
@@ -661,13 +702,13 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(await addDirectoryState(user)).toBeNull(); // offered: the choice starts the session
     await user.click(plusOf());
     await user.click(await screen.findByRole('menuitem', { name: 'Add directory…' }));
-    await waitFor(() => expect(invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'chip' }])); // after the picker answered
+    await waitFor(() => expect(invoked('session.acquire')).toEqual([{ appSessionId: A_ID, reason: 'chip' }])); // after the picker answered
     expect(invoked('layout.pickFiles')).toHaveLength(1);
     const phase = composerOf(0).querySelector('[data-add-directory-phase]');
     expect(phase?.textContent).toBe('Starting…');
     expect(invoked('session.applyFlagSettings')).toEqual([]);
-    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false }));
-    await waitFor(() => expect(invoked('session.applyFlagSettings')).toEqual([{ appSessionId: A, settings: { permissions: { additionalDirectories: ['/work/app-a/extra', '/work/picked'] } } }]));
+    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A_ID, launched: true, joined: false }));
+    await waitFor(() => expect(invoked('session.applyFlagSettings')).toEqual([{ appSessionId: A_ID, settings: { permissions: { additionalDirectories: ['/work/app-a/extra', '/work/picked'] } } }]));
     await waitFor(() => expect(composerOf(0).querySelector('[data-add-directory-phase]')).toBeNull());
   });
 
@@ -721,13 +762,13 @@ describe('one Stop handler for every pane', () => {
     expect(bindingsOf('composer.stop')).toHaveLength(1);
     act(() => editorOf(1).focus());
     await key(editorOf(1), { key: '.', code: 'Period', metaKey: true });
-    expect(invoked('session.interrupt')).toEqual([{ appSessionId: B, cancelEngineQueued: false, holdEngineQueued: true }]); // the plain stop holds waiting steers (W1)
+    expect(invoked('session.interrupt')).toEqual([{ appSessionId: B_ID, cancelEngineQueued: false, holdEngineQueued: true }]); // the plain stop holds waiting steers (W1)
     act(() => editorOf(0).focus()); // focus moves to pane 0: C5's pane corrects focusedPane on focusin
     expect(currentSet(useLayout.getState().main).focusedPane).toBe(0);
     await key(editorOf(0), { key: '.', code: 'Period', metaKey: true });
     expect(invoked('session.interrupt')).toEqual([
-      { appSessionId: B, cancelEngineQueued: false, holdEngineQueued: true },
-      { appSessionId: A, cancelEngineQueued: false, holdEngineQueued: true },
+      { appSessionId: B_ID, cancelEngineQueued: false, holdEngineQueued: true },
+      { appSessionId: A_ID, cancelEngineQueued: false, holdEngineQueued: true },
     ]);
 
     live(A); // idle
@@ -831,7 +872,7 @@ describe('unstarted send holds a starting state', () => {
     act(() => stub.set({ message: { content: 'go', display: 'go' } }));
     await stub.answer({ ok: true });
     await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
-    expect(invoked('session.history.append')).toEqual([{ appSessionId: A, display: 'go', pastedContents: {}, project: '/repo' }]);
+    expect(invoked('session.history.append')).toEqual([{ appSessionId: A_ID, display: 'go', pastedContents: {}, project: '/repo' }]);
     expect(primary().title).toBe('Your first message is with the setup above');
     expect(primary().disabled).toBe(true);
     expect(await addDirectoryState()).toBe('Your first message is with the setup above');
@@ -945,7 +986,7 @@ describe('unstarted send holds a starting state', () => {
     act(() => stub.setPhase(null));
     await waitFor(() => expect(setup()).toBeNull());
     view.unmount();
-    useSessions.setState({ records: new Map([[A, record(A)]]), engine: new Map() });
+    useSessions.setState({ records: new Map([[A, pageRecord(A)]]), engine: new Map() });
     mount([{ index: 0, id: A }]);
     act(() => stub.setPhase('Starting…'));
     await waitFor(() => expect(setup()?.textContent).toBe('Starting…'));
@@ -958,7 +999,7 @@ describe('unstarted send holds a starting state', () => {
   it('binds the intent on a failed setup’s retained tab (an exited status, no record): editable chips, Send, and its draft in the intent', async () => {
     const stub = stubIntent();
     const s = useSessions.getState();
-    useSessions.setState({ engine: new Map(s.engine).set(A, { ...status(A), process: 'exited' }) });
+    useSessions.setState({ engine: new Map(s.engine).set(A, { ...pageStatus(A), process: 'exited' }) });
     mount([{ index: 0, id: A }]);
     await waitFor(() => expect(editorOf()).toBeTruthy());
     const location = within(composerOf(0)).getByRole('button', { name: /^Location/ });
@@ -1021,7 +1062,7 @@ describe('unstarted send holds a starting state', () => {
     await waitFor(() => expect(primary().title).toBe('Available once the session starts'));
     expect(primary().disabled).toBe(true);
     expect(within(composerOf(0)).queryByRole('region', { name: 'Queued messages' })).toBeNull();
-    expect(invoked('session.queue.list')).toEqual([{ appSessionId: A }]); // read, but an unstarted session lists nothing
+    expect(invoked('session.queue.list')).toEqual([{ appSessionId: A_ID }]); // read, but an unstarted session lists nothing
   });
 });
 
@@ -1031,7 +1072,7 @@ describe('unstarted send holds a starting state', () => {
 describe('Send on a session with a record and no ready process', () => {
   const exitedBy = (appSessionId: AppSessionId, reason: 'budget' | 'stop' | 'crash') =>
     live(appSessionId, { status: { process: 'exited', exit: { code: 0, signal: null, reason, at: '2026-09-29T14:02:00.000Z', release: null } } });
-  const READY = { status: 'ready', appSessionId: A, launched: true, joined: false };
+  const READY = { status: 'ready', appSessionId: A_ID, launched: true, joined: false };
   beforeEach(() => useSetup.setState({ cards: new Map() }));
 
   it.each(['budget', 'stop', 'crash'] as const)('an exited session (%s) starts on Send: the text stays locked until the host accepts it, then clears and is recorded', async (reason) => {
@@ -1042,12 +1083,12 @@ describe('Send on a session with a record and no ready process', () => {
     expect(primary().getAttribute('aria-description')).toBe('Starts this session');
     await key(editorOf(), { key: 'Enter' });
     await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
-    expect(invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'send' }]);
+    expect(invoked('session.acquire')).toEqual([{ appSessionId: A_ID, reason: 'send' }]);
     expect(editorOf().editor.getText()).toBe('carry on');
     await act(() => fake.reply('session.acquire', READY));
     await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
-    expect(invoked('session.send')).toEqual([{ appSessionId: A, content: 'carry on' }]);
-    expect(invoked('session.history.append')).toEqual([{ appSessionId: A, display: 'carry on', pastedContents: {} }]);
+    expect(invoked('session.send')).toEqual([{ appSessionId: A_ID, content: 'carry on' }]);
+    expect(invoked('session.history.append')).toEqual([{ appSessionId: A_ID, display: 'carry on', pastedContents: {} }]);
   });
 
   it('a trust card holds the message: nothing is sent, the editor and its draft keep the text', async () => {
@@ -1056,7 +1097,7 @@ describe('Send on a session with a record and no ready process', () => {
     await type('carry on');
     await key(editorOf(), { key: 'Enter' });
     await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
-    await act(() => fake.reply('session.acquire', { status: 'needs_trust', appSessionId: A, trust: trustState() }));
+    await act(() => fake.reply('session.acquire', { status: 'needs_trust', appSessionId: A_ID, trust: trustState() }));
     await waitFor(() => expect(useSetup.getState().cards.get(A)).toMatchObject({ kind: 'trust', message: { content: 'carry on', display: 'carry on' } }));
     expect(editorOf().editor.getText()).toBe('carry on');
     expect(invoked('session.send')).toEqual([]);
@@ -1071,7 +1112,7 @@ describe('Send on a session with a record and no ready process', () => {
     await type('carry on');
     await key(editorOf(), { key: 'Enter' });
     await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
-    await act(() => fake.reply('session.acquire', { status: 'missing_directory', appSessionId: A, directory: '/work/gone' }));
+    await act(() => fake.reply('session.acquire', { status: 'missing_directory', appSessionId: A_ID, directory: '/work/gone' }));
     await waitFor(() => expect(useNotices.getState().notices.map((n) => [n.text, n.actions.map((a) => a.label)])).toEqual([['Directory not found: /work/gone', ['Retry']]]));
     expect(editorOf().editor.getText()).toBe('carry on');
     expect(invoked('session.send')).toEqual([]);
@@ -1080,8 +1121,8 @@ describe('Send on a session with a record and no ready process', () => {
   it('an archived session and a foreign-held one refuse Send with their words', () => {
     exitedBy(A, 'stop');
     live(B, { status: { process: 'exited' }, record: { holder: { kind: 'terminal', pid: 42 } } });
-    useSessions.getState().applyDigest(digest(A, { phase: 'exited', availability: 'archived' }));
-    useSessions.getState().applyDigest(digest(B, { phase: 'foreign', availability: 'foreign_held' }));
+    useSessions.getState().applyDigest(digest(A, { phase: 'exited', availability: 'archived' }), TEST_MACHINE);
+    useSessions.getState().applyDigest(digest(B, { phase: 'foreign', availability: 'foreign_held' }), TEST_MACHINE);
     mount([{ index: 0, id: A }, { index: 1, id: B }]);
     for (const [pane, words] of [[0, 'Archived · unarchive it to continue'], [1, 'Held by terminal · 42']] as const) {
       expect(primary(pane).title).toBe(words);
@@ -1091,7 +1132,7 @@ describe('Send on a session with a record and no ready process', () => {
 
   it('a start in flight reads Starting… and Send stays enabled to join it', async () => {
     exitedBy(A, 'stop');
-    useSessions.getState().applyDigest(digest(A, { phase: 'exited', availability: 'starting' }));
+    useSessions.getState().applyDigest(digest(A, { phase: 'exited', availability: 'starting' }), TEST_MACHINE);
     mount([{ index: 0, id: A }]);
     await type('carry on');
     await waitFor(() => expect(primary().disabled).toBe(false));
@@ -1107,7 +1148,7 @@ describe('Send on a session with a record and no ready process', () => {
     expect(primary().getAttribute('aria-description')).toBe('Starts this session');
     await key(editorOf(), { key: 'Enter' });
     await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
-    await act(() => fake.reply('session.acquire', { status: 'needs_trust', appSessionId: A, trust: trustState() }));
+    await act(() => fake.reply('session.acquire', { status: 'needs_trust', appSessionId: A_ID, trust: trustState() }));
     await waitFor(() => expect(useSetup.getState().cards.get(A)).toMatchObject({ kind: 'trust', message: null }));
     expect(editorOf().editor.getText()).toBe('!ls');
     expect(invoked('session.bash')).toEqual([]);
@@ -1121,7 +1162,7 @@ describe('Send on a session with a record and no ready process', () => {
     await key(editorOf(), { key: 'Enter' });
     await waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
     await act(() => fake.reply('session.acquire', READY));
-    await waitFor(() => expect(invoked('session.bash')).toEqual([{ appSessionId: A, command: 'ls' }]));
+    await waitFor(() => expect(invoked('session.bash')).toEqual([{ appSessionId: A_ID, command: 'ls' }]));
     await act(() => fake.reply('session.bash', { commandUuid: '22222222-2222-4222-8222-222222222222' }));
     await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
   });
@@ -1132,7 +1173,7 @@ describe('Send on a session with a record and no ready process', () => {
 // neither send nor start (no record; its process ended or starting) keeps the draft quietly, as a normal one does
 describe('an oversized draft on a session the seam refuses by state', () => {
   it.each(['exited', 'starting'] as const)('Enter on a session %s with no record keeps the draft, with no warning and nothing dispatched', async (process) => {
-    useSessions.setState({ engine: new Map(useSessions.getState().engine).set(A, { ...status(A), process }) });
+    useSessions.setState({ engine: new Map(useSessions.getState().engine).set(A, { ...pageStatus(A), process }) });
     mount([{ index: 0, id: A }]);
     const oversized = 'x'.repeat(1024 * 1024 + 1);
     await type(oversized);
@@ -1397,7 +1438,7 @@ describe('P3-G: a mark-up attached to the session’s draft', () => {
     );
     stored = { doc: { ...docOf([paragraph(textNode('keep this thought'))]), attrs: { attachments: [shot] } }, attachments: [], updatedAt: '2026-10-13T00:00:00.000Z' };
     sendAnswer = null;
-    const base = fake.client;
+    const base = preloadOf(fake); // main's side
     window.maws = {
       ...base,
       pathForFile: () => '',
@@ -1409,8 +1450,8 @@ describe('P3-G: a mark-up attached to the session’s draft', () => {
         }
         if (name === 'session.send' && sendAnswer === null) return new Promise((resolve) => (sendAnswer = resolve as (value: unknown) => void));
         return base.invoke(name as never, input as never);
-      }) as MawsBridge['invoke'],
-    } as MawsBridge;
+      }) as PreloadBridge['invoke'],
+    } as PreloadBridge;
   });
   afterEach(() => {
     vi.unstubAllGlobals();

@@ -4,6 +4,8 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import { bareOf } from '@shared/machine/address';
 import { digest, record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { useNotices } from '../stores/notices';
@@ -13,6 +15,8 @@ import { BtwWidget } from './BtwWidget';
 import { registerSidePane } from './register';
 import { resetSideQuestions, useSidePane } from './store';
 
+// P5 O6 M2: the fake is main: asked and answering with bare ids
+const A_ID = bareOf(A);
 let fake: FakeClient;
 
 beforeEach(() => {
@@ -22,7 +26,7 @@ beforeEach(() => {
   useNotices.setState({ notices: [] });
   registerSidePane();
   fake = fakeClient({ 'side.question.list': { exchanges: [] } });
-  window.maws = fake.client;
+  window.maws = fake.client as unknown as PreloadBridge;
   useSessions.setState({ engine: new Map([[A, status(A, { process: 'exited' } as never)]]) });
 });
 afterEach(() => {
@@ -37,11 +41,11 @@ describe('the /btw widget on a session with no ready process', () => {
     expect(fake.invoked('session.acquire')).toEqual([]);
     expect(screen.getByText('Starts this session')).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'Ask' }));
-    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A, reason: 'side' }]);
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A_ID, reason: 'side' }]);
     expect(screen.getByText('Starting…')).toBeTruthy();
     expect(fake.invoked('session.sideQuestion')).toEqual([]);
-    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false }));
-    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A, question: 'why?' }]);
+    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A_ID, launched: true, joined: false }));
+    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A_ID, question: 'why?' }]);
     expect(close).toHaveBeenCalledTimes(1);
   });
 
@@ -50,8 +54,8 @@ describe('the /btw widget on a session with no ready process', () => {
     const view = render(<BtwWidget appSessionId={A} args="why?" close={close} />);
     await userEvent.click(screen.getByRole('button', { name: 'Ask' }));
     view.unmount(); // Esc, then another widget opened in its place
-    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false }));
-    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A, question: 'why?' }]);
+    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A_ID, launched: true, joined: false }));
+    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A_ID, question: 'why?' }]);
     expect(close).not.toHaveBeenCalled();
   });
 
@@ -59,7 +63,7 @@ describe('the /btw widget on a session with no ready process', () => {
     const close = vi.fn();
     render(<BtwWidget appSessionId={A} args="why?" close={close} />);
     await userEvent.click(screen.getByRole('button', { name: 'Ask' }));
-    await act(() => fake.reply('session.acquire', { status: 'missing_directory', appSessionId: A, directory: '/gone' }));
+    await act(() => fake.reply('session.acquire', { status: 'missing_directory', appSessionId: A_ID, directory: '/gone' }));
     expect(screen.getByRole('alert').textContent).toBe('Directory not found: /gone');
     expect(fake.invoked('session.sideQuestion')).toEqual([]);
     expect(close).not.toHaveBeenCalled();

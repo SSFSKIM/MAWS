@@ -3,11 +3,15 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
 import { heard, resetSignIns } from './connectors/sign-in';
-import type { MawsBridge } from '@shared/ipc/schema';
-import type { ProjectId } from '@shared/graph/ids';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import { REGISTRY } from '@shared/ipc/registry';
+import { addressingOf, bareOf } from '@shared/machine/address';
+import type { EngineSessionStatus } from '@shared/engine/status';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { project, record, status } from '../../../../test/support/builders';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { useLibraryStore } from '../widgets/plugins/library-store';
@@ -21,8 +25,14 @@ import { resetCatalogStore } from '../stores/catalog';
 import { useReadLoads } from '../widgets/read';
 import { forgetKeptOperations } from '../widgets/plugins/operation';
 
-const P = 'project-one' as ProjectId;
-const Q = 'project-two' as ProjectId;
+// P5 O6 M2: the stores, the layout and the pickers hold the page's ids (addresses); `backend.bridge()`, installed as
+// `window.maws`, stands for main and is asked, answers and emits with the bare ids (`bareOf`).
+const P = at('project-one' as ProjectId);
+const Q = at('project-two' as ProjectId);
+const addressing = addressingOf(REGISTRY);
+const lifted = (main: EngineSessionStatus) => addressing.output('engine.sessions').lift([main], TEST_MACHINE)[0]!;
+const pageStatus = (bare: string) => lifted(status(bare));
+const pageRecord = (id: AppSessionId, over: Parameters<typeof record>[1]) => addressing.output('session.get').lift(record(bareOf(id), over), TEST_MACHINE)!;
 let backend: WidgetBackend;
 beforeEach(() => {
   backend = createWidgetBackend({ root: process.cwd(), statuses: [] });
@@ -44,16 +54,16 @@ afterEach(() => {
   useLayout.setState({ main: LAYOUT_DEFAULTS.main });
   useLibraryStore.setState(useLibraryStore.getInitialState());
   useCustomizeProject.setState({ projectId: undefined });
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 const mount = (section: 'plugins' | 'skills' | 'mcp') => render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><CustomizeView section={section} /></QueryClientProvider>);
 
 it('keeps the plugin session picker with its library controls and reloads the selected session without resetting disk choices', async () => {
-  const first = { ...status('live-a'), cwd: '/one', pluginsObservedAt: '2026-10-24T12:00:00.000Z' };
-  const second = { ...status('live-b'), cwd: '/one', pluginsObservedAt: '2026-10-24T12:00:00.000Z' };
+  const first = { ...pageStatus('live-a'), cwd: '/one', pluginsObservedAt: '2026-10-24T12:00:00.000Z' };
+  const second = { ...pageStatus('live-b'), cwd: '/one', pluginsObservedAt: '2026-10-24T12:00:00.000Z' };
   useSessions.setState({
     engine: new Map([[first.appSessionId, first], [second.appSessionId, second]]),
-    records: new Map([[first.appSessionId, record(first.appSessionId, { title: { text: 'Review notes', source: 'user' } })], [second.appSessionId, record(second.appSessionId, { title: { text: 'Prepare release', source: 'user' } })]]),
+    records: new Map([[first.appSessionId, pageRecord(first.appSessionId, { title: { text: 'Review notes', source: 'user' } })], [second.appSessionId, pageRecord(second.appSessionId, { title: { text: 'Prepare release', source: 'user' } })]]),
   });
   backend.script('plugins.list', () => ({ plugins: [] }));
   backend.script('marketplaces.list', () => ({ marketplaces: [] }));
@@ -79,9 +89,9 @@ it('keeps the plugin session picker with its library controls and reloads the se
   expect(picker).toHaveProperty('value', second.appSessionId);
   expect(screen.getByRole('searchbox', { name: 'Search plugins' })).toHaveProperty('value', 'notes');
   fireEvent.click(screen.getByRole('button', { name: 'Reload skills' }));
-  await waitFor(() => expect(backend.calls.filter((call) => call.command === 'session.reloadSkills').map((call) => call.input)).toEqual([{ appSessionId: second.appSessionId }]));
+  await waitFor(() => expect(backend.calls.filter((call) => call.command === 'session.reloadSkills').map((call) => call.input)).toEqual([{ appSessionId: bareOf(second.appSessionId) }]));
   expect(screen.getByText('Working…').getAttribute('role')).toBe('status');
-  act(() => backend.emitOperation({ appSessionId: second.appSessionId, opId: 'chrome-skills', command: 'session.reloadSkills', late: false, outcome: { ok: true, value: { skills: [{ name: 'review' }, { name: 'release' }] } } }));
+  act(() => backend.emitOperation({ appSessionId: bareOf(second.appSessionId), opId: 'chrome-skills', command: 'session.reloadSkills', late: false, outcome: { ok: true, value: { skills: [{ name: 'review' }, { name: 'release' }] } } }));
   expect((await screen.findByText('Reloaded · 2 skills')).getAttribute('role')).toBe('status');
   expect(screen.getByRole('button', { name: 'Reload plugins' })).toBeTruthy();
 
@@ -99,7 +109,7 @@ it('keeps the plugin session picker with its library controls and reloads the se
 });
 
 it('keeps the Skills scopes visible through search and detail without treating the attachment as disk inventory', async () => {
-  const live = { ...status('live-skills-scope'), cwd: '/one' };
+  const live = { ...pageStatus('live-skills-scope'), cwd: '/one' };
   useSessions.setState({ engine: new Map([[live.appSessionId, live]]) });
   mount('skills');
   await screen.findByRole('button', { name: 'View review' });
@@ -122,24 +132,24 @@ it('keeps the Skills scopes visible through search and detail without treating t
 });
 
 it('keeps the MCP session picker beside live connectors and switches only the live read', async () => {
-  const first = { ...status('mcp-a'), cwd: '/one' };
-  const second = { ...status('mcp-b'), cwd: '/one' };
+  const first = { ...pageStatus('mcp-a'), cwd: '/one' };
+  const second = { ...pageStatus('mcp-b'), cwd: '/one' };
   useSessions.setState({ engine: new Map([[first.appSessionId, first], [second.appSessionId, second]]) });
   backend.script('session.mcpStatus', (input) => ({ mcpServers: [{ name: (input as { appSessionId: string }).appSessionId, status: 'connected', tools: [{ name: 'read' }] }] }));
   mount('mcp');
   const live = await screen.findByRole('region', { name: 'Live connectors' });
-  await within(live).findByText(first.appSessionId);
+  await within(live).findByText(bareOf(first.appSessionId));
   const picker = within(live).getByRole('combobox', { name: 'Live session' });
   const pageHead = screen.getByRole('heading', { name: 'Customize' }).closest('header')!;
   expect(within(pageHead).queryByRole('combobox', { name: 'Live session' })).toBeNull();
   const inventoryReads = backend.calls.filter((call) => call.command === 'customization.inventory').length;
   picker.focus();
   fireEvent.change(picker, { target: { value: second.appSessionId } });
-  await within(screen.getByRole('region', { name: 'Live connectors' })).findByText(second.appSessionId);
+  await within(screen.getByRole('region', { name: 'Live connectors' })).findByText(bareOf(second.appSessionId));
   expect(screen.getByRole('combobox', { name: 'Live session' })).toBe(picker);
   expect(document.activeElement).toBe(picker);
   expect(screen.getByText('notion')).toBeTruthy();
-  expect(backend.calls.filter((call) => call.command === 'session.mcpStatus').map((call) => call.input)).toEqual([{ appSessionId: first.appSessionId }, { appSessionId: second.appSessionId }]);
+  expect(backend.calls.filter((call) => call.command === 'session.mcpStatus').map((call) => call.input)).toEqual([{ appSessionId: bareOf(first.appSessionId) }, { appSessionId: bareOf(second.appSessionId) }]);
   expect(backend.calls.filter((call) => call.command === 'customization.inventory')).toHaveLength(inventoryReads);
   expect(backend.calls.filter((call) => call.command === 'session.acquire')).toEqual([]);
 });
@@ -206,8 +216,9 @@ it('retains the engine-qualified invocation and Use in chat for the live Skills 
   backend.script('plugins.list', () => ({ plugins: [] }));
   backend.script('marketplaces.list', () => ({ marketplaces: [] }));
   window.maws = backend.bridge();
-  useSessions.setState({ engine: new Map([[live.appSessionId, backend.status(live.appSessionId)]]) });
-  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><SkillsWidget appSessionId={live.appSessionId} args="" close={() => {}} /></QueryClientProvider>);
+  const page = lifted(backend.status(live.appSessionId));
+  useSessions.setState({ engine: new Map([[page.appSessionId, page]]) });
+  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><SkillsWidget appSessionId={page.appSessionId} args="" close={() => {}} /></QueryClientProvider>);
   const open = await screen.findByRole('button', { name: 'View review' });
   expect(open.closest('li')!.querySelector('[data-skill-name]')!.getAttribute('title')).toBe('/reports:review');
   expect(open.closest('li')!.querySelector('span[aria-hidden]')!.textContent?.trim()).toBe('/');
@@ -254,14 +265,14 @@ it('opens the connector Manage footer for the composer project even when no sess
 });
 
 it('attaches live facts only from a ready session in the selected directory and detaches on exit', async () => {
-  const matching = { ...status('running-one'), cwd: '/one' };
-  const unrelated = { ...status('running-two'), cwd: '/two' };
+  const matching = { ...pageStatus('running-one'), cwd: '/one' };
+  const unrelated = { ...pageStatus('running-two'), cwd: '/two' };
   useSessions.setState({ engine: new Map([[matching.appSessionId, matching], [unrelated.appSessionId, unrelated]]) });
   backend.script('session.mcpStatus', () => ({ mcpServers: [{ name: 'live-documents', status: 'connected', tools: [{ name: 'read' }] }] }));
   mount('mcp');
   const live = await screen.findByRole('region', { name: 'Live connectors' });
   await within(live).findByText('live-documents');
-  expect(backend.calls.filter((call) => call.command === 'session.mcpStatus').map((call) => call.input)).toEqual([{ appSessionId: matching.appSessionId }]);
+  expect(backend.calls.filter((call) => call.command === 'session.mcpStatus').map((call) => call.input)).toEqual([{ appSessionId: bareOf(matching.appSessionId) }]);
   act(() => useSessions.setState({ engine: new Map([[matching.appSessionId, { ...matching, process: 'exited' }], [unrelated.appSessionId, unrelated]]) }));
   expect(screen.queryByRole('region', { name: 'Live connectors' })).toBeNull();
   expect(screen.getByText(/Connection state and tools are unavailable/)).toBeTruthy();
@@ -311,7 +322,7 @@ describe('Connectors', () => {
   });
 
   it('is the tab named Connectors; a user-scope server signs in from any ready session and shows each step and the result', async () => {
-    const elsewhere = { ...status('signer'), cwd: '/two' };
+    const elsewhere = { ...pageStatus('signer'), cwd: '/two' };
     useSessions.setState({ engine: new Map([[elsewhere.appSessionId, elsewhere]]) });
     backend.script('connectors.signIn', () => ({ opId: 'op-1' }));
     backend.script('connectors.signInCancel', () => ({ cancelled: true }));
@@ -346,7 +357,7 @@ describe('Connectors', () => {
     const client = fresh();
     posture(client, 'notion', 'auth_required');
     backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'local', path: '/config/.claude.json', transport: 'http' }], warnings: [], serversRead: true }));
-    const elsewhere = { ...status('elsewhere'), cwd: '/two' };
+    const elsewhere = { ...pageStatus('elsewhere'), cwd: '/two' };
     useSessions.setState({ engine: new Map([[elsewhere.appSessionId, elsewhere]]) });
     mountWith(client);
     const row = (await screen.findByText('notion')).closest('li')!;
@@ -359,7 +370,7 @@ describe('Connectors', () => {
     const client = fresh();
     backend.script('catalog.postures', () => ({ servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-user' }, { name: 'notion', scope: 'local', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-local' }] }));
     backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', transport: 'http' }, { name: 'notion', scope: 'local', path: '/config/.claude.json', transport: 'http' }], warnings: [], serversRead: true }));
-    const here = { ...status('here'), cwd: '/one' };
+    const here = { ...pageStatus('here'), cwd: '/one' };
     useSessions.setState({ engine: new Map([[here.appSessionId, here]]) });
     mountWith(client);
     await screen.findAllByText('notion');
@@ -373,7 +384,7 @@ describe('Connectors', () => {
     const client = fresh();
     posture(client, 'notion', 'auth_required');
     backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'app', path: '/maws/settings.json', transport: 'http' }, { name: 'notion', scope: 'user', path: '/config/.claude.json', transport: 'http' }], warnings: [], serversRead: true }));
-    const here = { ...status('here'), cwd: '/one' };
+    const here = { ...pageStatus('here'), cwd: '/one' };
     useSessions.setState({ engine: new Map([[here.appSessionId, here]]) });
     mountWith(client);
     await screen.findAllByText('notion');
@@ -392,7 +403,7 @@ describe('Connectors', () => {
     ] }));
     backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'project', path: outerFile, transport: 'http' }, { name: 'notion', scope: 'project', path: innerFile, transport: 'http' }], warnings: [], serversRead: true }));
     backend.script('connectors.signIn', () => ({ opId: 'op-inner' }));
-    const here = { ...status('here'), cwd: '/one' };
+    const here = { ...pageStatus('here'), cwd: '/one' };
     useSessions.setState({ engine: new Map([[here.appSessionId, here]]) });
     mountWith(fresh());
     await screen.findAllByText('notion');

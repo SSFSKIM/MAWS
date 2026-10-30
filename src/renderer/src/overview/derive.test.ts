@@ -5,16 +5,22 @@ import type { SessionDigest } from '@shared/ipc/schema';
 import { digest, item, project, record } from '../../../../test/support/builders';
 import { TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { loadScenario } from '../../../../test/support/scenario';
+import { addressOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { needsYou } from '../attention/derive';
+import { pageScenario } from '../test-support/shell-stores';
 import { cardActivity, cardFooter, orderProjects, overviewCards, overviewGroups, sortSessions } from './derive';
 
-const scenario = loadScenario(join(TEST_FIXTURE_DIR, 'shell/nine-sessions.json'));
+const scenario = pageScenario(loadScenario(join(TEST_FIXTURE_DIR, 'shell/nine-sessions.json'))); // P5 O6 M2: the page's ids
 const records = new Map(scenario.sessions.map((r) => [r.appId, r]));
 const digests = new Map(scenario.digests.map((d) => [d.appSessionId, { ...d, revision: 1 } as SessionDigest]));
 const bySession = new Map(scenario.attention.map((a) => [a.appSessionId, a.items]));
 const rows = needsYou(bySession, records);
 const titles = (ids: AppSessionId[]) => ids.map((id) => records.get(id)?.title.text);
-const input = { records, digests, projects: scenario.projects, rows };
+const machineName = (machine: MachineRef) => (machine === TEST_MACHINE ? 'This Mac' : 'Studio');
+const where = { local: TEST_MACHINE, machineName };
+const input = { records, digests, projects: scenario.projects, rows, ...where };
 
 describe('overview grouping', () => {
   it('gives a card to live, unread and waiting sessions, and none to exited read ones', () => {
@@ -32,7 +38,18 @@ describe('overview grouping', () => {
       ['MAWS', ['Charter + research']],
       ['codex_somersault', ['Somersault terminal run']],
       ['claude-usage-menubar', expect.arrayContaining(['Usage reset countdown', 'Settings idle probe'])],
-      ['Other sessions', ['Terminal workflow notes']],
+      ['This Mac', ['Terminal workflow notes']],
+    ]);
+  });
+
+  // P5 O6 M5 (T3): the sessions of no project are their machine's, one group per machine, named as its sidebar row is
+  it('groups the sessions of no project by machine, this machine’s first', () => {
+    const studio = (id: string) => addressOf(OTHER_MACHINE, id as AppSessionId);
+    const recs = new Map([record(studio('far'), { unread: true }), record(at('near'), { unread: true }), record(studio('gone'), { unread: true, projectId: studio('p') as never })].map((r) => [r.appId, r]));
+    const groups = overviewGroups({ records: recs, digests: new Map(), projects: [], rows: [], ...where });
+    expect(groups.map((g) => [g.id, g.title, g.sessions.length])).toEqual([
+      [`machine:${TEST_MACHINE}`, 'This Mac', 1],
+      [`machine:${OTHER_MACHINE}`, 'Studio', 2], // a project no longer known is its machine's too
     ]);
   });
 
@@ -48,19 +65,19 @@ describe('overview grouping', () => {
       ['ended' as AppSessionId, digest('ended', { phase: 'idle', lastTurnEndedAt: '2026-09-28T05:00:00Z' })],
       ['started' as AppSessionId, digest('started', { phase: 'working', turnStartedAt: '2026-09-28T06:00:00Z' })],
     ]);
-    const [group] = overviewGroups({ records: recs, digests: ds, projects: [p], rows: [] });
+    const [group] = overviewGroups({ records: recs, digests: ds, projects: [p], rows: [], ...where });
     expect(group.sessions).toEqual(['started', 'ended', 'old']);
   });
 
   it('never shows an archived session, and shows an exited one that is unread or waiting', () => {
     const recs = new Map([
-      ['a' as AppSessionId, record('a', { archived: true, unread: true })],
-      ['u' as AppSessionId, record('u', { unread: true })],
-      ['w' as AppSessionId, record('w')],
+      [at('a' as AppSessionId), record(at('a'), { archived: true, unread: true })],
+      [at('u' as AppSessionId), record(at('u'), { unread: true })],
+      [at('w' as AppSessionId), record(at('w'))],
     ]);
     const ds = new Map<AppSessionId, SessionDigest>([...recs.keys()].map((id) => [id, digest(id, { phase: 'exited' })]));
-    const waiting = needsYou(new Map([['w' as AppSessionId, [item('w', 'interrupted', '2026-09-28T10:00:00Z')]]]), recs);
-    expect(overviewCards({ records: recs, digests: ds, projects: [], rows: waiting }).sort()).toEqual(['u', 'w']);
+    const waiting = needsYou(new Map([[at('w' as AppSessionId), [item(at('w'), 'interrupted', '2026-09-28T10:00:00Z')]]]), recs);
+    expect(overviewCards({ records: recs, digests: ds, projects: [], rows: waiting, ...where }).sort()).toEqual([at('u'), at('w')]);
   });
 
   it('orders projects by their order, then name', () => {
@@ -125,6 +142,14 @@ describe('overview card lines', () => {
     expect(cardActivity(record('w'), digest('w', { phase: 'working' }), [])).toBe('Working');
     expect(cardActivity(record('f'), digest('f', { phase: 'failed' }), [])).toBe('Failed');
     expect(cardActivity(record('n'), null, [])).toBe('Idle');
+  });
+
+  // P5 O9 M6 (Q1): a terminal session MAWS drives through its bridge reads as any session; one with no live bridge, its holder
+  it('reads a bridged terminal session as any session, and its holder without a live bridge', () => {
+    const held = record('t', { holder: { kind: 'terminal', pid: 7 } });
+    expect(cardActivity(held, digest('t', { phase: 'foreign' }), [])).toBe('Terminal · pid 7');
+    expect(cardActivity(held, digest('t', { phase: 'working', activity: 'Running ls' }), [])).toBe('Running ls');
+    expect(cardActivity(held, digest('t', { phase: 'waiting' }), [item('t', 'permission', '2026-10-28T10:00:00Z')])).toBe('Waiting for approval');
   });
 
   it('the footer carries context, cost since seen and active child agents, each only when known', () => {

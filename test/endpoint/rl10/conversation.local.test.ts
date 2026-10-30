@@ -2,15 +2,18 @@
 // throwaway org on desk-hub's Worker in Miniflare (miniflare-hub.ts), and sminos played by fake-sminos.ts from
 // conversation.json, the fixture O12's phase 2 copies for its own conformance replay. What happens on the endpoint's
 // side between sminos's lines (a device's words, a hub that reposts or forges, a restart, a revocation, a lane A action)
-// is this suite's `scenes`. Events reach the endpoint from the hub through its log relay's entry point
+// is this suite's `scenes`; a lane A action that names a `member` is only decided by the endpoint's authorizer, as that
+// member's device, and never sent. Events reach the endpoint from the hub through its log relay's entry point
 // (`rl10.relay.fromHub`), where the hub link hands them, so a hostile hub's frames can be played; what the endpoint
 // sends the hub is the hub link's own `send`, watched.
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { base64urlDecode, importOrgKey, machineProjectId, seal, verify, encodeEnrollmentCodeV2, type EnrollmentIssued, type EnrollmentKey } from 'desk-hub/protocol';
-import { base64urlEncode, generateSigningKey, isListingGone, keyId, signEvent, verifyEvent, type SignedOrgState, type SigningKey, type OrgState } from 'org-protocol';
-import { afterAll, beforeAll, expect, it } from 'vitest';
+import { base64urlEncode, generateSigningKey, isListingGone, keyId, signEvent, verifyEvent, type Action, type SignedOrgState, type SigningKey, type OrgState } from 'org-protocol';
+import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { createEndpoint, type Endpoint } from '../../../src/endpoint';
+import type { Decision } from '../../../src/endpoint/authorize';
+import type { SessionRecord } from '../../../src/endpoint/sources';
 import type { ListingsFile } from '../../../src/endpoint/state/store';
 import { fakeServices, type FakeServices } from '../fake-services';
 import { ADMIN, ORG, startMiniflareHub, type LocalHub } from '../miniflare-hub';
@@ -154,6 +157,24 @@ const sentUp = (writer: string, seq: number) =>
 const nonEmpty = <T>(list: T[]) => (list.length > 0 ? list : null);
 const fromHub = (events: unknown[]) => endpoint.rl10.relay.fromHub({ t: 'events', project: PROJECT, events });
 
+/**
+ * The endpoint authorizer's decision on `action` from `member`'s device, with `shares` read into its session's record
+ * (sminos sends no shares until O8, so the share is this suite's): an `act` scene that names a member, never sent.
+ */
+async function decide(action: Action, member: string, shares: unknown): Promise<Decision> {
+  const members = endpoint.rl10.members;
+  const record = members.record.bind(members);
+  const shared = vi.spyOn(members, 'record').mockImplementation((target) => {
+    const held = record(target);
+    return held !== null && target.session === action.session ? { ...held, shares: shares as SessionRecord['shares'] } : held;
+  });
+  try {
+    return await endpoint.authorizer.authorize({ kind: 'act', name: action.action, input: action.args, action }, { member, device: action.device, clientClass: 'native-mac' }, Date.now());
+  } finally {
+    shared.mockRestore();
+  }
+}
+
 const scenes = async (step: { scene: string } & Record<string, unknown>, bindings: Record<string, unknown>): Promise<void> => {
   switch (step.scene) {
     case 'legacy-kept': {
@@ -232,6 +253,18 @@ const scenes = async (step: { scene: string } & Record<string, unknown>, binding
       expect(told.length).toBe(step.count);
       return;
     }
+    case 'notify': {
+      // The last notify the hub was told of the session is this one, and notified.json keeps a count above 0 alone.
+      const session = step.session as string;
+      await until(() => {
+        const last = toHub.findLast((f) => f.t === 'notify' && f.session === session);
+        return last !== undefined && last.kind === step.kind && last.pending === step.pending;
+      }, `a notify ${String(step.kind)} ${String(step.pending)} for ${session}`);
+      const path = join(services.machine.stateDir, 'notified.json');
+      const notified = fs.existsSync(path) ? (JSON.parse(fs.readFileSync(path, 'utf8')) as Record<string, { pending: number }>) : {};
+      expect(notified[session]?.pending).toBe((step.pending as number) > 0 ? step.pending : undefined);
+      return;
+    }
     case 'heard':
       await until(() => heard.some((m) => m.kind === step.kind), `a ${String(step.kind)} message`);
       return;
@@ -241,7 +274,7 @@ const scenes = async (step: { scene: string } & Record<string, unknown>, binding
         v: 1 as const,
         org: ORG,
         machine: services.machine.ref,
-        device: 'a1',
+        device: (step.device as string | undefined) ?? 'a1',
         opId: bindings[`opId:${name}`] as string,
         opCreated: bindings[`created:${name}`] as string,
         action: step.action as string,
@@ -251,6 +284,11 @@ const scenes = async (step: { scene: string } & Record<string, unknown>, binding
         created: (bindings[`created:${name}`] as string | undefined) ?? new Date().toISOString(),
       };
       if (name === undefined) Object.assign(action, { opId: 'cmVmdXNlZC1vcC1pZC0wMDAx', opCreated: action.created });
+      if (step.member !== undefined) {
+        const decision = await decide(action as unknown as Action, step.member as string, step.shares);
+        expect(decision).toEqual(step.refused === undefined ? { ok: true, target: { lane: 'A', session: step.session } } : { ok: false, reason: step.refused });
+        return;
+      }
       const sent = endpoint.rl10.rpc(action as never, { member: A, device: 'a1' }, (bindings[`fingerprint:${name}`] as string | undefined) ?? 'none');
       if (step.refused !== undefined) expect(sent).toEqual({ ok: false, reason: step.refused });
       else expect(sent.ok).toBe(true);

@@ -15,6 +15,8 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
+import { bareOf } from '../src/shared/machine/address';
+import { addressed } from './support/address';
 import { invoke, value } from './support/c7-replay';
 import { asDocumentReplay } from './support/document-replay';
 import { allowNext, closeScene, idle, launchScene, PASS3, recordedCwd, replay, scene, scratchProject, show, type Scene } from './support/maws-tools';
@@ -136,7 +138,7 @@ test('a document a session made, opened as its own tab with no chat shown: Comme
       await expect(card).toHaveAttribute('data-anchor-kind', 'artifact-comment');
       await expect(card).toHaveAttribute('data-anchor-locator', QUOTE);
       const named = card.locator('[data-card-parent]');
-      await expect(named, 'the card names the artifact’s own session').toHaveAttribute('data-card-parent', id);
+      await expect(named, 'the card names the artifact’s own session').toHaveAttribute('data-card-parent', await addressed(s.page, id)); // P5 O6 M2: the page names it by its address
       const title = await titleOf(s.page, id);
       await expect(named).toHaveText(`Session: ${title.trim() === '' ? 'New chat' : title}`);
       await expect(card.getByRole('radio', { name: 'Side thread' })).toBeChecked();
@@ -233,7 +235,7 @@ for (const [answer, trust] of [['Trust and start', 'accepted'], ['Start without 
         await expect(card).toHaveAttribute('data-anchor-locator', QUOTE);
         await expect(card.getByRole('radio', { name: 'Send to main' })).toBeChecked();
         await expect(marks(text).filter({ hasText: QUOTE }), 'on the same passage, one mark').toHaveCount(1);
-        const started = (await card.locator('[data-card-parent]').getAttribute('data-card-parent')) as AppSessionId;
+        const started = bareOf((await card.locator('[data-card-parent]').getAttribute('data-card-parent'))!) as AppSessionId; // P5 O6 M2: the journal is the bare id's
         // the owner's answer reached the engine as the composer's card sends it: attested on Trust and start, absent without
         const initialize = s.journal(started).find((row) => row.direction === 'out' && (row.frame as { request?: { subtype?: string } }).request?.subtype === 'initialize');
         const attested = (initialize?.frame as { request?: { workspaceTrust?: unknown } } | undefined)?.request?.workspaceTrust;

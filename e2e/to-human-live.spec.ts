@@ -49,6 +49,7 @@ import { RELAY_URL } from '../src/engine-host/launch';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { compareA15 } from '../test/support/owner-file';
 import { relaySkipReason } from '../test/support/relay-health';
+import { addressed } from './support/address';
 import { invoke, value } from './support/c7-replay';
 import { cleanupFailure, launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { forwardingScript, spentUnder } from './support/live-budget';
@@ -426,7 +427,7 @@ async function resume(page: Page, id: string): Promise<void> {
 async function open(page: Page, id: string): Promise<void> {
   await (await sidebarRow(page, { appSessionId: id })).click();
   await page.mouse.move(700, 450);
-  await expect(pane(page).locator(`[data-composer="${id}"]`)).toBeVisible();
+  await expect(pane(page).locator(`[data-composer="${await addressed(page, id)}"]`)).toBeVisible();
 }
 // The mods row in /plugins for the session in front.
 async function modsRow(page: Page): Promise<Locator> {

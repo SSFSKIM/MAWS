@@ -16,4 +16,4 @@ export interface EditorEnv {
 }
 
 // What a popup needs from it, handed over as plain props each time the suggestion plugin renders.
-export type PopupContext = Pick<EditorEnv, 'cwd' | 'additionalDirectories' | 'catalog' | 'widgets' | 'openWidget'>;
+export type PopupContext = Pick<EditorEnv, 'appSessionId' | 'cwd' | 'additionalDirectories' | 'catalog' | 'widgets' | 'openWidget'>; // P5 O6 M4: the session, whose machine the directories are on

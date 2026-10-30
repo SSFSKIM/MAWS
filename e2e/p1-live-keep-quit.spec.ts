@@ -2,8 +2,9 @@
 // turn in flight, on the packaged build. The packaged app (MAWS_E2E_EXECUTABLE) launched as e2e/supervisor-packaged.spec.ts
 // launches it, with the engine host detached (MAWS_HOST_MODE=detached), the installed Claude Code (unmodified, D-1) through
 // ClaudeUsage's relay (GET /api/hello, one retry two minutes later, else `blocked: relay`), on Haiku in default permission
-// mode, under a scratch config home. One session runs `sleep 45; echo DONE_<nonce>` through Bash (a permission request
-// allowed once if the engine asks); while the sleep runs the app quits and the quit question is answered keep (MAWS_E2E_QUIT_ANSWER=keep); the app
+// mode, under a scratch config home. One session runs a 45-second foreground job through Bash that prints DONE_<nonce> at
+// its end (`foregroundJob`: a `node` timer, since 2.1.310 refuses a leading `sleep 45`; a permission request allowed once
+// if the engine asks); while the job runs the app quits and the quit question is answered keep (MAWS_E2E_QUIT_ANSWER=keep); the app
 // is relaunched within 10 s over the same profile. Asserted: the quit kept one mid-turn session and the supervisor and
 // the engine outlived the app; the relaunch connects to the same supervisor, which lists the session live with its turn
 // open and no DONE yet; DONE_<nonce> then arrives (the host's stream, the relaunched window's live batches and the
@@ -21,6 +22,7 @@
 // MAWS_P1_LIVE_OUT (default /tmp/maws-e11-p1-live), line by line. It spends money; run on purpose only:
 //   pnpm build:app && MAWS_P1_LIVE=1 MAWS_E2E_EXECUTABLE=dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS \
 //     pnpm exec playwright test e2e/p1-live-keep-quit.spec.ts
+// In the gate it is the live group e2e:keep-quit-live (`ci-gate.sh --live`), which builds the unsigned app itself.
 import { execFileSync, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -38,13 +40,14 @@ import { ownerPlugins } from '../test/support/claude-env';
 import { isolatedGitEnv } from '../test/support/git-env';
 import { compareA15 } from '../test/support/owner-file';
 import { relaySkipReason } from '../test/support/relay-health';
+import { addressed } from './support/address';
 import { journal } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';
 import { journalSpend } from './support/c12-prerun';
 import { menu } from './support/code-product';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { seedTranscripts } from './support/maws-tools';
-import { a15Line, a15Reading, initPluginsOf, installedEngine, liveOutDir, sittingLog } from './support/p1-live';
+import { a15Line, a15Reading, foregroundJob, initPluginsOf, installedEngine, liveOutDir, sittingLog } from './support/p1-live';
 import { isAlive, killScratchProcesses, ps } from './support/processes';
 import { sidebarOf, sidebarRow } from './support/sidebar';
 import { tmpSocketDirOf } from './support/supervisor-socket';
@@ -53,7 +56,7 @@ const EXECUTABLE = process.env.MAWS_E2E_EXECUTABLE ? resolve(REPO_ROOT, process.
 test.skip(process.env.MAWS_P1_LIVE !== '1' || EXECUTABLE === null, 'S5 runs only under MAWS_P1_LIVE=1 over a packaged MAWS_E2E_EXECUTABLE');
 
 const CAP_USD = Number(process.env.MAWS_S5_MAX_USD ?? '0.10');
-const SLEEP_S = 45;
+const JOB_S = 45;
 const RELAUNCH_WITHIN_MS = 10_000;
 
 const statusOf = async (page: Page, id: AppSessionId) => value(await invoke(page, 'session.status', { appSessionId: id }));
@@ -102,7 +105,7 @@ test('S5: a keep-quit mid-turn on the packaged build; the relaunch lists the ses
   const engine = installedEngine();
   const nonce = randomBytes(4).toString('hex');
   const DONE = `DONE_${nonce}`;
-  const PROMPT = `Run the Bash command \`sleep ${SLEEP_S}; echo ${DONE}\` yourself, in the foreground (never in the background, never through an agent, and with no timeout of your own), then reply with its output.`;
+  const PROMPT = `Run the Bash command \`${foregroundJob(JOB_S, DONE)}\` yourself, a ${JOB_S}-second job that prints ${DONE} when it ends, in the foreground (never in the background, never through an agent, and with no timeout of your own), then reply with its output.`;
 
   const root = `/private/tmp/maws-e11-s5-${process.env.MAWS_S5_STAMP ?? new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)}Z`;
   mkdirSync(root, { recursive: true });
@@ -138,6 +141,7 @@ test('S5: a keep-quit mid-turn on the packaged build; the relaunch lists the ses
   const engines = new Set<number>();
   const sockets = new Set<string>();
   const launch = async (extra: Record<string, string> = {}): Promise<Run> => {
+    // the embedded shape's supervisor keeping a real turn across the quit is what this run records (E11's S5)
     const maws = await launchMaws({ userData, env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', MAWS_HOST_MODE: 'detached', CLAUDE_CONFIG_DIR: config, ...extra } });
     const child = maws.app.process(); // Playwright drops app.process() once the app closes; the cleanup still needs it
     let text = '';
@@ -174,13 +178,13 @@ test('S5: a keep-quit mid-turn on the packaged build; the relaunch lists the ses
       const row = await sidebarRow(page, { appSessionId: id });
       await expect(row).toBeVisible({ timeout: 2_000 });
       await row.click();
-      await expect(page.locator(`[data-region="main"] [data-composer="${id}"]`)).toBeVisible({ timeout: 2_000 });
+      await expect(page.locator(`[data-region="main"] [data-composer="${await addressed(page, id)}"]`)).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 30_000 });
   };
 
   let failed = false;
   try {
-    // ---- the first app: the session launched, its Bash sleep allowed and running ---------------------------------------
+    // ---- the first app: the session launched, its Bash job allowed and running -----------------------------------------
     const first = await launch({ MAWS_E2E_QUIT_ANSWER: 'keep' });
     const host = await ready(first.page);
     expect(host.transport).toBe('detached');
@@ -197,10 +201,13 @@ test('S5: a keep-quit mid-turn on the packaged build; the relaunch lists the ses
     value(await invoke(first.page, 'session.send', { appSessionId: id, content: PROMPT }));
     note(`prompt sent at ${new Date().toISOString()}: ${PROMPT}`);
 
-    // the Bash call: 2.1.293 runs `sleep` and `echo` in default mode without asking (S5's first run, 2026-10-08), so a
-    // permission request is allowed once through the app's answer if one comes, and not waited for
+    // the Bash call: 2.1.293 ran `sleep` and `echo` in default mode without asking (S5's first run, 2026-10-08); the job's
+    // `node` may ask, so a permission request is allowed once through the app's answer if one comes. A request follows its
+    // tool use within milliseconds, so the call counts as running once its request is answered, or once it has been seen
+    // for 2 s with none
     type ToolUse = Extract<SessionEvent, { kind: 'tool.use' }>;
     let call: ToolUse | undefined;
+    let callSeenAt: number | undefined;
     const allowed: string[] = [];
     await expect
       .poll(async () => {
@@ -211,13 +218,16 @@ test('S5: a keep-quit mid-turn on the packaged build; the relaunch lists the ses
           allowed.push(r.requestId);
           note(`permission requested for ${r.toolName} ${JSON.stringify(r.input).slice(0, 160)}: allowed once`);
         }
-        call = events.find((e): e is ToolUse => e.kind === 'tool.use' && e.toolName === 'Bash' && holds(e.input, DONE));
-        return call !== undefined && events.some((e) => e.kind === 'permission.requested' && (e as { toolUseId: string }).toolUseId === call!.toolUseId && !resolved.has((e as { requestId: string }).requestId)) === false;
+        const found = (call = events.find((e): e is ToolUse => e.kind === 'tool.use' && e.toolName === 'Bash' && holds(e.input, DONE)));
+        if (found === undefined) return false;
+        const seenAt = (callSeenAt ??= Date.now());
+        const asks = events.filter((e) => e.kind === 'permission.requested' && (e as { toolUseId: string }).toolUseId === found.toolUseId).map((e) => (e as { requestId: string }).requestId);
+        return asks.every((r) => resolved.has(r)) && (asks.length > 0 || Date.now() - seenAt >= 2_000);
       }, { timeout: 120_000, message: 'the Bash call runs' })
       .toBe(true);
     const ranAt = Date.now();
     note(`the Bash call ${call!.toolUseId}: ${JSON.stringify(call!.input).slice(0, 200)}; permission requests ${allowed.length === 0 ? 'none (run without asking)' : `${allowed.length}, allowed once`}`);
-    // a few seconds into the sleep: the command runs, its result 40 s away
+    // a few seconds into the job: the command runs, its result 40 s away
     await first.page.waitForTimeout(4_000);
     const toolUseId = call!.toolUseId;
     const resultOf = (events: SessionEvent[]) => events.find((e): e is Extract<SessionEvent, { kind: 'tool.result' }> => e.kind === 'tool.result' && e.toolUseId === toolUseId);
@@ -264,7 +274,7 @@ test('S5: a keep-quit mid-turn on the packaged build; the relaunch lists the ses
     await showSession(second.page, id);
 
     // ---- DONE arrives -----------------------------------------------------------------------------------------------------
-    await expect.poll(async () => resultOf(await hostEvents(second.page, id)) !== undefined, { timeout: (SLEEP_S + 60) * 1000, message: 'the Bash call answers' }).toBe(true);
+    await expect.poll(async () => resultOf(await hostEvents(second.page, id)) !== undefined, { timeout: (JOB_S + 60) * 1000, message: 'the Bash call answers' }).toBe(true);
     const doneAt = Date.now();
     const result = resultOf(await hostEvents(second.page, id))!;
     expect(holds(result.content, DONE), `the command's output is ${DONE}`).toBe(true);
@@ -289,7 +299,7 @@ test('S5: a keep-quit mid-turn on the packaged build; the relaunch lists the ses
     expect(new Set(eventIds).size, 'no event id twice in the host’s stream').toBe(eventIds.length);
     const records = value(await invoke(second.page, 'session.list', { includeArchived: true })).sessions.filter((s) => s.engineSessionId === engineId);
     expect(records, 'one record of the session').toHaveLength(1);
-    const sidebarRows = await sidebarOf(second.page).locator(`[role="treeitem"][data-menu="session:${id}"]`).count();
+    const sidebarRows = await sidebarOf(second.page).locator(`[role="treeitem"][data-menu="session:${await addressed(second.page, id)}"]`).count();
     const rendered = await pane.locator('[data-row-id]').evaluateAll((rows) => rows.map((r) => r.getAttribute('data-row-id') ?? ''));
     expect(new Set(rendered).size, 'no transcript row rendered twice').toBe(rendered.length);
     const doneRows = await pane.locator('[data-row-id]').filter({ hasText: DONE }).evaluateAll((rows) => rows.map((r) => r.getAttribute('data-row-id') ?? ''));
@@ -330,10 +340,11 @@ test('S5: a keep-quit mid-turn on the packaged build; the relaunch lists the ses
     for (const run of runs) {
       if (run.child.exitCode === null && run.child.signalCode === null) run.child.kill('SIGKILL');
       await bounded(run.exited, 10_000, () => `app pid ${run.child.pid} did not exit after SIGKILL`).catch((error: unknown) => note(String(error)));
-      await run.maws.cleanup().catch(() => {}); // the app is gone; the profile is the scratch's
     }
-    let leftover: unknown = null;
+    // read before the launches' cleanup, which ends every process of the profile (P5 O3-B)
     const survivorsBefore = [...supervisors, ...engines].filter(isAlive);
+    for (const run of runs) await run.maws.cleanup().catch(() => {}); // the app is gone; the profile is the scratch's
+    let leftover: unknown = null;
     await killScratchProcesses(root, [...supervisors, ...engines]).catch((error: unknown) => (leftover = error));
     for (const socket of sockets) {
       const dir = tmpSocketDirOf(userData, socket);

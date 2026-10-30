@@ -2,20 +2,23 @@
 // G5; owner decision 5): one data path for `/resume` and the sidebar's Resume…. Pure, so the scope, the search, the
 // order and the groups are testable without React.
 //
-// Scope: the project the chooser opened on (a session without a project opens on every project), its main checkout by
-// default as `claude --resume` scopes it; All projects (⌃A) widens it to every listed project and Other sessions, All
-// worktrees (⌃W) adds the sessions in its worktrees, Current branch (⌃B) keeps those on the branch the project's
-// checkout has out, Archived adds archived sessions and a hidden project's. The search is the sidebar's
+// Scope: the project the chooser opened on (P5 O6 M5: the sidebar row, `ChooserContext.row`; a session without a
+// project opens on every project), its main checkout by default as `claude --resume` scopes it; All projects (⌃A)
+// widens it to every listed project and the sessions of none, All worktrees (⌃W) adds the sessions in its worktrees,
+// Current branch (⌃B) keeps those on the branch the project's checkout has out, Archived adds archived sessions and a
+// hidden project's. The search is the sidebar's
 // (`sessionMatcher`: title, project name, folder and branch). One activity time per session (`lastActivity`: its latest
 // turn, else its record's update) orders the rows, groups them and is the time a row and the preview show.
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
+import type { MachineRef } from '@shared/machine/ref';
 import { dateFormats, formatClock, formatShortDate, formatWeekdayClock } from '@shared/app/date-format';
 import { lastActivity } from '../overview/derive';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { displayTitle } from '../sessions/title';
 import { sessionMatcher } from '../sidebar/derive';
+import { orgIndex, rowOfSession, type RowKey } from '../stores/org-projects';
 
 export interface ChooserToggles {
   allProjects: boolean;
@@ -30,9 +33,12 @@ export const NO_TOGGLES: ChooserToggles = { allProjects: false, currentBranch: f
 export const TOGGLE_KEYS: Record<string, keyof ChooserToggles> = { a: 'allProjects', b: 'currentBranch', w: 'allWorktrees' };
 
 // Where the chooser opened: a project (null: a session without a project, so every project), and the session it was
-// opened from, which it does not list (`/resume` lists the others).
+// opened from, which it does not list (`/resume` lists the others). P5 O6 M5: `row`, the sidebar row it opened on,
+// scopes it to the sessions that row groups, every machine's (`rowOfSession`); `projectId` is then the row's checkout
+// (its branch for Current branch).
 export interface ChooserContext {
   projectId: ProjectId | null;
+  row?: RowKey;
   exclude: AppSessionId | null;
 }
 
@@ -47,6 +53,7 @@ export interface ChooserInput {
   toggles: ChooserToggles;
   branch: string | null; // the project's checked-out branch, null while unknown (Current branch then keeps nothing)
   query: string;
+  local: MachineRef; // this machine, for the org index a row's scope reads
 }
 
 export interface ChooserRow {
@@ -58,14 +65,21 @@ export interface ChooserRow {
 export const sessionBranch = (record: SessionRecord): string | null => branchLabel(recordBranch(record));
 
 // The candidates, newest first (ties by title, then id, so the order is stable while the stores change).
-export function chooserRows({ records, digests, projects, context, toggles, branch, query }: ChooserInput): ChooserRow[] {
+export function chooserRows({ records, digests, projects, context, toggles, branch, query, local }: ChooserInput): ChooserRow[] {
   const matches = sessionMatcher(query, projects);
+  let inScope = (record: SessionRecord) => record.projectId === context.projectId;
+  const { row } = context;
+  if (row !== undefined) {
+    const index = orgIndex(projects.values(), local);
+    const listed = new Set([row]); // the row it opened on is listed, as the sidebar showed it
+    inScope = (record) => rowOfSession(index, projects, record, listed) === row;
+  }
   const rows: ChooserRow[] = [];
   for (const record of records.values()) {
     if (record.appId === context.exclude) continue;
     const project = record.projectId === null ? null : projects.get(record.projectId);
     if (!toggles.archived && (record.archived || project?.hidden)) continue;
-    if (!toggles.allProjects && record.projectId !== context.projectId) continue;
+    if (!toggles.allProjects && !inScope(record)) continue;
     if (!toggles.allWorktrees && record.worktree !== null) continue;
     if (toggles.currentBranch && (branch === null || sessionBranch(record) !== branch)) continue;
     if (!matches(record)) continue;

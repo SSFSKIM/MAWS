@@ -2,7 +2,9 @@
 // key before any history is released (the Transcript re-attaches the same key when it mounts), with the cost of each
 // batch recorded. History before the fixture's streamed tail is released at load.
 import type { SessionEvent } from '@shared/graph/events';
-import { toolUseOf, type AgentId } from '@shared/graph/ids';
+import { toolUseOf, type AgentId, type AppSessionId } from '@shared/graph/ids';
+import { addressOf } from '@shared/machine/address';
+import { ipc } from '../ipc/client';
 import { useTranscriptStore } from '../stores/transcript';
 import type { SubagentRef, TurnId } from '../transcript/model/rows';
 import { replaySource, type ReplaySource } from '../transcript/source/replay';
@@ -13,7 +15,9 @@ let sessions = 0;
 
 export class HarnessSession {
   readonly id = ++sessions;
-  readonly key = `harness:${this.id}`;
+  // P5 O6 M2: the key stands for a session's id (the transcript asks for its browser activities by it), so it is an
+  // address of the local machine, as every id the page mints.
+  readonly key: string = addressOf(ipc.localMachine, `harness:${this.id}` as AppSessionId);
   readonly player: ReplaySource;
   readonly source: TranscriptSource; // the player, with every batch timed
   readonly eventCount: number;

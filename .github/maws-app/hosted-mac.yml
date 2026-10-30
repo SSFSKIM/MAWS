@@ -162,6 +162,10 @@ jobs:
           SCRIPT: ${{ needs.plan.outputs.script }}
         run: |
           .github/scripts/gate-run.sh "$COUNTS" pnpm "$SCRIPT" 2>&1 | tee "$RUNNER_TEMP/e2e.log"
+      # e2e:daemon-unit (MAWS's P5 O2 M7) loads LaunchAgents into this runner's account: whatever the run did, every
+      # `dev.maws.mawsd.e2e-*` agent and plist goes, as MAWS's own e2e job sweeps after the group.
+      - if: always() && needs.plan.outputs.group == 'daemon-unit' && steps.checkout.outcome == 'success'
+        run: .github/scripts/launchd-sweep.sh
       # The result's body: the count lines and Playwright's numbered failure lines, at most 100.
       - id: summary
         name: summary

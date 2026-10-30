@@ -5,8 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectId } from '@shared/graph/ids';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import type { GitStatus } from '@shared/ipc/schema/git';
+import { bareOf } from '@shared/machine/address';
 import { digest, project, record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
+import { at, TEST_MACHINE } from '../../../../../test/support/machine';
 import { queryClient } from '../../ipc/query';
 import { resetLibrary } from '../../library/store';
 import { useLibraryView } from '../../library/view';
@@ -20,10 +22,13 @@ import type { SessionEvent } from '@shared/graph/events';
 import { A, B, probeTool, resetPanelStores } from '../../test-support/panel';
 import { panelHost, registerPanelTool } from '../host';
 import { Summary } from './Summary';
+import { preloadOf } from '../../test-support/preload-of';
 
-const P = 'project-a' as ProjectId;
-const Q = 'project-b' as ProjectId;
-const DIR = '/work/app-a';
+const P = at('project-a' as ProjectId);
+const Q = at('project-b' as ProjectId);
+const DIR = `/work/${A}`; // A's directory in the builders' record
+// P5 O6 M2: the fake bridge stands for main, so it is asked, answers and speaks of the bare ids
+const MAIN = { A: bareOf(A), P: bareOf(P), Q: bareOf(Q) };
 const GIT: GitStatus = {
   repoRoot: DIR, gitDir: `${DIR}/.git`, commonDir: `${DIR}/.git`, isWorktree: false, branch: 'main', head: 'abcdef1234567', upstream: 'origin/main',
   remoteUrl: 'git@github.com:o/maws.git', ahead: 1, behind: 0, dirty: true, stashCount: 0, checkedAt: '2026-09-29T10:00:00.000Z',
@@ -32,7 +37,7 @@ const GIT: GitStatus = {
 const artifact: LibraryRow = {
   id: '00000000-0000-4000-8000-000000000001', kind: 'document', title: 'Input errors plan', createdBy: { kind: 'human' },
   createdAt: 1, updatedAt: 2, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 1,
-  lastEditor: { kind: 'human' }, lastEditedAt: 2, sessions: [], project: { id: P, name: 'Project A' },
+  lastEditor: { kind: 'human' }, lastEditedAt: 2, sessions: [], project: { id: MAIN.P, name: 'Project A' },
 };
 let fake: FakeClient;
 const offs: (() => void)[] = [];
@@ -49,9 +54,9 @@ beforeEach(() => {
     'git.watch': GIT, 'git.diff': { patch: '', files: [{ path: 'a.ts', oldPath: null, insertions: 3, deletions: 1, binary: false }] }, 'git.unwatch': undefined,
     'layout.get': { value: null }, 'layout.set': undefined, 'layout.openExternal': undefined,
     'library.list': { rows: [artifact], counts: { document: 1, presentation: 0, design: 0, design_system: 0, dashboard: 0, html: 0, file: 0 } },
-    'session.observedFacts': { version: 1, appSessionId: A, engineSessionId: null, writtenAt: '2026-10-01T00:00:00Z', source: 'journal', launches: [], engineVersion: null, model: null, effort: null, mode: null, outputStyle: null, plugins: null, contextUsage: null, complete: true },
+    'session.observedFacts': { version: 1, appSessionId: MAIN.A, engineSessionId: null, writtenAt: '2026-10-01T00:00:00Z', source: 'journal', launches: [], engineVersion: null, model: null, effort: null, mode: null, outputStyle: null, plugins: null, contextUsage: null, complete: true },
   });
-  window.maws = fake.client;
+  window.maws = preloadOf(fake);
 });
 afterEach(() => {
   cleanup();
@@ -141,12 +146,12 @@ describe('floating session cards', () => {
   it('queries this project, switches projects, and opens real artifact tabs', async () => {
     const openTab = vi.spyOn(useLayout.getState(), 'openTab');
     mount();
-    await waitFor(() => expect(fake.invoked('library.list')).toEqual([{ filter: { projectId: P } }]));
+    await waitFor(() => expect(fake.invoked('library.list')).toEqual([{ filter: { projectId: MAIN.P } }]));
     await open('Artifacts');
     await userEvent.setup().click(await within(region('Artifacts')).findByRole('button', { name: 'Input errors plan' }));
-    expect(openTab).toHaveBeenCalledWith({ kind: 'artifact', artifactId: artifact.id });
+    expect(openTab).toHaveBeenCalledWith({ kind: 'artifact', artifactId: artifact.id, machine: TEST_MACHINE });
     await userEvent.setup().selectOptions(within(region('Artifacts')).getByRole('combobox', { name: 'Artifacts project' }), Q);
-    await waitFor(() => expect(fake.invoked('library.list')).toEqual([{ filter: { projectId: P } }, { filter: { projectId: Q } }]));
+    await waitFor(() => expect(fake.invoked('library.list')).toEqual([{ filter: { projectId: MAIN.P } }, { filter: { projectId: MAIN.Q } }]));
   });
 
   it('does not leak the entire Library when the session has no project', async () => {
@@ -187,17 +192,17 @@ describe('floating session cards', () => {
     const context = region('Context');
     expect(within(context).getAllByRole('listitem')).toHaveLength(8);
     await userEvent.setup().click(within(context).getByRole('button', { name: /reduce\.ts/ }));
-    expect(openTab).toHaveBeenCalledWith({ kind: 'file', path: '/tmp/maws-synth-exploration-and-web/src/model/reduce.ts', line: null, appSessionId: A });
+    expect(openTab).toHaveBeenCalledWith({ kind: 'file', path: '/tmp/maws-synth-exploration-and-web/src/model/reduce.ts', line: null, appSessionId: A, machine: TEST_MACHINE });
     await userEvent.setup().click(within(context).getByRole('button', { name: /tanstack\.com/ }));
     expect(fake.invoked('layout.openExternal')).toEqual([{ url: 'https://tanstack.com/virtual/latest/docs/api/virtualizer' }]);
     expect(within(context).queryByRole('button', { name: /docs · search/ })).toBeNull();
   });
 
   it('keeps plugin status lines and reload controls within Connectors', async () => {
-    const at = '2026-10-01T10:00:00.000Z';
+    const observedAt = '2026-10-01T10:00:00.000Z';
     const plugins = [{ name: 'mods-probe', path: '/p/probe', source: null, version: null }];
-    act(() => useSessions.setState({ engine: new Map([[A, { ...status(A), plugins, pluginsObservedAt: at }]]) }));
-    const event = { id: `${A}:L:1:0`, sessionId: 's', at, seq: 1, agentId: null, parentToolUseId: null, kind: 'plugin.status', plugin: 'mods-probe', text: 'watching the build' } as SessionEvent;
+    act(() => useSessions.setState({ engine: new Map([[A, { ...status(A), plugins, pluginsObservedAt: observedAt }]]) }));
+    const event = { id: `${A}:L:1:0`, sessionId: 's', at: observedAt, seq: 1, agentId: null, parentToolUseId: null, kind: 'plugin.status', plugin: 'mods-probe', text: 'watching the build' } as SessionEvent;
     await act(() => useTranscriptStore.getState().attach(A, { subscribe: () => () => {}, snapshot: () => Promise.resolve([event]) }));
     mount();
     await open('Connectors');
@@ -205,11 +210,11 @@ describe('floating session cards', () => {
     expect(within(connectors).getByText('mods-probe · watching the build')).toBeTruthy();
     expect(within(connectors).getByText('Plugins · 1 loaded')).toBeTruthy();
     await userEvent.setup().click(within(connectors).getByRole('button', { name: 'Reload plugins' }));
-    expect(fake.invoked('session.reloadPlugins')).toEqual([{ appSessionId: A }]);
+    expect(fake.invoked('session.reloadPlugins')).toEqual([{ appSessionId: MAIN.A }]);
     await act(() => fake.reply('session.reloadPlugins', { opId: 'op-1' }));
-    act(() => fake.event('session.operation', { appSessionId: A, opId: 'op-1', command: 'session.reloadPlugins', late: false, outcome: { ok: true, value: { commands: [], agents: [], plugins: [{ name: 'mods-probe' }], error_count: 0 } } }));
+    act(() => fake.event('session.operation', { appSessionId: MAIN.A, opId: 'op-1', command: 'session.reloadPlugins', late: false, outcome: { ok: true, value: { commands: [], agents: [], plugins: [{ name: 'mods-probe' }], error_count: 0 } } }));
     await userEvent.setup().click(within(connectors).getByRole('button', { name: 'Reload skills' }));
-    expect(fake.invoked('session.reloadSkills')).toEqual([{ appSessionId: A }]);
+    expect(fake.invoked('session.reloadSkills')).toEqual([{ appSessionId: MAIN.A }]);
   });
 
   it('has no session-dependent reads without a session', () => {

@@ -28,15 +28,15 @@ export const OwnerChannelAnsweredSchema = z.strictObject({
 });
 
 export const commands = {
-  'ownerChannel.state': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: OwnerChannelStateSchema, owner: 'main' },
+  'ownerChannel.state': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: OwnerChannelStateSchema, owner: 'machine' },
   // An unknown question (no such mark of the session, or not a question) fails `internal`, naming it.
-  'ownerChannel.answered': { input: OwnerChannelAnsweredSchema, output: z.void(), owner: 'main' },
+  'ownerChannel.answered': { input: OwnerChannelAnsweredSchema, output: z.void(), owner: 'machine' },
   'ownerChannel.cancel': {
     input: z.strictObject({ appSessionId: AppSessionIdSchema, markId: MarkIdSchema }),
     output: z.strictObject({ outcome: z.enum(['cancelled', 'already_delivering', 'not_queued']) }),
-    owner: 'main',
+    owner: 'machine',
   },
-  'ownerChannel.markRead': { input: z.strictObject({ appSessionId: AppSessionIdSchema, markIds: z.union([z.array(MarkIdSchema), z.literal('all')]) }), output: z.void(), owner: 'main' },
+  'ownerChannel.markRead': { input: z.strictObject({ appSessionId: AppSessionIdSchema, markIds: z.union([z.array(MarkIdSchema), z.literal('all')]) }), output: z.void(), owner: 'machine' },
 } as const satisfies Record<`ownerChannel.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

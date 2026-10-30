@@ -28,6 +28,8 @@ import { useEngineRead, WidgetReadPolicyContext } from './read';
 import { hasPluginSkills, skillGroups, skillsView } from './skills/skills';
 import { SkillsLibrary, SkillsToolbar } from './skills/SkillsLibrary';
 import { WidgetFrame } from './WidgetFrame';
+import { machineOf } from '@shared/machine/address';
+import { ipc } from '../ipc/client';
 
 const NO_VIEWS: ReadonlyMap<string, PluginManifestView> = new Map();
 const SECONDARY = 'rounded-md border border-border px-3 py-1 text-ui text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2';
@@ -41,7 +43,9 @@ export function SkillsWidget({ appSessionId, close }: { appSessionId: AppSession
   const line = operationLine(reload.state, skillsSummary);
 
   // the plugins a plugin's skill comes from: the CLI's listing in the session's directory, as `/plugins` reads it
-  const cwd = useSessions((s) => s.engine.get(appSessionId)?.cwd ?? s.records.get(appSessionId)?.directory ?? null);
+  // P5 O6 M4: the plugin CLI runs on this machine (O4 spans machines), so another machine's session's directory is not
+  // listed here: its skills show without their plugins' names.
+  const cwd = useSessions((s) => (machineOf(appSessionId) !== ipc.localMachine ? null : (s.engine.get(appSessionId)?.cwd ?? s.records.get(appSessionId)?.directory ?? null)));
   const installed = usePluginsRead('plugins.list', cwd);
   const marketplaces = usePluginsRead('marketplaces.list', cwd);
   const loaded = useLoadedPlugins(appSessionId);

@@ -7,7 +7,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CommandName, EventName, MawsBridge } from '@shared/ipc/schema';
+import type { CommandName, EventName, PreloadBridge } from '@shared/ipc/schema';
 import type { CatalogHome, CatalogItem, CatalogPage, CatalogQueryInput } from '@shared/ipc/schema/catalog';
 import type { PluginsOperationEvent } from '@shared/ipc/schema/plugins';
 import { useLibraryStore } from '../../widgets/plugins/library-store';
@@ -19,6 +19,8 @@ import { NO_CHOICES, useDiscoverStore } from './store';
 import { item } from './test-items';
 import type { ProjectId } from '@shared/graph/ids';
 import { project as projectRecord } from '../../../../../test/support/builders';
+import { at, TEST_MACHINE } from '../../../../../test/support/machine';
+import { ipc } from '../../ipc/client';
 import { useSessions } from '../../stores/sessions';
 import { forgetKeptOperations } from '../../widgets/plugins/operation';
 import { useCustomizeProject } from '../open';
@@ -143,7 +145,9 @@ beforeEach(() => {
   installedToo = [];
   iconAnswer = (url) => (url.includes('plugin-icons') ? 'data:image/png;base64,iVBORw0KGgo=' : null);
   outcome = () => ({ ok: true, result: { message: 'done' } });
-  const bridge: MawsBridge = {
+  // P5 O6 M2: main's side, installed as `window.maws`; the page reaches it through `ipc`
+  const bridge: PreloadBridge = {
+    localMachine: TEST_MACHINE,
     invoke: (async (name: CommandName, input: unknown) => {
       calls.push({ name, input });
       try {
@@ -151,13 +155,13 @@ beforeEach(() => {
       } catch (error) {
         return { ok: false, error: { code: 'invalid_input', message: (error as Error).message } };
       }
-    }) as MawsBridge['invoke'],
+    }) as PreloadBridge['invoke'],
     on: ((name: string, listener: (payload: unknown) => void) => {
       const set = listeners.get(name) ?? new Set();
       listeners.set(name, set);
       set.add(listener);
       return () => void set.delete(listener);
-    }) as MawsBridge['on'],
+    }) as PreloadBridge['on'],
     pathForFile: () => '',
   };
   window.maws = bridge;
@@ -171,7 +175,7 @@ afterEach(() => {
   useSessions.setState({ projects: new Map() });
   useCustomizeProject.setState({ projectId: undefined }, true);
   forgetKeptOperations();
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: PreloadBridge }).maws;
 });
 
 // A client with the window's catalog.changed listener (App.tsx's connectCatalogEvents), as the app has.
@@ -179,7 +183,7 @@ let disconnect: (() => void) | null = null;
 const client = () => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   disconnect?.();
-  disconnect = connectCatalogEvents(window.maws, qc);
+  disconnect = connectCatalogEvents(ipc, qc);
   return qc;
 };
 const mountPlugins = () =>
@@ -454,8 +458,8 @@ describe('Customize › Plugins › Discover', () => {
 // scalpel-5#1: Customize keys each page's library by its directory, so choosing another project unmounts the page an
 // add-then-install was asked on; the operation still finishes (the install after the add) and its line is there on return.
 describe('Customize: an add-then-install outlives a change of the page’s project', () => {
-  const A = 'project-a' as ProjectId;
-  const B = 'project-b' as ProjectId;
+  const A = at('project-a' as ProjectId); // P5 O6 M2: the page's ids
+  const B = at('project-b' as ProjectId);
   for (const [section, panel, cardOf, name] of [
     ['plugins', 'Plugins', hooked, 'hooked'],
     ['skills', 'Skills', skillsOnly, 'skills-only'],

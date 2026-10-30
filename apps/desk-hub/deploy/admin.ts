@@ -2,22 +2,24 @@
 // RL DL28; P5 O14 M2, its Interfaces §C). It holds an admin device of its own (`init`: a channel key and a step-up key in
 // a 0600 keys file), roots the deployment's org with it (`genesis`, the org's recovery key written only to an offline
 // destination and checked back), or anchors an org rooted before it (`adopt`); then pairs a device (`pair`, RL §5.3 with
-// the package's pairing code, MAC and fingerprint), lists and revokes devices, and signs the weekly no-change successor
-// the endpoint's 30-day backstop needs (`refresh`). For the cutover (O14) it enrolls and lists a machine by a code the
-// owner carries (`enroll`), creates and drops the devcloud delegation and emits its provisioning code to a pipe
+// the package's pairing code, MAC and fingerprint), lists and revokes devices, signs the weekly no-change successor
+// the endpoint's 30-day backstop needs (`refresh`), and makes a native-mac device of the owner's (the app's, P5 O8 M3) a
+// root beside itself (`root add`). For the cutover (O14) it enrolls and lists a machine by a code the owner carries
+// (`enroll`), creates and drops the devcloud delegation and emits its provisioning code to a pipe
 // (`delegation create|drop`), drops a machine however it is held (`machine drop`), revokes a phase-1 provisioning key
 // (`provisioning revoke`), shows the org (`show`), drops a proposal the hub refused once the owner judged it
 // (`abandon-pending`), and reads or strips a provisioning code locally (`code inspect|strip-legacy`).
 //
-//   deployment admin <init | genesis | adopt | refresh | pair | devices | remove-device | show | enroll | delegation |
-//                    machine | code | provisioning | abandon-pending> [--config deploy/<file>.json] [--keys <file>]
-//                    [--hub <url> --user <email> [--yes]] [the verb's own options] (deploy/README.md)
+//   deployment admin <init | genesis | adopt | refresh | pair | devices | remove-device | root | show | enroll |
+//                    delegation | machine | code | provisioning | keys | abandon-pending> [--config deploy/<file>.json]
+//                    [--keys <file>] [--hub <url> --user <email> [--yes]] [the verb's own options] (deploy/README.md)
 //
 // It acts on the deployment `--config` names (production's config.json by default; `checkTestHub` does not apply, and an
 // agent never runs it against production), as the signed-in owner: `DESK_ACCESS_TOKEN` from the environment when it is
 // set there (a runner's `--pipe`, whose stdin is the verb's own), else on stdin, as the other commands take it. `--hub
 // <loopback url> --user <email>` acts on the suites' local hub through its stand-in identity instead, where `--yes` may
-// answer the confirmations. Against a deployment every verb that signs, posts or deletes opens /dev/tty before any
+// answer the confirmations and `genesis --media-check` holds the recovery destination to a deployment's volume rules
+// (another volume than the keys', on removable or external media), so a real drive meets them before a deployment does. Against a deployment every verb that signs, posts or deletes opens /dev/tty before any
 // request and confirms there: a shell with no controlling terminal, an agent's, stops at that open and sends nothing.
 // The pairing code, a machine's enrollment code and a paper recovery key go to the terminal alone, never to stdout, so a
 // runner's log never holds them; a provisioning code goes to stdout alone, and only when stdout is not a terminal.
@@ -30,7 +32,7 @@
 // throughout (`run`), `enroll` only around its reads and its signing, never across its wait; so this device never signs
 // two successors of one parent. `genesis` keeps its own `<keys>.genesis.json`: version 1 has no parent, and no anchor
 // exists until the hub holds it. A throwaway org is not an option.
-import { closeSync, existsSync, fsyncSync, openSync, readSync, renameSync, rmSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, openSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -43,18 +45,19 @@ import {
   encodeProvisioningCodeV2,
   endorseDevice,
   generateSigningKey,
-  isDevice,
   isMachineName,
+  isMemberEmail,
   isSignedOrgState,
+  judgeEntry,
   keyId,
   machineNameKey,
   NO_CERTIFICATES,
   pairingFingerprint,
   signOrgState,
   stateHash,
+  successorProblems,
   verifyEnrollmentMac,
   verifyGenesis,
-  verifyPairingMac,
   verifyPinnedChain,
   type Certificates,
   type Delegation,
@@ -113,20 +116,24 @@ import { Person } from './hub';
 import { certificateViews, machineRows, resolveMachine, table } from './admin-machines';
 import { deviceEntry, purgeOrgKeys, restoreLegacyKey, retireLegacyKey, successor } from './org-admin';
 import { withRunLock } from './run-lock';
+import { openTerminal, type Terminal } from './terminal';
 
-export const SUBCOMMANDS = ['init', 'genesis', 'adopt', 'refresh', 'pair', 'devices', 'remove-device', 'show', 'enroll', 'delegation', 'machine', 'code', 'provisioning', 'keys', 'abandon-pending'] as const;
+// The pairing judges live in org-protocol (O8 M4a), where the app's pairing reads them too; re-exported for admin's suites.
+export { isPairedDeviceId, isRpId, judgeEntry } from 'org-protocol';
+
+export const SUBCOMMANDS = ['init', 'genesis', 'adopt', 'refresh', 'pair', 'devices', 'remove-device', 'root', 'show', 'enroll', 'delegation', 'machine', 'code', 'provisioning', 'keys', 'abandon-pending'] as const;
 /** The subcommands that name a verb of their own after them (`delegation create`). */
-const GROUPS = { delegation: ['create', 'publish', 'drop'], machine: ['drop'], code: ['inspect', 'strip-legacy'], provisioning: ['revoke'], keys: ['retire', 'purge'] } as const;
+const GROUPS = { root: ['add'], delegation: ['create', 'publish', 'drop'], machine: ['drop'], code: ['inspect', 'strip-legacy'], provisioning: ['revoke'], keys: ['retire', 'purge'] } as const;
 type Group = keyof typeof GROUPS;
 type Subcommand = Exclude<(typeof SUBCOMMANDS)[number], Group> | { [G in Group]: `${G} ${(typeof GROUPS)[G][number]}` }[Group];
 /** What signs, posts or deletes only after the owner says so at the terminal. */
-const CONFIRMING: readonly Subcommand[] = ['genesis', 'pair', 'remove-device', 'enroll', 'delegation create', 'delegation publish', 'delegation drop', 'machine drop', 'provisioning revoke', 'keys retire', 'keys purge', 'abandon-pending'];
+const CONFIRMING: readonly Subcommand[] = ['genesis', 'pair', 'remove-device', 'root add', 'enroll', 'delegation create', 'delegation publish', 'delegation drop', 'machine drop', 'provisioning revoke', 'keys retire', 'keys purge', 'abandon-pending'];
 /** The verbs whose stdout is a secret code, for a pipe alone: every other line they print goes to stderr. */
 const SECRET_STDOUT: readonly Subcommand[] = ['delegation create', 'code strip-legacy'];
 /** The local transforms: stdin to stdout, no keys, no anchor, no credential and no hub. */
 const LOCAL_TRANSFORMS: readonly Subcommand[] = ['code inspect', 'code strip-legacy'];
 /** The positional each verb takes, by what it names. */
-const POSITIONAL: Partial<Record<Subcommand, string>> = { 'remove-device': '<device id>', enroll: '<name>', 'delegation drop': '<delegation id>', 'machine drop': '<name>', 'provisioning revoke': '<provisioning key id>' };
+const POSITIONAL: Partial<Record<Subcommand, string>> = { 'remove-device': '<device id>', 'root add': '<device id>', enroll: '<name>', 'delegation drop': '<delegation id>', 'machine drop': '<name>', 'provisioning revoke': '<provisioning key id>' };
 /** How often `pair` reads the pending list. */
 export const PAIR_POLL_MS = 2000;
 /** How often `enroll` asks for the machine's posted key, and how long it waits for it by default. */
@@ -135,8 +142,7 @@ export const ENROLL_WAIT_S = 1800;
 const DAY_MS = 86_400_000;
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
 
-/** Where confirmations, the pairing code and a paper key go: /dev/tty against a deployment. */
-export type Terminal = { write(text: string): void; readLine(): Promise<string> };
+export type { Terminal };
 
 /** What the command reaches beyond the hub, each a suite's to replace. */
 export type AdminIo = {
@@ -287,34 +293,6 @@ async function signerProblem(head: OrgState, member: string, keys: AdminKeys): P
   return null;
 }
 
-/** A device entry as the pending list carries it, rebuilt as the state would list it (no endorsement yet). */
-function entryDevice(entry: PendingDevice): Omit<Device, 'endorsement'> {
-  const device: Record<string, unknown> = { id: entry.deviceId, class: entry.class, keyStorage: entry.keyStorage, channelPub: entry.channelPub };
-  if (entry.stepUpPub !== undefined) device.stepUpPub = entry.stepUpPub;
-  if (entry.passkey !== undefined) device.passkey = entry.passkey;
-  return device as Omit<Device, 'endorsement'>;
-}
-
-/**
- * Whether a pending entry answers this pairing: the device a state could list, of the class asked for, its MAC under
- * `k` over the org, the member and the whole entry, and not a device the head already lists. Otherwise why not.
- */
-export async function judgeEntry(
-  entry: PendingDevice,
-  pairing: { org: string; member: string; k: Uint8Array; class: Device['class']; listed: Set<string> },
-): Promise<{ ok: true; device: Omit<Device, 'endorsement'> } | { ok: false; why: string }> {
-  const device = entryDevice(entry);
-  if (device.class === 'web-cards' && device.stepUpPub !== undefined) return { ok: false, why: 'a web-cards entry with a step-up key, which the class never holds (RL 5.10)' };
-  if (!isDevice(device)) return { ok: false, why: 'not a device entry the org state could list' };
-  if (!isPairedDeviceId(device.id)) return { ok: false, why: 'its id is outside the device id grammar (base64url)' };
-  if (device.passkey !== undefined && !isRpId(device.passkey.rpId)) return { ok: false, why: "its passkey's rpId is not a host name" };
-  if (device.class !== pairing.class) return { ok: false, why: `of class ${device.class}, not ${pairing.class}` };
-  if (device.class === 'web-cards' && device.passkey === undefined) return { ok: false, why: 'a web-cards entry with no passkey' };
-  if (!(await verifyPairingMac(pairing.k, { org: pairing.org, member: pairing.member, device }, entry.mac))) return { ok: false, why: "its MAC is not under this code's secret" };
-  if (pairing.listed.has(device.id)) return { ok: false, why: 'its id is a device the head already lists' };
-  return { ok: true, device };
-}
-
 /**
  * A hub-supplied string as it may be printed: every character outside printable ASCII, and the backslash, written as an
  * escape. What the hub serves (a device id, a relying party, a member's email, its refusal's text) could otherwise carry
@@ -325,11 +303,6 @@ export const printable = (text: string) => text.replace(/[^\x20-\x5b\x5d-\x7e]/g
 /** `text` with every control character (C0, DEL, C1, the Unicode line separators and bidirectional controls) escaped. */
 // eslint-disable-next-line no-control-regex -- matching the control characters is the point
 const noControls = (text: string) => text.replace(/[\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
-
-/** A device id as a pairing takes it: base64url's alphabet, as the phone's 16 random bytes and this command's ids are. */
-export const isPairedDeviceId = (id: string) => /^[A-Za-z0-9_-]{1,128}$/.test(id);
-/** A relying party id as a pairing takes it: a lower-case host name (dot-separated labels) or a dotted IPv4 address. */
-export const isRpId = (rpId: string) => rpId.length <= 253 && /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/.test(rpId);
 
 const describeEntry = (d: Omit<Device, 'endorsement'>) => printable(`${d.id} ${d.class} ${d.keyStorage} rpId ${d.passkey?.rpId ?? '-'}`);
 
@@ -478,6 +451,11 @@ async function anchored(ctx: Context, needsSigner: boolean, { unsent = 'refuse' 
   async function signPending(edit: (state: OrgState) => Promise<void> | void, unsent: boolean): Promise<SignedOrgState> {
     const next = await successor(head.state, () => {});
     await edit(next);
+    // What the package would refuse once signed, refused before: the slot never holds a successor no verifier takes.
+    const problems = await successorProblems(head.state, next);
+    if (problems.length > 0) {
+      refuse(`version ${next.version} would be refused: ${problems.map((p) => (p.detail === undefined ? p.code : `${p.code} (${printable(p.detail)})`)).join('; ')}: nothing was signed`);
+    }
     const signed = await signOrgState(next, [keys.stepUp]);
     save({ ...anchor, pending: signed, ...(unsent ? { unsent: true as const } : {}) });
     return signed;
@@ -554,7 +532,7 @@ async function genesis(ctx: Context): Promise<number> {
   if (!recovery) return refuse('genesis --recovery <path on the removable volume | paper>');
   const paper = recovery === 'paper';
   if (!paper) {
-    const problem = recoveryPlacementProblem(recovery, ctx.keysPath, ctx.io.placement, { of: ctx.io.volumeOf, removable: ctx.io.removableVolume, required: !ctx.local });
+    const problem = recoveryPlacementProblem(recovery, ctx.keysPath, ctx.io.placement, { of: ctx.io.volumeOf, removable: ctx.io.removableVolume, required: !ctx.local || ctx.values['media-check'] === true });
     if (problem) refuse(`${problem}: nothing was written`);
   }
   if (readAnchor(ctx.keysPath)) refuse(`${anchorFile(ctx.keysPath)} exists: this device anchors an org already, and genesis runs once`);
@@ -607,6 +585,10 @@ async function genesis(ctx: Context): Promise<number> {
   }
 
   if (served.head !== null) refuse(`the hub holds a state (version ${served.head.state.version}): genesis roots an org with none`);
+  // The genesis writes the admin's email as `/api/me` names it, so it must be an address, as a successor's must.
+  if (!isMemberEmail(me.member.email)) {
+    refuse(`the hub names this member's email "${printable(me.member.email)}", which is not an address (one @, no space or control character, at most 64 characters before it and 253 after): nothing was written or signed`);
+  }
   if (!paper && existsSync(recovery)) refuse(`${recovery} exists: the recovery key is never written over a file; move it aside or name another path`);
   const key = await newRecoveryKey();
   if (paper) {
@@ -712,6 +694,30 @@ async function removeDevice(ctx: Context): Promise<number> {
     }
   });
   ctx.io.out(`revoked: version ${signed.state.version}`);
+  return 0;
+}
+
+/**
+ * `root add ID`: a device of this admin's own member made a root beside this admin device (P5 O8 M3, the co-root), its
+ * step-up key's kid appended to `root.keys`. Only a native-mac device with a step-up key signs org states, as this
+ * device does; a device under another member is not this verb's, so every root it adds is one `remove-device` removes.
+ * Either root then signs any successor alone (`verifySuccessor` asks one signature of the parent's root set).
+ */
+async function rootAdd(ctx: Context): Promise<number> {
+  const id = ctx.positionals[0];
+  const from = await anchored(ctx, true);
+  const { state } = from.head;
+  const member = state.members.find((m) => m.id === from.me.member.id)!;
+  const device = member.devices.find((d) => d.id === id) ?? refuse(`${from.me.member.id} has no device ${printable(id)} in the head (version ${state.version})`);
+  if (device.class !== 'native-mac' || device.stepUpPub === undefined) refuse(`${printable(id)} is a ${device.class} device: only a native-mac device with a step-up key signs org states`);
+  const kid = await keyId(device.stepUpPub);
+  if (state.root.keys.includes(kid)) refuse(`${printable(id)} is a root already (step-up ${kid})`);
+  // What `pair` showed when the device was approved: the same entry, so the same fingerprint (its endorsement left out).
+  const fingerprint = await pairingFingerprint(from.anchor.org, member.id, device);
+  const question = `make ${describeEntry(device)} of ${printable(member.email)} (fingerprint ${fingerprint}, step-up ${kid}) a root of ${from.anchor.org}? [y/N]`;
+  if (!(await confirm(ctx, question))) refuse('not made a root: nothing was signed');
+  const signed = await from.amend((s) => void s.root.keys.push(kid));
+  ctx.io.out(`root added: ${printable(id)}, step-up ${kid} (version ${signed.state.version})`);
   return 0;
 }
 
@@ -827,6 +833,16 @@ function delegationOver(state: OrgState, name: string): string | null {
   return prefixes.find((p) => key.startsWith(machineNameKey(p))) ?? null;
 }
 
+/**
+ * One line per root of the state: its step-up key id and the device listed in the head that holds the key. A verified
+ * head lists a device for every root; `no listed device` is for a head that somehow does not.
+ */
+export async function rootLines(state: OrgState): Promise<string[]> {
+  const holders = new Map<string, string>();
+  for (const m of state.members) for (const d of m.devices) if (d.stepUpPub !== undefined) holders.set(await keyId(d.stepUpPub), `${printable(m.email)} device ${printable(d.id)}`);
+  return state.root.keys.map((kid) => `root ${printable(kid)} (${holders.get(kid) ?? 'no listed device'})`);
+}
+
 async function show(ctx: Context): Promise<number> {
   const { head, keys, person, certificates } = await anchored(ctx, false, { unsent: 'note' });
   const state = head.state;
@@ -834,6 +850,7 @@ async function show(ctx: Context): Promise<number> {
     ctx.io.out(`member ${m.id} ${printable(m.email)} ${m.role}`);
     for (const d of m.devices) ctx.io.out(`  device ${describeEntry(d)}${d.id === keys.id ? ' (this admin device)' : ''}`);
   }
+  for (const line of await rootLines(state)) ctx.io.out(line);
   const rows = await machineRows(state, await certificateViews(state, certificates), await hubRows(person));
   if (rows.length === 0) ctx.io.out('machines: none');
   else {
@@ -1280,6 +1297,7 @@ const RUN: Record<Subcommand, (ctx: Context) => Promise<number>> = {
   pair,
   devices,
   'remove-device': removeDevice,
+  'root add': rootAdd,
   show,
   enroll,
   'delegation create': delegationCreate,
@@ -1317,6 +1335,7 @@ async function run(argv: string[], given: AdminIo): Promise<number> {
       user: { type: 'string' },
       yes: { type: 'boolean', default: false },
       recovery: { type: 'string' },
+      'media-check': { type: 'boolean' },
       class: { type: 'string' },
       ttl: { type: 'string' },
       replace: { type: 'boolean' },
@@ -1343,6 +1362,7 @@ async function run(argv: string[], given: AdminIo): Promise<number> {
   }
   const only: Array<[string, Subcommand[]]> = [
     ['recovery', ['genesis']],
+    ['media-check', ['genesis']],
     ['class', ['pair']],
     ['ttl', ['pair', 'enroll', 'delegation create']],
     ['replace', ['enroll']],
@@ -1364,6 +1384,8 @@ async function run(argv: string[], given: AdminIo): Promise<number> {
   if (LOCAL_TRANSFORMS.includes(sub)) return (sub === 'code inspect' ? codeInspect : codeStripLegacy)({ io });
   if ((values.config?.length ?? 0) > 1 || (values.keys?.length ?? 0) > 1) refuse('name one --config and one --keys');
   const local = values.hub !== undefined;
+  // The deployment's volume rules at the local hub: the owner's check of a real drive before a deployment's genesis.
+  if (values['media-check'] && !local) refuse('--media-check is for the local hub (--hub): a deployment checks the recovery destination\'s media always');
   if (values.yes && !local) refuse('--yes answers the confirmations only at the local hub (--hub): against a deployment they are the owner\'s, at /dev/tty');
   if (local !== (values.user !== undefined)) refuse('--hub and --user go together: the local hub and its stand-in identity');
   const keysPath = values.keys?.[0] ?? io.env.DESK_ADMIN_KEYS ?? refuse('--keys <file> (or DESK_ADMIN_KEYS): the admin device\'s keys');
@@ -1437,37 +1459,13 @@ function localHub(text: string): string {
 
 function usage(io: AdminIo): number {
   io.err(`usage: deployment admin <${SUBCOMMANDS.join(' | ')}> [--config deploy/<file>.json] [--keys <file>] [--hub <url> --user <email> [--yes]]`);
-  io.err('  genesis --recovery <path | paper>; pair --class web-cards|native-mac [--ttl <s>]; remove-device <device id>');
+  io.err('  genesis --recovery <path | paper> [--media-check, at --hub]; pair --class web-cards|native-mac [--ttl <s>]; remove-device <device id>; root add <device id>');
   io.err('  enroll <name> [--replace] [--ttl <s>] [--wait <s>]; delegation create --label <l> --prefix <p> --code-to-stdout [--ttl <s>] [--max-uses <n>] [--legacy-from-v1-code]');
   io.err('  delegation drop <id>; machine drop <name> [--revoke]; provisioning revoke <id>; code inspect | strip-legacy (stdin to stdout) (deploy/README.md)');
   return 2;
 }
 
 // ---- The machine's own io ---------------------------------------------------------------------------------------------
-
-/** A line read from `fd`, byte by byte, so nothing after it is consumed. */
-function readLineFrom(fd: number): string {
-  const bytes: number[] = [];
-  const one = Buffer.alloc(1);
-  for (;;) {
-    let n: number;
-    try {
-      n = readSync(fd, one, 0, 1, null);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EAGAIN') continue;
-      throw error;
-    }
-    if (n === 0 || one[0] === 0x0a) return Buffer.from(bytes).toString('utf8');
-    bytes.push(one[0]);
-  }
-}
-
-function openTerminal(deployment: boolean): Terminal {
-  if (!deployment) return { write: (text) => void process.stdout.write(text), readLine: async () => readLineFrom(0) };
-  const fd = openSync('/dev/tty', 'r+');
-  process.once('exit', () => closeSync(fd));
-  return { write: (text) => void writeSync(fd, text), readLine: async () => readLineFrom(fd) };
-}
 
 function exec(command: string, args: string[], input?: string): Promise<void> {
   return new Promise((resolve, reject) => {

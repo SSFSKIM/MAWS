@@ -165,6 +165,24 @@ describe('a lane B subscription', () => {
     await waitFor(a, (m) => m.t === 'paused' && m.sub === 's1', 'paused again', from);
   });
 
+  it('catches up from its cursor, exactly once and with no pause, when the engine-host link drops and streams again mid-stream (P5 O3-D D41)', async () => {
+    const f = await lab();
+    const a = await openRemote(f, org.a1, org.A);
+    await subscribe(a, 's1', { lane: 'B', id: 'app-1' });
+    const before = f.host.row('app-1', 3, { cut: [1] });
+    await until(() => evs(a, 's1').length === 3, 'the first row');
+    // Events stay available (mawsd's permanent link): the link alone drops, and what the host writes meanwhile reaches no one.
+    const from = a.inbox.length;
+    f.host.upstream(false);
+    const during = [...f.host.row('app-1', 2), ...f.host.row('app-1', 1)];
+    f.host.upstream(true);
+    await until(() => evs(a, 's1').length === 6, 'the catch-up');
+    const live = f.host.row('app-1', 1);
+    await until(() => evs(a, 's1').length === 7, 'live again');
+    sawExactly(a, 's1', [...before, ...during, ...live]);
+    expect(a.inbox.slice(from).filter((m) => m.t === 'paused' || m.t === 'resumed' || m.t === 'subbed')).toEqual([]);
+  });
+
   it('shows a question already pending at subscription, with no later broker change', async () => {
     const f = await lab();
     f.host.request('app-1', 'question', 'rq-1');

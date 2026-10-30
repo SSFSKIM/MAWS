@@ -4,13 +4,16 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import { SessionRecordSchema } from '@shared/graph/session';
+import { compileAddressing } from '@shared/machine/address';
 import { digest } from '../../../../test/support/builders';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { registerSetupIntentHook, type SetupIntentHook } from '../composer';
 import { effortBasis, resetEffectiveEfforts, useEffectiveEfforts } from '../composer/effective-effort';
 import { GatewayDialogs } from '../gateway/SwitchSheet';
+import { ipc } from '../ipc/client';
 import { useSetup } from '../sessions/store';
 import { useSessions } from '../stores/sessions';
 import { useUsage } from '../stores/usage';
@@ -23,15 +26,20 @@ import { REL } from '../test-support/relative-time';
 const SELECTOR_BACK = 'Back to effort';
 
 const ROOT = join(__dirname, '../../../..');
-const ID = 'app-7412a115' as AppSessionId; // routed, idle, sonnet, effective auto (pass2/auto-routed's catalogue, seq 143)
+// P5 O6 M2: the backend is main (bare ids); the page holds the address
+const BARE = 'app-7412a115' as AppSessionId; // routed, idle, sonnet, effective auto (pass2/auto-routed's catalogue, seq 143)
+const ID = at(BARE);
+const lifted = (status: EngineSessionStatus): EngineSessionStatus => ({ ...status, appSessionId: at(status.appSessionId) });
+const RECORD_ADDRESSING = compileAddressing(SessionRecordSchema);
+const INTENT = at(INTENT_ID); // the setup builders' id is main's
 let backend: WidgetBackend;
 let offs: (() => void)[] = [];
 
 beforeEach(() => {
   backend = createWidgetBackend({ root: ROOT, statuses: loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json')).engine });
   window.maws = backend.bridge();
-  useSessions.setState({ engine: new Map([[ID, backend.status(ID)]]) });
-  offs = [backend.bridge().on('session.status', (event) => useSessions.getState().applyStatus(event))];
+  useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
+  offs = [ipc.on('session.status', (event) => useSessions.getState().applyStatus(event, TEST_MACHINE))];
 });
 afterEach(() => {
   cleanup();
@@ -40,7 +48,7 @@ afterEach(() => {
   resetEffectiveEfforts();
   useSessions.setState({ engine: new Map() });
   useUsage.setState({ snapshot: null, windows: null, pinsFor: {} });
-  delete (window as { maws?: MawsBridge }).maws;
+  delete (window as { maws?: unknown }).maws;
 });
 
 const mount = (name: 'model' | 'effort' | 'fast' = 'effort', args = '', id: AppSessionId = ID) => {
@@ -56,7 +64,7 @@ const knowEffort = (effort: EngineSessionStatus['effort']) => {
   const status = useSessions.getState().engine.get(ID)!;
   useEffectiveEfforts.setState({ known: new Map([[ID, { basis: effortBasis(status)!, effort }]]) });
 };
-const setStatus = (patch: Partial<EngineSessionStatus>) => act(() => void backend.emitStatus(ID, patch));
+const setStatus = (patch: Partial<EngineSessionStatus>) => act(() => void backend.emitStatus(BARE, patch));
 const calls = (subtype: string) => backend.calls.filter((c) => c.subtype === subtype);
 const view = () => document.querySelector('[data-model-selector]')?.getAttribute('data-model-selector');
 const item = (name: RegExp) => screen.getByRole('menuitemradio', { name });
@@ -73,7 +81,7 @@ describe('the effort view: the effort in words over the model, a slider over its
     expect(slider.getAttribute('aria-valuetext')).toBe('High, 3 of 5');
     fireEvent.keyDown(slider, { key: 'ArrowRight' });
     await waitFor(() => expect(calls('apply_flag_settings')).toHaveLength(1));
-    expect(calls('apply_flag_settings')[0].input).toEqual({ appSessionId: ID, effort: 'xhigh' });
+    expect(calls('apply_flag_settings')[0].input).toEqual({ appSessionId: BARE, effort: 'xhigh' });
   });
 
   it('Reset clears an effort set explicitly, and is off while none is', async () => {
@@ -84,7 +92,7 @@ describe('the effort view: the effort in words over the model, a slider over its
     setStatus({ effort: 'max' });
     await waitFor(() => expect(reset.disabled).toBe(false));
     fireEvent.click(reset);
-    await waitFor(() => expect(calls('apply_flag_settings').map((c) => c.input)).toEqual([{ appSessionId: ID, effort: null }]));
+    await waitFor(() => expect(calls('apply_flag_settings').map((c) => c.input)).toEqual([{ appSessionId: BARE, effort: null }]));
   });
 
   it('offers no slider for a model without effort levels (Haiku’s live row lists none)', async () => {
@@ -104,7 +112,7 @@ describe('the effort view: the effort in words over the model, a slider over its
     await waitFor(() => expect(screen.getByText('Fast mode disables the auto-mode server lane: reviews then run locally on Sonnet 5 and count against usage')).toBeTruthy());
     expect(fast.getAttribute('aria-checked')).toBe('false');
     fireEvent.click(screen.getByRole('button', { name: 'Turn on fast mode' }));
-    await waitFor(() => expect(calls('apply_flag_settings').map((c) => c.input)).toEqual([{ appSessionId: ID, settings: { fastMode: true } }]));
+    await waitFor(() => expect(calls('apply_flag_settings').map((c) => c.input)).toEqual([{ appSessionId: BARE, settings: { fastMode: true } }]));
   });
 });
 
@@ -132,14 +140,14 @@ describe('the model view: Select model, Default with its recommendation, the cat
     mount('model');
     await screen.findByRole('group', { name: 'Claude models' });
     fireEvent.click(item(/^Opus/));
-    await waitFor(() => expect(calls('set_model').map((c) => c.input)).toEqual([{ appSessionId: ID, model: 'opus' }]));
+    await waitFor(() => expect(calls('set_model').map((c) => c.input)).toEqual([{ appSessionId: BARE, model: 'opus' }]));
     await waitFor(() => expect(view()).toBe('effort'));
     expect(screen.getByText('set · the next init frame confirms it')).toBeTruthy(); // until an init frame reports it
     fireEvent.click(screen.getByRole('button', { name: 'Opus 5.5 (1M context) · Select model' }));
     expect(view()).toBe('model');
     expect(item(/^Opus/).getAttribute('aria-checked')).toBe('true');
     fireEvent.click(item(/Default/));
-    await waitFor(() => expect(calls('set_model').map((c) => c.input)).toEqual([{ appSessionId: ID, model: 'opus' }, { appSessionId: ID, model: null }]));
+    await waitFor(() => expect(calls('set_model').map((c) => c.input)).toEqual([{ appSessionId: BARE, model: 'opus' }, { appSessionId: BARE, model: null }]));
     await waitFor(() => expect(view()).toBe('effort'));
     fireEvent.click(screen.getByRole('button', { name: /Select model/ }));
     expect(item(/^Default/).getAttribute('aria-checked')).toBe('true');
@@ -171,9 +179,9 @@ describe('the model view: Select model, Default with its recommendation, the cat
 describe('a session with a record and no ready process', () => {
   const scenario = () => loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json'));
   const dormant = () => {
-    const record = scenario().sessions.find((s) => s.appId === ID)!;
-    useSessions.setState({ engine: new Map([[ID, { ...backend.status(ID), process: 'exited' }]]), records: new Map([[ID, record]]) });
-    const facts = { ...emptyObservedFacts(ID, '2026-10-09T00:00:00.000Z', 'live'), model: { value: 'claude-opus-5-5', at: new Date(Date.now() - 2 * 86_400_000).toISOString(), launchId: 'l-1' }, complete: true };
+    const record = RECORD_ADDRESSING.lift(scenario().sessions.find((s) => s.appId === BARE)!, TEST_MACHINE);
+    useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), process: 'exited' }]]), records: new Map([[ID, record]]) });
+    const facts = { ...emptyObservedFacts(BARE, '2026-10-09T00:00:00.000Z', 'live'), model: { value: 'claude-opus-5-5', at: new Date(Date.now() - 2 * 86_400_000).toISOString(), launchId: 'l-1' }, complete: true };
     backend.script('session.observedFacts', () => facts);
   };
   const acquires = () => backend.calls.filter((c) => c.command === 'session.acquire').map((c) => c.input);
@@ -190,8 +198,8 @@ describe('a session with a record and no ready process', () => {
     fireEvent.click(screen.getByRole('button', { name: /Select model/ }));
     fireEvent.click(item(/^Opus/));
     expect(screen.getByText('set · the next init frame confirms it')).toBeTruthy(); // pending from the choice
-    await waitFor(() => expect(calls('set_model').map((c) => c.input)).toEqual([{ appSessionId: ID, model: 'opus' }]));
-    expect(acquires()).toEqual([{ appSessionId: ID, reason: 'chip' }]);
+    await waitFor(() => expect(calls('set_model').map((c) => c.input)).toEqual([{ appSessionId: BARE, model: 'opus' }]));
+    expect(acquires()).toEqual([{ appSessionId: BARE, reason: 'chip' }]);
     expect(useSessions.getState().engine.get(ID)?.process).toBe('ready');
     await waitFor(() => expect(view()).toBe('effort'));
     expect(screen.getByText('set · the next init frame confirms it')).toBeTruthy(); // the live binding keeps it until an init confirms
@@ -199,7 +207,7 @@ describe('a session with a record and no ready process', () => {
 
   it('a start that fails clears the pending mark, applies nothing and says why', async () => {
     dormant();
-    backend.script('session.acquire', () => ({ status: 'failed', appSessionId: ID, message: 'The session did not become ready.', resources: { worktree: null, record: 'kept', transcript: 'kept' } }));
+    backend.script('session.acquire', () => ({ status: 'failed', appSessionId: BARE, message: 'The session did not become ready.', resources: { worktree: null, record: 'kept', transcript: 'kept' } }));
     mount('model');
     await screen.findByRole('group', { name: 'Claude models' });
     fireEvent.click(item(/^Opus/));
@@ -211,7 +219,7 @@ describe('a session with a record and no ready process', () => {
 
   it('a terminal holding the session refuses a choice in words, and starts nothing', async () => {
     dormant();
-    const record = scenario().sessions.find((s) => s.appId === ID)!;
+    const record = RECORD_ADDRESSING.lift(scenario().sessions.find((s) => s.appId === BARE)!, TEST_MACHINE);
     useSessions.setState({ records: new Map([[ID, { ...record, holder: { kind: 'terminal', pid: 4711 } }]]), digests: new Map([[ID, digest(ID, { availability: 'foreign_held' })]]) });
     mount('model');
     await screen.findByRole('group', { name: 'Claude models' });
@@ -238,7 +246,7 @@ describe('an unstarted session writes its intent, with D-19’s route', () => {
       { value: 'claude/sol', resolvedModel: 'claude/sol', displayName: 'sol', description: 'From gateway', supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
     ];
     offHook = registerSetupIntentHook((id) =>
-      id === INTENT_ID
+      id === INTENT
         ? {
             intent: current,
             options: { models, autoModeNote: null },
@@ -251,13 +259,13 @@ describe('an unstarted session writes its intent, with D-19’s route', () => {
           }
         : null,
     );
-    useSetup.setState({ intents: new Map([[INTENT_ID, intent({ gateway: 'gateway' })]]) });
+    useSetup.setState({ intents: new Map([[INTENT, intent({ appSessionId: INTENT, gateway: 'gateway' })]]) });
     return patches;
   }
 
   it('a model choice drops an effort the model does not admit; the effort slider writes the intent', async () => {
     const patches = stub({ model: 'opus', effort: 'high' });
-    mount('model', '', INTENT_ID);
+    mount('model', '', INTENT);
     expect(screen.getByRole('radiogroup', { name: 'Route' })).toBeTruthy();
     fireEvent.click(item(/^Haiku/));
     await waitFor(() => expect(patches).toEqual([{ model: 'haiku', effort: null }]));
@@ -271,7 +279,7 @@ describe('an unstarted session writes its intent, with D-19’s route', () => {
         <GatewayDialogs />
       </QueryClientProvider>,
     );
-    mount('model', '', INTENT_ID);
+    mount('model', '', INTENT);
     fireEvent.click(screen.getByRole('radio', { name: /Direct/ }));
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
   });

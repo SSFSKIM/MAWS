@@ -8,15 +8,34 @@
 // page) before anything else, within 10 s. Every message is at most a handshake page (`maxPayload`), so an over-large
 // `h3` closes the socket before it is read. Handshakes are limited per source address (a burst of 3, then 5 a minute)
 // and overall (60 a minute); one past either is answered `503 busy` at the upgrade, before any key work.
+//
+// What a connection is sent waits in its socket's send buffer (send-buffer.ts) until the device reads it, bounded as
+// DIRECT_SEND_LIMITS says: the channel's stream waits at the soft cap, and the socket is ended (no sealed close, which
+// would wait behind the same bytes) once what it holds would pass the ceiling, or once it has held bytes and written no
+// frame for the stall bound. The channel then closes, its subscriptions' cursors resumable on the device's next
+// one. A channel closed gracefully (its sealed close sent) closes the socket only once the device has taken what it
+// holds, within the same stall bound. No WebSocket ping is answered (RL2 has its own), so every byte the socket is sent
+// is one the caps count.
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { HANDSHAKE_PAGE_BYTES } from 'org-protocol';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { CarrierDuplex } from './channels';
+import { SendBuffer, type SendLimits } from './send-buffer';
 import { directUrl, tailnetAddresses, type InterfaceTable } from './tailnet';
 
 /** The interfaces are read again this often (and at once after a bind error). */
 export const RESCAN_MS = 30_000;
+
+/**
+ * A device socket's send buffer (send-buffer.ts). Its stream waits at 1 MiB held: four frames' worth (a frame is at most
+ * 256 KiB of plaintext), so a healthy link never waits on one snapshot page, while a control message waits behind at
+ * most that, the channel's stream window and one message. The socket is ended past 16 MiB: room for the soft cap, the
+ * window and three of the largest answers a request gets (4 MiB each), which only a device that stopped reading
+ * reaches. And it is ended after 30 s holding bytes with no frame written, the stream window's own deadline: a frame
+ * taking that long is under 9 KiB a second, a dead link rather than a slow one.
+ */
+export const DIRECT_SEND_LIMITS: SendLimits = { soft: 1024 * 1024, ceiling: 16 * 1024 * 1024, stallMs: 30_000 };
 
 type Bucket = { burst: number; perMinute: number };
 export type HandshakeLimits = { perSource: Bucket; overall: Bucket };
@@ -73,6 +92,8 @@ export type DirectListenerOptions = {
   /** Listens `server` on `address`; answers the port it got. The suites listen on loopback in the address's place. */
   listen?(server: Server, address: string, port: number): Promise<number>;
   limits?: HandshakeLimits;
+  /** Each socket's send buffer; DIRECT_SEND_LIMITS unless a suite bounds it smaller. */
+  sendLimits?: SendLimits;
   rescanMs?: number;
   now?(): number;
 };
@@ -85,7 +106,7 @@ const BUSY = '{"error":"busy"}';
 export class DirectListener {
   readonly #options: DirectListenerOptions;
   readonly #limiter: HandshakeLimiter;
-  readonly #wss = new WebSocketServer({ noServer: true, maxPayload: HANDSHAKE_PAGE_BYTES, perMessageDeflate: false });
+  readonly #wss = new WebSocketServer({ noServer: true, maxPayload: HANDSHAKE_PAGE_BYTES, perMessageDeflate: false, autoPong: false });
   readonly #bound = new Map<string, Bound>();
   /** Addresses whose bind failed, left alone until the next periodic read. */
   readonly #failed = new Set<string>();
@@ -120,6 +141,7 @@ export class DirectListener {
     });
   }
 
+  /** Lets every address go; the next `start()` reports its bound set afresh, though it is the one reported before. */
   async stop(): Promise<void> {
     this.#stopped = true;
     if (this.#timer !== null) clearInterval(this.#timer);
@@ -127,6 +149,7 @@ export class DirectListener {
     await this.#serial(async () => {
       for (const address of [...this.#bound.keys()]) this.#unbind(address);
       for (const client of this.#wss.clients) client.terminate();
+      this.#reported = [];
     });
   }
 
@@ -214,17 +237,37 @@ export class DirectListener {
   }
 
   #connected(ws: WebSocket, source: string): void {
+    const limits = this.#options.sendLimits ?? DIRECT_SEND_LIMITS;
+    /** Why the endpoint ended the socket itself, which its close then says. */
+    let ending: string | null = null;
+    const end = (why: string, line: string) => {
+      if (ending !== null) return;
+      ending = why;
+      this.#options.log(line);
+      ws.terminate();
+    };
+    const buffer = new SendBuffer(ws, limits, (why) =>
+      end(
+        why,
+        why === 'stalled'
+          ? `endpoint: a direct connection from ${source} has held ${buffer.buffered} bytes and written nothing for ${limits.stallMs} ms; it is ended`
+          : `endpoint: a direct connection from ${source} holds ${buffer.buffered} bytes its device hasn't read, and a send would take it past its ceiling; it is ended`,
+      ),
+    );
     const io = new CarrierDuplex({
       send: (bytes) => {
-        if (ws.readyState === ws.OPEN) ws.send(bytes, { binary: true });
+        if (ws.readyState === ws.OPEN) buffer.send(bytes, { binary: true });
       },
-      close: (reason) => ws.close(1000, reason.slice(0, 64)),
+      // After what the socket holds, the channel's sealed close the last of it.
+      close: (reason) => buffer.close(1000, reason.slice(0, 64)),
+      writable: (signal) => buffer.writable(signal),
+      buffered: () => buffer.buffered,
     });
     ws.on('message', (data: RawData, isBinary: boolean) => {
       if (!isBinary) return io.close('malformed');
       io.deliver(bytesOf(data));
     });
-    ws.on('close', (_code: number, reason: Buffer) => io.end(reason.toString() || 'closed'));
+    ws.on('close', (_code: number, reason: Buffer) => io.end(ending ?? (reason.toString() || 'closed')));
     ws.on('error', () => ws.terminate());
     this.#options.connection(io, source);
   }

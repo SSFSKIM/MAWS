@@ -9,6 +9,7 @@ import { createSessionsStore } from '../stores/sessions';
 import { hasLiveGatewaySession, RELAY_BANNER_ID, RELAY_POLL_MS, startRelayMonitor } from './relay-monitor';
 import { createGatewayStore } from './store';
 import { REL } from '../test-support/relative-time';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 
 const URL = 'http://127.0.0.1:8641';
 const health = (ok: boolean, at: number): RelayHealth => ({ url: URL, ok, status: ok ? 200 : null, latencyMs: ok ? 2 : null, checkedAt: new Date(at).toISOString(), error: ok ? null : 'connect ECONNREFUSED 127.0.0.1:8641' });
@@ -24,7 +25,7 @@ function harness(answers: boolean[] = []) {
   const notices = createNoticesStore();
   const banner = vi.spyOn(notices.getState(), 'banner');
   const run = vi.fn();
-  const live = (id: string, s: EngineSessionStatus = gatewayStatus(id)) => sessions.getState().applyStatus({ appSessionId: id as AppSessionId, status: s });
+  const live = (id: string, s: EngineSessionStatus = gatewayStatus(id)) => sessions.getState().applyStatus({ appSessionId: id as AppSessionId, status: s }, TEST_MACHINE);
   const stop = startRelayMonitor({ gateway, sessions, notices, runAction: run });
   const banners = () => notices.getState().notices.filter((n) => n.kind === 'banner');
   const toasts = () => notices.getState().notices.filter((n) => n.kind === 'toast');
@@ -155,14 +156,14 @@ describe('relay monitor posts one banner per outage', () => {
 describe('hasLiveGatewaySession', () => {
   it('holds for a gateway status while starting, initializing or ready, and for nothing else', () => {
     const sessions = createSessionsStore();
-    const put = (s: EngineSessionStatus) => sessions.getState().applyStatus({ appSessionId: s.appSessionId, status: s });
+    const put = (s: EngineSessionStatus) => sessions.getState().applyStatus({ appSessionId: s.appSessionId, status: s }, TEST_MACHINE);
     expect(hasLiveGatewaySession(sessions.getState())).toBe(false);
     for (const process of ['exiting', 'exited'] as const) put(gatewayStatus(`g-${process}`, process));
     put(directStatus('d'));
     expect(hasLiveGatewaySession(sessions.getState())).toBe(false);
     for (const process of ['starting', 'initializing', 'ready'] as const) {
       const one = createSessionsStore();
-      one.getState().applyStatus({ appSessionId: 'g' as AppSessionId, status: gatewayStatus('g', process) });
+      one.getState().applyStatus({ appSessionId: 'g' as AppSessionId, status: gatewayStatus('g', process) }, TEST_MACHINE);
       expect(hasLiveGatewaySession(one.getState()), process).toBe(true);
     }
   });

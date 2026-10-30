@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { SETTINGS_DEFAULTS_V19 } from '@shared/settings/defaults';
+import { clientSettingsDefaults, machineSettingsDefaults, SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { ConfiguredDeliverySources } from './configured-delivery';
 import type { SourceFiles } from './source-entry';
 import { deferred } from './direct-pool.fixture';
@@ -12,10 +12,12 @@ function scene(captureEnv: () => Promise<Record<string, string>> = async () => (
     exists: async (path) => disk.has(path),
     executable: async () => { throw new Error('cold delivery must not resolve executables'); },
   };
-  const app = (servers = [{ name: 'notion', type: 'http', url: URL }]) => disk.set('/app/settings.json', JSON.stringify({ ...SETTINGS_DEFAULTS_V19, engine: { ...SETTINGS_DEFAULTS_V19.engine, mcpServers: servers } }));
+  // P5 O3-A: MAWS's own servers in machine-settings.json; `unifiedApp`, a profile no split build has started
+  const app = (servers = [{ name: 'notion', type: 'http', url: URL }]) => disk.set('/app/machine-settings.json', JSON.stringify({ ...machineSettingsDefaults(), engine: { ...machineSettingsDefaults().engine, mcpServers: servers } }));
+  const unifiedApp = (servers = [{ name: 'notion', type: 'http', url: URL }]) => disk.set('/app/settings.json', JSON.stringify({ ...SETTINGS_DEFAULTS_V21, version: 20, engine: { ...SETTINGS_DEFAULTS_V21.engine, mcpServers: servers } }));
   const user = (mcpServers: Record<string, unknown>) => disk.set('/home/.claude.json', JSON.stringify({ mcpServers }));
   const sources = new ConfiguredDeliverySources({ userData: '/app', captureEnv, files });
-  return { disk, files, app, user, sources };
+  return { disk, files, app, unifiedApp, user, sources };
 }
 
 describe('cold owner delivery sources', () => {
@@ -141,7 +143,7 @@ describe('cold owner delivery sources', () => {
     s.disk.set('/home/.claude/.config.json', '{}');
     expect((await s.sources.candidates()).map((c) => c.server)).toEqual(['notion']);
     s.disk.delete('/home/.claude/.config.json');
-    s.disk.set('/app/settings.json', '{"engine":{"mcpServers":[{"name":"notion","type":"http","url":"https://mcp.notion.com/mcp"}]}}');
+    s.disk.set('/app/machine-settings.json', '{"engine":{"mcpServers":[{"name":"notion","type":"http","url":"https://mcp.notion.com/mcp"}]}}');
     expect((await s.sources.candidates()).map((c) => c.server)).toEqual(['personal']);
   });
 
@@ -171,5 +173,41 @@ describe('cold owner delivery sources', () => {
     s.sources.clear();
     expect(read.ok && read.stillValid()).toBe(false);
     expect(await s.sources.readEntryForWrite(first.source)).toEqual({ ok: false, why: 'changed' });
+  });
+
+  // P5 O3-A (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §3; O3-A acceptance 4): the bytes move to
+  // machine-settings.json, the identity keeps naming settings.json, so a grant saved before the split is adopted after it
+  it('reads a unified settings.json while the machine file is absent, and names settings.json in the identity either way', async () => {
+    const before = scene();
+    before.unifiedApp();
+    const [candidate] = await before.sources.candidates();
+    const saved = await before.sources.resolveSource(candidate!.cwd, candidate!.server);
+    if (!saved.ok) throw new Error('no source');
+    // the split, and a fresh engine host after it (O2's update rule replaces an idle host)
+    const after = scene();
+    after.app();
+    after.disk.set('/app/settings.json', JSON.stringify(clientSettingsDefaults()));
+    const [split] = await after.sources.candidates();
+    const adopted = await after.sources.resolveSource(split!.cwd, split!.server);
+    if (!adopted.ok) throw new Error('no source');
+    // what main's OAuth custody keys a grant on (oauthIdentityOf: url, server, scope, path, entryPath), as a sealed record
+    // saved before the upgrade names it (src/main/connectors/oauth-store.test.ts builds one)
+    const identity = ({ source }: { source: typeof saved.source }) => ({ requestUrl: source.url, server: source.server, scope: source.scope, configPath: source.path, entryPath: source.entryPath });
+    expect(identity(saved)).toEqual({ requestUrl: URL, server: 'notion', scope: 'app', configPath: '/app/settings.json', entryPath: ['engine', 'mcpServers', 'name=notion'] });
+    expect(identity(adopted)).toEqual(identity(saved));
+  });
+
+  it('lists no app server from a client settings.json with no machine file beside it, and keeps the user scope', async () => {
+    const s = scene();
+    s.disk.set('/app/settings.json', JSON.stringify(clientSettingsDefaults()));
+    s.user({ personal: { type: 'http', url: URL } });
+    expect((await s.sources.candidates()).map((c) => c.server)).toEqual(['personal']);
+  });
+
+  it('takes the machine file over a unified settings.json beside it (a split interrupted before the client file)', async () => {
+    const s = scene();
+    s.unifiedApp([{ name: 'stale', type: 'http', url: URL }]);
+    s.app([{ name: 'notion', type: 'http', url: URL }]);
+    expect((await s.sources.candidates()).map((c) => c.server)).toEqual(['notion']);
   });
 });

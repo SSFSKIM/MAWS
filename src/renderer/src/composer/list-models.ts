@@ -8,6 +8,7 @@ import { useEffect, useRef } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import type { MachineRef } from '@shared/machine/ref';
 import type { ModelCatalogueEntry } from '@shared/sessions/models';
 import { useCommand } from '../ipc/query';
 import { rememberListedModels, type ListedModel } from '../stores/composer';
@@ -37,8 +38,8 @@ export function routeOf(status: EngineSessionStatus | null, record: SessionRecor
 // session's process becomes ready (a relay's `claude/*` aliases arrive with the first routed launch): on the change to
 // ready only, not at every mount of an already-ready session's composer. With the route, the session's directory: a
 // launch whose settings there set a model environment of its own has its own catalogue (debt wave 5).
-export function useModelCatalogue(route: Route | null, ready: boolean, cwd: string | null = null): readonly ModelCatalogueEntry[] | null {
-  const read = useCommand('engine.models', route === null ? { refresh: false } : cwd === null ? { refresh: false, gateway: route } : { refresh: false, gateway: route, cwd }, { staleTime: 60_000 });
+export function useModelCatalogue(machine: MachineRef, route: Route | null, ready: boolean, cwd: string | null = null): readonly ModelCatalogueEntry[] | null {
+  const read = useCommand('engine.models', route === null ? { refresh: false } : cwd === null ? { refresh: false, gateway: route } : { refresh: false, gateway: route, cwd }, { staleTime: 60_000 }, { machine });
   const client = useQueryClient();
   const wasReady = useRef(ready);
   useEffect(() => {

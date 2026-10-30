@@ -23,6 +23,7 @@
 // under docs/doperpowers/evidence/p1-e2/ (`e2-<surface>-<theme>.png`).
 // Runs under `pnpm e2e:deliverables` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch
 // passes MAWS_HARNESS=0, so the window is the product app.
+import { addressed } from './support/address';
 import { surface, surfaceRow, mainTabs as shellMainTabs } from './support/shell';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -38,7 +39,7 @@ import { invoke, value } from './support/c7-replay';
 import { FIRST_CREATED_REVISION } from './support/design-systems'; // Decision Log 67: fresh artifacts follow the seeded defaults.
 import {
   allowNext, asPublishReplay, closeScene, frameAt, headerAction, headerActions, idle, importSeeded, launchScene, listOf, mcpCalls, mcpResultOf, ofKind, openArtifacts, PASS3, pageUrlOf,
-  recordedCwd, replay, rowOf, scene, scratchProject, seamLines, seedArtifact, seedFile, shoot, show, unfoldWork, viewerOf, type Scene,
+  recordedCwd, replay, rowOf, scene, scratchProject, seamLines, seedArtifact, seedFile, shoot, show, unfoldWork, viewerOf, pointInFrame, type Scene,
 } from './support/maws-tools';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu'; // P3-G
@@ -246,19 +247,9 @@ test('the bridge script picks an element of an artifact in a sandboxed frame and
       element.contentWindow!.postMessage({ type: 'maws:pick', on: true }, '*');
     });
     const posted = () => maws.page.evaluate(() => (window as unknown as { __e2Posted: unknown[] }).__e2Posted);
-    // The overlay is shown by the pointer, moved again (a pixel back and forth) until the overlay is up, as the owner
-    // sees the highlight before they click. The pick-on message is a task in the frame that a move can overtake (L64);
-    // and Chromium routes input into a frame of another process only once the window's compositor has placed it, so in
-    // a run's first moments after the frame loaded an input event can still go to the app's document, where it reaches
-    // the iframe element and nothing in the frame (a click sent then was lost, with the overlay a move dispatched inside
-    // the frame had already put up). An overlay a real move placed is both settled, so the click below picks.
-    let nudge = 0;
-    await expect
-      .poll(async () => {
-        await maws.page.mouse.move(100 + (nudge++ % 2), 100);
-        return frame.locator('[data-maws-pick-overlay]').count();
-      })
-      .toBe(1);
+    // The overlay is shown by the pointer, moved until the overlay is up (`pointInFrame`): a click sent before input
+    // reached the frame was lost, with the overlay a move dispatched inside the frame had already put up.
+    await pointInFrame(maws.page, frame, 100, 100);
     await maws.page.mouse.click(100, 100);
     await expect.poll(posted).toEqual([
       { type: 'maws:picked', selector: '#hero', label: 'h1#hero', text: 'Sales overview', rect: { x: 0, y: 0, width: FRAME.width, height: 200 } },
@@ -987,7 +978,7 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     await expect(comment).toHaveAttribute('aria-pressed', 'false');
     await expect(viewer).toHaveAttribute('data-artifact-viewer', record.id);
     await expect(artifactsSurface).toBeVisible();
-    await expect(s.pane.locator(`[data-composer="${id}"]`)).toBeVisible();
+    await expect(s.pane.locator(`[data-composer="${await addressed(s.page, id)}"]`)).toBeVisible();
 
     // with the console popover open over a picking viewer, one Escape closes the popover alone
     await comment.click();
@@ -1001,8 +992,7 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
 
     // the heading under the pointer is highlighted in the page; a click picks it and opens the card beside it
     const box = (await viewer.locator('[data-artifact-frame="html"]').boundingBox())!;
-    await s.page.mouse.move(box.x + 60, box.y + 30);
-    await expect(frame.locator('[data-maws-pick-overlay]')).toHaveCount(1);
+    await pointInFrame(s.page, frame, box.x + 60, box.y + 30);
     await shoot(s, 'comment-picking', () => s.page.mouse.move(box.x + 61, box.y + 31));
     const mainTabs = shellMainTabs(s.page).getByRole('tab');
     const mainTabsBefore = await mainTabs.count();
@@ -1054,6 +1044,8 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     await s.page.locator('[data-region="main"] [data-editor-header]').getByRole('button', { name: 'Comment', exact: true }).click();
     await expect(tabViewer.locator('[data-picking]')).toBeVisible();
     const tabFrame = (await tabViewer.locator('[data-artifact-frame="html"]').boundingBox())!;
+    // the frame has just loaded in the tab: the click follows a move it heard (runs 40609072336 and 40760525466 lost it)
+    await pointInFrame(s.page, tabViewer.locator('[data-artifact-frame="html"]').contentFrame(), tabFrame.x + 60, tabFrame.y + 30);
     await s.page.mouse.click(tabFrame.x + 60, tabFrame.y + 30);
     const tabCard = tabViewer.locator('[data-comment-card]');
     await expect(tabCard).toHaveAttribute('data-anchor-locator', '#hero');
@@ -1072,11 +1064,13 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     await expect(viewer).toHaveCount(0);
     await rowOf(listOf(s), notes).click();
     await expect(viewer).toHaveAttribute('data-artifact-viewer', notes.id);
-    const foot = (await frameAt(s.page, await pageUrlOf(s.page, notes.id))).locator('#foot');
+    const notesFrame = await frameAt(s.page, await pageUrlOf(s.page, notes.id));
+    const foot = notesFrame.locator('#foot');
     await expect(foot).toHaveText('Prepared by the analytics team');
     await comment.click();
     await expect(hint).toBeVisible();
     const footBox = (await foot.boundingBox())!;
+    await pointInFrame(s.page, notesFrame, footBox.x + 60, footBox.y + footBox.height / 2);
     await s.page.mouse.click(footBox.x + 60, footBox.y + footBox.height / 2);
     const above = viewer.locator('[data-comment-card]');
     await expect(above).toHaveAttribute('data-anchor-locator', '#foot');

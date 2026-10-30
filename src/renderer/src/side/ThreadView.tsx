@@ -33,6 +33,7 @@ import { useEffect } from 'react';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { tabId } from '@shared/ipc/schema/layout';
+import { machineFor } from '../ipc/machine';
 import { SessionPane } from '../session/SessionPane';
 import { QUIET, SECONDARY } from '../sessions/ui';
 import { useLayout } from '../stores/layout';
@@ -134,7 +135,7 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
             <button
               type="button"
               title={anchor?.locator}
-              onClick={() => useLayout.getState().openTab({ kind: 'file', path, line: anchor?.line ?? null, appSessionId: parent })}
+              onClick={() => useLayout.getState().openTab({ kind: 'file', path, line: anchor?.line ?? null, appSessionId: parent, machine: machineFor(parent) })}
               className="max-w-full truncate rounded-sm font-mono text-ui-sm text-fg outline-accent hover:underline focus-visible:outline-2"
               aria-label={COPY.openFile(label)}
             >

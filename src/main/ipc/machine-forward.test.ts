@@ -3,6 +3,7 @@
 // by main's real host supervisor over the detached transport). Both bindings answer alike, and the remote handler sees
 // the invoking page's ClientRef, prefixed by its connection, ending when the page does or when the link closes.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2: the router's local machine
 import * as z from 'zod';
 import { fakeProfile, FakeProcesses, FakeSupervisor, type FakeProfile } from '../../../test/support/fake-supervisor';
 import { fakePage, type FakePage } from '../../../test/support/fake-page';
@@ -42,6 +43,8 @@ const PROBE = {
   },
   events: {},
   hostEvents: [],
+  ptyHostEvents: [],
+  machineEvents: [],
   mainOnly: new Set<string>(),
 } as const satisfies WireRegistry;
 
@@ -110,7 +113,7 @@ async function bind(kind: MachineBinding['kind']): Promise<Bound> {
   electron.handlers.clear();
   const holds = new Map<string, Set<string>>();
   if (kind === 'embedded') {
-    const router = createRouter({ appUrl: APP_URL, registry: PROBE, machine: { kind } });
+    const router = createRouter({ appUrl: APP_URL, local: 'LocalMachineRef0000000' as MachineRef, registry: PROBE, machine: { kind } });
     registerProbe(router.registerMachine, holds);
     router.install();
     return { holds, fake: null, close: async () => {} };
@@ -136,7 +139,7 @@ async function bind(kind: MachineBinding['kind']): Promise<Bound> {
   });
   await supervisor.start();
   expect(supervisor.snapshot('machine').state).toBe('ready');
-  const router = createRouter({ appUrl: APP_URL, registry: PROBE, dispatchToHost: supervisor.dispatch, machine: { kind } });
+  const router = createRouter({ appUrl: APP_URL, local: 'LocalMachineRef0000000' as MachineRef, registry: PROBE, dispatchToHost: supervisor.dispatch, machine: { kind } });
   router.install();
   return {
     holds,
@@ -225,6 +228,8 @@ describe('the engine host’s envelope (P5 O1 M5)', () => {
     commands: { 'probe.who': { owner: 'engine-host', input: z.undefined(), output: z.string() } },
     events: {},
     hostEvents: [],
+    ptyHostEvents: [],
+    machineEvents: [],
     mainOnly: new Set<string>(),
   } as const satisfies WireRegistry;
 

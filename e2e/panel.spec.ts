@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { expect, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import type { PanelChildMetrics, PanelHarnessApi, PanelHarnessTab } from '../src/renderer/src/harness/panel/api';
 import { PANEL_CHILD_TAIL } from '../test/support/panel-child-tail';
+import { addressed } from './support/address';
 import { withNativeClipboard } from './support/clipboard';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
 import { latencyWait } from './support/latency';
@@ -39,11 +40,11 @@ const ptys = (page: Page) =>
     return (result.ok ? result.value.ptys : []) as unknown as Pty[];
   });
 
-const panelA = (page: Page) =>
-  page.evaluate(async () => {
-    const result = await window.maws.invoke('layout.get', { key: 'panel.A' });
+const panelA = async (page: Page) =>
+  page.evaluate(async (key) => {
+    const result = await window.maws.invoke('layout.get', { key: key as 'regions' });
     return result.ok ? (result.value.value as { tabs: { id: string }[] } | null) : null;
-  });
+  }, `panel.${await addressed(page, 'A')}`);
 
 // C8a's ruling on the product's pty adoption (2026-09-29): after a renderer reload the restored Terminal tab reattaches
 // to the shell that kept running in the PTY host, and no second shell is started under its label.
@@ -178,7 +179,7 @@ class PanelPage {
       return result.ok ? (result.value.value as never) : null;
     }, key);
   }
-  panelOf = (id: 'A' | 'B') => this.layout<PanelSession>(`panel.${id}`);
+  panelOf = async (id: 'A' | 'B') => this.layout<PanelSession>(`panel.${await addressed(this.page, id)}`);
   // The session the relaunch will show: the focused pane's active tab in layout.json's main.tabs (W12: in the strip's
   // tab set, `current`).
   async shownOnDisk(): Promise<string | null> {
@@ -215,7 +216,7 @@ test.describe('the #panel harness: persistence and pins', () => {
 
   test('a pinned tab shows first for every session and unpins into the session’s list', async ({ maws }) => {
     const panel = await PanelPage.open(maws);
-    expect(await panel.call('session')).toBe('A');
+    expect(await panel.call('session')).toBe(await addressed(panel.page, 'A'));
     // B's own tab, opened before the pin exists, so the pin comes first in B's strip only by the pin rule.
     const own = await panel.call('addTool', 'harness-stub', { appSessionId: 'B', activate: false });
     const stub = await panel.call('addTool', 'harness-stub');
@@ -257,14 +258,14 @@ test.describe('the #panel harness: persistence and pins', () => {
     await panel.call('switchSession', 'B');
     const before = await panel.tabs();
     const quiet = await panel.call('addTool', 'harness-stub', { appSessionId: 'A', activate: false });
-    expect(await panel.call('session'), 'nothing switched').toBe('B');
+    expect(await panel.call('session'), 'nothing switched').toBe(await addressed(panel.page, 'B'));
     expect(await panel.tabs(), 'B’s strip is unchanged').toEqual(before);
     await panel.call('switchSession', 'A');
     expect(await panel.tabs()).toEqual([expect.objectContaining({ id: quiet, active: false })]);
 
     await panel.call('switchSession', 'B');
     const loud = await panel.call('addTool', 'harness-stub', { appSessionId: 'A' });
-    expect(await panel.call('session'), 'the main area switched to A').toBe('A');
+    expect(await panel.call('session'), 'the main area switched to A').toBe(await addressed(panel.page, 'A'));
     expect(await panel.active()).toBe(loud);
     await expect(panel.stubLine).toContainText(`${loud} · A · unpinned · visible`);
     await expect.poll(() => panel.panelOf('A')).toEqual({
@@ -282,12 +283,12 @@ test.describe('the #panel harness: persistence and pins', () => {
       const info = await panel.call('addTool', 'harness-single'); // in A, shown
       await panel.call('switchSession', 'B'); // so B is what the relaunch shows
       await expect.poll(() => panel.panelOf('A')).toEqual({ tabs: [{ id: info, toolId: 'harness-single', pinned: false }], activeTabId: info });
-      await expect.poll(() => panel.shownOnDisk()).toBe('session:B');
+      await expect.poll(() => panel.shownOnDisk()).toBe(`session:${await addressed(panel.page, 'B')}`);
       panel.expectQuietConsole();
 
       for (const activate of [false, undefined]) {
         panel = await launch();
-        expect(await panel.call('session')).toBe('B');
+        expect(await panel.call('session')).toBe(await addressed(panel.page, 'B'));
         const strip = await panel.tabs();
         expect(await panel.stub('harness-single', 'instances'), 'A was never shown: its tab has no instance').toEqual([]);
         const opts = activate === false ? { appSessionId: 'A' as const, activate } : { appSessionId: 'A' as const };
@@ -295,11 +296,11 @@ test.describe('the #panel harness: persistence and pins', () => {
         expect(await panel.stub('harness-single', 'instances')).toEqual([info]);
         expect(await panel.stub('harness-single', 'opens')).toBe(1);
         if (activate === false) {
-          expect(await panel.call('session')).toBe('B');
+          expect(await panel.call('session')).toBe(await addressed(panel.page, 'B'));
           expect(await panel.tabs(), 'B’s strip is unchanged').toEqual(strip);
           expect((await panel.panelOf('A'))?.tabs.filter((tab) => tab.toolId === 'harness-single')).toHaveLength(1);
         } else {
-          expect(await panel.call('session'), 'the main area switched to A').toBe('A');
+          expect(await panel.call('session'), 'the main area switched to A').toBe(await addressed(panel.page, 'A'));
           expect(await panel.active()).toBe(info);
           await expect(panel.stubLine).toContainText(`${info} · A · unpinned · visible`);
           expect(await panel.stub('harness-single', 'instances'), 'showing A created no second instance').toEqual([info]);
@@ -390,11 +391,11 @@ test.describe('the #panel harness: persistence and pins', () => {
       // layout.json holds the log refs, so the relaunch has restored ones to drop.
       await expect.poll(async () => (await panel.panelOf('A'))?.tabs.map((tab) => tab.id)).toEqual([info, ...logs]);
       await expect.poll(() => panel.layout('panel.pinned')).toEqual([{ id: pin, toolId: 'harness-stub', pinned: true }]);
-      await expect.poll(() => panel.shownOnDisk()).toBe('session:A');
+      await expect.poll(() => panel.shownOnDisk()).toBe(`session:${await addressed(panel.page, 'A')}`);
       panel.expectQuietConsole();
 
       panel = await launch();
-      expect(await panel.call('session')).toBe('A');
+      expect(await panel.call('session')).toBe(await addressed(panel.page, 'A'));
       expect(await panel.ids(), 'the pin first, A’s Session info back, no log tab').toEqual([pin, info]);
       await expect.poll(async () => (await panel.panelOf('A'))?.tabs.map((tab) => tab.id), 'no log ref left in layout.json').toEqual([info]);
       expect(await panel.layout('panel.pinned')).toEqual([{ id: pin, toolId: 'harness-stub', pinned: true }]);
@@ -403,7 +404,7 @@ test.describe('the #panel harness: persistence and pins', () => {
         return result.ok ? result.value.keys : [];
       });
       test.info().annotations.push({ type: 'layout.json keys after the relaunch', description: [...keys].sort().join(', ') });
-      expect(keys).toEqual(expect.arrayContaining(['regions', 'main.tabs', 'panel.pinned', 'panel.A', 'window.main']));
+      expect(keys).toEqual(expect.arrayContaining(['regions', 'main.tabs', 'panel.pinned', `panel.${await addressed(panel.page, 'A')}`, 'window.main']));
       await panel.call('switchSession', 'B');
       expect((await panel.ids())[0], 'the pin is first in B too, under the same id').toBe(pin);
       await panel.call('switchSession', 'A');
@@ -493,7 +494,7 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
   test('Session info renders its six sections for the shown session, and asks for a session when none is shown', async ({ maws }) => {
     const panel = await PanelPage.open(maws);
     const info = await panel.call('addTool', 'session-info', { pin: true });
-    const body = panel.region.locator('[data-session-info="A"]');
+    const body = panel.region.locator(`[data-session-info="${await addressed(panel.page, 'A')}"]`);
     for (const title of ['Engine', 'Model', 'Gateway', 'Permissions', 'Context, usage, cost', 'Hooks and MCP']) await expect(body.getByRole('region', { name: title })).toBeVisible();
     const route = body.getByRole('term').filter({ hasText: /^Route$/ }).locator('xpath=following-sibling::dd[1]');
     // W2 (C3): the Direct⇄gateway switch is the Route row's action, its button text part of the row's.
@@ -644,7 +645,7 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
           .poll(async () => Object.values((await panel.layout<{ sets: Record<string, { panes: { tabs: Record<string, unknown>[] }[] }> }>('main.tabs'))?.sets ?? {}).flatMap((set) => set.panes.flatMap((pane) => pane.tabs)), {
             message: 'a file row opens a file tab for A through C5’s openTab',
           })
-          .toContainEqual(expect.objectContaining({ kind: 'file', path: EDIT_SOURCES[0], appSessionId: 'A' }));
+          .toContainEqual(expect.objectContaining({ kind: 'file', path: EDIT_SOURCES[0], appSessionId: await addressed(panel.page, 'A') }));
       });
       panel.expectQuietConsole();
     });
@@ -797,11 +798,11 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
       // C8b (a C8a test amended by C8b): the page registers every P0 tool now, so the placeholder is a tool outside the
       // P0 table (§16's topology view), which the host names as not available.
       await page.waitForFunction(() => (window as unknown as { maws?: unknown }).maws !== undefined);
-      await page.evaluate(async () => {
+      await page.evaluate(async (key) => {
         const value = { tabs: [{ id: 'topology:placeholder', toolId: 'topology', pinned: false }], activeTabId: null }; // C8b
-        const result = await window.maws.invoke('layout.set', { key: 'panel.B', value });
+        const result = await window.maws.invoke('layout.set', { key, value });
         if (!result.ok) throw new Error(result.error.message);
-      });
+      }, `panel.${await addressed(page, 'B')}`);
       await page.reload();
       const panel = await PanelPage.open(maws);
       await panel.call('setSession', 'A', { directory: repo.dir });
@@ -1044,16 +1045,29 @@ const USAGE_ID = 'app-59505fdc';
 
 async function advanceTo(app: ElectronApplication, ms: number): Promise<void> {
   await app.evaluate((_electron, ms) => {
-    const scenario = (globalThis as { __maws_scenario?: { advanceTo(ms: number): void } }).__maws_scenario;
+    const scenario = (globalThis as { __maws_scenario?: { advanceTo(ms: number): unknown } }).__maws_scenario;
     if (!scenario) throw new Error('no scenario clock');
-    scenario.advanceTo(ms);
+    return scenario.advanceTo(ms); // M5b fix round 2: on the daemon shape a relay to mawsd, awaited (D11)
   }, ms);
 }
 
-// A pointer drag of `element` from its centre by `dx`, `dy` px (pointer capture, as a person drags it).
+// A pointer drag of `element` from its centre by `dx`, `dy` px (pointer capture, as a person drags it). The press waits
+// for the element to hold still and for its centre to reach it: a card just floated settles its height once after its
+// content shows, and a hosted Mac read the corner's box before that, 29 px above where it came to rest, so the press
+// fell on the tool behind the card and the drag did nothing (instrumented hosted run 40647343005, 1 miss in 12).
 async function dragBy(page: Page, element: Locator, dx: number, dy = 0): Promise<void> {
-  const box = (await element.boundingBox())!;
-  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  const seen: { centre: [number, number] | null } = { centre: null };
+  await expect
+    .poll(async () => {
+      const box = await element.boundingBox();
+      const centre: [number, number] | null = box && [box.x + box.width / 2, box.y + box.height / 2];
+      const still = centre !== null && seen.centre !== null && centre[0] === seen.centre[0] && centre[1] === seen.centre[1];
+      seen.centre = centre;
+      if (!still) return 'moving';
+      return element.evaluate((el, [x, y]) => (el.contains(document.elementFromPoint(x, y)) ? 'reached' : `covered by ${document.elementFromPoint(x, y)?.outerHTML.slice(0, 120)}`), centre!);
+    }, { message: 'the element holds still and its centre reaches it' })
+    .toBe('reached');
+  const [x, y] = seen.centre!;
   await page.mouse.move(x, y);
   await page.mouse.down();
   await page.mouse.move(x + dx, y + dy, { steps: 8 });
@@ -1064,10 +1078,11 @@ test.describe('the floating session card (P3-G)', () => {
   test('the divider, ⌥⌘B, the Float button, Close, the pill and Dock; one composer; over a DOM tool', async () => {
     await withScenario(async (maws, panel) => {
       const { page, app } = maws;
+      const usageId = await addressed(page, USAGE_ID); // the page's composer and Session info name the session's address
       const main = page.locator('[data-region="main"]');
       const card = panel.getByRole('region', { name: 'Session card' });
       const pill = panel.getByRole('button', { name: 'Show session card' });
-      const composers = page.locator(`section[data-composer="${USAGE_ID}"]`);
+      const composers = page.locator(`section[data-composer="${usageId}"]`);
       const divider = panel.getByRole('separator', { name: 'Resize right panel' });
       const mainWidth = () => main.evaluate((el) => el.getBoundingClientRect().width);
 
@@ -1094,7 +1109,7 @@ test.describe('the floating session card (P3-G)', () => {
 
       await test.step('acceptance 5: the card is the session’s one composer, and it has the keyboard', async () => {
         await expect(composers).toHaveCount(1);
-        await expect(card.locator(`section[data-composer="${USAGE_ID}"]`)).toHaveCount(1);
+        await expect(card.locator(`section[data-composer="${usageId}"]`)).toHaveCount(1);
         await expect(card.getByRole('textbox', { name: 'Message' })).toBeFocused();
       });
 
@@ -1135,7 +1150,7 @@ test.describe('the floating session card (P3-G)', () => {
       await test.step('acceptance 7: over a DOM tool the card floats 16 px from the panel’s right and bottom edges', async () => {
         await openSurface(page, 'Session info');
         await closeSurface(page, 'Files'); // Keep one tool for this floating-card contract, not the separate stacking case.
-        await expect(panel.locator(`[data-session-info="${USAGE_ID}"]`)).toBeVisible();
+        await expect(panel.locator(`[data-session-info="${usageId}"]`)).toBeVisible();
         await expect(card).toBeVisible();
         // P4-B3 (parent Decision Log 15.7): the card sits at the panel body's bottom right (it sat at the bottom left)
         const near = async () => {
@@ -1270,7 +1285,7 @@ const firstRowInView = (scroller: Locator) =>
   });
 const atEnd = (scroller: Locator) => scroller.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight < 2);
 
-// The most composers of `id` the page held at once since this call, sampled after every DOM change.
+// The most composers of `id` (the session's address) the page held at once since this call, sampled after every DOM change.
 async function watchComposers(page: Page, id: string): Promise<() => Promise<number>> {
   await page.evaluate((id) => {
     const w = window as unknown as { __b3Composers: number };
@@ -1287,6 +1302,7 @@ test.describe('the main split’s float (P4-B3)', () => {
     test.setTimeout(120_000);
     await withLongSession(async (s, id) => {
       const { page } = s;
+      const address = await addressed(page, id); // the page's composers name the session's address
       const app = s.maws.app;
       const main = page.locator('[data-region="main"]');
       const area = page.locator('[data-main-area]');
@@ -1294,7 +1310,7 @@ test.describe('the main split’s float (P4-B3)', () => {
       const card = main.getByRole('region', { name: 'Session card' });
       const outline = main.locator('[data-split-card-outline]'); // LC-3: the card's place while the drag is armed
       const pill = main.getByRole('button', { name: 'Show session card' });
-      const composers = page.locator(`section[data-composer="${id}"]`);
+      const composers = page.locator(`section[data-composer="${address}"]`);
       const left = page.locator('[data-pane="0"]');
       const right = page.locator('[data-pane="1"]');
       // the left column's width, as the main area's grid lays it out (a collapsed pane's body keeps its width, hidden)
@@ -1310,7 +1326,7 @@ test.describe('the main split’s float (P4-B3)', () => {
       await menu(app, 'diagnostics.open');
       await menu(app, 'pane.split');
       await expect(mainTabs(page).getByRole('tablist', { name: 'Right pane tabs' }).getByRole('tab', { name: /^Diagnostics/ })).toBeVisible();
-      await expect(left.locator(`section[data-composer="${id}"]`)).toBeVisible();
+      await expect(left.locator(`section[data-composer="${address}"]`)).toBeVisible();
       const paneScroller = left.locator('[data-transcript-scroller]');
       await expect(paneScroller.locator('[data-row-id]').first()).toBeVisible();
 
@@ -1323,7 +1339,7 @@ test.describe('the main split’s float (P4-B3)', () => {
       await page.mouse.wheel(0, -2500);
       await expect(left.getByRole('button', { name: 'Jump to latest' })).toBeVisible();
       await expect.poll(() => atEnd(paneScroller)).toBe(false);
-      const maxComposers = await watchComposers(page, id);
+      const maxComposers = await watchComposers(page, address);
 
       const region = (await area.boundingBox())!;
       const r0 = await valueNow();
@@ -1424,7 +1440,7 @@ test.describe('the main split’s float (P4-B3)', () => {
         await menu(app, 'panel.float');
         await expect(card).toHaveCount(0);
         await expect.poll(valueNow).toBe(r0);
-        await expect(left.locator(`section[data-composer="${id}"]`)).toBeVisible();
+        await expect(left.locator(`section[data-composer="${address}"]`)).toBeVisible();
         await expect.poll(() => atEnd(paneScroller), 'docked at the end').toBe(true);
         const panelCard = s.panel.getByRole('region', { name: 'Session card' });
         await expect(panelCard).toHaveCount(0);
