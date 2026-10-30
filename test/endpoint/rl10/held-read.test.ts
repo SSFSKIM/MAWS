@@ -11,6 +11,11 @@ import { generateSigningKey, keyId, NO_CERTIFICATES, signEvent, signRecord, SIGN
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEndpoint, type Endpoint } from '../../../src/endpoint';
 import { EndpointOrg } from '../../../src/endpoint/org-sync';
+import { InboundIndex } from '../../../src/endpoint/rl10/inbound-index';
+import { LegacyKey } from '../../../src/endpoint/rl10/legacy';
+import { LogRelay } from '../../../src/endpoint/rl10/log-relay';
+import { Members } from '../../../src/endpoint/rl10/members';
+import { SignatureLedger } from '../../../src/endpoint/rl10/signature-ledger';
 import { EndpointState } from '../../../src/endpoint/state/store';
 import { FakeHub, until } from '../fake-hub';
 import { fakeServices, mintRef, type FakeServices } from '../fake-services';
@@ -167,6 +172,53 @@ describe('an event held for a signer the head does not know', () => {
     expect(w.endpoint.rl10.relay.holding).toBe(4);
     expect(w.delivered('vm-three/human')).toEqual([]);
     expect(w.hub.frames('rejected')).toEqual([]);
+  });
+});
+
+describe('a hold judged while the head moved', () => {
+  it('is judged again under the new head when a retry began meanwhile, which passed it before it was held', async () => {
+    const a1 = await newDevice('a1');
+    const A = memberId();
+    const delegation = { id: memberId(), key: await generateSigningKey() };
+    const s1 = await genesis(ORG, A, a1, await generateSigningKey());
+    const s2 = await successor(s1, [a1], (s) => {
+      s.delegations.push({ id: delegation.id, pub: delegation.key.pub, prefix: 'vm-', expires: iso(Date.now() + 86_400_000), maxUses: 10, offlineRevokeS: 0, owners: [A] });
+    });
+    const key = await generateSigningKey();
+    const machine = mintRef(delegation.id);
+    const cert = await signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine, name: 'vm-two', pub: key.pub, delegation: delegation.id, use: 1, issued: iso(Date.now() - 60_000) }, delegation.key.privateKey, delegation.key.pub);
+    const vm: Certified = { name: 'vm-two', ref: machine, key, kid: await keyId(key.pub), cert };
+    const services = fakeServices();
+    closers.push(() => services.cleanup());
+    const state = EndpointState.open(services.machine.stateDir);
+    let current = { head: s2.state, certificates: NO_CERTIFICATES as Certificates, ref: mintRef(), name: 'mini' };
+    const down: Frame[] = [];
+    let asked = 0;
+    const r = new LogRelay({
+      org: () => current,
+      key: () => null,
+      members: new Members({ dispatch: () => Promise.reject(new Error('none')), listings: { report: async () => {}, gone: async () => {} }, listed: () => [], forget: () => {}, log: () => {}, now: Date.now }),
+      ledger: new SignatureLedger(() => state.subdirectory('signatures')),
+      index: new InboundIndex(() => state.subdirectory('inbound'), Date.now),
+      legacy: new LegacyKey(() => state, () => ORG),
+      hub: { openProject: () => () => {}, send: () => true },
+      toSminos: (f) => void down.push(f),
+      opened: () => {},
+      behind: () => void asked++,
+      now: Date.now,
+      log: () => {},
+    });
+    r.hello({ t: 'hello', project: P, name: 'mini', have: {} });
+    const event = await said(vm, 1);
+    // The event is verified under the head without vm-two's certificate; before the verdict, a read installs it and
+    // the retry it causes runs over a hold set that doesn't hold the event yet.
+    const arriving = r.fromHub({ t: 'events', project: P, events: [event] });
+    current = { ...current, certificates: { certs: [cert], retirements: [] } };
+    await r.retry();
+    await arriving;
+    expect(down).toEqual([{ t: 'events', project: P, events: [{ event, signer: { kind: 'machine', ref: machine, name: 'vm-two', keyId: vm.kid } }] }]);
+    expect(r.holding).toBe(0);
+    expect(asked).toBe(0);
   });
 });
 
