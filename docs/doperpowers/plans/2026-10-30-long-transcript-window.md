@@ -203,6 +203,12 @@ The renderer sees the same in both shapes.
   - 9a403c75c: a child waits out a parent the engine host still reads through before deciding its lifecycle.
   - 3eaaee924: a released follow says so, and a source still attached reads the engine host again at its session's
     next change.
+- [x] **The writer guard and the daemon-shape test** (9700ca3a4), added after the owner hit the bug on O3-D's build.
+- [x] **Second review's fixes** (reviewer-medium over the fixes and the guard; one commit each):
+  - 9bd508bc7: only a disk-form event marks how far a snapshot's window reaches (main's app events never do).
+  - 59c2c0346: a disk child records lifecycle from batches as they come, while its disk read still holds its own events.
+  - 18c907f2f: a pager refresh lets go of an older page in flight at once.
+  - 91989cbd6: an over-cap answer's error is dropped too when it would pass the cap itself.
 - [x] **M3b** (incremental `fs.sessionText` indexing) is out of this branch by ruling, dispatched separately after
   O3-D.
 
