@@ -134,8 +134,8 @@ The hold is in the engine host, so it reads the same in every shape.
 - They no longer see weeks of history replayed through them.
 
 **Daemon:**
-- mawsd relays the same batches. Once P5 O3-D moves the attention and digest consumers into mawsd's spine, they see
-  exactly that window there.
+- mawsd relays the same batches. Since P5 O3-D the attention and digest consumers run in mawsd's spine, subscribed to
+  the engine host's `session.eventBatch` through its supervisor, and they see exactly that window there.
 - The endpoint's lane B ignores disk events, as before, and now receives bounded answers.
 
 The renderer sees the same in both shapes.
@@ -143,8 +143,8 @@ The renderer sees the same in both shapes.
 ### Contracts this touches
 
 - **X2.** `session.events` input gains optional `before` and `agentId`, and its output (`EventsSnapshotSchema`) an
-  optional `earlier`. `fs.agentEvents` input gains `before`, its output `earlier`. All are additive: `WIRE_MINOR` 7,
-  and when P5 O3-D lands first, the next one past master's.
+  optional `earlier`. `fs.agentEvents` input gains `before`, its output `earlier`. All are additive: `WIRE_MINOR` 8,
+  the next past P5 O3-D's 7, which landed first.
   - An older engine host ignores the new fields and answers the whole history, as before.
   - An older renderer shows the newest window only.
 - **`complete`** keeps its meaning: the follow has read its transcript through.
@@ -165,7 +165,7 @@ The renderer sees the same in both shapes.
 ## Progress
 
 - [x] **M1** (dcae77cbf). The engine host holds the backfill and answers windows. Cursors and `before`, `limit` and
-  `agentId` on disk, quiet follows, `WIRE_MINOR` 7.
+  `agentId` on disk, quiet follows, a new `WIRE_MINOR` (8 after the merge of master at P5 O3-D, dec6647f9).
 - [x] **The unparsed skip** (6ccc2da4d). The two silent record types are never parsed: the 625 MB backfill drops from
   4.25 s to 3.36 s on its own.
 - [x] **M2** (c0ae2d7f5). The renderer shows the newest window first and pages older history in as the reader reaches
@@ -178,8 +178,17 @@ The renderer sees the same in both shapes.
   - The renderer equivalence across page edges (`transcript/source/older.test.tsx`: rewinds, a compaction, a background
     agent and main's notice straddling pages end in exactly the rows a whole load draws).
   - The transport regression over C1's runtime and a real socket with lowered caps (class 1a, facts only).
-- [x] **M3b** (incremental `fs.sessionText` indexing) is out of this branch by ruling. It goes after O3-D, which moves
-  `src/services` into mawsd.
+- [x] **One event past the hard cap** goes alone, so a page always moves the cursor back (4d83129a5).
+- [x] **Review fixes** (reviewer-high over the range; one commit each):
+  - 5da6810ca: a child's lifecycle evidence is never cut from its slice; the live path's slice is uncapped.
+  - c4bc40bd9: only the current subscription's snapshot starts the source's pager over.
+  - 8d29eaeab: held batches drop disk events from before the window the snapshot answered, which appends can move on
+    during the round trip.
+  - 9a403c75c: a child waits out a parent the engine host still reads through before deciding its lifecycle.
+  - 3eaaee924: a released follow says so, and a source still attached reads the engine host again at its session's
+    next change.
+- [x] **M3b** (incremental `fs.sessionText` indexing) is out of this branch by ruling, dispatched separately after
+  O3-D.
 
 ## Measured after (the same Mac and tools; the relay run is the daemon shape)
 
@@ -205,9 +214,9 @@ On the 625 MB transcript:
    open-session memory matters.
 2. **Jumps into history.** A jump to a row older than what is loaded (a search hit, an attention item in history) finds
    nothing until that page is in. Claude Desktop's "find" pages back until found, bounded; that is a follow-up.
-3. **Child sources out of interest.** A child source whose session is out of every client's interest is reset when
-   its follow is released, and follows again. That costs one read-through every two minutes while it stays out of
-   interest and attached.
+3. **Refresh after a release.** A source still attached when its follow was released reads the newest window again
+   at its session's next change, keeping what the reader opened. The older pages it had loaded go; the reader pages
+   them in again.
 4. **Two follows of one transcript.** A session whose live stream was dropped while a quiet follow existed gets a
    normal follow beside the quiet one until the release. Rare, bounded by the release.
 5. **First paint on the very largest transcripts.** Sub-second first paint above about 300 MB would take a tail-first
