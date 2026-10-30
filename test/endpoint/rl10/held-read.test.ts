@@ -176,7 +176,10 @@ describe('an event held for a signer the head does not know', () => {
 });
 
 describe('a hold judged while the head moved', () => {
-  it('is judged again under the new head when a retry began meanwhile, which passed it before it was held', async () => {
+  const Q = '88888888-8888-4888-8888-888888888888';
+
+  /** vm-two under delegation D, and a relay for P and Q whose head's certificates the test moves (`certify`). */
+  async function race() {
     const a1 = await newDevice('a1');
     const A = memberId();
     const delegation = { id: memberId(), key: await generateSigningKey() };
@@ -188,37 +191,82 @@ describe('a hold judged while the head moved', () => {
     const machine = mintRef(delegation.id);
     const cert = await signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine, name: 'vm-two', pub: key.pub, delegation: delegation.id, use: 1, issued: iso(Date.now() - 60_000) }, delegation.key.privateKey, delegation.key.pub);
     const vm: Certified = { name: 'vm-two', ref: machine, key, kid: await keyId(key.pub), cert };
-    const services = fakeServices();
-    closers.push(() => services.cleanup());
-    const state = EndpointState.open(services.machine.stateDir);
-    let current = { head: s2.state, certificates: NO_CERTIFICATES as Certificates, ref: mintRef(), name: 'mini' };
-    const down: Frame[] = [];
-    let asked = 0;
-    const r = new LogRelay({
-      org: () => current,
-      key: () => null,
-      members: new Members({ dispatch: () => Promise.reject(new Error('none')), listings: { report: async () => {}, gone: async () => {} }, listed: () => [], forget: () => {}, log: () => {}, now: Date.now }),
-      ledger: new SignatureLedger(() => state.subdirectory('signatures')),
-      index: new InboundIndex(() => state.subdirectory('inbound'), Date.now),
-      legacy: new LegacyKey(() => state, () => ORG),
-      hub: { openProject: () => () => {}, send: () => true },
-      toSminos: (f) => void down.push(f),
-      opened: () => {},
-      behind: () => void asked++,
-      now: Date.now,
-      log: () => {},
-    });
-    r.hello({ t: 'hello', project: P, name: 'mini', have: {} });
+    const signer = { kind: 'machine', ref: machine, name: 'vm-two', keyId: vm.kid };
+    const relay = () => {
+      const services = fakeServices();
+      closers.push(() => services.cleanup());
+      const state = EndpointState.open(services.machine.stateDir);
+      let current = { head: s2.state, certificates: NO_CERTIFICATES as Certificates, ref: mintRef(), name: 'mini' };
+      const down: Frame[] = [];
+      const counts = { asked: 0 };
+      const r = new LogRelay({
+        org: () => current,
+        key: () => null,
+        members: new Members({ dispatch: () => Promise.reject(new Error('none')), listings: { report: async () => {}, gone: async () => {} }, listed: () => [], forget: () => {}, log: () => {}, now: Date.now }),
+        ledger: new SignatureLedger(() => state.subdirectory('signatures')),
+        index: new InboundIndex(() => state.subdirectory('inbound'), Date.now),
+        legacy: new LegacyKey(() => state, () => ORG),
+        hub: { openProject: () => () => {}, send: () => true },
+        toSminos: (f) => void down.push(f),
+        opened: () => {},
+        behind: () => void counts.asked++,
+        now: Date.now,
+        log: () => {},
+      });
+      for (const project of [P, Q]) r.hello({ t: 'hello', project, name: 'mini', have: {} });
+      /** The read's certificate installed, and the retry it causes begun. */
+      const certify = () => {
+        current = { ...current, certificates: { certs: [cert], retirements: [] } };
+        return r.retry();
+      };
+      return { r, down, counts, certify };
+    };
+    return { vm, key, signer, relay };
+  }
+
+  it('is judged again under the new head when a retry began meanwhile, which passed it before it was held', async () => {
+    const { vm, signer, relay } = await race();
+    const { r, down, counts, certify } = relay();
     const event = await said(vm, 1);
     // The event is verified under the head without vm-two's certificate; before the verdict, a read installs it and
     // the retry it causes runs over a hold set that doesn't hold the event yet.
     const arriving = r.fromHub({ t: 'events', project: P, events: [event] });
-    current = { ...current, certificates: { certs: [cert], retirements: [] } };
-    await r.retry();
+    await certify();
     await arriving;
-    expect(down).toEqual([{ t: 'events', project: P, events: [{ event, signer: { kind: 'machine', ref: machine, name: 'vm-two', keyId: vm.kid } }] }]);
+    expect(down).toEqual([{ t: 'events', project: P, events: [{ event, signer }] }]);
     expect(r.holding).toBe(0);
-    expect(asked).toBe(0);
+    expect(counts.asked).toBe(0);
+  });
+
+  it('strands no event of another project whose key asked already, wherever between its verdict and its hold the retry begins', async () => {
+    const { vm, key, signer, relay } = await race();
+    const first = await said(vm, 1);
+    const draft = { ...first };
+    delete draft.sig;
+    const second = await signEvent({ org: ORG, project: Q }, draft, key.privateKey, key.pub);
+    // The retry begins `n` microtasks after Q's event arrives: across the range, once in the gap between the verdict
+    // under the old certificates and the hold (review round 2 on f4d399f47 found one such gap).
+    for (let n = 1; n <= 24; n++) {
+      const { r, down, counts, certify } = relay();
+      await r.fromHub({ t: 'events', project: P, events: [first] });
+      expect(counts.asked).toBe(1);
+      const arriving = r.fromHub({ t: 'events', project: Q, events: [second] });
+      const moving = new Promise<void>((resolve, reject) => {
+        let left = n;
+        const step = () => (--left > 0 ? queueMicrotask(step) : void certify().then(resolve, reject));
+        queueMicrotask(step);
+      });
+      await Promise.all([arriving, moving]);
+      expect({ n, down, holding: r.holding }).toEqual({
+        n,
+        down: expect.arrayContaining([
+          { t: 'events', project: P, events: [{ event: first, signer }] },
+          { t: 'events', project: Q, events: [{ event: second, signer }] },
+        ]),
+        holding: 0,
+      });
+      expect(counts.asked).toBe(1);
+    }
   });
 });
 

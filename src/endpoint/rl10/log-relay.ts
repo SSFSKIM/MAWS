@@ -149,7 +149,7 @@ export class LogRelay {
   readonly #held = new Map<string, Map<string, { event: unknown; since: number }>>();
   /** The keys that asked for a read, and when, in that order: each asks again only `HELD_READ_MS` later. */
   readonly #asked = new Map<string, number>();
-  /** The `retry`s begun (`#judge` reads it). */
+  /** The `retry`s begun (`#arrived` reads it). */
   #retries = 0;
 
   constructor(ctx: RelayContext) {
@@ -337,7 +337,14 @@ export class LogRelay {
       down = [];
     };
     for (const e of events) {
-      const judged = await this.#judge(project, e);
+      // A hold judged while a `retry` began is judged again: that retry may have passed this project before the event
+      // was held, and no later one comes unless the state moves. The check and the hold run with no await between.
+      let judged: Judged;
+      for (;;) {
+        const retries = this.#retries;
+        judged = await this.#verify(project, e);
+        if (!('hold' in judged) || retries === this.#retries) break;
+      }
       const at = position(e);
       if ('deliver' in judged) {
         down.push(judged.deliver);
@@ -391,18 +398,6 @@ export class LogRelay {
     if (this.#asked.has(kid)) return false;
     this.#asked.set(kid, now);
     return true;
-  }
-
-  /**
-   * `#verify`, and again for a hold while a `retry` began: that retry may have passed this event's project before the
-   * event was held, under a head or certificates it was judged before, and no later one comes unless the state moves.
-   */
-  async #judge(project: string, e: unknown): Promise<Judged> {
-    for (;;) {
-      const retries = this.#retries;
-      const judged = await this.#verify(project, e);
-      if (!('hold' in judged) || retries === this.#retries) return judged;
-    }
   }
 
   async #verify(project: string, e: unknown): Promise<Judged> {
