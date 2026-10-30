@@ -261,6 +261,7 @@ describe('the rewind repair on lane B’s claimed op (host.op)', () => {
   let h: SessionHarness;
   let bus: FakeBus;
   let ledger: Map<string, unknown>;
+  let bindings: Map<string, string>; // each known op's member and fingerprint, as the ledger's claim keeps them
   let refuseOps: string | null;
   let hangOps: (() => void) | null; // the process dies before the ledger answers: told as the op is forwarded
   let queryAnswer: ((opId: string) => Promise<unknown>) | null; // host.opQuery's answer, when a case sets its own
@@ -280,6 +281,8 @@ describe('the rewind repair on lane B’s claimed op (host.op)', () => {
         hangOps();
         return new Promise(() => {});
       }
+      const binding = `${input.member as string}/${input.fingerprint as string}`;
+      if (bindings.has(opId) && bindings.get(opId) !== binding) return { state: 'refused', reason: 'op-conflict' }; // another binding of a known id
       if (ledger.has(opId)) return ledger.get(opId); // a known op: what the ledger holds, nothing run
       if (refuseOps !== null) return { state: 'refused', reason: refuseOps };
       const inner = input.name as CommandName;
@@ -292,6 +295,7 @@ describe('the rewind repair on lane B’s claimed op (host.op)', () => {
       }
       const done = { state: 'done', result };
       ledger.set(opId, done);
+      bindings.set(opId, binding);
       return done;
     });
   };
@@ -299,6 +303,7 @@ describe('the rewind repair on lane B’s claimed op (host.op)', () => {
     h = await new SessionHarness().start();
     h.trustDirectory(h.work);
     ledger = new Map();
+    bindings = new Map();
     refuseOps = null;
     hangOps = null;
     queryAnswer = null;
@@ -321,9 +326,9 @@ describe('the rewind repair on lane B’s claimed op (host.op)', () => {
   };
   const rewindArgs = (id: AppSessionId) => ({ appSessionId: id, targetMessageUuid: TARGET, lastSeenMessageUuid: LAST_SEEN, files: false });
   // the endpoint's claimed op through the intercept the bus holds for it (host.op is main-only, which a client may not send)
-  const op = async (opId: string, name: string, input: unknown): Promise<Result> => {
+  const op = async (opId: string, name: string, input: unknown, binding: { opCreated?: string; fingerprint?: string } = {}): Promise<Result> => {
     try {
-      return { ok: true, value: await h.service.claimedOp({ opId, opCreated: '2026-10-30T00:00:00.000Z', member: 'member-1', device: 'phone-1', fingerprint: 'fp-1', name, input: input as never, context: { launchId: 'l', engineSessionId: 'e' } }) };
+      return { ok: true, value: await h.service.claimedOp({ opId, opCreated: '2026-10-30T00:00:00.000Z', member: 'member-1', device: 'phone-1', fingerprint: 'fp-1', ...binding, name, input: input as never, context: { launchId: 'l', engineSessionId: 'e' } }) };
     } catch (error) {
       return { ok: false, error: { code: 'thrown', message: (error as Error).message } };
     }
@@ -376,8 +381,10 @@ describe('the rewind repair on lane B’s claimed op (host.op)', () => {
 
   // Fix round 2: the ledger's query reserves nothing, so two copies of one op asked at once both hear `not-received`. Here
   // each query is answered as the ledger stood when it arrived, the first held until the second could have arrived; the
-  // second's answer is delivered only after the first copy ran and a newer local rewind B wrote its note.
-  it('two copies of one op at once: the second touches no note, so a newer local rewind’s note survives', async () => {
+  // second's answer is delivered only after the first copy ran and a newer local rewind B wrote its note. Round 3: the
+  // ledger knows an op by its id alone, so a competing binding of the id (another opCreated and fingerprint) waits the
+  // same, and its `op-conflict` touches no note.
+  for (const competing of [false, true]) it(`two ${competing ? 'competing bindings of one op id' : 'copies of one op'} at once: the second touches no note, so a newer local rewind’s note survives`, async () => {
     const id = await liveSession();
     const held: (() => void)[] = [];
     queryAnswer = (asked) => {
@@ -386,7 +393,7 @@ describe('the rewind repair on lane B’s claimed op (host.op)', () => {
     };
     const targetA = randomUUID();
     const first = op(opId(9), 'session.rewind', { ...rewindArgs(id), targetMessageUuid: targetA });
-    const second = op(opId(9), 'session.rewind', { ...rewindArgs(id), targetMessageUuid: targetA });
+    const second = op(opId(9), 'session.rewind', { ...rewindArgs(id), targetMessageUuid: targetA }, competing ? { opCreated: '2026-10-30T00:00:01.000Z', fingerprint: 'fp-2' } : {});
     await h.until(() => held.length >= 1);
     await new Promise((settle) => setTimeout(settle, 50)); // the second copy's query, had it one, has arrived
     held.shift()!();
@@ -395,7 +402,7 @@ describe('the rewind repair on lane B’s claimed op (host.op)', () => {
     queryAnswer = null;
     expect(await bus.invoke('session.rewind', rewindArgs(id))).toMatchObject({ ok: true }); // B, newer, local
     for (const answer of held.splice(0)) answer();
-    expect(await second).toMatchObject({ ok: true, value: { state: 'done' } }); // the ledger's replay
+    expect(await second).toMatchObject({ ok: true, value: competing ? { state: 'refused', reason: 'op-conflict' } : { state: 'done' } }); // the ledger's replay, or its conflict
     expect(noteOf(id)).toMatchObject({ state: 'confirmed', targetMessageUuid: TARGET });
     expect(h.host.calledWith('session.rewind')).toHaveLength(2); // A once, B once
   });

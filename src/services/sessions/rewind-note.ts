@@ -81,7 +81,8 @@ export class RewindNotes {
   // rewind was forwarded after the act was (the act's answer may come back after a later rewind's; and an act forwarded
   // while a rewind's note is still being written reaches the engine before that rewind does).
   private readonly forwarded = new Map<AppSessionId, number>();
-  // P5 O3-D M5a (D47): lane B's claimed ops being admitted, by their binding (opId, opCreated); one at a time per op
+  // P5 O3-D M5a (D47): lane B's claimed ops being admitted, by opId (the ledger's own key: another binding of a known id is
+  // its `op-conflict`); one at a time per id
   private readonly admitting = new Map<string, Promise<unknown>>();
   private closed = false;
 
@@ -113,14 +114,15 @@ export class RewindNotes {
 
   // P5 O3-D M5a (D47): lane B's claimed op (above). Its inner input is read as the command's own; one the command's schema
   // refuses goes on untouched, for the host's ledger to refuse `malformed`. The ledger's query reserves nothing, so a copy
-  // of an op (a device's retry) waits for the copy being admitted to settle and is then admitted alone: by then the ledger
-  // knows an op that reached it, and the copy touches no note.
+  // of an op (a device's retry), or another binding of its id, waits for the one being admitted under that id to settle
+  // and is then admitted alone: by then the ledger knows an op that reached it, replays it or refuses the other binding
+  // `op-conflict`, and the copy touches no note.
   async claimed(input: CommandInput<'host.op'>): Promise<Op> {
     const name = input.name;
     if (name !== 'session.rewind' && !isAct(name)) return this.sendOp(input);
     const inner = validateCommandInput(name, input.input);
     if (!inner.ok) return this.sendOp(input);
-    const key = `${input.opId}\n${input.opCreated}`;
+    const key = input.opId;
     for (let earlier = this.admitting.get(key); earlier; earlier = this.admitting.get(key)) await earlier.catch(() => {});
     const admitted = this.admit(input, name, inner.value as { appSessionId: string });
     this.admitting.set(key, admitted);
