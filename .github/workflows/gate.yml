@@ -300,7 +300,8 @@ env:
   # Non-e2e jobs admitted to the direct hosted route. Lane: hosted/no-hosted never changes these.
   # packaged (CI-opt): PR #297 records the admission evidence: 3/3 direct hosted greens on one tree, with the
   # same counts as its mini baseline, plus hosted settings/document checks after selecting overlay scrollbars.
-  # The unsigned app, daemon-packaged check and launchd sweep are the same on both routes; mirror keeps the mini.
+  # Direct runs two bare-suite shards, each building the unsigned app; shard 1 owns the small packaged checks.
+  # Every job sweeps launchd. Mirror keeps one unsharded build and all checks on the mini.
   HOSTED_MAC_JOBS: packaged
   # Never overflow these hosted-eligible groups to EC2 (Decision Log 123: an EC2-only red leaves at once).
   # Empty after the 2026-10-29 parity audit: the supplied sessions reds predate #297, shell predates 54aab1ada,
@@ -356,6 +357,7 @@ jobs:
       probes_runner: ${{ steps.plan.outputs.probes_runner }}
       packaged: ${{ steps.plan.outputs.packaged }}
       packaged_runner: ${{ steps.plan.outputs.packaged_runner }}
+      packaged_shards: ${{ steps.plan.outputs.packaged_shards }}
       evidence: ${{ steps.plan.outputs.evidence }}
       live: ${{ steps.plan.outputs.live }}
       default_beside: ${{ steps.plan.outputs.default_beside }}
@@ -575,14 +577,20 @@ jobs:
       - uses: ./.github/actions/setup
       - run: .github/scripts/gate-run.sh '^(ℹ|#) (tests|suites|pass|fail|cancelled|skipped|todo) ' pnpm test:probes
 
-  # The unsigned packaged app (Decision Log 35): one `pnpm build:app`, then its fuses and the e2e scripts that run against
-  # dist/ (the bare set, the detached supervisor, the daemon shape and voice's packaged case). Only by `Gates: packaged`;
-  # HOSTED_MAC_JOBS admits it to direct macos-26. Mirror, an unlisted job or a reserved final ref keeps the mini fallback.
+  # The unsigned packaged app (Decision Log 35), only by `Gates: packaged`: HOSTED_MAC_JOBS admits two jobs on direct
+  # macos-26, each building dist/ and checking its fuses before half the bare suite. Shard 1 alone runs the small checks
+  # (supervisor, daemon shape and voice), in their existing order. Every job sweeps launchd, even after a failed check.
+  # Mirror, an unlisted job or a reserved final ref keeps one unsharded build and all checks on the mini.
   packaged:
+    name: ${{ matrix.shard && format('packaged {0}', matrix.shard) || 'packaged' }}
     needs: plan
     if: needs.plan.outputs.packaged == 'true'
     runs-on: ${{ fromJSON(needs.plan.outputs.packaged_runner || '["self-hosted","macOS","ARM64"]') }}
     timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeouts).packaged || 40 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.packaged_shards) }}
     env:
       MAWS_E2E_QUIET: '1'
       SHELL: /bin/zsh
@@ -612,8 +620,9 @@ jobs:
       - if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         env:
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/packaged
-        run: .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' pnpm e2e:packaged
-      - if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+          SHARD: ${{ matrix.shard }}
+        run: .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' pnpm e2e:packaged ${SHARD:+--shard="$SHARD"}
+      - if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.checks }}
         env:
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/supervisor-packaged
         run: .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' pnpm e2e:supervisor:packaged
@@ -621,11 +630,11 @@ jobs:
       # the job creates, removes or rewrites anything of the account's canonical dev.maws.mawsd it could cause, its plist,
       # the default profile's sockets and lock, or that profile's mawsd/ tree; a live canonical mawsd's own logs and
       # endpoint state are left out, e2e/support/canonical-mawsd.ts)
-      - if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      - if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.checks }}
         env:
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/supervisor-daemon-packaged
         run: .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' pnpm e2e:supervisor-daemon:packaged
-      - if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      - if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.checks }}
         env:
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/voice-packaged
         run: .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' pnpm e2e:voice:packaged
@@ -637,7 +646,7 @@ jobs:
       - if: failure() || needs.plan.outputs.evidence == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: e2e-packaged
+          name: e2e-packaged${{ matrix.slug }}
           path: |
             playwright-report/
             test-results/

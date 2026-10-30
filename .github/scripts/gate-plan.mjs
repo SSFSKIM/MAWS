@@ -2,7 +2,7 @@
 // §3.6) and the runners its jobs take. The set: a manual run's `gates` input, else the pushed commit's `Gates:` trailer
 // (scripts/ci-gate.sh writes it when its caller narrows the set), else class 1a, with unit:darwin and class 1's e2e
 // groups added when the e2e lane is a macOS runner. Explicit unit:darwin runs on macOS regardless of the e2e lane, and so
-// does `packaged` (the unsigned app built once, then its checks; Decision Log 35), which is only ever explicit.
+// does `packaged` (the unsigned app built per job, then its checks; Decision Log 35), which is only ever explicit.
 // Class 1a's runner (static, unit, probes): the `class1a` input or the `Class1a:` trailer (`linux`, `macos` or `pool`),
 // else the repository variable GATE_RUNNER, else `linux`. `pool` is ci-kit's pool, each job in a container of its own
 // size (Decision Log 35; on GCE spot VMs since Decision Log 52); `pool=true` when a job runs there (ci-kit's launcher
@@ -77,8 +77,8 @@
 // exclusion is mirror-only: MAWS's own checkout can fetch its peer. HOSTED_MAC_E2E serves both routes and mirror refuses
 // a peer group, so the list cannot name one; under direct a peer group is hosted as if listed, on either lane (it takes a
 // Mac on both), `Lane: no-hosted` keeping it on the Mac. Unsigned packaged can also take the direct Mac on a macOS lane when HOSTED_MAC_JOBS admits it, except
-// on reserved final refs. Lane moves e2e groups only; packaged is unadmitted until its hosted failures are fixed and it
-// passes 3/3.
+// on reserved final refs. Hosted packaged runs two bare-suite shards, each building its app; self-hosted stays one
+// unsharded job. Lane moves e2e groups only, not packaged.
 // A fresh Mac-Backlog: trailer from ci-gate's account-wide count can overflow direct hosted e2e onto EC2 alone.
 // HOSTED_MAC_ONLY_E2E excludes parity failures. Overflow retains the hosted retry policy, uses the exclusive timeout
 // and self-hosted setup, and carries overflow: true (the job name and ci-gate tail identify it). No sample: no change.
@@ -367,7 +367,7 @@ export function planOf(env, scripts, now) {
   // unsharded job.
   const shards = class1a === 'pool' && !selection?.related ? UNIT_SHARDS : 1;
   const unitShards = shards > 1 ? Array.from({ length: shards }, (_, i) => ({ shard: `${i + 1}/${shards}`, slug: `-${i + 1}of${shards}` })) : [{ shard: '', slug: '' }];
-  // The jobs' minutes outside the e2e matrix (whose entries carry their own): packaged is always on the exclusive instance.
+  // The jobs' minutes outside the e2e matrix (whose entries carry their own); packaged's hosted bound is set below.
   const timeouts = { static: timeoutOn(runners.static, 30), unit: timeoutOn(runners.unit, 30), probes: timeoutOn(runners.probes, 30), unit_darwin: timeoutOn(unitDarwinRunner, 30) };
   const outputs = {
     static: has('static'), unit: has('unit'), unit_darwin: has('unit:darwin'), probes: has('probes'), e2e: JSON.stringify(e2e),
@@ -378,8 +378,13 @@ export function planOf(env, scripts, now) {
     e2e_hosted: JSON.stringify(e2eHosted), peer_wait: JSON.stringify(peerWait),
   };
   // No signing credentials: build:app disables identity discovery, mac.identity is null, and the helper
-  // only invokes swiftc. Its bare suite still needs admission: Lane is an e2e override, not a packaged trial.
+  // only invokes swiftc. HOSTED_MAC_JOBS admits packaged; Lane is an e2e override, not a packaged trial.
   const packagedHosted = direct && words(env.HOSTED_MAC_JOBS).includes('packaged') && lane === 'macos' && finalRef === undefined;
+  // Each hosted shard builds once. The first owns the small checks; keeping them together preserves their order
+  // and leaves the other shard bare-only. Self-hosted routes keep one build and every check on the one Mac.
+  outputs.packaged_shards = JSON.stringify(packagedHosted
+    ? [{ shard: '1/2', slug: '-1of2', checks: true }, { shard: '2/2', slug: '-2of2', checks: false }]
+    : [{ shard: '', slug: '', checks: true }]);
   if (packagedHosted) {
     outputs.packaged_runner = JSON.stringify(RUNNERS.macHosted);
     outputs.timeouts = JSON.stringify({ ...timeouts, packaged: 30 + HOSTED_MARGIN_MINUTES });
@@ -401,7 +406,7 @@ export function planOf(env, scripts, now) {
   const hostedNote =
     (keptForFinal ? ` On the reserved final ref ${finalRef}, so no group of this run is hosted: a group's final bundle is written only on the runner that ran it.` : '') +
     said(direct ? 'Hosted Mac (direct, macos-26)' : 'Hosted Mac (SSFSKIM/maws-app, each through a waiter on the pool)', e2e.filter((entry) => entry.hosted).map((entry) => `e2e:${entry.group}`)) +
-    (packagedHosted && gates.has('packaged') ? ' Hosted Mac (direct, macos-26): packaged.' : '') +
+    (packagedHosted && gates.has('packaged') ? ' Hosted Mac (direct, macos-26): packaged 1/2, packaged 2/2.' : '') +
     (keptOffHosted.length > 0 ? ` Lane: hosted, but never on a hosted Mac, so where it would be: ${named(keptOffHosted, 'e2e:')}.` : '') +
     (laneAsked === 'hosted' && !e2e.some((entry) => entry.hosted) && keptOffHosted.length === 0 && !keptForFinal ? ' Lane: hosted, but no e2e group of this run is hosted.' : '') +
     (laneAsked === 'no-hosted' ? ' Lane: no-hosted, so no group of this run is hosted.' : '');
