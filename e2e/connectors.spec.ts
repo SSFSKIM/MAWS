@@ -23,6 +23,7 @@
 //          and its server (the soak's relaunch, without its five-minute waits).
 import { createHash } from 'node:crypto';
 import { test, expect, type Locator, type TestInfo } from '@playwright/test';
+import type { AppSessionId } from '@shared/graph/ids';
 import { callMcpTool, probeMcpCall, qualifiedMcpToolName } from '../src/engine-host/mcp-call';
 import { startScratchEngine, type FixtureServer, type ScratchEngine } from './support/connector-engine';
 import { invoke, pageState, TOOL, TOOL_NAME, value, wait, WATCH_MS, withScene } from './support/connector-scene';
@@ -212,14 +213,18 @@ test('product: the owner starts a session and grants a page’s tool from the he
     expect((await scene.live(run.page)).map((s) => s.launchId)).toEqual([engine.launchId]);
     expect(scene.launches(engine.appSessionId)).toEqual({ spawns: 1, exits: 0 });
 
-    // allowed again, then an ordinary quit: the idle engine stops with the app
+    // allowed again, then the session ends and the app quits. On the embedded shape an ordinary quit stops the idle engine
+    // with the app; on the daemon shape (Q1, D12) a quit stops nothing and the session would outlive the app, so the
+    // owner stops it first, as Settings' Stop all or the session's Stop would (M5b fix round 2)
     sheet = await scene.openSheet(run.page);
     await row(sheet).getByRole('button', { name: `Allow ${TOOL_NAME} to read` }).click();
     await expect(row(sheet).locator('[data-connector-state]')).toContainText('Allowed to read');
     await scene.closeSheet(run.page);
     await expect(frame.locator('#last')).toHaveText('ok n=3 via=engine', { timeout: 20_000 });
+    const daemon = value(await invoke(run.page, 'host.status', undefined)).transport === 'daemon';
+    if (daemon) value(await invoke(run.page, 'session.stop', { appSessionId: engine.appSessionId as AppSessionId, reason: 'stop' }));
     await scene.quit(run);
-    await expect.poll(() => scene.pidAlive(engine.pid), { timeout: 30_000, message: 'the engine stopped with the app' }).toBe(false);
+    await expect.poll(() => scene.pidAlive(engine.pid), { timeout: 30_000, message: daemon ? 'the engine stopped before the quit' : 'the engine stopped with the app' }).toBe(false);
     const quitCalls = scene.toolCalls().length;
 
     // relaunched on the same profile: nothing is acquired, the grant is held, the page reads paused with Start offered
