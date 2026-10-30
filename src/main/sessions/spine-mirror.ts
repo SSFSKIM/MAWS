@@ -38,6 +38,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import { midTurnCountOf } from '@shared/engine/mid-turn';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
+import type { ClientId, ClientRef } from '@shared/ipc/client';
 import { eventPosition } from '@shared/host/stream-catchup';
 import type { CommandInput, CommandName, CommandOutput, CommandResult, ProjectRecord, SessionDigest } from '@shared/ipc/schema';
 import type { StreamCursor } from '@shared/ipc/schema/session';
@@ -58,6 +59,8 @@ export interface SpineMirrorOptions {
 
 export interface SpineMirror {
   readonly view: SpineView;
+  /** A command main forwarded to `mawsd` for a page (the router's host dispatch): its visibility claims are kept. */
+  forwarded(name: string, input: unknown, client: ClientRef | undefined): void;
   stop(): void;
 }
 
@@ -319,6 +322,38 @@ export function createMirrorSpineView(options: SpineMirrorOptions): SpineMirror 
     fire('engine', id, status);
   }
 
+  // ---- the visibility claims ------------------------------------------------------------------------------------------
+  // What each page claims on screen (`session.setVisible`, forwarded by main's router). `mawsd` releases a page's claims
+  // when machine.sock drops, and a page tells only the changes of its set (src/renderer/src/session/visibility.ts), so at
+  // each streaming the claims of the pages still there are told again, before the snapshot reads the visible set.
+  const claims = new Map<ClientId, { client: ClientRef; ids: Set<AppSessionId>; off(): void }>();
+  function forwarded(name: string, input: unknown, client: ClientRef | undefined): void {
+    if (name !== 'session.setVisible' || client === undefined || stopped) return;
+    const { appSessionId, visible } = input as CommandInput<'session.setVisible'>;
+    let page = claims.get(client.id);
+    if (page === undefined) {
+      if (!visible) return;
+      const entry = { client, ids: new Set<AppSessionId>(), off: () => {} };
+      claims.set(client.id, entry);
+      entry.off = client.onGone(() => {
+        if (claims.get(client.id) === entry) claims.delete(client.id);
+      });
+      if (!claims.has(client.id)) return; // gone already
+      page = entry;
+    }
+    if (visible) page.ids.add(appSessionId as AppSessionId);
+    else page.ids.delete(appSessionId as AppSessionId);
+  }
+  function replayClaims(): void {
+    for (const { client, ids } of claims.values()) {
+      for (const appSessionId of ids) {
+        void hosts.dispatch('machine', 'session.setVisible', { appSessionId, visible: true }, client).then((answer) => {
+          if (!answer.ok) log(`[spine-mirror] session.setVisible for ${appSessionId}: ${answer.error.code} ${answer.error.message}`);
+        });
+      }
+    }
+  }
+
   // ---- the events -----------------------------------------------------------------------------------------------------
   const offs = [
     hosts.onEvent('session.changed', ({ record }) => {
@@ -381,6 +416,7 @@ export function createMirrorSpineView(options: SpineMirrorOptions): SpineMirror 
       loaded = false;
       failure = null;
       availabilityChanged();
+      replayClaims();
       load();
       follow();
     }),
@@ -434,10 +470,13 @@ export function createMirrorSpineView(options: SpineMirrorOptions): SpineMirror 
   }
   return {
     view,
+    forwarded,
     stop() {
       stopped = true;
       if (retry) clearTimeout(retry);
       offs.forEach((off) => off());
+      for (const { off } of claims.values()) off();
+      claims.clear();
     },
   };
 }

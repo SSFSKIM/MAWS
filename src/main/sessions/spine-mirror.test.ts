@@ -6,6 +6,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId, AttentionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import { endableClientRef, type ClientRef } from '@shared/ipc/client';
 import type { HostState, ProjectRecord } from '@shared/ipc/schema';
 import { SCENARIO_UNAVAILABLE } from '@shared/spine/view';
 import { digest as digestOf, humanTurn, item as itemOf, project as projectOf, record as recordOf, status as statusOf, T0 } from '../../../test/support/builders';
@@ -34,7 +35,7 @@ type Answer = { ok: true; value: unknown } | { ok: false; error: { code: string;
 // The `machine` host as main's supervisor shows it: streaming once told, its commands answered from `answers` (a
 // command named in `held` waits for `release`), its events fired by the test
 class FakeMachine implements MirrorHosts {
-  readonly asked: { name: string; input: unknown }[] = [];
+  readonly asked: { name: string; input: unknown; client?: ClientRef }[] = [];
   readonly answers = new Map<string, (input: unknown) => Answer>();
   readonly held = new Set<string>();
   private readonly waiting = new Map<string, (() => void)[]>();
@@ -58,8 +59,8 @@ class FakeMachine implements MirrorHosts {
     this.answers.set('session.follow', ok({ streams: [] }));
   }
 
-  dispatch = async (_owner: string, name: string, input: unknown) => {
-    this.asked.push({ name, input });
+  dispatch = async (_owner: string, name: string, input: unknown, client?: ClientRef) => {
+    this.asked.push({ name, input, ...(client && { client }) });
     if (this.held.has(name)) await new Promise<void>((resolve) => this.waiting.set(name, [...(this.waiting.get(name) ?? []), resolve]));
     const answer = this.answers.get(name);
     return (answer ? answer(input) : { ok: false, error: { code: 'internal', message: `no answer for ${name}` } }) as never;
@@ -504,6 +505,37 @@ describe('the spine mirror (Interfaces §F)', () => {
     host.stream();
     await vi.waitFor(() => expect(follows()).toHaveLength(3));
     expect(follows()[2]).toEqual({ sessions: [{ appSessionId: A, cursor: { launchId: 'LA2', seq: 4, idx: -1 } }], live: true });
+  });
+
+  // mawsd releases a page's visibility claims when machine.sock drops, and a page sends only the changes of its set, so
+  // the mirror replays each page's claims it forwarded at the next streaming
+  it('replays the visibility claims each page forwarded, at each streaming, for the pages still there', async () => {
+    const host = new FakeMachine({ records: [record({ appId: A }), record({ appId: B })] });
+    const { mirror, view } = mirrorOver(host);
+    host.stream();
+    await loaded(view);
+    const [one, two] = [endableClientRef('page:1'), endableClientRef('page:2')];
+    const claim = (client: ClientRef, appSessionId: AppSessionId, visible: boolean) => mirror.forwarded('session.setVisible', { appSessionId, visible }, client);
+    claim(one, A, true);
+    claim(one, B, true);
+    claim(one, B, false);
+    claim(two, A, true);
+    claim(two, B, true);
+    mirror.forwarded('session.update', { appSessionId: C, patch: {} }, one); // no claim
+    const replayed = () => host.asked.filter((a) => a.name === 'session.setVisible').map((a) => [a.client?.id, a.input]);
+    host.lose();
+    host.stream();
+    await vi.waitFor(() => expect(replayed()).toHaveLength(3));
+    expect(replayed()).toEqual([
+      ['page:1', { appSessionId: A, visible: true }],
+      ['page:2', { appSessionId: A, visible: true }],
+      ['page:2', { appSessionId: B, visible: true }],
+    ]);
+    two.end(); // a page gone holds no claim any more
+    host.lose();
+    host.stream();
+    await vi.waitFor(() => expect(replayed()).toHaveLength(4));
+    expect(replayed()[3]).toEqual(['page:1', { appSessionId: A, visible: true }]);
   });
 
   it('stops: no event, no streaming and no daemon status reaches it any more', async () => {

@@ -4,6 +4,7 @@
 // (../client/port-answers.ts). The embedded shape's `startSpine` answers the same two needs in process.
 import type { ClientPort } from '@shared/client/port';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
+import type { ClientRef } from '@shared/ipc/client';
 import type { SpineView } from '@shared/spine/view';
 import { startPortAnswers } from '../client/port-answers';
 import type { DaemonStatusWatch } from '../hosts';
@@ -18,7 +19,14 @@ export interface DaemonSpineOptions {
   browserSocket(): string | null; // this app's cua socket directory, once the browser runs
 }
 
-export function startDaemonSpine({ hosts, daemon, port, browserSocket }: DaemonSpineOptions): { view: SpineView; stop(): void } {
+export interface DaemonSpine {
+  view: SpineView;
+  /** A command main's router forwarded to `mawsd` for a page (the mirror keeps its visibility claims, to replay them). */
+  forwarded(name: string, input: unknown, client: ClientRef | undefined): void;
+  stop(): void;
+}
+
+export function startDaemonSpine({ hosts, daemon, port, browserSocket }: DaemonSpineOptions): DaemonSpine {
   const log = (line: string) => console.log(line);
   const mirror = createMirrorSpineView({ hosts, spineRefused: () => daemon.status()?.spine?.refused ?? null, onDaemonStatus: daemon.onStatus, browserSocket, log });
   const stopAnswers = startPortAnswers({ hosts, port, clientOfId, log });
@@ -28,6 +36,7 @@ export function startDaemonSpine({ hosts, daemon, port, browserSocket }: DaemonS
   const stopSeams = installDaemonE2eSeams(hosts, process.env); // M5b fix round 2: the e2e's spine seams, relayed to mawsd
   return {
     view: mirror.view,
+    forwarded: mirror.forwarded,
     stop() {
       offAvailability();
       stopSeams();

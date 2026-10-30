@@ -387,8 +387,14 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   // every other command for another machine, and `laneA.*` for a socket-linked profile, goes to the manager. It writes
   // no file, so it runs in a run that doesn't hold spine.lock too.
   const remoteLaneA = createRemoteLaneA({ local, emit: (machine, name, payload) => void emitFrom(machine, name, payload), log: (line) => console.log(`[lane-a] ${line}`) });
-  // P5 O3-D M5b: on the daemon shape a `machine` name goes to mawsd's services front (the `machine` host)
-  installRouter({ appUrl, local, dispatchToHost: hosts.dispatch, remote: routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), machine: { kind: data === null ? 'host' : 'embedded' } });
+  // P5 O3-D M5b: on the daemon shape a `machine` name goes to mawsd's services front (the `machine` host); the spine's
+  // mirror, once it runs, is told each forward, to replay the pages' visibility claims at each streaming of mawsd
+  let forwardedToMachine: ((name: string, input: unknown, client: ClientRef | undefined) => void) | null = null;
+  const dispatchToHost: typeof hosts.dispatch = (owner, name, input, client) => {
+    if (owner === 'machine') forwardedToMachine?.(name, input, client);
+    return hosts.dispatch(owner, name, input, client);
+  };
+  installRouter({ appUrl, local, dispatchToHost, remote: routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), machine: { kind: data === null ? 'host' : 'embedded' } });
   // P5 O3-C (Interfaces §A): the services bus, how the library (the spine and the checkouts) registers its commands,
   // installs its intercepts, emits its events and taps them, bound here to the router and `emit`, so every tap main's
   // own code holds (the menu's, the stand-in's) still hears the library's events. O3-D's mawsd binds its services front.
@@ -460,6 +466,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
         home,
       });
   shutdown.add('spine', spine.stop);
+  if ('forwarded' in spine) forwardedToMachine = spine.forwarded; // the daemon shape's mirror (the router's forwards above)
   const view = spine.view;
   // P5 O3-C: the checkouts (git, `git.lsFiles`, files and scm), which O3-E moves, over the spine's view
   const checkouts = startCheckouts({ view, bus, clientPort, engineEnv, env: process.env });
