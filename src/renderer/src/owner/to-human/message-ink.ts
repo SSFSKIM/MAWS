@@ -57,7 +57,7 @@ const decorate: Plugin<[], Root> = () => (tree, file) => {
   let messages = 0;
   let touched: number | null = null; // the message whose text the block being drawn holds
   let removed = 0;
-  const touch = () => { if (open.at(-1)?.message) touched = open.at(-1)!.message; };
+  const touch = () => { touched = open.findLast((entry) => entry.message)?.message ?? touched; }; // a legacy tag inside a message is transparent
   const enter = (token: Token) => {
     if (token.close) open.pop();
     else open.push({ name: token.name, message: MESSAGE.includes(token.name) ? ++messages : 0 });

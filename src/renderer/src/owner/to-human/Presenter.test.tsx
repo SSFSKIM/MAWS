@@ -50,6 +50,13 @@ it('draws one mark around a multi-block message and leaves narration on neighbou
   expect(view.container.querySelector('.owner-message-ink span.owner-message-ink')).toBeNull();
 });
 
+it('keeps a message whole around a legacy mark nested in it', () => {
+  const view = render(draw('<message>A\n\n<insight>B</insight>\n\nC</message>'));
+  const marks = view.container.querySelectorAll('.owner-message-ink');
+  expect(marks).toHaveLength(1);
+  expect([...marks[0]!.querySelectorAll('p')].map((node) => node.textContent)).toEqual(['A', 'B', 'C']);
+});
+
 it('marks each of two adjacent messages once, and a legacy mark alone draws none', () => {
   const two = render(draw('<message>A</message>\n\n<message>B</message>\n\nC'));
   expect([...two.container.querySelectorAll('.owner-message-ink')].map((node) => node.textContent?.trim())).toEqual(['A', 'B']);
