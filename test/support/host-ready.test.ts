@@ -14,7 +14,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const daemon = (state: string, supervisor: unknown = state === 'ready' ? { pid: 4242 } : null): HostStatusLike => ({ transport: 'daemon', state, supervisor });
+const daemon = (state: string, supervisor: unknown = state === 'ready' ? { pid: 4242 } : null, watch: unknown = state === 'ready' ? { pid: 4343 } : null): HostStatusLike => ({ transport: 'daemon', state, supervisor, daemon: watch });
 
 // Starts the wait over `read`; `line()` stays undefined until it returns.
 function wait(read: () => Promise<HostStatusLike | null>) {
@@ -50,6 +50,16 @@ describe('untilHostReady', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(run.line()).toBe('[e2e] daemon host ready: waited 200 ms after the window, 700 ms after the launch');
     expect(run.reads).toHaveBeenCalledTimes(3);
+  });
+
+  it('waits for the daemon watch too: a ready host with its supervisor but no mawsd status yet is not ready (settings.spec.ts:587, run 41022966911)', async () => {
+    const statuses = [daemon('ready', { pid: 4242 }, null), daemon('ready')];
+    const run = wait(async () => statuses.shift()!);
+    await vi.advanceTimersByTimeAsync(99);
+    expect(run.line()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(run.line()).toBe('[e2e] daemon host ready: waited 100 ms after the window, 600 ms after the launch');
+    expect(run.reads).toHaveBeenCalledTimes(2);
   });
 
   it('returns at once, printing nothing, on another shape or a read answered null', async () => {

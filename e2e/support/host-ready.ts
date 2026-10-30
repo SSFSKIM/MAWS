@@ -12,6 +12,7 @@ export interface HostStatusLike {
   transport: string;
   state: string;
   supervisor: unknown;
+  daemon?: unknown; // the mawsd status main's watch holds; host.status answers null until its first read (P5 O3-D M6)
 }
 
 export interface HostReadyIo {
@@ -34,7 +35,8 @@ export async function untilHostReady(io: HostReadyIo, launchedAt: number): Promi
     const status = await Promise.race([io.read().catch(() => null), bound]);
     if (status === BOUND) return line(last);
     if (status?.transport !== 'daemon') return null;
-    if (status.state === 'ready' && status.supervisor !== null) return line(null);
+    // ready with its supervisor, and main's watch holding mawsd's status: specs read `host.status.daemon` at once
+    if (status.state === 'ready' && status.supervisor !== null && status.daemon !== null) return line(null);
     last = status.state;
     if ((await Promise.race([io.sleep(POLL_MS), bound])) === BOUND) return line(last);
   }
