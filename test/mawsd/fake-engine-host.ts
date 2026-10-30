@@ -20,6 +20,8 @@ export type HostSession = {
   queue: Record<string, unknown>;
   items: unknown[];
   catalog: Record<string, unknown>;
+  /** More of the status than the stream needs (a turn, for a mid-turn count). */
+  over: Record<string, unknown>;
 };
 
 type Raw = (message: { name: string; payload: unknown }) => void;
@@ -41,7 +43,7 @@ export class FakeEngineHost {
     parked: () => this.parkedNow,
   };
 
-  add(appSessionId: string): HostSession {
+  add(appSessionId: string, over: Record<string, unknown> = {}): HostSession {
     const session: HostSession = {
       appSessionId,
       launchId: `launch-${++this.#launches}`,
@@ -52,6 +54,7 @@ export class FakeEngineHost {
       queue: { entries: [], paused: false, pauseReason: null },
       items: [],
       catalog: { commands: [], agents: [], skills: [], terminalSlashCommands: [], revision: 1 },
+      over,
     };
     this.sessions.set(appSessionId, session);
     this.emit('session.status', { appSessionId, status: this.status(session) });
@@ -133,7 +136,7 @@ export class FakeEngineHost {
   }
 
   status(s: HostSession): Record<string, unknown> {
-    return { appSessionId: s.appSessionId, launchId: s.launchId, engineSessionId: `eng-${s.appSessionId}`, process: s.process, lastEventSeq: s.rows.length };
+    return { appSessionId: s.appSessionId, launchId: s.launchId, engineSessionId: `eng-${s.appSessionId}`, process: s.process, lastEventSeq: s.rows.length, ...s.over };
   }
 
   events(s: HostSession, afterSeq: number | null, limit: number | null): { events: SessionEvent[]; lastSeq: number; complete: boolean; historyUnavailable?: true } {
