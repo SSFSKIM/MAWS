@@ -5,59 +5,16 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import { eventBytes, type WindowBudget } from '@shared/graph/history-window';
-import type { AgentId, AppSessionId, EventId, SessionId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, EventId } from '@shared/graph/ids';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
+import { longTranscript as transcript, LONG_SESSION as SESSION, LONG_DIR as DIR } from '../../../test/support/long-transcript';
 import { StoreFixture } from '../../../test/support/store-fixture';
 import { UNKNOWN_CURSOR } from './follow';
 import { FsService, type InterestSource } from './service';
 import { DEBOUNCE_MS, SETTLE_MS } from './watcher';
 
-const SESSION = '22222222-2222-4222-8222-222222222222' as SessionId;
 const APP = 'app-long' as AppSessionId;
-const DIR = '/work/long';
-const PAD = 'x'.repeat(600); // each prompt and reply about 0.6 KB of event JSON
-
-// One turn: a prompt parented on `parent`, a reply, and its turn_duration; the silent request record the engine writes
-// per model call between them. Returns the lines and the turn's last uuid.
-function turnLines(n: number, parent: string | null, at: number): { lines: string[]; last: string } {
-  const ts = new Date(Date.parse('2026-09-01T00:00:00.000Z') + at * 1000).toISOString();
-  const base = { sessionId: SESSION, cwd: DIR, version: '2.1.312', isSidechain: false, userType: 'external', timestamp: ts };
-  return {
-    lines: [
-      JSON.stringify({ ...base, type: 'user', uuid: `u${n}`, parentUuid: parent, message: { role: 'user', content: `prompt ${n} ${PAD}` } }),
-      JSON.stringify({ type: 'api-request', sessionId: SESSION, id: `r${n}`, params: { body: PAD } }),
-      JSON.stringify({ ...base, type: 'assistant', uuid: `a${n}`, parentUuid: `u${n}`, message: { id: `msg_${n}`, role: 'assistant', model: 'm', content: [{ type: 'text', text: `reply ${n} ${PAD}` }] } }),
-      JSON.stringify({ ...base, type: 'system', subtype: 'turn_duration', uuid: `d${n}`, parentUuid: `a${n}`, durationMs: 1000 }),
-      JSON.stringify({ type: 'file-history-snapshot', messageId: `u${n}`, snapshot: { messageId: `u${n}`, trackedFileBackups: {} }, isSnapshotUpdate: false }),
-    ],
-    last: `d${n}`,
-  };
-}
-
-// `turns` turns in one chain; with `rewindTo`, a last prompt parented on that turn's end (a terminal /rewind's shape) and
-// one more turn after it.
-function transcript(turns: number, options: { rewindTo?: number; compactAt?: number } = {}): string[] {
-  const lines: string[] = [];
-  let parent: string | null = null;
-  for (let n = 1; n <= turns; n++) {
-    if (n === options.compactAt) {
-      const ts = new Date(Date.parse('2026-09-01T00:00:00.000Z') + n * 1000 - 500).toISOString();
-      lines.push(JSON.stringify({ type: 'system', subtype: 'compact_boundary', uuid: `c${n}`, parentUuid: null, logicalParentUuid: parent, sessionId: SESSION, cwd: DIR, timestamp: ts, compactMetadata: { trigger: 'auto', preTokens: 1000 } }));
-      parent = `c${n}`;
-    }
-    const turn = turnLines(n, parent, n);
-    lines.push(...turn.lines);
-    parent = turn.last;
-  }
-  if (options.rewindTo !== undefined) {
-    const rewound = turnLines(turns + 1, `d${options.rewindTo}`, turns + 1);
-    lines.push(...rewound.lines);
-    lines.push(...turnLines(turns + 2, rewound.last, turns + 2).lines);
-  }
-  return lines;
-}
-
 type Emitted = { [N in EventName]: { name: N; payload: EventPayload<N> } }[EventName];
 
 describe('a long transcript is read in windows', () => {
