@@ -45,6 +45,18 @@
 // client port asks the client whose request minted the asking ref, or the app attached on engine-host.sock for none
 // (client-port.ts); the endpoint's `dispatch('machine', …)` is the front's table and its `onEvent` carries the spine's
 // events with owner `machine`.
+//
+// P5 O3-D M5a (Interfaces §L; D10, D21, D44(3)): `mawsd`'s side of the cutover, built behind the option `claimSpine`,
+// off in the product until M5b turns it on with `permanentClient`, `spine.wakeOnEvents` and the app's `machine.spine`
+// (src/mawsd/index.ts), so nothing changes for an app of today. With it on, a hello on engine-host.sock that lists no
+// `machine.spine` (an app that runs a spine of its own) is refused with `mawsd`'s own `refuse wire` line, waking no
+// host, and its one exit asks nothing of the engine host; and when that app's pid holds no `spine.lock` (an app from
+// before O3-A) the spine yields to it while it lives. The second signal, the profile's `SingletonLock` read at each load
+// attempt, is built behind its own switch (`singletonSignal`), off until its probe (e2e/spine-lock.spec.ts) shows what
+// macOS Electron writes there. Whatever the option, an app whose hello lists `machine.spine` hears no event on its
+// engine relay (its events come on machine.sock), and its relayed requests that the spine intercepts go through the
+// spine's intercepts, as a machine.sock client's and the endpoint's do (front.ts). The spine's trash is `mawsd`'s own
+// move into the user's trash directory (trash.ts), and a load logs `[spine] loaded in N ms`.
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import { createServer, type Server } from 'node:net';
@@ -61,10 +73,10 @@ import { PrivatePathError } from '@shared/host/private-path';
 import { captureShellEnvironment } from '@shared/host/shell-env';
 import { writeToken } from '@shared/host/socket-host';
 import { CLOSE_GRACE_MS } from '@shared/host/socket-port';
-import { ATTACHMENT_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL, type DocumentsOpen } from '@shared/host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL, type DocumentsOpen, type ServerRefuse } from '@shared/host/socket-protocol';
 import { serveSocketClients, type SocketClients, type SupervisorIdentity } from '@shared/host/socket-server';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { ClientRef } from '@shared/ipc/client';
+import { endableClientRef, type ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import { MAX_IDLE_EXIT_MS } from '@shared/ipc/schema/host';
@@ -80,15 +92,21 @@ import { LOG_ROTATE_BYTES, openSupervisorLog } from '../engine-host/supervisor-l
 import { ptyHostFiles } from '../pty-host/files';
 import { DaemonClocks, DEFAULT_IDLE_EXIT_MS } from './clocks';
 import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOINT_MODULE, type CheckoutSource, type DaemonServices, type EndpointModule } from './endpoint-seam';
-import { createServicesFront } from './front';
+import { createServicesFront, SPINE_ENGINE_INTERCEPTS } from './front';
 import { DEPARTURE_BOUND_MS, Relay, type RelayRequest } from './relay';
 import { createLazySpine, loadServicesEntry, type SpineEntry, type SpineTiming } from './spine-seam';
+import { trashPath } from './trash';
 
 export const EXIT_RESTART = 75; // a requested restart: the units restart on it
 // P5 O3-D D38 (the owner's ruling on D5): re-executing a unit daemon after its spine's release is built and off; a later
 // PR flips this default once M7's whole-set reading asks for it. MAWS_SPINE_REEXECUTE=1, read by a unit daemon at
 // start, turns it on for that daemon (the measured scene's seam). A private daemon never re-executes.
 export const SPINE_REEXECUTE_DEFAULT = false;
+// P5 O3-D M5a (D21): whether the profile's `SingletonLock` is read as the yield's second signal. Off until M5's probe
+// (e2e/spine-lock.spec.ts) shows that macOS Electron writes a pid there; with no pid, the first signal stands alone.
+export const SINGLETON_LOCK_SIGNAL_DEFAULT = false;
+export const SPINE_LOCK_FILE = 'spine.lock'; // src/services/settings/spine-lock.ts's SPINE_LOCK, which mawsd's eager graph cannot import
+export const SINGLETON_LOCK_FILE = 'SingletonLock'; // Electron's single-instance lock in the profile (src/main/files/profile-lock.ts)
 const STATUS_BOUND_MS = 5_000; // daemon.status waits this long for the engine host's own status
 const MAX_INTEREST = 10_000; // host.interest's bound
 
@@ -124,6 +142,10 @@ export interface DaemonOptions {
   // P5 O3-D M3 (D30): the engine host's permanent client (above), off in the product until M5 turns it on with the front's
   // session streams and `wakeOnEvents`: until then a kept session's events while no app is attached would reach no app
   permanentClient?: boolean;
+  // P5 O3-D M5a (Interfaces §L): the spine is the machine's, and an app that runs its own is refused at engine-host.sock
+  // and yielded to (above); off in the product until M5b turns it on with permanentClient, when apps list machine.spine
+  claimSpine?: boolean;
+  singletonSignal?: boolean; // D21's second signal (SINGLETON_LOCK_SIGNAL_DEFAULT unless a test says), under claimSpine
 }
 
 export interface RunningDaemon {
@@ -213,6 +235,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const permanentClient = options.permanentClient ?? false;
   const engineHello = permanentClient ? PEER_CAPABILITIES.daemonToEngineHost : PEER_CAPABILITIES.daemonToEngineHost.filter((name) => name !== ATTACHMENT_CAPABILITY);
   const engineIdentity = appIdentity(options.modules.engineHost, env, 'detached', engineHello); // the e2e seams stand in, as for main
+  // P5 O3-D M5a (§L): off until M5b; the second signal under it, behind its own switch until its probe answers (D21)
+  const claimSpine = options.claimSpine ?? false;
+  const singletonSignal = options.singletonSignal ?? SINGLETON_LOCK_SIGNAL_DEFAULT;
   // P5 O3-D M4 (Interfaces §E, D11): MAWS's own projects, checkouts the endpoint knows beside RL10's: every project row of
   // the loaded spine while its view is available (none while it is cold, refused, or a scenario's)
   const projects: CheckoutSource = {
@@ -276,9 +301,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       clientPort: front.port, // §E: the asking client's connection, or the attached app's
       interest: () => new Set(union()),
       browserSocket: () => front.browserSocket(), // the attached app's, from its machine.client
-      trash: async (path) => {
-        throw new Error(`the trash is not reachable from mawsd yet: ${path} kept`); // D10's binding is M5's
-      },
+      trash: (path) => trashPath(path, { platform, home: homedir(), env }), // D10: mawsd's own move into the user's trash
       engineEnv: captureShellEnvironment({ cache: false }), // one capture per load
       env,
       packaged,
@@ -297,6 +320,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     restart: (reason) => void stop(reason, EXIT_RESTART),
     exitForYield: () => void stop('yield', kind === 'unit' ? EXIT_RESTART : 0),
     collected: () => idle.dropped(),
+    yieldCandidate: () => (claimSpine && singletonSignal ? singletonHolder() : null), // D21's second signal
     onState: (state) => {
       if (state !== 'loading' && state !== 'loaded' && state !== 'releasing') front.unbind(); // the parts stopped: the next load registers afresh
     },
@@ -304,6 +328,48 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     ...(options.spine?.timing && { timing: options.spine.timing }),
     ...(options.spine?.lockWaitMs !== undefined && { lockWaitMs: options.spine.lockWaitMs }),
   });
+
+  // --- the lock's daemon side (P5 O3-D M5a, Interfaces §L) -------------------------------------------------------------
+  // The apps whose hello listed machine.spine, on any of the three sockets, by pid and start: never yielded to.
+  const spineReaders = new Map<number, string | null>();
+  const readsSpine = (pid: number) => spineReaders.has(pid) && spineReaders.get(pid) === procStartOf(pid);
+  const announced = (connected: boolean, peer: { capabilities: readonly string[] } | undefined, appPid: number | undefined) => {
+    if (!connected || appPid === undefined || !peer?.capabilities.includes(MACHINE_SPINE_CAPABILITY)) return;
+    spineReaders.set(appPid, procStartOf(appPid));
+    if (spine.yieldedTo() !== appPid) return;
+    log(`[spine] pid ${appPid} reads the machine’s spine (its hello lists ${MACHINE_SPINE_CAPABILITY}): the yield to it lifted`);
+    spine.yield(null);
+  };
+  // `spine.lock` names this pid, at this start (the lock's own liveness rule)
+  const holdsSpineLock = (pid: number) => {
+    const lock = readLock(profileDir, fs, SPINE_LOCK_FILE);
+    return lock !== null && lock.pid === pid && lock.procStart === procStartOf(pid);
+  };
+  // The first signal: a hello refused for lacking machine.spine. An app from before O3-A holds no spine.lock and is
+  // yielded to; one from O3-A to O3-C holds it, and the lock refuses mawsd's spine while it runs.
+  const refuseSpineless = (peer: { build: string; capabilities: readonly string[] }, appPid: number): ServerRefuse | null => {
+    if (!claimSpine || peer.capabilities.includes(MACHINE_SPINE_CAPABILITY)) return null;
+    const holds = holdsSpineLock(appPid);
+    log(`engine-host.sock: refuse wire to appPid ${appPid} (build ${peer.build}): its hello lists no ${MACHINE_SPINE_CAPABILITY}, so it runs a spine of its own${holds ? ', and holds spine.lock' : ''}`);
+    if (!holds) spine.yield(appPid);
+    return { t: 'refuse', reason: 'wire', protocol: identity.protocol, buildId: identity.buildId, wire: identity.wire, liveSessions: hosts.welcome('engine-host')?.liveSessions ?? 0 };
+  };
+  // The second signal (D21): the profile's SingletonLock, a symlink `<host>-<pid>` as Chromium writes it, naming a live
+  // app of this host that no post-D hello announced and that holds no spine.lock.
+  const singletonHolder = (): number | null => {
+    let target: string;
+    try {
+      target = fs.readlinkSync(join(profileDir, SINGLETON_LOCK_FILE));
+    } catch {
+      return null; // none, or not a symlink
+    }
+    const named = /^(.+)-(\d+)$/.exec(target);
+    if (!named || named[1] !== hostname()) return null;
+    const pid = Number(named[2]);
+    if (pid === process.pid || !isAlive(pid) || readsSpine(pid) || holdsSpineLock(pid)) return null;
+    log(`[spine] ${SINGLETON_LOCK_FILE} names pid ${pid}, a live app that reads no spine of the machine’s and holds no spine.lock`);
+    return pid;
+  };
 
   // --- the clocks -----------------------------------------------------------------------------------------------------
   const idle = idleCollector({ log, collect: options.collect, quiet: () => clocks.quiet() }); // P5 Decision Log 124's lever: a collection at each quiet entry, asked again as it collects
@@ -416,7 +482,10 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     hosts,
     log: (line) => log(`engine-host.sock: ${line}`),
     startedAt: (pid) => lockStartedAt(join(profileDir, 'supervisor'), pid),
-    intercept: (request) => interceptEngine(request),
+    // P5 O3-D M5a (D44(3)): a post-D app's request the spine intercepts goes through it, the spine loaded for it if cold
+    intercept: (request, app) => (app.capabilities.includes(MACHINE_SPINE_CAPABILITY) && SPINE_ENGINE_INTERCEPTS.has(request.name) ? throughSpine(request) : interceptEngine(request)),
+    refuseHello: refuseSpineless, // P5 O3-D M5a (§L), under claimSpine
+    deliverTo: (capabilities) => !capabilities.includes(MACHINE_SPINE_CAPABILITY), // P5 O3-D M5a: a post-D app's events come on machine.sock
     onDocument: (message, end) => {
       // the app's channels are below 2^31; one at or above is the endpoint's range (P5 Decision Log 42: a value rule)
       if (message.channel >= ENDPOINT_CHANNEL_BASE) return end.close();
@@ -466,6 +535,15 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     holdMs: options.helloHoldMs,
     between: () => clientsChanged(), // P5 Decision Log 124: the quiet's
   });
+
+  // A post-D app's relayed request through the spine's intercept for it; one the spine cannot take (it cannot load: the
+  // lock's holder keeps its own note) goes on raw, its client named, as the relay forwards any other.
+  const relayClient = endableClientRef('engine-host.sock');
+  async function throughSpine(request: RelayRequest): Promise<HostResponse> {
+    const answered = await front.intercepted(request.name, request.input, relayClient);
+    if (answered) return { t: 'res', id: request.id, ...answered } as HostResponse;
+    return hosts.forward('engine-host', { name: request.name, input: request.input, ...(request.client && { client: request.client }) });
+  }
 
   function interceptEngine(request: RelayRequest): Promise<HostResponse> | null {
     const input = (request.input ?? {}) as Record<string, unknown>;
@@ -752,9 +830,12 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     engineClients = serveSocketClients(engineServer, {
       runtime: engineRelay,
       badToken: 'close',
-      admitHello: () => engineRelay.admit(),
+      admitHello: (peer, appPid) => engineRelay.admit(peer, appPid),
       onClientEnd: () => engineRelay.ended(),
-      onClient: (connected, _peer, appPid) => void (engineAppPid = connected ? (appPid ?? null) : null),
+      onClient: (connected, peer, appPid) => {
+        engineAppPid = connected ? (appPid ?? null) : null;
+        announced(connected, peer, appPid);
+      },
       identity: () => identity,
       counts: counts('engine-host'),
       token: () => token,
@@ -766,11 +847,12 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     ptyClients = serveSocketClients(ptyServer, {
       runtime: ptyRelay,
       badToken: 'close',
-      admitHello: () => ptyRelay.admit(),
+      admitHello: (peer, appPid) => ptyRelay.admit(peer, appPid),
       identity: () => identity,
       counts: counts('pty-host'),
       token: () => token,
       onExit: (when, from) => ptyRelay.exit(when, from),
+      onClient: announced,
       log: (line) => log(`pty-host.sock: ${line}`),
     });
     ptyRelay.bind(ptyClients);
@@ -786,7 +868,10 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         log('exit now on machine.sock: restarting');
         void stop('exit', EXIT_RESTART);
       },
-      onClient: () => clientsChanged(),
+      onClient: (connected, peer, appPid) => {
+        announced(connected, peer, appPid);
+        clientsChanged();
+      },
       log: (line) => log(`machine.sock: ${line}`),
     });
     for (const [server, path] of [

@@ -290,7 +290,7 @@ describe('the hold and the barrier', () => {
       'live batch s1 3',
     ]);
     expect(root.later).toEqual([2, 1]); // the hold's own order, offered to the fold at each held event
-    expect(logs).toContainEqual(expect.stringMatching(/^spine: the hold drained: 3 events \(\d+ bytes\)$/));
+    expect(logs).toContainEqual(expect.stringMatching(/^\[spine\] the hold drained: 3 events \(\d+ bytes\)$/));
   });
 
   it('a batch while cold wakes nothing when events do not wake the spine (M2 in production)', async () => {
@@ -420,7 +420,7 @@ describe('the release', () => {
     await sleep(80);
     expect(answered).toBeNull();
     expect(first.stop).not.toHaveBeenCalled();
-    expect(logs).toContainEqual('spine: the release waits for the spine’s work in flight');
+    expect(logs).toContainEqual('[spine] the release waits for the spine’s work in flight');
     done();
     await request;
     expect(first.stop).toHaveBeenCalledOnce();
@@ -494,7 +494,7 @@ describe('the daemon’s exit during a load', () => {
       }),
     });
     const loaded = spine.ensure('command');
-    await vi.waitFor(() => expect(logs).toContain('spine: loading (command)'));
+    await vi.waitFor(() => expect(logs).toContain('[spine] loading (command)'));
     await sleep(20); // the lock is taken; the data's open waits
     await spine.stop(); // bounded: the open is still in flight
     open();
@@ -550,13 +550,30 @@ describe('the yield', () => {
     await vi.waitFor(() => expect(roots).toHaveLength(1));
     spine.yield(777);
     live.delete(777);
-    await vi.waitFor(() => expect(logs).toContain('spine: the yield to pid 777 lifted'));
+    await vi.waitFor(() => expect(logs).toContain('[spine] the yield to pid 777 lifted'));
     link.batch('s1', 5); // held again: the load's barrier drains it
     release();
     const root = (await loaded) as FakeRoot;
     link.batch('s1', 6);
     expect(root.seen).toEqual(['resync', 'resync paged (ok)', 'held batch s1 5', 'live batch s1 6']);
     expect(spine.state()).toBe('loaded');
+  });
+
+  // P5 O3-D M5 (Interfaces §L, D21): the second signal, read at each load attempt
+  it('a yield candidate named at a load attempt yields instead of loading, takes no lock, and the load goes on once lifted', async () => {
+    let candidate: number | null = 777;
+    const spine = seam({ processes, yieldCandidate: () => candidate });
+    await expect(spine.ensure('command')).rejects.toThrow(/yielded to pid 777/);
+    expect(spine.yieldedTo()).toBe(777);
+    expect(spine.state()).toBe('yielded');
+    expect(loads).toBe(0);
+    const another = await takeSpineLock(profile, { build: 'the old app', waitMs: 10, log: () => {} }); // no lock was taken
+    expect(another.refused).toBeNull();
+    another.release();
+    candidate = null;
+    spine.yield(null); // a post-D hello announced the pid (daemon.ts)
+    expect(spine.yieldedTo()).toBeNull();
+    await expect(spine.ensure('command')).resolves.toBeDefined();
   });
 
   it('a yield during a load discards its hold, counted, and a cold seam just refuses until the pid is gone', async () => {

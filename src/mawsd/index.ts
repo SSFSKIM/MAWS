@@ -75,6 +75,9 @@ function run({ kind, dir }: RunArgs, profileDir: string): void {
     // P5 O3-D M3 (D30): the engine host's permanent client stays off until M5 turns it on with the front's session
     // streams and the spine's event trigger (`spine.wakeOnEvents`); until then O2's recycle per attachment serves the app
     permanentClient: false,
+    // P5 O3-D M5a (Interfaces §L): the refusal of an app that runs a spine of its own, and the yield to one from before
+    // O3-A, stay off with it; M5b turns them on with `spine.wakeOnEvents` and the app's `machine.spine`, in one step
+    claimSpine: false,
     openLog: (at) => {
       const opened = openSupervisorLog(at, LOG_ROTATE_BYTES, DAEMON_FILES.log);
       log = opened;

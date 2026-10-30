@@ -480,7 +480,7 @@ test('daemon idle spine alone: the physical footprint and CPU of the spine compo
 // MAWS_ENGINE_REPLAY=1, so the engine host the spine's start wakes runs no engine. Two daemons in sequence, since a
 // released unit daemon exits at once (D5) and a private one never re-executes (D6): (1) `run --private`, the spine
 // loaded by a bare machine.sock client's session.list (the fixture's sessions read back) that holds its connection, read
-// LOADED; the client closes, the quiet passes, the log reads `spine: released`, read RELEASED; the daemon is stopped
+// LOADED; the client closes, the quiet passes, the log reads `[spine] released`, read RELEASED; the daemon is stopped
 // (SIGTERM). (2) `run --unit` with MAWS_SPINE_REEXECUTE=1 (re-execution is off by default, D38), restarted here on exit 75 as launchd would, following the new pid: the client loads the
 // spine and closes, the quiet passes, the log reads `exited (spine released, code 75)`, the restart serves, read
 // RE-EXECUTED. Each window is SPINE_RELEASED_RUN's (120 s settle, 300 s, 11 samples, the load rule), over the
@@ -546,7 +546,7 @@ test('daemon idle mawsd with the spine: loaded, released, re-executed', async ()
     expect(holding.sessions, 'the spine in mawsd reads the fixture').toBe(counts.sessions);
     windows.loaded = await measureWindow(await settled(), SPINE_RELEASED_RUN);
     holding.link.close();
-    await expect.poll(() => lines('spine: released'), { timeout: 5 * 60_000, message: `the spine is released after the quiet:\n${log()}` }).toBe(1);
+    await expect.poll(() => lines('[spine] released'), { timeout: 5 * 60_000, message: `the spine is released after the quiet:\n${log()}` }).toBe(1);
     windows.released = await measureWindow(await settled(), SPINE_RELEASED_RUN);
     first.kill('SIGTERM');
     await expect.poll(() => first.exitCode !== null || first.signalCode !== null, { timeout: 30_000, message: 'the private mawsd exits at SIGTERM' }).toBe(true);
@@ -568,7 +568,7 @@ test('daemon idle mawsd with the spine: loaded, released, re-executed', async ()
     const readings = { loaded: read(windows.loaded), released: read(windows.released), reexecuted: read(windows.reexecuted) };
     const line = mawsdSpineLine({ windows: readings, reasons, counts });
     const all = (Object.keys(reasons) as SpineWindow[]).flatMap((key) => reasons[key].map((reason) => `${key}: ${reason}`));
-    const spineLines = log().split('\n').filter((l) => /\bspine: |exit(ing|ed) \(/.test(l));
+    const spineLines = log().split('\n').filter((l) => /\[spine\] |exit(ing|ed) \(/.test(l));
     report('daemon-idle-mawsd-spine.json', line, all, { shape: 'mawsd with the spine', electron, counts, readings, reasons, spineLines, loaded: windows.loaded?.record, released: windows.released?.record, reexecuted: windows.reexecuted?.record });
   } finally {
     ending = true;

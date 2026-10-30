@@ -85,7 +85,7 @@ export class SpineEvents {
       try {
         listener(payload);
       } catch (error) {
-        this.options.log(`spine: a listener of ${name} failed: ${error instanceof Error ? error.message : String(error)}`);
+        this.options.log(`[spine] a listener of ${name} failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   }
@@ -142,7 +142,7 @@ export class SpineEvents {
   discard(why: string, next: Mode): void {
     if (this.held.length > 0) {
       this.dropped += this.held.length;
-      this.options.log(`spine: the hold's ${this.held.length} events (${this.heldBytes} bytes) discarded: ${why}`);
+      this.options.log(`[spine] the hold's ${this.held.length} events (${this.heldBytes} bytes) discarded: ${why}`);
     }
     this.held = [];
     this.heldBytes = 0;
@@ -296,7 +296,7 @@ export class SpineHostsAdapter implements SpineHosts {
           this.replayingHold = false;
           this.atBarrier = false;
         }
-        if (drained.events > 0) this.options.log(`spine: the hold drained: ${drained.events} events (${drained.bytes} bytes)`);
+        if (drained.events > 0) this.options.log(`[spine] the hold drained: ${drained.events} events (${drained.bytes} bytes)`);
         for (const listener of [...this.drainedListeners]) listener();
         if (streams && this.options.link.streaming('engine-host')) {
           this.streamed = true;
@@ -321,13 +321,13 @@ export class SpineHostsAdapter implements SpineHosts {
         : this.dispatch(owner, name, input);
     const boundMs = this.options.resyncBoundMs ?? RESYNC_BOUND_MS;
     const bound = setTimeout(() => {
-      this.options.log(`spine: the engine host's resync took longer than ${boundMs / 1000} s; draining the hold without it`);
+      this.options.log(`[spine] the engine host's resync took longer than ${boundMs / 1000} s; draining the hold without it`);
       controller.abort('bound');
     }, boundMs);
     const ended = new Promise<void>((resolve) => controller.signal.addEventListener('abort', () => resolve(), { once: true }));
     const pulled = Promise.resolve()
       .then(() => resync(guarded, controller.signal))
-      .catch((error: unknown) => this.options.log(`spine: the engine host's resync failed: ${error instanceof Error ? error.message : String(error)}`));
+      .catch((error: unknown) => this.options.log(`[spine] the engine host's resync failed: ${error instanceof Error ? error.message : String(error)}`));
     await Promise.race([pulled, ended]);
     clearTimeout(bound);
     if (this.resyncing === controller) this.resyncing = null;

@@ -319,6 +319,7 @@ export class MawsdScene {
 export interface RawHelloOptions {
   token?: string;
   capabilities?: string[];
+  appPid?: number; // P5 O3-D M5: the app's pid its hello names (this process's unless a test names another)
 }
 
 // An app on a relay socket, raw: its hello, then (once welcomed) C1's envelope and the document frames through the real
@@ -368,7 +369,7 @@ export class RawApp {
       };
       socket.on('data', onData);
       socket.on('connect', () => {
-        socket.write(`${JSON.stringify({ t: 'hello', protocol: SOCKET_PROTOCOL, token, minor: WIRE_MINOR, build: 'raw-app', capabilities, appPid: process.pid })}\n`);
+        socket.write(`${JSON.stringify({ t: 'hello', protocol: SOCKET_PROTOCOL, token, minor: WIRE_MINOR, build: 'raw-app', capabilities, appPid: options.appPid ?? process.pid })}\n`);
       });
     });
   }

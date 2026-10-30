@@ -587,7 +587,7 @@ describe('the spine (P5 O3-D M2)', () => {
     expect(await client.request('session.launchMode')).toMatchObject({ ok: true, value: { mode: 'index' } });
     expect(chunk.loads).toHaveBeenCalledOnce();
     expect(await client.request('daemon.status')).toMatchObject({ ok: true, value: { spine: { state: 'loaded', loadedAt: expect.any(String) } } });
-    expect(scene.logs).toContainEqual(expect.stringMatching(/^spine: loaded in \d+ ms$/));
+    expect(scene.logs).toContainEqual(expect.stringMatching(/^\[spine\] loaded in \d+ ms$/));
   });
 
   // D38, O10 M9's last piece: the enrollment machine.identity's project and the spine's org projects read is the endpoint
@@ -654,7 +654,7 @@ describe('the spine (P5 O3-D M2)', () => {
       const client = await scene.app('machine');
       expect(await client.request('session.launchMode')).toMatchObject({ ok: true });
       client.destroy();
-      await until(() => scene.logs.includes('spine: released'), 5_000, 'the release');
+      await until(() => scene.logs.includes('[spine] released'), 5_000, 'the release');
       expect(chunk.stops).toHaveBeenCalledOnce();
       if (kind === 'unit' && reexecute) {
         await until(() => scene.exits.length > exits, 5_000, 'the re-execution');
