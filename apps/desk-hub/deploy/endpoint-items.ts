@@ -1258,7 +1258,9 @@ async function resumeWithoutLoss(scene: Scene, report: ItemReport): Promise<void
     direct.finish();
   });
   // Lane B's live half, where the scene has a lane B session (staging's VM; never production, which shows lane A alone).
+  // There every check of the item's, both lanes', must report, ok or FAIL: one a path never reached fails the item.
   const sourceB = scene.target === 'production' ? null : (scene.machine.laneB ?? null);
+  if (sourceB !== null) report.expect('2', [...ITEM2_CHECKS.laneA, ...ITEM2_CHECKS.laneB]);
   // Set inside its first check (`as`: a closure assigns it, which narrowing would not see).
   let laneB = null as { app: string; launch: string; engine: string; alias: string; relayed: LaneBTrack; direct: LaneBTrack } | null;
   let stretchB = 0;
@@ -1516,6 +1518,28 @@ async function resumeWithoutLoss(scene: Scene, report: ItemReport): Promise<void
 // ---- production ------------------------------------------------------------------------------------------------------
 
 const both = (check: string) => ['relayed', 'direct'].map((carrier) => check.replace('<carrier>', carrier));
+
+/**
+ * Item 2's checks, each of which a run with lane B must report (`ItemReport.expect`): lane A's, then lane B's. A check
+ * that never reports fails the item, so none can go missing unseen (test/deploy/endpoint-acceptance.test.ts holds this
+ * list to the checks item 2 makes).
+ */
+export const ITEM2_CHECKS = {
+  laneA: [
+    'both carriers subscribed to the lane A session, rows flowing',
+    'the endpoint’s RL1 socket cut by force: the relayed channel resumes by replay, the direct one never drops',
+    'a hub deploy, then the forced cut: the relayed channel resumes by replay',
+    '`mawsd restart`: both channels close `restart` and resume by snapshot under a new epoch',
+    ...both('lane A over the <carrier> carrier: every event once, by the endpoint’s cursor, sminos’s numbering and the transcript'),
+  ],
+  laneB: [
+    'both carriers subscribed to the lane B session, events flowing',
+    'the endpoint’s RL1 socket cut by force: the relayed lane B channel resumes by replay, the direct one never drops',
+    'a hub deploy, then the forced cut: the relayed lane B channel resumes by replay',
+    '`mawsd restart`: both lane B channels close `restart` and resume by their cursors',
+    ...both('lane B over the <carrier> carrier: every event once, by the endpoint’s cursor and the engine host’s journal'),
+  ],
+} as const;
 
 /**
  * What production runs (acceptance 7), by name: each clause VM-local on the production machine (channels and

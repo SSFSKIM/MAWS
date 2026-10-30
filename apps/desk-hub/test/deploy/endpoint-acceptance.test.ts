@@ -449,6 +449,28 @@ describe('production’s allowlist', () => {
     for (const name of laneB) for (const carrier of ['relayed', 'direct']) expect(admit('2', name.replace('${track.carrier}', carrier)), name).not.toBeNull();
   });
 
+  it('expects of item 2 exactly the checks item 2 makes, and fails it when one of lane B’s is dropped', async () => {
+    const { ITEM2_CHECKS } = await import('../../deploy/endpoint-items.ts');
+    const { ItemReport } = await import('../../deploy/endpoint-verdicts.ts');
+    const source = (await import('node:fs')).readFileSync(join(import.meta.dirname, '../../deploy/endpoint-items.ts'), 'utf8');
+    const made = new Set<string>();
+    for (const m of source.matchAll(/report\.check\('2', (`[^`]*`|'[^']*')/g)) {
+      const raw = m[1].slice(1, -1);
+      for (const carrier of raw.includes('${') ? ['relayed', 'direct'] : ['']) made.add(raw.replace('${track.carrier}', carrier));
+    }
+    expect(new Set([...ITEM2_CHECKS.laneA, ...ITEM2_CHECKS.laneB])).toEqual(made);
+    expect(ITEM2_CHECKS.laneB.length).toBe(6);
+    // A run in which every check of item 2 passed but one of lane B's never reported: item 2 fails, naming it.
+    for (const dropped of ITEM2_CHECKS.laneB) {
+      const lines: string[] = [];
+      const report = new ItemReport(['2'], (l) => lines.push(l));
+      report.expect('2', [...ITEM2_CHECKS.laneA, ...ITEM2_CHECKS.laneB]);
+      for (const check of [...ITEM2_CHECKS.laneA, ...ITEM2_CHECKS.laneB]) if (check !== dropped) await report.check('2', check, async () => 'ok');
+      expect(report.summary()).toBe(false);
+      expect(lines.at(-1)).toBe(`FAIL 2: 1 expected check never reported: ${dropped}`);
+    }
+  });
+
   it('names only clauses the items have', async () => {
     const { PRODUCTION_CLAUSES } = await import('../../deploy/endpoint-items.ts');
     const source = (await import('node:fs')).readFileSync(join(import.meta.dirname, '../../deploy/endpoint-items.ts'), 'utf8');

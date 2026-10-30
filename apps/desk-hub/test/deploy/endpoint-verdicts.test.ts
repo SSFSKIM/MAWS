@@ -296,6 +296,32 @@ describe('the report', () => {
     expect(lines.slice(-2)).toEqual(['NOT SHOWN 2: the hub deploy (no deploy in this scene)', 'FAIL 5: nothing was checked']);
   });
 
+  it('fails an item one of whose expected checks never reported, naming it, and counts them when all did', async () => {
+    const lines: string[] = [];
+    const report = new ItemReport(['2'], (l) => lines.push(l));
+    report.expect('2', ['lane A cut', 'lane B cut', 'lane B verdict']);
+    await report.check('2', 'lane A cut', async () => 'replay');
+    await report.check('2', 'lane B cut', async () => 'replay');
+    expect(report.summary()).toBe(false);
+    expect(lines.at(-1)).toBe('FAIL 2: 1 expected check never reported: lane B verdict');
+    await report.check('2', 'lane B verdict', async () => 'every event once');
+    lines.length = 0;
+    expect(report.summary()).toBe(true);
+    expect(lines).toEqual(['PASS 2: 3 checks reported, every one of the 3 expected among them']);
+  });
+
+  it('names the expected checks missing beside a failed one, and leaves an item it was given none for as before', async () => {
+    const lines: string[] = [];
+    const report = new ItemReport(['2', '3'], (l) => lines.push(l));
+    report.expect('2', ['a', 'b']);
+    await report.check('2', 'a', async () => {
+      throw new Error('lost one');
+    });
+    await report.check('3', 'c', async () => 'ok');
+    report.summary();
+    expect(lines.slice(-2)).toEqual(['FAIL 2: 1 expected check never reported: b', 'PASS 3']);
+  });
+
   it('starts no check once the run is interrupted', async () => {
     const stop = new AbortController();
     const report = new ItemReport(['2'], () => {}, stop.signal);

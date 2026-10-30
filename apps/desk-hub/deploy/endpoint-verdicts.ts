@@ -305,6 +305,7 @@ export type CheckStatus = 'pass' | 'fail' | 'skip';
 export class ItemReport {
   readonly #checks = new Map<string, Array<{ status: CheckStatus; check: string; detail: string }>>();
   readonly #notes = new Map<string, string[]>();
+  readonly #expected = new Map<string, readonly string[]>();
 
   constructor(
     readonly items: readonly string[],
@@ -345,6 +346,15 @@ export class ItemReport {
     this.print(`${status === 'pass' ? 'ok  ' : status === 'fail' ? 'FAIL' : 'skip'} ${item} ${check}: ${detail}`);
   }
 
+  /**
+   * The checks `item` must report: one that never does (a path that returned before it, a check dropped from the code)
+   * fails the item, named. Its summary then says how many checks reported, so a check line lost on its way to the
+   * reader (a runner's filter) shows too.
+   */
+  expect(item: string, checks: readonly string[]): void {
+    this.#expected.set(item, [...checks]);
+  }
+
   /** A clause of the item this run does not show, with whose it is: printed under its summary line. */
   outstanding(item: string, text: string): void {
     this.#notes.set(item, [...(this.#notes.get(item) ?? []), `outstanding: ${text}`]);
@@ -358,11 +368,15 @@ export class ItemReport {
   /** The verdict of one item. */
   verdict(item: string): { word: 'PASS' | 'FAIL' | 'NOT SHOWN'; why?: string } {
     const checks = this.#checks.get(item) ?? [];
-    if (checks.some((c) => c.status === 'fail')) return { word: 'FAIL' };
+    const expected = this.#expected.get(item);
+    const absent = (expected ?? []).filter((name) => !checks.some((c) => c.check === name));
+    const never = absent.length > 0 ? `${absent.length} expected check${absent.length === 1 ? '' : 's'} never reported: ${absent.join('; ')}` : undefined;
+    if (checks.some((c) => c.status === 'fail')) return never === undefined ? { word: 'FAIL' } : { word: 'FAIL', why: never };
+    if (never !== undefined) return { word: 'FAIL', why: never };
     if (checks.length === 0) return { word: 'FAIL', why: 'nothing was checked' };
     const skipped = checks.filter((c) => c.status === 'skip');
     if (skipped.length > 0) return { word: 'NOT SHOWN', why: skipped.map((c) => `${c.check} (${c.detail})`).join('; ') };
-    return { word: 'PASS' };
+    return expected === undefined ? { word: 'PASS' } : { word: 'PASS', why: `${checks.length} checks reported, every one of the ${expected.length} expected among them` };
   }
 
   /** One line per item, its notes under it; whether every item passed. */
