@@ -254,6 +254,39 @@ describe('a front client’s session streams', () => {
     expect(ids(c.batched('s1'))).toEqual(ids([...before, ...during, ...after]));
   });
 
+  it('keeps the old launch’s epoch with its cursor when a new launch’s opening read fails, so the relink opens the new launch from its first event', async () => {
+    const host = new FakeEngineHost();
+    host.add('s1');
+    let failEvents = false;
+    const streams = new FrontStreams({
+      read: async (name, input) => {
+        if (name === 'session.events' && failEvents) {
+          failEvents = false;
+          return { ok: false };
+        }
+        return host.answer(name, input);
+      },
+      liveSessions: async () => [...host.sessions.keys()],
+      log: () => {},
+    });
+    cleanups.push(() => streams.stop());
+    cleanups.push(host.hosts.onRaw('engine-host', ({ name, payload }) => streams.liveEvent(name, payload)));
+    const batches: SessionEvent[] = [];
+    const follower = streams.follower((name, payload) => void (name === 'session.eventBatch' && batches.push(...(payload as { events: SessionEvent[] }).events)));
+    await follower.follow({ sessions: [{ appSessionId: 's1', cursor: null }], live: false });
+    const old = [...host.row('s1', 1), ...host.row('s1', 1), ...host.row('s1', 1)];
+    await vi.waitFor(() => expect(batches).toHaveLength(3));
+    failEvents = true; // the new launch's opening reads it from its start, and that read fails
+    host.relaunch('s1');
+    await vi.waitFor(() => expect(failEvents).toBe(false));
+    host.drop();
+    const fresh = host.row('s1', 2); // the new launch's row 1, written while the link was down
+    host.reconnect();
+    streams.relinked();
+    await vi.waitFor(() => expect(batches).toHaveLength(5));
+    expect(ids(batches)).toEqual(ids([...old, ...fresh]));
+  });
+
   it('does not wake a parked engine host: a stream of it waits, and opens from its launch’s first event at the link’s next streaming', async () => {
     const { host, client } = lab();
     host.add('s1');

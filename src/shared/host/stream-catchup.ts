@@ -267,9 +267,11 @@ export class SessionStreams {
     // A launch begun while the stream ran, or first seen after its opening failed, goes on from its first event,
     // whatever `from` says.
     const from: StreamFrom = how === 'relaunch' || relaunched || stream.unanswered ? 'start' : stream.from;
-    stream.epoch = launch;
     stream.engine = engineOf(status);
-    if (stream.view === 'cards') return this.#openCards(stream, gen, catchUp);
+    if (stream.view === 'cards') {
+      stream.epoch = launch;
+      return this.#openCards(stream, gen, catchUp);
+    }
 
     let mode: StreamMode = how === 'missing' ? 'missing' : 'snapshot';
     let first: Page | null = null;
@@ -288,7 +290,7 @@ export class SessionStreams {
         const page = await this.#events(stream, cursor.seq - 1);
         if (gen !== stream.gen) return;
         if (page === undefined) return this.#fail(stream);
-        if (this.#continues(stream, page, cursor)) {
+        if (this.#continues(stream, page, cursor, launch)) {
           mode = 'replay';
           at = cursor;
           first = page;
@@ -311,6 +313,9 @@ export class SessionStreams {
         first = page;
       }
     }
+    // The launch and the position in it are adopted together, once its reads answered: a stream whose read failed keeps
+    // the launch it stood in, so its next opening still sees this one as new (from its first event).
+    stream.epoch = launch;
     stream.queued = at;
     const state = await this.#readParts(stream, ['queue', 'pendingItems', 'catalog']);
     if (gen !== stream.gen) return;
@@ -597,8 +602,8 @@ export class SessionStreams {
    * A page read from a cursor's own row goes on from it: its first event in that row, no later than the one after it.
    * What a lost journal took is before the page's first event, so this holds whatever `historyUnavailable` says.
    */
-  #continues(stream: Stream, page: Page, from: At): boolean {
-    const first = page.events.length > 0 ? this.#cursor(stream, page.events[0]) : null;
+  #continues(stream: Stream, page: Page, from: At, epoch = stream.epoch): boolean {
+    const first = page.events.length > 0 ? this.#cursor(stream, page.events[0], epoch) : null;
     return first !== null && first.seq === from.seq && first.idx <= from.idx + 1;
   }
 
@@ -656,9 +661,9 @@ export class SessionStreams {
   }
 
   /** An event's place in its launch, from its id (`<appSessionId>:<launchId>:<seq>:<i>`); null for one not of a launch. */
-  #cursor(stream: Stream, event: SessionEvent): At | null {
+  #cursor(stream: Stream, event: SessionEvent, epoch = stream.epoch): At | null {
     const parsed = eventPosition(stream.app, event);
-    return parsed === null || parsed.launch !== stream.epoch ? null : { seq: parsed.seq, idx: parsed.idx };
+    return parsed === null || parsed.launch !== epoch ? null : { seq: parsed.seq, idx: parsed.idx };
   }
 
   /** An event of a launch other than the stream's: the session was launched again. */
