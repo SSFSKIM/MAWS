@@ -428,4 +428,24 @@ describe('SocketPort pty frames (P5 O2 M4)', () => {
     ]);
     expect(client.destroyed || server.destroyed).toBe(false);
   });
+
+  it('drops an answer\'s error too when that error would pass the cap itself (a long request id), and the connection stays', async () => {
+    const { server, client } = await pair();
+    const log = vi.fn();
+    const serverPort = new SocketPort(server, Buffer.alloc(0), { lineCap: 1024, log });
+    const clientPort = new SocketPort(client, Buffer.alloc(0), { lineCap: 1024 });
+    const atClient = receiving(clientPort);
+    serverPort.start();
+    clientPort.start();
+    const id = 'i'.repeat(850);
+    expect(serverPort.postMessage({ t: 'res', id, ok: true, value: 'x'.repeat(2048) })).toBe(true);
+    serverPort.postMessage({ t: 'res', id: '8', ok: true, value: 'small' });
+    await until(() => atClient.length === 1);
+    expect(atClient).toEqual([{ t: 'res', id: '8', ok: true, value: 'small' }]);
+    expect(log.mock.calls.map(([line]) => line)).toEqual([
+      expect.stringMatching(/^refused to write the answer to request i+: \d+ bytes, over the 1024-byte line cap$/),
+      expect.stringMatching(/^refused to write its error too: \d+ bytes, over the 1024-byte line cap$/),
+    ]);
+    expect(client.destroyed || server.destroyed).toBe(false);
+  });
 });

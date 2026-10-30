@@ -109,7 +109,15 @@ export class SocketPort implements HostPort {
     this.log(`refused to write ${what}: ${bytes} bytes, over the ${this.lineCap}-byte line cap`);
     if (record?.t !== 'res' || typeof record.id !== 'string') return true;
     const error = ipcError('internal', `the answer is ${bytes} bytes, over the ${this.lineCap}-byte line cap of the connection it would cross`, { tooLarge: { bytes, cap: this.lineCap } });
-    return this.write(`${encodeJsonLine({ t: 'res', id: record.id, ok: false, error })}\n`);
+    const reply = encodeJsonLine({ t: 'res', id: record.id, ok: false, error });
+    // A request id is unbounded, so the error can pass the cap too; it is then dropped like any other message over it,
+    // and the requester waits out its deadline rather than the connection closing.
+    const replyBytes = Buffer.byteLength(reply);
+    if (replyBytes > this.lineCap) {
+      this.log(`refused to write its error too: ${replyBytes} bytes, over the ${this.lineCap}-byte line cap`);
+      return true;
+    }
+    return this.write(`${reply}\n`);
   }
 
   // P3-A M5 start: a document frame for `channel`, under postMessage's rules.
