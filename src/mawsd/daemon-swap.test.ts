@@ -50,6 +50,21 @@ describe('a private mawsd whose bundle was replaced', () => {
     expect(scene.spawn).toHaveBeenCalledTimes(1);
   });
 
+  it('waiting for an incompatible engine host when its bundle is replaced: once that host is gone, parked with no refusal, not crashed', async () => {
+    const old = await scene.engine({ protocol: 99, counts: { liveSessions: 3, rows: 3 } });
+    const daemon = await scene.start();
+    expect(await daemon.services.dispatch('engine-host', 'engine.ping', undefined)).toMatchObject({ ok: false, error: { message: expect.stringContaining('is crashed') } });
+    expect(daemon.hosts.refusal('engine-host')).toMatchObject({ reason: 'protocol', liveSessions: 3 }); // waiting for it
+    replaceBundle();
+    await old.supervisor.die(); // the transport's own retry finds nothing, and would spawn
+    await until(() => daemon.hosts.parked('engine-host'), 5_000, 'the park');
+    expect(daemon.hosts.snapshot('engine-host').state).not.toBe('crashed');
+    expect(daemon.hosts.refusal('engine-host')).toBeNull();
+    expect(await daemon.services.dispatch('engine-host', 'engine.ping', undefined)).toMatchObject({ ok: false, error: { message: expect.stringMatching(REPLACED) } });
+    expect(scene.spawn).not.toHaveBeenCalled();
+    expect(daemon.hosts.facts('engine-host').lastExit).toBeNull();
+  });
+
   it('loads no deferred chunk from the files now on disk: the spine’s load fails with the reason', async () => {
     const load = vi.fn(async () => {
       throw new Error('the services chunk was loaded');
