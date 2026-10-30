@@ -9,6 +9,7 @@ import { startPortAnswers } from '../client/port-answers';
 import type { DaemonStatusWatch } from '../hosts';
 import { clientOfId } from '../ipc/clients';
 import { createMirrorSpineView } from './spine-mirror';
+import { installDaemonE2eSeams } from './daemon-e2e-seams';
 
 export interface DaemonSpineOptions {
   hosts: HostSupervisor;
@@ -24,10 +25,12 @@ export function startDaemonSpine({ hosts, daemon, port, browserSocket }: DaemonS
   // the spine's state (a load the lock refused, one that succeeded after) changes at no host transition: host.status
   // reads it from the daemon's status, read again at each change of the mirror's availability
   const offAvailability = mirror.view.on('availability', () => daemon.refresh());
+  const stopSeams = installDaemonE2eSeams(hosts, process.env); // M5b fix round 2: the e2e's spine seams, relayed to mawsd
   return {
     view: mirror.view,
     stop() {
       offAvailability();
+      stopSeams();
       stopAnswers();
       mirror.stop();
     },

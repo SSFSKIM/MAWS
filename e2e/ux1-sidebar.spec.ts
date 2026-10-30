@@ -18,9 +18,9 @@ async function size(maws: MawsLaunch, width: number, height: number): Promise<vo
 
 async function advance(maws: MawsLaunch, at: number): Promise<void> {
   await maws.app.evaluate((_electron, at) => {
-    const scenario = (globalThis as { __maws_scenario?: { advanceTo(ms: number): void } }).__maws_scenario;
+    const scenario = (globalThis as { __maws_scenario?: { advanceTo(ms: number): unknown } }).__maws_scenario;
     if (!scenario) throw new Error('Missing manual scenario clock');
-    scenario.advanceTo(at);
+    return scenario.advanceTo(at); // M5b fix round 2: on the daemon shape a relay to mawsd, awaited (D11)
   }, at);
 }
 

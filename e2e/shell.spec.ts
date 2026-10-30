@@ -997,9 +997,9 @@ async function openPalette(app: ElectronApplication, page: Page): Promise<void> 
 // Plays the scenario's timeline up to `ms` (the manual clock, MAWS_SCENARIO_CLOCK=manual).
 async function advanceTo(app: ElectronApplication, ms: number): Promise<void> {
   await app.evaluate((_electron, ms) => {
-    const scenario = (globalThis as { __maws_scenario?: { advanceTo(ms: number): void } }).__maws_scenario;
+    const scenario = (globalThis as { __maws_scenario?: { advanceTo(ms: number): unknown } }).__maws_scenario;
     if (!scenario) throw new Error('no scenario clock: the app is not in launch mode scenario with MAWS_SCENARIO_CLOCK=manual');
-    scenario.advanceTo(ms);
+    return scenario.advanceTo(ms); // M5b fix round 2: on the daemon shape a relay to mawsd, awaited (D11)
   }, ms);
 }
 

@@ -87,6 +87,12 @@ export const commands = {
     z.strictObject({ command: z.string(), args: z.array(z.string()), secret: z.string().optional() }),
     z.strictObject({ code: z.number().int(), out: z.string() }),
   ),
+  // M5b fix round 2 (D11): the e2e's seams that live with the spine, run in `mawsd` on the daemon shape (src/mawsd/e2e-seam.ts):
+  // the scenario's manual clock played to `ms`, the library's refreshes held; refused unless `mawsd` runs under MAWS_E2E=1
+  'daemon.e2eSeam': machine(
+    z.discriminatedUnion('seam', [z.strictObject({ seam: z.literal('scenario.advanceTo'), ms: z.number().int().nonnegative() }), z.strictObject({ seam: z.literal('library.holdRefreshes') })]),
+    z.void(),
+  ),
 } as const satisfies Record<`daemon.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {} as const satisfies Record<`daemon.${string}`, z.ZodType>;

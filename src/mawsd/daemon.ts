@@ -82,6 +82,7 @@ import { ipcError } from '@shared/ipc/errors';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import { MAX_IDLE_EXIT_MS } from '@shared/ipc/schema/host';
 import type { DaemonHost, DaemonStatus } from '@shared/ipc/schema/daemon';
+import type { CommandInput } from '@shared/ipc/schema';
 import { WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { machineEnrollment, machineName, machineProject } from '@shared/machine/identity';
@@ -94,6 +95,7 @@ import { ptyHostFiles } from '../pty-host/files';
 import { DaemonClocks, DEFAULT_IDLE_EXIT_MS } from './clocks';
 import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOINT_MODULE, type CheckoutSource, type DaemonServices, type EndpointModule } from './endpoint-seam';
 import { createServicesFront, spineTakes } from './front';
+import { runE2eSeam } from './e2e-seam'; // M5b fix round 2
 import { DEPARTURE_BOUND_MS, Relay, type RelayRequest } from './relay';
 import { createLazySpine, loadServicesEntry, type SpineEntry, type SpineTiming } from './spine-seam';
 import { trashPath } from './trash';
@@ -711,6 +713,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         log('restart asked');
         setImmediate(() => void stop('restart', EXIT_RESTART)); // after the answer is written
         return undefined;
+      case 'daemon.e2eSeam':
+        return runE2eSeam(input as CommandInput<'daemon.e2eSeam'>, env); // M5b fix round 2: the e2e's seams with the spine
       case 'daemon.endpoint': {
         const { command, args, secret } = input as { command: string; args: string[]; secret?: string };
         if (!endpoint) return { code: 2, out: NO_ENDPOINT_MODULE };

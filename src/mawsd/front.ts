@@ -58,7 +58,7 @@ import { SpineUnavailable } from './spine-seam';
 import type { EngineIntercept } from './spine-hosts';
 
 // The front's own `machine` names, answered without the spine: the daemon's, the identity, and a client's own.
-export const FRONT_COMMANDS = ['clientPort.answer', 'daemon.endpoint', 'daemon.restart', 'daemon.status', 'machine.client', 'machine.identity', 'session.follow'] as const;
+export const FRONT_COMMANDS = ['clientPort.answer', 'daemon.e2eSeam', 'daemon.endpoint', 'daemon.restart', 'daemon.status', 'machine.client', 'machine.identity', 'session.follow'] as const;
 // The names a machine.sock client asks of the front for itself, never the endpoint.
 const CLIENT_COMMANDS: ReadonlySet<string> = new Set(['clientPort.answer', 'machine.client', 'session.follow']);
 // P5 O3-D M5 (D44(3)): the engine host's names the spine's session service intercepts in launch mode `index`
@@ -152,6 +152,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
 
   const own: Record<(typeof FRONT_COMMANDS)[number], (input: unknown, context: HandlerContext, from: FrontClient | null) => unknown> = {
     'clientPort.answer': (input, _context, from) => clientPort.answer(from!, input as CommandInput<'clientPort.answer'>),
+    'daemon.e2eSeam': async (input) => void (await options.daemon('daemon.e2eSeam', input)),
     'daemon.endpoint': (input) => options.daemon('daemon.endpoint', input),
     'daemon.restart': async () => void (await options.daemon('daemon.restart', undefined)),
     'daemon.status': () => options.daemon('daemon.status', undefined),
