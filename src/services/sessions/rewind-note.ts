@@ -10,6 +10,13 @@
 // The resume that `session.start` and `session.acquire` both reach (resume.ts) re-sends a note it finds once, between its
 // launch's ready and any input; an anchor that landed answers `target_not_found`, which changes nothing.
 //
+// P5 O3-D M5a (D44(3), D47): a phone's act reaches the engine host as lane B's claimed `host.op`, run inside the host by
+// its op ledger. One whose inner command is the rewind or a conversation act goes through the note as a local one does
+// (`claimed`): the rewind's `attempted` written before the op is forwarded, its outcome read from the op's answer
+// (`rewound: true` confirms; a refusal before it ran, `rewound: false` or the host's refusal before it wrote the request
+// deletes), an act's accepted answer clearing the note. An op the host's ledger already knows (a retried action, whose
+// answer the ledger replays and which runs nothing) touches no note.
+//
 // A note names the launch it was sent to (the live row's at the rewind; the resume's own once a re-send landed), so only
 // that launch's end can clear it: a resume that fails after its launch stops a process the rewind never reached.
 import { rm } from 'node:fs/promises';
@@ -20,6 +27,7 @@ import type { RewindOutcome } from '@shared/engine/rewind-outcome';
 import { HostCommandError } from '@shared/host/runtime';
 import type { HostDispatch } from '@shared/host/host-supervisor';
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
+import { validateCommandInput } from '@shared/ipc/validate';
 import { hostCall, reservationOf } from './context';
 import { fileOf, readAll, writeWhole } from './json-files';
 import { messageOf, SetupFailure } from './setup-steps';
@@ -42,6 +50,8 @@ export type RewindNote = z.infer<typeof RewindNoteSchema>;
 // last-seen cursor, which the engine's guard against discarding an unseen turn refuses.
 export const CONVERSATION_ACTS = ['session.send', 'session.steer', 'session.queue.promote', 'session.bash'] as const;
 export type ConversationAct = (typeof CONVERSATION_ACTS)[number];
+const isAct = (name: string): name is ConversationAct => (CONVERSATION_ACTS as readonly string[]).includes(name);
+type Op = CommandOutput<'host.op'>;
 
 // The engine host's refusals before it writes the request to the engine (src/engine-host/ipc.ts `sessionOf`, rewind.ts
 // `clientOf`): nothing reached the engine, so nothing can land later. Any other failure (a timeout, a process that exited
@@ -88,17 +98,7 @@ export class RewindNotes {
   // `session.rewind`, through the note. A note that cannot be written refuses the rewind unsent.
   async rewind(input: CommandInput<'session.rewind'>): Promise<CommandOutput<'session.rewind'>> {
     const appSessionId = input.appSessionId as AppSessionId;
-    const live = await reservationOf(this.deps.dispatch, appSessionId).catch(() => null);
-    const note: RewindNote = {
-      appSessionId,
-      state: 'attempted',
-      targetMessageUuid: input.targetMessageUuid as MessageUuid, // the input passed the branded id schema
-      lastSeenMessageUuid: input.lastSeenMessageUuid as MessageUuid,
-      files: input.files,
-      launchId: live?.launchId ?? null,
-      at: this.deps.now(),
-    };
-    await this.update(appSessionId, () => note);
+    const note = await this.attempt(input);
     const result = await this.forward(appSessionId, () => this.deps.dispatch('engine-host', 'session.rewind', input));
     if (!result.ok) {
       if (result.error.code === 'internal' && UNSENT.test(result.error.message)) await this.settle(note, null);
@@ -107,6 +107,43 @@ export class RewindNotes {
     const outcome = result.value as RewindOutcome;
     await this.settle(note, outcome.rewound ? { ...note, state: 'confirmed' } : null);
     return outcome;
+  }
+
+  // P5 O3-D M5a (D47): lane B's claimed op (above). Its inner input is read as the command's own; one the command's schema
+  // refuses goes on untouched, for the host's ledger to refuse `malformed`.
+  async claimed(input: CommandInput<'host.op'>): Promise<Op> {
+    const send = () => this.deps.dispatch('engine-host', 'host.op', input);
+    const answered = (result: Awaited<ReturnType<typeof send>>): Op => {
+      if (!result.ok) throw new HostCommandError(result.error);
+      return result.value as Op;
+    };
+    const name = input.name;
+    if (name !== 'session.rewind' && !isAct(name)) return answered(await send());
+    const inner = validateCommandInput(name, input.input);
+    if (!inner.ok) return answered(await send());
+    const appSessionId = (inner.value as { appSessionId: string }).appSessionId as AppSessionId;
+    // a retried action: the ledger answers what it holds and runs nothing (or refuses it as expired); no note moves
+    const known = await this.deps.dispatch('engine-host', 'host.opQuery', { opId: input.opId, opCreated: input.opCreated, tombstoneIfAbsent: false });
+    const state = known.ok ? (known.value as CommandOutput<'host.opQuery'>).state : 'unavailable';
+    if (state === 'done' || state === 'in-progress' || state === 'expired') return answered(await send());
+
+    if (isAct(name)) {
+      const before = this.forwarded.get(appSessionId) ?? 0;
+      const op = answered(await send());
+      if (op.state === 'done' && op.result.ok) await this.quietly(appSessionId, (note) => (note === null || (this.forwarded.get(appSessionId) ?? 0) !== before ? undefined : null));
+      return op;
+    }
+    const note = await this.attempt(inner.value as CommandInput<'session.rewind'>);
+    const result = await this.forward(appSessionId, send);
+    if (!result.ok) {
+      if (result.error.code === 'internal' && UNSENT.test(result.error.message)) await this.settle(note, null);
+      throw new HostCommandError(result.error);
+    }
+    const op = result.value as Op;
+    if (op.state === 'refused') await this.settle(note, null); // the ledger ran nothing: its context, its input, a conflict
+    else if (op.state === 'done' && op.result.ok) await this.settle(note, (op.result.value as RewindOutcome | undefined)?.rewound ? { ...note, state: 'confirmed' } : null);
+    else if (op.state === 'done' && !op.result.ok && op.result.error.code === 'internal' && UNSENT.test(op.result.error.message)) await this.settle(note, null);
+    return op; // `in-progress`, or a failure after the request may have been written: `attempted` kept
   }
 
   // A conversation act, forwarded; once the host accepted it the note it followed has served (a rewind forwarded after
@@ -125,6 +162,23 @@ export class RewindNotes {
   private forward<T>(appSessionId: AppSessionId, send: () => Promise<T>): Promise<T> {
     this.forwarded.set(appSessionId, (this.forwarded.get(appSessionId) ?? 0) + 1);
     return send();
+  }
+
+  // The rewind's note, `attempted`, written before its forward. A note that cannot be written refuses the rewind unsent.
+  private async attempt(input: CommandInput<'session.rewind'>): Promise<RewindNote> {
+    const appSessionId = input.appSessionId as AppSessionId;
+    const live = await reservationOf(this.deps.dispatch, appSessionId).catch(() => null);
+    const note: RewindNote = {
+      appSessionId,
+      state: 'attempted',
+      targetMessageUuid: input.targetMessageUuid as MessageUuid, // the input passed the branded id schema
+      lastSeenMessageUuid: input.lastSeenMessageUuid as MessageUuid,
+      files: input.files,
+      launchId: live?.launchId ?? null,
+      at: this.deps.now(),
+    };
+    await this.update(appSessionId, () => note);
+    return note;
   }
 
   // ---- what the service tells it -------------------------------------------------------------------------------------

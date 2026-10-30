@@ -124,8 +124,9 @@ describe('the spine inside mawsd', () => {
     expect(spine.state()).toBe('loaded');
     expect(link.calls.map((call) => call.name)).toContain('engine.sessions'); // the resync's listing, through the adapter
     expect(front.commands()).toEqual([...SPINE_COMMANDS, ...FRONT_COMMANDS].sort());
-    // P5 O3-D M5 (D44(3)): the engine-host names the front loads a cold spine for are those the spine intercepts
-    expect(front.intercepts()).toEqual([...SPINE_ENGINE_INTERCEPTS].sort());
+    // P5 O3-D M5 (D44(3)): the engine-host names the front loads a cold spine for are those the spine intercepts, and
+    // lane B's claimed op (D47), which the spine takes for an inner name among them
+    expect(front.intercepts()).toEqual([...SPINE_ENGINE_INTERCEPTS, 'host.op'].sort());
   }, 30_000);
 
   it('releases after the quiet period, every part stopped and its listeners gone, and loads again at the next trigger', async () => {

@@ -7,7 +7,7 @@ import { REGISTRY } from '@shared/ipc/registry';
 import type { CommandName } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import { status as statusOf } from '../../test/support/builders';
-import { createServicesFront, FRONT_COMMANDS, LATER_COMMANDS, SPINE_ENGINE_INTERCEPTS, type FrontOptions } from './front';
+import { createServicesFront, FRONT_COMMANDS, LATER_COMMANDS, SPINE_ENGINE_INTERCEPTS, spineTakes, type FrontOptions } from './front';
 import { SpineUnavailable } from './spine-seam';
 
 const IDENTITY = { ref: 'TestMachineRef00000000' as MachineRef, name: 'test machine', project: { key: 'machine:TestMachineRef00000000', name: 'test machine', smnsId: null } };
@@ -91,7 +91,7 @@ describe('the services front', () => {
 
   it('answers the refusal on every spine command: host_unavailable naming the holder', async () => {
     const refusal = 'spine.lock is held by pid 4321 (build 1.0.0+abc), so this run starts none of the machine’s services and writes none of its files';
-    const { client } = front({ spine: { ensure: async () => Promise.reject(new SpineUnavailable(refusal)) } });
+    const { client } = front({ spine: { ensure: async () => Promise.reject(new SpineUnavailable(refusal, 'refused')) } });
     const c = client();
     for (const name of ['session.list', 'attention.list', 'library.list']) {
       expect(await c.request(name, name === 'attention.list' ? undefined : name === 'session.list' ? { includeArchived: false } : {})).toMatchObject({ ok: false, error: { code: 'host_unavailable', message: refusal } });
@@ -138,7 +138,7 @@ describe('the services front', () => {
   });
 
   it('forwards an intercepted name raw when the spine cannot load, and never loads it for a name it does not intercept', async () => {
-    const ensure = vi.fn(async () => Promise.reject(new SpineUnavailable('spine.lock is held by pid 4321 (build old)')));
+    const ensure = vi.fn(async () => Promise.reject(new SpineUnavailable('spine.lock is held by pid 4321 (build old)', 'refused')));
     const { client, forwarded, logs } = front({ spine: { ensure } });
     const c = client();
     expect(await c.request('session.rewind', REWIND)).toMatchObject({ ok: true, value: { forwarded: 'session.rewind' } });
@@ -149,12 +149,23 @@ describe('the services front', () => {
     expect(forwarded.map((f) => f.name)).toEqual(['session.rewind', 'engine.sessions']);
   });
 
+  // Review fix: only the spine's classified states (the lock's refusal, the yield) leave a request to go on raw
+  it('answers host_unavailable and forwards nothing when the load fails otherwise (a chunk error, the daemon’s exit)', async () => {
+    for (const failure of [new Error('database disk image is malformed'), new SpineUnavailable('the daemon is exiting', 'exiting')]) {
+      const harness = front({ spine: { ensure: vi.fn(async () => Promise.reject(failure)) } });
+      expect(await harness.client().request('session.rewind', REWIND)).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+      expect(await harness.served.dispatch('host.op', { opId: 'phone-op-00000001', opCreated: 'c', member: 'm', device: 'd', fingerprint: 'f', name: 'session.rewind', input: REWIND, context: { launchId: 'l', engineSessionId: 'e' } })).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+      expect(await harness.served.intercepted('session.answer', { appSessionId: 'a', requestId: 'r', answer: { kind: 'permission', decision: 'deny' } })).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+      expect(harness.forwarded).toEqual([]);
+    }
+  });
+
   it('intercepted: the spine’s intercept for a relayed request, loaded for it; null for another name or an unloadable spine', async () => {
     let loadable = true;
     const harness = front({
       spine: {
         ensure: vi.fn(async () => {
-          if (!loadable) throw new SpineUnavailable('yielded');
+          if (!loadable) throw new SpineUnavailable('yielded', 'yielded');
           if (harness.served.intercepts().length === 0) harness.served.bus.intercept('session.rewind', () => REWOUND as never);
           return {} as never;
         }),
@@ -167,6 +178,15 @@ describe('the services front', () => {
     harness.served.unbind();
     loadable = false;
     expect(await harness.served.intercepted('session.rewind', REWIND, ref)).toBeNull();
+  });
+
+  it('spineTakes: an intercepted name, and lane B’s claimed op (host.op) of one (D47); not a claimed op of another', () => {
+    expect(spineTakes('session.rewind', REWIND)).toBe(true);
+    expect(spineTakes('host.op', { name: 'session.rewind', input: REWIND })).toBe(true);
+    expect(spineTakes('host.op', { name: 'session.steer', input: {} })).toBe(true);
+    expect(spineTakes('host.op', { name: 'session.stop', input: {} })).toBe(false);
+    expect(spineTakes('host.op', undefined)).toBe(false);
+    expect(spineTakes('engine.sessions', { name: 'session.rewind' })).toBe(false);
   });
 
   it('SPINE_ENGINE_INTERCEPTS names engine-host commands only', () => {

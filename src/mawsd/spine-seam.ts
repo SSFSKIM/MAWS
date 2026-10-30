@@ -89,8 +89,16 @@ export interface LazySpine {
   stop(): Promise<void>; // the daemon's exit order: release without re-execution, bounded
 }
 
-// Not loadable now: the refusal (the lock's holder named) or the yield.
-export class SpineUnavailable extends Error {}
+// Not loadable now: the refusal (the lock's holder named), the yield, or the daemon's exit. A request the spine intercepts
+// goes on without it for the first two only (front.ts): the note is then the lock holder's or the yielded-to app's.
+export class SpineUnavailable extends Error {
+  constructor(
+    message: string,
+    readonly why: 'refused' | 'yielded' | 'exiting',
+  ) {
+    super(message);
+  }
+}
 
 const WORKING_REASONS = new Set(['turn', 'busy', 'background_tasks']);
 
@@ -151,15 +159,15 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
 
   async function ensure(reason: SpineTrigger): Promise<SpineRoot> {
     for (;;) {
-      if (stopped) throw new SpineUnavailable('the daemon is exiting');
-      if (yieldTo) throw new SpineUnavailable(`the spine yielded to pid ${yieldTo.pid}, an app that runs its own`);
+      if (stopped) throw new SpineUnavailable('the daemon is exiting', 'exiting');
+      if (yieldTo) throw new SpineUnavailable(`the spine yielded to pid ${yieldTo.pid}, an app that runs its own`, 'yielded');
       if (loaded && state === 'loaded') return loaded.root;
       if (loading) return loading;
       if (releasing) {
         await releasing;
         continue;
       }
-      if (state === 'refused' && !loadable()) throw new SpineUnavailable(refusal!.reason);
+      if (state === 'refused' && !loadable()) throw new SpineUnavailable(refusal!.reason, 'refused');
       const candidate = options.yieldCandidate?.() ?? null; // P5 O3-D M5 (D21): read at each load attempt
       if (candidate !== null) {
         yieldSpine(candidate);
@@ -226,12 +234,12 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
 
   // read through a call: the exit begins while the load awaits
   function throwIfExiting(): void {
-    if (stopped) throw new SpineUnavailable('the daemon is exiting');
+    if (stopped) throw new SpineUnavailable('the daemon is exiting', 'exiting');
   }
 
   // read through a call: a yield arrives while the load awaits
   function throwIfYielded(): void {
-    if (yieldTo) throw new SpineUnavailable(`the spine yielded to pid ${yieldTo.pid} while it loaded`);
+    if (yieldTo) throw new SpineUnavailable(`the spine yielded to pid ${yieldTo.pid} while it loaded`, 'yielded');
   }
 
   function refuse(reason: string): never {
@@ -239,7 +247,7 @@ export function createLazySpine(options: LazySpineOptions): LazySpine {
     events.discard('the spine is refused', 'cold');
     set('refused', reason);
     log(`[spine] refused: ${reason}`);
-    throw new SpineUnavailable(reason);
+    throw new SpineUnavailable(reason, 'refused');
   }
 
   // --- the release ------------------------------------------------------------------------------------------------------

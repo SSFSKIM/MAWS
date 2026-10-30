@@ -8,9 +8,10 @@
 //
 // P5 O3-D M5a (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §L, D21): the `SingletonLock` probe. The
 // yield's second signal reads Electron's single-instance lock in the profile, which Chromium writes on Linux as a
-// symlink `<host>-<pid>`; what macOS Electron writes there is unknown until a launch on a scratch profile shows it. The
+// symlink `<host>-<pid>`; what macOS Electron writes there was unknown until a launch on a scratch profile showed it. The
 // probe records it (one `[probe] SingletonLock …` line, an annotation and an attachment) and asserts nothing about its
-// form; `mawsd`'s use of it stays switched off (SINGLETON_LOCK_SIGNAL_DEFAULT) until the line is read.
+// form. Its line (hosted e2e:settings run 40978897272): a symlink `<host>-<pid>` naming the app's pid, removed at a
+// clean quit, so `mawsd` reads it (SINGLETON_LOCK_SIGNAL_DEFAULT on, under claimSpine).
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';

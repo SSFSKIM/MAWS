@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { rename as fsRename } from 'node:fs/promises';
 import { trashPath } from './trash';
 
 let root: string;
@@ -73,6 +74,53 @@ describe('the trash on macOS', () => {
     expect(renames).toEqual([path]);
     expect(existsSync(path)).toBe(false);
     expect(readFileSync(join(home, '.Trash', 'big.bin'), 'utf8')).toBe('bytes');
+  });
+});
+
+// Review fix: two moves of a same-named item at once, each reaching its rename only once both have chosen a name (a
+// rendezvous), never land on one name: each claims its name before the move, so neither item is lost.
+describe('two moves of one name at once', () => {
+  function rendezvous() {
+    let arrived = 0;
+    let release!: () => void;
+    const both = new Promise<void>((resolve) => (release = resolve));
+    return async (from: string, to: string) => {
+      arrived += 1;
+      if (arrived === 2) release();
+      await both;
+      await fsRename(from, to);
+    };
+  }
+
+  for (const platform of ['darwin', 'linux'] as const) {
+    for (const kind of ['file', 'directory'] as const) {
+      it(`${platform}: two ${kind === 'file' ? 'files' : 'directories'} of one name both land, each under its own name`, async () => {
+        const env = { XDG_DATA_HOME: join(root, 'xdg') };
+        const trash = platform === 'darwin' ? join(home, '.Trash') : join(root, 'xdg', 'Trash', 'files');
+        const read = (path: string) => readFileSync(kind === 'file' ? path : join(path, 'body'), 'utf8');
+        const sources = ['one', 'two'].map((where) => {
+          const path = join(root, where, 'report');
+          mkdirSync(kind === 'file' ? join(root, where) : path, { recursive: true });
+          writeFileSync(kind === 'file' ? path : join(path, 'body'), where);
+          return path;
+        });
+        const rename = rendezvous();
+        await Promise.all(sources.map((path) => trashPath(path, { platform, home, env, now: () => AT, rename })));
+        const held = readdirSync(trash);
+        expect(held).toHaveLength(2);
+        expect(held.map((name) => read(join(trash, name))).sort()).toEqual(['one', 'two']);
+      });
+    }
+  }
+
+  it('across devices (EXDEV), a directory lands whole on the name it claimed', async () => {
+    const dir = join(root, 'worktree');
+    mkdirSync(join(dir, 'src'), { recursive: true });
+    writeFileSync(join(dir, 'src', 'a.ts'), 'a');
+    const exdev = async () => Promise.reject(Object.assign(new Error('cross-device link not permitted'), { code: 'EXDEV' }));
+    await trashPath(dir, { platform: 'darwin', home, env: {}, rename: exdev });
+    expect(existsSync(dir)).toBe(false);
+    expect(readFileSync(join(home, '.Trash', 'worktree', 'src', 'a.ts'), 'utf8')).toBe('a');
   });
 });
 

@@ -53,8 +53,9 @@ const SPINE_REFUSED_COMMANDS = [
   'session.recentTurns', 'session.search', 'session.setVisible', 'session.update',
   'settings.engineApplied', 'settings.userEngineDefaults',
 ];
-// P5 O3-D M4 (D18): the rewind's last-act note and the conversation acts that clear it, in launch mode index
-const SPINE_INTERCEPTS = ['session.answer', 'session.rewind', 'session.send', 'session.steer', 'session.queue.promote', 'session.bash'];
+// P5 O3-D M4 (D18): the rewind's last-act note and the conversation acts that clear it, in launch mode index; M5a (D47):
+// lane B's claimed op, for a phone's rewind or act
+const SPINE_INTERCEPTS = ['session.answer', 'session.rewind', 'session.send', 'session.steer', 'session.queue.promote', 'session.bash', 'host.op'];
 const SPINE_REFUSED_INTERCEPTS = ['session.answer']; // no session service: nothing to repair
 const SPINE_TAPS = ['attention.changed', 'session.eventBatch', 'session.intent.changed', 'session.projects.changed'];
 const SPINE_REFUSED_TAPS = ['attention.changed', 'session.eventBatch', 'session.intent.changed']; // no projects to follow: the index is unavailable

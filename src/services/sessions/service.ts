@@ -1042,6 +1042,12 @@ export class SessionService {
     return this.rewinds.act(name, input);
   }
 
+  // P5 O3-D M5a (D47): lane B's claimed op (`host.op`, the endpoint's), through the note when it runs the rewind or a
+  // conversation act (rewind-note.ts's `claimed`)
+  claimedOp(input: CommandInput<'host.op'>): Promise<CommandOutput<'host.op'>> {
+    return this.rewinds.claimed(input);
+  }
+
   // `session.trust.check`, read with the environment the engine receives.
   async trustCheck(directory: string): Promise<TrustState> {
     const s = await this.ready();

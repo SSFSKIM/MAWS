@@ -6,7 +6,7 @@
 // spine is bound to. Over the daemon in this process, stand-in hosts on real sockets (test/support/mawsd-scene.ts) and a
 // stand-in of the services chunk with the real spine.lock.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lutimesSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
@@ -51,7 +51,7 @@ async function otherApp(): Promise<number> {
 }
 
 // The services chunk as the seam loads it: the real lock, and a root that registers one command and intercepts the
-// rewind, noting each it is handed
+// rewind and lane B's claimed op (D47), noting each it is handed
 function standInChunk() {
   const noted: unknown[] = [];
   const stops = vi.fn();
@@ -63,6 +63,7 @@ function standInChunk() {
       deps.push(started);
       started.bus.register('session.launchMode', () => ({ mode: 'index' }));
       started.bus.intercept('session.rewind', (input) => (noted.push(input), REWOUND));
+      started.bus.intercept('host.op', (input) => (noted.push(input), { state: 'done', result: { ok: true, value: REWOUND } }));
       return { view: { engineStatuses: () => [], on: () => () => {} } as never, settled: async () => {}, busy: () => false, stop: stops };
     },
   });
@@ -156,17 +157,19 @@ describe('the yield (§L), behind claimSpine', () => {
 });
 
 // D21: the profile's SingletonLock, Chromium's `<host>-<pid>` symlink, read at each load attempt
-describe('the second signal (D21), behind its own switch', () => {
+describe('the second signal (D21), on since the probe answered, under claimSpine', () => {
   async function singleton(): Promise<number> {
     const pid = await otherApp();
     symlinkSync(`${hostname()}-${pid}`, join(scene.root, 'SingletonLock'));
     return pid;
   }
 
-  it('is off by default, and off without claimSpine', async () => {
-    expect(SINGLETON_LOCK_SIGNAL_DEFAULT).toBe(false);
+  // e2e:settings' probe (hosted run 40978897272): macOS Electron's SingletonLock is a symlink `<host>-<pid>` naming the
+  // app's own pid, and a clean quit removes it
+  it('is on by default, and off without claimSpine or with its own switch off', async () => {
+    expect(SINGLETON_LOCK_SIGNAL_DEFAULT).toBe(true);
     await singleton();
-    for (const options of [{ claimSpine: true }, { singletonSignal: true }]) {
+    for (const options of [{}, { singletonSignal: true }, { claimSpine: true, singletonSignal: false }]) {
       const chunk = standInChunk();
       const daemon = await scene.start({ ...options, spine: { load: chunk.load } });
       expect(await (await scene.app('machine')).request('session.launchMode')).toMatchObject({ ok: true });
@@ -174,16 +177,34 @@ describe('the second signal (D21), behind its own switch', () => {
     }
   });
 
-  it('with it on, a load attempt yields to the live app the SingletonLock names, until a hello of that pid lists machine.spine', async () => {
+  it('with claimSpine, a load attempt yields to the live app the SingletonLock names, until a hello of that pid lists machine.spine', async () => {
     const pid = await singleton();
     const chunk = standInChunk();
-    await scene.start({ claimSpine: true, singletonSignal: true, spine: { load: chunk.load } });
+    await scene.start({ claimSpine: true, spine: { load: chunk.load } });
     const client = await scene.app('machine');
     expect(await client.request('session.launchMode')).toMatchObject({ ok: false, error: { code: 'host_unavailable', message: expect.stringContaining(`yielded to pid ${pid}`) } });
     expect(scene.logs).toContainEqual(`[spine] SingletonLock names pid ${pid}, a live app that reads no spine of the machine’s and holds no spine.lock`);
     await scene.app('machine', { appPid: pid, capabilities: POST_D }); // a post-D app is never yielded to
     expect(scene.logs).toContainEqual(`[spine] pid ${pid} reads the machine’s spine (its hello lists machine.spine): the yield to it lifted`);
     expect(await client.request('session.launchMode')).toMatchObject({ ok: true });
+  });
+
+  it('a stale SingletonLock, left by a crash, is no signal: its pid gone, or alive but started after the lock was written (reused)', async () => {
+    const reused = await otherApp();
+    symlinkSync(`${hostname()}-${reused}`, join(scene.root, 'SingletonLock'));
+    const before = new Date(Date.now() - 3_600_000);
+    lutimesSync(join(scene.root, 'SingletonLock'), before, before); // written an hour before that process started
+    const chunk = standInChunk();
+    const daemon = await scene.start({ claimSpine: true, spine: { load: chunk.load } });
+    expect(await (await scene.app('machine')).request('session.launchMode')).toMatchObject({ ok: true });
+    await daemon.stop('test');
+    rmSync(join(scene.root, 'SingletonLock'));
+    const gone = spawn('/bin/sleep', ['0']);
+    await new Promise((exited) => gone.once('exit', exited));
+    symlinkSync(`${hostname()}-${gone.pid}`, join(scene.root, 'SingletonLock'));
+    const again = standInChunk();
+    await scene.start({ claimSpine: true, spine: { load: again.load } });
+    expect(await (await scene.app('machine')).request('session.launchMode')).toMatchObject({ ok: true });
   });
 
   it('a SingletonLock of another host, or naming a pid that holds spine.lock, is no signal', async () => {
@@ -233,7 +254,7 @@ describe('the spine’s intercepts on every path (D44(3))', () => {
     expect(await app.request('session.rewind', REWIND)).toMatchObject({ t: 'res', ok: true, value: REWOUND });
     expect(chunk.noted).toEqual([REWIND]);
     expect(await spineState()).toBe('loaded');
-    expect(scene.lastEngine().named('session.rewind')).toEqual([]); // the stand-in intercept answered it
+    expect(scene.lastEngine().named('session.rewind')).toEqual([REWIND]); // today's only: the stand-in intercept answered the post-D app's
   });
 
   it('the endpoint’s machine route: dispatch(machine, session.rewind) through the loaded spine’s intercept', async () => {
@@ -243,6 +264,43 @@ describe('the spine’s intercepts on every path (D44(3))', () => {
     expect(await seam.services().dispatch('machine', 'session.launchMode', undefined)).toMatchObject({ ok: true });
     expect(await seam.services().dispatch('machine', 'session.rewind', REWIND)).toMatchObject({ ok: true, value: REWOUND });
     expect(chunk.noted).toEqual([REWIND]);
+  });
+
+  // D47: a phone's rewind reaches mawsd through the endpoint's engine-host route, as lane B's claimed op or bare
+  const CLAIMED = { opId: 'phone-op-00000001', opCreated: '2026-10-30T00:00:00.000Z', member: 'member-1', device: 'phone-1', fingerprint: 'fp-1', name: 'session.rewind', input: REWIND, context: { launchId: 'l', engineSessionId: 'e' } };
+
+  it('under claimSpine, the spine cold: the endpoint’s engine-host route of a claimed rewind (host.op) and of a bare one loads it, and its intercepts note both', async () => {
+    const seam = endpoint();
+    const chunk = standInChunk();
+    await scene.start({ claimSpine: true, endpoint: seam.module, spine: { load: chunk.load } });
+    expect(await spineState()).toBe('cold');
+    expect(await seam.services().dispatch('engine-host', 'host.op', CLAIMED)).toMatchObject({ ok: true, value: { state: 'done', result: { ok: true, value: REWOUND } } });
+    expect(await spineState()).toBe('loaded');
+    expect(await seam.services().dispatch('engine-host', 'session.rewind', REWIND)).toMatchObject({ ok: true, value: REWOUND });
+    expect(chunk.noted).toEqual([CLAIMED, REWIND]);
+    expect(scene.engines.flatMap((engine) => [...engine.named('host.op'), ...engine.named('session.rewind')])).toEqual([]); // none reached the engine host
+  });
+
+  it('under claimSpine, a claimed op of a name the spine does not intercept goes on raw, the spine left cold', async () => {
+    const seam = endpoint();
+    const chunk = standInChunk();
+    await scene.start({ claimSpine: true, endpoint: seam.module, spine: { load: chunk.load } });
+    await seam.services().dispatch('engine-host', 'host.op', { ...CLAIMED, name: 'session.stop', input: { appSessionId: 'app-1' } });
+    expect(scene.lastEngine().named('host.op')).toHaveLength(1);
+    expect(await spineState()).toBe('cold');
+    expect(chunk.noted).toEqual([]);
+  });
+
+  it('with claimSpine off (today), the endpoint’s engine-host route forwards a claimed rewind and a bare one raw, the spine left cold', async () => {
+    const seam = endpoint();
+    const chunk = standInChunk();
+    await scene.start({ endpoint: seam.module, spine: { load: chunk.load } });
+    await seam.services().dispatch('engine-host', 'host.op', CLAIMED);
+    await seam.services().dispatch('engine-host', 'session.rewind', REWIND);
+    expect(scene.lastEngine().named('host.op')).toHaveLength(1);
+    expect(scene.lastEngine().named('session.rewind')).toHaveLength(1);
+    expect(await spineState()).toBe('cold');
+    expect(chunk.noted).toEqual([]);
   });
 
   it('the spine cold: a rewind from the endpoint loads it, and the load’s intercept notes it', async () => {

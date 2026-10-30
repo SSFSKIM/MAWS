@@ -74,7 +74,7 @@ describe('the rewind repair: a last-act note, re-sent at resume', () => {
   const conversationCalls = () => h.host.calls.map((c) => c.name).filter((name) => ['session.launch', 'session.rewind', 'session.send'].includes(name));
 
   it('intercepts the rewind and the acts that clear it in launch mode index only (scenario’s fixture seams intercept some of them)', () => {
-    expect(bus.intercepted().sort()).toEqual(['session.bash', 'session.queue.promote', 'session.rewind', 'session.send', 'session.steer']);
+    expect(bus.intercepted().sort()).toEqual(['host.op', 'session.bash', 'session.queue.promote', 'session.rewind', 'session.send', 'session.steer']);
     const scenario = fakeBus();
     registerSessionServiceHandlers(h.service, scenario, 'scenario');
     expect(scenario.intercepted()).toEqual([]);
@@ -251,5 +251,132 @@ describe('the rewind repair: a last-act note, re-sent at resume', () => {
     await restart();
     expect(await h.service.acquire(id, 'send')).toMatchObject({ status: 'ready', launched: true });
     expect(h.host.calledWith('session.rewind')).toEqual([]);
+  });
+});
+
+// P5 O3-D M5a (D44(3), D47): a phone's rewind is lane B's claimed op, `host.op` with the inner name `session.rewind`, run
+// inside the engine host by its op ledger; through the note as a local rewind is. The fake host's ledger: `host.opQuery`
+// answers what it knows, and `host.op` runs the inner command through the fake's own answer once, replaying after.
+describe('the rewind repair on lane B’s claimed op (host.op)', () => {
+  let h: SessionHarness;
+  let bus: FakeBus;
+  let ledger: Map<string, unknown>;
+  let refuseOps: string | null;
+  let hangOps: (() => void) | null; // the process dies before the ledger answers: told as the op is forwarded
+  const bind = () => {
+    bus = fakeBus();
+    registerSessionServiceHandlers(h.service, bus, 'index');
+  };
+  // the engine host's op ledger, over the fake's own answers
+  const withLedger = () => {
+    const seam = h.host as unknown as { answer: Answer };
+    const answer = seam.answer.bind(h.host);
+    vi.spyOn(seam, 'answer').mockImplementation(async (name, input) => {
+      if (name === 'host.opQuery') return { state: ledger.has(input.opId as string) ? 'done' : 'not-received' };
+      if (name !== 'host.op') return answer(name, input);
+      const opId = input.opId as string;
+      if (hangOps !== null) {
+        hangOps();
+        return new Promise(() => {});
+      }
+      if (ledger.has(opId)) return ledger.get(opId); // a known op: what the ledger holds, nothing run
+      if (refuseOps !== null) return { state: 'refused', reason: refuseOps };
+      const inner = input.name as CommandName;
+      h.host.calls.push({ name: inner, input: input.input }); // what the ledger ran, as the fake records a call
+      let result: unknown;
+      try {
+        result = { ok: true, value: await answer(inner, input.input as Record<string, unknown>) };
+      } catch (error) {
+        result = { ok: false, error: { code: 'internal', message: (error as Error).message } };
+      }
+      const done = { state: 'done', result };
+      ledger.set(opId, done);
+      return done;
+    });
+  };
+  beforeEach(async () => {
+    h = await new SessionHarness().start();
+    h.trustDirectory(h.work);
+    ledger = new Map();
+    refuseOps = null;
+    hangOps = null;
+    bind();
+    withLedger();
+  });
+  afterEach(() => h.dispose());
+
+  const noteOf = (id: AppSessionId): Record<string, unknown> | null => {
+    try {
+      return JSON.parse(readFileSync(join(h.userData, 'sessions', 'rewinds', `${id}.json`), 'utf8')) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  };
+  const liveSession = async (): Promise<AppSessionId> => {
+    const record = h.index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(0x4e4000 + ++n), directory: h.work })).record;
+    expect(await h.service.acquire(record.appId, 'send')).toMatchObject({ status: 'ready', launched: true });
+    return record.appId;
+  };
+  const rewindArgs = (id: AppSessionId) => ({ appSessionId: id, targetMessageUuid: TARGET, lastSeenMessageUuid: LAST_SEEN, files: false });
+  // the endpoint's claimed op through the intercept the bus holds for it (host.op is main-only, which a client may not send)
+  const op = async (opId: string, name: string, input: unknown): Promise<Result> => {
+    try {
+      return { ok: true, value: await h.service.claimedOp({ opId, opCreated: '2026-10-30T00:00:00.000Z', member: 'member-1', device: 'phone-1', fingerprint: 'fp-1', name, input: input as never, context: { launchId: 'l', engineSessionId: 'e' } }) };
+    } catch (error) {
+      return { ok: false, error: { code: 'thrown', message: (error as Error).message } };
+    }
+  };
+  const opId = (n: number) => `phone-op-${String(n).padStart(8, '0')}`;
+
+  it('a claimed rewind writes `attempted` before the op is forwarded, and a SIGKILL inside the window is re-sent once by the resume', async () => {
+    const id = await liveSession();
+    let noteAtForward: Record<string, unknown> | null = null;
+    hangOps = () => void (noteAtForward = noteOf(id));
+    void op(opId(1), 'session.rewind', rewindArgs(id));
+    await h.until(() => h.host.calledWith('host.op').length === 1);
+    expect(noteAtForward, 'written before the forward').toMatchObject({ appSessionId: id, state: 'attempted', targetMessageUuid: TARGET, lastSeenMessageUuid: LAST_SEEN });
+    h.host.exitNow(id); // SIGKILL: no end_session
+
+    hangOps = null;
+    await h.restart();
+    bind();
+    withLedger();
+    expect(await h.service.acquire(id, 'send')).toMatchObject({ status: 'ready', launched: true });
+    expect(h.host.calledWith('session.rewind')).toEqual([rewindArgs(id)]); // once, before any input
+  });
+
+  it('the outcome is read from the op’s answer: `rewound: true` confirms, `rewound: false` and a ledger refusal delete', async () => {
+    const id = await liveSession();
+    const first = await op(opId(2), 'session.rewind', rewindArgs(id));
+    expect(first, JSON.stringify(first)).toMatchObject({ ok: true, value: { state: 'done', result: { ok: true, value: { rewound: true } } } });
+    expect(noteOf(id)).toMatchObject({ state: 'confirmed' });
+    h.host.rewound = false;
+    expect(await op(opId(3), 'session.rewind', rewindArgs(id))).toMatchObject({ ok: true, value: { state: 'done', result: { ok: true, value: { rewound: false } } } });
+    expect(noteOf(id)).toBeNull();
+    refuseOps = 'context';
+    expect(await op(opId(4), 'session.rewind', rewindArgs(id))).toMatchObject({ ok: true, value: { state: 'refused', reason: 'context' } });
+    expect(noteOf(id)).toBeNull();
+  });
+
+  it('a replayed op answer is not a new rewind: a retried rewind leaves a later note as it is, and a retried act clears nothing', async () => {
+    const id = await liveSession();
+    expect(await op(opId(5), 'session.rewind', rewindArgs(id))).toMatchObject({ ok: true });
+    expect(await op(opId(6), 'session.send', { appSessionId: id, content: 'from the phone' })).toMatchObject({ ok: true, value: { state: 'done', result: { ok: true } } });
+    expect(noteOf(id), 'a claimed act clears the note').toBeNull();
+    expect(await op(opId(5), 'session.rewind', rewindArgs(id))).toMatchObject({ ok: true, value: { state: 'done' } }); // the device retried
+    expect(noteOf(id), 'the replay wrote no note').toBeNull();
+    expect(h.host.calledWith('session.rewind')).toHaveLength(1);
+    expect(await bus.invoke('session.rewind', rewindArgs(id))).toMatchObject({ ok: true }); // a local rewind after it
+    expect(noteOf(id)).toMatchObject({ state: 'confirmed' });
+    expect(await op(opId(6), 'session.send', { appSessionId: id, content: 'from the phone' })).toMatchObject({ ok: true }); // the act retried
+    expect(noteOf(id), 'a replayed act clears nothing').toMatchObject({ state: 'confirmed' });
+  });
+
+  it('a claimed op of another command goes on untouched', async () => {
+    const id = await liveSession();
+    expect(await op(opId(7), 'session.rewind', rewindArgs(id))).toMatchObject({ ok: true });
+    await op(opId(8), 'session.interrupt', { appSessionId: id });
+    expect(h.host.calledWith('host.opQuery')).toHaveLength(1); // the rewind's only
+    expect(noteOf(id)).toMatchObject({ state: 'confirmed' });
   });
 });

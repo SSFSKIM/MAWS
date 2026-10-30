@@ -30,9 +30,10 @@
 //
 // P5 O3-D M5 (D44(3)): the engine host's names the spine intercepts (SPINE_ENGINE_INTERCEPTS: the stale answer's check,
 // the rewind's note and the acts that clear it) load a cold spine first, so the intercept applies whatever path the
-// request came by: a client here, the endpoint's `machine` route, and (`intercepted`, daemon.ts) a post-D app's relay.
-// A spine that cannot load (refused by the lock, yielded) leaves the request to go on unintercepted, as a request did
-// before the spine moved here: the note is then the lock holder's to keep.
+// request came by: a client here, the endpoint's `machine` route, and (`intercepted`, daemon.ts) a post-D app's relay
+// and, under claimSpine (D47), the endpoint's `engine-host` route, a phone's claimed `host.op` of one of them included.
+// A spine refused by the lock or yielded leaves the request to go on unintercepted, as a request did before the spine
+// moved here: the note is then the lock holder's to keep. Any other failure to load answers it host_unavailable.
 import { thrownError, type DocPortEnd, type HostPort } from '@shared/host/runtime';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
 import { MACHINE_SPINE_CAPABILITY } from '@shared/host/socket-protocol';
@@ -65,6 +66,12 @@ export const LATER_COMMANDS: ReadonlySet<string> = new Set(['library.fileLinkedP
 // (src/services/sessions/index.ts's `session.answer`, service-register.ts's `session.rewind` and CONVERSATION_ACTS);
 // daemon-spine.test.ts pins it to what the spine registers.
 export const SPINE_ENGINE_INTERCEPTS: ReadonlySet<string> = new Set(['session.answer', 'session.bash', 'session.queue.promote', 'session.rewind', 'session.send', 'session.steer']);
+// D47: lane B's claimed act (`host.op`) carries one of them as its inner name; the session service intercepts it too.
+export function spineTakes(name: string, input: unknown): boolean {
+  if (SPINE_ENGINE_INTERCEPTS.has(name)) return true;
+  const inner = name === 'host.op' && typeof input === 'object' && input !== null ? (input as { name?: unknown }).name : undefined;
+  return typeof inner === 'string' && SPINE_ENGINE_INTERCEPTS.has(inner);
+}
 
 export interface ClientFacts {
   appPid: number;
@@ -89,8 +96,9 @@ export interface ServicesFront {
   // The endpoint's `dispatch('machine', …)`: a client's request in process, `client` the endpoint's ref for its device
   dispatch(name: string, input: unknown, client?: ClientRef): Promise<CommandResult<CommandName>>;
   // P5 O3-D M5 (D44(3)): an engine-host request through the spine's intercept for its name, the spine loaded for it if
-  // cold; null when the spine intercepts no such name or cannot load, for the caller to forward it raw as before
-  intercepted(name: string, input: unknown, client: ClientRef): Promise<CommandResult<CommandName> | null>;
+  // cold; null when the spine intercepts no such name or is refused by the lock or yielded, for the caller to forward it
+  // raw as before; host_unavailable when it fails to load otherwise. No `client` is the endpoint's own request.
+  intercepted(name: string, input: unknown, client?: ClientRef): Promise<CommandResult<CommandName> | null>;
   intercepts(): CommandName[]; // the names the loaded spine intercepts now
   events(listener: (name: string, payload: unknown) => void): () => void; // every event `bus.emit` sent (the endpoint's owner `machine`)
   browserSocket(): string | null; // the attached app's, from its machine.client; null with no app
@@ -199,17 +207,24 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
   }
 
   // The intercept the spine installs for an engine-host name it intercepts, through the seam as a spine command is (a
-  // cold spine loaded for it, a releasing one waited for); undefined when there is none, or the spine cannot load now
-  // (logged). Another engine-host name keeps what is installed now (the scenario stub's).
-  async function spineIntercept(name: string): Promise<AnyHandler | undefined> {
-    if (!SPINE_ENGINE_INTERCEPTS.has(name)) return intercepts.get(name);
+  // cold spine loaded for it, a releasing one waited for); no handler when there is none, or the spine is refused by the
+  // lock or yielded (logged: the request goes on raw). Any other failure to load (a chunk's or its data's error, the
+  // daemon's exit) is the request's answer, `host_unavailable`, so nothing the spine must see goes on unseen. Another
+  // engine-host name keeps what is installed now (the scenario stub's).
+  type Taken = { handler?: AnyHandler; failed?: CommandResult<CommandName> };
+  async function spineIntercept(name: string, input: unknown): Promise<Taken> {
+    if (!spineTakes(name, input)) return { handler: intercepts.get(name) };
     try {
       await options.spine.ensure('command');
     } catch (error) {
-      log(`[spine] ${name} goes on without the spine’s intercept: ${messageOf(error)}`);
-      return undefined;
+      if (error instanceof SpineUnavailable && error.why !== 'exiting') {
+        log(`[spine] ${name} goes on without the spine’s intercept: ${error.message}`);
+        return {};
+      }
+      log(`[spine] ${name} is refused: the spine did not load: ${messageOf(error)}`);
+      return { failed: { ok: false, error: ipcError('host_unavailable', `the spine did not load for ${name}: ${messageOf(error)}`) } };
     }
-    return intercepts.get(name);
+    return { handler: intercepts.get(name) };
   }
 
   // A client's request (`from`: its connection; null for the endpoint's), or the bus's invoke (`loaded`: the spine asks
@@ -220,8 +235,9 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
     if (!input.ok) return input;
     const { owner } = REGISTRY.commands[name];
     if (owner !== 'machine') {
-      const intercept = loaded ? intercepts.get(name) : await spineIntercept(name); // the spine's own invoke never waits on it
-      return intercept ? run(name, intercept, input.value, context) : forward(name, rawInput);
+      const taken: Taken = loaded ? { handler: intercepts.get(name) } : await spineIntercept(name, rawInput); // the spine's own invoke never waits on it
+      if (taken.failed) return taken.failed;
+      return taken.handler ? run(name, taken.handler, input.value, context) : forward(name, rawInput);
     }
     if (CLIENT_COMMANDS.has(name) && from === null) return { ok: false, error: ipcError('internal', `${name} is a machine.sock client's own`) };
     if (OWN.has(name)) return run(name, (value, ctx) => own[name as keyof typeof own](value, ctx, from), input.value, context);
@@ -356,10 +372,11 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
     dispatch: (name, input, client) => answer(name, input, { client: client ?? endpointClient }, false, null),
     async intercepted(name, rawInput, client) {
       if (!codec.isCommandName(name) || REGISTRY.commands[name].owner !== 'engine-host') return null;
-      const intercept = await spineIntercept(name);
-      if (!intercept) return null;
+      const taken = await spineIntercept(name, rawInput);
+      if (taken.failed) return taken.failed;
+      if (!taken.handler) return null;
       const input = codec.readCommandInput(name, rawInput);
-      return input.ok ? run(name, intercept, input.value, { client }) : input;
+      return input.ok ? run(name, taken.handler, input.value, { client: client ?? endpointClient }) : input;
     },
     intercepts: () => [...intercepts.keys()].sort() as CommandName[],
     events(listener) {

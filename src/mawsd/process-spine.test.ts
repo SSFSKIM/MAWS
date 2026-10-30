@@ -15,9 +15,10 @@ import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'v
 import { launchDefaults } from '@shared/composer/launch-defaults';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HostResponse } from '@shared/ipc/host-protocol';
+import { endHostProcess } from '../../test/support/host-exit';
 import { writeReplayEngine } from '../../test/support/replay-engine';
 import { writeSpineFixture } from '../../test/support/spine-fixture';
-import { isAlive, readLock } from '../engine-host/supervisor-files';
+import { readLock } from '../engine-host/supervisor-files';
 import { startDaemon, type RunningDaemon } from './daemon';
 import type { DaemonServices, EndpointModule } from './endpoint-seam';
 
@@ -74,18 +75,14 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  await daemon?.stop('test over');
-  const pid = readLock(join(profile, 'supervisor'))?.pid; // the engine host mawsd woke outlives it, as it does in the product
-  if (pid !== undefined) {
-    try {
-      process.kill(pid, 'SIGTERM');
-      await until(() => !isAlive(pid), 'the engine host’s exit', 10_000); // it writes under the profile until it is gone
-    } catch {
-      // gone
-    }
+  try {
+    await daemon?.stop('test over');
+    const pid = readLock(join(profile, 'supervisor'))?.pid; // the engine host mawsd woke outlives it, as it does in the product
+    if (pid !== undefined) await endHostProcess(pid);
+  } finally {
+    vi.restoreAllMocks(); // the console back first, so a failure below is heard
+    rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
-  rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  vi.restoreAllMocks();
 });
 
 describe.skipIf(!existsSync(MAWSD))('the endpoint reaches the machine with no app (acceptance 8, process level)', () => {
