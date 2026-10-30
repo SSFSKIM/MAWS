@@ -30,6 +30,8 @@ function harness(transport: HostFacts['transport'] = 'detached', shape: Pick<Hos
   let facts: HostFacts = { transport, reason: null, refused: null, waitingLiveSessions: null, lastExit: null };
   const stateListeners = new Set<(s: HostState) => void>();
   const machineListeners = new Set<(s: HostState) => void>();
+  let machineStreaming = true; // from main's ready line on machine.sock until it leaves ready
+  const streamingListeners = new Set<() => void>();
   const eventListeners = new Set<(s: SupervisorStatus) => void>();
   const handlers = new Map<string, (input: unknown) => unknown>();
   const emitted: HostStatus[] = [];
@@ -42,6 +44,12 @@ function harness(transport: HostFacts['transport'] = 'detached', shape: Pick<Hos
     hosts: {
       snapshot: (owner) => (owner === 'machine' ? machine : state),
       dispatch: (async (owner: string, name: string) => (asked.push(name), askedOn.push(owner), answer(owner))) as HostStatusDeps['hosts']['dispatch'],
+      streaming: (owner) => owner === 'machine' && machineStreaming,
+      onStreaming: (owner, l) => {
+        if (owner !== 'machine') return () => {};
+        streamingListeners.add(l);
+        return () => void streamingListeners.delete(l);
+      },
       onState: (owner, l) => {
         const listeners = owner === 'machine' ? machineListeners : stateListeners;
         listeners.add(l);
@@ -61,7 +69,7 @@ function harness(transport: HostFacts['transport'] = 'detached', shape: Pick<Hos
     ...shape,
   };
   const service = startHostStatus(deps);
-  return {
+  const h = {
     service,
     emitted,
     restartSupervisor,
@@ -72,9 +80,16 @@ function harness(transport: HostFacts['transport'] = 'detached', shape: Pick<Hos
       state = { ...state, ...next, revision: state.revision + 1 };
       stateListeners.forEach((l) => l(state));
     },
-    moveMachine(next: Partial<HostState>) {
+    // machine.sock's `ready` state comes before main's ready line, from which it streams (the host supervisor's order)
+    moveMachine(next: Partial<HostState>, stream = true) {
       machine = { ...machine, ...next, revision: machine.revision + 1 };
+      machineStreaming = false;
       machineListeners.forEach((l) => l(machine));
+      if (machine.state === 'ready' && stream) h.streamMachine();
+    },
+    streamMachine() {
+      machineStreaming = true;
+      streamingListeners.forEach((l) => l());
     },
     status(next: SupervisorStatus) {
       eventListeners.forEach((l) => l(next));
@@ -84,8 +99,9 @@ function harness(transport: HostFacts['transport'] = 'detached', shape: Pick<Hos
     answerWith(next: (owner: string) => Promise<CommandResult<'host.supervisorStatus'>>) {
       answer = next;
     },
-    listeners: () => stateListeners.size + machineListeners.size + eventListeners.size,
+    listeners: () => stateListeners.size + machineListeners.size + streamingListeners.size + eventListeners.size,
   };
+  return h;
 }
 
 describe('host.status', () => {
@@ -254,6 +270,20 @@ describe('host.status', () => {
     h.move({ state: 'ready', pid: 5151 });
     expect(h.askedOn).toHaveLength(3); // asked once both are ready
     await vi.waitFor(() => expect(h.emitted.some((status) => status.supervisor?.liveSessions === 3)).toBe(true));
+  });
+
+  // M5b fix round 5: machine.sock is `ready` before main's ready line, and the front sends that connection no event until
+  // the line; a read begun at `ready` could be answered before a change whose event the front then never sent
+  it('on the daemon shape asks over machine.sock only once it streams, not at its ready state', () => {
+    const h = harness('detached', { daemon: () => null });
+    h.move({ state: 'ready', pid: 4242 });
+    h.moveMachine({ state: 'restarting', pid: null });
+    h.moveMachine({ state: 'ready', pid: 78 }, false); // welcomed; main's ready line not yet sent
+    h.move({ state: 'restarting', pid: null });
+    h.move({ state: 'ready', pid: 4242 }); // nor does the engine host's ready ask while machine.sock does not stream
+    expect(h.askedOn).toEqual(['machine']);
+    h.streamMachine();
+    expect(h.askedOn).toEqual(['machine', 'machine']);
   });
 
   it('the embedded shape waits for the connect burst and asks nothing', () => {

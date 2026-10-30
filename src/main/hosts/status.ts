@@ -15,7 +15,7 @@ import { CommandFailure, type registerMainHandler } from '../ipc/router';
 import type { HostSupervisor } from './supervisor';
 
 export interface HostStatusDeps {
-  hosts: Pick<HostSupervisor, 'snapshot' | 'onState' | 'onEvent' | 'facts' | 'restartSupervisor' | 'dispatch'>;
+  hosts: Pick<HostSupervisor, 'snapshot' | 'onState' | 'onEvent' | 'facts' | 'restartSupervisor' | 'dispatch' | 'onStreaming' | 'streaming'>;
   appBuildId(): string; // the build id of the engine-host bundle this app would start
   appWire(): string; // this app's wire fingerprint
   mainBuild: MainBuild; // E11 §2.7: main's own build, for Diagnostics
@@ -85,7 +85,9 @@ export function startHostStatus(deps: HostStatusDeps): HostStatusService {
   // ready, a status heard while the answer is out winning over it.
   // M5b fix round 4: asked over machine.sock, where a post-D app hears the host's events (mawsd's relay keeps them off
   // engine-host.sock), so on one ordered connection an event sent before the answer arrives before it and the rule above
-  // covers one sent after (D19's one connection); and asked again when machine.sock is ready again, its events between lost
+  // covers one sent after (D19's one connection); and asked again when machine.sock streams again, its events between lost.
+  // Fix round 5: from its streaming, not its `ready` state, which comes before main's ready line: the front sends a
+  // connection no event before that line, so a change in between would be in neither the events nor an earlier answer
   let heard = 0;
   const ask = () => {
     const before = heard;
@@ -93,14 +95,14 @@ export function startHostStatus(deps: HostStatusDeps): HostStatusService {
       if (answer.ok && heard === before && deps.hosts.snapshot('engine-host').state === 'ready') take(answer.value as SupervisorStatus);
     });
   };
-  const bothReady = () => deps.hosts.snapshot('engine-host').state === 'ready' && deps.hosts.snapshot('machine').state === 'ready';
+  const bothReady = () => deps.hosts.snapshot('engine-host').state === 'ready' && deps.hosts.streaming('machine');
   const offs = [
     deps.hosts.onState('engine-host', (state) => {
       if (state.state !== 'ready') supervisor = null;
       deps.emit(status());
       if (deps.daemon && bothReady()) ask();
     }),
-    ...(deps.daemon ? [deps.hosts.onState('machine', () => void (bothReady() && ask()))] : []),
+    ...(deps.daemon ? [deps.hosts.onStreaming('machine', () => void (bothReady() && ask()))] : []),
     deps.hosts.onEvent('host.supervisorStatus', (next) => {
       heard += 1;
       take(next);
