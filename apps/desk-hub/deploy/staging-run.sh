@@ -70,7 +70,9 @@ umask 077
 mkdir -p $O || exit 2
 stamp() { date -u +%Y%m%dT%H%M%SZ; }
 # Line by line ($| = 1): a step that asks at /dev/tty (admin pair) shows what it asks about before the question.
-filter() { perl -ne 'BEGIN { $| = 1 } print if /^wrangler target / || !/token|secret|bearer|eyJ/i'; }
+# A line naming a token, a secret or a bearer (any case), or holding a JWT (its prefix `eyJ`, base64url of `{"`, whose case
+# is its own: read case-insensitively it dropped any line holding `eyj`, a base32 launch id among them), is not passed on.
+filter() { perl -ne 'BEGIN { $| = 1 } print if /^wrangler target / || !(/token|secret|bearer/i || /eyJ/)'; }
 # How many of `paths…` hold any line of the list file <list> (empty lines ignored, so an empty list matches nothing):
 # the search after a run for the secrets it handled. The patterns are read from the list, never an argument.
 secret_scan() {

@@ -1,16 +1,18 @@
 // The machine the endpoint acceptance run (endpoint-acceptance.ts; P5 O10 M11) drives: the scratch `mawsd` it enrolls,
-// the sminos beside it and the lane A session under that sminos. `EndpointMachine` is what the items ask of it; the
-// devcloud acceptance VM's implementation (`VmMachine`) runs each step as the scene's own script, `vm/scene.sh`, which
-// `vm/setup.sh` installs as /opt/o10-m11/scene.sh, through `devcloud vm ssh <vm> [--root] < <file>` and nothing else
-// (P5 DL 103): a script file of mode 0600 written under the run's scratch directory and unlinked as soon as devcloud has
-// it open, so a file that held a secret (an enrollment code) is gone before the step ends, and the secret reaches no
-// argument of any process here or on the VM (`printf` is the shell's builtin). Every step is bounded.
+// the sminos beside it and the lane A session under that sminos, and on staging a lane B session in that `mawsd`'s own
+// engine host, with no app (O3-D). `EndpointMachine` is what the items ask of it; the devcloud acceptance VM's
+// implementation (`VmMachine`) runs each step as the scene's own script, `vm/scene.sh`, which `vm/setup.sh` installs as
+// /opt/o10-m11/scene.sh, through `devcloud vm ssh <vm> [--root] < <file>` and nothing else (P5 DL 103): a script file of
+// mode 0600 written under the run's scratch directory and unlinked as soon as devcloud has it open, so a file that held
+// a secret (an enrollment code) is gone before the step ends, and the secret reaches no argument of any process here or
+// on the VM (`printf` is the shell's builtin). Every step is bounded.
 //
 // A step's script prints its own lines between `@@BEGIN` and `@@END <status>`, so the VM's login banner and devcloud's
 // own words are never read as the step's.
 import { spawn } from 'node:child_process';
 import { closeSync, openSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { LaneBEvent } from './endpoint-verdicts';
 
 /** The endpoint's `status()` as `mawsd endpoint status --json` prints it (O10 M2's shape). */
 export type EndpointStatus = {
@@ -65,6 +67,20 @@ export interface LaneAScene {
   started(): Promise<string[]>;
 }
 
+/**
+ * The lane B source: a session in `mawsd`'s own engine host, started with no app anywhere (O3-D), in lane A's checkout
+ * and project, so the machine's sminos lists it as lane B and the endpoint authorizes it by that record.
+ */
+export interface LaneBScene {
+  /** The session started and its first turn ended: its appSessionId (what a device subscribes by), launch and engine
+   * session, and its alias as sminos lists it. */
+  up(tag: string): Promise<{ app: string; launch: string; engine: string; alias: string }>;
+  /** A stretch of `count` rows the session goes on writing by itself, asked for through `send` (the stub's tool loop). */
+  ticks(count: number, tag: string, send: (text: string) => Promise<void>): Promise<void>;
+  /** The producer's own record: every event of the session's launch as the engine host numbers it, in order. */
+  events(app: string): Promise<LaneBEvent[]>;
+}
+
 export interface EndpointMachine {
   /** What the run prints for it. */
   readonly label: string;
@@ -88,6 +104,8 @@ export interface EndpointMachine {
   /** The local addresses the direct listener is bound to. */
   listening(): Promise<string[]>;
   laneA: LaneAScene;
+  /** Lane B's live source, where the scene has one (the staging VM's scratch scene; never production's). */
+  readonly laneB?: LaneBScene | null;
   /** Everything of the scene stopped and removed; what could not be. */
   down(): Promise<string[]>;
   /**
@@ -299,16 +317,19 @@ export class VmMachine implements EndpointMachine {
   readonly directUrl: string;
   readonly runner: ScriptRunner;
   readonly laneA: LaneAScene;
+  readonly laneB: LaneBScene | null;
   readonly #script: string;
 
   /** `options.script` is the scene's script on the VM: the scratch scene's (SCENE) unless named. */
   /** `gate` and `signal` are the run's interruption (ScriptRunner's). */
-  constructor(ssh: Ssh, scratchDir: string, options: { directUrl: string; log?: (line: string) => void; script?: string; label?: string; gate?: () => void; signal?: AbortSignal }) {
+  /** `laneB`: the scene starts a lane B session (the scratch scene's verbs; staging alone asks for it). */
+  constructor(ssh: Ssh, scratchDir: string, options: { directUrl: string; log?: (line: string) => void; script?: string; label?: string; gate?: () => void; signal?: AbortSignal; laneB?: boolean }) {
     this.runner = new ScriptRunner(ssh, scratchDir, options.log, { gate: options.gate, signal: options.signal });
     this.directUrl = options.directUrl;
     this.#script = options.script ?? SCENE;
     this.label = options.label ?? `the scratch mawsd on ${ssh.vm}`;
     this.laneA = new VmLaneA(this);
+    this.laneB = options.laneB === true ? new VmLaneB(this) : null;
   }
 
   /** A scene verb as root, its words checked by the caller; throws on a non-zero status unless `allow` holds it. */
@@ -420,7 +441,7 @@ class VmLaneA implements LaneAScene {
 
   async started(): Promise<string[]> {
     return (await this.vm.scene('started')).lines.flatMap((line) => {
-      const m = /^(session|seat) ([0-9a-f-]{36})$/.exec(line);
+      const m = /^(session|seat|lane-b) ([0-9a-f-]{36})$/.exec(line);
       return m ? [m[2]] : [];
     });
   }
@@ -444,4 +465,48 @@ class VmLaneA implements LaneAScene {
     if (!Number.isSafeInteger(shown)) throw new Error(`count: the scene answered no number for ${token}`);
     return shown;
   }
+}
+
+const UUID = /^[0-9a-f-]{36}$/;
+
+class VmLaneB implements LaneBScene {
+  constructor(private readonly vm: VmMachine) {}
+
+  async up(tag: string): Promise<{ app: string; launch: string; engine: string; alias: string }> {
+    if (!/^[a-z0-9]{1,16}$/.test(tag)) throw new Error('lane-b-up: a tag [a-z0-9]');
+    // The plugin's install, the session's start (its first turn against the stub) and sminos's listing, each bounded
+    // on the VM: 180 s for the start, about 90 for the listing.
+    const shown = jsonLine('lane-b-up', await this.vm.scene('lane-b-up', [tag], { ms: 600_000 }));
+    const [app, launch, engine, alias] = [shown.app, shown.launch, shown.engine, shown.alias].map(String);
+    if (!UUID.test(app) || !UUID.test(engine) || launch === '') throw new Error(`lane-b-up answered ${JSON.stringify(shown)}`);
+    return { app, launch, engine, alias };
+  }
+
+  async ticks(count: number, tag: string, send: (text: string) => Promise<void>): Promise<void> {
+    if (!Number.isSafeInteger(count) || count < 1 || count > 500 || !/^[a-z0-9]{1,16}$/.test(tag)) throw new Error('ticks: a count 1-500 and a tag [a-z0-9]');
+    await send(`o10-m11 ticks ${count} ${tag}`);
+  }
+
+  async events(app: string): Promise<LaneBEvent[]> {
+    if (!UUID.test(app)) throw new Error(`an app session id, not ${JSON.stringify(app)}`);
+    return laneBEventLines((await this.vm.scene('lane-b-events', [app], { ms: 180_000 })).lines);
+  }
+}
+
+/** `lane-b-events`' lines (`ev <launch> <seq> <idx>`, then `events <n> complete`) as the events; throws unless whole. */
+export function laneBEventLines(lines: readonly string[]): LaneBEvent[] {
+  const events: LaneBEvent[] = [];
+  for (const line of lines) {
+    const ev = /^ev ([A-Za-z0-9_-]{1,64}) (\d{1,15}) (\d{1,15})$/.exec(line);
+    if (ev) {
+      events.push({ epoch: ev[1], seq: Number(ev[2]), idx: Number(ev[3]) });
+      continue;
+    }
+    const end = /^events (\d+) complete$/.exec(line);
+    if (end) {
+      if (Number(end[1]) !== events.length) throw new Error(`lane-b-events counted ${end[1]} events and printed ${events.length}`);
+      return events;
+    }
+  }
+  throw new Error(`lane-b-events did not end: ${lines.slice(-2).join(' / ').slice(0, 300)}`);
 }

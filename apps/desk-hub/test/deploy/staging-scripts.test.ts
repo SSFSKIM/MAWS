@@ -180,6 +180,22 @@ describe('the admin step', () => {
   it('filters line by line, so what a step asks about at /dev/tty is shown before the question', () => {
     expect(scripts[0].text).toMatch(/^filter\(\) \{ perl -ne 'BEGIN \{ \$\| = 1 \} /m);
   });
+
+  // Staging run 3 (tag 316ec0) lost every lane B line naming the session's launch: a base32 id can hold `eyj`, which a
+  // JWT's prefix read case-insensitively matched.
+  it.skipIf(!zsh)('drops a line naming a token, a secret or a bearer, or holding a JWT, and keeps one whose id holds `eyj`', () => {
+    const filter = scripts[0].text.split('\n').find((l) => l.startsWith('filter()'))!;
+    const lines = [
+      'ok   2 lane B over the direct carrier: 2 answers (snapshot, replay), 1091 events, the 1091 the engine host numbered in launch bkeyjq2a each once',
+      'DESK_ACCESS_TOKEN=abc',
+      'a secret: x',
+      'Authorization: Bearer abc',
+      'cf: eyJhbGciOiJSUzI1NiJ9.e30.x',
+      'wrangler target desk-hub-staging, token scope checked',
+    ];
+    const run = spawnSync('zsh', ['-c', `${filter}; filter`], { input: `${lines.join('\n')}\n`, encoding: 'utf8' });
+    expect(run.stdout.split('\n').filter(Boolean)).toEqual([lines[0], lines[5]]);
+  });
 });
 
 /** A provisioning code with a `legacy` field, and the same code without it: what strip-legacy turns one into. */

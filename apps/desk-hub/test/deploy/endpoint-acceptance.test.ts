@@ -1,8 +1,10 @@
 // The endpoint acceptance command's guards and helpers (deploy/endpoint-acceptance.ts, endpoint-production.ts,
-// endpoint-remote.ts and vm/stub-model.mjs; P5 O10 M11): which mode a command line asks for and what it refuses, above
-// all production; the pacing of the run's own direct dials under the listener's limit; production's pairing answer,
-// which prints the device and its fingerprint and never the code; and the stub model's answers by content.
+// endpoint-remote.ts, vm/stub-model.mjs and vm/lane-b.mjs; P5 O10 M11): which mode a command line asks for and what it
+// refuses, above all production; the pacing of the run's own direct dials under the listener's limit; production's
+// pairing answer, which prints the device and its fingerprint and never the code; the stub model's answers by content;
+// and lane B's machine.sock client, against a stand-in for the socket.
 import { copyFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { createServer, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { base64urlDecode, decodePairingCode, encodePairingCode, generateSigningKey, keyId, verifyPairingMac, type Device } from 'org-protocol';
@@ -10,7 +12,8 @@ import { describe, expect, it } from 'vitest';
 import { mode } from '../../deploy/endpoint-acceptance.ts';
 import { pairRunDevice, productionRun, waitForFile } from '../../deploy/endpoint-production.ts';
 import { DirectPacer } from '../../deploy/endpoint-remote.ts';
-import { Secrets } from '../../deploy/endpoint-verdicts.ts';
+import type { Msg } from '../../deploy/endpoint-remote.ts';
+import { Secrets, type LaneBSegment } from '../../deploy/endpoint-verdicts.ts';
 import type { Person } from '../../deploy/hub.ts';
 import { Cleanup } from '../../deploy/proof.ts';
 import { PRODUCTION_HOST, STAGING_HOST } from '../../deploy/config.ts';
@@ -170,6 +173,136 @@ describe('the lane A session’s stub model', () => {
   });
 });
 
+describe('lane B’s machine.sock client', () => {
+  type LaneB = {
+    reach(dir: string): Promise<{ request(name: string, input: unknown, ms?: number): Promise<unknown>; close(): void }>;
+    up(link: unknown, directory: string, tag: string, options?: { readyMs?: number }): Promise<{ app: string; launch: string; engine: string }>;
+    events(link: unknown, app: string): Promise<Array<{ launch: string; seq: number; idx: number }>>;
+  };
+  const load = async () => (await import(join(import.meta.dirname, '../../deploy/vm/lane-b.mjs'))) as LaneB;
+  const APP = '5b1f0c2e-8d4a-4c3b-9e7f-1a2b3c4d5e6f';
+  const ENGINE = '0f3e8a52-7c1d-4b9e-9a61-2d4f6b8c0e13';
+
+  /** A stand-in for mawsd's machine.sock: the token's hello welcomed, each request answered by `answer` (a throw is a
+   * refusal), every request kept. */
+  async function machineSock(answer: (name: string, input: Record<string, unknown>) => unknown, { welcome = true } = {}) {
+    const dir = mkdtempSync(join(tmpdir(), 'o10-ms-'));
+    writeFileSync(join(dir, 'mawsd.token'), 'f'.repeat(64) + '\n', { mode: 0o600 });
+    const asked: Array<{ name: string; input: Record<string, unknown> }> = [];
+    const hellos: Array<Record<string, unknown>> = [];
+    const sockets: Socket[] = [];
+    const server = createServer((socket) => {
+      sockets.push(socket);
+      let rest = '';
+      let first = true;
+      socket.on('data', (chunk) => {
+        rest += chunk.toString();
+        for (let at = rest.indexOf('\n'); at >= 0; at = rest.indexOf('\n')) {
+          const message = JSON.parse(rest.slice(0, at)) as Record<string, unknown>;
+          rest = rest.slice(at + 1);
+          if (first) {
+            first = false;
+            hellos.push(message);
+            socket.write(`${JSON.stringify(welcome && message.token === 'f'.repeat(64) ? { t: 'welcome', protocol: 3 } : { t: 'refuse', reason: 'token' })}\n`);
+            continue;
+          }
+          asked.push({ name: String(message.name), input: message.input as Record<string, unknown> });
+          let reply: Record<string, unknown>;
+          try {
+            reply = { t: 'res', id: message.id, ok: true, value: answer(String(message.name), message.input as Record<string, unknown>) };
+          } catch (error) {
+            reply = { t: 'res', id: message.id, ok: false, error: { code: 'not_found', message: (error as Error).message } };
+          }
+          // An event first, which the client is not asking for and passes over.
+          socket.write(`${JSON.stringify({ t: 'evt', name: 'session.changed', payload: {} })}\n${JSON.stringify(reply)}\n`);
+        }
+      });
+    });
+    await new Promise<void>((done) => server.listen(join(dir, 'machine.sock'), done));
+    return { dir, asked, hellos, close: () => (sockets.forEach((s) => s.destroy()), server.close()) };
+  }
+
+  it('starts a session as the app does, on the gateway route with the trust given, waits out its first turn and keeps it running', async () => {
+    const lb = await load();
+    let polls = 0;
+    const sock = await machineSock((name, input) => {
+      if (name === 'session.create') return { appSessionId: APP, intent: {} };
+      if (name === 'session.start') return { status: 'starting', appSessionId: input.appSessionId };
+      if (name === 'session.status') {
+        if (++polls === 1) throw new Error('no such session yet');
+        return polls < 3 ? { process: 'ready', engineSessionId: ENGINE, launchId: 'lnch0001', turn: { id: 't' } } : { process: 'ready', engineSessionId: ENGINE, launchId: 'lnch0001', turn: null };
+      }
+      return name === 'session.setKeep' ? { kept: true } : {};
+    });
+    const link = await lb.reach(sock.dir);
+    try {
+      await expect(lb.up(link, '/home/o10acc/work', 'abc1b', { readyMs: 20_000 })).resolves.toEqual({ app: APP, launch: 'lnch0001', engine: ENGINE });
+    } finally {
+      link.close();
+      sock.close();
+    }
+    expect(sock.hellos[0]).toMatchObject({ t: 'hello', protocol: 3, token: 'f'.repeat(64), capabilities: [] });
+    expect(sock.asked.map((a) => a.name)).toEqual(['daemon.status', 'session.create', 'session.start', 'session.status', 'session.status', 'session.status', 'session.setKeep']);
+    expect(sock.asked[1].input).toEqual({ projectId: null, location: { kind: 'directory', path: '/home/o10acc/work' } });
+    expect(sock.asked[2].input).toEqual({ appSessionId: APP, message: { content: 'o10-m11 lane B up abc1b', display: 'o10-m11 lane B up abc1b' }, options: { gateway: 'gateway', trust: 'accepted' } });
+    expect(sock.asked[6].input).toEqual({ appSessionId: APP, keep: true });
+  }, 30_000);
+
+  it('refuses a start the session service did not begin', async () => {
+    const lb = await load();
+    const sock = await machineSock((name, input) => (name === 'session.create' ? { appSessionId: APP, intent: {} } : name === 'session.start' ? { status: 'relay_unreachable', appSessionId: input.appSessionId, health: {} } : {}));
+    const link = await lb.reach(sock.dir);
+    await expect(lb.up(link, '/w', 'x')).rejects.toThrow(/session.start answered .*relay_unreachable/);
+    link.close();
+    sock.close();
+  });
+
+  it('reads the launch’s every event page by page, each after the row the last page ended on, as the engine host numbers them', async () => {
+    const lb = await load();
+    const ev = (seq: number, idx: number) => ({ id: `${APP}:lnch0001:${seq}:${idx}`, seq });
+    const sock = await machineSock((_name, input) =>
+      input.afterSeq === null
+        ? { events: [{ id: 'from-disk' }, ev(1, 0), ev(1, 1), ev(2, 0)], lastSeq: 2, complete: false }
+        : { events: [ev(3, 0), ev(3, 1)], lastSeq: 3, complete: true },
+    );
+    const link = await lb.reach(sock.dir);
+    expect(await lb.events(link, APP)).toEqual([
+      { launch: 'lnch0001', seq: 1, idx: 0 },
+      { launch: 'lnch0001', seq: 1, idx: 1 },
+      { launch: 'lnch0001', seq: 2, idx: 0 },
+      { launch: 'lnch0001', seq: 3, idx: 0 },
+      { launch: 'lnch0001', seq: 3, idx: 1 },
+    ]);
+    expect(sock.asked.map((a) => a.input)).toEqual([
+      { appSessionId: APP, afterSeq: null, limit: 500 },
+      { appSessionId: APP, afterSeq: 2, limit: 500 },
+    ]);
+    link.close();
+    sock.close();
+  });
+
+  it('refuses a read whose history is gone, or an event whose id names no place of the session', async () => {
+    const lb = await load();
+    for (const [page, why] of [
+      [{ events: [], lastSeq: 0, complete: true, historyUnavailable: true }, /history is unavailable/],
+      [{ events: [{ id: `${APP}:lnch0001:2:0`, seq: 3 }], lastSeq: 3, complete: true }, /names no place/],
+    ] as const) {
+      const sock = await machineSock(() => page);
+      const link = await lb.reach(sock.dir);
+      await expect(lb.events(link, APP)).rejects.toThrow(why);
+      link.close();
+      sock.close();
+    }
+  });
+
+  it('fails at a hello the daemon refuses', async () => {
+    const lb = await load();
+    const sock = await machineSock(() => ({}), { welcome: false });
+    await expect(lb.reach(sock.dir)).rejects.toThrow(/refused the hello/);
+    sock.close();
+  });
+});
+
 describe('the run’s requests to the hub', () => {
   /** A hub that takes every request and never answers it. */
   async function silent(): Promise<{ url: string; close(): void }> {
@@ -235,6 +368,51 @@ describe('the late original’s answer', () => {
   });
 });
 
+describe('lane B’s snapshot pages', () => {
+  const SUB = 'sub-1';
+  const snap = (pages: number[], body: string[], lastPage?: number) =>
+    pages.map((page, i) => ({ t: 'snap', sub: SUB, epoch: 'lnch0001', seq: 0, page, last: page === (lastPage ?? pages.at(-1)), body: body[i] }) as Msg);
+  const subbed = { t: 'subbed', sub: SUB, mode: 'snapshot', epoch: 'lnch0001', seq: 0 } as Msg;
+  const text = JSON.stringify({ status: 1, queue: [], pendingItems: [], catalog: {} });
+  const cut = (n: number) => Array.from({ length: n }, (_, i) => text.slice(Math.floor((i * text.length) / n), Math.floor(((i + 1) * text.length) / n)));
+  const read = async (messages: Msg[]) => {
+    const { fill } = await import('../../deploy/endpoint-items.ts');
+    const segment: LaneBSegment = { after: 'first', cursor: null, expect: 'snapshot', subbed: null, states: [], snapPages: null, events: [], controls: [], ended: null };
+    fill(segment, [subbed, ...messages]);
+    return segment;
+  };
+
+  it('joins pages 0, 1, 2 ending in `last` into one state', async () => {
+    const segment = await read(snap([0, 1, 2], cut(3)));
+    expect(segment.snapPages).toBeNull();
+    expect(segment.states).toEqual([{ epoch: 'lnch0001', seq: 0, parts: ['status', 'queue', 'pendingItems', 'catalog'] }]);
+  });
+
+  it('reads each complete snapshot in order, a single part ahead of the state included', async () => {
+    const segment = await read([...snap([0], [JSON.stringify({ queue: [] })]), ...snap([0, 1], cut(2))]);
+    expect(segment.snapPages).toBeNull();
+    expect(segment.states.map((s) => s.parts.length)).toEqual([1, 4]);
+  });
+
+  it('reports a lost or doubled page as malformed, counting no state from it', async () => {
+    const lost = await read(snap([0, 2], cut(2)));
+    expect(lost.snapPages).toBe('0,2');
+    expect(lost.states).toEqual([]);
+    const doubled = await read(snap([0, 1, 1, 2], cut(4)));
+    expect(doubled.snapPages).toBe('0,1,1');
+    expect(doubled.states).toEqual([]);
+    const headless = await read(snap([1, 2], cut(2)));
+    expect(headless.snapPages).toBe('1');
+    expect(headless.states).toEqual([]);
+  });
+
+  it('ignores a trailing snapshot the channel left unfinished', async () => {
+    const segment = await read(snap([0, 1], cut(2), 5));
+    expect(segment.snapPages).toBeNull();
+    expect(segment.states).toEqual([]);
+  });
+});
+
 describe('production’s allowlist', () => {
   it('runs only the clauses it lists, a hub write only when allowed, and never a hub deploy or an org-state change', async () => {
     const { productionAdmit } = await import('../../deploy/endpoint-items.ts');
@@ -260,6 +438,37 @@ describe('production’s allowlist', () => {
     report.admit = productionAdmit(true);
     await report.check('5', 'a device’s words arrive verified and are delivered into the session', run('words'));
     expect(ran).toEqual(['caps', 'words']);
+  });
+
+  it('admits none of lane B’s live half, which production never runs', async () => {
+    const { productionAdmit } = await import('../../deploy/endpoint-items.ts');
+    const source = (await import('node:fs')).readFileSync(join(import.meta.dirname, '../../deploy/endpoint-items.ts'), 'utf8');
+    const laneB = [...source.matchAll(/report\.check\('2', (`[^`]*`|'[^']*')/g)].map((m) => m[1].slice(1, -1)).filter((name) => name.includes('lane B'));
+    expect(laneB.length).toBe(5);
+    const admit = productionAdmit(true);
+    for (const name of laneB) for (const carrier of ['relayed', 'direct']) expect(admit('2', name.replace('${track.carrier}', carrier)), name).not.toBeNull();
+  });
+
+  it('expects of item 2 exactly the checks item 2 makes, and fails it when one of lane B’s is dropped', async () => {
+    const { ITEM2_CHECKS } = await import('../../deploy/endpoint-items.ts');
+    const { ItemReport } = await import('../../deploy/endpoint-verdicts.ts');
+    const source = (await import('node:fs')).readFileSync(join(import.meta.dirname, '../../deploy/endpoint-items.ts'), 'utf8');
+    const made = new Set<string>();
+    for (const m of source.matchAll(/report\.check\('2', (`[^`]*`|'[^']*')/g)) {
+      const raw = m[1].slice(1, -1);
+      for (const carrier of raw.includes('${') ? ['relayed', 'direct'] : ['']) made.add(raw.replace('${track.carrier}', carrier));
+    }
+    expect(new Set([...ITEM2_CHECKS.laneA, ...ITEM2_CHECKS.laneB])).toEqual(made);
+    expect(ITEM2_CHECKS.laneB.length).toBe(6);
+    // A run in which every check of item 2 passed but one of lane B's never reported: item 2 fails, naming it.
+    for (const dropped of ITEM2_CHECKS.laneB) {
+      const lines: string[] = [];
+      const report = new ItemReport(['2'], (l) => lines.push(l));
+      report.expect('2', [...ITEM2_CHECKS.laneA, ...ITEM2_CHECKS.laneB]);
+      for (const check of [...ITEM2_CHECKS.laneA, ...ITEM2_CHECKS.laneB]) if (check !== dropped) await report.check('2', check, async () => 'ok');
+      expect(report.summary()).toBe(false);
+      expect(lines.at(-1)).toBe(`FAIL 2: 1 expected check never reported: ${dropped}`);
+    }
   });
 
   it('names only clauses the items have', async () => {
@@ -348,6 +557,62 @@ describe('item 2’s deploy watcher', () => {
     } finally {
       process.off('unhandledRejection', listen);
     }
+  });
+});
+
+describe('item 2’s channels kept live at the end', () => {
+  /** A track whose channel the hub closes once, `after` ms in. */
+  const track = (after: number | null) => {
+    const t = { dropped: false, recovered: 0, recover: async () => void ((t.dropped = false), t.recovered++) };
+    if (after !== null) setTimeout(() => (t.dropped = true), after);
+    return t;
+  };
+
+  it('resumes a channel a close the run did not make ended while the run waits, once, and none after the wait', async () => {
+    const { keepLive } = await import('../../deploy/endpoint-items.ts');
+    const late = track(30);
+    const quiet = track(null);
+    const after = track(400); // closes after the wait has ended: not the keeper's
+    expect(await keepLive([late, quiet, after], () => new Promise((done) => setTimeout(() => done('at rest'), 150)), 10)).toBe('at rest');
+    await new Promise((r) => setTimeout(r, 450));
+    expect([late.recovered, quiet.recovered, after.recovered]).toEqual([1, 0, 0]);
+  });
+
+  it('resumes each closed channel on its own: a slow one holds no other, and one still resuming when the wait ends is joined', async () => {
+    const { keepLive } = await import('../../deploy/endpoint-items.ts');
+    const done: string[] = [];
+    const slow = { dropped: true, recover: async () => ((slow.dropped = false), await new Promise((r) => setTimeout(r, 300)), void done.push('slow')) };
+    const quick = { dropped: true, recover: async () => ((quick.dropped = false), void done.push('quick')) };
+    const started = Date.now();
+    await keepLive([slow, quick], () => new Promise((r) => setTimeout(r, 50)), 10);
+    expect(done).toEqual(['quick', 'slow']);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(290);
+  });
+
+  it('resumes a channel found closed just as the wait ends', async () => {
+    const { keepLive } = await import('../../deploy/endpoint-items.ts');
+    const t = { dropped: false, recovered: 0, recover: async () => void ((t.dropped = false), t.recovered++) };
+    await keepLive([t], async () => void (t.dropped = true), 1000);
+    expect(t.recovered).toBe(1);
+  });
+
+  it('fails the wait when a resume fails', async () => {
+    const { keepLive } = await import('../../deploy/endpoint-items.ts');
+    const broken = { dropped: true, recover: async () => Promise.reject(new Error('the relayed channel never opened')) };
+    await expect(keepLive([broken], () => new Promise((done) => setTimeout(done, 100)), 10)).rejects.toThrow(/never opened/);
+  });
+
+  it('prints the endpoint’s own lines about its hub connection and its channels, the last of them', async () => {
+    const { channelLines } = await import('../../deploy/endpoint-items.ts');
+    const log = [
+      '2026-10-30T22:25:01Z endpoint: connected to the hub (generation 2)',
+      '2026-10-30T22:25:02Z [spine] loaded in 900 ms',
+      "2026-10-30T22:26:40Z endpoint: the hub connection closed 1006; connecting again at once",
+      '2026-10-30T22:26:41Z endpoint: channel r7 sealed no stream message in 30000 ms; its carrier is ended',
+      '2026-10-30T22:26:42Z serving; 3 clients',
+    ];
+    expect(channelLines(log)).toEqual([log[0], log[2], log[3]]);
+    expect(channelLines(log, 1)).toEqual([log[3]]);
   });
 });
 

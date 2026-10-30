@@ -272,7 +272,11 @@ O10's acceptance items 2-5, 8 and 9 against a real `mawsd` (`endpoint-acceptance
 `endpoint-items.ts`, its verdicts in `endpoint-verdicts.ts`). The machine is a scratch scene on the devcloud acceptance
 VM (`vm/`): the user `o10acc`, a `mawsd` built from the branch on a scratch profile with the direct listener on 47831,
 a sminos cut over to it and one terminal `claude` session under that sminos whose model is a stub (`vm/stub-model.mjs`),
-all in a private mount namespace that hides the VM's managed settings; every step on the VM is a 0600 script handed to
+and, for item 2's lane B half, a session in that `mawsd`'s own engine host started over `machine.sock` with no app
+(`vm/lane-b.mjs`: `session.create`, then `session.start` on the gateway route, which `MAWS_RELAY_URL` points at the
+same stub, the engine on a config dir of `mawsd`'s holding the sminos plugin from the scene's own directory
+marketplace), its delivery judged against the engine host's own numbering read over `machine.sock`; all in a private
+mount namespace that hides the VM's managed settings; every step on the VM is a 0600 script handed to
 `devcloud vm ssh <vm> --root` on its stdin and unlinked at once (`endpoint-machine.ts`). The run enrolls the scratch
 `mawsd` by a code the staging admin mints and lists it, adds a second member, drives each item over the relay and over
 the tailnet (`TamperRelay` and the run's own relays in the path for item 3), and undoes all of it, the policy included.
