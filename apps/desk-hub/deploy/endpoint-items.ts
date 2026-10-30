@@ -5,16 +5,16 @@
 // report line; what an item changes (the policy, a device it adds) is undone before it ends, and registered on the
 // run's cleanup in case it never gets there.
 //
-// What the run cannot show on a machine with no app (lane B's live half, O3), what is another child's (O12's phase 2,
-// O14's cutover for item 7), and what only the suites can show (a kill between an fsync and its answer) are named under
-// the item, never counted as shown.
+// What a scene cannot show (lane B's live half where it has no lane B session: production's, the local proof's), what is
+// another child's (O12's phase 2, O14's cutover for item 7), and what only the suites can show (a kill between an fsync
+// and its answer) are named under the item, never counted as shown.
 import { randomBytes } from 'node:crypto';
-import { canonicalize, endorseDevice, generateSigningKey, keyId, OP_HORIZON_S, signEvent, verifyEvent, verifyListing, type Action, type ByteDuplex, type Certificates, type KeyHolder, type Listing, type LogEventV2, type OrgState, type RevokedKey, type Signed, type SignedOrgState } from 'org-protocol';
+import { canonicalize, endorseDevice, generateSigningKey, keyId, OP_HORIZON_S, signEvent, SUB_CREDIT_MAX, verifyEvent, verifyListing, type Action, type ByteDuplex, type Certificates, type KeyHolder, type Listing, type LogEventV2, type OrgState, type RevokedKey, type Signed, type SignedOrgState } from 'org-protocol';
 import { ProjectSocket, type DeviceHuman } from 'org-protocol/test-support';
 import type { Person } from './hub';
 import type { EndpointMachine } from './endpoint-machine';
-import { DirectPacer, dialDirect, FrameRelay, openRemote, Remote, testDevice, throughTamper, upgradeStatus, type RelayDialer, type RunDevice } from './endpoint-remote';
-import { laneAProblems, resumeCursor, type ItemReport, type Segment } from './endpoint-verdicts';
+import { DirectPacer, dialDirect, FrameRelay, openRemote, Remote, testDevice, throughTamper, upgradeStatus, type Msg, type RelayDialer, type RunDevice } from './endpoint-remote';
+import { laneAProblems, laneBProblems, laneBResume, resumeCursor, type ItemReport, type LaneBCursor, type LaneBEvent, type LaneBSegment, type Segment } from './endpoint-verdicts';
 import type { Cleanup } from './proof';
 
 export const ITEMS = ['2', '3', '4', '5', '8', '9'] as const;
@@ -969,6 +969,164 @@ export function watchDuring<T>(watch: () => Promise<T>): { join(): Promise<T> } 
   };
 }
 
+/** The credit a lane B device grants back once it has taken this much of the stream (a client tops its credit up as it
+ * reads, so a long catch-up is never held for credit). */
+const CREDIT_STEP = 1 << 20;
+
+/**
+ * A lane B subscription followed across its channel's ends, as `Track` follows lane A's: each answer and what came after
+ * it on its channel a segment, and an answer the endpoint gives again on the same channel (a relaunch's `subbed`) a
+ * segment of its own. Its device grants credit back as it takes the stream.
+ */
+class LaneBTrack {
+  readonly segments: LaneBSegment[] = [];
+  remote: Remote | null = null;
+  /** Where this channel's messages for the subscription start, and the segment its own `sub` began. */
+  #from = 0;
+  #base = 0;
+  #credit: (() => void) | null = null;
+
+  constructor(
+    readonly scene: Scene,
+    readonly app: string,
+    readonly sub: string,
+    readonly carrier: 'relayed' | 'direct',
+  ) {}
+
+  /** The segments since this channel's `sub`, read again from its inbox: each `subbed` begins one. */
+  #collect(): void {
+    const remote = this.remote;
+    const head = this.segments[this.#base];
+    if (remote === null || head === undefined) return;
+    const groups: Msg[][] = [[]];
+    for (const m of remote.inbox.slice(this.#from)) {
+      if (m.sub !== this.sub) continue;
+      if (m.t === 'subbed' && groups.at(-1)!.some((x) => x.t === 'subbed')) groups.push([]);
+      groups.at(-1)!.push(m);
+    }
+    this.segments.length = this.#base + 1;
+    for (const [i, group] of groups.entries()) {
+      const segment: LaneBSegment = i === 0 ? head : { after: 'a relaunch, on the same channel', cursor: laneBResume(this.segments.at(-1)!), expect: 'snapshot', subbed: null, state: null, events: [], controls: [], ended: null };
+      fill(segment, group);
+      if (i > 0) this.segments.push(segment);
+    }
+  }
+
+  /** The device's credit topped up on `remote` as the subscription's stream is taken. */
+  #grant(remote: Remote): void {
+    this.#credit?.();
+    let taken = 0;
+    this.#credit = remote.channel.onMessage((m) => {
+      const message = m as Msg;
+      if (message.sub !== this.sub || (message.t !== 'ev' && message.t !== 'snap')) return;
+      taken += Buffer.byteLength(JSON.stringify(message));
+      if (taken < CREDIT_STEP) return;
+      const bytes = Math.min(taken, SUB_CREDIT_MAX);
+      taken -= bytes;
+      void remote.channel.send({ t: 'credit', sub: this.sub, bytes }).catch(() => {});
+    });
+  }
+
+  /**
+   * Opens a channel and subscribes, resuming from the last segment's cursor; the answer is the one `expect` names. With
+   * `untilListed`, an `ended` before any answer is asked again for `ms`: the endpoint authorizes the session by sminos's
+   * record of it, which reaches it over RL10 a while after sminos lists it.
+   */
+  async subscribe(after: string, expect: LaneBSegment['expect'], { untilListed = false, ms = 120_000 } = {}): Promise<string> {
+    this.#collect();
+    const previous = this.segments.at(-1);
+    const cursor = previous === undefined ? null : laneBResume(previous);
+    const started = Date.now();
+    const remote = await until(async () => open(this.scene, this.scene.owner, this.carrier).catch(() => null), `a ${this.carrier} channel`, ms, 2000);
+    this.remote = remote;
+    this.#grant(remote);
+    this.#base = this.segments.length;
+    this.segments.push({ after, cursor, expect, subbed: null, state: null, events: [], controls: [], ended: null });
+    const deadline = Date.now() + ms;
+    for (;;) {
+      this.#from = remote.inbox.length;
+      await remote.channel.send({ t: 'sub', sub: this.sub, session: { lane: 'B', id: this.app }, view: 'full', cursor, credit: SUB_CREDIT_MAX });
+      const answer = await remote.waitFor((m) => m.sub === this.sub && (m.t === 'subbed' || m.t === 'ended'), `the answer to ${this.sub}`, this.#from, 30_000);
+      if (answer.t === 'subbed') return `${String(answer.mode)} after ${((Date.now() - started) / 1000).toFixed(1)} s`;
+      if (!untilListed || Date.now() > deadline) throw new Error(`${this.sub} ended ${String(answer.reason)}`);
+      await sleep(3000);
+    }
+  }
+
+  /** Waits for the channel to close (a cut the run made), its segments kept. */
+  async closed(ms: number): Promise<string> {
+    const remote = this.remote;
+    if (remote === null) return 'no channel';
+    const reason = await Promise.race([remote.closed, sleep(ms).then(() => null)]);
+    this.#collect();
+    if (reason === null) throw new Error(`the ${this.carrier} channel stayed open`);
+    this.remote = null;
+    return reason;
+  }
+
+  /** Whether its channel is still the one it opened, never closed. */
+  get live(): boolean {
+    return this.remote !== null && this.remote.closeReason === null;
+  }
+
+  /** The events received so far on this channel. */
+  count(): number {
+    this.#collect();
+    return this.segments.slice(this.#base).reduce((n, s) => n + s.events.length, 0);
+  }
+
+  /** The last event the device has, or its answer's position. */
+  last(): LaneBCursor | null {
+    this.#collect();
+    const segment = this.segments.at(-1);
+    return segment === undefined ? null : laneBResume(segment);
+  }
+
+  finish(): void {
+    this.#collect();
+    this.#credit?.();
+    this.#credit = null;
+    this.remote?.close();
+  }
+}
+
+/** A lane B segment's answer, opening state, events and controls, from its messages in order. */
+function fill(segment: LaneBSegment, messages: readonly Msg[]): void {
+  const place = (m: Msg) => ({ epoch: String(m.epoch), seq: Number(m.seq), ...(typeof m.idx === 'number' ? { idx: m.idx } : {}) });
+  const subbed = messages.find((m) => m.t === 'subbed');
+  segment.subbed = subbed ? { mode: String(subbed.mode), ...place(subbed) } : null;
+  // The opening's state is its first `snap`, in pages until `last`; later ones are single parts the stream replaces.
+  const pages = messages.filter((m) => m.t === 'snap');
+  const last = pages.findIndex((m) => m.last === true);
+  segment.state = last < 0 ? null : { ...place(pages[0]), parts: stateParts(pages.slice(0, last + 1).map((m) => m.body as string).join('')) };
+  segment.events = messages
+    .filter((m) => m.t === 'ev')
+    .map((m) => {
+      const body = m.body as { id?: unknown; seq?: unknown; omitted?: unknown } | null;
+      const omitted = body?.omitted !== undefined;
+      return { ...place(m), id: omitted ? null : String(body?.id), eventSeq: omitted ? null : body?.seq };
+    });
+  segment.controls = messages.flatMap((m) => (m.t === 'paused' ? [`paused ${String(m.reason)}`] : m.t === 'resumed' ? ['resumed'] : []));
+  const ended = messages.find((m) => m.t === 'ended');
+  segment.ended = ended ? String(ended.reason) : null;
+}
+
+/** The parts an opening's state carries (its pages' text joined), or `(unreadable)`. */
+function stateParts(text: string): string[] {
+  try {
+    return Object.keys(JSON.parse(text) as Record<string, unknown>);
+  } catch {
+    return ['(unreadable)'];
+  }
+}
+
+/** Whether `track` holds the engine host's last event: it caught up with the producer. */
+const caughtUp = (track: LaneBTrack, produced: readonly LaneBEvent[]) => {
+  const want = produced.at(-1);
+  const have = track.last();
+  return want !== undefined && have !== null && have.epoch === want.epoch && have.seq === want.seq && have.idx === want.idx;
+};
+
 export async function item2(scene: Scene, report: ItemReport): Promise<void> {
   const relayed = new Track(scene, `r-${scene.tag}`, 'relayed');
   const direct = new Track(scene, `d-${scene.tag}`, 'direct');
@@ -976,8 +1134,39 @@ export async function item2(scene: Scene, report: ItemReport): Promise<void> {
     relayed.finish();
     direct.finish();
   });
+  // Lane B's live half, where the scene has a lane B session (staging's VM; never production, which shows lane A alone).
+  const sourceB = scene.target === 'production' ? null : (scene.machine.laneB ?? null);
+  // Set inside its first check (`as`: a closure assigns it, which narrowing would not see).
+  let laneB = null as { app: string; launch: string; engine: string; alias: string; relayed: LaneBTrack; direct: LaneBTrack } | null;
+  let stretchB = 0;
+  /** A lane B stretch, asked for by the owner's device over lane B's direct channel: `session.send` on the session's
+   * current launch, as a phone sends one. */
+  const askB = async (count: number) => {
+    const run = laneB;
+    if (sourceB === null || run === null) return;
+    const { app } = run;
+    const via = run.direct.live ? run.direct.remote! : await open(scene, scene.owner, 'direct');
+    try {
+      await sourceB.ticks(count, `${scene.tag}b${++stretchB}`, async (text) => {
+        const status = await via.call('session.status', { appSessionId: app });
+        if (!status.ok) throw new Error(`session.status was answered ${status.code}`);
+        const { launchId, engineSessionId } = status.output as { launchId: string; engineSessionId: string };
+        const said = await via.act(via.device.action({ machine: scene.ref, action: 'session.send', session: app, context: { lane: 'B', launchId, engineSessionId }, args: { appSessionId: app, content: text } }));
+        if (said !== 'accepted') throw new Error(`the lane B stretch's send was answered ${said}`);
+      });
+    } finally {
+      if (via !== run.direct.remote) via.close();
+    }
+  };
+  /** A lane B stretch asked beside one of lane A's, whose failure is lane B's next check's to report, never lane A's. */
+  let besideB: string | null = null;
+  const takeBeside = () => {
+    const failed = besideB;
+    besideB = null;
+    if (failed !== null) throw new Error(`a lane B stretch asked beside lane A's failed: ${failed}`);
+  };
   let stretch = 0;
-  /** A stretch of rows the session writes by itself, asked for over the direct channel. */
+  /** A stretch of rows the session writes by itself, asked for over the direct channel (and lane B's beside it). */
   const ticks = async (count: number) => {
     const via = direct.remote ?? (await open(scene, scene.owner, 'direct'));
     await scene.machine.laneA.ticks(count, `${scene.tag}${++stretch}`, async (text) => {
@@ -986,9 +1175,11 @@ export async function item2(scene: Scene, report: ItemReport): Promise<void> {
       if (said !== 'accepted') throw new Error(`the stretch's send was answered ${said}`);
     });
     if (via !== direct.remote) via.close();
+    if (laneB !== null) await askB(count).catch((error: unknown) => void (besideB ??= error instanceof Error ? error.message : String(error)));
   };
   /** A new stretch of `count` rows, and each track's events growing from before it was asked for. */
   const fresh = (what: string, tracks: Track[], count = 10) => flowingAfter(() => ticks(count), tracks, what);
+  const freshB = (what: string, tracks: LaneBTrack[], count = 10) => flowingAfter(() => askB(count), tracks, what);
   const ok = await report.check('2', 'both carriers subscribed to the lane A session, rows flowing', async () => {
     const a = await relayed.subscribe('first', 'snapshot');
     const b = await direct.subscribe('first', 'snapshot');
@@ -996,6 +1187,23 @@ export async function item2(scene: Scene, report: ItemReport): Promise<void> {
     return `relayed ${a}, direct ${b}`;
   });
   if (!ok) return;
+
+  if (sourceB !== null) {
+    await report.check('2', 'both carriers subscribed to the lane B session, events flowing', async () => {
+      const up = await sourceB.up(`${scene.tag}b`);
+      if (!scene.sessions.includes(up.engine)) scene.sessions.push(up.engine);
+      const tracks = { relayed: new LaneBTrack(scene, up.app, `rb-${scene.tag}`, 'relayed'), direct: new LaneBTrack(scene, up.app, `db-${scene.tag}`, 'direct') };
+      scene.cleanup.add('close item 2’s lane B channels', async () => {
+        tracks.relayed.finish();
+        tracks.direct.finish();
+      });
+      const r = await tracks.relayed.subscribe('first', 'snapshot', { untilListed: true });
+      const d = await tracks.direct.subscribe('first', 'snapshot', { untilListed: true });
+      laneB = { ...up, ...tracks };
+      await freshB('from the first stretch', [tracks.relayed, tracks.direct], 20);
+      return `session ${up.app} (engine ${up.engine}, ${up.alias}) on launch ${up.launch}, started over machine.sock with no app: relayed ${r}, direct ${d}`;
+    });
+  }
 
   await report.check('2', 'the endpoint’s RL1 socket cut by force: the relayed channel resumes by replay, the direct one never drops', async () => {
     await ticks(40); // rows being written as the cut lands
@@ -1008,6 +1216,18 @@ export async function item2(scene: Scene, report: ItemReport): Promise<void> {
     if (direct.remote === null) throw new Error('the direct channel dropped');
     return `${cut}; the relayed channel closed ${reason} and resumed (${resumed})`;
   });
+  if (laneB !== null) {
+    const { relayed: rb, direct: db } = laneB;
+    await report.check('2', 'the endpoint’s RL1 socket cut by force: the relayed lane B channel resumes by replay, the direct one never drops', async () => {
+      takeBeside(); // lane B's events were being written as the cut landed, asked beside lane A's
+      const reason = await rb.closed(60_000);
+      const resumed = await rb.subscribe('the hub socket cut', 'replay');
+      if (!db.live) throw new Error('the direct lane B channel dropped');
+      await freshB('after the cut and the replay', [rb, db]);
+      if (!db.live) throw new Error('the direct lane B channel dropped');
+      return `the relayed channel closed ${reason} and resumed (${resumed})`;
+    });
+  }
 
   await report.check('2', 'a hub deploy, then the forced cut: the relayed channel resumes by replay', async () => {
     if (scene.hubDeploy === null) return { skip: 'this scene deploys no hub' };
@@ -1044,6 +1264,19 @@ export async function item2(scene: Scene, report: ItemReport): Promise<void> {
     await fresh('after the forced cut', [relayed]);
     return `${during.length ? `${during.join('; ')}; ` : 'the deploy cut nothing; '}${cut}; closed ${reason}, resumed (${resumed})`;
   });
+  if (laneB !== null) {
+    const { relayed: rb } = laneB;
+    await report.check('2', 'a hub deploy, then the forced cut: the relayed lane B channel resumes by replay', async () => {
+      if (scene.hubDeploy === null) return { skip: 'this scene deploys no hub' };
+      takeBeside();
+      // Lane B's relayed channel is resumed once, after the deploy and its forced cut, whichever of them closed it: a lane
+      // B cursor is the engine host's, so its replay has no window to keep.
+      const reason = await rb.closed(60_000);
+      const resumed = await rb.subscribe('the hub deploy and its forced cut', 'replay');
+      await freshB('after the forced cut', [rb]);
+      return `closed ${reason}, resumed (${resumed})`;
+    });
+  }
 
   await report.check('2', '`mawsd restart`: both channels close `restart` and resume by snapshot under a new epoch', async () => {
     await fresh('before the restart', [direct], 40);
@@ -1059,6 +1292,27 @@ export async function item2(scene: Scene, report: ItemReport): Promise<void> {
     await fresh('after the restart', [relayed, direct]);
     return `relayed ${a}, direct ${b}`;
   });
+  if (laneB !== null) {
+    const { app, relayed: rb, direct: db } = laneB;
+    await report.check('2', '`mawsd restart`: both lane B channels close `restart` and resume by their cursors', async () => {
+      takeBeside();
+      const [r, d] = await Promise.all([rb.closed(60_000), db.closed(60_000)]);
+      if (r !== 'restart' || d !== 'restart') throw new Error(`the channels closed ${r} and ${d}`);
+      // M8's rule on the engine host's cursor: one on the launch the session still runs (the engine host outlives
+      // mawsd) replays from it; one on an earlier launch is a snapshot of the new one.
+      const q = await open(scene, scene.owner, 'direct');
+      const status = await q.call('session.status', { appSessionId: app }).finally(() => q.close());
+      if (!status.ok) throw new Error(`session.status was answered ${status.code}`);
+      const launch = String((status.output as { launchId?: unknown }).launchId);
+      const answers: string[] = [];
+      for (const track of [rb, db]) {
+        const expect = track.last()?.epoch === launch ? 'replay' : 'snapshot';
+        answers.push(`${track.carrier} ${await track.subscribe('mawsd restart', expect)}`);
+      }
+      await freshB('after the restart', [rb, db]);
+      return `the session on launch ${launch}${launch === laneB!.launch ? ', the one it started on' : `, not ${laneB!.launch} it started on`}: ${answers.join(', ')}`;
+    });
+  }
 
   // The verdict: the session's own transcript, once it stops growing, against each subscription.
   let produced: string[] = [];
@@ -1078,7 +1332,40 @@ export async function item2(scene: Scene, report: ItemReport): Promise<void> {
       return `${track.segments.length} answers (${track.segments.map((s) => s.subbed?.mode).join(', ')}), ${events} events, ${produced.length} transcript rows all held`;
     });
   }
-  report.outstanding('2', 'lane B’s live half needs an app-less event source on a machine with no app, O3’s (P5 DL 29); until then M8’s suites prove it (test/endpoint/subscriptions-b.test.ts)');
+  if (sourceB === null) {
+    report.outstanding('2', 'lane B’s live half needs an app-less event source on a machine with no app, O3’s (P5 DL 29); until then M8’s suites prove it (test/endpoint/subscriptions-b.test.ts)');
+    return;
+  }
+  if (laneB === null) return; // its first check failed, and said why
+  // Lane B's: the engine host's own numbering of the session's events, read over machine.sock once it stops growing,
+  // against each subscription once it caught up with it (or a minute passed: the verdict then names what it lacks).
+  const { app } = laneB;
+  let atRest: Promise<LaneBEvent[]> | null = null;
+  const producedB = () =>
+    (atRest ??= (async () => {
+      let events: LaneBEvent[] = [];
+      await until(async () => {
+        const now = await sourceB!.events(app);
+        const settled = now.length === events.length && now.length > 0;
+        events = now;
+        return settled;
+      }, 'the lane B session at rest', 180_000, 5000);
+      return events;
+    })());
+  for (const track of [laneB.relayed, laneB.direct]) {
+    await report.check('2', `lane B over the ${track.carrier} carrier: every event once, by the endpoint’s cursor and the engine host’s journal`, async () => {
+      takeBeside();
+      const events = await producedB();
+      await until(() => caughtUp(track, events), `the ${track.carrier} subscription caught up`, 60_000, 1000).catch(() => {});
+      track.finish();
+      const problems = laneBProblems(track.segments, app, events);
+      if (problems.length) throw new Error(problems.slice(0, 5).join('; '));
+      const delivered = track.segments.reduce((n, s) => n + s.events.length, 0);
+      const pauses = track.segments.reduce((n, s) => n + s.controls.filter((c) => c.startsWith('paused')).length, 0);
+      const launches = [...new Set(events.map((e) => e.epoch))];
+      return `${track.segments.length} answers (${track.segments.map((s) => s.subbed?.mode).join(', ')}), ${delivered} events, the ${events.length} the engine host numbered in launch ${launches.join(', ')} each once${pauses ? `; paused ${pauses} time(s), each resumed` : ''}`;
+    });
+  }
 }
 
 // ---- production ------------------------------------------------------------------------------------------------------

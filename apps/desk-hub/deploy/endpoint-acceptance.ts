@@ -1,7 +1,8 @@
 // `deployment endpoint-acceptance` (P5 O10 M11; docs/doperpowers/plans/2026-10-27-p5-o10-endpoint.md, Acceptance 2-5, 8
 // and 9): a real `mawsd` with its endpoint, enrolled by a code the staging OrgAdmin mints and listed in the org's
-// state, the sminos beside it cut over to the endpoint and one terminal session under it (lane A), and the run's test
-// device driving each item over the relay (the staging hub's multiplex) and over the tailnet (the direct listener).
+// state, the sminos beside it cut over to the endpoint and one terminal session under it (lane A), on staging a session
+// in that mawsd's own engine host with no app (lane B, item 2's), and the run's test device driving each item over the
+// relay (the staging hub's multiplex) and over the tailnet (the direct listener).
 // One `PASS <item>` line per item that showed, `FAIL` or `NOT SHOWN` otherwise; then the cleanup (the machine unlisted
 // and revoked, every member and device the run added taken out, the scene on the machine ended) and a read-back of the
 // head and the hub's machines for anything of the run's still there.
@@ -409,7 +410,7 @@ export function setupHead(base: string, commit: string): string {
   return `BASE='${base}'\nCOMMIT='${commit}'\n`;
 }
 
-/** The files vm/setup.sh's stage holds: the scene, the stub model and its API, and the branch's bundle. */
+/** The files vm/setup.sh's stage holds: the scene, the stub model and its API, lane B's client, and the branch's bundle. */
 export function setupPayload(app: string, repo: string, bundle: string): Record<string, Buffer> {
   const vm = join(app, 'deploy', 'vm');
   return {
@@ -417,6 +418,7 @@ export function setupPayload(app: string, repo: string, bundle: string): Record<
     'production.sh': readFileSync(join(vm, 'production.sh')),
     'stub-model.mjs': readFileSync(join(vm, 'stub-model.mjs')),
     'stub-api.mjs': readFileSync(join(repo, 'spikes', 'protocol-probe', 'stub-api.mjs')),
+    'lane-b.mjs': readFileSync(join(vm, 'lane-b.mjs')),
     'maws.bundle': readFileSync(bundle),
   };
 }
@@ -563,7 +565,7 @@ export async function main(argv: string[]): Promise<number> {
 
   if (!isTestTarget(config!)) return 2;
   const device = await loadAdminDevice(values['device-keys'] as string);
-  const machine = new VmMachine(ssh, scratch, { directUrl: directUrlFor('staging', values['direct-url'] as string | undefined), log: (line) => log(`  vm: ${line}`), ...interruption });
+  const machine = new VmMachine(ssh, scratch, { directUrl: directUrlFor('staging', values['direct-url'] as string | undefined), log: (line) => log(`  vm: ${line}`), ...interruption, laneB: true });
   const deployScript = values['hub-deploy'] as string | undefined;
   const hubDeploy = deployScript === undefined ? null : () => run('zsh', [deployScript, 'deploy'], log, DEPLOY_MS, { env: hubDeployEnv(process.env) });
   return runEndpointAcceptance({

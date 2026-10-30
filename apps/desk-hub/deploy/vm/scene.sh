@@ -22,16 +22,33 @@
 #   sminos-status | sminos-revoked   `sminos daemon status` (and whether hub.json exists); daemon/revoked.json
 #   imported <token>             how many events in sminos's project logs hold the token (words it imported)
 #   local-spawn <alias> | retire <alias>   a local `sminos spawn` from the project's checkout; its retirement
-#   started                      the sessions the scene recorded starting: `session <id>` (lane A), `seat <id>`
+#   lane-b-up <tag>              a lane B session in mawsd's engine host, started over machine.sock with no app (as the
+#                                app starts one: lane-b.mjs), in lane A's checkout, once sminos lists it as lane B
+#   lane-b-events <app>          the engine host's own numbering of the lane B session's events (`session.events`
+#                                over machine.sock, never the endpoint): `ev <launch> <seq> <idx>` a line
+#   started                      the sessions the scene recorded starting: `session <id>` (lane A), `seat <id>`,
+#                                `lane-b <id>` (the lane B session's engine session)
 #   down                         everything of the scene ended and removed; `LEFT …` for what could not be
 # Nothing here names the owner, the owner's profile, sminos or daemon, or the VM's own mawsd (port 47830): the scene is
 # o10acc's alone, and `down` ends that user's processes and nothing else.
+#
+# Lane B's engine is mawsd's (its engine host's), which builds the engine's environment itself (src/engine-host/launch.ts):
+# an allowlist over its login shell's, its gateway route's ANTHROPIC_BASE_URL and token set over anything inherited. So
+# its model is reached as the gateway: MAWS_RELAY_URL on mawsd's environment names the stub (the relay's dev override,
+# honoured in an unpackaged build such as the pack), which answers the relay's health check, and the token is the
+# engine host's fixed non-secret marker. mawsd runs on a config dir of its own (CB) holding the sminos plugin installed
+# from the scene's directory marketplace (MARKET), since a MAWS launch loads the user scope's plugins and takes no
+# --plugin-dir; lane A keeps its own (`--plugin-dir`) and is not loaded twice. The engine's allowlist drops
+# SMINOS_HOME, so a lane B session's sminos hooks use the default home, ~/.claude/sminos: the scene's sminos lives there.
 set -uo pipefail
 U=o10acc
 H=/home/$U
 O=/opt/o10-m11
 P=$H/profile
-S=$H/s
+S=$H/.claude/sminos
+CB=$H/.claude-mawsd
+MARKET=$O/market
+LANE_B=$O/lane-b.mjs
 W=$H/work
 R=$H/run
 DIRECT_PORT=47831
@@ -42,6 +59,11 @@ SMINOS=$O/bin/sminos
 CLAUDE=$O/bin/claude
 TX=o10-m11
 SCENE_ENV=("HOME=$H" "USER=$U" "LOGNAME=$U" "SHELL=/bin/bash" "PATH=$O/bin:$H/pack/runtime/bin:/usr/bin:/bin" "LANG=C.UTF-8" "TERM=xterm-256color" "MAWS_USER_DATA=$P" "SMINOS_HOME=$S" "SMINOS_RL10=$P/mawsd/endpoint/rl10.json" "SMINOS_DERIVE_EVERY=0" "MAWS_ENDPOINT_DIRECT=1" "MAWS_ENDPOINT_PORT=$DIRECT_PORT" "CLAUDE_CONFIG_DIR=$H/.claude" "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1" "ANTHROPIC_BASE_URL=http://127.0.0.1:$STUB_PORT" "ANTHROPIC_AUTH_TOKEN=o10-m11-stub-no-credential" "DISABLE_AUTOUPDATER=1" "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1" "DISABLE_TELEMETRY=1" "DISABLE_ERROR_REPORTING=1")
+
+# mawsd's environment: the scene's, on its own config dir, its engine host's gateway the stub.
+MAWSD_ENV=()
+for kv in "${SCENE_ENV[@]}"; do [[ $kv == CLAUDE_CONFIG_DIR=* ]] || MAWSD_ENV+=("$kv"); done
+MAWSD_ENV+=("CLAUDE_CONFIG_DIR=$CB" "MAWS_RELAY_URL=http://127.0.0.1:$STUB_PORT")
 
 say() { printf '%s\n' "$*"; }
 fail() { say "$*"; exit 1; }
@@ -90,6 +112,7 @@ check() {
   say "claude: $([[ -x $CLAUDE ]] && "$CLAUDE" --version 2>/dev/null | head -1 || echo absent)"
   say "sminos: $([[ -x $SMINOS ]] && grep -m1 '"version"' $O/sminos/.claude-plugin/plugin.json | tr -d ' ,' || echo absent)"
   say "stub: $([[ -f $O/stub-model.mjs && -f $O/stub-api.mjs ]] && echo present || echo absent)"
+  say "lane B: $([[ -f $LANE_B && -f $MARKET/.claude-plugin/marketplace.json && -f $MARKET/sminos/.claude-plugin/plugin.json ]] && echo present || echo absent)"
   say "tools: $(for t in tmux python3 ss nsenter unshare runuser curl git; do command -v $t >/dev/null || printf 'missing-%s ' $t; done)ok"
   say "port $DIRECT_PORT: $(ss -ltnH "( sport = :$DIRECT_PORT )" | wc -l) listener(s)"
   say "scene: $(anchor >/dev/null && echo up || echo down)"
@@ -99,14 +122,14 @@ check() {
 up() {
   down >/dev/null 2>&1
   [[ -x $NODE && -f $MAWSD_JS ]] || fail "no mawsd pack at $H/pack: run setup.sh first"
-  install -d -m 700 -o $U -g $U $P $S $R $W $H/.claude
+  install -d -m 700 -o $U -g $U $H/.claude $P $S $R $W
   # The namespace's anchor: a sleep whose mount namespace has /etc/claude-code as an empty tmpfs (propagation private,
   # so the host's own mount table never sees it). Every process of the scene is started inside it.
   setsid -f unshare -m --propagation private sh -c "mount -t tmpfs -o mode=755,size=1m tmpfs /etc/claude-code && echo \$\$ > $R/anchor.pid && exec sleep infinity" </dev/null >/dev/null 2>&1
   within 10 anchor >/dev/null || fail "the scene's namespace did not come up"
   [[ -z $(inns ls -A /etc/claude-code) ]] || fail "the namespace still shows /etc/claude-code's files"
   # mawsd as a unit would run it, under a loop that starts it again after `mawsd restart` (its exit 75) and only then.
-  inns setsid -f runuser -u $U -- env -i "${SCENE_ENV[@]}" bash -c 'while :; do "$0" --disable-sigusr1 "$1" run --unit --dir "$2"; rc=$?; [ $rc -eq 75 ] || exit $rc; done' \
+  inns setsid -f runuser -u $U -- env -i "${MAWSD_ENV[@]}" bash -c 'while :; do "$0" --disable-sigusr1 "$1" run --unit --dir "$2"; rc=$?; [ $rc -eq 75 ] || exit $rc; done' \
     $NODE $MAWSD_JS $P/mawsd </dev/null >>$R/mawsd.out 2>&1
   within 90 served 1 || { tail -5 $R/mawsd.out; fail "mawsd did not serve within 90 s"; }
   say "serving: mawsd pid $(mawsd_pid), the direct listener on port $DIRECT_PORT once enrolled"
@@ -185,7 +208,8 @@ start_session() {
   local resume=$1 flags=(--plugin-dir "$O/sminos" --model sonnet -n o10-m11-lane-a)
   [[ -n $resume ]] && flags+=(--resume "$resume")
   inns runuser -u $U -- env -i "${SCENE_ENV[@]}" tmux -L $TX new-session -d -s lane-a -x 200 -y 50 -c $W "$CLAUDE ${flags[*]}" || fail "tmux"
-  if ! within 120 bash -c "ls $S/bridge/*.sock >/dev/null 2>&1"; then
+  # A resume waits for its own session's bridge (a lane B session's may be there too); a first start has no other.
+  if ! within 120 bash -c "ls $S/bridge/${resume:-*}.sock >/dev/null 2>&1"; then
     say "the pane, last lines:"; as tmux -L $TX capture-pane -p -t lane-a 2>/dev/null | grep -v '^\s*$' | tail -15
     fail "no bridge within 120 s"
   fi
@@ -194,8 +218,10 @@ start_session() {
 bridge_launch() { as curl -sf --max-time 5 --unix-socket $S/bridge/$1.sock http://bridge/status | python3 -c 'import json,sys; print(json.load(sys.stdin)["launch"])'; }
 
 lane_a_stop() {
+  local sid; sid=$(cat $R/session) || fail "no session to stop"
   as tmux -L $TX kill-session -t lane-a 2>/dev/null
-  within 30 bash -c "! ls $S/bridge/*.sock >/dev/null 2>&1" || fail "the bridge did not go within 30 s"
+  # Lane A's own bridge: a lane B session's sits in the same directory.
+  within 30 bash -c "[[ ! -e $S/bridge/$sid.sock ]]" || fail "the bridge did not go within 30 s"
   say "the session's engine ended"
 }
 
@@ -204,6 +230,78 @@ lane_a_resume() {
   start_session "$sid"
   [[ -S $S/bridge/$sid.sock ]] || fail "the resumed engine bridged another session"
   python3 -c 'import json,sys; print(json.dumps({"launch": sys.argv[1]}))' "$(bridge_launch "$sid")"
+}
+
+# mawsd's config dir, as the scratch user: a command with it, in the scene's namespace, from the scratch home.
+as_mawsd() { inns runuser -u $U -- env -i "${MAWSD_ENV[@]}" bash -c 'cd ~ && exec "$@"' bash "$@"; }
+
+# Whether `sminos list` shows the session $1 as lane B (by its controller, or a `maws` origin awaiting one): its alias
+# and status 0; status 2 with what it shows when it is listed otherwise; status 1 when it is not listed.
+lane_b_listed() {
+  as bash -c "cd $W && $SMINOS list --here --json" 2>/dev/null | python3 -c '
+import json, sys
+sid = sys.argv[1]
+def walk(x):
+    if isinstance(x, dict):
+        if sid in x.values():
+            yield x
+        for v in x.values():
+            yield from walk(v)
+    elif isinstance(x, list):
+        for v in x:
+            yield from walk(v)
+try:
+    found = list(walk(json.load(sys.stdin)))
+except ValueError:
+    sys.exit(1)
+for m in found:
+    origin, controller = m.get("origin") or {}, m.get("controller") or {}
+    if controller.get("lane") == "B" or (not controller and origin.get("kind") == "maws"):
+        print(m.get("alias") or "")
+        sys.exit(0)
+if found:
+    print("listed as origin %s, controller %s" % (json.dumps(found[0].get("origin")), json.dumps(found[0].get("controller"))))
+    sys.exit(2)
+sys.exit(1)' "$1"
+}
+
+lane_b_up() {
+  local tag=$1 out app launch engine alias
+  [[ $tag =~ ^[a-z0-9]{1,16}$ ]] || fail "a tag ([a-z0-9])"
+  [[ -f $LANE_B && -f $MARKET/.claude-plugin/marketplace.json ]] || fail "no lane B files under $O: run setup.sh again"
+  [[ -f $W/.smns ]] || fail "no checkout at $W: lane-a-up first"
+  bash -c "exec 3<>/dev/tcp/127.0.0.1/$STUB_PORT" 2>/dev/null || fail "the stub model is not listening: lane-a-up first"
+  # mawsd's config dir: onboarded, the checkout trusted, the sminos plugin installed and enabled in the user scope, and
+  # `echo` allowed (the stub's ticks), as lane A's is.
+  install -d -m 700 -o $U -g $U $CB
+  as python3 -c 'import json,sys; w=sys.argv[2]; json.dump({"hasCompletedOnboarding": True, "projects": {w: {"hasTrustDialogAccepted": True}}}, open(sys.argv[1], "w"))' $CB/.claude.json $W
+  as_mawsd $CLAUDE plugin marketplace add $MARKET >/dev/null 2>&1 || fail "the scene's plugin marketplace was not added to $CB"
+  as_mawsd $CLAUDE plugin install sminos@o10-m11 --scope user >/dev/null 2>&1 || fail "the sminos plugin was not installed in $CB"
+  as python3 -c '
+import json, sys
+p = sys.argv[1]
+s = json.load(open(p))
+if s.get("enabledPlugins", {}).get("sminos@o10-m11") is not True:
+    sys.exit("the sminos plugin is not enabled in " + p)
+s.setdefault("permissions", {})["allow"] = ["Bash(echo:*)"]
+json.dump(s, open(p, "w"))' $CB/settings.json || fail "mawsd's config dir's settings"
+  # The engine binary MAWS resolves first on a machine with no setting (src/engine-host/binary-info.ts).
+  as mkdir -p $H/.local/bin && as ln -sfn $CLAUDE $H/.local/bin/claude || fail "the engine binary's link"
+  out=$(as $NODE $LANE_B up $W $tag 2>&1) || { say "$out" | tail -5; fail "the lane B session did not start"; }
+  read -r app launch engine < <(python3 -c 'import json,sys; v=json.loads(sys.argv[1].splitlines()[-1]); print(v["app"], v["launch"], v["engine"])' "$out") || fail "lane-b.mjs answered no ids: $(say "$out" | tail -1)"
+  say "$engine" > $R/lane-b.session
+  # sminos's member, which the endpoint authorizes a subscription by: its hooks ran in the session, marked MAWS's.
+  if ! within 90 lane_b_listed "$engine" >/dev/null; then
+    out=$(lane_b_listed "$engine")
+    fail "sminos does not list $engine as lane B within 90 s${out:+: $out}"
+  fi
+  alias=$(lane_b_listed "$engine")
+  python3 -c 'import json,sys; print(json.dumps({"app": sys.argv[1], "launch": sys.argv[2], "engine": sys.argv[3], "alias": sys.argv[4]}))' "$app" "$launch" "$engine" "$alias"
+}
+
+lane_b_events() {
+  [[ ${1:-} =~ ^[0-9a-f-]{36}$ ]] || fail "an app session id"
+  as $NODE $LANE_B events "$1"
 }
 
 transcript() {
@@ -240,7 +338,7 @@ down() {
   pkill -TERM -u $U 2>/dev/null
   within 10 bash -c "! pgrep -u $U >/dev/null" || pkill -KILL -u $U 2>/dev/null
   p=$(cat $R/anchor.pid 2>/dev/null) && kill "$p" 2>/dev/null
-  rm -rf $P $S $W $R $H/.claude $H/.claude.json $H/.config $H/.local/state
+  rm -rf $P $S $W $R $H/.claude $CB $H/.claude.json $H/.config $H/.local/state $H/.local/bin/claude
   if pgrep -u $U >/dev/null; then say "LEFT processes of $U: $(pgrep -u $U | tr '\n' ' ')"; left=1; fi
   if [[ $(ss -ltnH "( sport = :$DIRECT_PORT )" | wc -l) != 0 ]]; then say "LEFT a listener on port $DIRECT_PORT"; left=1; fi
   ((left == 0)) && say "down: nothing of the scene runs or remains (the pack and build stay for the next run)"
@@ -274,7 +372,9 @@ case $verb in
     sed -n 's|^seat [a-z-]*: .*\[[0-9a-z]* / \([0-9a-f-]\{36\}\)\].*|\1|p' <<<"$out" | tail -1 >$R/seat.session
     exit $rc ;;
   retire) word "${1:-}"; as bash -c "cd $W && exec $SMINOS retire $1" ;;
-  started) for f in session seat.session; do [[ -s $R/$f ]] && say "${f%.session} $(head -1 $R/$f)"; done; true ;;
+  lane-b-up) lane_b_up "${1:-}" ;;
+  lane-b-events) lane_b_events "${1:-}" ;;
+  started) for f in session seat.session lane-b.session; do [[ -s $R/$f ]] && say "${f%.session} $(head -1 $R/$f)"; done; true ;;
   down) stop_verbs; v=$?; down; d=$?; exit $((v | d)) ;;
-  *) fail "scene.sh check | up | enroll <name> | mawsd <args…> | restart | cut-hub | listening | log-size <log> | log-since <log> <bytes> | lane-a-up <project> <name> | lane-a-stop | lane-a-resume | transcript <session> [token] | sminos-status | sminos-revoked | imported <token> | local-spawn <alias> | retire <alias> | started | down" ;;
+  *) fail "scene.sh check | up | enroll <name> | mawsd <args…> | restart | cut-hub | listening | log-size <log> | log-since <log> <bytes> | lane-a-up <project> <name> | lane-a-stop | lane-a-resume | transcript <session> [token] | sminos-status | sminos-revoked | imported <token> | local-spawn <alias> | retire <alias> | lane-b-up <tag> | lane-b-events <app> | started | down" ;;
 esac

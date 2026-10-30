@@ -1,12 +1,15 @@
-// The lane A session's model in the endpoint acceptance scene (P5 O10 M11; scene.sh starts it): a stand-in for the
-// Messages API on 127.0.0.1, so the terminal `claude` under the scene's sminos runs turns with no credential and no
-// spend. Built on spikes/protocol-probe/stub-api.mjs's turn encoding (scene.sh ships it beside this file), answered by
-// content rather than order, so a resumed session and any request the engine repeats get the same answers:
+// The model of the endpoint acceptance scene's sessions (P5 O10 M11; scene.sh starts it): a stand-in for the Messages API
+// on 127.0.0.1, so the terminal `claude` under the scene's sminos (lane A) and the engine mawsd's engine host launches
+// (lane B) run turns with no credential and no spend. Built on spikes/protocol-probe/stub-api.mjs's turn encoding
+// (scene.sh ships it beside this file), answered by content rather than order, so a resumed session and any request the
+// engine repeats get the same answers:
 // - a main-loop request whose last user text says `o10-m11 ticks <k> <tag>` starts a tool loop: `echo o10-m11 tick
 //   1/<k> <tag>` through Bash, and each tool result for tick i < k answers tick i + 1, the last a plain text turn; so
 //   the session goes on writing rows by itself (two per tick) while the run cuts its links;
 // - any other main-loop request is answered with a short text turn naming the request;
-// - a side request (a title, a classifier) with a short text; count_tokens a fixed count; any other path 404.
+// - a side request (a title, a classifier) with a short text; count_tokens a fixed count; the relay's health check
+//   (GET /api/hello) 200, so a MAWS gateway launch pointed here by MAWS_RELAY_URL (lane B's engine) starts; any other
+//   path 404.
 // Each answer waits `--delay-ms` (default 700), so a run of ticks spreads over time. Usage:
 //   node stub-model.mjs --port <port> [--delay-ms <ms>]
 import { Buffer } from 'node:buffer';
@@ -66,6 +69,10 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()
     req.on('data', (c) => chunks.push(c));
     req.on('end', () => {
       const path = req.url.split('?')[0];
+      if (req.method === 'GET' && path === '/api/hello') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ ok: true }));
+      }
       if (req.method === 'POST' && path === '/v1/messages/count_tokens') {
         res.writeHead(200, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ input_tokens: 1000 }));

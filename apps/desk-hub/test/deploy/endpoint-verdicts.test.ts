@@ -1,10 +1,11 @@
-// The endpoint acceptance run's verdicts (deploy/endpoint-verdicts.ts; P5 O10 M11): acceptance 2's lane A rule over a
-// subscription followed across its resumes, the per-item report, and the secrets kept out of every printed line.
+// The endpoint acceptance run's verdicts (deploy/endpoint-verdicts.ts; P5 O10 M11): acceptance 2's lane A and lane B
+// rules over a subscription followed across its resumes, the per-item report, and the secrets kept out of every printed
+// line.
 import { mkdtempSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ItemReport, laneAProblems, resumeCursor, rowUuid, Secrets, type PlaneMessage, type Segment } from '../../deploy/endpoint-verdicts.ts';
+import { ItemReport, laneAProblems, laneBEventOf, laneBProblems, laneBResume, resumeCursor, rowUuid, Secrets, type LaneBEvent, type LaneBSegment, type PlaneMessage, type Segment } from '../../deploy/endpoint-verdicts.ts';
 
 const row = (sub: string | null, n: number | null, uuid: string): PlaneMessage => ({ kind: 'row', sub, n, body: { row: { uuid, type: 'assistant' }, agentId: null } });
 const snap = (rows: string[]): PlaneMessage => ({ kind: 'snapshot', sub: 'E1', n: 0, body: { rows: rows.map((uuid) => ({ uuid })), more: false } });
@@ -115,6 +116,116 @@ describe('acceptance 2, lane A: a subscription followed across its resumes', () 
     expect(rowUuid(row('E1', 1, 'u1'))).toBe('u1');
     expect(rowUuid({ kind: 'presence', body: { row: { uuid: 'u1' } } })).toBeNull();
     expect(rowUuid({ kind: 'row', body: { row: { uuid: '' } } })).toBeNull();
+  });
+});
+
+// ---- lane B ----
+
+const APP = '5b1f0c2e-8d4a-4c3b-9e7f-1a2b3c4d5e6f';
+/** The engine host's numbering of launch `launch`: rows `seq` 1.., each with `per` events (idx 0..). */
+function numbered(launch: string, rows: number, per = 2): LaneBEvent[] {
+  return Array.from({ length: rows * per }, (_, k) => ({ epoch: launch, seq: Math.floor(k / per) + 1, idx: k % per }));
+}
+/** The `ev`s carrying `events`, each with its own id and seq. */
+const evs = (events: LaneBEvent[]) => events.map((e) => ({ ...e, id: `${APP}:${e.epoch}:${e.seq}:${e.idx}`, eventSeq: e.seq as unknown }));
+const STATE = (launch: string) => ({ epoch: launch, seq: 0, parts: ['status', 'queue', 'pendingItems', 'catalog'] });
+/** A first subscription to `launch`: a snapshot from its start, then `events`. */
+function firstB(launch: string, events: LaneBEvent[]): LaneBSegment {
+  return { after: 'first', cursor: null, expect: 'snapshot', subbed: { mode: 'snapshot', epoch: launch, seq: 0 }, state: STATE(launch), events: evs(events), controls: [], ended: null };
+}
+/** A replay after `prev` from its cursor, carrying `events`. */
+function replayB(prev: LaneBSegment, after: string, events: LaneBEvent[]): LaneBSegment {
+  const cursor = laneBResume(prev)!;
+  return { after, cursor, expect: 'replay', subbed: { mode: 'replay', ...cursor }, state: { ...cursor, parts: ['status', 'queue', 'pendingItems', 'catalog'] }, events: evs(events), controls: [], ended: null };
+}
+
+describe('acceptance 2, lane B: a subscription followed across its resumes by the engine host’s cursor', () => {
+  const L = numbered('lnch0001', 6); // 12 events, two a row
+
+  it('passes a snapshot from the launch’s start, then replays that each go on exactly after the cursor, a row cut in two included', () => {
+    const a = firstB('lnch0001', L.slice(0, 5)); // ends inside row 3, after its first event
+    const b = replayB(a, 'the hub socket cut', L.slice(5, 9));
+    const c = replayB(b, 'mawsd restart', L.slice(9));
+    expect(laneBResume(a)).toEqual({ epoch: 'lnch0001', seq: 3, idx: 0 });
+    expect(laneBProblems([a, b, c], APP, L)).toEqual([]);
+  });
+
+  it('names an event lost across a resume, by its place in the engine host’s numbering', () => {
+    const a = firstB('lnch0001', L.slice(0, 5));
+    const b = replayB(a, 'the hub deploy', L.slice(6)); // (3, 1) never came
+    expect(laneBProblems([a, b], APP, L)).toEqual(['after the hub deploy: (lnch0001, 4, 0) where (lnch0001, 3, 1) was next (1 lost)']);
+  });
+
+  it('names an event delivered twice: the rest of a cut row sent again whole', () => {
+    const a = firstB('lnch0001', L.slice(0, 5));
+    const b = replayB(a, 'the hub socket cut', L.slice(4));
+    expect(laneBProblems([a, b], APP, L)).toEqual(['after the hub socket cut: (lnch0001, 3, 0) came again (a repeat)']);
+  });
+
+  it('counts the events the engine host numbered that no answer carried, the latest’s tail included', () => {
+    const a = firstB('lnch0001', L.slice(0, 10));
+    expect(laneBProblems([a], APP, L)).toEqual(['2 of the 12 events the engine host numbered in launch lnch0001 reached no answer of the subscription (first: (lnch0001, 6, 0))']);
+  });
+
+  it('holds each event’s cursor to its own id and seq', () => {
+    const a = firstB('lnch0001', L);
+    a.events[3] = { ...a.events[3], id: `${APP}:lnch0001:2:0` };
+    a.events[5] = { ...a.events[5], eventSeq: 9 };
+    expect(laneBProblems([a], APP, L)).toEqual([`after first: the event ${APP}:lnch0001:2:0 (seq 2) came at the cursor (lnch0001, 2, 1)`, `after first: the event ${APP}:lnch0001:3:1 (seq 9) came at the cursor (lnch0001, 3, 1)`]);
+  });
+
+  it('refuses a snapshot where the design answers a replay, a replay from anywhere but the cursor, and a cursor behind what the device had', () => {
+    const a = firstB('lnch0001', L.slice(0, 4));
+    const again: LaneBSegment = { ...firstB('lnch0001', L), after: 'the hub socket cut', cursor: laneBResume(a), expect: 'replay' };
+    expect(laneBProblems([a, again], APP, L)).toEqual(['after the hub socket cut: answered snapshot, expected replay', 'after the hub socket cut: a snapshot of launch lnch0001, which an earlier answer streamed: its events come again']);
+    const off = replayB(a, 'the hub socket cut', L.slice(4));
+    off.subbed = { mode: 'replay', epoch: 'lnch0001', seq: 2, idx: 0 };
+    expect(laneBProblems([a, off], APP, L)[0]).toBe('after the hub socket cut: a replay from (lnch0001, 2, 0), not from the cursor (lnch0001, 2, 1)');
+    const behind = replayB(a, 'the hub socket cut', L.slice(4));
+    behind.cursor = { epoch: 'lnch0001', seq: 1, idx: 1 };
+    behind.subbed = { mode: 'replay', epoch: 'lnch0001', seq: 1, idx: 1 };
+    expect(laneBProblems([a, behind], APP, L)[0]).toBe('after the hub socket cut: the cursor named (lnch0001, 1, 1), but the device had last (lnch0001, 2, 1)');
+  });
+
+  it('takes a relaunch’s snapshot of the new launch from its start, and counts what the old launch’s tail lost', () => {
+    const M = numbered('lnch0002', 2);
+    const a = firstB('lnch0001', L.slice(0, 8));
+    const relaunch: LaneBSegment = { ...firstB('lnch0002', M), after: 'mawsd restart', cursor: laneBResume(a) };
+    // The engine host's record holds both launches here; the subscription left lnch0001 four events short.
+    expect(laneBProblems([a, relaunch], APP, [...L, ...M])).toEqual(['4 of the 12 events the engine host numbered in launch lnch0001 reached no answer of the subscription (first: (lnch0001, 5, 0))']);
+    // Read back at the end, the journal holds the current launch alone: the earlier one cannot be judged, and says so.
+    expect(laneBProblems([a, relaunch], APP, M)).toEqual(["the engine host's journal numbers no event of launch lnch0001, which the subscription answered (the session launched again since?)"]);
+  });
+
+  it('fails a snapshot that does not start at its launch’s start, or carries no state, and a launch no answer reached', () => {
+    const late = firstB('lnch0001', L.slice(2));
+    late.subbed = { mode: 'snapshot', epoch: 'lnch0001', seq: 1, idx: 1 };
+    late.state = null;
+    expect(laneBProblems([late], APP, L)).toEqual([
+      "after first: a snapshot from (lnch0001, 1, 1), not from its launch's start",
+      'after first: a snapshot answer with no state',
+      'after first: (lnch0001, 2, 0) where (lnch0001, 1, 0) was next (2 lost)',
+    ]);
+    const a = firstB('lnch0001', L);
+    expect(laneBProblems([a], APP, [...L, ...numbered('lnch0009', 1)])).toEqual(["the engine host's launch lnch0009 reached no answer of the subscription"]);
+  });
+
+  it('fails a subscription left paused or ended, and passes one paused and resumed', () => {
+    const a = firstB('lnch0001', L);
+    expect(laneBProblems([{ ...a, controls: ['paused no-app', 'resumed'] }], APP, L)).toEqual([]);
+    expect(laneBProblems([{ ...a, controls: ['paused no-app'] }], APP, L)).toEqual(['after first: left paused no-app, never resumed']);
+    expect(laneBProblems([{ ...a, ended: 'unavailable' }], APP, L)).toEqual(['after first: the endpoint ended the subscription (unavailable)']);
+  });
+
+  it('counts an event the endpoint sent `omitted` by its cursor alone', () => {
+    const a = firstB('lnch0001', L);
+    a.events[2] = { ...a.events[2], id: null, eventSeq: null };
+    expect(laneBProblems([a], APP, L)).toEqual([]);
+  });
+
+  it('reads an event’s place from its id alone', () => {
+    expect(laneBEventOf(APP, `${APP}:lnch0001:12:3`)).toEqual({ epoch: 'lnch0001', seq: 12, idx: 3 });
+    for (const bad of [`${APP}:lnch0001:12`, `${APP}:lnch0001:12:`, `${APP}:lnch0001::3`, `other:lnch0001:1:0`, `${APP}:lnch0001:1:-1`, 7]) expect(laneBEventOf(APP, bad)).toBeNull();
   });
 });
 

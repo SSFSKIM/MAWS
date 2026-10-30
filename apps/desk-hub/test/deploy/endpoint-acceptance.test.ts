@@ -1,8 +1,10 @@
 // The endpoint acceptance command's guards and helpers (deploy/endpoint-acceptance.ts, endpoint-production.ts,
-// endpoint-remote.ts and vm/stub-model.mjs; P5 O10 M11): which mode a command line asks for and what it refuses, above
-// all production; the pacing of the run's own direct dials under the listener's limit; production's pairing answer,
-// which prints the device and its fingerprint and never the code; and the stub model's answers by content.
+// endpoint-remote.ts, vm/stub-model.mjs and vm/lane-b.mjs; P5 O10 M11): which mode a command line asks for and what it
+// refuses, above all production; the pacing of the run's own direct dials under the listener's limit; production's
+// pairing answer, which prints the device and its fingerprint and never the code; the stub model's answers by content;
+// and lane B's machine.sock client, against a stand-in for the socket.
 import { copyFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { createServer, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { base64urlDecode, decodePairingCode, encodePairingCode, generateSigningKey, keyId, verifyPairingMac, type Device } from 'org-protocol';
@@ -170,6 +172,136 @@ describe('the lane A session’s stub model', () => {
   });
 });
 
+describe('lane B’s machine.sock client', () => {
+  type LaneB = {
+    reach(dir: string): Promise<{ request(name: string, input: unknown, ms?: number): Promise<unknown>; close(): void }>;
+    up(link: unknown, directory: string, tag: string, options?: { readyMs?: number }): Promise<{ app: string; launch: string; engine: string }>;
+    events(link: unknown, app: string): Promise<Array<{ launch: string; seq: number; idx: number }>>;
+  };
+  const load = async () => (await import(join(import.meta.dirname, '../../deploy/vm/lane-b.mjs'))) as LaneB;
+  const APP = '5b1f0c2e-8d4a-4c3b-9e7f-1a2b3c4d5e6f';
+  const ENGINE = '0f3e8a52-7c1d-4b9e-9a61-2d4f6b8c0e13';
+
+  /** A stand-in for mawsd's machine.sock: the token's hello welcomed, each request answered by `answer` (a throw is a
+   * refusal), every request kept. */
+  async function machineSock(answer: (name: string, input: Record<string, unknown>) => unknown, { welcome = true } = {}) {
+    const dir = mkdtempSync(join(tmpdir(), 'o10-ms-'));
+    writeFileSync(join(dir, 'mawsd.token'), 'f'.repeat(64) + '\n', { mode: 0o600 });
+    const asked: Array<{ name: string; input: Record<string, unknown> }> = [];
+    const hellos: Array<Record<string, unknown>> = [];
+    const sockets: Socket[] = [];
+    const server = createServer((socket) => {
+      sockets.push(socket);
+      let rest = '';
+      let first = true;
+      socket.on('data', (chunk) => {
+        rest += chunk.toString();
+        for (let at = rest.indexOf('\n'); at >= 0; at = rest.indexOf('\n')) {
+          const message = JSON.parse(rest.slice(0, at)) as Record<string, unknown>;
+          rest = rest.slice(at + 1);
+          if (first) {
+            first = false;
+            hellos.push(message);
+            socket.write(`${JSON.stringify(welcome && message.token === 'f'.repeat(64) ? { t: 'welcome', protocol: 3 } : { t: 'refuse', reason: 'token' })}\n`);
+            continue;
+          }
+          asked.push({ name: String(message.name), input: message.input as Record<string, unknown> });
+          let reply: Record<string, unknown>;
+          try {
+            reply = { t: 'res', id: message.id, ok: true, value: answer(String(message.name), message.input as Record<string, unknown>) };
+          } catch (error) {
+            reply = { t: 'res', id: message.id, ok: false, error: { code: 'not_found', message: (error as Error).message } };
+          }
+          // An event first, which the client is not asking for and passes over.
+          socket.write(`${JSON.stringify({ t: 'evt', name: 'session.changed', payload: {} })}\n${JSON.stringify(reply)}\n`);
+        }
+      });
+    });
+    await new Promise<void>((done) => server.listen(join(dir, 'machine.sock'), done));
+    return { dir, asked, hellos, close: () => (sockets.forEach((s) => s.destroy()), server.close()) };
+  }
+
+  it('starts a session as the app does, on the gateway route with the trust given, waits out its first turn and keeps it running', async () => {
+    const lb = await load();
+    let polls = 0;
+    const sock = await machineSock((name, input) => {
+      if (name === 'session.create') return { appSessionId: APP, intent: {} };
+      if (name === 'session.start') return { status: 'starting', appSessionId: input.appSessionId };
+      if (name === 'session.status') {
+        if (++polls === 1) throw new Error('no such session yet');
+        return polls < 3 ? { process: 'ready', engineSessionId: ENGINE, launchId: 'lnch0001', turn: { id: 't' } } : { process: 'ready', engineSessionId: ENGINE, launchId: 'lnch0001', turn: null };
+      }
+      return name === 'session.setKeep' ? { kept: true } : {};
+    });
+    const link = await lb.reach(sock.dir);
+    try {
+      await expect(lb.up(link, '/home/o10acc/work', 'abc1b', { readyMs: 20_000 })).resolves.toEqual({ app: APP, launch: 'lnch0001', engine: ENGINE });
+    } finally {
+      link.close();
+      sock.close();
+    }
+    expect(sock.hellos[0]).toMatchObject({ t: 'hello', protocol: 3, token: 'f'.repeat(64), capabilities: [] });
+    expect(sock.asked.map((a) => a.name)).toEqual(['daemon.status', 'session.create', 'session.start', 'session.status', 'session.status', 'session.status', 'session.setKeep']);
+    expect(sock.asked[1].input).toEqual({ projectId: null, location: { kind: 'directory', path: '/home/o10acc/work' } });
+    expect(sock.asked[2].input).toEqual({ appSessionId: APP, message: { content: 'o10-m11 lane B up abc1b', display: 'o10-m11 lane B up abc1b' }, options: { gateway: 'gateway', trust: 'accepted' } });
+    expect(sock.asked[6].input).toEqual({ appSessionId: APP, keep: true });
+  }, 30_000);
+
+  it('refuses a start the session service did not begin', async () => {
+    const lb = await load();
+    const sock = await machineSock((name, input) => (name === 'session.create' ? { appSessionId: APP, intent: {} } : name === 'session.start' ? { status: 'relay_unreachable', appSessionId: input.appSessionId, health: {} } : {}));
+    const link = await lb.reach(sock.dir);
+    await expect(lb.up(link, '/w', 'x')).rejects.toThrow(/session.start answered .*relay_unreachable/);
+    link.close();
+    sock.close();
+  });
+
+  it('reads the launch’s every event page by page, each after the row the last page ended on, as the engine host numbers them', async () => {
+    const lb = await load();
+    const ev = (seq: number, idx: number) => ({ id: `${APP}:lnch0001:${seq}:${idx}`, seq });
+    const sock = await machineSock((_name, input) =>
+      input.afterSeq === null
+        ? { events: [{ id: 'from-disk' }, ev(1, 0), ev(1, 1), ev(2, 0)], lastSeq: 2, complete: false }
+        : { events: [ev(3, 0), ev(3, 1)], lastSeq: 3, complete: true },
+    );
+    const link = await lb.reach(sock.dir);
+    expect(await lb.events(link, APP)).toEqual([
+      { launch: 'lnch0001', seq: 1, idx: 0 },
+      { launch: 'lnch0001', seq: 1, idx: 1 },
+      { launch: 'lnch0001', seq: 2, idx: 0 },
+      { launch: 'lnch0001', seq: 3, idx: 0 },
+      { launch: 'lnch0001', seq: 3, idx: 1 },
+    ]);
+    expect(sock.asked.map((a) => a.input)).toEqual([
+      { appSessionId: APP, afterSeq: null, limit: 500 },
+      { appSessionId: APP, afterSeq: 2, limit: 500 },
+    ]);
+    link.close();
+    sock.close();
+  });
+
+  it('refuses a read whose history is gone, or an event whose id names no place of the session', async () => {
+    const lb = await load();
+    for (const [page, why] of [
+      [{ events: [], lastSeq: 0, complete: true, historyUnavailable: true }, /history is unavailable/],
+      [{ events: [{ id: `${APP}:lnch0001:2:0`, seq: 3 }], lastSeq: 3, complete: true }, /names no place/],
+    ] as const) {
+      const sock = await machineSock(() => page);
+      const link = await lb.reach(sock.dir);
+      await expect(lb.events(link, APP)).rejects.toThrow(why);
+      link.close();
+      sock.close();
+    }
+  });
+
+  it('fails at a hello the daemon refuses', async () => {
+    const lb = await load();
+    const sock = await machineSock(() => ({}), { welcome: false });
+    await expect(lb.reach(sock.dir)).rejects.toThrow(/refused the hello/);
+    sock.close();
+  });
+});
+
 describe('the run’s requests to the hub', () => {
   /** A hub that takes every request and never answers it. */
   async function silent(): Promise<{ url: string; close(): void }> {
@@ -260,6 +392,15 @@ describe('production’s allowlist', () => {
     report.admit = productionAdmit(true);
     await report.check('5', 'a device’s words arrive verified and are delivered into the session', run('words'));
     expect(ran).toEqual(['caps', 'words']);
+  });
+
+  it('admits none of lane B’s live half, which production never runs', async () => {
+    const { productionAdmit } = await import('../../deploy/endpoint-items.ts');
+    const source = (await import('node:fs')).readFileSync(join(import.meta.dirname, '../../deploy/endpoint-items.ts'), 'utf8');
+    const laneB = [...source.matchAll(/report\.check\('2', (`[^`]*`|'[^']*')/g)].map((m) => m[1].slice(1, -1)).filter((name) => name.includes('lane B'));
+    expect(laneB.length).toBe(5);
+    const admit = productionAdmit(true);
+    for (const name of laneB) for (const carrier of ['relayed', 'direct']) expect(admit('2', name.replace('${track.carrier}', carrier)), name).not.toBeNull();
   });
 
   it('names only clauses the items have', async () => {
