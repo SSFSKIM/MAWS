@@ -343,9 +343,21 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   expect(atAttach.filter((e) => seqOf(e) > seqAtQuit).length, 'events from rows journaled after the keeper had exited').toBeGreaterThan(0);
   const failure = atAttach.find((e) => e.kind === 'task.notification');
   expect(failure && seqOf(failure), 'the failure was journaled after the keeper had exited').toBeGreaterThan(seqAtQuit);
-  await expect.poll(async () => (await attentionOf(second.page, id, 'error')).map((i) => i.summary), { message: 'the failure’s Needs-you item, derived from the tail' }).toEqual([`Background task failed: ${TASK_FAILED}`]);
+  // P5 O3-D M6 (the architect's ruling; O3 Decision Log 5(1)): on a pre-A attacher after this build's mawsd held the
+  // stream, the failure's item is the one gap of the downgrade. mawsd, the engine host's permanent client while no app
+  // ran, took the tail (the host's connect burst sends only what no client has received, src/engine-host/session-stream.ts
+  // `republish`) and its spine derived the item into the index at 14, which a pre-A app cannot read (its 13): so neither
+  // the item nor the events reach the old app. Every other check of the scene runs. Without the daemon no client takes
+  // the tail while away, and the burst brings it to the old app, which derives the item live.
+  const derivedUnreadable = shapes.keeper === 'daemon' && !takesSpineLock(attacher);
+  if (derivedUnreadable) {
+    test.info().annotations.push({ type: 'skipped check', description: `the failure's Needs-you item, derived from the tail: ${attacher.label} (wire ${wireOf(attacher)}) is from before O3-A; this build's mawsd took the tail while away and derived the item into the index at 14, which it cannot read (O3 DL 5(1))` });
+    said.push(`  tail: the failure's Needs-you item not checked: ${attacher.label} is from before O3-A and cannot read the index at 14 where mawsd derived it (O3 DL 5(1))`);
+  } else {
+    await expect.poll(async () => (await attentionOf(second.page, id, 'error')).map((i) => i.summary), { message: 'the failure’s Needs-you item, derived from the tail' }).toEqual([`Background task failed: ${TASK_FAILED}`]);
+  }
   await expect.poll(async () => (await pendingPermissions(second.page, id)).length, { message: 'the request raised while away' }).toBe(1);
-  said.push(`  tail: ${atAttach.filter((e) => seqOf(e) > seqAtQuit).length} events journaled after the keeper's quit; the failure's item and the request's reached main`);
+  said.push(`  tail: ${atAttach.filter((e) => seqOf(e) > seqAtQuit).length} events journaled after the keeper's quit; ${derivedUnreadable ? "the request's item" : "the failure's item and the request's"} reached main`);
 
   // across the gap: the newer build's commands, as the older supervisor answers them
   const before = gap ? await probe(second.page, gap.newer, gap.older, inputsOf(s)) : null;
@@ -548,14 +560,6 @@ test('(update, daemon) the peer’s app keeps a session on its own supervisor; t
 
 test('(downgrade, daemon) this build’s app keeps a session under its mawsd; the peer’s app ends mawsd (or, before O2, takes the engine host from it), attaches that engine host, is served as another build, and moves to its own supervisor', async () => {
   const { here, peer, newer, older } = builds();
-  // P5 O3-D M6 (the architect's ruling; O3 Decision Log 5(1)): a peer from before O3-A cannot read this build's index
-  // (user_version 14 against its 13), and on this shape the tail it would derive the failure's item from is not sent to
-  // it again: this build's `mawsd`, the engine host's permanent client while no app ran, took the tail (the host's connect
-  // burst sends only what no client has received, src/engine-host/session-stream.ts `republish`) and its spine derived
-  // the item into that index. The pre-A app neither reads the item nor hears the events again, so the scene's tail check
-  // has no product meaning there; the pre-O3 scene covers a pre-A peer on this shape. (downgrade) without the daemon
-  // passes on the same peer because no client took the tail while away, so the burst brings it to the old app.
-  test.skip(!takesSpineLock(peer), `the peer (wire ${wireOf(peer)}) is from before O3-A: it cannot read this build's index, where this build's mawsd derived the tail while away (O3 DL 5(1)); the (pre-O3 app, daemon) scene covers it`);
   const gap = peer === newer ? { newer, older } : null;
   await withScratch('xb-daemon-downgrade', async (s) => record(await crossing(s, here, peer, gap, { keeper: 'daemon', attacher: 'detached' })));
 });
