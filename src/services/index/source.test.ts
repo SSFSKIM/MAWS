@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
+import { stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, MessageUuid, SessionId } from '@shared/graph/ids';
 import type { HostEmit, HostOn } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
+import type { SearchCheckpoint } from '@shared/ipc/schema/fs';
 import type { CommandName, CommandResult, EventName, EventPayload, HostState } from '@shared/ipc/schema';
 import { EngineSessionStatusSchema, type EngineSessionStatus } from '@shared/engine/status';
 import { validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
@@ -14,6 +16,7 @@ import { sessionIdFor, summary, tempDir } from '../../../test/support/index-fixt
 import { StoreFixture } from '../../../test/support/store-fixture';
 import { registerFs } from '../../engine-host/fs/register';
 import { registerEngineIpc } from '../../engine-host/ipc';
+import { SearchTextReader } from '../../engine-host/fs/search-text';
 import type { FsService } from '../../engine-host/fs/service';
 import { Index } from './index';
 import { Db } from './db';
@@ -139,8 +142,8 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
     return true;
   };
   const events = <N extends EventName>(name: N) => emitted.filter((e) => e.name === name).map((e) => e.payload as EventPayload<N>);
-  const begin = (host: SourceHost, writer = recordingWriter().writer) => {
-    source = new IndexSessionSource(index, host, { emit, tickMs: 5 });
+  const begin = (host: SourceHost, writer = recordingWriter().writer, searchDebounceMs = 0) => {
+    source = new IndexSessionSource(index, host, { emit, tickMs: 5, searchDebounceMs });
     stop = source.start(writer);
     return source;
   };
@@ -203,6 +206,97 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
       expect(replace).toHaveBeenCalledTimes(2);
       expect(index.sessionSearch.indexing()).toBe(false);
     } finally { replace.mockRestore(); }
+  });
+
+  it('resumes a transcript\u2019s text where its checkpoint says, and replaces it when the host had to read the file again', async () => {
+    const transcript = summary();
+    const fake = scriptedHost('starting');
+    const checkpoint = (offset: number) => ({ offset, ino: '7', head: `head-${offset}`, started: true });
+    const inputs: unknown[] = [];
+    const answers = [
+      { text: 'First needle-one', cursor: null, size: transcript.size, mtimeMs: transcript.mtimeMs, from: 0, checkpoint: checkpoint(100) },
+      { text: '\nsecond needle-two', cursor: null, size: transcript.size + 1, mtimeMs: transcript.mtimeMs + 1, from: 100, checkpoint: checkpoint(180) },
+      { text: 'Rewritten needle-three', cursor: null, size: transcript.size + 2, mtimeMs: transcript.mtimeMs + 2, from: 0, checkpoint: checkpoint(50) },
+    ];
+    fake.answers.set('fs.sessionText', (input) => { inputs.push(input); return answers[inputs.length - 1]; });
+    begin(fake.host);
+    const fire = (n: number) => fake.fire('fs.sessionChanged', { summary: { ...transcript, size: transcript.size + n, mtimeMs: transcript.mtimeMs + n }, appSessionId: null });
+    fire(0);
+    await vi.waitFor(() => expect(index.sessionSearch.search('needle-one')).toHaveLength(1));
+    const record = index.sessions.getByEngineId(transcript.sessionId)!;
+    expect(index.sessionSearch.resume(record.appId, transcript.sessionId)).toEqual(checkpoint(100));
+    fire(1);
+    await vi.waitFor(() => expect(index.sessionSearch.search('needle-two')).toHaveLength(1));
+    // The first pass asked for everything; the second offered the stored checkpoint, and its text joined the first's.
+    expect(inputs).toEqual([{ sessionId: transcript.sessionId }, { sessionId: transcript.sessionId, resume: checkpoint(100) }]);
+    expect(index.sessionSearch.search('needle-one')).toHaveLength(1);
+    expect(index.sessionSearch.search('one\nsecond')).toHaveLength(1);
+    expect(index.sessionSearch.current(record.appId, transcript.sessionId, transcript.size + 1, transcript.mtimeMs + 1)).toBe(true);
+    expect(index.sessionSearch.resume(record.appId, transcript.sessionId)).toEqual(checkpoint(180));
+    fire(2);
+    await vi.waitFor(() => expect(index.sessionSearch.search('needle-three')).toHaveLength(1));
+    expect(inputs[2]).toEqual({ sessionId: transcript.sessionId, resume: checkpoint(180) });
+    expect(index.sessionSearch.search('needle-one')).toEqual([]);
+    expect(index.sessionSearch.search('needle-two')).toEqual([]);
+    expect(index.sessionSearch.indexing()).toBe(false);
+  });
+
+  it('coalesces a burst of appends to a transcript just indexed into one pass per debounce window', async () => {
+    const transcript = summary();
+    const fake = scriptedHost('starting');
+    let latest = { size: transcript.size, mtimeMs: transcript.mtimeMs };
+    let reads = 0;
+    fake.answers.set('fs.sessionText', () => { reads += 1; return { text: `Pass ${reads} needle`, cursor: null, ...latest }; });
+    begin(fake.host, recordingWriter().writer, 400);
+    const fire = (n: number) => {
+      latest = { size: transcript.size + n, mtimeMs: transcript.mtimeMs + n };
+      fake.fire('fs.sessionChanged', { summary: { ...transcript, ...latest }, appSessionId: null });
+    };
+    fire(0);
+    await vi.waitFor(() => expect(reads).toBe(1));
+    await vi.waitFor(() => expect(index.sessionSearch.indexing()).toBe(false));
+    for (let n = 1; n <= 20; n += 1) { fire(n); await applied(); }
+    await settle();
+    expect(reads).toBe(1); // twenty appends inside the window: nothing read yet, and still owed
+    expect(index.sessionSearch.indexing()).toBe(true);
+    await vi.waitFor(() => expect(reads).toBe(2), { timeout: 3000 });
+    await vi.waitFor(() => expect(index.sessionSearch.indexing()).toBe(false));
+    await settle();
+    expect(reads).toBe(2); // one pass for the whole burst, of its last state
+    const record = index.sessions.getByEngineId(transcript.sessionId)!;
+    expect(index.sessionSearch.current(record.appId, transcript.sessionId, transcript.size + 20, transcript.mtimeMs + 20)).toBe(true);
+  });
+
+  it('indexes a growing real transcript incrementally, finding a record the old offset split', async () => {
+    const reader = new SearchTextReader();
+    const file = join(dir.path, 'grow.jsonl');
+    const row = (text: string) => JSON.stringify({ type: 'user', message: { content: text } });
+    const bytes = Buffer.from([row('alpha-0 first'), row('beta-1 second'), row('gamma-2 third')].join('\n') + '\n');
+    const first = Buffer.byteLength(row('alpha-0 first')) + 1;
+    const cuts = [10, first + 10, first + Buffer.byteLength(row('beta-1 second')) + 20, bytes.length - 3, bytes.length]; // each of the first four splits a record
+    const transcript = summary();
+    const fake = scriptedHost('starting');
+    const dispatch = fake.host.dispatch;
+    let resumed = 0;
+    fake.host.dispatch = async (owner, name, input) => {
+      if (name !== 'fs.sessionText') return dispatch(owner, name, input);
+      const { cursor, resume } = input as { cursor?: string; resume?: SearchCheckpoint };
+      const page = await reader.read(file, cursor, resume);
+      if (!cursor && page.from > 0) resumed += 1;
+      return { ok: true, value: page } as CommandResult<typeof name>;
+    };
+    try {
+      begin(fake.host);
+      for (const cut of cuts) {
+        await writeFile(file, bytes.subarray(0, cut));
+        const info = await stat(file);
+        fake.fire('fs.sessionChanged', { summary: { ...transcript, size: info.size, mtimeMs: info.mtimeMs }, appSessionId: null });
+        await vi.waitFor(() => expect(index.sessionSearch.current(index.sessions.getByEngineId(transcript.sessionId)?.appId ?? ('' as AppSessionId), transcript.sessionId, info.size, info.mtimeMs)).toBe(true));
+      }
+      const record = index.sessions.getByEngineId(transcript.sessionId)!;
+      for (const phrase of ['alpha-0 first', 'first\nbeta-1', 'beta-1 second', 'gamma-2 third']) expect(index.sessionSearch.search(phrase).map((hit) => hit.appSessionId)).toEqual([record.appId]);
+      expect(resumed).toBe(3);
+    } finally { reader.stop(); }
   });
 
   it('discards an in-flight old stamp and indexes a replacement discovery instead', async () => {
@@ -1220,7 +1314,7 @@ describe('IndexSessionSource against the real filesystem state service', () => {
   const S = [sessionIdFor(1), sessionIdFor(2), sessionIdFor(3)];
   const noop = recordingWriter().writer;
   const begin = (writer: ReadModelWriter = noop) => {
-    const source = new IndexSessionSource(index, wired.host, { emit: () => true, tickMs: 5 });
+    const source = new IndexSessionSource(index, wired.host, { emit: () => true, tickMs: 5, searchDebounceMs: 0 });
     stop = source.start(writer);
     return source;
   };

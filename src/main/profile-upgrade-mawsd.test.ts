@@ -112,7 +112,7 @@ function expectMigrated(profile: string, o2: O2Profile, browser: BrowserData): v
   const paths = settingsPaths(profile);
   expect(JSON.parse(readFileSync(paths.client, 'utf8')), 'the client file, split by mawsd').toEqual(splitSettings(O2_CHOSEN_SETTINGS).client);
   expect(JSON.parse(readFileSync(paths.machine, 'utf8')), 'the machine file').toEqual(splitSettings(O2_CHOSEN_SETTINGS).machine);
-  expect(indexVersion(o2.indexPath), 'the index at 14').toBe(14);
+  expect(indexVersion(o2.indexPath), 'the index at 15').toBe(15);
   const index = new DatabaseSync(o2.indexPath, { readOnly: true });
   try {
     expect(index.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'browser_%'").all(), 'no browser table left in the index').toEqual([]);

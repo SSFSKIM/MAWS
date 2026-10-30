@@ -73,7 +73,7 @@ describe('index migration 14 (P5 O3-A)', () => {
 
   // acceptance 7's index half: a build from before O3-A meets an index O3-A migrated
   it('an opener knowing migrations 1 to 13 only opens a version-14 index read-only and unavailable, and the file does not change', () => {
-    new Index(path).close();
+    openDb(path, MIGRATIONS.slice(0, 14), REPAIRS).close();
     const before = readFileSync(path);
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const older = openDb(path, MIGRATIONS.slice(0, 13), REPAIRS);

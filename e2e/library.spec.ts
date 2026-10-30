@@ -245,7 +245,7 @@ function schemaOf(db: DatabaseSync): { version: unknown; objects: unknown[] } {
 function rewindIndexTo9(path: string): void {
   const db = new DatabaseSync(path);
   try {
-    expect(schemaOf(db).version, 'the first launch left the index at 14').toBe(14);
+    expect(schemaOf(db).version, 'the first launch left the index at 15').toBe(15);
     for (const migration of MIGRATIONS.filter((m) => m.version >= 5 && m.version <= 7)) db.exec(migration.sql);
     db.exec('ALTER TABLE projects DROP COLUMN org_smns_id; ALTER TABLE projects DROP COLUMN org_source; ALTER TABLE projects DROP COLUMN org_name; ALTER TABLE projects DROP COLUMN org_key;');
     db.exec('DROP TRIGGER session_text_delete; DROP TABLE session_text_chunks; DROP TABLE session_text_state; DROP TABLE session_text;');
@@ -337,7 +337,7 @@ test('an index at version 9 beside a populated host store migrates to the curren
   launch = null;
   const db = new DatabaseSync(join(userData, 'index.sqlite'), { readOnly: true });
   try {
-    expect(schemaOf(db).version, 'the index is at 14 again').toBe(14);
+    expect(schemaOf(db).version, 'the index is at 15 again').toBe(15);
     expect((db.prepare("SELECT count(*) AS n FROM library_artifacts WHERE kind <> 'design_system'").get() as { n: number }).n).toBe(3); // the case's own three (P3-D seeds design systems)
   } finally {
     db.close();
