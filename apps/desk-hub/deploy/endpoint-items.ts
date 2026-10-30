@@ -1006,7 +1006,7 @@ class LaneBTrack {
     }
     this.segments.length = this.#base + 1;
     for (const [i, group] of groups.entries()) {
-      const segment: LaneBSegment = i === 0 ? head : { after: 'a relaunch, on the same channel', cursor: laneBResume(this.segments.at(-1)!), expect: 'snapshot', subbed: null, state: null, events: [], controls: [], ended: null };
+      const segment: LaneBSegment = i === 0 ? head : { after: 'a relaunch, on the same channel', cursor: laneBResume(this.segments.at(-1)!), expect: 'snapshot', subbed: null, states: [], snapPages: null, events: [], controls: [], ended: null };
       fill(segment, group);
       if (i > 0) this.segments.push(segment);
     }
@@ -1041,7 +1041,7 @@ class LaneBTrack {
     this.remote = remote;
     this.#grant(remote);
     this.#base = this.segments.length;
-    this.segments.push({ after, cursor, expect, subbed: null, state: null, events: [], controls: [], ended: null });
+    this.segments.push({ after, cursor, expect, subbed: null, states: [], snapPages: null, events: [], controls: [], ended: null });
     const deadline = Date.now() + ms;
     for (;;) {
       this.#from = remote.inbox.length;
@@ -1090,15 +1090,34 @@ class LaneBTrack {
   }
 }
 
-/** A lane B segment's answer, opening state, events and controls, from its messages in order. */
-function fill(segment: LaneBSegment, messages: readonly Msg[]): void {
+/**
+ * A lane B segment's answer, snapshots, events and controls, from its messages in order. A snapshot is one JSON value
+ * whose text is cut into pages numbered 0, 1, … k, the last carrying `last: true`; every such complete group is read
+ * (the stream sends a snapshot of one key beside the opening's whole state, and a relink can leave one ahead of it), in
+ * order. A page that breaks the numbering (one other than 0 starting a group, a gap, a repeat, a 0 inside an open
+ * group) makes a malformed run: the first one's page numbers are kept, and the group is not counted. A group still
+ * open where the messages end is a snapshot the channel left unfinished, and is ignored.
+ */
+export function fill(segment: LaneBSegment, messages: readonly Msg[]): void {
   const place = (m: Msg) => ({ epoch: String(m.epoch), seq: Number(m.seq), ...(typeof m.idx === 'number' ? { idx: m.idx } : {}) });
   const subbed = messages.find((m) => m.t === 'subbed');
   segment.subbed = subbed ? { mode: String(subbed.mode), ...place(subbed) } : null;
-  // The opening's state is its first `snap`, in pages until `last`; later ones are single parts the stream replaces.
-  const pages = messages.filter((m) => m.t === 'snap');
-  const last = pages.findIndex((m) => m.last === true);
-  segment.state = last < 0 ? null : { ...place(pages[0]), parts: stateParts(pages.slice(0, last + 1).map((m) => m.body as string).join('')) };
+  segment.states = [];
+  segment.snapPages = null;
+  let open: Msg[] = [];
+  for (const m of messages) {
+    if (m.t !== 'snap') continue;
+    if (m.page !== open.length) {
+      segment.snapPages ??= [...open, m].map((x) => String(x.page)).join(',');
+      open = [];
+      if (m.page !== 0) continue;
+    }
+    open.push(m);
+    if (m.last === true) {
+      segment.states.push({ ...place(open[0]), parts: stateParts(open.map((x) => String(x.body)).join('')) });
+      open = [];
+    }
+  }
   segment.events = messages
     .filter((m) => m.t === 'ev')
     .map((m) => {

@@ -12,7 +12,8 @@ import { describe, expect, it } from 'vitest';
 import { mode } from '../../deploy/endpoint-acceptance.ts';
 import { pairRunDevice, productionRun, waitForFile } from '../../deploy/endpoint-production.ts';
 import { DirectPacer } from '../../deploy/endpoint-remote.ts';
-import { Secrets } from '../../deploy/endpoint-verdicts.ts';
+import type { Msg } from '../../deploy/endpoint-remote.ts';
+import { Secrets, type LaneBSegment } from '../../deploy/endpoint-verdicts.ts';
 import type { Person } from '../../deploy/hub.ts';
 import { Cleanup } from '../../deploy/proof.ts';
 import { PRODUCTION_HOST, STAGING_HOST } from '../../deploy/config.ts';
@@ -364,6 +365,51 @@ describe('the late original’s answer', () => {
     expect(isTombstoned({ t: 'done', outcome: { state: 'done', result: {} } })).toBe(false);
     expect(isTombstoned({ t: 'done', outcome: { state: 'failed', error: { code: 'internal' } } })).toBe(false);
     expect(isTombstoned({ t: 'ack', outcome: undefined })).toBe(false);
+  });
+});
+
+describe('lane B’s snapshot pages', () => {
+  const SUB = 'sub-1';
+  const snap = (pages: number[], body: string[], lastPage?: number) =>
+    pages.map((page, i) => ({ t: 'snap', sub: SUB, epoch: 'lnch0001', seq: 0, page, last: page === (lastPage ?? pages.at(-1)), body: body[i] }) as Msg);
+  const subbed = { t: 'subbed', sub: SUB, mode: 'snapshot', epoch: 'lnch0001', seq: 0 } as Msg;
+  const text = JSON.stringify({ status: 1, queue: [], pendingItems: [], catalog: {} });
+  const cut = (n: number) => Array.from({ length: n }, (_, i) => text.slice(Math.floor((i * text.length) / n), Math.floor(((i + 1) * text.length) / n)));
+  const read = async (messages: Msg[]) => {
+    const { fill } = await import('../../deploy/endpoint-items.ts');
+    const segment: LaneBSegment = { after: 'first', cursor: null, expect: 'snapshot', subbed: null, states: [], snapPages: null, events: [], controls: [], ended: null };
+    fill(segment, [subbed, ...messages]);
+    return segment;
+  };
+
+  it('joins pages 0, 1, 2 ending in `last` into one state', async () => {
+    const segment = await read(snap([0, 1, 2], cut(3)));
+    expect(segment.snapPages).toBeNull();
+    expect(segment.states).toEqual([{ epoch: 'lnch0001', seq: 0, parts: ['status', 'queue', 'pendingItems', 'catalog'] }]);
+  });
+
+  it('reads each complete snapshot in order, a single part ahead of the state included', async () => {
+    const segment = await read([...snap([0], [JSON.stringify({ queue: [] })]), ...snap([0, 1], cut(2))]);
+    expect(segment.snapPages).toBeNull();
+    expect(segment.states.map((s) => s.parts.length)).toEqual([1, 4]);
+  });
+
+  it('reports a lost or doubled page as malformed, counting no state from it', async () => {
+    const lost = await read(snap([0, 2], cut(2)));
+    expect(lost.snapPages).toBe('0,2');
+    expect(lost.states).toEqual([]);
+    const doubled = await read(snap([0, 1, 1, 2], cut(4)));
+    expect(doubled.snapPages).toBe('0,1,1');
+    expect(doubled.states).toEqual([]);
+    const headless = await read(snap([1, 2], cut(2)));
+    expect(headless.snapPages).toBe('1');
+    expect(headless.states).toEqual([]);
+  });
+
+  it('ignores a trailing snapshot the channel left unfinished', async () => {
+    const segment = await read(snap([0, 1], cut(2), 5));
+    expect(segment.snapPages).toBeNull();
+    expect(segment.states).toEqual([]);
   });
 });
 
