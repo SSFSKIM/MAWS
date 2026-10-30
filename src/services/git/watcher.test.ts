@@ -1091,6 +1091,14 @@ describe('git.changed from a watched fixture repository', () => {
   });
 
   const settle = () => new Promise((resolve) => setTimeout(resolve, 600)); // past the settle pass and one debounce
+  // Until a count of status runs holds still for 800 ms: past the settle pass and, where the watch is the tree (Linux),
+  // the status its initial walk's end asks for, which a check-ignore batch inside the walk can put after `settle`.
+  const runsSettle = async (statusRuns: () => number) => {
+    for (let last = -1; statusRuns() !== last; ) {
+      last = statusRuns();
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
+  };
   async function nextChange(from: number, withinMs: number): Promise<{ event: GitChanged; ms: number }> {
     const start = Date.now();
     while (Date.now() - start < withinMs) {
@@ -1208,7 +1216,7 @@ describe('git.changed from a watched fixture repository', () => {
     const statusRuns = () => execFile.mock.calls.filter(([, args]) => args[2] === 'status' && args[1] === repo.root).length;
     try {
       await local.watch(repo.root);
-      await settle();
+      await runsSettle(statusRuns);
       const [runs, emitted] = [statusRuns(), events.length];
       for (let i = 0; i < 5; i++) {
         await repo.write(`.claude/worktrees/engine/src/f${i}.ts`, `${i}\n`);
