@@ -291,3 +291,16 @@ describe.skipIf(graph === null)('the built ws', () => {
   });
 });
 // P5 O10 end
+
+// Main-process bundles as Latin-1 text (scripts/latin1-bundles.ts, which fails the build itself): this holds the build's
+// config to it, so a change that drops the plugin from main's or the preloads' output is caught where the build passes.
+// Node keeps a loaded file's source in the heap, at two bytes a character for the whole file if one is above U+00FF.
+describe.skipIf(!existsSync(OUT))('the built main, host and preload files', () => {
+  it('hold no character above U+00FF', () => {
+    const files = [OUT, resolve(OUT, '../preload')].flatMap((dir) =>
+      existsSync(dir) ? readdirSync(dir, { recursive: true, encoding: 'utf8' }).filter((name) => name.endsWith('.js')).map((name) => join(dir, name)) : [],
+    );
+    expect(files.length).toBeGreaterThan(2);
+    expect(files.filter((file) => /[\u0100-\uffff]/.test(readFileSync(file, 'utf8')))).toEqual([]);
+  });
+});
