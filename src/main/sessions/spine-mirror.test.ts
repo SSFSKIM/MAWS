@@ -10,6 +10,8 @@ import type { HostState, ProjectRecord } from '@shared/ipc/schema';
 import { SCENARIO_UNAVAILABLE } from '@shared/spine/view';
 import { digest as digestOf, humanTurn, item as itemOf, project as projectOf, record as recordOf, status as statusOf, T0 } from '../../../test/support/builders';
 import { intentFor as intentOf } from '../../../test/support/session-host';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
+import { startNotifier } from '../attention/notifier';
 import { createMirrorSpineView, type MirrorHosts } from './spine-mirror';
 
 // The builders' shapes, keyed as the mirror keys them
@@ -274,6 +276,44 @@ describe('the spine mirror (Interfaces §F)', () => {
     await loaded(view);
     expect(told).toEqual([{ id: A, items: [expect.objectContaining({ id: 'att-1' })], silent: ['att-1'] }]);
     expect(records).toEqual([]); // the readers start from availability, not a record event per session
+  });
+
+  // M5b fix round 5 (e2e:c7 requests.spec.ts:404, e2e:layout shell.spec.ts:693): main's notifier sets the dock badge from
+  // this view. The first snapshot tells no record, so when attention.list answers before session.list, the count taken
+  // at the attention change finds no record for its items; availability, where the readers start, counts them again.
+  it.each(['index', 'scenario'] as const)('gives the notifier the dock badge of what the first snapshot found, though attention answers before the records (launch mode %s)', async (mode) => {
+    const host = new FakeMachine({
+      mode,
+      records: [record({ appId: A }), record({ appId: B })],
+      attention: [item({ appSessionId: A, id: 'att-1' as AttentionId }), item({ appSessionId: B, id: 'att-2' as AttentionId })],
+    });
+    const { view } = mirrorOver(host);
+    const badges: number[] = [];
+    const port = { notify: () => ({ noClient: true as const }), badge: (_client: unknown, count: number) => void badges.push(count), focus: () => {} };
+    const stop = startNotifier(view, { port, isFocused: () => true, isViewing: () => false, navigate: () => {}, failure: () => {}, settings: () => SETTINGS_DEFAULTS_V21, emit: (() => true) as never });
+    host.held.add('session.list');
+    host.stream();
+    await vi.waitFor(() => expect(host.asked.map((a) => a.name)).toContain('attention.list'));
+    await new Promise((resolve) => setTimeout(resolve, 0)); // attention.list answered; the records are still out
+    host.release('session.list');
+    await vi.waitFor(() => expect(view.unavailable()).toBe(mode === 'scenario' ? SCENARIO_UNAVAILABLE : null));
+    expect(badges.at(-1)).toBe(2);
+    stop();
+  });
+
+  // M5b fix round 5: the first snapshot's digests are told by no event either, so a turn running when it loaded was not
+  // known to the notifier as running; availability gives it them, and the turn's end is announced
+  it('gives the notifier the turns the first snapshot found running, so one that ends after is announced', async () => {
+    const host = new FakeMachine({ records: [record({ appId: A })], digests: [digestOf(A, { phase: 'working', turnStartedAt: T0 })] });
+    const { view } = mirrorOver(host);
+    const bodies: string[] = [];
+    const port = { notify: (_client: unknown, request: { body: string }) => (bodies.push(request.body), { close: () => {} }), badge: () => {}, focus: () => {} };
+    const stop = startNotifier(view, { port, isFocused: () => false, isViewing: () => false, navigate: () => {}, failure: () => {}, settings: () => SETTINGS_DEFAULTS_V21, emit: (() => true) as never });
+    host.stream();
+    await loaded(view);
+    host.fire('session.digest', digestOf(A, { turnStartedAt: T0, lastTurnEndedAt: '2026-09-28T10:01:00Z', lastAssistantLine: 'All tests pass.' }));
+    expect(bodies).toEqual(['All tests pass.']);
+    stop();
   });
 
   it('is unavailable in launch mode scenario while answering the scenario’s records', async () => {
