@@ -275,6 +275,21 @@ describe('the services front', () => {
     served.bus.register('session.launchMode', () => ({ mode: 'index' }) as never); // the next load registers afresh
   });
 
+  it('hands the discovery wake the request’s arrival, taken before the spine’s load (the panel’s sweep#4)', async () => {
+    vi.useFakeTimers({ now: new Date('2026-10-30T08:00:00.000Z'), toFake: ['Date'] });
+    try {
+      const arrived = Date.now();
+      const before = vi.fn(async () => {});
+      const ensure = vi.fn(async () => (vi.setSystemTime(arrived + 4_000), {}) as never); // the load takes 4 s
+      const { served, client } = front({ spine: { ensure }, beforeSpineCommand: before });
+      served.bus.register('session.list', () => ({ sessions: [], revision: 0 }) as never);
+      expect(await client().request('session.list', { includeArchived: false })).toMatchObject({ ok: true });
+      expect(before).toHaveBeenCalledWith('session.list', false, arrived);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('a client’s end ends its refs and its events', async () => {
     const { served, client } = front();
     let ended = false;

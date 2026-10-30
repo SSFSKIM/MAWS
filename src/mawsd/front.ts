@@ -88,8 +88,9 @@ export interface FrontOptions {
   log(line: string): void;
   portDeadlineMs?: number; // the client port's deadline (CLIENT_PORT_DEADLINE_MS unless a test shortens it)
   // P5 O3-D M6 (fix round 1): before a client's or the endpoint's spine command runs, the spine loaded (daemon.ts's
-  // discovery wake); `app` is a client whose hello listed machine.spine, the app, which keeps the index current itself
-  beforeSpineCommand?(name: CommandName, app: boolean): Promise<void>;
+  // discovery wake); `app` is a client whose hello listed machine.spine, the app, which keeps the index current itself;
+  // `arrivedAt` is when the front took the request, before the load (the panel's sweep#4: the wait is bounded from it)
+  beforeSpineCommand?(name: CommandName, app: boolean, arrivedAt: number): Promise<void>;
 }
 
 export interface ServicesFront {
@@ -237,6 +238,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
   // A client's request (`from`: its connection; null for the endpoint's), or the bus's invoke (`loaded`: the spine asks
   // it of itself, so it is not waited for).
   async function answer(name: string, rawInput: unknown, context: HandlerContext, loaded: boolean, from: FrontClient | null): Promise<CommandResult<CommandName>> {
+    const arrivedAt = Date.now();
     if (!codec.isCommandName(name)) return { ok: false, error: ipcError('unknown_command', `unknown command: ${name}`) };
     const input = codec.readCommandInput(name, rawInput);
     if (!input.ok) return input;
@@ -254,7 +256,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       } catch (error) {
         return { ok: false, error: ipcError('host_unavailable', error instanceof SpineUnavailable ? error.message : `the spine did not load: ${messageOf(error)}`) };
       }
-      await options.beforeSpineCommand?.(name, from !== null && readsHostEvents(from));
+      await options.beforeSpineCommand?.(name, from !== null && readsHostEvents(from), arrivedAt);
     }
     const handler = intercepts.get(name) ?? table.get(name);
     if (!handler) return { ok: false, error: ipcError('internal', `the spine registered no handler for ${name}`) };

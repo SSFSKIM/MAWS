@@ -1,8 +1,9 @@
 // The discovery wake (P5 O3-D M6 fix round 1, item 7; the architect's ruling (a)): a machine.sock client's read that
 // needs the index, on a `mawsd` with no app and its engine host parked, sees what is on disk as of the read. The read
-// wakes the host and waits (DISCOVERY_WAKE_BOUND_MS) for its first discovery pass to reach the index, then answers; the
-// host is asked to park again at once (nothing attached, no interest); reads that arrive meanwhile join the one wake,
-// and a read within DISCOVERY_FRESH_MS of the pass wakes nothing. Nobody sends daemon.status first. Over the daemon in
+// wakes the host and waits for its first discovery pass to reach the index (at most DISCOVERY_WAKE_BOUND_MS from the
+// read's arrival, the spine's load included), then answers; the host is asked to park again at once (nothing attached,
+// no interest); reads that arrive meanwhile join the one wake, and a read within DISCOVERY_FRESH_MS of the pass wakes
+// nothing. Nobody sends daemon.status first. Over the daemon in
 // this process with the product's options, its engine host the built bundle (`out/main/`) under MAWS_ENGINE_REPLAY=1,
 // the spine the services entry, a bare machine.sock client as the CLI's. Skipped without a build; class 1a builds first.
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
