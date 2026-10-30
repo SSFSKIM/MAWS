@@ -590,6 +590,39 @@ describe('the spine (P5 O3-D M2)', () => {
     expect(scene.logs).toContainEqual(expect.stringMatching(/^\[spine\] loaded in \d+ ms$/));
   });
 
+  // M5b fix round 3 (D): daemon.e2eSeam answers only for a mawsd started under MAWS_E2E=1, read from its own environment at
+  // its start: a daemon started without it refuses, though its environment says so later, and nothing a request carries
+  // changes that
+  it('refuses daemon.e2eSeam unless mawsd was started under MAWS_E2E=1, whatever its environment says later', async () => {
+    const seams = globalThis as { __maws_scenario?: { advanceTo(ms: number): void } };
+    const played: number[] = [];
+    seams.__maws_scenario = { advanceTo: (ms) => void played.push(ms) };
+    try {
+      const env: NodeJS.ProcessEnv = { MAWS_USER_DATA: scene.root };
+      await scene.start({ env });
+      env.MAWS_E2E = '1';
+      const client = await scene.app('machine');
+      expect(await client.request('daemon.e2eSeam', { seam: 'scenario.advanceTo', ms: 3000 })).toMatchObject({ ok: false, error: { message: 'daemon.e2eSeam is refused: mawsd was not started under MAWS_E2E=1' } });
+      expect(played).toEqual([]);
+    } finally {
+      delete seams.__maws_scenario;
+    }
+  });
+
+  it('plays the e2e’s spine seams in mawsd when it was started under MAWS_E2E=1', async () => {
+    const seams = globalThis as { __maws_scenario?: { advanceTo(ms: number): void } };
+    const played: number[] = [];
+    seams.__maws_scenario = { advanceTo: (ms) => void played.push(ms) };
+    try {
+      await scene.start({ env: { MAWS_USER_DATA: scene.root, MAWS_E2E: '1' } });
+      const client = await scene.app('machine');
+      expect(await client.request('daemon.e2eSeam', { seam: 'scenario.advanceTo', ms: 3000 })).toMatchObject({ ok: true });
+      expect(played).toEqual([3000]);
+    } finally {
+      delete seams.__maws_scenario;
+    }
+  });
+
   // D38, O10 M9's last piece: the enrollment machine.identity's project and the spine's org projects read is the endpoint
   // module's in process (D16's injected source); while it holds none the answer is the one before it
   it('machine.identity’s project and the spine’s enrollment are the endpoint’s in-process enrollment, and none while it holds none', async () => {

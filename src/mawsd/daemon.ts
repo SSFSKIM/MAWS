@@ -705,6 +705,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       spine: spine.status(),
     };
   }
+  // M5b fix round 2, round 3: whether the e2e's spine seams answer, read once from mawsd's own environment at its start,
+  // never from a request (daemon.e2eSeam, ./e2e-seam.ts)
+  const e2eSeamsAllowed = env.MAWS_E2E === '1';
   async function daemonCommand(name: string, input: unknown): Promise<unknown> {
     switch (name) {
       case 'daemon.status':
@@ -714,7 +717,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         setImmediate(() => void stop('restart', EXIT_RESTART)); // after the answer is written
         return undefined;
       case 'daemon.e2eSeam':
-        return runE2eSeam(input as CommandInput<'daemon.e2eSeam'>, env); // M5b fix round 2: the e2e's seams with the spine
+        return runE2eSeam(input as CommandInput<'daemon.e2eSeam'>, e2eSeamsAllowed); // M5b fix round 2: the e2e's seams with the spine
       case 'daemon.endpoint': {
         const { command, args, secret } = input as { command: string; args: string[]; secret?: string };
         if (!endpoint) return { code: 2, out: NO_ENDPOINT_MODULE };
