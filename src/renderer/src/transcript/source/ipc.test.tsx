@@ -541,6 +541,28 @@ describe('child source provenance', () => {
     expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual([...disk, done].map((e) => e.id));
   });
 
+  it('holds the disk follow\'s batches until fs.agentEvents answers, and drops what they carry from before its window', async () => {
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const fake = fakeClient();
+    const source = childSource(fake);
+    const hydrated = useTranscriptStore.getState().attach(CHILD_KEY, source, { agentId: AGENT });
+    answer(fake, 'session.events', { events: parent.map((e) => ({ ...e, seq: null })), lastSeq: 0, complete: true }); // a disk-backed parent
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: [], complete: false }); // the child's follow still reads it through
+    await flush();
+    fake.emit('session.eventBatch', batch(disk.slice(0, 2))); // its window once read through
+    fake.emit('fs.followState', followState('following'));
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: disk.slice(1), complete: true, earlier: disk[1].id }); // appends moved the window on
+    await hydrated;
+    expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual(disk.slice(1).map((e) => e.id));
+    source.older!.loadOlder();
+    answer(fake, 'fs.agentEvents', { events: disk.slice(0, 1), complete: true });
+    await vi.waitFor(() => expect([...useTranscriptStore.getState().entries[CHILD_KEY].state.seen]).toEqual(disk.map((e) => e.id)));
+    useTranscriptStore.getState().detach(CHILD_KEY);
+  });
+
   it('reacquires a mounted disk child after both parent relaunch unfollows, including a late index stop', async () => {
     const { parent, child } = live();
     const disk = onDisk(child);
@@ -1156,6 +1178,25 @@ describe('ipcSource over a long transcript\'s window', () => {
   const page = (events: SessionEvent[], older = false) => ({ ok: true, value: { events, lastSeq: 0, complete: true, ...(older && { earlier: events[0]!.id }) } }) as never;
   const ids = (events: SessionEvent[]) => events.map((event) => event.id);
   const seen = () => [...useTranscriptStore.getState().entries[APP]!.state.seen];
+
+  it('drops what a held batch carries from before the window the snapshot answered, and the older page brings it back in order', async () => {
+    const fake = fakeClient();
+    const store = useTranscriptStore.getState();
+    const source = ipcSourceOver(fake.client, APP);
+    const hydrated = store.attach(APP, source);
+    fake.calls[0].answer({ ok: true, value: { events: [], lastSeq: 0, complete: false } } as never); // the host still reads it through
+    await vi.waitFor(() => expect(fake.listeners.get('fs.followState')?.size ?? 0).toBeGreaterThan(0));
+    fake.emit('session.eventBatch', batch(turns(1, 2))); // its window once read through, held while the snapshot is on its way
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(2)); // the batch wakes the read
+    fake.calls[1].answer(page(turns(2, 3), true)); // turn 3 appended meanwhile moved the window on
+    await hydrated;
+    expect(seen()).toEqual(ids(turns(2, 3))); // turn 1 never lands after turn 3
+    source.older!.loadOlder();
+    expect(fake.calls[2].input).toMatchObject({ before: turns(2, 2)[0]!.id });
+    fake.calls[2].answer(page(turns(1, 1)));
+    await vi.waitFor(() => expect(seen()).toEqual(ids(turns(1, 3))));
+    store.detach(APP);
+  });
 
   it('a snapshot whose subscription was superseded leaves the pager to the current one, so an older page keeps what is shown', async () => {
     const fake = fakeClient();

@@ -14,6 +14,7 @@ import { createTranscriptStore } from '../../stores/transcript';
 import { turnId } from '../model/keys';
 import { builder, task, tool, uuid } from '../model/test-events';
 import { ipcSourceOver } from './ipc';
+import { withoutOlderThanWindow } from './older';
 
 const APP = at('app-long' as AppSessionId);
 const MAIN_APP = bareOf(APP);
@@ -154,5 +155,23 @@ describe('a disk-backed session paged in from its newest window', () => {
     expect(entry.phase).toBe('live');
     expect([...entry.state.seen]).toEqual(window.map((event) => event.id)); // the batch and the answer are one window, once
     expect(source.older!.state.getState().more).toBe(true);
+  });
+});
+
+describe('batches held while a snapshot was on its way', () => {
+  // `d…` disk-form, `l…` another form (live, or the app's own); the snapshot holds `s…`.
+  const event = (id: string) => ({ id }) as SessionEvent;
+  const diskForm = (e: SessionEvent) => !e.id.startsWith('l');
+  const held = (...batches: string[][]) => batches.map((batch) => batch.map(event));
+  const ids = (batches: SessionEvent[][]) => batches.map((batch) => batch.map((e) => e.id));
+  const snapshot = ['s1', 's2', 's3'].map(event);
+
+  it('drops a disk-form event the snapshot lacks before the last held event it holds, and nothing else', () => {
+    expect(ids(withoutOlderThanWindow(held(['d0', 'l0', 's1'], ['d1', 's2', 'd2', 'l1'], ['d3']), snapshot, diskForm))).toEqual([['l0', 's1'], ['s2', 'd2', 'l1'], ['d3']]);
+  });
+
+  it('keeps every batch whole when none holds an event the snapshot holds (nothing shows how far it reaches)', () => {
+    expect(ids(withoutOlderThanWindow(held(['d0', 'l0'], ['d1']), snapshot, diskForm))).toEqual([['d0', 'l0'], ['d1']]);
+    expect(withoutOlderThanWindow([], snapshot, diskForm)).toEqual([]);
   });
 });

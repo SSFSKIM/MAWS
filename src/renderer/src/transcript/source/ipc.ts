@@ -13,7 +13,7 @@ import { turnId as turnIdOf } from '../model/keys';
 import type { TranscriptState } from '../model/reduce';
 import type { Spill, TurnId } from '../model/rows';
 import type { RewindInterface } from '../view/context';
-import { HistoryPager } from './older';
+import { HistoryPager, withoutOlderThanWindow } from './older';
 import type { TranscriptSource } from './types';
 
 // How much of a spilled result is read into the detail (residue *Spilled results*): past it, the head and Open full log.
@@ -285,7 +285,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
       if (subscription) {
         if (events.some(liveForm)) subscription.live = true;
         track(subscription, events); // E10
-        const waiting = subscription.held ?? [];
+        const waiting = withoutOlderThanWindow(subscription.held ?? [], events, diskForm); // the long-transcript window
         subscription.held = null;
         for (const batch of waiting) subscription.pass(batch);
         resetIfOverturned(subscription); // W7: a turn to foreign-live heard while this snapshot was on its way
@@ -323,6 +323,9 @@ interface Subscriber {
 
 function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: AgentId): TranscriptSource {
   let provenance: 'undecided' | 'live' | 'disk' = 'undecided';
+  // The long-transcript window: the disk snapshot whose `fs.agentEvents` answer is on its way. Batches are held until it
+  // completes, then those older than the window it answered are dropped before they are passed on.
+  let reading: object | null = null;
   let ended: SessionEvent | null = null; // the parent's report that the child ended, for the disk slice
   const resets = new Set<() => void>();
   const subscribers = new Set<Subscriber>();
@@ -337,6 +340,7 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
   const finishes = (event: SessionEvent) => (event.kind === 'subagent.finished' || event.kind === 'task.notification') && names(event.taskId);
   const exits = (event: SessionEvent) => event.kind === 'process.exited' && event.agentId === null;
   const liveForm = (event: SessionEvent) => event.seq !== null;
+  const ownOnDisk = (event: SessionEvent) => own(event) && !liveForm(event); // never the parent's reports, whatever their form
   // An exit ends the child only if it follows the child's start in the stream that carried it: an exit the parent's
   // snapshot holds, by its position there; any other exit, once a start has been seen (the snapshot's or a batch's).
   // An explicit child finish survives parent exits until another child start clears it. A replay or backfill batch
@@ -358,7 +362,7 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
   // One batch under the current provenance: its own events in that form, the parent's finish for the child, and while
   // live an exit that ends it, pass into the child's state; an end seen while live switches to disk.
   const receive = (subscriber: Subscriber, events: SessionEvent[]) => {
-    if (provenance === 'undecided') {
+    if (provenance === 'undecided' || reading !== null) {
       subscriber.held.push(events);
       return;
     }
@@ -388,9 +392,12 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
     // On disk too, a newly observed finish must follow the complete backfill, not overtake it in a batch.
     if (changedEnd && ended !== null) toDisk();
   };
+  const flush = () => {
+    for (const subscriber of subscribers) for (const events of subscriber.held.splice(0)) receive(subscriber, events);
+  };
   const decide = (chosen: 'live' | 'disk') => {
     provenance = chosen;
-    for (const subscriber of subscribers) for (const events of subscriber.held.splice(0)) receive(subscriber, events);
+    if (reading === null) flush();
   };
   // The reset is signalled once the batch that carried the end has been delivered, so the store's new subscription can
   // never receive that batch a second time.
@@ -473,7 +480,10 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
         pager.started(live, null);
         return live;
       }
-      if (!onDisk()) decide('disk');
+      // Held, not passed, until the disk answer is in (the long-transcript window: `reading`).
+      provenance = 'disk';
+      const token = {};
+      reading = token;
       // An incomplete snapshot is not terminal history. Listen before reading so a completed backfill during the
       // round trip is not missed; re-read on its following state, never spin on a reloading/error follower.
       let changed: boolean;
@@ -500,7 +510,8 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
           if (disk.complete) {
             const history = ended === null ? disk.events : [...disk.events, ended];
             pager.started(history, disk.earlier ?? null);
-            return history;
+            for (const subscriber of subscribers) subscriber.held = withoutOlderThanWindow(subscriber.held, history, ownOnDisk);
+            return history; // the held batches pass on as this returns (finally), so the hydration drains them after it
           }
           if (failure !== null) throw new Error(failure);
           if (!changed) await new Promise<void>((resolve) => { wake = resolve; });
@@ -512,6 +523,10 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
         clearTimeout(timer);
         offFollow();
         for (const subscriber of attached) subscriber.ended.signal.removeEventListener('abort', signal);
+        if (reading === token) {
+          reading = null;
+          flush();
+        }
       }
     },
     onReset(listener) {
