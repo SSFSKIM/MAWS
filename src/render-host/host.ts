@@ -25,6 +25,7 @@ export const RENDER_HOST_FLAG = '--render-host';
 export const RENDER_HOST_DIR = 'render-host'; // under the daemon's directory
 export const EXIT_USAGE = 2; // no profile named
 export const EXIT_UNREACHABLE = 1; // no mawsd to serve
+export const EXIT_FAILED = 70; // the render host itself failed (EX_SOFTWARE): root.ts's `fatal`
 
 // What the render host asks of the render library (src/render/compose.ts's `Render`)
 export interface RenderLibrary {

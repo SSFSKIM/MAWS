@@ -30,7 +30,9 @@ registerStoreSchemes();
 
 // The root loads in this script's own turn, before Electron's `ready`. A root that throws while loading fails as it did
 // when its code was this file's: an uncaught exception, never a quietly rejected promise.
-const root = process.argv.includes('--render-host') ? import('../render-host/root').then(({ runRenderHost }) => runRenderHost()) : import('./app');
+// The render host is told this entry's directory, where mawsd.js is (its build id): its root is a chunk under chunks/,
+// where `__dirname` names another directory, and neither `require.main` nor argv names the entry under every launcher.
+const root = process.argv.includes('--render-host') ? import('../render-host/root').then(({ runRenderHost }) => runRenderHost(__dirname)) : import('./app');
 root.catch((error: unknown) => {
   setImmediate(() => {
     throw error;

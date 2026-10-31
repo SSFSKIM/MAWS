@@ -19,7 +19,7 @@ vi.mock('./app', () => {
 });
 vi.mock('../render-host/root', () => {
   order.push('render-host root');
-  return { runRenderHost: () => order.push('runRenderHost') };
+  return { runRenderHost: (entryDir: string) => order.push(`runRenderHost ${entryDir}`) };
 });
 
 describe("main's entry", () => {
@@ -49,8 +49,8 @@ describe("main's entry", () => {
   it('with --render-host <profile>, runs the same bootstrap, then the render host’s root and nothing of the app’s (M3)', async () => {
     process.argv = [argv[0]!, 'out/main/index.js', '--render-host', '/scratch/profile'];
     await import('./index');
-    await vi.waitFor(() => expect(order).toContain('runRenderHost'));
-    expect(order).toEqual(['guardStdio', 'setPath userData /scratch/profile', 'switch use-mock-keychain', 'disableChromiumFeatures', 'registerStoreSchemes', 'render-host root', 'runRenderHost']);
+    await vi.waitFor(() => expect(order).toContain(`runRenderHost ${__dirname}`));
+    expect(order).toEqual(['guardStdio', 'setPath userData /scratch/profile', 'switch use-mock-keychain', 'disableChromiumFeatures', 'registerStoreSchemes', 'render-host root', `runRenderHost ${__dirname}`]); // the entry's own directory, where mawsd.js is
     expect(order).not.toContain('app');
     expect(process.listenerCount('SIGUSR1')).toBe(listeners.length + 1);
   });

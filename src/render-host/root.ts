@@ -11,7 +11,8 @@
 // The library is composed over the `machine.sock` link's engine-host commands, with no Word comment authors of its own
 // (the exporters' defaults) and no restart count (a dashboard export is not captured twice); its exports are written
 // under the profile's store, `<profile>/artifacts`, as the app writes them.
-import { dirname, join } from 'node:path';
+import { writeSync } from 'node:fs';
+import { join } from 'node:path';
 import { app, session } from 'electron';
 import { buildIdOf } from '../engine-host/supervisor-files';
 import { CAPTURE_PARTITION } from '../render/capture';
@@ -19,13 +20,24 @@ import { composeRender } from '../render/compose';
 import { installRenderSeams } from '../render/e2e-seams';
 import { guardPermissions, installFramePolicies } from '../render/policies';
 import { serveArtifactsThrough, type ContentLookup } from '../render/scheme';
-import { startRenderHost } from './host';
+import { EXIT_FAILED, startRenderHost } from './host';
 
-export function runRenderHost(): Promise<void> {
+// A windowless process must never raise Electron's error dialog, which an uncaught exception in main shows, modal: it
+// would hold the render host (before `ready`, Chromium's start with it) with nothing said. The failure is written to
+// stderr at once, synchronously since an asynchronous pipe write would not outlive the exit, and ends the process.
+function fatal(error: unknown): void {
+  writeSync(2, `[render-host] failed: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);
+  app.exit(EXIT_FAILED);
+}
+
+export function runRenderHost(entryDir: string): Promise<void> {
+  process.on('uncaughtException', fatal);
   return startRenderHost({
     argv: process.argv,
-    // main's hello names its build by mawsd.js beside the entry (src/main/hosts/index.ts), so the render host does too
-    build: () => buildIdOf(join(dirname(require.main?.filename ?? process.argv[1] ?? ''), 'mawsd.js')),
+    // main's hello names its build by mawsd.js beside the entry (src/main/hosts/index.ts), so the render host does too.
+    // The entry names its directory: `require.main` is unset under Playwright's loader, and the build id read from a
+    // relative 'mawsd.js' failed there (P5 O5 M3's first gate run)
+    build: () => buildIdOf(join(entryDir, 'mawsd.js')),
     userData(dir) {
       app.setPath('userData', dir);
       app.setActivationPolicy?.('accessory');
@@ -49,5 +61,5 @@ export function runRenderHost(): Promise<void> {
     },
     log: (line) => console.error(line),
     exit: (code) => app.exit(code),
-  });
+  }).catch(fatal);
 }
