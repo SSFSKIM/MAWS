@@ -1419,6 +1419,10 @@ Added at the re-plan of 2026-10-31. Each is built as recommended unless answered
   Rationale: each fills a gap in M2's decisions in their intent; (4) keeps the bar for real gaps.
   Date/Author: 2026-10-31, O7 M2b's executor, folded by the controller.
 
+- Decision: M2b's task review (1 Important, 2 Minor, and a renderer-reload gap) and its first class 1a run, fixed (cf60e1131, f183f6991). (1) One pending bound per act: `ActRequest.sendBy` (an absolute deadline) ends the link's unsent window at the adapter's deadline, and no act is made past it, so a resume's time is not given back to the send (A4's hold is one minute from the person's Send, not from the act's creation). (2) A tab of a session the org rows list as lane A is never placed by lane B (`RemoteLaneBDeps.laneOf`, refreshed at each rows change). (3) A session-only `ended('removed')` (a withdrawn session right, the channel kept) closes every control with "`<machine>` no longer lets you open this session", apart from the device's removal. (4) A reloaded or second window gets the held session's record, last parts and `remote.session` again: the pane's own `session.get` of a held remote session triggers the replay, so the renderer subscribes to its events before that call (M2c). Rejected: a window-load hook (events sent at `did-finish-load` are lost, `src/main/attention/navigation.ts`); a new renderer command. The gate fix: the app root's suites mock what the composition now takes, and `address-paths.json` gains the `remote.*` addresses.
+  Rationale: (1) is A4's intent (no delayed outbox); (2)–(4) close what the tabs rule and the overlay promise.
+  Date/Author: 2026-10-31, O7 M2b's executor from the task review, folded by the controller.
+
 The residue for P5's Decision Log. Each item is decided where it binds (M1 unless marked), with the alternative it rejected:
 
 1. M1 defines `OrgSession` and holds `signedOut()` in production, plus a development source behind `MAWS_DEV_ORG` in unpackaged builds; O8's sign-in implements it. Rejected: O7 building sign-in, so that two children build it.
