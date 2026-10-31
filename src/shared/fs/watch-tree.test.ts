@@ -93,6 +93,19 @@ describe('the watch tree walks a directory tree', () => {
     expect(() => watchTree('/missing', { fs: fake.options }, () => {})).toThrow(expect.objectContaining({ code: 'ENOENT' }));
   });
 
+  // VM measure of M1: the walk's allocations are what its RSS growth is made of, so it reads no directory's identity but
+  // the root's (whose replacement no parent can tell); a directory's is read when a pass lists it again.
+  it("reads the root's identity alone while it walks", async () => {
+    const fake = new FakeWatchFs();
+    fake.mkdir('a/b/c');
+    fake.mkdir('d');
+    const { handle } = open(fake);
+    await drain();
+    expect(fake.watched()).toHaveLength(5);
+    expect(fake.lstats).toEqual([fake.root]);
+    handle.close();
+  });
+
   it('drops a directory that vanished between its listing and its watch, silently', async () => {
     const fake = new FakeWatchFs();
     fake.mkdir('gone');
@@ -224,6 +237,40 @@ describe('the watch tree follows directories created and removed after it opened
     expect(fake.watched()).toEqual(['', 'dist']);
     expect(heard).toContainEqual(['rename', 'dist/new.js']);
     handle.close();
+  });
+
+  // A directory whose identity no pass has read yet cannot be told from a replacement: watched afresh, rather than keep
+  // a watch that may have died with the old one. Once a pass read it, the same directory named again keeps its watch.
+  it("keeps the watch of a directory named again once a pass read its identity, and renews it before", async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      const fake = new FakeWatchFs();
+      fake.write('dist/a.js');
+      const { handle, heard } = open(fake);
+      await drain();
+      const first = fake.watches.find((watch) => watch.path === fake.abs('dist'))!;
+      fake.fire('', 'rename', 'dist'); // moved out and back, say: the same directory
+      await drain();
+      expect(first.closed).toBe(true);
+      expect(fake.watched()).toEqual(['', 'dist']);
+      const second = fake.watches.find((watch) => watch.path === fake.abs('dist') && !watch.closed)!;
+      await vi.advanceTimersByTimeAsync(RECONCILE_MS);
+      await drain();
+      heard.length = 0;
+      fake.fire('', 'rename', 'dist');
+      await drain();
+      expect(second.closed).toBe(false);
+      expect(heard).toEqual([['rename', 'dist']]);
+      fake.rm('dist');
+      fake.write('dist/b.js'); // replaced: a new identity
+      fake.fire('', 'rename', 'dist');
+      await drain();
+      expect(second.closed).toBe(true);
+      expect(heard).toContainEqual(['rename', 'dist/b.js']);
+      handle.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('reports a file event once it knows the name is no directory', async () => {
@@ -483,8 +530,8 @@ describe('the watch tree reconciles', () => {
     fake.mkdir('a/b/c');
     const { handle } = open(fake);
     await drain();
-    const opendir = fake.fs.opendir;
-    fake.fs.opendir = async (path: string) => (path === fake.abs('a') ? Promise.reject(errno('EMFILE', path)) : opendir(path));
+    const readdir = fake.fs.readdir;
+    fake.fs.readdir = async (path: string) => (path === fake.abs('a') ? Promise.reject(errno('EMFILE', path)) : readdir(path));
     await vi.advanceTimersByTimeAsync(RECONCILE_MS);
     await drain();
     expect(fake.watched().sort()).toEqual(['', 'a', 'a/b', 'a/b/c']);
@@ -667,6 +714,20 @@ describe.runIf(process.platform === 'linux')('the watch tree over inotify', () =
     await until(() => heard.includes('late'), 1000, 'the removal');
     await until(() => inotifyWatches() === before, 1000, 'the closed watches');
     expect(heard).not.toContain('late/late');
+  });
+
+  // A branch switch's pattern: a directory the walk watched, whose identity no pass has read, removed and made again.
+  it('watches a directory replaced under its name afresh, before any pass read its identity', async () => {
+    mkdirSync(join(root, 'dist'));
+    start();
+    await until(() => heard.includes('<null>'), 2000, 'the initial walk');
+    const before = inotifyWatches();
+    rmSync(join(root, 'dist'), { recursive: true });
+    mkdirSync(join(root, 'dist'));
+    await until(() => heard.filter((name) => name === 'dist').length >= 2, 1000, 'the replacement');
+    await until(() => inotifyWatches() === before, 1000, "the new directory's watch");
+    writeFileSync(join(root, 'dist/after.js'), 'x');
+    await until(() => heard.includes('dist/after.js'), 1000, 'a write into the new directory');
   });
 
   it('names every file of a 2,000-file burst into a new directory within 1 s of the burst', async () => {
