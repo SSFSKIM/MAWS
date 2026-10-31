@@ -156,6 +156,41 @@ describe('acts', () => {
     ]);
   });
 
+  it('resumes a session whose launch exited with its row kept (a crash, a stop, a release) instead of sealing the act to it, and waits for the new launch’s `ready`', async () => {
+    const l = lab();
+    const sub = await live(l);
+    const exited = { ...statusOf(APP, 'L1'), process: 'exited', exit: { code: 0, signal: null, reason: 'stop', at: '2026-10-31T00:00:00.000Z', release: null } };
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, { status: exited });
+    l.link.onAct = (act) => {
+      if (act.request.action === 'session.acquire') return act.settle({ state: 'done', result: { status: 'ready', appSessionId: APP, launched: true, joined: false } });
+      act.settle({ state: 'done', result: { messageUuid: null, disposition: 'sent', queueId: 'q1' } });
+    };
+    const sending = l.cmd('session.send', { appSessionId: APP, content: 'after the exit' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.link.acts.map((a) => a.request.action)).toEqual(['session.acquire']);
+    // The relaunch is starting: still not sealed.
+    sub.sink.subbed('snapshot', { epoch: 'L2', seq: 0 });
+    sub.sink.snapshot({ epoch: 'L2', seq: 0 }, { status: { ...statusOf(APP, 'L2'), process: 'starting' } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.link.acts.map((a) => a.request.action)).toEqual(['session.acquire']);
+    sub.sink.snapshot({ epoch: 'L2', seq: 0 }, { status: statusOf(APP, 'L2') });
+    expect(await sending).toEqual({ ok: true, value: { messageUuid: null, disposition: 'sent', queueId: 'q1' } });
+    expect(l.link.acts[1].request).toMatchObject({ action: 'session.send', context: { lane: 'B', launchId: 'L2', engineSessionId: `eng-${APP}` } });
+  });
+
+  it('waits for a launch already `starting` to be `ready`, with no resume of its own', async () => {
+    const l = lab();
+    const sub = await live(l);
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, { status: { ...statusOf(APP, 'L1'), process: 'initializing' } });
+    l.link.onAct = settleWith({ state: 'done', result: { stillQueued: [], cancelled: [] } });
+    const interrupting = l.cmd('session.interrupt', { appSessionId: APP, cancelEngineQueued: false });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(l.link.acts).toEqual([]);
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, { status: statusOf(APP, 'L1') });
+    expect(await interrupting).toEqual({ ok: true, value: { stillQueued: [], cancelled: [] } });
+    expect(l.link.acts.map((a) => a.request.action)).toEqual(['session.interrupt']);
+  });
+
   it('answers a resume the machine refused, or one whose status never comes within the bound, with nothing sent', async () => {
     const l = lab({ timing: { sendPendingMs: 5000 } });
     await vi.advanceTimersByTimeAsync(0);

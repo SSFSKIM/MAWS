@@ -16,8 +16,9 @@
 //   stream delivered (`{lane: 'B', launchId, engineSessionId}`), its args the command's input (bare ids: the renderer
 //   lowered them); an answer carries DX6's request digest over the pending request read with `session.pendingRequest`. A
 //   `machine` act (`session.acquire`) carries neither a session nor a context: the machine places it by its args. An
-//   engine-host act on a session with no status (released, or opening) resumes it first, `session.acquire` unless one is
-//   out, and is sealed with the first status the resumed launch delivers. An act on a session no tab holds is refused
+//   engine-host act on a session with no `ready` status (released, opening, or its launch `exited` with the row kept)
+//   resumes it first, `session.acquire` unless one is out, and is sealed with the first `ready` status the resumed launch
+//   delivers; one whose launch is `starting` or `initializing` waits for its `ready`. An act on a session no tab holds is refused
 //   `not-open`. Step-up is the link's `if-asked`.
 // - Sends (`session.send`, `session.steer`) go one at a time per session: the next act is made at the one before's
 //   outcome or at the pending bound, at most `sendQueueMax` waiting; an interrupt or an answer never waits behind them.
@@ -262,7 +263,10 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     let context = lane.session.context();
     const resuming = context === null;
     if (context === null) {
-      const resume = await resumed(link, app, lane, deadline);
+      // A launch already on its way is waited for; one that ended (its row kept, `exited`) or none is resumed first.
+      const resume = lane.session.launching()
+        ? ((await lane.session.whenContext(deadline, now)) ?? failure('host_unavailable', `Not sent: ${link.name} didn’t resume the session in time`))
+        : await resumed(link, app, lane, deadline);
       if ('ok' in resume) return resume;
       context = resume;
     }

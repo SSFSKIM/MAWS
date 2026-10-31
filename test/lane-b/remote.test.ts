@@ -61,13 +61,27 @@ const LOCAL = 'local-machine-ref-0001' as MachineRef;
  */
 class LaneBHost extends FakeEngineHost {
   readonly stored = new Map<string, SessionEvent[]>();
+  /** Sessions whose launch ended with the host's row kept (`ProcessTable`'s exited rows): their status says `exited`. */
+  readonly exited = new Set<string>();
   /** Each `host.op` that arrived, by its inner name, held or not. */
   readonly arrived: string[] = [];
   readonly #holding = new Set<string>();
   readonly #held: Array<() => void> = [];
 
   override status(s: HostSession): Record<string, unknown> {
-    return { ...status(s.appSessionId), launchId: s.launchId, engineSessionId: s.engineSessionId, cwd: CHECKOUT };
+    const ended = this.exited.has(s.appSessionId) ? { process: 'exited', exit: { code: 0, signal: null, reason: 'stop', at: iso(Date.now()), release: null } } : {};
+    return { ...status(s.appSessionId), launchId: s.launchId, engineSessionId: s.engineSessionId, cwd: CHECKOUT, ...ended };
+  }
+
+  /** The launch ended, its row kept: the status says `exited`, as the engine host publishes it. */
+  exit(appSessionId: string): void {
+    this.exited.add(appSessionId);
+    this.emit('session.status', { appSessionId, status: this.status(this.session(appSessionId)) });
+  }
+
+  override relaunch(appSessionId: string): HostSession {
+    this.exited.delete(appSessionId);
+    return super.relaunch(appSessionId);
   }
 
   override event(s: HostSession, seq: number, i: number, fields: Record<string, unknown>): SessionEvent {
@@ -320,6 +334,20 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     expect(sessionOf(l.a, 'app-r')?.stream).toBe('live');
     // The send's row streams on the new launch.
     await until(() => eventsOf(l.a, 'app-r').some((e) => e.id.startsWith(`app-r:${resumed}:1:`)), 'the new launch’s first row');
+  });
+
+  it('resumes a session whose launch exited with the host’s row kept, rather than sealing a send to the exited launch', async () => {
+    const l = await lab();
+    const s = l.host.add('app-1');
+    l.place('app-1');
+    await opened(l.a, 'app-1', s.launchId);
+    const ended = s.launchId;
+    l.host.exit('app-1'); // a stop, a crash, a budget or idle release: the row stays, with both ids
+    await until(() => (of(l.a, 'session.status', 'app-1').at(-1)?.status as { process: string }).process === 'exited', 'the exited status streamed');
+    expect(await l.a.cmd('session.send', { appSessionId: 'app-1', content: 'after the exit' })).toMatchObject({ disposition: 'queued' });
+    expect(l.f.spine.acquired).toEqual(['app-1']);
+    expect(s.launchId).not.toBe(ended);
+    expect(l.host.runs).toEqual([{ appSessionId: 'app-1', content: 'after the exit', launchId: s.launchId }]);
   });
 
   it('runs a send once across a forced drop, answering only at its outcome', async () => {

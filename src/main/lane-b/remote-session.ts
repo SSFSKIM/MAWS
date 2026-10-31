@@ -149,10 +149,21 @@ export class RemoteSession {
     this.#subscribe();
   }
 
-  /** The context an engine-host act is sealed with: the live launch and its engine session, or null while not live. */
+  /**
+   * The context an engine-host act is sealed with: the launch and its engine session while its process is `ready`, else
+   * null. The engine host keeps a row for a launch that ended (a crash, a stop, a budget or idle release: `exited`, both
+   * ids still set) and the stream goes on publishing it, so the ids alone don't say the launch takes acts.
+   */
   context(): { launchId: string; engineSessionId: string } | null {
     const status = this.state.status;
-    return typeof status?.launchId === 'string' && typeof status.engineSessionId === 'string' ? { launchId: status.launchId, engineSessionId: status.engineSessionId } : null;
+    if (status?.process !== 'ready') return null;
+    return typeof status.launchId === 'string' && typeof status.engineSessionId === 'string' ? { launchId: status.launchId, engineSessionId: status.engineSessionId } : null;
+  }
+
+  /** Whether a launch is on its way to `ready` (`starting`, `initializing`): an act waits for it rather than resuming. */
+  launching(): boolean {
+    const process = this.state.status?.process;
+    return process === 'starting' || process === 'initializing';
   }
 
   /** The context once the stream delivers one, or null at `deadline` (epoch ms) or at `stop`. */

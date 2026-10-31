@@ -429,11 +429,14 @@ export class FakeSpine {
     return null;
   }
 
-  /** The resume: the session on the engine host again, as a new launch under its record's engine session. */
+  /** The resume: the session on the engine host again, as a new launch under its record's engine session (or its exited row's). */
   #acquire({ appSessionId }: { appSessionId: string }): { status: 'ready'; appSessionId: string; launched: boolean; joined: boolean } {
     this.acquired.push(appSessionId);
-    const launched = !this.host.sessions.has(appSessionId);
-    if (launched) this.host.add(appSessionId, (this.records.get(appSessionId)?.engineSessionId as string | null | undefined) ?? `eng-${appSessionId}`);
+    const row = this.host.sessions.get(appSessionId);
+    // P5 O7 M2b: a row the host kept for a launch that ended (`exited`) is resumed as a new launch, as the spine does
+    const launched = row === undefined || this.host.status(row).process === 'exited';
+    if (row === undefined) this.host.add(appSessionId, (this.records.get(appSessionId)?.engineSessionId as string | null | undefined) ?? `eng-${appSessionId}`);
+    else if (launched) this.host.relaunch(appSessionId);
     return { status: 'ready', appSessionId, launched, joined: !launched };
   }
 }
