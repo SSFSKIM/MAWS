@@ -335,3 +335,31 @@ Branch `p5-o7-m4`, worktree `/Users/new/.local/share/maws-worktrees/p5-o7`, from
   - So #414's "a request against a lagging index is `unavailable` until it catches up" now holds only for a caller with
     rank at the floor on the recorded engine session.
 - **Not run (CPU hold):** the new test and everything in this wave. The run commands are listed in the hand-back.
+
+### Fix wave 1, test results (after the 22:20Z all-clear; head 3d8cf6e25, with M4b's commits and uncommitted work in the worktree)
+
+- **The touched endpoint suites, one run:** `targets`, `checkout-rule`, `feeds`, `checkout-rows`, `lane-b-rows`,
+  `grades`, `subscriptions-b`, `actions`, `queries-machine`, `calls`, `subscription-table`.
+  - 11 files, **165/165 green on the first run**.
+  - The new fail-first lag case, the symlink and late-root case, the roots-change feed case and the below-view
+    mismatch case all pass.
+- **`pnpm typecheck`:** clean, with the controller's `9cf6c887c` (`placed` narrowed to the session kind) in.
+- **eslint** over this wave's files: clean.
+- **`test/lane-b/remote.test.ts`:** 22 passed, 2 failed. Both failures are in M4b's new cases, and neither comes from
+  this wave.
+  - **"follows git and files watches over the checkout feed…"**
+    - Error: `files.watch: internal invalid output of files.watch: expected void, received null`.
+    - Cause: the endpoint's `calls.ts` answers a call's output as `response.value ?? null`. That line dates from O10
+      M8 and is unchanged here, because RL2's `result` must carry `output` and JSON has no `undefined`.
+    - So every `void` command crosses as `output: null`. `files.watch` and `git.unwatch` are the first `void` commands
+      offered as calls.
+    - The fix belongs on the device side. Main should read `null` as `undefined` for a command whose output schema is
+      `z.void()` before it validates the output. This is M4b's adapter or its dispatch over the link.
+  - **"hydrates a live launch over 4 MiB in budgeted pages…"**
+    - Error: `expected false to be true` at `remote.test.ts:883`. The test asserts that every `session.events` the
+      host was asked carried `maxBytes`, and at least one did not.
+    - The endpoint forwards `session.events`' input to the engine host as given (`calls.ts`, unchanged), so this is
+      about which reads main sends unbudgeted (likely the pane's opening read). It is M4b's.
+- **CI:** run 41246661836 on `2e3ad1cf4` passed unit 1–4/4, probes and cross-build. Its static job failed on TS2322
+  (the spread onto `placed`), which the controller fixed in `9cf6c887c`. That fix's gate, `o7-m4a2-fix2`, is the
+  controller's.
