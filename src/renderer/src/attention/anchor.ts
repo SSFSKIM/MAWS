@@ -35,12 +35,13 @@ export function openAnchor(appSessionId: AppSessionId, anchor: Pick<ItemAnchor, 
   let reaching = false;
   // Once the tab's source has given the transcript its history: the report, then the jump (which opens the turn's
   // record if it holds the text). A transcript kept from an earlier tab, with no source attached, is live before its
-  // fresh history arrives, and the text may be newer than it: the jump waits for the tab's own.
+  // fresh history arrives, and the text may be newer than it: the jump waits for the tab's own; so does one whose load
+  // failed, until a Retry brings it.
   const settle = (): boolean => {
     if (done) return true;
     const store = useTranscriptStore.getState();
     const entry = store.entries[key];
-    if (!entry || entry.phase === 'hydrating' || !store.attached(key)) return false;
+    if (entry?.phase !== 'live' || !store.attached(key)) return false; // a failed load waits for its Retry
     done = true; // the view's and the jump's own store changes re-enter here
     store.setView(key, 'report');
     reaching = true;

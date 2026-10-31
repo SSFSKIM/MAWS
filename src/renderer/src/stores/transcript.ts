@@ -553,7 +553,7 @@ export function createTranscriptStore() {
           };
           const timer = setTimeout(() => finish(false), REACH_ARRIVAL_MS);
           let searched: TranscriptEntry | undefined; // searched without the text: unchanged, it is not searched again
-          const off = api.subscribe(() => {
+          const check = () => {
             if (done) return;
             if (!mine()) return finish(false);
             const current = entry(key);
@@ -562,7 +562,9 @@ export function createTranscriptStore() {
             if (get().jumpToMessage(key, anchor)) return finish(true);
             done = false;
             searched = entry(key);
-          });
+          };
+          const off = api.subscribe(check);
+          check(); // what is loaded now: a page the reader asked for may have brought the text while the seek waited for it
         });
         return landed ? end('landed') : end('missing', { anchor, phase: 'missing' });
       },

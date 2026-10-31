@@ -265,6 +265,27 @@ describe('a jump to a message older than the window', () => {
     await vi.waitFor(() => expect(source.older!.state.getState().revision).toBe(revision + 1));
   });
 
+  it('lands on a message the reader\u2019s own page in flight brings, which the seek waited for', async () => {
+    const { events, notice } = history();
+    const store = createTranscriptStore();
+    let release: () => void = () => {};
+    const host = fakeHost(events, notice, true, { gate: () => new Promise<void>((resolve) => (release = resolve)) });
+    const source = ipcSourceOver(host.client, APP);
+    await store.getState().attach(APP, source);
+    const sizeOf = (i: number) => eventBytes(events[i]!);
+    const newest = historyWindowStart(events, events.length, sizeOf, BUDGET);
+    const older = events.slice(historyWindowStart(events, newest, sizeOf, BUDGET), newest);
+    const text = older.find((event) => event.kind === 'assistant.block.complete' && event.agentId === null && event.block.type === 'text');
+    if (text?.kind !== 'assistant.block.complete') throw new Error('the page before the window holds no text');
+    source.older!.loadOlder(); // the reader reached the top: the page before the window is on its way
+    const reaching = store.getState().reachMessage(APP, { messageUuid: text.messageUuid!, blockIndex: text.blockIndex });
+    release();
+    await vi.waitFor(() => expect(source.older!.state.getState().loadingOlder).toBe(false));
+    release();
+    expect(await reaching).toBe('landed');
+    expect(store.getState().entries[APP]!.reach).toBeUndefined();
+  });
+
   it('lands through an engine host that does not know `seek`: each page says whether it holds the message', async () => {
     const { events, notice } = history();
     const store = createTranscriptStore();
