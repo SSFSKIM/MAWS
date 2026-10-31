@@ -197,7 +197,9 @@ describe('the catalog service', () => {
   });
 
   // P5 O4 M3: the machine half unreachable (a refused spine, a daemon gone) is an engine that could not be read
-  it('with the machine unreachable, answers the network’s items and still refreshes the network', async () => {
+  // (the task review) the network unchanged, a Refresh the machine missed still tells the renderer to read again: its
+  // queries never go stale on their own, so without it Discover would keep the engine view it showed before
+  it('with the machine unreachable, answers the network’s items, still refreshes the network and says the catalog changed', async () => {
     const engine = host(() => recordedEngine(PROJECT_A));
     const { invoke, emitted } = service(engine.call, {}, { machine: false });
     const page = await invoke('catalog.query', { tab: 'plugins', cwd: PROJECT_A, limit: 200 });
@@ -205,6 +207,7 @@ describe('the catalog service', () => {
     expect(page.items.find((i) => i.name === 'agentmail' || i.name === 'AgentMail')?.install).toMatchObject({ kind: 'manual' });
     emitted.length = 0;
     expect(await invoke('catalog.refresh', {})).toHaveLength(15);
+    expect(emitted).toEqual(['catalog.changed']); // the recordings did not change: the machine's refresh failed
     expect(engine.asked).toEqual([]);
   });
 

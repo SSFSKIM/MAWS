@@ -128,11 +128,18 @@ export function startCatalog(deps: CatalogDeps): Catalog {
     return item;
   });
   // The machine's reads forgotten (its `catalog.engineChanged` says catalog.changed), then the network read again (a
-  // change there says it too); a machine that cannot be asked leaves the network's refresh to go on
+  // change there says it too). A machine that cannot be asked leaves the network's refresh to go on, then says
+  // catalog.changed itself: the renderer reads again into an engine that could not be read rather than keep the view it
+  // showed (its queries never go stale on their own).
   deps.register('catalog.refresh', async () => {
     const refreshed = await deps.invoke('catalog.engineRefresh', undefined).catch((error: unknown) => ({ ok: false as const, error: ipcError('internal', error instanceof Error ? error.message : String(error)) }));
-    if (!refreshed.ok) log(`catalog.engineRefresh failed: ${refreshed.error.message}`);
-    return store.refresh();
+    if (refreshed.ok) return store.refresh();
+    log(`catalog.engineRefresh failed: ${refreshed.error.message}`);
+    try {
+      return await store.refresh();
+    } finally {
+      changed();
+    }
   });
   deps.register('catalog.icon', async ({ url }) => ({ dataUrl: await icons.dataUrl(url) }));
   // M4: from the copy held (no fetch: a posture is not worth a network read), against the configured servers' endpoints
