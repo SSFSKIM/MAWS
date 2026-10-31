@@ -1,7 +1,7 @@
 // The transcript's input (C6 execution document, Public surface): a source of X1 event batches under the hydration
 // protocol, and the player the harness and tests drive a replay with.
 import type { SessionEvent } from '@shared/graph/events';
-import type { AgentId } from '@shared/graph/ids';
+import type { AgentId, MessageUuid } from '@shared/graph/ids';
 import type { StoreApi } from 'zustand';
 
 export interface TranscriptSource {
@@ -31,7 +31,16 @@ export interface OlderPagesState {
 export interface OlderPages {
   readonly state: StoreApi<OlderPagesState>;
   loadOlder(): void;
+  // Additive: a jump to a message older than what is loaded walks back to the page holding it (older.ts `seek`), and
+  // the reader may give up on the way.
+  seek?(target: MessageUuid, progress?: (share: number) => void): Promise<SeekResult>;
+  stopSeek?(): void;
 }
+
+// How a seek ended: the message's page is in (`found`, the key rebuilding); the message is not older than what is loaded
+// (`held`: in it, on its way, or in no page the source can ask); in none of the history (`absent`); given up or
+// superseded (`stopped`); or a page did not load (`failed`).
+export type SeekResult = { outcome: 'found' | 'held' | 'absent' | 'stopped' } | { outcome: 'failed'; error: string };
 
 export interface Player {
   play(): void;

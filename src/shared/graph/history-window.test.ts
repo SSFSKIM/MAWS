@@ -3,7 +3,8 @@
 // turn, and a window never starting inside a rewind it carries.
 import { describe, expect, it } from 'vitest';
 import type { SessionEvent } from './events';
-import { historyWindowStart, type WindowBudget } from './history-window';
+import { historyWindowStart, soughtIn, type WindowBudget } from './history-window';
+import type { MessageUuid } from './ids';
 
 // A history of `kinds`, each event weighing its `size` (sizes are given, not measured, so the budgets read plainly).
 function history(spec: readonly (readonly [kind: string, size: number, extra?: Record<string, unknown>])[]): { events: SessionEvent[]; sizeOf: (i: number) => number } {
@@ -52,5 +53,22 @@ describe('historyWindowStart', () => {
     expect(historyWindowStart(events, events.length, sizeOf, budget(22, 100))).toBe(3);
     // A cap too small for the target leaves it out.
     expect(historyWindowStart(events, events.length, sizeOf, budget(22, 25))).toBe(6);
+  });
+});
+
+describe('soughtIn', () => {
+  // Three turns; the second's prompt is `u2`, and its reply's two blocks carry `m2`.
+  const { events } = history([...turn(10, 'u1'), ['turn.started', 1, { userMessageUuid: 'u2' }], ['assistant.text', 5, { messageUuid: 'm2' }], ['assistant.text', 5, { messageUuid: 'm2' }], ['turn.ended', 1], ...turn(10, 'u3')]);
+  const m = (uuid: string) => uuid as MessageUuid;
+
+  it('places the message by its first event: on the page, on an earlier one and how many events back, or at or after its end', () => {
+    expect(soughtIn(events, m('m2'), 3, 7)).toEqual({ at: 'page', behind: 0 });
+    expect(soughtIn(events, m('m2'), 5, 7)).toEqual({ at: 'earlier', behind: 1 }); // its first block is before the page
+    expect(soughtIn(events, m('u2'), 7, events.length)).toEqual({ at: 'earlier', behind: 4 }); // a prompt: its turn's start
+    expect(soughtIn(events, m('u3'), 0, 7)).toEqual({ at: 'newer', behind: 0 });
+  });
+
+  it('says a message in none of the history is absent', () => {
+    expect(soughtIn(events, m('gone'), 0, events.length)).toEqual({ at: 'absent', behind: 0 });
   });
 });

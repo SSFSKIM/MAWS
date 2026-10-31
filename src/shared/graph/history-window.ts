@@ -5,6 +5,7 @@
 // reducer needs on the same page to hide the abandoned branch (it hides nothing when the target is not loaded). The
 // engine host cuts disk-backed `session.events` and `fs.agentEvents` answers with it; the renderer's tests cut pages
 // with it too, so both sides agree on what a page is.
+import * as z from 'zod';
 import type { SessionEvent } from './events';
 import type { MessageUuid } from './ids';
 
@@ -28,6 +29,26 @@ export const HISTORY_WINDOW_BUDGET: WindowBudget = { soft: HISTORY_WINDOW_BYTES,
 // the history from the host again at the next sign of new history, which a released follow no longer sends; any other
 // stop (a resume handing the session to its live stream, an unbind) carries no message.
 export const FOLLOW_RELEASED = 'released: the session left every client\'s interest';
+
+// Where a page stands to a message a jump looks for (`seek` on a `before` read; the long-transcript window's jumps into
+// history): the message is on this page; on an earlier one, with `behind` events between it and this page's first; at or
+// after the cursor (`newer`: in what the reader already holds, or arriving); or in none of the history (`absent`: a
+// rewritten transcript, another session's message). `behind` is 0 unless `earlier`.
+export const HistorySoughtSchema = z.strictObject({ at: z.enum(['page', 'earlier', 'newer', 'absent']), behind: z.number().int().nonnegative() });
+export type HistorySought = z.infer<typeof HistorySoughtSchema>;
+
+// Whether an event belongs to the message `target`: one of its blocks, or the turn its prompt started.
+export const ofMessage = (event: SessionEvent, target: MessageUuid): boolean =>
+  (event.kind === 'turn.started' && event.userMessageUuid === target) || ('messageUuid' in event && event.messageUuid === target);
+
+// Where the page `[start, end)` of `events` stands to the message `target` (its first event: the whole message lies at
+// or after it).
+export function soughtIn(events: readonly SessionEvent[], target: MessageUuid, start: number, end: number): HistorySought {
+  const at = events.findIndex((event) => ofMessage(event, target));
+  if (at === -1) return { at: 'absent', behind: 0 };
+  if (at >= end) return { at: 'newer', behind: 0 };
+  return at >= start ? { at: 'page', behind: 0 } : { at: 'earlier', behind: start - at };
+}
 
 // One event's share of a window: its JSON's length.
 export const eventBytes = (event: SessionEvent): number => JSON.stringify(event).length;
@@ -100,7 +121,7 @@ function turnOf(events: readonly SessionEvent[], target: MessageUuid, before: nu
     bytes += sizeOf(i);
     if (bytes > room) return null;
     const event = events[i]!;
-    if (found === -1 && ((event.kind === 'turn.started' && event.userMessageUuid === target) || ('messageUuid' in event && event.messageUuid === target))) found = i;
+    if (found === -1 && ofMessage(event, target)) found = i;
     if (found !== -1 && event.kind === 'turn.started') return { start: i, bytes };
   }
   return found === -1 ? null : { start: 0, bytes };

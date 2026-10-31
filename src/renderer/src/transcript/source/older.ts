@@ -5,16 +5,20 @@
 // store hydrates the key again from the source's snapshot, which answers the pager's whole history without asking the
 // host, so the reducer applies it in transcript order and a rewind, a compaction or an agent straddling a page edge
 // lands as a full load would land it (lane A's rule for older rows, plane-transcript.ts). A page asked while the host's
-// read of the transcript is still running comes back empty with the same cursor and is asked again shortly.
+// read of the transcript is still running comes back empty with the same cursor and is asked again shortly. A jump to a
+// message older than what is loaded seeks it (`seek`): the pages back to the one holding it, walked with the host
+// saying where the message stands, and taken in with one rebuild.
 import { createStore } from 'zustand/vanilla';
 import type { SessionEvent } from '@shared/graph/events';
-import type { EventId } from '@shared/graph/ids';
-import type { OlderPages, OlderPagesState } from './types';
+import { ofMessage, type HistorySought } from '@shared/graph/history-window';
+import type { EventId, MessageUuid } from '@shared/graph/ids';
+import type { OlderPages, OlderPagesState, SeekResult } from './types';
 
 export interface Page {
   events: SessionEvent[];
   complete: boolean;
   earlier?: EventId;
+  sought?: HistorySought; // asked with a message to seek
 }
 
 // A cursor the host no longer holds (its follow started again): the source starts the key over from its newest window.
@@ -47,9 +51,12 @@ export class HistoryPager implements OlderPages {
   private rebuilt: SessionEvent[] | null = null; // the history a rebuild's snapshot answers
   private readonly rebuilds = new Set<() => void>();
   private generation = 0; // a snapshot that starts over makes an older page in flight stale
+  private inFlight: Promise<void> | null = null; // the older page on its way
+  private seekRun = 0; // a seek started, stopped or superseded since makes a walk in flight stale
+  private seeking = false; // a walk is on its way: the reader's own pages wait for it
 
   constructor(
-    private readonly fetchPage: (before: EventId) => Promise<Page>,
+    private readonly fetchPage: (before: EventId, seek?: MessageUuid) => Promise<Page>,
     private readonly place: (page: SessionEvent[], last: boolean) => SessionEvent[], // the page's place for events the source keeps aside (main's app events)
     private readonly lost: () => void, // the cursor is gone: the source resets the key
   ) {}
@@ -94,28 +101,92 @@ export class HistoryPager implements OlderPages {
 
   loadOlder(): void {
     const { more, loadingOlder } = this.state.getState();
-    if (!more || loadingOlder || this.earlier === null) return;
-    void this.load(this.earlier, this.generation);
+    if (!more || loadingOlder || this.seeking || this.earlier === null) return;
+    const load = this.load(this.earlier, this.generation);
+    this.inFlight = load;
+    void load.finally(() => {
+      if (this.inFlight === load) this.inFlight = null;
+    });
+  }
+
+  // The pages back to the one holding the message `target`, asked with it so the host says where it stands (`sought`):
+  // a message in none of the history ends the walk at once (`absent`), one at or after the cursor is in what the store
+  // already holds or is on its way (`held`). The pages are taken in once the one holding it is in, with one rebuild, so a
+  // walk across many pages hydrates the key once. `progress` hears the share walked, once the host has said how far.
+  // A later seek, `stopSeek` or a snapshot starting over stops it (`stopped`); nothing it fetched is kept then.
+  async seek(target: MessageUuid, progress?: (share: number) => void): Promise<SeekResult> {
+    const run = ++this.seekRun;
+    while (this.inFlight) await this.inFlight; // the reader's page goes first: the walk starts at its cursor
+    const generation = this.generation;
+    const current = () => run === this.seekRun && generation === this.generation;
+    if (!current()) return { outcome: 'stopped' };
+    if (this.earlier === null) return { outcome: 'held' };
+    this.seeking = true;
+    try {
+      const pages: Page[] = [];
+      let walked = 0;
+      let total: number | null = null;
+      for (let before: EventId = this.earlier; ; ) {
+        const page = await this.read(before, current, target);
+        if (!current()) return { outcome: 'stopped' };
+        // A host that does not know `seek` answers no `sought`: the page itself says whether it holds the message.
+        const sought: HistorySought = page.sought ?? { at: page.events.some((event) => ofMessage(event, target)) ? 'page' : page.earlier !== undefined ? 'earlier' : 'absent', behind: 0 };
+        if (sought.at === 'absent') return { outcome: 'absent' };
+        if (sought.at === 'newer') return { outcome: 'held' };
+        pages.unshift(page);
+        walked += page.events.length;
+        if (sought.at === 'page') break;
+        if (page.earlier === undefined) return { outcome: 'absent' };
+        if (sought.behind > 0) total = walked + sought.behind;
+        if (total !== null) progress?.(Math.min(1, walked / total));
+        before = page.earlier;
+      }
+      this.take(pages[0]!.earlier ?? null, pages.flatMap((page) => page.events));
+      return { outcome: 'found' };
+    } catch (error) {
+      if (!current()) return { outcome: 'stopped' };
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes(UNKNOWN_CURSOR)) this.lost();
+      return { outcome: 'failed', error: message };
+    } finally {
+      if (run === this.seekRun) this.seeking = false;
+    }
+  }
+
+  stopSeek(): void {
+    this.seekRun += 1;
+    this.seeking = false;
+  }
+
+  // The page before `before`, asked again while the host still reads the transcript through.
+  private async read(before: EventId, current: () => boolean, seek?: MessageUuid): Promise<Page> {
+    let page = await this.fetchPage(before, seek);
+    for (let tries = 0; page.events.length === 0 && !page.complete && tries < PAGE_RETRIES && current(); tries++) {
+      await new Promise((resolve) => setTimeout(resolve, PAGE_RETRY_MS));
+      page = await this.fetchPage(before, seek);
+    }
+    if (current() && page.events.length === 0 && page.earlier !== undefined) throw new Error('the transcript is still being read');
+    return page;
+  }
+
+  // Older events joined the history: they go before all of it, and the store rebuilds the key.
+  private take(earlier: EventId | null, events: SessionEvent[]): void {
+    this.earlier = earlier;
+    const history = [...this.place(events, this.earlier === null), ...this.held];
+    // With no store attached the page is let go: the next snapshot asks the host for the newest window again (the
+    // batches of the time between were never held).
+    this.rebuilt = this.rebuilds.size > 0 ? history : null;
+    if (this.rebuilt === null) this.started([], null);
+    for (const listener of [...this.rebuilds]) listener(); // the store stages the rebuild first, then the view hears the page
+    this.state.setState((state) => ({ more: this.earlier !== null, loadingOlder: false, revision: state.revision + 1 }));
   }
 
   private async load(before: EventId, generation: number): Promise<void> {
     this.state.setState({ loadingOlder: true, olderFailed: null });
     try {
-      let page = await this.fetchPage(before);
-      for (let tries = 0; page.events.length === 0 && !page.complete && tries < PAGE_RETRIES && generation === this.generation; tries++) {
-        await new Promise((resolve) => setTimeout(resolve, PAGE_RETRY_MS));
-        page = await this.fetchPage(before);
-      }
+      const page = await this.read(before, () => generation === this.generation);
       if (generation !== this.generation) return;
-      if (page.events.length === 0 && page.earlier !== undefined) throw new Error('the transcript is still being read');
-      this.earlier = page.earlier ?? null;
-      const history = [...this.place(page.events, this.earlier === null), ...this.held];
-      // With no store attached the page is let go: the next snapshot asks the host for the newest window again (the
-      // batches of the time between were never held).
-      this.rebuilt = this.rebuilds.size > 0 ? history : null;
-      if (this.rebuilt === null) this.started([], null);
-      for (const listener of [...this.rebuilds]) listener(); // the store stages the rebuild first, then the view hears the page
-      this.state.setState((state) => ({ more: this.earlier !== null, loadingOlder: false, revision: state.revision + 1 }));
+      this.take(page.earlier ?? null, page.events);
     } catch (error) {
       if (generation !== this.generation) return;
       const message = error instanceof Error ? error.message : String(error);

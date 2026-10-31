@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import { eventBytes, FOLLOW_RELEASED, type WindowBudget } from '@shared/graph/history-window';
-import type { AgentId, AppSessionId, EventId, SessionId, TaskId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, EventId, MessageUuid, SessionId, TaskId } from '@shared/graph/ids';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { longTranscript as transcript, LONG_SESSION as SESSION, LONG_DIR as DIR } from '../../../test/support/long-transcript';
@@ -84,6 +84,35 @@ describe('a long transcript is read in windows', () => {
     expect(userTexts(whole)).toEqual(Array.from({ length: 40 }, (_, i) => `prompt ${i + 1}`)); // no gap
     for (const page of pages.slice(1)) expect(page[0]!.kind).toBe('turn.started');
     expect(ids(batches())).toEqual(ids(first.events)); // paging sends nothing
+  });
+
+  it('says where each page stands to a message a jump seeks, so the walk back ends on its page, or at once when it is in none', async () => {
+    await fixture.addTranscript(DIR, SESSION, transcript(40));
+    const fs = await start();
+    const first = await fs.eventsSnapshot(APP, null);
+    expect(first.sought).toBeUndefined(); // the open asks nothing of the kind, and answers one window as before
+    const target = 'a3' as MessageUuid; // turn 3's reply, many pages back
+    let page = await fs.eventsSnapshot(APP, null, { before: first.earlier!, seek: target });
+    expect(page.sought).toMatchObject({ at: 'earlier' });
+    const behind = page.sought!.behind;
+    const firstLength = page.events.length;
+    let walked = 0;
+    let pages = 1;
+    while (page.sought?.at === 'earlier') {
+      walked += page.events.length;
+      page = await fs.eventsSnapshot(APP, null, { before: page.earlier!, seek: target });
+      pages += 1;
+    }
+    expect(pages).toBeGreaterThan(3);
+    expect(page.sought).toEqual({ at: 'page', behind: 0 });
+    // `behind` counted the events between the first page asked and the message's first event
+    const at = page.events.findIndex((e) => 'messageUuid' in e && e.messageUuid === target);
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(behind).toBe(walked - firstLength + page.events.length - at);
+    // Not in the history at all: said on the first page asked, with nothing walked
+    expect((await fs.eventsSnapshot(APP, null, { before: first.earlier!, seek: 'gone' as MessageUuid })).sought).toEqual({ at: 'absent', behind: 0 });
+    // At or after the cursor: in what the reader already holds
+    expect((await fs.eventsSnapshot(APP, null, { before: first.earlier!, seek: 'a40' as MessageUuid })).sought).toEqual({ at: 'newer', behind: 0 });
   });
 
   it('answers the first N events for a limit, one agent\'s slice for an agent id, and refuses a cursor it never gave', async () => {

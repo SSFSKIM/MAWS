@@ -386,7 +386,7 @@ export class FsService {
   // names, so until a meta naming it has been read the call is refused rather than following with a parent it cannot know for
   // the rest of the follow; the consumer retries on the `fs.subagentsChanged` the meta's arrival emits. A workflow
   // agent's meta names no tool use (nor does the wire), so it follows at once with `parentToolUseId: null`.
-  async agentEvents(appSessionId: AppSessionId, agentId: AgentId, request: Pick<HistoryRequest, 'before'> = {}): Promise<HistoryPage> {
+  async agentEvents(appSessionId: AppSessionId, agentId: AgentId, request: Pick<HistoryRequest, 'before' | 'seek'> = {}): Promise<HistoryPage> {
     const sessionId = this.sessionOf(appSessionId);
     const entry = await this.ensureFollow(appSessionId, agentId, async () => {
       const agent = (await this.listAgents(sessionId)).find((candidate) => candidate.agentId === agentId);
@@ -397,7 +397,7 @@ export class FsService {
       return this.newFollow(appSessionId, sessionId, agent.transcriptPath, { agentId, parentToolUseId });
     });
     entry.usedAt = Date.now();
-    return snapshotOf(entry.follow, { before: request.before ?? null });
+    return snapshotOf(entry.follow, { before: request.before ?? null, seek: request.seek ?? null });
   }
 
   // `fs.unfollow`: stops the follower, and with agentId null every follower of the session. Following no one is a no-op.

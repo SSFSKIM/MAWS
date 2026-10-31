@@ -593,6 +593,27 @@ describe('child source provenance', () => {
     useTranscriptStore.getState().detach(CHILD_KEY);
   });
 
+  it('a jump into a disk child\'s older history asks fs.agentEvents for the pages back to the message, and lands on it', async () => {
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const fake = fakeClient();
+    const hydrated = useTranscriptStore.getState().attach(CHILD_KEY, childSource(fake), { agentId: AGENT });
+    answer(fake, 'session.events', { events: parent.map((e) => ({ ...e, seq: null })), lastSeq: 0, complete: true });
+    await flush();
+    answer(fake, 'fs.agentEvents', { events: disk.slice(1), complete: true, earlier: disk[1].id }); // its newest window
+    await hydrated;
+    const target = { messageUuid: uuid('c1-u0'), blockIndex: 0 }; // the child's first words, before the window
+    expect(disk[0]).toMatchObject({ messageUuid: target.messageUuid });
+    const reaching = useTranscriptStore.getState().reachMessage(CHILD_KEY, target);
+    await flush();
+    expect(fake.calls.at(-1)).toMatchObject({ name: 'fs.agentEvents', input: { appSessionId: APP, agentId: AGENT, before: disk[1].id, seek: target.messageUuid } });
+    answer(fake, 'fs.agentEvents', { events: disk.slice(0, 1), complete: true, sought: { at: 'page', behind: 0 } });
+    expect(await reaching).toBe('landed');
+    const entry = useTranscriptStore.getState().entries[CHILD_KEY]!;
+    expect(entry.rows.find((row) => row.id === entry.jump?.rowId)).toMatchObject({ kind: 'assistant_text', messageUuid: target.messageUuid });
+    useTranscriptStore.getState().detach(CHILD_KEY);
+  });
+
   it('a released follow is no reset: the child is read again at the next change of its session\'s record', async () => {
     const { parent, child } = live();
     const disk = onDisk(child);

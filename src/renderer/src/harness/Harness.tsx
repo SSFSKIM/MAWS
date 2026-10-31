@@ -5,6 +5,7 @@
 // request's slot through `renderRequest`, and after a subagent row is opened, "Show child" mounts a second Transcript
 // with `variant: 'child'` over that agent's own events (C8's drill-in).
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import type { MessageUuid } from '@shared/graph/ids';
 import { useTranscriptStore } from '../stores/transcript';
 import { rowId } from '../transcript/model/keys';
 import type { Row, SubagentRef } from '../transcript/model/rows';
@@ -16,6 +17,7 @@ import type { HarnessApi, HarnessMetrics } from './api';
 import { FIXTURES, loadFixture } from './fixtures';
 import { FrameMetrics, percentile } from './metrics';
 import { HarnessSession } from './player';
+import { textOfTurn } from './paged';
 
 // `window.__maws_harness` is declared once for every harness page, this one's members included (`./env.d.ts`).
 
@@ -50,12 +52,12 @@ export function Harness() {
     const theme = params.get('theme');
     if (theme === 'dark' || theme === 'light') document.documentElement.dataset.theme = theme;
 
-    const load = async (name: string) => {
+    const load = async (name: string, paged: { delayMs: number } | null = null) => {
       const started = performance.now();
       const loaded = await loadFixture(name);
       sessionRef.current?.dispose();
       frames.current.stop();
-      const next = new HarnessSession(loaded, speedRef.current);
+      const next = new HarnessSession(loaded, speedRef.current, paged);
       sessionRef.current = next;
       setFixture(name);
       setSession(next);
@@ -114,6 +116,24 @@ export function Harness() {
         };
       },
       setEffort,
+      loadPaged: async (name, delayMs) => {
+        const loaded = await load(name, { delayMs });
+        await current().attached;
+        await painted();
+        const session = current();
+        const total = session.events.filter((event) => event.kind === 'turn.started' && event.agentId === null).length;
+        return { ...loaded, rows: session.rows().length, turns: useTranscriptStore.getState().entries[session.key]?.state.order.length ?? 0, total };
+      },
+      reach: (n) => {
+        const session = current();
+        const anchor = n === 'missing' ? { messageUuid: 'harness-missing-message' as MessageUuid, blockIndex: 0 } : textOfTurn(session.events, n);
+        void useTranscriptStore.getState().reachMessage(session.key, anchor);
+      },
+      rowOfText: (n) => {
+        const session = current();
+        const { messageUuid } = textOfTurn(session.events, n);
+        return session.rows().find((row) => row.kind === 'assistant_text' && row.messageUuid === messageUuid)?.id ?? null;
+      },
     };
     const frameMetrics = frames.current;
     window.__maws_harness = api;

@@ -2,15 +2,18 @@
 // session's history answered one window at a time, with every older page loaded as the reader reaches the top, ends in
 // exactly the rows a whole-history load draws, though rewinds, a compaction, a background agent and main's own notice
 // straddle the page edges; the newest window alone already hides the turns a rewind in it abandoned; and a snapshot
-// asked while the host still reads the transcript through waits for the window rather than drawing nothing.
+// asked while the host still reads the transcript through waits for the window rather than drawing nothing. A jump to a
+// message older than the window (an attention item's mark, residue 2) walks back only to the page holding it, takes the
+// pages in with one rebuild and lands on it; one in none of the history ends at once, visibly; the reader can give up.
 import { describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
-import { eventBytes, historyWindowStart, type WindowBudget } from '@shared/graph/history-window';
-import type { AppSessionId, EventId, ParentToolUseId } from '@shared/graph/ids';
+import { eventBytes, historyWindowStart, soughtIn, type WindowBudget } from '@shared/graph/history-window';
+import type { AppSessionId, EventId, MessageUuid, ParentToolUseId } from '@shared/graph/ids';
 import type { CommandName, CommandResult, EventName, EventPayload, EventSource, MawsBridge } from '@shared/ipc/schema';
 import { bareOf } from '@shared/machine/address';
 import { at, TEST_MACHINE } from '../../../../../test/support/machine';
-import { createTranscriptStore } from '../../stores/transcript';
+import { openAnchor } from '../../attention/anchor';
+import { createTranscriptStore, useTranscriptStore } from '../../stores/transcript';
 import { turnId } from '../model/keys';
 import { builder, task, tool, uuid } from '../model/test-events';
 import { ipcSourceOver } from './ipc';
@@ -50,8 +53,10 @@ function history(): { events: SessionEvent[]; notice: SessionEvent } {
 }
 
 // A fake main that answers `session.events` as the engine host answers a disk-backed session: the window before
-// `before` (or the newest), cut by the same rule, with its `earlier` cursor; `paged: false` answers the whole history.
-function fakeHost(events: SessionEvent[], notice: SessionEvent, paged: boolean) {
+// `before` (or the newest), cut by the same rule, with its `earlier` cursor, and where it stands to a message `seek`
+// names (`sought`, unless `seekless`: a host from before jumps into history); `paged: false` answers the whole history.
+// `gate`, when set, holds each paged answer until the test releases it.
+function fakeHost(events: SessionEvent[], notice: SessionEvent, paged: boolean, options: { seekless?: boolean; gate?: () => Promise<void> } = {}) {
   const sizeOf = (i: number) => eventBytes(events[i]!);
   const listeners = new Map<string, Set<(payload: unknown, from: EventSource) => void>>();
   const asked: unknown[] = [];
@@ -62,11 +67,15 @@ function fakeHost(events: SessionEvent[], notice: SessionEvent, paged: boolean) 
     if (!paged) return { ok: true, value: { events, lastSeq: 0, complete: true } } as never;
     const end = input.before === undefined ? events.length : events.findIndex((event) => event.id === input.before);
     const start = historyWindowStart(events, end, sizeOf, BUDGET);
-    return { ok: true, value: { events: events.slice(start, end), lastSeq: 0, complete: true, ...(start > 0 && { earlier: events[start]!.id }) } } as never;
+    const sought = input.seek !== undefined && !options.seekless ? soughtIn(events, input.seek as MessageUuid, start, end) : null;
+    return { ok: true, value: { events: events.slice(start, end), lastSeq: 0, complete: true, ...(start > 0 && { earlier: events[start]!.id }), ...(sought && { sought }) } } as never;
   };
   const client: MawsBridge = {
     localMachine: TEST_MACHINE,
-    invoke: (async (name: CommandName, input: Record<string, unknown>) => answer(name, input)) as MawsBridge['invoke'],
+    invoke: (async (name: CommandName, input: Record<string, unknown>) => {
+      if (options.gate && name === 'session.events' && input.before !== undefined) await options.gate();
+      return answer(name, input);
+    }) as MawsBridge['invoke'],
     on: ((name: EventName, listener: (payload: unknown, from: EventSource) => void) => {
       const set = listeners.get(name) ?? new Set();
       set.add(listener);
@@ -177,5 +186,107 @@ describe('batches held while a snapshot was on its way', () => {
     // the next turn) shows nothing of the window's reach: the turn before it stays.
     const withAppEvent = [...snapshot, event('l2')];
     expect(ids(withoutOlderThanWindow(held(['d4', 'l2']), withAppEvent, diskForm))).toEqual([['d4', 'l2']]);
+  });
+});
+
+describe('a jump to a message older than the window', () => {
+  const textOf = (n: number) => ({ messageUuid: uuid(`m${n}-u0`), blockIndex: 0 }); // turn n's answer
+  const seeks = (asked: unknown[]) => asked.filter((input) => (input as { seek?: unknown }).seek !== undefined);
+  const landedOn = (store: ReturnType<typeof createTranscriptStore>, n: number) => {
+    const entry = store.getState().entries[APP]!;
+    const row = entry.rows.find((candidate) => candidate.id === entry.jump?.rowId);
+    return row?.kind === 'assistant_text' && row.messageUuid === textOf(n).messageUuid;
+  };
+
+  it('opens on one window, then walks back only to the page holding the message, takes the pages in with one rebuild and lands on it', async () => {
+    const { events, notice } = history();
+    const store = createTranscriptStore();
+    const host = fakeHost(events, notice, true);
+    const source = ipcSourceOver(host.client, APP);
+    await store.getState().attach(APP, source);
+    expect(host.asked).toEqual([{ appSessionId: APP, afterSeq: null, limit: null }]); // the open: the newest window, nothing more
+    const opened = store.getState().entries[APP]!;
+    expect(opened.state.order).not.toContain(turnId.ofMessage(uuid('u2')));
+    const revision = source.older!.state.getState().revision;
+
+    expect(await store.getState().reachMessage(APP, textOf(2))).toBe('landed');
+    expect(landedOn(store, 2)).toBe(true);
+    expect(store.getState().entries[APP]!.reach).toBeUndefined();
+    // Several pages walked, each asked with the message, the last the one holding it; one rebuild took them all in.
+    const walked = seeks(host.asked);
+    expect(walked.length).toBeGreaterThan(1);
+    expect(walked.every((input) => (input as { seek: unknown }).seek === textOf(2).messageUuid)).toBe(true);
+    expect(source.older!.state.getState().revision).toBe(revision + 1);
+    // The walk stopped at that page: turn 1 is older still and was not asked for
+    expect(store.getState().entries[APP]!.state.order).toContain(turnId.ofMessage(uuid('u2')));
+    expect(store.getState().entries[APP]!.state.order).not.toContain(turnId.ofMessage(uuid('u1')));
+    expect(source.older!.state.getState().more).toBe(true);
+  });
+
+  it('ends at once, saying so, when the message is in none of the history: one page asked, nothing taken in', async () => {
+    const { events, notice } = history();
+    const store = createTranscriptStore();
+    const host = fakeHost(events, notice, true);
+    const source = ipcSourceOver(host.client, APP);
+    await store.getState().attach(APP, source);
+    const rows = store.getState().entries[APP]!.rows;
+    const anchor = { messageUuid: 'gone' as MessageUuid, blockIndex: 0 };
+    expect(await store.getState().reachMessage(APP, anchor)).toBe('missing');
+    expect(store.getState().entries[APP]!.reach).toEqual({ anchor, phase: 'missing' });
+    expect(seeks(host.asked)).toHaveLength(1);
+    expect(store.getState().entries[APP]!.rows).toBe(rows);
+    store.getState().stopReach(APP); // dismissed
+    expect(store.getState().entries[APP]!.reach).toBeUndefined();
+  });
+
+  it('says it is loading while the pages are on their way, and the reader can give up: nothing walked is taken in', async () => {
+    const { events, notice } = history();
+    const store = createTranscriptStore();
+    let release: () => void = () => {};
+    const host = fakeHost(events, notice, true, { gate: () => new Promise<void>((resolve) => (release = resolve)) });
+    const source = ipcSourceOver(host.client, APP);
+    await store.getState().attach(APP, source);
+    const revision = source.older!.state.getState().revision;
+    const reaching = store.getState().reachMessage(APP, textOf(2));
+    expect(store.getState().entries[APP]!.reach).toMatchObject({ phase: 'loading', progress: null });
+    await vi.waitFor(() => expect(seeks(host.asked)).toHaveLength(0)); // the first page waits at the gate
+    release();
+    await vi.waitFor(() => expect(store.getState().entries[APP]!.reach).toMatchObject({ phase: 'loading', progress: expect.any(Number) }));
+    store.getState().stopReach(APP);
+    release();
+    expect(await reaching).toBe('stopped');
+    expect(store.getState().entries[APP]!.reach).toBeUndefined();
+    expect(source.older!.state.getState().revision).toBe(revision);
+    expect(store.getState().entries[APP]!.jump).toBeNull();
+    // the reader's own pages ask again from where they were
+    source.older!.loadOlder();
+    await vi.waitFor(() => expect(source.older!.state.getState().loadingOlder).toBe(true));
+    release();
+    await vi.waitFor(() => expect(source.older!.state.getState().revision).toBe(revision + 1));
+  });
+
+  it('lands through an engine host that does not know `seek`: each page says whether it holds the message', async () => {
+    const { events, notice } = history();
+    const store = createTranscriptStore();
+    const host = fakeHost(events, notice, true, { seekless: true });
+    await store.getState().attach(APP, ipcSourceOver(host.client, APP));
+    expect(await store.getState().reachMessage(APP, textOf(3))).toBe('landed');
+    expect(landedOn(store, 3)).toBe(true);
+  });
+
+  it('an attention item’s mark several pages back opens on it (openAnchor, the owner channel’s jump)', async () => {
+    const { events, notice } = history();
+    const host = fakeHost(events, notice, true);
+    const source = ipcSourceOver(host.client, APP);
+    const attached = useTranscriptStore.getState().attach(APP, source);
+    openAnchor(APP, textOf(2), () => {}); // the tab opens; its history arrives after
+    await attached;
+    await vi.waitFor(() => {
+      const entry = useTranscriptStore.getState().entries[APP]!;
+      const row = entry.rows.find((candidate) => candidate.id === entry.jump?.rowId);
+      expect(row).toMatchObject({ kind: 'assistant_text', messageUuid: textOf(2).messageUuid });
+    });
+    expect(useTranscriptStore.getState().entries[APP]!.state.ui.view).toBe('report');
+    useTranscriptStore.getState().drop(APP);
   });
 });

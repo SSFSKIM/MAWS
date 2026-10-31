@@ -12,8 +12,8 @@
 // change at the next poke.
 import { open, type FileHandle } from 'node:fs/promises';
 import type { SessionEvent } from '@shared/graph/events';
-import { eventBytes, HISTORY_WINDOW_BUDGET, historyWindowStart, type WindowBudget } from '@shared/graph/history-window';
-import type { AgentId, AppSessionId, EventId, ParentToolUseId, SessionId } from '@shared/graph/ids';
+import { eventBytes, HISTORY_WINDOW_BUDGET, historyWindowStart, soughtIn, type HistorySought, type WindowBudget } from '@shared/graph/history-window';
+import type { AgentId, AppSessionId, EventId, MessageUuid, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import { HostCommandError, type HostEmit } from '@shared/host/runtime';
 import type { SubagentLookup } from './backfill';
 import { ChainFollower, type ChainFollowerOptions, type FileReader, type FollowState } from './chain-follower';
@@ -99,17 +99,20 @@ export interface FollowOptions {
 }
 
 // What a read asks of the log: the page before `before` (an event id an earlier page started at), the first `limit`
-// events, or the slice that concerns one agent; none of them, the newest window.
+// events, or the slice that concerns one agent; none of them, the newest window. `seek` names a message a jump looks for:
+// the page then says where it stands to it (`sought`), so a jump walks back only to a message that is there.
 export interface HistoryRequest {
   before?: EventId | null;
   limit?: number | null;
   agentId?: AgentId | null;
+  seek?: MessageUuid | null;
 }
 
 export interface HistoryPage {
   events: SessionEvent[];
   complete: boolean; // the follow has read its transcript through (its backfill is done)
   earlier?: EventId; // older history remains: the cursor that asks for the page before this one
+  sought?: HistorySought; // where the page stands to the message `seek` named
 }
 
 // A cursor the log does not hold: the follow was started again since the page that named it (a rebind, a release).
@@ -219,7 +222,8 @@ export class Follow {
     const end = before === null ? this.delivered.length : this.positions.get(before);
     if (end === undefined) throw new HostCommandError({ code: 'invalid_input', message: `${UNKNOWN_CURSOR}: ${before}` });
     const start = this.windowStart(end);
-    return { events: this.delivered.slice(start, end), complete, ...(start > 0 && { earlier: this.delivered[start]!.id }) };
+    const sought = request.seek ? soughtIn(this.delivered, request.seek, start, end) : null;
+    return { events: this.delivered.slice(start, end), complete, ...(start > 0 && { earlier: this.delivered[start]!.id }), ...(sought && { sought }) };
   }
 
   get backfillDone(): boolean {
