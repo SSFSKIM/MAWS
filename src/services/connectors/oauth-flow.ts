@@ -37,7 +37,9 @@ import { OAUTH_CALLBACK_HOST, type ListenLoopback, type LoopbackReply, type Loop
 import { boundedOAuthFetch, isPermittedOAuthUrl, OAuthTransportError, type OAuthFetch } from './oauth-http';
 import type { ConnectorOAuthGrant, ConnectorOAuthTokens } from '@shared/connectors/oauth-types';
 
-export const CONNECT_CALLBACK_TIMEOUT_MS = 120_000;
+import { CONNECT_CALLBACK_TIMEOUT_MS } from './deadlines';
+
+export { CONNECT_CALLBACK_TIMEOUT_MS };
 export const OAUTH_CALLBACK_PATH = '/callback';
 const TOKEN_LIMIT = 16_384; // the host's transient credential bound (DirectCredentialSchema)
 const SCOPE_LIMIT = 8_192;

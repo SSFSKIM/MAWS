@@ -122,7 +122,7 @@ describe('the detached entry', () => {
     expect(statSync(lock.socketPath).mode & 0o777).toBe(0o600);
 
     const client = await connect();
-    expect(await client.next()).toEqual({ t: 'welcome', protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, build: lock.buildId, capabilities: ['socket.ptyFrames', 'host.attachment'] /* P5 O3-D: its own list, host.attachment served from M3 */, pid: process.pid, startedAt: lock.startedAt, liveSessions: 1, rows: 2 });
+    expect(await client.next()).toEqual({ t: 'welcome', protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, build: lock.buildId, capabilities: ['socket.ptyFrames', 'host.attachment', 'host.connectors'] /* P5 O3-D: its own list, host.attachment served from M3; P5 O4 M2: host.connectors */, pid: process.pid, startedAt: lock.startedAt, liveSessions: 1, rows: 2 });
     client.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined });
     expect(await client.next((line) => (line as { t: string }).t === 'res')).toMatchObject({ id: '1', ok: true, value: { pid: process.pid } });
     client.send({ t: 'ready' });

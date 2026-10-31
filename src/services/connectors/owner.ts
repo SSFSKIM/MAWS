@@ -47,7 +47,9 @@ import { oauthIdentityOf, type ConnectorOAuthIdentity } from '@shared/connectors
 type Covered<T extends ConnectorOwnerFailure> = T;
 export type OwnerFailureCoverage = Covered<ConnectorOAuthConnectFailure | DirectReason>;
 
-export const OWNER_QUERY_DEADLINE_MS = 15_000;
+import { OWNER_QUERY_DEADLINE_MS } from './deadlines';
+
+export { OWNER_QUERY_DEADLINE_MS };
 // The provider's flow (120 s from its listener) and a discovery (180 s), with slack.
 export const OWNER_ACTION_DEADLINE_MS = 330_000;
 export const OWNER_ACTION_LIMIT = 16; // owner actions running at once

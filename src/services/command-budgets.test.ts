@@ -1,6 +1,8 @@
 // The spine's commands that run past a host request's 10 s (the panel's sweep#3): each keeps a budget that covers its
 // own named waits, so main's `machine` binding does not answer `timeout` while mawsd goes on to finish it.
 import { EventEmitter } from 'node:events';
+import { join, relative } from 'node:path';
+import { buildSync } from 'esbuild';
 import { describe, expect, it, vi } from 'vitest';
 import { createHostSupervisor, REQUEST_TIMEOUT_MS, type UtilityLink } from '@shared/host/host-supervisor';
 import type { HostMessage } from '@shared/ipc/host-protocol';
@@ -159,5 +161,18 @@ describe('the connectors’ and delivery’s command budgets (P5 O4)', () => {
     for (const name of ['connectors.open', 'connectors.connect', 'connectors.signIn', 'delivery.cancel', 'delivery.receipts', 'artifacts.grantConnectorTool'] as const) {
       expect(COMMAND_BUDGETS_MS[name], name).toBeUndefined();
     }
+  });
+});
+
+// P5 O4 M2 (acceptance 9): the table loads with main's import of the services entry and in every chunk that names it,
+// so of the connectors and delivery it reads their deadlines alone, never their services (the custody's backup
+// exclusion among them, whose JXA text the bundle guard reads as a dynamic import)
+describe('what the budgets load of the connectors and delivery', () => {
+  it('is their deadline modules alone', () => {
+    const root = join(__dirname, '..', '..');
+    const { metafile } = buildSync({ entryPoints: [join(__dirname, 'command-budgets.ts')], bundle: true, write: false, metafile: true, platform: 'node', format: 'esm', packages: 'external', tsconfig: join(root, 'tsconfig.node.json'), logLevel: 'silent' });
+    const loaded = Object.keys(metafile.inputs).map((path) => relative(root, join(root, path)));
+    expect(loaded.filter((path) => /^src\/services\/(connectors|delivery)\//.test(path)).sort()).toEqual(['src/services/connectors/deadlines.ts', 'src/services/delivery/deadlines.ts']);
+    expect(loaded.filter((path) => path.includes('backup-exclusion'))).toEqual([]);
   });
 });

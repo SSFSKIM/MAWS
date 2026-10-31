@@ -7,13 +7,9 @@
 import { CONNECTOR_OPERATION_DEADLINE_MS } from '@shared/artifacts/connectors';
 import { REQUEST_TIMEOUT_MS } from '@shared/host/host-supervisor';
 import type { CommandName } from '@shared/ipc/schema';
-import { DIRECT_OPERATION_DEADLINE_MS, DIRECT_RESOLVE_DEADLINE_MS } from './connectors/direct-route';
-import { CONNECT_CALLBACK_TIMEOUT_MS } from './connectors/oauth-flow';
-import { OAUTH_REQUEST_TIMEOUT_MS } from './connectors/oauth-http';
-import { OAUTH_HOST_CLOSE_TIMEOUT_MS } from './connectors/oauth-provider';
-import { OWNER_QUERY_DEADLINE_MS } from './connectors/owner';
-import { DELIVERY_STATUS_DEADLINE_MS } from './delivery';
-import { GONE_WAIT_MS, GWS_LOGIN_DEADLINE_MS, GWS_STATUS_TIMEOUT_MS, GWS_UPLOAD_TIMEOUT_MS, KILL_GRACE_MS } from './delivery/gws';
+// P5 O4 M2 (acceptance 9): the connectors' and delivery's bounds from their constants modules alone, never their services
+import { CONNECT_CALLBACK_TIMEOUT_MS, DIRECT_OPERATION_DEADLINE_MS, DIRECT_RESOLVE_DEADLINE_MS, OAUTH_HOST_CLOSE_TIMEOUT_MS, OAUTH_REQUEST_TIMEOUT_MS, OWNER_QUERY_DEADLINE_MS } from './connectors/deadlines';
+import { DELIVERY_STATUS_DEADLINE_MS, GONE_WAIT_MS, GWS_LOGIN_DEADLINE_MS, GWS_STATUS_TIMEOUT_MS, GWS_UPLOAD_TIMEOUT_MS, KILL_GRACE_MS } from './delivery/deadlines';
 import { GIT_TIMEOUT_MS } from './git/runner';
 import { GH_READ_TIMEOUT_MS } from './scm/pr-state';
 import { COMMIT_TIMEOUT_MS, LOCAL_TIMEOUT_MS, SCM_ADMIT_MS } from './scm/service';

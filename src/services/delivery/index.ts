@@ -44,7 +44,9 @@ import type { SpineHosts } from '../spine-root';
 import { findGws, gwsLogin, gwsUpload, readGwsState, type GwsState } from './gws';
 import { NOTION_CONTENT_MAX_BYTES, NOTION_HOSTS, NOTION_TOOL, notionArguments, notionTitle, readNotionAnswer } from './notion';
 
-export const DELIVERY_STATUS_DEADLINE_MS = 30_000; // the sheet's read of a target
+import { DELIVERY_STATUS_DEADLINE_MS } from './deadlines';
+
+export { DELIVERY_STATUS_DEADLINE_MS };
 export const DELIVERY_SOURCE_LIMIT = 64; // located sources' handles kept
 export const DELIVERY_RECEIPT_LIMIT = 1_000;
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';

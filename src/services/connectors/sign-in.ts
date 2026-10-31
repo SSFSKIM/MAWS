@@ -339,8 +339,11 @@ export interface SignInServiceDeps {
   onSessionStatus(listener: (payload: { appSessionId: string; status: { process: string; cwd: string } }) => void): () => void;
   onHostLost(listener: () => void): () => void; // the engine host left ready: every session with it
   // P5 O4 M2 (D30): the engine host's sessions as it lists them now, read at the start and each time it streams again,
-  // since the spine may load long after a session became ready (its status then announced to no one here)
+  // since the spine may load long after a session became ready (its status then announced to no one here). Read at the
+  // start only while the host streams: on the daemon shape a dispatch to a parked host starts it, ahead of the
+  // discovery wake that waits only for a host it woke (src/mawsd/discovery-wake.ts)
   sessions(): Promise<readonly { appSessionId: string; process: string; cwd: string }[]>;
+  hostStreaming(): boolean;
   onHostStreaming(listener: () => void): () => void;
   port: Pick<ClientPort, 'openExternal'>;
   listen: ListenLoopback;
@@ -376,7 +379,7 @@ export function startSignIn(deps: SignInServiceDeps): Settling & { stop(): void 
       listings.delete(heard);
     }
   };
-  void learn();
+  if (deps.hostStreaming()) void learn();
   const offStreaming = deps.onHostStreaming(() => void learn());
   // the entries the session's engine reads, from its own directory, as the inventory reads them (scalpel-2#1), and the
   // server it holds, as its mcp_status reports it (fix-D#4)

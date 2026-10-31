@@ -101,8 +101,9 @@ const NO_CREDENTIAL = 'no credential could be prepared'; // P4-B5: the lost word
 
 // The host's own bounds are 8 s to resolve and 180 s for a call or discovery from its start; main takes or withdraws at
 // these, so no lost event leaves a caller waiting.
-export const DIRECT_RESOLVE_DEADLINE_MS = 8_000;
-export const DIRECT_OPERATION_DEADLINE_MS = 180_000;
+import { DIRECT_OPERATION_DEADLINE_MS, DIRECT_RESOLVE_DEADLINE_MS } from './deadlines';
+
+export { DIRECT_OPERATION_DEADLINE_MS, DIRECT_RESOLVE_DEADLINE_MS };
 // The operations main keeps pending at once (E keeps no bound; the host's own is 256).
 export const DIRECT_PENDING_LIMIT = 64;
 // P3-F F-connectors 5: how long after an unanswered dataset cancel or take main asks it again, when no end came first.

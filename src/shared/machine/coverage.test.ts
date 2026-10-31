@@ -128,6 +128,9 @@ const PASTED = "a paste placeholder's number, as a string (the terminal's key)";
 const SURFACE_PROPS = "an engine surface's prop names";
 const PINS = 'an engine session id → the account uuid it is pinned to';
 const BRIDGE_CONTROLS = "a control's key in the bridge's capabilities.controls (desk-hub/protocol's CONTROL_KEYS)"; // P5 O9 M2
+// P5 O4 M2: a grant's OAuth documents as the legacy reader hands them to the machine; the store validates each with the
+// SDK's own schema before it keeps them
+const OAUTH_DOCUMENT = "an OAuth document's own fields (RFC 8414 server metadata, RFC 7591 client information): no MAWS id";
 const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.artifacts.datasetRefreshRequest.output.request.args': TOOL_ARGUMENTS,
   'commands.artifacts.setDefaults.input.spaces': SPACE_SYSTEMS,
@@ -135,6 +138,8 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.attention.request.output.event<kind=question.answered>.answers': ANSWERS,
   'commands.attention.request.output.event<kind=usage.sample>.modelUsage': MODEL_USAGE,
   'commands.browser.bookmarks.favicons.output.icons': 'a page origin → the favicon its pages last showed',
+  'commands.connectors.adoptGrant.input.record.authorizationServer': OAUTH_DOCUMENT, // P5 O4 M2
+  'commands.connectors.adoptGrant.input.record.client': OAUTH_DOCUMENT,
   'commands.connectors.call.output.result': JSON_OBJECT,
   'commands.connectors.directSend.input.arguments': TOOL_ARGUMENTS,
   'commands.connectors.directStart.input.arguments': TOOL_ARGUMENTS,

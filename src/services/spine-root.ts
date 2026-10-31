@@ -456,6 +456,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       if (!listed.ok) throw new Error(listed.error.message);
       return listed.value;
     },
+    hostStreaming: () => hosts.streaming('engine-host'),
     onHostStreaming: (listener) => hosts.onStreaming('engine-host', listener),
     port: deps.clientPort,
     listen,

@@ -73,6 +73,7 @@ async function lab() {
     onSessionStatus: (listener) => ((status = listener), () => (status = null)),
     onHostLost: () => () => {},
     sessions: async () => [],
+    hostStreaming: () => true,
     onHostStreaming: () => () => {},
     port: front.port,
     listen: async () => ({ port: 53_100, close: async () => {} }),

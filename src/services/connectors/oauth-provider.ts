@@ -69,7 +69,9 @@ import { oauthIdentityOf, sameOAuthIdentity, type ConnectorOAuthGrant, type Conn
 // A token this close to its expiry is refreshed on demand (and used meanwhile while still valid).
 export const OAUTH_REFRESH_MARGIN_MS = 60_000;
 // The host's acknowledgment of a credential close, past which it counts as unconfirmed.
-export const OAUTH_HOST_CLOSE_TIMEOUT_MS = 10_000;
+import { OAUTH_HOST_CLOSE_TIMEOUT_MS } from './deadlines';
+
+export { OAUTH_HOST_CLOSE_TIMEOUT_MS };
 // Disconnect's best-effort revocation, both requests together.
 export const OAUTH_REVOKE_TIMEOUT_MS = 30_000;
 // Disconnect's read of a record main does not hold (for its revocation); past it, the record is forgotten unrevoked.

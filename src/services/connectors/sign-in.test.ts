@@ -37,6 +37,7 @@ describe('the sign-in service against the running engine (fix-D#4)', () => {
       onSessionStatus: (listener) => (statuses.add(listener), () => statuses.delete(listener)),
       onHostLost: () => () => {},
       sessions: async () => [],
+      hostStreaming: () => true,
       onHostStreaming: () => () => {},
       port: { openExternal: async () => ({ opened: true }) },
       listen: listenLoopback,
@@ -478,6 +479,7 @@ describe('the sign-in service', () => {
       onSessionStatus: (listener) => (statuses.add(listener), () => statuses.delete(listener)),
       onHostLost: () => () => {},
       sessions: async () => [],
+      hostStreaming: () => true,
       onHostStreaming: () => () => {},
       port: { openExternal: async () => ({ opened: true }) },
       listen: listenLoopback,
@@ -496,7 +498,7 @@ describe('the sign-in service', () => {
 // long after a session became ready; the engine host's listing tells it the sessions no status announced
 describe('the sign-in service loaded after its sessions', () => {
   type Status = { appSessionId: string; status: { process: string; cwd: string } };
-  function serve(sessions: () => Promise<{ appSessionId: string; process: string; cwd: string }[]>) {
+  function serve(sessions: () => Promise<{ appSessionId: string; process: string; cwd: string }[]>, streams = true) {
     const handlers = new Map<string, (input: unknown, ctx: unknown) => unknown>();
     const events: ConnectorSignInChanged[] = [];
     const statuses = new Set<(payload: Status) => void>();
@@ -514,6 +516,7 @@ describe('the sign-in service loaded after its sessions', () => {
       onSessionStatus: (listener) => (statuses.add(listener), () => statuses.delete(listener)),
       onHostLost: () => () => {},
       sessions,
+      hostStreaming: () => streams,
       onHostStreaming: (listener) => (streaming.add(listener), () => streaming.delete(listener)),
       port: { openExternal: async () => ({ opened: true }) },
       listen: listenLoopback,
@@ -555,5 +558,15 @@ describe('the sign-in service loaded after its sessions', () => {
     const opId = t.start();
     await vi.waitFor(() => expect(t.host.asked.map((a) => a.name)).toContain('session.mcpAuthenticate'));
     expect((await t.reasonOf(opId))?.reason).not.toBe('no_session');
+  });
+
+  it('asks for the listing only once the engine host streams', async () => {
+    const sessions = vi.fn(async () => [{ appSessionId: SESSION, process: 'ready', cwd: '/p' }]);
+    const t = serve(sessions, false);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sessions).not.toHaveBeenCalled();
+    t.streamed();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sessions).toHaveBeenCalledOnce();
   });
 });

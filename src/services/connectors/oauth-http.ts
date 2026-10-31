@@ -15,7 +15,9 @@
 export type OAuthFetch = (url: string | URL, init?: RequestInit) => Promise<Response>;
 type BaseFetch = (url: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
-export const OAUTH_REQUEST_TIMEOUT_MS = 15_000;
+import { OAUTH_REQUEST_TIMEOUT_MS } from './deadlines';
+
+export { OAUTH_REQUEST_TIMEOUT_MS };
 export const OAUTH_RESPONSE_LIMIT_BYTES = 1_048_576;
 
 export type OAuthTransportFailure = 'insecure' | 'network' | 'tooLarge' | 'cancelled' | 'timeout';

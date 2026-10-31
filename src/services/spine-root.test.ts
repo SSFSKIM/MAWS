@@ -501,6 +501,16 @@ describe('the spine and the checkouts composed under plain Node', () => {
     lock.release();
   });
 
+  // P5 O4 M2: on the daemon shape a dispatch to a parked engine host starts it, and the discovery wake waits only for a
+  // host it woke itself (src/mawsd/discovery-wake.ts): a load asks a host that does not stream nothing (CI run
+  // 41205847879, where sign-in's listing at the load spawned the host before the wake)
+  it('asks an engine host that does not stream nothing at its load', async () => {
+    const host = new FakeSpineHost();
+    compose(await openSpineData(profile, { build: BUILD }), host, fakeBus());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(host.calls.map(({ name }) => name)).toEqual([]);
+  });
+
   it('installs exactly its commands, intercepts and taps, and its stop releases every listener the spine held on the host', async () => {
     const host = new FakeSpineHost();
     const spineBus = fakeBus();
