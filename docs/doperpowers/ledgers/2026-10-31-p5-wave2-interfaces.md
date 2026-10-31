@@ -39,6 +39,9 @@
 | `problem.stream`, `problem {kind: 'roster'}`, `hello`'s null session ids before `launch`, `RING_RECORD_OVERHEAD` 48 | session host protocol 1, additive | O16 M1 | the engine host's `HostTransport` (M2) |
 | `src/engine-host/holder/protocol.ts` exports (`HostMessageSchema`, `HostStreamDecoder`, `controlLine`, `stdinRecord`), `files.ts` (`sessionHostBinary`, `sessionHostPaths`, `hostsDirOf`); roster temp files `.<holderId>.json.<pid>.tmp` | TS modules | O16 M1 | O16 M2 on; the roster reader skips the temp files |
 | `DaemonServices.artifacts` (and `EndpointServices.artifacts` in `src/endpoint/services.ts`, `test/endpoint/fake-services.ts`), `daemon.status.artifacts` (`{loaded, requests}`, optional), `DAEMON_FILES.artifactsSocket`, `DaemonPaths.artifactsSocket` | `mawsd` services and status, `src/shared/daemon/files.ts` | O5 M2 | O7 M5; O10's endpoint services (the desk track told) |
+| `host.supervisorStatus.holder {hosts, adopted, failed, gate, handover}` (from M2), `EngineSessionStatus.holder`, `.reap {state, observer}`, `.work.descendants`; `WorkUnknown` reasons `observer_unhealthy`, `reap_term_ignored`, `descendants_unreadable` | status and schema fields | O16 M2, M5 | `daemon.status.sessionHosts`; O7's remote status rows; the renderer's session info |
+| `live.json`'s `holderId`; the state file's `owedInterrupt`, `observerSeenLaunch`; the journal meta's `reap {phase}` and `holder:gap`; `GATE_SOCKET`, `gateSocketPath()` in `src/engine-host/holder/files.ts`; `--await-initialize` on every launch whose binary declares it | engine host internals and the launch line | O16 M2, M5 | O12 M4 (the gate socket); anything reading the engine host's journal |
+| `ActRequest.sendBy` (one 60 s bound per act across a resume); `REMOTE_INLINE_MAX_BYTES`, `REMOTE_TOO_LARGE_WORDS`, `CONTROL_KEYS` in `src/shared/ipc/schema/remote.ts`; the `remote` namespace's names and grades files, `remote` in `link-surface.ts`'s `CLIENT_RULES`, two `remote.*` addresses in `address-paths.json`; the renderer's `stores/hub-access.ts` | wire schema, link surface and renderer store | O7 M2 | O7 M3 to M6; the renderer |
 
 ## Shared files and who goes first
 
@@ -66,6 +69,8 @@
 | `package.json` (`build:session-host`), `scripts/build-session-host.sh`, `scripts/check-session-host.sh`, `electron-builder.yml` (`extraResources` to `session-host/`), `scripts/mawsd-pack.mjs` (`addSessionHost`, a Linux pack refuses without it) | O16 M1 | separate from O5's runtime step; the later lander reconciles |
 | `.github/workflows/gate.yml` static job (`actions/setup-go@v7` from `native/session-host/go.version`, the `session-host` gate-bg start and its wait step), `.github/scripts/gate-plan.test.mjs` (the refused-start list) | O16 M1 | CI-opt reviews the hunk |
 | new directories `src/services/artifacts/scheme/` and `src/render/` (first file `scheme.ts`); `tsconfig.node.json` and `tsconfig.web.json` include lists (explicit globs only: `src/render/**/*` broke the renderer suite); `test/support/mawsd-scene.ts` (`ENGINE_COMMANDS` gains `artifacts.content`); `ArtifactsDeps` in `src/main/artifacts/index.ts` | O5 M2 | the later lander reconciles |
+| `test/support/stub-engine.ts`, `stub-engine-bin.ts` (`writeStubEngine`), `src/engine-host/holder/fake-observer.ts` (an explicit file in `tsconfig.e2e.json`), the env var `MAWS_RECORD_GATE_FIXTURE` | O16 M2, M5 | test support others may reuse; the later lander reconciles `tsconfig.e2e.json` |
+| `e2e/support/local-org.ts` (`admin`, `listDevice`, `chain()`, the bundle's `endorseDevice` export), `e2e/support/profile-daemon.ts` (`nodeArgs`, `cli()`), both additive | O7 M2 | e2e support others may reuse; existing callers unchanged |
 
 ## Start order
 
@@ -77,3 +82,4 @@
 - 2026-10-31, the architect: written from the four documents' shared-surface sections, before any executor starts.
 - 2026-10-31, the architect: O4's and O7's additions at their starts (ledger rule 5).
 - 2026-10-31, the architect: the rule 5 additions of O4 M1, O7 M2, O16 M1 and O5 M2; O5's entry split landed first (#398, master 3239a670f), so O4 and O7 edit `src/main/app.ts` from now on (P5 Decision Log 169).
+- 2026-10-31, the architect: rule 5 additions from O16 M2 and M5 (the holder's status fields, its internals, the stub engine and the fake observer) and O7 M2's second set (the remote schema's constants and the renderer's hub-access store; two e2e supports).
