@@ -57,3 +57,8 @@ export interface EndpointModule {
   enrollment(): { name: string; org: string } | null;
   cli(command: string, args: readonly string[], secret?: string): Promise<{ code: number; out: string }>;
 }
+
+/** `dispatch` on behalf of `client`, a channel's ref (P5 O7 M2); `dispatch` itself without one. */
+export function dispatchAs(dispatch: EndpointServices['dispatch'], client: ClientRef | undefined): EndpointServices['dispatch'] {
+  return client === undefined ? dispatch : (owner, name, input) => dispatch(owner, name, input, client);
+}

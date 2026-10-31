@@ -18,7 +18,10 @@ export const isRefusalReason = (value: unknown): value is RefusalReason => typeo
 
 /** The largest byte credit a subscription holds (M8). */
 export const SUB_CREDIT_MAX = 4 * 1024 * 1024;
-export type Executor = 'sminos' | 'engine-host' | 'endpoint';
+/** Who runs an act, as a query names it. `machine` (`mawsd`'s services' ledger, `machine.op`) is sent only to a peer whose
+ * handshake listed `rl2.executor.machine` (P5 O7 M2; RL2_PROTOCOL 1.1): an older endpoint finds it malformed. */
+export type Executor = 'sminos' | 'engine-host' | 'endpoint' | 'machine';
+const EXECUTORS: readonly string[] = ['sminos', 'engine-host', 'endpoint', 'machine'] satisfies readonly Executor[];
 export type SessionRef = { lane: 'A' | 'B'; id: string };
 /** A subscription's cursor: lane A's epoch is the endpoint's upstream subscription, lane B's the launch; `idx`, lane B's
  * only, is the event's index within its journal row. */
@@ -96,7 +99,7 @@ const FROM_DEVICE: Record<string, (m: Fields) => boolean> = {
   ...EITHER,
   call: (m) => isText(m.id, 128) && isText(m.name, 128) && 'input' in m,
   act: (m) => isAction(m.action),
-  query: (m) => isOpId(m.opId) && isIsoMillis(m.opCreated) && (m.executor === 'sminos' || m.executor === 'engine-host' || m.executor === 'endpoint'),
+  query: (m) => isOpId(m.opId) && isIsoMillis(m.opCreated) && EXECUTORS.includes(m.executor as string),
   sub: (m) =>
     isText(m.sub, 128) &&
     isSessionRef(m.session) &&

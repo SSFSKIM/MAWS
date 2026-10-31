@@ -1,5 +1,5 @@
 // The link's acts (P5 O7 M1, "Acts"): the opId lifecycle against a channel the test plays, with fake timers.
-import { generateSigningKey, isAction, OP_HORIZON_S, type Action, type DeviceMessage, type EndpointMessage } from 'org-protocol';
+import { generateSigningKey, isAction, MESSAGE_MAX_BYTES, OP_HORIZON_S, type Action, type DeviceMessage, type EndpointMessage } from 'org-protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MachineRef } from '@shared/machine/ref';
 import type { SignedIn } from '../../org/session';
@@ -14,7 +14,8 @@ type Signer = SignedIn['stepUp']['sign'];
 
 async function harness(options: { sign?: Signer } = {}) {
   const sent: DeviceMessage[] = [];
-  const channel = { current: true };
+  // The current channel, and the capabilities its peer listed in `h2`.
+  const channel = { current: true, peer: ['rl2.executor.machine'] as string[] };
   const key = await generateSigningKey();
   const signs: unknown[] = [];
   const sign: Signer =
@@ -30,6 +31,7 @@ async function harness(options: { sign?: Signer } = {}) {
     signedIn: () => signedIn,
     send: (message) => (channel.current ? (sent.push(message), true) : false),
     current: () => channel.current,
+    peerCapabilities: () => (channel.current ? channel.peer : null),
     timing: timingOf(),
     now: () => Date.now(),
     log: () => {},
@@ -262,6 +264,33 @@ describe('after a lost channel', () => {
     expect(h.acts().filter((m) => m.action.opId === held.opId)).toEqual([]);
     expect(handle.progress()).not.toBe('waiting');
   });
+
+  it('ends the held window at the caller’s `sendBy` (P5 O7 M2: a send’s pending budget): refused `offline` then, never sent after', async () => {
+    const h = await harness();
+    h.drop();
+    const handle = h.table.act({ ...SEND, sendBy: Date.now() + 1000 }, null);
+    expect(handle.progress()).toBe('waiting');
+    vi.advanceTimersByTime(999);
+    expect(await settled(handle.outcome)).toBeNull();
+    vi.advanceTimersByTime(1);
+    expect(await settled(handle.outcome)).toEqual({ state: 'refused', reason: 'offline' });
+    h.reconnect();
+    expect(h.acts()).toEqual([]);
+    // One whose `sendBy` has already passed is never sent, even on a current channel.
+    const late = h.table.act({ ...SEND, sendBy: Date.now() }, null);
+    expect(await settled(late.outcome)).toEqual({ state: 'refused', reason: 'offline' });
+    expect(h.acts()).toEqual([]);
+  });
+
+  it('reseals an act lost before its ack only before its `sendBy`; after it, the act is queried', async () => {
+    const h = await harness();
+    const handle = h.table.act({ ...SEND, sendBy: Date.now() + 1000 }, null);
+    h.drop();
+    vi.advanceTimersByTime(1000);
+    h.reconnect();
+    expect(h.acts().filter((m) => m.action.opId === handle.opId)).toHaveLength(1); // the first copy only
+    expect(h.queries()).toHaveLength(1);
+  });
 });
 
 describe('step-up', () => {
@@ -330,5 +359,84 @@ describe('the link’s end', () => {
     expect(await settled(sent.outcome)).toEqual({ state: 'unknown', reason: 'removed' });
     expect(await settled(waiting.outcome)).toEqual({ state: 'refused', reason: 'removed' });
     expect(await settled(h.table.act(SEND, 'closed').outcome)).toEqual({ state: 'refused', reason: 'closed' });
+  });
+});
+
+// P5 O7 M2: what the peer could not read is never sent, since the endpoint would close the channel on it (RL2's
+// capabilities), and neither is what the channel would refuse to carry (its message limit).
+describe('what the peer reads', () => {
+  const ACQUIRE: ActRequest = { action: 'session.acquire', args: { appSessionId: 'app-1', reason: 'send' }, executor: 'machine' };
+
+  it('sends a `machine` act to a peer that listed `rl2.executor.machine`, and queries it there', async () => {
+    const h = await harness();
+    const handle = h.table.act(ACQUIRE, null);
+    expect(h.acts().map((m) => m.action.action)).toEqual(['session.acquire']);
+    h.answer({ t: 'ack', opId: handle.opId, state: 'accepted' });
+    h.drop();
+    h.reconnect();
+    expect(h.queries()).toEqual([{ t: 'query', opId: handle.opId, opCreated: handle.opCreated, executor: 'machine' }]);
+  });
+
+  it('refuses `not-offered`, never sent, a `machine` act for a peer that did not list it', async () => {
+    const h = await harness();
+    h.channel.peer = [];
+    expect(await settled(h.table.act(ACQUIRE, null).outcome)).toEqual({ state: 'refused', reason: 'not-offered' });
+    expect(h.sent).toEqual([]);
+  });
+
+  it('refuses `not-offered` a `machine` act held for a channel whose peer turns out not to list it', async () => {
+    const h = await harness();
+    h.drop();
+    const handle = h.table.act(ACQUIRE, null);
+    h.channel.peer = [];
+    h.reconnect();
+    expect(await settled(handle.outcome)).toEqual({ state: 'refused', reason: 'not-offered' });
+    expect(h.sent).toEqual([]);
+  });
+
+  it('leaves `unknown not-offered`, never queried, a `machine` act that went out when the next channel’s peer does not list it', async () => {
+    const h = await harness();
+    const handle = h.table.act(ACQUIRE, null);
+    h.answer({ t: 'ack', opId: handle.opId, state: 'accepted' });
+    h.drop();
+    h.channel.peer = [];
+    h.reconnect();
+    expect(await settled(handle.outcome)).toEqual({ state: 'unknown', reason: 'not-offered' });
+    expect(h.queries()).toEqual([]);
+  });
+
+  it('sends RL2’s first three executors to a peer that listed nothing', async () => {
+    const h = await harness();
+    h.channel.peer = [];
+    for (const action of ['sminos.steer', 'endpoint.grant', 'session.send']) h.table.act({ action, args: {} }, null);
+    expect(h.acts().map((m) => m.action.action)).toEqual(['sminos.steer', 'endpoint.grant', 'session.send']);
+  });
+
+  /** A `session.send` whose `act` message is `size` bytes of UTF-8 JSON, its padding in one text block. */
+  const sized = (size: number): ActRequest => {
+    const probe = { ...SEND, args: { appSessionId: 'app-1', content: '' } };
+    const base = new TextEncoder().encode(JSON.stringify({ t: 'act', action: { ...SEND, ...shape(probe) } })).length;
+    return { ...SEND, args: { appSessionId: 'app-1', content: 'x'.repeat(size - base) } };
+  };
+  // The fields a built act adds beside the request's, at their final lengths (an opId of 16 bytes, a nonce, two times).
+  const shape = (request: ActRequest) => ({ v: 1, org: 'org-1', machine: REF, device: 'd1', opId: 'o'.repeat(22), opCreated: '2026-10-28T12:00:00.000Z', action: request.action, args: request.args, nonce: 'n'.repeat(22), created: '2026-10-28T12:00:00.000Z' });
+
+  it('refuses `too-large`, never sent, an act whose sealed form is over the channel’s message limit, and sends one at it', async () => {
+    const h = await harness();
+    expect(await settled(h.table.act(sized(MESSAGE_MAX_BYTES + 1), null).outcome)).toEqual({ state: 'refused', reason: 'too-large' });
+    expect(h.sent).toEqual([]);
+    h.table.act(sized(MESSAGE_MAX_BYTES), null);
+    expect(h.acts()).toHaveLength(1);
+    expect(new TextEncoder().encode(JSON.stringify(h.acts()[0])).length).toBe(MESSAGE_MAX_BYTES);
+  });
+
+  it('refuses `too-large` a `required` act before the person is asked, and one that the signature takes over the limit after', async () => {
+    const h = await harness();
+    expect(await settled(h.table.act({ ...sized(MESSAGE_MAX_BYTES + 1), stepUp: 'required' }, null).outcome)).toEqual({ state: 'refused', reason: 'too-large' });
+    expect(h.signs).toEqual([]);
+    const handle = h.table.act({ ...sized(MESSAGE_MAX_BYTES), stepUp: 'required' }, null);
+    expect(await settled(handle.outcome)).toEqual({ state: 'refused', reason: 'too-large' });
+    expect(h.signs).toHaveLength(1);
+    expect(h.sent).toEqual([]);
   });
 });

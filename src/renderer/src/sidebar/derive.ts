@@ -12,7 +12,7 @@ import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { displayTitle, NEW_CHAT } from '../sessions/title'; // E3
 import { projectLabels } from './project-labels';
 import type { MachineRef } from '@shared/machine/ref';
-import { machineOfRow, machineOrder, machineProject, orgIndex, orgKeyOf, primaryCheckout, rowOfListed, rowOfSession, type OrgProject, type RowKey } from '../stores/org-projects'; // P5 O6 M5
+import { machineOfRow, machineOrder, machineProject, orgIndex, orgKeyOf, primaryCheckout, rowOfListed, rowOfListedRecord, rowOfSession, type OrgProject, type RowKey } from '../stores/org-projects'; // P5 O6 M5; P5 O7 M2: rowOfListedRecord
 import type { ListedSession } from '../stores/sessions'; // P5 O8 M2
 import { SIDE_COPY } from '../side/copy'; // E3
 
@@ -84,7 +84,8 @@ export interface ProjectEntry {
 //
 // P5 O8 M2 ("Drawing", membership): another machine's listed session the member owns joins the row `rowOfListed` files it
 // under, unless a record holds its address (the yield rule: the record's row is drawn); its issue counts as activity, and
-// a listed row waiting or busy adds to the counts.
+// a listed row waiting or busy adds to the counts. P5 O7 M2: a record at a listed address whose project is not known here
+// (another machine's lane B session main read over its link) is filed where its listing is, so the row stands still.
 //
 // P5 O8 M5 ("The People toggle"): ownership comes first. An address, a record's or a listing's, is others' when a listing
 // at it exists and isn't the member's, and yours otherwise (a record carries no owners). Filed as above, others' rows are
@@ -102,7 +103,8 @@ export function projectList({ records, digests, projects, rows, local, machineNa
   };
   const isTheirs = (appId: AppSessionId) => remoteSessions.get(appId)?.mine === false;
   for (const record of records.values()) {
-    const key = rowOfSession(index, projects, record, alsoListed);
+    const listedRow = rowOfListedRecord(index, projects, record, remoteSessions, alsoListed); // P5 O7 M2: one row per address
+    const key = listedRow === undefined ? rowOfSession(index, projects, record, alsoListed) : listedRow;
     if (key === null) continue; // a hidden project's: nowhere
     const entry = groupOf(key);
     if (isTheirs(record.appId)) {

@@ -14,6 +14,7 @@ import { base64urlEncode, encodePairingCode, keyId, type Device, type OrgState }
 import type { PendingDevice } from 'desk-hub/protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createEndpoint, type Endpoint } from '../../src/endpoint';
+import { DEVICE_CAPABILITIES } from '../../src/main/machines/remote/capabilities';
 import type { RemoteLink } from '../../src/main/machines/remote/link';
 import type { OrgSessionDeps, OrgSessionService } from '../../src/main/org/org-session';
 import { createRegistryFeed, type RegistryFeed } from '../../src/main/org/registry-feed';
@@ -94,7 +95,7 @@ describe('the org session on the local hub', { timeout: 120_000 }, () => {
     expect(pairing.out.find((l) => l.startsWith('pending: '))).toMatch(new RegExp(`fingerprint ${approval.fingerprint}$`));
     const signedIn = await until(() => s.current(), 'the device signed in');
     deviceId = signedIn.identity.device;
-    expect(signedIn.identity).toMatchObject({ org: ORG, member, clientClass: 'native-mac', capabilities: [] });
+    expect(signedIn.identity).toMatchObject({ org: ORG, member, clientClass: 'native-mac', capabilities: [...DEVICE_CAPABILITIES] });
     expect(deviceId).toBe(await keyId(signedIn.identity.channelKey.pub));
     expect(await signedIn.hub!.headers()).toEqual({ 'x-desk-standin-user': ADMIN });
     expect(registered(s)).toMatchObject({ session: 'signed-in', member: { id: member, email: ADMIN }, head: { version: (await served()).head.state.version }, problem: null });

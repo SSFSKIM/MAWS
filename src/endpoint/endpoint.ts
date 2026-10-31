@@ -40,6 +40,7 @@ import { homedir, networkInterfaces } from 'node:os';
 import { importSigningKey, isListingGone, stateHash, type MachineIdentity, type OrgState, type Right, type Rl1Refusal, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { Authorizer, type AuthorizeContext } from './authorize';
 import { Calls } from './calls';
+import { ENDPOINT_CAPABILITIES } from './capabilities';
 import { Channels } from './channels';
 import { DirectListener, type DirectListenerOptions } from './direct-listener';
 import { Actions } from './actions';
@@ -289,10 +290,11 @@ export class Endpoint implements EndpointModule {
       settingsMode: authorization.settingsMode ?? (() => settingsDefaultMode(homedir())),
       records: authorization.records ?? this.rl10.members,
       checkouts: this.checkouts,
-      dispatch: (owner, name, input) => {
+      dispatch: (...request) => {
         if (this.#services === null) return Promise.reject(new Error('the endpoint has not started'));
-        return this.#services.dispatch(owner, name, input);
+        return this.#services.dispatch(...request);
       },
+      log: (line) => log(line),
       webauthn: {
         origin: () => this.#webOrigin(),
         counter: (credentialId) => this.#state?.webauthn[credentialId] ?? 0,
@@ -304,9 +306,10 @@ export class Endpoint implements EndpointModule {
       registry: authorization.registry,
     });
     this.gate = new Gate({ authorize: (request, who, now) => this.authorizer.authorize(request, who, now), now: this.deps.now, log });
-    const dispatch: EndpointServices['dispatch'] = (owner, name, input) => {
+    // A channel's request names its asker (P5 O7 M2: the channel's `ClientRef`), which goes on as given.
+    const dispatch: EndpointServices['dispatch'] = (...request) => {
       if (this.#services === null) return Promise.reject(new Error('the endpoint has not started'));
-      return this.#services.dispatch(owner, name, input);
+      return this.#services.dispatch(...request);
     };
     this.own = new EndpointActions({
       stateDir: () => {
@@ -682,7 +685,7 @@ export class Endpoint implements EndpointModule {
   /** The machine as RL2's `h2` signs it, while it serves channels: it speaks for its ref, its state sound. */
   #identity(): MachineIdentity | null {
     if (this.#stopped || this.#services === null || this.#key === null || !this.#speaks || this.#state?.refusing !== null || this.#org?.ready !== true) return null;
-    return { ref: this.#services.machine.ref, key: this.#key, build: this.#options.build ?? 'unknown', capabilities: [] };
+    return { ref: this.#services.machine.ref, key: this.#key, build: this.#options.build ?? 'unknown', capabilities: [...ENDPOINT_CAPABILITIES] };
   }
 
   #listener(env: Record<string, string | undefined>): DirectListener {

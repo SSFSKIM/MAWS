@@ -15,6 +15,9 @@
 // - stop: SIGTERM (the daemon's clean stop, its spine released and `spine.lock` given up), its exit's time, then every
 //   process naming the profile ended (its hosts, which outlive it by design), as a launch's cleanup ends them.
 // - log: `<profile>/mawsd/mawsd.log`, which a failure quotes.
+// - cli: the daemon's own command line (`mawsd <args>`) under its environment, `input` on its stdin (P5 O7 M2's remote
+//   scene enrolls B with it); `nodeArgs` go before the script, Node's own flags for the daemon alone (the scene's fake
+//   tailnet preload; NODE_OPTIONS would not reach it, since supervisorEnv drops it).
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -41,6 +44,7 @@ export interface ProfileDaemon {
   pid: number;
   readyAt: number; // when its spine first answered (Date.now())
   request<T>(name: string, input?: unknown): Promise<T>;
+  cli(args: string[], input?: string): Promise<{ status: number | null; stdout: string; stderr: string }>;
   log(): string;
   stop(): Promise<{ exitedAt: number; code: number | null }>;
 }
@@ -50,6 +54,7 @@ export interface ProfileDaemonOptions {
   env?: Record<string, string>; // the scene's own (a machine name)
   keepConfigHome?: boolean; // a relaunch keeps `<profile>/claude-config`, as launchMaws's keepConfigHome does
   prepare?: (paths: { claudeConfigDir: string }) => void; // before the daemon starts: the scene's seeded transcripts
+  nodeArgs?: string[]; // Node's flags for the daemon's process alone, before its script (a `--require` preload)
 }
 
 // The Electron binary the daemon runs as Node (ELECTRON_RUN_AS_NODE, from supervisorEnv), as its `electron` package names it
@@ -76,7 +81,7 @@ export async function startProfileDaemon(opts: ProfileDaemonOptions): Promise<Pr
   const logFile = join(paths.dir, 'mawsd.log');
   const log = () => (existsSync(logFile) ? readFileSync(logFile, 'utf8') : '');
   const servedBefore = log().split('\n').filter((line) => line.includes(' serving; ')).length;
-  const child: ChildProcess = spawn(electronBinary(), ['--disable-sigusr1', script, 'run', '--private', '--dir', paths.dir], { env, stdio: 'ignore', argv0: MAWSD_ARGV0 });
+  const child: ChildProcess = spawn(electronBinary(), ['--disable-sigusr1', ...(opts.nodeArgs ?? []), script, 'run', '--private', '--dir', paths.dir], { env, stdio: 'ignore', argv0: MAWSD_ARGV0 });
   let exit: { exitedAt: number; code: number | null } | null = null;
   const exited = new Promise<{ exitedAt: number; code: number | null }>((resolve) => child.once('exit', (code) => resolve((exit = { exitedAt: Date.now(), code }))));
   const ended = async () => {
@@ -116,6 +121,15 @@ export async function startProfileDaemon(opts: ProfileDaemonOptions): Promise<Pr
     pid: child.pid!,
     readyAt,
     request: (name, input) => request(name, input),
+    cli: (args, input = '') =>
+      new Promise((done) => {
+        const run = spawn(electronBinary(), ['--disable-sigusr1', script, ...args], { env, stdio: ['pipe', 'pipe', 'pipe'], argv0: MAWSD_ARGV0 });
+        let [stdout, stderr] = ['', ''];
+        run.stdout!.on('data', (chunk: Buffer) => void (stdout += chunk.toString()));
+        run.stderr!.on('data', (chunk: Buffer) => void (stderr += chunk.toString()));
+        run.once('exit', (status) => done({ status, stdout, stderr }));
+        run.stdin!.end(input);
+      }),
     log,
     async stop() {
       machine.close();

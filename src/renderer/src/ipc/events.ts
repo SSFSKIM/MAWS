@@ -8,6 +8,10 @@
 // P5 O8 M2 (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, "The snapshot rule"): the org's rows (`org.rows`,
 // `org.rows.changed`) fill the sessions store's listed partition; a machine they cover takes no record snapshot and loads
 // when they have.
+// P5 O7 M2 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §K): `remote.session`, main's word on a
+// lane B session it streams from another machine, into that store (lane-b/remote-session.ts). Subscribed here with the
+// events main says alongside it, so a remote pane's opening read (lane-b/remote-connect.ts, mounted after) comes after
+// them all and what main says again for it is heard.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EventPayload, MawsBridge, SessionDigest } from '@shared/ipc/schema';
 import type { MachineState } from '@shared/ipc/schema/machines';
@@ -20,6 +24,7 @@ import { createFreshness, type Freshness } from '../stores/freshness';
 import { useLayout } from '../stores/layout';
 import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
+import { applyRemoteSession, holdsRemoteStatus, keepsRemoteStatus } from '../lane-b/remote-session'; // P5 O7 M2
 import { selectOrgIndex, sessionSetKey, setKeyOfProject } from '../stores/org-projects'; // P5 O6 M5
 import { displayTitle } from '../sessions/title'; // P5 O6 M2: a session tab's last-known title
 import type { RekeyOf } from '../stores/layout-model';
@@ -195,6 +200,12 @@ export function connectShell(
       rowsFreshness.advance();
       takeRows(rows);
     }),
+    // P5 O7 M2: main's word on a lane B session it streams from another machine; a stream main says idle or ended is one
+    // whose status main forgot, so its status here goes too (kept through a link going down, below)
+    on('remote.session', (state) => {
+      applyRemoteSession(state);
+      if (!holdsRemoteStatus(state)) sessions().forgetStatuses(machineOf(state.address), (appSessionId) => appSessionId !== state.address);
+    }),
   ];
 
   // Replies apply only while this connection and the machine's link generation are live; the stores' own revisions
@@ -262,7 +273,7 @@ export function connectShell(
         link.hostState = null;
         link.departures++;
         link.freshness.advance();
-        sessions().forgetStatuses(m.ref);
+        sessions().forgetStatuses(m.ref, keepsRemoteStatus); // P5 O7 M2: but a lane B session main still holds there
         continue;
       }
       if (link.up && link.generation === m.generation) continue;

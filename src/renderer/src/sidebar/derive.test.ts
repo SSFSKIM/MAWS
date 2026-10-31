@@ -241,6 +241,14 @@ describe('listed rows in the project list', () => {
     expect(shape(entries)).toEqual([[ORG, [addr('s1')], []], [machineKey(OTHER_MACHINE), [there('b1')], [there('b3')]]]);
   });
 
+  // P5 O7 M2: the record main read over the link for a lane B row it opened stands where the row stood (its project is
+  // unknown here), so one row per address, and it doesn't move when the record arrives
+  it('draws a record at a listed address where its listing was filed when its project is not known here', () => {
+    const recorded = sessionOn(OTHER_MACHINE, 'b1', { projectId: there('maws-b') as ProjectId });
+    const entries = list(listedMap(listedOn('b1', { orgKey: ORG })), { records: recs(local, recorded) });
+    expect(shape(entries)).toEqual([[ORG, [addr('s1'), there('b1')], []]]);
+  });
+
   it('adds listed rows waiting and busy to the waiting and working counts', () => {
     const states = ['waiting', 'busy', 'busy', 'idle', 'failed'];
     const entries = list(listedMap(...states.map((state, i) => listedOn(`b${i}`, { orgKey: ORG, state }))), {
@@ -308,10 +316,11 @@ describe('other people’s sessions and the People toggle', () => {
     expect(on[1].rollup).toEqual({ waiting: 0, working: 0 });
   });
 
-  it('draws a record at your listed address as today', () => {
+  // P5 O7 M2: where its listing is filed (one row per address), its project being unknown here
+  it('draws a record at your listed address as today, where its listing is filed', () => {
     const recorded = sessionOn(OTHER_MACHINE, 'b1', { projectId: null });
     const entries = list(listedMap(listedOn('b1', { owners: ['member-1', 'ana'] })), new Set(), { records: recs(local, recorded) });
-    expect(shape(entries)).toEqual([[ORG, [addr('s1')], [], 0], [OTHER_ROW, [there('b1')], [], 0]]);
+    expect(shape(entries)).toEqual([[ORG, [addr('s1'), there('b1')], [], 0]]);
   });
 
   it('counts yours only in the rollups: others’ waiting and busy rows add nothing', () => {

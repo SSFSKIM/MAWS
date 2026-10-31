@@ -4,6 +4,8 @@
 // that answers but can't be driven, it gets none: it is read-only, with the holder notice and "Take over here", as
 // before. P5 O9 M9: another machine's terminal session (a listed row of lane A, which has no record) gets lane A's port
 // over main's remote adapter, its state the page's watch's (starting until the first), its gaps the remote ones.
+// P5 O7 M2: another machine's lane B session (lane-b/remote-session.ts) gets lane B's port over main's remote lane B
+// adapter, with the overlay main says for it (`remote.session`'s controls).
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { SendContent } from '@shared/engine/session-state-store';
 import type { AttentionItem } from '@shared/graph/attention';
@@ -17,6 +19,7 @@ import { ipc } from '../../ipc/client';
 import { holderWords } from '../../sessions/holder-words';
 import { isRemoteLaneA, remoteMachineName, startingRemoteState, useRemoteLaneA } from '../../lane-a/remote-session';
 import { laneAStateOf, useLaneACatalog, useLaneAState } from '../../stores/lane-a';
+import { isRemoteLaneB, remoteLaneBStateOf, useIsRemoteLaneB, useRemoteLaneBState } from '../../lane-b/remote-session'; // P5 O7 M2
 import { useSessions } from '../../stores/sessions';
 import { laneAControls } from './lane-a';
 import { laneBControls, type LaneBFrame, type LaneBInputs } from './lane-b';
@@ -28,7 +31,8 @@ const heldElsewhere = (record: SessionRecord | null): boolean => record?.holder.
 export function controlsFor(record: SessionRecord | null, laneA: LaneAState | null, inputs: LaneBInputs): SessionControls | null {
   const { appSessionId, client } = inputs;
   if (record === null && isRemoteLaneA(appSessionId)) return laneAControls(laneA ?? startingRemoteState(appSessionId), null, { appSessionId, client, remote: { machine: remoteMachineName(appSessionId) } });
-  if (heldElsewhere(record)) return laneA?.bridge === 'live' ? laneAControls(laneA, record, inputs) : null;
+  if (heldElsewhere(record)) return laneA?.bridge === 'live' ? laneAControls(laneA, record, { appSessionId, client }) : null;
+  if (isRemoteLaneB(appSessionId)) return laneBControls(record, { ...inputs, remote: { state: remoteLaneBStateOf(appSessionId) } }); // P5 O7 M2
   return laneBControls(record, inputs);
 }
 
@@ -50,6 +54,8 @@ export function useSessionControls(appSessionId: AppSessionId, options: { client
   const laneA = useLaneAState(appSessionId);
   useLaneACatalog(appSessionId); // read through the port; subscribed here so its arrival renders again
   useRemoteLaneA(appSessionId); // M9: a listed row of another machine's lane A takes the port; subscribed so its listing renders again
+  useIsRemoteLaneB(appSessionId); // P5 O7 M2: another machine's lane B session takes main's overlay; subscribed so its state renders again
+  useRemoteLaneBState(appSessionId);
   return controlsFor(record, laneA, { appSessionId, client: options.client ?? ipc, ...(options.frame && { frame: options.frame }) });
 }
 

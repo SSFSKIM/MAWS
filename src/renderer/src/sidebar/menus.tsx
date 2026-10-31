@@ -22,6 +22,8 @@ import { useSessions } from '../stores/sessions';
 import { PROJECT_ACTION_IDS, PROJECT_ACTIONS, runProjectAction, useProjectActionEnabled, type ProjectActionId } from './project-actions';
 import { openResumeChooser } from '../resume/host'; // P2-D
 import { KEEP_RUNNING } from './copy'; // P5 O2 M2
+import { isRemoteLaneB } from '../lane-b/remote-session'; // P5 O7 M2
+import { setRemoteUnread } from '../lane-b/read-marks'; // P5 O7 M2
 
 // P5 O8 M5: a project's or machine's `people` says whether its row offers the People toggle.
 export type MenuTarget = { kind: 'machine'; machine: MachineRef; people: boolean } | { kind: 'session'; appSessionId: AppSessionId } | { kind: 'project'; projectId: ProjectId; people: boolean };
@@ -77,7 +79,7 @@ function SessionItems({ appSessionId, dropdown = false }: { appSessionId: AppSes
   const foreign = record.holder.kind === 'terminal' || record.holder.kind === 'background_job'; // D-12: the opens only
   return (
     <>
-      {sessionActionsFor(record, { bridged }).map((id) => <SessionItem key={id} id={id} record={record} dropdown={dropdown} />)}
+      {sessionActionsFor(record, { bridged, remote: isRemoteLaneB(appSessionId) /* P5 O7 M2 */ }).map((id) => <SessionItem key={id} id={id} record={record} dropdown={dropdown} />)}
       {kept !== undefined && !foreign && <KeepItem appSessionId={appSessionId} kept={kept} dropdown={dropdown} />}
     </>
   );
@@ -159,10 +161,14 @@ function ProjectItem({ id, projectId }: { id: ProjectActionId; projectId: Projec
 }
 
 // "Mark all read" (residue *Unread*): C4's `session.update` per unread session, with `lastSeen` now.
+// P5 O7 M2: a lane B session on another machine is marked read in this app's memory (lane-b/read-marks.ts): its record's
+// read marks are its machine's owner's until O8 M6.
 async function markAllRead(records: SessionRecord[]): Promise<void> {
   const at = new Date().toISOString();
+  const [remote, local] = [records.filter((r) => isRemoteLaneB(r.appId)), records.filter((r) => !isRemoteLaneB(r.appId))];
+  for (const r of remote) setRemoteUnread(r.appId, false);
   await Promise.all(
-    records.map(async (r) => {
+    local.map(async (r) => {
       const result = await ipc.invoke('session.update', { appSessionId: r.appId, patch: { unread: false, lastSeen: { messageUuid: r.lastSeen.messageUuid, at } } });
       if (!result.ok) console.error('[sidebar] session.update (mark read) failed', result.error);
     }),

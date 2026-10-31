@@ -11,6 +11,10 @@
 // (`.thread-column`, W2: §5.4 as amended 2026-10-01, Codex's shared class), so the frame is exactly the transcript's
 // width. P5 O9 M9: another machine's terminal session (a listed lane A row) has no record and reads as started: its
 // transcript from its machine's plane, its composer driven through the lane A port, its requests docked as cards.
+// P5 O7 M2: another machine's lane B session is started once main has read its record there (main emits it as
+// `session.changed`, so the pane is a record's like a local one's); until then it reads "Opening on <machine>…", and
+// "<machine> can't place this session" (or whatever reason main says) with Try again once main gave up. The pane's mount
+// is its announcement to main (lane-b/remote-connect.ts), so a reloaded page or a second window gets the session again.
 import { useEffect, useRef, type ReactNode } from 'react';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -25,6 +29,9 @@ import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
 import { useSettling } from '../lane-a/race'; // P5 O9 M6
 import { useSessions } from '../stores/sessions';
 import { useRemoteLaneA } from '../lane-a/remote-session'; // P5 O9 M9
+import { retryRemoteSession, useRemotePaneOpening } from '../lane-b/remote-connect'; // P5 O7 M2
+import { useIsRemoteLaneB, useRemoteLaneBState } from '../lane-b/remote-session'; // P5 O7 M2
+import { useMachineMark } from '../app/machine-mark'; // P5 O7 M2
 import { HolderNotice } from './HolderNotice';
 import { useSessionControls } from './controls/controls-for'; // P5 O9 M4
 import { SessionTabNotes } from '../sessions/SessionDialogs'; // C10
@@ -40,10 +47,33 @@ export function ComposerColumn({ children }: { children: ReactNode }) {
 export function SessionPane({ appSessionId, paneIndex, compact = false }: { appSessionId: AppSessionId; paneIndex: PaneIndex; compact?: boolean }) {
   const record = useSessions((s) => s.records.get(appSessionId));
   const remote = useRemoteLaneA(appSessionId); // P5 O9 M9
+  const remoteB = useIsRemoteLaneB(appSessionId); // P5 O7 M2
+  useRemotePaneOpening(appSessionId); // P5 O7 M2
   const envelope = useRef<HTMLDivElement>(null);
   return <div ref={envelope} className="h-full min-h-0 min-w-0"><SurfaceViewportProvider element={envelope}>
-    {record || remote ? <StartedPane appSessionId={appSessionId} record={record ?? null} paneIndex={paneIndex} compact={compact} /> : <UnstartedPane appSessionId={appSessionId} paneIndex={paneIndex} compact={compact} />}
+    {record || remote ? <StartedPane appSessionId={appSessionId} record={record ?? null} paneIndex={paneIndex} compact={compact} /> : remoteB ? <OpeningRemotePane appSessionId={appSessionId} /> : <UnstartedPane appSessionId={appSessionId} paneIndex={paneIndex} compact={compact} />}
   </SurfaceViewportProvider></div>;
+}
+
+// P5 O7 M2: another machine's lane B session whose record main hasn't read there yet, or couldn't: main's reason (opening,
+// can't place, the device refused, the link closed), with Try again once it gave up, unless the machine removed this device.
+function OpeningRemotePane({ appSessionId }: { appSessionId: AppSessionId }) {
+  const state = useRemoteLaneBState(appSessionId);
+  const machine = useMachineMark(appSessionId).name;
+  const ended = state?.stream === 'ended';
+  const retry = ended && state.link.refusal === null;
+  return (
+    <div className="flex h-full items-center justify-center p-6">
+      <div role="status" className="flex flex-col items-center gap-3 text-ui text-fg-muted">
+        <p className="m-0">{state?.reason ?? `Opening on ${machine}…`}</p>
+        {retry && (
+          <button type="button" onClick={() => retryRemoteSession()} className="rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2">
+            Try again
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function UnstartedPane({ appSessionId, paneIndex, compact }: { appSessionId: AppSessionId; paneIndex: PaneIndex; compact: boolean }) {

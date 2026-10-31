@@ -92,11 +92,14 @@ env:
   # mawsd on its scratch profile, unless its script or spec pins MAWS_HOST_MODE for what it tests. The embedded shape keeps
   # two sentinels until O15 deletes its root: supervisor (its detached supervisor) and c7-utility, c7's specs with both
   # hosts Electron utility processes.
+  # remote (P5 O7 M2): remote lane B over RL2, the app on one profile and a second profile's enrolled mawsd on a local org;
+  # it proves behaviour and carries no wall-clock bound (e2e:remote-latency, measured, holds those). It joins
+  # HOSTED_MAC_E2E only by the rule below (three green `Lane: hosted` runs on one tree), CI-opt's call.
   CLASS1_E2E: >-
     default artifacts library side tools to-human deliverables panel supervisor browser browser-comment browser-import
     settings transcript terminal code agents widgets c7 c7-utility scm c12 available document document-app presentations
     design-systems browser-cua browser-chrome desk-web design dashboard connectors connectors-direct connectors-oauth delivery
-    discover supervisor-daemon daemon-unit machines lane-a
+    discover supervisor-daemon daemon-unit machines lane-a remote
   # The groups §3.1's table found green on a Linux runner, the only ones a Linux lane takes (never by default). desk-web
   # (DC5): the desk's web app in a browser, against its DX3 double, which needs no Electron and no Mac.
   LINUX_E2E: library artifacts available tools agents desk-web

@@ -19,7 +19,7 @@ import { KNOWN_MACHINES_FILE } from './known-machines';
 import { createLocalLink } from './local-link';
 import { createConnectionManager } from './manager';
 import { createSocketLink } from './socket-link';
-import type { RemoteLink } from './remote/link';
+import type { RemoteLink, RemoteLinkDeps } from './remote/link';
 import { createRemoteSource } from './remote/source';
 
 export interface MachinesDeps {
@@ -30,6 +30,7 @@ export interface MachinesDeps {
   env: NodeJS.ProcessEnv;
   build: string; // this app's build, said in a link's hello
   session: OrgSession; // the org session the RL2 links read: signed out until O8's sign-in, or MAWS_DEV_ORG's in development
+  linkDeps?: Partial<RemoteLinkDeps>; // P5 O7 M2: what every RL2 link takes in place of its defaults (the dev session's directMap as `dialDirect`)
   register(name: 'machines.list', handler: MainHandler<'machines.list'>): void;
   dispatchLocal(name: CommandName, input: unknown, ctx: MainContext): Promise<CommandResult<CommandName>>;
 }
@@ -44,7 +45,7 @@ export interface Machines {
 export function startMachines(deps: MachinesDeps): Machines {
   const { local, localName, userData, packaged, env, build, dispatchLocal } = deps;
   const log = (line: string) => console.log(`[machines] ${line}`);
-  const remote = createRemoteSource({ session: deps.session, local, userData, log });
+  const remote = createRemoteSource({ session: deps.session, local, userData, log, ...(deps.linkDeps === undefined ? {} : { linkDeps: deps.linkDeps }) });
   const manager = createConnectionManager({
     local,
     localName,

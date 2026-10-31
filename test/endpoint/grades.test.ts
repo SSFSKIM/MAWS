@@ -98,6 +98,8 @@ function engineHost(seen: string[]) {
   return async (owner: string, name: string, input: unknown): Promise<HostResponse> => {
     seen.push(name);
     const { appSessionId, requestId } = input as { appSessionId?: string; requestId?: string };
+    // The machine's index holds no record of these sessions (P5 O7 M2): the engine host places each.
+    if (owner === 'machine' && name === 'session.get') return ok(null);
     if (owner !== 'engine-host') return refused('unknown_command');
     if (name === 'session.status') return appSessionId !== undefined && ENGINE[appSessionId] !== undefined ? ok({ appSessionId, engineSessionId: ENGINE[appSessionId], launchId: 'launch-1' }) : refused('internal');
     if (name === 'session.pendingRequest') {
@@ -664,6 +666,7 @@ describe('the decision without a channel', () => {
       },
       checkouts: { known: () => true },
       dispatch: options.dispatch ?? engineHost([]),
+      log: () => {},
       webauthn: { origin: () => HUB, counter: () => 0, setCounter: () => {} },
     };
     return {

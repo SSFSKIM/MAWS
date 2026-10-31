@@ -13,6 +13,7 @@ import { vi, type Mock } from 'vitest';
 import * as z from 'zod';
 import { daemonHostFiles, daemonPaths, type DaemonPaths, type DaemonSocket } from '@shared/daemon/files';
 import { createHostSupervisor, type HostSupervisor, type HostSupervisorOptions } from '@shared/host/host-supervisor';
+import type { ClientRef } from '@shared/ipc/client';
 import type { DocPortEnd, HostEmit, HostOn, HostRuntime } from '@shared/host/runtime';
 import { createHostRuntime } from '@shared/host/runtime';
 import { SocketPort } from '@shared/host/socket-port';
@@ -66,6 +67,7 @@ export interface StandInOptions extends Partial<Omit<FakeSupervisorOptions, 'run
 // ready client for the next client's connect burst, as SessionStream's undelivered tail does.
 export class StandIn {
   readonly calls: { name: string; input: unknown }[] = [];
+  readonly clients: ClientRef[] = []; // P5 O7 M2: each request's asker, as the runtime minted it, in order
   // P5 O3-D M3: the engine host's presence as attachment.ts keeps it: its gone hooks run, its shell recaptures counted
   appGone = 0;
   shellRecaptured = 0;
@@ -89,8 +91,9 @@ export class StandIn {
       (on, emit, client) => {
         this.hostEmit = emit;
         for (const name of names.filter((n) => n !== 'host.attachment'))
-          on(name, async (input) => {
+          on(name, async (input, ctx) => {
             this.calls.push({ name, input });
+            this.clients.push(ctx.client);
             return (this.answers[name]?.(input) ?? null) as never;
           });
         if (this.kind !== 'engine-host') return;

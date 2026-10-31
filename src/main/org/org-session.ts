@@ -78,6 +78,7 @@ import {
   type DeviceKeysDeps,
 } from '../device/keys';
 import type { StateSigner } from '../device/step-up';
+import { DEVICE_CAPABILITIES } from '../machines/remote/capabilities';
 import { cloudflareLoginTransfer, hubAdmission, hubHeaders, standinLogin, tokenClaims, AccessLoginError, type AccessLogin, type HubCredential } from './access-login';
 import {
   ACCESS_FILE,
@@ -385,7 +386,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     if (value === null || key !== valueKey) {
       valueKey = key;
       value = {
-        identity: { org: reg.org, member: reg.member.id, device: reg.device, clientClass: 'native-mac', channelKey: k.channel, build: deps.build, capabilities: [] },
+        identity: { org: reg.org, member: reg.member.id, device: reg.device, clientClass: 'native-mac', channelKey: k.channel, build: deps.build, capabilities: [...DEVICE_CAPABILITIES] },
         view: held!,
         stepUp: deps.stepUp(k, { org: reg.org, device: reg.device }),
         hub: live ? hubAccessFor(credential!, reg.hub) : null,

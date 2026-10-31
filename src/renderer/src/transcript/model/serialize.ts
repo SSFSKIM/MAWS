@@ -42,6 +42,7 @@ function partOf(row: Row): string | null {
     case 'request_slot': return `*${requestSlotPlaceholder(row.toolName ?? row.requestKind)}*`;
     case 'error': return `*${row.text}*`;
     case 'boundary': return `---\n*${row.text}*`;
+    case 'gap': return `---\n*${row.text}*`; // P5 O7 M2
     case 'bash': return `\`\`\`\n${[bashHeader(row.command), row.stdout, row.stderr, bashFooter(row.exitCode)].filter((part) => part.length > 0).join('\n')}\n\`\`\``;
     case 'local_command': return `*${LOCAL_COMMAND_HEADER}*\n${row.text}`;
     // E1 start

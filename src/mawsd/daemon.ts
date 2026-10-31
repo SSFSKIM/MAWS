@@ -844,11 +844,12 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         const answered = await front.intercepted(name, input, client);
         if (answered) return { t: 'res', id: 'endpoint', ...answered } as HostResponse;
       }
-      if (host === 'engine-host') return hosts.forward(host, { name, input: sent, ...(client && { client: client.id }) });
+      // P5 O7 M2: the asker goes as a ref, so the endpoint channel's end reaches the host as its clientGone
+      if (host === 'engine-host') return hosts.forward(host, { name, input: sent, ...(client && { client }) });
       // the pty host it woke stays up for the request (a spawn), and parks after it if nothing lives and no app is on
       ptyRequests += 1;
       try {
-        return await hosts.forward(host, { name, input: sent, ...(client && { client: client.id }) });
+        return await hosts.forward(host, { name, input: sent, ...(client && { client }) });
       } finally {
         ptyRequests -= 1;
         if (ptyRequests === 0) void settleCredit();

@@ -1,7 +1,9 @@
 // Remote reads (O10 M8; RL3, RL §6.2; Interfaces §G): the gate's `call` executor. What reaches it is authorized: offered
 // as a call, graded `list` or `view` (anything higher is an act, `act-required`), held by the caller on its target.
-//   - Lane B's reads (`session.status`, `.events`, `.pendingRequest`, `.pendingItems`, `.queue.list`, `.catalog`) go
-//     through `dispatch` to the engine host, and its answer is the result.
+//   - Lane B's engine-host reads (`session.status`, `.events`, `.pendingRequest`, `.pendingItems`, `.queue.list`,
+//     `.catalog`, and from P5 O7 M2 a remote pane's: the context, usage, settings, models, rules, MCP and cost reads) go
+//     through `dispatch` to the engine host, and its answer is the result. A host error `host_unavailable` or `timeout`
+//     is `unavailable`; any other code passes through.
 //   - Lane A's `sminos.rows`, `.diff`, `.output` and `.read` go down RL10 as DX2's frames on the caller's own upstream
 //     subscription (named by the caller's `sub` on that session), as the hub carried a browser's: sminos answers on that
 //     subscription, so the answer comes in its stream at its place in the sequence, and the result says it was asked.
@@ -9,9 +11,11 @@
 //     on: the one the hub holds when it is current, else one signed for the asker alone. A `private` session's listing
 //     leaves the machine only so, to its owners and shares (RL §6.2).
 //   - `daemon.status` is `mawsd`'s (O2, graded `list`): its status through `dispatch`, less every field the schema marks
-//     local-only (`remoteDaemonStatus`: file paths). `machine.identity` (O6) is refused `ungraded` before it reaches here
-//     until O6 grades it; anything else answers `unavailable`.
-// A result over the channel's message limit answers `too-large`.
+//     local-only (`remoteDaemonStatus`: file paths). Any other `machine` row (P5 O7 M2: a lane B session's record, app
+//     events and history; O6's `machine.identity`) goes through `dispatch` to the machine's services as an engine-host
+//     row goes to the engine host; anything else answers `unavailable`.
+// Every dispatch carries the asking channel's `ClientRef` (P5 O7 M2). A result over the channel's message limit answers
+// `too-large`.
 import { MESSAGE_MAX_BYTES, type CallMessage, type Listing, type Signed } from 'org-protocol';
 import { remoteDaemonStatus, type DaemonStatus } from '@shared/ipc/schema/daemon';
 import type { RemoteChannel } from './channels';
@@ -19,7 +23,7 @@ import { rankAtLeast, sessionRank } from './grades';
 import type { SessionReport } from './listings';
 import { OFFERS, type Offers } from './offers';
 import type { Member } from './rl10/members';
-import type { EndpointServices } from './services';
+import { dispatchAs, type EndpointServices } from './services';
 import type { RecordSource, SessionTarget } from './sources';
 import type { Subscription } from './subscriptions';
 
@@ -101,10 +105,11 @@ export class Calls {
       if (result.ok && Buffer.byteLength(JSON.stringify(result.output ?? null)) > MESSAGE_MAX_BYTES - 1024) return void channel.send({ t: 'result', id: m.id, ok: false, error: { code: 'too-large' } });
       channel.send(result.ok ? { t: 'result', id: m.id, ok: true, output: result.output } : { t: 'result', id: m.id, ok: false, error: { code: result.code } });
     };
+    const dispatch = dispatchAs(this.ctx.dispatch, channel.client);
     let run: Promise<{ ok: true; output: unknown } | { ok: false; code: string }>;
-    if (row?.executor === 'engine-host') run = this.#host(m);
+    if (row?.executor === 'engine-host' || (row?.executor === 'machine' && m.name !== 'daemon.status')) run = this.#forward(dispatch, row.executor, m);
     else if (row?.executor === 'sminos' && Object.hasOwn(LANE_A, m.name)) run = Promise.resolve(this.#laneA(channel, m));
-    else if (row?.executor === 'machine' && m.name === 'daemon.status') run = this.#daemonStatus();
+    else if (row?.executor === 'machine') run = this.#daemonStatus(dispatch);
     else if (m.name === 'endpoint.listings') run = this.#listings(channel.member).then((listings) => ({ ok: true as const, output: { listings } }));
     else run = Promise.resolve({ ok: false, code: 'unavailable' });
     run.then(answer, (error: unknown) => {
@@ -113,16 +118,17 @@ export class Calls {
     });
   }
 
-  async #host(m: CallMessage): Promise<{ ok: true; output: unknown } | { ok: false; code: string }> {
-    const response = await this.ctx.dispatch('engine-host', m.name, m.input === null ? undefined : m.input);
+  /** A read its executor answers raw: the engine host's, or the machine's services'. */
+  async #forward(dispatch: EndpointServices['dispatch'], owner: 'engine-host' | 'machine', m: CallMessage): Promise<{ ok: true; output: unknown } | { ok: false; code: string }> {
+    const response = await dispatch(owner, m.name, m.input === null ? undefined : m.input);
     if (response.ok) return { ok: true, output: response.value ?? null };
     const code = response.error.code === 'host_unavailable' || response.error.code === 'timeout' ? 'unavailable' : response.error.code;
     return { ok: false, code };
   }
 
   /** `mawsd`'s status as a remote caller sees it: no file paths (P5 O2). */
-  async #daemonStatus(): Promise<{ ok: true; output: unknown } | { ok: false; code: string }> {
-    const response = await this.ctx.dispatch('machine', 'daemon.status', undefined);
+  async #daemonStatus(dispatch: EndpointServices['dispatch']): Promise<{ ok: true; output: unknown } | { ok: false; code: string }> {
+    const response = await dispatch('machine', 'daemon.status', undefined);
     return response.ok ? { ok: true, output: remoteDaemonStatus(response.value as DaemonStatus) } : { ok: false, code: 'unavailable' };
   }
 

@@ -17,7 +17,8 @@ import { createTranscriptStore, useTranscriptStore } from '../../stores/transcri
 import { turnId } from '../model/keys';
 import { builder, task, tool, uuid } from '../model/test-events';
 import { ipcSourceOver } from './ipc';
-import { withoutOlderThanWindow } from './older';
+import { withHistoryGap, withoutOlderThanWindow } from './older';
+import { HISTORY_GAP, isHistoryGap } from '../model/gap'; // P5 O7 M2
 
 const APP = at('app-long' as AppSessionId);
 const MAIN_APP = bareOf(APP);
@@ -344,5 +345,23 @@ describe('the cron calls a newest window carries', () => {
     host.emit('session.changed', { record: { appId: APP, holder: { kind: 'terminal', pid: 7 } }, cause: 'live', revision: 1 } as never);
     await vi.waitFor(() => expect(store.getState().entries[APP]!.phase).toBe('failed'));
     expect(store.getState().entries[APP]!.cronHistory).toBe(carried);
+  });
+});
+
+// P5 O7 M2 (P5 Decision Log 77): an older page whose range is partly gone starts with the gap bar's event, under the bare
+// app id as the app's own events are, the same for the same page; a whole page is left as it is.
+describe('withHistoryGap', () => {
+  it('puts the gap at the start of a page partly gone, once per page, and leaves a whole page alone', () => {
+    const b = builder();
+    b.turn('u1');
+    const page = { events: b.events, complete: false, historyUnavailable: true as const };
+    const gapped = withHistoryGap(page, 'app-1');
+    expect(gapped.events.slice(1)).toEqual(b.events);
+    expect(isHistoryGap(gapped.events[0]!)).toBe(true);
+    expect(gapped.events[0]).toMatchObject({ seq: null, at: b.events[0]!.at, text: HISTORY_GAP });
+    expect(gapped.events[0]!.id.startsWith('app-1:')).toBe(true);
+    expect(withHistoryGap(page, 'app-1').events[0]!.id).toBe(gapped.events[0]!.id);
+    const whole = { events: b.events, complete: true };
+    expect(withHistoryGap(whole, 'app-1')).toBe(whole);
   });
 });

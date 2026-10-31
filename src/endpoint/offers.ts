@@ -10,7 +10,8 @@
 import type { GradeSpec } from '@shared/ipc/grades';
 
 /**
- * Where a request's session is read: `appSessionId` (lane B, mapped to the engine session through `session.status`),
+ * Where a request's session is read: `appSessionId` (lane B, mapped to the engine session through the spine's record,
+ * `session.get`, else the engine host's `session.status`: targets.ts),
  * `session` (lane A: the engine session id, `args.session` in an action, as DX6 has it), or none: the machine itself.
  */
 export type TargetRule = 'appSessionId' | 'session' | 'machine';
@@ -30,6 +31,8 @@ export type OfferRow = {
 export type Offers = { commands: Readonly<Record<string, OfferRow>>; subscriptions: readonly ('A' | 'B')[] };
 
 const laneB = (kind: 'call' | 'act'): OfferRow => ({ kind, executor: 'engine-host', target: 'appSessionId' });
+/** A lane B session's command the machine's services run (the spine: its record, its app events, the resume). */
+const laneBMachine = (kind: 'call' | 'act'): OfferRow => ({ kind, executor: 'machine', target: 'appSessionId' });
 const laneA = (kind: 'call' | 'act', grade: GradeSpec): OfferRow => ({ kind, executor: 'sminos', target: 'session', grade });
 
 export const OFFERS: Offers = {
@@ -48,6 +51,37 @@ export const OFFERS: Offers = {
     'session.pendingItems': laneB('call'),
     'session.queue.list': laneB('call'),
     'session.catalog': laneB('call'),
+    // P5 O7 M2: a remote pane's reads (each `view`), the queue's and the chips' acts through `host.op`, and the spine's
+    // record, app events and history, and its resume behind a send to a released session (`machine.op`, P5 Decision Log
+    // 36), which carries neither `session` nor `context`: the services' ledger claims no launch.
+    'session.getContextUsage': laneB('call'),
+    'session.getUsage': laneB('call'),
+    'session.getWorkspaceDiff': laneB('call'),
+    'session.getSettings': laneB('call'),
+    'session.listModels': laneB('call'),
+    'session.listPermissionRules': laneB('call'),
+    'session.getStatus': laneB('call'),
+    'session.mcpStatus': laneB('call'),
+    'session.getSessionCost': laneB('call'),
+    'session.get': laneBMachine('call'),
+    'session.appEvents': laneBMachine('call'),
+    'session.history.list': laneBMachine('call'),
+    'session.queue.hold': laneB('act'),
+    'session.queue.remove': laneB('act'),
+    'session.setModel': laneB('act'),
+    'session.setEffort': laneB('act'),
+    'session.setThinking': laneB('act'),
+    'session.setPermissionMode': laneB('act'),
+    'session.stopTask': laneB('act'),
+    'session.sideQuestion': laneB('act'),
+    'session.mcpToggle': laneB('act'),
+    'session.mcpReconnect': laneB('act'),
+    'session.rewind': laneB('act'),
+    'session.rewindFiles': laneB('act'),
+    'session.forget': laneB('act'),
+    'session.setKeep': laneB('act'),
+    'session.generateTitle': laneB('act'),
+    'session.acquire': laneBMachine('act'),
     // Lane A's bridge-fenced RPCs and spawn, through RL10 (M6); `resume`, `retire` and `stop` run outside the bridge's
     // fence and are not offered.
     'sminos.steer': laneA('act', 'converse'),
