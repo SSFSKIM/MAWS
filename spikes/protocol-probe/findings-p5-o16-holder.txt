@@ -1,0 +1,162 @@
+P5 O16 M0: the -p spike (U6): the gate, SIGTERM, re-initialize, descendants, --await-initialize and the relay hop
+(docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, M0; parent docs/doperpowers/plans/2026-10-27-p5-org.md, child
+O16; document blob b429c8f3e697aaa8b4d7bf837c81db5f66ffe841 at master cb21c4813; 2026-10-31)
+
+Question (D-1). What the session host, the adoption and the reap take from the engine, measured on MAWS's own launch
+line before M2 and M5 build on it: the six questions of M0.
+
+Method. scenarios/pass3/p5-o16-holder.mjs: MAWS's launch line and initialize (p1-common: ENGINE_FLAGS, the constant
+environment, a scratch CLAUDE_CONFIG_DIR, the trust attestation), the engine spawned detached as transport.ts spawns it,
+MAWS_LANE=B and SMNS_MEMBER the probe's own pid (the engine's parent), CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 (the owner's
+switch), TZ=UTC, a Stop host callback (maws_Stop_1) answered {} and every tool allowed unless a question holds a request.
+sminos 1.27.17 installed into each scratch config home from the doperpowers checkout at cc459470f9cc (`claude plugin
+marketplace add <checkout>`, `claude plugin install sminos@doperpowers`; a directory marketplace loads the plugin in
+place). A `turn.step` fence of the probe's own (a plugin under --plugin-dir, the shape O12 M4's observer will have) reads a
+mode file before a turn's first main request and holds 3.0 s, refuses, or passes, logging each step with $.ui.log. The
+Messages API is a scripted stand-in over stub-api.mjs's sseOf keyed by content (a prompt's [[O16:<plan>]] marker; a
+tool_result continues its plan; a task notification is answered as one), nothing spent. Fixtures fixtures/p5/
+p5-o16-holder-<arm>.jsonl on the pin and -<arm>-installed.jsonl on the installed engine, tests in fixtures.test.mjs
+("p5 O16", 25 pass). Question 6: p5-o16-relay/ (main.go, D3's Go prototype given M1's hot path; bench.mjs), summary
+fixtures/p5/p5-o16-holder-relay.json.
+Engines (D22): 2.1.283, the fixture pin (FIXTURE_ENGINE_VERSION), and 2.1.316, the Claude Code the VM installs and mawsd
+would run there (newer than TESTED_ENGINE_VERSION 2.1.312); both by the official installer as the probe user.
+Where it ran: devcloud VM dc-o16spike-8b78 (GCE e2-custom-4-8192, us-central1-a, Ubuntu 24.04, kernel 7.0.0-1014-gcp,
+Node 26.13.0, lease 3 h, deleted after the recording), as a dedicated user (o16probe) with no access to the owner's home
+and no credential, an environment built from nothing, and /etc/claude-code hidden by a private tmpfs mount (the host's
+managed settings route engines to the relay); every fixture's provenance reads managedSettings []. Never on the owner's
+MacBook.
+
+Arms.
+  main              sminos, the fence and two stdio MCP servers (one from --mcp-config, one user-scope in the scratch
+                    .claude.json); the trees at rest, during a foreground Bash, a background Bash (sleep 600), a Monitor
+                    (tail -f), a subagent's Bash, and after stop_task of each; then four engine-started turns: a task
+                    notification with the fence passing (baseline), held 3.0 s, a one-shot cron fire held 3.0 s, and a
+                    task notification refused. The mode is written after the prompt's own turn ends, so it applies to
+                    the turn the engine starts.
+  end-session, sigterm      a background `sleep 300`, then end_session {reason: stop} or SIGTERM to the engine's pid;
+  ...-pending               the same with a Bash permission (curl to a closed port) held unanswered. A SessionEnd command
+                    hook in the scratch settings and a SessionEnd host callback record the reason.
+  reinit            a background `sleep 900`; then one message of three concurrency-safe calls, each kept outstanding:
+                    the maws server's `hold` (its tools/call unanswered), a Read of /etc/hostname (its permission
+                    unanswered), the maws server's `hooked` (its PreToolUse host callback unanswered); a control_response
+                    to an id the engine never sent; a second initialize as an adopter sends it (the same hooks and
+                    sdkMcpServers); then the late answers, one kind at a time.
+  await-seed, await-resume, plain-resume   a session holding an every-minute session cron, then --resume of it with
+                    --await-initialize and without, initialize withheld 75 s, then sent.
+
+The answers (the expected-line form; the pin first, then the installed engine; a difference is named).
+
+Q1 turn.step held cron turn for 3.0 s before the main request: yes (2.1.283: 3,032 ms from the turn's start to its
+   request; 2.1.316: 3,028 ms inside the hook, 3,046 ms from the start). Q1 turn.step held task turn for 3.0 s before the
+   main request: yes (2.1.283: 3,030 ms; 2.1.316: 3,030 ms inside, 3,047 ms from the start). The baseline task turn,
+   fence passing, reached its request 23 ms (2.1.283) and 37 ms (2.1.316) after its start. A refusal (the fence yields
+   the reason as the turn's text, never calls next) ends the engine-started turn with result "O16 fence refused this
+   turn." and no main request, on both. The bridge: 2.1.316 loads sminos's hooks module (events include turn.step) and
+   runs its child, `python3 …/sminos.py bridge --session <id> --launch=<id>`, a direct child of claude; 2.1.283 loads no
+   sminos module at all: `hooks module sminos@doperpowers failed to load: … bridge.tsx … "session.append" is not an
+   event` (sminos at cc459470 hooks an event the pin does not have), while the probe's fence, a separate plugin, loads on
+   both. Difference: the bridge needs the newer engine; the fence mechanism holds on both. Not measured: the bridge's lane
+   verdict (its `lane` line to the mod is not on the wire); 2.1.283 sends no ui_log to the host (no ui_surface_v1), so its
+   hold is read from the turn's start to its request.
+   (main: q1 notes task-baseline, task-held, cron-held, task-refused; debug_full.)
+
+Q2 end_session: SessionEnd none (2.1.283) | other (2.1.316, the command hook; no host callback on either), exit 0 in 81 ms
+   (2.1.283) | 1,856 ms (2.1.316) with the session at rest, exit 1 in 58 ms | 1,789 ms with a permission pending (the
+   engine sends control_cancel_request for it, the turn ends error_during_execution / aborted_tools, the transcript
+   records "[Request interrupted by user for tool use]"), shell gone, stdin after an ignored one: n/a (never ignored).
+   Q2 SIGTERM: SessionEnd other (host callback and command hook, on both), exit 143 in 287 / 279 ms (2.1.283) | 306 /
+   214 ms (2.1.316), shell gone, stdin after an ignored one: n/a (never ignored). In all eight runs the background shell
+   (its bash wrapper and its sleep) was gone a second after the exit, the task reported `stopped` first; the bridge child
+   (2.1.316) was gone too; the transcript ends with a newline and every line parses (a pending permission's tool_use is
+   the last message record under SIGTERM, with no result). Difference: 2.1.316 runs SessionEnd hooks on end_session and
+   takes about 1.8 s to exit; 2.1.283 exits in under 0.1 s with no SessionEnd. Both answer end_session `success` before
+   exiting.
+   (end-session, end-session-pending, sigterm, sigterm-pending: q2 notes.)
+
+Q3 re-initialize: pending 1 requests redelivered (the held Read's can_use_tool, by its original request_id, in the
+   initialize answer's pending_permission_requests; pending_user_dialog_requests []), hooks retired (the pending PreToolUse
+   callback gets control_cancel_request before the answer, and its tool is not run: "PreToolUse:mcp__maws__hooked hook
+   error: The SDK host reconnected before its PreToolUse hook answered, so this tool call was not executed. No one denied
+   it; retry the same tool call."; the late answer to it draws nothing), outstanding tools/call kept (its late
+   mcp_response is taken: the model's tool_result reads O16_HELD_RESULT), late response dropped (a control_response to an
+   id the engine never sent draws no frame and no stderr, and the process goes on), background_tasks_changed snapshot
+   (right after the answer, listing the running shell), Stop.background_tasks.ambient absent (Stop's entries carry id,
+   type, status, description, command; background_tasks_changed's carry task_id, task_type, description, and run_id from
+   2.1.316; no `ambient` key for a shell, a Monitor or a subagent). The held permission's late answer, to its original id,
+   runs the Read. Same on both engines. Unmeasured: redelivery of a user dialog or an MCP elicitation. The recordings
+   held one permission and nothing else (pending_user_dialog_requests: []), so M3's rows for dialogs and elicitations
+   rest on the document, not on this spike.
+   (reinit: q3_outstanding, q3_stray, q3_reinit, q3_late.)
+
+Q4 resting tree (after stop_task of each task; ps -axo pid=,ppid=,pgid=,stat=,lstart=,command=, which Linux's procps
+   takes): claude; `/usr/bin/node <root>/o16-mcp.mjs user` and `… flag`, the two stdio MCP servers, direct children in
+   claude's process group; and on 2.1.316 the sminos bridge child, direct, same group. Nothing else. Read 2 s after start,
+   2.1.316 also showed short-lived engine children that were gone a few seconds later: `rg --no-config --files --hidden
+   --no-ignore --max-depth 4 --glob .orphaned_at <config>/plugins/cache` (the plugin cache's orphan scan, in the
+   fixture) and, in an earlier recording not kept, a `[2.1.316] <defunct>` zombie. Working tree: each Bash, foreground
+   (sleep 6), background (sleep 600), a Monitor's (tail -f, 2.1.316 only: 2.1.283 answers "Monitor is disabled") and a
+   subagent's (sleep 8), is `/bin/bash -c source <config>/shell-snapshots/snapshot-bash-….sh … eval …` with its command as
+   a child, a direct child of claude that leads a process group and session of its own (pgid = pid, stat s): none of them
+   is in claude's group. The command under it (sleep, tail) leads a further process group of its own inside the
+   wrapper's session (pgid = its pid, stat without s), so a signal to the wrapper's group does not reach it; only the
+   tree (or the session) does. A subagent adds no process of its own. (The recording keeps 400 characters of each
+   command line, so a long wrapper line is cut inside its eval; the tests match each command to its own wrapper by
+   parent pid.) get_settings's `effective` carries no mcpServers on either
+   engine (enabledPlugins, extraKnownMarketplaces, dialogExpiry); mcp_status carries each server's config {type: stdio,
+   command, args} exactly as launched, with scope `dynamic` (--mcp-config) or `user`.
+   (main: tree notes rest, foreground-bash, background-bash, monitor, subagent, rest-after-stop; get_settings, mcp_status.)
+
+Q5 --await-initialize: accepted (both engines; a hidden option), cron held yes. With it, the resumed session writes
+   no stream output and makes no main model request for the 75 s initialize is withheld, though its every-minute cron
+   was due (its one request before initialize is a reachability probe, HEAD /api/hello, 404 from the stub); initialize is
+   answered 1.0 s (2.1.283) | 1.5 s (2.1.316) after it is sent; then the cron fires (2.1.283 at once, 0.16 s after the
+   answer, catching up the missed minute; 2.1.316 at the next minute, 27 s later). Without it, the resurrected cron
+   fires before any initialize: 1.6 s after spawn and then every minute (2.1.283: three fires and three results while
+   initialize was withheld), at the first minute (2.1.316), each a full turn with no host hooks registered (no Stop
+   callback). Difference: catch-up of a fire missed while waiting (2.1.283 fires it at once, 2.1.316 does not).
+   (await-seed, await-resume, plain-resume: q5_withheld, q5_after_initialize.)
+
+Q6 relay p50/p95 at most 296.8/402.3 µs (gate 500/1500): under the gate. Read with 2.1.316's stream on the VM; the Mac
+   measurement is M6's. Two readings carry the verdict, neither by subtraction:
+   - The bound. The stamped replay of 2.1.316's own stream (1,081 lines in 5.0 s, 303 bytes at p50, 17,730 at most,
+     8 turns of 120 streamed deltas through MAWS's launch line), six rounds each way alternating, 6,486 lines each:
+     engine write to manager arrival through the relay, p50/p95/p99 296.8/402.3/471.8 µs. Per line the added hop is at
+     most this hosted total, because the direct latency is never negative, so these are upper bounds on the hop's
+     p50/p95. Caveat: the replay is a Node surrogate with the engine's sizes and timing, not the engine's own writes.
+   - The live estimate. The live engine under the relay, from the host's read of a line to its arrival at the
+     manager's socket (the part of the hosted path the direct path does not have): 157.6/248.2/348.6 µs (1,081 lines).
+     It starts at the relay's pipe read, so it leaves out the pipe the direct path also has.
+   Recorded, not gated: the differential estimate, hosted less direct per percentile (direct on a pipe 176.3/255.6/308.3
+   µs), 120.5/146.7/163.6 µs. A difference of independently pooled percentiles is not the percentile of the per-line
+   added latency, so it is an estimate only. The input direction (not gated): 174.1/192.5 µs added at p50/p95 by the
+   same estimate (2,400 stamped lines every 5 ms). Paid twice per round trip, even the bound is about 0.6 ms at p50
+   against OX7's 1.3 ms headroom. A second run 46 minutes later, the same bench
+   (fixtures/p5/p5-o16-holder-relay-repeat.json): hosted bound 326.6/446.2/531.0 µs, live segment 182.1/278.1 µs,
+   estimate 125.9/158.7/187.5 µs, input estimate 194.6/216.0 µs. The fixtures' `verdict` field was computed by the
+   bench on the estimate when recorded; bench.mjs now computes it on the bound and the live segment (the same answer
+   for both recordings). The clock: CLOCK_MONOTONIC in every process (Node's process.hrtime, Go's runtime.nanotime). The
+   relay is Go 1.25.3, static linux/amd64 (sha256 0a341ede43d2…).
+
+Verdicts for the controller (each question's discard rule in the document):
+- Q1: the gate holds an engine-started turn in -p; OX10 stays adoptable. The bridge itself needs an engine past the pin
+  (session.append), so O12 M4's observer is tested on 2.1.316, not on the fixture pin.
+- Q2: both rungs end -p within 2 s and take the shell with them; the "ignored" branch never arose, so M5's
+  term_ignored path is defensive, not observed. end_session exits 1 with a turn running.
+- Q3: M3's table holds as written for permissions (redelivered by id), tools/call (kept) and hook callbacks (retired:
+  answering {} later is harmless, the engine has already cancelled them and failed the tool with a retry text); a
+  snapshot follows re-initialize, so M3's seeding of tasks may also take it. `ambient` is never present, so MAWS's
+  `ambient === true` reads false for every task observed.
+- Q4: registration by get_settings cannot work: it carries no mcpServers. mcp_status carries each stdio server's command
+  and args (the launch's and the user's alike), and is the source to use. Tools' shells are never in claude's group, so
+  the tree rule (D17) is the one that sees them. Startup can show transient engine children (an `rg` scan, a zombie).
+- Q5: the flag exists on the pin and holds the fire; without it a resumed session runs cron turns before any initialize.
+- Q6: under the gate on the bound itself (the hosted totals, 297/402 µs and 327/446 µs at p50/p95, under 500/1500),
+  with the live segment (158/248 µs and 182/278 µs) under it too; M2 may start. The Mac reading is M6's.
+
+Notes.
+- 2.1.316 sends a `role: "system"` message after the last user message in every main request (the budget line); a stub
+  keyed on the last message reads nothing there, so this scenario reads the last user message.
+- The `rest` tree of 2.1.283 has no sminos child (the module never loaded); its process group and state columns are the
+  same as 2.1.316's otherwise.
+- Fixtures carry the VM's scratch paths under /tmp and /home/o16probe; no credential was on the VM user, and the harness
+  redaction ran on every row.

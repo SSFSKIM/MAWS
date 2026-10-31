@@ -1,14 +1,19 @@
 // P3-HD M3a: the sealed store of MAWS's own OAuth grants (docs/doperpowers/plans/2026-10-17-p3-hd-direct-route.md M3,
 // Decision Log 13/18; P3 co-work Decision Log 98 (5), its per-connection refinement by the architect, 2026-10-17).
 //
-// One file per saved connection, `<directory>/<connectionId>.sealed`: a plain format line, then the base64 of
-// safeStorage's ciphertext of one version-1 JSON record. The name is the opaque, stable `connectionId`; the identity
-// (exact request URL and configured entry) and every token live only inside the ciphertext, since a request URL's query
-// can itself be a secret. Deleting a connection is an unlink, so a record that no longer decrypts (a rotated or denied
-// key, a damaged file) is still listed by id and can be forgotten.
+// One file per saved connection, `<directory>/<connectionId>.sealed`: a plain format line, then the base64 of the
+// sealer's ciphertext of one version-1 JSON record. The name is the opaque, stable `connectionId`; the identity (exact
+// request URL and configured entry) and every token live only inside the ciphertext, since a request URL's query can
+// itself be a secret. Deleting a connection is an unlink, so a record that no longer decrypts (a rotated or denied key,
+// a damaged file) is still listed by id and can be forgotten.
 //
-// - Fails closed: without asynchronous safeStorage, nothing is read or written and nothing is ever stored plain. An
-//   empty store is answered without touching safeStorage.
+// The format line is the sealer's own (P5 O4 M1, docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §A
+// and D21): Electron's safeStorage writes `maws-connector-oauth/1`, the machine's key file `/2`. A file whose line is
+// not this store's sealer's is unreadable in the same sense, read without asking the sealer: listed by id, failed
+// closed on by the provider, forgotten by `remove`.
+//
+// - Fails closed: without the sealer, nothing is read or written and nothing is ever stored plain. A store with no record
+//   of its own sealer's format (empty, or only other sealers' files) is listed without touching the sealer.
 // - Late saves cannot resurrect: `claim` takes a connection's generation synchronously; `remove` advances it before
 //   any await. A save encrypts outside any lock, then checks its claim and replaces the file atomically under a short
 //   lock that holds only file operations, so a slow keychain answer for one connection never delays another's removal.
@@ -25,29 +30,17 @@ import { join } from 'node:path';
 import * as z from 'zod';
 import { OAuthClientInformationFullSchema, OAuthMetadataSchema, OpenIdProviderDiscoveryMetadataSchema } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { atomicWriteFile } from '@shared/fs/atomic-write';
-import type { ConnectorOAuthGrant, ConnectorOAuthIdentity, ConnectorOAuthRecord } from './oauth-types';
-
-export interface ConnectorOAuthSealer {
-  available(): Promise<boolean>;
-  seal(text: string): Promise<Buffer>;
-  open(sealed: Buffer): Promise<{ text: string; reseal: boolean }>;
-}
-
-// Electron's safeStorage's asynchronous API, as far as the sealer calls it (a local interface, so this module stays free
-// of Electron; O4 replaces the store's custody).
-export interface AsyncSafeStorage {
-  isAsyncEncryptionAvailable(): Promise<boolean>;
-  encryptStringAsync(plainText: string): Promise<Buffer>;
-  decryptStringAsync(encrypted: Buffer): Promise<{ result: string; shouldReEncrypt: boolean }>;
-}
+import type { ConnectorOAuthGrant, ConnectorOAuthIdentity, ConnectorOAuthRecord } from '@shared/connectors/oauth-types';
+import { SEALED_FORMAT_V1, type AsyncSafeStorage, type ConnectorOAuthSealer } from '@shared/connectors/sealer';
 
 // Electron's safeStorage through its asynchronous API only, each call after app readiness: the synchronous methods
-// can block main's event loop on a keychain prompt.
+// can block main's event loop on a keychain prompt. Its files are format 1; it binds no connection id.
 export function electronOAuthSealer(
   safeStorage: AsyncSafeStorage,
   ready: () => Promise<unknown>,
 ): ConnectorOAuthSealer {
   return {
+    format: SEALED_FORMAT_V1,
     async available() {
       try {
         await ready();
@@ -104,7 +97,6 @@ export interface ConnectorOAuthStore {
 
 export const OAUTH_STORE_RECORD_LIMIT = 256;
 const FILE_LIMIT_BYTES = 1_048_576;
-const FORMAT = 'maws-connector-oauth/1';
 const SUFFIX = '.sealed';
 const ConnectionId = z.uuid();
 
@@ -193,7 +185,7 @@ export function createConnectorOAuthStore(deps: { directory: string; sealer: Con
       if (!info.isFile() || info.size > FILE_LIMIT_BYTES) throw new ConnectorOAuthStoreError('unreadable');
       const text = await handle.readFile('utf8');
       const [format, body, rest] = text.split('\n');
-      if (format !== FORMAT || !body || (rest !== undefined && rest !== '')) throw new ConnectorOAuthStoreError('unreadable');
+      if (format !== sealer.format || !body || (rest !== undefined && rest !== '')) throw new ConnectorOAuthStoreError('unreadable');
       return Buffer.from(body, 'base64');
     } catch (error) {
       if (error instanceof ConnectorOAuthStoreError) throw error;
@@ -210,11 +202,11 @@ export function createConnectorOAuthStore(deps: { directory: string; sealer: Con
   async function seal(record: ConnectorOAuthRecord): Promise<string> {
     let sealed: Buffer;
     try {
-      sealed = await sealer.seal(JSON.stringify({ version: 1, ...record }));
+      sealed = await sealer.seal(JSON.stringify({ version: 1, ...record }), record.connectionId);
     } catch {
       throw new ConnectorOAuthStoreError('unavailable');
     }
-    const text = `${FORMAT}\n${sealed.toString('base64')}\n`;
+    const text = `${sealer.format}\n${sealed.toString('base64')}\n`;
     if (Buffer.byteLength(text, 'utf8') > FILE_LIMIT_BYTES) throw new ConnectorOAuthStoreError('tooLarge');
     return text;
   }
@@ -247,15 +239,28 @@ export function createConnectorOAuthStore(deps: { directory: string; sealer: Con
     });
   }
 
-  async function readRecord(id: string): Promise<ConnectorOAuthRecord | null> {
+  // What a record's file held when it was read, with the claim and commit count taken before the read, so a
+  // re-encryption of it never replaces a newer commit.
+  interface SealedRead { claim: ConnectorOAuthClaim; written: number; sealed: Buffer }
+
+  async function readSealedRecord(id: string): Promise<SealedRead | null> {
     const claim = { connectionId: id, generation: generationOf(id) };
     const written = writes.get(id) ?? 0;
     const sealed = await readSealed(id);
-    if (sealed === null) return null;
+    return sealed === null ? null : { claim, written, sealed };
+  }
+
+  async function readRecord(id: string): Promise<ConnectorOAuthRecord | null> {
+    const read = await readSealedRecord(id);
+    if (read === null) return null;
     await requireAvailable();
+    return openRecord(id, read);
+  }
+
+  async function openRecord(id: string, { claim, written, sealed }: SealedRead): Promise<ConnectorOAuthRecord> {
     let opened: { text: string; reseal: boolean };
     try {
-      opened = await sealer.open(sealed);
+      opened = await sealer.open(sealed, id);
     } catch {
       throw new ConnectorOAuthStoreError('unreadable');
     }
@@ -272,16 +277,25 @@ export function createConnectorOAuthStore(deps: { directory: string; sealer: Con
 
   return {
     async list() {
-      const found = await names();
-      if (found.length === 0) return [];
-      await requireAvailable();
-      const listed: ConnectorOAuthSaved[] = [];
-      for (const name of found) {
+      // Every file's format line first: only a record of this sealer's own format asks it for availability, so
+      // another sealer's files are listed by id with no sealer at all.
+      const reads: { connectionId: string; read: SealedRead | 'unreadable' }[] = [];
+      for (const name of await names()) {
         const connectionId = name.slice(0, -SUFFIX.length);
         try {
-          const record = await readRecord(connectionId);
-          if (record === null) continue;
-          const { identity, issuer, resource, savedAt, tokens } = record;
+          const read = await readSealedRecord(connectionId);
+          if (read !== null) reads.push({ connectionId, read });
+        } catch (error) {
+          if (!(error instanceof ConnectorOAuthStoreError) || error.code !== 'unreadable') throw error;
+          reads.push({ connectionId, read: 'unreadable' });
+        }
+      }
+      if (reads.some(({ read }) => read !== 'unreadable')) await requireAvailable();
+      const listed: ConnectorOAuthSaved[] = [];
+      for (const { connectionId, read } of reads) {
+        try {
+          if (read === 'unreadable') throw new ConnectorOAuthStoreError('unreadable');
+          const { identity, issuer, resource, savedAt, tokens } = await openRecord(connectionId, read);
           listed.push({ state: 'sealed', connectionId, identity, issuer, resource, savedAt, ...(tokens.expiresAt !== undefined && { expiresAt: tokens.expiresAt }), refreshable: tokens.refreshToken !== undefined });
         } catch (error) {
           if (!(error instanceof ConnectorOAuthStoreError) || error.code !== 'unreadable') throw error;

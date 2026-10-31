@@ -12,8 +12,9 @@ import type { DirectCredentialPrepared } from './direct-route';
 import type { ConnectorOAuthFlow } from './oauth-flow';
 import { ConnectorOAuthError } from './oauth-flow';
 import { createConnectorOAuthProvider, OAUTH_FORGET_READ_TIMEOUT_MS, OAUTH_HOST_CLOSE_TIMEOUT_MS, type ConnectorOAuthProvider, type ConnectorOAuthProviderDeps } from './oauth-provider';
-import { createConnectorOAuthStore, type ConnectorOAuthSealer, type ConnectorOAuthStore } from './oauth-store';
-import { oauthIdentityOf, type ConnectorOAuthGrant, type ConnectorOAuthIdentity, type ConnectorOAuthTokens } from './oauth-types';
+import { SEALED_FORMAT_V1, type ConnectorOAuthSealer } from '@shared/connectors/sealer';
+import { createConnectorOAuthStore, type ConnectorOAuthStore } from './oauth-store';
+import { oauthIdentityOf, type ConnectorOAuthGrant, type ConnectorOAuthIdentity, type ConnectorOAuthTokens } from '@shared/connectors/oauth-types';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults'; // P5 O3-A
 import { ConfiguredDeliverySources } from '../../engine-host/connectors/configured-delivery'; // P5 O3-A
 import { publicSource } from '../../engine-host/connectors/direct-calls'; // P5 O3-A
@@ -59,6 +60,7 @@ function deferred<T>(): Deferred<T> {
 let events: string[];
 
 class FakeSealer implements ConnectorOAuthSealer {
+  readonly format = SEALED_FORMAT_V1;
   isAvailable = true;
   failOpen = false;
   openHangs = false; // a keychain prompt nobody answers

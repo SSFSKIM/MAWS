@@ -5,8 +5,10 @@ import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, s
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createConnectorOAuthStore, electronOAuthSealer, type ConnectorOAuthSealer } from './oauth-store';
-import type { ConnectorOAuthGrant, ConnectorOAuthIdentity } from './oauth-types';
+import type { ConnectorOAuthGrant, ConnectorOAuthIdentity } from '@shared/connectors/oauth-types';
+import { SEALED_FORMAT_V1, SEALED_FORMAT_V2, type ConnectorOAuthSealer } from '@shared/connectors/sealer';
+import { fileKeyCustody } from '../../services/connectors/custody';
+import { createConnectorOAuthStore, electronOAuthSealer } from './oauth-store';
 
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
@@ -33,7 +35,9 @@ const grant = (patch: Partial<ConnectorOAuthGrant> = {}): ConnectorOAuthGrant =>
 
 // A reversible stand-in for safeStorage: the bytes on disk are not the plaintext. `gate` holds the next seal until released.
 class FakeSealer implements ConnectorOAuthSealer {
+  format = SEALED_FORMAT_V1;
   isAvailable = true;
+  readonly ids: string[] = []; // the connection id each seal and open was given
   failOpen = false;
   reseal = false;
   seals = 0;
@@ -45,14 +49,16 @@ class FakeSealer implements ConnectorOAuthSealer {
     return release;
   }
   async available() { return this.isAvailable; }
-  async seal(text: string) {
+  async seal(text: string, id: string) {
+    this.ids.push(`seal:${id}`);
     this.seals += 1;
     const gate = this.held.shift();
     if (gate) await gate;
     if (!this.isAvailable) throw new Error('keychain denied');
     return Buffer.from(Buffer.from(text, 'utf8').map((byte) => byte ^ 0x5a));
   }
-  async open(sealed: Buffer) {
+  async open(sealed: Buffer, id: string) {
+    this.ids.push(`open:${id}`);
     this.opens += 1;
     if (this.failOpen) throw new Error('decrypt failed');
     return { text: Buffer.from(sealed.map((byte) => byte ^ 0x5a)).toString('utf8'), reseal: this.reseal };
@@ -177,6 +183,52 @@ describe('ConnectorOAuthStore', () => {
     expect(sealer.opens).toBe(0);
   });
 
+  // P5 O4 M1 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §A, D21): the format line is the sealer's,
+  // and a file another sealer wrote is unreadable in the existing sense, read without asking this one.
+  it("writes its sealer's format line and hands the sealer the connection id", async () => {
+    sealer.format = 'maws-connector-oauth/test';
+    const s = store();
+    await s.save(s.claim(A), identity(), grant());
+    expect(readFileSync(join(dir, `${A}.sealed`), 'utf8').split('\n')[0]).toBe('maws-connector-oauth/test');
+    expect(await store().read(A)).toMatchObject({ connectionId: A });
+    expect(sealer.ids).toEqual([`seal:${A}`, `open:${A}`]);
+  });
+
+  it("reads a file of another sealer's format as unreadable without asking the sealer, and forgets it", async () => {
+    const s = store();
+    await s.save(s.claim(A), identity(), grant());
+    sealer.format = SEALED_FORMAT_V2; // the same files, now under a store whose sealer writes the next format
+    const touched = [vi.spyOn(sealer, 'available'), vi.spyOn(sealer, 'open'), vi.spyOn(sealer, 'seal')];
+    await expect(store().read(A)).rejects.toMatchObject({ code: 'unreadable' });
+    for (const spy of touched) expect(spy).not.toHaveBeenCalled();
+    expect(await store().remove(A)).toBe(true);
+    expect(sealedFiles()).toEqual([]);
+  });
+
+  it('lists a directory of foreign files alone by id, never asking the sealer for availability', async () => {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(join(dir, `${A}.sealed`), `${SEALED_FORMAT_V1}\n${Buffer.from('legacy').toString('base64')}\n`, { mode: 0o600 });
+    writeFileSync(join(dir, `${B}.sealed`), 'garbage', { mode: 0o600 });
+    sealer.format = SEALED_FORMAT_V2;
+    sealer.isAvailable = false;
+    const touched = [vi.spyOn(sealer, 'available'), vi.spyOn(sealer, 'open'), vi.spyOn(sealer, 'seal')];
+    const listed = await store().list();
+    expect(listed).toHaveLength(2);
+    expect(listed).toEqual(expect.arrayContaining([{ state: 'unreadable', connectionId: A }, { state: 'unreadable', connectionId: B }]));
+    for (const spy of touched) expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("lists its own records sealed and another sealer's unreadable, side by side", async () => {
+    const s = store();
+    await s.save(s.claim(A), identity(), grant());
+    writeFileSync(join(dir, `${B}.sealed`), `maws-connector-oauth/0\n${Buffer.from('older').toString('base64')}\n`, { mode: 0o600 });
+    const listed = await store().list();
+    expect(listed).toEqual(expect.arrayContaining([expect.objectContaining({ state: 'sealed', connectionId: A }), { state: 'unreadable', connectionId: B }]));
+    expect(listed).toHaveLength(2);
+    sealer.isAvailable = false; // one record of its own is enough to need the sealer: fails closed as before
+    await expect(store().list()).rejects.toMatchObject({ code: 'unavailable' });
+  });
+
   it('a save still encrypting when its connection is removed never lands (no resurrection)', async () => {
     const s = store();
     const claim = s.claim(A);
@@ -291,6 +343,16 @@ describe('ConnectorOAuthStore', () => {
 });
 
 describe('electronOAuthSealer', () => {
+  it("names the Keychain's format, version 1", () => {
+    const adapter = electronOAuthSealer({
+      isAsyncEncryptionAvailable: async () => true,
+      encryptStringAsync: async () => Buffer.alloc(0),
+      decryptStringAsync: async () => ({ result: '', shouldReEncrypt: false }),
+    }, async () => {});
+    expect(adapter.format).toBe(SEALED_FORMAT_V1);
+    expect(adapter.format).toBe('maws-connector-oauth/1');
+  });
+
   it('uses only the asynchronous safeStorage API, after app readiness', async () => {
     const order: string[] = [];
     let ready!: () => void;
@@ -307,7 +369,7 @@ describe('electronOAuthSealer', () => {
     expect(order).toEqual(['wait']);
     ready();
     expect(await availability).toBe(true);
-    expect(await adapter.open(await adapter.seal('hello'))).toEqual({ text: 'hello', reseal: true });
+    expect(await adapter.open(await adapter.seal('hello', A), A)).toEqual({ text: 'hello', reseal: true });
     expect(order).toEqual(['wait', 'ready', 'available', 'wait', 'ready', 'encrypt', 'wait', 'ready', 'decrypt']);
   });
 
@@ -318,5 +380,33 @@ describe('electronOAuthSealer', () => {
       decryptStringAsync: async () => ({ result: '', shouldReEncrypt: false }),
     }, async () => {});
     expect(await adapter.available()).toBe(false);
+  });
+});
+
+// P5 O4 M1: the store over the machine's file key (src/services/connectors/custody.ts, Interfaces §A); the backup
+// exclusion is a fake. Here until M2 moves the store beside the custody.
+describe('the store over the file key', () => {
+  const fileKeyStore = () => createConnectorOAuthStore({ directory: dir, sealer: fileKeyCustody(dir, { excludeFromBackup: async () => true }), now: () => 1_700_000_100_000 });
+
+  it('writes format 2 and reads the record back after a relaunch', async () => {
+    const first = fileKeyStore();
+    await first.save(first.claim(A), identity(), grant());
+    expect(readFileSync(join(dir, `${A}.sealed`), 'utf8').split('\n')[0]).toBe(SEALED_FORMAT_V2);
+    expect(await fileKeyStore().read(A)).toEqual({ ...grant(), connectionId: A, identity: identity(), savedAt: 1_700_000_100_000 });
+  });
+
+  it('a file copied under another id is unreadable', async () => {
+    const first = fileKeyStore();
+    await first.save(first.claim(A), identity(), grant());
+    writeFileSync(join(dir, `${B}.sealed`), readFileSync(join(dir, `${A}.sealed`)), { mode: 0o600 });
+    await expect(fileKeyStore().read(B)).rejects.toMatchObject({ code: 'unreadable' });
+    expect(await fileKeyStore().list()).toEqual(expect.arrayContaining([{ state: 'unreadable', connectionId: B }]));
+  });
+
+  it("lists a profile's format 1 records as unreadable rows without asking the file key", async () => {
+    const legacy = store(); // the Electron-shaped fake, format 1
+    await legacy.save(legacy.claim(A), identity(), grant());
+    expect(await fileKeyStore().list()).toEqual([{ state: 'unreadable', connectionId: A }]);
+    expect(readdirSync(dir)).toEqual([`${A}.sealed`]); // no key was made for a listing with no record of its own
   });
 });

@@ -90,7 +90,7 @@ vi.mock('./widgets/fixture-backend', () => ({ installWidgetBackend: () => null }
 // C11 end
 // P5 O8 M1: the org session main makes, its deps kept; backup exclusion stubbed, so no test runs osascript
 const org = vi.hoisted(() => ({ deps: [] as Array<{ excludeFromBackup?(path: string): Promise<boolean> }>, exclude: vi.fn<(path: string) => Promise<boolean>>(async () => true) }));
-vi.mock('./device/backup-exclusion', () => ({ excludeFromBackup: org.exclude }));
+vi.mock('@shared/fs/backup-exclusion', () => ({ excludeFromBackup: org.exclude }));
 vi.mock('./org/org-session', async (original) => {
   const real = await original<typeof import('./org/org-session')>();
   return { ...real, createOrgSession: (deps: Parameters<typeof real.createOrgSession>[0]) => (org.deps.push(deps), real.createOrgSession(deps)) };
