@@ -5,6 +5,8 @@
 // P5 O6 M2 (OX2): every invoke carries the machine it goes to, and every event the machine it came from, as the IPC
 // message's last argument. The preload checks nothing about a machine (main's router validates it); an invoke that names
 // none is the local machine's, the raw bridge's convenience for e2e specs and harness pages over bare ids.
+// P5 O7 M4 (Interfaces §O): the last argument may instead be `{machine, session?}`, the session a path-class command is
+// made from; it crosses as it is, and main's router reads both forms.
 import type { IpcRenderer, WebUtils } from 'electron';
 import { commandChannel, eventChannel, isBridgedCommandName, isBridgedEventName } from '@shared/ipc/names';
 import type { PreloadBridge } from '@shared/ipc/schema';
@@ -17,12 +19,12 @@ export function createBridge(ipc: BridgeTransport, localMachine: MachineRef, fil
   return {
     localMachine,
     // Every outcome is a `CommandResult`: an unknown name, a rejected transport and main's own answer alike.
-    invoke: async (name, input, machine = localMachine) => {
+    invoke: async (name, input, target = localMachine) => {
       if (!isBridgedCommandName(name)) {
         return { ok: false, error: { code: 'unknown_command', message: `unknown command: ${String(name)}` } };
       }
       try {
-        return await ipc.invoke(commandChannel(name), input, machine);
+        return await ipc.invoke(commandChannel(name), input, target);
       } catch (error) {
         return { ok: false, error: { code: 'internal', message: error instanceof Error ? error.message : String(error) } };
       }

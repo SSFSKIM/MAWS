@@ -8,6 +8,7 @@ import type { IpcError } from './errors';
 import type { BridgedCommandName, BridgedEventName, MainOnlyCommandName } from './names';
 import type { PathCommandName } from './routes'; // P5 O6 M2
 import type { MachineRef } from '../machine/ref'; // P5 O6 M2
+import type { AppSessionId } from '../graph/ids'; // P5 O7 M4
 import * as attention from './schema/attention';
 import type { CommandSpec, Namespace } from './schema/common';
 import * as engine from './schema/engine';
@@ -325,9 +326,16 @@ export interface MawsBridge {
 
 // The whole surface the preload exposes as `window.maws`; nothing else is bridged. Typed by name as the client is (the ids
 // it carries are bare, which the same branded types describe), so a spec's raw call reads its answer typed.
+// P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O, `MainContext.session`): the invoke's
+// last argument is its machine, or its machine with the session a path-class command is made from (the session's bare id
+// on that machine), which main sends with the command to a machine that bounds a path read by its session.
+export interface InvokeTarget {
+  machine: MachineRef;
+  session?: AppSessionId;
+}
 export interface PreloadBridge {
   readonly localMachine: MachineRef;
-  invoke<N extends CommandName>(name: N, input: CommandInput<N>, machine?: MachineRef): Promise<CommandResult<N>>; // no machine: the local one
+  invoke<N extends CommandName>(name: N, input: CommandInput<N>, target?: MachineRef | InvokeTarget): Promise<CommandResult<N>>; // no machine: the local one
   on<N extends EventName>(name: N, listener: (payload: EventPayload<N>, machine: MachineRef | undefined) => void): () => void;
   pathForFile(file: File): string;
 }

@@ -131,6 +131,24 @@ describe('main ipc router', () => {
       expect(handler).toHaveBeenCalledOnce(); // the local machine's stays local
     });
 
+    // P5 O7 M4 (Interfaces §O): the preload envelope's `{machine, session}` form
+    it('reads the machine with the session a command was made from, handing it on as ctx.session; a malformed one is refused', async () => {
+      const remote = vi.fn<RemoteDispatch>(async () => ({ ok: true, value: { sessions: [], revision: 7 } }));
+      await load(DEV_URL, undefined, remote);
+      const handler = vi.fn<(input: unknown, context: MainContext) => typeof LIGHT>(() => LIGHT);
+      router.registerMainHandler('settings.get', handler);
+      const event = appWindow();
+      await expect(invoke(event, 'session.list', {}, { machine: OTHER, session: 'app-1' })).resolves.toEqual({ ok: true, value: { sessions: [], revision: 7 } });
+      await invoke(event, 'session.list', {}, { machine: OTHER });
+      expect(remote.mock.calls.map(([machine, , , context]) => [machine, context.session])).toEqual([[OTHER, 'app-1'], [OTHER, undefined]]);
+      await invoke(event, 'settings.get', undefined, { machine: LOCAL, session: 'app-2' });
+      expect(handler.mock.calls.map(([, context]) => [context.target, context.session])).toEqual([[LOCAL, 'app-2']]);
+      for (const target of [{ machine: 'a/b' }, { session: 'app-1' }, { machine: OTHER, session: 7 }, { machine: OTHER, extra: true }]) {
+        await expect(invoke(event, 'session.list', {}, target)).resolves.toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+      }
+      expect(remote).toHaveBeenCalledTimes(2);
+    });
+
     it('answers internal when the connection manager rejects, and still refuses a client command for another machine itself', async () => {
       const remote = vi.fn<RemoteDispatch>(async () => {
         throw new Error('the manager broke');

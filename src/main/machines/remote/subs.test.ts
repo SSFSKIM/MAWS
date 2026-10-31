@@ -7,9 +7,9 @@ import { MAX_SUBS, timingOf } from './timing';
 
 function harness() {
   const sent: DeviceMessage[] = [];
-  const channel = { current: true };
+  const channel = { current: true, peer: [] as string[] };
   const logs: string[] = [];
-  const table = new SubTable({ send: (m) => (channel.current ? (sent.push(m), true) : false), current: () => channel.current, timing: timingOf(), log: (l) => void logs.push(l) });
+  const table = new SubTable({ send: (m) => (channel.current ? (sent.push(m), true) : false), current: () => channel.current, peerCapabilities: () => (channel.current ? channel.peer : null), timing: timingOf(), log: (l) => void logs.push(l) });
   const heard: Array<[string, ...unknown[]]> = [];
   const sink: SubscriptionSink = {
     subbed: (mode, at) => void heard.push(['subbed', mode, at]),
@@ -176,5 +176,45 @@ describe('endings', () => {
     const s = h.table.subscribe({ session: { lane: 'A', id: 'la-1' } }, h.sink, null);
     h.table.onCurrent();
     expect(h.subs().map((m) => m.sub)).toEqual([s.id, s.id]);
+  });
+});
+
+// P5 O7 M4 (§R): a session's checkout feed, behind `rl2.feeds`.
+describe('feeds', () => {
+  it('sends a checkout feed with no view and no cursor to a peer that lists `rl2.feeds`, again on each channel, deduping by (epoch, seq)', async () => {
+    const h = harness();
+    h.channel.peer = ['rl2.feeds'];
+    const s = h.table.subscribe({ session: { lane: 'B', id: 'app-1' }, view: 'full', feed: 'checkout' }, h.sink, null);
+    expect(h.subs()).toEqual([{ t: 'sub', sub: s.id, session: { lane: 'B', id: 'app-1' }, feed: 'checkout', cursor: null, credit: 1024 * 1024 }]);
+    h.table.receive({ t: 'subbed', sub: s.id, mode: 'snapshot', epoch: 'checkout:boot', seq: 0 });
+    h.table.receive({ t: 'ev', sub: s.id, epoch: 'checkout:boot', seq: 1, body: { name: 'files.changed', payload: {} } });
+    h.table.receive({ t: 'ev', sub: s.id, epoch: 'checkout:boot', seq: 1, body: { name: 'files.changed', payload: {} } });
+    expect(h.heard.filter((x) => x[0] === 'event')).toHaveLength(1);
+    h.table.onCurrent();
+    expect(h.subs().at(-1)).toEqual({ t: 'sub', sub: s.id, session: { lane: 'B', id: 'app-1' }, feed: 'checkout', cursor: null, credit: 1024 * 1024 });
+    // a new opening starts the count again
+    h.table.receive({ t: 'subbed', sub: s.id, mode: 'snapshot', epoch: 'checkout:boot', seq: 0 });
+    h.table.receive({ t: 'ev', sub: s.id, epoch: 'checkout:boot', seq: 1, body: { name: 'git.changed', payload: {} } });
+    expect(h.heard.filter((x) => x[0] === 'event')).toHaveLength(2);
+  });
+
+  it('ends a feed `not-offered`, never sent, for a peer that lists no `rl2.feeds`, on its subscribe or on the next channel', async () => {
+    const h = harness();
+    h.table.subscribe({ session: { lane: 'B', id: 'app-1' }, feed: 'checkout' }, h.sink, null);
+    await Promise.resolve();
+    expect(h.subs()).toEqual([]);
+    expect(h.heard).toEqual([['ended', 'not-offered']]);
+    expect(h.table.size).toBe(0);
+
+    h.channel.peer = ['rl2.feeds'];
+    const later = harness();
+    later.channel.peer = ['rl2.feeds'];
+    later.table.subscribe({ session: { lane: 'B', id: 'app-1' }, feed: 'checkout' }, later.sink, null);
+    later.channel.peer = []; // the next channel's peer, an older build
+    later.table.onCurrent();
+    await Promise.resolve();
+    expect(later.subs()).toHaveLength(1);
+    expect(later.heard).toEqual([['ended', 'not-offered']]);
+    expect(later.table.size).toBe(0);
   });
 });

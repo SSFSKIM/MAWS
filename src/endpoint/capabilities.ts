@@ -10,4 +10,6 @@ export const ENDPOINT_CAPABILITIES = [
   'rl2.call-session',
   // M4: a `sub` may name a feed (`feed`, §R): `checkout` here; `attention` is read and refused `not-offered` until M6.
   'rl2.feeds',
+  // M4 (acceptance 12): `session.events` takes `maxBytes` and answers `omitted` (the registry this build's front reads).
+  'rl2.events-budget',
 ] as const;

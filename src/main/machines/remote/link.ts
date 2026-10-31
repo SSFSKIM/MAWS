@@ -42,12 +42,15 @@ import {
   type DeviceMessage,
   type EndpointMessage,
   type OrgState,
+  type SessionRef,
 } from '../../../../apps/org-protocol/src/index.ts';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import type { OrgSession, SignedIn } from '../../org/session';
 import type { LinkState, MachineLink } from '../manager';
 import { ActTable, type ActHandle, type ActRequest } from './acts';
+import { peerLists } from './capabilities';
 import { CARRIER_CLOSED, dialDirect as dialDirectCarrier, isTailnetAddress, openRelaySocket, raceDirect, RelayUpgradeError, type RelaySocket } from './carriers';
 import { dispatchOverLink } from './dispatch';
 import type { EndpointRecords } from './endpoint-records';
@@ -77,7 +80,11 @@ export interface RemoteLink extends MachineLink {
   onCaps(listener: (caps: DeviceCaps) => void): () => void;
   /** The current channel's `h2` capabilities (capabilities.ts); null while no channel is current (P5 O7 M2). */
   peerCapabilities(): readonly string[] | null;
-  call(name: string, input: unknown, options?: { timeoutMs?: number }): Promise<CallResult>;
+  /**
+   * `session` (P5 O7 M4): the session a path-class read is made from, sent as `call.session` only to a peer that listed
+   * `rl2.call-session` (checked at each send, so a call carried to the next channel follows that channel's peer).
+   */
+  call(name: string, input: unknown, options?: { timeoutMs?: number; session?: SessionRef }): Promise<CallResult>;
   act(request: ActRequest): ActHandle;
   subscribe(request: SubscribeRequest, sink: SubscriptionSink): Subscription;
   /** `person`: a person acted on this machine (also lifts `refused`). */
@@ -108,7 +115,7 @@ type Internal = 'connecting' | 'up' | 'reconnecting' | 'down' | 'refused' | 'clo
 type Trust = { generation: number; keys: string[]; identity: string };
 type Current = { channel: Channel; carrier: Carrier; serial: number; trust: Trust };
 type Attempt = { channel: Channel; carrier: Carrier; trust: Trust } | { failed: string };
-type PendingCall = { id: string; name: string; input: unknown; sentOn: number | null; timer: ReturnType<typeof setTimeout>; resolve(result: CallResult): void };
+type PendingCall = { id: string; name: string; input: unknown; session: SessionRef | undefined; sentOn: number | null; timer: ReturnType<typeof setTimeout>; resolve(result: CallResult): void };
 
 const REPORTED: Record<Internal, LinkState> = { connecting: 'connecting', up: 'up', reconnecting: 'up', down: 'down', refused: 'down', closed: 'down' };
 
@@ -209,7 +216,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
 
   const peerCapabilities = (): readonly string[] | null => current?.channel.peer.capabilities ?? null;
   const acts = new ActTable({ machine: ref, signedIn: () => deps.session.current(), send, current: () => current !== null, peerCapabilities, timing, now, log });
-  const subs = new SubTable({ send, current: () => current !== null, timing, log });
+  const subs = new SubTable({ send, current: () => current !== null, peerCapabilities, timing, log });
 
   // The carrier a reported `up` stands on: the last current channel's, so a reconnect within the grace over the same
   // carrier is heard as nothing, and a switch is heard.
@@ -647,8 +654,19 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     if (current === null) return;
     for (const pending of calls.values()) {
       if (pending.sentOn === current.serial) continue;
-      if (send({ t: 'call', id: pending.id, name: pending.name, input: pending.input ?? null })) pending.sentOn = current.serial;
+      sendCall(pending);
     }
+  }
+
+  /**
+   * A call on the current channel. A void input goes as null: JSON drops an undefined `input`, and a `call` without one is
+   * malformed, which closes the channel with every stream on it; the endpoint reads null back as no input. Its session
+   * goes only to a peer that reads it (P5 O7 M4: an older endpoint offers no row that needs it).
+   */
+  function sendCall(pending: PendingCall): void {
+    if (current === null) return;
+    const session = pending.session !== undefined && peerLists({ peerCapabilities }, 'rl2.call-session') ? { session: pending.session } : {};
+    if (send({ t: 'call', id: pending.id, name: pending.name, input: pending.input ?? null, ...session })) pending.sentOn = current.serial;
   }
 
   function answered(message: Extract<EndpointMessage, { t: 'result' }>): void {
@@ -686,9 +704,10 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       capsListeners.add(listener);
       return () => void capsListeners.delete(listener);
     },
-    // The caller is the channel's member and device (RL §5.5): its ClientRef is not sent.
-    dispatch(commandName: CommandName, input: unknown): Promise<CommandResult<CommandName>> {
-      return dispatchOverLink(link, commandName, input);
+    // The caller is the channel's member and device (RL §5.5): its ClientRef is not sent. P5 O7 M4: the session a
+    // path-class read is made from goes as the call's `session`.
+    dispatch(commandName: CommandName, input: unknown, _client: unknown, session?: AppSessionId): Promise<CommandResult<CommandName>> {
+      return dispatchOverLink(link, commandName, input, session);
     },
     onState(listener) {
       stateListeners.add(listener);
@@ -707,6 +726,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
           id,
           name: callName,
           input,
+          session: options.session,
           sentOn: null,
           resolve,
           timer: setTimeout(() => {
@@ -716,9 +736,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
           }, timeoutMs),
         };
         calls.set(id, pending);
-        // A void input goes as null: JSON drops an undefined `input`, and a `call` without one is malformed, which closes
-        // the channel with every stream on it. The endpoint reads null back as no input.
-        if (current !== null && send({ t: 'call', id, name: callName, input: input ?? null })) pending.sentOn = current.serial;
+        sendCall(pending);
       });
     },
     act: (request) => acts.act(request, ended()),

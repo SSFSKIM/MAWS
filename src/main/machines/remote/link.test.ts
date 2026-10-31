@@ -637,6 +637,24 @@ describe('calls', () => {
     expect(h.last().of('call')).toEqual([{ t: 'call', id: expect.any(String), name: 'machine.identity', input: null }]);
   });
 
+  // P5 O7 M4 (§M): `call.session` only to a peer that reads it, judged per channel for a call carried over.
+  it('names the call’s session to a peer that lists `rl2.call-session`, and leaves it out for one that does not', async () => {
+    const h = await harness();
+    h.peer.capabilities = ['rl2.call-session'];
+    await settle();
+    const session = { lane: 'B' as const, id: 'app-1' };
+    void h.link.call('git.status', { directory: '/r' }, { session });
+    expect(h.last().of('call')).toEqual([{ t: 'call', id: expect.any(String), name: 'git.status', input: { directory: '/r' }, session }]);
+    const carried = h.link.call('git.status', { directory: '/r' }, { session });
+    h.peer.capabilities = [];
+    h.last().end('carrier');
+    await settle();
+    // both calls in flight carried to the new channel, neither with the session its peer would not read
+    const bare = { t: 'call', id: expect.any(String), name: 'git.status', input: { directory: '/r' } };
+    expect(h.last().of('call')).toEqual([bare, bare]);
+    void carried;
+  });
+
   it('fails `timeout` when the channel holds and the endpoint never answers', async () => {
     const h = await harness();
     await settle();

@@ -21,6 +21,7 @@
 //   `connecting` until their link first answers, closed and dropped when the roster drops them, renamed when the head
 //   renames them; `known-machines.json` stays the socket links' file. One link up per ref spans both kinds: a link that
 //   comes `up` while another entry already reaches its ref `up` is closed.
+import type { AppSessionId } from '@shared/graph/ids';
 import type { ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
@@ -36,7 +37,9 @@ export interface MachineLink {
   readonly machine: MachineRef | null; // null until its identity is known
   readonly name: string | null; // the far machine's display name, with its identity
   state(): LinkState;
-  dispatch(name: CommandName, input: unknown, client: ClientRef): Promise<CommandResult<CommandName>>;
+  // P5 O7 M4: `session`, the session a path-class command was made from (MainContext.session), for a link whose machine
+  // bounds a path read by its session (an RL2 link's `call.session`); a socket link's machine reads the asker's ref instead.
+  dispatch(name: CommandName, input: unknown, client: ClientRef, session?: AppSessionId): Promise<CommandResult<CommandName>>;
   onState(listener: (state: LinkState) => void): () => void;
   onEvent(listener: (name: EventName, payload: unknown) => void): () => void;
   close(): void; // stops reconnecting; never stops the far side
@@ -245,7 +248,7 @@ export function createConnectionManager(deps: ConnectionManagerDeps): Connection
       if (machine === local) return localLink.dispatch(name, input, ctx.client);
       const entry = [...entries, ...remoteEntries.values()].find((candidate) => candidate.ref === machine && candidate.state === 'up');
       if (!entry) return { ok: false, error: ipcError('host_unavailable', `${name}: machine ${machine} is not connected`) };
-      return entry.link.dispatch(name, input, ctx.client);
+      return entry.link.dispatch(name, input, ctx.client, ctx.session);
     },
     list,
     onChanged(listener) {
