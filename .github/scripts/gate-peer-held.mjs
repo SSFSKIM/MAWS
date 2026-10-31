@@ -4,7 +4,7 @@ import { appendFileSync, readFileSync, realpathSync } from 'node:fs';
 import process from 'node:process';
 import { URLSearchParams, fileURLToPath } from 'node:url';
 import console from 'node:console';
-import { peerCheckOf } from './gate-plan.mjs';
+import { peerCheckOf, planOf } from './gate-plan.mjs';
 import { githubApi, jobsOf } from './gate-peer-api.mjs';
 
 const active = new Set(['queued', 'in_progress', 'waiting']);
@@ -52,7 +52,8 @@ export async function peerHeldBy({ env, scripts, event, api, now = new Date(), w
     for (const run of candidates) {
       const candidateHead = headOf(run.head_commit);
       if (run.event !== 'push' || candidateHead.tree_id !== head.tree_id) continue;
-      const candidate = peerCheckOf({ ...planning, HEAD_MESSAGE: candidateHead.message }, scripts);
+      // A candidate must be runnable on its own ref and lane; eligibility alone cannot promise a verdict.
+      const candidate = planOf({ ...planning, HEAD_MESSAGE: candidateHead.message, GITHUB_REF: `refs/heads/${run.head_branch}`, GITHUB_REF_NAME: run.head_branch }, scripts).peerCheck;
       if (candidate.peer !== check.peer || !check.groups.every((group) => candidate.groups.includes(group))) continue;
       const jobs = await jobsOf(api, `${root}/runs/${run.id}`);
       const state = heldState(jobs, check.groups);

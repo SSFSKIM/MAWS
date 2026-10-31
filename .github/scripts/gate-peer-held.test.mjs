@@ -187,3 +187,15 @@ test('EC2 off discovers a hosted peer holder before final placement refuses an u
   // An explicit request still runs its own peer check, even if a matching holder exists.
   assert.throws(() => planOf({ ...planning, HEAD_MESSAGE: message('e2e:cross-build'), PEER_HELD_BY: result }, scripts), /LAUNCHD_E2E.*MAC_EC2/);
 });
+
+
+test('a queued candidate whose final plan needs disabled EC2 cannot hold a newer hosted peer check', async () => {
+  const protectedEnv = { ...env, LAUNCHD_E2E: 'cross-build', MAC_EC2: 'off', HOSTED_MAC_ROUTE: 'direct' };
+  const holder = run(90, { head_commit: { tree_id: tree, message: message('unit', 'Lane: no-hosted') } });
+  const { result } = await check({ env: protectedEnv, runs: [holder], jobs: [job('plan', 'in_progress')] });
+  assert.equal(result, '');
+  const { outputs } = planOf({ ...protectedEnv, HEAD_MESSAGE: event.head_commit.message, PEER_HELD_BY: result }, scripts);
+  const entries = JSON.parse(outputs.e2e);
+  assert.deepEqual(entries.map((entry) => [entry.group, JSON.parse(entry.runner)]), [['cross-build', 'macos-26']]);
+  assert.equal(outputs.peer_wait, '[]');
+});
