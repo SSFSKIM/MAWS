@@ -6,4 +6,8 @@
 export const ENDPOINT_CAPABILITIES = [
   // M2: `query.executor` may be `machine`, the services' ledger (`machine.op`, `machine.opQuery`).
   'rl2.executor.machine',
+  // M4: a `call` may name its session (`session`), which the `checkout` target rule reads (git.*'s reads).
+  'rl2.call-session',
+  // M4: a `sub` may name a feed (`feed`, §R): `checkout` here; `attention` is read and refused `not-offered` until M6.
+  'rl2.feeds',
 ] as const;

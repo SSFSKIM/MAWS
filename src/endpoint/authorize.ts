@@ -12,12 +12,14 @@
 //   4. the caller's standing at the command's floor: a session rank on the session its target rule reads (`no-target`
 //      when it names none, `grade` below it, or on a session this machine can't place; `list`-graded machine reads need
 //      none), a machine grade among the member's rights (`grade`). Nothing of a session is read for a caller below its
-//      floor, so a refusal says nothing of whether a session exists;
+//      floor, so a refusal says nothing of whether a session exists; then, for the `checkout` rule (P5 O7 M4), the
+//      input's path within the session's checkout (`no-target`);
 //   5. a by-effect command's rule gives the grade its input takes (`no-rule`), held to the floor, and the standing is
 //      checked again at it; a call is a read, so anything graded above `view` must come as an act (`act-required`);
 //   6. the machine's policy: a head too old stops every action but a delivered state (`state-too-old`), read-only
-//      refuses everything graded above `view` (`read-only`), and a spawn is held to the ceiling, the known checkouts and
-//      its allowed fields (`ceiling`, `unknown-checkout`, `spec-field`);
+//      refuses everything graded above `view` (`read-only`), and a spawn (every `spawn`-graded row with the `machine`
+//      target: `sminos.spawn`, and from P5 O7 M4 `session.spawn`) is held to the ceiling, the known checkouts and its
+//      allowed fields (`ceiling`, `unknown-checkout`, `spec-field`);
 //   7. what the class may say: a web-cards answer only takes or refuses what is pending (`class`);
 //   8. presence: a web-cards action's WebAuthn assertion, a native action's step-up where RL §5.6 asks for it
 //      (`step-up`).
@@ -26,7 +28,8 @@
 // now; moved again, it is `unavailable`. Presence is checked last, once, on the decision that stood (a WebAuthn counter
 // is spent by its check).
 // The endpoint's own actions (`endpoint.grant`, `endpoint.state`) carry their authority in their signatures and take no
-// grade. A `sub` takes `view` on its session, or ownership for the `cards` view; a `query` is answered only to the member
+// grade. A `sub` takes `view` on its session, or ownership for the `cards` view, and a feed (P5 O7 M4) one the offer
+// table lists: a session's `checkout` feed takes `view` on it; a `query` is answered only to the member
 // who sent the operation, while they still hold `view` on its stored target (M7 brings the binding), and to a web-cards
 // device only for what its class may do on a session its member owns.
 //
@@ -34,7 +37,7 @@
 // asking channel's `ClientRef` (`Who.client`), as its executors' do. A lane B session is placed by the machine's index and
 // bound to the engine session the engine host runs for it now (targets.ts): a request the index's engine session would
 // authorize while the host runs another is `unavailable`.
-import type { Action, Certificates, DeviceClass, OrgState, RefusalReason, Right } from 'org-protocol';
+import type { Action, Certificates, DeviceClass, OrgState, RefusalReason, Right, SessionRef, SessionSubMessage } from 'org-protocol';
 import type { ClientRef } from '@shared/ipc/client';
 import { gradeOf as declaredGrade, type Grade, type GradeSpec } from '@shared/ipc/grades';
 import { REGISTRY, type WireRegistry } from '@shared/ipc/registry';
@@ -46,9 +49,10 @@ import { spawnRefusal, type Policy } from './policy';
 import { dispatchAs, type EndpointServices } from './services';
 import type { CheckoutSource, RecordSource, SessionRecord, SessionTarget } from './sources';
 import { Assertions, deviceOf, stepUpRequired, verifyDeviceStepUp } from './step-up';
-import { resolveSubscription, resolveTarget, type Resolved } from './targets';
+import { CheckoutBounds, resolveSubscription, resolveTarget, withinCheckout, type Resolved } from './targets';
 
-export type AuthorizeRequest = { kind: 'call' | 'act' | 'query' | 'sub'; name: string; input: unknown; action?: Action };
+/** `session`: a call's own (P5 O7 M4, RL2's `call.session`), which the `checkout` target rule reads. */
+export type AuthorizeRequest = { kind: 'call' | 'act' | 'query' | 'sub'; name: string; input: unknown; action?: Action; session?: SessionRef };
 /** `client`: the asking channel's ref (P5 O7 M2), absent for the endpoint's own re-checks. */
 export type Who = { member: string; device: string; clientClass: DeviceClass; client?: ClientRef };
 export type Decision = { ok: true; target?: SessionTarget } | { ok: false; reason: RefusalReason };
@@ -66,6 +70,8 @@ export type AuthorizeContext = {
   settingsMode(): string;
   records: RecordSource;
   checkouts: CheckoutSource;
+  /** Lane B sessions' checkout bounds (the `checkout` rule; P5 O7 M4), shared with the checkout feed; its own if none. */
+  checkoutBounds?: CheckoutBounds;
   dispatch: EndpointServices['dispatch'];
   /** What a decision can't be taken on and why, beyond its refusal (a lane B session the spine failed to place). */
   log(line: string): void;
@@ -147,9 +153,11 @@ class Reads implements EffectReads {
 
 export class Authorizer {
   readonly #assertions: Assertions;
+  readonly #bounds: CheckoutBounds;
 
   constructor(private readonly ctx: AuthorizeContext) {
     this.#assertions = new Assertions(ctx.webauthn, () => ctx.webauthn.origin());
+    this.#bounds = ctx.checkoutBounds ?? new CheckoutBounds();
   }
 
   /**
@@ -220,13 +228,16 @@ export class Authorizer {
 
     // 4. The caller's standing at the floor, before anything of the session is read.
     // An engine host act's engine session is checked against the live row where it runs (actions.ts's context check).
-    const resolved = await resolveTarget(row.target, input, action, { dispatch: reads.dispatch, log: (line) => this.ctx.log(line), live: !(kind === 'act' && row.executor === 'engine-host') });
+    const placing = { dispatch: reads.dispatch, log: (line: string) => this.ctx.log(line), live: !(kind === 'act' && row.executor === 'engine-host') };
+    const resolved = await resolveTarget(row.target, input, action, placing, request.session);
     if (resolved.kind === 'refused') return no(resolved.reason);
     if (resolved.kind === 'unknown') return no('grade');
     const target = resolved.kind === 'session' ? resolved.target : undefined;
     const record = target === undefined ? null : reads.record(target);
     const atFloor = await this.#stands(floor, target, record, who, reads);
     if (atFloor !== null) return no(atFloor);
+    // A checkout read's path, read only for a caller who views the session: in its checkout, or no target of it.
+    if (row.target === 'checkout' && !(target?.lane === 'B' && (await withinCheckout(input, target.appSessionId, placing, this.#bounds)))) return no('no-target');
 
     // 5. The grade its input's effect takes, and the standing at it.
     const grade = await this.#effectiveGrade(name, spec, input, reads);
@@ -238,12 +249,13 @@ export class Authorizer {
       if (atGrade !== null) return no(atGrade);
     }
 
-    // 6. The machine's policy, on the effect. A spawn's args are read only for a member who may spawn: the known
-    // checkouts are no one else's to probe.
+    // 6. The machine's policy, on the effect. A spawn's args (any `spawn`-graded row on the machine) are read only for a
+    // member who may spawn: the known checkouts are no one else's to probe. A registry command's args already hold to
+    // its schema (step 2), so a field it lacks is `malformed` there, before the guard's `spec-field`.
     if (kind === 'act' && org.tooOld && name !== 'endpoint.state') return no('state-too-old');
     const policy = this.ctx.policy();
     if (grade !== null && grade !== 'list' && grade !== 'view' && policy.read_only) return no('read-only');
-    if (name === 'sminos.spawn') {
+    if (grade === 'spawn' && row.target === 'machine') {
       const refusal = spawnRefusal(input as Readonly<Record<string, unknown>>, policy, () => this.ctx.settingsMode(), this.ctx.checkouts);
       if (refusal !== null) return no(refusal);
     }
@@ -318,10 +330,16 @@ export class Authorizer {
     return answer.decision === 'deny' || (answer.decision === 'allow' && answer.scope === 'once');
   }
 
-  /** A subscription: `view` on its session (`full`), or ownership (`cards`); a web-cards device the cards of its own. */
+  /**
+   * A subscription: `view` on its session (`full`), or ownership (`cards`); a web-cards device the cards of its own. A
+   * feed the offer table lists (P5 O7 M4): a session's `checkout` feed, `view` on that lane B session, never a web-cards
+   * device's.
+   */
   async #sub(input: unknown, who: Who, reads: Reads): Promise<Decision> {
-    const message = input as { session: { lane: 'A' | 'B'; id: string }; view?: 'full' | 'cards' };
-    if (!this.#offers.subscriptions.includes(message.session.lane)) return refuse('not-offered');
+    const message = input as SessionSubMessage;
+    const feed = message.feed;
+    if (feed === undefined ? !this.#offers.subscriptions.includes(message.session.lane) : !this.#offers.feeds.includes(feed)) return refuse('not-offered');
+    if (feed !== undefined && message.session.lane !== 'B') return refuse('no-target');
     const cards = message.view === 'cards';
     const webCards = who.clientClass === 'web-cards';
     if (webCards && !cards) return refuse('class');

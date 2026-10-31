@@ -1,7 +1,7 @@
 // The subscription table's own rules (O10 M8; RL3), on a channel stand-in: a `sub` is registered before it is decided,
 // so the device's `credit` can come first; a later `sub` of the same id replaces it, and the replaced one's decision,
 // when it comes, answers nothing that would end the newer one; and the stream's credit rule.
-import type { EndpointMessage, SubMessage } from 'org-protocol';
+import type { EndpointMessage, SessionSubMessage } from 'org-protocol';
 import { describe, expect, it } from 'vitest';
 import { endableClientRef } from '@shared/ipc/client';
 import type { RemoteChannel } from '../../src/endpoint/channels';
@@ -51,7 +51,7 @@ function table(seams: { transmitDeadlineMs?: number } = {}): { subs: Subscriptio
   const subs = new Subscriptions({
     ...seams,
     authorize: () => Promise.resolve({ ok: true }) as never,
-    planes: { A: plane, B: plane },
+    planes: { A: plane, B: plane, feeds: plane },
     interest: new Interest({ interest: () => null, log: () => {} }),
     records: NO_RECORDS,
     now: () => Date.now(),
@@ -60,7 +60,7 @@ function table(seams: { transmitDeadlineMs?: number } = {}): { subs: Subscriptio
   return { subs, opened };
 }
 
-const sub = (credit = 1000): SubMessage => ({ t: 'sub', sub: 's1', session: { lane: 'B', id: 'app-1' }, cursor: null, credit });
+const sub = (credit = 1000): SessionSubMessage => ({ t: 'sub', sub: 's1', session: { lane: 'B', id: 'app-1' }, cursor: null, credit });
 
 describe('the subscription table', () => {
   it('answers a replaced sub’s refusal with nothing, and the newer one’s with its reason', () => {
@@ -164,7 +164,7 @@ describe('the subscription table', () => {
     let authorizing = false;
     const subs = new Subscriptions({
       authorize: () => (authorizing ? new Promise((resolve) => (decide = (ok) => resolve((ok ? { ok: true } : { ok: false, reason: 'grade' }) as never))) : Promise.resolve({ ok: true } as never)),
-      planes: { A: plane, B: plane },
+      planes: { A: plane, B: plane, feeds: plane },
       interest: new Interest({ interest: () => null, log: () => {} }),
       records: NO_RECORDS,
       now: () => Date.now(),
@@ -229,14 +229,14 @@ describe('the subscription table', () => {
     const other: Plane = { open: () => {}, close: () => {}, stop: () => {} };
     const subs = new Subscriptions({
       authorize: () => (authorizing ? new Promise((resolve) => (decide = (ok) => resolve((ok ? { ok: true } : { ok: false, reason: 'grade' }) as never))) : Promise.resolve({ ok: true } as never)),
-      planes: { A: planeA, B: other },
+      planes: { A: planeA, B: other, feeds: other },
       interest: new Interest({ interest: () => null, log: () => {} }),
       records: NO_RECORDS,
       now: () => Date.now(),
       log: () => {},
     });
     const ch = channel();
-    const m: SubMessage = { t: 'sub', sub: 'c1', session: { lane: 'A', id: 'la-1' }, view: 'cards', cursor: null, credit: 4 * 1024 * 1024 };
+    const m: SessionSubMessage = { t: 'sub', sub: 'c1', session: { lane: 'A', id: 'la-1' }, view: 'cards', cursor: null, credit: 4 * 1024 * 1024 };
     subs.receive(ch, m, () => {});
     subs.start(ch, m, { ok: true, target: { lane: 'A', session: 'la-1' } } as never);
     await settle();
