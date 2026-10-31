@@ -37,6 +37,7 @@ let answers: FakeSpineHost;
 let hosts: FakeSupervisor[];
 let received: Map<number, string[]>;
 let exiting: Set<number>;
+let stallNext: Set<string> | null; // what the next engine host spawned never answers
 let spawn: ReturnType<typeof vi.fn>;
 let supervisor: HostSupervisor;
 let spine: LazySpine;
@@ -49,6 +50,8 @@ let needs: number;
 async function engineHost(pid: number): Promise<FakeSupervisor> {
   const names: string[] = [];
   received.set(pid, names);
+  const stall = stallNext;
+  stallNext = null;
   const host: FakeSupervisor = new FakeSupervisor(profile, processes, {
     pid,
     register: (on) => {
@@ -59,6 +62,7 @@ async function engineHost(pid: number): Promise<FakeSupervisor> {
             void host.die();
             return new Promise(() => {});
           }
+          if (stall?.has(name)) return new Promise(() => {}); // never answered while it lives
           const result = await answers.dispatch('engine-host', name, input);
           if (!result.ok) throw new Error(result.error.message);
           return result.value;
@@ -79,6 +83,7 @@ beforeEach(async () => {
   hosts = [];
   received = new Map();
   exiting = new Set();
+  stallNext = null;
   logs = [];
   needs = 0;
   spawn = vi.fn(() => {
@@ -244,6 +249,27 @@ describe('a command that waits on the engine host, with the spine cold and the h
     expect(needs).toBe(0);
     expect(spawn).not.toHaveBeenCalled();
     expect(supervisor.parked('engine-host')).toBe(true);
+  }, 30_000);
+
+  // The need told while the link streams but before this load's barrier has passed (its resync unanswered) asks nothing
+  // of the supervisor; a host already asked to exit when idle then goes, and the need is told again for its successor
+  it('a need told while the host streams but the load has not, that host then exiting when idle: its successor is woken', async () => {
+    await supervisor.start();
+    await spine.ensure('command');
+    stallNext = new Set(['engine.sessions']); // its barrier's resync never answers
+    supervisor.wake('engine-host');
+    await vi.waitFor(() => expect(hosts).toHaveLength(1));
+    const first = hosts[0]!;
+    await vi.waitFor(() => expect(received.get(first.pid)).toContain('engine.sessions'));
+    expect(supervisor.exitSupervisor('idle', 'engine-host')).toBe(true);
+    await vi.waitFor(() => expect(first.exits).toEqual(['idle']));
+    const answer = within(front.dispatch('session.intent.list', undefined));
+    await vi.waitFor(() => expect(needs).toBe(1));
+    expect(supervisor.streaming('engine-host')).toBe(true); // nothing asked of the supervisor for it
+    await first.die(); // its idle exit
+    expect(await answer).toMatchObject({ ok: true, value: { intents: [] } });
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(needs).toBe(2);
   }, 30_000);
 
   it('after an event’s load parked the host, a command that waits on the boot wakes it and answers', async () => {
