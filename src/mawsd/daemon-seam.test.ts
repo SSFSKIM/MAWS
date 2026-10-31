@@ -68,7 +68,7 @@ describe('the seam’s life', () => {
   it('starts once mawsd’s sockets are up, before any adoption and any app, with both hosts parked', async () => {
     const { endpoint, daemon } = await started();
     expect(endpoint.atStart!.spawns).toBe(0);
-    expect(endpoint.atStart!.logs.filter((line) => line.startsWith('listening on'))).toHaveLength(3);
+    expect(endpoint.atStart!.logs.filter((line) => line.startsWith('listening on'))).toHaveLength(4); // P5 O5 M2: artifacts.sock the fourth
     expect(endpoint.atStart!.logs.some((line) => line.startsWith('serving'))).toBe(false);
     expect(endpoint.s.machine).toEqual({ ref: daemon.ref, profileDir: scene.root, stateDir: scene.paths.endpoint, kind: 'private' });
     expect(daemon.hosts.parked('engine-host')).toBe(true);

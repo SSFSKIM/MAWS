@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ciRefusal, e2eLabel, E2E_LABEL_PREFIX, runIdOf } from '../../e2e/support/daemon-unit-guard.mjs';
+import { ciRefusal, e2eLabel, E2E_LABEL_PREFIX, homeInstanceRefusal, runIdOf } from '../../e2e/support/daemon-unit-guard.mjs';
 
 const ROOT = join(__dirname, '../..');
 const GUARD = join(ROOT, 'e2e/support/daemon-unit-guard.mjs');
@@ -55,5 +55,24 @@ describe('the labels', () => {
 
   it('is a label launchd and the installer take: letters, digits, dots and dashes', () => {
     expect(e2eLabel(runIdOf({ GITHUB_RUN_ID: '1', GITHUB_RUN_ATTEMPT: '1' }), 'restart')).toMatch(/^[A-Za-z0-9.-]+$/);
+  });
+});
+
+// P5 O5 M4 (the architect's ruling): no group that installs a unit mawsd runs on the mini's home instance
+describe('the home instance’s refusal', () => {
+  const RULE = "no group that installs a unit mawsd runs where the owner's own dev.maws.mawsd lives (the architect's ruling); nothing was installed";
+  it('refuses on the mini’s home runner, naming the rule', () => {
+    expect(homeInstanceRefusal({ RUNNER_NAME: 'ci-kit-mac-mini' }, false)).toBe(`refused on the mini's home instance (RUNNER_NAME ci-kit-mac-mini): ${RULE}`);
+  });
+
+  it('refuses where the owner’s dev.maws.mawsd is loaded, whatever the runner', () => {
+    expect(homeInstanceRefusal({ RUNNER_NAME: 'GitHub Actions 1000001' }, true)).toBe(`refused: dev.maws.mawsd is loaded in this account's gui domain: ${RULE}`);
+    expect(homeInstanceRefusal({}, true)).not.toBeNull();
+  });
+
+  it('lets a hosted or EC2 runner with no owner unit through', () => {
+    expect(homeInstanceRefusal({ RUNNER_NAME: 'GitHub Actions 1000001' }, false)).toBeNull();
+    expect(homeInstanceRefusal({ RUNNER_NAME: 'ci-kit-ec2-mac-1' }, false)).toBeNull();
+    expect(homeInstanceRefusal({}, false)).toBeNull();
   });
 });

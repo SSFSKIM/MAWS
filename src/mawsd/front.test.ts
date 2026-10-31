@@ -1,7 +1,9 @@
 // The services front's core (P5 O3-D M2; docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §B): a
 // machine.sock client's runtime over a stand-in seam and hosts. The front over the real spine is daemon-spine.test.ts's.
 import { describe, expect, it, vi } from 'vitest';
-import { MACHINE_SPINE_CAPABILITY } from '@shared/host/socket-protocol';
+import { MACHINE_SPINE_CAPABILITY, RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
+import { HostCommandError } from '@shared/host/runtime';
+import { ipcError } from '@shared/ipc/errors';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import { REGISTRY } from '@shared/ipc/registry';
 import type { CommandName } from '@shared/ipc/schema';
@@ -41,7 +43,9 @@ function connection() {
 
 function front(over: Partial<FrontOptions> = {}) {
   const raw = new Set<(message: { name: string; payload: unknown }) => void>();
-  const forwarded: { owner: string; name: string; input: unknown }[] = [];
+  const forwarded: { owner: string; name: string; input: unknown; client?: unknown }[] = [];
+  // P5 O5 M4: the render seam as the front reaches it
+  const render = { ready: 0, gone: 0, answers: [] as unknown[], posted: new Set<string>(), exports: [] as unknown[] };
   const ensure = vi.fn(async () => ({}) as never);
   const logs: string[] = [];
   const served = createServicesFront({
@@ -57,6 +61,16 @@ function front(over: Partial<FrontOptions> = {}) {
     identity: () => IDENTITY,
     isApp: () => false,
     log: (line) => void logs.push(line),
+    render: {
+      clientReady: () => void render.ready++,
+      clientGone: () => void render.gone++,
+      answer: (input) => (render.answers.push(input), render.posted.has(input.id)),
+      exportForLibrary: async (input) => {
+        render.exports.push(input);
+        if (input.format === 'docx') throw new HostCommandError(ipcError('invalid_input', 'no docx', { reason: 'exportUnavailable', data: {} }));
+        return { path: '/p/x.pdf', revision: 1 };
+      },
+    },
     ...over,
   });
   const client = (capabilities: readonly string[] = []) => {
@@ -64,7 +78,7 @@ function front(over: Partial<FrontOptions> = {}) {
     served.runtimeFor({ appPid: 1, capabilities }).serve(end.port);
     return end;
   };
-  return { served, client, ensure, forwarded, logs, raw: (name: string, payload: unknown) => raw.forEach((l) => l({ name, payload })) };
+  return { served, client, ensure, forwarded, logs, render, raw: (name: string, payload: unknown) => raw.forEach((l) => l({ name, payload })) };
 }
 
 describe('the services front', () => {
@@ -300,5 +314,75 @@ describe('the services front', () => {
     c.close();
     served.bus.emit('session.status', { appSessionId: 's1', status: statusOf('s1') } as never); // the closed port refuses: the client is gone
     expect(ended).toBe(true);
+  });
+
+  // P5 O5 M4 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §A): the render host is a client whose
+  // hello lists render.client: its ready and its end go to the render seam, render.request and render.exit are posted
+  // to it alone, render.answer is taken from it alone, and nothing of the bus's fan-out reaches it
+  it('a render.client: its ready and end told to the seam, its posts its alone, and no bus event reaches it', () => {
+    const { served, client, render } = front();
+    const [app, renderer] = [client([MACHINE_SPINE_CAPABILITY]), client([RENDER_CLIENT_CAPABILITY])];
+    app.ready();
+    expect(served.postRender('render.request', { id: 'r0', kind: 'capture', request: {} } as never), 'none ready').toBe(false);
+    renderer.ready();
+    expect(render.ready).toBe(1);
+    expect(served.renderClients()).toBe(1);
+    expect(served.postRender('render.exit', {})).toBe(true);
+    expect(renderer.events()).toEqual(['render.exit']);
+    expect(app.events()).toEqual([]);
+    served.bus.emit('session.status', { appSessionId: 's1', status: statusOf('s1') } as never);
+    expect(app.events()).toEqual(['session.status']);
+    expect(renderer.events(), 'the bus’s fan-out skips it').toEqual(['render.exit']);
+    renderer.close();
+    expect(served.postRender('render.exit', {}), 'its connection gone').toBe(false);
+    expect(render.gone).toBe(1);
+    expect(served.renderClients()).toBe(0);
+  });
+
+  it('takes render.answer from a render.client alone, and refuses an id the seam did not post', async () => {
+    const { client, render } = front();
+    const [plain, renderer] = [client([MACHINE_SPINE_CAPABILITY]), client([RENDER_CLIENT_CAPABILITY])];
+    renderer.ready();
+    render.posted.add('r1');
+    const answer = { ok: true, png: 'x', width: 1, height: 1, consoleErrors: [] };
+    expect(await plain.request('render.answer', { id: 'r1', answer })).toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+    expect(render.answers).toEqual([]);
+    expect(await renderer.request('render.answer', { id: 'r1', answer })).toMatchObject({ ok: true });
+    expect(await renderer.request('render.answer', { id: 'r9', answer })).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+    expect(render.answers).toEqual([{ id: 'r1', answer }, { id: 'r9', answer }]);
+  });
+
+  it('posts the engine host’s capture and export requests to no client, the app’s included; the taps hear them', () => {
+    const { served, client, raw } = front();
+    const [spine, renderer] = [client([MACHINE_SPINE_CAPABILITY]), client([RENDER_CLIENT_CAPABILITY])];
+    spine.ready();
+    renderer.ready();
+    const tapped: string[] = [];
+    served.bus.onEmitted('maws.artifact.capture' as never, () => void tapped.push('capture'));
+    raw('maws.artifact.capture', { appSessionId: 's1', requestId: 'q', artifactId: 'a', revision: 1, width: 1, height: 1 });
+    raw('maws.artifact.export', { appSessionId: 's1', requestId: 'q2' });
+    raw('plugins.changed', {});
+    expect(tapped).toEqual(['capture']);
+    expect(spine.events()).toEqual(['plugins.changed']);
+    expect(renderer.events()).toEqual([]);
+  });
+
+  it('answers artifacts.export through the render seam, cold, never loading the spine, a refusal with its IPC error', async () => {
+    const { client, ensure, render } = front();
+    const c = client([MACHINE_SPINE_CAPABILITY]);
+    expect(await c.request('artifacts.export', { artifactId: '2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f', format: 'pdf', dialect: 'notion' })).toMatchObject({ ok: true, value: { path: '/p/x.pdf', revision: 1 } });
+    expect(await c.request('artifacts.export', { artifactId: '2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f', format: 'docx' })).toMatchObject({ ok: false, error: { code: 'invalid_input', issues: { reason: 'exportUnavailable' } } });
+    expect(render.exports).toEqual([{ artifactId: '2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f', format: 'pdf', dialect: 'notion' }, { artifactId: '2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f', format: 'docx' }]);
+    expect(ensure).not.toHaveBeenCalled();
+  });
+
+  it('names the asking connection’s ref on each engine-host request it forwards (the holds’ owner)', async () => {
+    const { client, forwarded } = front();
+    const renderer = client([RENDER_CLIENT_CAPABILITY]);
+    await renderer.request('engine.sessions');
+    await renderer.request('engine.sessions', undefined, 'page:1');
+    const [own, named] = forwarded.map((entry) => entry.client as { id: string });
+    expect(own!.id).toMatch(/^\d+$/);
+    expect(named!.id).toMatch(/^\d+\/page:1$/);
   });
 });

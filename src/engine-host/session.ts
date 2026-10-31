@@ -115,6 +115,10 @@ export interface EngineSessionOptions {
   // E10: whether an app is attached to the engine host (P5 O3-D M3: the runtime's AppPresence); `show_pane` and
   // `artifact_screenshot` fail at once with `appNotOpen` while it is false. Absent, always attached.
   appAttached?: () => boolean;
+  // P5 O5 M4 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §F): `artifact_screenshot`'s and
+  // `artifact_export`'s gate, a client that answers render requests (the attachment's `answersRenders`: an attached app,
+  // or a post-O5 `mawsd` whose render seam answers them). Absent, `appAttached`.
+  rendersAnswered?: () => boolean;
   // P2-C (2026-10-09): the steers earlier launches left unstated when the host died with them (the launcher's read of
   // the session's journals), abandoned as rows at the queue's recovery. Absent, none.
   unsettledPrompts?: () => Promise<MessageUuid[]>;
@@ -253,7 +257,7 @@ export class EngineSession {
     this.surface = new SessionSurface({ log: this.log, touch: () => this.touch() }); // R2
     // E1: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
     this.maws = new SessionMaws({
-      appSessionId: opts.spec.appSessionId, appVersion: opts.appVersion, appAttached: opts.appAttached, artifactScope: opts.artifactScope /* P2-E1 */, artifacts: opts.artifacts /* P3-A */, datasetRefresh: opts.datasetRefresh /* E3 */,
+      appSessionId: opts.spec.appSessionId, appVersion: opts.appVersion, appAttached: opts.appAttached, rendersAnswered: opts.rendersAnswered /* P5 O5 M4 */, artifactScope: opts.artifactScope /* P2-E1 */, artifacts: opts.artifacts /* P3-A */, datasetRefresh: opts.datasetRefresh /* E3 */,
       emit: (name, payload) => this.emit(name, payload),
       respond: (requestId, response, writeOpts) => this.respond(requestId, response, writeOpts),
       cwd: () => this.tracker.engineCwd ?? this.spec.cwd,

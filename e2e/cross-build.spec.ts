@@ -56,6 +56,28 @@
 //                       launched on the daemon shape. It is refused at the relay, `mawsd` yields its spine to it, the
 //                       old app finds the index unavailable, and no spine file changes after the yield while it idles.
 //                       Run only with such a peer (`--peer <O2-era master sha>`); skipped otherwise.
+// P5 O5 M2 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, acceptance 10's artifact page): in (update, daemon) this
+// build's app loads an artifact page made in the kept engine host, the peer's: through its own `mawsd`'s artifact
+// endpoint when that `mawsd`'s welcome lists `machine.artifacts`, which resolves the URL through the peer's engine host
+// (`artifacts.content`, unchanged since P3-A), through main's own handler when it lists it not. A newer app held on an
+// older `mawsd` is not staged: the app's build check restarts a private `mawsd` of another build at its first status
+// read (src/main/hosts/daemon.ts, watchDaemon), so it serves the app only until then; main reads the welcome at each
+// request (src/main/artifacts/index.ts), and its unit test holds that choice.
+// P5 O5 M4 (acceptance 10, both directions of the render service): an app of one build on a `mawsd` of the other. A
+// private `mawsd` of another build would be restarted by the app's build check at its first status read, so each scene
+// runs the other build's `mawsd` as the profile's LaunchAgent (./support/unit-daemon.ts), which the check leaves as it
+// is; they load a LaunchAgent, so they run in CI alone, and the gate job sweeps the label prefix at its end.
+//   (update, render)    this build's app on the peer's unit `mawsd`, whose welcome lists no `machine.render`: main keeps
+//                       today's capture and export services, so an artifact page loads through main's handler, main's
+//                       capture renders it, and `artifacts.export`, machine-owned now, is answered in main (the router's
+//                       fallback) for the library's Export and with Send to's `dialect`, the peer's `mawsd` rendering
+//                       nothing;
+//   (downgrade, render) the peer's app on this build's unit `mawsd`: the peer's library Export stays its main's, and the
+//                       unit's render seam renders beside it (a capture through `daemon.e2eRender` from a bare
+//                       machine.sock client, the render host started by the unit's `mawsd`).
+// A session's `artifact_screenshot` and `artifact_export` through either pair is not driven: the unit and render-seam
+// unit tests (src/mawsd/daemon-render.test.ts) hold that a post-O5 `mawsd` takes the engine host's requests and posts
+// them to no client, and that an older one's are answered by main's listeners (src/main/artifacts/index.ts).
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
 import { randomUUID } from 'node:crypto';
@@ -66,10 +88,14 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HostStatus } from '@shared/ipc/schema/host';
 import type { CommandInput } from '@shared/ipc/schema';
+import { artifactRefusalOf } from '@shared/ipc/schema/artifacts';
+import type { IpcError } from '@shared/ipc/errors';
 import { classifyWireChange, type WireManifest } from '@shared/ipc/wire';
 import { daemonPaths } from '@shared/daemon/files';
 import { reachMachine } from '../src/mawsd/machine-client';
 import { invoke, replaySpec, turnsJournal, value } from './support/c7-replay';
+import { ciRefusal, e2eLabel, runIdOf } from './support/daemon-unit-guard.mjs';
+import { installUnitDaemon, type UnitDaemon } from './support/unit-daemon';
 import { REPO_ROOT } from './support/launch';
 import { isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
@@ -187,6 +213,9 @@ const INPUTS: Record<string, unknown> = {
   'session.drafts.set': { appSessionId: 'x', draft: null },
   'session.replay.start': { source: { kind: 'journal', path: '/nonexistent/cross-build-probe.jsonl' }, speed: 'instant' }, // an absolute path; no replay starts
   'session.update': { appSessionId: 'x', patch: { pinned: true } }, // a patch sets at least one field
+  // P5 O5 M4: on the wire as `machine`; an id no artifact has, one id for both probes so the two answers compare. Its
+  // handler answers an unknown artifact `invalid_input` with its named refusal (`notFound`), which a parsed input alone reaches.
+  'artifacts.export': { artifactId: '00000000-0000-4000-8000-00000000c0b5', format: 'pdf' },
 };
 
 // A command whose own handler refuses an input that names no real file: `side.screenshot.preview` reads an image under
@@ -201,8 +230,13 @@ function inputsOf(s: Scratch): Record<string, unknown> {
 
 // ---- one crossing -----------------------------------------------------------------------------------------------------
 
-type Answer = { ok: true } | { ok: false; code: string; message: string };
-const answerOf = (result: { ok: boolean; error?: { code: string; message: string } }): Answer => (result.ok ? { ok: true } : { ok: false, code: result.error!.code, message: result.error!.message });
+// `refusal`: an artifact command's named refusal (ArtifactRefusalSchema's reason), which its handler gives a parsed input
+type Answer = { ok: true } | { ok: false; code: string; message: string; refusal?: string };
+const answerOf = (result: { ok: boolean; error?: IpcError }): Answer => {
+  if (result.ok) return { ok: true };
+  const refusal = artifactRefusalOf(result.error!)?.reason;
+  return { ok: false, code: result.error!.code, message: result.error!.message, ...(refusal && { refusal }) };
+};
 
 // Each command `newer` added that its windows can send, invoked from one of `newer`'s app with its sample input.
 async function probe(page: Page, newer: Build, older: Build, inputs: Record<string, unknown>): Promise<Map<string, Answer>> {
@@ -363,6 +397,9 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   await expect.poll(async () => (await pendingPermissions(second.page, id)).length, { message: 'the request raised while away' }).toBe(1);
   said.push(`  tail: ${atAttach.filter((e) => seqOf(e) > seqAtQuit).length} events journaled after the keeper's quit; ${derivedUnreadable ? "the request's item" : "the failure's item and the request's"} reached main`);
 
+  // P5 O5 M2: an artifact page of the kept engine host, loaded by this build's app on the daemon shape
+  if (attacherDaemon !== null) said.push(await artifactPage(s, second, attacher.label, servesArtifacts(attacher)));
+
   // across the gap: the newer build's commands, as the older supervisor answers them
   const before = gap ? await probe(second.page, gap.newer, gap.older, inputsOf(s)) : null;
 
@@ -410,7 +447,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
     for (const [name, onOlder] of before) {
       const onOwn = after.get(name)!;
       const { owner } = commandOf(gap.newer, name)!;
-      expect(onOwn.ok || onOwn.code !== 'invalid_input', `${name}: its sample input is refused (${onOwn.ok ? '' : onOwn.message}); give it one in INPUTS (inputsOf for one naming a scratch file)`).toBe(true);
+      expect(onOwn.ok || onOwn.code !== 'invalid_input' || onOwn.refusal !== undefined, `${name}: its sample input is refused (${onOwn.ok ? '' : onOwn.message}); give it one in INPUTS (inputsOf for one naming a scratch file)`).toBe(true);
       if (!servedByAttacher(owner)) {
         expect(onOwn, `${name} is served by its own build's supervisor`).not.toMatchObject({ ok: false, code: 'unknown_command' });
         expect(onOlder, `${name}, which the older supervisor lacks`).toMatchObject({ ok: false, code: 'unknown_command' });
@@ -536,6 +573,30 @@ async function permanentAcrossReattach(s: Scratch, run: Run, attach: () => Promi
   await expect.poll(async () => (await pendingPermissions(next.page, o.id)).length, { message: 'the request, pending once after the reattach' }).toBe(1);
   o.said.push(`  permanent (acceptance 9): supervisor pid ${o.host} of this build kept mawsd pid ${o.daemon}’s one connection across a quit and a reattach (${connects} connections from it in the log)`);
   return next;
+}
+
+// P5 O5 M2: whether a build's `mawsd` serves the artifact endpoint (its manifest's capabilities, the union its peers list)
+const servesArtifacts = (build: Build) => build.manifest.capabilities.includes('machine.artifacts');
+// P5 O5 M2: an html artifact made in the attached engine host, its page loaded through the app's scheme; the endpoint's
+// load in `mawsd`'s log when the app's own `mawsd` serves the endpoint
+async function artifactPage(s: Scratch, run: Run, label: string, endpoint: boolean): Promise<string> {
+  const MARK = 'CROSS_BUILD_PAGE';
+  const created = (await run.page.evaluate(
+    (html) => window.maws.invoke('artifacts.create' as never, { kind: 'html', title: 'Cross-build page', content: { bytes: new TextEncoder().encode(html), name: 'index.html' } } as never),
+    `<!doctype html><html><head><title>x</title></head><body><p>${MARK}</p></body></html>`,
+  )) as { ok: true; value: { artifact: { id: string } } } | { ok: false; error: { message: string } };
+  if (!created.ok) throw new Error(`artifacts.create on the kept engine host failed: ${created.error.message}`);
+  const url = `maws-artifact://${created.value.artifact.id}/live/index.html`;
+  const page = await run.maws.app.evaluate(async ({ session }, target) => {
+    const response = await session.defaultSession.fetch(target);
+    return { status: response.status, text: await response.text() };
+  }, url);
+  expect(page.status, `${label}'s app loads the page`).toBe(200);
+  expect(page.text).toContain(MARK);
+  expect(page.text).toContain('data-maws-bridge');
+  const throughEndpoint = s.daemonLog().includes('[artifacts] the artifact endpoint’s handler loaded at its first use');
+  expect(throughEndpoint, `mawsd's log: the page came ${endpoint ? 'through' : 'not through'} its artifact endpoint`).toBe(endpoint);
+  return `  artifact page: ${url} loaded with the bridge script, ${throughEndpoint ? "through this build's mawsd's artifact endpoint, resolved by the kept engine host" : "by main's own handler (the app's mawsd lists no machine.artifacts)"}`;
 }
 
 const record = (lines: string[]) => {
@@ -742,5 +803,113 @@ test('(pre-O3 app, daemon) an O2-era app on a profile whose mawsd runs the spine
     const lock = s.daemonLock();
     said.push(`  then (O2's downgrade, D29; recorded only): mawsd pid ${daemon} ${isAlive(daemon) ? 'still runs' : `exited${s.daemonLog().includes('exited (restart, code 75)') ? ' 75 at the old app’s daemon.restart' : ''}`}; the profile’s mawsd lock names ${lock === null ? 'nothing' : `pid ${lock.pid}`}; spine.lock ${spineLockOf(s.userData) === null ? 'absent' : `names pid ${spineLockOf(s.userData)!.pid}`}`);
     record(said);
+  });
+});
+
+// ---- P5 O5 M4: the render service across builds, on a unit `mawsd` of the other build (acceptance 10) ------------------
+
+const rendersOn = (build: Build) => build.manifest.capabilities.includes('machine.render');
+const UNIT_SKIP = process.platform !== 'darwin' ? 'a unit mawsd is a LaunchAgent: macOS alone' : ciRefusal(process.env);
+// The unit's environment beside its own: the e2e mark (its seams, daemon.e2eRender), the scratch engine store and usage
+// directory, as a launch gives a private daemon (./support/scratch-env.ts)
+const unitEnv = (userData: string): Record<string, string> => ({ MAWS_E2E: '1', CLAUDE_CONFIG_DIR: join(userData, 'claude-config'), MAWS_CLAUDE_USAGE_DIR: join(userData, 'claude-usage'), MAWS_MACHINE_ROLE: 'laptop' });
+const RENDER_PAGE = '<!doctype html><html><head><title>Render</title></head><body style="margin:0;background:#2a6"><p>CROSS_BUILD_RENDER</p></body></html>';
+
+async function withUnit(s: Scratch, build: Build, name: string, body: (unit: UnitDaemon) => Promise<void>): Promise<void> {
+  const unit = await installUnitDaemon({ root: build.root ?? REPO_ROOT, userData: s.userData, label: e2eLabel(runIdOf(process.env), name), env: unitEnv(s.userData) });
+  s.daemons.add(unit.pid);
+  try {
+    await body(unit);
+  } finally {
+    unit.remove(); // before the scratch's cleanup ends its processes: KeepAlive would restart a killed unit
+  }
+}
+
+async function createPage(run: Run): Promise<{ id: string; revision: number }> {
+  const created = (await run.page.evaluate(
+    (html) => window.maws.invoke('artifacts.create' as never, { kind: 'html', title: 'Cross-build render', content: { bytes: new TextEncoder().encode(html), name: 'index.html' } } as never),
+    RENDER_PAGE,
+  )) as { ok: true; value: { artifact: { id: string; revision: number } } } | { ok: false; error: { message: string } };
+  if (!created.ok) throw new Error(`artifacts.create failed: ${created.error.message}`);
+  return created.value.artifact;
+}
+const exported = async (run: Run, input: Record<string, unknown>) => {
+  const answer = (await run.page.evaluate((i) => window.maws.invoke('artifacts.export' as never, i as never), input)) as { ok: true; value: { path: string; revision: number } } | { ok: false; error: { code: string; message: string } };
+  if (!answer.ok) throw new Error(`artifacts.export ${JSON.stringify(input)}: ${answer.error.code} ${answer.error.message}`);
+  return answer.value;
+};
+const machineWelcome = (output: string, daemonPid: number) => output.split('\n').filter((line) => line.includes(`connected to supervisor pid ${daemonPid} build `)).at(-1) ?? '';
+
+test('(update, render) this build’s app on the peer’s unit mawsd, which lists no machine.render: main keeps its capture and export services; the library’s Export and Send to’s are answered in main', async () => {
+  const { here, peer, newer } = builds();
+  test.skip(here !== newer || rendersOn(peer) || !rendersOn(here) || !peer.manifest.capabilities.includes('machine.spine'), `the peer (wire ${wireOf(peer)}) is not an older build of the daemon shape before the render service`);
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  await withScratch('xb-render-update', async (s) => {
+    await withUnit(s, peer, 'xb-render-update', async (unit) => {
+      const said = [`${here.label} (wire ${wireOf(here)}) on ${peer.label}'s unit mawsd (wire ${wireOf(peer)}), pid ${unit.pid}`];
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' });
+      await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(run.output(), 'the build check leaves a unit of another bundle as it is').toContain(`mawsd pid ${unit.pid} runs build `);
+      expect(run.output()).toContain('its unit runs another bundle, so it is left as it is');
+      const welcome = machineWelcome(run.output(), unit.pid);
+      expect(welcome, "main's log: the unit mawsd's welcome").not.toBe('');
+      expect(welcome, 'the peer’s mawsd lists no machine.render').not.toContain('machine.render');
+
+      const { id, revision } = await createPage(run);
+      const page = await run.maws.app.evaluate(async ({ session }, url) => {
+        const response = await session.defaultSession.fetch(url);
+        return { status: response.status, text: await response.text() };
+      }, `maws-artifact://${id}/live/index.html`);
+      expect(page.status, 'the page loads through main’s handler').toBe(200);
+      expect(page.text).toContain('CROSS_BUILD_RENDER');
+      // main's capture service, composed as today: the capture seam runs it in main (__maws_captures)
+      const captured = (await run.maws.app.evaluate(
+        (_electron, request) => (globalThis as unknown as { __maws_captures: { capture(r: unknown): Promise<{ ok: boolean; width?: number; error?: string }> } }).__maws_captures.capture(request),
+        { appSessionId: 'xb-render', requestId: 'xb-render-1', artifactId: id, revision, width: 640, height: 480 },
+      )) as { ok: boolean; width?: number; error?: string };
+      expect(captured, JSON.stringify(captured).slice(0, 300)).toMatchObject({ ok: true, width: 640 });
+      // artifacts.export, machine-owned: the router answers it in main while the daemon lists no machine.render
+      const pdf = await exported(run, { artifactId: id, format: 'pdf' });
+      expect(pdf.path.startsWith(join(s.userData, 'artifacts', id, 'exports'))).toBe(true);
+      expect(readFileSync(pdf.path).subarray(0, 5).toString('latin1')).toBe('%PDF-');
+      const sendTo = await exported(run, { artifactId: id, format: 'png', width: 640, height: 480, dialect: 'notion' }); // Send to's export, its dialect on the wire
+      expect(readFileSync(sendTo.path).subarray(1, 4).toString('latin1')).toBe('PNG');
+      expect(s.daemonLog(), 'the peer’s mawsd rendered nothing').not.toMatch(/\[render\]|\[render-host\]/);
+      said.push(`  welcome: ${welcome.trim()}`, `  page, capture (640x480), library Export (${pdf.path}) and Send to's export (${sendTo.path}) answered in main`);
+      await s.quit(run);
+      record(said);
+    });
+  });
+});
+
+test('(downgrade, render) the peer’s app on this build’s unit mawsd: its library Export stays its main’s, and the unit’s render seam renders beside it', async () => {
+  const { here, peer } = builds();
+  test.skip(rendersOn(peer) || !rendersOn(here) || !peer.manifest.capabilities.includes('machine.spine'), `the peer (wire ${wireOf(peer)}) is not a build of the daemon shape before the render service`);
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  await withScratch('xb-render-downgrade', async (s) => {
+    await withUnit(s, here, 'xb-render-downgrade', async (unit) => {
+      const said = [`${peer.label} (wire ${wireOf(peer)}) on ${here.label}'s unit mawsd (wire ${wireOf(here)}), pid ${unit.pid}`];
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+      await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(machineWelcome(run.output(), unit.pid), 'this build’s mawsd lists machine.render, which the peer’s main does not read').toContain('machine.render');
+      const { id, revision } = await createPage(run);
+      const pdf = await exported(run, { artifactId: id, format: 'pdf' }); // the peer's registry keeps artifacts.export main's
+      expect(readFileSync(pdf.path).subarray(0, 5).toString('latin1')).toBe('%PDF-');
+      expect(s.daemonLog(), 'the peer’s library Export is its main’s: no render host').not.toContain('[render] starting the render host');
+
+      const windows = () => run.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
+      const before = await windows();
+      const to = join(s.root, 'render-downgrade.png');
+      await unit.request('daemon.e2eRender', { artifactId: id, revision, width: 640, height: 480, to }, 120_000);
+      const png = readFileSync(to);
+      expect(png.subarray(1, 4).toString('latin1')).toBe('PNG');
+      expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([640, 480]);
+      expect(s.daemonLog(), 'the unit’s mawsd started its render host for the capture').toContain('[render] starting the render host for artifact_screenshot');
+      expect((await unit.status()).render, 'daemon.status.render').toMatchObject({ state: 'ready', starts: 1 });
+      expect(await windows(), 'no capture window in the peer’s main').toBe(before);
+      said.push(`  the peer's library Export in its main (${pdf.path}); the unit's render seam captured ${id} at 640x480 beside it`);
+      await s.quit(run);
+      record(said);
+    });
   });
 });

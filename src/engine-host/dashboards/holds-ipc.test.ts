@@ -12,6 +12,8 @@ import { listDatasets, setDataset, snapshotOf } from '@artifacts/dashboard/datas
 import { applyV2, newDoc } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
 import { HostCommandError, type HostOn } from '@shared/host/runtime';
+import { remoteClients } from '@shared/host/client-refs'; // P5 O5 M4
+import type { HandlerContext } from '@shared/ipc/client'; // P5 O5 M4
 import { MAIN_ONLY_COMMANDS } from '@shared/ipc/names';
 import type { CommandName, CommandOutput } from '@shared/ipc/schema';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
@@ -23,7 +25,7 @@ const human: Actor = { kind: 'human' };
 let dir: string;
 let documents: Documents;
 let dashboards: Dashboards;
-let handlers: Map<string, (input: unknown) => Promise<unknown>>;
+let handlers: Map<string, (input: unknown, ctx?: HandlerContext) => Promise<unknown>>;
 let surface: { close(): void };
 let gone: (() => void)[];
 
@@ -33,7 +35,7 @@ beforeEach(() => {
   dashboards = registerDashboards({ documents });
   handlers = new Map();
   gone = [];
-  const on: HostOn = (name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>);
+  const on: HostOn = (name, handler) => void handlers.set(name, handler as (input: unknown, ctx?: HandlerContext) => Promise<unknown>);
   surface = registerArtifacts(on, () => true, { onDocPort: () => {}, presence: { onGone: (hook) => (gone.push(hook), () => {}) } }, { documents, env: {} });
 });
 afterEach(() => {
@@ -43,10 +45,11 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-async function call<N extends CommandName>(name: N, input: unknown): Promise<CommandOutput<N>> {
+// `ctx`: the asking client as the runtime hands it (P5 O5 M4); none, as a test of before it called
+async function call<N extends CommandName>(name: N, input: unknown, ctx?: HandlerContext): Promise<CommandOutput<N>> {
   const checked = validateCommandInput(name, input);
   if (!checked.ok) throw new Error(`invalid input for ${name}`);
-  const value = await handlers.get(name)!(checked.value);
+  const value = await handlers.get(name)!(checked.value, ctx);
   const output = validateCommandOutput(name, value);
   if (!output.ok) throw new Error(`invalid output of ${name}: ${JSON.stringify(output.error.issues).slice(0, 400)}`);
   return output.value as CommandOutput<N>;
@@ -145,6 +148,48 @@ describe('the hold commands (E3)', () => {
     expect(await call('artifacts.releaseAssets', { assetHoldId: captured.assetHoldId })).toEqual({ released: false });
   });
 
+  // P5 O5 M4 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, M4's holds decision): a hold belongs to the client
+  // ref that took it. `mawsd`'s permanent link names the render host's connection on each request it forwards (a remote
+  // ref, `<connection>/<client>`); that ref's end (the render host's connection ending, told as the link's clientGone, or
+  // the link's own end) releases its holds, and the app's presence going releases none of them. A request that names no
+  // client (the connection's own ref: main's link, the relayed app's requests) keeps the presence rule.
+  it('a named client’s holds outlive the app’s going and end with that client', async () => {
+    const link = remoteClients(1); // mawsd's permanent link, as the runtime mints its refs
+    const renderHost = { client: link.refFor('7') };
+    const app = { client: link.refFor(undefined) }; // the relayed app's requests name no client
+    const board = await documents.store.create({ kind: 'dashboard', title: 'Board' }, human);
+    const one = await refresh(board.id, 'live');
+    const exporting = await call('artifacts.captureDatasetState', { artifactId: board.id }, renderHost);
+    const windowed = await call('artifacts.holdAssets', { artifactId: board.id, refs: [one] }, app);
+    // the app quits during the render host's export, a dataset refresh going on meanwhile
+    for (const hook of gone) hook();
+    expect(await call('artifacts.releaseAssets', { assetHoldId: windowed.assetHoldId }, app)).toEqual({ released: false }); // the app's: released at its going
+    await churn(board.id, 'live');
+    expect(exists(board.id, one)).toBe(true); // the export still reads its snapshot
+    expect(refsOf(exporting.bytes)).toEqual([one]);
+    // the render host dies holding it, the daemon living: its connection's end is the link's clientGone
+    const again = await call('artifacts.holdAssets', { artifactId: board.id, refs: [one] }, renderHost);
+    link.gone('7');
+    expect(exists(board.id, one)).toBe(false);
+    expect(await call('artifacts.releaseAssets', { assetHoldId: exporting.assetHoldId }, renderHost)).toEqual({ released: false });
+    expect(await call('artifacts.releaseAssets', { assetHoldId: again.assetHoldId }, renderHost)).toEqual({ released: false });
+    // a hold asked under the ended ref is released at once and refused (no hold outlives its owner)
+    const late = await call('artifacts.captureDatasetState', { artifactId: board.id }, { client: link.refFor('7') }).catch((error: unknown) => error);
+    expect(late).toBeInstanceOf(Error);
+  });
+
+  it('a link’s end releases every named client’s holds, as the presence rule does for the rest', async () => {
+    const link = remoteClients(2);
+    const board = await documents.store.create({ kind: 'dashboard', title: 'Board' }, human);
+    const one = await refresh(board.id, 'live');
+    await call('artifacts.holdAssets', { artifactId: board.id, refs: [one] }, { client: link.refFor('3') });
+    await call('artifacts.holdAssets', { artifactId: board.id, refs: [one] }, { client: link.refFor('4') });
+    await churn(board.id, 'live');
+    expect(exists(board.id, one)).toBe(true);
+    link.end();
+    expect(exists(board.id, one)).toBe(false);
+  });
+
   it('across a host restart a held, retired snapshot is collected at the reopen: its old id releases nothing, a fresh hold on it is refused as unavailable, the latest holds', async () => {
     const board = await documents.store.create({ kind: 'dashboard', title: 'Board' }, human);
     const old = await refresh(board.id, 'live');
@@ -159,7 +204,7 @@ describe('the hold commands (E3)', () => {
     dashboards = registerDashboards({ documents });
     handlers = new Map();
     gone = [];
-    const on: HostOn = (name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>);
+    const on: HostOn = (name, handler) => void handlers.set(name, handler as (input: unknown, ctx?: HandlerContext) => Promise<unknown>);
     surface = registerArtifacts(on, () => true, { onDocPort: () => {}, presence: { onGone: (hook) => (gone.push(hook), () => {}) } }, { documents, env: {} });
     expect(exists(board.id, old)).toBe(false); // collected at the reopen
     expect(await call('artifacts.releaseAssets', { assetHoldId })).toEqual({ released: false });

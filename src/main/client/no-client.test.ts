@@ -13,7 +13,7 @@ import { NO_CLIENT, type ClientPort, type NotifyEvent } from '@shared/client/por
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { item, project, record } from '../../../test/support/builders';
 import { SessionHarness } from '../../../test/support/session-harness';
-import { zipFiles } from '../design-systems/zip';
+import { zipFiles } from '../../render/design-systems/zip';
 import { createAssetDownload } from '../dashboard/download';
 import { startDelivery, type GwsDriver } from '../delivery';
 import { gwsLogin } from '../delivery/gws';

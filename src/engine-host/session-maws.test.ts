@@ -681,6 +681,33 @@ describe('the artifact tools on an EngineSession (scripted)', () => {
     expect(run.rebuilt()).toEqual(run.events);
   });
 
+  // P5 O5 M4 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §F): the capture and export bridges ask a
+  // client that answers render requests, app or no app; show_pane keeps the app's presence
+  it('with no app attached but a client that renders, artifact_screenshot and artifact_export sends its request; show_pane is appNotOpen', async () => {
+    writeFileSync(join(cwd, 'dashboard.html'), '<h1>HELLO_E2</h1>');
+    const run = await withStore({ appAttached: () => false, rendersAnswered: () => true });
+    await run.answered(run.call('artifact_create', { id: 'dash', html_path: 'dashboard.html', title: 'Dashboard' }));
+    const shot = run.call('artifact_screenshot', { id: 'dash' });
+    await until(() => run.captures.length === 1, 'the capture request, sent with no app');
+    run.session.answerCapture(shot, { ok: false, error: 'the render service could not start on mini: no display' });
+    expect((await run.answered(shot)).result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.captureFailed('the render service could not start on mini: no display') }], isError: true });
+    const pane = await run.answered(run.call('show_pane', { pane: 'terminal' }));
+    expect(pane.result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.appNotOpen('show_pane') }], isError: true });
+    run.transport.exit(0);
+    await run.session.exited;
+  });
+
+  it('with neither an app nor a client that renders, artifact_screenshot is appNotOpen and nothing is sent', async () => {
+    writeFileSync(join(cwd, 'dashboard.html'), '<h1>HELLO_E2</h1>');
+    const run = await withStore({ appAttached: () => false, rendersAnswered: () => false });
+    await run.answered(run.call('artifact_create', { id: 'dash', html_path: 'dashboard.html', title: 'Dashboard' }));
+    const refused = await run.answered(run.call('artifact_screenshot', { id: 'dash' }));
+    expect(refused.result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.appNotOpen('artifact_screenshot') }], isError: true });
+    expect(run.captures).toEqual([]);
+    run.transport.exit(0);
+    await run.session.exited;
+  });
+
   it('a screenshot the engine withdrew, and one pending at exit, are answered with nothing', async () => {
     writeFileSync(join(cwd, 'dashboard.html'), '<h1>HELLO_E2</h1>');
     const run = await withStore();
