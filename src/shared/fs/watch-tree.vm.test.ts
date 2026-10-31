@@ -61,7 +61,7 @@ const STORE_LAYOUT = [
 ] as const;
 
 setFlagsFromString('--expose_gc');
-const gc = runInNewContext('gc') as () => void;
+const gc = runInNewContext('gc') as (options?: { type: 'major'; execution: 'sync'; flavor: 'last-resort' }) => void;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const MiB = 2 ** 20;
 
@@ -292,9 +292,12 @@ function memory(): Memory {
 
 // RSS growth and its retained part: RSS less the V8 heap committed but free after a full GC, which is the heap used,
 // the external memory (array buffers) and the rest, native (the watch handles, libuv's watcher lists, malloc's arenas).
+// Then RSS once more after a memory-reducing collection (V8's last resort, which gives committed new space back): a
+// walk's survivors grow new space to its cap, and an ordinary collection keeps it (the VM measure of M1's fix round).
 function growth(before: Memory, after: Memory) {
   const mib = (key: keyof Memory) => (after[key] - before[key]) / MiB;
   const committedFree = mib('heapTotal') - mib('heapUsed');
+  gc({ type: 'major', execution: 'sync', flavor: 'last-resort' });
   return {
     rssMiB: round1(mib('rss')),
     retainedMiB: round1(mib('rss') - committedFree),
@@ -302,11 +305,12 @@ function growth(before: Memory, after: Memory) {
     externalMiB: round1(mib('external')),
     nativeMiB: round1(mib('rss') - mib('heapTotal') - mib('external')),
     heapCommittedFreeMiB: round1(committedFree),
+    rssReducedMiB: round1((process.memoryUsage().rss - before.rss) / MiB),
   };
 }
 
 function memoryText(memory: ReturnType<typeof growth>): string {
-  return `rss +${memory.rssMiB} MiB (retained +${memory.retainedMiB}: heap +${memory.heapUsedMiB}, external +${memory.externalMiB}, native +${memory.nativeMiB}; V8 committed and free +${memory.heapCommittedFreeMiB})`;
+  return `rss +${memory.rssMiB} MiB (retained +${memory.retainedMiB}: heap +${memory.heapUsedMiB}, external +${memory.externalMiB}, native +${memory.nativeMiB}; V8 committed and free +${memory.heapCommittedFreeMiB}; after a memory-reducing collection +${memory.rssReducedMiB})`;
 }
 
 const GC_KINDS: Record<number, string> = {
