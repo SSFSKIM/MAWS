@@ -10,6 +10,7 @@
 //   of a held remote session makes main say it all again (M2b's fix wave, item 4), so the pane asks only once this page
 //   listens for every event the answer is followed by: `connectShell` subscribes them (`ipc/events.ts`, `remote.session`
 //   into ./remote-session.ts's store), and this connection is mounted after it. A pane announced before then waits.
+// - Its read marks, in this app's memory (./read-marks.ts), shown on the records the stores hold.
 // - `remote.gap` is the transcript's own (transcript/source/ipc.ts), heard in order with the session's event batches.
 import { useEffect } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -17,6 +18,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import { registerRemoteOpener } from '../sessions/remote-openers';
 import { useLayout } from '../stores/layout';
+import { connectRemoteReadMarks } from './read-marks';
 import { remoteLaneBStateOf, useIsRemoteLaneB } from './remote-session';
 
 let connected: MawsBridge | null = null;
@@ -56,11 +58,13 @@ export function connectRemoteLaneB(client: MawsBridge = ipc): () => void {
     useLayout.getState().openSession(listed.appId);
     if (remoteLaneBStateOf(listed.appId)?.stream === 'ended') retryRemoteSession(client);
   });
+  const offReadMarks = connectRemoteReadMarks();
   connected = client;
   for (const appSessionId of waiting) readSession(client, appSessionId);
   waiting.clear();
   return () => {
     offOpener();
+    offReadMarks();
     if (connected === client) connected = null;
   };
 }

@@ -38,6 +38,15 @@ export function applyRemoteSession(state: RemoteSession): void {
 export const remoteLaneBStateOf = (appSessionId: AppSessionId): RemoteSession | null => useRemoteLaneB.getState().states.get(appSessionId) ?? null;
 export const useRemoteLaneBState = (appSessionId: AppSessionId): RemoteSession | null => useRemoteLaneB((s) => s.states.get(appSessionId) ?? null);
 
+// The overlay rule (M2): a link down closes nothing, its acts held for a minute (A4), so the status this page last heard
+// for a session main still holds stays through the link's drop, for Stop and Esc to reach its turn; main says when it
+// forgot the status itself: the stream idle (released) or ended.
+export const holdsRemoteStatus = (state: RemoteSession): boolean => state.stream !== 'idle' && state.stream !== 'ended';
+export const keepsRemoteStatus = (appSessionId: AppSessionId): boolean => {
+  const state = remoteLaneBStateOf(appSessionId);
+  return state !== null && holdsRemoteStatus(state);
+};
+
 /** A send on its way to the session; the returned function ends it (once). */
 export function beginRemoteSend(appSessionId: AppSessionId): () => void {
   const change = (by: number) =>

@@ -325,6 +325,31 @@ describe('ipcSource', () => {
       view.unmount();
     });
 
+    // M2's review: a gap told while the history is still being read stays at its launch's boundary, even when the read
+    // already holds the launch after it (the launch's events are named by their ids, `<app>:<launchId>:<seq>:<i>`)
+    it('keeps a gap told during the history read before the first event of its launch, or after the history without one', async () => {
+      const launched = (b: ReturnType<typeof builder>, launch: string, from: number) => b.events.map((event, i) => ({ ...event, seq: from + i, id: `app-r:${launch}:${from + i}:0` as EventId }));
+      const b1 = builder();
+      turnOf(b1, 1);
+      const b2 = builder();
+      turnOf(b2, 2);
+      const history = [...launched(b1, 'L1', 1), ...launched(b2, 'L2', 1)];
+      for (const [launchId, expected] of [['L2', 'between'], ['L3', 'last']] as const) {
+        useTranscriptStore.getState().detach(REMOTE);
+        const fake = fakeClient();
+        const hydrated = useTranscriptStore.getState().attach(REMOTE, ipcSourceOver(fake.client, REMOTE));
+        fake.emit('remote.gap', { appSessionId: REMOTE, launchId }, OTHER_MACHINE);
+        fake.calls[0].answer({ ok: true, value: { events: history, lastSeq: 9, complete: true } } as never);
+        await hydrated;
+        const order = kinds(REMOTE);
+        expect(order.filter((kind) => kind === 'gap'), launchId).toHaveLength(1);
+        if (expected === 'between') {
+          expect(order.indexOf('gap'), launchId).toBeGreaterThan(order.indexOf('assistant_text'));
+          expect(order.indexOf('gap'), launchId).toBeLessThan(order.lastIndexOf('user'));
+        } else expect(order.at(-1), launchId).toBe('gap');
+      }
+    });
+
     it('draws it at the start of a page whose range is partly gone, once however often the key is read again', async () => {
       const fake = fakeClient();
       const source = ipcSourceOver(fake.client, APP);

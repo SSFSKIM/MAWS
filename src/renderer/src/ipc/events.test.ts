@@ -5,7 +5,7 @@ import { EMPTY_TAB_SET, NO_PROJECT } from '@shared/ipc/schema/layout';
 import type { MachineState } from '@shared/ipc/schema/machines';
 import { addressOf } from '@shared/machine/address';
 import type { OrgKey } from '@shared/machine/org-key';
-import { digest, item, project, record, remoteRow, status } from '../../../../test/support/builders';
+import { digest, humanTurn, item, project, record, remoteRow, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { preloadOf } from '../test-support/preload-of';
@@ -18,6 +18,8 @@ import { createMachinesStore, selectOffline } from '../stores/machines';
 import { createSessionsStore } from '../stores/sessions';
 import { connectShell } from './events';
 import { ownersLabel } from '../sidebar/owners'; // P5 O8 M5
+import { resetRemoteLaneBStore } from '../lane-b/remote-session'; // P5 O7 M2
+import { remoteSessionState } from '../lane-b/test-support/remote-session';
 
 // P5 O6 M2: `fake` stands for main (its answers, events and the saved layout hold bare ids); the shell connects through
 // the page's client over it, so the stores hold addresses (`A`, `at(id)`), and a saved layout from before O6 reads lifted.
@@ -508,6 +510,27 @@ describe('the shell per machine', () => {
     expect(stores.sessions.getState().records.get(onB('b1'))?.title.text).toBe('read again');
     fake.event('session.changed', { record: titledB('b1', 'renamed'), cause: 'update', revision: 2 }, OTHER_MACHINE);
     expect(stores.sessions.getState().records.get(onB('b1'))?.title.text).toBe('renamed');
+  });
+
+  // P5 O7 M2 (the overlay rule): a lane B session main holds on B keeps the status this page last heard through B's link
+  // going down, so Stop and Esc still reach its turn under the link's hold (A4); main forgetting it (the stream idle or
+  // ended) forgets it here too
+  it('keeps the status of a lane B session main holds on a machine that went down, until main says its stream is idle', async () => {
+    resetRemoteLaneBStore();
+    const { fake, stores } = setup(0, { machines: [LOCAL_ENTRY, other('up', 1)] });
+    await answerSnapshots(fake);
+    await answerOther(fake, [record('b1'), record('b2')], 5);
+    fake.event('session.status', { appSessionId: 'b1', status: status('b1', { engineState: 'running', turn: humanTurn }) }, OTHER_MACHINE);
+    fake.event('session.status', { appSessionId: 'b2', status: status('b2') }, OTHER_MACHINE);
+    fake.event('remote.session', remoteSessionState('b1' as AppSessionId), OTHER_MACHINE); // main says it from the session's machine
+    fake.event('machines.changed', { machines: [LOCAL_ENTRY, other('down', 1)] });
+    fake.event('remote.session', remoteSessionState('b1' as AppSessionId, { stream: 'paused', link: { state: 'down', carrier: null, refusal: null, member: 'member-1', rights: [] } }), OTHER_MACHINE);
+    expect(stores.sessions.getState().engine.get(onB('b1'))?.turn).not.toBeNull();
+    expect(stores.sessions.getState().engine.has(onB('b1'))).toBe(true);
+    expect(stores.sessions.getState().engine.has(onB('b2'))).toBe(false);
+    fake.event('remote.session', remoteSessionState('b1' as AppSessionId, { stream: 'idle' }), OTHER_MACHINE);
+    expect(stores.sessions.getState().engine.has(onB('b1'))).toBe(false);
+    resetRemoteLaneBStore();
   });
 
   // M4's review: events heard before the first roster belong to no generation the page has reconciled.

@@ -197,6 +197,24 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
   // no longer reach it. At the next sign of new history, the record's change, the source reads the host again.
   let stale = false;
   let gaps = 0; // P5 O7 M2: the gap bars `remote.gap` put in, each an id of its own
+  const gapLaunches = new WeakMap<SessionEvent, string>(); // P5 O7 M2: a gap told during a read, by the launch it precedes
+  // P5 O7 M2 (M2's review): a gap told while the history was being read is held behind it, and so would land after the
+  // events the read already holds of the launch it precedes (a relaunch's `snapshot`). It goes before that launch's first
+  // event instead (the live journal's ids, `<app>:<launchId>:<seq>:<i>`); one whose launch the read doesn't hold stays held,
+  // after the history and before what came after it.
+  const placeHeldGaps = (events: SessionEvent[], subscription: { held: SessionEvent[][] | null }, bareApp: string): SessionEvent[] => {
+    if (subscription.held === null) return events;
+    let placed = events;
+    subscription.held = subscription.held.filter((batch) => {
+      const launchId = batch.length === 1 ? gapLaunches.get(batch[0]) : undefined;
+      if (launchId === undefined) return true;
+      const at = placed.findIndex((event) => event.id.startsWith(`${bareApp}:${launchId}:`));
+      if (at < 0) return true;
+      placed = [...placed.slice(0, at), batch[0], ...placed.slice(at)];
+      return false;
+    });
+    return placed;
+  };
   const atOf = (event: SessionEvent) => Date.parse(event.at);
   const pager = new HistoryPager(
     async (before, seek) => withHistoryGap(valueOf(await client.invoke('session.events', { appSessionId, afterSeq: null, limit: null, before, ...(seek && { seek }) })), bareOf(appSessionId)), // P5 O7 M2
@@ -272,8 +290,10 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         if (gapped !== appSessionId) return;
         const sessionId = subscription.running?.sessionId ?? (bareOf(appSessionId) as string as SessionId);
         const gap = historyGapEvent(bareOf(appSessionId), `${launchId}:${Date.now()}:${++gaps}`, new Date().toISOString(), sessionId);
-        if (subscription.held) subscription.held.push([gap]);
-        else subscription.pass([gap]);
+        if (subscription.held) {
+          gapLaunches.set(gap, launchId); // placed by the snapshot when the history it reads holds that launch
+          subscription.held.push([gap]);
+        } else subscription.pass([gap]);
       });
       return () => {
         off();
@@ -311,6 +331,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         }
       }
       if (subscription) {
+        events = placeHeldGaps(events, subscription, bareOf(appSessionId)); // P5 O7 M2
         if (events.some(liveForm)) subscription.live = true;
         track(subscription, events); // E10
         const waiting = withoutOlderThanWindow(subscription.held ?? [], events, diskForm); // the long-transcript window
