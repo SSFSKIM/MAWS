@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectorOAuthGrant, ConnectorOAuthIdentity } from '@shared/connectors/oauth-types';
 import { SEALED_FORMAT_V1, SEALED_FORMAT_V2, type ConnectorOAuthSealer } from '@shared/connectors/sealer';
+import { fileKeyCustody } from '../../services/connectors/custody';
 import { createConnectorOAuthStore, electronOAuthSealer } from './oauth-store';
 
 const A = '11111111-1111-4111-8111-111111111111';
@@ -379,5 +380,33 @@ describe('electronOAuthSealer', () => {
       decryptStringAsync: async () => ({ result: '', shouldReEncrypt: false }),
     }, async () => {});
     expect(await adapter.available()).toBe(false);
+  });
+});
+
+// P5 O4 M1: the store over the machine's file key (src/services/connectors/custody.ts, Interfaces §A); the backup
+// exclusion is a fake. Here until M2 moves the store beside the custody.
+describe('the store over the file key', () => {
+  const fileKeyStore = () => createConnectorOAuthStore({ directory: dir, sealer: fileKeyCustody(dir, { excludeFromBackup: async () => true }), now: () => 1_700_000_100_000 });
+
+  it('writes format 2 and reads the record back after a relaunch', async () => {
+    const first = fileKeyStore();
+    await first.save(first.claim(A), identity(), grant());
+    expect(readFileSync(join(dir, `${A}.sealed`), 'utf8').split('\n')[0]).toBe(SEALED_FORMAT_V2);
+    expect(await fileKeyStore().read(A)).toEqual({ ...grant(), connectionId: A, identity: identity(), savedAt: 1_700_000_100_000 });
+  });
+
+  it('a file copied under another id is unreadable', async () => {
+    const first = fileKeyStore();
+    await first.save(first.claim(A), identity(), grant());
+    writeFileSync(join(dir, `${B}.sealed`), readFileSync(join(dir, `${A}.sealed`)), { mode: 0o600 });
+    await expect(fileKeyStore().read(B)).rejects.toMatchObject({ code: 'unreadable' });
+    expect(await fileKeyStore().list()).toEqual(expect.arrayContaining([{ state: 'unreadable', connectionId: B }]));
+  });
+
+  it("lists a profile's format 1 records as unreadable rows without asking the file key", async () => {
+    const legacy = store(); // the Electron-shaped fake, format 1
+    await legacy.save(legacy.claim(A), identity(), grant());
+    expect(await fileKeyStore().list()).toEqual([{ state: 'unreadable', connectionId: A }]);
+    expect(readdirSync(dir)).toEqual([`${A}.sealed`]); // no key was made for a listing with no record of its own
   });
 });
