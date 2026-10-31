@@ -131,23 +131,34 @@ export type FilesReadResolvedInput = z.infer<typeof FilesReadResolvedInputSchema
 // P5 O3-E (Interfaces §F; D7; O7's C8): bounded bytes written into a session's attachments directory on its machine,
 // answered with the stored absolute paths in input order. The bounds are the schema's, so an oversized call is
 // `invalid_input` at main's router and at `machine.op`'s validation, before a line reaches the socket (whose cap is
-// 64 MiB) or the handler: 1 to UPLOAD_FILES_MAX files, each and all together at most 32 MiB decoded, bounded here on
-// the encoded lengths. Declared at M2 (the manifest final then), its write M3's; a refusal is a value, as files.write's.
+// 64 MiB) or the handler: 1 to UPLOAD_FILES_MAX files, each and all together at most 32 MiB decoded. Base64 strings of
+// one length decode to lengths up to two bytes apart (by their padding), so the encoded length is only a pre-cap (the
+// padded encoding of the bound, before the pattern runs) and the bounds are on the decoded lengths, exactly. Declared at
+// M2 (the manifest final then), its write M3's; a refusal is a value, as files.write's.
 const MiB = 1024 * 1024;
 export const UPLOAD_FILE_MAX_BYTES = 32 * MiB; // decoded, per file
 export const UPLOAD_CALL_MAX_BYTES = 32 * MiB; // decoded, per call
 export const UPLOAD_FILES_MAX = 8;
-// The longest base64 a decoded length encodes to, with room for a stray pad
-const encodedMax = (bytes: number) => Math.ceil((bytes * 4) / 3) + 3;
+const encodedLength = (bytes: number) => 4 * Math.ceil(bytes / 3); // padded
+// The bytes a string the base64 pattern took decodes to: three per four characters, less one per pad
+const decodedLength = (base64: string) => (base64.length / 4) * 3 - (base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0);
 export const FilesUploadInputSchema = z
   .strictObject({
     appSessionId: AppSessionIdSchema,
     files: z
-      .array(z.strictObject({ name: z.string(), bytes: z.base64().max(encodedMax(UPLOAD_FILE_MAX_BYTES)) }))
+      .array(
+        z.strictObject({
+          name: z.string(),
+          bytes: z
+            .base64()
+            .max(encodedLength(UPLOAD_FILE_MAX_BYTES))
+            .refine((bytes) => decodedLength(bytes) <= UPLOAD_FILE_MAX_BYTES, { message: `a file of an upload exceeds ${UPLOAD_FILE_MAX_BYTES / MiB} MiB` }),
+        }),
+      )
       .min(1)
       .max(UPLOAD_FILES_MAX),
   })
-  .refine((input) => input.files.reduce((sum, file) => sum + file.bytes.length, 0) <= encodedMax(UPLOAD_CALL_MAX_BYTES), {
+  .refine((input) => input.files.reduce((sum, file) => sum + decodedLength(file.bytes), 0) <= UPLOAD_CALL_MAX_BYTES, {
     message: `the files of one upload exceed ${UPLOAD_CALL_MAX_BYTES / MiB} MiB together`,
     path: ['files'],
   });

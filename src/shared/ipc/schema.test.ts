@@ -264,12 +264,22 @@ describe('ipc schema validates both directions', () => {
       expect(upload(Array.from({ length: files.UPLOAD_FILES_MAX }, () => file('YQ=='))).ok).toBe(true);
       expect(upload(Array.from({ length: files.UPLOAD_FILES_MAX + 1 }, () => file('YQ=='))).ok).toBe(false);
       expect(upload([file('not base64!')]).ok).toBe(false);
-      const encoded = (bytes: number) => 'A'.repeat(4 * Math.ceil(bytes / 3));
-      expect(upload([file(encoded(files.UPLOAD_FILE_MAX_BYTES))]).ok).toBe(true);
-      expect(upload([file(encoded(files.UPLOAD_FILE_MAX_BYTES + 3))]).ok).toBe(false); // one file past the bound
-      const half = encoded(files.UPLOAD_CALL_MAX_BYTES / 2 + 3);
-      const together = upload([file(half), file(half)]);
-      expect(together.ok).toBe(false); // each within, together past it
+      // base64 of exactly `bytes` decoded bytes, padded as encoded: a length that is no multiple of three ends in a pad
+      // group, so two strings of one length decode to lengths that differ by up to two (fix round 1: the bound is the
+      // decoded length, the encoded one only a pre-cap)
+      const encoded = (bytes: number) => 'A'.repeat(4 * Math.floor(bytes / 3)) + ['', 'AA==', 'AAA='][bytes % 3];
+      const MAX = files.UPLOAD_FILE_MAX_BYTES;
+      expect(Buffer.from(encoded(MAX), 'base64').length).toBe(MAX);
+      expect(upload([file(encoded(MAX))]).ok).toBe(true); // exactly the bound, padded
+      expect(upload([file(encoded(MAX + 1))]).ok).toBe(false); // one byte past it, unpadded at the same encoded length
+      expect(encoded(MAX + 1)).toHaveLength(encoded(MAX).length);
+      expect(upload([file('A'.repeat(encoded(MAX).length + 4))]).ok).toBe(false); // past the encoded pre-cap
+      // together: 16 MiB + 1 padded once and 16 MiB - 1 unpadded is exactly the call's bound; one byte more is past it
+      const half = files.UPLOAD_CALL_MAX_BYTES / 2;
+      expect(upload([file(encoded(half + 1)), file(encoded(half - 1))]).ok).toBe(true);
+      expect(upload([file(encoded(half + 1)), file(encoded(half)), file('YQ==')]).ok).toBe(false);
+      const together = upload([file(encoded(half + 1)), file(encoded(half))]);
+      expect(together.ok).toBe(false); // each within, together one byte past it
       expect(together.ok ? null : together.error.code).toBe('invalid_input');
       expect(validateCommandOutput('files.upload', { status: 'ok', paths: ['/r/.claude/desk-uploads/a/x.0.png'] }).ok).toBe(true);
       expect(validateCommandOutput('files.upload', { status: 'refused', reason: 'uploads are not available this run' }).ok).toBe(true);
