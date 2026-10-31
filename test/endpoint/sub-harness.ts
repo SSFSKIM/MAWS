@@ -115,6 +115,8 @@ export class FakeEngineHost {
   readonly answered: string[] = [];
   /** Each `session.send` the engine host ran under its op ledger, in order (P5 O7 M1): what a run-once proof reads. */
   readonly runs: Array<{ appSessionId: string; content: unknown; launchId: string }> = [];
+  /** `host.op` handlers a suite serves beside `session.send` and `session.answer` (P5 O7 M2b: an interrupt), by name. */
+  readonly handlers = new Map<string, (input: unknown) => unknown>();
 
   /** Wires the fake into `services`' dispatch, onEvent, onAttachment and onUpstream, its op ledger in the machine's state directory. */
   serve(services: FakeServices): void {
@@ -125,7 +127,9 @@ export class FakeEngineHost {
           ? (input) => Promise.resolve(this.#answer(input as { appSessionId: string; requestId: string }))
           : name === 'session.send'
             ? (input) => Promise.resolve(this.#send(input as { appSessionId: string; content: unknown }))
-            : undefined,
+            : this.handlers.has(name)
+              ? (input) => Promise.resolve(this.handlers.get(name)!(input))
+              : undefined,
       status: (id) => {
         const s = this.sessions.get(id);
         return s === undefined || s.engineSessionId === null ? null : { launchId: s.launchId, engineSessionId: s.engineSessionId };
