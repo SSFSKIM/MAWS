@@ -82,7 +82,7 @@ export function resolveSubscription(session: { lane: 'A' | 'B'; id: string }, pl
  */
 async function laneB(appSessionId: string, { dispatch, log, live = true }: Placing): Promise<Resolved> {
   const unavailable: Resolved = { kind: 'refused', reason: 'unavailable' };
-  const placed = (engine: string): Resolved => ({ kind: 'session', target: { lane: 'B', session: engine, appSessionId } });
+  const placed = (engine: string): Extract<Resolved, { kind: 'session' }> => ({ kind: 'session', target: { lane: 'B', session: engine, appSessionId } });
   const record = await dispatch('machine', 'session.get', { appSessionId }).catch((error: unknown) => ({ ok: false as const, error: { code: 'internal', message: (error as Error).message } }));
   if (!record.ok) {
     log(`endpoint: lane B session ${appSessionId} not placed: the spine answered ${record.error.code} (${record.error.message})`);
