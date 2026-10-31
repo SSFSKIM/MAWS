@@ -106,6 +106,28 @@ describe("the repository's ignore rules, read from a listing of a million paths"
   });
 });
 
+// VM measure of M1: on Node 24, mawsd's runtime, git's listing of a kernel checkout reaches the prune as one 3.9 MB
+// string held outside V8's heap, and a directory kept as a substring of it held all of it for as long as the prune
+// lived (the kernel arm's external memory, +3.8 MiB). Node 22 makes a heap string of it, which this case cannot tell
+// from the heap's own churn: there it is skipped.
+describe("the repository's ignore rules, kept apart from the listing they were read from", () => {
+  it('holds none of the listing once read', async (context) => {
+    // The bytes are made first and kept: an array buffer's memory leaves `external` on a sweep after the collection.
+    const bytes = Buffer.from(Array.from({ length: 100_000 }, (_, i) => `drivers/net/ethernet/vendor${i % 2_000}/sub${i % 3}/f${i}.c\0`).join(''));
+    gc();
+    const before = process.memoryUsage().external;
+    let listing: string | null = bytes.toString(); // as the runner decodes git's output
+    if ((process.memoryUsage().external - before) / 2 ** 20 < 4) return context.skip(); // a heap string: Node 22
+    const run: GitRun = async (_directory, args) => (args.includes('-i') ? '' : listing!);
+    const prune = await gitIgnored(run, '/repo');
+    listing = null;
+    gc();
+    expect(await prune('drivers/net/ethernet/vendor7/sub1')).toBe(false); // alive, answering from what it kept
+    expect((process.memoryUsage().external - before) / 2 ** 20).toBeLessThan(1); // the listing alone is 4.3 MiB
+    expect(bytes.length).toBeGreaterThan(0);
+  });
+});
+
 // Real git: the listings' shapes and check-ignore's answers, through the service's own runner.
 describe("the repository's ignore rules, read from a real repository", () => {
   let repo: GitFixture;

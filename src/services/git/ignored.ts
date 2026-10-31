@@ -12,7 +12,7 @@
 import type { GitRun } from './runner';
 
 export const CHECK_IGNORE_BATCH_MS = 250; // the repository watcher's own debounce
-const PARSE_CHUNK = 5_000;
+const PARSE_SLICE_MS = 4; // the longest a listing's read holds the loop before it lets the walk run
 
 export async function gitIgnored(run: GitRun, root: string): Promise<(dir: string) => Promise<boolean>> {
   const [ignoredOut, listedOut] = await Promise.all([
@@ -25,7 +25,7 @@ export async function gitIgnored(run: GitRun, root: string): Promise<(dir: strin
   await eachEntry(ignoredOut, (entry) => {
     addAncestors(above, entry);
     addAncestors(known, entry, true);
-    if (entry.endsWith('/')) collapsed.push(entry.slice(0, -1));
+    if (entry.endsWith('/')) collapsed.push(detached(entry.slice(0, -1)));
   });
   await eachEntry(listedOut, (entry) => addAncestors(known, entry, true));
   const ignored = new Set(collapsed.filter((dir) => !above.has(dir)));
@@ -41,18 +41,28 @@ function entries(out: string): string[] {
   return out.split('\0').filter((entry) => entry !== '');
 }
 
-// Each entry of a NUL-terminated listing, PARSE_CHUNK at a time with the loop free between chunks: a kernel-sized
-// checkout lists 80k paths (3.9 MB), which split whole held the loop 44 ms while the tree's walk ran beside it.
+// Each entry of a NUL-terminated listing, a slice of at most PARSE_SLICE_MS at a time with the loop free between: a
+// kernel-sized checkout lists 80k paths (3.9 MB), which split whole held the loop 44 ms while the tree's walk ran beside
+// it, and a first slice of 5,000 entries, its code not yet optimised, 10 to 26 ms (the VM measure of M1).
 async function eachEntry(out: string, take: (entry: string) => void): Promise<void> {
   let start = 0;
   let read = 0;
+  let since = performance.now();
   while (start < out.length) {
     let end = out.indexOf('\0', start);
     if (end < 0) end = out.length;
     if (end > start) take(out.slice(start, end));
     start = end + 1;
-    if (++read % PARSE_CHUNK === 0) await new Promise((resolve) => setImmediate(resolve));
+    if ((++read & 255) !== 0 || performance.now() - since < PARSE_SLICE_MS) continue;
+    await new Promise((resolve) => setImmediate(resolve));
+    since = performance.now();
   }
+}
+
+// A copy of a directory's name that holds nothing else: V8 keeps a longer substring as a view of the string it came
+// from, and a listing git wrote is one string of megabytes, held outside the heap for as long as one view of it lives.
+function detached(dir: string): string {
+  return Buffer.from(dir).toString();
 }
 
 // Adds every directory above `entry` (and a `dir/` entry's own, with `self`), from the deepest up, stopping at one
@@ -62,7 +72,7 @@ function addAncestors(set: Set<string>, entry: string, self = false): void {
   while (end > 0) {
     const dir = entry.slice(0, end);
     if (set.has(dir)) return;
-    set.add(dir);
+    set.add(detached(dir));
     end = entry.lastIndexOf('/', end - 1);
   }
 }
