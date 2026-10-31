@@ -36,15 +36,20 @@ afterEach(async () => {
 const ENGINE = 5000; // the session's engine
 const CHILD = 5001; // its cua serve
 const STRANGER = 6000; // a Terminal's nc, under launchd
+const DAEMON = 4000; // the attached mawsd (P5 O5 M5), the engine's ancestor through its engine host
+const ENGINE_HOST = 4500;
 const uid = process.getuid!();
 
-function fakeAddon(): PeerAddon & { peerPid: number } {
+function fakeAddon(): PeerAddon & { peerPid: number; table: Map<number, { ppid: number; start: number }> } {
   const table = new Map([
     [ENGINE, { ppid: 1, start: 10 }],
     [CHILD, { ppid: ENGINE, start: 20 }],
     [STRANGER, { ppid: 1, start: 30 }],
+    [DAEMON, { ppid: 1, start: 5 }],
+    [ENGINE_HOST, { ppid: DAEMON, start: 6 }],
   ]);
   const addon = {
+    table,
     peerPid: CHILD,
     version: PEER_AUTH_VERSION,
     peer: () => ({ pid: addon.peerPid, uid }),
@@ -296,5 +301,63 @@ describe('the wait for the session\'s engine', () => {
     expect(client.closed()).toBe(false);
     h.backend.engineProcess(A, ENGINE);
     await until(() => client.heard() > 0);
+  });
+});
+
+// P5 O5 M5 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §H): on the daemon shape the engine's peer is
+// checked by `mawsd`, which relays the connection from its own process; the app admits it by the daemon's exact instance
+// (the welcome's pid, its start read when the app attached), at once, without waiting for the session's engine.
+describe('the daemon\'s relay', () => {
+  it('is admitted by its exact instance at once, with no engine known for the session', async () => {
+    const addon = fakeAddon();
+    const h = harness({ peer: { addon } });
+    h.backend.relay(DAEMON);
+    addon.peerPid = DAEMON;
+    const started = Date.now();
+    const host = await connectFakeHost(h.backend.socketPathFor(A)!);
+    tracked.hosts.push(host);
+    expect(host.hello).toMatchObject({ extensionInstanceId: 'maws:A' });
+    expect(Date.now() - started).toBeLessThan(PEER_ROOT_WAIT_MS);
+    expect(h.backend.inspect().sessions.A).toMatchObject({ connections: 1, refused: 0 });
+  });
+
+  it('refuses the daemon\'s pid once another process holds it, a descendant of the daemon that is not the daemon, and the daemon after it detached', async () => {
+    const addon = fakeAddon();
+    const h = harness({ peer: { addon } });
+    h.backend.engineProcess(A, ENGINE);
+    h.backend.relay(DAEMON);
+    addon.table.set(DAEMON, { ppid: 1, start: 99 }); // the daemon exited and its pid was taken
+    addon.peerPid = DAEMON;
+    const reused = rawClient(h.backend.socketPathFor(A)!);
+    await until(reused.closed);
+    addon.table.set(DAEMON, { ppid: 1, start: 5 });
+    addon.peerPid = ENGINE_HOST;
+    const hostOfEngines = rawClient(h.backend.socketPathFor(A)!);
+    await until(hostOfEngines.closed);
+    h.backend.relay(null);
+    addon.peerPid = DAEMON;
+    const detached = rawClient(h.backend.socketPathFor(A)!);
+    await until(detached.closed);
+    expect([reused.heard(), hostOfEngines.heard(), detached.heard()]).toEqual([0, 0, 0]);
+    expect(h.logs).toEqual([
+      `cua socket of A: refused peer pid ${DAEMON} (not_descendant)`,
+      `cua socket of A: refused peer pid ${ENGINE_HOST} (not_descendant)`,
+      `cua socket of A: refused peer pid ${DAEMON} (not_descendant)`,
+    ]);
+  });
+
+  it('is read again at each attachment: a daemon restarted under the same pid with another start is refused until relay() reads it', async () => {
+    const addon = fakeAddon();
+    const h = harness({ peer: { addon } });
+    h.backend.engineProcess(A, ENGINE);
+    h.backend.relay(DAEMON);
+    addon.table.set(DAEMON, { ppid: 1, start: 7 });
+    addon.peerPid = DAEMON;
+    const before = rawClient(h.backend.socketPathFor(A)!);
+    await until(before.closed);
+    h.backend.relay(DAEMON); // the app's machine link reconnected: the instance read again
+    const after = await connectFakeHost(h.backend.socketPathFor(A)!);
+    tracked.hosts.push(after);
+    expect(after.hello).toMatchObject({ extensionInstanceId: 'maws:A' });
   });
 });

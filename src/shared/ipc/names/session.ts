@@ -34,6 +34,7 @@ export const commands = [
   'session.recentTurns', // P2-D (2026-10-09): the resume chooser's preview read
   'session.setKeep', // P5 O2 M2: the owner's Keep running mark
   'session.pendingItems', // P5 O10 M8: the broker's items as a read (a `view` read, as `session.pendingRequest` is)
+  'session.capabilities', // P5 O5 M5: the session's agent capabilities on its machine
 ] as const;
 
 // P4-AGG M4: the engine's own MCP sign-in, main's sign-in operation alone (src/main/connectors/sign-in.ts)
@@ -45,4 +46,5 @@ export const events = [
   'session.forgotten', 'session.changed', 'session.removed', 'session.projects.changed', 'session.replay.progress',
   'session.digest', 'session.catalogChanged', 'session.setup', 'session.intent.changed',
   'session.visibleChanged', // P5 O3-D
+  'session.capabilitiesChanged', // P5 O5 M5
 ] as const;

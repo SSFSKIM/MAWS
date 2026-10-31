@@ -385,4 +385,28 @@ describe('the services front', () => {
     expect(own!.id).toMatch(/^\d+$/);
     expect(named!.id).toMatch(/^\d+\/page:1$/);
   });
+
+  // P5 O5 M5 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §I): a session's capabilities, cold
+  it('answers session.capabilities cold from the daemon\'s reading, never loading the spine, to a client and the endpoint alike', async () => {
+    const asked: string[] = [];
+    const { served, client, ensure } = front({ capabilities: (appSessionId) => (asked.push(appSessionId), { browser: { available: false, reason: 'no browser is attached on mini' } }) });
+    const answer = await client().request('session.capabilities', { appSessionId: 's1' });
+    expect(answer).toMatchObject({ ok: true, value: { browser: { available: false, reason: 'no browser is attached on mini' } } });
+    expect(await served.dispatch('session.capabilities', { appSessionId: 's2' })).toMatchObject({ ok: true });
+    expect(asked).toEqual(['s1', 's2']);
+    expect(ensure).not.toHaveBeenCalled();
+  });
+
+  it('tells the daemon when the attached app\'s browser socket may have changed: its machine.client, and the end of a client that sent one', async () => {
+    let changed = 0;
+    const { served, client } = front({ isApp: () => true, browserChanged: () => void changed++ });
+    const app = client([MACHINE_SPINE_CAPABILITY]);
+    const other = client();
+    expect(await app.request('machine.client', { browserSocket: '/u/browser/cua' })).toMatchObject({ ok: true });
+    expect(changed).toBe(1);
+    expect(served.browserSocket()).toBe('/u/browser/cua');
+    other.close();
+    served.close();
+    expect(changed).toBe(2); // the app's connection ended (the other sent none)
+  });
 });

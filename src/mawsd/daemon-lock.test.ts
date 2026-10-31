@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'v
 import { PEER_CAPABILITIES, SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import type { AppSessionId } from '@shared/graph/ids';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
+import { cuaSocketDir } from '@shared/daemon/files';
 import { buildIdOf, procStartOf } from '../engine-host/supervisor-files';
 import { SPINE_LOCK, takeSpineLock } from '../services/settings/spine-lock';
 import type { SpineDeps } from '../services/spine-root';
@@ -337,9 +338,10 @@ describe('the spine’s bindings (§A)', () => {
     expect(readFileSync(join(data, 'Trash', 'info', 'gone.trashinfo'), 'utf8')).toContain(`Path=${join(scene.root, 'gone')}`);
   });
 
-  // P5 O3-D M5b: machine.client names the app's cua socket directory; each session's socket is `<dir>/<appSessionId>.sock`
-  // (E13), none for a path longer than a Unix socket allows
-  it('browserSocket: the session’s socket in the attached app’s directory, from its machine.client; another client’s is not the app’s; null once the app left', async () => {
+  // P5 O3-D M5b gave a launch the attached app's own cua socket; P5 O5 M5 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md,
+  // Interfaces §H) gives it mawsd's: `<cuaSocketDir>/<appSessionId>.sock`, the same path whether or not an app is attached,
+  // so an engine launched before any app, or outliving one, keeps a socket that serves it again at the next attachment
+  it('browserSocket: the daemon’s own socket for the session, the same before, during and after an app’s attachment', async () => {
     const chunk = standInChunk();
     await scene.start({ spine: { load: chunk.load } });
     const app = await scene.app(); // attached on engine-host.sock, this process's pid
@@ -347,17 +349,14 @@ describe('the spine’s bindings (§A)', () => {
     const other = await scene.app('machine', { appPid: 1 }); // a CLI, a second client
     expect(await machine.request('session.launchMode')).toMatchObject({ ok: true });
     const id = 'app-1' as AppSessionId;
-    expect(chunk.deps[0]!.browserSocket(id)).toBeNull();
+    const own = join(cuaSocketDir(scene.root), 'app-1.sock');
+    expect(chunk.deps[0]!.browserSocket(id)).toBe(own);
     expect(await other.request('machine.client', { browserSocket: '/tmp/not-the-app' })).toMatchObject({ ok: true });
-    expect(chunk.deps[0]!.browserSocket(id)).toBeNull();
     expect(await machine.request('machine.client', { browserSocket: '/tmp/cua' })).toMatchObject({ ok: true });
-    expect(chunk.deps[0]!.browserSocket(id)).toBe('/tmp/cua/app-1.sock');
-    expect(await machine.request('machine.client', { browserSocket: `/tmp/${'d'.repeat(100)}` })).toMatchObject({ ok: true });
-    expect(chunk.deps[0]!.browserSocket(id)).toBeNull(); // past sun_path
-    expect(await machine.request('machine.client', { browserSocket: '/tmp/cua' })).toMatchObject({ ok: true });
+    expect(chunk.deps[0]!.browserSocket(id)).toBe(own);
     app.leave();
     await until(() => app.closed, 3_000, 'the app’s departure');
-    expect(chunk.deps[0]!.browserSocket(id)).toBeNull();
+    expect(chunk.deps[0]!.browserSocket(id)).toBe(own);
   });
 });
 

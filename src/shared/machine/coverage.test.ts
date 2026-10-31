@@ -128,6 +128,7 @@ const PASTED = "a paste placeholder's number, as a string (the terminal's key)";
 const SURFACE_PROPS = "an engine surface's prop names";
 const PINS = 'an engine session id → the account uuid it is pinned to';
 const BRIDGE_CONTROLS = "a control's key in the bridge's capabilities.controls (desk-hub/protocol's CONTROL_KEYS)"; // P5 O9 M2
+const SESSION_TOOLS = "a tool name (artifact_screenshot, artifact_export, browser; O4's own), never an id"; // P5 O5 M5
 const RENDER_AUTHOR_SESSIONS = "a document comment actor's appSessionId → that session's title (the export's comment authors)";
 const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.artifacts.datasetRefreshRequest.output.request.args': TOOL_ARGUMENTS,
@@ -185,6 +186,8 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.settings.usage.output.pinsFor': PINS,
   'events.connectors.watchUpdate.update.result': JSON_OBJECT,
   'events.laneA.changed.state.controls': BRIDGE_CONTROLS, // P5 O9 M2
+  'commands.session.capabilities.output': SESSION_TOOLS, // P5 O5 M5
+  'events.session.capabilitiesChanged.capabilities': SESSION_TOOLS, // P5 O5 M5
   'events.laneA.changed.state.pending[].input': TOOL_ARGUMENTS,
   'events.machineSettings.changed.settings.artifacts.spaceDesignSystems': SPACE_SYSTEMS, // P5 O3-D M1
   'events.plugins.operation.outcome.result': ENGINE_JSON,

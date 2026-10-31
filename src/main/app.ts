@@ -19,7 +19,7 @@ import { startSettings, type SettingsService } from './client/settings'; // P5 O
 import { readLaunchShape } from './client/settings-store'; // P5 O3-A
 import { createMachineSettingsMirror } from './client/machine-settings-mirror'; // P5 O3-D M5b: the daemon shape's machine half
 import { startDaemonSpine, type DaemonSpine } from './sessions/daemon-spine'; // P5 O3-D M5b: the daemon shape's spine
-import { CUA_SOCKET_DIR } from '@shared/browser/cua-socket'; // P5 O3-D M5b
+import { CUA_SOCKET_DIR, cuaSocketPath } from '@shared/browser/cua-socket'; // P5 O3-D M5b; P5 O5 M5: cuaSocketPath
 import { daemonPaths } from '@shared/daemon/files'; // P5 O5 M2: artifacts.sock
 import { launchMode, scenarioPath } from '@shared/sessions/select-source'; // P5 O3-D M5b (D11)
 import { settingsPaths } from '@shared/settings/paths';
@@ -628,6 +628,25 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   });
   shutdown.add('browser', browser.stop);
   cuaSockets = browser.cua; // E13
+  // P5 O5 M5 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §H): on the daemon shape a launch is told
+  // mawsd's socket, which checks the engine's peer and relays the connection here from its own process; every session's
+  // socket admits that relay by the attached daemon's exact instance: the machine welcome's pid, its start read through
+  // the addon now and at each reconnect (none while the machine link is down)
+  if (launch.mode === 'daemon') {
+    const tellRelay = () => browser.cua.relay(hosts.snapshot('machine').state === 'ready' ? (hosts.welcome('machine')?.pid ?? null) : null);
+    tellRelay();
+    shutdown.add('cua relay', hosts.onState('machine', tellRelay));
+  }
+  // P5 O5 M5 (Interfaces §I): on the embedded shape this app is the session's machine, its renderer and its tab engine,
+  // so a session's capabilities hold but for a socket path too long for its browser (mawsd answers them on the daemon's)
+  if (data !== null) {
+    const appCuaDir = join(app.getPath('userData'), ...CUA_SOCKET_DIR);
+    registerMachineHandler('session.capabilities', ({ appSessionId }) => ({
+      artifact_screenshot: { available: true },
+      artifact_export: { available: true },
+      browser: cuaSocketPath(appCuaDir, appSessionId) === null ? { available: false, reason: `the browser socket of this session is longer than a Unix socket allows on ${localName}` } : { available: true },
+    }));
+  }
   // E4a end
   // E4b start: the Chrome import over E4a's handle (E4b Decision Log 31, 32, 34): browser.import.*, the per-boot loading
   // of an imported profile's extensions, the active profile's partition prepared now; at will-quit a running import is

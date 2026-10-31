@@ -9,6 +9,11 @@
 // it waits PEER_ROOT_WAIT_MS for one. A refused socket is destroyed unread, and one line names its pid and the reason.
 // Without the peer identity addon every peer is refused (fail closed).
 //
+// P5 O5 M5 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §H): on the daemon shape a launch is told
+// `mawsd`'s socket for the session, which checks the engine's peer itself and relays the connection here from its own
+// process. That relay is admitted by the attached daemon's exact instance (`relay`: the machine welcome's pid, its start
+// read now), at once and never as a root, since every engine on the machine descends from the daemon.
+//
 // Each connection is one cua host in its own process (connection.ts); what crosses connections, which tabs are reserved
 // or leased to whom, is `TabClaims`. The store's hooks reach every connection: a tab gone (`tabs.removed`), a tab changed
 // (`tabs.updated`), and a leased page's `window.open` adopted as a tab (`tabs.adopted`).
@@ -70,6 +75,9 @@ export interface CuaBackend extends LeaseHolds {
   closeSession(appSessionId: AppSessionId): void;
   // The session's engine process, from each of its statuses: the root its socket's peers must descend from (null: none).
   engineProcess(appSessionId: AppSessionId, pid: number | null): void;
+  // P5 O5 M5: the attached daemon's pid (the machine.sock welcome's), its instance read now through the addon, whose
+  // relayed connections every session's socket admits; null with no daemon attached. Read again at each reconnect.
+  relay(pid: number | null): void;
   // The e2e seam's reading: whether the peer check's addon loaded; per listening session, its connections, held commands,
   // leased tabs and refused peers.
   inspect(): { peerModule: 'loaded' | 'unavailable'; sessions: Record<string, CuaSessionInspection> };
@@ -121,6 +129,17 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
     return engine ? [engine, ...trustedRoots] : [...trustedRoots];
   };
   const hasLiveRoot = (appSessionId: AppSessionId) => addon !== null && rootsOf(appSessionId).some((root) => addon.process(root.pid)?.start === root.start);
+  let relayRoot: ProcessRoot | null = null; // P5 O5 M5
+  // The accepted socket's peer is the daemon's relay by pid (its start is the verdict's to check): nothing to wait for.
+  const fromRelay = (socket: Socket) => {
+    if (addon === null || relayRoot === null) return false;
+    const fd = socketFd(socket);
+    try {
+      return fd !== null && addon.peer(fd).pid === relayRoot.pid;
+    } catch {
+      return false;
+    }
+  };
 
   // The verdict on an accepted socket, which nothing has read yet: refused, it is counted and then destroyed unread;
   // accepted, it becomes a connection, counted before its hello goes, and only then is read. The order is what a reader
@@ -129,7 +148,7 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
   const decide = (appSessionId: AppSessionId, listening: Listening, socket: Socket, acceptedAt: number) => {
     listening.pending.delete(socket);
     if (socket.destroyed) return;
-    const refusal = authorizePeer(socketFd(socket), rootsOf(appSessionId), { addon, now: acceptedAt, uid });
+    const refusal = authorizePeer(socketFd(socket), rootsOf(appSessionId), { addon, now: acceptedAt, uid, relay: relayRoot });
     if (refusal) {
       listening.refused += 1;
       log(refusalLine(appSessionId, refusal));
@@ -147,7 +166,7 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
   const admit = (appSessionId: AppSessionId, listening: Listening, socket: Socket) => {
     const acceptedAt = Date.now();
     socket.on('error', () => {}); // a socket destroyed while it waits reports nothing
-    if (addon && !hasLiveRoot(appSessionId)) {
+    if (addon && !hasLiveRoot(appSessionId) && !fromRelay(socket)) {
       const timer = setTimeout(() => decide(appSessionId, listening, socket, acceptedAt), PEER_ROOT_WAIT_MS);
       listening.pending.set(socket, { acceptedAt, timer });
       return;
@@ -230,6 +249,17 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
       for (const [socket, { acceptedAt, timer }] of [...listening.pending]) {
         clearTimeout(timer);
         decide(appSessionId, listening, socket, acceptedAt);
+      }
+    },
+    relay(pid) {
+      relayRoot = pid === null || !addon ? null : rootOf(pid, addon);
+      // a relayed socket accepted before the daemon was known waits no longer
+      for (const [appSessionId, listening] of sessions) {
+        for (const [socket, { acceptedAt, timer }] of [...listening.pending]) {
+          if (!fromRelay(socket)) continue;
+          clearTimeout(timer);
+          decide(appSessionId, listening, socket, acceptedAt);
+        }
       }
     },
     closeSession(appSessionId) {

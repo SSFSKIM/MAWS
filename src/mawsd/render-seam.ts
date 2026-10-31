@@ -38,13 +38,10 @@ import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
 import type { DaemonRender } from '@shared/ipc/schema/daemon';
 import type { MawsArtifactCapture, MawsArtifactCapturedResult, MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/schema/maws';
 import { RENDER_AUTHOR_SESSIONS_MAX, type RenderAuthors, type RenderRequest } from '@shared/ipc/schema/render';
+import { renderCapabilities, type RenderCapabilities } from './session-capabilities'; // P5 O5 M5
 
 export type RenderState = 'off' | 'starting' | 'ready' | 'ending' | 'unavailable';
 export type RenderRuntime = { available: true } | { available: false; reason: string };
-export interface SessionCapability {
-  available: boolean;
-  reason?: string;
-}
 
 // The render host's process as the seam holds it.
 export interface RenderChild {
@@ -93,7 +90,7 @@ export interface RenderSeam extends RenderService {
   clientReady(): void; // the front's: a render.client said ready
   clientGone(): void; // the front's: a ready render.client's connection ended
   answer(input: { id: string; answer: unknown }): boolean; // the front's: false for an id the seam did not post
-  capabilities(): { artifact_screenshot: SessionCapability; artifact_export: SessionCapability };
+  capabilities(): RenderCapabilities;
   status(): DaemonRender;
   stop(): Promise<void>;
 }
@@ -477,15 +474,15 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
       answerWith(entry, answer);
       return true;
     },
-    capabilities() {
-      const runtime = options.runtime();
-      const unavailable = (reason: string): SessionCapability => ({ available: false, reason });
-      let entry: SessionCapability = { available: true };
-      if (!runtime.available) entry = unavailable(`the render service is unavailable on ${machine}: ${runtime.reason}`);
-      else if (state === 'unavailable' && Date.now() < unavailableUntil) entry = unavailable(`the render service is unavailable on ${machine}: ${lastFailure ?? 'it failed twice'}`);
-      else if (!options.engineHostRenders() && !options.appAttached()) entry = unavailable(`the engine host on ${machine} predates the render service; it is replaced when idle`);
-      return { artifact_screenshot: entry, artifact_export: entry };
-    },
+    // P5 O5 M5: the reasons are session-capabilities.ts's, shared with the render handle's reading while this is not loaded
+    capabilities: () =>
+      renderCapabilities({
+        machine,
+        runtime: options.runtime(),
+        failure: state === 'unavailable' && Date.now() < unavailableUntil ? (lastFailure ?? 'it failed twice') : null,
+        engineHostRenders: options.engineHostRenders(),
+        appAttached: options.appAttached(),
+      }),
     status: () => ({ state, detail, pid: child?.pid ?? null, starts, requests: table.size }),
     async stop() {
       if (stopped) return;

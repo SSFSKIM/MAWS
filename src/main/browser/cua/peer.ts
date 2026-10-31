@@ -4,6 +4,11 @@
 // process tree: it runs as this user and descends from a root, a process instance (pid and start time) captured when it
 // became known and re-verified on every walk, so a root whose pid now names another process matches nothing. The kernel
 // reports the peer's pid and uid; the process table each process's parent and start time. Nothing here logs.
+//
+// P5 O5 M5 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §H): beside the roots, one relay peer, the
+// attached `mawsd`, which checks the engine's peer at its own socket and relays the connection from its own process. It
+// is admitted by its exact instance (pid and kernel start), never as a root: every engine on the machine descends from
+// the daemon, so its descendants are walked as any peer's. `mawsd` loads this module too, for its own sockets' check.
 import type { Socket } from 'node:net';
 import { join } from 'node:path';
 
@@ -77,11 +82,11 @@ export function descends(pid: number, roots: readonly ProcessRoot[], lookup: Pro
 
 // The verdict on an accepted socket's peer: the first refusal, or null to accept. `roots` is every root the socket
 // answers to (a session's engine beside any trusted root); `now` is the accept time in milliseconds since the epoch, and
-// `uid` this process's user.
+// `uid` this process's user; `relay` the attached daemon's instance, admitted as itself alone (P5 O5 M5).
 export function authorizePeer(
   fd: number | null | undefined,
   roots: readonly ProcessRoot[],
-  { addon, now, uid }: { addon: PeerAddon | null; now: number; uid: number },
+  { addon, now, uid, relay = null }: { addon: PeerAddon | null; now: number; uid: number; relay?: ProcessRoot | null },
 ): PeerRefusal | null {
   if (!addon) return { reason: 'module_unavailable', pid: null };
   const read = (): { pid: number; uid: number } | null => {
@@ -96,6 +101,8 @@ export function authorizePeer(
   if (!peer) return { reason: 'peer_unavailable', pid: null };
   const { pid } = peer;
   if (peer.uid !== uid) return { reason: 'uid_mismatch', pid };
+  // the daemon's relay, by its exact instance; its pid with another start is a stranger, judged as any peer below
+  if (relay !== null && pid === relay.pid && isLive(relay, addon.process)) return read()?.pid === pid ? null : { reason: 'not_descendant', pid };
   const live = roots.filter((root) => isLive(root, addon.process));
   if (live.length === 0) return { reason: 'no_root', pid };
   // A peer started after the accept is not the process that connected: that one is gone and its pid reused.
