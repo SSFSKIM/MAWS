@@ -1,6 +1,9 @@
 // The index's schema history (C4 execution document, Interfaces "Index"; residue *Index schema and location*). An
 // ordered list: version N is the N-th entry, applied once, inside the one transaction that opens a database behind the
 // app, with `PRAGMA user_version` recording the last applied. Never edit a released entry; append.
+// A migration that rebuilds a table (create a new one, copy, drop the old, rename) must carry that table's ADDED_COLUMNS
+// entries (below) into the new table and its copy: they are added once, after the migrations, and a rebuild that drops
+// one would lose its values for every row (P5 O7 M4).
 import type { DatabaseSync } from 'node:sqlite';
 import { stageBrowserTables } from './browser-staging'; // P5 O3-A
 

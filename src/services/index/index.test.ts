@@ -87,6 +87,52 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     expect(again.sessions.get(spawned.appId)?.launchedBy).toEqual(launchedBy);
   });
 
+  // P5 O7 M4 (the architect's conditions on ADDED_COLUMNS): the guard iterates the constant itself, so every future entry
+  // is held to exist on a fresh file once its migrations have run
+  it('a fresh file holds every added column once its migrations have run, user_version at the last migration', () => {
+    const path = join(dir.path, 'index.sqlite');
+    const index = open(path);
+    expect(index.applied).toEqual(MIGRATIONS.map((migration) => migration.version));
+    index.close();
+    opened.pop();
+    const db = new DatabaseSync(path, { readOnly: true });
+    try {
+      for (const { table, column } of ADDED_COLUMNS) {
+        const columns = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((info) => info.name);
+        expect(columns, `${table}.${column}`).toContain(column);
+      }
+    } finally {
+      db.close();
+    }
+    expect(inspect(path).version).toBe(MIGRATIONS.length);
+  });
+
+  it('adds no column to a file at a newer user_version: it stays read-only and unavailable, its bytes unchanged', () => {
+    const path = join(dir.path, 'index.sqlite');
+    const raw = new DatabaseSync(path);
+    for (const migration of MIGRATIONS) raw.exec(migration.sql); // the schema as this app knows it, but no added column
+    raw.exec(`PRAGMA user_version = ${MIGRATIONS.length + 1}`); // as a newer build leaves it
+    raw.close();
+    const before = readFileSync(path);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const index = open(path);
+    expect(index.readOnly).toBe(true);
+    expect(index.unavailable).toBe(`user_version ${MIGRATIONS.length + 1} is newer than this app knows (${MIGRATIONS.length})`);
+    index.close();
+    opened.pop();
+    expect(readFileSync(path).equals(before)).toBe(true);
+    const db = new DatabaseSync(path, { readOnly: true });
+    try {
+      for (const { table, column } of ADDED_COLUMNS) {
+        const columns = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((info) => info.name);
+        expect(columns, `${table}.${column}`).not.toContain(column);
+      }
+    } finally {
+      db.close();
+    }
+    expect(inspect(path).version).toBe(MIGRATIONS.length + 1);
+  });
+
   it('v2 makes a v1 default routed flag unknown and keeps the ones a verification wrote', () => {
     const path = join(dir.path, 'index.sqlite');
     const raw = new DatabaseSync(path);
