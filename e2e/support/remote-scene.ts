@@ -64,7 +64,8 @@ type KeysModule = {
 
 /** A's device keys, made now in A's profile, and the ids the org state lists them by. */
 async function deviceOf(scratch: string, userData: string): Promise<{ device: string; channelPub: string; stepUpPub: string }> {
-  // keys.ts imports org-protocol by its TypeScript source and extension, which Playwright's transform cannot load
+  // keys.ts imports org-protocol by its TypeScript source and extension, which Playwright's transform cannot load, and
+  // `@shared/*` by the alias tsconfig.base.json declares
   const outfile = join(scratch, 'device-keys.cjs');
   await build({
     stdin: { contents: "export { loadDeviceKeys, deviceKeyIds } from './src/main/device/keys.ts';", resolveDir: REPO_ROOT, sourcefile: 'remote-scene-keys.ts', loader: 'ts' },
@@ -74,6 +75,7 @@ async function deviceOf(scratch: string, userData: string): Promise<{ device: st
     platform: 'node',
     target: 'node22',
     logLevel: 'error',
+    alias: { '@shared': join(REPO_ROOT, 'src/shared') }, // the tsconfig paths esbuild does not read from the root's references
   });
   const keys = createRequire(__filename)(outfile) as KeysModule;
   await keys.loadDeviceKeys(userData, { excludeFromBackup: async () => true }); // no tmutil

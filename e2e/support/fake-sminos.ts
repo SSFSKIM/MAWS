@@ -50,7 +50,7 @@ export interface FakeSminos {
  */
 export async function startFakeSminos(scratch: string, info: { socket: string; token: string }, machine: string): Promise<FakeSminos> {
   const outfile = join(scratch, 'fake-sminos.cjs');
-  await build({ entryPoints: [FAKE_SMINOS], outfile, bundle: true, format: 'cjs', platform: 'node', target: 'node22', logLevel: 'error' });
+  await build({ entryPoints: [FAKE_SMINOS], outfile, bundle: true, format: 'cjs', platform: 'node', target: 'node22', logLevel: 'error', alias: { '@shared': join(REPO_ROOT, 'src/shared') } });
   const { FakeSminos } = createRequire(__filename)(outfile) as FakeSminosModule;
   const s = await FakeSminos.open(info.socket);
   const policy = { read_only: false, ceiling: 'settings' };
