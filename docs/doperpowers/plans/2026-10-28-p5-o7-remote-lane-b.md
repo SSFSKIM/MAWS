@@ -1,6 +1,6 @@
 # P5 O7 — Remote lane B at full depth (2026-10-28)
 
-> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O7**, §"O7: Remote lane B at full depth". Parent pin: blob `e6f948e1b8fb8b8d0cb663c3d9d0420dcad11b64` at master `33935b949` (P5's Decision Logs 1–162; M1 was planned at blob `e673d56f`, master `629f1d467`, Decision Logs 1–91; re-pinned 2026-10-31 at the re-plan of M2–M7, after O3-E's landing).
+> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O7**, §"O7: Remote lane B at full depth". Parent pin: blob `e6f948e1b8fb8b8d0cb663c3d9d0420dcad11b64` at master `cf1c6eeb2` (P5's Decision Logs 1–163; M1 was planned at blob `e673d56f`, master `629f1d467`, Decision Logs 1–91; re-pinned 2026-10-31 at the re-plan of M2–M7, after O3-E's landing).
 >
 > **What binds.** O7's section in P5 is this document's design, and P5's approval covers it. Binding with it:
 > - P5 §3 (the connection manager: one connection per machine, RL2 over either carrier, direct tried first with a short timeout, the hub relay as fallback; a machine's departure greys only its sessions) and §5 (the remote surfaces); parent acceptance 4, 5 and 8;
