@@ -62,6 +62,7 @@ import * as org from './names/org'; // P5 O8 M1
 import * as laneA from './names/lane-a'; // P5 O9 M2
 import * as machineSettings from './names/machine-settings'; // P5 O3-D
 import * as clientPort from './names/client-port'; // P5 O3-D
+import * as render from './names/render'; // P5 O5 M3
 import * as remote from './names/remote'; // P5 O7 M2
 
 export const NAMESPACES = [
@@ -106,6 +107,7 @@ export const NAMESPACES = [
   'org', // P5 O8 M1
   'laneA', // P5 O9 M2
   'machineSettings', 'clientPort', // P5 O3-D
+  'render', // P5 O5 M3
   'remote', // P5 O7 M2
 ] as const;
 export type Namespace = (typeof NAMESPACES)[number];
@@ -137,13 +139,14 @@ export const NAMES = {
   org, // P5 O8 M1
   laneA, // P5 O9 M2
   machineSettings, clientPort, // P5 O3-D
+  render, // P5 O5 M3
   remote, // P5 O7 M2
 } as const satisfies { [N in Namespace]: { commands: readonly `${N}.${string}`[]; events: readonly `${N}.${string}`[] } };
 
 type Names = typeof NAMES;
 export type BridgedCommandName = { [N in Namespace]: Names[N]['commands'][number] }[Namespace];
-export type MainOnlyCommandName = (typeof engine.mainOnlyCommands)[number] | (typeof host.mainOnlyCommands)[number] /* E10: host's */ | (typeof artifacts.mainOnlyCommands)[number] /* P3-A M4 */ | (typeof library.mainOnlyCommands)[number] /* P3-L M1 */ | (typeof designSystems.mainOnlyCommands)[number] /* P3-D */ | (typeof connectors.mainOnlyCommands)[number] /* P3-H H3b */ | (typeof maws.mainOnlyCommands)[number] /* P3-E E3 */ | (typeof session.mainOnlyCommands)[number] | (typeof customization.mainOnlyCommands)[number] /* P4-AGG M4 */ | (typeof pty.mainOnlyCommands)[number] /* P5 O2 M4 */ | (typeof daemon.mainOnlyCommands)[number] /* P5 O2 M5 */ | (typeof fs.mainOnlyCommands)[number] | (typeof machine.mainOnlyCommands)[number] | (typeof clientPort.mainOnlyCommands)[number] /* P5 O3-D */ | (typeof files.mainOnlyCommands)[number]; // P5 O3-E
-export const MAIN_ONLY_COMMANDS: readonly MainOnlyCommandName[] = [...engine.mainOnlyCommands, ...host.mainOnlyCommands, ...artifacts.mainOnlyCommands /* P3-A M4 */, ...library.mainOnlyCommands /* P3-L M1 */, ...designSystems.mainOnlyCommands /* P3-D */, ...connectors.mainOnlyCommands /* P3-H H3b */, ...maws.mainOnlyCommands /* P3-E E3 */, ...session.mainOnlyCommands /* P4-AGG M4 */, ...customization.mainOnlyCommands /* P4-AGG M4 */, ...pty.mainOnlyCommands /* P5 O2 M4 */, ...daemon.mainOnlyCommands /* P5 O2 M5 */, ...fs.mainOnlyCommands, ...machine.mainOnlyCommands, ...clientPort.mainOnlyCommands /* P5 O3-D */, ...files.mainOnlyCommands /* P5 O3-E */];
+export type MainOnlyCommandName = (typeof engine.mainOnlyCommands)[number] | (typeof host.mainOnlyCommands)[number] /* E10: host's */ | (typeof artifacts.mainOnlyCommands)[number] /* P3-A M4 */ | (typeof library.mainOnlyCommands)[number] /* P3-L M1 */ | (typeof designSystems.mainOnlyCommands)[number] /* P3-D */ | (typeof connectors.mainOnlyCommands)[number] /* P3-H H3b */ | (typeof maws.mainOnlyCommands)[number] /* P3-E E3 */ | (typeof session.mainOnlyCommands)[number] | (typeof customization.mainOnlyCommands)[number] /* P4-AGG M4 */ | (typeof pty.mainOnlyCommands)[number] /* P5 O2 M4 */ | (typeof daemon.mainOnlyCommands)[number] /* P5 O2 M5 */ | (typeof fs.mainOnlyCommands)[number] | (typeof machine.mainOnlyCommands)[number] | (typeof clientPort.mainOnlyCommands)[number] /* P5 O3-D */ | (typeof files.mainOnlyCommands)[number] /* P5 O3-E */ | (typeof render.mainOnlyCommands)[number]; // P5 O5 M3
+export const MAIN_ONLY_COMMANDS: readonly MainOnlyCommandName[] = [...engine.mainOnlyCommands, ...host.mainOnlyCommands, ...artifacts.mainOnlyCommands /* P3-A M4 */, ...library.mainOnlyCommands /* P3-L M1 */, ...designSystems.mainOnlyCommands /* P3-D */, ...connectors.mainOnlyCommands /* P3-H H3b */, ...maws.mainOnlyCommands /* P3-E E3 */, ...session.mainOnlyCommands /* P4-AGG M4 */, ...customization.mainOnlyCommands /* P4-AGG M4 */, ...pty.mainOnlyCommands /* P5 O2 M4 */, ...daemon.mainOnlyCommands /* P5 O2 M5 */, ...fs.mainOnlyCommands, ...machine.mainOnlyCommands, ...clientPort.mainOnlyCommands /* P5 O3-D */, ...files.mainOnlyCommands /* P5 O3-E */, ...render.mainOnlyCommands /* P5 O5 M3 */];
 export type BridgedEventName = { [N in Namespace]: Names[N]['events'][number] }[Namespace];
 
 // Pure, so a bundle that takes only `NAMESPACES` or a channel (the renderer and main, through `./schema.ts`) drops

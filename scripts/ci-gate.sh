@@ -291,6 +291,7 @@ variables_ok=true
 gate_runner=$(gh variable get GATE_RUNNER -R "$REPO") || variables_ok=false
 gate_e2e_runner=$(gh variable get GATE_E2E_RUNNER -R "$REPO") || variables_ok=false
 gate_hosted_route=$(gh variable list -R "$REPO" --json name,value --jq '.[] | select(.name == "HOSTED_MAC_ROUTE") | .value') || variables_ok=false
+gate_mac_ec2=$(gh variable list -R "$REPO" --json name,value --jq '.[] | select(.name == "MAC_EC2") | .value') || variables_ok=false
 gate_hosted_cap=$(gh variable list -R "$REPO" --json name,value --jq '.[] | select(.name == "HOSTED_MAC_CAP") | .value') || variables_ok=false
 gate_hosted_repos=$(gh variable list -R "$REPO" --json name,value --jq '.[] | select(.name == "HOSTED_MAC_REPOS") | .value') || variables_ok=false
 # Sample only when the direct route could host e2e work (unit may add the peer group) and the caller named no hosted
@@ -310,7 +311,7 @@ if [[ ${hosted_route:-$gate_hosted_route} == direct && $lane != no-hosted && $la
   [[ -z $backlog_trailer ]] || trailers+=$'\n'"$backlog_trailer"
 fi
 if [[ -z $label ]]; then
-  label=$(HEAD_MESSAGE="$trailers" GATE_RUNNER="$gate_runner" GATE_E2E_RUNNER="$gate_e2e_runner" HOSTED_MAC_ROUTE="$gate_hosted_route" HOSTED_MAC_CAP="$gate_hosted_cap" \
+  label=$(HEAD_MESSAGE="$trailers" GATE_RUNNER="$gate_runner" GATE_E2E_RUNNER="$gate_e2e_runner" HOSTED_MAC_ROUTE="$gate_hosted_route" HOSTED_MAC_CAP="$gate_hosted_cap" MAC_EC2="$gate_mac_ec2" \
     node "$(dirname "$0")/ci-gate-identity.mjs" --git-dir "$git_dir" --sha "$sha" --branch "$branch") || exit 2
   label=${label//[^A-Za-z0-9._-]/-}
   ref=ci/$label-$short
@@ -350,7 +351,7 @@ exec > >(tee "$log") 2>&1
 [[ -z $backlog_trailer ]] || printf 'ci-gate: %s\n' "$backlog_trailer"
 
 if [[ $variables_ok == true ]] &&
-   pool_demand=$(HEAD_MESSAGE="$trailers" GATE_RUNNER="$gate_runner" GATE_E2E_RUNNER="$gate_e2e_runner" HOSTED_MAC_ROUTE="$gate_hosted_route" HOSTED_MAC_CAP="$gate_hosted_cap" \
+   pool_demand=$(HEAD_MESSAGE="$trailers" GATE_RUNNER="$gate_runner" GATE_E2E_RUNNER="$gate_e2e_runner" HOSTED_MAC_ROUTE="$gate_hosted_route" HOSTED_MAC_CAP="$gate_hosted_cap" MAC_EC2="$gate_mac_ec2" \
      node "$(dirname "$0")/ci-gate-pool-demand.mjs" --git-dir "$git_dir" --sha "$sha"); then
   trailers+=$'\n'"Pool-Demand: $pool_demand"
 else

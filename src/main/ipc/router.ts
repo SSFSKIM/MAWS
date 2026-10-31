@@ -20,6 +20,11 @@
 // `host_unavailable` while the machine is not up; with no manager it answers `host_unavailable` itself. `dispatchLocal` is
 // the route minus the sender check, the local link's entry to this machine's services (src/main/machines/local-link.ts);
 // another profile's app reaches them through this profile's mawsd (P5 O3-D M6, O6's stand-in gone).
+//
+// P5 O5 M4 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, "One answerer, both directions"): on the host binding,
+// `artifacts.export` alone is answered here, by the handler the root registered with `registerMachine`, while the
+// attached daemon does not render (`daemonRenders`: its welcome lists no `machine.render`, an older `mawsd` whose front
+// serves no such name). No other machine command's binding moves.
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type { HostDispatch, HostOwner } from '@shared/host/host-supervisor'; // P5 O2 M3
 import { HostCommandError, thrownError } from '@shared/host/runtime';
@@ -50,7 +55,7 @@ export type MachineHandler<N extends CommandName> = (input: CommandInput<N>, con
 // P5 O1 M5: `client` is the asker, passed for a `machine`-owned command only (the host binding). P5 O2 M3: both types
 // moved with the host supervisor to @shared/host/host-supervisor.
 export type { HostDispatch, HostOwner };
-export type MachineBinding = { kind: 'embedded' } | { kind: 'host' };
+export type MachineBinding = { kind: 'embedded' } | { kind: 'host'; daemonRenders?(): boolean /* P5 O5 M4: false answers artifacts.export here */ };
 // P5 O6 M3: the connection manager's dispatch, for a command whose target is another machine (its input validated).
 export type RemoteDispatch = (machine: MachineRef, name: CommandName, input: unknown, ctx: MainContext) => Promise<CommandResult<CommandName>>;
 
@@ -184,7 +189,7 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
     const interceptor = interceptors.get(name); // C5: the stub source's seam, above
     if (interceptor) {
       answer = run(interceptor);
-    } else if (owner === 'machine' && machine.kind === 'host') {
+    } else if (owner === 'machine' && machine.kind === 'host' && !(name === 'artifacts.export' && machine.daemonRenders?.() === false)) {
       answer = () => dispatchToHost(owner, name, input.value, context.client); // P5 O1 M5
     } else if (owner === 'machine') {
       const handler = machineHandlers.get(name); // P5 O1 M5: embedded

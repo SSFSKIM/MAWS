@@ -52,6 +52,10 @@ export interface DaemonServices {
   onUpstream(listener: (link: { connected: boolean; generation: number }) => void): () => void; // the engine-host link; every channel's 'upstream' close comes before connected: false
   hold(reason: string): () => void; // a private mawsd's idle exit waits while one is out; the returned function releases it
   interest: { report(viewer: string, sessions: readonly AppSessionId[]): void; drop(viewer: string): void }; // a remote viewer's subscriptions join the union (OX5)
+  // P5 O5 M2 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §C): a `maws-artifact:` URL's answer as
+  // artifacts.sock serves it (the status, the scheme's headers, the bytes), its handler loaded at the first use; for
+  // O7 M5's RL2 kind, graded by O10 as `view` on the artifact's session
+  artifacts: { fetch(request: { url: string; method: 'GET' | 'HEAD'; range?: string }): Promise<{ status: number; headers: Record<string, string>; body: ReadableStream<Uint8Array> | null }> };
   log(line: string): void;
 }
 

@@ -6,7 +6,7 @@ import { HtmlFrame, type FrameHandle } from '../../renderer/src/tools/artifacts/
 import { pinOf, placeCard } from '../../renderer/src/side/card/placement';
 import { installResizeObserver } from '../../renderer/src/test-support/resize';
 import { relayPage, type PageRelay } from '../../renderer/src/tools/artifacts/viewers/connectors/relay';
-import { BRIDGE_SCRIPT } from './bridge-script';
+import { BRIDGE_SCRIPT } from '../../services/artifacts/scheme/bridge-script'; // P5 O5 M2: moved with the scheme's library (this suite imports the renderer, which the library's directory may not)
 
 beforeAll(() => {
   (window as unknown as { happyDOM: { settings: { navigation: { disableChildFrameNavigation: boolean } } } }).happyDOM.settings.navigation.disableChildFrameNavigation = true;

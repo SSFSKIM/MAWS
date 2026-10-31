@@ -18,7 +18,7 @@ const directives = (script: string[], connect: string[]) => [
   ['font-src', "'self'", 'data:', 'maws-artifact:'],
   ['connect-src', "'self'", ...connect],
   // E2: the viewers' frames and media load the store through its scheme ('self' keeps the request card's srcdoc frame,
-  // which inherits this policy); each answer of the scheme carries its own policy (artifacts/scheme-handler.ts). P3-A M7:
+  // which inherits this policy); each answer of the scheme carries its own policy (src/services/artifacts/scheme/scheme-handler.ts). P3-A M7:
   // the artifact store's scheme; P3-L M6b: E2's `maws-deliverable:` no more
   ['frame-src', "'self'", 'maws-artifact:'],
   ['media-src', "'self'", 'maws-artifact:'],

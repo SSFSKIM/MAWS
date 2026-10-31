@@ -9,7 +9,7 @@
 import { join } from 'node:path';
 import { BrowserWindow, screen, type Rectangle, type WebContents } from 'electron';
 import type { PresentInput, PresentOutput } from '@shared/ipc/schema/presentations';
-import { guardFrames, type SeamEnv } from '../artifacts/policies';
+import { guardFrames, type SeamEnv } from '../../render/policies';
 import { pageOf } from '../ipc/clients';
 import type { registerMainHandler } from '../ipc/router';
 import { showAppWindow } from '../window-show';

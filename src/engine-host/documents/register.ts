@@ -12,6 +12,8 @@
 // open answers `unavailable`; a refusal waits for the batch its validation read the same way (`writeCommitted`).
 import { join } from 'node:path';
 import { HostCommandError, type AppPresence, type HostClientHooks, type HostEmit, type HostOn } from '@shared/host/runtime';
+import { namesClient } from '@shared/host/client-refs'; // P5 O5 M4
+import type { HandlerContext } from '@shared/ipc/client'; // P5 O5 M4
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { isDocKind, type Space } from '@shared/artifacts/entity';
@@ -83,10 +85,10 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
   };
   // A handler whose store refusals reach the caller typed, each released only after the batch its validation may have
   // read (`store.writeCommitted`; a read's own refusal already waits in `readCommitted`).
-  const serve = <N extends HostArtifactCommand>(name: N, handler: (input: CommandInput<N>) => CommandOutput<N> | Promise<CommandOutput<N>>) =>
-    on(name, async (input) => {
+  const serve = <N extends HostArtifactCommand>(name: N, handler: (input: CommandInput<N>, ctx?: HandlerContext) => CommandOutput<N> | Promise<CommandOutput<N>>) =>
+    on(name, async (input, ctx) => {
       try {
-        const run = async () => handler(input);
+        const run = async () => handler(input, ctx);
         return await (documents ? documents.store.writeCommitted(run) : run());
       } catch (error) {
         throw typed(error);
@@ -266,13 +268,40 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
   // E3 start: main's holds over snapshot bytes (src/engine-host/dashboards/holds.ts), the attached app's alone
   const holds = new ConnectionHolds();
   const stopGone = client.presence?.onGone(() => holds.releaseAll());
-  serve('artifacts.captureDatasetState', async ({ artifactId, versionId }) => {
+  // P5 O5 M4 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, M4's holds decision): a request that names its client
+  // (`mawsd` forwards the render host's with its connection's ref) holds under that ref, released at its end (the link's
+  // clientGone, or the link's end) and never at the app's going; one that names none keeps the presence rule above
+  const clientHolds = new Map<string, ConnectionHolds>();
+  const goneClient = () => new HostCommandError(ipcError('host_unavailable', 'the client that asked for this hold has gone'));
+  // the asker's holds: the presence's for a request naming no client; null once a named client has ended
+  const holdsOf = (ctx?: HandlerContext): ConnectionHolds | null => {
+    if (!ctx || !namesClient(ctx.client)) return holds;
+    const { client: ref } = ctx;
+    const owned = clientHolds.get(ref.id);
+    if (owned) return owned;
+    const taken = new ConnectionHolds();
+    clientHolds.set(ref.id, taken);
+    ref.onGone(() => {
+      if (clientHolds.get(ref.id) === taken) clientHolds.delete(ref.id);
+      taken.releaseAll();
+    }); // run at once for a ref already ended
+    return clientHolds.get(ref.id) === taken ? taken : null;
+  };
+  const stillHeld = (taker: ConnectionHolds, ctx?: HandlerContext) => taker === holds || clientHolds.get(ctx!.client.id) === taker;
+  serve('artifacts.captureDatasetState', async ({ artifactId, versionId }, ctx) => {
     const store = storeOf();
+    const taker = holdsOf(ctx);
+    if (!taker) throw goneClient();
     if (versionId === undefined) await prepared(store, artifactId); // the live state is the kind's model, as `artifacts.state`'s
-    return holds.capture(store, artifactId, versionId);
+    if (!stillHeld(taker, ctx)) throw goneClient(); // its client ended during the wait: a hold now would belong to nobody
+    return taker.capture(store, artifactId, versionId);
   });
-  serve('artifacts.holdAssets', async ({ artifactId, refs }) => ({ assetHoldId: await holds.hold(storeOf(), artifactId, refs) }));
-  serve('artifacts.releaseAssets', ({ assetHoldId }) => ({ released: holds.release(assetHoldId) }));
+  serve('artifacts.holdAssets', async ({ artifactId, refs }, ctx) => {
+    const taker = holdsOf(ctx);
+    if (!taker) throw goneClient();
+    return { assetHoldId: await taker.hold(storeOf(), artifactId, refs) };
+  });
+  serve('artifacts.releaseAssets', ({ assetHoldId }, ctx) => ({ released: holdsOf(ctx)?.release(assetHoldId) ?? false }));
   // E3: an agent's pending dataset refresh, as main reads it once its id was announced (main-only)
   serve('artifacts.datasetRefreshRequest', ({ requestId }) => ({ request: datasetRefresh?.read(requestId) ?? null }));
   // E3 end
@@ -340,6 +369,8 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
       loopDelay?.close();
       stopGone?.(); // E3
       holds.releaseAll(); // E3
+      for (const owned of clientHolds.values()) owned.releaseAll(); // P5 O5 M4
+      clientHolds.clear();
     },
   };
 }

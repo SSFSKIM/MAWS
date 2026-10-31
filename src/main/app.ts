@@ -5,7 +5,7 @@
 // P5 O3-C (docs/doperpowers/plans/2026-10-28-p5-o3-c-spine-library.md): the library's one door, its two roots
 import { COMMAND_BUDGETS_MS, openSpineData, startMachineIdentity, startSpine, type SpineData } from '../services/entry';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { CommandResult } from '@shared/ipc/schema';
+import type { CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { REGISTRY } from '@shared/ipc/registry'; // P5 O3-D M1: the bus's register reads each name's owner
 import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
 import { join } from 'node:path';
@@ -20,6 +20,7 @@ import { readLaunchShape } from './client/settings-store'; // P5 O3-A
 import { createMachineSettingsMirror } from './client/machine-settings-mirror'; // P5 O3-D M5b: the daemon shape's machine half
 import { startDaemonSpine, type DaemonSpine } from './sessions/daemon-spine'; // P5 O3-D M5b: the daemon shape's spine
 import { CUA_SOCKET_DIR } from '@shared/browser/cua-socket'; // P5 O3-D M5b
+import { daemonPaths } from '@shared/daemon/files'; // P5 O5 M2: artifacts.sock
 import { launchMode, scenarioPath } from '@shared/sessions/select-source'; // P5 O3-D M5b (D11)
 import { settingsPaths } from '@shared/settings/paths';
 import { startWithProfileLock } from './files/profile-lock';
@@ -102,6 +103,7 @@ import { engineQuitDeps } from './lifecycle/engine-quit';
 // E11 start
 import { shutdownSteps } from './lifecycle/shutdown';
 import { CLOSE_GRACE_MS } from '@shared/host/socket-port';
+import { MACHINE_RENDER_CAPABILITY } from '@shared/host/socket-protocol'; // P5 O5 M4
 // E11 end
 // E4a start
 import { startBrowser, type Browser } from './browser';
@@ -121,21 +123,14 @@ import { readResolvedThrough, registerLibraryFiles } from './library/files'; // 
 import type { ServicesBus } from '@shared/spine/bus'; // P5 O3-C
 // P3-L end
 // P3-B start
-import { registerInspectionExporters } from './artifacts/inspection';
-import { registerDocumentExporters } from './artifacts/export-document'; // P3-B
-import { resolveExportHumanName } from '@shared/artifacts/export-author';
+import { resolveExportHumanName } from '@shared/artifacts/export-author'; // P5 O5 M3: every kind's exporters are the render library's, composed by startArtifacts
 // P3-B end
 // P3-D start
-import { engineHostCall, governDocumentExporter } from './design-systems/documents';
-import { registerDesignSystemExporters } from './design-systems/export';
-import { registerPresentationExporters } from './presentations/export'; // P3-C M9
-import { registerDesignExporters } from './design/export'; // P3-E (E1's M5)
 import { registerPresenter } from './presentations/present'; // P3-C M6
 // P3-D end
 // P3-E start
 import { registerAssetDownload } from './dashboard/download';
 import { holdAsset, registerDatasetHolds } from './dashboard/holds'; // E3
-import { registerDashboardExporters } from './dashboard/export'; // E2 M5
 // P3-E end
 import { startConnectors } from './connectors'; // P3-H H3b
 import { createDirectRoute } from './connectors/direct-route'; // P3-HD: route D, MAWS's own MCP connections
@@ -409,7 +404,13 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     if (owner === 'machine') forwardedToMachine?.(name, input, client);
     return hosts.dispatch(owner, name, input, client);
   };
-  installRouter({ appUrl, local, dispatchToHost, remote: routeLaneB(routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), (ref) => machines.remote(ref), remoteLaneB), machine: { kind: data === null ? 'host' : 'embedded' } });
+  // P5 O5 M4: on the daemon shape artifacts.export goes to mawsd's render seam while its welcome lists machine.render, and
+  // is answered by this root's own registration (startArtifacts) on an older daemon; before any welcome it is forwarded
+  const daemonRenders = () => {
+    const peer = hosts.peer('machine');
+    return peer === null || peer.capabilities.includes(MACHINE_RENDER_CAPABILITY);
+  };
+  installRouter({ appUrl, local, dispatchToHost, remote: routeLaneB(routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), (ref) => machines.remote(ref), remoteLaneB), machine: data === null ? { kind: 'host', daemonRenders } : { kind: 'embedded' } });
   // P5 O3-C (Interfaces §A): the services bus, how the library (the spine and the checkouts) registers its commands,
   // installs its intercepts, emits its events and taps them, bound here to the router and `emit`, so every tap main's
   // own code holds (the menu's, the stand-in's) still hears the library's events. O3-D's mawsd binds its services front.
@@ -654,15 +655,28 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     tracked(win); // C5: tracked placement
     return win; // C5: the notifier re-creates the window through here
   };
+  // WR 73: a document's and a dashboard's Word comment authors, the same resolved identity for every export entry point
+  const exportAuthors = {
+    sessionTitle: (appSessionId: string) => view.record(appSessionId as AppSessionId)?.title.text, // P5 O3-C (reader R9)
+    humanAuthorName: async () => {
+      const saved = settings.state().settings.artifacts.exportAuthorName;
+      return resolveExportHumanName(saved, saved ? null : await usage.routedAccountName());
+    },
+  };
   // P3-A M4: `artifacts.open` (a document's port to the asking window), before the first window loads (P5 O3-C, D23: the
-  // design-system defaults' relay is the spine's)
+  // design-system defaults' relay is the spine's). P5 O5 M3: with it the render library, every kind's exporters (P3-B's
+  // documents, P3-D's design systems and the governing system, P3-C's presentations, the inspections, P3-E's dashboards and
+  // designs) composed in-process as before
   const artifacts = startArtifacts({
     hosts,
     register: registerMainHandler,
+    registerMachine: registerMachineHandler, // P5 O5 M4: artifacts.export
     emit, // P3-A M5: artifacts.resync
     env: process.env,
     openWindow,
     root: join(app.getPath('userData'), 'artifacts'), // P3-A M7: the store's directory (the host's own rule)
+    artifactsSocket: launch.mode === 'daemon' ? daemonPaths(profile).artifactsSocket : null, // P5 O5 M2: the scheme proxy's endpoint, while the daemon's welcome lists it
+    authors: exportAuthors, // P5 O5 M3
   });
   shutdown.add('artifacts', artifacts.stop);
   // P3-H H3b: an artifact page's connector calls and watches and the owner's grants (main's broker; route E through the
@@ -703,7 +717,13 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   const delivery = startDelivery({
     register: registerMainHandler,
     emit: (name, payload) => emit(name, payload),
-    exportArtifact: (input, options) => artifacts.exports.exportForLibrary(input, options),
+    // P5 O5 M4: the library's Export as the machine command, its dialect on the wire: this root's handler on the embedded
+    // shape (and on an older daemon), mawsd's render seam on the daemon shape
+    exportArtifact: async (input, options) => {
+      const exported = await invokeOwn('artifacts.export', { ...input, ...(options?.dialect && { dialect: options.dialect }) }, { client: mainClient, target: local });
+      if (!exported.ok) throw new Error(exported.error.message);
+      return exported.value as CommandOutput<'artifacts.export'>;
+    },
     call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
     connectors: connectors.delivery ?? null,
     shellEnv: () => engineEnv,
@@ -723,21 +743,6 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     userAgent: `MAWS/${app.getVersion()}`,
   });
   shutdown.add('catalog', catalog.stop);
-  // P3-B: document × md, html, docx, pdf. P3-D (the P3 spec's Decision Log 61): each run handed its governing design system
-  const exportAuthors = {
-    sessionTitle: (appSessionId: string) => view.record(appSessionId as AppSessionId)?.title.text, // P5 O3-C (reader R9)
-    humanAuthorName: async () => {
-      const saved = settings.state().settings.artifacts.exportAuthorName;
-      return resolveExportHumanName(saved, saved ? null : await usage.routedAccountName());
-    },
-  };
-  shutdown.add('document-exporters', registerDocumentExporters((exporter) => artifacts.exporters.register(governDocumentExporter(exporter, engineHostCall(hosts.dispatch))), exportAuthors)); // P3-B, P3-D; WR 73
-  registerDesignSystemExporters(artifacts.exporters); // P3-D M7: `design_system` as `claude` (Claude's files, zipped)
-  registerPresentationExporters(artifacts.exporters, { call: engineHostCall(hosts.dispatch), env: process.env }); // P3-C M9: `presentation` as html, pdf, png, pptx, claude; the governing system from D's `designSystems.governing` (Decision Log 27 (2))
-  shutdown.add('inspection-exporters', registerInspectionExporters(artifacts.exporters, { call: engineHostCall(hosts.dispatch), env: process.env }));
-  // P3-E (E2 M5; E's Decision Log 32): `dashboard` as md, html, docx, pdf: B's four, governed by D, over the captured views
-  shutdown.add('dashboard-exporters', registerDashboardExporters((exporter) => artifacts.exporters.register(exporter), { call: engineHostCall(hosts.dispatch), env: process.env, ...exportAuthors })); // WR 73: the same resolved identity for every document/dashboard export entry point
-  registerDesignExporters(artifacts.exporters, { call: engineHostCall(hosts.dispatch), env: process.env }); // P3-E (E1's M5): `design` as png and pdf over C's capture window, never cropped (XE9)
   shutdown.add('presenter', registerPresenter({ register: registerMainHandler, appUrl, env: process.env }).end); // P3-C M6: `presentations.present`, the show's windows
   // P3-L M5b: the viewers' and the library's reach to a byte kind's stored file and its exports, whatever the index's
   // state. P5 O3-C (D22): the client's; the library's derived index is the spine's, and `library.read` reaches the

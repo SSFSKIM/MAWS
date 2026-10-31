@@ -45,6 +45,7 @@ export const PATH_COMMANDS = [
   'host.op', // P5 O10 M7: main-only (mawsd's ledger), never bridged; its `context.engineSessionId` makes it path
   'files.readResolved', // P5 O3-E: main-only (library.read's reach), never bridged; a bare path
   'machineSettings.set', // P5 O3-D: as settings.set, its engine patch's paths
+  'render.answer', // P5 O5 M3: main-only (the render host's answer to mawsd), never bridged; an export's answer's `path`
 ] as const satisfies readonly CommandName[];
 export type PathCommandName = (typeof PATH_COMMANDS)[number];
 
