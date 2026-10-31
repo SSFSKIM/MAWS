@@ -44,7 +44,7 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
   });
 
   // Every payload is checked against its X2 schema, as the host runtime would before posting it.
-  const start = async (watch?: WatchFn, startScanFallbackMs?: number, reconcileMs?: number) => {
+  const start = async (watch?: WatchFn, startScanFallbackMs?: number, reconcileMs?: number, agentRetryMs?: number) => {
     service = new FsService({
       paths: fixture.paths,
       emit: (name, payload) => {
@@ -56,6 +56,7 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
       watch,
       startScanFallbackMs,
       reconcileMs,
+      agentRetryMs,
     });
     await service.start();
     return service;
@@ -179,13 +180,13 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
     afterEach(() => restore());
 
     // A service whose projects watch reports what `fire` names (a path under a session's directory), as FSEvents would.
-    const startReporting = async (reconcileMs?: number) => {
+    const startReporting = async (reconcileMs?: number, agentRetryMs?: number) => {
       let projects: ((event: string, filename: string | null) => void) | null = null;
       const watch: WatchFn = (path, _options, listener) => {
         if (path === fixture.paths.projects) projects = listener;
         return Object.assign(new EventEmitter(), { close: vi.fn() });
       };
-      const fs = await start(watch, undefined, reconcileMs);
+      const fs = await start(watch, undefined, reconcileMs, agentRetryMs);
       fire = (sessionId, rel) => projects!('change', relative(fixture.paths.projects, join(sessionDirOf(sessionId), rel)));
       projectsChanged = (path) => projects!('change', relative(fixture.paths.projects, path));
       return fs;
@@ -383,6 +384,45 @@ describe('filesystem state service: discovery, sidecars and holders', () => {
       expect(updates).toBe(0);
       const page = await fs.eventsSnapshot(A1, null, {}, true);
       expect(page.events.flatMap((e) => (e.kind === 'subagent.started' || e.kind === 'subagent.finished' ? [`${e.kind} ${e.taskId}`] : []))).toEqual(['subagent.started c1', 'subagent.finished c1']);
+    });
+
+    it('the reconcile tick\'s poke of a follow waits for the agent changes gathered before it too', async () => {
+      const parent = await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'first')]);
+      const fs = await startReporting(200);
+      await fs.bind([{ sessionId: S1, appSessionId: A1 }]);
+      await fs.eventsSnapshot(A1, null);
+      await settled();
+      walks = [];
+      const release = hold();
+      const asked = fs.subagents(A1); // a walk read the tree before the child, and is held
+      await expect.poll(() => walks.length).toBeGreaterThan(0);
+      await addAgent(S1, 'c1'); // gathered behind the held walk
+      await fixture.appendLines(parent, agentCall('toolu_c1')); // never reported: only the tick's poke reads it
+      await sleep(DEBOUNCE_MS + 400); // the tick has poked the follow at least once meanwhile
+      release();
+      await asked;
+      await expect.poll(() => lifecycle(A1), { timeout: 2_000 }).toEqual(['subagent.started c1', 'subagent.finished c1']);
+    });
+
+    it('a listing whose pass failed is read again before a follow trusts it, once its retry wait has passed', async () => {
+      await fixture.addTranscript('/work/a', S1, [user('u1', null, '/work/a', 'first'), ...agentCall('toolu_c1')]);
+      const fs = await startReporting(undefined, 200);
+      await fs.bind([{ sessionId: S1, appSessionId: A1 }]);
+      await fs.subagents(A1); // listed before the child existed
+      await settled();
+      const failing = vi.spyOn(SubagentReader.prototype, 'update').mockRejectedValueOnce(new Error('EIO: a read failed'));
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        await addAgent(S1, 'c1', false);
+        fire(S1, 'subagents/agent-c1.meta.json'); // its one pass fails, and no later change asks again
+        await expect.poll(() => logged.mock.calls.some(([message]) => String(message).includes('cannot list subagents'))).toBe(true);
+        await sleep(300); // past the retry wait
+        const page = await fs.eventsSnapshot(A1, null, {}, true);
+        expect(page.events.flatMap((e) => (e.kind === 'subagent.started' || e.kind === 'subagent.finished' ? [`${e.kind} ${e.taskId}`] : []))).toEqual(['subagent.started c1', 'subagent.finished c1']);
+      } finally {
+        failing.mockRestore();
+        logged.mockRestore();
+      }
     });
 
     it('a pass that fails is not tried again on every write', async () => {

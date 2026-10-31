@@ -85,6 +85,7 @@ export interface FsServiceOptions {
   startScanFallbackMs?: number;
   window?: WindowBudget; // tests' smaller pages
   releaseMs?: number; // FOLLOW_RELEASE_MS
+  agentRetryMs?: number; // AGENT_RETRY_MS
 }
 
 // The replay runs' side of the snapshot seam (ReplayHost): null for an app id no run has.
@@ -166,6 +167,7 @@ export class FsService {
   private reconcile: ReturnType<typeof setInterval> | null = null;
   private readonly window: WindowBudget | undefined;
   private readonly releaseMs: number;
+  private readonly agentRetryMs: number;
   private interest: InterestSource | null = null; // absent (tests, diagnostics), follows are never released for it
   private interested: ReadonlySet<AppSessionId> = new Set();
   private offInterest: (() => void) | null = null;
@@ -194,6 +196,7 @@ export class FsService {
     this.reconcileMs = options.reconcileMs ?? RECONCILE_MS;
     this.window = options.window;
     this.releaseMs = options.releaseMs ?? FOLLOW_RELEASE_MS;
+    this.agentRetryMs = options.agentRetryMs ?? AGENT_RETRY_MS;
     this.startScanFallbackMs = options.startScanFallbackMs ?? START_SCAN_FALLBACK_MS;
     this.taskReader = new TaskReader(options.paths);
     this.discovery = new Discovery(options.paths);
@@ -587,7 +590,7 @@ export class FsService {
   private scheduleAgentPass(sessionId: SessionId, sync: AgentSync): void {
     if (sync.pass !== null || sync.timer !== null || this.stopped) return;
     const now = Date.now();
-    const wait = Math.max(sync.endedAt + AGENT_SETTLE_MS - now, sync.failedAt === null ? 0 : sync.failedAt + AGENT_RETRY_MS - now);
+    const wait = Math.max(sync.endedAt + AGENT_SETTLE_MS - now, sync.failedAt === null ? 0 : sync.failedAt + this.agentRetryMs - now);
     if (wait <= 0) {
       this.runAgentPass(sessionId, sync);
       return;
@@ -599,28 +602,19 @@ export class FsService {
   }
 
   // Settles once every agent-file change gathered for the session so far is in its listing; null when none waits. A
-  // follow folds a transcript record only after this (`pokeInOrder`): the engine writes a child's meta before the
-  // parent's `Agent` tool result, and the backfill looks the child up when it folds that result, once. The pass the
-  // changes are owed begins now rather than after AGENT_SETTLE_MS; one owed to a listing that just failed to read waits
-  // its retry, and the fold does not wait for it.
+  // follow folds a transcript record only after this (pokeFollows): the engine writes a child's meta before the parent's
+  // `Agent` tool result, and the backfill looks the child up when it folds that result, once. The pass owed to the
+  // changes (or to a listing that failed to read) begins now rather than after AGENT_SETTLE_MS; within a failed pass's
+  // retry wait nothing is owed, and the fold does not wait.
   private agentsCaughtUp(sessionId: SessionId): Promise<void> | null {
     const sync = this.agentSyncs.get(sessionId);
     if (sync === undefined) return null;
-    const owed = sync.changed.size > 0 && (sync.failedAt === null || Date.now() >= sync.failedAt + AGENT_RETRY_MS);
+    const owed = (sync.changed.size > 0 || sync.stale) && (sync.failedAt === null || Date.now() >= sync.failedAt + this.agentRetryMs);
     if (sync.pass === null && !owed) return null;
     const through = sync.begun + (owed ? 1 : 0);
     const done = new Promise<void>((resolve) => sync.waiters.push({ through, resolve }));
     if (owed) this.runAgentPass(sessionId, sync);
     return done;
-  }
-
-  // Pokes the followers `which` picks of a session once its agent listing has caught up (agentsCaughtUp), at once when
-  // nothing waits.
-  private pokeInOrder(sessionId: SessionId, which: (entry: FollowEntry) => boolean): void {
-    if (![...this.follows.values()].some(which)) return;
-    const caughtUp = this.agentsCaughtUp(sessionId);
-    if (caughtUp === null) this.pokeFollows(which);
-    else void caughtUp.then(() => this.pokeFollows(which));
   }
 
   // One pass over the session's agents, unless one is running (its end starts the next): a walk when one was asked for,
@@ -702,8 +696,19 @@ export class FsService {
     return entry.workflowWork;
   }
 
+  // Pokes the followers `which` picks (its side effects, a new location, apply now), each once its session's agent
+  // listing has caught up (agentsCaughtUp), at once when nothing waits.
   private pokeFollows(which: (entry: FollowEntry) => boolean): void {
-    for (const entry of this.follows.values()) if (which(entry)) void entry.follow.poke();
+    const picked = new Map<SessionId, FollowEntry[]>();
+    for (const entry of this.follows.values()) if (which(entry)) picked.set(entry.sessionId, [...(picked.get(entry.sessionId) ?? []), entry]);
+    for (const [sessionId, entries] of picked) {
+      const poke = () => {
+        for (const entry of entries) void entry.follow.poke(); // a follow stopped meanwhile reads nothing
+      };
+      const caughtUp = this.agentsCaughtUp(sessionId);
+      if (caughtUp === null) poke();
+      else void caughtUp.then(poke);
+    }
   }
 
   // Under `<sessionId>/`: the title sidecar folds into the summary; an agent transcript or meta is read into the agent
@@ -731,17 +736,16 @@ export class FsService {
     if (!AGENT_SIDECAR.test(rel)) return;
     this.agentFileChanged(sessionId, rel);
     const path = join(this.paths.projects, change.slug, sessionId, rel);
-    this.pokeInOrder(sessionId, (entry) => entry.sessionId === sessionId && entry.agentId !== null && entry.location.path === path); // a nested agent's meta first
+    this.pokeFollows((entry) => entry.sessionId === sessionId && entry.agentId !== null && entry.location.path === path);
   }
 
   private onChange(change: StoreChange): void {
     switch (change.kind) {
       case 'transcript':
-        // Poke at once (an append to the file being followed is the common case; after the agent files reported before
-        // it are read, pokeInOrder), then take the location from the listing as the re-summary (or removal) left it: a
-        // relocation notified new-path-then-old-path-deleted, or the other way round, must leave the follower on the
-        // surviving file, not on whichever path was notified last.
-        this.pokeInOrder(change.sessionId, (entry) => entry.sessionId === change.sessionId && entry.agentId === null);
+        // Poke at once (an append to the file being followed is the common case), then take the location from the
+        // listing as the re-summary (or removal) left it: a relocation notified new-path-then-old-path-deleted, or the
+        // other way round, must leave the follower on the surviving file, not on whichever path was notified last.
+        this.pokeFollows((entry) => entry.sessionId === change.sessionId && entry.agentId === null);
         void this.summarizePath(change.path, change.sessionId, 'changed').then(() => this.locateFollows(change.sessionId));
         this.checkContest(change.sessionId, change.path); // W7
         return;
