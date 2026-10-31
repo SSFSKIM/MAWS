@@ -250,7 +250,7 @@ class WatchTree implements WatchHandle {
 
   // The directory and every one beneath it ('' is the whole tree): watches closed, holds forgotten.
   private drop(rel: string): void {
-    const beneath = (key: string) => rel === '' || key === rel || key.startsWith(`${rel}/`);
+    const beneath = (key: string) => key === rel || under(rel, key);
     for (const [key, { watch }] of this.watches) {
       if (!beneath(key)) continue;
       watch.close();
@@ -337,7 +337,7 @@ class WatchTree implements WatchHandle {
       if (code === 'ENOENT' || code === 'ENOTDIR') return this.drop(rel);
       // A listing that failed otherwise (no permission, no descriptor left) says nothing of what lies beneath: a pass
       // keeps those watches rather than sweep them.
-      if (walk.seen) for (const key of this.watches.keys()) if (key.startsWith(`${rel}/`)) walk.seen.add(key);
+      if (walk.seen) for (const key of this.watches.keys()) if (under(rel, key)) walk.seen.add(key);
       return;
     }
     if (this.closed) return;
@@ -444,6 +444,11 @@ interface Watched {
   ino: number | null;
   born: number; // birth time, ms (0 where the filesystem keeps none: dev and ino alone tell then)
   pass: number; // the whole-tree pass it was opened in
+}
+
+// Whether `key` lies beneath the directory `rel` (the root, '', holds every other key).
+function under(rel: string, key: string): boolean {
+  return rel === '' ? key !== '' : key.startsWith(`${rel}/`);
 }
 
 // Whether the directory a stat describes is the one the watch was opened on (an identity not read: not known to be).

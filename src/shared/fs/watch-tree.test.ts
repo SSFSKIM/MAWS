@@ -547,6 +547,24 @@ describe('the watch tree reconciles', () => {
     handle.close();
   });
 
+  // The final review's finding 2: the root's own listing failing for a reason of its own (EMFILE) says nothing of what
+  // lies beneath it either, so the pass keeps every watch, and a later event beneath is still heard
+  it('keeps every watch beneath the root when the root’s own listing failed for a reason of its own', async () => {
+    const fake = new FakeWatchFs();
+    fake.mkdir('src/deep');
+    const { handle, heard } = open(fake);
+    await drain();
+    const readdir = fake.fs.readdir;
+    fake.fs.readdir = async (path: string) => (path === fake.root ? Promise.reject(errno('EMFILE', path)) : readdir(path));
+    await vi.advanceTimersByTimeAsync(RECONCILE_MS);
+    await drain();
+    expect(fake.watched().sort()).toEqual(['', 'src', 'src/deep']);
+    heard.length = 0;
+    fake.fire('src/deep', 'change', 'a.ts');
+    expect(heard).toEqual([['change', 'src/deep/a.ts']]);
+    handle.close();
+  });
+
   // Task review of the fix round (finding 1): a directory's identity is its watch's, read as the watch opens, so a pass
   // tells a directory replaced while every event of it was lost (its parent's and its own) from the one it watches.
   it('watches afresh, at the next pass, a directory replaced before anything read it while its events were lost', async () => {
