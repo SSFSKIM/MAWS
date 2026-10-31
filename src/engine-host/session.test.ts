@@ -21,6 +21,7 @@ import { mkdtempSync, rmSync } from 'node:fs'; // P5 O16 M2
 import { tmpdir } from 'node:os'; // P5 O16 M2
 import { JOURNAL_MAX_BYTES, JournalWriter } from './journal'; // P5 O16 M2
 import { mapFileOf } from './holder/checkpoint'; // P5 O16 M2
+import { LATE_TABLE_MS } from './rpc'; // P5 O16 M2 fix wave 2
 import type { SessionJournal } from './session'; // P5 O16 M2
 // C7 start
 import { readFileSync } from 'node:fs';
@@ -1741,6 +1742,28 @@ describe('P5 O16: the owed interrupt', () => {
     await vi.advanceTimersByTimeAsync(0);
     await third;
     expect(marks).toEqual([true, false, true, true, false]);
+    t.transport.exit(0);
+    await t.session.exited;
+  });
+
+  // fix wave 2: the mark's settlement outlives RPC's bounded late table; the session matches the answer itself
+  it('clears the mark at a timed-out interrupt\'s answer that arrives after the late table forgot it', async () => {
+    vi.useFakeTimers();
+    const store = new MemorySessionStateStore();
+    const marks: boolean[] = [];
+    store.saveOwedInterrupt = async (_id, owed) => void marks.push(owed);
+    const t = setup({ transport: { holder: HOLDER }, session: { store }, responder: defaultResponder({ interrupt: () => null }) });
+    const starting = t.session.start();
+    await vi.advanceTimersByTimeAsync(0);
+    await starting;
+    const pending = t.session.interrupt({ cancelEngineQueued: false }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS.interrupt);
+    expect(await pending).toMatchObject({ name: 'ControlTimeout' });
+    await vi.advanceTimersByTimeAsync(LATE_TABLE_MS + 1_000); // RPC's late table has let the request go
+    const request = t.transport.requestsOf('interrupt')[0]!;
+    t.transport.push({ type: 'control_response', response: { subtype: 'success', request_id: request.request_id, response: { still_queued: [] } } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(marks).toEqual([true, false]);
     t.transport.exit(0);
     await t.session.exited;
   });

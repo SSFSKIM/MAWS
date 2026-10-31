@@ -740,11 +740,6 @@ export class EngineSession {
     // gets a notice that it may have applied after the reported failure.
     let thinkingDisplayRequestId: RequestId | null = null;
     client.onLateResponse((late) => {
-      // P5 O16 M2 (D12): the owed interrupt's own late answer settles its mark
-      if (late.requestId === this.owedInterrupt.lateRequestId) {
-        this.owedInterrupt.lateRequestId = null;
-        this.storeWrite(this.store.saveOwedInterrupt(this.spec.appSessionId, false), 'owed interrupt');
-      }
       if (requestClassOf(late.subtype) === 'read' || late.requestId === thinkingDisplayRequestId) return;
       this.record('meta', { event: 'notice', level: 'warning', key: `late_response:${late.subtype}:${late.requestId}`, text: `${late.subtype} answered after its deadline; it may have applied after the error you saw.` });
     });
@@ -945,6 +940,7 @@ export class EngineSession {
       if (frame.type === 'system') this.publishCatalog(); // C7: only system/init and system/commands_changed move the catalogue
       // R2: an init that advertises the surface after an initialize answer that did not
       if (this.handshakeDone && this.client && frame.type === 'system' && frame.subtype === 'init' && Array.isArray(frame.capabilities)) void this.surface.attach(this.client, frame.capabilities as string[]);
+      this.settleOwedInterrupt(frame); // P5 O16 M2
       this.broker.observe(item.frame);
       this.bashMode.observe(item.frame);
       this.client?.observe(item.frame);
@@ -957,6 +953,17 @@ export class EngineSession {
 
   // The out path's rule (OutboundWriter.settle) for an inbound row: `transport_error { journal_failed }` if the journal
   // can still take it, then the ladder without end_session (whole-branch review).
+  // P5 O16 M2 (D12): a timed-out interrupt's answer, however late, settles the durable mark it holds. Matched here
+  // rather than through RPC's late table, which forgets a request after LATE_TABLE_MS while the mark lasts until the
+  // answer (or a newer interrupt takes it over).
+  private settleOwedInterrupt(frame: Frame): void {
+    const requestId = this.owedInterrupt.lateRequestId;
+    if (requestId === null || frame.type !== 'control_response') return;
+    if ((frame.response as { request_id?: unknown } | undefined)?.request_id !== requestId) return;
+    this.owedInterrupt.lateRequestId = null;
+    this.storeWrite(this.store.saveOwedInterrupt(this.spec.appSessionId, false), 'owed interrupt');
+  }
+
   private inboundJournalFailed(error: JournalWriteFailed): void {
     try {
       this.record('meta', { event: 'transport_error', code: 'journal_failed', message: `journal write failed: ${error.message}` });
