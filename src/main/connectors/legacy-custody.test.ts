@@ -168,6 +168,17 @@ describe('adoptLegacy', () => {
     expect(logged).toEqual(['[connectors] adopted 1 of 4 legacy grants; left: invalid 3']);
   });
 
+  it('leaves a format 1 file whose envelope is malformed, never skipping it, and goes on', async () => {
+    writeFileSync(join(dir, `${A}.sealed`), `${SEALED_FORMAT_V1}\n`, { mode: 0o600 }); // the header alone: an empty body
+    writeFileSync(join(dir, `${B}.sealed`), `${SEALED_FORMAT_V1}\n${'A'.repeat(1_100_000)}\n`, { mode: 0o600 }); // over the store's bound
+    writeFileSync(join(dir, `${C}.sealed`), `${SEALED_FORMAT_V1}\nAAAA\nAAAA\n`, { mode: 0o600 }); // a line too many
+    plant(D);
+    expect(await adopt()).toEqual({ adopted: 1, left: 3, stopped: false });
+    expect(sealer.opened).toEqual([ADOPTION_PROBE_ID, D]); // a malformed envelope is never handed to the sealer
+    expect(adopted.map(({ connectionId }) => connectionId)).toEqual([D]);
+    expect(logged).toEqual(['[connectors] adopted 1 of 4 legacy grants; left: malformed 3']);
+  });
+
   it('skips a record forgotten or adopted after the listing', async () => {
     plant(A);
     plant(B);

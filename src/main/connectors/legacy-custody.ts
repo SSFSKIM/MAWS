@@ -88,7 +88,11 @@ export async function adoptLegacy(deps: AdoptLegacyDeps): Promise<LegacyAdoption
   }
   for (const id of ids) {
     const sealed = await readLegacy(join(directory, `${id}${SUFFIX}`));
-    if (sealed === null) continue; // forgotten or replaced since the listing: no longer legacy
+    if (sealed === 'gone') continue; // forgotten or replaced since the listing: no longer legacy
+    if (sealed === 'malformed') {
+      leave('malformed');
+      continue;
+    }
     let text: string;
     try {
       text = (await sealer.open(sealed, id)).text;
@@ -138,13 +142,15 @@ function legacyRecord(text: string, id: string): ConnectorOAuthRecord | null {
   return record as unknown as ConnectorOAuthRecord;
 }
 
-// The sealed bytes of a format 1 file, or null when it is gone or no longer format 1 (adopted meanwhile). A file that is
-// not a regular one, over the store's bound or malformed is null too: the store lists it unreadable as it is.
-async function readLegacy(path: string): Promise<Buffer | null> {
+// The sealed bytes of a format 1 file; `gone` when it is absent, no longer a regular file or no longer format 1
+// (forgotten or adopted since the listing); `malformed` when it still starts with the format 1 line but its envelope is
+// not the store's (no body, a line too many, over the store's bound), a file the store lists unreadable as it is.
+async function readLegacy(path: string): Promise<Buffer | 'gone' | 'malformed'> {
   const bytes = await readPrefix(path, FILE_LIMIT_BYTES + 1);
-  if (bytes === null || bytes.length > FILE_LIMIT_BYTES) return null;
-  const [format, body, rest] = bytes.toString('utf8').split('\n');
-  if (format !== SEALED_FORMAT_V1 || !body || (rest !== undefined && rest !== '')) return null;
+  if (bytes === null || !bytes.subarray(0, Buffer.byteLength(HEADER)).equals(Buffer.from(HEADER))) return 'gone';
+  if (bytes.length > FILE_LIMIT_BYTES) return 'malformed';
+  const [, body, rest] = bytes.toString('utf8').split('\n');
+  if (!body || (rest !== undefined && rest !== '')) return 'malformed';
   return Buffer.from(body, 'base64');
 }
 
