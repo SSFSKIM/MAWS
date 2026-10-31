@@ -363,3 +363,35 @@ Branch `p5-o7-m4`, worktree `/Users/new/.local/share/maws-worktrees/p5-o7`, from
 - **CI:** run 41246661836 on `2e3ad1cf4` passed unit 1–4/4, probes and cross-build. Its static job failed on TS2322
   (the spread onto `placed`), which the controller fixed in `9cf6c887c`. That fix's gate, `o7-m4a2-fix2`, is the
   controller's.
+
+## Fix wave 2 (re-review: one Important, one Minor)
+
+- **Minor, done** (`de24cb899`). `checkout-rule.test.ts`' symlink case is now two cases.
+  - **(a)** A fully resolved set is warmed first. A second read asks git nothing, which proves the set was kept. The
+    symlink is then retargeted, and the old target is `no-target` while the new one is admitted.
+  - **(b)** The late-appearing root, alone.
+  - Checked against a raw-key cache: (a) fails there and passes on the canonical key. `checkout-rule` is 13/13.
+- **Important, not applied: the review's stop condition holds.** I applied the proposed `if (hostAway) return
+  {kind: 'unknown'}` locally, ran the endpoint suites and reverted it. 4 cases fail (160 of 164 pass).
+  - **Breaks the uniform `unavailable` for an unrecorded session:** `targets.test.ts`, "is `unavailable` while the
+    engine host can't answer, whether it places the session or checks its live row". Its `app-1` has no spine record,
+    and the owner now gets `grade`.
+  - **Ends live subscriptions:** `subscriptions-b.test.ts`, three cases of "a lane B subscription whose access can't
+    be checked now".
+    - The cases: held while `unavailable` and ended `removed` once the share is gone; ended `unavailable` after the
+      retries; goes on once a retry grants it.
+    - Their sessions are placed through the engine host, with no spine record.
+    - Under the change, the first re-check during a host outage answers `grade`, so a live subscription ends
+      `removed` at once. That replaces holding it and retrying.
+    - M4b's link reads `removed` as final, so the stream would not come back when the host does. That reaches beyond
+      the opening `sub`.
+  - **Recommended instead: host-away is uniform `unavailable` for every lane B id, before the rank check.**
+    - When placement's live read of the engine host fails (`host_unavailable` or `timeout`), the request is
+      `unavailable`, recorded session or not. This is the pre-wave behavior for host-away.
+    - The engine-host-act path (`live: false`) also reads `session.status`, so a recorded id and an absent id meet the
+      same check.
+    - Like a failing spine, the host's absence is machine-wide and says nothing of a session: no existence oracle.
+    - A live subscription stays held and retried, and the four tests above keep passing.
+    - The finding-3 fix keeps its scope: with the host up and the live engine session not the recorded one, it is
+      still the deferred flag, answered after the rank on the recorded engine session.
+    - Cost: one more `session.status` read per engine-host act. `actions.ts` reads it again for the context check.
