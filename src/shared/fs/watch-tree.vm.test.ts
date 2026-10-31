@@ -12,7 +12,7 @@
 // max_user_watches to 600) or =instances (max_user_instances at the user's count) runs the exhaustion arm instead.
 // Prints one line per arm and merges its numbers into test-results/watch-tree-vm.json. A missed bound fails the case
 // (each read softly, so every line prints); it is a finding for the architect, never a widened bound.
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -320,8 +320,12 @@ function latencyText(latency: Record<string, { create: ReturnType<typeof stats>;
 
 // Another process writes, then removes, BURST_FILES files in one new directory while this one only watches.
 async function burstAt(root: string, tap: Tap) {
-  const rel = `.o3e-burst-${process.pid}`;
+  // A name the repository's own rules do not ignore: the kernel's `.gitignore` opens with `.*`, so a dot-named burst
+  // directory is pruned (rightly) and its files never named, which is no reading of the burst.
+  const rel = `o3e-burst-${process.pid}`;
   const dir = join(root, rel);
+  const ignoredBy = spawnSync('git', ['-C', root, 'check-ignore', '-v', rel], { encoding: 'utf8' });
+  expect(ignoredBy.status, `the burst directory ${rel} is ignored by ${ignoredBy.stdout.trim()}`).toBe(1);
   const watched = tap.next((filename) => filename === rel, 10_000); // a late directory's own event comes last
   mkdirSync(dir);
   try {
